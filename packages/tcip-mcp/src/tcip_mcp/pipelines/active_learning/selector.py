@@ -1,8 +1,8 @@
 """Active learning selector: partition a checkpoint's own predictions.
 
-Auto-accept (high-confidence), review-queue (medium-confidence) and unscoreable partitioning over
-prediction dicts. Ranking unlabeled images by informativeness is the scorers' own seam
-(``active_learning.scorer``), which reads the predictor rather than these dicts.
+Review-queue (medium-confidence) and unscoreable partitioning over prediction dicts. Ranking
+unlabeled images by informativeness is the scorers' own seam (``active_learning.scorer``), which
+reads the predictor rather than these dicts.
 """
 
 from __future__ import annotations
@@ -27,35 +27,6 @@ def unscoreable(predictions: list[dict]) -> list[dict]:
     """
     return [pred for pred in predictions
             if "scores" not in pred and not _confidence_values(pred)]
-
-
-def auto_accept(
-    predictions: list[dict],
-    *,
-    threshold: float,
-) -> list[dict]:
-    """Filter predictions confident enough for automatic labeling.
-
-    Args:
-        predictions: List of prediction dicts (from GenericPredictor).
-        threshold: Minimum confidence score for auto-acceptance; required.
-
-    Returns:
-        Predictions where every detection/classification exceeds threshold.
-    """
-    accepted = []
-    for pred in predictions:
-        scores = pred.get("scores", [])
-        if scores:
-            # Detection: every kept box must clear the threshold.
-            if all(s >= threshold for s in scores):
-                accepted.append(pred)
-        else:
-            # Classification/ordinal: every head's confidence must clear it.
-            confs = _confidence_values(pred)
-            if confs and all(c >= threshold for c in confs):
-                accepted.append(pred)
-    return accepted
 
 
 def review_queue(

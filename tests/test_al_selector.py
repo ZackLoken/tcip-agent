@@ -1,4 +1,4 @@
-"""Active learning selector: auto_accept / review_queue / unscoreable partitioning.
+"""Active learning selector: review_queue / unscoreable partitioning.
 
 Covers the GenericPredictor output contract: detection dicts carry ``scores``;
 classification/ordinal checkpoints (ComposedModel -> ``_format_other``) carry
@@ -6,9 +6,7 @@ classification/ordinal checkpoints (ComposedModel -> ``_format_other``) carry
 ``head{i}_values``, no confidence-bearing key at all.
 """
 
-import pytest
-
-from tcip_mcp.pipelines.active_learning.selector import auto_accept, review_queue, unscoreable
+from tcip_mcp.pipelines.active_learning.selector import review_queue, unscoreable
 
 
 def _cls_pred(image: str, conf: float) -> dict:
@@ -55,65 +53,6 @@ def _seg_pred(image: str) -> dict:
         "head0_masks": [[[0, 1], [1, 0]]],
         "head0_probabilities": [[[[0.9, 0.1], [0.1, 0.9]], [[0.1, 0.9], [0.9, 0.1]]]],
     }
-
-
-# ====================================================================
-# auto_accept
-# ====================================================================
-
-class TestAutoAccept:
-    def test_detection_partitioning(self):
-        predictions = [
-            {"image": "a.png", "scores": [0.95, 0.9]},
-            {"image": "b.png", "scores": [0.3]},
-            {"image": "c.png", "scores": [0.85, 0.82]},
-            {"image": "d.png", "scores": [0.9, 0.5]},  # one weak box blocks accept
-        ]
-        accepted = auto_accept(predictions, threshold=0.8)
-        assert [p["image"] for p in accepted] == ["a.png", "c.png"]
-
-    def test_classification_partitioning(self):
-        predictions = [
-            _cls_pred("hi.png", 0.93),
-            _cls_pred("lo.png", 0.55),
-            _cls_pred("edge.png", 0.8),  # threshold is inclusive
-        ]
-        accepted = auto_accept(predictions, threshold=0.8)
-        assert [p["image"] for p in accepted] == ["hi.png", "edge.png"]
-
-    def test_ordinal_partitioning(self):
-        predictions = [
-            _ordinal_pred("hi.png", 2, 0.93),
-            _ordinal_pred("lo.png", 1, 0.55),
-            _ordinal_pred("edge.png", 0, 0.8),  # threshold is inclusive
-        ]
-        accepted = auto_accept(predictions, threshold=0.8)
-        assert [p["image"] for p in accepted] == ["hi.png", "edge.png"]
-
-    def test_integer_labels_not_mistaken_for_confidence(self):
-        # head0_labels holds class indices (here 2 > threshold); only
-        # head0_confidences may gate acceptance.
-        pred = _cls_pred("lo.png", 0.1)
-        assert auto_accept([pred], threshold=0.8) == []
-
-    def test_multi_head_requires_all_heads_confident(self):
-        pred = _cls_pred("multi.png", 0.95)
-        pred["head1_confidences"] = [0.4]
-        assert auto_accept([pred], threshold=0.8) == []
-        pred["head1_confidences"] = [0.9]
-        assert auto_accept([pred], threshold=0.8) == [pred]
-
-    def test_seg_probabilities_are_ignored(self):
-        # 4-D nested head0_probabilities must not be treated as confidence.
-        assert auto_accept([_seg_pred("mask.png")], threshold=0.1) == []
-
-    def test_empty_detection_not_accepted(self):
-        assert auto_accept([{"image": "neg.png", "scores": []}], threshold=0.8) == []
-
-    def test_threshold_is_required(self):
-        """No pinned default: a caller must derive and pass a confirmed threshold."""
-        with pytest.raises(TypeError, match="'threshold'"):
-            auto_accept([{"image": "a.png", "scores": [0.95]}])  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to threshold
 
 
 # ====================================================================
@@ -173,11 +112,10 @@ class TestReviewQueue:
 
 class TestUnscoreable:
     def test_regression_prediction_has_no_confidence_signal(self):
-        """A regression prediction can't be partitioned by auto_accept/review_queue at all (both
-        already silently exclude it, unchanged); unscoreable() is what catches that it needs
-        explicit routing instead of vanishing."""
+        """A regression prediction can't be partitioned by review_queue at all (it silently
+        excludes it, unchanged); unscoreable() is what catches that it needs explicit routing
+        instead of vanishing."""
         pred = _reg_pred("val.png", 0.42)
-        assert auto_accept([pred], threshold=0.8) == []
         assert review_queue([pred], low=0.0, high=1.0) == []
         assert unscoreable([pred]) == [pred]
 
@@ -188,8 +126,8 @@ class TestUnscoreable:
 
     def test_detection_negative_is_not_unscoreable(self):
         """scores=[] (zero boxes found) is a complete, unambiguous signal, not an architecture
-        gap; it must stay excluded from unscoreable the same way auto_accept/review_queue already
-        exclude it, checked by key presence, not truthiness."""
+        gap; it must stay excluded from unscoreable the same way review_queue already excludes
+        it, checked by key presence, not truthiness."""
         assert unscoreable([{"image": "neg.png", "scores": []}]) == []
 
     def test_detection_and_classification_and_ordinal_are_not_unscoreable(self):

@@ -213,7 +213,7 @@ def count_by_class(
     """``(n_total, n_positive, n_unclassified)`` for one image's predictions.
 
     ``scope`` is the bucket's own recorded scope. When it classifies no ``positive_value``
-    (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.positive_id`), every detection is
+    (:func:`~tcip_annotation.json_io.class_id` over its ``value_ids``), every detection is
     unclassified: a whole-bucket decision, so a detector bucket whose one map key happens to equal
     ``positive_value`` never counts a positive.
 
@@ -229,7 +229,9 @@ def count_by_class(
 
     annotations = json_io.detection_annotations(json_path)
     total = len(annotations)
-    if scope.positive_id(positive_value) is None:
+    try:
+        json_io.class_id(positive_value, scope.value_ids)
+    except json_io.ClassKeyUnknown:
         return total, 0, total
     positive = 0
     for i, a in enumerate(annotations):
@@ -422,6 +424,8 @@ def measure_phenology(
     (``plant_mapping.resolve_delivery_mapping``); each refuses as it does, and so does
     :func:`per_plant_phenology` (:func:`measurement_refusals`).
     """
+    from tcip_annotation import json_io
+
     from tcip_mcp.buckets import by_recorded_date, read_bucket
     from tcip_mcp.operationalization import confirmed_revision
     from tcip_mcp.pipelines.postprocessing import plant_mapping
@@ -441,11 +445,15 @@ def measure_phenology(
     mapping_build, verified = plant_mapping.resolve_delivery_mapping(project, mapping_name, dated)
     measured = per_plant_phenology(mapping_build.rows(), dated, revision.entry, wanted,
                                    require_all_dates_complete=require_all_dates_complete)
-    positive = revision.entry.positive_value
+    decoded = []
+    for b in dated.values():
+        try:
+            decoded.append(json_io.class_id(revision.entry.positive_value, b.scope.value_ids))
+        except json_io.ClassKeyUnknown:
+            continue
     return PhenologyMeasurement(
         revision=revision, buckets=dated, rows=measured["rows"],
-        positive_class_assessed=(measured["positive_class_assessed"] and any(
-            b.scope.positive_id(positive) is not None for b in dated.values())),
+        positive_class_assessed=measured["positive_class_assessed"] and bool(decoded),
         require_all_dates_complete=require_all_dates_complete,
         plant_mapping=mapping_build.delivery_disclosure(verified, list(dated)),
         plants=wanted)

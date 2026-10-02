@@ -1,111 +1,117 @@
-"""The review verdict: its action vocabulary, declared once, and the one reading of a stored entry.
-
-``VerdictAction``'s literal strings are the declaration; ``VERDICT_ACTIONS`` is derived from them.
-Every stored entry is read through :func:`decode_verdict`.
-"""
+"""The verdict shard: the log of a person's decisions on a prediction bucket's proposals for one
+image, each entry read through :func:`decode_verdict` alone."""
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from pathlib import Path, PurePosixPath
 from typing import Literal, get_args
 
-from tcip_annotation.json_io import iscrowd_of
+import tcip_store
+from tcip_store import LOG_JSON, Key, StoreDescriptor, register_store
+from tcip_store.layout_claims import REVIEW_SHARD_DIRNAME, REVIEW_SHARD_SUFFIX
 
-VerdictAction = Literal["accepted", "rejected", "edited", "swept"]
+VerdictAction = Literal["accepted", "rejected"]
 VERDICT_ACTIONS: tuple[VerdictAction, ...] = get_args(VerdictAction)
 
-ACCEPTED_ACTION: VerdictAction = "accepted"
-REJECTED_ACTION: VerdictAction = "rejected"
-EDITED_ACTION: VerdictAction = "edited"
-SWEPT_ACTION: VerdictAction = "swept"
-
-POSITIVE_ACTIONS: frozenset[VerdictAction] = frozenset({ACCEPTED_ACTION, EDITED_ACTION})
-"""The actions by which a breeder affirms an object exists. A rejection is not among them, and
-neither is a verdict that only attests the image was swept."""
-
-GT_BOX_KEY = "gt_bbox_norm"
-PRED_BOX_KEY = "pred_bbox_norm"
-
-Box = tuple[float, float, float, float]
+_PATH_HOSTILE = '\\/:*?"<>|'
 
 
 @dataclass(frozen=True)
 class Verdict:
-    """One decoded verdict entry.
+    """One decision: ``proposal`` is the record's index in the bucket's document for the image,
+    ``action`` what the person decided, ``by`` who (the label record's own spelling) and ``at``
+    when."""
 
-    ``reviewed_by`` is the bare name of the person who recorded this verdict, as the engine stamped
-    it, or ``""`` when the store holds none.
-
-    Boxes are the stored normalized center form ``(cx, cy, w, h)``, or ``None`` when the entry
-    carries no usable box under that key. ``affirmed_box`` is the ground-truth box when the entry
-    has one and the predicted box otherwise (an accepted false positive has only what the model
-    drew). ``geometry_recorded`` says whether the entry named a box at all: an entry with neither
-    key is a coverage-only attestation that a human swept the image, and it contributes no object
-    to anything. ``iscrowd`` is the crowd flag of the ground-truth record the verdict was recorded
-    on, which every entry states. ``producer_identity`` and ``conf_threshold`` are the producing
-    bucket's identity and the display threshold the verdict was recorded against, each ``None``
-    where the caller resolved none.
-    """
-
-    action: VerdictAction | None
-    class_name: str
-    reviewed_by: str
-    gt_box: Box | None
-    pred_box: Box | None
-    affirmed_box: Box | None
-    geometry_recorded: bool
-    conf: float | None
-    class_id: int | None
-    missed_object_attested: bool
-    iscrowd: bool
-    producer_identity: dict | None
-    conf_threshold: float | None
-
-    @property
-    def is_positive(self) -> bool:
-        """Whether this verdict affirms the object exists."""
-        return self.action in POSITIVE_ACTIONS
-
-    @property
-    def is_rejection(self) -> bool:
-        return self.action == REJECTED_ACTION
+    proposal: int
+    action: VerdictAction
+    by: str
+    at: str
 
 
-def _box(raw: object) -> Box | None:
-    """A stored ``[cx, cy, w, h]`` as floats, or None when it is absent or not four values."""
-    if not raw or not isinstance(raw, (list, tuple)) or len(raw) != 4:
-        return None
-    return tuple(float(v) for v in raw)  # type: ignore[return-value]
-
-
-_STATED_KEYS = ("action", "reviewed_by", "class_name", GT_BOX_KEY, PRED_BOX_KEY, "conf",
-                "class_id", "missed_object_attested", "iscrowd", "producer_identity",
-                "conf_threshold")
-"""The keys every verdict entry states (``review_engine.record_detection_action`` writes each
-one, a ``null`` where it has no value)."""
+def encode_verdict(verdict: Verdict) -> dict:
+    """``verdict`` as the entry its shard stores."""
+    return asdict(verdict)
 
 
 def decode_verdict(entry: Mapping) -> Verdict:
-    """One stored verdict entry as a :class:`Verdict`, reading every stated key as stated, or
-    ``ValueError`` naming the keys an entry does not state or a crowd flag that is not one."""
-    missing = [k for k in _STATED_KEYS if k not in entry]
-    if missing:
-        raise ValueError(f"a verdict entry states {missing}; this one carries none: {entry!r}")
-    raw_gt, raw_pred = entry[GT_BOX_KEY], entry[PRED_BOX_KEY]
-    conf, class_id, threshold = entry["conf"], entry["class_id"], entry["conf_threshold"]
-    return Verdict(
-        action=entry["action"],
-        class_name=str(entry["class_name"]),
-        reviewed_by=str(entry["reviewed_by"]).strip(),
-        gt_box=_box(raw_gt),
-        pred_box=_box(raw_pred),
-        affirmed_box=_box(raw_gt or raw_pred),
-        geometry_recorded=raw_gt is not None or raw_pred is not None,
-        conf=float(conf) if conf is not None else None,
-        class_id=int(class_id) if class_id is not None else None,
-        missed_object_attested=bool(entry["missed_object_attested"]),
-        iscrowd=iscrowd_of(entry["iscrowd"]),
-        producer_identity=entry["producer_identity"],
-        conf_threshold=float(threshold) if threshold is not None else None,
+    """One stored entry as a :class:`Verdict`, or ``ValueError`` naming the entry when a key is
+    missing, the proposal is not an index, the action is not one of :data:`VERDICT_ACTIONS` or
+    the person or time is not a string."""
+    try:
+        proposal, action, by, at = (entry["proposal"], entry["action"], entry["by"], entry["at"])
+    except KeyError as exc:
+        raise ValueError(f"verdict entry {dict(entry)!r} states no {exc.args[0]!r}") from exc
+    if (isinstance(proposal, bool) or not isinstance(proposal, int) or proposal < 0
+            or action not in VERDICT_ACTIONS or not isinstance(by, str) or not by
+            or not isinstance(at, str) or not at):
+        raise ValueError(f"verdict entry {dict(entry)!r} is not a proposal index, one of "
+                         f"{VERDICT_ACTIONS}, a person and a time")
+    return Verdict(proposal=proposal, action=action, by=by, at=at)
+
+
+def _sanitized(key: str) -> str:
+    """``key`` with path-hostile characters folded to ``_``, hash-suffixed when that changed it,
+    so two keys that fold alike keep distinct files."""
+    safe = key
+    for ch in _PATH_HOSTILE:
+        safe = safe.replace(ch, "_")
+    if safe != key:
+        safe = f"{safe}.{hashlib.sha1(key.encode('utf-8')).hexdigest()[:8]}"
+    return safe
+
+
+@dataclass(frozen=True)
+class _ShardLocator:
+    """Places one (bucket, image) shard under ``review/<bucket>/<image>.jsonl``, its parts as
+    :func:`verdict_key` spells them."""
+
+    def relative_path(self, scope: str, parts: tuple[str, ...]) -> PurePosixPath:
+        bucket, img_name = parts
+        return PurePosixPath(REVIEW_SHARD_DIRNAME, bucket, f"{img_name}{REVIEW_SHARD_SUFFIX}")
+
+    def parts_from(self, relative_path: PurePosixPath) -> tuple[str, ...] | None:
+        segments = relative_path.parts
+        if (len(segments) != 3 or segments[0] != REVIEW_SHARD_DIRNAME
+                or not segments[2].endswith(REVIEW_SHARD_SUFFIX)):
+            return None
+        return (segments[1], segments[2][: -len(REVIEW_SHARD_SUFFIX)])
+
+
+REVIEW_VERDICTS_STORE = "review_verdicts"
+register_store(
+    StoreDescriptor(
+        name=REVIEW_VERDICTS_STORE,
+        kind="log",
+        key_fields=("bucket", "image"),
+        frozen=True,
+        codec=LOG_JSON,
+        enumerable=True,
+        locator=_ShardLocator(),
     )
+)
+
+
+def verdict_key(state_dir: str | Path, bucket: str, img_name: str) -> Key:
+    """One image's verdict shard under one prediction bucket, in a dataset's state directory: each
+    part with path-hostile characters folded, so the shard's own path spells its key."""
+    return Key(REVIEW_VERDICTS_STORE, str(state_dir), (_sanitized(bucket), _sanitized(img_name)))
+
+
+def record_verdicts(key: Key, verdicts: list[Verdict]) -> None:
+    """Append ``verdicts`` to the shard ``key`` names, each through :func:`encode_verdict`."""
+    for verdict in verdicts:
+        tcip_store.append(key, encode_verdict(verdict))
+
+
+def read_verdicts(key: Key) -> list[Verdict]:
+    """Every verdict the shard ``key`` names holds, oldest first, each through
+    :func:`decode_verdict`; an absent shard holds none. Entries that will not decode, or whose
+    schema version this reader does not know, refuse (``ValueError``) naming their positions."""
+    page = tcip_store.read_log(key)
+    if page.corrupt or page.version_refused:
+        raise ValueError(f"verdict shard {key.parts} holds entries at {page.corrupt} that will not "
+                         f"decode and at {page.version_refused} of an unknown version")
+    return [decode_verdict(entry) for entry in page.records]

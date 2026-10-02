@@ -1,15 +1,9 @@
 /**
- * Pure geometry for in-place box/polygon editing, shared by the Annotate and Review tabs'
- * editors. Extracted so the drag math (corner-anchored resize, bounds-clamped moves, handle hit
- * tests) is unit-testable without Konva.
+ * Pure geometry for in-place box/polygon editing. Extracted so the drag math (corner-anchored
+ * resize, bounds-clamped moves, handle hit tests) is unit-testable without Konva.
  */
 
-import { MIN_BOX_SIDE, pointInPolygon, polygonBbox } from "@/lib/polygonGeometry";
-import type { ReviewGeom } from "@/lib/reviewGeometry";
-
-// Re-exported under this module's established name; the constant itself lives in
-// polygonGeometry.ts so the cut tool's piece floor can share it without a circular import.
-export { MIN_BOX_SIDE };
+import { pointInPolygon, polygonBbox } from "@/lib/polygonGeometry";
 
 export type EditShape =
   | { kind: "box"; box: [number, number, number, number] }
@@ -21,22 +15,6 @@ export type EditDrag =
   | { mode: "move"; lastX: number; lastY: number };
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-
-/** Clamp a seeded shape into the image so drag math starts from a valid state
- *  (tiled predictions can carry slightly out-of-bounds coordinates). */
-export function clampShapeToImage(shape: EditShape, w: number, h: number): EditShape {
-  if (shape.kind === "box") {
-    const [x1, y1, x2, y2] = shape.box;
-    return {
-      kind: "box",
-      box: [clamp(x1, 0, w), clamp(y1, 0, h), clamp(x2, 0, w), clamp(y2, 0, h)],
-    };
-  }
-  return {
-    kind: "polygon",
-    points: shape.points.map(([px, py]) => [clamp(px, 0, w), clamp(py, 0, h)]),
-  };
-}
 
 /** What a mouse-down at (x, y) grabs: the nearest handle within `tol`, else the shape
  *  body (move), else nothing. Nearest, not first within tolerance, so small boxes and
@@ -133,15 +111,4 @@ export function applyEditDrag(
     };
   }
   return { shape, drag };
-}
-
-/** The shape Edit picks up, from the geometry the detection draws as (the matched GT for a TP/FN,
- *  what a save replaces, or the prediction for an FP, which a save adds). Deep-copied so dragging
- *  never mutates matches. Single-ring by construction: hand-editing adjusts one contour, and
- *  ``/review/action``'s ``edited_points`` carries exactly one (startEdit turns a multi-part shape
- *  away rather than seeding one part and saving it as the whole object). A point never gets here:
- *  the editor authors an outline, and there is no outline a location could stand in for. */
-export function seedEditShape(geom: Exclude<ReviewGeom, { kind: "point" }>): EditShape {
-  if (geom.kind === "box") return { kind: "box", box: geom.box };
-  return { kind: "polygon", points: geom.rings[0].map((p): [number, number] => [p[0], p[1]]) };
 }

@@ -10,9 +10,8 @@ from tcip_annotation import (
     BBox,
     read_annotations,
     write_annotations,
-    box_iou,
-    compute_matches,
 )
+from tcip_annotation.matching import iou_matrix, pair_proposals
 
 
 def test_bbox_creation():
@@ -54,32 +53,20 @@ def test_write_and_read_roundtrip(tmp_path: Path):
         assert abs(orig.geometry.y1 - read.geometry.y1) < 2
 
 
-def test_box_iou():
-    b1 = BBox(x1=0, y1=0, x2=10, y2=10)
-    b2 = BBox(x1=0, y1=0, x2=10, y2=10)
-    assert box_iou(b1, b2) == 1.0
-
-    b3 = BBox(x1=5, y1=5, x2=15, y2=15)
-    iou = box_iou(b1, b3)
-    assert 0.1 < iou < 0.2  # 25/175 ≈ 0.143
+def test_iou_matrix():
+    iou = iou_matrix([[0, 0, 10, 10]], [[0, 0, 10, 10], [5, 5, 15, 15], [20, 20, 30, 30]])
+    assert iou[0, 0] == 1.0
+    assert 0.1 < iou[0, 1] < 0.2  # 25/175 ≈ 0.143
+    assert iou[0, 2] == 0.0
 
 
-def test_box_iou_no_overlap():
-    b1 = BBox(x1=0, y1=0, x2=10, y2=10)
-    b2 = BBox(x1=20, y1=20, x2=30, y2=30)
-    assert box_iou(b1, b2) == 0.0
-
-
-def test_compute_matches():
+def test_pair_proposals():
     gt = [Annotation(subject="bud", geometry=BBox(x1=0, y1=0, x2=10, y2=10))]
     preds = [
         Annotation(subject="bud", geometry=BBox(x1=0, y1=0, x2=10, y2=10), score=0.9),
         Annotation(subject="bud", geometry=BBox(x1=50, y1=50, x2=60, y2=60), score=0.8),
     ]
-    matches = compute_matches(gt, preds, iou_threshold=0.5, conf_threshold=0.25)
-    assert len(matches["tp"]) == 1
-    assert len(matches["fp"]) == 1
-    assert len(matches["fn"]) == 0
+    assert pair_proposals(gt, preds, {"kind": "iou", "iou_threshold": 0.5}).pairs == [(0, 0)]
 
 
 def test_score_predictions_single_image(data_dir: Path):

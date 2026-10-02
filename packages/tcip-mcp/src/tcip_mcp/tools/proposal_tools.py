@@ -1,11 +1,11 @@
 """Proposal-workflow tools: turn a chosen auto-labeling engine's output into predictions for
 canvas review.
 
-propose_annotations and segment_prompt each ask an engine (the built-in SAM reference, or a
-bespoke 'module:factory' the agent brings) to look at pixels and offer candidates or a prompted
-mask. stage_proposals publishes either an engine's reviewed candidates or explicit boxes/polygons
-once as a proposal bucket in the predictions tree, refusing one already published, for a human to
-accept, reject or edit on the Review canvas. It never writes ground truth.
+propose_annotations asks a named engine (one registered, or a 'module:factory' the agent brings)
+to look at pixels and offer candidates. stage_proposals publishes either an engine's reviewed
+candidates or explicit boxes/polygons once as a proposal bucket in the predictions tree, refusing
+one already published, for a human to accept, reject or correct on the Annotate canvas. It never
+writes ground truth.
 """
 
 from __future__ import annotations
@@ -18,13 +18,13 @@ from pydantic import BaseModel, ConfigDict
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_annotation import Annotation, BBox, Polygon, bbox_of
+from tcip_annotation.grid import grid_to_rect
 from tcip_annotation.json_io import stored_box_extent_ok
-from tcip_annotation.sam_wrapper import grid_to_rect
 from tcip_annotation.viz import render_candidates, render_detections
 
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.image_utils import (
-    BandGroupIncomplete, image_dimensions, resolve_image_source,
+    BandGroupIncomplete, image_dimensions, resolve_image_path,
 )
 from tcip_mcp.project_paths import viz_output_path
 from tcip_mcp.server import tool
@@ -94,7 +94,7 @@ def _staging_key_for(image_path: str) -> StagingAddress:
 
 def _unresolvable_staging_source(img: Path, exc: Exception) -> str:
     """A reason to decline staging ``img``, when
-    :func:`~tcip_mcp.pipelines.image_utils.resolve_image_source` raised ``exc`` for it.
+    :func:`~tcip_mcp.pipelines.image_utils.resolve_image_path` raised ``exc`` for it.
 
     A band-group member's own path (``capture_Red.tif`` when ``capture.bandgroup`` claims it)
     resolves to nothing; this names the manifest that claims it instead. ``BandGroupIncomplete`` (a
@@ -116,9 +116,8 @@ def _unresolvable_staging_source(img: Path, exc: Exception) -> str:
 def _region_rect_from_cells(cells: list, names: list[str]) -> "Rect":
     """The bounding rect, in the grid's native-pixel frame, of the named reference-grid cells.
 
-    Each name resolves through ``sam_wrapper.grid_to_rect``, so a malformed or out-of-grid name is
-    refused here exactly as it is for a point prompt, and the matched cells union to their combined
-    bounding box.
+    Each name resolves through ``grid.grid_to_rect``, so a malformed or out-of-grid name is
+    refused here, and the matched cells union to their combined bounding box.
     """
     from tcip_mcp.pipelines.raster_source import Rect
 
@@ -165,13 +164,13 @@ def _offset_candidates(candidates: list[dict], origin: tuple[float, float]) -> l
 def propose_annotations(
     project: Path,
     image_path: str,
-    engine: str = "sam",
+    engine: str,
     engine_params: dict | None = None,
     grid_cells: list[str] | None = None,
     tile_size: int | None = None,
     overlap: float = 0.0,
 ) -> dict:
-    """Propose candidate annotations on an image for review, using a chosen auto-labeling engine.
+    """Propose candidate annotations on an image for review, using a named auto-labeling engine.
 
     Runs the engine's whole-image proposal pass, renders the numbered candidates, and returns the
     render path and neutral candidate data. Read the render with your own image-capable read tool,
@@ -191,10 +190,10 @@ def propose_annotations(
     same way, but nothing is staged (the response's ``staged`` is ``false``, naming why), so such a
     call cannot later be accepted.
 
-    The engine is a capability, not a fixed method: 'sam' is the built-in SAM2 reference; the agent
-    can register another engine (``register_proposal_engine``) or pass a dotted 'module:factory' it
-    wrote, then trial and compare engines by how well each one's high-conf proposals survive
-    breeder review, and pick the most useful for the task.
+    The engine is a capability, not a fixed method: name one registered
+    (``register_proposal_engine``) or a dotted 'module:factory' the agent wrote, then trial and
+    compare engines by how well each one's high-conf proposals survive breeder review, and pick the
+    most useful for the task. An empty or unknown name refuses, naming the registered ones.
 
     ``grid_cells`` restricts the pass to a region instead of the whole frame: name the
     reference-grid cells the region spans (e.g. ``['B3', 'C3', 'B4', 'C4']``), and the engine
@@ -207,17 +206,15 @@ def propose_annotations(
 
     Args:
         image_path: Absolute path to the image file.
-        engine: Proposal engine: 'sam' (built-in) or a dotted 'module:factory' the agent brings.
-        engine_params: Engine-specific knobs forwarded to the engine (e.g. SAM's model_type,
-            points_per_side, pred_iou_thresh, stability_score_thresh, min_mask_region_area). Omit
-            for the engine's own defaults.
+        engine: Proposal engine: a registered name or a dotted 'module:factory' the agent brings.
+        engine_params: Engine-specific knobs forwarded to the engine. Omit for the engine's own
+            defaults.
         grid_cells: Reference-grid cell names bounding the region to propose over (e.g. ['B3',
             'D5']); the engine sees the bounding rect of the named cells, not the whole frame.
             Requires ``tile_size``. Omit for the whole frame.
         tile_size: Cell edge, in native pixels, of the grid the cells were read off. Required with
             ``grid_cells``.
-        overlap: Overlap fraction of the grid the cells were read off, ``segment_prompt``'s same
-            semantics.
+        overlap: Overlap fraction of the grid the cells were read off.
     """
     from tcip_mcp.pipelines.proposal import resolve_proposer
 
@@ -334,7 +331,7 @@ def propose_annotations(
         try:
             # The same resolution the assignments regime will make: staging over an unrereadable
             # source would leave a record it can never confirm.
-            source = image_utils.resolve_image_source(img.parent, img.stem)
+            source = image_utils.resolve_image_path(img)
         except (FileNotFoundError, image_utils.BandGroupIncomplete) as exc:
             staged = False
             stage_note = f" Not staged: {_unresolvable_staging_source(img, exc)}"
@@ -375,12 +372,8 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
     """Stage the candidates ``assignments`` names, each with its subject, from the record staged
     at ``address`` for ``img``; refuses when that record is absent or the image's content no
     longer matches the content identity it recorded."""
-    from tcip_mcp.pipelines.image_utils import (
-        BandGroupIncomplete, image_dimensions, resolve_image_source,
-    )
-
     try:
-        source = resolve_image_source(img.parent, img.stem)
+        source = resolve_image_path(img)
     except (FileNotFoundError, BandGroupIncomplete) as exc:
         return {"error": str(exc)}
 
@@ -401,8 +394,8 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
                           "its content has changed since that run staged these candidates. "
                           "Run propose_annotations again on the current image."}
 
-    engine = envelope.get("engine", "unknown")
-    candidates = envelope.get("candidates", [])
+    engine = envelope["engine"]
+    candidates = envelope["candidates"]
     cand_map = {c["candidate_id"]: c for c in candidates}
 
     w, h = image_dimensions(source)
@@ -427,7 +420,7 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
             return {"error": f"assignment {i}: {exc}"}
         n_poly += 1
 
-    # Model output for a human to accept on the Review canvas, never written straight to ground truth.
+    # Model output for a human to accept on the Annotate canvas, never written straight to ground truth.
     try:
         path = _stage_document(project, address, engine, img, annotations=proposals,
                                img_w=w, img_h=h)
@@ -452,100 +445,6 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
         "path": path,
         "summary": note,
         "proposal_count": n_poly,
-    }
-
-
-@tool()
-def segment_prompt(
-    image_path: str,
-    points: list[dict] | None = None,
-    box: dict | None = None,
-    grid_cells: list[str] | None = None,
-    tile_size: int | None = None,
-    overlap: float = 0.0,
-    engine: str = "sam",
-    engine_params: dict | None = None,
-) -> dict:
-    """Turn an interactive prompt (points, a box, or grid cells) into mask polygon rings, via an
-    engine.
-
-    Returns ``rings``, the mask's contours as ``[[{x, y}, ...], ...]``, one ring per connected
-    region; an occlusion-split object segments to more than one region and all of them come back.
-
-    Provide point prompts, a box prompt, or grid-cell references (e.g. ['B3', 'D5'], converted to
-    foreground point prompts). ``grid_cells`` requires an explicit ``tile_size``, the geometry the
-    overlay whose cells are being named was rendered with (``overlay_reference_grid`` echoes
-    ``tile_size`` and ``overlap`` back). The cells recompute here through
-    ``reference_grid.reference_cells``, so the resolved centers are the rendered cells' own. 'sam'
-    is the built-in SAM2 reference engine; the agent can bring another prompted-segmentation engine
-    behind the same seam (a dotted 'module:factory').
-
-    Args:
-        image_path: Absolute path to the image file.
-        points: List of point prompts, each with x, y, and label (1=fg, 0=bg).
-        box: Box prompt with x1, y1, x2, y2 in pixel coordinates.
-        grid_cells: List of grid cell references like ['B3', 'D5']. Each is a foreground point.
-        tile_size: Cell edge, in native pixels, of the grid the cells were read off. Required with
-            ``grid_cells``.
-        overlap: Overlap fraction of the grid the cells were read off.
-        engine: Segmentation engine, 'sam' (built-in) or a dotted 'module:factory' the agent
-            brings.
-        engine_params: Engine-specific knobs forwarded to the engine (e.g. SAM's model_type).
-    """
-    img = Path(image_path)
-    if not img.is_file():
-        return {"error": f"Image not found: {image_path}"}
-
-    if points is None and box is None and grid_cells is None:
-        return {"error": "Provide either points, box, or grid_cells prompt"}
-
-    if grid_cells is not None:
-        if tile_size is None:
-            return {"error": "grid_cells requires tile_size, the cell edge of the grid the "
-                             "cells were read off (overlay_reference_grid echoes it back, with "
-                             "overlap). Without it a cell name resolves against a grid nobody "
-                             "rendered."}
-        from tcip_annotation.sam_wrapper import grid_to_pixel
-
-        from tcip_mcp.pipelines.reference_grid import reference_cells
-        from tcip_mcp.pipelines.image_utils import image_path_dimensions
-        w, h = image_path_dimensions(image_path)
-        try:
-            cells = reference_cells(w, h, tile_size, overlap, clamp=True)
-        except ValueError as e:
-            return {"error": str(e)}
-        points = []
-        for cell in grid_cells:
-            try:
-                cx, cy = grid_to_pixel(cell, cells)
-                points.append({"x": cx, "y": cy, "label": 1})
-            except ValueError as e:
-                return {"error": f"Invalid grid cell {cell!r}: {e}"}
-
-    from tcip_mcp.pipelines.proposal import resolve_proposer
-
-    try:
-        proposer = resolve_proposer(engine)
-    except (ValueError, ImportError) as e:
-        return {"error": str(e)}
-
-    try:
-        rings = proposer.segment(image_path, points=points, box=box, **(engine_params or {}))
-    except ImportError as e:
-        return {"error": f"segmentation engine dependencies not available: {e}"}
-    except FileNotFoundError as e:
-        return {"error": str(e)}
-    except Exception as e:
-        return {"error": f"segmentation failed: {e}"}
-
-    if not rings:
-        return {"error": "engine produced empty mask", "rings": []}
-
-    return {
-        "rings": [[{"x": x, "y": y} for x, y in ring] for ring in rings],
-        "ring_count": len(rings),
-        "vertex_count": sum(len(ring) for ring in rings),
-        "engine": engine,
     }
 
 
@@ -603,7 +502,7 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: S
         norm_boxes.append((b, conf, cx, cy, w, h))
 
     try:
-        img_source = resolve_image_source(img.parent, img.stem)
+        img_source = resolve_image_path(img)
     except (FileNotFoundError, BandGroupIncomplete) as exc:
         return {"error": str(exc)}
     img_w, img_h = image_dimensions(img_source)
@@ -695,8 +594,8 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: S
         return {"error": str(exc)}
 
     note = ("staged to predictions/ for canvas review, not committed as ground truth; the human "
-            "accepts on the Review tab before it becomes GT (focus_human_attention tab='review' to "
-            "send them). It is reviewed through the accept path and is never promoted to a "
+            "accepts each proposal on the Annotate tab before it becomes GT "
+            "(focus_human_attention tab='annotate' to send them). It is never promoted to a "
             "reference.")
 
     return {
@@ -735,9 +634,8 @@ def stage_proposals(
       ``[{subject, conf, cx, cy, w, h}]`` with cx/cy/w/h normalized to [0, 1]; ``polygons`` is
       ``[{subject, conf, points|rings}]``, exactly one of two frames per proposal: ``points``, one
       ring of ``[x, y]`` pairs normalized to [0, 1]; or ``rings``, a list of rings in pixel
-      coordinates, each vertex an ``[x, y]`` pair or an ``{"x":, "y":}`` mapping, the frame
-      ``segment_prompt`` returns. Both build the same ``Polygon`` through the ground-truth door's
-      own vertex parser.
+      coordinates, each vertex an ``[x, y]`` pair or an ``{"x":, "y":}`` mapping. Both build the
+      same ``Polygon`` through the ground-truth door's own vertex parser.
 
     Either regime resolves the dataset root, capture date and stem from ``image_path`` itself, and
     publishes the image's proposal once as its own bucket at
@@ -745,7 +643,7 @@ def stage_proposals(
     what proposed it and no checkpoint, execution record or class scope: a proposal already staged
     for the image under the same producer refuses, so a re-run never overwrites reviewed
     predictions or orphans their verdicts, and no delivery ships one. Pair with
-    ``focus_human_attention(tab='review')`` to send the human straight to the result.
+    ``focus_human_attention(tab='annotate')`` to send the human straight to the result.
 
     A staged annotation's ``subject`` is whatever ``assignments``/``boxes``/``polygons`` named;
     the platform validates no subject name.

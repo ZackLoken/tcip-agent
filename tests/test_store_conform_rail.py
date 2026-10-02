@@ -22,7 +22,10 @@ import pytest
 import tcip_store as ts
 from tcip_store.file_backend import FileBackend, RootedFileLocator
 from tcip_store.sqlite_backend import SqliteBackend, database_path
-from tests._store_worker import BLOB, LOG, LWW, directory_claim, register_contract_stores
+from tcip_store.layout_claims import ANY, Claim, Constant, Patterned
+from tests._store_worker import (
+    BLOB, CONTRACT_LAYOUT, LOG, LWW, directory_claim, register_contract_stores,
+)
 
 register_contract_stores()
 
@@ -31,6 +34,10 @@ LATE_ARRIVAL = "rail_late_arrival"
 
 UNCLAIMED = "rail_unclaimed"
 """A store that states no claim, which is what the database backend has to refuse."""
+
+NESTED = "rail_nested"
+"""A store whose entries sit one or two directories under ``nest/``, so one path can be its entry
+under two different roots."""
 
 _declared = False
 
@@ -59,6 +66,20 @@ def _register_rail_stores() -> None:
             codec=ts.RECORD_JSON,
             concurrency="last_writer_wins",
             locator=RootedFileLocator(prefix=("unclaimed",), suffix=".json"),
+        )
+    )
+    ts.register_store(
+        ts.StoreDescriptor(
+            name=NESTED,
+            kind="record",
+            key_fields=("name",),
+            codec=ts.RECORD_JSON,
+            concurrency="last_writer_wins",
+            locator=RootedFileLocator(prefix=("nest",), suffix=".json"),
+            claim=Claim(CONTRACT_LAYOUT, (
+                (Constant("nest"), Patterned(ANY, tail=".json")),
+                (Constant("nest"), Patterned(ANY), Patterned(ANY, tail=".json")),
+            )),
         )
     )
 
@@ -185,32 +206,32 @@ def test_a_file_written_after_this_backend_last_looked_still_refuses(tmp_path):
 def test_a_restored_archive_reads_back_at_once_with_no_hand_adoption(tmp_path):
     """An import extracts a project's files into a fresh directory and, bound to the database
     backend, adopts them into a database itself: the root is usable at once, with no operator
-    tcip adopt-store run between the two doors and no window where a confirmed negative
-    would otherwise read as absent.
+    tcip adopt-store run between the two doors and no window where a stored record would
+    otherwise read as absent.
     """
-    from tcip_mcp import dataset_layout
     from tcip_mcp.tools.project_tools import archive_project, import_project
+    from tcip_mcp.web_client import gui_snapshot_key
 
     source = tmp_path / "source"
     (source / "images" / "2026-03-04").mkdir(parents=True)
     (source / "images" / "2026-03-04" / "a_1.jpg").write_bytes(b"\xff\xd8\xff")
-    negative = {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}}
+    snapshot = {"active_tab": "annotate", "active_subject": "ü"}
     restored = tmp_path / "restored"
 
     with bound(FileBackend()):
-        ts.replace(dataset_layout.image_status_key(source), negative, expect=ts.Version.ABSENT)
+        ts.replace(gui_snapshot_key(source), snapshot, expect=ts.Version.ABSENT)
         assert "error" not in archive_project(source, str(tmp_path / "bundle.zip"))
 
     with bound(SqliteBackend()):
         # The order a long-lived process reaches a destination in: it answers about the root,
         # then the bundle lands in it, then something reads.
         restored.mkdir()
-        assert ts.read(dataset_layout.image_status_key(restored), default=None) is None
+        assert ts.read(gui_snapshot_key(restored), default=None) is None
         imported = import_project(str(tmp_path / "bundle.zip"), str(restored))
         assert "error" not in imported
         assert imported["database_built"] is True
 
-        assert ts.read(dataset_layout.image_status_key(restored)) == negative
+        assert ts.read(gui_snapshot_key(restored)) == snapshot
     assert (restored / ".tcip" / "store.db").is_file()
 
 
@@ -401,3 +422,26 @@ def test_a_store_that_states_no_claim_is_refused_rather_than_placed_by_guess(tmp
 
     assert UNCLAIMED in str(raised.value)
     assert "claim=" in str(raised.value)
+
+
+def test_a_blob_target_matching_two_claims_locks_both_roots_and_refuses_at_the_database(
+    tmp_path,
+):
+    """One path can be a legal entry of one store under two different roots, so the writer
+    cannot pick one and hope: it holds every candidate before it decides, in a fixed order, so
+    a concurrent creator cannot deadlock against it, and it refuses at whichever candidate
+    holds a database."""
+    from tcip_annotation.json_io import annotation_record_key
+
+    inner = tmp_path / "nest"
+    inner.mkdir()
+    with bound(SqliteBackend()):
+        ts.replace(_key(LWW, inner, "held"), {"n": 1})
+
+    with bound(FileBackend()):
+        with pytest.raises(ts.StoreError) as raised:
+            ts.put_blob(annotation_record_key(inner / "nest", "a_1"), b"{}")
+
+    assert NESTED in str(raised.value)
+    assert (tmp_path / ".tcip").is_dir()
+    assert not (inner / "nest" / "a_1.json").exists()

@@ -16,6 +16,7 @@ import pytest
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
 pytest.importorskip("pycocotools")
 
+from tcip_annotation.matching import match_pairs  # noqa: E402
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
@@ -27,7 +28,6 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     concordance_correlation_coefficient,
     effective_iou_type,
     gt_class_avg_size,
-    match_pairs,
     ordinal_metrics,
     pick_count_unbiased,
     pick_f1_max,
@@ -685,8 +685,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
         "iou_threshold", "execution", "eval_regime",
     }
     full_frame_only_fields = {
-        "scored_images", "tallies", "contradicted_negatives",
-        "max_dets_cap_saturated_frac",
+        "scored_images", "tallies", "max_dets_cap_saturated_frac",
     }
 
     from tcip_mcp.pipelines.execution import prepare_pass

@@ -140,13 +140,6 @@ function TraitRow({
         <div className={shown.confirmed ? "text-tcip-muted" : "text-tcip-fp"}>
           {revisionStateText(shown)}
         </div>
-        {shown.confirmed_at && (
-          <div className="text-tcip-muted">
-            {shown.identity_from_request
-              ? "That name came with the confirming request."
-              : "That name came from the backend's own environment, not from the confirming request."}
-          </div>
-        )}
         <div className="mt-1 text-tcip-muted">
           {`Proposed ${shown.proposed_at}. Why: ${shown.rationale}`}
           {shown.relayed_note && ` Relayed from you: ${shown.relayed_note}`}
@@ -241,7 +234,7 @@ export function TraitRevisionPanel() {
         trait,
         revision: revision.number,
         entry_sha256: revision.entry_sha256,
-        user: useStore.getState().user || undefined,
+        user: useStore.getState().user,
         confirmed,
       });
       setAuditWarnings((prev) => ({ ...prev, [trait]: res.audit_warning }));

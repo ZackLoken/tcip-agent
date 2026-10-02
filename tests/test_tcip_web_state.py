@@ -10,7 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 import tcip_store
-from tcip_mcp.web_client import DatasetSelection, GuiState, ReviewFilters, gui_snapshot_key
+from tcip_mcp.web_client import DatasetSelection, GuiState, gui_snapshot_key
 from tcip_web.state import GuiMutationInvalid, ProjectNotOpen, StateStore
 
 from tests._web_fixtures import new_project
@@ -19,7 +19,7 @@ from tests._web_fixtures import new_project
 def test_version_increments_on_mutate() -> None:
     store = StateStore()
     assert store.version == 0
-    asyncio.run(store.mutate({"active_tab": "review"}))
+    asyncio.run(store.mutate({"active_tab": "training"}))
     assert store.version == 1
     asyncio.run(store.mutate({"mode": "polygon"}))
     assert store.version == 2
@@ -48,7 +48,7 @@ def test_nothing_persists_while_no_project_is_open(tmp_path: Path) -> None:
 
     asyncio.run(store.open_project(project))
     asyncio.run(store.close_project())
-    asyncio.run(store.mutate({"active_tab": "review"}))
+    asyncio.run(store.mutate({"active_tab": "training"}))
     assert not tcip_store.exists(gui_snapshot_key(project))
 
 
@@ -146,11 +146,11 @@ def test_mutate_refuses_a_built_model_with_a_wrongly_typed_field_and_holds_nothi
     """A pre-built model instance passes model_copy untouched (revalidate_instances="never"), so
     mutate must dump it and validate the merged result rather than trust it as already valid."""
     store = StateStore()
-    bad_filters = ReviewFilters.model_construct(iou_threshold="banana")
+    bad_dataset = DatasetSelection.model_construct(current_image_index="banana")
     with pytest.raises(GuiMutationInvalid):
-        asyncio.run(store.mutate({"review": bad_filters}))
+        asyncio.run(store.mutate({"dataset": bad_dataset}))
     assert store.version == 0
-    assert store.state.review.iou_threshold == 0.5
+    assert store.state.dataset.current_image_index == 0
 
 
 def test_mutate_refuses_an_unknown_top_level_key_and_holds_nothing() -> None:
@@ -158,7 +158,7 @@ def test_mutate_refuses_an_unknown_top_level_key_and_holds_nothing() -> None:
     dropped."""
     store = StateStore()
     with pytest.raises(GuiMutationInvalid):
-        asyncio.run(store.mutate({"activ_tab": "review"}))
+        asyncio.run(store.mutate({"activ_tab": "results"}))
     assert store.version == 0
     assert store.state.active_tab == "annotate"
 

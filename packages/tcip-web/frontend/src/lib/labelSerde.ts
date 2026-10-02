@@ -15,15 +15,8 @@ import type {
 } from "@/store/types";
 
 /** The facts a shape carries through the canvas unchanged ({@link CarriedFields}). */
-function provenance(a: CarriedFields): CarriedFields {
-  return {
-    iscrowd: a.iscrowd,
-    created_by: a.created_by ?? null,
-    created_at: a.created_at ?? null,
-    accepted_by: a.accepted_by ?? null,
-    accepted_at: a.accepted_at ?? null,
-    accepted_by_rule: a.accepted_by_rule ?? null,
-  };
+function carried(a: CarriedFields): CarriedFields {
+  return { iscrowd: a.iscrowd };
 }
 
 export interface CanvasLabels {
@@ -49,7 +42,7 @@ export function annotationsToCanvas(annotations: Annotation[]): CanvasLabels {
         rings: a.rings.map((ring) => ring.map(([x, y]): [number, number] => [x, y])),
         subject: a.subject,
         attributes,
-        ...provenance(a),
+        ...carried(a),
         authorship: a.authorship ?? null,
       });
     } else if (a.bbox) {
@@ -61,7 +54,7 @@ export function annotationsToCanvas(annotations: Annotation[]): CanvasLabels {
         y2,
         subject: a.subject,
         attributes,
-        ...provenance(a),
+        ...carried(a),
         authorship: a.authorship ?? null,
       });
     } else if (a.point) {
@@ -71,7 +64,7 @@ export function annotationsToCanvas(annotations: Annotation[]): CanvasLabels {
         y,
         subject: a.subject,
         attributes,
-        ...provenance(a),
+        ...carried(a),
         authorship: a.authorship ?? null,
       });
     } else {
@@ -89,13 +82,11 @@ export function canvasToAnnotations(labels: CanvasLabels): AnnotationPayload[] {
       subject: b.subject,
       bbox: [b.x1, b.y1, b.x2, b.y2],
       attributes: b.attributes ?? {},
-      ...provenance(b),
+      ...carried(b),
     });
   }
   for (const p of labels.polygons) {
-    // One contour goes back as `points`, the field a hand-drawn/hand-edited shape belongs in, and
-    // the only one the Review edit route (`edited_points`) has. More than one goes back as `rings`,
-    // which is the only field that can carry them. Never both: the backend prefers `rings`.
+    // One contour goes back as `points`, more than one as `rings`; never both.
     const geometry =
       p.rings.length === 1
         ? { points: p.rings[0].map(([x, y]) => [x, y]) }
@@ -104,7 +95,7 @@ export function canvasToAnnotations(labels: CanvasLabels): AnnotationPayload[] {
       subject: p.subject,
       ...geometry,
       attributes: p.attributes ?? {},
-      ...provenance(p),
+      ...carried(p),
     });
   }
   for (const p of labels.points) {
@@ -113,11 +104,11 @@ export function canvasToAnnotations(labels: CanvasLabels): AnnotationPayload[] {
       subject: p.subject,
       point: [p.x, p.y],
       attributes: p.attributes ?? {},
-      ...provenance(p),
+      ...carried(p),
     });
   }
   for (const a of labels.imageAnnotations) {
-    out.push({ subject: a.subject, attributes: a.attributes ?? {}, ...provenance(a) });
+    out.push({ subject: a.subject, attributes: a.attributes ?? {}, ...carried(a) });
   }
   return out;
 }

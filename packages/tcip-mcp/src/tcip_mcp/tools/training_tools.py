@@ -134,18 +134,10 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
     resolution: ResolvedRun | None = None
     if not issues:
         counts: dict[str, int] = {}
-        contradicted: set[str] = set()
         try:
-            resolution = resolve_run(config, project=project, contradicted_out=contradicted,
-                                     tallies_out=counts)
+            resolution = resolve_run(config, project=project, tallies_out=counts)
         except Exception as exc:  # noqa: BLE001, whatever stops the resolution stops the launch
             issues.append(str(exc))
-        if contradicted:
-            warnings.append(
-                f"data: {sorted(contradicted)} are recorded negative for the subject but their "
-                "label file now holds subject annotations; the stored negative is stale, they "
-                "train on their labeled content instead, and the confirmation needs re-review."
-            )
         # Trainable-sample coverage, never gating: a run admitting a fraction of its annotated
         # images would otherwise read "valid, no warnings" while training on far fewer.
         dropped = {k: v for k, v in counts.items()

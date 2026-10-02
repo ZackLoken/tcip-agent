@@ -36,7 +36,7 @@ interface Props {
   onSubmit: (color: string) => void;
   onCancel: () => void;
   /** Reverts to a caller-defined default (e.g. a subject's derived color) instead of picking one;
-   *  omitted where there is no such default (e.g. Review's outcome colors). */
+   *  omitted where there is no such default. */
   onReset?: () => void;
 }
 

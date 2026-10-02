@@ -22,7 +22,7 @@ describe("useActiveTabSync", () => {
     const spy = vi.spyOn(api.state, "tab").mockResolvedValue({ status: "ok" });
     renderHook(() => useActiveTabSync());
 
-    act(() => useStore.getState().setActiveTab("review"));
+    act(() => useStore.getState().setActiveTab("results"));
     act(() => useStore.getState().setActiveTab("training"));
     expect(spy).not.toHaveBeenCalled();
 

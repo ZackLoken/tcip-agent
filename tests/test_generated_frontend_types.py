@@ -1,9 +1,9 @@
-"""The browser's coverage-record types are a projection of the pydantic models that declare them.
+"""The browser's server-declared types are a projection of the models that declare them.
 
 ``tools/generate_frontend_types.py`` renders ``frontend/src/api/types.generated.ts`` from
-``routes/_coverage_models.py``, ``routes/coverage.py``, ``routes/review.py``,
-``routes/training.py``, ``routes/terminal.py`` and ``tcip_web.state.GuiVocabulary`` (the declared
-pydantic models), plus a handful of runtime constants from ``routes/images.py``,
+``routes/images.py``, ``routes/training.py``, ``routes/terminal.py`` and
+``tcip_web.state.GuiVocabulary`` (the declared pydantic models), the server's ``Literal``
+vocabularies the browser names, plus a handful of runtime constants from ``routes/images.py``,
 ``tcip_mcp.web_client`` and ``tcip_web.jobstore``; these tests hold that projection to what the
 models produce, and keep another frontend module from declaring an interface with the same
 field set as a generated one, or a bare union alias with the same members as one of a generated

@@ -246,16 +246,15 @@ def test_replace_registry_refuses_an_empty_registry(tmp_path):
         replace_registry(tmp_path, SubjectRegistry(subjects=()), expect=Version.ABSENT)
 
 
-def test_replace_registry_first_write_succeeds_and_reports_no_sweep(tmp_path):
+def test_replace_registry_first_write_succeeds_and_reports_the_save(tmp_path):
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
 
     # admits valid work: a first write over an absent registry, asserted with Version.ABSENT.
     result = replace_registry(tmp_path, _leaf_bush(), expect=Version.ABSENT)
     assert read_registry(tmp_path) == _leaf_bush()
-    assert result["schema_change_sweep"] == {
-        "newly_stamped": {}, "predating_vocabulary": {}, "warning": None}
-    assert result["version"] == _version(tmp_path).token
+    assert result == {"subjects_path": str(tmp_path / "subjects.json"), "n_subjects": 2,
+                      "version": _version(tmp_path).token}
 
 
 def test_replace_registry_admits_growing_the_registry(tmp_path):
@@ -330,32 +329,6 @@ def test_replace_registry_repairs_undecodable_bytes_when_allow_removals(tmp_path
     assert read_registry(tmp_path) == SubjectRegistry(subjects=(Subject(name="bush"),))
 
 
-def test_a_failed_compare_and_set_leaves_no_confirmation_stamp_behind(tmp_path):
-    """A schema-changing write that loses its compare-and-set must not have swept the digest
-    store first: the stamp is tied to the write actually landing, not to the attempt."""
-    from tcip_mcp.subject_registry import replace_registry
-    from tcip_mcp.dataset_layout import (
-        image_status_digest_key, record_image_statuses, status_bucket,
-    )
-    from tcip_store import Version, VersionConflict
-    import tcip_store as ts
-
-    two_states = SubjectRegistry(subjects=(Subject(name="leaf", attributes=(
-        Attribute(name="stage", type="categorical", values=("early", "late")),)),))
-    replace_registry(tmp_path, two_states, expect=Version.ABSENT)
-    record_image_statuses(
-        tmp_path, status_bucket("leaf", None), {"img.jpg": "negative"}, recorded_by="user:breeder")
-    assert not ts.exists(image_status_digest_key(tmp_path))
-
-    three_states = SubjectRegistry(subjects=(Subject(name="leaf", attributes=(
-        Attribute(name="stage", type="categorical", values=("early", "mid", "late")),)),))
-    with pytest.raises(VersionConflict):
-        replace_registry(tmp_path, three_states, expect=Version("not-the-stored-token"))
-
-    assert not ts.exists(image_status_digest_key(tmp_path))
-    assert read_registry(tmp_path) == two_states
-
-
 def test_replace_registry_refuses_a_same_values_type_flip_without_allow_type_changes(tmp_path):
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
@@ -400,38 +373,25 @@ def test_replace_registry_allow_removals_alone_does_not_admit_a_type_flip(tmp_pa
         replace_registry(tmp_path, ordinal, expect=_version(tmp_path), allow_removals=True)
 
 
-def test_replace_registry_admits_a_type_flip_with_allow_type_changes_and_sweeps_it(tmp_path):
-    """A flip lands under the flag, and the confirmation-digest sweep stales a previously stamped
-    finished status under the subject exactly as a value change would."""
-    from tcip_mcp.subject_registry import attribute_schema_digest, replace_registry
-    from tcip_mcp.dataset_layout import (
-        image_status_digest_key, record_image_statuses, stamp_image_status_digests, status_bucket,
-    )
+def test_replace_registry_admits_a_type_flip_with_allow_type_changes(tmp_path):
+    """A flip lands under the flag."""
+    from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
-    import tcip_store as ts
 
     categorical = SubjectRegistry(subjects=(Subject(name="bud", attributes=(
         Attribute(name="opening", type="categorical", values=("closed", "open")),)),))
     replace_registry(tmp_path, categorical, expect=Version.ABSENT)
-    record_image_statuses(
-        tmp_path, status_bucket("bud", None), {"img.jpg": "complete"}, recorded_by="user:breeder")
-    old_digest = attribute_schema_digest(categorical, "bud")
-    stamp_image_status_digests(tmp_path, status_bucket("bud", None), ["img.jpg"], old_digest)
 
     ordinal = SubjectRegistry(subjects=(Subject(name="bud", attributes=(
         Attribute(name="opening", type="ordinal", values=("closed", "open")),)),))
-    result = replace_registry(
-        tmp_path, ordinal, expect=_version(tmp_path), allow_type_changes=True)
+    replace_registry(tmp_path, ordinal, expect=_version(tmp_path), allow_type_changes=True)
 
     assert read_registry(tmp_path) == ordinal
-    assert result["schema_change_sweep"]["predating_vocabulary"] == {"bud": 1}
-    assert ts.read(image_status_digest_key(tmp_path)).get(
-        status_bucket("bud", None), {}).get("img.jpg") == old_digest
 
 
 def test_replace_registry_admits_a_values_only_growth_and_a_same_type_resave(tmp_path):
-    """The type-flip refusal never fires over a growth or a re-save that restates the same type,
-    the existing sweep tests' own coverage of those shapes."""
+    """The type-flip refusal never fires over a growth or a re-save that restates the same
+    type."""
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
 

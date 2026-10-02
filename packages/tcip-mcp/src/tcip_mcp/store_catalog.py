@@ -13,7 +13,7 @@ from pathlib import Path
 from tcip_store import registered_stores
 from tcip_store.layout_claims import ROOT, RUN, SPLITS, STATE
 
-from tcip_annotation import json_io, review_engine  # noqa: F401
+from tcip_annotation import json_io, verdicts  # noqa: F401
 from tcip_mcp import experiments
 from tcip_mcp import (  # noqa: F401
     audit,
@@ -30,7 +30,6 @@ from tcip_mcp import (  # noqa: F401
 )
 from tcip_mcp.project_paths import project_state_dir
 from tcip_mcp.pipelines.data import band_groups, selection, splits  # noqa: F401
-from tcip_mcp.pipelines.feedback import materialize  # noqa: F401
 from tcip_mcp.pipelines.postprocessing import plant_mapping  # noqa: F401
 from tcip_mcp.pipelines.training import hpo  # noqa: F401
 from tcip_mcp.tools import (  # noqa: F401

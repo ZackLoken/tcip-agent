@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 
 /** Per-browser subject color overrides: a subject name -> hex, never written to the registry
- *  (`subjects.json` stores no color; see `api/subjects.ts`'s `subjectColor`). Shaped after
- *  `lib/reviewColors.ts`'s persisted palette: a `localStorage` map plus a same-tab event, so a
- *  recolor reaches every consumer of `subjectColor` without a page reload. */
+ *  (`subjects.json` stores no color; see `api/subjects.ts`'s `subjectColor`): a `localStorage`
+ *  map plus a same-tab event, so a recolor reaches every consumer of `subjectColor` without a
+ *  page reload. */
 export type SubjectColorOverrides = Record<string, string>;
 
 const SUBJECT_COLORS_KEY = "tcip.annotate.subjectColors";

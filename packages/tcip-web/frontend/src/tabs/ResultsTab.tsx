@@ -333,7 +333,11 @@ export function ResultsTab() {
         filename,
         acknowledgment:
           unvalidated && resultSha256
-            ? { reason: ackReason.trim(), result_sha256: resultSha256[payload] }
+            ? {
+                user: useStore.getState().user,
+                reason: ackReason.trim(),
+                result_sha256: resultSha256[payload],
+              }
             : null,
       };
       const blob = await resultsApi.downloadCsv(body);
@@ -398,7 +402,11 @@ export function ResultsTab() {
         filename: countFilename.trim(),
         acknowledgment:
           countShowAck && countGateRefusal?.result_sha256
-            ? { reason: countAckReason.trim(), result_sha256: countGateRefusal.result_sha256 }
+            ? {
+                user: useStore.getState().user,
+                reason: countAckReason.trim(),
+                result_sha256: countGateRefusal.result_sha256,
+              }
             : null,
       };
       const { blob, headers } = await resultsApi.downloadCountCsv(body);

@@ -1,20 +1,19 @@
 """The platform's recorded-actor convention, in one place.
 
 A stamped fact says who or what produced it: a person is ``user:<name>``, a tool producer stays
-bare (``sam``, ``materialize_review_dataset``).
+bare (``model:<checkpoint>``, an agent's own name).
 """
 
 from __future__ import annotations
 
+from tcip_annotation.json_io import PERSON_IDENTITY_PREFIX
 
-def user_identity(name: str | None) -> str:
-    """A person's recorded identity: ``user:<name>``, idempotent, never bare. Refuses an empty
-    name.
-    """
+
+def actor(name: str | None) -> str:
+    """A person's recorded identity, ``user:<name>``, idempotent, from the ``name`` a request
+    states. Refuses (``ValueError``) when ``name`` is missing or blank."""
     value = (name or "").strip()
     if not value:
-        raise ValueError(
-            "a confirmation records who gave it, so the confirming name is required; resolve it "
-            "from the request or the backend's own fallback identity before calling"
-        )
-    return value if value.startswith("user:") else f"user:{value}"
+        raise ValueError("an act records who made it, and the request names no one; state the "
+                         "person's name")
+    return value if value.startswith(PERSON_IDENTITY_PREFIX) else PERSON_IDENTITY_PREFIX + value

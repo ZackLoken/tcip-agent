@@ -53,7 +53,7 @@ def test_a_reference_of_the_models_own_predictions_refuses_whole(tmp_path):
         json_io.require_reference_ground_truth(documents)
 
     assert "16 of 16 annotations" in str(exc.value)
-    assert "accept the model's proposals through review" in str(exc.value)
+    assert "accept the model's proposals in the editor" in str(exc.value)
 
 
 def test_a_mixed_reference_refuses_whole_rather_than_keeping_its_clean_subset(tmp_path):
@@ -75,7 +75,7 @@ def test_ground_truth_an_agent_authored_that_nobody_ruled_on_refuses(tmp_path):
     message = str(exc.value)
     assert "8 of 8 annotations" in message
     assert PRODUCER in message
-    assert "review-confirmation loop" in message
+    assert "confirm these records in the editor" in message
 
 
 def test_a_bare_tool_name_reads_as_a_machine_author(tmp_path):
@@ -85,43 +85,12 @@ def test_a_bare_tool_name_reads_as_a_machine_author(tmp_path):
         json_io.require_reference_ground_truth(documents)
 
 
-def test_a_person_created_record_carrying_the_rule_with_no_sign_off_refuses_naming_it(tmp_path):
-    documents = _documents(tmp_path, ["a"], lambda s: [
-        _hand(created_by="user:breeder", accepted_by_rule="assessment-1")])
-
-    with pytest.raises(ValueError) as exc:
-        json_io.require_reference_ground_truth(documents)
-
-    assert "accepted_by_rule with no person's accepted_by" in str(exc.value)
-    assert "a.json record 0" in str(exc.value)
-
-
-def test_a_tool_record_with_a_non_person_sign_off_and_the_rule_refuses(tmp_path):
-    documents = _documents(tmp_path, ["a"], lambda s: [
-        _hand(created_by=PRODUCER, accepted_by="model:other", accepted_by_rule="assessment-1")])
-
-    with pytest.raises(ValueError, match="accepted_by_rule with no person's accepted_by"):
-        json_io.require_reference_ground_truth(documents)
-
-
-def test_provenance_facts_reports_rule_admitted_unsigned_indices():
-    records = [
-        _hand(created_by="user:breeder", accepted_by_rule="assessment-1"),
-        _hand(created_by="user:breeder", accepted_by="user:breeder",
-              accepted_by_rule="assessment-1"),
-        _hand(created_by="user:breeder", accepted_by_rule=""),
-        _hand(created_by="user:breeder"),
-    ]
-    assert json_io.provenance_facts(records).rule_admitted_unsigned == [0, 2]
-
-
 @pytest.mark.parametrize("record", [
     _hand(),
     _hand(created_by="user:breeder", created_at="2026-01-01T00:00:00+00:00"),
     _hand(created_by=PRODUCER, accepted_by="user:breeder",
           accepted_at="2026-01-02T00:00:00+00:00"),
-    _hand(created_by=PRODUCER, accepted_by="user:breeder", accepted_by_rule="assessment-1"),
-], ids=["unattributed", "a-persons", "reviewer-accepted", "signed-rule-admission"])
+], ids=["unattributed", "a-persons", "reviewer-accepted"])
 def test_ground_truth_a_person_stands_behind_is_a_reference(tmp_path, record):
     json_io.require_reference_ground_truth(_documents(tmp_path, STEMS, lambda s: [record]))
 

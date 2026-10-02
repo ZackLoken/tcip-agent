@@ -1,10 +1,9 @@
 """What an archive must refuse to bundle, and what a restored bundle still carries.
 
 An archive is a file bundle, so under a database backend it exports every database under the
-tree to its files before scanning them, rather than restoring a project whose confirmed
-negatives are simply absent because nobody exported first, and absence is what an unannotated
-image looks like to a trainer. Both doors are checked here: before the copy, and again after
-it, so the bundle reported is the bundle verified.
+tree to its files before scanning them, rather than restoring a project whose stored records are
+simply absent because nobody exported first. Both doors are checked here: before the copy, and
+again after it, so the bundle reported is the bundle verified.
 """
 
 from __future__ import annotations
@@ -14,14 +13,14 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import tcip_store as ts
-from tcip_mcp import dataset_layout
 from tcip_mcp.tools import project_tools
 from tcip_mcp.tools.project_tools import archive_project, import_project
+from tcip_mcp.web_client import gui_snapshot_key
 from tcip_store.file_backend import FileBackend
 from tcip_store.sqlite_backend import SqliteBackend
 
-_NEGATIVE = {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}}
-"""One confirmed negative: an image a human marked done with nothing on it."""
+_RECORD = {"active_tab": "annotate", "active_subject": "ü"}
+"""One record a root's database holds, which its files hold only once exported."""
 
 
 @contextmanager
@@ -66,20 +65,20 @@ def _project(tmp_path: Path) -> Path:
 
 
 def test_a_project_whose_state_is_not_yet_in_its_files_still_archives(tmp_path):
-    """The confirmed negative lives in a row no operator has exported yet; the door exports it
-    itself before bundling, so a project the doors create archives without that step run by
-    hand and the negative is not simply absent from the restored files."""
+    """The record lives in a row no operator has exported yet; the door exports it itself before
+    bundling, so a project the doors create archives without that step run by hand and the record
+    is not simply absent from the restored files."""
     with bound(SqliteBackend()):
         root = _project(tmp_path)
-        ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
+        ts.replace(gui_snapshot_key(root), _RECORD, expect=ts.Version.ABSENT)
         result = archive_project(root, str(tmp_path / "bundle.zip"))
 
     assert "error" not in result
     with zipfile.ZipFile(str(tmp_path / "bundle.zip")) as zf:
         names = zf.namelist()
-        status_name = next(name for name in names if name.endswith("image_status.json"))
-        content = zf.read(status_name)
-    assert b"negative" in content
+        record_name = next(name for name in names if name.endswith("state/gui.json"))
+        content = zf.read(record_name)
+    assert b"active_subject" in content
 
 
 def test_a_project_whose_files_are_current_archives(tmp_path):
@@ -87,7 +86,7 @@ def test_a_project_whose_files_are_current_archives(tmp_path):
     exported project is not missing any."""
     with bound(SqliteBackend()):
         root = _project(tmp_path)
-        ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
+        ts.replace(gui_snapshot_key(root), _RECORD, expect=ts.Version.ABSENT)
         export_files(root)
         result = archive_project(root, str(tmp_path / "bundle.zip"))
 
@@ -100,7 +99,7 @@ def test_a_project_written_during_the_copy_takes_its_own_output_back(tmp_path, m
     rather than a mix of before and after."""
     with bound(SqliteBackend()) as backend:
         root = _project(tmp_path)
-        ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
+        ts.replace(gui_snapshot_key(root), _RECORD, expect=ts.Version.ABSENT)
         export_files(root)
         original = project_tools._database_counters
         seen: list[int] = []
@@ -109,12 +108,9 @@ def test_a_project_written_during_the_copy_takes_its_own_output_back(tmp_path, m
             counters = original(target)
             seen.append(len(seen))
             if len(seen) > 1:
-                current = ts.read_versioned(dataset_layout.image_status_key(root))
-                ts.replace(
-                    dataset_layout.image_status_key(root),
-                    {"bud/2026-03-04": {"a_1.jpg": {"status": "complete", "by": "user:ü"}}},
-                    expect=current.version,
-                )
+                current = ts.read_versioned(gui_snapshot_key(root))
+                ts.replace(gui_snapshot_key(root), {"active_tab": "results"},
+                           expect=current.version)
                 return original(target)
             return counters
 
@@ -147,7 +143,7 @@ def test_no_database_file_travels_in_the_bundle(tmp_path):
     authorities and no way to tell which one a reader is looking at."""
     with bound(SqliteBackend()):
         root = _project(tmp_path)
-        ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
+        ts.replace(gui_snapshot_key(root), _RECORD, expect=ts.Version.ABSENT)
         export_files(root)
         archive_project(root, str(tmp_path / "bundle.zip"))
 
@@ -157,31 +153,31 @@ def test_no_database_file_travels_in_the_bundle(tmp_path):
     assert not [name for name in names if "store.db" in name]
 
 
-def test_a_restored_project_conformed_to_a_database_still_holds_its_confirmed_negatives(
+def test_a_restored_project_conformed_to_a_database_still_holds_its_records(
     tmp_path, monkeypatch,
 ):
     """The whole round trip the gate exists for: rows out to files, files into a bundle, bundle
-    into a fresh directory, and that directory adopted back into a database with the human's
-    negative still saying negative.
+    into a fresh directory, and that directory adopted back into a database with the record
+    still saying what it said.
     """
     from tcip_store.adoption import adopt_root
     from tcip_store.layout_claims import ROOT
 
     with bound(SqliteBackend()):
         root = _project(tmp_path)
-        ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
+        ts.replace(gui_snapshot_key(root), _RECORD, expect=ts.Version.ABSENT)
         export_files(root)
         archive_project(root, str(tmp_path / "bundle.zip"))
 
     restored = tmp_path / "restored"
     with bound(FileBackend()):
         assert "error" not in import_project(str(tmp_path / "bundle.zip"), str(restored))
-        assert ts.read(dataset_layout.image_status_key(restored)) == _NEGATIVE
+        assert ts.read(gui_snapshot_key(restored)) == _RECORD
 
     adopt_root(str(restored), ROOT, report=lambda line: None)
 
     with bound(SqliteBackend()):
-        assert ts.read(dataset_layout.image_status_key(restored)) == _NEGATIVE
+        assert ts.read(gui_snapshot_key(restored)) == _RECORD
 
 
 def test_a_render_cache_and_hash_cache_are_not_bundled_and_are_counted(tmp_path):

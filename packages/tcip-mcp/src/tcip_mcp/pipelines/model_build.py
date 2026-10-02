@@ -61,6 +61,23 @@ def _import_dotted(target: object) -> Any:
         raise ValueError(f"Builder {attr!r} not found in module {mod_name!r}.") from exc
 
 
+def resolve_named(name: str, registry: "Mapping[str, Any]", *, kind: str, register: str) -> Any:
+    """The entry ``registry`` holds under ``name``, else the target a dotted ``module:factory``
+    ``name`` imports. Refuses (``ValueError``) a name that is neither, the registered names and
+    ``register`` (the call that adds one) named, and a dotted name that will not import."""
+    if name in registry:
+        return registry[name]
+    if ":" in name or "." in name:
+        try:
+            return _import_dotted(name)
+        except Exception as exc:  # noqa: BLE001 (any import failure is an unresolvable name)
+            raise ValueError(f"Could not import {kind} {name!r}: {exc}") from exc
+    raise ValueError(
+        f"Unknown {kind} {name!r}. Name a registered one ({sorted(registry)}), register one with "
+        f"{register}, or pass a dotted 'module:factory' you wrote."
+    )
+
+
 def _import_root(file: Path, module: str) -> Path | None:
     """The directory ``module`` imports from when ``file`` is that module's own source, or
     ``None`` when ``file`` is not it.

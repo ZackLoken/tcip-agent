@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 
+import { isFocusableControl } from "@/hooks/useKeyboardShortcuts";
+import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
 import type { TabName } from "@/store/types";
 
 interface Shortcut {
@@ -12,36 +14,10 @@ const GLOBAL: Shortcut[] = [
   { key: "Esc", desc: "Close dialogs / cancel in-progress drawing" },
 ];
 
-const ANNOTATE: Shortcut[] = [
-  { key: "m", desc: "Cycle Box / Polygon / Point mode" },
-  { key: "Ctrl+Z", desc: "Undo" },
-  { key: "Ctrl+Shift+Z", desc: "Redo" },
-  { key: "Ctrl+Y", desc: "Redo (alias)" },
-  { key: "Ctrl+S", desc: "Save labels" },
-  { key: "v", desc: "Toggle stream drawing: click starts/pauses laying, double-click closes" },
-  { key: "s", desc: "Toggle vertex snapping (polygon mode)" },
-  {
-    key: "x",
-    desc: "Arm the cut tool: click two points on either side of the selected polygon",
-  },
-  { key: "0–9", desc: "Select the Nth registered subject (0 is the first)" },
-  { key: "Enter", desc: "Close current polygon (or double-click)" },
-  { key: "Delete", desc: "Delete the selected polygon, box or point" },
-  { key: "Esc", desc: "Clear a pending cut click and disarm the cut tool; re-arm with x" },
-  { key: "←  →", desc: "Prev / Next image" },
-  { key: "[  ]", desc: "Prev / Next unswept grid cell (large rasters with a coverage grid)" },
-];
-
-// Verdicts write ground truth: keep in sync with ReviewTab's button titles.
-const REVIEW: Shortcut[] = [
-  { key: "a", desc: "Accept: keep this object in GT (accepting an FP adds the prediction to GT)" },
-  { key: "r", desc: "Reject: FP discards the prediction; TP/FN deletes the ground-truth object" },
-  { key: "e", desc: "Edit the shape in place on this canvas (drag corners / points)" },
-  { key: "Enter", desc: "Save the edited shape to ground truth" },
-  { key: "Esc", desc: "Cancel the edit, ground truth unchanged" },
-  { key: "←  →", desc: "Prev / Next detection" },
-  { key: "↑  ↓", desc: "Prev / Next image" },
-];
+const ANNOTATE: Shortcut[] = Object.values(ANNOTATE_KEYS).map((k) => ({
+  key: k.label,
+  desc: k.desc,
+}));
 
 const MOUSE: Shortcut[] = [
   { key: "Scroll / two-finger", desc: "Pan (any direction)" },
@@ -84,19 +60,7 @@ export function HelpOverlay({ activeTab }: HelpOverlayProps) {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      // Ignore keystrokes aimed at a focused form control (mirrors
-      // useKeyboardShortcuts): typing "?" into a text field must insert the
-      // character, not toggle the overlay.
-      const tgt = e.target as HTMLElement | null;
-      if (
-        tgt &&
-        (tgt.tagName === "INPUT" ||
-          tgt.tagName === "TEXTAREA" ||
-          tgt.tagName === "SELECT" ||
-          tgt.isContentEditable)
-      ) {
-        return;
-      }
+      if (isFocusableControl(e.target)) return;
       if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
         e.preventDefault();
         setOpen((p) => !p);
@@ -125,7 +89,6 @@ export function HelpOverlay({ activeTab }: HelpOverlayProps) {
           </button>
         </div>
         {activeTab === "annotate" && <Section title="Annotate" items={ANNOTATE} />}
-        {activeTab === "review" && <Section title="Review" items={REVIEW} />}
         <Section title="Mouse" items={MOUSE} />
         <Section title="Global" items={GLOBAL} />
       </div>

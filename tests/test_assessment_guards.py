@@ -346,7 +346,7 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(t
     Image.new("RGB", (8, 8)).save(tmp_path / "a.png")
     (tmp_path / "t.csv").write_text("image,value\na,1.0\n", encoding="utf-8")
     sample = Sample(member="a", source=str(tmp_path / "a.png"), ground_truth=str(tmp_path / "t.csv"),
-                    group="a", side="holdout", confirmation_bucket=None, row_key="a")
+                    group="a", side="holdout", row_key="a")
     entry = fx.COUNT_SPEC.model_copy(update={"regression_criterion": "r_squared"})
 
     with pytest.raises(AssessmentRefused, match="_values"):

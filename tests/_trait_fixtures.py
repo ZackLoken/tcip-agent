@@ -106,7 +106,7 @@ def confirm(project_root: Path, revision: TraitRevision, *, user: str = "grüne"
     """Confirm ``revision`` the way the Setup tab posts it: by number and the hash it showed."""
     return traits.confirm_revision(
         project_root, revision.entry.name, revision.number, revision.entry_sha256,
-        user=user, identity_from_request=True, confirmed=True)
+        user=user, confirmed=True)
 
 
 def propose_and_confirm(project_root: Path, proposed: TraitEntry) -> TraitRevision:

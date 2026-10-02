@@ -137,32 +137,35 @@ def test_the_row_checks_notice_a_row_that_is_missing_or_misshapen(tmp_path: Path
     a row deliberately made wrong: one dropped from the table, one whose constant directory is
     misspelled so the store's own placement no longer matches it, and one widened until it
     swallows a document belonging to another store."""
-    dropped = {name for name in PLATFORM_CLAIMS if name != "image_status"}
-    placed = _golden_path("image_status", tmp_path)
+    dropped = {name for name in PLATFORM_CLAIMS if name != "project_status"}
+    placed = _golden_path("project_status", tmp_path)
     misspelled = Claim(
-        PLATFORM_CLAIMS["image_status"].layout,
-        ((Constant(".tcip"), Constant("stat"), Patterned(literal("image_status"), tail=".json")),),
+        PLATFORM_CLAIMS["project_status"].layout,
+        ((Constant(".tcip"), Constant("stat"), Patterned(literal("project_status"), tail=".json")),),
     )
     widened = Claim(
-        PLATFORM_CLAIMS["image_status"].layout,
+        PLATFORM_CLAIMS["project_status"].layout,
         ((Constant(".tcip"), Constant("state"), Patterned(ANY, tail=".json")),),
     )
 
     assert dropped != _stores_owed_a_claim()
     assert _matching_templates(misspelled, placed) == []
-    assert _matching_templates(widened, ".tcip/state/not_image_status.json")
-    assert _matching_templates(PLATFORM_CLAIMS["image_status"], ".tcip/state/not_image_status.json") == []
+    assert _matching_templates(widened, ".tcip/state/not_project_status.json")
+    assert _matching_templates(
+        PLATFORM_CLAIMS["project_status"], ".tcip/state/not_project_status.json") == []
 
 
-def test_both_review_verdict_depths_match_the_one_row_that_speaks_for_them():
-    """A verdict names a prediction bucket or names none, and its shard sits one directory
-    deeper in the first case. One row covers both or half the shards read as unclaimed."""
-    claim = PLATFORM_CLAIMS["review_verdicts"]
+def test_the_verdict_shard_claim_matches_one_bucket_depth_only():
+    """A verdict always names the prediction bucket whose proposal it decides, so its shard sits
+    at exactly one depth and the claim row speaks for that depth alone."""
+    from tcip_annotation.verdicts import REVIEW_VERDICTS_STORE
 
-    assert _matching_templates(claim, "review/predictions/live/a_1.jpg.json") == []
-    assert _matching_templates(claim, "review/predictions_live/a_1.jpg.json")
-    assert _matching_templates(claim, "review/a_1.jpg.json")
-    assert _matching_templates(claim, "a_1.jpg.json") == []
+    claim = PLATFORM_CLAIMS[REVIEW_VERDICTS_STORE]
+
+    assert _matching_templates(claim, "review/predictions_live/a_1.jpg.jsonl")
+    assert _matching_templates(claim, "review/a_1.jpg.jsonl") == []
+    assert _matching_templates(claim, "review/predictions/live/a_1.jpg.jsonl") == []
+    assert _matching_templates(claim, "review/predictions_live/a_1.jpg.json") == []
 
 
 def test_every_platform_registration_is_an_import_side_effect():

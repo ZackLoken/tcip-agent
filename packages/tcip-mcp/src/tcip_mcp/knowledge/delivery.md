@@ -64,7 +64,6 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | `deliver_phenology_milestones` | Per-plant milestone CSV from classified buckets and a plant mapping; its own column schema; see `phenology` skill |
 | `register_plant_registry` | Names a plant-locations CSV set once (per-file `sha256`/`n_plants`, `crop`, `site`, a content digest over the parsed rows), so `deliver_orthomosaic_plant_counts` and `build_plant_mapping` read the same registered version by name (`plant_registry`) instead of re-asserting file paths; a shapefile is converted first by `tcip shp-to-plant-csv` |
 | `deliver_orthomosaic_plant_counts` | Per-plant detection counts from a published whole-raster bucket plus a `plant_registry` name. Nearest-neighbor by default; `canopy_subject` switches to containment in an accepted canopy boundary instead (refused alongside a stated `nn_tolerance_m`). Fewer rows than the registry names can ship under either regime, the absent plants named on the delivery event |
-| `materialize_review_dataset` | Turn human review verdicts into a curated training set for re-delivery after correction; see `annotation` skill |
 
 An unvalidated delivery ships only under a breeder's recorded acknowledgment of exactly the rows
 and disclosure it writes. A breeder records one in the Results tab, never through these tools; each

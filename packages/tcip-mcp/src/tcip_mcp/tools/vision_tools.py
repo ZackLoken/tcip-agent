@@ -16,7 +16,6 @@ from tcip_annotation import Annotation, Point, bbox_of
 from tcip_annotation.state import box_derivable, polygonal, prediction_score
 from tcip_annotation.json_io import UnreadableLabelDocument, read_predictions
 from tcip_annotation.json_io import read_annotations as read_labels
-from tcip_annotation.sam_wrapper import column_label
 from tcip_annotation.viz import (
     render_canvas_state,
     render_comparison,
@@ -130,11 +129,10 @@ def _source_for_path(image_path: str) -> "str | Path | BandGroupRef":
     """
     from tcip_mcp.pipelines import image_utils
 
-    img = Path(image_path)
     try:
-        return image_utils.resolve_image_source(img.parent, img.stem)
+        return image_utils.resolve_image_path(image_path)
     except (FileNotFoundError, image_utils.BandGroupIncomplete):
-        return img
+        return Path(image_path)
 
 
 def _display_for_path(image_path: str, *, max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
@@ -183,9 +181,9 @@ def _legend_name(a: Annotation, *, scope) -> str:
     (the object class alone would be one name for every prediction), else ``a.subject``.
     """
     if scope is not None and scope.classified:
-        from tcip_annotation.json_io import classified_value_of
+        from tcip_annotation.json_io import assessed_key
 
-        value = classified_value_of(a, subject=scope.subject, attribute=scope.attribute)
+        value = assessed_key(a, scope.subject, scope.attribute)
         if value is not None:
             return value
     return a.subject
@@ -249,7 +247,7 @@ def visualize(
         task: 'detect' or 'segment'.
         class_names: Comma-separated class names (e.g. "fruit,shoot").
         conf_threshold: Minimum confidence; filters displayed predictions (source='predictions')
-            and the predictions matched against GT (source='comparison'). Defaults to the review
+            and the predictions matched against GT (source='comparison'). Defaults to the viewing
             filter ``matching.REVIEW_CONF_FLOOR``.
         iou_threshold: IoU threshold for a positive match (source='comparison' only).
         n: Number of samples in the grid (source='dataset' only).
@@ -408,12 +406,17 @@ def _viz_comparison(
 ) -> dict:
     """Render GT vs prediction comparison with match indicators. See ``visualize``.
 
-    Green = ground truth, Red = predictions, Yellow lines = matched pairs, from ``compute_matches``
-    over the two documents as written; the legend keys the prediction side by its decoded value
-    (:func:`_legend_name`).
+    Green = ground truth, Red = predictions, Yellow lines = matched pairs, and the TP/FP/FN
+    counts, all as the single-image scoring
+    (:func:`~tcip_mcp.tools.annotation_tools.score_predictions`) states them at ``iou_threshold``
+    over the predictions at or above ``conf_threshold``; the legend keys the prediction side by
+    its decoded value (:func:`_legend_name`).
     """
-    from tcip_annotation.matching import compute_matches
+    from tcip_annotation.matching import pair_proposals
+
     from tcip_mcp.dataset_layout import find_gt_label
+    from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
+    from tcip_mcp.tools.annotation_tools import score_predictions
 
     img = Path(image_path)
     if not img.is_file():
@@ -426,9 +429,10 @@ def _viz_comparison(
     if label_path is None:
         return {"error": f"No labels found for {stem}"}
     try:
-        gt = _boxable(read_labels(str(label_path)))
+        gt_all = read_labels(str(label_path))
     except UnreadableLabelDocument as exc:
         return {"error": str(exc)}
+    gt = _boxable(gt_all)
     gt_dicts = [_box_dict(a, index) for a in gt]
 
     try:
@@ -436,22 +440,28 @@ def _viz_comparison(
     except ValueError as exc:
         return {"error": str(exc)}
     pred_dicts: list[dict] = []
-    tp_matches: list[dict] = []
+    tp_matches: list[tuple[int, int]] = []
+    unpredicted = pair_proposals(
+        gt_all, [], resolve_match_criterion(None, [], iou_threshold=iou_threshold))
+    tp, fp, fn = 0, 0, len(unpredicted.missed)
     if pred_file is not None:
         try:
-            preds = _boxable(read_predictions(str(pred_file)))
+            preds_all = read_predictions(str(pred_file))
         except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
-        pred_dicts = [_box_dict(a, index, scope=scope) for a in preds]
-        # Match at the caller's conf operating point (not compute_matches' silent 0.25 default).
-        match_result = compute_matches(gt, preds, iou_threshold=iou_threshold,
-                                       conf_threshold=conf_threshold)
-        tp_matches = match_result["tp"]
-        tp = len(tp_matches)
-        fp = len(match_result["fp"])
-        fn = len(match_result["fn"])
-    else:
-        tp, fp, fn = 0, 0, len(gt)
+        pred_dicts = [_box_dict(a, index, scope=scope) for a in _boxable(preds_all)]
+        scored = score_predictions(image_path, str(Path(project, predictions_dir)),
+                                   iou_threshold=iou_threshold, conf_threshold=conf_threshold,
+                                   detail=True)
+        if "error" in scored:
+            return {"error": scored["error"]}
+        # The scoring indexes the whole documents; the renderer draws their boxable entries.
+        gpos = {i: k for k, i in enumerate(
+            i for i, a in enumerate(gt_all) if box_derivable(a.geometry))}
+        ppos = {i: k for k, i in enumerate(
+            i for i, a in enumerate(preds_all) if box_derivable(a.geometry))}
+        tp_matches = [(gpos[g], ppos[p]) for g, p in scored["matches"]]
+        tp, fp, fn = scored["tp"], scored["fp"], scored["fn"]
 
     read = _display_for_path(image_path)
     out = render_comparison(read.pixels, gt_dicts, pred_dicts, native_size=read.native_size,
@@ -709,12 +719,12 @@ def capture_live_canvas(
     """Render exactly what the human's GUI canvas showed for this project: image, shapes, viewport.
 
     Reads the canvas state the GUI pushes under the project's ``.tcip/state/``:
-    ``canvas_live.json`` (image, viewport, classes, legend, counts, tab, mode, active_subject,
+    ``canvas_live.json`` (image, viewport, classes, counts, tab, mode, active_subject,
     cut_armed, dirty and user) and ``canvas_shapes.json`` (the full display-resolved geometry,
     including unsaved edits and an in-progress drawing). The backend writes a push only under the
     project it has open, so these documents are always this project's own. Renders the region
     being shown at up to ``max_edge`` and returns the artifact path for the agent's own
-    image-capable read tool, plus the classes schema, review legend, per-tag/per-creator counts,
+    image-capable read tool, plus the classes schema, per-tag/per-creator counts,
     and the state's age. A canvas document that will not read raises the store's own error.
 
     Args:
@@ -811,7 +821,6 @@ def capture_live_canvas(
         "viewport": state.get("viewport"),
         "cropped_to_viewport": region is not None,
         "classes": state.get("classes") or [],
-        "legend": state.get("legend"),
         "counts": state.get("counts"),
         "shape_counts_by_tag": tag_counts,
         "shape_counts_by_creator": creator_counts,
@@ -847,8 +856,8 @@ def overlay_reference_grid(
     (``reference_grid.derive_pointing_tile_size``) so the rendered labels stay legible. Every
     response echoes the full grid geometry (``tile_size``, ``overlap``, ``cols``, ``rows``,
     ``width``, ``height``): pass the echoed ``tile_size``/``overlap`` to
-    ``segment_prompt(grid_cells=...)`` so a cell name resolves against the grid that was actually
-    rendered.
+    ``propose_annotations(grid_cells=...)`` so a cell name resolves against the grid that was
+    actually rendered.
 
     Args:
         image_path: Absolute path to the image file.
@@ -877,11 +886,10 @@ def overlay_reference_grid(
                               output_path=viz_output_path(project, "grid_overlay"))
 
     geometry = grid_geometry(w, h, tile_size, overlap)
-    last = f"{column_label(geometry['cols'] - 1)}{geometry['rows']}"
     return {
         "image_path": out,
         "summary": f"Reference grid ({geometry['cols']}x{geometry['rows']}, tile_size "
                    f"{tile_size}) rendered on {img.name}. Reference cells like 'A1' "
-                   f"(top-left) to '{last}' (bottom-right).",
+                   f"(top-left) to '{cells[-1].name}' (bottom-right).",
         **geometry,
     }

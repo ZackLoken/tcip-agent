@@ -129,14 +129,12 @@ and how many runs this process's own registry currently reports running.
 
 An auto-label engine turns an image into candidate shapes for a human to review. The seam is as
 open as `model_source`: implement the `Proposer` protocol (`propose(image)` for whole-image
-candidates, `segment(image, points/box)` for one prompted mask) and register it with
-`register_proposal_engine(name, engine)` so `engine=<name>` resolves to it, or bring one by dotted
-`module:factory` with no registration at all, so you can wire, trial, and compare techniques and
-deduce which serves a task best by how well each engine's high-conf proposals survive breeder
-review. `available_engines()` is the discovery call: it lists every name
-`register_proposal_engine` has registered (SAM included unconditionally; SAM's own import is
-lazy, attempted only when the engine actually runs), so presence there means registration, not
-a per-machine importability probe.
+candidates) and register it with `register_proposal_engine(name, engine)` so `engine=<name>`
+resolves to it, or bring one by dotted `module:factory` with no registration at all, so you can
+wire, trial, and compare techniques and deduce which serves a task best by how well each engine's
+high-conf proposals survive breeder review. No engine ships registered: `propose_annotations`
+names its engine, and an empty or unknown name refuses, listing every name registered in this
+process.
 
 Candidates use a neutral schema (`candidate_id` / `bbox` / `area` / `rings` / `score` / `engine`
 / `engine_meta`) so the shared review/staging path stays method-agnostic. `rings` is `Polygon.rings`

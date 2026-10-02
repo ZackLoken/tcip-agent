@@ -269,6 +269,7 @@ describe("ResultsTab evidence gate", () => {
   });
 
   it("replaces the disabled export with an acknowledge-and-export flow while unvalidated", async () => {
+    useStore.setState({ user: "breeder" });
     mockTree();
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
       curves: { rows: [CURVE_ROW], n_plants: 1 },
@@ -296,6 +297,7 @@ describe("ResultsTab evidence gate", () => {
 
     await waitFor(() => expect(downloadCsv).toHaveBeenCalled());
     expect(downloadCsv.mock.calls[0][0].acknowledgment).toEqual({
+      user: "breeder",
       reason: "calibration is not ready yet",
       result_sha256: "c".repeat(64),
     });

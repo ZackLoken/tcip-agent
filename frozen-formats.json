@@ -43,18 +43,6 @@
       "schema_version": 1,
       "cannot_carry_field": null
     },
-    "coverage_grid_zoom": {
-      "kind": "record",
-      "frozen": false,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
-    "curated_manifest": {
-      "kind": "record",
-      "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
     "dataset_identity": {
       "kind": "blob",
       "frozen": true,
@@ -79,12 +67,6 @@
       "schema_version": 1,
       "cannot_carry_field": null
     },
-    "flat_image": {
-      "kind": "blob",
-      "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": "raw placed-image bytes, the same raw-bytes nature as imagery"
-    },
     "friction_reports": {
       "kind": "record",
       "frozen": true,
@@ -97,29 +79,11 @@
       "schema_version": 1,
       "cannot_carry_field": null
     },
-    "image_status": {
-      "kind": "record",
-      "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
-    "image_status_digest": {
-      "kind": "record",
-      "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
     "imagery": {
       "kind": "blob",
       "frozen": true,
       "schema_version": 1,
       "cannot_carry_field": "raw capture bytes (JPEG/PNG/TIFF/GeoTIFF/NPZ), nothing to version"
-    },
-    "label_baselines": {
-      "kind": "blob",
-      "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": null
     },
     "model_registry": {
       "kind": "record",
@@ -169,18 +133,6 @@
       "schema_version": 1,
       "cannot_carry_field": null
     },
-    "region_completeness": {
-      "kind": "record",
-      "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
-    "region_completeness_digest": {
-      "kind": "record",
-      "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
     "retrospectives": {
       "kind": "record",
       "frozen": true,
@@ -188,7 +140,7 @@
       "cannot_carry_field": "retrospective markdown text, parsed by heading and section markers only"
     },
     "review_verdicts": {
-      "kind": "record",
+      "kind": "log",
       "frozen": true,
       "schema_version": 1,
       "cannot_carry_field": null
@@ -208,12 +160,6 @@
     "traits": {
       "kind": "record",
       "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
-    "view_coverage": {
-      "kind": "record",
-      "frozen": false,
       "schema_version": 1,
       "cannot_carry_field": null
     },

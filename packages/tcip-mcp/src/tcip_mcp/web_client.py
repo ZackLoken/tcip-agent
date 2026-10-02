@@ -12,7 +12,6 @@ from typing import Any, Literal, Optional, get_args
 
 import tcip_store
 from pydantic import BaseModel, ConfigDict, Field
-from tcip_annotation.matching import REVIEW_CONF_FLOOR
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, text_codec
 from tcip_store.file_backend import RootedFileLocator
 
@@ -126,21 +125,16 @@ def annotation_stats_key(project: str) -> Key:
     return Key(ANNOTATION_STATS_STORE, project, _ANNOTATION_STATS_PARTS)
 
 
-ActiveTab = Literal[
-    "setup", "annotate", "review", "training", "tuning", "inference", "results", "meta"]
-"""The GUI's tabs: the vocabulary ``GuiState.active_tab`` holds and ``POST /api/state/tab``
-validates against."""
+ActiveTab = Literal["setup", "annotate", "training", "tuning", "inference", "results", "meta"]
+"""The GUI's tabs: the vocabulary ``GuiState.active_tab`` holds and ``POST /api/state/tab`` and
+the canvas push validate against."""
 
 TAB_NAMES = get_args(ActiveTab)
 
-AnnotateMode = Literal["box", "polygon", "point", "map"]
-"""The Annotate canvas's tool modes: the vocabulary :attr:`GuiState.mode` holds. The first three
-draw; ``map`` navigates the coverage lattice (a click opens a cell's tile) and authors nothing."""
+AnnotateMode = Literal["box", "polygon", "point"]
+"""The Annotate canvas's drawing modes: the vocabulary :attr:`GuiState.mode` holds."""
 
 ANNOTATE_MODES = get_args(AnnotateMode)
-
-ReviewFilterType = Literal["all", "tp", "fp", "fn"]
-"""Which review outcomes the Review tab walks."""
 
 _TRANSPORT = ConfigDict(extra="forbid", json_schema_serialization_defaults_required=True)
 """The GUI state models' config: no field beyond the declared ones, and every field present in
@@ -167,26 +161,13 @@ class DatasetSelection(BaseModel):
 
 
 class ViewState(BaseModel):
-    """Pan/zoom state shared between the Annotate and Review tabs."""
+    """The Annotate canvas's pan/zoom state."""
 
     model_config = _TRANSPORT
 
     scale: float = 1.0
     offset_x: float = 0.0
     offset_y: float = 0.0
-
-
-class ReviewFilters(BaseModel):
-    """The Review tab's thresholds, outcome filter, subject filter and position."""
-
-    model_config = _TRANSPORT
-
-    iou_threshold: float = 0.5
-    conf_threshold: float = REVIEW_CONF_FLOOR
-    filter_type: ReviewFilterType = "all"
-    # A subject name, or "all".
-    filter_class: str = "all"
-    detection_idx: int = 0
 
 
 class _GuiFields(BaseModel):
@@ -197,7 +178,6 @@ class _GuiFields(BaseModel):
     view: ViewState = Field(default_factory=ViewState)
     mode: AnnotateMode = "box"
     active_subject: Optional[str] = None
-    review: ReviewFilters = Field(default_factory=ReviewFilters)
 
 
 class GuiState(_GuiFields):
@@ -324,13 +304,11 @@ VALID_PANELS = frozenset(TAB_NAMES) | {"app"}
 # caller-supplied type beyond this set, so this is not the full panel-event vocabulary.
 PANEL_EVENT_LABELS_WRITTEN = "labels_written"
 PANEL_EVENT_ANNOTATE_FOCUS = "annotate_focus"
-PANEL_EVENT_REVIEW_FOCUS = "review_focus"
 PANEL_EVENT_CANVAS_STATE_REQUEST = "canvas_state_request"
 
 PLATFORM_PANEL_EVENTS = (
     PANEL_EVENT_LABELS_WRITTEN,
     PANEL_EVENT_ANNOTATE_FOCUS,
-    PANEL_EVENT_REVIEW_FOCUS,
     PANEL_EVENT_CANVAS_STATE_REQUEST,
 )
 

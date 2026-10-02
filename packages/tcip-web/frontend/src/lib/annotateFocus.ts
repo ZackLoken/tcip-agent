@@ -1,10 +1,9 @@
 /**
- * Drive the Annotate tab to a specific (subject, date, image, mode) in response to the agent's
- * `annotate_focus` event. Uses local store setters (the exact path the Review→Edit button
- * uses), never the state snapshot: `mergeSnapshot` deliberately keeps `mode` and
- * `current_image_index` browser-local so a passive re-broadcast can't yank the user mid-edit.
- * An `annotate_focus` event is a deliberate command, so applying it locally is correct and
- * safe, and preserves that invariant.
+ * Drive the Annotate tab to a specific (subject, date, image, mode, proposal bucket) in response
+ * to the agent's `annotate_focus` event. Uses local store setters, never the state snapshot:
+ * `mergeSnapshot` deliberately keeps `mode` and `current_image_index` browser-local so a passive
+ * re-broadcast can't yank the user mid-edit. An `annotate_focus` event is a deliberate command,
+ * so applying it locally is correct and safe, and preserves that invariant.
  */
 
 import { api } from "@/api/client";
@@ -19,6 +18,8 @@ export interface AnnotateFocusData {
   image_index?: number;
   mode?: Mode;
   active_subject?: string | null;
+  predictions_dir?: string | null;
+  proposal?: number | null;
 }
 
 export async function applyAnnotateFocus(d: AnnotateFocusData): Promise<void> {
@@ -27,14 +28,15 @@ export async function applyAnnotateFocus(d: AnnotateFocusData): Promise<void> {
     !!d.dataset_root &&
     (d.dataset_root !== cur.dataset_root ||
       (d.subject ?? null) !== cur.subject ||
-      (d.date ?? null) !== cur.date);
+      (d.date ?? null) !== cur.date ||
+      (d.predictions_dir ?? null) !== cur.predictions_dir);
   const project = useStore.getState().openProject;
   if (needsSwitch && project) {
     const res = await api.dataset.select({
       dataset_root: d.dataset_root!,
       subject: d.subject ?? null,
       date: d.date ?? null,
-      predictions_dir: null,
+      predictions_dir: d.predictions_dir ?? null,
     });
     useStore.getState().applyRestoredDataset(res.selection, project);
     toastLabelProblem(res.label_problem);
@@ -53,5 +55,6 @@ export async function applyAnnotateFocus(d: AnnotateFocusData): Promise<void> {
   // focused frame, otherwise a frame labeled for another subject shows a blank canvas even in
   // the right mode.
   if (d.active_subject) store.setActiveSubject(d.active_subject);
+  store.setFocusedProposal(d.proposal ?? null);
   store.setActiveTab("annotate");
 }

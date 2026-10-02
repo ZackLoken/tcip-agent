@@ -1,6 +1,5 @@
-"""Review -> retrain feedback MCP tools: ``materialize_review_dataset``,
-``prioritize_review_queue`` and ``triage_predictions``, each reading the verdict store of the
-dataset root the review was recorded against, or the store the caller states instead.
+"""Review-queue MCP tools: ``prioritize_review_queue`` and ``triage_predictions``, each skipping
+the images whose label document marks the named subject finished.
 """
 
 from __future__ import annotations
@@ -9,36 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from tcip_mcp.server import tool
-from tcip_mcp.audit import audited
-from tcip_mcp.pipelines.feedback.materialize import (
-    materialize_dataset, reviewed_image_names, select_unreviewed,
-)
-
-
-def _review_state_exists(review_state_dir: str) -> bool:
-    """True if the verdict store at ``review_state_dir`` holds any review shard, enumerated through
-    the store.
-    """
-    import tcip_store
-
-    from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE
-
-    return bool(tcip_store.keys(REVIEW_VERDICTS_STORE, str(review_state_dir)))
-
-
-def _verdict_store_of(dataset_root: str, review_state_dir: str) -> Path:
-    """The verdict store to read: the one the caller stated, else the dataset's own.
-
-    A stated ``review_state_dir`` is used verbatim; with none stated the store is derived from the
-    dataset root through :func:`~tcip_mcp.project_paths.project_state_dir`. The two are never
-    merged and neither backs the other: a stated store holding nothing is a stated store holding
-    nothing.
-    """
-    from tcip_mcp.project_paths import project_state_dir
-
-    if review_state_dir:
-        return Path(review_state_dir)
-    return project_state_dir(dataset_root)
 
 
 def _load_or_refuse(checkpoint_path: str, project: Path):
@@ -75,142 +44,15 @@ def _reference_stems(checkpoint, images_dir: Path, project: Path) -> set[str] | 
             if s.side in REFERENCE_SIDES and same_directory(Path(s.source).parent, images_dir)}
 
 
-def _resolve_review_bucket(engine, bucket_dir: Path | None) -> tuple[str | None, str | None]:
-    """The verdict store key to read, and the refusal when that is not one answer: the key
-    ``bucket_dir`` spells (:func:`~tcip_mcp.buckets.bucket_key_of`), or, with no bucket named,
-    the ground-truth-only review when that is all the store holds; any other store content is
-    named for the caller to choose a bucket from.
-    """
-    from tcip_annotation.review_engine import NO_BUCKET
-
-    from tcip_mcp.buckets import bucket_key_of
-
-    if bucket_dir is not None:
-        return bucket_key_of(bucket_dir), None
-    buckets = engine.reviewed_buckets()
-    if buckets == [NO_BUCKET]:
-        return NO_BUCKET, None
-    return None, (
-        f"review state holds verdicts for {len(buckets)} prediction bucket(s) "
-        f"({', '.join(repr(b) for b in buckets)}); pass predictions_dir to name the bucket "
-        "whose verdicts to read"
-    )
-
-
-@tool()
-@audited(scope_arg="output_dir")
-def materialize_review_dataset(
-    project: Path,
-    dataset_root: str,
-    source_images_dir: str,
-    output_dir: str,
-    include_hard_negatives: bool = True,
-    only_completed: bool = False,
-    copy_files: bool = True,
-    subject: str | None = None,
-    predictions_dir: str | None = None,
-    review_state_dir: str = "",
-) -> dict:
-    """Build a curated detection dataset from human review verdicts.
-
-    Accepted/edited GT boxes become positive name-based labels; rejected-only images become
-    empty-label hard negatives (keyed under ``subject``, derived from the verdicts when omitted).
-    Output is the platform's ``images/`` + ``annotations/`` dataset layout, with its
-    ``curated_manifest.json`` naming the review session it was built from and its source.
-
-    The reviewed bucket's scope is the one its record states, and a ``subject`` stated beside a
-    bucket refuses. Under a classified scope every positive is written
-    with the object class in ``subject`` and the confirmed value under the scope's attribute, and
-    no rejected-only image is confirmed negative, landing in
-    ``unconfirmed_negatives`` instead. The source dataset's own registry is then copied over;
-    refuses by name when the source names no dataset root, that root has no ``subjects.json``, or
-    the output already holds a registry. A detector scope, and a ground-truth-only review with no
-    bucket, read no classified scope.
-
-    Args:
-        dataset_root: Root of the dataset the review was recorded against. It scopes the verdict
-            store read when ``review_state_dir`` is not stated (``<dataset_root>/.tcip/state``).
-        source_images_dir: Directory of the reviewed source images.
-        output_dir: Destination for the curated dataset (distinct from the source); a relative
-            path is under the project.
-        include_hard_negatives: Emit rejected-only images as empty-label backgrounds.
-        only_completed: Restrict to fully-reviewed (``img_status=='completed'``) images.
-        copy_files: Copy images (True) or symlink (False).
-        subject: The object a ground-truth-only review was about; confirmed negatives are keyed
-            under it. A bucket records its own and refuses it. When neither states one it is
-            derived from every subject the verdicts name, rejections included, and only when they
-            name exactly one. A rejected image whose own rejections answer for another subject, or
-            for none, is materialized as an unconfirmed empty and reported in
-            ``unconfirmed_negatives`` with why.
-        predictions_dir: The published bucket whose verdicts to curate. Omitted reads a
-            ground-truth-only review, and refuses, naming them, when the store holds a bucket's.
-        review_state_dir: A verdict store to read instead of the dataset's own. Not stated (the
-            default) derives the store from ``dataset_root``; stated, it is read verbatim and the
-            response names it. A stated store holding no shards is refused.
-    """
-    output_dir = str(Path(project, output_dir))
-    if not dataset_root:
-        return {"error": "dataset_root is required: it names the dataset whose review this curates"}
-    store_dir = _verdict_store_of(dataset_root, review_state_dir)
-    if not _review_state_exists(str(store_dir)):
-        return {"error": f"no review state (review/ shards) in {store_dir}"}
-    if not Path(source_images_dir).is_dir():
-        return {"error": f"Source images dir not found: {source_images_dir}"}
-
-    from tcip_annotation.review_engine import ReviewEngine
-
-    from tcip_mcp.buckets import input_scope, read_bucket
-
-    engine = ReviewEngine(str(store_dir))
-    bucket_dir = Path(project, predictions_dir) if predictions_dir is not None else None
-    resolved_bucket, refusal = _resolve_review_bucket(engine, bucket_dir)
-    if refusal is not None:
-        return {"error": refusal}
-    assert resolved_bucket is not None  # _resolve_review_bucket pairs a None refusal with a bucket
-    review_state = {"image": engine.image_states(resolved_bucket)}
-    state_path = engine.shard_dir
-
-    try:
-        scope = input_scope(read_bucket(bucket_dir) if bucket_dir is not None else None,
-                            subject, None)
-    except ValueError as exc:
-        return {"error": str(exc)}
-
-    try:
-        result = materialize_dataset(
-            review_state, source_images_dir, output_dir,
-            scope=scope,
-            include_hard_negatives=include_hard_negatives,
-            copy_files=copy_files, only_completed=only_completed,
-        )
-    except ValueError as exc:
-        return {"error": str(exc)}
-    result["review_state"] = str(state_path)
-    result["dataset_root"] = dataset_root
-    result["review_state_stated"] = bool(review_state_dir)
-    result["review_state_origin"] = (
-        f"verdict shards read from the stated store {store_dir}, not from this dataset's own "
-        f"store at {_verdict_store_of(dataset_root, '')}"
-        if review_state_dir
-        else f"verdict shards read from this dataset's own store at {store_dir}"
-    )
-    return result
-
-
-def _prepare_queue_sources(
-    checkpoint_path: str,
-    images_dir: str,
-    dataset_root: str,
-    review_state_dir: str,
-    skip_reviewed: bool,
-    bucket_dir: Path | None,
-):
-    """The checkpoint-file, images-dir and reviewed-skip plumbing both review-queue doors share, in
-    order: checkpoint existence, images directory, logical image enumeration, then which of them
-    the dataset's own review state already covers.
+def _prepare_queue_sources(checkpoint_path: str, images_dir: str, subject: str | None):
+    """The candidate images of ``images_dir``, in order: checkpoint existence, images directory,
+    logical image enumeration, then, with a ``subject`` named, dropping each image whose label
+    document marks it finished (:meth:`~tcip_annotation.json_io.LabelDocument.finished`).
 
     Returns ``(sources, reviewed_skipped, error)``; ``error`` is a ready ``{"error": ...}`` dict
-    and the other two are ``None``/``0`` when it is set.
+    and the other two are ``None``/``0`` when it is set. With a ``subject`` named, an image
+    outside a dataset's image tree, which cannot name its label document, and a label document
+    that will not read are that error.
     """
     if not Path(checkpoint_path).is_file():
         return None, 0, {"error": f"Checkpoint not found: {checkpoint_path}"}
@@ -224,26 +66,19 @@ def _prepare_queue_sources(
         return None, 0, {"error": "No images found in images_dir"}
     # Real sources, one per logical image: a band-grouped capture's sibling bands fold into one entry.
     sources = [logical[stem] for stem in sorted(logical)]
+    if subject is None:
+        return sources, 0, None
 
-    reviewed_skipped = 0
-    if (dataset_root or review_state_dir) and skip_reviewed:
-        store_dir = _verdict_store_of(dataset_root, review_state_dir)
-        if _review_state_exists(str(store_dir)):
-            from tcip_annotation.review_engine import ReviewEngine
-            engine = ReviewEngine(str(store_dir))
-            resolved_bucket, refusal = _resolve_review_bucket(engine, bucket_dir)
-            if refusal is not None:
-                return None, 0, {"error": refusal}
-            # _resolve_review_bucket pairs a None refusal with a bucket
-            assert resolved_bucket is not None
-            reviewed = reviewed_image_names({"image": engine.image_states(resolved_bucket)})
-            before = len(sources)
-            # A band-grouped capture's review-state identity is its manifest filename, not a sibling band's.
-            display = [str(s.manifest_path) if isinstance(s, BandGroupRef) else str(s) for s in sources]
-            kept = set(select_unreviewed(display, reviewed))
-            sources = [s for s, d in zip(sources, display) if d in kept]
-            reviewed_skipped = before - len(sources)
-    return sources, reviewed_skipped, None
+    from tcip_annotation.json_io import UnreadableLabelDocument, read_label_document
+
+    from tcip_mcp.dataset_layout import annotation_path_for_image
+
+    try:
+        kept = [s for s in sources if not read_label_document(annotation_path_for_image(
+            s.manifest_path if isinstance(s, BandGroupRef) else s)).finished(subject)]
+    except (ValueError, UnreadableLabelDocument) as exc:
+        return None, 0, {"error": str(exc)}
+    return kept, len(sources) - len(kept), None
 
 
 def _untiled_pass(checkpoint) -> tuple[Any, dict | None]:
@@ -263,16 +98,14 @@ def prioritize_review_queue(
     project: Path,
     checkpoint_path: str,
     images_dir: str,
-    dataset_root: str = "",
     method: str = "combined",
     budget: int = 50,
-    skip_reviewed: bool = True,
-    predictions_dir: str | None = None,
-    review_state_dir: str = "",
+    subject: str | None = None,
 ) -> dict:
-    """Rank un-reviewed images by active-learning informativeness for the next review batch.
+    """Rank unfinished images by active-learning informativeness for the next review batch.
 
-    Scores every candidate with ``method`` and returns the most uncertain/diverse frames first.
+    Scores every candidate with ``method`` and returns the most uncertain/diverse frames first,
+    each ``queue`` entry naming its image by its logical name.
 
     When ``checkpoint_path`` names a checkpoint produced by a run bound to a selection, each
     ``queue`` entry carries ``reference_member: bool``, matched against the calibration and holdout
@@ -283,24 +116,15 @@ def prioritize_review_queue(
     Args:
         checkpoint_path: Trained model checkpoint (drives scoring).
         images_dir: Directory of candidate images.
-        dataset_root: Root of the dataset whose review is in progress. It scopes the verdict store
-            (``<dataset_root>/.tcip/state``) that ``skip_reviewed`` reads. With neither this nor
-            ``review_state_dir`` stated, no store is read and every candidate image is ranked.
         method: Informativeness scorer. ``uncertainty`` | ``diversity`` | ``combined`` are the
             built-in reference implementations: register your own with ``register_scorer``, or pass
             a dotted ``module:factory`` you wrote, scoring under the checkpoint's own task. An
             unresolvable name is refused.
         budget: Number of images to return.
-        skip_reviewed: Exclude already-completed images from the queue.
-        predictions_dir: The published bucket whose completed reviews ``skip_reviewed`` skips.
-            Omitted reads a ground-truth-only review, and refuses, naming them, when the store
-            holds a bucket's.
-        review_state_dir: A verdict store to read instead of the dataset's own. Not stated (the
-            default) derives the store from ``dataset_root``; stated, it is read verbatim.
+        subject: The subject whose finished images (marked complete in their label document)
+            are skipped; omitted ranks every candidate image.
     """
-    sources, reviewed_skipped, error = _prepare_queue_sources(
-        checkpoint_path, images_dir, dataset_root, review_state_dir, skip_reviewed,
-        Path(project, predictions_dir) if predictions_dir is not None else None)
+    sources, reviewed_skipped, error = _prepare_queue_sources(checkpoint_path, images_dir, subject)
     if error is not None:
         return error
 
@@ -327,17 +151,13 @@ def prioritize_review_queue(
     except ValueError as e:  # unknown scorer: refuse rather than silently reordering the queue
         return {"error": str(e)}
 
-    from tcip_mcp.pipelines.image_utils import BandGroupRef
-
-    from tcip_mcp.pipelines.image_utils import stem_of
+    from tcip_mcp.pipelines.image_utils import logical_image_name, stem_of
 
     scored = scorer.score(sources, predictor)[:budget]
     reference_stems = _reference_stems(checkpoint, Path(images_dir), project)
     queue = []
     for p, s in scored:
-        entry: dict[str, Any] = {
-            "image": str(p.manifest_path) if isinstance(p, BandGroupRef) else str(p),
-            "score": round(float(s), 6)}
+        entry: dict[str, Any] = {"image": logical_image_name(p), "score": round(float(s), 6)}
         if reference_stems is not None:
             entry["reference_member"] = stem_of(p) in reference_stems
         queue.append(entry)
@@ -356,55 +176,34 @@ def triage_predictions(
     project: Path,
     checkpoint_path: str,
     images_dir: str,
-    dataset_root: str = "",
-    skip_reviewed: bool = True,
     low: float = 0.3,
     high: float = 0.8,
-    auto_threshold: float | None = None,
-    predictions_dir: str | None = None,
-    review_state_dir: str = "",
+    subject: str | None = None,
 ) -> dict:
-    """Sort a checkpoint's own predictions by confidence into auto-accept, needs-review and
-    unscoreable queues.
+    """Sort a checkpoint's own predictions by confidence into needs-review and unscoreable
+    queues; this door writes nothing.
 
-    Returns predictions at or above ``auto_threshold`` as the confident set for a caller to accept
-    as ground truth; this door writes nothing itself. Routes predictions between ``low`` and
-    ``high`` into the needs-review queue, which can overlap the confident set when
-    ``auto_threshold`` sits below ``high``, and separates out predictions with no
-    confidence-bearing signal at all (e.g. a regression head's point estimate) into their own
-    ``unscoreable_images`` list.
+    Routes predictions between ``low`` and ``high`` into the needs-review queue, and separates out
+    predictions with no confidence-bearing signal at all (e.g. a regression head's point estimate)
+    into their own ``unscoreable_images`` list.
 
     Args:
         checkpoint_path: Trained model checkpoint (drives predictions).
         images_dir: Directory of candidate images.
-        dataset_root: Root of the dataset whose review is in progress. It scopes the verdict store
-            (``<dataset_root>/.tcip/state``) that ``skip_reviewed`` reads. With neither this nor
-            ``review_state_dir`` stated, no store is read and every candidate image is triaged.
-        skip_reviewed: Exclude already-completed images before triaging.
         low: Lower confidence bound for the needs-review band.
         high: Upper confidence bound for the needs-review band.
-        auto_threshold: Confidence at/above which a prediction joins the confident set this door
-            returns. ``None`` (default) refuses to auto-accept. Derive it from the model's
-            validated confidence distribution and confirm with a breeder spot-check; the result is
-            stamped as requiring that confirmation.
-        predictions_dir: The published bucket whose completed reviews ``skip_reviewed`` skips.
-            Omitted reads a ground-truth-only review, and refuses, naming them, when the store
-            holds a bucket's.
-        review_state_dir: A verdict store to read instead of the dataset's own. Not stated (the
-            default) derives the store from ``dataset_root``; stated, it is read verbatim.
+        subject: The subject whose finished images (marked complete in their label document)
+            are skipped; omitted triages every candidate image.
     """
-    sources, reviewed_skipped, error = _prepare_queue_sources(
-        checkpoint_path, images_dir, dataset_root, review_state_dir, skip_reviewed,
-        Path(project, predictions_dir) if predictions_dir is not None else None)
+    sources, reviewed_skipped, error = _prepare_queue_sources(checkpoint_path, images_dir, subject)
     if error is not None:
         return error
 
-    from tcip_mcp.pipelines.active_learning.selector import auto_accept, review_queue, unscoreable
+    from tcip_mcp.pipelines.active_learning.selector import review_queue, unscoreable
 
     if not sources:
-        return {"total_images": 0, "reviewed_skipped": reviewed_skipped,
-                "auto_accepted": 0, "needs_review": 0, "review_images": [],
-                "unscoreable_images": [], "auto_accepted_images": []}
+        return {"total_images": 0, "reviewed_skipped": reviewed_skipped, "needs_review": 0,
+                "review_images": [], "unscoreable_images": []}
     checkpoint, refusal = _load_or_refuse(checkpoint_path, project)
     if refusal is not None:
         return refusal
@@ -412,35 +211,13 @@ def triage_predictions(
     if refusal is not None:
         return refusal
     predictions = p.predict(sources)
-    needs_review = review_queue(predictions, low=low, high=high)
     # A prediction with no confidence signal at all (a regression head's point estimate) is tagged unscoreable, not dropped.
     unscoreable_preds = unscoreable(predictions)
-    all_review = needs_review + unscoreable_preds
-    # Refuse to auto-accept at a pinned threshold: it must be derived from the validated conf distribution and breeder-confirmed.
-    if auto_threshold is None:
-        return {
-            "total_images": len(predictions),
-            "reviewed_skipped": reviewed_skipped,
-            "auto_accepted": 0,
-            "auto_accept_refused": (
-                "auto_threshold=None: auto-accepting predictions as GT requires a threshold "
-                "derived from the model's validated confidence distribution and confirmed by a "
-                "breeder spot-check; pass auto_threshold explicitly once confirmed."),
-            "needs_review": len(all_review),
-            "review_images": [r.get("image", "") for r in all_review],
-            "unscoreable_images": [p.get("image", "") for p in unscoreable_preds],
-            "auto_accepted_images": [],
-        }
-    accepted = auto_accept(predictions, threshold=auto_threshold)
+    all_review = review_queue(predictions, low=low, high=high) + unscoreable_preds
     return {
         "total_images": len(predictions),
         "reviewed_skipped": reviewed_skipped,
-        "auto_accepted": len(accepted),
-        "auto_accept_requires_breeder_confirmation": (
-            "auto-accepted labels are GT only if this threshold was breeder-confirmed on a "
-            "high-conf sample"),
         "needs_review": len(all_review),
         "review_images": [r.get("image", "") for r in all_review],
         "unscoreable_images": [p.get("image", "") for p in unscoreable_preds],
-        "auto_accepted_images": [a.get("image", "") for a in accepted],
     }

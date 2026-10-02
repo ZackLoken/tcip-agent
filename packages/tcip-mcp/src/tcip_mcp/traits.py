@@ -17,7 +17,7 @@ from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.experiments import now_iso
-from tcip_mcp.identity import user_identity
+from tcip_mcp.identity import actor
 
 if TYPE_CHECKING:
     from tcip_mcp.subject_registry import SubjectRegistry
@@ -334,8 +334,6 @@ class TraitRevision(BaseModel):
     proposed_at: str
     confirmed_by: str | None
     confirmed_at: str | None
-    identity_from_request: bool | None
-    """Whether the confirming request named its user, or the backend used its own identity."""
     withdrawn_by: str | None
     withdrawn_at: str | None
 
@@ -495,8 +493,7 @@ def propose_trait(
         revision = TraitRevision(
             number=len(revisions) + 1, entry=entry, entry_sha256=entry_sha256(entry),
             rationale=rationale, relayed_note=relayed_note, proposed_at=now_iso(),
-            confirmed_by=None, confirmed_at=None, identity_from_request=None,
-            withdrawn_by=None, withdrawn_at=None,
+            confirmed_by=None, confirmed_at=None, withdrawn_by=None, withdrawn_at=None,
         )
         txn.write(key, TraitRecord(revisions=(*revisions, revision)).model_dump(mode="json"))
     record_event_or_raise(
@@ -518,12 +515,12 @@ def confirm_revision(
     number: int,
     entry_sha256: str,
     *,
-    user: str,
-    identity_from_request: bool,
+    user: str | None,
     confirmed: bool,
 ) -> TraitRevision:
     """Record the breeder's confirmation of revision ``number`` of ``trait`` (``confirmed``), or
-    the withdrawal of one they gave (not ``confirmed``). Neither edits the entry.
+    the withdrawal of one they gave (not ``confirmed``), by the person :func:`~tcip_mcp.identity.
+    actor` makes of ``user``, which refuses a missing name. Neither edits the entry.
 
     ``entry_sha256`` is the hash of the entry the surface showed; one that is not the revision's
     own raises :class:`RevisionMoved`. Refuses a revision that does not exist, a confirmation of a
@@ -548,18 +545,15 @@ def confirm_revision(
             raise ValueError(f"revision {number} of {trait!r} was already confirmed")
         if not confirmed and not revision.confirmed:
             raise ValueError(f"revision {number} of {trait!r} holds no confirmation to withdraw")
-        who = user_identity(user)
-        stamp = (
-            {"confirmed_by": who, "confirmed_at": now_iso(),
-             "identity_from_request": identity_from_request}
-            if confirmed else {"withdrawn_by": who, "withdrawn_at": now_iso()}
-        )
+        who = actor(user)
+        stamp = ({"confirmed_by": who, "confirmed_at": now_iso()} if confirmed
+                 else {"withdrawn_by": who, "withdrawn_at": now_iso()})
         revisions[number - 1] = revision.model_copy(update=stamp)
         txn.write(key, TraitRecord(revisions=tuple(revisions)).model_dump(mode="json"))
     record_event_or_raise(
         "confirm_trait_revision",
         {"trait": trait, "revision": number, "entry_sha256": entry_sha256,
-         "confirmed": confirmed, "identity_from_request": identity_from_request},
+         "confirmed": confirmed},
         scope=project, user=who,
     )
     return revisions[number - 1]

@@ -2,24 +2,17 @@
 
 from __future__ import annotations
 
-import os
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
 from PIL import Image
 
-import tcip_store
-from tcip_store import Key, StoreDescriptor, Version, VersionConflict, register_store
-from tcip_store.file_backend import RootedFileLocator
-
 from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.data.band_groups import (
     BandGroupIncomplete,
     BandGroupRef,
     MANIFEST_EXT,
-    band_group_manifest_key,
     read_band_group_manifest,
 )
 from tcip_mcp.pipelines.raster_source import Rect
@@ -30,9 +23,10 @@ if TYPE_CHECKING:
 __all__ = [
     "AmbiguousImageStem", "BandGroupIncomplete", "BandGroupRef", "IMAGE_EXTS",
     "bucket_logical_identities", "capture_kind", "display_source_path",
-    "flat_image_key", "image_dimensions", "list_logical_images", "load_image", "load_multiband",
-    "logical_image_name", "pil_to_tensor", "pixel_array", "place_logical_image",
-    "refuse_incomplete_band_group", "resolve_image_source", "stem_collision_key", "stem_of",
+    "image_dimensions", "list_logical_images", "load_image", "load_multiband",
+    "logical_image_name", "pil_to_tensor", "pixel_array",
+    "refuse_incomplete_band_group", "resolve_image_path", "resolve_image_source",
+    "stem_collision_key", "stem_of",
     "to_pil_if_faithful",
 ]
 
@@ -171,12 +165,18 @@ def resolve_image_source(images_dir: str | Path, stem: str) -> "Path | BandGroup
     return refuse_incomplete_band_group(src)
 
 
-def image_path_dimensions(image_path: str | Path) -> tuple[int, int]:
-    """``(width, height)`` of the logical image ``image_path`` names in its own directory
-    (:func:`resolve_image_source`, a grouped capture folded into its one frame), as
-    :func:`image_dimensions` measures it. Its refusals propagate."""
+def resolve_image_path(image_path: str | Path) -> "Path | BandGroupRef":
+    """The logical image ``image_path`` names in its own directory (:func:`resolve_image_source`
+    over its directory and stem); its refusals propagate."""
     path = Path(image_path)
-    return image_dimensions(resolve_image_source(path.parent, path.stem))
+    return resolve_image_source(path.parent, path.stem)
+
+
+def image_path_dimensions(image_path: str | Path) -> tuple[int, int]:
+    """``(width, height)`` of the logical image ``image_path`` names
+    (:func:`resolve_image_path`, a grouped capture folded into its one frame), as
+    :func:`image_dimensions` measures it. Its refusals propagate."""
+    return image_dimensions(resolve_image_path(image_path))
 
 
 def resolve_source_path(source: str | Path) -> "Path | BandGroupRef":
@@ -205,7 +205,7 @@ def source_path_of(source: "Path | BandGroupRef") -> str:
 
 
 def logical_image_name(source: "Path | BandGroupRef") -> str:
-    """The name a by-name reader (an image-status bucket, a COCO ``file_name``) resolves this
+    """The name a by-name reader (a verdict shard, a COCO ``file_name``) resolves this
     logical image under: a :class:`BandGroupRef`'s own ``.bandgroup`` manifest name, since that
     file stands in for the whole grouped capture everywhere a name is matched against a store;
     a plain path's own name otherwise.
@@ -219,87 +219,6 @@ def logical_images_by_name(images_dir: str | Path) -> dict[str, str]:
     :func:`list_logical_images` raises."""
     named = {logical_image_name(src): stem for stem, src in list_logical_images(images_dir).items()}
     return {name: named[name] for name in sorted(named)}
-
-
-FLAT_IMAGE_STORE = "flat_image"
-_FLAT_IMAGE_LOCATOR = RootedFileLocator()
-register_store(
-    StoreDescriptor(
-        name=FLAT_IMAGE_STORE,
-        kind="blob",
-        key_fields=("filename",),
-        frozen=True,
-        cannot_carry_field="raw placed-image bytes, the same raw-bytes nature as imagery",
-        locator=_FLAT_IMAGE_LOCATOR,
-    )
-)
-
-
-def flat_image_key(images_dir: str | Path, filename: str) -> Key:
-    """One placed image's bytes, addressed by the flat directory it was materialized into: a
-    curated dataset's ``images/`` tree, distinct from ``image_key``'s dated ingest layout.
-    """
-    return Key(FLAT_IMAGE_STORE, str(Path(images_dir)), (filename,))
-
-
-def place_logical_image(
-    source: "Path | BandGroupRef",
-    dest_dir: str | Path,
-    *,
-    copy_files: bool,
-    dest_key: "Callable[[str], Key]",
-) -> str:
-    """Copies (or symlinks) one logical image into ``dest_dir`` and returns the name
-    :func:`logical_image_name` gives it there.
-
-    A :class:`BandGroupRef` places every sibling band it names plus its own ``.bandgroup``
-    manifest; a plain path places just that one file. ``dest_dir`` is absolute.
-
-    ``copy_files=True`` routes each band and plain image through the store under
-    ``dest_key(filename)`` and the destination manifest under ``band_group_manifest_key(dest_dir,
-    stem)``, each a create-only write (``expect=Version.ABSENT``) that leaves an already-placed
-    destination alone. ``copy_files=False`` symlinks instead, skipping a destination
-    ``os.path.lexists`` reports present and tolerating a concurrent placement's
-    ``FileExistsError``.
-    """
-    dest_dir = Path(dest_dir)
-
-    def _place_copy(src_path: Path, key: Key, dst: Path) -> None:
-        if dst.exists():
-            return  # already placed: a shared band group or a re-run over an existing tree
-        try:
-            tcip_store.put_blob_from_path(key, src_path, expect=Version.ABSENT)
-        except VersionConflict:
-            pass  # a concurrent placer won the race; the file is there either way
-
-    def _place_symlink(src_path: Path, dst: Path) -> None:
-        if os.path.lexists(dst):
-            return
-        try:
-            os.symlink(str(src_path), str(dst))
-        except FileExistsError:
-            pass  # a concurrent placement won the race; the link is there either way
-
-    if isinstance(source, BandGroupRef):
-        for band_path in source.bands.values():
-            if copy_files:
-                _place_copy(band_path, dest_key(band_path.name), dest_dir / band_path.name)
-            else:
-                _place_symlink(band_path, dest_dir / band_path.name)
-        if copy_files:
-            _place_copy(
-                source.manifest_path, band_group_manifest_key(dest_dir, source.stem),
-                dest_dir / source.manifest_path.name,
-            )
-        else:
-            _place_symlink(source.manifest_path, dest_dir / source.manifest_path.name)
-        return source.manifest_path.name
-
-    if copy_files:
-        _place_copy(source, dest_key(source.name), dest_dir / source.name)
-    else:
-        _place_symlink(source, dest_dir / source.name)
-    return source.name
 
 
 def stem_of(source: "str | Path | BandGroupRef") -> str:

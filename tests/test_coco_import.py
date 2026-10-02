@@ -401,8 +401,8 @@ def test_an_import_whose_second_document_conflicts_leaves_no_document_written(
 
     root = _dataset(tmp_path)
     document = _document(tmp_path / "external.json")
-    person = [json_io.annotation_from_payload(
-        {"subject": "leaf", "bbox": [1, 1, 5, 5]}, author="user:breeder", now="2025-09-16")]
+    person = [json_io.stamped([json_io.annotation_from_payload(
+        {"subject": "leaf", "bbox": [1, 1, 5, 5]})], [], actor="user:breeder", now="2025-09-16")[0]]
     second = _labels(root) / "tree_02.json"
     _label_placed_before_the_writes(monkeypatch, second, person)
 
@@ -500,8 +500,8 @@ def test_an_import_that_committed_no_document_leaves_no_event(tmp_path: Path, mo
     assert _import(_document(tmp_path / "empty.json", annotations=[]), root)["written"] == []
     assert not [row for row in _rows(root) if row["tool"] == "coco_document_imported"]
 
-    person = [json_io.annotation_from_payload(
-        {"subject": "leaf", "bbox": [1, 1, 5, 5]}, author="user:breeder", now="2025-09-16")]
+    person = [json_io.stamped([json_io.annotation_from_payload(
+        {"subject": "leaf", "bbox": [1, 1, 5, 5]})], [], actor="user:breeder", now="2025-09-16")[0]]
     _label_placed_before_the_writes(monkeypatch, _labels(root) / "tree_01.json", person)
     with pytest.raises(ValueError, match="already exists"):
         import_coco_document(_document(tmp_path / "external.json"), root, date=DATE)

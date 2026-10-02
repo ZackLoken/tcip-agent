@@ -20,7 +20,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 import tcip_store as ts
-from tcip_annotation import json_io, review_engine
+from tcip_annotation import json_io, verdicts
 from tcip_mcp import (
     audit,
     dataset_layout,
@@ -32,11 +32,9 @@ from tcip_mcp import (
     web_client,
     workspace,
 )
-from tcip_mcp.pipelines import image_utils
 from tcip_mcp.project_paths import project_state_dir
 from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord
 from tcip_mcp.pipelines.data import band_groups, selection
-from tcip_mcp.pipelines.feedback import materialize
 from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.pipelines.training import hpo
 from tcip_mcp.tools import (
@@ -1897,11 +1895,6 @@ def _split_dir(root: Path) -> Path:
     return root / "splits"
 
 
-def _curated_dir(root: Path) -> Path:
-    """A curated dataset's output directory, wherever the caller asked it to be materialized."""
-    return root / "curated"
-
-
 @dataclass(frozen=True)
 class Registered:
     """One registered store: a ``golden`` value of the shape it holds, the key it is written
@@ -1938,8 +1931,7 @@ def _real_selection() -> dict:
             samples=(
                 Sample(member="a_1", source=str(scratch / "ü/images/2026-03-04/a_1.jpg"),
                        ground_truth=str(scratch / "ü/annotations/2026-03-04/a_1.json"),
-                       group="a", side="train", confirmation_bucket="bud/2026-03-04",
-                       ground_truth_digest="7f3a1b9c2d4e5f60"),
+                       group="a", side="train", ground_truth_digest="7f3a1b9c2d4e5f60"),
             ),
             scope=ClassScope(subject="bud", id_map={"bud": 0}), seed=42,
             group_by="stem", dataset_fingerprint="7ac1",
@@ -1950,38 +1942,15 @@ def _real_selection() -> dict:
 
 
 REGISTERED = {
-    "image_status": Registered(
-        {"bud/2026-03-04": {"a_1.jpg": "negative", "ü_2.jpg": "complete"}},
-        dataset_layout.image_status_key, ".tcip/state/image_status.json"),
-    "image_status_digest": Registered(
-        {"bud/2026-03-04": {"a_1.jpg": "9f2c"}},
-        dataset_layout.image_status_digest_key, ".tcip/state/image_status_digest.json"),
-    "view_coverage": Registered(
-        {"bud/2026-03-04": {"a_1.jpg": {"grid": {"rows": 3, "cols": 3},
-                                           "cells_served_at_native": ["r1c1"],
-                                           "cells_seen_at_scale": {"r1c1": 1.0}}}},
-        dataset_layout.view_coverage_key, ".tcip/state/view_coverage.json"),
-    "coverage_grid_zoom": Registered(
-        {"bud": {"zoom": 1.5, "set_by": "user:ü", "set_at": "2026-03-04T00:00:00+00:00"}},
-        dataset_layout.coverage_grid_zoom_key, ".tcip/state/coverage_grid_zoom.json"),
-    "region_completeness": Registered(
-        {"bud/orthö": {"grid": {"rows": 2, "cols": 2}, "cells_complete": ["r1c1"],
-                          "stem": "orthö"}},
-        dataset_layout.region_completeness_key, ".tcip/state/region_completeness.json"),
-    "region_completeness_digest": Registered(
-        {"bud/orthö": {"r1c1": "3ab9"}},
-        dataset_layout.region_completeness_digest_key,
-        ".tcip/state/region_completeness_digest.json"),
     "subject_registry": Registered(
         SUBJECT_REGISTRY_BYTES, dataset_layout.subject_registry_key, "subjects.json"),
     "dataset_identity": Registered(
         DATASET_IDENTITY_BYTES,
         dataset_layout.dataset_identity_key, "dataset.json"),
     "review_verdicts": Registered(
-        {"image": "a_1.jpg", "reviewed_by": "ü", "verdict": "accepted"},
-        lambda root: review_engine.review_verdict_key(
-            project_state_dir(root), "predictions", "a_1.jpg"),
-        ".tcip/state/review/predictions/a_1.jpg.json", root_of=project_state_dir),
+        {"proposal": 0, "action": "accepted", "by": "user:ü", "at": "2026-03-04T12:00:00+00:00"},
+        lambda root: verdicts.verdict_key(project_state_dir(root), "predictions", "a_1.jpg"),
+        ".tcip/state/review/predictions/a_1.jpg.jsonl", root_of=project_state_dir),
     "canvas_meta": Registered(
         {"tab": "annotate", "image": "ü.jpg"},
         lambda root: canvas.canvas_meta_key(str(root)), ".tcip/state/canvas_live.json"),
@@ -2057,16 +2026,12 @@ REGISTERED = {
             "rationale": "the breeder described the state directly", "relayed_note": "",
             "proposed_at": "2026-03-04T12:00:00+00:00",
             "confirmed_by": "user:ü", "confirmed_at": "2026-03-04T12:30:00+00:00",
-            "identity_from_request": True, "withdrawn_by": None, "withdrawn_at": None}]},
+            "withdrawn_by": None, "withdrawn_at": None}]},
         lambda root: traits.trait_key(root, TRAIT_UNDER_TEST),
         f".tcip/state/traits/{TRAIT_UNDER_TEST}.json", root_of=project_state_dir),
     "annotation_records": Registered(
         LABEL_BYTES, lambda root: json_io.annotation_record_key(_generic_label_dir(root), "a_1"),
         "labels/a_1.json", root_of=_generic_label_dir),
-    "label_baselines": Registered(
-        LABEL_BYTES,
-        lambda root: review_engine.label_baseline_key(_generic_label_dir(root), "a_1"),
-        "labels/.original/a_1.json", root_of=_generic_label_dir),
     "annotation_stats": Registered(
         {"sessions": [{"user": "ü", "images_annotated": 1, "total_annotations": 3,
                        "total_time_seconds": 42.5}]},
@@ -2075,10 +2040,6 @@ REGISTERED = {
         BAND_GROUP_MANIFEST_BYTES,
         lambda root: band_groups.band_group_manifest_key(_band_group_dir(root), "cap_ü"),
         f"images/cap_ü{band_groups.MANIFEST_EXT}", root_of=_band_group_dir),
-    "flat_image": Registered(
-        IMAGE_BYTES,
-        lambda root: image_utils.flat_image_key(_band_group_dir(root), "cap_ü.jpg"),
-        "images/cap_ü.jpg", root_of=_band_group_dir),
     "ray_dashboard": Registered(
         {"url": "http://127.0.0.1:8265", "pid": 4242},
         hpo.ray_dashboard_key, ".tcip/state/ray_dashboard.json"),
@@ -2089,12 +2050,6 @@ REGISTERED = {
         _real_selection(),
         lambda root: selection.selection_key(_split_dir(root)),
         "splits/selection.json", root_of=_split_dir),
-    "curated_manifest": Registered(
-        {"created": "2026-03-04T00:00:00+00:00", "subject": "bud", "subjects": ["bud"],
-         "images": [{"image": "ü_2.jpg", "status": "hard_negative", "n_boxes": 0,
-                     "rejected_count": 1}]},
-        lambda root: materialize.curated_manifest_key(_curated_dir(root)),
-        "curated/curated_manifest.json", root_of=_curated_dir),
     "audit_log": Registered(
         {"timestamp": "2026-03-04T12:00:00+00:00", "tool": "save_label_document",
          "arguments": {"image_path": "images/2026-03-04/a_1.JPG", "n_annotations": 3},
@@ -2274,49 +2229,47 @@ def test_a_registered_store_lands_where_its_locator_says_with_the_bytes_its_code
     assert descriptor.locator.parts_from(PurePosixPath(relative_to_root)) == key.parts
 
 
-def test_a_sanitized_shard_name_places_the_file_the_review_engine_places_it_at(tmp_path):
-    """An image key carrying a separator is one filename, a bucket key carrying separators is one
-    directory, and the keys recoverable from that path place the very same file."""
+def test_a_shard_path_spells_its_key_back_whatever_separators_its_names_carry(tmp_path):
+    """An image name carrying a separator is one filename and a bucket carrying separators one
+    directory, and the path reads back as the very key that placed it, while two names folding
+    alike keep distinct keys."""
     state_dir = project_state_dir(tmp_path)
-    engine = review_engine.ReviewEngine(state_dir, current_user="ü")
-    key = review_engine.review_verdict_key(state_dir, "predictions/live/2026-03-04", "a/b.jpg")
-    locator = ts.get_descriptor(review_engine.REVIEW_VERDICTS_STORE).locator
+    key = verdicts.verdict_key(state_dir, "predictions/live/2026-03-04", "a/b.jpg")
+    locator = ts.get_descriptor(verdicts.REVIEW_VERDICTS_STORE).locator
 
     placed = locator.relative_path(str(state_dir), key.parts)
-    assert Path(state_dir, *placed.parts) == engine._shard_path(*key.parts)
     assert len(placed.parts) == 3  # review/<one bucket dir>/<one shard file>
-    recovered = locator.parts_from(placed)
-    assert recovered != key.parts
-    assert locator.relative_path(str(state_dir), recovered) == placed
-
-
-def test_a_verdict_with_no_prediction_bucket_places_its_shard_under_the_review_dir(tmp_path):
-    """A ground-truth-only review names no bucket, and its shard sits directly under ``review/``
-    rather than in a directory standing in for one."""
-    state_dir = project_state_dir(tmp_path)
-    key = review_engine.review_verdict_key(state_dir, review_engine.NO_BUCKET, "a_1.jpg")
-    locator = ts.get_descriptor(review_engine.REVIEW_VERDICTS_STORE).locator
-
-    placed = locator.relative_path(str(state_dir), key.parts)
-    assert placed == PurePosixPath("review/a_1.jpg.json")
     assert locator.parts_from(placed) == key.parts
+    assert verdicts.verdict_key(state_dir, "predictions_live_2026-03-04", "a_b.jpg") != key
 
 
-def test_enumerating_review_verdicts_answers_with_identities_that_read_back(store):
-    """``keys`` answers the verdict's own key, which reads it back, though its shard path
-    sanitizes the image name and folds the bucket."""
+def test_enumerating_review_verdicts_answers_identities_that_read_back(store):
+    """``keys`` answers the shard's own key, which reads the shard back, though its names carry
+    separators."""
     state_dir = project_state_dir(store.root)
-    bucket, image = "predictions/live/2026-03-04", "a/b.jpg"
-    key = review_engine.review_verdict_key(state_dir, bucket, image)
-    ts.replace(
-        key,
-        {"bucket": bucket, "img_name": image, "state": {"img_status": "completed"}},
-        expect=ts.Version.ABSENT,
-    )
+    key = verdicts.verdict_key(state_dir, "predictions/live/2026-03-04", "a/b.jpg")
+    decided = verdicts.Verdict(proposal=0, action="accepted", by="user:ü",
+                               at="2026-03-04T12:00:00+00:00")
+    verdicts.record_verdicts(key, [decided])
 
-    found = ts.keys(review_engine.REVIEW_VERDICTS_STORE, str(state_dir))
-    assert found == [key]
-    assert ts.read(found[0])["img_name"] == image
+    assert ts.keys(verdicts.REVIEW_VERDICTS_STORE, str(state_dir)) == [key]
+    assert verdicts.read_verdicts(key) == [decided]
+
+
+def test_a_cleared_log_enumerates_as_absent(store):
+    """A log that holds entries is enumerated once, however many it holds, and one cleared of
+    them is not enumerated at all."""
+    state_dir = project_state_dir(store.root)
+    kept = verdicts.verdict_key(state_dir, "predictions/live/2026-03-04", "a.jpg")
+    cleared = verdicts.verdict_key(state_dir, "predictions/live/2026-03-04", "b.jpg")
+    decided = verdicts.Verdict(proposal=0, action="rejected", by="user:ü",
+                               at="2026-03-04T12:00:00+00:00")
+    verdicts.record_verdicts(kept, [decided, decided])
+    verdicts.record_verdicts(cleared, [decided])
+
+    ts.clear_log(cleared)
+
+    assert ts.keys(verdicts.REVIEW_VERDICTS_STORE, str(state_dir)) == [kept]
 
 
 # ── conditional blob writes ─────────────────────────────────────────────────────

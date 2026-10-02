@@ -26,18 +26,18 @@ describe("TabBanner", () => {
   });
 
   it("stays dismissed when the same event is replayed, and shows a new one", () => {
-    useStore.getState().setActiveTab("review");
-    useStore.getState().pushBanner("review", "e1", "First note");
+    useStore.getState().setActiveTab("results");
+    useStore.getState().pushBanner("results", "e1", "First note");
     render(<TabBanner />);
 
     fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
     expect(screen.queryByText("First note")).not.toBeInTheDocument();
 
     // The backend replays its event ring on every reconnect: the same id must stay dismissed.
-    act(() => useStore.getState().pushBanner("review", "e1", "First note"));
+    act(() => useStore.getState().pushBanner("results", "e1", "First note"));
     expect(screen.queryByText("First note")).not.toBeInTheDocument();
 
-    act(() => useStore.getState().pushBanner("review", "e2", "Second note"));
+    act(() => useStore.getState().pushBanner("results", "e2", "Second note"));
     expect(screen.getByText("Second note")).toBeInTheDocument();
   });
 

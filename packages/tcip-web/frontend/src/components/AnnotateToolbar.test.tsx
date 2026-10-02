@@ -4,14 +4,12 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import type { ImageBandsResponse } from "@/api/client";
 import { api } from "@/api/client";
-import { subjectsApi, type ImageStatus } from "@/api/subjects";
+import { subjectsApi } from "@/api/subjects";
 import { StructuredRefusalError } from "@/api/http";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
-import { UNSET_GLYPH } from "@/lib/glyphs";
-import { imagePath } from "@/lib/paths";
 import { useStore } from "@/store";
-import type { DatasetSelection } from "@/store/types";
+import type { SubjectCompletion } from "@/store/types";
 
 const initialStoreState = useStore.getState();
 
@@ -32,11 +30,6 @@ beforeEach(() => {
   }
   // The toolbar's nav hook persists the settled index; nothing here should reach the backend.
   vi.spyOn(api.dataset, "nav").mockResolvedValue({ status: "ok" } as never);
-  // The status read-back after a finished write; a case about staleness overrides it.
-  vi.spyOn(subjectsApi, "loadImageStatus").mockResolvedValue({
-    statuses: {},
-    stale_definition: [],
-  });
 });
 
 afterEach(() => {
@@ -48,11 +41,11 @@ function renderToolbar(
   bandsInfo?: ImageBandsResponse | null,
   bandSelection?: BandSelection | null,
   extra?: {
-    completeWarning?: () => string | null;
-    workingScaleReason?: string | null;
-    workingScaleSubject?: string | null;
-    coverageMultiCell?: boolean;
-    replaceRequired?: { cols: number; rows: number; cellsSeen: number } | null;
+    subjectCompletion?: SubjectCompletion | null;
+    onComplete?: (next: boolean) => void;
+    onCompleteView?: () => void;
+    hideProposals?: boolean;
+    onHideProposals?: (next: boolean) => void;
   },
 ) {
   render(
@@ -63,11 +56,11 @@ function renderToolbar(
       bandsInfo={bandsInfo}
       bandSelection={bandSelection}
       onBandSelectionChange={() => {}}
-      completeWarning={extra?.completeWarning}
-      workingScaleReason={extra?.workingScaleReason ?? null}
-      workingScaleSubject={extra?.workingScaleSubject ?? null}
-      coverageMultiCell={extra?.coverageMultiCell}
-      replaceRequired={extra?.replaceRequired ?? null}
+      subjectCompletion={extra?.subjectCompletion ?? null}
+      onComplete={extra?.onComplete ?? (() => {})}
+      onCompleteView={extra?.onCompleteView}
+      hideProposals={extra?.hideProposals ?? false}
+      onHideProposals={extra?.onHideProposals ?? (() => {})}
     />,
   );
 }
@@ -148,36 +141,8 @@ describe("AnnotateToolbar draw mode", () => {
     expect(labels).toEqual(["Point", "Box", "Polygon"]);
   });
 
-  it("offers no Map tool for a raster with no multi-cell coverage grid", () => {
+  it("Box and Polygon describe themselves, the same as Point does", () => {
     renderToolbar();
-    expect(screen.queryByRole("button", { name: /^Map$/ })).not.toBeInTheDocument();
-  });
-
-  it("offers Map for a multi-cell raster and switches the store's mode to it", () => {
-    render(
-      <AnnotateToolbar onSave={() => {}} saveDisabled={false} dirty={false} coverageMultiCell />,
-    );
-    const mapButton = screen.getByRole("button", { name: /^Map$/ });
-    expect(mapButton).toHaveAttribute("aria-pressed", "false");
-    fireEvent.click(mapButton);
-    expect(useStore.getState().gui.mode).toBe("map");
-    expect(mapButton).toHaveAttribute("aria-pressed", "true");
-  });
-
-  it("the Map tooltip says the cell opens, never calling it a tile", () => {
-    render(
-      <AnnotateToolbar onSave={() => {}} saveDisabled={false} dirty={false} coverageMultiCell />,
-    );
-    expect(screen.getByRole("button", { name: /^Map$/ })).toHaveAttribute(
-      "title",
-      "Map: click a coverage cell to open it; no annotation is authored",
-    );
-  });
-
-  it("Box and Polygon describe themselves, the same as Point and Map do", () => {
-    render(
-      <AnnotateToolbar onSave={() => {}} saveDisabled={false} dirty={false} coverageMultiCell />,
-    );
     expect(screen.getByRole("button", { name: "Box" })).toHaveAttribute(
       "title",
       expect.stringMatching(/box/i),
@@ -208,19 +173,7 @@ describe("AnnotateToolbar Cut button", () => {
     expect(cutButton).toHaveAttribute("title", "Cut: in polygon mode only");
   });
 
-  it("states the disabled reason on a locked (confirmed) image", () => {
-    render(<AnnotateToolbar onSave={() => {}} saveDisabled={false} dirty={false} isLocked />);
-    openEditor();
-    fireEvent.click(modeButton("Polygon"));
-    const cutButton = screen.getByRole("button", { name: "Cut" });
-    expect(cutButton).toBeDisabled();
-    expect(cutButton).toHaveAttribute(
-      "title",
-      "Cut: this image is confirmed; uncheck Complete to edit",
-    );
-  });
-
-  it("states the how-to once enabled, in polygon mode on an unlocked image", () => {
+  it("states the how-to once enabled, in polygon mode", () => {
     renderToolbar();
     openEditor();
     fireEvent.click(modeButton("Polygon"));
@@ -230,15 +183,6 @@ describe("AnnotateToolbar Cut button", () => {
       "title",
       "Click two points on either side of the selected polygon to split it (x)",
     );
-  });
-});
-
-describe("AnnotateToolbar status filter", () => {
-  it("lists the start state (Unannotated) before the terminal states, matching Review's convention", () => {
-    renderToolbar();
-    const select = screen.getByTitle("Status filter");
-    const options = Array.from(select.querySelectorAll("option")).map((o) => o.textContent);
-    expect(options).toEqual(["All", "Unannotated", "Partial", "Complete", "Negative"]);
   });
 });
 
@@ -275,7 +219,6 @@ describe("AnnotateToolbar subject authoring", () => {
       n_subjects: 2,
       subjects_path: "C:/data/subjects.json",
       version: "v1",
-      schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     });
     answerPrompt("  husk  ");
     renderToolbar();
@@ -302,7 +245,6 @@ describe("AnnotateToolbar subject authoring", () => {
       n_subjects: 2,
       subjects_path: "C:/data/subjects.json",
       version: "v1",
-      schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     });
     answerPrompt("leaf");
     renderToolbar();
@@ -325,7 +267,6 @@ describe("AnnotateToolbar subject authoring", () => {
       n_subjects: 1,
       subjects_path: "C:/data/subjects.json",
       version: "v1",
-      schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     });
     const promptSpy = answerPrompt(null);
     renderToolbar();
@@ -355,7 +296,6 @@ describe("AnnotateToolbar subject authoring", () => {
       n_subjects: 2,
       subjects_path: "C:/data/subjects.json",
       version: "v2",
-      schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     });
     answerPrompt("husk");
     renderToolbar();
@@ -427,7 +367,6 @@ describe("AnnotateToolbar subject authoring", () => {
       n_subjects: 2,
       subjects_path: "C:/data/subjects.json",
       version: "v2",
-      schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     };
     const message = "replace_registry completed and its audit entry could not be written";
     vi.spyOn(subjectsApi, "save").mockRejectedValue(
@@ -450,62 +389,6 @@ describe("AnnotateToolbar subject authoring", () => {
     // active subject is kept rather than reverted (unlike an ordinary refusal above).
     expect(useStore.getState().registry.version).toBe("v2");
     expect(useStore.getState().gui.active_subject).toBe("husk");
-  });
-
-  it("toasts the schema_change_sweep's predating_vocabulary count, same as the attribute panel's", async () => {
-    seedDataset();
-    act(() => useStore.getState().setRegistry({ leaf: {} }, "v1"));
-    vi.spyOn(subjectsApi, "save").mockResolvedValue({
-      status: "ok",
-      n_subjects: 2,
-      subjects_path: "C:/data/subjects.json",
-      version: "v2",
-      schema_change_sweep: {
-        newly_stamped: { leaf: 3 },
-        predating_vocabulary: { leaf: 3 },
-        warning: null,
-      },
-    });
-    answerPrompt("husk");
-    renderToolbar();
-
-    openSubjectMenu();
-    await act(async () => {
-      fireEvent.click(screen.getByText("+ New subject"));
-    });
-
-    expect(useStore.getState().toasts.at(-1)?.message).toMatch(
-      /3 confirmed image\(s\) of leaf were confirmed under its previous vocabulary/,
-    );
-  });
-
-  it("reports the predating count once even though newly_stamped counts the same confirmations", async () => {
-    seedDataset();
-    act(() => useStore.getState().setRegistry({ leaf: {} }, "v1"));
-    vi.spyOn(subjectsApi, "save").mockResolvedValue({
-      status: "ok",
-      n_subjects: 2,
-      subjects_path: "C:/data/subjects.json",
-      version: "v2",
-      schema_change_sweep: {
-        newly_stamped: { leaf: 5 },
-        predating_vocabulary: { leaf: 5 },
-        warning: null,
-      },
-    });
-    answerPrompt("husk");
-    renderToolbar();
-
-    openSubjectMenu();
-    await act(async () => {
-      fireEvent.click(screen.getByText("+ New subject"));
-    });
-
-    const leafToasts = useStore.getState().toasts.filter((t) => t.message.includes("leaf"));
-    expect(leafToasts).toHaveLength(1);
-    expect(leafToasts[0].message).toMatch(
-      /5 confirmed image\(s\) of leaf were confirmed under its previous vocabulary/,
-    );
   });
 });
 
@@ -542,476 +425,74 @@ describe("AnnotateToolbar band picker (progressive disclosure)", () => {
   });
 });
 
-function seedImageDataset(opts: { subject: string; currentStatus?: ImageStatus; stale?: boolean }) {
-  const dataset: DatasetSelection = {
-    dataset_root: "C:/data",
-    subject: opts.subject,
-    date: "2026-01-01",
-    image_list: ["img1.jpg"],
-    current_image_index: 0,
-    images_dir: "C:/data/images/2026-01-01",
-    annotations_dir: "C:/data/annotations/2026-01-01",
-    predictions_dir: null,
-    label_paths: { "img1.jpg": "C:/data/annotations/2026-01-01/img1.json" },
-    prediction_paths: {},
-  };
-  const byImage: Record<string, ImageStatus> = {};
-  if (opts.currentStatus) byImage["img1.jpg"] = opts.currentStatus;
+function seedSubject(subject: string) {
   useStore.setState((s) => ({
-    gui: { ...s.gui, dataset },
-    openProject: { id: "a1b2c3d4e5f6", path: "C:/proj" },
-    canvas: { ...s.canvas, loadedImagePath: imagePath(dataset, "img1.jpg") },
-    imageStatus: {
-      ...s.imageStatus,
-      byImage,
-      staleMarks: opts.stale ? ["img1.jpg"] : [],
+    gui: {
+      ...s.gui,
+      dataset: { ...s.gui.dataset, subject, image_list: ["img1.jpg"], current_image_index: 0 },
     },
   }));
 }
 
-function setCanvasBoxSubjects(subjects: string[]) {
-  useStore.setState((s) => ({
-    canvas: {
-      ...s.canvas,
-      boxes: subjects.map((subject) => ({ x1: 0, y1: 0, x2: 10, y2: 10, subject, attributes: {} })),
-    },
-  }));
-}
-
-describe("AnnotateToolbar Complete toggle, subject-scoped", () => {
-  it("writes negative for the dataset's subject when the canvas holds only another subject's shapes", async () => {
-    seedImageDataset({ subject: "subject_a" });
-    setCanvasBoxSubjects(["subject_b"]);
-    const setStatus = vi
-      .spyOn(subjectsApi, "setImageStatus")
-      .mockResolvedValue({ status: "ok", digest_stamped: true });
-    renderToolbar();
-
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("Complete"));
-    });
-
-    expect(setStatus).toHaveBeenCalledWith(
-      "img1.jpg",
-      "negative",
-      "subject_a",
-      "2026-01-01",
-      "C:/data",
-      undefined,
-    );
-  });
-
-  it("writes complete for the dataset's subject when the canvas holds this subject's shapes", async () => {
-    seedImageDataset({ subject: "subject_a" });
-    setCanvasBoxSubjects(["subject_a"]);
-    const setStatus = vi
-      .spyOn(subjectsApi, "setImageStatus")
-      .mockResolvedValue({ status: "ok", digest_stamped: true });
-    renderToolbar();
-
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("Complete"));
-    });
-
-    expect(setStatus).toHaveBeenCalledWith(
-      "img1.jpg",
-      "complete",
-      "subject_a",
-      "2026-01-01",
-      "C:/data",
-      undefined,
-    );
-  });
-
-  it("reads no staleness back when unchecking Complete (not a finished status)", async () => {
-    seedImageDataset({ subject: "subject_a", currentStatus: "complete" });
-    setCanvasBoxSubjects([]);
-    const setStatus = vi.spyOn(subjectsApi, "setImageStatus").mockResolvedValue({
-      status: "ok",
-      digest_stamped: false,
-    });
-    renderToolbar();
-
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("Complete"));
-    });
-
-    expect(setStatus).toHaveBeenCalledWith(
-      "img1.jpg",
-      "unannotated",
-      "subject_a",
-      "2026-01-01",
-      "C:/data",
-      undefined,
-    );
-    expect(subjectsApi.loadImageStatus).not.toHaveBeenCalled();
-    expect(useStore.getState().imageStatus.staleMarks).toEqual([]);
-  });
-
-  it("leaves an unstamped finished status unmarked when the backend names it not stale", async () => {
-    seedImageDataset({ subject: "subject_a" });
-    setCanvasBoxSubjects(["subject_a"]);
-    vi.spyOn(subjectsApi, "setImageStatus").mockResolvedValue({
-      status: "ok",
-      digest_stamped: false,
-    });
-    renderToolbar();
-
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("Complete"));
-    });
-
-    expect(subjectsApi.loadImageStatus).toHaveBeenCalledWith("subject_a", "2026-01-01", "C:/data");
-    expect(useStore.getState().imageStatus.staleMarks).toEqual([]);
-  });
-
-  it("marks stale when the backend names the finished image stale after its audit line is lost", async () => {
-    seedImageDataset({ subject: "subject_a" });
-    setCanvasBoxSubjects(["subject_a"]);
-    vi.mocked(subjectsApi.loadImageStatus).mockResolvedValue({
-      statuses: { "img1.jpg": "complete" },
-      stale_definition: ["img1.jpg"],
-    });
-    const committed = { status: "ok", digest_stamped: true };
-    const message = "gui_set_image_status completed and its audit entry could not be written";
-    vi.spyOn(subjectsApi, "setImageStatus").mockRejectedValue(
-      new StructuredRefusalError(
-        { error: "audit_entry_not_written", message, committed },
-        409,
-        message,
-      ),
-    );
-    renderToolbar();
-
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("Complete"));
-    });
-
-    expect(useStore.getState().imageStatus.staleMarks).toEqual(["img1.jpg"]);
-    const messages = useStore.getState().toasts.map((t) => t.message);
-    expect(messages).toContainEqual(expect.stringContaining("is stale under subject_a"));
-    expect(messages).toContainEqual(message);
-  });
-});
-
-describe("AnnotateToolbar current image identity", () => {
-  it("leaves the identity null for an empty image list, rather than a display constant a status write could read as a real name", () => {
-    const dataset: DatasetSelection = {
-      dataset_root: "C:/data",
-      subject: "subject_a",
-      date: "2026-01-01",
-      image_list: [],
-      current_image_index: 0,
-      images_dir: "C:/data/images/2026-01-01",
-      annotations_dir: "C:/data/annotations/2026-01-01",
-      predictions_dir: null,
-      label_paths: {},
-      prediction_paths: {},
-    };
+describe("AnnotateToolbar image stepping", () => {
+  it("leaves the focused proposal and the selected polygon behind on the image it left", () => {
     useStore.setState((s) => ({
-      gui: { ...s.gui, dataset },
-      openProject: { id: "a1b2c3d4e5f6", path: "C:/proj" },
-      imageStatus: { ...s.imageStatus, byImage: { [UNSET_GLYPH]: "complete" } },
+      gui: {
+        ...s.gui,
+        dataset: { ...s.gui.dataset, image_list: ["img1.jpg", "img2.jpg"], current_image_index: 0 },
+      },
+      annotateUi: { ...s.annotateUi, focusedProposal: 3 },
+      canvas: { ...s.canvas, selectedPolygonIdx: 0 },
     }));
     renderToolbar();
 
-    // A per-image status keyed by the display glyph must never read back as this (nonexistent)
-    // image's own status.
-    expect(screen.getByLabelText("Complete")).not.toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Next image" }));
+
+    expect(useStore.getState().gui.dataset.current_image_index).toBe(1);
+    expect(useStore.getState().annotateUi.focusedProposal).toBeNull();
+    expect(useStore.getState().canvas.selectedPolygonIdx).toBeNull();
   });
 });
 
-describe("AnnotateToolbar Complete toggle coverage warning", () => {
-  it("toasts the completeWarning wording when unswept cells remain", async () => {
-    seedImageDataset({ subject: "subject_a" });
-    setCanvasBoxSubjects(["subject_a"]);
-    const setStatus = vi
-      .spyOn(subjectsApi, "setImageStatus")
-      .mockResolvedValue({ status: "ok", digest_stamped: true });
-    renderToolbar(undefined, undefined, {
-      completeWarning: () => "Complete: 2 of 6 grid cells have not had every part on screen",
-      workingScaleReason: null,
-      coverageMultiCell: true,
-    });
+const NEGATIVE: SubjectCompletion = { state: "negative", finished: true };
+const PARTIAL: SubjectCompletion = { state: "partial", finished: false };
 
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("Complete"));
-    });
-
-    expect(
-      useStore
-        .getState()
-        .toasts.some((t) => t.message.includes("2 of 6 grid cells have not had every part")),
-    ).toBe(true);
-    expect(setStatus).toHaveBeenCalled(); // the warning is advisory: Complete still writes the status
+describe("AnnotateToolbar Complete toggle", () => {
+  it("reads checked from the served finished flag, with or without annotations", () => {
+    seedSubject("subject_a");
+    renderToolbar(null, null, { subjectCompletion: NEGATIVE });
+    expect(screen.getByRole("checkbox", { name: /Complete/ })).toBeChecked();
+    cleanup();
+    renderToolbar(null, null, { subjectCompletion: PARTIAL });
+    expect(screen.getByRole("checkbox", { name: /Complete/ })).not.toBeChecked();
   });
 
-  it("toasts the no-working-scale sentence, naming the subject the reason was computed for", async () => {
-    seedImageDataset({ subject: "subject_a" });
-    setCanvasBoxSubjects([]);
-    const setStatus = vi
-      .spyOn(subjectsApi, "setImageStatus")
-      .mockResolvedValue({ status: "ok", digest_stamped: true });
-    renderToolbar(undefined, undefined, {
-      completeWarning: () => null,
-      workingScaleReason: "no saved box or polygon annotation of subject_a",
-      workingScaleSubject: "subject_a",
-      coverageMultiCell: true,
-    });
-
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("Complete"));
-    });
-
-    const toast = useStore
-      .getState()
-      .toasts.find((t) => t.message.includes("no working scale for subject_a"));
-    expect(toast).toBeTruthy();
-    expect(toast!.message).toContain("no saved box or polygon annotation of subject_a");
-    expect(toast!.message).toContain("so coverage was not checked");
-    expect(setStatus).toHaveBeenCalled();
+  it("asks the tab to mark or withdraw, and is disabled until the document loads", () => {
+    seedSubject("subject_a");
+    const onComplete = vi.fn();
+    renderToolbar(null, null, { subjectCompletion: PARTIAL, onComplete });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Complete/ }));
+    expect(onComplete).toHaveBeenCalledWith(true);
+    cleanup();
+    renderToolbar(null, null, { subjectCompletion: null, onComplete });
+    expect(screen.getByRole("checkbox", { name: /Complete/ })).toBeDisabled();
   });
 
-  it("names the reason's own subject, never dataset.subject, when the two differ", async () => {
-    seedImageDataset({ subject: "subject_a" });
-    setCanvasBoxSubjects([]);
-    const setStatus = vi
-      .spyOn(subjectsApi, "setImageStatus")
-      .mockResolvedValue({ status: "ok", digest_stamped: true });
-    renderToolbar(undefined, undefined, {
-      completeWarning: () => null,
-      workingScaleReason: "no saved box or polygon annotation of other_subject",
-      workingScaleSubject: "other_subject",
-      coverageMultiCell: true,
-    });
-
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("Complete"));
-    });
-
-    const toast = useStore
-      .getState()
-      .toasts.find((t) => t.message.includes("no working scale for other_subject"));
-    expect(toast).toBeTruthy();
-    expect(
-      useStore.getState().toasts.some((t) => t.message.includes("no working scale for subject_a")),
-    ).toBe(false);
-    expect(setStatus).toHaveBeenCalled();
+  it("offers the region mark only when the tab supplies one", () => {
+    seedSubject("subject_a");
+    const onCompleteView = vi.fn();
+    renderToolbar(null, null, { subjectCompletion: PARTIAL, onCompleteView });
+    fireEvent.click(screen.getByRole("button", { name: "Complete view" }));
+    expect(onCompleteView).toHaveBeenCalledTimes(1);
+    cleanup();
+    renderToolbar(null, null, { subjectCompletion: PARTIAL });
+    expect(screen.queryByRole("button", { name: "Complete view" })).not.toBeInTheDocument();
   });
 
-  it("states no active subject, rather than a literal null, when there is none", async () => {
-    seedImageDataset({ subject: "subject_a" });
-    setCanvasBoxSubjects([]);
-    const setStatus = vi
-      .spyOn(subjectsApi, "setImageStatus")
-      .mockResolvedValue({ status: "ok", digest_stamped: true });
-    renderToolbar(undefined, undefined, {
-      completeWarning: () => null,
-      workingScaleReason: "no active subject",
-      workingScaleSubject: null,
-      coverageMultiCell: true,
-    });
-
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("Complete"));
-    });
-
-    const toast = useStore.getState().toasts.find((t) => t.message.includes("no active subject"));
-    expect(toast).toBeTruthy();
-    expect(toast!.message).not.toContain("null");
-    expect(setStatus).toHaveBeenCalled();
-  });
-
-  it("skips the no-bar toast on a single-cell raster with no coverage tracking", async () => {
-    seedImageDataset({ subject: "subject_a" });
-    setCanvasBoxSubjects([]);
-    const setStatus = vi
-      .spyOn(subjectsApi, "setImageStatus")
-      .mockResolvedValue({ status: "ok", digest_stamped: true });
-    const toastsBefore = useStore.getState().toasts.length;
-    renderToolbar(undefined, undefined, {
-      completeWarning: () => null,
-      workingScaleReason: "no saved box or polygon annotation of subject_a",
-      workingScaleSubject: "subject_a",
-      coverageMultiCell: false,
-    });
-
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("Complete"));
-    });
-
-    expect(useStore.getState().toasts.length).toBe(toastsBefore);
-    expect(setStatus).toHaveBeenCalled();
-  });
-
-  it("stays silent when the warning is null and a bar exists (every cell already swept)", async () => {
-    seedImageDataset({ subject: "subject_a" });
-    setCanvasBoxSubjects(["subject_a"]);
-    const setStatus = vi
-      .spyOn(subjectsApi, "setImageStatus")
-      .mockResolvedValue({ status: "ok", digest_stamped: true });
-    const toastsBefore = useStore.getState().toasts.length;
-    renderToolbar(undefined, undefined, {
-      completeWarning: () => null,
-      workingScaleReason: null,
-      coverageMultiCell: true,
-    });
-
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("Complete"));
-    });
-
-    expect(useStore.getState().toasts.length).toBe(toastsBefore);
-    expect(setStatus).toHaveBeenCalled();
-  });
-
-  it("adds the replace hold's sentence beside the completeWarning wording", async () => {
-    seedImageDataset({ subject: "subject_a" });
-    setCanvasBoxSubjects(["subject_a"]);
-    const setStatus = vi
-      .spyOn(subjectsApi, "setImageStatus")
-      .mockResolvedValue({ status: "ok", digest_stamped: true });
-    renderToolbar(undefined, undefined, {
-      completeWarning: () => "Complete: 2 of 6 grid cells have not had every part on screen",
-      workingScaleReason: null,
-      coverageMultiCell: true,
-      replaceRequired: { cols: 4, rows: 4, cellsSeen: 3 },
-    });
-
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("Complete"));
-    });
-
-    const toast = useStore
-      .getState()
-      .toasts.find((t) => t.message.includes("2 of 6 grid cells have not had every part"));
-    expect(toast).toBeTruthy();
-    expect(toast!.message).toContain("3 cells seen on a previous lattice");
-    expect(setStatus).toHaveBeenCalled(); // Complete stays advisory even beside the hold
-  });
-
-  it("toasts the replace hold's sentence alone when nothing else would have fired", async () => {
-    seedImageDataset({ subject: "subject_a" });
-    setCanvasBoxSubjects(["subject_a"]);
-    const setStatus = vi
-      .spyOn(subjectsApi, "setImageStatus")
-      .mockResolvedValue({ status: "ok", digest_stamped: true });
-    renderToolbar(undefined, undefined, {
-      completeWarning: () => null,
-      workingScaleReason: null,
-      coverageMultiCell: true,
-      replaceRequired: { cols: 2, rows: 2, cellsSeen: 1 },
-    });
-
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("Complete"));
-    });
-
-    const toast = useStore
-      .getState()
-      .toasts.find((t) => t.message.includes("1 cell seen on a previous lattice"));
-    expect(toast).toBeTruthy();
-    expect(setStatus).toHaveBeenCalled();
-  });
-});
-
-describe("AnnotateToolbar stale re-confirm", () => {
-  it("writes negative for the dataset's subject and clears the mark when the canvas holds only another subject's shapes", async () => {
-    seedImageDataset({ subject: "subject_a", currentStatus: "complete", stale: true });
-    setCanvasBoxSubjects(["subject_b"]);
-    const setStatus = vi
-      .spyOn(subjectsApi, "setImageStatus")
-      .mockResolvedValue({ status: "ok", digest_stamped: true });
-    renderToolbar();
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Re-confirm" }));
-    });
-
-    expect(setStatus).toHaveBeenCalledWith(
-      "img1.jpg",
-      "negative",
-      "subject_a",
-      "2026-01-01",
-      "C:/data",
-      undefined,
-    );
-    expect(useStore.getState().imageStatus.staleMarks).toEqual([]);
-  });
-
-  it("writes complete and clears the mark when the canvas holds this subject's shapes", async () => {
-    seedImageDataset({ subject: "subject_a", currentStatus: "complete", stale: true });
-    setCanvasBoxSubjects(["subject_a"]);
-    const setStatus = vi
-      .spyOn(subjectsApi, "setImageStatus")
-      .mockResolvedValue({ status: "ok", digest_stamped: true });
-    renderToolbar();
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Re-confirm" }));
-    });
-
-    expect(setStatus).toHaveBeenCalledWith(
-      "img1.jpg",
-      "complete",
-      "subject_a",
-      "2026-01-01",
-      "C:/data",
-      undefined,
-    );
-    expect(useStore.getState().imageStatus.staleMarks).toEqual([]);
-  });
-
-  it("does nothing over a stale image whose labels have not loaded yet (loadedImagePath mismatch)", async () => {
-    seedImageDataset({ subject: "subject_a", currentStatus: "complete", stale: true });
-    useStore.setState((s) => ({ canvas: { ...s.canvas, loadedImagePath: null } }));
-    setCanvasBoxSubjects(["subject_a"]);
-    const setStatus = vi
-      .spyOn(subjectsApi, "setImageStatus")
-      .mockResolvedValue({ status: "ok", digest_stamped: true });
-    renderToolbar();
-
-    const button = screen.getByRole("button", { name: "Re-confirm" });
-    expect(button).toBeDisabled();
-    fireEvent.click(button);
-
-    expect(setStatus).not.toHaveBeenCalled();
-    expect(useStore.getState().imageStatus.staleMarks).toEqual(["img1.jpg"]);
-  });
-
-  it("restores the stale mark when the re-confirm write fails to persist", async () => {
-    seedImageDataset({ subject: "subject_a", currentStatus: "complete", stale: true });
-    setCanvasBoxSubjects(["subject_a"]);
-    vi.spyOn(subjectsApi, "setImageStatus").mockRejectedValue(new Error("network error"));
-    renderToolbar();
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Re-confirm" }));
-    });
-
-    expect(useStore.getState().imageStatus.staleMarks).toEqual(["img1.jpg"]);
-  });
-
-  it("restores the stale mark and toasts the image when the backend still names it stale", async () => {
-    seedImageDataset({ subject: "subject_a", currentStatus: "complete", stale: true });
-    setCanvasBoxSubjects(["subject_a"]);
-    vi.spyOn(subjectsApi, "setImageStatus").mockResolvedValue({
-      status: "ok",
-      digest_stamped: false,
-    });
-    vi.mocked(subjectsApi.loadImageStatus).mockResolvedValue({
-      statuses: { "img1.jpg": "complete" },
-      stale_definition: ["img1.jpg"],
-    });
-    renderToolbar();
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Re-confirm" }));
-    });
-
-    expect(useStore.getState().imageStatus.staleMarks).toEqual(["img1.jpg"]);
-    expect(useStore.getState().toasts.at(-1)?.message).toMatch(
-      /img1\.jpg is stale under subject_a's attribute schema/,
-    );
+  it("toggles hiding proposals through the tab", () => {
+    const onHideProposals = vi.fn();
+    renderToolbar(null, null, { onHideProposals });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Hide proposals/ }));
+    expect(onHideProposals).toHaveBeenCalledWith(true);
   });
 });

@@ -24,7 +24,6 @@ def test_the_selection_golden_carries_each_sample_s_own_source_label_group_and_s
                 selection.Sample(member="a_1", source=str(tmp_path / "images/2026-03-04/a_1.jpg"),
                                  ground_truth=str(tmp_path / "annotations/2026-03-04/a_1.json"),
                                  group="a", side="train",
-                                 confirmation_bucket="bud/2026-03-04",
                                  ground_truth_digest="7f3a1b9c2d4e5f60"),
             ),
             scope=selection.ClassScope(subject="bud", id_map={"bud": 0}), seed=42,
@@ -37,8 +36,8 @@ def test_the_selection_golden_carries_each_sample_s_own_source_label_group_and_s
     assert isinstance(golden, dict)
 
     assert "members" not in golden and "splits" not in golden and "date" not in golden
-    assert set(golden["samples"][0]) >= {
-        "member", "source", "ground_truth", "group", "side", "confirmation_bucket"}
+    assert set(golden["samples"][0]) == set(fresh["samples"][0]) >= {
+        "member", "source", "ground_truth", "group", "side"}
     assert set(golden) == set(fresh)
 
 

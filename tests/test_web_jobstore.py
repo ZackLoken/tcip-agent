@@ -315,21 +315,19 @@ def test_priority_queue_by_id_reaches_a_job_launched_for_a_previously_open_proje
     already holds: opening another project must not make the job invisible by id."""
     from fastapi import HTTPException
 
-    from tcip_web.routes.review import (
-        PriorityQueueJob, _pq_get, _pq_register, _pq_registry, get_priority_queue_job,
-    )
+    from tcip_web.routes.annotate import PriorityQueueJob, _pq_registry, get_priority_queue_job
     from tests._web_fixtures import open_new_project
 
     job = PriorityQueueJob(
         job_id="pq-under-a", project=str(opened_project), checkpoint_path="c", images_dir="i",
-        dataset_root="d", status="completed", queue=[{"image": "a.jpg", "score": 0.9}],
+        subject=None, status="completed", queue=[{"image": "a.jpg", "score": 0.9}],
     )
-    _pq_register(job)
+    _pq_registry.register(job.job_id, job)
 
     try:
         open_new_project(tmp_path / "other")
 
-        assert _pq_get("pq-under-a") is job
+        assert _pq_registry.get("pq-under-a") is job
         assert get_priority_queue_job("pq-under-a")["job_id"] == "pq-under-a"
 
         with pytest.raises(HTTPException) as miss:

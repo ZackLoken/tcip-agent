@@ -244,28 +244,29 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
 
 
 class AcknowledgmentPayload(BaseModel):
-    """Why the breeder ships the unvalidated result shown, and that result's digest
+    """Who ships the unvalidated result shown (``user``), why, and that result's digest
     (``result_sha256``, as the refusal or the screen measurement served it)."""
 
     model_config = ConfigDict(extra="forbid")
 
+    user: str
     reason: str
     result_sha256: str
 
 
 def _recorded_acknowledgment(payload, request: Request) -> Optional[str]:
     """Record the acknowledgment ``payload`` carries (:func:`~tcip_mcp.delivery.
-    record_acknowledgment`) by the identity this backend runs as, and return its id; ``None``
-    when it carries none. A request with no browser ``Origin``, or one declaring an agent identity
-    (:data:`~tcip_mcp.agent_identity.HEADERS`), refuses (403), and a blank reason refuses (400),
-    before anything runs; an act recorded whose audit line could not follow answers 409.
+    record_acknowledgment`) by the person it names, and return its id; ``None`` when it carries
+    none. A request with no browser ``Origin``, or one declaring an agent identity
+    (:data:`~tcip_mcp.agent_identity.HEADERS`), refuses (403), and a blank reason or name refuses
+    (400), before anything runs; an act recorded whose audit line could not follow answers 409.
     """
     if payload.acknowledgment is None:
         return None
     from tcip_mcp import agent_identity
     from tcip_mcp.audit import AuditEntryNotWritten
     from tcip_mcp.delivery import record_acknowledgment
-    from tcip_web.identity import current_user, user_id
+    from tcip_mcp.identity import actor
     from tcip_web.routes.audit_gap import audit_gap_409
 
     if request.headers.get("origin") is None or any(
@@ -274,7 +275,7 @@ def _recorded_acknowledgment(payload, request: Request) -> Optional[str]:
                                  "request from no browser, or from an agent, cannot record one.")
     try:
         return record_acknowledgment(
-            store.open_root(), acknowledged_by=user_id(current_user()),
+            store.open_root(), acknowledged_by=actor(payload.acknowledgment.user),
             reason=payload.acknowledgment.reason,
             result_sha256=payload.acknowledgment.result_sha256).acknowledgment_id
     except AuditEntryNotWritten as exc:
@@ -528,8 +529,7 @@ class ConfirmRevisionPayload(BaseModel):
     """The breeder's confirmation of one trait revision, or the withdrawal of one they gave.
 
     ``entry_sha256`` is the hash of the entry the surface showed. ``user`` is the name the surface
-    carries; when it is absent the backend falls back to its own process identity and records that
-    it did.
+    carries.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -537,7 +537,7 @@ class ConfirmRevisionPayload(BaseModel):
     trait: str
     revision: int
     entry_sha256: str
-    user: Optional[str] = None
+    user: str
     confirmed: bool
 
 
@@ -548,21 +548,18 @@ def confirm_trait_revision(payload: ConfirmRevisionPayload) -> dict:
 
     Refused with 409 when the hash is not the revision's own, the body carrying the trait's record
     as it stands, and with 400 for every other refusal. A committed confirmation whose audit line
-    could not be written returns the revision with that failure as ``audit_warning``. Records a
-    name the request supplied and whether it supplied one; it is not authentication.
+    could not be written returns the revision with that failure as ``audit_warning``. Records the
+    name the request supplied, refusing a blank one; it is not authentication.
     """
     from tcip_mcp.audit import AuditEntryNotWritten
     from tcip_mcp.traits import RevisionMoved, TraitUnknownError, confirm_revision, read_trait
 
-    from tcip_web.identity import resolve_user
-
     root = store.open_root()
-    actor = resolve_user(payload.user)
     audit_warning: Optional[str] = None
     try:
         revision = confirm_revision(
-            root, payload.trait, payload.revision, payload.entry_sha256, user=actor,
-            identity_from_request=bool((payload.user or "").strip()), confirmed=payload.confirmed)
+            root, payload.trait, payload.revision, payload.entry_sha256, user=payload.user,
+            confirmed=payload.confirmed)
     except AuditEntryNotWritten as e:
         revision = read_trait(payload.trait, root).revisions[payload.revision - 1]
         audit_warning = str(e)

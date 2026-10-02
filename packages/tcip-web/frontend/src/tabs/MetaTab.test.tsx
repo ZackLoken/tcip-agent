@@ -35,13 +35,13 @@ describe("MetaTab heading", () => {
 
 describe("MetaTab annotation sessions", () => {
   it("shows a rejected sessions load as the tab's error, never as no sessions", async () => {
-    vi.spyOn(sessionsApi, "load").mockRejectedValue(new Error("image_status does not decode"));
+    vi.spyOn(sessionsApi, "load").mockRejectedValue(new Error("a label document does not decode"));
 
     render(<MetaTab />);
 
     expect(
       await screen.findByText(
-        /Annotation sessions could not be loaded: .*image_status does not decode/,
+        /Annotation sessions could not be loaded: .*a label document does not decode/,
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("not loaded")).toBeInTheDocument();

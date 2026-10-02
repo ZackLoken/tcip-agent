@@ -7,7 +7,6 @@ import pytest
 
 from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE, VIZ_ARTIFACT_MAX_EDGE
 from tcip_mcp.pipelines.reference_grid import (
-    derive_lattice_tile_size,
     derive_pointing_tile_size,
     derive_serving_tile_size,
     grid_geometry,
@@ -57,7 +56,7 @@ class TestReferenceCells:
         assert max(c.x1 for c in cells) == max(c.y1 for c in cells) == 200
 
     def test_names_are_column_letter_plus_row(self):
-        from tcip_annotation.sam_wrapper import column_index, column_label
+        from tcip_annotation.grid import column_index, column_label
 
         cells = reference_cells(2800, 200, 100, clamp=True)
         assert cells[0].name == "A1"
@@ -118,41 +117,14 @@ class TestDerivations:
         chosen against its own long edge: 640 splits into 14 cells of edge 46."""
         assert derive_pointing_tile_size(640, 480) == 46
 
-    def test_serving_tile_is_a_fixed_derivation_regardless_of_zoom(self):
-        """The serving grid never depends on a set zoom or the coverage lattice: hardcoded
-        expected values, not a self-comparison, so a shared-code-path regression would actually
-        be caught."""
+    def test_serving_tile_is_a_fixed_derivation_of_the_extent(self):
+        """Hardcoded expected values, not a self-comparison, so a shared-code-path regression
+        would actually be caught."""
         assert derive_serving_tile_size(141130, 239921) == 4067
         assert derive_serving_tile_size(4000, 3000) == 4000
         assert derive_serving_tile_size(5000, 64) == 2500
         assert derive_serving_tile_size(640, 480) == 640
         assert derive_serving_tile_size(4096, 3000) == 4096
-
-    def test_lattice_tile_is_one_screenful_at_the_set_zoom(self):
-        """One screenful of native pixels at the zoom, off the short viewport dimension: at 1.5x
-        zoom on a 1416x903 viewport (the render's own mockup numbers), the short dimension (903)
-        derives a 602 px cell edge."""
-        import math
-
-        assert derive_lattice_tile_size(1416, 903, 1.5) == math.ceil(903 / 1.5)
-        assert derive_lattice_tile_size(1416, 903, 1.5) == 602
-
-    def test_lattice_tile_uses_the_short_viewport_dimension(self):
-        assert derive_lattice_tile_size(2000, 500, 1.0) == 500
-        assert derive_lattice_tile_size(500, 2000, 1.0) == 500
-
-    def test_lattice_tile_scales_inversely_with_zoom(self):
-        assert derive_lattice_tile_size(1000, 800, 2.0) < derive_lattice_tile_size(1000, 800, 1.0)
-
-    def test_lattice_tile_refuses_a_non_positive_zoom(self):
-        with pytest.raises(ValueError, match="zoom"):
-            derive_lattice_tile_size(1000, 800, 0)
-        with pytest.raises(ValueError, match="zoom"):
-            derive_lattice_tile_size(1000, 800, -1.5)
-
-    def test_lattice_tile_refuses_a_sub_pixel_viewport(self):
-        with pytest.raises(ValueError, match="viewport"):
-            derive_lattice_tile_size(0, 800, 1.0)
 
 
 class TestGridGeometry:

@@ -5,11 +5,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { api } from "@/api/client";
 import type { SaveResult } from "@/api/client";
 import { subjectsApi, subjectColor } from "@/api/subjects";
-import { StructuredRefusalError } from "@/api/http";
-import * as CanvasStageMock from "@/components/Canvas/CanvasStage";
 import * as canvasSync from "@/lib/canvasSync";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
-import type { CompletenessRecord } from "@/lib/coverage";
 import { CUT_MISSES_REFUSAL } from "@/lib/polygonGeometry";
 import { sessionsApi } from "@/api/sessions";
 import { useStore } from "@/store";
@@ -49,20 +46,17 @@ vi.mock("react-konva", () => ({
 // the real screen<->image conversion is CanvasStage's own concern) so tests can drive the drawing
 // tools without a real Konva stage.
 vi.mock("@/components/Canvas/CanvasStage", () => {
-  let capturedOnBaseFacts: ((facts: unknown) => void) | undefined;
   return {
     CanvasStage: (props: {
       children?: React.ReactNode;
       overlay?: React.ReactNode;
       imageUrl?: string | null;
-      onBaseFacts?: (facts: unknown) => void;
       onPixelDown?: (x: number, y: number, ev: unknown) => void;
       onPixelMove?: (x: number, y: number, ev: unknown) => void;
       onPixelUp?: (x: number, y: number, ev: unknown) => void;
       onPixelClick?: (x: number, y: number, ev: unknown) => void;
       onPixelContextMenu?: (x: number, y: number, ev: unknown) => void;
     }) => {
-      capturedOnBaseFacts = props.onBaseFacts;
       return (
         <div
           data-testid="canvas-stage"
@@ -85,12 +79,26 @@ vi.mock("@/components/Canvas/CanvasStage", () => {
         </div>
       );
     },
-    __triggerBaseFacts: (facts: unknown) => capturedOnBaseFacts?.(facts),
   };
 });
 vi.mock("@/components/AnnotateToolbar", () => ({
-  AnnotateToolbar: (props: { bandsInfo?: { band_count: number } | null }) => (
-    <div data-testid="toolbar" data-band-count={props.bandsInfo?.band_count ?? ""} />
+  AnnotateToolbar: (props: {
+    bandsInfo?: { band_count: number } | null;
+    subjectCompletion: { state: string; finished: boolean } | null;
+    onComplete: (next: boolean) => void;
+    hideProposals: boolean;
+    onHideProposals: (next: boolean) => void;
+  }) => (
+    <div
+      data-testid="toolbar"
+      data-band-count={props.bandsInfo?.band_count ?? ""}
+      data-subject-state={props.subjectCompletion?.state ?? ""}
+    >
+      <button onClick={() => props.onComplete(!props.subjectCompletion?.finished)}>
+        toolbar-complete
+      </button>
+      <button onClick={() => props.onHideProposals(!props.hideProposals)}>toolbar-hide</button>
+    </div>
   ),
 }));
 
@@ -110,9 +118,12 @@ function labelsFor(imagePath: string) {
     polygons: [],
     points: [],
     imageAnnotations: [],
+    completion: {},
     base_mtime: String(LOAD_MTIME[name] ?? 1),
   };
 }
+
+const saved = (base_mtime: string): SaveResult => ({ status: "ok", base_mtime, completion: {} });
 
 function setupDataset() {
   useStore.setState((s) => ({
@@ -160,8 +171,7 @@ beforeEach(() => {
   loadSpy = vi
     .spyOn(api.annotate, "load")
     .mockImplementation((imagePath) => Promise.resolve(labelsFor(imagePath)));
-  saveSpy = vi.spyOn(api.annotate, "save").mockResolvedValue({ status: "ok", base_mtime: "1" });
-  vi.spyOn(subjectsApi, "setImageStatus").mockResolvedValue({ status: "ok", digest_stamped: true });
+  saveSpy = vi.spyOn(api.annotate, "save").mockResolvedValue(saved("1"));
   vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue({});
   // Default: a standard 3-band RGB image; the band picker's own describe block overrides this
   // per-case to exercise the >3-band path.
@@ -173,9 +183,9 @@ beforeEach(() => {
       { name: "Blue", wavelength_nm: null, dtype: "uint8", min: 0, max: 255 },
     ],
   });
-  // The coverage-grid fetch is gated on a real canvas-host measurement (useCoverageGrid); jsdom's
-  // own getBoundingClientRect is always zero, so every test needing that fetch stubs one here.
+  // jsdom's own getBoundingClientRect is always zero; the viewport math needs a real host.
   vi.spyOn(canvasSync, "measureCanvasHost").mockReturnValue({ w: 1000, h: 800 });
+  vi.spyOn(api.images, "servingGrid").mockResolvedValue({ tile_size: 1000, cells: [] });
   // One jsdom instance per file, not per test: a recolor left by an earlier test must not leak
   // into a later one's derived-color assertions.
   try {
@@ -193,7 +203,7 @@ describe("AnnotateTab save/load race", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
-    saveSpy.mockResolvedValueOnce({ status: "ok", base_mtime: "101" });
+    saveSpy.mockResolvedValueOnce(saved("101"));
     act(addBox);
     pressSave();
     await flush();
@@ -237,21 +247,11 @@ describe("AnnotateTab save/load race", () => {
     // Edit img2 while the img1 save is still in flight, then let it resolve late.
     act(addBox);
     await act(async () => {
-      resolveFlushSave({ status: "ok", base_mtime: "150" });
+      resolveFlushSave(saved("150"));
     });
 
     // The stale result must not markClean() the img2 edits...
     expect(useStore.getState().canvas.dirty).toBe(true);
-    // ...but the per-image status for the image actually saved is still recorded, scoped to the
-    // selected subject, so it cannot mark the image negative under another subject.
-    expect(subjectsApi.setImageStatus).toHaveBeenCalledWith(
-      "img1.jpg",
-      "partial",
-      "subject_a",
-      "2026-01-01",
-      "C:/data",
-      undefined,
-    );
 
     // ...and the next save must target img2 with img2's loaded mtime, not
     // img1's file with the stale save's echoed mtime.
@@ -287,7 +287,7 @@ describe("AnnotateTab save/load race", () => {
     expect(screen.queryByText(/changed elsewhere/)).not.toBeInTheDocument();
   });
 
-  it("records the status under the name the app is set to, not the backend's own identity", async () => {
+  it("names the person the app is set to on the save, and sends no provenance of its own", async () => {
     act(() => useStore.getState().setUser("breeder"));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -297,24 +297,11 @@ describe("AnnotateTab save/load race", () => {
     pressSave();
     await flush();
 
-    expect(useStore.getState().user).toBe("breeder");
-    expect(vi.mocked(subjectsApi.setImageStatus).mock.calls[0][5]).toBe("breeder");
-  });
-
-  it("never rewrites a confirmed negative to partial, even when the save adds content", async () => {
-    useStore.setState((s) => ({
-      imageStatus: { ...s.imageStatus, byImage: { "img1.jpg": "negative" } },
-    }));
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-
-    act(addBox);
-    pressSave();
-    await flush();
-
-    expect(subjectsApi.setImageStatus).not.toHaveBeenCalled();
-    expect(useStore.getState().imageStatus.byImage["img1.jpg"]).toBe("negative");
+    const body = saveSpy.mock.calls[0][0];
+    expect(body.user).toBe("breeder");
+    for (const a of body.annotations) {
+      expect(Object.keys(a).filter((k) => /_(by|at)$/.test(k))).toEqual([]);
+    }
   });
 });
 
@@ -327,6 +314,7 @@ describe("AnnotateTab audit-gap handling", () => {
     saveSpy.mockResolvedValueOnce({
       status: "unrecorded",
       base_mtime: "101",
+      completion: {},
       message: "save_label_document completed and its audit entry could not be written",
     });
     act(addBox);
@@ -343,40 +331,6 @@ describe("AnnotateTab audit-gap handling", () => {
     pressSave();
     await flush();
     expect(saveSpy.mock.calls[1][0].base_mtime).toBe("101");
-  });
-
-  it("toasts the message when the healed status write's own audit line is lost", async () => {
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-
-    const message = "gui_set_image_status completed and its audit entry could not be written";
-    vi.spyOn(subjectsApi, "setImageStatus").mockRejectedValue(
-      new StructuredRefusalError(
-        { error: "audit_entry_not_written", message, committed: { status: "ok" } },
-        409,
-        message,
-      ),
-    );
-    act(addBox);
-    pressSave();
-    await flush();
-
-    expect(useStore.getState().toasts.at(-1)?.message).toBe(message);
-  });
-
-  it("stays silent when the healed status write fails for any other reason", async () => {
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-
-    vi.spyOn(subjectsApi, "setImageStatus").mockRejectedValue(new Error("network down"));
-    const before = useStore.getState().toasts.length;
-    act(addBox);
-    pressSave();
-    await flush();
-
-    expect(useStore.getState().toasts.length).toBe(before);
   });
 });
 
@@ -739,16 +693,7 @@ describe("AnnotateTab point tool", () => {
 
     expect(saveSpy).toHaveBeenCalledTimes(1);
     expect(saveSpy.mock.calls[0][0].annotations).toEqual([
-      {
-        subject: "tip",
-        point: [12, 34],
-        attributes: {},
-        created_by: null,
-        created_at: null,
-        accepted_by: null,
-        accepted_at: null,
-        accepted_by_rule: null,
-      },
+      { subject: "tip", point: [12, 34], attributes: {} },
     ]);
   });
 
@@ -784,21 +729,6 @@ describe("AnnotateTab AttributePanel", () => {
     expect(screen.getByText("Select a shape to set its attributes.")).toBeInTheDocument();
     expect(screen.getByText("Attributes for subject_a")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "+ Attribute" })).toBeInTheDocument();
-  });
-
-  it("a locked image mounts the panel with the subject block only", async () => {
-    useStore.getState().setRegistry({ subject_a: {} });
-    useStore.setState((s) => ({
-      imageStatus: { ...s.imageStatus, byImage: { "img1.jpg": "complete" } },
-    }));
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-
-    expect(screen.getByText("Attributes for subject_a")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "+ Attribute" })).toBeInTheDocument();
-    expect(screen.queryByText("Select a shape to set its attributes.")).not.toBeInTheDocument();
-    expect(screen.queryByText("Ratings for this whole image")).not.toBeInTheDocument();
   });
 
   it("reopens on its own when a shape gets selected, and can be closed manually", async () => {
@@ -852,7 +782,6 @@ describe("AnnotateTab AttributePanel authoring", () => {
       n_subjects: 1,
       subjects_path: "C:/data/subjects.json",
       version: "v2",
-      schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     });
 
     await declareAttribute();
@@ -884,27 +813,6 @@ describe("AnnotateTab AttributePanel authoring", () => {
     expect(useStore.getState().registry.version).toBe("v3");
   });
 
-  it("toasts the schema_change_sweep the save response carries, naming the subject and count", async () => {
-    await openPanelOnASelectedBox();
-    vi.spyOn(subjectsApi, "save").mockResolvedValue({
-      status: "ok",
-      n_subjects: 1,
-      subjects_path: "C:/data/subjects.json",
-      version: "v2",
-      schema_change_sweep: {
-        newly_stamped: { subject_a: 4 },
-        predating_vocabulary: { subject_a: 4 },
-        warning: null,
-      },
-    });
-
-    await declareAttribute();
-
-    expect(useStore.getState().toasts.at(-1)?.message).toMatch(
-      /4 confirmed image\(s\) of subject_a/,
-    );
-  });
-
   it("counts the active subject's shapes carrying no value for each declared attribute", async () => {
     await openPanelOnASelectedBox();
     vi.spyOn(subjectsApi, "save").mockResolvedValue({
@@ -912,7 +820,6 @@ describe("AnnotateTab AttributePanel authoring", () => {
       n_subjects: 1,
       subjects_path: "C:/data/subjects.json",
       version: "v2",
-      schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     });
 
     await declareAttribute();
@@ -1219,6 +1126,7 @@ function seedPolygons(polygons: (typeof POLY_A)[]) {
     polygons,
     points: [],
     imageAnnotations: [],
+    completion: {},
   });
 }
 
@@ -1291,17 +1199,6 @@ describe("Cut tool arming", () => {
   it("x does nothing outside polygon mode", async () => {
     await renderPolygonCanvas();
     act(() => useStore.getState().setMode("box"));
-    fireEvent.keyDown(window, { key: "x" });
-    expect(useStore.getState().annotateUi.cut).toBe(false);
-  });
-
-  it("x does nothing on a locked image", async () => {
-    await renderPolygonCanvas();
-    act(() => {
-      useStore.setState((s) => ({
-        imageStatus: { ...s.imageStatus, byImage: { "img1.jpg": "complete" } },
-      }));
-    });
     fireEvent.keyDown(window, { key: "x" });
     expect(useStore.getState().annotateUi.cut).toBe(false);
   });
@@ -1486,24 +1383,6 @@ describe("Cut gesture", () => {
     fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
     fireEvent.keyDown(window, { key: "x" });
     act(() => useStore.getState().setCut(true));
-    fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 }); // a fresh first click, not a cut
-    expect(useStore.getState().canvas.polygons).toHaveLength(2);
-  });
-
-  it("confirming the image (locking it) clears the flag and the pending start", async () => {
-    const stage = await renderPolygonCanvas();
-    armOnPolyA();
-    fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
-    act(() => {
-      useStore.setState((s) => ({
-        imageStatus: { ...s.imageStatus, byImage: { "img1.jpg": "complete" } },
-      }));
-    });
-    expect(useStore.getState().annotateUi.cut).toBe(false);
-    act(() => {
-      useStore.setState((s) => ({ imageStatus: { ...s.imageStatus, byImage: {} } }));
-      useStore.getState().setCut(true);
-    });
     fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 }); // a fresh first click, not a cut
     expect(useStore.getState().canvas.polygons).toHaveLength(2);
   });
@@ -1727,16 +1606,7 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
 
     expect(saveSpy).toHaveBeenCalledTimes(1);
     expect(saveSpy.mock.calls[0][0].annotations).toEqual([
-      {
-        subject: "subject_a",
-        attributes: { canopy_cover: "sparse" },
-        iscrowd: false,
-        created_by: null,
-        created_at: null,
-        accepted_by: null,
-        accepted_at: null,
-        accepted_by_rule: null,
-      },
+      { subject: "subject_a", attributes: { canopy_cover: "sparse" }, iscrowd: false },
     ]);
   });
 });
@@ -1881,374 +1751,115 @@ describe("AnnotateTab canvas push names its project", () => {
   });
 });
 
-const MULTI_CELL_GRID = {
-  width: 1000,
-  height: 800,
-  tile_size: 500,
-  overlap: 0,
-  cols: 2,
-  rows: 2,
-};
-const MULTI_CELL_CELLS = [
-  { name: "A1", x0: 0, y0: 0, x1: 500, y1: 400 },
-  { name: "B1", x0: 500, y0: 0, x1: 1000, y1: 400 },
-  { name: "A2", x0: 0, y0: 400, x1: 500, y1: 800 },
-  { name: "B2", x0: 500, y0: 400, x1: 1000, y1: 800 },
-];
-const BELOW_NATIVE_BASE_FACTS = {
-  ok: true,
-  servedSize: { w: 500, h: 400 },
-  servedSizeRaw: "500x400",
-  statsSource: null,
-  displayBounds: null,
-  imageError: null,
-  image: null,
-  aborted: false,
-  headerParseError: null,
+const BUCKET = "C:/data/predictions/m1/2026-01-01";
+const PROPOSALS = {
+  bucket: BUCKET,
+  proposals: [
+    {
+      subject: "subject_a",
+      bbox: [10, 10, 50, 50] as [number, number, number, number],
+      attributes: {},
+      iscrowd: false,
+      score: 0.9,
+      index: 0,
+      paired: null,
+      decision: null,
+      admitted: false,
+    },
+  ],
 };
 
-// A rendered geometry block used for both `grid` and `serving` (get_grid's own nested shape):
-// these tests exercise neither the set-zoom lookup nor the serving grid's own derivation.
-function gridResponse(geometry: typeof MULTI_CELL_GRID, cells: typeof MULTI_CELL_CELLS) {
-  const rendered = {
-    ...geometry,
-    derivation: "cells sized to one full-resolution screenful",
-    cells,
-  };
-  return { grid: rendered, reason: null, fresh_derivation_differs: null, serving: rendered };
+function withBucket() {
+  useStore.setState((s) => ({
+    gui: { ...s.gui, dataset: { ...s.gui.dataset, predictions_dir: BUCKET } },
+  }));
+  return vi.spyOn(api.annotate, "proposals").mockResolvedValue(PROPOSALS);
 }
 
-function mockMultiCellGrid() {
-  // The Map tests below also mount the coverage-tracking hook, which reads and pushes the
-  // session sweep record for the same raster; mocked here too so no real fetch is attempted.
-  vi.spyOn(api.coverage, "get").mockResolvedValue(null);
-  vi.spyOn(api.coverage, "push").mockResolvedValue({
-    record: { cells_seen_at_scale: {} },
-  });
-  return vi
-    .spyOn(api.coverage, "grid")
-    .mockResolvedValue(gridResponse(MULTI_CELL_GRID, MULTI_CELL_CELLS));
+async function mountTab() {
+  render(<AnnotateTab />);
+  await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+  await flush();
 }
 
-// The mock module's own extra export, absent from the real CanvasStage's type: cast once here
-// rather than at every call site.
-const triggerBaseFacts = (
-  CanvasStageMock as unknown as { __triggerBaseFacts: (facts: unknown) => void }
-).__triggerBaseFacts;
+const dottedRects = () =>
+  screen.queryAllByTestId("k-rect").filter((r) => r.getAttribute("data-dash") === "true");
 
-// Drives the coverage grid's fetch (useCoverageGrid needs a served-below-native base serve).
-function triggerBelowNativeBaseFacts() {
-  act(() => triggerBaseFacts(BELOW_NATIVE_BASE_FACTS));
-}
-
-describe("AnnotateTab Map tool", () => {
-  const stage = () => screen.getByTestId("canvas-stage");
-
-  async function mountMapMode() {
-    mockMultiCellGrid();
-    vi.spyOn(api.coverage, "completeness").mockResolvedValue({
-      by_subject: {},
-      annotation_counts: {},
-      counts_grid: null,
-      counts_error: null,
-      working_scale: {},
-      working_scale_error: null,
-      working_scale_reason: {},
-    });
-    useStore.getState().setRegistry({ tip: {} });
-    useStore.setState((s) => ({
-      gui: { ...s.gui, mode: "map" as const, active_subject: "tip" },
-    }));
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-    triggerBelowNativeBaseFacts();
-    await waitFor(() => expect(api.coverage.grid).toHaveBeenCalled());
-    await flush();
-    expect(useStore.getState().gui.mode).toBe("map");
-  }
-
-  it("a press-and-click in Map mode authors no point, box or polygon vertex", async () => {
-    await mountMapMode();
-    fireEvent.mouseDown(stage(), { clientX: 50, clientY: 50, button: 0 });
-    fireEvent.click(stage(), { clientX: 50, clientY: 50, button: 0 });
-    await flush();
-
-    expect(useStore.getState().canvas.points).toHaveLength(0);
-    expect(useStore.getState().canvas.boxes).toHaveLength(0);
-    expect(useStore.getState().canvas.polygons).toHaveLength(0);
-    expect(useStore.getState().canvas.currentPolygon).toHaveLength(0);
-  });
-
-  it("Map mode is inert even over a lockedImage, since navigation is not an edit", async () => {
-    // The same click a Point-mode press would use to author a point.
-    await mountMapMode();
-    useStore.setState((s) => ({
-      imageStatus: { ...s.imageStatus, byImage: { "img1.jpg": "complete" } },
-    }));
-    fireEvent.click(stage(), { clientX: 50, clientY: 50, button: 0 });
-    await flush();
-    expect(useStore.getState().canvas.points).toHaveLength(0);
-  });
-
-  it("falls back to a drawing tool when the Map tool is withdrawn (no multi-cell grid)", async () => {
-    vi.spyOn(api.coverage, "get").mockResolvedValue(null);
-    vi.spyOn(api.coverage, "push").mockResolvedValue({
-      record: { cells_seen_at_scale: {} },
-    });
-    // An ordinary raster's own lattice is one cell: settled, never pending, and offers no Map.
-    vi.spyOn(api.coverage, "grid").mockResolvedValue(
-      gridResponse({ width: 1000, height: 800, tile_size: 1000, overlap: 0, cols: 1, rows: 1 }, [
-        { name: "A1", x0: 0, y0: 0, x1: 1000, y1: 800 },
-      ]),
+describe("AnnotateTab completion marks", () => {
+  it("marks the subject through the save door and shows the state the reloaded document derives", async () => {
+    await mountTab();
+    loadSpy.mockImplementation((imagePath) =>
+      Promise.resolve({
+        ...labelsFor(imagePath),
+        completion: { subject_a: { state: "negative" as const, finished: true } },
+      }),
     );
-    vi.spyOn(api.coverage, "completeness").mockResolvedValue({
-      by_subject: {},
-      annotation_counts: {},
-      counts_grid: null,
-      counts_error: null,
-      working_scale: {},
-      working_scale_error: null,
-      working_scale_reason: {},
-    });
-    useStore.getState().setRegistry({ tip: {} });
-    useStore.setState((s) => ({
-      gui: { ...s.gui, mode: "map" as const, active_subject: "tip" },
-    }));
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-    act(() => triggerBaseFacts({ ...BELOW_NATIVE_BASE_FACTS, servedSize: { w: 1000, h: 800 } }));
-    await waitFor(() => expect(api.coverage.grid).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByText("toolbar-complete"));
     await flush();
 
-    expect(useStore.getState().gui.mode).toBe("box");
+    expect(saveSpy.mock.calls[0][0]).toMatchObject({
+      complete: { subject_a: true },
+      rect: null,
+      proposals_hidden: false,
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("toolbar")).toHaveAttribute("data-subject-state", "negative"),
+    );
+  });
+
+  it("records on the mark that proposals were hidden while it was made", async () => {
+    withBucket();
+    await mountTab();
+
+    fireEvent.click(screen.getByText("toolbar-hide"));
+    await flush();
+    fireEvent.click(screen.getByText("toolbar-complete"));
+    await flush();
+
+    expect(saveSpy.mock.calls[0][0].proposals_hidden).toBe(true);
   });
 });
 
-describe("AnnotateTab completeness refresh and attestation control", () => {
-  it("a save refetches completeness, so counts and staleness never go stale on the open image", async () => {
-    const completenessSpy = vi.spyOn(api.coverage, "completeness").mockResolvedValue({
-      by_subject: {},
-      annotation_counts: {},
-      counts_grid: null,
-      counts_error: null,
-      working_scale: {},
-      working_scale_error: null,
-      working_scale_reason: {},
-    });
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-    const callsBeforeSave = completenessSpy.mock.calls.length;
-
-    act(addBox);
-    pressSave();
-    await flush();
-
-    expect(saveSpy).toHaveBeenCalledTimes(1);
-    expect(completenessSpy.mock.calls.length).toBeGreaterThan(callsBeforeSave);
-  });
-
-  it("a completeness read failure shows in the chrome on an ordinary single-cell raster", async () => {
-    vi.spyOn(api.coverage, "completeness").mockRejectedValue(new Error("network down"));
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-
-    expect(
-      screen.getByText(/labels could not be read, so nothing can be attested.*network down/),
-    ).toBeInTheDocument();
-  });
-
-  async function mountWithCoverageChrome(bySubject: Record<string, CompletenessRecord>) {
-    localStorage.removeItem("tcip.annotate.coverageGridOverlayOpen");
-    mockMultiCellGrid();
-    vi.spyOn(api.coverage, "completeness").mockResolvedValue({
-      by_subject: bySubject,
-      annotation_counts: {},
-      counts_grid: null,
-      counts_error: null,
-      working_scale: {},
-      working_scale_error: null,
-      working_scale_reason: {},
-    });
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-      width: 200,
-      height: 200,
-      top: 0,
-      left: 0,
-      right: 200,
-      bottom: 200,
-      x: 0,
-      y: 0,
-      toJSON: () => "",
-    } as DOMRect);
-    // Matches this test's own 200x200 geometry above, so computeViewport's center is the same.
-    vi.spyOn(canvasSync, "measureCanvasHost").mockReturnValue({ w: 200, h: 200 });
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-    triggerBelowNativeBaseFacts();
-    await waitFor(() => expect(api.coverage.grid).toHaveBeenCalled());
-    await flush();
-    // The attest control is offered only while the overlay is on: no writing about an unseen
-    // cell. These tests exercise the control itself, so switch it on first.
-    fireEvent.click(screen.getByRole("button", { name: /Overlay off/ }));
-  }
-
-  it("labels the control Attest, naming the active subject, when the raw stored set never held the cell", async () => {
-    await mountWithCoverageChrome({});
-    expect(
-      screen.getByRole("button", { name: "Attest A1 complete for subject_a" }),
-    ).toBeInTheDocument();
-  });
-
-  it("labels the control Unattest, naming the active subject, when the raw stored set holds the cell and it is fresh", async () => {
-    await mountWithCoverageChrome({
-      subject_a: {
-        grid: MULTI_CELL_GRID,
-        cells_complete: ["A1"],
-        attested_by: "user:z",
-        attested_at: "t",
-        stem: "img1",
-        date: "2026-01-01",
-        subject: "subject_a",
-        stale_cells: [],
-        cells_attested_view: {},
-      },
-    });
-    expect(screen.getByRole("button", { name: "Unattest A1 for subject_a" })).toBeInTheDocument();
-  });
-
-  it("labels the control Re-attest when the raw stored set holds the cell and it is stale", async () => {
-    await mountWithCoverageChrome({
-      subject_a: {
-        grid: MULTI_CELL_GRID,
-        cells_complete: ["A1"],
-        attested_by: "user:z",
-        attested_at: "t",
-        stem: "img1",
-        date: "2026-01-01",
-        subject: "subject_a",
-        stale_cells: ["A1"],
-        cells_attested_view: {},
-      },
-    });
-    expect(
-      screen.getByRole("button", {
-        name: "Re-attest A1 for subject_a (changed since attested)",
-      }),
-    ).toBeInTheDocument();
-  });
-
-  it("switching the subject picker moves the attest control and the counts to that subject", async () => {
-    localStorage.removeItem("tcip.annotate.coverageGridOverlayOpen");
-    mockMultiCellGrid();
-    vi.spyOn(api.coverage, "completeness").mockResolvedValue({
-      by_subject: {
-        subject_a: {
-          grid: MULTI_CELL_GRID,
-          cells_complete: ["A1"],
-          attested_by: "user:z",
-          attested_at: "t",
-          stem: "img1",
-          date: "2026-01-01",
-          subject: "subject_a",
-          stale_cells: [],
-          cells_attested_view: {},
-        },
-      },
-      annotation_counts: { subject_a: { A1: 2 }, subject_b: { A1: 5 } },
-      counts_grid: MULTI_CELL_GRID,
-      counts_error: null,
-      working_scale: {},
-      working_scale_error: null,
-      working_scale_reason: {},
-    });
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-      width: 200,
-      height: 200,
-      top: 0,
-      left: 0,
-      right: 200,
-      bottom: 200,
-      x: 0,
-      y: 0,
-      toJSON: () => "",
-    } as DOMRect);
-    // Matches this test's own 200x200 geometry above, so computeViewport's center is the same.
-    vi.spyOn(canvasSync, "measureCanvasHost").mockReturnValue({ w: 200, h: 200 });
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-    triggerBelowNativeBaseFacts();
-    await waitFor(() => expect(api.coverage.grid).toHaveBeenCalled());
-    await flush();
-    fireEvent.click(screen.getByRole("button", { name: /Overlay off/ }));
-
-    expect(screen.getByText("Coverage for subject_a")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Unattest A1 for subject_a" })).toBeInTheDocument();
-    expect(screen.getByText("saved for subject_a: A1 (2)")).toBeInTheDocument();
-
-    act(() => useStore.getState().setActiveSubject("subject_b"));
-    await flush();
-
-    expect(screen.getByText("Coverage for subject_b")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Attest A1 complete for subject_b" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("saved for subject_b: A1 (5)")).toBeInTheDocument();
-  });
-
-  it("a single-cell raster renders the chrome with its attest control", async () => {
-    localStorage.removeItem("tcip.annotate.coverageGridOverlayOpen");
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-      width: 200,
-      height: 200,
-      top: 0,
-      left: 0,
-      right: 200,
-      bottom: 200,
-      x: 0,
-      y: 0,
-      toJSON: () => "",
-    } as DOMRect);
-    // Matches this test's own 200x200 geometry above, so computeViewport's center is the same.
-    vi.spyOn(canvasSync, "measureCanvasHost").mockReturnValue({ w: 200, h: 200 });
-    vi.spyOn(api.coverage, "get").mockResolvedValue(null);
-    vi.spyOn(api.coverage, "push").mockResolvedValue({
-      record: { cells_seen_at_scale: {} },
-    });
-    vi.spyOn(api.coverage, "grid").mockResolvedValue(
-      gridResponse({ width: 800, height: 600, tile_size: 800, overlap: 0, cols: 1, rows: 1 }, [
-        { name: "A1", x0: 0, y0: 0, x1: 800, y1: 600 },
-      ]),
+describe("AnnotateTab proposals", () => {
+  it("shows the bucket's undecided proposals and requests none while they are hidden", async () => {
+    const proposalsSpy = withBucket();
+    await mountTab();
+    await waitFor(() => expect(dottedRects()).toHaveLength(1));
+    expect(proposalsSpy).toHaveBeenCalledWith(
+      "C:/data/images/2026-01-01/img1.jpg",
+      BUCKET,
+      "C:/data/annotations/2026-01-01/img1.json",
     );
-    vi.spyOn(api.coverage, "completeness").mockResolvedValue({
-      by_subject: {},
-      annotation_counts: {},
-      counts_grid: null,
-      counts_error: null,
-      working_scale: {},
-      working_scale_error: null,
-      working_scale_reason: {},
-    });
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-    await waitFor(() => expect(api.coverage.grid).toHaveBeenCalled());
-    await flush();
 
-    // A single cell has no overlay to draw, so the toggle is withdrawn and the control is
-    // offered directly, with nothing to hide the cell behind.
-    expect(screen.queryByRole("button", { name: /Overlay/ })).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Attest A1 complete for subject_a" }),
-    ).toBeInTheDocument();
-    // The Map tool stays withdrawn: a single-cell raster has nowhere else to jump to.
-    expect(screen.queryByRole("button", { name: /^Map$/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("toolbar-hide"));
+    await flush();
+    expect(dottedRects()).toHaveLength(0);
+    act(() => {
+      const s = useStore.getState();
+      s.patchGui({ dataset: { ...s.gui.dataset } });
+    });
+    await flush();
+    expect(proposalsSpy).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    ["a", "accept"],
+    ["r", "reject"],
+  ] as const)(
+    "%s adjudicates the selected proposal through the save door, then reloads",
+    async (key, field) => {
+      withBucket();
+      await mountTab();
+      await waitFor(() => expect(dottedRects()).toHaveLength(1));
+
+      fireEvent.keyDown(window, { key });
+      await flush();
+
+      expect(saveSpy.mock.calls[0][0]).toMatchObject({ bucket: BUCKET, [field]: [0] });
+      await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    },
+  );
 });
 
 describe("AnnotateTab heading", () => {

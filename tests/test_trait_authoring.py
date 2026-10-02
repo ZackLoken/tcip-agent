@@ -202,6 +202,8 @@ def _bucket(project: Path, date: str, id_map: dict, *, attribute: str | None,
 
 
 def test_the_positive_class_id_resolves_by_name_from_the_buckets_own_map(tmp_path: Path):
+    from tcip_annotation.json_io import ClassKeyUnknown, class_id
+
     from tcip_mcp.buckets import read_bucket
 
     named = read_bucket(_bucket(tmp_path, "2026-02-11", {"closed": 0, "open": 1},
@@ -209,8 +211,9 @@ def test_the_positive_class_id_resolves_by_name_from_the_buckets_own_map(tmp_pat
     absent = read_bucket(_bucket(tmp_path, "2026-02-25", {"closed": 0, "bud": 1},
                                  attribute="opening"))
 
-    assert named.scope.positive_id(BUD_OPENING.positive_value) == 1
-    assert absent.scope.positive_id(BUD_OPENING.positive_value) is None
+    assert class_id(BUD_OPENING.positive_value, named.scope.value_ids) == 1
+    with pytest.raises(ClassKeyUnknown, match=repr(BUD_OPENING.positive_value)):
+        class_id(BUD_OPENING.positive_value, absent.scope.value_ids)
 
 
 # ── end-to-end through the phenology delivery ─────────────────────────────────

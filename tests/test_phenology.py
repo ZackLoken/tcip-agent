@@ -359,13 +359,18 @@ def test_per_plant_series_accepts_dict_assignments(tmp_path):
 
 
 def test_the_positive_class_id_reads_the_bucket_records_map(tmp_path):
+    from tcip_annotation.json_io import class_id
+
     bucket = _bucket(tmp_path, "2024-05-01", {})
-    assert bucket.scope.positive_id(BUD_OPENING.positive_value) == 1
+    assert class_id(BUD_OPENING.positive_value, bucket.scope.value_ids) == 1
 
 
-def test_the_positive_class_id_is_none_for_a_bucket_that_classifies_nothing(tmp_path):
+def test_the_positive_class_id_refuses_for_a_bucket_that_classifies_nothing(tmp_path):
+    from tcip_annotation.json_io import ClassKeyUnknown, class_id
+
     bucket = _bucket(tmp_path, "2024-05-01", {}, DETECTOR)
-    assert bucket.scope.positive_id(BUD_OPENING.positive_value) is None
+    with pytest.raises(ClassKeyUnknown, match=repr(BUD_OPENING.positive_value)):
+        class_id(BUD_OPENING.positive_value, bucket.scope.value_ids)
 
 
 _SPEC_SHAPES = [

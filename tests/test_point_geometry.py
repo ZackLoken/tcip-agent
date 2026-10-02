@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from tcip_annotation import json_io
-from tcip_annotation.matching import compute_matches
+from tcip_annotation.matching import pair_proposals
 from tcip_annotation.state import Annotation, BBox, Point, Polygon, bbox_of
 
 BOX = BBox(10.0, 10.0, 30.0, 30.0)
@@ -123,8 +123,6 @@ def test_a_point_only_document_carries_the_subject_and_the_detection_loader_refu
     does: it is real ground truth, not an empty image. Which geometries answer for a measurement
     is the selected loader's own fact, so the detection loader refuses that sample by name rather
     than training it as a zero-object negative no human confirmed."""
-    from tcip_mcp.pipelines.data.label_queries import _label_record_state
-
     from tests._producer_fixtures import dataset_over
 
     images, labels = tmp_path / "images", tmp_path / "annotations"
@@ -137,8 +135,8 @@ def test_a_point_only_document_carries_the_subject_and_the_detection_loader_refu
     json_io.write_annotations(labels / "IMG_0002.json",
                               [Annotation(subject="bud", geometry=BOX)], 100, 80)
 
-    assert _label_record_state(labels / "IMG_0001.json", "bud") == (True, True)
-    assert _label_record_state(labels / "IMG_0002.json", "bud") == (True, True)
+    for stem in ("IMG_0001", "IMG_0002"):
+        assert json_io.read_label_document(labels / f"{stem}.json").state("bud") == "partial"
 
     with pytest.raises(ValueError, match="only in geometries a detection loader does not read"):
         dataset_over("detection", images, labels, subject="bud")
@@ -148,26 +146,25 @@ def test_a_point_only_document_carries_the_subject_and_the_detection_loader_refu
     assert [Path(s).stem for s in ds.stems] == ["IMG_0002"]
 
 
-# ── IoU matching ─────────────────────────────────────────────────────────────
+# ── pairing ──────────────────────────────────────────────────────────────────
+
+IOU = {"kind": "iou", "iou_threshold": 0.5}
 
 
-def test_compute_matches_ignores_a_point_on_either_side() -> None:
+def test_the_pairing_ignores_a_point_on_either_side() -> None:
     gt = [Annotation(subject="bud", geometry=Point(20.0, 20.0))]
     preds = [Annotation(subject="bud", geometry=Point(20.0, 20.0), score=0.9)]
-    m = compute_matches(gt, preds, iou_threshold=0.5, conf_threshold=0.1)
-    # Not a TP (nothing overlapped), not an FP, not an FN: a point makes no spatial claim to score.
-    assert (m["tp"], m["fp"], m["fn"]) == ([], [], [])
+    # A point makes no spatial claim to pair: nothing pairs, nothing crashes on bbox_of.
+    assert pair_proposals(gt, preds, IOU).pairs == []
 
 
-def test_compute_matches_still_matches_the_boxes_around_a_point() -> None:
+def test_the_pairing_still_pairs_the_boxes_around_a_point() -> None:
     gt = [Annotation(subject="bud", geometry=Point(1.0, 1.0)),
           Annotation(subject="bud", geometry=BOX)]
     preds = [Annotation(subject="bud", geometry=Point(1.0, 1.0), score=0.9),
              Annotation(subject="bud", geometry=BOX, score=0.9)]
-    m = compute_matches(gt, preds, iou_threshold=0.5, conf_threshold=0.1)
-    assert len(m["tp"]) == 1 and not m["fp"] and not m["fn"]
-    # The reported indices address the caller's own lists, so they must still point at the boxes.
-    assert m["tp"][0]["gt_idx"] == 1 and m["tp"][0]["pred_idx"] == 1
+    # The indices address the caller's own lists, so they must still point at the boxes.
+    assert pair_proposals(gt, preds, IOU).pairs == [(1, 1)]
 
 
 # ── COCO scoring records ─────────────────────────────────────────────────────
@@ -231,33 +228,6 @@ def test_phenology_detection_counts_exclude_a_point(tmp_path: Path) -> None:
     scope = ClassScope(subject="bud", attribute="opening", id_map={"open": 0, "closed": 1})
     total, positive, unclassified = count_by_class(path, "open", scope=scope)
     assert (total, positive, unclassified) == (1, 1, 0)
-
-
-# ── review engine: a verdict's box ───────────────────────────────────────────
-
-
-def test_review_engine_reads_no_bbox_for_a_point(tmp_path: Path) -> None:
-    from tcip_annotation import ReviewEngine
-
-    eng = ReviewEngine(state_dir=tmp_path / "state")
-    anns = [Annotation(subject="bud", geometry=Point(20.0, 20.0)),
-            Annotation(subject="bud", geometry=BOX)]
-    assert eng._box_of(anns[0]) is None  # like a geometry-less label, not a 0-area box
-    assert eng._box_of(anns[1]) == (10.0, 10.0, 30.0, 30.0)
-
-
-# ── spatial index (hit-testing, a different concern from bbox_of) ────────────
-
-
-def test_annotation_engine_indexes_a_point_at_its_own_location(tmp_path: Path) -> None:
-    from tcip_annotation import AnnotationEngine
-    from tcip_annotation.state import AnnotationState
-
-    state = AnnotationState(img_width=100, img_height=80)
-    state.annotations = [Annotation(subject="bud", geometry=Point(20.0, 25.0))]
-    AnnotationEngine(state).ensure_poly_bboxes()
-    # A real hit-test cell at the point, not the (0,0,0,0) placeholder a geometry-less label gets.
-    assert state._poly_bboxes == [(20.0, 25.0, 20.0, 25.0)]
 
 
 # ── renderers ────────────────────────────────────────────────────────────────
@@ -371,7 +341,7 @@ def test_annotate_route_round_trips_a_point(client: TestClient, tmp_path: Path) 
 
     resp = client.post("/api/annotate/labels", json={
         "image_path": str(img), "label_path": str(label),
-        "annotations": [{"subject": "bud", "point": [12.0, 34.0]}],
+        "annotations": [{"subject": "bud", "point": [12.0, 34.0]}], "user": "breeder",
     })
     assert resp.status_code == 200
     (stored,) = json_io.read_annotations(str(label))
@@ -392,18 +362,21 @@ def test_annotate_route_round_trips_mixed_point_and_box_geometry(
         "image_path": str(img), "label_path": str(label),
         "annotations": [{"subject": "bud", "point": [12.0, 34.0]},
                         {"subject": "bud", "bbox": [10.0, 10.0, 30.0, 30.0]}],
+        "user": "breeder",
     })
     assert resp.status_code == 200
     kinds = [type(a.geometry) for a in json_io.read_annotations(str(label))]
     assert kinds == [Point, BBox]
 
 
-def test_review_matches_returns_a_point_gt_without_scoring_it(
+def test_the_proposals_route_pairs_no_proposal_with_a_point(
     client: TestClient, tmp_path: Path
 ) -> None:
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
+    from tests._web_fixtures import open_new_project
 
+    tmp_path = open_new_project(tmp_path / "proj")
     img = _img(tmp_path)
     gt = tmp_path / "gt.json"
     json_io.write_annotations(gt, [Annotation(subject="bud", geometry=Point(20.0, 20.0))], 100, 80)
@@ -411,15 +384,11 @@ def test_review_matches_returns_a_point_gt_without_scoring_it(
         {"image": str(img), "width": 100, "height": 80,
          "boxes": [[BOX.x1, BOX.y1, BOX.x2, BOX.y2]], "scores": [0.9], "labels": [1]}],
         scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
-    pred = bucket.document(img)
 
-    body = client.post("/api/review/matches", json={
-        "dataset_root": str(tmp_path / "proj"),
-        "image_name": "IMG_0001.JPG", "image_path": str(img),
-        "gt_path": str(gt), "pred_path": str(pred),
-        "iou_threshold": 0.3, "conf_threshold": 0.1,
-    }).json()
+    resp = client.get("/api/annotate/proposals", params={
+        "image_path": str(img), "bucket": str(bucket.path), "label_path": str(gt)})
+    assert resp.status_code == 200, resp.text
 
-    # The point is neither an FN nor a match; the box prediction is a plain FP against no GT.
-    assert (body["n_tp"], body["n_fp"], body["n_fn"]) == (0, 1, 0)
-    assert body["gt"][0]["point"] == [20.0, 20.0]  # still shown to the reviewer, with its location
+    # The point makes no spatial claim: the box proposal pairs with nothing.
+    (proposal,) = resp.json()["proposals"]
+    assert proposal["paired"] is None and proposal["bbox"] == [BOX.x1, BOX.y1, BOX.x2, BOX.y2]

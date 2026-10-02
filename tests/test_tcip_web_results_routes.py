@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 import tcip_store
 from tcip_mcp.audit import audit_log_key
 from tcip_web.app import app
-from tcip_web.identity import current_user, user_id
 
 from tests import _trait_fixtures as fx
 from tests._audit_fixtures import refuse_audit_appends
@@ -165,32 +164,37 @@ def test_an_acknowledged_export_ships_unvalidated_and_its_event_names_the_act(
     events = client.get("/api/results/delivery-events").json()["records"]
     (event,) = [r for r in events if r["door"] == "results.export_csv"]
     assert (event["acknowledgment"]["acknowledged_by"], event["acknowledgment"]["reason"]) == (
-        user_id(current_user()), "a look before assessment")
+        "user:breeder", "a look before assessment")
     assert event["validated"] is False
 
 
 def test_an_acknowledgment_is_recorded_only_from_the_browser_and_with_a_reason(
-    client: TestClient, tmp_path: Path,
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A request from no browser, or one declaring an agent identity, cannot originate the
-    breeder's act, and a reason of spaces says nothing; each refuses before anything runs, and
-    the same acknowledgment from the browser ships."""
+    breeder's act, and a reason of spaces says nothing, nor a name of spaces who; each refuses
+    before anything runs, and the same acknowledgment from the browser ships, signed by the
+    person it names."""
     from tcip_mcp import agent_identity
 
+    monkeypatch.setenv("TCIP_USER", "osuser")
     body = _series(tmp_path, fractions=(0.0, 1.0), assessed=False).body()
 
     digest = _export(client, body).json()["detail"]["result_sha256"]
-    acknowledgment = {"reason": "needs a look", "result_sha256": digest}
+    acknowledgment = {"user": "breeder", "reason": "needs a look", "result_sha256": digest}
     bare = _export(client, body, acknowledgment=acknowledgment)
     agent = _export(client, body, acknowledgment=acknowledgment, headers={
         **BROWSER, agent_identity.HEADERS["agent_session"]: "mcp_0123"})
-    blank = _export(client, body, acknowledgment={"reason": "   ", "result_sha256": digest},
+    blank = _export(client, body, acknowledgment={**acknowledgment, "reason": "   "},
                     headers=BROWSER)
+    nameless = _export(client, body, acknowledgment={**acknowledgment, "user": "  "},
+                       headers=BROWSER)
 
     assert (bare.status_code, agent.status_code) == (403, 403)
     assert "cannot record one" in bare.json()["detail"]
     assert blank.status_code == 400
     assert "an acknowledgment states why" in blank.json()["detail"]
+    assert nameless.status_code == 400 and "names no one" in nameless.json()["detail"]
     assert client.get("/api/results/delivery-events").json()["records"] == []
     assert _export(client, body, acknowledgment=acknowledgment,
                    headers=BROWSER).status_code == 200
@@ -376,13 +380,13 @@ def test_an_unassessed_count_bucket_delivers_under_acknowledgment(
 
     assert resp.status_code == 200, resp.text[:300]
     assert resp.headers["X-TCIP-Validated"] == "false"
-    assert unquote(resp.headers["X-TCIP-Acknowledged-By"]) == user_id(current_user())
+    assert unquote(resp.headers["X-TCIP-Acknowledged-By"]) == "user:breeder"
     rows = _rows(resp.text)
     assert [r["detection_count"] for r in rows] == ["3", "3"]
     assert {r["validated"] for r in rows} == {"False"}
     (event,) = client.get("/api/results/delivery-events").json()["records"]
     assert event["door"] == "results.export_count_csv"
-    assert event["acknowledgment"]["acknowledged_by"] == user_id(current_user())
+    assert event["acknowledgment"]["acknowledged_by"] == "user:breeder"
 
 
 def test_an_assessed_count_bucket_delivers_validated_and_discards_an_acknowledgment(
@@ -398,7 +402,8 @@ def test_an_assessed_count_bucket_delivers_validated_and_discards_an_acknowledgm
 
     bare = _export_count(client, _per_image(chain.bucket))
     posted = _export_count(client, _per_image(
-        chain.bucket, acknowledgment={"reason": "just in case", "result_sha256": "0" * 64}),
+        chain.bucket, acknowledgment={"user": "breeder", "reason": "just in case",
+                                      "result_sha256": "0" * 64}),
         headers=BROWSER)
 
     assert bare.status_code == 200, bare.text[:300]
@@ -419,7 +424,8 @@ def test_export_count_csv_answers_409_when_the_delivery_event_audit_line_cannot_
     refuse_audit_appends(monkeypatch, landing=1)  # the acknowledgment's own line lands
 
     resp = _export_count(client, _per_image(
-        bucket, acknowledgment={"reason": "a look", "result_sha256": digest}), headers=BROWSER)
+        bucket, acknowledgment={"user": "breeder", "reason": "a look", "result_sha256": digest}),
+        headers=BROWSER)
 
     assert resp.status_code == 409
     detail = resp.json()["detail"]
@@ -436,9 +442,11 @@ def test_export_count_csv_refuses_an_acknowledgment_from_no_browser_or_with_a_bl
 
     digest = _digest(client, _per_image(bucket))
     bare = _export_count(client, _per_image(
-        bucket, acknowledgment={"reason": "no browser", "result_sha256": digest}))
+        bucket, acknowledgment={"user": "breeder", "reason": "no browser",
+                                "result_sha256": digest}))
     blank = _export_count(client, _per_image(
-        bucket, acknowledgment={"reason": "   ", "result_sha256": digest}), headers=BROWSER)
+        bucket, acknowledgment={"user": "breeder", "reason": "   ", "result_sha256": digest}),
+        headers=BROWSER)
 
     assert bare.status_code == 403 and "cannot record one" in bare.json()["detail"]
     assert blank.status_code == 400 and "reason" in blank.json()["detail"]
@@ -559,7 +567,7 @@ def test_an_unassessed_raster_bucket_delivers_under_acknowledgment_with_its_regi
 
     assert resp.status_code == 200, resp.text[:300]
     assert resp.headers["X-TCIP-Validated"] == "false"
-    assert unquote(resp.headers["X-TCIP-Acknowledged-By"]) == user_id(current_user())
+    assert unquote(resp.headers["X-TCIP-Acknowledged-By"]) == "user:breeder"
     rows = {r["plant_id"]: r for r in _rows(resp.text)}
     assert rows["plot0"]["value"] == "1" and rows["plot3"]["value"] == "0"
     assert {r["validated"] for r in rows.values()} == {"False"}

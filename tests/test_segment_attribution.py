@@ -13,14 +13,12 @@ from pathlib import Path
 import pytest
 
 from tcip_annotation.json_io import write_annotations
-from tcip_annotation.matching import _to_shapely, box_ring
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
 
 from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import OrthomosaicGeoreference
 from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
 from tcip_mcp.pipelines.postprocessing.segment_attribution import (
     CanopySegmentRefusal,
-    _polygon_of,
     assign_detections_to_segments,
     load_canopy_segments,
     tie_segments_to_plants,
@@ -80,22 +78,8 @@ def test_load_canopy_segments_admits_a_hand_traced_polygon_and_a_box(tmp_path: P
 
     assert [s.segment_index for s in segments] == [0, 1]
     assert segments[0].polygon.rings[0][0] == (5.0, 5.0)
-    # A box is admitted as the rectangle it is: four corners, same order _to_shapely builds.
+    # A box is admitted as the rectangle it is: four corners, in box_ring's order.
     assert segments[1].polygon.rings[0] == [(30.0, 30.0), (45.0, 30.0), (45.0, 45.0), (30.0, 45.0)]
-
-
-def test_polygon_of_a_box_agrees_with_matchings_own_box_conversion() -> None:
-    """``_polygon_of`` and ``tcip_annotation.matching._to_shapely`` both build a box's rectangle
-    through the one shared :func:`box_ring`, so a canopy segment's own polygon and the shapely
-    polygon a box annotation matches through carry the same corner order, never two independently
-    maintained copies of it."""
-    b = BBox(3.0, 4.0, 9.0, 12.0)
-
-    segment_polygon = _polygon_of(b)
-    matching_polygon, _area = _to_shapely(Annotation(subject="canopy", geometry=b))
-
-    assert segment_polygon.rings == [box_ring(b)]
-    assert list(matching_polygon.exterior.coords)[:-1] == box_ring(b)
 
 
 def test_load_canopy_segments_excludes_annotations_of_another_subject(tmp_path: Path) -> None:
@@ -210,11 +194,11 @@ def test_load_canopy_segments_refuses_a_machine_authored_polygon_with_no_persons
             data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
 
 
-def test_load_canopy_segments_admits_a_sam_authored_polygon_accepted_through_review(
+def test_load_canopy_segments_admits_a_proposed_polygon_accepted_through_the_save_door(
     tmp_path: Path,
 ) -> None:
-    """A SAM-authored proposal accepted through the review route's own accept path delivers: the
-    platform's own producer of a person's ``accepted_by``, never a hand-written provenance pair.
+    """A staged polygon proposal accepted through the editor's save door delivers: the platform's
+    own producer of a person's ``accepted_by``, never a hand-written provenance pair.
     """
     from fastapi.testclient import TestClient
 
@@ -222,29 +206,18 @@ def test_load_canopy_segments_admits_a_sam_authored_polygon_accepted_through_rev
 
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
-    dataset_root, raster_path, _georef, identity = _setup(tmp_path)
+    _dataset_root, raster_path, _georef, identity = _setup(tmp_path)
     ring = [[5.0, 5.0], [20.0, 5.0], [20.0, 20.0], [5.0, 20.0]]
-    staged = stage_proposals(tmp_path, str(raster_path), model_name="sam", polygons=[
+    staged = stage_proposals(tmp_path, str(raster_path), model_name="segmenter", polygons=[
         {"subject": "canopy", "conf": 0.9, "rings": [ring]}])
     assert "error" not in staged, staged
-    pred_path = Path(staged["path"])
+    bucket = Path(staged["path"]).parent
     gt_path = _doc_path(raster_path)
 
     client = TestClient(app, base_url="http://127.0.0.1")
-    resp = client.post("/api/review/action", json={
-        "dataset_root": str(dataset_root),
-        "image_name": raster_path.name,
-        "image_path": str(raster_path),
-        "gt_path": str(gt_path),
-        "pred_path": str(pred_path),
-        "det_type": "fp",
-        "class_name": "canopy",
-        "conf": 0.9,
-        "gt_idx": None,
-        "pred_idx": 0,
-        "bbox": (5.0, 5.0, 20.0, 20.0),
-        "action": "accepted",
-        "user": "breeder",
+    resp = client.post("/api/annotate/labels", json={
+        "image_path": str(raster_path), "label_path": str(gt_path), "annotations": [],
+        "bucket": str(bucket), "accept": [0], "user": "breeder",
     })
     assert resp.status_code == 200, resp.text
 
@@ -253,7 +226,7 @@ def test_load_canopy_segments_admits_a_sam_authored_polygon_accepted_through_rev
         raster_identity=identity)
     assert len(segments) == 1
     stored = json.loads(gt_path.read_text())
-    assert stored["annotations"][0]["created_by"] == "sam"
+    assert stored["annotations"][0]["created_by"] == "segmenter"
     assert stored["annotations"][0]["accepted_by"] == "user:breeder"
     assert "score" not in stored["annotations"][0]
 

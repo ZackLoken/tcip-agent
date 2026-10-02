@@ -11,14 +11,7 @@ const s = () => useStore.getState();
 
 // tcip_web.state.GuiState's own field names, transcribed since this suite has no live backend
 // to query; a field added there and not here fails the difference assertion below.
-const BACKEND_GUI_STATE_FIELDS = [
-  "active_tab",
-  "dataset",
-  "view",
-  "mode",
-  "active_subject",
-  "review",
-];
+const BACKEND_GUI_STATE_FIELDS = ["active_tab", "dataset", "view", "mode", "active_subject"];
 
 describe("the GUI state the browser opens with", () => {
   it("carries every field of the backend state, at the values the backend also starts from", () => {
@@ -39,13 +32,6 @@ describe("the GUI state the browser opens with", () => {
       view: { scale: 1, offset_x: 0, offset_y: 0 },
       mode: "box",
       active_subject: null,
-      review: {
-        iou_threshold: 0.5,
-        conf_threshold: 0.25,
-        filter_type: "all",
-        filter_class: "all",
-        detection_idx: 0,
-      },
     });
 
     // The two field sets are one set: nothing the backend persists is dropped on the way in.
@@ -63,7 +49,7 @@ describe("adopting a different dataset selection", () => {
     const project = { id: "a1b2c3d4e5f6", path: "/proj/alpha" };
     useStore.setState({
       gui: {
-        active_tab: "review",
+        active_tab: "results",
         dataset: {
           dataset_root: "/proj/alpha/ds",
           subject: "leaf",
@@ -79,13 +65,6 @@ describe("adopting a different dataset selection", () => {
         view: { scale: 2, offset_x: 30, offset_y: 70 },
         mode: "polygon",
         active_subject: "leaf",
-        review: {
-          iou_threshold: 0.5,
-          conf_threshold: 0.25,
-          filter_type: "all",
-          filter_class: "all",
-          detection_idx: 0,
-        },
       },
       openProject: project,
       wsVersion: 4,
@@ -108,13 +87,6 @@ describe("adopting a different dataset selection", () => {
       view: { scale: 1, offset_x: 0, offset_y: 0 },
       mode: "box",
       active_subject: "bud",
-      review: {
-        iou_threshold: 0.5,
-        conf_threshold: 0.25,
-        filter_type: "all",
-        filter_class: "all",
-        detection_idx: 0,
-      },
     };
 
     s().mergeSnapshot(incoming, 5, project, null);

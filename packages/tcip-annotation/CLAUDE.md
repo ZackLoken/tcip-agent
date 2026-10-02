@@ -1,20 +1,20 @@
 # packages/tcip-annotation
 
-Headless annotation/review engine: label I/O, IoU matching, SAM wrapper. Loads on top of the root
-`CLAUDE.md`; invariants and operating posture there apply here and aren't restated.
+Headless annotation library: the label document and its completion marks, the verdict shard, the
+one matcher. Loads on top of the root `CLAUDE.md`; invariants and operating posture there apply
+here and aren't restated.
 
 ## Layout
 
 ```
 src/tcip_annotation/
-  annotation_engine.py   # core annotation read/write
-  review_engine.py        # review-verdict logging (accept/edit/reject) and the GT label write-back
-                          # (save_gt); the hard-negative partition itself lives in tcip-mcp's pipelines/feedback/materialize.py
-  json_io.py               # per-image JSON annotation records
-  format_io.py              # the external COCO reader, for the import only
-  matching.py                # IoU matching (GT vs prediction, review vs GT)
-  sam_wrapper.py               # SAM-assisted labeling
-  state.py                      # engine-local state
+  json_io.py      # the per-image label document: records, completion marks, provenance stamping
+  verdicts.py     # the verdict shard: a person's accept/reject decisions on a bucket's proposals
+  matching.py     # the one matcher of detections to ground truth, and geometry helpers
+  format_io.py    # the external COCO reader, for the import only
+  grid.py         # reference-grid cell names and the named-cell lookup
+  mask_contours.py  # a binary mask's rings, one per connected region
+  state.py        # the Annotation record and its geometries
   utils.py, viz.py
 ```
 
@@ -30,6 +30,6 @@ src/tcip_annotation/
   carrying `iscrowd` is a region of unseparated objects, never one instance; a run-length mask
   arrives as rings. One per-record decoder (`json_io.annotation_of_record`) reads every record,
   and a supplied value that does not parse refuses rather than reading as absent.
-- A negative is empty labels plus an explicit human Complete (see root `CLAUDE.md`'s
-  measurement-integrity invariants); this package's read/write paths must not treat an empty label
-  file alone as a negative.
+- A negative is an empty subject plus a person's completion mark in the same document (see root
+  `CLAUDE.md`'s measurement-integrity invariants); `LabelDocument.state` is the one reading of it,
+  and an empty label file alone is never a negative.

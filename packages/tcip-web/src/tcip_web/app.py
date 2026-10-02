@@ -22,11 +22,7 @@ from pydantic import BaseModel
 from tcip_store.binding import bind_default
 
 from tcip_mcp.buckets import NotABucket
-from tcip_mcp.web_client import (
-    PANEL_EVENT_ANNOTATE_FOCUS,
-    PANEL_EVENT_REVIEW_FOCUS,
-    VALID_PANELS,
-)
+from tcip_mcp.web_client import PANEL_EVENT_ANNOTATE_FOCUS, VALID_PANELS
 from tcip_web.trust_boundary import TrustBoundaryMiddleware
 
 logger = logging.getLogger(__name__)
@@ -76,8 +72,8 @@ app = FastAPI(title="TCIP Pipeline", version="0.1.0", lifespan=_lifespan)
 # applies the Origin policy before a route runs (trust_boundary).
 app.add_middleware(TrustBoundaryMiddleware)
 
-# Compress JSON/text responses above ~1KB. The /api/review/matches payload scales with
-# polygon count (dense images ship high-hundreds-of-KB to multi-MB uncompressed JSON).
+# Compress JSON/text responses above ~1KB. A label document's payload scales with polygon count
+# (dense images ship high-hundreds-of-KB to multi-MB uncompressed JSON).
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # ── Tab routes ──
@@ -313,16 +309,7 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
     _gui_store.retain_event(panel, payload)
     # Agent focus events also update the advisory GuiState slice, so gui.json reflects where the
     # agent pointed the human: the browser applies the event locally and never syncs these back.
-    if event.event_type == PANEL_EVENT_REVIEW_FOCUS:
-        review = _gui_store.state.review.model_copy(
-            update={
-                k: event.data[k]
-                for k in ("filter_type", "iou_threshold", "conf_threshold", "detection_idx")
-                if k in event.data
-            }
-        )
-        await _gui_store.mutate({"active_tab": "review", "review": review})
-    elif event.event_type == PANEL_EVENT_ANNOTATE_FOCUS:
+    if event.event_type == PANEL_EVENT_ANNOTATE_FOCUS:
         mutation: dict[str, Any] = {"active_tab": "annotate"}
         if "mode" in event.data:
             mutation["mode"] = event.data["mode"]

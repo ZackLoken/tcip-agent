@@ -15,7 +15,7 @@ file, resolved through the dataset's single subject registry::
 
 The subject registry lives in the dataset and travels with the labels. This module never parses
 ``subjects.json`` (its contents belong to :mod:`tcip_mcp.subject_registry`). It owns the
-dataset-root stores it registers below, with their status vocabulary, derivation and writers.
+dataset-root stores it registers below and the one label save.
 
 ``<date>`` of ``None`` (non-dated datasets) simply omits that segment.
 """
@@ -23,9 +23,10 @@ dataset-root stores it registers below, with their status vocabulary, derivation
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional, cast
 
 import tcip_store
 from tcip_store import (
@@ -39,6 +40,9 @@ from tcip_store import (
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_annotation.json_io import LABEL_SUFFIX
+
+if TYPE_CHECKING:
+    from tcip_mcp.buckets import Bucket
 
 #: Geometry kinds a task authors, kept as a selector, not a label-path segment.
 TASKS = ("detect", "segment")
@@ -256,8 +260,8 @@ def annotation_date(path: str | Path) -> Optional[str]:
 
 
 #: The top-level segments under a dataset root; a path under any of them locates the root.
-#: ``labels`` covers a curated tree whose label documents sit there rather than under
-#: ``annotations/``, so the same locator resolves both shapes.
+#: ``labels`` covers a tree whose label documents sit there rather than under ``annotations/``,
+#: so the same locator resolves both shapes.
 _DATASET_SEGMENTS = ("annotations", "predictions", "images", "labels")
 
 
@@ -375,397 +379,6 @@ def require_dataset_identity(dataset_root: str | Path) -> dict:
     return identity
 
 
-def image_status_path(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/.tcip/state/image_status.json``: the confirmed-negatives store.
-
-    Shape: ``{bucket: {image_name: {status, recorded_by, recorded_at}}}``, bucket via
-        :func:`status_bucket`. Each record says who set the status and when.
-    """
-    return _entry_path(_STATE_DOC, dataset_root, _IMAGE_STATUS_PARTS)
-
-
-IMAGE_STATUS_STORE = "image_status"
-_IMAGE_STATUS_PARTS = _document_of("image_status.json")
-register_store(
-    StoreDescriptor(
-        name=IMAGE_STATUS_STORE,
-        kind="record",
-        key_fields=("document",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        locator=_STATE_DOC,
-    )
-)
-
-
-def image_status_key(dataset_root: str | Path) -> Key:
-    """The dataset's confirmed-negative store, written compare-and-set."""
-    return Key(IMAGE_STATUS_STORE, str(dataset_root), _IMAGE_STATUS_PARTS)
-
-
-def read_image_status_store(dataset_root: str | Path) -> dict:
-    """The dataset's stored image statuses as written, or ``{}`` when none is stored."""
-    return tcip_store.read(image_status_key(dataset_root), default={})
-
-
-VIEW_COVERAGE_STORE = "view_coverage"
-_VIEW_COVERAGE_PARTS = _document_of("view_coverage.json")
-register_store(
-    StoreDescriptor(
-        name=VIEW_COVERAGE_STORE,
-        kind="record",
-        key_fields=("document",),
-        frozen=False,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        locator=_STATE_DOC,
-    )
-)
-
-
-def view_coverage_key(dataset_root: str | Path) -> Key:
-    """The per-image view-coverage records, ``{bucket: {image_name: record}}`` (bucket via
-    :func:`status_bucket`, the record declared by the web layer's ``CoverageRecord``), written
-    compare-and-set."""
-    return Key(VIEW_COVERAGE_STORE, str(dataset_root), _VIEW_COVERAGE_PARTS)
-
-
-def image_status_digest_path(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/.tcip/state/image_status_digest.json``: ``{bucket: {image_name: digest}}``.
-
-    Stamped per image by the writers of :func:`image_status_path` at confirmation time with the
-    subject's attribute-schema digest in effect
-    (:func:`tcip_mcp.subject_registry.attribute_schema_digest`). Absence of a stamp is not evidence
-    of staleness: only a stamp that positively disagrees with the current schema is grounds to
-    quarantine that one image.
-    """
-    return _entry_path(_STATE_DOC, dataset_root, _IMAGE_STATUS_DIGEST_PARTS)
-
-
-IMAGE_STATUS_DIGEST_STORE = "image_status_digest"
-_IMAGE_STATUS_DIGEST_PARTS = _document_of("image_status_digest.json")
-register_store(
-    StoreDescriptor(
-        name=IMAGE_STATUS_DIGEST_STORE,
-        kind="record",
-        key_fields=("document",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        locator=_STATE_DOC,
-    )
-)
-
-
-def image_status_digest_key(dataset_root: str | Path) -> Key:
-    """The schema stamps beside the confirmed-negative store, written compare-and-set."""
-    return Key(IMAGE_STATUS_DIGEST_STORE, str(dataset_root), _IMAGE_STATUS_DIGEST_PARTS)
-
-
-def region_completeness_path(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/.tcip/state/region_completeness.json``: per-subject attestations that every
-    instance of a subject has been found within a reference-grid region's cells.
-
-    Keyed by :func:`status_bucket` with the raster's own stem standing in for ``date``: one
-    ``{grid, cells_complete, cells_attested_view, attested_by, attested_at, stem, date, subject}``
-    record per bucket, not one per image name.
-    """
-    return _entry_path(_STATE_DOC, dataset_root, _REGION_COMPLETENESS_PARTS)
-
-
-REGION_COMPLETENESS_STORE = "region_completeness"
-_REGION_COMPLETENESS_PARTS = _document_of("region_completeness.json")
-register_store(
-    StoreDescriptor(
-        name=REGION_COMPLETENESS_STORE,
-        kind="record",
-        key_fields=("document",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        locator=_STATE_DOC,
-    )
-)
-
-
-def region_completeness_key(dataset_root: str | Path) -> Key:
-    """The region-completeness attestations, written compare-and-set."""
-    return Key(REGION_COMPLETENESS_STORE, str(dataset_root), _REGION_COMPLETENESS_PARTS)
-
-
-def region_completeness_digest_path(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/.tcip/state/region_completeness_digest.json``: ``{bucket: {cell_name:
-    digest}}``.
-
-    Stamped per cell at attestation time with a content digest of the subject's annotations found
-    inside that cell (see :mod:`tcip_mcp.pipelines.region_completeness`), so a reader can tell an
-    attestation whose cell content has since been edited or deleted from one still valid.
-    """
-    return _entry_path(_STATE_DOC, dataset_root, _REGION_COMPLETENESS_DIGEST_PARTS)
-
-
-REGION_COMPLETENESS_DIGEST_STORE = "region_completeness_digest"
-_REGION_COMPLETENESS_DIGEST_PARTS = _document_of("region_completeness_digest.json")
-register_store(
-    StoreDescriptor(
-        name=REGION_COMPLETENESS_DIGEST_STORE,
-        kind="record",
-        key_fields=("document",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        locator=_STATE_DOC,
-    )
-)
-
-
-COVERAGE_GRID_ZOOM_STORE = "coverage_grid_zoom"
-_COVERAGE_GRID_ZOOM_PARTS = _document_of("coverage_grid_zoom.json")
-register_store(
-    StoreDescriptor(
-        name=COVERAGE_GRID_ZOOM_STORE,
-        kind="record",
-        key_fields=("document",),
-        frozen=False,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        locator=_STATE_DOC,
-    )
-)
-
-
-def coverage_grid_zoom_key(dataset_root: str | Path) -> Key:
-    """The breeder-set inspection zoom each subject's coverage-lattice cell size is derived from,
-    ``{subject: {zoom, set_by, set_at}}``, written compare-and-set; a subject absent from it has
-    no coverage lattice yet."""
-    return Key(COVERAGE_GRID_ZOOM_STORE, str(dataset_root), _COVERAGE_GRID_ZOOM_PARTS)
-
-
-def region_completeness_digest_key(dataset_root: str | Path) -> Key:
-    """The content stamps beside the region-completeness attestations, written compare-and-set."""
-    return Key(REGION_COMPLETENESS_DIGEST_STORE, str(dataset_root),
-               _REGION_COMPLETENESS_DIGEST_PARTS)
-
-
-
-
-
-def status_bucket(subject: str, date: Optional[str]) -> str:
-    """The ``image_status.json`` key a confirmation belongs under.
-
-    Scoped by subject and date but not task: a Complete covers detect and segment together.
-    ``subject`` must be a real subject; there is no catch-all default.
-    """
-    return f"{subject}/{date}" if date else subject
-
-
-def bucket_subject_date(bucket: str) -> tuple[str, Optional[str]]:
-    """The ``(subject, date)`` a bucket key was built from: the declared inverse of
-    :func:`status_bucket`, so a reader that has to take a key apart never re-derives the
-    separator the writer used."""
-    subject, _, date = bucket.partition("/")
-    return subject, (date or None)
-
-
-def status_of(record: Mapping[str, str]) -> str:
-    """The status token a stored ``{"status", "recorded_by", "recorded_at"}`` record holds. A
-    record lacking any of the three raises ``KeyError`` naming it.
-    """
-    status, _by, _at = record["status"], record["recorded_by"], record["recorded_at"]
-    return status
-
-
-def status_records(
-    statuses: Mapping[str, str], *, recorded_by: str, recorded_at: Optional[str] = None
-) -> dict[str, dict[str, str]]:
-    """One bucket's ``{image_name: status}`` as stored records, attributed to ``recorded_by``.
-
-    ``recorded_by`` names the actor the status came from under the platform's identity convention
-    (:func:`tcip_mcp.identity.user_identity` for a person, a bare name for a tool producer).
-    ``recorded_at`` defaults to the moment of this call, one timestamp across the names in it.
-    Refuses an unattributed write.
-    """
-    if not (recorded_by or "").strip():
-        raise ValueError(
-            "an image status records who set it, so recorded_by is required; pass the person's "
-            "user:<name> identity or the writing tool's own name"
-        )
-    at = recorded_at or datetime.now(timezone.utc).isoformat()
-    return {name: {"status": status, "recorded_by": recorded_by, "recorded_at": at}
-            for name, status in statuses.items()}
-
-
-def status_confirmations(
-    raw: Mapping[str, Mapping[str, Mapping[str, str]]],
-) -> dict[str, dict[str, dict[str, str]]]:
-    """``{bucket: {image_name: record}}``: the stored records whole, attribution included, each
-    read through :func:`status_of`. A bucket is ``status_bucket(subject, date)``;
-    :func:`status_tokens` is its status-token projection.
-    """
-    return {bucket: {name: dict(record, status=status_of(record))
-                     for name, record in records.items()}
-            for bucket, records in raw.items()}
-
-
-def status_tokens(
-    raw: Mapping[str, Mapping[str, Mapping[str, str]]],
-) -> dict[str, dict[str, str]]:
-    """``{bucket: {image_name: status}}``: the status-token projection of
-    :func:`status_confirmations`.
-    """
-    return {bucket: {name: status_of(record) for name, record in records.items()}
-            for bucket, records in raw.items()}
-
-
-CONFIRMED_NEGATIVE = "negative"
-"""The status token for an image a human marked done with none of the subject on it."""
-
-IMAGE_STATUSES = ("complete", "partial", CONFIRMED_NEGATIVE, "unannotated")
-"""Every status the store holds, and the only values a write may record.
-
-``"complete"`` and ``"negative"`` are opposites, not degrees: both mean the human finished the
-image, and they differ on whether anything of the subject is on it. Anything reading ``"complete"``
-as a confirmed negative trains populated images as empty.
-"""
-
-FINISHED_STATUSES = ("complete", CONFIRMED_NEGATIVE)
-"""The two statuses a human's own confirmation ends on, as opposed to
-:func:`status_confirmations`'s wider sense of every stored record: a ``partial`` or
-``unannotated`` status is not a person's assertion about the subject. ``is_finished_status`` is
-the membership predicate; the same pair the frontend declares as ``FINISHED_STATUSES`` in
-``api/subjects.ts``, held equal to this one by ``tests/test_frontend_dataset_vocabulary.py``.
-"""
-
-
-def derive_status(*, completed: bool, has_content: bool) -> str:
-    """The status one image holds for one subject, from the human's Complete and what is labeled.
-
-    ``has_content`` is whether the image carries any annotation of the subject in question. An
-    uncompleted empty image is ``"unannotated"`` rather than a negative.
-    """
-    if completed:
-        return "complete" if has_content else CONFIRMED_NEGATIVE
-    return "partial" if has_content else "unannotated"
-
-
-def annotations_hold_subject(annotations: Iterable, subject: str) -> bool:
-    """Whether any of ``annotations`` (as :func:`tcip_annotation.json_io.read_annotations` returns
-    them) names ``subject``, geometry or not.
-
-    An image-level record (a subject with no geometry) counts as content for that subject.
-    """
-    return any(a.subject == subject for a in annotations)
-
-
-def is_confirmed_negative(status: object) -> bool:
-    """Whether a stored status is a human's confirmation that the image holds none of the subject."""
-    return status == CONFIRMED_NEGATIVE
-
-
-def is_finished_status(status: object) -> bool:
-    """Whether a stored status is one of the two a human's own confirmation ends on (``complete``
-    or ``negative``), as opposed to :func:`status_confirmations`'s wider sense of every stored
-    record. A ``partial`` or ``unannotated`` status is not a person's assertion and is never
-    finished.
-    """
-    return status in FINISHED_STATUSES
-
-
-def confirmed_negative_names_any_subject(by_bucket: Mapping[str, Mapping[str, str]]) -> set[str]:
-    """Every image file name confirmed negative for some subject, in any date bucket.
-
-    Takes ``by_bucket`` already in :func:`status_tokens`'s shape rather than a root to read.
-    """
-    return {name for bucket in by_bucket.values() for name, status in bucket.items()
-            if is_confirmed_negative(status)}
-
-
-def _require_known_statuses(bucket: str, statuses: Iterable[str]) -> None:
-    """Refuse a status outside :data:`IMAGE_STATUSES`."""
-    unknown = sorted(set(statuses) - set(IMAGE_STATUSES))
-    if unknown:
-        raise ValueError(
-            f"image status must be one of {IMAGE_STATUSES}, recorded with who set it and when; "
-            f"refusing to record {unknown} for {bucket!r}"
-        )
-
-
-def record_image_statuses(
-    dataset_root: str | Path, bucket: str, statuses: Mapping[str, str], *, recorded_by: str
-) -> None:
-    """Merge one bucket's per-image statuses into the dataset's confirmed-negative store.
-
-    Merged, never replaced: every other subject's and date's confirmations stay exactly as they
-    were. ``recorded_by`` is the actor this write is on behalf of, stamped onto each record by
-    :func:`status_records`. A stored record lacking a field fails the merge at the read.
-    """
-    _require_known_statuses(bucket, statuses.values())
-    records = status_records(statuses, recorded_by=recorded_by)
-    key = image_status_key(dataset_root)
-    with tcip_store.transaction(key) as txn:
-        store = status_confirmations(txn.read(key, default={}))
-        store.setdefault(bucket, {}).update(records)
-        txn.write(key, {k: dict(sorted(store[k].items())) for k in sorted(store)})
-
-
-def replace_image_status_store(
-    dataset_root: str | Path, records_by_bucket: Mapping[str, Mapping[str, Mapping[str, str]]]
-) -> None:
-    """Write the whole confirmed-negative store for a dataset this call is producing.
-
-    Takes whole records, not bare tokens: new confirmations are built with :func:`status_records`,
-    and another dataset's confirmations pass through unchanged, attribution included.
-    """
-    for bucket, records in records_by_bucket.items():
-        _require_known_statuses(bucket, (status_of(r) for r in records.values()))
-    key = image_status_key(dataset_root)
-    with tcip_store.transaction(key) as txn:
-        txn.write(key, {k: {n: dict(records_by_bucket[k][n])
-                            for n in sorted(records_by_bucket[k])}
-                        for k in sorted(records_by_bucket)})
-
-
-def bucket_digest_stamps(stamps: object, bucket: str) -> dict:
-    """The ``bucket``-scoped image-to-digest map inside a raw digest-store document.
-
-    Returns ``{}`` when ``stamps`` itself, or its value at ``bucket``, is not a dict: whatever a
-    corrupt or absent read produced, never raised here. Always a copy, never the document's own
-    inner dict, so a caller that mutates the result cannot reach back into ``stamps``.
-    """
-    if not isinstance(stamps, dict):
-        return {}
-    bucket_stamps = stamps.get(bucket)
-    return dict(bucket_stamps) if isinstance(bucket_stamps, dict) else {}
-
-
-def stamp_image_status_digests(
-    dataset_root: str | Path, bucket: str, image_names: Iterable[str], digest: str,
-    *, only_unstamped: bool = False,
-) -> list[str]:
-    """Record ``digest`` against each of ``image_names`` in ``bucket``, merging into what is there,
-    and return the names this call stamped.
-
-    ``only_unstamped`` leaves an image that already carries a stamp exactly as it is. The read and
-    the write share one transaction, so a stamp landing between them is seen rather than clobbered.
-    """
-    key = image_status_digest_key(dataset_root)
-    with tcip_store.transaction(key) as txn:
-        stamps = txn.read(key, default={})
-        if not isinstance(stamps, dict):
-            stamps = {}
-        bucket_stamps = bucket_digest_stamps(stamps, bucket)
-        stamped = [name for name in image_names
-                   if not (only_unstamped and isinstance(bucket_stamps.get(name), str))]
-        if not stamped:
-            return stamped  # nothing to record: leave the document, and its absence, untouched
-        for name in stamped:
-            bucket_stamps[name] = digest
-        stamps[bucket] = dict(sorted(bucket_stamps.items()))
-        txn.write(key, dict(sorted(stamps.items())))
-    return stamped
-
-
 def prediction_root(dataset_root: str | Path) -> Path:
     """``<dataset_root>/predictions/``: the whole prediction tree, every model bucket under it."""
     return Path(dataset_root, *_PREDICTION_TREE.prefix)
@@ -786,21 +399,109 @@ def annotation_path_for_image(image_path: str | Path, *, date: Optional[str] = N
     return annotation_path(root, date if date is not None else img_date, stem)
 
 
+@dataclass(frozen=True)
+class Gestures:
+    """What one save decides beyond the annotations it writes: the proposals of the bucket at
+    ``bucket`` it accepts and rejects, each by its index in that bucket's document for the image;
+    each subject of ``complete`` marked complete over ``rect`` (pixel ``[x, y, w, h]``, the whole
+    image when ``None``) or, mapped to ``False``, its marks withdrawn; and whether proposals were
+    hidden while the person annotated."""
+
+    bucket: Optional[str] = None
+    accept: frozenset[int] = frozenset()
+    reject: frozenset[int] = frozenset()
+    complete: Mapping[str, bool] = field(default_factory=dict)
+    rect: Optional[tuple[float, float, float, float]] = None
+    proposals_hidden: bool = False
+
+
+def image_proposals(bucket_dir: str | Path, image_path: str | Path) -> tuple["Bucket", list]:
+    """The published bucket at ``bucket_dir`` and its proposals for ``image_path``, in document
+    order; a bucket that names no document for the image refuses (``ValueError``)."""
+    from tcip_annotation.json_io import read_predictions
+
+    from tcip_mcp.buckets import read_bucket
+
+    bucket = read_bucket(bucket_dir)
+    document = bucket.document(image_path)
+    if document is None:
+        raise ValueError(f"{bucket.path} holds no proposals for {Path(image_path).name}")
+    return bucket, read_predictions(str(document))
+
+
+def verdict_key_of(project: str | Path | None, image_path: str | Path,
+                   bucket_dir: str | Path) -> Key:
+    """The verdict shard of ``image_path``'s proposals in the bucket at ``bucket_dir``, in the
+    state directory of the dataset the image lies in, or of ``project`` when it lies in none;
+    refuses (``ValueError``) with neither."""
+    from tcip_annotation.verdicts import verdict_key
+
+    from tcip_mcp.audit import dataset_scope_of
+    from tcip_mcp.buckets import bucket_key_of
+    from tcip_mcp.project_paths import project_state_dir
+
+    scope = dataset_scope_of(image_path) or project
+    if scope is None:
+        raise ValueError(f"{image_path} lies in no dataset and no project is open to hold its "
+                         "verdicts; open the project the image belongs to")
+    return verdict_key(project_state_dir(scope), bucket_key_of(bucket_dir), Path(image_path).name)
+
+
+def proposal_pairs(project: str | Path | None, bucket: "Bucket", annotations: list,
+                   proposals: list) -> dict[int, int]:
+    """Which annotation each of ``bucket``'s proposals pairs with, proposal index to annotation
+    index, by the one matcher (:func:`~tcip_annotation.matching.pair_proposals`) under the
+    localization criterion the assessment ``bucket`` was published under measured its count by;
+    a bucket published under none, or under one that measured no count, pairs under the
+    platform's comparability convention. Refuses (``ValueError``) a bucket's assessment with no
+    ``project`` to read it from."""
+    from tcip_annotation.matching import pair_proposals
+
+    from tcip_mcp.assessment import read_assessment
+    from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
+
+    criterion = None
+    if bucket.assessment_id is not None:
+        if project is None:
+            raise ValueError(f"{bucket.path} was published under assessment "
+                             f"{bucket.assessment_id}, which only its project holds; open it")
+        count = read_assessment(project, bucket.assessment_id).criterion.get("count")
+        criterion = count["localization"] if count else None
+    m = pair_proposals(annotations, proposals, criterion or resolve_match_criterion(None, []))
+    return {p: g for g, p in m.pairs}
+
+
 def save_label_document(
     project: str | Path | None, image_path: str | Path, label_path: str | Path,
     payloads: Iterable[dict], *, width: int, height: int, author: Optional[str],
-    expect: Optional[tcip_store.Version] = None,
+    expect: Optional[tcip_store.Version] = None, gestures: Gestures = Gestures(),
 ) -> Optional[tcip_store.Version]:
-    """Write ``image_path``'s label document at ``label_path``: every annotation parsed from
-    ``payloads`` (``annotation_from_payload``, stamped by ``author`` at the save's time), an empty
-    list kept as an empty document; then the save's one audit line, in the log of the dataset
-    ``label_path`` lies in or ``project``'s when it lies in none. Returns the new version.
+    """Write ``image_path``'s label document at ``label_path`` and the save's one audit line, in
+    the log of the dataset ``label_path`` lies in or ``project``'s when it lies in none. Returns
+    the new version.
 
-    Raises ``ValueError``, before writing, for a label path in no dataset with no ``project`` and
-    for a payload that does not parse; ``VersionConflict`` when ``expect`` is not the stored
-    version, and ``AuditEntryNotWritten`` when the write landed and its line could not follow.
+    The document holds every annotation parsed from ``payloads``, provenance stamped
+    (:func:`~tcip_annotation.json_io.stamped`): a record unchanged since it was stored keeps its
+    own, any other is ``author``'s at the save's time. Each accepted proposal of ``gestures``
+    pairing no annotation (:func:`proposal_pairs`) joins it as ground truth, authored by its
+    producer and accepted by ``author``; one that pairs confirms that annotation and adds nothing.
+    The document's completion marks still live over the new annotations stay, beside the marks
+    ``gestures`` makes; a subject mapped to ``False`` loses its marks. Each accepted and rejected
+    proposal appends one entry to the image's verdict shard under that bucket, before the
+    document is written.
+
+    Raises, before writing anything: ``ValueError`` for a label path in no dataset with no
+    ``project``, a payload that does not parse, a proposal index the bucket's document does not
+    hold or that is both accepted and rejected, and a mark or a verdict with no ``author`` to
+    record; ``VersionConflict`` when ``expect`` is not the version read. A document changed
+    between that read and the write raises ``VersionConflict`` with the verdicts appended, and a
+    landed write whose line cannot follow raises ``AuditEntryNotWritten``.
     """
-    from tcip_annotation.json_io import annotation_from_payload, write_annotations
+    from tcip_annotation.json_io import (
+        CompletionMark, annotation_from_payload, annotation_record_key, read_document_versioned,
+        stamped, subject_digest, write_annotations,
+    )
+    from tcip_annotation.verdicts import Verdict, VerdictAction, record_verdicts
 
     from tcip_mcp.audit import dataset_scope_of, record_event_or_raise
 
@@ -808,19 +509,58 @@ def save_label_document(
     if scope is None:
         raise ValueError(f"{label_path} lies in no dataset and no project is open to record the "
                          "save in; open the project the labels belong to")
+    if not author and (gestures.accept or gestures.reject or gestures.complete):
+        raise ValueError("a completion mark and a verdict each record who made them; name the "
+                         "person saving")
     now = datetime.now(timezone.utc).isoformat()
-    annotations = []
+    contents = []
     for i, payload in enumerate(payloads):
         try:
-            annotations.append(annotation_from_payload(payload, author=author, now=now))
+            contents.append(annotation_from_payload(payload))
         except ValueError as exc:
             raise ValueError(f"annotation {i} {exc}") from exc
+    stored, read = read_document_versioned(str(label_path))
+    if expect is not None and expect != read:
+        raise tcip_store.VersionConflict(
+            annotation_record_key(Path(label_path).parent, Path(label_path).stem), expect, read)
+    annotations = stamped(contents, stored.annotations, actor=author, now=now)
+    verdicts: list[Verdict] = []
+    if gestures.accept or gestures.reject:
+        if gestures.bucket is None:
+            raise ValueError("accepting or rejecting a proposal names the bucket it came from")
+        both = gestures.accept & gestures.reject
+        if both:
+            raise ValueError(f"proposal(s) {sorted(both)} are both accepted and rejected; decide "
+                             "each once")
+        bucket, proposals = image_proposals(gestures.bucket, image_path)
+        paired = proposal_pairs(project, bucket, annotations, proposals)
+        decided: tuple[tuple[VerdictAction, frozenset[int]], ...] = (
+            ("accepted", gestures.accept), ("rejected", gestures.reject))
+        for action, indices in decided:
+            for i in sorted(indices):
+                if not 0 <= i < len(proposals):
+                    raise ValueError(f"{bucket.path} holds {len(proposals)} proposals for "
+                                     f"{Path(image_path).name}, not one at index {i}")
+                if action == "accepted" and i not in paired:
+                    annotations.append(replace(proposals[i], score=None, accepted_by=author,
+                                               accepted_at=now))
+                verdicts.append(Verdict(proposal=i, action=action, by=cast(str, author), at=now))
+    marks = {s: held for s, held in stored.marks.items() if gestures.complete.get(s, True)}
+    for subject in (s for s, made in gestures.complete.items() if made):
+        marks.setdefault(subject, []).append(CompletionMark(
+            rect=gestures.rect or (0, 0, width, height), by=cast(str, author), at=now,
+            digest=subject_digest(annotations, subject),
+            proposals_hidden=gestures.proposals_hidden))
+    if verdicts:
+        record_verdicts(verdict_key_of(project, image_path, bucket.path), verdicts)
     Path(label_path).parent.mkdir(parents=True, exist_ok=True)
     version = write_annotations(str(label_path), annotations, width, height, keep_empty=True,
-                                expect=expect)
+                                expect=read, marks=marks)
     record_event_or_raise("save_label_document", {
         "image_path": str(image_path), "label_path": str(Path(label_path).resolve()),
         "n_annotations": len(annotations), "version": version.token if version else None,
+        "accepted": sorted(gestures.accept), "rejected": sorted(gestures.reject),
+        "complete": dict(gestures.complete),
     }, scope=scope)
     return version
 

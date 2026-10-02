@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildAnnotateShapes,
-  buildReviewShapes,
   computeViewport,
   createCanvasPusher,
   measureCanvasHost,
@@ -12,15 +11,7 @@ import {
   type CanvasStateBody,
 } from "@/lib/canvasSync";
 import { ringsBbox } from "@/lib/polygonGeometry";
-import type { ReviewColors } from "@/lib/reviewColors";
-import type { MatchesResponse } from "@/store/types";
-
-const COLORS: ReviewColors = {
-  tp: "#22C55E",
-  fp: "#EF4444",
-  fn: "#F59E0B",
-  active: "#00BFFF",
-} as ReviewColors;
+import type { Proposal } from "@/store/types";
 
 describe("computeViewport", () => {
   it("maps pan/zoom to the visible image region", () => {
@@ -104,7 +95,6 @@ describe("buildAnnotateShapes", () => {
         ] as [number, number][][],
         subject: "subject_a",
         attributes: {},
-        created_by: "user:breeder",
       },
       {
         rings: [
@@ -126,7 +116,7 @@ describe("buildAnnotateShapes", () => {
     colorFor: (subject: string) => (subject === "subject_a" ? "#FF0000" : "#00FF00"),
   };
 
-  it("filters polygon mode to the active subject, keeps provenance, colors from the GUI", () => {
+  it("filters polygon mode to the active subject, colors from the GUI", () => {
     const shapes = buildAnnotateShapes(base);
     expect(shapes).toHaveLength(1); // "other" filtered out (not selected)
     expect(shapes[0]).toMatchObject({
@@ -134,7 +124,6 @@ describe("buildAnnotateShapes", () => {
       color: "#FF0000",
       label: "subject_a",
       tag: "gt",
-      created_by: "user:breeder",
     });
   });
 
@@ -276,7 +265,6 @@ describe("buildAnnotateShapes", () => {
       ] as [number, number][][],
       subject: "subject_a",
       attributes: {},
-      created_by: "user:breeder",
     };
     const shapes = buildAnnotateShapes({ ...base, polygons: [multi] });
     expect(shapes).toHaveLength(2);
@@ -317,7 +305,7 @@ describe("buildAnnotateShapes", () => {
       mode: "point",
       polygons: [],
       points: [
-        { x: 5.06, y: 7.04, subject: "subject_a", attributes: {}, created_by: "user:breeder" },
+        { x: 5.06, y: 7.04, subject: "subject_a", attributes: {} },
         { x: 50, y: 60, subject: "other", attributes: {} },
       ],
     });
@@ -328,7 +316,6 @@ describe("buildAnnotateShapes", () => {
       color: "#FF0000",
       label: "subject_a",
       tag: "gt",
-      created_by: "user:breeder",
     });
     expect(shapes[0].xyxy).toBeUndefined();
   });
@@ -478,204 +465,36 @@ describe("buildAnnotateShapes", () => {
   });
 });
 
-describe("buildReviewShapes", () => {
-  const matches = {
-    img_width: 100,
-    img_height: 80,
-    n_tp: 1,
-    n_fp: 1,
-    n_fn: 1,
-    detections: [
-      {
-        det_type: "tp",
-        class_name: "subject_a",
-        conf: 0.9,
-        iou: 0.8,
-        gt_idx: 0,
-        pred_idx: 0,
-        bbox: [0, 0, 10, 10],
-        reviewed: true,
-        reviewed_action: "accepted",
-      },
-      {
-        det_type: "fp",
-        class_name: "subject_a",
-        conf: 0.7,
-        iou: null,
-        gt_idx: null,
-        pred_idx: 1,
-        bbox: [20, 20, 30, 30],
-        reviewed: false,
-        reviewed_action: null,
-      },
-      {
-        det_type: "fn",
-        class_name: "subject_a",
-        conf: null,
-        iou: null,
-        gt_idx: 1,
-        pred_idx: null,
-        bbox: [40, 40, 50, 50],
-        reviewed: false,
-        reviewed_action: null,
-      },
-    ],
-    gt: [
-      { subject: "subject_a", bbox: [0, 0, 10, 10], attributes: {} },
-      { subject: "subject_a", bbox: [40, 40, 50, 50], attributes: {} },
-    ],
-    preds: [
-      { subject: "subject_a", bbox: [1, 1, 11, 11], attributes: {}, score: 0.9 },
-      { subject: "subject_a", bbox: [20, 20, 30, 30], attributes: {}, score: 0.7 },
-    ],
-    image_status: "started",
-  } as unknown as MatchesResponse;
-
-  it("mirrors the review symbology: outcome colors, focused dashed-active, reviewed wash", () => {
-    const shapes = buildReviewShapes(matches, COLORS, 1);
-    const tp = shapes.find((s) => s.tag === "tp")!;
-    const fp = shapes.find((s) => s.tag === "fp")!;
-    const fn = shapes.find((s) => s.tag === "fn")!;
-    expect(tp).toMatchObject({ color: COLORS.tp, fill: true }); // reviewed → washed
-    expect(fp).toMatchObject({ color: COLORS.active, dashed: true, label: "subject_a 0.70" });
-    expect(fn).toMatchObject({ color: COLORS.fn });
+describe("buildAnnotateShapes proposals", () => {
+  const base = {
+    boxes: [],
+    polygons: [],
+    currentPolygon: [] as [number, number][],
+    selectedPolygonIdx: null,
+    mode: "polygon",
+    activeSubject: "subject_a",
+    visible: true,
+    colorFor: () => "#FF0000",
+  };
+  const proposal = (over: Partial<Proposal>): Proposal => ({
+    subject: "subject_a",
+    attributes: {},
+    iscrowd: false,
+    score: 0.9,
+    index: 0,
+    paired: null,
+    decision: null,
+    admitted: false,
+    ...over,
   });
 
-  it("the focused TP overlays its prediction dashed-active", () => {
-    const shapes = buildReviewShapes(matches, COLORS, 0);
-    const pred = shapes.find((s) => s.tag === "pred");
-    expect(pred).toMatchObject({ color: COLORS.active, dashed: true });
-  });
-
-  it("marks an admitted detection's own prediction shape, never its ground truth or an fn", () => {
-    // fp scored 0.7 (its own prediction shape carries tag "fp"); tp scored 0.9, whose focused
-    // overlay is the "pred"-tagged shape, never the "tp"-tagged ground truth.
-    const shapes = buildReviewShapes(matches, COLORS, 0, {}, 0.8);
-    expect(shapes.find((s) => s.tag === "tp")?.admitted).toBeUndefined();
-    expect(shapes.find((s) => s.tag === "pred")?.admitted).toBe(true);
-    expect(shapes.find((s) => s.tag === "fn")?.admitted).toBeUndefined();
-
-    const belowRule = buildReviewShapes(matches, COLORS, -1, {}, 0.8);
-    expect(belowRule.find((s) => s.tag === "fp")?.admitted).toBe(false);
-
-    const bothAdmitted = buildReviewShapes(matches, COLORS, -1, {}, 0.5);
-    expect(bothAdmitted.find((s) => s.tag === "fp")?.admitted).toBe(true);
-  });
-
-  it("carries the admitted flag on an unfocused tp's own prediction shape too", () => {
-    // The canvas marks an admitted tp while its ground-truth shape is drawn, focused or not; the
-    // mirror carries the flag on a prediction shape for the unfocused one on the same terms.
-    const shapes = buildReviewShapes(matches, COLORS, -1, {}, 0.8);
-    const predShapes = shapes.filter((s) => s.tag === "pred");
-    expect(predShapes).toHaveLength(1);
-    expect(predShapes[0].admitted).toBe(true);
-    expect(predShapes[0].color).toBe(COLORS.tp); // outcome color, never the active color
-    expect(predShapes[0].dashed).toBeFalsy();
-    // With ground truth hidden the canvas draws nothing for an unfocused tp and marks nothing,
-    // so the mirror carries no shape for it either.
-    const gtHidden = buildReviewShapes(matches, COLORS, -1, { showGT: false }, 0.8);
-    expect(gtHidden.filter((s) => s.tag === "pred")).toHaveLength(0);
-  });
-
-  it("marks nothing when no admission conf is given", () => {
-    const shapes = buildReviewShapes(matches, COLORS, 0);
-    expect(shapes.every((s) => !s.admitted)).toBe(true);
-  });
-
-  it("honors the GT / Pred visibility toggles", () => {
-    expect(
-      buildReviewShapes(matches, COLORS, 1, { showPred: false }).some(
-        (s) => s.tag === "fp" || s.tag === "pred",
-      ),
-    ).toBe(false);
-    expect(
-      buildReviewShapes(matches, COLORS, 1, { showGT: false }).some(
-        (s) => s.tag === "tp" || s.tag === "fn",
-      ),
-    ).toBe(false);
-  });
-
-  it("renders both geometry kinds, a box and a polygon annotation each draw (no kind hidden)", () => {
-    // Measurement-critical: a unified file may mix a bbox annotation and a polygon annotation.
-    // Both must render by their own geometry; hiding a kind is an unreviewed false-negative.
-    const mixed = {
-      img_width: 100,
-      img_height: 80,
-      n_tp: 0,
-      n_fp: 0,
-      n_fn: 2,
-      detections: [
-        {
-          det_type: "fn",
-          class_name: "subject_a",
-          conf: null,
-          iou: null,
-          gt_idx: 0,
-          pred_idx: null,
-          bbox: [0, 0, 10, 10],
-          reviewed: false,
-          reviewed_action: null,
-        },
-        {
-          det_type: "fn",
-          class_name: "leaf",
-          conf: null,
-          iou: null,
-          gt_idx: 1,
-          pred_idx: null,
-          bbox: [40, 40, 60, 60],
-          reviewed: false,
-          reviewed_action: null,
-        },
-      ],
-      gt: [
-        { subject: "subject_a", bbox: [0, 0, 10, 10], attributes: {} },
-        {
-          subject: "leaf",
-          rings: [
-            [
-              [40, 40],
-              [60, 40],
-              [60, 60],
-            ],
-          ],
-          attributes: {},
-        },
-      ],
-      preds: [],
-      image_status: "started",
-    } as unknown as MatchesResponse;
-    const shapes = buildReviewShapes(mixed, COLORS, -1); // none focused
-    expect(shapes.filter((s) => s.kind === "box")).toHaveLength(1);
-    expect(shapes.filter((s) => s.kind === "polygon")).toHaveLength(1);
-  });
-
-  it("an occlusion-split prediction pushes every ring, in the same outcome color", () => {
-    // A verdict on a two-part prediction is a verdict on both parts, so the agent's mirror of the
-    // review canvas has to show both: one shape entry per ring, not just the first.
-    const split = {
-      img_width: 100,
-      img_height: 80,
-      n_tp: 0,
-      n_fp: 1,
-      n_fn: 0,
-      detections: [
-        {
-          det_type: "fp",
-          class_name: "subject_a",
-          conf: 0.7,
-          iou: null,
-          gt_idx: null,
-          pred_idx: 0,
-          bbox: [0, 0, 60, 60],
-          reviewed: false,
-          reviewed_action: null,
-        },
-      ],
-      gt: [],
-      preds: [
-        {
-          subject: "subject_a",
+  it("mirrors the proposals the canvas shows, dotted, every ring, the selected one highlighted", () => {
+    const shapes = buildAnnotateShapes({
+      ...base,
+      proposals: [
+        proposal({ index: 0, bbox: [1, 2, 11, 12], admitted: true }),
+        proposal({
+          index: 1,
           rings: [
             [
               [0, 0],
@@ -688,66 +507,26 @@ describe("buildReviewShapes", () => {
               [60, 60],
             ],
           ],
-          attributes: {},
-          score: 0.7,
-        },
+        }),
       ],
-      image_status: "started",
-    } as unknown as MatchesResponse;
-    const shapes = buildReviewShapes(split, COLORS, -1); // not focused: plain outcome color
-    expect(shapes).toHaveLength(2);
+      selectedProposal: 1,
+    });
+    const shown = shapes.filter((s) => s.tag === "proposal");
+    expect(shown).toHaveLength(3);
+    expect(shown[0]).toMatchObject({ kind: "box", xyxy: [1, 2, 11, 12], admitted: true });
+    expect(shown.every((s) => s.dashed && s.dash_kind === "tool")).toBe(true);
+    expect(shown.slice(1).every((s) => s.kind === "polygon" && s.color === "#00BFFF")).toBe(true);
+    expect(shown.filter((s) => s.label)).toHaveLength(2); // one label per proposal
+  });
+
+  it("the labels toggle hides proposals too", () => {
     expect(
-      shapes.every((s) => s.kind === "polygon" && s.color === COLORS.fp && s.tag === "fp"),
-    ).toBe(true);
-    expect(shapes.map((s) => s.points)).toEqual([
-      [
-        [0, 0],
-        [10, 0],
-        [10, 10],
-      ],
-      [
-        [40, 40],
-        [60, 40],
-        [60, 60],
-      ],
-    ]);
-  });
-
-  it("draws the focused detection last so neighbors never bury it", () => {
-    const shapes = buildReviewShapes(matches, COLORS, 0);
-    expect(shapes.at(-1)!.tag).toBe("pred"); // the focused TP's overlay is on top
-  });
-
-  it("a point-carrying GT pushes a point shape, not a box, and not nothing", () => {
-    // Review load responses can carry {point: [x, y]} on a GT/prediction. Dropping it would hide a
-    // real annotation from the agent's mirror; boxing it would invent an extent.
-    const withPoint = {
-      img_width: 100,
-      img_height: 80,
-      n_tp: 0,
-      n_fp: 0,
-      n_fn: 1,
-      detections: [
-        {
-          det_type: "fn",
-          class_name: "tip",
-          conf: null,
-          iou: null,
-          gt_idx: 0,
-          pred_idx: null,
-          bbox: [10, 20, 10, 20],
-          reviewed: false,
-          reviewed_action: null,
-        },
-      ],
-      gt: [{ subject: "tip", point: [10.04, 20.06], attributes: {} }],
-      preds: [],
-      image_status: "started",
-    } as unknown as MatchesResponse;
-    const shapes = buildReviewShapes(withPoint, COLORS, -1);
-    expect(shapes).toHaveLength(1);
-    expect(shapes[0]).toMatchObject({ kind: "point", points: [[10, 20.1]], color: COLORS.fn });
-    expect(shapes[0].xyxy).toBeUndefined();
+      buildAnnotateShapes({
+        ...base,
+        visible: false,
+        proposals: [proposal({ bbox: [1, 2, 11, 12] })],
+      }),
+    ).toEqual([]);
   });
 });
 
@@ -973,16 +752,16 @@ describe("canvas state request", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it("a request reaches every mounted tab's handler", () => {
-    const annotateHandler = vi.fn();
-    const reviewHandler = vi.fn();
-    const offAnnotate = onCanvasStateRequest(annotateHandler);
-    const offReview = onCanvasStateRequest(reviewHandler);
+  it("a request reaches every registered handler", () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const offFirst = onCanvasStateRequest(first);
+    const offSecond = onCanvasStateRequest(second);
     notifyCanvasStateRequest();
-    expect(annotateHandler).toHaveBeenCalledTimes(1);
-    expect(reviewHandler).toHaveBeenCalledTimes(1);
-    offAnnotate();
-    offReview();
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(1);
+    offFirst();
+    offSecond();
   });
 
   it("an unsubscribed handler stops receiving requests", () => {

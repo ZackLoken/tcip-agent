@@ -2,9 +2,8 @@
 is dropped was dropped.
 
 Covers the one shape read over a place (``ground_truth_shape``), the label store's own
-subject-scoped admission and its human confirmations, the attribute-completeness rail, the
-quarantine over a since-changed schema, and the targets the loaders read off each admitted
-sample's own document."""
+subject-scoped admission and its completion marks, the attribute-completeness rail, and the
+targets the loaders read off each admitted sample's own document."""
 
 import json
 
@@ -15,15 +14,14 @@ from PIL import Image  # noqa: E402
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
-from tcip_mcp.dataset_layout import (
-    record_image_statuses, stamp_image_status_digests, status_bucket,
-)  # noqa: E402
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.subject_registry import (  # noqa: E402
     Attribute, SubjectRegistry, Subject, assign_class_ids,
 )
 
-from tests._producer_fixtures import admit_over, dataset_over, registry_over  # noqa: E402
+from tests._producer_fixtures import (  # noqa: E402
+    admit_over, dataset_over, mark_complete, registry_over,
+)
 
 BUD = "bud"
 BUD_SCOPE = ClassScope(subject=BUD, id_map={BUD: 0})
@@ -375,8 +373,7 @@ def _rail_fixture(tmp_path):
     json_io.write_annotations(labels / "ann.json", [_box(4, 4, 12, 12)], 100, 100, keep_empty=True)
     json_io.write_annotations(labels / "empty.json", [], 100, 100, keep_empty=True)
     json_io.write_annotations(labels / "neg.json", [], 100, 100, keep_empty=True)
-    record_image_statuses(tmp_path, status_bucket(BUD, None), {"neg.jpg": "negative"},
-                          recorded_by="user:breeder")
+    mark_complete(images / "neg.jpg", labels / "neg.json", BUD, project=tmp_path)
     return images, labels
 
 
@@ -470,34 +467,6 @@ def _write_registry_for(root, *, attribute=None, values=()):
     return reg
 
 
-@pytest.mark.parametrize("ext", [".jpg", ".JPG"])
-def test_confirmed_negative_survives_an_uppercase_extension(tmp_path, ext):
-    """The name compared against the status store must be the real one on disk.
-
-    `Path.exists()` is case-insensitive on Windows and macOS, so probing constructed paths returns
-    the name that was built, not the one on disk. The status store is keyed on the real filename,
-    so a fabricated name matches nothing and every human-confirmed negative is silently dropped,
-    including the review loop's hard negatives. `IMG_*.JPG` is this repo's canonical camera name.
-    """
-    from PIL import Image as _Image
-
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    images.mkdir(parents=True)
-    labels.mkdir(parents=True)
-    for stem in ("IMG_0001", "IMG_0002"):
-        _Image.new("RGB", (100, 100)).save(images / f"{stem}{ext}")
-    json_io.write_annotations(labels / "IMG_0001.json", [_box(4, 4, 12, 12)], 100, 100,
-                              keep_empty=True)
-    json_io.write_annotations(labels / "IMG_0002.json", [], 100, 100, keep_empty=True)
-    record_image_statuses(tmp_path, status_bucket(BUD, None), {f"IMG_0002{ext}": "negative"},
-                          recorded_by="user:breeder")
-
-    admitted = admit_over(images, labels, subject=BUD)
-    assert sorted(r.member for r in admitted.records) == ["IMG_0001", "IMG_0002"]
-    assert admitted.tallies["confirmed_negative"] == 1
-
-
 def test_semantic_seg_requires_a_mask_but_admits_an_all_background_one(tmp_path):
     """Existence is the whole rail for masks: an all-background mask is a real annotation."""
     import numpy as np
@@ -520,15 +489,12 @@ def test_sample_counts_distinguish_unannotated_from_unconfirmed_empty(tmp_path):
     images, labels = _rail_fixture(tmp_path)
     admitted = admit_over(images, labels, subject=BUD)
     assert admitted.tallies == {"annotated": 1, "confirmed_negative": 1, "skipped_unannotated": 1,
-                               "skipped_unconfirmed_empty": 1, "skipped_incomplete_attribute": 0,
-                               "quarantined_stale_definition": 0}
+                               "skipped_unconfirmed_empty": 1, "skipped_incomplete_attribute": 0}
 
 
 def test_a_confirmation_does_not_leak_across_subjects(tmp_path):
     """A Complete is a statement about one trait. Re-applying it elsewhere trains an image full of
     bushes as containing no bushes."""
-    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
-
     images = tmp_path / "images"
     labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
@@ -539,255 +505,23 @@ def test_a_confirmation_does_not_leak_across_subjects(tmp_path):
                                _box(4, 4, 12, 12, subject="bush")], 100, 100, keep_empty=True)
     json_io.write_annotations(labels / "shared.json", [], 100, 100, keep_empty=True)
     # Confirmed negative for bud only; the breeder never judged it for bush.
-    record_image_statuses(tmp_path, status_bucket("bud", None), {"shared.jpg": "negative"},
-                          recorded_by="user:breeder")
+    mark_complete(images / "shared.jpg", labels / "shared.json", "bud", project=tmp_path)
 
-    assert confirmed_negative_names(labels, subject="bud", date=None) == {"shared.jpg"}
-    assert confirmed_negative_names(labels, subject="bush", date=None) == set()
     assert sorted(r.member for r in admit_over(images, labels, subject="bud").records) == [
         "ann", "shared"]
     assert [r.member for r in admit_over(images, labels, subject="bush").records] == ["ann"]
 
 
-def test_unresolvable_subject_refuses_rather_than_dropping_negatives(tmp_path):
-    """Silently returning nothing would discard every hard negative the review loop harvested.
+def test_a_negative_mark_dies_with_an_edit_of_its_subject(tmp_path):
+    """A mark names its subject's annotations when it was made: once a bud is drawn on a marked
+    negative, the mark no longer holds and the image trains as annotated, never as a negative."""
+    images, labels = _rail_fixture(tmp_path)
+    marks = json_io.read_label_document(labels / "neg.json").marks
+    json_io.write_annotations(labels / "neg.json", [_box(4, 4, 12, 12)], 100, 100, marks=marks)
 
-    A flat ``labels/`` dir can't name its subject from its path; the confirmations live
-    dataset-native, a sibling of ``labels/``'s own resolved root, not found by walking arbitrarily
-    far up an ancestor chain.
-    """
-    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
-
-    labels = tmp_path / "labels"
-    labels.mkdir(parents=True)
-    record_image_statuses(tmp_path, status_bucket("bud", None), {"a.jpg": "negative"},
-                          recorded_by="user:breeder")
-
-    with pytest.raises(ValueError, match="needs an explicit subject"):
-        confirmed_negative_names(labels, subject=None, date=None)
-
-
-def test_a_derived_tree_without_negatives_does_not_refuse(tmp_path):
-    """Refuse only when there is something to lose.
-
-    A split or curated export cannot name its subject. Raising there would block the platform's
-    own documented split -> train path; with no confirmed negatives in the project there is nothing
-    to drop, so it must proceed.
-    """
-    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
-
-    labels = tmp_path / "labels"
-    labels.mkdir(parents=True)
-    record_image_statuses(tmp_path, status_bucket("bud", None), {"a.jpg": "complete"},
-                          recorded_by="user:breeder")
-
-    assert confirmed_negative_names(labels, subject=None, date=None) == set()
-
-
-def test_a_stale_complete_confirmation_is_quarantined(tmp_path):
-    """A complete confirmation is an image trained by its label file's content alone: a bud image
-    finished under a two-value attribute vocabulary that grew to three is held out exactly as a
-    stale negative already is, never admitted as ``annotated`` by the boxes it happens to carry."""
-    from tcip_mcp import subject_registry
-    from tcip_mcp.pipelines.data.label_queries import admit, admitted_documents, require_admitted
-
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    labels.mkdir(parents=True)
-    registry = _write_registry_for(tmp_path, attribute="opening", values=("closed", "open"))
-    current_digest = subject_registry.attribute_schema_digest(registry, BUD)
-
-    _make_images(images, ["a"])
-    json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12)], 100, 100)
-
-    record_image_statuses(tmp_path, status_bucket(BUD, None), {"a.jpg": "complete"},
-                          recorded_by="user:breeder")
-    assert current_digest != "stale-digest"
-    stamp_image_status_digests(tmp_path, status_bucket(BUD, None), ["a.jpg"], "stale-digest")
-
-    records, counts = admitted_documents(str(labels), str(images), scope=BUD_SCOPE, date=None)
-    keep = [record.member for record in records]
-
-    assert keep == []
-    assert counts["quarantined_stale_definition"] == 1
-    assert counts["annotated"] == 0
-    with pytest.raises(ValueError, match="quarantined"):
-        require_admitted(admit(images, labels, scope=BUD_SCOPE))
-
-
-def test_a_quarantined_negative_reads_as_quarantined(tmp_path):
-    """A human-confirmed-but-schema-stale negative reads as ``quarantined_stale_definition``
-    ("looked, but the schema changed since"), never as ``skipped_unconfirmed_empty`` ("nobody ever
-    looked")."""
-    from tcip_mcp import subject_registry
-    from tcip_mcp.pipelines.data.label_queries import admitted_documents
-
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    labels.mkdir(parents=True)
-    registry = _write_registry_for(tmp_path, attribute="opening", values=("closed", "open"))
-    current_digest = subject_registry.attribute_schema_digest(registry, BUD)
-
-    _make_images(images, ["a"])
-    json_io.write_annotations(labels / "a.json", [], 100, 100, keep_empty=True)
-
-    record_image_statuses(tmp_path, status_bucket(BUD, None), {"a.jpg": "negative"},
-                          recorded_by="user:breeder")
-    assert current_digest != "stale-digest"
-    stamp_image_status_digests(tmp_path, status_bucket(BUD, None), ["a.jpg"], "stale-digest")
-
-    _records, counts = admitted_documents(str(labels), str(images), scope=BUD_SCOPE, date=None)
-    assert counts["quarantined_stale_definition"] == 1
-    assert counts["skipped_unconfirmed_empty"] == 0
-
-
-def test_a_reconfirmed_complete_trains_again_after_the_schema_change(tmp_path):
-    """Re-confirming restamps the current digest, so the same image trains once a human has
-    looked again under the vocabulary now in effect."""
-    from tcip_mcp import subject_registry
-    from tcip_mcp.pipelines.data.label_queries import admitted_documents
-
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    labels.mkdir(parents=True)
-    registry = _write_registry_for(tmp_path, attribute="opening", values=("closed", "open"))
-    current_digest = subject_registry.attribute_schema_digest(registry, BUD)
-
-    _make_images(images, ["a"])
-    json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12)], 100, 100)
-    record_image_statuses(tmp_path, status_bucket(BUD, None), {"a.jpg": "complete"},
-                          recorded_by="user:breeder")
-    stamp_image_status_digests(tmp_path, status_bucket(BUD, None), ["a.jpg"], current_digest)
-
-    records, counts = admitted_documents(str(labels), str(images), scope=BUD_SCOPE, date=None)
-    keep = [record.member for record in records]
-    assert keep == ["a"]
-    assert counts["annotated"] == 1
-    assert counts["quarantined_stale_definition"] == 0
-
-
-def test_an_unstamped_complete_trains(tmp_path):
-    """A complete confirmation the stamp transaction never reached is admitted, not quarantined:
-    absence of a stamp is never evidence of staleness."""
-    from tcip_mcp.pipelines.data.label_queries import admitted_documents
-
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    labels.mkdir(parents=True)
-    _write_registry_for(tmp_path, attribute="opening", values=("closed", "open"))
-
-    _make_images(images, ["a"])
-    json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12)], 100, 100)
-    record_image_statuses(tmp_path, status_bucket(BUD, None), {"a.jpg": "complete"},
-                          recorded_by="user:breeder")
-
-    records, counts = admitted_documents(str(labels), str(images), scope=BUD_SCOPE, date=None)
-    keep = [record.member for record in records]
-    assert keep == ["a"]
-    assert counts["quarantined_stale_definition"] == 0
-
-
-def test_a_complete_under_an_unchanged_subject_trains(tmp_path):
-    """Another subject's own schema change never quarantines a bucket the change had no part in:
-    only bud's digest moves, so bush's complete, stamped under its own still-current digest,
-    admits."""
-    from tcip_mcp import subject_registry
-    from tcip_mcp.pipelines.data.label_queries import admitted_documents
-
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    labels.mkdir(parents=True)
-    registry = SubjectRegistry(subjects=(
-        Subject(name=BUD, attributes=(
-            Attribute(name="opening", type="categorical", values=("closed", "open")),
-        )),
-        Subject(name="bush"),
-    ))
-    registry_over(tmp_path, registry)
-    bush_digest = subject_registry.attribute_schema_digest(registry, "bush")
-
-    _make_images(images, ["a"])
-    json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12, subject="bush")], 100, 100)
-    record_image_statuses(tmp_path, status_bucket("bush", None), {"a.jpg": "complete"},
-                          recorded_by="user:breeder")
-    stamp_image_status_digests(tmp_path, status_bucket("bush", None), ["a.jpg"], bush_digest)
-    # bud's own schema changes; bush's bucket, and its stamp, must be untouched by it.
-    stamp_image_status_digests(tmp_path, status_bucket(BUD, None), ["b.jpg"], "stale-digest")
-
-    records, counts = admitted_documents(str(labels), str(images),
-                                         scope=ClassScope(subject="bush"), date=None)
-    keep = [record.member for record in records]
-    assert keep == ["a"]
-    assert counts["quarantined_stale_definition"] == 0
-
-
-def test_a_partial_carrying_a_stale_stamp_still_trains(tmp_path):
-    """A partial is not a human's assertion (it carries no Complete), so a stamp on it, however
-    stale, never quarantines: the quarantine is over finished statuses only."""
-    from tcip_mcp.pipelines.data.label_queries import admitted_documents
-
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    labels.mkdir(parents=True)
-    _write_registry_for(tmp_path, attribute="opening", values=("closed", "open"))
-
-    _make_images(images, ["a"])
-    json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12)], 100, 100)
-    record_image_statuses(tmp_path, status_bucket(BUD, None), {"a.jpg": "partial"},
-                          recorded_by="user:breeder")
-    stamped = stamp_image_status_digests(
-        tmp_path, status_bucket(BUD, None), ["a.jpg"], "stale-digest")
-    assert stamped == ["a.jpg"]
-
-    records, counts = admitted_documents(str(labels), str(images), scope=BUD_SCOPE, date=None)
-    keep = [record.member for record in records]
-    assert keep == ["a"]
-    assert counts["quarantined_stale_definition"] == 0
-
-
-def test_a_stale_and_contradicted_negative_still_trains_by_content(tmp_path):
-    """Real content contradicts a stored negative outright; staleness never overrides that, and
-    the contradiction is still named for the caller to surface."""
-    from tcip_mcp.pipelines.data.label_queries import admitted_documents
-
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    labels.mkdir(parents=True)
-    _write_registry_for(tmp_path, attribute="opening", values=("closed", "open"))
-
-    _make_images(images, ["a"])
-    # Recorded negative, but the label file now carries real content: a contradiction.
-    json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12)], 100, 100)
-    record_image_statuses(tmp_path, status_bucket(BUD, None), {"a.jpg": "negative"},
-                          recorded_by="user:breeder")
-    stamp_image_status_digests(tmp_path, status_bucket(BUD, None), ["a.jpg"], "stale-digest")
-
-    contradicted: set[str] = set()
-    records, counts = admitted_documents(str(labels), str(images), scope=BUD_SCOPE, date=None,
-                                         contradicted_out=contradicted)
-    assert [record.member for record in records] == ["a"]
-    assert counts["annotated"] == 1
-    assert counts["quarantined_stale_definition"] == 0
-    assert contradicted == {"a.jpg"}
-
-
-def test_admission_with_subject_none_over_only_complete_statuses_does_not_refuse(tmp_path):
-    """A tree holding only complete confirmations has no negative to lose, so an unthreaded
-    subject does not refuse the way it would with a confirmed negative present (coverage)."""
-    from tcip_mcp.pipelines.data.label_queries import admitted_documents
-
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    labels.mkdir(parents=True)
-    _make_images(images, ["a"])
-    json_io.write_annotations(labels / "a.json", [_box(4, 4, 12, 12)], 100, 100)
-    record_image_statuses(tmp_path, status_bucket(BUD, None), {"a.jpg": "complete"},
-                          recorded_by="user:breeder")
-
-    records, counts = admitted_documents(str(labels), str(images), scope=ClassScope(), date=None)
-    keep = [record.member for record in records]
-    assert keep == ["a"]
-    assert counts["annotated"] == 1
+    assert json_io.read_label_document(labels / "neg.json").marks == {}
+    tallies = admit_over(images, labels, subject=BUD).tallies
+    assert (tallies["annotated"], tallies["confirmed_negative"]) == (2, 0)
 
 
 def test_json_det_targets_skips_unlabeled_instead_of_raising(tmp_path):

@@ -162,14 +162,13 @@ def test_review_priority_route_worker_fails_the_job_on_an_unregistered_checkpoin
     """Drives the review-priority route's own worker directly, the way
     tests/test_inference_route_write_order.py drives the inference worker."""
     pytest.importorskip("fastapi")
-    from tcip_web.routes.review import PriorityQueueJob, _pq_worker
+    from tcip_web.routes.annotate import PriorityQueueJob, _pq_worker
 
     ckpt = _unregistered(tmp_path)
     images_dir, _ = _images(tmp_path)
 
     job = PriorityQueueJob(job_id="rail1-pq", checkpoint_path=ckpt, images_dir=str(images_dir),
-                           dataset_root=str(tmp_path), method="combined", budget=10,
-                           project=str(tmp_path))
+                           subject=None, method="combined", budget=10, project=str(tmp_path))
     _pq_worker(job)
     assert job.status == "failed"
     assert "register_model" in job.error
@@ -185,7 +184,7 @@ def test_review_priority_route_worker_completes_the_job_with_a_registered_checkp
     from types import SimpleNamespace
 
     import tcip_mcp.pipelines.active_learning.helpers as al_helpers
-    from tcip_web.routes.review import PriorityQueueJob, _pq_worker
+    from tcip_web.routes.annotate import PriorityQueueJob, _pq_worker
 
     ckpt = registered_checkpoint(tmp_path)
     images_dir, _ = _images(tmp_path)
@@ -195,8 +194,7 @@ def test_review_priority_route_worker_completes_the_job_with_a_registered_checkp
         lambda method, task: SimpleNamespace(score=lambda sources, predictor: []))
 
     job = PriorityQueueJob(job_id="rail7-pq", checkpoint_path=ckpt, images_dir=str(images_dir),
-                           dataset_root=str(tmp_path), method="combined", budget=10,
-                           project=str(tmp_path))
+                           subject=None, method="combined", budget=10, project=str(tmp_path))
     _pq_worker(job)
     assert job.status == "completed", job.error
     assert job.queue == []

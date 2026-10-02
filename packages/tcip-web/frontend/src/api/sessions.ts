@@ -11,9 +11,8 @@ export interface SessionEntry {
   total_annotations: number;
   total_time_seconds: number;
   avg_seconds_per_annotation: number;
-  // Read-time split of total_time_seconds against image_status.json's current state, not frozen
-  // at image_event time: negative_confirmation_seconds + review_seconds + new_annotation_seconds
-  // sums back to total_time_seconds.
+  // Read-time split of total_time_seconds against each label document's current marks, not
+  // frozen at image_event time: the three parts sum back to total_time_seconds.
   negative_confirmation_seconds: number;
   review_seconds: number;
   new_annotation_seconds: number;
@@ -39,8 +38,8 @@ export const sessionsApi = {
     session_seconds_delta: number;
     annotations_added_delta: number;
     final_annotation_count: number;
-    // Where this image's image_status.json entry lives, so a later read can classify this
-    // time as review vs. negative-confirmation vs. new-annotation work.
+    // Where this image's label document lives, so a later read can classify this time as
+    // review vs. negative-confirmation vs. new-annotation work.
     dataset_root?: string | null;
     subject?: string | null;
     date?: string | null;

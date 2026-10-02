@@ -53,7 +53,7 @@ export async function asJson<T>(r: Response): Promise<T> {
 
 /** The stable marker a route answers with when a mutation it already committed could not be
  *  recorded to the audit log (`routes/audit_gap.py`'s own name for it). Carried in `detail.error`
- *  at whatever status the route answers: 409 for most GUI routes, 500 for coverage's own. */
+ *  at whatever status the route answers. */
 export const AUDIT_ENTRY_NOT_WRITTEN = "audit_entry_not_written";
 
 /** True when `e` is a refusal carrying that marker, at any status. */

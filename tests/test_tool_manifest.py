@@ -151,7 +151,7 @@ def test_consolidated_tools_present_and_removed_absent():
         # The general per-plant CSV door, over a caller's own aggregation and mapping.
         "deliver_per_plant_csv",
         # Method-neutral auto-labeling seam: no longer SAM-specific names.
-        "propose_annotations", "stage_proposals", "segment_prompt",
+        "propose_annotations", "stage_proposals",
         # The assessment doors every delivered number rests on.
         "assess_checkpoint", "assess_reserved_regions", "calibrate_physical_scale",
     ):
@@ -167,7 +167,7 @@ def test_consolidated_tools_present_and_removed_absent():
         "recommend_model", "list_components", "validate_model_spec",
         "validate_pipeline_spec", "compose_and_summarize",
         "get_worst_predictions", "run_pipeline",
-        # focus_annotate + focus_review merged into focus_human_attention(tab=).
+        # focus_annotate + focus_review merged into focus_human_attention.
         "focus_annotate", "focus_review",
         # get_experiment_lineage merged into get_experiment(view='lineage').
         "get_experiment_lineage",
@@ -179,6 +179,8 @@ def test_consolidated_tools_present_and_removed_absent():
         "export_project", "get_project_status", "load_dataset", "load_annotations",
         "visualize_worst_predictions", "visualize_grid_overlay", "visualize_canvas",
         "sam_auto_label",
+        # The SAM-specific prompt tool and the alternate label source are gone.
+        "segment_prompt", "materialize_review_dataset",
         # The old SAM-hardcoded names must no longer register.
         "generate_mask_candidates", "accept_candidates", "sam_predict",
         # Old names: must no longer register.

@@ -115,34 +115,6 @@ class TestPostPanelEventRoute:
         open_new_project(tmp_path.parent / "other")
         assert store.retained_events("results") == []
 
-    def test_review_focus_persists_advisory_state(self, client: TestClient, project_id: str) -> None:
-        # The agent reads gui state back via view_gui_state: a focus event must
-        # land there even though the browser applies it with local setters only.
-        resp = client.post(
-            "/api/events/app",
-            json={
-                "project_id": project_id,
-                "event_type": "review_focus",
-                "data": {
-                    "subject": "bud",
-                    "date": "2-11-26",
-                    "predictions_dir": "predictions/m1/2-11-26",
-                    "image_index": 3,
-                    "detection_idx": 7,
-                    "filter_type": "fp",
-                    "iou_threshold": 0.4,
-                    "conf_threshold": 0.3,
-                },
-            },
-        )
-        assert resp.status_code == 200
-        state = client.get("/api/state").json()
-        assert state["active_tab"] == "review"
-        assert state["review"]["filter_type"] == "fp"
-        assert state["review"]["detection_idx"] == 7
-        assert state["review"]["iou_threshold"] == 0.4
-        assert state["review"]["conf_threshold"] == 0.3
-
     def test_annotate_focus_persists_advisory_state(self, client: TestClient, project_id: str) -> None:
         """An annotate_focus event carrying a mode and an active_subject writes both into the
         advisory state, alongside the tab it lands on."""
@@ -187,7 +159,7 @@ class TestPostPanelEventRoute:
             return {"delivered": True, "status": "ok"}
 
         monkeypatch.setattr(web_client, "post_panel_event", _capture)
-        res = focus_human_attention(opened_project, opened_project.parent, "annotate",
+        res = focus_human_attention(opened_project, opened_project.parent,
                                     str(data_dir), "bud", "2-11-26", mode="point", image_index=2)
         assert "error" not in res, res
         assert posted["event_type"] == "annotate_focus"

@@ -86,27 +86,23 @@ def select_gt_for_band(
 
 
 def check_completeness(
-    dataset_root: str, subject: str, stem: str, rects: dict[str, tuple[int, int, int, int]],
+    label_path: str, subject: str, rects: dict[str, tuple[int, int, int, int]],
 ) -> None:
-    """Refuse by name (:class:`~tcip_mcp.assessment.AssessmentRefused`, naming the incomplete or
-    stale cells and the subject) unless every rect in ``rects`` is fully covered by an
-    attested-complete, non-stale region-completeness record.
+    """Refuse by name (:class:`~tcip_mcp.assessment.AssessmentRefused`, naming the regions and
+    the subject) unless the live completion marks the label document at ``label_path`` holds for
+    ``subject`` cover every half-open rect in ``rects``.
     """
-    from tcip_mcp.assessment import AssessmentRefused
-    from tcip_mcp.pipelines.region_completeness import incomplete_cells_for_rect
+    from tcip_annotation.json_io import covers, read_label_document
 
-    problems: list[str] = []
-    for name, rect in sorted(rects.items()):
-        missing = incomplete_cells_for_rect(dataset_root, subject, stem, rect)
-        if missing is None:
-            problems.append(f"{name}: no region-completeness record exists for subject {subject!r}")
-        elif missing:
-            problems.append(f"{name}: cells not attested complete for subject {subject!r}: {missing}")
-    if problems:
+    from tcip_mcp.assessment import AssessmentRefused
+
+    marks = read_label_document(label_path).marks.get(subject, [])
+    uncovered = sorted(name for name, rect in rects.items() if not covers(marks, rect))
+    if uncovered:
         raise AssessmentRefused(
-            "the reserved calibration/test regions are not fully attested complete for subject "
-            f"{subject!r}: {'; '.join(problems)}. Attest every listed cell complete (the Annotate "
-            "canvas's Attest control) before the regions' ground truth can be assessed against."
+            f"the reserved region(s) {uncovered} are not marked complete for subject {subject!r} "
+            f"in {label_path}: mark each region complete in the Annotate tab before its ground "
+            "truth can be assessed against."
         )
 
 

@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 
 import tcip_store as ts
-from tcip_mcp import dataset_layout
 from tcip_mcp.tools.project_tools import archive_project, import_project
+from tcip_mcp.web_client import gui_snapshot_key
 from tcip_store.file_backend import FileBackend, lock_file_for
 from tcip_store.sqlite_backend import SqliteBackend
 
@@ -67,20 +67,14 @@ def test_import_refuses_a_non_empty_destination_and_changes_nothing(tmp_path, mo
     dest.mkdir()
     (dest / "subjects.json").write_bytes(b"already here")
     with bound(SqliteBackend()):
-        ts.replace(
-            dataset_layout.image_status_key(dest),
-            {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:x"}}},
-            expect=ts.Version.ABSENT,
-        )
+        ts.replace(gui_snapshot_key(dest), {"active_subject": "x"}, expect=ts.Version.ABSENT)
 
         result = import_project(str(zip_path), str(dest))
 
         assert "error" in result
         assert str(dest) in result["error"]
         assert (dest / "subjects.json").read_bytes() == b"already here"
-        assert ts.read(dataset_layout.image_status_key(dest)) == {
-            "bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:x"}}
-        }
+        assert ts.read(gui_snapshot_key(dest)) == {"active_subject": "x"}
 
 
 def test_import_admits_a_pre_existing_empty_destination(tmp_path):
@@ -281,10 +275,10 @@ def test_import_refuses_a_corrupt_zip_without_stranding_a_staging_tree(tmp_path)
 
 
 def test_import_under_file_backend_lands_files_and_builds_no_database(tmp_path):
-    negative = {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:x"}}}
+    record = {"active_subject": "x"}
     with bound(FileBackend()):
         root = _project(tmp_path / "source")
-        ts.replace(dataset_layout.image_status_key(root), negative, expect=ts.Version.ABSENT)
+        ts.replace(gui_snapshot_key(root), record, expect=ts.Version.ABSENT)
         assert "error" not in archive_project(root, str(tmp_path / "bundle.zip"))
 
     dest = tmp_path / "dest"
@@ -294,7 +288,7 @@ def test_import_under_file_backend_lands_files_and_builds_no_database(tmp_path):
         assert "error" not in result
         assert result["database_built"] is False
         assert not (dest / ".tcip" / "store.db").exists()
-        assert ts.read(dataset_layout.image_status_key(dest)) == negative
+        assert ts.read(gui_snapshot_key(dest)) == record
 
 
 # ── rail 13: concurrency ─────────────────────────────────────────────────────────────────────
@@ -435,20 +429,16 @@ def _annotated_dataset(root: Path, n: int) -> None:
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
 
 
-def test_a_splits_root_nested_under_a_curated_root_archives_and_round_trips(tmp_path):
-    """The producer chain the skills document: a curated dataset (materialize_review_dataset's
-    own output shape, a curated_manifest.json at its root) sits under a project, and draw_splits
-    partitions it in place, landing selection.json under the curated root rather than beside it.
-    The cross-anchor constraint must admit that nesting rather than refusing the whole
-    project."""
+def test_a_splits_root_nested_under_a_nested_dataset_root_archives_and_round_trips(tmp_path):
+    """A dataset sits under a project, and draw_splits partitions it in place, landing
+    selection.json under the dataset root rather than beside it. The cross-anchor constraint must
+    admit that nesting rather than refusing the whole project."""
     from tcip_mcp.pipelines.data.selection import selection_key
-    from tcip_mcp.pipelines.feedback.materialize import curated_manifest_key
     from tcip_mcp.tools.data_tools import draw_splits
 
     project = tmp_path / "project"
     curated = project / "curated"
     _annotated_dataset(curated, 4)
-    ts.replace(curated_manifest_key(curated), {"source": "review verdicts"}, expect=ts.Version.ABSENT)
 
     splits_result = draw_splits(project, str(curated), subject="bud", output_path=str(curated / "splits"),
                                  train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
@@ -461,7 +451,6 @@ def test_a_splits_root_nested_under_a_curated_root_archives_and_round_trips(tmp_
     dest = tmp_path / "dest"
     imported = import_project(str(zip_path), str(dest))
     assert "error" not in imported, imported
-    assert (dest / "curated" / "curated_manifest.json").is_file()
     assert ts.read(selection_key(dest / "curated" / "splits"))["scope"]["subject"] == "bud"
 
 

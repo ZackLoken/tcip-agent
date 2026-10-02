@@ -61,8 +61,8 @@ class ImageEventPayload(BaseModel):
     session_seconds_delta: float = 0.0       # incremental time added
     annotations_added_delta: int = 0         # new annotations created during this slice
     final_annotation_count: int              # boxes + polygons after the slice
-    # Where this image's own image_status.json entry lives, so a read-time classification of
-    # this session's time (new annotation / review / negative confirmation) can look it up later.
+    # Where this image's label document lives, so a read-time classification of this session's
+    # time (new annotation / review / negative confirmation) can look it up later.
     # Optional: a caller with no dataset context in hand still gets recorded, just unclassifiable.
     dataset_root: Optional[str] = None
     subject: Optional[str] = None
@@ -202,52 +202,43 @@ def _refresh_session_aggregate(s: dict[str, Any]) -> None:
     )
 
 
-def _status_bucket_for(cache: dict[str, dict[str, str]], dataset_root: str,
-                       subject: str | None, date: str | None) -> dict[str, str]:
-    """One (dataset_root, subject, date) bucket of image_name -> status, read at most once per call
-    to :func:`_classify_session_seconds` regardless of how many images in a session share it.
-
-    A dataset with no confirmations yet has no bucket, which is an empty one. A recorded root the
+def _marked_negative(dataset_root: str, subject: str, date: str | None, image_name: str) -> bool:
+    """Whether ``image_name``'s label document under ``dataset_root`` and ``date`` says ``subject``
+    is a negative (:meth:`~tcip_annotation.json_io.LabelDocument.state`). A recorded root the
     allow-set does not admit is refused with a 403 naming it, nothing outside the allowed roots
-    read; a store that will not decode raises ``tcip_store.DecodeError``.
-    """
-    from tcip_mcp.dataset_layout import image_status_key, status_tokens, status_bucket
+    read; a document that will not read raises."""
+    from pathlib import Path
+
+    from tcip_annotation.json_io import read_label_document
+
+    from tcip_mcp.dataset_layout import annotation_path
     from tcip_web.paths import assert_path_allowed
 
-    key = f"{dataset_root}\0{subject or ''}\0{date or ''}"
-    if key not in cache:
-        try:
-            allowed = assert_path_allowed(dataset_root)
-        except ValueError as exc:
-            raise HTTPException(403, f"a session records time on images under {dataset_root}, "
-                                     f"which this server may not read, so that time cannot be "
-                                     f"classified: {exc}") from exc
-        raw = tcip_store.read(image_status_key(allowed), default={})
-        cache[key] = status_tokens(raw).get(status_bucket(subject or "", date), {})
-    return cache[key]
+    try:
+        allowed = assert_path_allowed(dataset_root)
+    except ValueError as exc:
+        raise HTTPException(403, f"a session records time on images under {dataset_root}, "
+                                 f"which this server may not read, so that time cannot be "
+                                 f"classified: {exc}") from exc
+    label = annotation_path(allowed, date, Path(image_name).stem)
+    return read_label_document(label).state(subject) == "negative"
 
 
 def _classify_session_seconds(s: dict[str, Any]) -> dict[str, float]:
     """This session's time, split into new-annotation / review / negative-confirmation seconds,
-    read against image_status.json's current state. An image with no dataset_root recorded counts
-    as review time.
+    read against each image's label document as it stands. An image with no dataset_root or
+    subject recorded counts as review time.
     """
-    from tcip_mcp.dataset_layout import is_confirmed_negative
-
     images = s["images"]
-    cache: dict[str, dict[str, str]] = {}
     negative_seconds = review_seconds = annotation_seconds = 0.0
     for name, img in images.items():
         seconds = img["session_seconds"]
         if img["annotations_added"] > 0:
             annotation_seconds += seconds
             continue
-        dataset_root = img.get("dataset_root")
-        status = (
-            _status_bucket_for(cache, dataset_root, img.get("subject"), img.get("date")).get(name)
-            if dataset_root else None
-        )
-        if is_confirmed_negative(status):
+        dataset_root, subject = img.get("dataset_root"), img.get("subject")
+        if dataset_root and subject and _marked_negative(dataset_root, subject, img.get("date"),
+                                                         name):
             negative_seconds += seconds
         else:
             review_seconds += seconds

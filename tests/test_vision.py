@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -216,15 +215,15 @@ class TestRenderComparison:
         assert Path(result).is_file()
 
     def test_a_tp_entry_draws_a_line_between_the_boxes_it_indexes(self, viz_dataset: Path):
-        """``matches`` carries ``compute_matches``'s own index-shaped ``tp`` entries; the line is
-        resolved from ``gt_boxes``/``pred_boxes`` by ``gt_idx``/``pred_idx``, not from a box pair
-        embedded in the match entry itself."""
+        """``matches`` carries the one matcher's ``(gt index, prediction index)`` pairs; the line
+        is resolved from ``gt_boxes``/``pred_boxes`` by those indices, not from a box pair embedded
+        in the match itself."""
         from tcip_annotation.viz import render_comparison
 
         pixels, native = _display(str(viz_dataset / "images" / "img_001.jpg"))
         gt = [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}]
         pred = [{"x1": 110, "y1": 110, "x2": 210, "y2": 210, "class_id": 0, "confidence": 0.9}]
-        tp = [{"gt_idx": 0, "pred_idx": 0, "iou": 0.7, "class_name": "0", "conf": 0.9}]
+        tp = [(0, 0)]
 
         with_line = str(viz_dataset / "test_comp_with_line.png")
         render_comparison(pixels, gt, pred, native_size=native, matches=tp, output_path=with_line)
@@ -360,6 +359,39 @@ class TestVisualizePredictions:
         result = visualize(viz_bucket, "predictions", str(viz_bucket / "images" / "img_001.jpg"),
                            predictions_dir=PUBLISHED)
         assert "error" in result
+
+
+def test_scoring_and_the_comparison_render_state_one_count_for_one_image(tmp_path: Path):
+    """With no trait, the single-image scoring's TP/FP/FN, its per-detection tags and the
+    comparison render's counts are one matching's: a detection centered in a thin crowd strip,
+    which COCOeval's area-based crowd test would count a false positive, is ignored by all three."""
+    pytest.importorskip("torch")
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    from tcip_mcp.tools.annotation_tools import score_predictions
+    from tcip_mcp.tools.vision_tools import visualize
+    from tests._chain_fixtures import published
+
+    (tmp_path / "images").mkdir()
+    image = tmp_path / "images" / "img_001.jpg"
+    Image.new("RGB", (640, 480), color=(100, 120, 80)).save(image)
+    json_io.write_annotations(tmp_path / "annotations" / "img_001.json", [
+        Annotation(subject="bud", geometry=BBox(288, 216, 352, 264)),
+        Annotation(subject="bud", geometry=BBox(0, 395, 640, 405), iscrowd=True)], 640, 480)
+    published(tmp_path, tmp_path / PUBLISHED, [
+        {"image": "img_001.jpg", "width": 640, "height": 480,
+         "boxes": [[288, 216, 352, 264], [100, 350, 200, 450]], "scores": [0.95, 0.9],
+         "labels": [1, 1]}], scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
+
+    scored = score_predictions(str(image), str(tmp_path / PUBLISHED), detail=True)
+    rendered = visualize(tmp_path, "comparison", str(image), predictions_dir=PUBLISHED)
+
+    assert "error" not in scored and "error" not in rendered, (scored, rendered)
+    tags = [d["tag"] for d in scored["detections"]]
+    counted = {"tp": tags.count("tp"), "fp": tags.count("fp"), "fn": tags.count("fn")}
+    assert {k: scored[k] for k in counted} == counted == {"tp": 1, "fp": 0, "fn": 0}
+    assert {k: rendered[k] for k in counted} == counted
 
 
 class TestVisualizeComparison:
@@ -546,7 +578,7 @@ class TestVisualizeWorstPredictions:
         assert len(result.get("case_images", [])) > 0
 
 
-# === New tests for SAM repositioning ===
+# ── Candidate and grid renders ──────────────────────────────────────────────
 
 
 class TestRenderCandidates:
@@ -602,7 +634,7 @@ class TestRenderGridOverlay:
         assert Path(out).is_file()
 
     def test_cell_dicts_accepted(self, viz_dataset: Path):
-        """The renderer takes the same plain dicts the coverage route serves."""
+        """The renderer takes the plain dicts a JSON route serves as well as cell objects."""
         from tcip_annotation.viz import render_grid_overlay
 
         pixels, native = _display(str(viz_dataset / "images" / "img_001.jpg"))
@@ -655,68 +687,56 @@ class TestRenderGridOverlay:
         assert yellow[79, :].sum() >= 75, "no bottom outer boundary at y=79"
 
 
-class TestGridToPixel:
-    def test_basic_conversion(self):
-        from tcip_annotation.sam_wrapper import grid_to_pixel
+class TestGridToRect:
+    def test_a_name_resolves_to_its_cells_rect(self):
+        from tcip_annotation.grid import grid_to_rect
 
-        # A1 is the top-left cell's center
-        x, y = grid_to_pixel("A1", _uniform_cells(640, 480, 80))
-        assert x == pytest.approx(40)
-        assert y == pytest.approx(40)
-
-    def test_bottom_right(self):
-        from tcip_annotation.sam_wrapper import grid_to_pixel
-
-        x, y = grid_to_pixel("H6", _uniform_cells(640, 480, 80))
-        assert x == pytest.approx(600)
-        assert y == pytest.approx(440)
+        assert grid_to_rect("A1", _uniform_cells(640, 480, 80)) == (0.0, 0.0, 80.0, 80.0)
+        assert grid_to_rect("H6", _uniform_cells(640, 480, 80)) == (560.0, 400.0, 640.0, 480.0)
 
     def test_case_insensitive(self):
-        from tcip_annotation.sam_wrapper import grid_to_pixel
+        from tcip_annotation.grid import grid_to_rect
 
         cells = _uniform_cells(640, 480, 80)
-        assert grid_to_pixel(" b3 ", cells) == grid_to_pixel("B3", cells)
+        assert grid_to_rect(" b3 ", cells) == grid_to_rect("B3", cells)
 
-    def test_clamped_edge_cell_center_is_its_own(self):
-        """A truncated edge cell's center is its clipped rect's, not a uniform cell's."""
-        from tcip_annotation.sam_wrapper import grid_to_pixel
+    def test_a_clamped_edge_cell_is_its_own_clipped_rect(self):
+        from tcip_annotation.grid import grid_to_rect
 
-        x, y = grid_to_pixel("B2", _uniform_cells(100, 80, 64))
-        assert x == pytest.approx((64 + 100) / 2)
-        assert y == pytest.approx((64 + 80) / 2)
+        assert grid_to_rect("B2", _uniform_cells(100, 80, 64)) == (64.0, 64.0, 100.0, 80.0)
 
     def test_cell_dicts_accepted(self):
-        """The lookup takes the same plain dicts the coverage route serves."""
-        from tcip_annotation.sam_wrapper import grid_to_pixel
+        """The lookup takes the plain dicts a JSON route serves as well as cell objects."""
+        from tcip_annotation.grid import grid_to_rect
 
         cells = [{"name": c.name, "x0": c.x0, "y0": c.y0, "x1": c.x1, "y1": c.y1}
                  for c in _uniform_cells(640, 480, 80)]
-        assert grid_to_pixel("C2", cells) == (200.0, 120.0)
+        assert grid_to_rect("C2", cells) == (160.0, 80.0, 240.0, 160.0)
 
     def test_unknown_column_names_the_valid_range(self):
-        from tcip_annotation.sam_wrapper import grid_to_pixel
+        from tcip_annotation.grid import grid_to_rect
 
         with pytest.raises(ValueError, match="Use A1 through H6"):
-            grid_to_pixel("Z1", _uniform_cells(640, 480, 80))
+            grid_to_rect("Z1", _uniform_cells(640, 480, 80))
 
     def test_unknown_row_names_the_valid_range(self):
-        from tcip_annotation.sam_wrapper import grid_to_pixel
+        from tcip_annotation.grid import grid_to_rect
 
         with pytest.raises(ValueError, match="Use A1 through H6"):
-            grid_to_pixel("A9", _uniform_cells(640, 480, 80))
+            grid_to_rect("A9", _uniform_cells(640, 480, 80))
 
     def test_malformed_reference_is_invalid(self):
-        from tcip_annotation.sam_wrapper import grid_to_pixel
+        from tcip_annotation.grid import grid_to_rect
 
         with pytest.raises(ValueError, match="Invalid cell reference"):
-            grid_to_pixel("3B", _uniform_cells(640, 480, 80))
+            grid_to_rect("3B", _uniform_cells(640, 480, 80))
 
 
 class TestColumnLabels:
     """Spreadsheet-style column labels shared by the grid geometry and cell lookup."""
 
     def test_round_trip_boundaries(self):
-        from tcip_annotation.sam_wrapper import column_index, column_label
+        from tcip_annotation.grid import column_index, column_label
 
         expected = {0: "A", 25: "Z", 26: "AA", 27: "AB", 31: "AF", 32: "AG", 51: "AZ", 52: "BA"}
         for idx, label in expected.items():
@@ -724,100 +744,32 @@ class TestColumnLabels:
             assert column_index(label) == idx
 
     def test_multi_letter_cell_parses(self):
-        from tcip_annotation.sam_wrapper import grid_to_pixel
+        from tcip_annotation.grid import grid_to_rect
 
-        x, y = grid_to_pixel("AA1", _uniform_cells(2700, 480, 100))
-        assert x == pytest.approx(26.5 * 100)
-        assert y == pytest.approx(50)
+        assert grid_to_rect("AA1", _uniform_cells(2700, 480, 100))[:2] == (2600.0, 0.0)
 
     def test_high_columns_do_not_alias(self):
         # chr() past 'Z' labeled column 32 'a', which case folding silently parsed as column 0
-        from tcip_annotation.sam_wrapper import column_label, grid_to_pixel
+        from tcip_annotation.grid import column_label, grid_to_rect
 
         cols = 40
         labels = [column_label(c) for c in range(cols)]
         assert len(set(labels)) == cols
         cells = _uniform_cells(cols * 100, 480, 100)
         for c, label in enumerate(labels):
-            x, _ = grid_to_pixel(f"{label}1", cells)
-            assert x == pytest.approx((c + 0.5) * 100)
+            assert grid_to_rect(f"{label}1", cells)[0] == c * 100
 
     def test_out_of_range_hint_uses_column_labels(self):
-        from tcip_annotation.sam_wrapper import grid_to_pixel
+        from tcip_annotation.grid import grid_to_rect
 
         with pytest.raises(ValueError, match="Use A1 through AD6"):
-            grid_to_pixel("BA1", _uniform_cells(3000, 600, 100))
-
-
-class TestSamPredictorCache:
-    """Predictor/image caching in sam_wrapper (fake SAM2, no checkpoint)."""
-
-    def test_model_swap_invalidates_image_cache(self, monkeypatch, tmp_path: Path):
-        # sam_wrapper loads images via cv2, which ships only with the optional ``sam`` extra
-        # (not installed in CI): skip there, like the other SAM-stack tests.
-        pytest.importorskip("cv2")
-        import sys
-        import types
-
-        import numpy as np
-
-        from tcip_annotation import sam_wrapper
-
-        set_image_calls: list[object] = []
-
-        class FakePredictor:
-            def __init__(self, model):
-                self.model = model
-
-            def set_image(self, img):
-                set_image_calls.append(self)
-
-            def predict(self, **kwargs):
-                masks = np.zeros((1, 16, 16), dtype=bool)
-                masks[0, 4:12, 4:12] = True
-                return masks, np.array([0.9]), None
-
-        build_sam_mod = types.ModuleType("sam2.build_sam")
-        build_sam_mod.build_sam2 = lambda config, ckpt, device: object()
-        predictor_mod = types.ModuleType("sam2.sam2_image_predictor")
-        predictor_mod.SAM2ImagePredictor = FakePredictor
-        monkeypatch.setitem(sys.modules, "sam2", types.ModuleType("sam2"))
-        monkeypatch.setitem(sys.modules, "sam2.build_sam", build_sam_mod)
-        monkeypatch.setitem(sys.modules, "sam2.sam2_image_predictor", predictor_mod)
-
-        # Fake home with the expected checkpoint files present.
-        ckpt_dir = tmp_path / ".cache" / "tcip" / "sam2"
-        ckpt_dir.mkdir(parents=True)
-        (ckpt_dir / "sam2.1_hiera_tiny.pt").write_bytes(b"fake")
-        (ckpt_dir / "sam2.1_hiera_large.pt").write_bytes(b"fake")
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-        # Start from a clean singleton state (monkeypatch restores afterwards).
-        monkeypatch.setattr(sam_wrapper, "_predictor", None)
-        monkeypatch.setattr(sam_wrapper, "_current_model_type", None)
-        monkeypatch.setattr(sam_wrapper, "_current_image_path", None)
-
-        img_path = str(tmp_path / "cache_test.jpg")
-        Image.new("RGB", (16, 16), color=(120, 120, 120)).save(img_path)
-
-        rings = sam_wrapper.predict_from_point(img_path, 8, 8, model_type="hiera_t")
-        assert len(rings) == 1 and len(rings[0]) >= 3
-        assert len(set_image_calls) == 1
-
-        # Same image + same model: embedding cache hit, no new set_image.
-        sam_wrapper.predict_from_point(img_path, 8, 8, model_type="hiera_t")
-        assert len(set_image_calls) == 1
-
-        # Same image + different model: new predictor must recompute the embedding.
-        sam_wrapper.predict_from_point(img_path, 8, 8, model_type="hiera_l")
-        assert len(set_image_calls) == 2
-        assert set_image_calls[1] is not set_image_calls[0]
+            grid_to_rect("BA1", _uniform_cells(3000, 600, 100))
 
 
 class TestVisualizeGridOverlayTool:
     def test_derived_default_echoes_geometry(self, viz_dataset: Path):
         """With no tile_size the tool derives the pointing grain and still echoes the full
-        geometry, so the caller can hand it straight to segment_prompt."""
+        geometry, so the caller can hand it straight to propose_annotations."""
         from tcip_mcp.pipelines.reference_grid import derive_pointing_tile_size
         from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
@@ -875,7 +827,7 @@ class TestProposeAnnotationsTool:
     def test_missing_image(self, tmp_path: Path):
         from tcip_mcp.tools.proposal_tools import propose_annotations
 
-        result = propose_annotations(tmp_path, image_path="/nonexistent.jpg")
+        result = propose_annotations(tmp_path, image_path="/nonexistent.jpg", engine="stub")
         assert "error" in result
 
     def test_unknown_engine(self, viz_dataset: Path):
@@ -911,7 +863,7 @@ class TestAcceptProposalsTool:
                 "bbox": [100.0, 100.0, 200.0, 200.0],
                 "area": 10000,
                 "score": 0.90,
-                "engine": "sam",
+                "engine": "stub",
                 "engine_meta": {"stability_score": 0.95, "predicted_iou": 0.90},
                 "rings": [[[100, 100], [200, 100], [200, 200], [100, 200]]],
             },
@@ -920,7 +872,7 @@ class TestAcceptProposalsTool:
                 "bbox": [300.0, 300.0, 400.0, 400.0],
                 "area": 5000,
                 "score": 0.85,
-                "engine": "sam",
+                "engine": "stub",
                 "engine_meta": {"stability_score": 0.88, "predicted_iou": 0.85},
                 "rings": [[[300, 300], [400, 300], [400, 400], [300, 400]]],
             },
@@ -933,7 +885,7 @@ class TestAcceptProposalsTool:
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: StubProposer())
 
         propose_result = propose_annotations(
-            viz_dataset, image_path=str(viz_dataset / "images" / "img_001.jpg"), engine="sam")
+            viz_dataset, image_path=str(viz_dataset / "images" / "img_001.jpg"), engine="stub")
         assert "error" not in propose_result, propose_result
         assert propose_result["staged"] is True
 
@@ -948,197 +900,23 @@ class TestAcceptProposalsTool:
         assert result["proposal_count"] == 2
         assert Path(result["image_path"]).is_file()
 
-        # Masks are staged as SAM predictions (predictions/<engine>, engine="sam"), not GT: one
+        # Masks are staged as the engine's predictions (predictions/<engine>), not GT: one
         # unified per-image file holding both accepted objects by subject name.
         from tcip_annotation import json_io
 
-        pred_file = viz_dataset / "predictions" / "sam" / "img_001" / "img_001.json"
+        pred_file = viz_dataset / "predictions" / "stub" / "img_001" / "img_001.json"
         assert pred_file.is_file()
         anns = json_io.read_annotations(pred_file)
         assert len(anns) == 2
         assert {a.subject for a in anns} == {"bud", "nut"}
 
-        # Each staged object is SAM output: created_by="sam" and a numeric score.
+        # Each staged object is the engine's output: created_by="stub" and a numeric score.
         objs = json.loads(pred_file.read_text(encoding="utf-8"))["annotations"]
-        assert objs and all(o["created_by"] == "sam" for o in objs)
+        assert objs and all(o["created_by"] == "stub" for o in objs)
         assert all(isinstance(o["score"], float) for o in objs)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Layer 3: SAM integration tests (skipped when SAM is not installed)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-def _sam_available() -> bool:
-    """Whether SAM2 and its runtime deps are importable (the wrapper uses ``sam2``, not SAM1)."""
-    try:
-        import cv2  # noqa: F401
-        import sam2  # noqa: F401
-        import torch  # noqa: F401
-        return True
-    except ImportError:
-        return False
-
-
-#: The SAM2 model the guarded tests exercise: the smallest variant, for speed.
-SAM_TEST_MODEL = "hiera_t"
-
-
-def _sam_checkpoint_available() -> bool:
-    """Whether the SAM2 checkpoint the guarded tests load (``SAM_TEST_MODEL``) exists, resolved
-    through the wrapper's own ``checkpoint_path`` so the guard can't drift from what the code reads."""
-    from tcip_annotation.sam_wrapper import checkpoint_path
-
-    return checkpoint_path(SAM_TEST_MODEL).is_file()
-
-
-requires_sam = pytest.mark.skipif(
-    not _sam_available() or not _sam_checkpoint_available(),
-    reason="SAM2 (sam2 package + hiera_t checkpoint) not available",
-)
-
-
-@requires_sam
-class TestSamAutoMask:
-    """Integration tests for auto_mask with real SAM model."""
-
-    @pytest.fixture
-    def real_image(self, tmp_path: Path) -> str:
-        """Create a synthetic image with distinct regions for SAM."""
-        img = Image.new("RGB", (512, 512), color=(200, 200, 200))
-        # Draw some colored rectangles to give SAM something to segment
-        from PIL import ImageDraw
-        draw = ImageDraw.Draw(img)
-        draw.rectangle([50, 50, 200, 200], fill=(255, 0, 0))
-        draw.rectangle([300, 100, 480, 300], fill=(0, 0, 255))
-        draw.ellipse([100, 300, 250, 450], fill=(0, 200, 0))
-        path = str(tmp_path / "test_sam.jpg")
-        img.save(path)
-        return path
-
-    def test_auto_mask_returns_candidates(self, real_image: str):
-        from tcip_annotation.sam_wrapper import auto_mask
-
-        candidates = auto_mask(
-            real_image,
-            model_type=SAM_TEST_MODEL,
-            points_per_side=16,  # smaller for speed
-            min_mask_region_area=500,
-        )
-        assert isinstance(candidates, list)
-        assert len(candidates) > 0
-
-        for c in candidates:
-            assert "candidate_id" in c
-            assert "bbox" in c
-            assert len(c["bbox"]) == 4
-            assert "rings" in c
-            assert c["rings"] and all(len(r) >= 3 for r in c["rings"])
-            assert "area" in c
-            assert c["area"] > 0
-            assert 0.0 <= c["stability_score"] <= 1.0
-            assert c["predicted_iou"] >= 0.0  # can slightly exceed 1.0 due to model FP
-
-    def test_auto_mask_sorted_by_area(self, real_image: str):
-        from tcip_annotation.sam_wrapper import auto_mask
-
-        candidates = auto_mask(real_image, model_type=SAM_TEST_MODEL, points_per_side=16)
-        areas = [c["area"] for c in candidates]
-        assert areas == sorted(areas, reverse=True)
-
-    def test_auto_mask_polygon_within_image(self, real_image: str):
-        """All polygon vertices, in every ring, should be within image bounds."""
-        from tcip_annotation.sam_wrapper import auto_mask
-
-        candidates = auto_mask(real_image, model_type=SAM_TEST_MODEL, points_per_side=16)
-        for c in candidates:
-            for x, y in (pt for ring in c["rings"] for pt in ring):
-                assert 0 <= x <= 512, f"x={x} out of bounds"
-                assert 0 <= y <= 512, f"y={y} out of bounds"
-
-
-@requires_sam
-class TestSamPredictFromGrid:
-    """Integration tests for segment_prompt with grid_cells (real SAM)."""
-
-    @pytest.fixture
-    def real_dataset(self, tmp_path: Path) -> Path:
-        images_dir = tmp_path / "images"
-        images_dir.mkdir()
-        img = Image.new("RGB", (640, 480), color=(200, 200, 200))
-        from PIL import ImageDraw
-        draw = ImageDraw.Draw(img)
-        # Object at roughly B2 area (col=1, row=1 → center ~120,120)
-        draw.rectangle([80, 80, 160, 160], fill=(255, 0, 0))
-        img.save(images_dir / "grid_test.jpg")
-        return tmp_path
-
-    def test_grid_cell_produces_polygon(self, real_dataset: Path):
-        from tcip_mcp.tools.proposal_tools import segment_prompt
-
-        img_path = str(real_dataset / "images" / "grid_test.jpg")
-        result = segment_prompt(
-            image_path=img_path,
-            grid_cells=["B2"],
-            tile_size=80,
-            engine_params={"model_type": SAM_TEST_MODEL},
-        )
-        assert "error" not in result
-        assert result["rings"] and all(len(r) >= 3 for r in result["rings"])
-        assert result["vertex_count"] >= 3
-
-
-@requires_sam
-class TestFullSamPipeline:
-    """End-to-end: auto_mask → accept → verify, with real SAM."""
-
-    @pytest.fixture
-    def sam_dataset(self, tmp_path: Path) -> Path:
-        images_dir = tmp_path / "images"
-        images_dir.mkdir()
-        img = Image.new("RGB", (512, 512), color=(220, 220, 220))
-        from PIL import ImageDraw
-        draw = ImageDraw.Draw(img)
-        draw.rectangle([100, 100, 300, 300], fill=(255, 0, 0))
-        draw.rectangle([350, 350, 480, 480], fill=(0, 0, 255))
-        img.save(images_dir / "e2e.jpg")
-        return tmp_path
-
-    def test_auto_label_then_accept(self, sam_dataset: Path):
-        from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations
-
-        img_path = str(sam_dataset / "images" / "e2e.jpg")
-
-        # Step 1: auto-label
-        auto_result = propose_annotations(
-            sam_dataset, image_path=img_path,
-            engine_params={
-                "model_type": SAM_TEST_MODEL,
-                "points_per_side": 16,
-                "min_mask_region_area": 500,
-            },
-        )
-        assert "error" not in auto_result
-        assert auto_result["candidate_count"] > 0
-        assert Path(auto_result["image_path"]).is_file()
-
-        # Step 2: accept first two candidates
-        cands = auto_result["candidates"][:2]
-        accept_result = stage_proposals(
-            sam_dataset, image_path=img_path,
-            assignments=[
-                {"candidate_id": c["id"], "subject": subj}
-                for c, subj in zip(cands, ("bud", "nut"))
-            ],
-        )
-        assert "error" not in accept_result
-        assert accept_result["proposal_count"] == 2
-        assert Path(accept_result["image_path"]).is_file()
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Layer 2: Integration tests over the full pipeline with mocked SAM candidates
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Integration over the full pipeline with a stub engine's candidates ─────
 
 
 MOCK_CANDIDATES: list[dict[str, Any]] = [
@@ -1147,7 +925,7 @@ MOCK_CANDIDATES: list[dict[str, Any]] = [
         "bbox": [50.0, 40.0, 200.0, 180.0],
         "area": 21000,
         "score": 0.93,
-        "engine": "sam",
+        "engine": "stub",
         "engine_meta": {"stability_score": 0.96, "predicted_iou": 0.93},
         "rings": [[
             (50, 40), (200, 40), (200, 180), (50, 180),
@@ -1158,7 +936,7 @@ MOCK_CANDIDATES: list[dict[str, Any]] = [
         "bbox": [300.0, 250.0, 450.0, 400.0],
         "area": 15000,
         "score": 0.88,
-        "engine": "sam",
+        "engine": "stub",
         "engine_meta": {"stability_score": 0.91, "predicted_iou": 0.88},
         "rings": [[
             (300, 250), (450, 250), (450, 400), (300, 400),
@@ -1169,7 +947,7 @@ MOCK_CANDIDATES: list[dict[str, Any]] = [
         "bbox": [500.0, 100.0, 600.0, 200.0],
         "area": 8000,
         "score": 0.80,
-        "engine": "sam",
+        "engine": "stub",
         "engine_meta": {"stability_score": 0.85, "predicted_iou": 0.80},
         "rings": [[
             (500, 100), (600, 100), (600, 200), (500, 200),
@@ -1236,13 +1014,14 @@ class TestFullPipelineIntegration:
                 return candidates
 
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: StubProposer())
-        result = propose_annotations(project, image_path=image_path, engine="sam")
+        result = propose_annotations(project, image_path=image_path, engine="stub")
         assert "error" not in result, result
 
     def test_accept_writes_json_detect(
         self, pipeline_dataset: Path, monkeypatch: pytest.MonkeyPatch,
     ):
-        """SAM proposals are staged as predictions: pixel geometry, subject names, and score preserved."""
+        """Engine proposals are staged as predictions: pixel geometry, subject names, and score
+        preserved."""
         from tcip_annotation import bbox_of, json_io
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
@@ -1259,24 +1038,24 @@ class TestFullPipelineIntegration:
         assert "error" not in result
         assert result["proposal_count"] == 2
 
-        pred_file = pipeline_dataset / "predictions" / "sam" / "sample" / "sample.json"
+        pred_file = pipeline_dataset / "predictions" / "stub" / "sample" / "sample.json"
         assert pred_file.is_file()
         anns = json_io.read_annotations(pred_file)
         assert len(anns) == 2
         assert {a.subject for a in anns} == {"bud", "nut"}
-        # Pixel coords within the 640x480 image; staged as SAM predictions (created_by="sam").
+        # Pixel coords within the 640x480 image; staged as the engine's (created_by="stub").
         for a in anns:
             b = bbox_of(a.geometry)
             assert 0.0 <= b.x1 < b.x2 <= 640.0
             assert 0.0 <= b.y1 < b.y2 <= 480.0
-            assert a.created_by == "sam"
+            assert a.created_by == "stub"
         objs = json.loads(pred_file.read_text(encoding="utf-8"))["annotations"]
         assert all(isinstance(o["score"], float) for o in objs)
 
     def test_accept_writes_json_segment(
         self, pipeline_dataset: Path, monkeypatch: pytest.MonkeyPatch,
     ):
-        """SAM proposals are staged as prediction polygons: pixel vertices, subject, score."""
+        """Engine proposals are staged as prediction polygons: pixel vertices, subject, score."""
         from tcip_annotation import json_io
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
@@ -1290,7 +1069,7 @@ class TestFullPipelineIntegration:
         assert "error" not in result
         assert result["proposal_count"] == 1
 
-        pred_file = pipeline_dataset / "predictions" / "sam" / "sample" / "sample.json"
+        pred_file = pipeline_dataset / "predictions" / "stub" / "sample" / "sample.json"
         assert pred_file.is_file()
         anns = json_io.read_annotations(pred_file)
         assert len(anns) == 1
@@ -1301,7 +1080,7 @@ class TestFullPipelineIntegration:
             assert 0.0 <= x <= 640.0
             assert 0.0 <= y <= 480.0
         objs = json.loads(pred_file.read_text(encoding="utf-8"))["annotations"]
-        assert objs and all(o["created_by"] == "sam" for o in objs)
+        assert objs and all(o["created_by"] == "stub" for o in objs)
         assert all(isinstance(o["score"], float) for o in objs)
 
     def test_detect_and_segment_consistent(
@@ -1323,7 +1102,7 @@ class TestFullPipelineIntegration:
         )
         assert result["proposal_count"] == 2
 
-        pred_file = pipeline_dataset / "predictions" / "sam" / "sample" / "sample.json"
+        pred_file = pipeline_dataset / "predictions" / "stub" / "sample" / "sample.json"
         anns = json_io.read_annotations(pred_file)
         # Each object is one polygon with a derivable box under the same subject: the box and mask
         # views can never diverge because they are the same annotations.
@@ -1368,7 +1147,7 @@ class TestFullPipelineIntegration:
     def test_render_then_accept_pipeline(
         self, pipeline_dataset: Path, monkeypatch: pytest.MonkeyPatch,
     ):
-        """Full render → accept → verify pipeline (sans SAM)."""
+        """Full render → accept → verify pipeline."""
         from tcip_annotation.viz import render_candidates, render_grid_overlay
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
@@ -1406,141 +1185,9 @@ class TestFullPipelineIntegration:
         assert Path(result["image_path"]).is_file()
 
 
-class TestGridCellToSamPrompt:
-    """Test grid cell -> point prompt conversion in segment_prompt."""
-
-    def test_grid_cells_converted_to_points(self, viz_dataset: Path):
-        """Grid cells should convert to points before hitting SAM."""
-        from tcip_mcp.tools.proposal_tools import segment_prompt
-
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
-
-        # Mock at the source module where the lazy import resolves
-        with patch(
-            "tcip_annotation.sam_wrapper.predict_from_points"
-        ) as mock_predict:
-            mock_predict.return_value = [
-                [(100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0)],
-            ]
-
-            result = segment_prompt(
-                image_path=img_path,
-                grid_cells=["A1", "D3"],
-                tile_size=80,
-            )
-
-        # Should have called predict_from_points (2 points → multi-point)
-        assert mock_predict.called
-        call_args = mock_predict.call_args
-        pts = call_args[0][1]  # second positional arg: points
-        lbls = call_args[0][2]  # third: labels
-        assert len(pts) == 2
-        assert all(lbl == 1 for lbl in lbls)
-
-        # Verify result carries the mask's rings
-        assert result["ring_count"] == 1
-        assert result["vertex_count"] == 4
-
-    def test_single_grid_cell_uses_single_point(self, viz_dataset: Path):
-        """Single grid cell should use predict_from_point (not predict_from_points)."""
-        from tcip_mcp.tools.proposal_tools import segment_prompt
-
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
-
-        with patch(
-            "tcip_annotation.sam_wrapper.predict_from_point"
-        ) as mock_predict:
-            mock_predict.return_value = [
-                [(100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0)],
-            ]
-
-            segment_prompt(
-                image_path=img_path,
-                grid_cells=["C4"],
-                tile_size=80,
-            )
-
-        assert mock_predict.called
-        # Verify the coordinates are reasonable for C4 on 640x480 at tile 80
-        call_args = mock_predict.call_args
-        x = call_args[0][1]  # positional: image_path, x, y
-        y = call_args[0][2]
-        # C = column 2 (0-indexed), cell center x = (2 + 0.5) * 80 = 200
-        assert abs(x - 200.0) < 1.0
-        # 4 = row 3 (0-indexed), cell center y = (3 + 0.5) * 80 = 280
-        assert abs(y - 280.0) < 1.0
-
-    def test_invalid_grid_cell_returns_error(self, viz_dataset: Path):
-        """Invalid grid cell like 'Z9' should return error, not crash."""
-        from tcip_mcp.tools.proposal_tools import segment_prompt
-
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
-        result = segment_prompt(image_path=img_path, grid_cells=["Z9"], tile_size=80)
-        assert "error" in result
-        assert "Invalid grid cell" in result["error"]
-
-    def test_grid_cells_without_tile_size_is_refused(self, viz_dataset: Path):
-        """A cell name means nothing without its grid: resolving 'B3' against an assumed
-        grid when the overlay rendered another picks the wrong pixel silently, so the
-        call is refused."""
-        from tcip_mcp.tools.proposal_tools import segment_prompt
-
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
-        result = segment_prompt(image_path=img_path, grid_cells=["B3"])
-        assert "error" in result
-        assert "tile_size" in result["error"]
-
-    def test_grid_cells_resolve_against_the_callers_own_grid(self, viz_dataset: Path):
-        """The cells are resolved with the caller's tile_size, the grid
-        overlay_reference_grid actually rendered, never a derived default."""
-        from tcip_mcp.tools.proposal_tools import segment_prompt
-
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
-        with patch("tcip_annotation.sam_wrapper.predict_from_point") as mock_predict:
-            mock_predict.return_value = [
-                [(100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0)],
-            ]
-            segment_prompt(image_path=img_path, grid_cells=["C4"], tile_size=64)
-
-        x, y = mock_predict.call_args[0][1], mock_predict.call_args[0][2]
-        # C4 at tile 64 over 640x480: x = (2 + 0.5) * 64 = 160, y = (3 + 0.5) * 64 = 224;
-        # the derived-default grid's reading of the same cell lands elsewhere.
-        assert abs(x - 160.0) < 1.0
-        assert abs(y - 224.0) < 1.0
-
-    def test_echoed_geometry_round_trips_from_the_overlay(self, viz_dataset: Path):
-        """A legitimate call with the overlay's own echoed geometry succeeds end to end,
-        and the resolved center is the rendered grid's own cell center."""
-        from tcip_mcp.tools.proposal_tools import segment_prompt
-        from tcip_mcp.tools.vision_tools import overlay_reference_grid
-
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
-        overlay = overlay_reference_grid(viz_dataset, image_path=img_path)
-        assert "error" not in overlay
-        with patch("tcip_annotation.sam_wrapper.predict_from_point") as mock_predict:
-            mock_predict.return_value = [
-                [(100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0)],
-            ]
-            result = segment_prompt(
-                image_path=img_path, grid_cells=["B2"],
-                tile_size=overlay["tile_size"], overlap=overlay["overlap"],
-            )
-        assert "error" not in result
-        ts = overlay["tile_size"]
-        assert mock_predict.call_args[0][1] == pytest.approx(1.5 * ts)
-        assert mock_predict.call_args[0][2] == pytest.approx(1.5 * ts)
-
-    def test_no_prompts_returns_error(self, viz_dataset: Path):
-        """Calling with no prompts at all should error."""
-        from tcip_mcp.tools.proposal_tools import segment_prompt
-
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
-        result = segment_prompt(image_path=img_path)
-        assert "error" in result
-
-
-class TestSamPredictionStaging:
-    """stage_proposals stages engine masks as predictions (predictions/sam), not ground truth."""
+class TestEnginePredictionStaging:
+    """stage_proposals stages engine masks as predictions (predictions/<engine>), not ground
+    truth."""
 
     @pytest.fixture
     def format_dataset(self, tmp_path: Path) -> Path:
@@ -1561,7 +1208,7 @@ class TestSamPredictionStaging:
                 return MOCK_CANDIDATES
 
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: StubProposer())
-        result = propose_annotations(project, image_path=image_path, engine="sam")
+        result = propose_annotations(project, image_path=image_path, engine="stub")
         assert "error" not in result, result
 
     def test_json_detect_and_segment_written(
@@ -1580,7 +1227,7 @@ class TestSamPredictionStaging:
         assert "format" not in result  # fmt param dropped in the JSON cutover
         assert result["proposal_count"] == 1
 
-        pred = format_dataset / "predictions" / "sam" / "fmt_test" / "fmt_test.json"
+        pred = format_dataset / "predictions" / "stub" / "fmt_test" / "fmt_test.json"
         assert pred.is_file()
         anns = json_io.read_annotations(pred)
         assert len(anns) == 1 and {a.subject for a in anns} == {"bud"}
@@ -1588,10 +1235,11 @@ class TestSamPredictionStaging:
         assert anns[0].geometry is not None
         assert bbox_of(anns[0].geometry) is not None
 
-    def test_prediction_carries_sam_score(
+    def test_prediction_carries_the_engine_score(
         self, format_dataset: Path, monkeypatch: pytest.MonkeyPatch,
     ):
-        """Staged SAM output is a prediction: each object has created_by="sam" and a ``score``."""
+        """Staged engine output is a prediction: each object has created_by="stub" and a
+        ``score``."""
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
         img_path = str(format_dataset / "images" / "fmt_test.jpg")
@@ -1600,9 +1248,9 @@ class TestSamPredictionStaging:
             format_dataset, image_path=img_path,
             assignments=[{"candidate_id": 0, "subject": "bud"}],
         )
-        pred = format_dataset / "predictions" / "sam" / "fmt_test" / "fmt_test.json"
+        pred = format_dataset / "predictions" / "stub" / "fmt_test" / "fmt_test.json"
         data = json.loads(pred.read_text(encoding="utf-8"))
         assert data["annotations"]
-        assert all(o["created_by"] == "sam" for o in data["annotations"])
+        assert all(o["created_by"] == "stub" for o in data["annotations"])
         assert all(isinstance(o["score"], float) for o in data["annotations"])
 

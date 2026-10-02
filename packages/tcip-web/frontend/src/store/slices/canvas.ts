@@ -2,7 +2,14 @@ import type { StateCreator } from "zustand";
 
 import { pathInDir } from "@/lib/paths";
 import type { AppState } from "@/store/appState";
-import type { Annotation, Box, ImageLabels, PointShape, PolygonShape } from "@/store/types";
+import type {
+  Annotation,
+  Box,
+  ImageLabels,
+  PointShape,
+  PolygonShape,
+  SubjectCompletion,
+} from "@/store/types";
 
 /**
  * Local canvas state: per-image draft annotations shown on the canvas.
@@ -26,9 +33,11 @@ export interface CanvasState {
   dirty: boolean;
   /** Serialized content of the last save/load: the baseline dirty is computed against. */
   savedSignature: string;
-  /** Which image's labels the canvas holds: status writes must not read shapes that
-   *  still belong to the previous image (or a failed load) mid-flip. */
+  /** Which image's labels the canvas holds: a save must not read shapes that still belong to the
+   *  previous image (or a failed load) mid-flip. */
   loadedImagePath: string | null;
+  /** Each subject's completion as the backend last served it for the loaded image. */
+  completion: Record<string, SubjectCompletion>;
 }
 
 /** The saved-content fields only: selection, undo stacks and draft state don't make a save. */
@@ -70,6 +79,7 @@ const EMPTY_CANVAS: CanvasState = {
   dirty: false,
   savedSignature: contentSignature({ boxes: [], polygons: [], points: [], imageAnnotations: [] }),
   loadedImagePath: null,
+  completion: {},
 };
 
 /** Whether the loaded canvas belongs to the open dataset's own image directory: nothing clears
@@ -119,9 +129,8 @@ export interface CanvasSlice {
   ) => void;
   deletePolygon: (idx: number) => void;
   /** Replaces the polygon at `idx` with the two pieces a cut produced: one undo snapshot, the
-   *  first piece selected, the parent's provenance kept on each except the sign-off and the
-   *  rule marker (both dropped), and the hover index cleared since every later polygon's index
-   *  has just shifted by one. */
+   *  first piece selected, the parent's subject, attributes and crowd flag on each, and the hover
+   *  index cleared since every later polygon's index has just shifted by one. */
   splitPolygon: (idx: number, rings: [[number, number][], [number, number][]]) => void;
   selectPolygon: (idx: number | null) => void;
   /** Point helpers. A point is one coordinate, so it has no vertex/ring variants: it is placed,
@@ -138,7 +147,8 @@ export interface CanvasSlice {
   addImageAnnotation: (subject: string) => void;
   updateImageAnnotation: (idx: number, ann: Annotation) => void;
   deleteImageAnnotation: (idx: number) => void;
-  markClean: () => void;
+  /** Re-baseline after a save, adopting the completion the save answered with. */
+  markClean: (completion: Record<string, SubjectCompletion>) => void;
   /** Settle dirty from content after a drag (drags flag it per tick without comparing). */
   recomputeDirty: () => void;
 }
@@ -167,6 +177,7 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
           dirty: false,
           savedSignature: contentSignature(content),
           loadedImagePath: labels.image_path || null,
+          completion: labels.completion,
         },
       };
     }),
@@ -311,19 +322,11 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
     set((s) => {
       const parent = s.canvas.polygons[idx];
       if (!parent) return s;
-      // Dropping the sign-off (below) means an accepted tool shape's pieces read as the tool's
-      // unreviewed work again; every other authorship value copies unchanged.
-      const pieceAuthorship = parent.authorship === "tool_accepted" ? "tool" : parent.authorship;
       const pieces: PolygonShape[] = rings.map((ring) => ({
         rings: [ring],
         subject: parent.subject,
         attributes: { ...parent.attributes },
-        created_by: parent.created_by,
-        created_at: parent.created_at,
-        accepted_by: null,
-        accepted_at: null,
-        accepted_by_rule: null,
-        authorship: pieceAuthorship,
+        iscrowd: parent.iscrowd,
       }));
       const polys = s.canvas.polygons.slice();
       polys.splice(idx, 1, ...pieces);
@@ -439,9 +442,14 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
   },
 
   // A save re-baselines: the just-saved content is what future edits compare against.
-  markClean: () =>
+  markClean: (completion) =>
     set((s) => ({
-      canvas: { ...s.canvas, dirty: false, savedSignature: contentSignature(s.canvas) },
+      canvas: {
+        ...s.canvas,
+        dirty: false,
+        savedSignature: contentSignature(s.canvas),
+        completion,
+      },
     })),
 
   recomputeDirty: () => set((s) => ({ canvas: withContentDirty(s.canvas) })),

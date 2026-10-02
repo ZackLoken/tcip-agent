@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from tcip_annotation.json_io import write_annotations
+from tcip_annotation.json_io import read_annotations, write_annotations
 from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.pipelines.data.selection import ClassScope
 
@@ -84,9 +84,8 @@ def test_a_corner_box_is_refused_and_admitted_through_the_save_conversion():
     from tcip_annotation.json_io import annotation_from_payload
 
     with pytest.raises(ValueError, match="positive extent"):
-        annotation_from_payload({"subject": "leaf", "bbox": [10, 10, 5, 5]}, author=None, now="t")
-    box = annotation_from_payload({"subject": "leaf", "bbox": [5, 5, 10, 20]},
-                                  author=None, now="t").geometry
+        annotation_from_payload({"subject": "leaf", "bbox": [10, 10, 5, 5]})
+    box = annotation_from_payload({"subject": "leaf", "bbox": [5, 5, 10, 20]}).geometry
     assert (box.x1, box.y1, box.x2, box.y2) == (5, 5, 10, 20)
 
 
@@ -134,7 +133,8 @@ def test_write_annotations_admits_a_real_polygon(tmp_path):
         200, 150,
     )
     saved = json.loads(path.read_text(encoding="utf-8"))
-    assert saved["annotations"][0]["bbox"] == [5, 10, 10, 10]
+    assert "bbox" not in saved["annotations"][0]
+    assert read_annotations(str(path))[0].geometry == Polygon(rings=[[(5, 10), (15, 10), (15, 20)]])
 
 
 # ── the MCP save door ────────────────────────────────────────────────────────
@@ -184,7 +184,7 @@ def test_annotate_save_refuses_an_inverted_box(client: TestClient, tmp_path: Pat
         "/api/annotate/labels",
         json={
             "image_path": str(img), "label_path": str(label_path),
-            "annotations": [{"subject": "leaf", "bbox": [10, 10, 5, 5]}],
+            "annotations": [{"subject": "leaf", "bbox": [10, 10, 5, 5]}], "user": "breeder",
         },
     )
 
@@ -201,7 +201,7 @@ def test_annotate_save_admits_an_ordered_box(client: TestClient, tmp_path: Path)
         "/api/annotate/labels",
         json={
             "image_path": str(img), "label_path": str(label_path),
-            "annotations": [{"subject": "leaf", "bbox": [5, 5, 10, 20]}],
+            "annotations": [{"subject": "leaf", "bbox": [5, 5, 10, 20]}], "user": "breeder",
         },
     )
 
@@ -231,14 +231,15 @@ def test_annotate_save_admits_every_selected_dataset_save(
 
     resp = client.post(
         "/api/annotate/labels",
-        json={"image_path": str(img), "label_path": str(label_path), "annotations": []},
+        json={"image_path": str(img), "label_path": str(label_path), "annotations": [],
+              "user": "breeder"},
     )
 
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
 
 
-# ── the review action's edited box and accept branch ────────────────────────
+# ── the save door's corrected box and accepted proposal ─────────────────────
 
 
 def _seed_review_dataset(tmp_path: Path, *, pred_box=(10, 10, 20, 20), gt_box=None) -> tuple[Path, Path]:
@@ -276,93 +277,74 @@ def _seed_review_dataset(tmp_path: Path, *, pred_box=(10, 10, 20, 20), gt_box=No
     return gt_path, pred_path
 
 
-def _action_payload(dataset_root: Path, gt_path: Path, pred_path: Path, **overrides) -> dict:
-    payload = {
-        "dataset_root": str(dataset_root),
-        "image_name": "img_001.jpg",
-        "image_path": str(dataset_root / "images" / "img_001.jpg"),
-        "gt_path": str(gt_path),
-        "pred_path": str(pred_path),
-        "det_type": "fp",
-        "class_name": "leaf",
-        "pred_idx": 0,
-        "bbox": [10, 10, 20, 20],
-        "action": "accepted",
-    }
-    payload.update(overrides)
-    return payload
+def _save(dataset_root: Path, gt_path: Path, annotations: list, **gestures) -> dict:
+    return {"image_path": str(dataset_root / "images" / "img_001.jpg"),
+            "label_path": str(gt_path), "annotations": annotations, "user": "breeder", **gestures}
 
 
-def test_review_action_refuses_an_inverted_edited_box(client: TestClient, tmp_path: Path) -> None:
-    gt_path, pred_path = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
+def test_the_save_door_refuses_an_inverted_box(client: TestClient, tmp_path: Path) -> None:
+    gt_path, _pred_path = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
 
-    resp = client.post(
-        "/api/review/action",
-        json=_action_payload(
-            tmp_path, gt_path, pred_path, det_type="fn", gt_idx=0,
-            action="edited", edited_box=[10, 10, 5, 5],
-        ),
-    )
+    resp = client.post("/api/annotate/labels", json=_save(
+        tmp_path, gt_path, [{"subject": "leaf", "bbox": [10, 10, 5, 5]}]))
 
     assert resp.status_code == 400
     assert json.loads(gt_path.read_text())["annotations"][0]["bbox"] == [1, 1, 2, 2]
 
 
-@pytest.mark.parametrize("edit", [
-    {"edited_points": [[10.0, 10.0]]},                                  # one vertex: no polygon
-    {"edited_box": [5, 5, 10, 20], "edited_points": [[10.0, 10.0]]},    # beside a valid box
-    {"edited_box": ["10", "10", "50", "50"]},                           # coordinates as strings
-    {"edited_points": [["10", "10"], ["50", "10"], ["50", "50"]]},
+@pytest.mark.parametrize("shape", [
+    {"points": [[10.0, 10.0]]},                                  # one vertex: no polygon
+    {"bbox": [5, 5, 10, 20], "points": [[10.0, 10.0]]},          # beside a valid box
+    {"bbox": ["10", "10", "50", "50"]},                          # coordinates as strings
+    {"points": [["10", "10"], ["50", "10"], ["50", "50"]]},
 ], ids=["one_vertex_contour", "one_vertex_contour_beside_a_box", "string_box", "string_ring"])
-def test_a_review_edit_is_checked_as_a_saved_shape_is(client: TestClient, tmp_path: Path, edit) -> None:
-    """The edit route reads the reviewer's shape through the save routes' own conversion, so
-    every value it carries is checked, whichever geometry the edit resolves to."""
-    gt_path, pred_path = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
+def test_a_corrected_geometry_is_checked_as_any_saved_shape_is(
+    client: TestClient, tmp_path: Path, shape,
+) -> None:
+    """A geometry correction is a save like any other, so every value the corrected shape carries
+    is checked, whichever geometry it resolves to."""
+    gt_path, _pred_path = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
 
-    resp = client.post("/api/review/action", json=_action_payload(
-        tmp_path, gt_path, pred_path, det_type="fn", gt_idx=0, action="edited", **edit))
+    resp = client.post("/api/annotate/labels", json=_save(
+        tmp_path, gt_path, [{"subject": "leaf", **shape}]))
 
     assert resp.status_code == 400, resp.text
     assert json.loads(gt_path.read_text())["annotations"][0]["bbox"] == [1, 1, 2, 2]
 
 
-def test_review_action_admits_an_ordered_edited_box(client: TestClient, tmp_path: Path) -> None:
-    gt_path, pred_path = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
+def test_the_save_door_admits_an_ordered_corrected_box(client: TestClient, tmp_path: Path) -> None:
+    gt_path, _pred_path = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
 
-    resp = client.post(
-        "/api/review/action",
-        json=_action_payload(
-            tmp_path, gt_path, pred_path, det_type="fn", gt_idx=0,
-            action="edited", edited_box=[5, 5, 10, 20],
-        ),
-    )
+    resp = client.post("/api/annotate/labels", json=_save(
+        tmp_path, gt_path, [{"subject": "leaf", "bbox": [5, 5, 10, 20]}]))
 
     assert resp.status_code == 200
     assert json.loads(gt_path.read_text())["annotations"][0]["bbox"] == [5, 5, 5, 15]
 
 
-def test_review_action_refuses_accepting_a_degenerate_prediction(
+def test_the_save_door_refuses_accepting_a_degenerate_proposal(
     client: TestClient, tmp_path: Path
 ) -> None:
-    # A degenerate prediction reaching the document bypasses the publication's own drop (an
-    # edit in place): the accept branch still refuses it.
+    # A degenerate proposal reaching the document bypasses the publication's own drop (an
+    # edit in place): accepting it still refuses.
     gt_path, pred_path = _seed_review_dataset(tmp_path, pred_box=(10, 10, 10, 20))
 
-    resp = client.post("/api/review/action", json=_action_payload(tmp_path, gt_path, pred_path))
+    resp = client.post("/api/annotate/labels", json=_save(
+        tmp_path, gt_path, [], bucket=str(pred_path.parent), accept=[0]))
 
     assert resp.status_code == 400, resp.text
-    assert "bucket" not in resp.json()["detail"]
     assert json.loads(gt_path.read_text())["annotations"] == []
 
 
-def test_review_action_admits_accepting_an_ordered_prediction(
+def test_the_save_door_admits_accepting_an_ordered_proposal(
     client: TestClient, tmp_path: Path
 ) -> None:
     gt_path, pred_path = _seed_review_dataset(tmp_path)
 
-    resp = client.post("/api/review/action", json=_action_payload(tmp_path, gt_path, pred_path))
+    resp = client.post("/api/annotate/labels", json=_save(
+        tmp_path, gt_path, [], bucket=str(pred_path.parent), accept=[0]))
 
-    assert resp.status_code == 200
+    assert resp.status_code == 200, resp.text
     assert json.loads(gt_path.read_text())["annotations"][0]["bbox"] == [10, 10, 10, 10]
 
 

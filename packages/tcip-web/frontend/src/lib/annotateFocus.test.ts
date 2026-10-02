@@ -131,33 +131,30 @@ describe("applyAnnotateFocus", () => {
     expect(g.active_tab).toBe("annotate");
   });
 
-  it("clears a prior dataset's reviewStatus when the focus switches identity", async () => {
-    seedDataset({ dataset_root: "/ws/proj", subject: "subject_a", date: "2026-01-01" });
-    useStore.setState({
-      reviewStatus: {
-        byImage: { "old.jpg": "completed" },
-        hasDetections: { "old.jpg": true },
-        unreadable: [],
-        activeFilter: "all",
-      },
-    });
+  it("selects the named proposal bucket and focuses the named proposal", async () => {
+    seedDataset({ dataset_root: "/ws/proj", subject: "bush", date: "2026-03-02" });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
       selection: selection({
-        subject: "subject_a",
-        date: "2026-02-11",
-        annotations_dir: "/ws/proj/annotations/2026-02-11",
+        subject: "bush",
+        date: "2026-03-02",
+        predictions_dir: "/ws/proj/predictions/m1/2026-03-02",
       }),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     await applyAnnotateFocus({
       dataset_root: "/ws/proj",
-      subject: "subject_a",
-      date: "2026-02-11",
+      subject: "bush",
+      date: "2026-03-02",
+      predictions_dir: "/ws/proj/predictions/m1/2026-03-02",
+      proposal: 3,
     });
 
-    expect(useStore.getState().reviewStatus.byImage).toEqual({});
+    expect(vi.mocked(api.dataset.select).mock.calls[0][0]).toMatchObject({
+      predictions_dir: "/ws/proj/predictions/m1/2026-03-02",
+    });
+    expect(useStore.getState().annotateUi.focusedProposal).toBe(3);
   });
 
   it("toasts a label_problem the selection carries", async () => {

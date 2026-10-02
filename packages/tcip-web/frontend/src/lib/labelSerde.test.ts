@@ -38,12 +38,7 @@ describe("labelSerde round-trip", () => {
         attributes: {},
       },
       { subject: "tip", iscrowd: false, point: [7, 9], attributes: {} },
-      {
-        subject: "efb",
-        iscrowd: false,
-        attributes: { severity: "moderate" },
-        created_by: "user:breeder",
-      },
+      { subject: "efb", iscrowd: false, attributes: { severity: "moderate" } },
     ];
 
     const canvas = annotationsToCanvas(annotations);
@@ -76,8 +71,6 @@ describe("labelSerde round-trip", () => {
       ],
     });
     expect(rating).toMatchObject({ subject: "efb", attributes: { severity: "moderate" } });
-    // Provenance travels through the round-trip.
-    expect(rating?.created_by).toBe("user:breeder");
   });
 
   it("preserves a geometry-less rating across a load->save->load cycle (never silently dropped)", () => {
@@ -206,19 +199,12 @@ describe("labelSerde multi-ring polygons", () => {
 
   it("round-trips a multi-ring shape unchanged through save -> load (points bucket empty)", () => {
     const original: Annotation[] = [
-      {
-        subject: "subject_a",
-        iscrowd: false,
-        rings: twoRings,
-        attributes: {},
-        created_by: "user:breeder",
-      },
+      { subject: "subject_a", iscrowd: false, rings: twoRings, attributes: {} },
     ];
     const saved = canvasToAnnotations(annotationsToCanvas(original));
     const reloaded = annotationsToCanvas(asLoaded(saved));
     expect(reloaded.polygons).toHaveLength(1);
     expect(reloaded.polygons[0].rings).toEqual(twoRings);
-    expect(reloaded.polygons[0].created_by).toBe("user:breeder");
     expect(reloaded.points).toHaveLength(0);
   });
 });
@@ -308,9 +294,8 @@ describe("labelSerde authorship", () => {
 });
 
 describe("labelSerde cut pieces", () => {
-  it("two single-ring pieces from a cut serialize as two points records, the parent's provenance, no sign-off", () => {
-    // What splitPolygon hands to save: two PolygonShapes sharing the parent's subject, attributes
-    // and authorship, created_by/created_at kept, accepted_by/accepted_at nulled.
+  it("two single-ring pieces from a cut serialize as two points records with the parent's values", () => {
+    // What splitPolygon hands to save: two PolygonShapes sharing the parent's subject and values.
     const pieceA: [number, number][] = [
       [0, 0],
       [5, 0],
@@ -324,24 +309,8 @@ describe("labelSerde cut pieces", () => {
     const saved = canvasToAnnotations({
       boxes: [],
       polygons: [
-        {
-          rings: [pieceA],
-          subject: "subject_a",
-          attributes: { health: "good" },
-          created_by: "model:x",
-          created_at: "2024-01-01T00:00:00Z",
-          accepted_by: null,
-          accepted_at: null,
-        },
-        {
-          rings: [pieceB],
-          subject: "subject_a",
-          attributes: { health: "good" },
-          created_by: "model:x",
-          created_at: "2024-01-01T00:00:00Z",
-          accepted_by: null,
-          accepted_at: null,
-        },
+        { rings: [pieceA], subject: "subject_a", attributes: { health: "good" } },
+        { rings: [pieceB], subject: "subject_a", attributes: { health: "good" } },
       ],
       points: [],
       imageAnnotations: [],
@@ -352,10 +321,6 @@ describe("labelSerde cut pieces", () => {
         subject: "subject_a",
         points: ring,
         attributes: { health: "good" },
-        created_by: "model:x",
-        created_at: "2024-01-01T00:00:00Z",
-        accepted_by: null,
-        accepted_at: null,
       });
       expect(saved[i].rings).toBeUndefined();
     }
@@ -372,7 +337,6 @@ describe("labelSerde points", () => {
         point: [12.5, 40],
         attributes: { stage: "open" },
         iscrowd: false,
-        created_by: "user:breeder",
       },
     ]);
     expect(canvas.points).toEqual([
@@ -382,11 +346,6 @@ describe("labelSerde points", () => {
         subject: "tip",
         attributes: { stage: "open" },
         iscrowd: false,
-        created_by: "user:breeder",
-        created_at: null,
-        accepted_by: null,
-        accepted_at: null,
-        accepted_by_rule: null,
         authorship: null,
       },
     ]);
@@ -409,15 +368,9 @@ describe("labelSerde points", () => {
     expect(saved[0].rings).toBeUndefined();
   });
 
-  it("round-trips a point (position, subject, attributes, provenance) through save -> load", () => {
+  it("round-trips a point (position, subject, attributes) through save -> load", () => {
     const original: Annotation[] = [
-      {
-        subject: "tip",
-        iscrowd: false,
-        point: [101.5, 202.25],
-        attributes: { stage: "open" },
-        created_by: "user:breeder",
-      },
+      { subject: "tip", iscrowd: false, point: [101.5, 202.25], attributes: { stage: "open" } },
     ];
     const reloaded = annotationsToCanvas(
       asLoaded(canvasToAnnotations(annotationsToCanvas(original))),
@@ -428,7 +381,6 @@ describe("labelSerde points", () => {
       y: 202.25,
       subject: "tip",
       attributes: { stage: "open" },
-      created_by: "user:breeder",
     });
     // A round-trip must not multiply the annotation into a second geometry kind.
     expect(reloaded.boxes).toHaveLength(0);

@@ -1,11 +1,11 @@
 /**
  * The GUI state's shape is generated from the backend's own model (types.generated.ts). The
- * label schema below mirrors routes/{annotate,review,classes}.py.
+ * label schema below mirrors routes/annotate.py.
  */
 
-import type { ActionPayload, GuiState } from "@/api/types.generated";
+import type { GuiState, SubjectState, VerdictAction } from "@/api/types.generated";
 
-export type { DatasetSelection, GuiState, ReviewFilters, ViewState } from "@/api/types.generated";
+export type { DatasetSelection, GuiState, SubjectState, ViewState } from "@/api/types.generated";
 
 export type TabName = GuiState["active_tab"];
 
@@ -16,12 +16,6 @@ export interface OpenProject {
   id: string;
   path: string;
 }
-
-/** Per-image review completion status (from ReviewEngine.get_image_review_status). */
-export type ReviewImageStatus = "not_started" | "started" | "completed";
-
-/** Image-level Reviewed/Unreviewed navigation filter (drives which images the Review tab walks). */
-export type ReviewStatusFilter = "all" | "reviewed" | "unreviewed";
 
 /* ── Label schema (name-based, one unified file per image) ───────────────── */
 
@@ -47,19 +41,11 @@ export interface Annotation extends CarriedFields {
   authorship?: string | null;
 }
 
-/** The facts an annotation carries through the canvas unchanged and back on save, so a re-save
- *  never re-stamps the original creator: its crowd flag (COCO's iscrowd, a region of unseparated
- *  objects, never one instance; a shape drawn here states none, which the save route reads as no
- *  crowd) and its provenance. ``accepted_by_rule`` names the validation record a rule-based
- *  admission was verified against ("<experiment_id>:<record_digest>"), set only by the Review
- *  accept that verified the claim. */
+/** The fact an annotation carries through the canvas unchanged and back on save: its crowd flag
+ *  (COCO's iscrowd, a region of unseparated objects, never one instance; a shape drawn here
+ *  states none, which the save route reads as no crowd). Provenance is the save's own. */
 export interface CarriedFields {
   iscrowd?: boolean;
-  created_by?: string | null;
-  created_at?: string | null;
-  accepted_by?: string | null;
-  accepted_at?: string | null;
-  accepted_by_rule?: string | null;
 }
 
 /** The wire shape the Annotate save route accepts (mirrors AnnotationPayload in annotate.py):
@@ -107,39 +93,10 @@ export interface PointShape extends CanvasShape {
   y: number;
 }
 
-/** A review detection: an outcome (TP/FP/FN) referencing a GT and/or a prediction annotation by
- *  index. The class is named by ``class_name`` (a subject), never an integer id; the geometry to
- *  render is looked up from the referenced annotation's own bbox/rings, never inferred here. */
-export interface Detection {
-  det_type: "tp" | "fp" | "fn";
-  class_name: string;
-  conf: number | null;
-  iou: number | null;
-  gt_idx: number | null;
-  pred_idx: number | null;
-  bbox: [number, number, number, number];
-  reviewed: boolean;
-  reviewed_action: ActionPayload["action"] | null;
-}
-
-export interface MatchesResponse {
-  img_width: number;
-  img_height: number;
-  n_tp: number;
-  n_fp: number;
-  n_fn: number;
-  detections: Detection[];
-  // Every GT / prediction annotation, each carrying its own geometry (bbox, rings or point).
-  gt: Annotation[];
-  preds: Annotation[];
-  image_status: "not_started" | "started" | "completed";
-  // Current detections with a stored verdict, and the current total, from review_progress;
-  // n_total counts the whole image regardless of the active detection filter.
-  n_reviewed: number;
-  n_total: number;
-  // The bucket's own resolved review scope; both null means a bare directory, nothing else.
-  subject: string | null;
-  attribute: string | null;
+/** One subject's completion on an image, derived by the backend from the label document. */
+export interface SubjectCompletion {
+  state: SubjectState;
+  finished: boolean;
 }
 
 /** The Annotate canvas' load payload, split from the unified annotation list by geometry kind. */
@@ -152,4 +109,16 @@ export interface ImageLabels {
   points: PointShape[];
   // Geometry-less (image/plant-level) ratings, kept so they round-trip losslessly on save.
   imageAnnotations: Annotation[];
+  // Each subject the document holds or marks; a subject absent here is unannotated.
+  completion: Record<string, SubjectCompletion>;
+}
+
+/** One proposal the chosen bucket offers for the image (GET /api/annotate/proposals): its index
+ *  in the bucket's document, the annotation it pairs with, the last decision on it, and whether
+ *  the bucket's assessment admits it. */
+export interface Proposal extends Annotation {
+  index: number;
+  paired: number | null;
+  decision: VerdictAction | null;
+  admitted: boolean;
 }

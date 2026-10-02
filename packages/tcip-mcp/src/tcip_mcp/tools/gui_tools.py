@@ -1,4 +1,4 @@
-"""GUI-driving tools: push data to a panel, or drive the live Annotate/Review tab to a frame.
+"""GUI-driving tools: push data to a panel, or drive the live Annotate tab to a frame.
 
 Delivery goes through the tcip-web event channel (:mod:`tcip_mcp.web_client`), which delivers only
 when the backend has this server's project open, and answers ``delivered: false`` naming what it
@@ -13,7 +13,6 @@ from tcip_annotation import Annotation, BBox
 from tcip_annotation.state import polygonal
 from tcip_annotation.json_io import UnreadableLabelDocument
 from tcip_annotation.json_io import read_annotations as read_labels
-from tcip_annotation.matching import REVIEW_CONF_FLOOR
 
 from tcip_mcp.audit import audited
 from tcip_mcp.server import tool
@@ -41,8 +40,8 @@ def push_panel_event(project: Path, workspace: Path, panel: str, event_type: str
     "no_subscribers"}``.
 
     Args:
-        panel: Target panel: one per GUI tab, or 'app' for app-level events like annotate_focus /
-            review_focus. See ``web_client.VALID_PANELS`` for the current set.
+        panel: Target panel: one per GUI tab, or 'app' for app-level events like
+            annotate_focus. See ``web_client.VALID_PANELS`` for the current set.
         event_type: Any event type the panel understands, not confined to
             ``web_client.PLATFORM_PANEL_EVENTS`` (the platform's own emitters). 'banner' is the one
             example the browser renders directly: ``data['text']`` shows as a quiet note above that
@@ -65,57 +64,108 @@ def push_panel_event(project: Path, workspace: Path, panel: str, event_type: str
 def focus_human_attention(
     project: Path,
     workspace: Path,
-    tab: str,
     dataset_root: str,
     subject: str,
     date: str,
     image_index: int | None = None,
     mode: str | None = None,
     predictions_dir: str | None = None,
-    detection_idx: int = 0,
-    filter_type: str = "all",
-    iou_threshold: float = 0.5,
-    conf_threshold: float = REVIEW_CONF_FLOOR,
+    proposal: int | None = None,
 ) -> dict:
-    """Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab.
+    """Drive the live Annotate tab to a (subject, date) frame in the right mode, showing the
+    proposals of the bucket at ``predictions_dir`` when one is named (emits ``annotate_focus``).
 
-    ``tab='annotate'`` lands the Annotate tab on the first frame annotated for ``subject`` in the
-    right mode (emits ``annotate_focus``); ``tab='review'`` lands the Review tab on a model's
-    predictions (emits ``review_focus``). A backend with another project open, or none running,
-    answers ``delivered: false`` rather than raising. On both tabs, an image elsewhere on the date
-    whose label or prediction document will not read is named by file name in the result's
-    ``unreadable``; only the landed-on or explicitly named frame's own unreadable document refuses,
-    naming that document's path.
+    It lands on ``image_index``, else on the first frame holding ``subject``: in the bucket's
+    document for it when a bucket is named, in its label document otherwise. A backend with
+    another project open, or none running, answers ``delivered: false`` rather than raising. An
+    image elsewhere on the date whose document will not read is named by file name in the result's
+    ``unreadable``; only the landed-on frame's own unreadable document refuses, naming that
+    document's path, and an ``image_index`` outside the date's images or a ``date`` that is not
+    one path segment refuses.
 
     Args:
-        tab: Which GUI surface to drive, 'annotate' or 'review'.
         dataset_root: Dataset root holding ``images/`` and ``annotations/`` (plus
             ``predictions/``).
         subject: Annotation subject (e.g. "fruit").
         date: Capture-date bucket (e.g. "2026-03-02").
-        image_index: Index into the date's sorted image list. Default: first frame labeled for
-            ``subject`` (annotate) / with a prediction of ``subject`` in the bucket (review).
-        mode: Annotate only, "box", "polygon" or "point" (default: inferred from the geometry the
-            labels on that frame actually carry).
-        predictions_dir: Review only (required when ``tab='review'``), the bucket directory whose
-            predictions to review: a published bucket, or staged proposals.
-        detection_idx: Review only, which detection to center in the Review navigator.
-        filter_type: Review only, "all" | "tp" | "fp" | "fn" match filter.
-        iou_threshold: Review only, IoU cutoff for the TP/FP/FN match classification.
-        conf_threshold: Review only, confidence cutoff for showing predictions.
+        image_index: Index into the date's sorted image list.
+        mode: "box", "polygon" or "point" (default: inferred from the geometry the labels on
+            that frame actually carry).
+        predictions_dir: The published bucket or staged proposals whose proposals the canvas
+            shows.
+        proposal: The index of the proposal, in the bucket's document for the frame, to focus.
     """
-    if tab == "annotate":
-        return _focus_annotate(project, workspace, dataset_root, subject, date, mode=mode,
-                               image_index=image_index)
-    if tab == "review":
-        if not predictions_dir:
-            return {"error": "tab='review' requires predictions_dir"}
-        return _focus_review(
-            project, workspace, dataset_root, subject, date, predictions_dir,
-            image_index=image_index, detection_idx=detection_idx, filter_type=filter_type,
-            iou_threshold=iou_threshold, conf_threshold=conf_threshold,
-        )
-    return {"error": f"tab must be 'annotate' or 'review', got {tab!r}"}
+    from tcip_annotation.json_io import annotations_hold_subject
+
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.dataset_layout import annotation_dir, image_dir, label_filename
+    from tcip_mcp.web_client import ANNOTATE_MODES, PANEL_EVENT_ANNOTATE_FOCUS, post_panel_event
+    from tcip_mcp.workspace import is_valid_name
+
+    if not is_valid_name(date):
+        return {"error": f"date must be a single safe path segment (no separators/'..'), got {date!r}"}
+    idir = Path(image_dir(dataset_root, date))
+    if not idir.is_dir():
+        return {"error": f"no images for date {date} under {dataset_root}"}
+    images = sorted(_logical_image_names(idir))
+    if not images:
+        return {"error": f"no images on {date}"}
+    try:
+        bucket = read_bucket(predictions_dir) if predictions_dir else None
+    except ValueError as exc:
+        return {"error": str(exc)}
+    adir = Path(annotation_dir(dataset_root, date))
+
+    def _document(name: str) -> Path | None:
+        if bucket is not None:
+            return bucket.document(name)
+        label = adir / label_filename(Path(name).stem)
+        return label if label.is_file() else None
+
+    holding: list[int] = []
+    unreadable: dict[str, str] = {}
+    for i, name in enumerate(images):
+        document = _document(name)
+        try:
+            if document is not None and annotations_hold_subject(read_labels(str(document)),
+                                                                 subject):
+                holding.append(i)
+        except UnreadableLabelDocument as exc:
+            unreadable[name] = str(exc)
+
+    if image_index is None:
+        image_index = holding[0] if holding else 0
+    if not 0 <= image_index < len(images):
+        return {"error": f"image_index {image_index} names none of the {len(images)} images on "
+                         f"{date}"}
+    target_name = images[image_index]
+    if target_name in unreadable:
+        return {"error": unreadable[target_name]}
+    if mode is None:
+        label = adir / label_filename(Path(target_name).stem)
+        try:
+            task = _subject_task(read_labels(str(label)), subject) if label.is_file() else None
+        except UnreadableLabelDocument as exc:
+            return {"error": str(exc)}
+        mode = _TASK_MODE.get(task or "", "box")
+    if mode not in ANNOTATE_MODES:
+        vocabulary = ", ".join(repr(m) for m in ANNOTATE_MODES)
+        return {"error": f"mode must be one of {vocabulary}, got {mode!r}"}
+
+    payload = {
+        "dataset_root": dataset_root, "subject": subject, "date": date,
+        "image_index": image_index, "mode": mode, "active_subject": subject,
+        "predictions_dir": predictions_dir, "proposal": proposal,
+    }
+    result = post_panel_event(project, workspace, "app", PANEL_EVENT_ANNOTATE_FOCUS, payload)
+    return {
+        "delivered": result.get("delivered", False),
+        "status": result.get("status"),
+        "subject": subject, "date": date, "image_index": image_index, "mode": mode,
+        "predictions_dir": predictions_dir, "proposal": proposal,
+        "n_images": len(images), "n_holding_subject": len(holding), "image": target_name,
+        "unreadable": sorted(unreadable),
+    }
 
 
 def _subject_task(anns: list[Annotation], subject: str) -> str | None:
@@ -135,169 +185,3 @@ def _subject_task(anns: list[Annotation], subject: str) -> str | None:
 # The GUI drawing mode each resolved task is edited in, the frontend's own Mode union ("box" |
 # "polygon" | "point", store/types.ts); a point-only frame lands in point mode, never box mode.
 _TASK_MODE = {"segment": "polygon", "detect": "box", "point": "point"}
-
-
-def _focus_annotate(
-    project: Path,
-    workspace: Path,
-    dataset_root: str,
-    subject: str,
-    date: str,
-    mode: str | None = None,
-    image_index: int | None = None,
-) -> dict:
-    """Drive the live Annotate tab to a (subject, date), in the right mode, on a frame labeled for
-    the subject. Posts an ``annotate_focus`` event the GUI honors with local view setters.
-
-    Refuses only when the landed-on (or explicitly named) frame's own label will not read, naming
-    that document's path; every other image whose label will not read is named (by image file name)
-    in the result's ``unreadable``. ``mode`` is validated against
-    ``tcip_mcp.web_client.AnnotateMode``.
-    """
-    from tcip_mcp.dataset_layout import annotation_dir, image_dir, label_filename
-    from tcip_mcp.web_client import ANNOTATE_MODES, PANEL_EVENT_ANNOTATE_FOCUS, post_panel_event
-
-    idir = Path(image_dir(dataset_root, date))
-    if not idir.is_dir():
-        return {"error": f"no images for date {date} under {dataset_root}"}
-    images = sorted(_logical_image_names(idir))
-    if not images:
-        return {"error": f"no images on {date}"}
-
-    adir = Path(annotation_dir(dataset_root, date))
-
-    def _task(stem: str) -> str | None:
-        f = adir / label_filename(stem)
-        return _subject_task(read_labels(str(f)), subject) if f.is_file() else None
-
-    n_annotated = 0
-    first_idx: int | None = None
-    tasks: dict[str, str | None] = {}
-    unreadable: dict[str, str] = {}
-    for i, name in enumerate(images):
-        try:
-            task = _task(Path(name).stem)
-        except UnreadableLabelDocument as exc:
-            unreadable[name] = str(exc)
-            continue
-        tasks[name] = task
-        if task is not None:
-            n_annotated += 1
-            if first_idx is None:
-                first_idx = i
-
-    if image_index is None:
-        image_index = first_idx if first_idx is not None else 0
-    image_index = max(0, min(image_index, len(images) - 1))
-
-    target_name = images[image_index]
-    if target_name in unreadable:
-        return {"error": unreadable[target_name]}
-    resolved_task = tasks[target_name]
-    if mode is None:
-        mode = _TASK_MODE.get(resolved_task or "", "box")
-    if mode not in ANNOTATE_MODES:
-        vocabulary = ", ".join(repr(m) for m in ANNOTATE_MODES)
-        return {"error": f"mode must be one of {vocabulary}, got {mode!r}"}
-
-    payload = {
-        "dataset_root": dataset_root,
-        "subject": subject, "date": date, "image_index": image_index, "mode": mode,
-        "active_subject": subject,
-    }
-    result = post_panel_event(project, workspace, "app", PANEL_EVENT_ANNOTATE_FOCUS, payload)
-    return {
-        "delivered": result.get("delivered", False),
-        "status": result.get("status"),
-        "subject": subject, "date": date, "image_index": image_index, "mode": mode,
-        "n_images": len(images), "n_annotated": n_annotated, "image": images[image_index],
-        "unreadable": sorted(unreadable),
-    }
-
-
-def _focus_review(
-    project: Path,
-    workspace: Path,
-    dataset_root: str,
-    subject: str,
-    date: str,
-    predictions_dir: str,
-    image_index: int | None = None,
-    detection_idx: int = 0,
-    filter_type: str = "all",
-    iou_threshold: float = 0.5,
-    conf_threshold: float = REVIEW_CONF_FLOOR,
-) -> dict:
-    """Drive the live Review tab to a bucket's predictions of ``subject`` on a frame, each image's
-    document the one the bucket's record names for it. Posts a ``review_focus`` event the GUI
-    honors with local setters.
-
-    Refuses a ``predictions_dir`` that is no bucket, and the landed-on (or explicitly named)
-    frame whose own prediction document will not read, naming that document's path in the error;
-    every other image whose prediction will not read is named instead (by image file name) in the
-    result's ``unreadable``, the same stance ``_focus_annotate`` takes."""
-    from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.dataset_layout import image_dir
-    from typing import get_args
-
-    from tcip_mcp.web_client import PANEL_EVENT_REVIEW_FOCUS, ReviewFilterType, post_panel_event
-    from tcip_mcp.workspace import is_valid_name
-
-    if filter_type not in get_args(ReviewFilterType):
-        return {"error": f"filter_type must be all|tp|fp|fn, got {filter_type!r}"}
-    if not is_valid_name(date):
-        return {"error": f"date must be a single safe path segment (no separators/'..'), got {date!r}"}
-
-    idir = Path(image_dir(dataset_root, date))
-    if not idir.is_dir():
-        return {"error": f"no images for date {date} under {dataset_root}"}
-    images = sorted(_logical_image_names(idir))
-    if not images:
-        return {"error": f"no images on {date}"}
-    try:
-        bucket = read_bucket(predictions_dir)
-    except ValueError as exc:
-        return {"error": str(exc)}
-
-    def _has_pred(name: str) -> bool:
-        f = bucket.document(name)
-        return bool(f is not None and any(a.subject == subject and a.geometry is not None
-                                          for a in read_labels(str(f))))
-
-    n_with_preds = 0
-    first_idx: int | None = None
-    unreadable: dict[str, str] = {}
-    for i, name in enumerate(images):
-        try:
-            has_pred = _has_pred(name)
-        except (UnreadableLabelDocument, ValueError) as exc:
-            unreadable[name] = str(exc)
-            continue
-        if has_pred:
-            n_with_preds += 1
-            if first_idx is None:
-                first_idx = i
-
-    if image_index is None:
-        image_index = first_idx if first_idx is not None else 0
-    image_index = max(0, min(image_index, len(images) - 1))
-
-    target_name = images[image_index]
-    if target_name in unreadable:
-        return {"error": unreadable[target_name]}
-
-    payload = {
-        "dataset_root": dataset_root,
-        "subject": subject, "date": date, "predictions_dir": predictions_dir,
-        "image_index": image_index, "detection_idx": detection_idx, "filter_type": filter_type,
-        "iou_threshold": iou_threshold, "conf_threshold": conf_threshold,
-    }
-    result = post_panel_event(project, workspace, "app", PANEL_EVENT_REVIEW_FOCUS, payload)
-    return {
-        "delivered": result.get("delivered", False),
-        "status": result.get("status"),
-        "subject": subject, "date": date, "predictions_dir": predictions_dir,
-        "image_index": image_index, "detection_idx": detection_idx, "filter_type": filter_type,
-        "n_images": len(images), "n_with_predictions": n_with_preds, "image": images[image_index],
-        "unreadable": sorted(unreadable),
-    }

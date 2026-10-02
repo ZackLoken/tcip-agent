@@ -9,7 +9,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 import tcip_store
-from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
 from tcip_mcp.web_client import annotation_stats_key
 from tcip_web.app import app
 
@@ -17,6 +16,24 @@ from tcip_web.app import app
 @pytest.fixture
 def client(opened_project: Path) -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
+
+
+def _mark_negative(dataset_root: Path, date: str, stem: str) -> None:
+    """``stem``'s image on ``date``, its label document empty and marked complete for ``bud``
+    through the editor's own save."""
+    from PIL import Image
+
+    from tcip_annotation import json_io
+    from tcip_mcp.dataset_layout import annotation_path, image_dir
+    from tests._producer_fixtures import mark_complete
+
+    image = image_dir(dataset_root, date) / f"{stem}.jpg"
+    image.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (32, 32)).save(image)
+    label = annotation_path(dataset_root, date, stem)
+    label.parent.mkdir(parents=True, exist_ok=True)
+    json_io.write_annotations(label, [], 32, 32, keep_empty=True)
+    mark_complete(image, label, "bud", project=dataset_root)
 
 
 def _load(client: TestClient) -> dict:
@@ -109,12 +126,11 @@ def test_negative_confirmation_time_counts_toward_the_session_total(client: Test
 def test_load_splits_time_into_new_annotation_review_and_negative_confirmation(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """Read-time classification against image_status.json's current state, not a write-time
+    """Read-time classification against each label document's current marks, not a write-time
     snapshot: negative_confirmation_seconds + review_seconds + new_annotation_seconds sums back
     to total_time_seconds."""
     dataset_root = tmp_path / "data"
-    record_image_statuses(dataset_root, status_bucket("bud", "2026-02-11"),
-                          {"IMG_NEG": "negative"}, recorded_by="user:breeder")
+    _mark_negative(dataset_root, "2026-02-11", "IMG_NEG")
 
     common = {"dataset_root": str(dataset_root), "subject": "bud", "date": "2026-02-11"}
     client.post("/api/sessions/start", json={"user": "alice"})
@@ -123,7 +139,7 @@ def test_load_splits_time_into_new_annotation_review_and_negative_confirmation(
         **common, "image_name": "IMG_NEG", "session_seconds_delta": 5.0,
         "annotations_added_delta": 0, "final_annotation_count": 0,
     })
-    # IMG_REVIEW: has no status recorded, no new annotations (pure review, not a confirmed negative).
+    # IMG_REVIEW: has no label document, no new annotations (pure review, not a confirmed negative).
     client.post("/api/sessions/image_event", json={
         **common, "image_name": "IMG_REVIEW", "session_seconds_delta": 7.0,
         "annotations_added_delta": 0, "final_annotation_count": 2,
@@ -145,23 +161,18 @@ def test_load_splits_time_into_new_annotation_review_and_negative_confirmation(
     )
 
 
-def test_a_status_store_that_will_not_decode_fails_the_load(tmp_path: Path) -> None:
-    """The confirmation store is read as written: one that will not decode raises out of the
-    load rather than reading as a store holding no confirmation.
+def test_a_label_document_that_will_not_read_fails_the_load(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A label document is read as written: one that will not decode raises out of the load
+    rather than reading as a document holding no mark."""
+    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_mcp.dataset_layout import annotation_path
 
-    Bound to the file backend before the project is made: the claim needs bytes on disk no codec
-    decodes, which only the file backend ever holds raw.
-    """
-    from tcip_store.file_backend import FileBackend
-
-    from tests._web_fixtures import open_new_project
-
-    tcip_store.bind(FileBackend())
-    open_new_project(tmp_path)
-    client = TestClient(app, base_url="http://127.0.0.1")
     dataset_root = tmp_path / "data"
-    (dataset_root / ".tcip" / "state").mkdir(parents=True)
-    (dataset_root / ".tcip" / "state" / "image_status.json").write_bytes(b"{not a status store")
+    label = annotation_path(dataset_root, "2026-02-11", "IMG_UNREADABLE")
+    label.parent.mkdir(parents=True)
+    label.write_bytes(b"{not a label document")
 
     client.post("/api/sessions/start", json={"user": "alice"})
     client.post("/api/sessions/image_event", json={
@@ -170,7 +181,7 @@ def test_a_status_store_that_will_not_decode_fails_the_load(tmp_path: Path) -> N
         "annotations_added_delta": 0, "final_annotation_count": 0,
     })
 
-    with pytest.raises(tcip_store.DecodeError, match="image_status"):
+    with pytest.raises(UnreadableLabelDocument, match="IMG_UNREADABLE"):
         client.get("/api/sessions/load")
 
 
@@ -210,7 +221,7 @@ def test_load_reflects_a_negative_confirmed_after_the_session_that_spent_time_en
     """The split is read fresh, not frozen when image_event fired: confirming a negative later
     still reclassifies that image's already-recorded time on the next load."""
     dataset_root = tmp_path / "data"
-    (dataset_root / ".tcip" / "state").mkdir(parents=True)
+    dataset_root.mkdir()
 
     client.post("/api/sessions/start", json={"user": "alice"})
     client.post("/api/sessions/image_event", json={
@@ -223,8 +234,7 @@ def test_load_reflects_a_negative_confirmed_after_the_session_that_spent_time_en
     assert before["review_seconds"] == 9.0
     assert before["negative_confirmation_seconds"] == 0.0
 
-    record_image_statuses(dataset_root, status_bucket("bud", "2026-02-11"),
-                          {"IMG_LATE": "negative"}, recorded_by="user:breeder")
+    _mark_negative(dataset_root, "2026-02-11", "IMG_LATE")
 
     after = _load(client)["sessions"][0]
     assert after["review_seconds"] == 0.0
@@ -269,8 +279,8 @@ def test_load_missing_returns_empty_shape(client: TestClient) -> None:
 def test_start_then_image_event_stores_only_a_sessions_key(
     client: TestClient, opened_project: Path
 ) -> None:
-    """The stored document carries no dead ``image_status`` key: every writer here puts only
-    ``sessions`` on disk."""
+    """The stored document carries only ``sessions``: every writer here puts nothing else on
+    disk."""
     client.post("/api/sessions/start", json={"user": "alice"})
     client.post(
         "/api/sessions/image_event",

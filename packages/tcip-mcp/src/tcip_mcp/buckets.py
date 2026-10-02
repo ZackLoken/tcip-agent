@@ -265,16 +265,11 @@ def prediction_producer(checkpoint: VerifiedCheckpoint) -> str:
     return f"model:{Path(checkpoint.path).stem}@{checkpoint.sha256[:12]}"
 
 
-def bucket_key_of(bucket_dir: str | Path | None) -> str:
+def bucket_key_of(bucket_dir: str | Path) -> str:
     """The verdict store's key for the prediction bucket at ``bucket_dir``: its path relative to
-    the dataset root it sits in, its own resolved path under none, and
-    :data:`~tcip_annotation.review_engine.NO_BUCKET` for no directory at all."""
-    from tcip_annotation.review_engine import NO_BUCKET
-
+    the dataset root it sits in, its own resolved path under none."""
     from tcip_mcp.dataset_layout import dataset_root_of
 
-    if not bucket_dir:
-        return NO_BUCKET
     d = Path(bucket_dir).resolve()
     root = dataset_root_of(d)
     return d.as_posix() if root is None else d.relative_to(root).as_posix()

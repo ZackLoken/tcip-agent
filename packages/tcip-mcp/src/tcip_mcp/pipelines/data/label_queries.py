@@ -1,14 +1,14 @@
 """The producer: where a directory of ground truth or a ground-truth table becomes the samples a
 run trains, evaluates or calibrates over.
 
-It reads a dataset's per-image label documents, its ``<stem>.png`` masks or its table of rows, its
-``subjects.json`` registry and its confirmed-negative image-status store, admits by the shape the
-ground truth itself carries (:func:`ground_truth_shape`), and answers an :class:`Admission`.
+It reads a dataset's per-image label documents with their completion marks, its ``<stem>.png``
+masks or its table of rows, and its ``subjects.json`` registry, admits by the shape the ground
+truth itself carries (:func:`ground_truth_shape`), and answers an :class:`Admission`.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -143,103 +143,49 @@ def ground_truth_shape(ground_truth) -> str:
 
 
 def admitted_records(
-    records: Mapping[str, tuple[str | None, str | None]], *, labels_dir,
-    scope: "ClassScope", date, contradicted_out: set[str] | None = None,
+    records: Mapping[str, tuple[str | None, str | None]], *, scope: "ClassScope",
 ) -> tuple[list[str], dict[str, int]]:
     """The keys of ``records`` the label store accounts for under ``scope``, an admitted document
     class space, plus the partition that produced them.
 
     ``records`` maps a caller's own key to ``(label document path, logical image name)``; a
     ``None`` image name is a key with no image at all and a ``None`` document is a key the label
-    store holds nothing for. The counts are the partition :func:`admitted_documents` returns. The
-    same pairs answer the confirmed-negative read's contradiction check.
+    store holds nothing for. A key is admitted when its document holds the scope's subject, or
+    holds none of it and its marks finish it
+    (:meth:`~tcip_annotation.json_io.LabelDocument.state`). The counts are ``annotated`` /
+    ``confirmed_negative`` / ``skipped_unannotated`` / ``skipped_unconfirmed_empty`` /
+    ``skipped_incomplete_attribute``; under a classified scope an image carrying any instance never
+    assessed for the attribute is dropped whole, through :func:`json_det_targets`, ahead of every
+    other reason.
     """
-    subject = scope.subject
-    quarantined: set[str] = set()
-    contradicted: set[str] = set()
-    negatives = confirmed_negative_names(labels_dir, subject=subject, date=date,
-                                         quarantined_out=quarantined,
-                                         contradicted_out=contradicted,
-                                         label_paths={
-                                             image_name: label_path
-                                             for label_path, image_name in records.values()
-                                             if image_name is not None and label_path is not None
-                                         })
-    if contradicted_out is not None:
-        contradicted_out.update(contradicted)
+    from tcip_annotation.json_io import read_label_document
+
     counts = {"annotated": 0, "confirmed_negative": 0, "skipped_unannotated": 0,
-              "skipped_unconfirmed_empty": 0, "skipped_incomplete_attribute": 0,
-              "quarantined_stale_definition": 0}
-
-    incomplete_names: set[str] = set()
-    if scope.classified:
-        # The attribute-completeness rail, through the same reader the loader uses.
-        for label_path, image_name in records.values():
-            if image_name is None or label_path is None or not Path(label_path).is_file():
-                continue
-            _target, n_unlabeled = json_det_targets(label_path, scope)
-            if n_unlabeled:
-                incomplete_names.add(image_name)
-
+              "skipped_unconfirmed_empty": 0, "skipped_incomplete_attribute": 0}
     keep: list[str] = []
     for key, (label_path, image_name) in records.items():
-        if image_name is None or label_path is None:
+        if image_name is None or label_path is None or not Path(label_path).is_file():
             counts["skipped_unannotated"] += 1
             continue
-        if image_name in incomplete_names:
-            # Checked first: an image with incomplete attribute GT is dropped for that reason,
-            # never for whichever category its absence downstream happens to resemble.
+        if scope.classified and json_det_targets(label_path, scope)[1]:
             counts["skipped_incomplete_attribute"] += 1
             continue
-        has_record, holds_subject = _label_record_state(label_path, subject)
-        if not has_record:
-            counts["skipped_unannotated"] += 1
-        elif image_name in quarantined and image_name not in contradicted:
-            counts["quarantined_stale_definition"] += 1
-        elif holds_subject:
+        state = read_label_document(label_path).state(cast(str, scope.subject))
+        reason = {"complete": "annotated", "partial": "annotated",
+                  "negative": "confirmed_negative"}.get(state, "skipped_unconfirmed_empty")
+        counts[reason] += 1
+        if reason != "skipped_unconfirmed_empty":
             keep.append(key)
-            counts["annotated"] += 1
-        elif image_name in negatives:
-            keep.append(key)
-            counts["confirmed_negative"] += 1
-        elif image_name in quarantined:
-            counts["quarantined_stale_definition"] += 1
-        else:
-            counts["skipped_unconfirmed_empty"] += 1
     return keep, counts
 
 
 def admitted_documents(
-    labels_dir, images_dir, members=None, *, scope: "ClassScope", date,
-    contradicted_out: set[str] | None = None,
+    labels_dir, images_dir, members=None, *, scope: "ClassScope",
 ) -> tuple[list[Admitted], dict[str, int]]:
     """The members a directory of per-image label documents admits under ``scope``, an admitted
-    document class space, resolved, plus the partition that produced them.
-
-    A sample is admitted when its document carries at least one annotation of the scope's subject,
-    whatever its geometry, or carries none and the image is a confirmed negative for that subject
-    (``confirmed_negative_names``).
-
-    Returns ``(stems, counts)`` where counts carries ``annotated`` / ``confirmed_negative`` /
-    ``skipped_unannotated`` / ``skipped_unconfirmed_empty`` / ``skipped_incomplete_attribute`` /
-    ``quarantined_stale_definition``. ``quarantined_stale_definition`` counts images a human
-    finished, complete or negative alike, under an attribute schema that has since changed (see
-    :func:`_stale_finished`).
-
-    ``date`` states which capture date's confirmations this partition may admit, ``None`` for a
-    tree that carries no date, and is passed through to ``confirmed_negative_names`` as the bucket
-    key.
-
-    A confirmed negative whose label file now holds the subject is admitted by its real content
-    instead, even when it is also stale-stamped; the caller's ``contradicted_out`` set, when given,
-    is updated with those names. A stale-stamped complete confirmation is quarantined ahead of the
-    content branch, whether or not its label file carries boxes.
-
-    ``skipped_incomplete_attribute``: under a classified scope, an image carrying any instance
-    never assessed for its attribute is dropped entirely, through ``json_det_targets``.
-
-    The verdicts are :func:`admitted_records`, over each candidate stem paired with the document
-    this directory holds for it (``None`` when it holds none) and its real on-disk image name.
+    document class space, resolved, plus the partition that produced them: :func:`admitted_records`
+    over each candidate stem paired with the document this directory holds for it (``None`` when
+    it holds none) and its real on-disk image name.
     """
     from tcip_annotation.json_io import prediction_documents
     from tcip_mcp.pipelines.image_utils import refuse_incomplete_band_group, source_path_of
@@ -251,7 +197,7 @@ def admitted_documents(
         {stem: (str(documents[stem]) if stem in documents else None,
                 logical_image_name(sources[stem]) if stem in sources else None)
          for stem in candidates},
-        labels_dir=labels_dir, scope=scope, date=date, contradicted_out=contradicted_out,
+        scope=scope,
     )
     return [
         Admitted(member=stem,
@@ -280,30 +226,21 @@ class Admitted:
 
 def samples_over(
     records: "Sequence[Admitted]", assignment: dict[str, str],
-    group_of: "Callable[[str], str]", *, confirmation_bucket: str | None = None,
-    digests: Mapping[str, str] | None = None,
+    group_of: "Callable[[str], str]", *, digests: Mapping[str, str] | None = None,
 ) -> list["Sample"]:
     """Admitted records as explicit samples, one per record.
 
     ``assignment`` maps each member to the side it landed on, ``group_of`` gives its group key, and
     ``digests`` its ground-truth digest when the caller computed one. Each sample carries the
     source and the ground truth the admission already resolved for that member.
-
-    ``confirmation_bucket`` is the ``image_status.json`` key a document admission read
-    (:func:`~tcip_mcp.dataset_layout.status_bucket`), so a selection spanning three capture dates
-    says per sample which human confirmations answered for it; it rides only on a sample whose
-    ground truth is its own document.
     """
-    from tcip_mcp.pipelines.data.selection import DOCUMENT, Sample, shape_of
+    from tcip_mcp.pipelines.data.selection import Sample
 
     digests = digests or {}
     return [
         Sample(
             member=record.member, source=record.source, ground_truth=record.ground_truth, row_key=record.row_key,
             group=group_of(record.member), side=assignment[record.member],
-            confirmation_bucket=(
-                confirmation_bucket
-                if shape_of(record.ground_truth, record.row_key) == DOCUMENT else None),
             ground_truth_digest=digests.get(record.member),
         )
         for record in sorted(records, key=lambda r: r.member)
@@ -439,18 +376,15 @@ def refuse_inadmissible_samples(samples: "Sequence[Sample]", scope: "ClassScope"
     :func:`admit` holds it (``ClassScope.admitted_for``), so a document read under a scope naming
     no subject refuses by name.
 
-    Dispatches once on each sample's own shape: the label store and its confirmations for a
-    document, the mask's own existence for a mask raster, the row's own presence in its table for a
-    table row, each over the paths the sample recorded. The capture date a document sample is
-    checked under comes from the confirmation bucket the producer stamped on it
-    (:func:`~tcip_mcp.dataset_layout.bucket_subject_date`). Every sample's recorded source is
-    resolved once (:func:`~tcip_mcp.pipelines.image_utils.resolve_source_path`, which also catches
-    a band group missing a sibling).
+    Dispatches once on each sample's own shape: the label document and its marks for a document,
+    the mask's own existence for a mask raster, the row's own presence in its table for a table
+    row, each over the paths the sample recorded. Every sample's recorded source is resolved once
+    (:func:`~tcip_mcp.pipelines.image_utils.resolve_source_path`, which also catches a band group
+    missing a sibling).
 
     Membership is never changed here: a sample the admission no longer holds refuses the run by
     name.
     """
-    from tcip_mcp.dataset_layout import bucket_subject_date
     from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK
     from tcip_mcp.pipelines.image_utils import BandGroupIncomplete, resolve_source_path
 
@@ -458,7 +392,7 @@ def refuse_inadmissible_samples(samples: "Sequence[Sample]", scope: "ClassScope"
     unresolved: list[str] = []
     reasons: dict[str, int] = {}
     tables: dict[str, dict[str, str]] = {}
-    documents: dict[tuple[str, str], dict[str, tuple[str, str | None]]] = {}
+    documents: dict[str, tuple[str | None, str | None]] = {}
     for shape in {s.shape for s in samples}:
         scope.admitted_for(shape, "the class space these samples are read under")
     for sample in samples:
@@ -468,11 +402,7 @@ def refuse_inadmissible_samples(samples: "Sequence[Sample]", scope: "ClassScope"
             unresolved.append(sample.source)
             continue
         if sample.shape == DOCUMENT:
-            bucket = sample.confirmation_bucket
-            assert bucket is not None, "a label-document sample always states the bucket it read"
-            documents.setdefault(
-                (sample.ground_truth_scope, bucket), {}
-            )[sample.location] = (sample.ground_truth, image_name)
+            documents[sample.location] = (sample.ground_truth, image_name)
         elif sample.shape == MASK:
             if not is_mask(Path(sample.ground_truth)):
                 refused.append(sample.location)
@@ -485,13 +415,12 @@ def refuse_inadmissible_samples(samples: "Sequence[Sample]", scope: "ClassScope"
             if not holds_row(tables[table], sample.row_key):
                 refused.append(sample.location)
                 reasons["row_gone"] = reasons.get("row_gone", 0) + 1
-    for (labels_dir, bucket), records in sorted(documents.items()):
-        _subject, date = bucket_subject_date(bucket)
-        admitted, counts = admitted_records(records, labels_dir=labels_dir, scope=scope, date=date)
+    if documents:
+        admitted, counts = admitted_records(documents, scope=scope)
         for name, value in counts.items():
-            if name.startswith(("skipped_", "quarantined_")):
+            if name.startswith("skipped_"):
                 reasons[name] = reasons.get(name, 0) + value
-        refused.extend(sorted(set(records) - set(admitted)))
+        refused.extend(sorted(set(documents) - set(admitted)))
     if not refused and not unresolved:
         return
     named = ", ".join(f"{name}={value}" for name, value in sorted(reasons.items()) if value)
@@ -500,11 +429,10 @@ def refuse_inadmissible_samples(samples: "Sequence[Sample]", scope: "ClassScope"
     raise ValueError(
         f"{len(refused) + len(unresolved)} of this selection's samples are no longer admissible "
         f"({sorted(refused)[:5] + unresolved[:5]}): {named}.{sources} The data moved under the "
-        "selection since it was drawn: a label emptied with nobody confirming that image "
-        "negative, a mask or a label file deleted, a row dropped from its table, an image moved, "
-        "a confirmation invalidated by a schema edit, or an instance left unassessed for this "
-        "run's attribute. Restore what those name, finish the annotation or confirmation, or "
-        "draw the selection again over the current data."
+        "selection since it was drawn: a label emptied with nobody marking that image complete, "
+        "a mask or a label file deleted, a row dropped from its table, an image moved, or an "
+        "instance left unassessed for this run's attribute. Restore what those name, finish the "
+        "annotation or the mark, or draw the selection again over the current data."
     )
 
 
@@ -532,12 +460,6 @@ def require_admitted(admitted: "Admission") -> None:
             f"train. Fix the row keys, or point data.images_dir at the directory holding those "
             f"images."
         )
-    quarantined = counts["quarantined_stale_definition"]
-    quarantine_note = (
-        f" {quarantined} more were confirmed complete or negative but quarantined because the "
-        f"subject's attribute schema changed since, re-confirm them or revert the schema edit."
-        if quarantined else ""
-    )
     incomplete = counts["skipped_incomplete_attribute"]
     incomplete_note = (
         f" {incomplete} more carry at least one instance never assessed for this run's attribute, "
@@ -552,230 +474,8 @@ def require_admitted(admitted: "Admission") -> None:
         f"have no label record and {counts['skipped_unconfirmed_empty']} have an empty one "
         f"nobody confirmed. An empty label file is a negative only once a human marks that image "
         f"Complete; until then it reads as unannotated. Annotate some images, or mark the "
-        f"genuinely-empty ones Complete.{incomplete_note}{quarantine_note}"
+        f"genuinely-empty ones Complete.{incomplete_note}"
     )
-
-
-def _label_record_state(label_path: str | Path, subject: str | None) -> tuple[bool, bool]:
-    """``(a record exists, it carries subject)`` for one label document.
-
-    "Carries the subject" means an annotation of that subject in any geometry, or none, by
-    :func:`~tcip_mcp.dataset_layout.annotations_hold_subject`.
-    """
-    from tcip_annotation import json_io
-    from tcip_mcp.dataset_layout import annotations_hold_subject
-
-    path = Path(label_path)
-    if not path.is_file():
-        return False, False
-    anns = json_io.read_annotations(str(path))
-    if subject is None:
-        return True, bool(anns)
-    return True, annotations_hold_subject(anns, subject)
-
-
-def _raw_status_store(labels_dir) -> dict:
-    """The dataset's stored image statuses, for a caller that has a labels directory rather than a
-    dataset root, or ``{}`` when the directory belongs to no dataset. Reads through
-    :func:`~tcip_mcp.dataset_layout.read_image_status_store`.
-    """
-    from tcip_mcp.dataset_layout import dataset_root_of, read_image_status_store
-
-    root = dataset_root_of(labels_dir)
-    return {} if root is None else read_image_status_store(root)
-
-
-def stale_stamped_names(
-    stamped_by_image: Mapping[str, object], current_digest: str, names: Iterable[str],
-) -> set[str]:
-    """Names among ``names`` whose recorded digest stamp positively disagrees with
-    ``current_digest``. Absence of a stamp is never stale.
-    """
-    return {
-        name for name in names
-        if isinstance(stamped_by_image.get(name), str) and stamped_by_image[name] != current_digest
-    }
-
-
-def _stale_finished(
-    root: Path, bucket_key: str, records: Mapping[str, dict[str, str]], subject: str,
-) -> set[str]:
-    """Names among ``records`` (one bucket's ``{image_name: record}``, already loaded by the
-    caller) whose stored status is finished (:func:`~tcip_mcp.dataset_layout.is_finished_status`,
-    ``complete`` or ``negative``) and whose stamped digest positively disagrees with ``subject``'s
-    current attribute-schema digest, over one read each of the digest store and the registry. No
-    digest store, stamp, registry or digest for ``subject`` names none; a digest store or a
-    registry that will not read raises.
-    """
-    import tcip_store
-
-    from tcip_mcp.subject_registry import attribute_schema_digest, read_registry
-    from tcip_mcp.dataset_layout import (
-        bucket_digest_stamps, image_status_digest_key, is_finished_status,
-        status_of, subjects_path,
-    )
-
-    finished = {name for name, record in records.items() if is_finished_status(status_of(record))}
-    if not finished:
-        return set()
-    stamps = tcip_store.read(image_status_digest_key(root), default={})
-    stamped_by_image = bucket_digest_stamps(stamps, bucket_key)
-    if not stamped_by_image:
-        return set()
-    if not subjects_path(root).is_file():
-        return set()
-    current_digest = attribute_schema_digest(read_registry(root), subject)
-    if current_digest is None:
-        return set()
-    return stale_stamped_names(stamped_by_image, current_digest, finished)
-
-
-def stale_finished_names(
-    dataset_root: str | Path | None, *, subject: str | None, date,
-) -> set[str]:
-    """Names in ``status_bucket(subject, date)`` whose stored status is finished and whose stamped
-    digest positively disagrees with ``subject``'s current attribute-schema digest, over a resolved
-    dataset root.
-
-    Reads the status store, then the digest store and the registry through :func:`_stale_finished`,
-    in a call of its own.
-
-    Answers an empty set for ``dataset_root`` unset or ``subject`` unset.
-    """
-    if not dataset_root or not subject:
-        return set()
-    from tcip_mcp.dataset_layout import read_image_status_store, status_bucket, status_confirmations
-
-    root = Path(dataset_root)
-    bucket_key = status_bucket(subject, date)
-    bucket = status_confirmations(read_image_status_store(root)).get(bucket_key)
-    if not bucket:
-        return set()
-    return _stale_finished(root, bucket_key, bucket, subject)
-
-
-def confirmed_negative_names(
-    labels_dir, *, subject: str | None, date, quarantined_out: set[str] | None = None,
-    contradicted_out: set[str] | None = None,
-    label_paths: Mapping[str, str] | None = None,
-) -> set[str]:
-    """Image names a human marked negative (empty + Complete) for this subject: the name projection
-    of :func:`confirmed_negative_records`.
-
-    A name whose label file holds the subject, contradicting the stored negative, is excluded from
-    the return value the same way a quarantined name is; pass ``contradicted_out`` to learn which.
-    ``label_paths`` is forwarded verbatim.
-    """
-    return set(confirmed_negative_records(
-        labels_dir, subject=subject, date=date, quarantined_out=quarantined_out,
-        contradicted_out=contradicted_out, label_paths=label_paths))
-
-
-def _exclude_contradicted(
-    records: dict[str, dict[str, str]], subject: str,
-    contradicted_out: set[str] | None,
-    label_paths: Mapping[str, str],
-) -> dict[str, dict[str, str]]:
-    """Drops a name whose label document holds ``subject`` (through ``annotations_hold_subject``);
-    a trainable-stems enumeration over the same directory admits it by that content instead.
-
-    ``label_paths`` maps an image name to the label document that answers for it, as the record
-    that named both holds them. A name the caller named no document for is not contradicted.
-    """
-    from tcip_annotation import json_io
-    from tcip_mcp.dataset_layout import annotations_hold_subject
-
-    def _label_holds_subject(name: str) -> bool:
-        recorded = label_paths.get(name)
-        if recorded is None:
-            return False
-        label = Path(recorded)
-        return label.is_file() and annotations_hold_subject(
-            json_io.read_annotations(str(label)), subject
-        )
-
-    contradicted = [name for name in records if _label_holds_subject(name)]
-    if not contradicted:
-        return records
-    if contradicted_out is not None:
-        contradicted_out.update(contradicted)
-    return {name: r for name, r in records.items() if name not in contradicted}
-
-
-def confirmed_negative_records(
-    labels_dir, *, subject: str | None, date, quarantined_out: set[str] | None = None,
-    contradicted_out: set[str] | None = None,
-    label_paths: Mapping[str, str] | None = None,
-) -> dict[str, dict[str, str]]:
-    """Image names a human marked negative for this subject, each with the record that says so.
-
-    A record is the store's own ``{status, recorded_by, recorded_at}``, returned whole so a caller
-    copying these confirmations carries who confirmed them.
-
-    Reads the dataset-native store ``image_status_key`` names, keyed by the dataset root the way
-    ``subjects.json`` is, and returns only the ``status_bucket(subject, date)`` bucket: a
-    confirmation is a human's statement about one subject on one image.
-
-    ``date`` is the capture date the confirmation was recorded under, stated by the caller,
-    ``None`` for a tree that carries no date (a materialized split's ``labels/``, a curated review
-    dataset's flat ``annotations/``). A bucket nothing wrote to is empty here.
-
-    Stale stamps are computed once per call over every finished status in the bucket, complete or
-    negative alike, through :func:`_stale_finished`; ``quarantined_out`` (a set, mutated in place)
-    receives every stale finished name, complete ones included. The return value excludes the stale
-    negatives and the contradicted ones: :func:`_exclude_contradicted` runs over every original
-    negative, so a negative both stale-stamped and contradicted lands in ``contradicted_out`` too.
-
-    A negative is quarantined only when the dataset's ``image_status_digest.json`` carries an
-    explicit per-image stamp that no longer matches the subject's current
-    :func:`~tcip_mcp.subject_registry.attribute_schema_digest`. Absence of a stamp is not
-    quarantined.
-
-    ``subject`` must be threaded explicitly; unthreaded while the dataset holds confirmed
-    negatives, this refuses. With no locatable dataset root, no store, or no confirmations for this
-    subject, it returns nothing.
-
-    ``label_paths`` maps an image name to the document that answers for it; see
-    :func:`_exclude_contradicted`.
-    """
-    from tcip_mcp.dataset_layout import (
-        dataset_root_of, is_confirmed_negative, status_confirmations, status_bucket, status_of,
-    )
-
-    root = dataset_root_of(labels_dir)
-    if root is None:
-        return {}
-    statuses = status_confirmations(_raw_status_store(labels_dir))
-    if not subject:
-        # Refuse only when there is something to lose: a store with confirmed negatives this
-        # run might be entitled to. Silently returning none would drop the human's work.
-        has_negatives = any(
-            is_confirmed_negative(status_of(r)) for b in statuses.values() for r in b.values()
-        )
-        if not has_negatives:
-            return {}
-        raise ValueError(
-            f"confirmed_negative_names needs an explicit subject to read the negative bucket "
-            f"for {labels_dir}, and this dataset has human-confirmed negatives that would be "
-            f"silently dropped. Thread the run's subject through the admission that named them."
-        )
-    bucket_key = status_bucket(subject, date)
-    bucket = statuses.get(bucket_key)
-    if not bucket:
-        return {}  # nothing was ever written under the key this caller stated
-    negatives = {name: r for name, r in bucket.items() if is_confirmed_negative(status_of(r))}
-    # Computed over the whole bucket, never only ``negatives``: a stale complete confirmation
-    # has to reach quarantined_out even in a bucket with no negative in it at all.
-    stale = _stale_finished(root, bucket_key, bucket, subject)
-    if quarantined_out is not None:
-        quarantined_out.update(stale)
-    if not negatives:
-        return negatives
-    # Runs over the original negatives, not a stale-excluded remainder, so a negative both
-    # stale-stamped and contradicted is named in contradicted_out too.
-    without_contradicted = _exclude_contradicted(
-        negatives, subject, contradicted_out, label_paths or {})
-    return {name: r for name, r in without_contradicted.items() if name not in stale}
 
 
 @dataclass(frozen=True)
@@ -788,10 +488,9 @@ class Admission:
     each :class:`Admitted` carrying its member name, its image source and its own ground truth.
     :meth:`samples` turns a side assignment over those records into explicit samples.
 
-    ``scope`` and ``date`` are the class space and capture date a document admission read
-    confirmations and class ids under; the scope is empty and the date ``None`` for a shape no
-    confirmation store and no registry answers for: a mask raster and a table row carry their own
-    classes.
+    ``scope`` and ``date`` are the class space a document admission read class ids under and the
+    capture date its documents sit under; the scope is empty and the date ``None`` for a shape no
+    registry answers for: a mask raster and a table row carry their own classes.
     """
 
     shape: str
@@ -808,12 +507,7 @@ class Admission:
         digests: Mapping[str, str] | None = None,
     ) -> list["Sample"]:
         """The admitted records this assignment names, as samples on the sides it gives them."""
-        from tcip_mcp.dataset_layout import status_bucket
-
-        subject = self.scope.subject
-        bucket = status_bucket(subject, self.date) if subject else None
-        return samples_over(self.records, assignment, group_of,
-                            confirmation_bucket=bucket, digests=digests)
+        return samples_over(self.records, assignment, group_of, digests=digests)
 
     def every_sample(self) -> list["Sample"]:
         """Every admitted record as a sample, all on the training side, each member grouped by the
@@ -827,13 +521,13 @@ class Admission:
 
 def admit(
     images_dir, ground_truth, *, scope: "ClassScope | None" = None,
-    members: list[str] | None = None, contradicted_out: set[str] | None = None,
+    members: list[str] | None = None,
 ) -> Admission:
     """The membership one place holding ground truth admits, through the admission its own shape
     reads.
 
-    Dispatches once on :func:`ground_truth_shape`: the label store and its human confirmations for
-    per-image documents, under ``scope`` and its map; the mask's own existence beside the image for
+    Dispatches once on :func:`ground_truth_shape`: the label documents and their completion marks
+    for per-image documents, under ``scope`` and its map; the mask's own existence beside the image for
     mask rasters, and the row's own presence beside a resolvable image for a table, both under an
     empty scope. The admitted scope is held to its shape
     (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.admitted_for`), so a document scope with
@@ -855,14 +549,10 @@ def admit(
     else:
         from tcip_mcp.dataset_layout import annotation_date
 
-        date = annotation_date(ground_truth)
-        records, counts = admitted_documents(
-            ground_truth, images_dir, members, scope=admitted, date=date,
-            contradicted_out=contradicted_out,
-        )
+        records, counts = admitted_documents(ground_truth, images_dir, members, scope=admitted)
         return Admission(
             shape=shape, images_dir=str(images_dir), ground_truth=str(ground_truth),
-            records=records, tallies=counts, scope=admitted, date=date,
+            records=records, tallies=counts, scope=admitted, date=annotation_date(ground_truth),
         )
     return Admission(shape=shape, images_dir=str(images_dir), ground_truth=str(ground_truth),
                      records=records, tallies=counts, scope=admitted)

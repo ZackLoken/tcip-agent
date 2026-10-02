@@ -74,16 +74,15 @@ def test_the_payload_route_keeps_the_crowd_flag_and_shares_the_decoders_checks()
 
     kept = annotation_from_payload(
         {"subject": "bur", "bbox": [1, 2, 30, 40], "iscrowd": True, "created_by": "user:a",
-         "attributes": {"stage": "ripe"}}, author="user:b", now="2026-01-01T00:00:00+00:00")
+         "attributes": {"stage": "ripe"}})
     assert kept.iscrowd and kept.attributes == {"stage": "ripe"}
     b = kept.geometry
     assert isinstance(b, BBox) and (b.x1, b.y1, b.x2, b.y2) == (1.0, 2.0, 30.0, 40.0)
     for bad in ({"attributes": {"stage": 12}}, {"attributes": {"stage": ""}}, {"iscrowd": 2},
                 {"iscrowd": "yes"}, {"bbox": [10, 10, 5, 5]}, {"bbox": ["1", "2", "3", "4"]}):
         with pytest.raises(ValueError):
-            annotation_from_payload({"subject": "bur", **bad}, author=None, now="t")
-    assert not annotation_from_payload({"subject": "bur", "iscrowd": None}, author=None,
-                                       now="t").iscrowd
+            annotation_from_payload({"subject": "bur", **bad})
+    assert not annotation_from_payload({"subject": "bur", "iscrowd": None}).iscrowd
 
 
 @pytest.mark.parametrize("subject", [None, "", 7], ids=["absent", "empty", "not_a_string"])
@@ -104,19 +103,39 @@ def test_a_record_naming_no_subject_is_refused_where_an_annotation_is_made(
         read_annotations(path)
 
 
-def test_the_payload_route_reads_provenance_presence_as_the_decoder_does() -> None:
-    """A payload carrying a provenance key is a round-trip by the decoder's own presence rule (any
-    value but null), so every provenance key it carries is kept, an empty creator included; a
-    payload carrying none is a new shape stamped to its author."""
-    from tcip_annotation.json_io import annotation_from_payload
+def test_a_record_and_a_bare_value_decode_through_one_lookup() -> None:
+    """An annotation's class id and a value's are one lookup: they agree on every key of the map
+    and refuse the same unknown key by name."""
+    from tcip_annotation.json_io import ClassKeyUnknown, class_id, target_class_id
 
-    kept = annotation_from_payload(
-        {"subject": "bur", "created_by": "", "created_at": "2026-01-02", "accepted_by": "user:a",
-         "accepted_at": "2026-01-03", "accepted_by_rule": "exp:abc"}, author="user:b", now="t")
-    assert (kept.created_by, kept.created_at, kept.accepted_by, kept.accepted_at,
-            kept.accepted_by_rule) == ("", "2026-01-02", "user:a", "2026-01-03", "exp:abc")
-    new = annotation_from_payload({"subject": "bur", "accepted_by": "user:a"}, author="user:b",
-                                  now="t")
+    id_map = {"closed": 0, "open": 1}
+
+    def record(value: str) -> Annotation:
+        return Annotation(subject="bud", geometry=BBox(1.0, 1.0, 2.0, 2.0),
+                          attributes={"stage": value})
+
+    for value, cid in id_map.items():
+        assert target_class_id(record(value), "bud", "stage", id_map) == class_id(value, id_map)
+        assert class_id(value, id_map) == cid
+    with pytest.raises(ClassKeyUnknown, match="'shed'"):
+        class_id("shed", id_map)
+    with pytest.raises(ClassKeyUnknown, match="'shed'"):
+        target_class_id(record("shed"), "bud", "stage", id_map)
+
+
+def test_provenance_is_the_stored_records_or_the_actors_never_the_payloads() -> None:
+    """A payload's provenance keys are not read: a content the document already stores keeps
+    that record's provenance, and any other is the actor's at the save's time."""
+    from tcip_annotation.json_io import annotation_from_payload, stamped
+
+    stored = Annotation(subject="bur", geometry=BBox(1.0, 2.0, 3.0, 4.0), created_by="model:m",
+                        created_at="2026-01-02", accepted_by="user:a", accepted_at="2026-01-03")
+    kept, new = stamped([
+        annotation_from_payload({"subject": "bur", "bbox": [1, 2, 3, 4], "created_by": "user:x"}),
+        annotation_from_payload({"subject": "bur", "bbox": [5, 6, 7, 8], "accepted_by": "user:x"}),
+    ], [stored], actor="user:b", now="t")
+    assert (kept.created_by, kept.created_at, kept.accepted_by, kept.accepted_at) == (
+        "model:m", "2026-01-02", "user:a", "2026-01-03")
     assert (new.created_by, new.created_at, new.accepted_by) == ("user:b", "t", None)
 
 
@@ -130,21 +149,18 @@ def test_a_payload_polygon_that_is_no_shape_refuses_rather_than_reading_as_absen
     from tcip_annotation.json_io import annotation_from_payload
 
     with pytest.raises(ValueError, match="polygon|segmentation|vertex"):
-        annotation_from_payload({"subject": "bur", **geometry}, author=None, now="t")
+        annotation_from_payload({"subject": "bur", **geometry})
 
 
 def test_a_payload_polygon_translates_to_the_record_the_decoder_reads() -> None:
     from tcip_annotation.json_io import annotation_from_payload
 
-    pairs = annotation_from_payload({"subject": "bur", "points": [[0, 0], [10, 0], [10, 10]]},
-                                    author=None, now="t")
+    pairs = annotation_from_payload({"subject": "bur", "points": [[0, 0], [10, 0], [10, 10]]})
     mappings = annotation_from_payload(
-        {"subject": "bur", "rings": [[{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 10}]]},
-        author=None, now="t")
+        {"subject": "bur", "rings": [[{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 10}]]})
     assert pairs.geometry == mappings.geometry == Polygon([[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)]])
     # A corner box lands on the stored grid through the one corner conversion.
-    box = annotation_from_payload({"subject": "bur", "bbox": [1.004, 2.0, 3.006, 4.0]},
-                                  author=None, now="t").geometry
+    box = annotation_from_payload({"subject": "bur", "bbox": [1.004, 2.0, 3.006, 4.0]}).geometry
     assert (box.x1, box.y1, box.x2, box.y2) == (1.0, 2.0, 3.0, 4.0)
 
 
@@ -223,18 +239,9 @@ def test_polygon_gt_round_trip(tmp_path: Path) -> None:
     assert data["annotations"][0]["segmentation"] == [[10.0, 20.0, 110.0, 20.0, 110.0, 220.0, 10.0, 220.0]]
     assert data["annotations"][1]["segmentation"] == [[0.5, 0.25, 30.0, 0.25, 15.25, 40.75]]
     assert all("score" not in o for o in data["annotations"])
+    # A polygon record stores its rings only; its box is derived on read, never a second spelling.
+    assert all("bbox" not in o for o in data["annotations"])
 
-    # Each polygon record also carries its derived box (COCO xywh of bbox_of(points)) alongside the
-    # segmentation; the polygon stays the source of truth, its box travels with it on disk.
-    def _xywh(pts: list[tuple[float, float]]) -> list[float]:
-        b = bbox_of(Polygon([pts]))
-        return [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1]
-
-    assert data["annotations"][0]["bbox"] == _xywh(SQUARE) == [10.0, 20.0, 100.0, 200.0]
-    assert data["annotations"][1]["bbox"] == _xywh(TRIANGLE) == [0.5, 0.25, 29.5, 40.5]
-
-    # The on-disk bbox is derived, not a second geometry: each record reads back as exactly one
-    # polygon annotation (segmentation wins over the co-stored bbox), never a box and a polygon.
     got = read_annotations(path)
     assert len(got) == 2
     assert all(isinstance(a.geometry, Polygon) for a in got)
@@ -244,7 +251,7 @@ def test_polygon_gt_round_trip(tmp_path: Path) -> None:
 def test_multi_ring_polygon_round_trip_keeps_every_ring_in_order(tmp_path: Path) -> None:
     # An occlusion-split instance is one annotation with more than one ring. Every ring must survive
     # the write/read round trip, in authored order; a reader that kept only the first would silently
-    # shrink the object, and its derived box with it.
+    # shrink the object, and the box derived from it with it.
     path = tmp_path / "labels" / "IMG_multi.json"
     write_annotations(
         path, [Annotation(subject="bud", geometry=Polygon([LEFT_LOBE, RIGHT_LOBE]), score=0.5)],
@@ -255,9 +262,6 @@ def test_multi_ring_polygon_round_trip_keeps_every_ring_in_order(tmp_path: Path)
         [10.0, 10.0, 30.0, 10.0, 30.0, 50.0, 10.0, 50.0],
         [70.0, 12.0, 90.0, 12.0, 90.0, 48.0, 70.0, 48.0],
     ]
-    # The co-stored box spans both rings, not just the first.
-    assert rec["bbox"] == [10.0, 10.0, 80.0, 40.0]
-
     got = read_annotations(path)
     assert len(got) == 1  # one annotation, not one per ring
     assert got[0].geometry.rings == [LEFT_LOBE, RIGHT_LOBE]
@@ -340,7 +344,6 @@ PROV = {
     "created_at": "2026-07-15T10:00:00Z",
     "accepted_by": "user:breeder",
     "accepted_at": "2026-07-15T11:00:00Z",
-    "accepted_by_rule": "exp-1:0123456789abcdef",
 }
 
 
@@ -384,7 +387,7 @@ def test_unset_provenance_omitted_from_json_not_null(tmp_path: Path) -> None:
     write_annotations(spath, [Annotation(subject="bud", geometry=Polygon([TRIANGLE]))], 100, 100)
     for path in (dpath, spath):
         obj = _raw(path)["annotations"][0]
-        for k in ("created_by", "created_at", "accepted_by", "accepted_at", "accepted_by_rule"):
+        for k in ("created_by", "created_at", "accepted_by", "accepted_at"):
             assert k not in obj  # omitted entirely, never written as null
 
 
@@ -393,12 +396,11 @@ def test_partial_provenance_writes_only_set_fields(tmp_path: Path) -> None:
     write_annotations(path, [Annotation(subject="bud", geometry=BBox(1.0, 2.0, 3.0, 4.0), created_by="claude")], 100, 100)
     obj = _raw(path)["annotations"][0]
     assert obj["created_by"] == "claude"
-    for k in ("created_at", "accepted_by", "accepted_at", "accepted_by_rule"):
+    for k in ("created_at", "accepted_by", "accepted_at"):
         assert k not in obj
     (box,) = read_annotations(path)
     assert box.created_by == "claude"
     assert box.created_at is None and box.accepted_by is None and box.accepted_at is None
-    assert box.accepted_by_rule is None
 
 
 def test_provenance_set_by_mutation_survives_write(tmp_path: Path) -> None:
@@ -486,13 +488,12 @@ def test_json_that_is_not_a_dict_raises(tmp_path: Path) -> None:
     ({"images": [], "categories": [], "annotations": []}, "import_coco"),
     ({"categories": [{"id": 1, "name": "bud"}],
       "annotations": [{"subject": "bud", "bbox": [1, 1, 9, 9]}]}, "import_coco"),
-    ({"image": "a", "objects": [{"label": "bud"}], "annotations": []}, "'objects'"),
-], ids=["empty_coco", "subject_bearing_coco", "objects_schema"])
+], ids=["empty_coco", "subject_bearing_coco"])
 def test_a_document_of_another_shape_is_refused_by_the_one_reader(
     tmp_path: Path, payload: dict, named: str,
 ) -> None:
-    """A dataset-level COCO, even an empty one or one whose records carry ``subject``, and the
-    old ``objects`` schema are never read as this image's annotations."""
+    """A dataset-level COCO, even an empty one or one whose records carry ``subject``, is never
+    read as this image's annotations."""
     from tcip_annotation.json_io import UnreadableLabelDocument
 
     path = tmp_path / "a.json"
@@ -891,16 +892,16 @@ def test_read_annotations_raises_on_invalid_utf8_bytes(tmp_path: Path) -> None:
         read_annotations(path)
 
 
-def test_read_annotations_versioned_raises_on_invalid_utf8_bytes(tmp_path: Path) -> None:
+def test_read_document_versioned_raises_on_invalid_utf8_bytes(tmp_path: Path) -> None:
     import tcip_store
     from tcip_annotation.json_io import (
-        UnreadableLabelDocument, annotation_record_key, read_annotations_versioned,
+        UnreadableLabelDocument, annotation_record_key, read_document_versioned,
     )
 
     key = annotation_record_key(tmp_path, "a")
     tcip_store.put_blob(key, b'{"annotations": [{"subject": "cat\xffkin"}]}')
     with pytest.raises(UnreadableLabelDocument):
-        read_annotations_versioned(key)
+        read_document_versioned(key)
 
 
 def test_load_label_document_reads_a_document_carrying_a_utf8_bom(tmp_path: Path) -> None:
@@ -913,41 +914,41 @@ def test_load_label_document_reads_a_document_carrying_a_utf8_bom(tmp_path: Path
     assert load_label_document(path) == {"annotations": []}
 
 
-def test_read_annotations_versioned_reads_a_document_carrying_a_utf8_bom(tmp_path: Path) -> None:
+def test_read_document_versioned_reads_a_document_carrying_a_utf8_bom(tmp_path: Path) -> None:
     import tcip_store
-    from tcip_annotation.json_io import annotation_record_key, read_annotations_versioned
+    from tcip_annotation.json_io import annotation_record_key, read_document_versioned
 
     key = annotation_record_key(tmp_path, "a")
     tcip_store.put_blob(key, b"\xef\xbb\xbf" + b'{"annotations": []}')
-    annotations, _ = read_annotations_versioned(key)
-    assert annotations == []
+    doc, _ = read_document_versioned(key)
+    assert doc.annotations == []
 
 
-def test_read_annotations_versioned_reads_an_absent_document_as_empty(tmp_path: Path) -> None:
+def test_read_document_versioned_reads_an_absent_document_as_empty(tmp_path: Path) -> None:
     from tcip_store import Version
-    from tcip_annotation.json_io import annotation_record_key, read_annotations_versioned
+    from tcip_annotation.json_io import annotation_record_key, read_document_versioned
 
     key = annotation_record_key(tmp_path, "never_written")
-    annotations, version = read_annotations_versioned(key)
-    assert annotations == []
+    doc, version = read_document_versioned(key)
+    assert doc.annotations == [] and doc.marks == {}
     assert version == Version.ABSENT
 
 
-def test_read_annotations_versioned_and_read_annotations_agree_on_the_same_bytes(
+def test_read_document_versioned_and_read_annotations_agree_on_the_same_bytes(
     tmp_path: Path,
 ) -> None:
     """One decode policy: whatever the file reader accepts or refuses, the store-backed reader
     over the identical bytes must agree."""
     from tcip_annotation.json_io import (
-        UnreadableLabelDocument, annotation_record_key, read_annotations_versioned,
+        UnreadableLabelDocument, annotation_record_key, read_document_versioned,
         write_annotations,
     )
 
     path = tmp_path / "a.json"
     write_annotations(path, [Annotation(subject="bud", geometry=BBox(1, 1, 2, 2))], 10, 10)
     key = annotation_record_key(tmp_path, "a")
-    annotations, _ = read_annotations_versioned(key)
-    assert [a.subject for a in annotations] == [a.subject for a in read_annotations(path)]
+    doc, _ = read_document_versioned(key)
+    assert [a.subject for a in doc.annotations] == [a.subject for a in read_annotations(path)]
 
     corrupt = tmp_path / "b.json"
     corrupt.write_bytes(b"{not json")
@@ -955,7 +956,7 @@ def test_read_annotations_versioned_and_read_annotations_agree_on_the_same_bytes
     with pytest.raises(UnreadableLabelDocument):
         read_annotations(corrupt)
     with pytest.raises(UnreadableLabelDocument):
-        read_annotations_versioned(corrupt_key)
+        read_document_versioned(corrupt_key)
 
 
 def test_a_box_that_would_round_to_zero_extent_is_refused_at_write(tmp_path: Path) -> None:

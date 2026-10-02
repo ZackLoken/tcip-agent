@@ -1,10 +1,9 @@
 """What a project bundle holds: every file of a project tree classified (:func:`account_for`).
 
-Roots are derived from the tree's own structure plus the anchored documents the platform's own
-writers place (``selection.json``, ``curated_manifest.json``); an anchor found somewhere the
-derivation constraints exclude (the tree root, under ``.tcip``, under a blob home, or under or
-above another derived root) raises :class:`AnchorMisplaced` naming the file. One nesting is
-admitted: a splits root sitting under a curated root. Classification of one file is by precedence:
+Roots are derived from the tree's own structure plus the anchored document the platform's own
+writers place (``selection.json``); an anchor found somewhere the derivation constraints exclude
+(the tree root, under ``.tcip``, under a blob home, or under or above another derived root) raises
+:class:`AnchorMisplaced` naming the file. Classification of one file is by precedence:
 bookkeeping first, then a record or log claimed by a derived root's own layout (a file two
 derived roots claim is a collision), then a recognized blob home, then everything else,
 unaccounted.
@@ -18,16 +17,15 @@ from pathlib import Path
 
 from tcip_store.adoption import AdoptionPlan, plan_root
 from tcip_store.file_backend import _is_bookkeeping
-from tcip_store.layout_claims import CURATED, ROOT, RUN, SPLITS, STATE
+from tcip_store.layout_claims import ROOT, RUN, SPLITS, STATE
 
 from tcip_mcp.registry_paths import is_at_or_under as _is_at_or_under
 
 SELECTION_NAME = "selection.json"
-CURATED_MANIFEST_NAME = "curated_manifest.json"
 
 
 class AnchorMisplaced(ValueError):
-    """A split or curated manifest sits somewhere the derivation constraints exclude."""
+    """A split's selection sits somewhere the derivation constraints exclude."""
 
 
 @dataclass(frozen=True)
@@ -66,7 +64,6 @@ class BundleAccounting:
 def _validate_anchor(
     tree: Path, directory: Path, filename: str, others: list[Path],
     image_root: Path, annotation_root: Path,
-    curated_dirs: frozenset[Path] = frozenset(), split_dirs: frozenset[Path] = frozenset(),
 ) -> None:
     member = directory / filename
     if directory == tree:
@@ -78,11 +75,6 @@ def _validate_anchor(
     if _is_at_or_under(directory, annotation_root):
         raise AnchorMisplaced(f"{member} sits under the annotation tree, which no {filename} may claim")
     for other in others:
-        # A curated dataset split in place: the one nesting the producer chain admits.
-        if directory in split_dirs and other in curated_dirs and _is_at_or_under(directory, other):
-            continue
-        if other in split_dirs and directory in curated_dirs and _is_at_or_under(other, directory):
-            continue
         if _is_at_or_under(directory, other) or _is_at_or_under(other, directory):
             raise AnchorMisplaced(f"{member} sits under or above another derived root, {other}")
 
@@ -94,7 +86,7 @@ def _anchored_dirs(tree: Path, filename: str) -> tuple[Path, ...]:
 
 def derive_roots(tree: str | Path) -> tuple[DerivedRoot, ...]:
     """Every root ``tree`` is, or holds, per the platform's own writers and anchors. Raises
-    :class:`AnchorMisplaced` naming the file when a split or curated manifest sits somewhere the
+    :class:`AnchorMisplaced` naming the file when a split's selection sits somewhere the
     constraints exclude.
     """
     from tcip_mcp.dataset_layout import annotation_root as _annotation_root
@@ -109,19 +101,10 @@ def derive_roots(tree: str | Path) -> tuple[DerivedRoot, ...]:
 
     image_root, annotation_root = _image_root(root), _annotation_root(root)
     split_dirs = _anchored_dirs(root, SELECTION_NAME)
-    curated_dirs = _anchored_dirs(root, CURATED_MANIFEST_NAME)
-    every_anchor = [*split_dirs, *curated_dirs]
-    curated_set, split_set = frozenset(curated_dirs), frozenset(split_dirs)
     for directory in split_dirs:
         _validate_anchor(root, directory, SELECTION_NAME,
-                          [d for d in every_anchor if d != directory], image_root, annotation_root,
-                          curated_dirs=curated_set, split_dirs=split_set)
+                          [d for d in split_dirs if d != directory], image_root, annotation_root)
         derived.append(DerivedRoot(directory, SPLITS))
-    for directory in curated_dirs:
-        _validate_anchor(root, directory, CURATED_MANIFEST_NAME,
-                          [d for d in every_anchor if d != directory], image_root, annotation_root,
-                          curated_dirs=curated_set, split_dirs=split_set)
-        derived.append(DerivedRoot(directory, CURATED))
     return tuple(derived)
 
 

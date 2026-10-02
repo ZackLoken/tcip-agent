@@ -358,17 +358,15 @@ def test_a_selected_label_emptied_since_the_draw_refuses_the_run(tmp_path: Path)
 def test_a_selected_label_a_human_confirmed_negative_still_trains(tmp_path: Path):
     """The admitting half of that rail: the same emptied label, this time with a human marking
     the image negative for this subject, is a real negative and the run binds."""
-    from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tests._producer_fixtures import mark_complete
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
     emptied = drawn.on("train")[0]
     json_io.write_annotations(emptied.ground_truth, [], 64, 64, keep_empty=True)
-    record_image_statuses(
-        root, status_bucket(SUBJECT, Path(emptied.ground_truth).parent.name),
-        {Path(emptied.source).name: "negative"}, recorded_by="user:tester")
+    mark_complete(emptied.source, emptied.ground_truth, SUBJECT, project=root)
 
     train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", _run_data_cfg(root, out), None)
 
@@ -402,54 +400,6 @@ def test_a_bound_run_admits_when_an_unselected_images_stem_turns_ambiguous(tmp_p
     assert len(val_ds) == len(drawn.on("val"))
 
 
-def test_a_positive_named_unlike_its_image_contradicts_a_stale_negative(tmp_path: Path):
-    """A sample's ground truth and its image are two trees, and a sample may name them
-    independently. A human's negative for that image, stamped under a since-changed schema, is
-    contradicted by the positive the sample actually records, so the sample is admitted on the
-    content it names rather than quarantined for a document nobody said had to sit beside the
-    image.
-
-    The sample comes back through ``read_selection``, the platform's own reader of a recorded
-    selection, which accepts an independently named pair; ``directory_samples`` cannot yet draw
-    one, so no draw produces this shape today.
-    """
-    from tcip_mcp.dataset_layout import (
-        record_image_statuses, stamp_image_status_digests, status_bucket,
-    )
-    from tcip_mcp.pipelines.data.label_queries import refuse_inadmissible_samples
-    from tcip_mcp.pipelines.data.selection import (
-        Sample, Selection, read_selection, write_selection,
-    )
-
-    from PIL import Image
-
-    root = tmp_path / "ds"
-    images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
-    images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (64, 64), (100, 120, 90)).save(images_dir / "photo.jpg")
-    registry_over(root,SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
-    # The positive this sample records is the only one there is, and it is not beside the image.
-    json_io.write_annotations(labels_dir / "reviewed.json",
-                              [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))],
-                              64, 64, keep_empty=True)
-
-    bucket = status_bucket(SUBJECT, DATES[0])
-    record_image_statuses(root, bucket, {"photo.jpg": "negative"}, recorded_by="user:tester")
-    stamp_image_status_digests(root, bucket, ["photo.jpg"], "a-schema-since-changed")
-
-    out = tmp_path / "m"
-    write_selection(out, Selection(samples=(Sample(
-        member="reviewed", source=str(images_dir / "photo.jpg"),
-        ground_truth=str(labels_dir / "reviewed.json"),
-        group="g", side="train", confirmation_bucket=bucket),
-    ), scope=ClassScope(subject=SUBJECT, id_map={SUBJECT: 0}), seed=0, group_by="stem"),
-        project=tmp_path)
-
-    selection = read_selection(out, project=tmp_path)
-    refuse_inadmissible_samples(selection.samples, selection.scope)
-
-
 def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(tmp_path: Path):
     """``row_key`` names one row inside a ground truth that answers for many samples. A geometry
     loader reads a per-image document, and reading the file whole would take a document answering
@@ -462,7 +412,6 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
     """
     from PIL import Image
 
-    from tcip_mcp.dataset_layout import status_bucket
     from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
     from tcip_mcp.pipelines.data.selection import (
         ClassScope, Sample, Selection, read_selection, write_selection,
@@ -483,8 +432,7 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
         write_selection(out, Selection(samples=(Sample(
             member=row_key or "a", source=str(images_dir / "a.jpg"),
             ground_truth=str(labels_dir / "a.json"),
-            group="g", side="train", confirmation_bucket=status_bucket(SUBJECT, DATES[0]),
-            row_key=row_key),
+            group="g", side="train", row_key=row_key),
         ), scope=ClassScope() if row_key else scope, seed=0, group_by="stem"), project=tmp_path)
         return read_selection(out, project=tmp_path)
 
@@ -536,12 +484,12 @@ def test_auto_train_val_admits_a_confirmed_negative_the_draw_admitted(tmp_path: 
     """A stem whose label file is empty and whose image a human marked negative was admitted at
     the draw, so the bound run trains on it; the loader reads it as a zero-object sample rather
     than re-deciding what a negative is."""
-    from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tests._producer_fixtures import mark_complete
 
     root = _dataset_with_a_confirmed_negative(tmp_path / "ds")
-    record_image_statuses(root, status_bucket(SUBJECT, DATES[0]), {"n.jpg": "negative"},
-                          recorded_by="user:tester")
+    mark_complete(root / "images" / DATES[0] / "n.jpg", root / "annotations" / DATES[0] / "n.json",
+                  SUBJECT, project=root)
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out, seed=1)
     assert "n" in {Path(s.ground_truth).stem for s in drawn.samples}
@@ -648,7 +596,7 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(tmp_pa
         for dataset in datasets:
             for sample in dataset.seen_samples:
                 seen.append((sample.source, sample.ground_truth, sample.row_key, sample.rect,
-                             sample.group, sample.confirmation_bucket, sample.member))
+                             sample.group, sample.member))
         return sorted(seen)
 
     # Comparable universes: the unbound run admits one date, so the bound run's members from the
@@ -920,8 +868,8 @@ def test_the_explicit_draw_the_runs_own_draw_and_the_redraw_agree_member_for_mem
 def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
     """A dataset plus a selection over it whose train-and-val members hold one foreground group:
     the val side's only group is a confirmed negative. Returns ``(root, selection_dir)``."""
-    from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
     from tcip_mcp.pipelines.data.selection import Sample, Selection, write_selection
+    from tests._producer_fixtures import mark_complete
 
     root = tmp_path / "ds"
     registry_over(root,SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
@@ -929,13 +877,11 @@ def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
     for stem in ("fg", "neg", "held_a", "held_b"):
         _write_stem(images_dir, labels_dir, stem, [] if stem == "neg" else
                    [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))])
-    record_image_statuses(root, status_bucket(SUBJECT, DATES[0]), {"neg.jpg": "negative"},
-                          recorded_by="user:tester")
+    mark_complete(images_dir / "neg.jpg", labels_dir / "neg.json", SUBJECT, project=root)
 
     def _sample(stem: str, side: str) -> Sample:
         return Sample(member=stem, source=str(images_dir / f"{stem}.jpg"),
-                      ground_truth=str(labels_dir / f"{stem}.json"), group=stem, side=side,
-                      confirmation_bucket=status_bucket(SUBJECT, DATES[0]))
+                      ground_truth=str(labels_dir / f"{stem}.json"), group=stem, side=side)
 
     out = tmp_path / "m"
     write_selection(out, Selection(

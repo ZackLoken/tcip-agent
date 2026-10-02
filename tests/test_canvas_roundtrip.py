@@ -6,7 +6,7 @@ These tests simulate what the annotation canvas webview does:
 3. Save the single name-based per-image label file
 4. Read back and verify content matches
 
-Also tests prediction overlay data roundtrip for the review panel.
+Also tests prediction overlay data roundtrip for the proposals the editor shows.
 """
 
 from __future__ import annotations
@@ -17,13 +17,12 @@ import pytest
 
 from tcip_annotation import (
     Annotation,
-    AnnotationState,
     BBox,
     Polygon,
-    compute_matches,
     read_annotations,
     write_annotations,
 )
+from tcip_annotation.matching import pair_proposals
 
 
 # ── Setup ──
@@ -53,20 +52,15 @@ class TestBoxRoundtrip:
 
     def test_draw_save_reload(self, img_dir: Path) -> None:
         """Draw two boxes, save, reload and verify."""
-        state = AnnotationState(
-            image_path=str(img_dir / "images" / "test_001.jpg"),
-            img_width=640,
-            img_height=480,
-        )
-
         # Draw boxes (simulating canvas click-drag)
-        state.annotations.append(Annotation(subject="bud", geometry=BBox(x1=100, y1=50, x2=250, y2=200)))
-        state.annotations.append(Annotation(subject="nut", geometry=BBox(x1=400, y1=300, x2=550, y2=420)))
-        assert len(state.annotations) == 2
+        annotations = [
+            Annotation(subject="bud", geometry=BBox(x1=100, y1=50, x2=250, y2=200)),
+            Annotation(subject="nut", geometry=BBox(x1=400, y1=300, x2=550, y2=420)),
+        ]
 
         # Save
         label_path = str(img_dir / "labels" / "test_001.json")
-        write_annotations(label_path, state.annotations, 640, 480)
+        write_annotations(label_path, annotations, 640, 480)
 
         # Read back
         read_back = read_annotations(label_path)
@@ -74,26 +68,12 @@ class TestBoxRoundtrip:
         assert {a.subject for a in read_back} == {"bud", "nut"}
 
         # Verify coordinates (within float precision)
-        for orig, loaded in zip(state.annotations, read_back):
+        for orig, loaded in zip(annotations, read_back):
             assert abs(orig.geometry.x1 - loaded.geometry.x1) < 2
             assert abs(orig.geometry.y1 - loaded.geometry.y1) < 2
             assert abs(orig.geometry.x2 - loaded.geometry.x2) < 2
             assert abs(orig.geometry.y2 - loaded.geometry.y2) < 2
             assert orig.subject == loaded.subject
-
-    def test_undo_redo_then_save(self, img_dir: Path) -> None:
-        """Draw boxes, verify save: state management is tested elsewhere."""
-        state = AnnotationState(img_width=640, img_height=480)
-
-        state.annotations.append(Annotation(subject="bud", geometry=BBox(x1=10, y1=10, x2=100, y2=100)))
-        state.annotations.append(Annotation(subject="nut", geometry=BBox(x1=200, y1=200, x2=300, y2=300)))
-        assert len(state.annotations) == 2
-
-        label_path = str(img_dir / "labels" / "test_001.json")
-        write_annotations(label_path, state.annotations, 640, 480)
-
-        read_back = read_annotations(label_path)
-        assert len(read_back) == 2
 
     def test_five_distinct_subjects_survive_the_round_trip(self, img_dir: Path) -> None:
         """Coverage: five box annotations of five distinct subjects, written and read back
@@ -121,20 +101,12 @@ class TestPolygonRoundtrip:
 
     def test_draw_polygon_save_reload(self, img_dir: Path) -> None:
         """Draw a polygon, save, reload and verify."""
-        state = AnnotationState(
-            image_path=str(img_dir / "images" / "test_001.jpg"),
-            img_width=640,
-            img_height=480,
-        )
-
         # Draw a triangle polygon (simulating canvas vertex clicks)
         poly = Polygon(rings=[[(100.0, 50.0), (250.0, 200.0), (50.0, 200.0)]])
-        state.annotations.append(Annotation(subject="bud", geometry=poly))
-        assert len(state.annotations) == 1
 
         # Save
         label_path = str(img_dir / "labels" / "test_001.json")
-        write_annotations(label_path, state.annotations, 640, 480)
+        write_annotations(label_path, [Annotation(subject="bud", geometry=poly)], 640, 480)
 
         # Read back
         read_back = read_annotations(label_path)
@@ -150,23 +122,23 @@ class TestPolygonRoundtrip:
 
     def test_multi_class_polygon(self, img_dir: Path) -> None:
         """Multiple polygons with different subjects."""
-        state = AnnotationState(img_width=640, img_height=480)
-
-        state.annotations.append(Annotation(
-            subject="bud", geometry=Polygon(rings=[[(10, 10), (100, 10), (100, 100), (10, 100)]])))
-        state.annotations.append(Annotation(
-            subject="leaf", geometry=Polygon(rings=[[(200, 200), (300, 200), (300, 300), (200, 300)]])))
+        annotations = [
+            Annotation(subject="bud",
+                       geometry=Polygon(rings=[[(10, 10), (100, 10), (100, 100), (10, 100)]])),
+            Annotation(subject="leaf",
+                       geometry=Polygon(rings=[[(200, 200), (300, 200), (300, 300), (200, 300)]])),
+        ]
 
         label_path = str(img_dir / "labels" / "test_001.json")
-        write_annotations(label_path, state.annotations, 640, 480)
+        write_annotations(label_path, annotations, 640, 480)
 
         read_back = read_annotations(label_path)
         assert len(read_back) == 2
         assert {a.subject for a in read_back} == {"bud", "leaf"}
 
     def test_occlusion_split_prediction_survives_the_round_trip(self, img_dir: Path) -> None:
-        """A model-predicted mask the review canvas overlays can be occlusion-split: one instance,
-        two contours. Both rings must come back so the reviewer sees the whole object."""
+        """A model-predicted mask the editor overlays can be occlusion-split: one instance, two
+        contours. Both rings must come back so the person sees the whole object."""
         rings = [
             [(100.0, 50.0), (150.0, 50.0), (150.0, 200.0), (100.0, 200.0)],
             [(300.0, 60.0), (350.0, 60.0), (350.0, 190.0), (300.0, 190.0)],
@@ -191,14 +163,14 @@ class TestSingleFileSave:
 
     def test_box_and_polygon_single_file(self, img_dir: Path) -> None:
         """Save a box and a polygon together, verify both survive in one file."""
-        state = AnnotationState(img_width=640, img_height=480)
-
-        state.annotations.append(Annotation(subject="bud", geometry=BBox(x1=50, y1=50, x2=200, y2=150)))
-        state.annotations.append(Annotation(
-            subject="nut", geometry=Polygon(rings=[[(300, 100), (400, 100), (400, 200), (300, 200)]])))
+        annotations = [
+            Annotation(subject="bud", geometry=BBox(x1=50, y1=50, x2=200, y2=150)),
+            Annotation(subject="nut",
+                       geometry=Polygon(rings=[[(300, 100), (400, 100), (400, 200), (300, 200)]])),
+        ]
 
         label_path = str(img_dir / "labels" / "test_001.json")
-        write_annotations(label_path, state.annotations, 640, 480)
+        write_annotations(label_path, annotations, 640, 480)
 
         read_back = read_annotations(label_path)
         assert len(read_back) == 2
@@ -212,10 +184,10 @@ class TestSingleFileSave:
 
 
 class TestPredictionOverlay:
-    """Verify that predictions load correctly and matching produces expected TP/FP/FN."""
+    """Verify that proposals load correctly and pair with the annotation they overlap."""
 
-    def test_prediction_overlay_matching(self, img_dir: Path) -> None:
-        """Load GT + predictions, compute matches, verify overlay data."""
+    def test_prediction_overlay_pairing(self, img_dir: Path) -> None:
+        """Load annotations + proposals, pair them, verify overlay data."""
         # Write GT
         gt = [
             Annotation(subject="bud", geometry=BBox(x1=100, y1=50, x2=250, y2=200)),
@@ -236,8 +208,7 @@ class TestPredictionOverlay:
         loaded_gt = read_annotations(gt_path)
         loaded_preds = read_annotations(pred_path)
 
-        matches = compute_matches(loaded_gt, loaded_preds, iou_threshold=0.5, conf_threshold=0.25)
+        paired = pair_proposals(loaded_gt, loaded_preds, {"kind": "iou", "iou_threshold": 0.5})
 
-        assert len(matches["tp"]) == 1, "Expected 1 TP (overlapping prediction)"
-        assert len(matches["fp"]) == 1, "Expected 1 FP (non-overlapping prediction)"
-        assert len(matches["fn"]) == 1, "Expected 1 FN (unmatched GT box)"
+        # The overlapping proposal confirms the first annotation; the other pairs with nothing.
+        assert paired.pairs == [(0, 0)]

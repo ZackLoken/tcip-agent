@@ -18,6 +18,7 @@ export const BoxOverlay = memo(function BoxOverlay({
   selected,
   handleR,
   dashed,
+  strokeOpacity,
 }: {
   box: Box;
   stroke: string;
@@ -29,6 +30,8 @@ export const BoxOverlay = memo(function BoxOverlay({
   selected?: boolean;
   handleR?: number;
   dashed?: DashKind;
+  /** The outline's opacity; full when omitted. */
+  strokeOpacity?: number;
 }) {
   const corners: [number, number][] = [
     [box.x1, box.y1],
@@ -46,6 +49,7 @@ export const BoxOverlay = memo(function BoxOverlay({
         stroke={stroke}
         strokeWidth={width}
         dash={dashed ? dashPattern(dashed, width) : undefined}
+        opacity={strokeOpacity}
       />
       {selected &&
         handleR &&

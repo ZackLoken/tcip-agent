@@ -6,7 +6,6 @@ import type { TabName } from "@/store/types";
 export const TAB_LABELS: Record<TabName, string> = {
   setup: "Setup",
   annotate: "Annotate",
-  review: "Review",
   training: "Training",
   tuning: "Tuning",
   inference: "Inference",

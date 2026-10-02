@@ -25,16 +25,17 @@ ROOT = "root"
 """A project or dataset root: the directory holding ``images/``, ``annotations/`` and ``.tcip/``."""
 
 STATE = "state"
-"""A root's ``.tcip/state`` directory, the root the review shards and per-trait records hang off."""
+"""A root's ``.tcip/state`` directory, the root the verdict shards and per-trait records hang off."""
+
+REVIEW_SHARD_DIRNAME, REVIEW_SHARD_SUFFIX = "review", ".jsonl"
+"""The directory under :data:`STATE` the verdict shards sit in, one per bucket below it, and each
+shard's file suffix."""
 
 WORKSPACE = "workspace"
 """The workspace directory holding the project folders and the active-project marker."""
 
 SPLITS = "splits"
 """A selection's output directory: the one document a draw writes its whole partition as."""
-
-CURATED = "curated"
-"""A curated dataset's output directory."""
 
 RUN = "run"
 """A run's own directory, where an evaluation of its checkpoint writes its results."""
@@ -53,7 +54,6 @@ LAYOUTS = (
     STATE,
     WORKSPACE,
     SPLITS,
-    CURATED,
     RUN,
 )
 """Every kind of directory a root can be, for an operator naming one on a command line."""
@@ -128,9 +128,7 @@ _BARE_EXTENSION = re.compile(r"^\.[^.\\/]+$")
 class Claim:
     """Where one store's entries can sit under a root of ``layout``.
 
-    A store carries more than one template when one shape cannot cover every legal entry: a
-    review verdict places its shard under a bucket directory or directly under ``review/``
-    depending on whether the review named a prediction bucket, and both depths are legal.
+    A store carries more than one template when one shape cannot cover every legal entry.
     """
 
     layout: str
@@ -230,20 +228,6 @@ def _named(*segments: str, name: str, suffix: str = "") -> Template:
 
 
 PLATFORM_CLAIMS: Mapping[str, Claim] = {
-    "image_status": Claim(ROOT, (_named(".tcip", "state", name="image_status", suffix=".json"),)),
-    "image_status_digest": Claim(
-        ROOT, (_named(".tcip", "state", name="image_status_digest", suffix=".json"),)
-    ),
-    "view_coverage": Claim(ROOT, (_named(".tcip", "state", name="view_coverage", suffix=".json"),)),
-    "coverage_grid_zoom": Claim(
-        ROOT, (_named(".tcip", "state", name="coverage_grid_zoom", suffix=".json"),)
-    ),
-    "region_completeness": Claim(
-        ROOT, (_named(".tcip", "state", name="region_completeness", suffix=".json"),)
-    ),
-    "region_completeness_digest": Claim(
-        ROOT, (_named(".tcip", "state", name="region_completeness_digest", suffix=".json"),)
-    ),
     "gui_snapshot": Claim(ROOT, (_named(".tcip", "state", name="gui", suffix=".json"),)),
     "canvas_meta": Claim(ROOT, (_named(".tcip", "state", name="canvas_live", suffix=".json"),)),
     "canvas_geometry": Claim(ROOT, (_named(".tcip", "state", name="canvas_shapes", suffix=".json"),)),
@@ -283,10 +267,7 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
     ),
     "review_verdicts": Claim(
         STATE,
-        (
-            (Constant("review"), Patterned(ANY), Patterned(ANY, tail=".json")),
-            (Constant("review"), Patterned(ANY, tail=".json")),
-        ),
+        ((Constant(REVIEW_SHARD_DIRNAME), Patterned(ANY), Patterned(ANY, tail=REVIEW_SHARD_SUFFIX)),),
     ),
     "traits": Claim(STATE, ((Constant("traits"), Patterned(ANY, tail=".json")),)),
     "delivery_events": Claim(
@@ -296,7 +277,6 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
         STATE, ((Constant("delivery_acknowledgments"), Patterned(ANY, tail=".json")),)
     ),
     "selection": Claim(SPLITS, (_named(name="selection", suffix=".json"),)),
-    "curated_manifest": Claim(CURATED, (_named(name="curated_manifest", suffix=".json"),)),
     "raster_pass_progress": Claim(
         ROOT,
         (
@@ -513,7 +493,6 @@ __all__ = [
     "ANY",
     "ARCHIVED_NAME_SEGMENT",
     "AnchoredMatch",
-    "CURATED",
     "Claim",
     "ClaimedFile",
     "Claimant",
@@ -523,6 +502,8 @@ __all__ = [
     "PLATFORM_CLAIMS",
     "PartPattern",
     "Patterned",
+    "REVIEW_SHARD_DIRNAME",
+    "REVIEW_SHARD_SUFFIX",
     "ROOT",
     "RUN",
     "SPLITS",

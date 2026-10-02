@@ -76,6 +76,7 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
     assert ts.read_log(audit.audit_log_key(project)).records[:-1] == audit_lines
     (line,) = _renamed_lines(project)
     assert line["arguments"]["previous_display_name"] == "Valley block"
+    assert line["arguments"]["requested_by"] == "user:tester"
     listed = {p["id"]: p for p in client.get("/api/projects").json()["projects"]}
     assert listed[project_id]["display_name"] == "Valley block, north half"
 
@@ -89,6 +90,20 @@ def test_a_display_name_the_record_refuses_answers_400_and_changes_nothing(clien
         "id": project_id, "display_name": "   ", "user": "tester"})
 
     assert resp.status_code == 400
+    assert read_record(project)["display_name"] == "Valley block"
+    assert _renamed_lines(project) == []
+
+
+def test_a_rename_naming_no_one_answers_400_and_changes_nothing(client, tmp_path, monkeypatch):
+    from tcip_mcp.project_record import read_record
+
+    monkeypatch.setenv("TCIP_USER", "osuser")
+    project, project_id = _project(tmp_path.parent, "valley_block", "Valley block")
+
+    resp = client.post("/api/projects/rename", json={
+        "id": project_id, "display_name": "Hill block", "user": "  "})
+
+    assert resp.status_code == 400 and "names no one" in resp.text
     assert read_record(project)["display_name"] == "Valley block"
     assert _renamed_lines(project) == []
 

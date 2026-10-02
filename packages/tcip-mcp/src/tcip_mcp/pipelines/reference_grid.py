@@ -1,6 +1,6 @@
 """Named reference grid over a raster's native pixel frame: cells recomputed from the serializable
 geometry dict (:func:`grid_geometry`) by :func:`reference_cells`, each named spreadsheet-style, a
-bijective base-26 column letter plus a 1-based row number ("B3", ``tcip_annotation.sam_wrapper``'s
+bijective base-26 column letter plus a 1-based row number ("B3", ``tcip_annotation.grid``'s
 ``column_label``)."""
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from tcip_annotation.sam_wrapper import column_label
+from tcip_annotation.grid import column_label
 
 from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE, VIZ_ARTIFACT_MAX_EDGE
 
@@ -31,11 +31,6 @@ class Cell:
     y0: int
     x1: int
     y1: int
-
-    @property
-    def center(self) -> tuple[float, float]:
-        """The rect's center in native pixels."""
-        return (self.x0 + self.x1) / 2.0, (self.y0 + self.y1) / 2.0
 
 
 def reference_cells(
@@ -81,25 +76,11 @@ def derive_serving_tile_size(width: int, height: int) -> int:
     ``n = ceil(long_edge / DISPLAY_MAX_EDGE)`` cells along the long edge, so the returned edge is
     ``ceil(long_edge / n) <= DISPLAY_MAX_EDGE``; an image inside the display bound derives one cell
     spanning it. Deterministic in the image dims and the platform display bound
-    (``display_bounds.DISPLAY_MAX_EDGE``). Not the coverage lattice's size
-    (:func:`derive_lattice_tile_size`).
+    (``display_bounds.DISPLAY_MAX_EDGE``).
     """
     long_edge = max(width, height)
     n = math.ceil(long_edge / DISPLAY_MAX_EDGE)
     return math.ceil(long_edge / n)
-
-
-def derive_lattice_tile_size(viewport_w: int, viewport_h: int, zoom: float) -> int:
-    """Cell edge for the coverage lattice at the breeder's own set inspection zoom: one
-    screenful of native pixels at that zoom, ``ceil(min(viewport_w, viewport_h) / zoom)``, on the
-    canvas host as measured when the grid was fetched. Refuses a non-positive zoom or a viewport
-    under 1x1.
-    """
-    if zoom <= 0:
-        raise ValueError(f"zoom must be positive, got {zoom}")
-    if viewport_w < 1 or viewport_h < 1:
-        raise ValueError(f"viewport must be at least 1x1, got {viewport_w}x{viewport_h}")
-    return math.ceil(min(viewport_w, viewport_h) / zoom)
 
 
 def derive_pointing_tile_size(width: int, height: int) -> int:
@@ -124,9 +105,8 @@ def grid_geometry(width: int, height: int, tile_size: int, overlap: float = 0.0)
     overlap, cols, rows}``.
 
     Cells are recomputed from this dict via :func:`reference_cells` (clamped or not, the caller's
-    choice). ``tile_size`` is required: :func:`derive_serving_tile_size`,
-    :func:`derive_lattice_tile_size` and :func:`derive_pointing_tile_size` each derive one for
-    their own grid.
+    choice). ``tile_size`` is required: :func:`derive_serving_tile_size` and
+    :func:`derive_pointing_tile_size` each derive one for their own grid.
     """
     cells = reference_cells(width, height, tile_size, overlap)
     return {

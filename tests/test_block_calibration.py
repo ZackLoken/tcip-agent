@@ -1,7 +1,7 @@
 """A mosaic's own reserved calibration and test regions assessed directly, without a separate
 held-out image set (``assessment.assess_reserved_regions``).
 
-Covers: the region-completeness gate (refuses unattested, admits attested), the sub-banding and
+Covers: the completion-mark gate (refuses unmarked, admits marked), the sub-banding and
 halo running real tiled inference over real bands under the one execution record the assessment
 records, the geometric disjointness check, and the band geometry helpers.
 """
@@ -131,44 +131,14 @@ def _build_experiment(tmp_path: Path, *, reserve_frac: float = 0.15,
 
 def _attest_regions_complete(root: Path, stem: str, regions: list[list[tuple[int, int, int, int]]],
                              *, subject: str = "bud") -> None:
-    """Directly writes the region-completeness store (bypassing the HTTP route, same effect as a
-    breeder attesting every intersecting cell complete): every reference-grid cell (at the
-    training tile_size, clamped) that any rect in ``regions`` overlaps is marked complete, with a
-    real content digest so the staleness check reads it as fresh."""
-    from tcip_annotation import json_io as _json_io
+    """Mark every rect of ``regions`` complete for ``subject`` in the mosaic's label document,
+    through the editor's own save door, one mark per rect."""
+    from tcip_mcp.dataset_layout import annotation_path
+    from tests._producer_fixtures import mark_complete
 
-    from tcip_mcp.dataset_layout import (
-        annotation_path, region_completeness_digest_key, region_completeness_key, status_bucket,
-    )
-    from tcip_mcp.pipelines.raster_source import rects_overlap
-    from tcip_mcp.pipelines.reference_grid import grid_geometry, reference_cells
-    from tcip_mcp.pipelines.region_completeness import cell_annotation_digest
-    from tcip_store import transaction
-
-    grid = grid_geometry(WIDTH, HEIGHT, TILE, 0.0)
-    cells = reference_cells(WIDTH, HEIGHT, TILE, 0.0, clamp=True)
-    all_rects = [tuple(r) for region in regions for r in region]
-    covered = sorted({
-        c.name for c in cells
-        if any(rects_overlap((c.x0, c.y0, c.x1, c.y1), r) for r in all_rects)
-    })
-
-    label_path = annotation_path(root, None, stem)
-    annotations = _json_io.read_annotations(str(label_path)) if label_path.is_file() else []
-    bucket = status_bucket(subject, stem)
-    store = {bucket: {
-        "grid": grid, "cells_complete": covered, "attested_by": "test", "attested_at": "now",
-        "stem": stem, "date": None, "subject": subject, "cells_attested_view": {},
-    }}
-    digests = {bucket: {
-        c.name: cell_annotation_digest(annotations, subject, c) for c in cells if c.name in covered
-    }}
-    # Digest first, the order the coverage route commits them in: an attestation with no digest
-    # beside it reads as stale.
-    digest_key, completeness_key = region_completeness_digest_key(root), region_completeness_key(root)
-    with transaction(digest_key, completeness_key) as txn:
-        txn.write(digest_key, digests)
-        txn.write(completeness_key, store)
+    for x0, y0, x1, y1 in (r for region in regions for r in region):
+        mark_complete(root / "images" / f"{stem}.tif", annotation_path(root, None, stem), subject,
+                      project=root.parent, rect=(x0, y0, x1 - x0, y1 - y0))
 
 
 def _attested(tmp_path: Path, **kwargs) -> dict:
@@ -209,7 +179,20 @@ def test_an_assessment_refuses_while_the_reserved_regions_are_unattested(tmp_pat
 
     exp = _build_experiment(tmp_path)
 
-    with pytest.raises(AssessmentRefused, match="not fully attested complete"):
+    with pytest.raises(AssessmentRefused, match="not marked complete"):
+        _assess(exp)
+
+
+def test_a_mark_over_one_region_leaves_the_other_unattested(tmp_path: Path):
+    """The check reads each mark's rect: a mark over the calibration region attests that region
+    alone, so the assessment refuses naming the test region and only it."""
+    from tcip_mcp.assessment import AssessmentRefused
+
+    exp = _build_experiment(tmp_path)
+    _attest_regions_complete(exp["root"], exp["stem"],
+                             [exp["spatial_manifest"]["calibration_region"]])
+
+    with pytest.raises(AssessmentRefused, match=r"\['test_region'\] are not marked complete"):
         _assess(exp)
 
 
@@ -222,7 +205,7 @@ def test_completeness_is_checked_before_feasibility(tmp_path: Path):
 
     with pytest.raises(AssessmentRefused) as exc_info:
         _assess(exp, k_cal=40, k_test=40)
-    assert "not fully attested complete" in str(exc_info.value)
+    assert "not marked complete" in str(exc_info.value)
     assert "leaves only" not in str(exc_info.value)
 
 
@@ -507,7 +490,7 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(tmp_path: Path):
           "iscrowd": np.asarray(target["iscrowd"], dtype=bool)}
     stub = SimpleNamespace(predictor=_OneDetection(), tile_batch_size=8)
     band = Sample(member="a", source="mosaic.tif", ground_truth="", group="a", side="",
-                  confirmation_bucket=None, rect=(0, 0, 200, 200))
+                  rect=(0, 0, 200, 200))
 
     records = _band_records(SimpleNamespace(height=200, width=200, num_channels=3),
                             {"a": (0, 0, 200, 200)}, stub,
@@ -643,36 +626,28 @@ def test_a_recorded_id_map_needs_no_registry_on_disk(tmp_path: Path):
     assert _band_total(_assess(exp)) > 0
 
 
-def test_regions_attested_through_the_coverage_route_admit_the_assessment(tmp_path: Path):
-    """The completeness gate reads the record the breeder's own attestation writes: every reserved
-    cell is toggled complete through the coverage route the Annotate canvas posts to."""
+def test_regions_marked_through_the_editors_save_admit_the_assessment(tmp_path: Path):
+    """The completeness gate reads the record the breeder's own gesture writes: each reserved
+    region marked complete through the save the Annotate canvas posts to."""
     from fastapi.testclient import TestClient
 
-    from tcip_mcp.pipelines.raster_source import rects_overlap
-    from tcip_mcp.pipelines.region_completeness import incomplete_cells_for_rect
+    from tcip_mcp.dataset_layout import annotation_path
     from tcip_web.app import app
+    from tests._web_fixtures import open_new_project
 
     exp = _build_experiment(tmp_path)
+    open_new_project(tmp_path)
     manifest = exp["spatial_manifest"]
-    regions = [manifest["calibration_region"], manifest["test_region"]]
+    label = annotation_path(exp["root"], None, exp["stem"])
     client = TestClient(app, base_url="http://127.0.0.1")
-    grid_resp = client.get("/api/coverage/grid",
-                           params={"path": str(exp["raster_path"]), "tile_size": TILE})
-    assert grid_resp.status_code == 200, grid_resp.text
-    served = grid_resp.json()["grid"]
-    grid = {key: value for key, value in served.items() if key not in ("cells", "derivation")}
-    all_rects = [tuple(r) for region in regions for r in region]
-    covered = sorted(c["name"] for c in served["cells"]
-                     if any(rects_overlap((c["x0"], c["y0"], c["x1"], c["y1"]), r)
-                            for r in all_rects))
-    assert covered
-    for name in covered:
-        resp = client.post("/api/coverage/completeness", json={
-            "image_path": str(exp["raster_path"]), "subject": "bud", "grid": grid,
-            "cell": name, "complete": True, "user": "breeder", "view_scale": None})
+    for region in (manifest["calibration_region"], manifest["test_region"]):
+        x0, y0, x1, y1 = region[0]
+        current = client.get("/api/annotate/labels", params={
+            "image_path": str(exp["raster_path"]), "label_path": str(label)}).json()
+        resp = client.post("/api/annotate/labels", json={
+            "image_path": str(exp["raster_path"]), "label_path": str(label),
+            "annotations": current["annotations"], "base_mtime": current["base_mtime"],
+            "user": "breeder", "complete": {"bud": True}, "rect": [x0, y0, x1 - x0, y1 - y0]})
         assert resp.status_code == 200, resp.text
-    for region in regions:
-        assert incomplete_cells_for_rect(str(exp["root"]), "bud", exp["stem"],
-                                         tuple(region[0])) == []
 
     assert _band_total(_assess(exp)) > 0

@@ -74,7 +74,7 @@ def _deliver_counts(root: Path, name: str) -> dict:
 def _confirm(client: TestClient, revision: traits.TraitRevision, **extra):
     body = {"trait": revision.entry.name,
             "revision": revision.number, "entry_sha256": revision.entry_sha256,
-            "confirmed": True, **extra}
+            "confirmed": True, "user": "breeder", **extra}
     return client.post(CONFIRM_ROUTE, json=body)
 
 
@@ -155,8 +155,7 @@ def test_a_withdrawn_confirmation_marks_the_revision_and_leaves_the_entry(tmp_pa
     revision = fx.propose_and_confirm(tmp_path, _count_entry())
 
     withdrawn = traits.confirm_revision(
-        tmp_path, fx.COUNT_TRAIT, 1, revision.entry_sha256, user="rosalind",
-        identity_from_request=True, confirmed=False)
+        tmp_path, fx.COUNT_TRAIT, 1, revision.entry_sha256, user="rosalind", confirmed=False)
 
     assert withdrawn.withdrawn_by == "user:rosalind" and not withdrawn.confirmed
     assert withdrawn.entry == revision.entry and withdrawn.confirmed_by == revision.confirmed_by
@@ -172,7 +171,7 @@ def test_a_withdrawn_later_revision_leaves_the_earlier_confirmed_one_answering(
     fx.propose_and_confirm(tmp_path, _count_entry())
     second = fx.propose_and_confirm(tmp_path, _count_entry(statement="stems per frame, tips excluded"))
     traits.confirm_revision(tmp_path, fx.COUNT_TRAIT, 2, second.entry_sha256, user="rosalind",
-                            identity_from_request=True, confirmed=False)
+                            confirmed=False)
 
     assert _deliver_counts(tmp_path, "back_to_first")["trait_revision"] == 1
 
@@ -287,7 +286,7 @@ def test_the_entry_hash_covers_every_field_and_ignores_sequence_type() -> None:
 
 
 def test_an_entry_cannot_carry_a_confirmation_and_a_confirmation_needs_a_name(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from pydantic import ValidationError
 
@@ -295,8 +294,10 @@ def test_an_entry_cannot_carry_a_confirmation_and_a_confirmation_needs_a_name(
         traits.TraitEntry.model_validate({**fx.COUNT_SPEC.model_dump(), "confirmed_by": "user:x"})
 
     revision = fx.propose(tmp_path, _count_entry())
-    with pytest.raises(ValueError, match="confirming name is required"):
+    monkeypatch.setenv("TCIP_USER", "rosalind")
+    with pytest.raises(ValueError, match="names no one"):
         fx.confirm(tmp_path, revision, user="  ")
+    assert not traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest.confirmed
     confirmed = fx.confirm(tmp_path, revision)
     assert confirmed.confirmed_by == "user:grüne" and confirmed.confirmed_at.endswith("+00:00")
 
@@ -343,7 +344,6 @@ def test_a_confirmation_with_another_hash_refuses_and_the_revisions_own_hash_con
 
     assert confirmed.status_code == 200, confirmed.text
     assert confirmed.json()["confirmed_by"] == "user:rosalind"
-    assert confirmed.json()["identity_from_request"] is True
     assert confirmed.json()["audit_warning"] is None
     assert traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest_confirmed.number == 1
 
@@ -365,15 +365,16 @@ def test_the_traits_route_serves_every_revision_and_the_vocabulary_definitions(
     assert body["unreadable"] == []
 
 
-def test_a_nameless_confirmation_records_the_backend_identity_and_says_so(
-    client: TestClient, tmp_path: Path,
+def test_a_nameless_confirmation_refuses_and_confirms_nothing(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("TCIP_USER", "osuser")
     revision = fx.propose(tmp_path, _count_entry())
 
-    body = _confirm(client, revision).json()
+    resp = _confirm(client, revision, user=" ")
 
-    assert body["identity_from_request"] is False
-    assert body["confirmed_by"].startswith("user:")
+    assert resp.status_code == 400 and "names no one" in resp.text
+    assert not traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest.confirmed
 
 
 def test_confirming_and_withdrawing_land_in_the_project_log_with_the_actor(
@@ -419,7 +420,7 @@ def test_the_door_refuses_an_unknown_trait_and_a_revision_that_does_not_exist(
     revision = fx.propose(tmp_path, _count_entry())
 
     body = {"trait": fx.COUNT_TRAIT, "revision": 1,
-            "entry_sha256": revision.entry_sha256, "confirmed": True}
+            "entry_sha256": revision.entry_sha256, "confirmed": True, "user": "breeder"}
     unknown = client.post(CONFIRM_ROUTE, json={**body, "trait": "not_a_trait"})
     missing = client.post(CONFIRM_ROUTE, json={**body, "revision": 2})
 

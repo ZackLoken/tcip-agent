@@ -81,11 +81,7 @@ function makeLoaded(over: Partial<LoadedImage> = {}): LoadedImage {
     ok: true,
     aborted: false,
     servedSize: null,
-    servedSizeRaw: null,
-    statsSource: null,
-    displayBounds: null,
     imageError: null,
-    headerParseError: null,
     ...over,
   };
 }
@@ -124,36 +120,17 @@ afterEach(() => {
   loader.pending.length = 0;
 });
 
-describe("CanvasStage base image load failure", () => {
-  it("names the header that failed to parse, rather than the generic missing-image message", async () => {
-    render(<CanvasStage imageUrl={BASE_URL} imgWidth={1000} imgHeight={800} />);
-    await resolveLoad(
-      BASE_URL,
-      makeLoaded({
-        ok: false,
-        image: null,
-        headerParseError: "X-TCIP-Stats-Source did not parse: garbage",
-      }),
-    );
-    expect(screen.getByText(/X-TCIP-Stats-Source did not parse: garbage/)).toBeInTheDocument();
-    expect(screen.queryByText(/it may be missing/)).not.toBeInTheDocument();
-  });
-});
-
 describe("CanvasStage regions", () => {
-  it("renders a region at its image-coord rect once its serve loads, and reports the facts", async () => {
-    const onLoaded = vi.fn();
-    render(<CanvasStage {...stageProps([{ ...REGION, onLoaded }])} />);
+  it("renders a region at its image-coord rect once its serve loads", async () => {
+    render(<CanvasStage {...stageProps([REGION])} />);
     expect(screen.queryAllByTestId("k-image")).toHaveLength(0);
 
-    const facts = makeLoaded({ servedSize: { w: 50, h: 40 } });
-    await resolveLoad(REGION.url, facts);
+    await resolveLoad(REGION.url, makeLoaded({ servedSize: { w: 50, h: 40 } }));
     const node = screen.getByTestId("k-image");
     expect(node).toHaveAttribute("data-x", "100");
     expect(node).toHaveAttribute("data-y", "200");
     expect(node).toHaveAttribute("data-width", "50");
     expect(node).toHaveAttribute("data-height", "40");
-    expect(onLoaded).toHaveBeenCalledWith(facts);
   });
 
   it("unmounts a region dropped from the prop (no longer intersecting the viewport)", async () => {
@@ -179,12 +156,10 @@ describe("CanvasStage regions", () => {
     expect(screen.queryAllByTestId("k-image")).toHaveLength(1);
   });
 
-  it("ignores a failed region serve (no bitmap installed, facts still reported)", async () => {
-    const onLoaded = vi.fn();
-    render(<CanvasStage {...stageProps([{ ...REGION, onLoaded }])} />);
+  it("ignores a failed region serve (no bitmap installed)", async () => {
+    render(<CanvasStage {...stageProps([REGION])} />);
     await resolveLoad(REGION.url, makeLoaded({ ok: false, image: null }));
     expect(screen.queryAllByTestId("k-image")).toHaveLength(0);
-    expect(onLoaded).toHaveBeenCalled();
   });
 });
 

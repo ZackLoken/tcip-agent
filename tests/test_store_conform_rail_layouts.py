@@ -3,7 +3,7 @@
 The rail's mechanics are exercised with synthetic stores in ``test_store_conform_rail.py``.
 What is asked here is whether the shipped claim table is right about real directories: a
 project root holding a spreadsheet and a nested dataset, a workspace holding project folders,
-an output directory that is a curated root and a dataset root at once. Every case addresses
+a directory that is a selection root and a project root at once. Every case addresses
 shipped stores through their own key constructors, because the table's rows are what is under
 test and a harness store would only restate the table's assumptions back at it.
 
@@ -42,17 +42,25 @@ def bound(backend):
         backend.close()
 
 
-def _image_status(root: Path) -> ts.Key:
-    from tcip_mcp import dataset_layout
+def _state_record(root: Path) -> ts.Key:
+    """A compare-and-set record rooted on ``.tcip/state``, at ``annotation_stats.json``."""
+    from tcip_mcp import web_client
 
-    return dataset_layout.image_status_key(root)
+    return web_client.annotation_stats_key(str(root))
 
 
-def _plant_mapping(root: Path) -> ts.Key:
-    """A store rooted on ``.tcip/state``, addressed here at whatever root a case gives it."""
-    from tcip_mcp.pipelines.postprocessing import plant_mapping
+def _other_state_record(root: Path) -> ts.Key:
+    """A second record rooted on ``.tcip/state``, at ``gui.json``."""
+    from tcip_mcp import web_client
 
-    return ts.Key(plant_mapping.PLANT_MAPPING_STORE, str(root), ("plant_mapping",))
+    return web_client.gui_snapshot_key(root)
+
+
+def _selection(root: Path) -> ts.Key:
+    """A record rooted on a selection's own output directory, at ``selection.json``."""
+    from tcip_mcp.pipelines.data.selection import selection_key
+
+    return selection_key(root)
 
 
 def _blob_target(directory: Path, stem: str) -> ts.Key:
@@ -81,9 +89,9 @@ def test_a_project_root_holding_a_stray_csv_and_a_nested_dataset_is_admitted(tmp
     (dataset / "dataset.json").write_text('{"identity": "ü"}', encoding="utf-8")
 
     with bound(SqliteBackend()):
-        ts.replace(_image_status(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
+        ts.replace(_state_record(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
 
-        assert ts.read(_image_status(tmp_path)) == {"bud": {}}
+        assert ts.read(_state_record(tmp_path)) == {"bud": {}}
     assert database_path(str(tmp_path)).is_file()
 
 
@@ -106,47 +114,41 @@ def test_a_workspace_root_holding_only_foreign_files_is_admitted(tmp_path):
 
 
 def test_a_directory_that_is_two_kinds_of_root_is_served_end_to_end(tmp_path):
-    """A curated materialization writes its manifest and the dataset documents it carries into
-    one output directory, so that directory is a curated root and a dataset root at once. Every
-    door has to serve it: the writes, the reads, and one transaction spanning both kinds."""
-    from tcip_mcp import dataset_layout
-    from tcip_mcp.pipelines.feedback import materialize
-
-    out = tmp_path / "curated"
+    """A selection drawn into a project's own directory makes that directory a selection root
+    and a project root at once. Every door has to serve it: the writes, the reads, and one
+    transaction spanning both kinds."""
+    out = tmp_path / "project"
     out.mkdir()
-    manifest = materialize.curated_manifest_key(out)
-    digest = dataset_layout.image_status_digest_key(out)
+    drawn, stats = _selection(out), _state_record(out)
 
     with bound(SqliteBackend()):
-        ts.replace(manifest, {"images": ["a_1.jpg"]})
-        ts.replace(digest, {"bud/2026-03-04": {"a_1.jpg": "9f2c"}}, expect=ts.Version.ABSENT)
-        with ts.transaction(manifest, digest) as txn:
-            txn.write(manifest, {"images": ["a_1.jpg", "b_2.jpg"]})
-            txn.write(digest, {"bud/2026-03-04": {"a_1.jpg": "9f2c", "b_2.jpg": "1ab3"}})
+        ts.replace(drawn, {"samples": ["a_1"]})
+        ts.replace(stats, {"bud": {"a_1.jpg": 1}}, expect=ts.Version.ABSENT)
+        with ts.transaction(drawn, stats) as txn:
+            txn.write(drawn, {"samples": ["a_1", "b_2"]})
+            txn.write(stats, {"bud": {"a_1.jpg": 1, "b_2.jpg": 2}})
 
-        assert ts.read(manifest) == {"images": ["a_1.jpg", "b_2.jpg"]}
-        assert ts.read(digest)["bud/2026-03-04"]["b_2.jpg"] == "1ab3"
+        assert ts.read(drawn) == {"samples": ["a_1", "b_2"]}
+        assert ts.read(stats)["bud"]["b_2.jpg"] == 2
 
     with bound(SqliteBackend()):
-        assert ts.read(manifest) == {"images": ["a_1.jpg", "b_2.jpg"]}
+        assert ts.read(drawn) == {"samples": ["a_1", "b_2"]}
 
 
 def test_a_second_kinds_files_refuse_on_the_connection_that_already_served_the_first(tmp_path):
     """A connection opened for one kind of root must still answer for the second before it
     serves it. Checking once per connection would let a directory's other half stay invisible
     for that connection's whole life, which is the absence a database beside files produces."""
-    from tcip_mcp.pipelines.feedback import materialize
-
     with bound(SqliteBackend()):
-        ts.replace(_image_status(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
-        assert ts.read(_image_status(tmp_path)) == {"bud": {}}
-        (tmp_path / "curated_manifest.json").write_text('{"images": []}', encoding="utf-8")
+        ts.replace(_state_record(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
+        assert ts.read(_state_record(tmp_path)) == {"bud": {}}
+        (tmp_path / "selection.json").write_text('{"samples": []}', encoding="utf-8")
 
         with pytest.raises(ts.StoreError) as raised:
-            ts.read(materialize.curated_manifest_key(tmp_path), default=None)
+            ts.read(_selection(tmp_path), default=None)
 
     message = str(raised.value)
-    assert "curated_manifest" in message
+    assert "selection" in message
     assert "tcip adopt-store" in message
 
 
@@ -155,16 +157,16 @@ def test_a_file_of_a_store_the_database_never_held_refuses_beside_it(tmp_path):
     accounting is per store: a store the database has never held is the one whose file no
     export can explain, and reading past it answers every one of its entries with absence."""
     with bound(SqliteBackend()):
-        ts.replace(_image_status(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
+        ts.replace(_state_record(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
     state = tmp_path / ".tcip" / "state"
     state.mkdir(parents=True, exist_ok=True)
-    (state / "view_coverage.json").write_text('{"bud/2026-03-04": {}}', encoding="utf-8")
+    (state / "gui.json").write_text('{"active_tab": "annotate"}', encoding="utf-8")
 
     with bound(SqliteBackend()):
         with pytest.raises(ts.StoreError) as raised:
-            ts.read(_image_status(tmp_path), default=None)
+            ts.read(_state_record(tmp_path), default=None)
 
-    assert "view_coverage" in str(raised.value)
+    assert "gui" in str(raised.value)
     assert "tcip adopt-store" in str(raised.value)
 
 
@@ -174,10 +176,10 @@ def test_a_process_that_imported_one_owning_module_still_sees_another_stores_fil
     Asked of the registry, a process that never imported the owning module read this root as
     fresh, created a database over its confirmed negatives, and answered them as absent."""
     with bound(FileBackend()):
-        ts.replace(_image_status(tmp_path), {"bud/2026-03-04": {}}, expect=ts.Version.ABSENT)
+        ts.replace(_state_record(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
     program = (
         "import json, sys\n"
-        "import tcip_annotation.review_engine\n"
+        "import tcip_annotation.verdicts\n"
         "from tcip_store.layout_claims import ROOT, unconformed_files\n"
         "print(json.dumps(sorted(p.name for p in unconformed_files(sys.argv[1], ROOT))))\n"
     )
@@ -187,7 +189,7 @@ def test_a_process_that_imported_one_owning_module_still_sees_another_stores_fil
         capture_output=True, text=True, check=True,
     )
 
-    assert json.loads(result.stdout) == ["image_status.json"]
+    assert json.loads(result.stdout) == ["annotation_stats.json"]
 
 
 # ── the blob write that would land on a record's own path ────────────────────
@@ -201,18 +203,18 @@ def test_a_blob_written_onto_a_records_claimed_path_beside_a_database_is_refused
     directions, since a store's first write can mint markers on a cached connection and a read
     can serve honest absence while the file idles, neither of which reaches another process."""
     with bound(SqliteBackend()):
-        ts.replace(_image_status(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
+        ts.replace(_state_record(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
 
     with bound(FileBackend()):
         with pytest.raises(ts.StoreError) as held_store:
-            ts.put_blob(_blob_target(tmp_path / ".tcip" / "state", "image_status"), b"{}")
+            ts.put_blob(_blob_target(tmp_path / ".tcip" / "state", "annotation_stats"), b"{}")
         with pytest.raises(ts.StoreError) as never_held_store:
-            ts.put_blob(_blob_target(tmp_path / ".tcip" / "state", "view_coverage"), b"{}")
+            ts.put_blob(_blob_target(tmp_path / ".tcip" / "state", "gui"), b"{}")
 
-    assert "image_status" in str(held_store.value)
-    assert "view_coverage" in str(never_held_store.value)
-    assert not (tmp_path / ".tcip" / "state" / "image_status.json").exists()
-    assert not (tmp_path / ".tcip" / "state" / "view_coverage.json").exists()
+    assert "annotation_stats" in str(held_store.value)
+    assert "gui" in str(never_held_store.value)
+    assert not (tmp_path / ".tcip" / "state" / "annotation_stats.json").exists()
+    assert not (tmp_path / ".tcip" / "state" / "gui.json").exists()
 
 
 def test_a_caller_named_output_that_collides_with_a_claim_is_refused_by_name(tmp_path):
@@ -220,17 +222,15 @@ def test_a_caller_named_output_that_collides_with_a_claim_is_refused_by_name(tmp
     someone to discover: an export whose filename happens to be a record's own is refused beside
     a database even where the author meant no harm. The message has to carry the store whose
     path it is and what to do, because renaming the output is the whole remedy."""
-    from tcip_mcp.pipelines.feedback import materialize
-
     with bound(SqliteBackend()):
-        ts.replace(materialize.curated_manifest_key(tmp_path), {"images": []})
+        ts.replace(_selection(tmp_path), {"samples": []})
 
     with bound(FileBackend()):
         with pytest.raises(ts.StoreError) as raised:
-            ts.put_blob(_blob_target(tmp_path, "curated_manifest"), b"{}")
+            ts.put_blob(_blob_target(tmp_path, "selection"), b"{}")
 
     message = str(raised.value)
-    assert "curated_manifest" in message
+    assert "selection" in message
     assert "Rename the output" in message
 
 
@@ -239,40 +239,29 @@ def test_a_stores_first_write_is_refused_while_a_file_it_claims_predates_it(tmp_
     that matters is the write that gives it its first row: after it, a file that predated the
     store stops being visible to the accounting. The connection here has already served this
     kind of root, so nothing would walk it again; the guard is what refuses."""
-    from tcip_mcp import dataset_layout
-
     with bound(SqliteBackend()):
-        ts.replace(_image_status(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
+        ts.replace(_state_record(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
         state = tmp_path / ".tcip" / "state"
         state.mkdir(parents=True, exist_ok=True)
-        (state / "view_coverage.json").write_text('{"bud": {}}', encoding="utf-8")
+        (state / "gui.json").write_text('{"active_tab": "annotate"}', encoding="utf-8")
 
         with pytest.raises(ts.StoreError) as raised:
-            ts.replace(
-                dataset_layout.view_coverage_key(tmp_path), {"bud": {}},
-                expect=ts.Version.ABSENT,
-            )
+            ts.replace(_other_state_record(tmp_path), {"active_tab": "results"})
 
     message = str(raised.value)
-    assert "view_coverage.json" in message
+    assert "gui.json" in message
     assert "tcip adopt-store" in message
 
 
 def test_a_stores_first_write_lands_when_no_file_of_its_own_predates_it(tmp_path):
     """The partner of the guard above: a store arriving at a root that holds a database is
     ordinary work, and the guard may only fire on a file that would become invisible."""
-    from tcip_mcp import dataset_layout
-
     with bound(SqliteBackend()):
-        ts.replace(_image_status(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
+        ts.replace(_state_record(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
 
-        ts.replace(
-            dataset_layout.view_coverage_key(tmp_path),
-            {"bud/2026-03-04": {"a_1.jpg": {"grid": {"rows": 1, "cols": 1}}}},
-            expect=ts.Version.ABSENT,
-        )
+        ts.replace(_other_state_record(tmp_path), {"active_tab": "results"})
 
-        assert ts.read(dataset_layout.view_coverage_key(tmp_path))["bud/2026-03-04"]
+        assert ts.read(_other_state_record(tmp_path)) == {"active_tab": "results"}
 
 
 def test_an_ordinary_blob_write_beside_a_database_takes_no_lock_and_creates_no_state_dir(
@@ -286,7 +275,7 @@ def test_an_ordinary_blob_write_beside_a_database_takes_no_lock_and_creates_no_s
     from tcip_store import file_backend as file_backend_module
 
     with bound(SqliteBackend()):
-        ts.replace(_image_status(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
+        ts.replace(_state_record(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
     output = tmp_path / "exports" / "2026-03-04"
     output.mkdir(parents=True)
     locked: list[str] = []
@@ -313,27 +302,6 @@ def test_an_ordinary_blob_write_beside_a_database_takes_no_lock_and_creates_no_s
     assert (output / "annotations.json").read_bytes() == b"{}"
 
 
-def test_a_blob_target_matching_two_claims_locks_both_roots_and_refuses_at_the_database(
-    tmp_path,
-):
-    """One path can be a legal entry of one store under two different roots, so the writer
-    cannot pick one and hope: it holds every candidate before it decides, in a fixed order, so
-    a concurrent creator cannot deadlock against it, and it refuses at whichever candidate
-    holds a database."""
-    inner = tmp_path / "review"
-    inner.mkdir()
-    with bound(SqliteBackend()):
-        ts.replace(_plant_mapping(inner), {"2026-03-04": []})
-
-    with bound(FileBackend()):
-        with pytest.raises(ts.StoreError) as raised:
-            ts.put_blob(_blob_target(inner / "review", "a_1.jpg"), b"{}")
-
-    assert "review_verdicts" in str(raised.value)
-    assert (tmp_path / ".tcip").is_dir()
-    assert not (inner / "review" / "a_1.jpg.json").exists()
-
-
 def test_a_colliding_blob_write_and_a_database_creation_never_both_land(tmp_path):
     """The two publishers race on one lock, so whichever runs second sees the first: either the
     database exists and the blob was refused, or the blob's file is there and the creation
@@ -349,7 +317,7 @@ def test_a_colliding_blob_write_and_a_database_creation_never_both_land(tmp_path
             backend = SqliteBackend()
             try:
                 ready.wait(timeout=30)
-                backend.replace(_image_status(root), {"bud": {}}, expect=ts.Version.ABSENT)
+                backend.replace(_state_record(root), {"bud": {}}, expect=ts.Version.ABSENT)
                 outcomes["create"] = "created"
             except ts.StoreError as exc:
                 outcomes["create"] = f"refused: {exc}"
@@ -360,7 +328,8 @@ def test_a_colliding_blob_write_and_a_database_creation_never_both_land(tmp_path
             backend = FileBackend()
             try:
                 ready.wait(timeout=30)
-                backend.put_blob(_blob_target(root / ".tcip" / "state", "image_status"), b"{}")
+                backend.put_blob(_blob_target(root / ".tcip" / "state", "annotation_stats"),
+                                 b"{}")
                 outcomes["blob"] = "written"
             except ts.StoreError as exc:
                 outcomes["blob"] = f"refused: {exc}"
@@ -374,7 +343,7 @@ def test_a_colliding_blob_write_and_a_database_creation_never_both_land(tmp_path
             thread.join(timeout=60)
 
         made_a_database = database_path(str(root)).is_file()
-        wrote_the_file = (root / ".tcip" / "state" / "image_status.json").is_file()
+        wrote_the_file = (root / ".tcip" / "state" / "annotation_stats.json").is_file()
         assert not (made_a_database and wrote_the_file), outcomes
         assert made_a_database or wrote_the_file, outcomes
         if made_a_database:
