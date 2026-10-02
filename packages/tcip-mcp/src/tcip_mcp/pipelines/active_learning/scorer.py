@@ -206,22 +206,10 @@ def register_scorer(name: str, factory: Callable[[str], BaseScorer]) -> None:
 
 
 def resolve_scorer(method: str, task: str) -> BaseScorer:
-    """Resolve a scorer: a registered built-in name, else a dotted ``module:factory`` you wrote.
+    """The scorer the factory registered under ``method``, or the dotted ``module:factory`` it
+    names, builds for ``task`` (:func:`~tcip_mcp.pipelines.model_build.resolve_named`, whose
+    refusals propagate)."""
+    from tcip_mcp.pipelines.model_build import resolve_named
 
-    An unresolvable or unimportable name raises ``ValueError``.
-    """
-    factory = SCORER_REGISTRY.get(method)
-    if factory is not None:
-        return factory(task)
-    if ":" in method or "." in method:
-        from tcip_mcp.pipelines.model_build import _import_dotted
-
-        try:
-            target = _import_dotted(method)
-        except Exception as exc:  # noqa: BLE001 (any import failure is an unresolvable name)
-            raise ValueError(f"Could not import scorer {method!r}: {exc}") from exc
-        return target(task) if callable(target) else target
-    raise ValueError(
-        f"Unknown scorer {method!r}. Use a built-in ({sorted(SCORER_REGISTRY)}), register one with "
-        f"register_scorer, or pass a dotted 'module:factory' you wrote."
-    )
+    target = resolve_named(method, SCORER_REGISTRY, kind="scorer", register="register_scorer")
+    return target(task) if callable(target) else target

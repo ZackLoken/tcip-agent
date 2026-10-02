@@ -1,7 +1,7 @@
 """The one GeoTIFF-writing helper every suite that needs a real (or deliberately incomplete or
-rotated) georeferenced raster on disk imports, so test_region_completeness.py,
-test_coverage_routes.py, test_orthomosaic_mapping.py, test_orthomosaic_tools.py and
-test_segment_attribution.py never drift into slightly different recipes for "the same" fixture.
+rotated) georeferenced raster on disk imports, so test_orthomosaic_mapping.py,
+test_orthomosaic_tools.py and test_segment_attribution.py never drift into slightly different
+recipes for "the same" fixture.
 """
 
 from __future__ import annotations

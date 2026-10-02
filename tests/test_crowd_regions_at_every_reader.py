@@ -2,8 +2,8 @@
 
 Each fixture is written through the platform's own label writer and read back through the
 reader under test: the loaders and their crop, the trainer's and the validation loss's hand-off
-to the heads, the model contract's overfit probe, the completeness digest, review
-materialization, and the assessment's cap, size, spacing and merge threshold. Where a reader forms a number
+to the heads, the model contract's overfit probe, the completion mark's digest, the editor's
+proposal pairing, and the assessment's cap, size, spacing and merge threshold. Where a reader forms a number
 from objects, the same records with and without crowd regions must give the same number.
 """
 
@@ -177,17 +177,13 @@ def test_the_overfit_probe_drives_the_model_with_objects_only(tmp_path: Path):
         RecordingDetector.handed)
 
 
-def test_the_completeness_digest_changes_with_the_crowd_flag(tmp_path: Path):
-    from tcip_mcp.pipelines.reference_grid import reference_cells
-    from tcip_mcp.pipelines.region_completeness import cell_annotation_digest
-
-    (cell,) = reference_cells(IMG, IMG, IMG, clamp=True)
+def test_the_completion_digest_changes_with_the_crowd_flag(tmp_path: Path):
     path = tmp_path / "a.json"
     digests = []
     for crowd in (False, True):
         json_io.write_annotations(path, [Annotation(subject=SUBJECT, geometry=CROWD,
                                                     iscrowd=crowd)], IMG, IMG)
-        digests.append(cell_annotation_digest(json_io.read_annotations(path), SUBJECT, cell))
+        digests.append(json_io.subject_digest(json_io.read_annotations(path), SUBJECT))
     assert digests[0] != digests[1]
 
 
@@ -267,11 +263,11 @@ def test_one_selector_answers_both_halves_of_the_crowd_split(tmp_path: Path):
     assert [a.geometry for a in instances(gt)] == [OBJECT]
 
 
-def test_reviews_matching_gives_a_crowd_region_cocos_ignore_semantics(tmp_path: Path):
-    """A predicted crowd region is no detection; a ground-truth crowd region is no miss; a
-    prediction left unmatched inside one is neither true nor false; every index still addresses
-    the caller's own lists."""
-    from tcip_annotation.matching import compute_matches
+def test_the_editors_pairing_never_pairs_with_or_as_a_crowd_region(tmp_path: Path):
+    """A predicted crowd region is no proposal to pair; a ground-truth crowd region is nothing to
+    confirm; a proposal inside one pairs with nothing; every index still addresses the caller's
+    own lists."""
+    from tcip_annotation.matching import pair_proposals
 
     inside = BBox(60.0, 60.0, 80.0, 80.0)
     gt = _read_back(tmp_path / "g.json", [
@@ -282,24 +278,8 @@ def test_reviews_matching_gives_a_crowd_region_cocos_ignore_semantics(tmp_path: 
         Annotation(subject=SUBJECT, geometry=inside, score=0.9),
         Annotation(subject=SUBJECT, geometry=OBJECT, score=0.9)])
 
-    matches = compute_matches(gt, preds)
-    assert [(m["gt_idx"], m["pred_idx"]) for m in matches["tp"]] == [(1, 2)]
-    assert matches["fp"] == [] and matches["fn"] == []
-    assert compute_matches([], preds[:1]) == {"tp": [], "fp": [], "fn": []}
-
-
-def test_the_classification_projections_keep_the_crowd_flag(tmp_path: Path):
-    from tcip_annotation.matching import compute_classified_trait_matches
-
-    gt = _read_back(tmp_path / "g.json", [
-        Annotation(subject=SUBJECT, geometry=CROWD, attributes={"stage": "open"}, iscrowd=True)])
-    preds = _read_back(tmp_path / "p.json", [
-        Annotation(subject=SUBJECT, geometry=CROWD, score=0.9, attributes={"stage": "open"},
-                   iscrowd=True)])
-
-    matches = compute_classified_trait_matches(
-        gt, preds, subject=SUBJECT, attribute="stage", vocabulary={"open", "closed"})
-    assert matches["tp"] == [] and matches["fp"] == [] and matches["fn"] == []
+    assert pair_proposals(gt, preds, {"kind": "iou", "iou_threshold": 0.5}).pairs == [(1, 2)]
+    assert pair_proposals([], preds[:1], {"kind": "iou", "iou_threshold": 0.5}).pairs == []
 
 
 CENTER = {"kind": "center_match", "tolerance": 5.0}

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -193,11 +192,11 @@ def test_dataset_tree_per_date_reflects_actual_labels(
     assert body["prediction_dirs"]["2026-03-24"] == {}
 
 
-def test_the_label_memo_serves_the_tree_the_registry_and_the_review_scan_alike(
+def test_the_label_memo_serves_the_tree_and_the_registry_alike(
     client: TestClient, dataset_root: Path, monkeypatch,
 ) -> None:
-    """The dataset tree, the subject registry's draft scan and the review batch all parse the
-    same date's label files; each file's parse is paid once, not once per route."""
+    """The dataset tree and the subject registry's draft scan both parse the same date's label
+    files; each file's parse is paid once, not once per route."""
     import tcip_annotation.json_io as json_io
 
     ann = dataset_root / "annotations" / "2-11-26"
@@ -218,10 +217,6 @@ def test_the_label_memo_serves_the_tree_the_registry_and_the_review_scan_alike(
     client.get(
         "/api/subjects/load",
         params={"dataset_root": str(dataset_root), "annotations_dir": str(ann)},
-    )
-    client.get(
-        "/api/review/image_statuses",
-        params={"dataset_root": str(dataset_root), "gt_dir": str(ann)},
     )
 
     assert len(calls) == 5, "each of the 5 label files must be parsed exactly once, not per route"
@@ -453,6 +448,7 @@ def test_annotate_load_and_save_roundtrip(client: TestClient, dataset_root: Path
                 {"subject": "bud", "bbox": [10, 20, 50, 60]},
                 {"subject": "bud", "points": [[5, 5], [10, 5], [10, 10], [5, 10]]},
             ],
+            "user": "breeder",
         },
     )
     assert resp.status_code == 200
@@ -555,12 +551,12 @@ def test_annotate_load_authorship_agrees_with_is_unadjudicated_agent_authorship(
         assert (a_dict["authorship"] == "tool") == is_unadjudicated_agent_authorship(a)
 
 
-def test_annotate_load_authorship_tool_accepted_through_review(
+def test_annotate_load_authorship_tool_accepted_through_the_editor(
     client: TestClient, dataset_root: Path, tmp_path: Path,
 ) -> None:
-    """A model's own prediction, once a reviewer accepts it into ground truth, reads
-    tool_accepted: its created_by travels into GT and accepted_by is the reviewer's sign-off, so
-    it is no longer an unadjudicated tool call but it is still not the reviewer's own hand."""
+    """A model's own proposal, once a person accepts it into ground truth, reads tool_accepted:
+    its created_by travels into GT and accepted_by is the person's sign-off, so it is no longer
+    an unadjudicated tool call but it is still not the person's own hand."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     write_annotations(str(gt), [], 100, 80, keep_empty=True)
@@ -568,11 +564,10 @@ def test_annotate_load_authorship_tool_accepted_through_review(
     produced_by = read_annotations(str(pred))[0].created_by
     assert str(produced_by).startswith("model:")
 
-    resp = _review_action(
-        client, img_path, gt, dataset_root,
-        pred_path=str(pred), det_type="fp", action="accepted",
-    )
-    assert resp.status_code == 200
+    resp = client.post("/api/annotate/labels", json={
+        "image_path": str(img_path), "label_path": str(gt), "annotations": [],
+        "user": "breeder", "bucket": str(pred.parent), "accept": [0]})
+    assert resp.status_code == 200, resp.text
 
     body = client.get(
         "/api/annotate/labels",
@@ -597,13 +592,15 @@ def test_annotate_save_empty_preserves_negative(
             "image_path": str(img_path),
             "label_path": str(label_path),
             "annotations": [{"subject": "bud", "bbox": [10, 20, 50, 60]}],
+            "user": "breeder",
         },
     )
     assert label_path.exists()
 
     resp = client.post(
         "/api/annotate/labels",
-        json={"image_path": str(img_path), "label_path": str(label_path), "annotations": []},
+        json={"image_path": str(img_path), "label_path": str(label_path), "annotations": [],
+              "user": "breeder"},
     )
     assert resp.status_code == 200
     # A present file with no annotations is a confirmed negative (kept, not deleted).
@@ -620,7 +617,8 @@ def test_annotate_save_label_path_outside_allowed_root_403(
     outside = tmp_path_factory.mktemp("outside") / "evil" / "IMG_0000.json"
     resp = client.post(
         "/api/annotate/labels",
-        json={"image_path": str(img_path), "label_path": str(outside), "annotations": []},
+        json={"image_path": str(img_path), "label_path": str(outside), "annotations": [],
+              "user": "breeder"},
     )
     assert resp.status_code == 403
     assert not outside.exists()
@@ -633,6 +631,7 @@ def _save_box(client: TestClient, img_path, label_path, **extra) -> dict:
             "image_path": str(img_path),
             "label_path": str(label_path),
             "annotations": [{"subject": "bud", "bbox": [10, 20, 50, 60]}],
+            "user": "breeder",
             **extra,
         },
     )
@@ -656,6 +655,7 @@ def test_annotate_save_refuses_a_token_the_document_has_moved_past(
             "label_path": str(label_path),
             "annotations": [],
             "base_mtime": base,
+            "user": "breeder",
         },
     )
     assert resp.status_code == 409
@@ -723,6 +723,7 @@ def test_annotate_save_persists_polygon_as_polygon(client, dataset_root, tmp_pat
             "image_path": str(img_path),
             "label_path": str(label_path),
             "annotations": [{"subject": "bud", "points": [[10, 10], [30, 10], [30, 30], [10, 30]]}],
+            "user": "breeder",
         },
     )
     assert resp.status_code == 200
@@ -745,7 +746,7 @@ def test_annotate_multi_ring_polygon_round_trips_through_the_route(client, datas
     rings = [[[10, 10], [30, 10], [30, 30], [10, 30]], [[60, 10], [80, 10], [80, 30], [60, 30]]]
     resp = client.post("/api/annotate/labels", json={
         "image_path": str(img_path), "label_path": str(label_path),
-        "annotations": [{"subject": "bud", "rings": rings}],
+        "annotations": [{"subject": "bud", "rings": rings}], "user": "breeder",
     })
     assert resp.status_code == 200
 
@@ -768,7 +769,7 @@ def test_annotate_save_prefers_rings_over_points_when_both_are_sent(client, data
     rings = [[[10, 10], [30, 10], [30, 30]], [[60, 10], [80, 10], [80, 30]]]
     resp = client.post("/api/annotate/labels", json={
         "image_path": str(img_path), "label_path": str(label_path),
-        "annotations": [{"subject": "bud", "rings": rings, "points": rings[0]}],
+        "annotations": [{"subject": "bud", "rings": rings, "points": rings[0]}], "user": "breeder",
     })
     assert resp.status_code == 200
     (stored,) = read_annotations(str(label_path))
@@ -784,6 +785,7 @@ def test_annotate_save_persists_box_as_box(client, dataset_root, tmp_path) -> No
             "image_path": str(img_path),
             "label_path": str(label_path),
             "annotations": [{"subject": "bud", "bbox": [50, 40, 70, 60]}],
+            "user": "breeder",
         },
     )
     assert resp.status_code == 200
@@ -816,7 +818,7 @@ def test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote(
     assert [{k: v for k, v in line["arguments"].items() if k != "version"}
             for line in lines] == [
         {"image_path": str(img_path), "label_path": str(label_path.resolve()),
-         "n_annotations": 1}] * 2
+         "n_annotations": 1, "accepted": [], "rejected": [], "complete": {}}] * 2
     assert not any(e.get("tool") == "save_label_document" for e in _audit_entries(tmp_path))
 
 
@@ -874,140 +876,16 @@ def test_annotate_save_answers_409_with_the_committed_body_on_a_lost_audit_line(
     assert len(anns) == 1
 
 
-# ── /api/review ─────────────────────────────────────────────────────────
-
-
-def _shard_state(state_dir: Path, img_name: str) -> dict:
-    """The one review verdict recorded for ``img_name``, wherever its bucket key put it."""
-    from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE
-
-    found = [k for k in tcip_store.keys(REVIEW_VERDICTS_STORE, str(state_dir)) if k.parts[1] == img_name]
-    assert len(found) == 1, found
-    return tcip_store.read(found[0])["state"]
-
-
 def _audit_entries(root: Path) -> list[dict]:
     """Every audit entry recorded in the log ``root`` names, through the seam."""
     return list(tcip_store.read_log(audit_log_key(root)).records)
-
-
-def _stat_fingerprint(path: Path) -> tuple[int, int] | None:
-    """``(size, mtime_ns)`` for a raw stat of a file, or ``None`` when it is absent; a stat
-    rather than a store read, since the platform's own reader (a file-backend lock, a database
-    connect) can create the very file a probe of an unwritten location must not."""
-    try:
-        st = path.stat()
-    except FileNotFoundError:
-        return None
-    return (st.st_size, st.st_mtime_ns)
-
-
-def _cwd_write_fingerprint(cwd: Path) -> tuple:
-    """Everything an unguarded review route resolving an empty ``dataset_root`` to ``cwd``
-    could leave on disk, read without opening any store: the review-verdict store directory's
-    own entries (the review engine writes verdicts and completion marks under
-    ``project_state_dir(cwd)``), and the audit store's file for the bound backend with its
-    write-ahead sibling, since a database write lands in ``store.db-wal`` until a checkpoint.
-    Coverage on the tree the gate runs on, where ``cwd`` is the repository root and its
-    ``.tcip`` already exists; the probe bites on a clean checkout."""
-    from tcip_mcp.project_paths import project_state_dir
-    from tcip_store.binding import is_database_backend
-    from tcip_store.file_backend import FileBackend, database_file
-
-    state_dir = project_state_dir(cwd)
-    try:
-        state_entries: tuple[str, ...] | None = tuple(sorted(os.listdir(state_dir)))
-    except FileNotFoundError:
-        state_entries = None
-    if is_database_backend():
-        audit_file = database_file(str(cwd))
-    else:
-        audit_file = FileBackend().path_for(audit_log_key(cwd))
-    wal = audit_file.with_name(audit_file.name + "-wal")
-    return (state_entries, _stat_fingerprint(audit_file), _stat_fingerprint(wal))
-
-
-def test_review_matches_returns_400_for_a_stem_collision(
-    client: TestClient, dataset_root: Path, tmp_path: Path,
-) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    Image.new("RGB", (100, 80)).save(dataset_root / "images" / "2-11-26" / "IMG_0000.PNG")
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [(40, 32, 60, 48)])
-    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
-
-    resp = client.post(
-        "/api/review/matches",
-        json={
-            "dataset_root": str(dataset_root),
-            "image_name": "IMG_0000.JPG",
-            "image_path": str(img_path),
-            "gt_path": str(gt),
-            "pred_path": str(pred),
-            "iou_threshold": 0.3,
-            "conf_threshold": 0.1,
-        },
-    )
-    assert resp.status_code == 400
-
-
-def test_review_matches_end_to_end(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    gt = tmp_path / "gt.json"
-    # Image is 100x80; one GT covering the center (pixel xyxy [40,32,60,48]).
-    _write_gt(gt, [(40, 32, 60, 48)])
-    # One prediction matching the GT (TP) + one off-center prediction (FP).
-    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9), (75, 60, 85, 68, 0.8)])
-    resp = client.post(
-        "/api/review/matches",
-        json={
-            "dataset_root": str(dataset_root),
-            "image_name": "IMG_0000.JPG",
-            "image_path": str(img_path),
-            "gt_path": str(gt),
-            "pred_path": str(pred),
-            "iou_threshold": 0.3,
-            "conf_threshold": 0.1,
-        },
-    )
-    body = resp.json()
-    assert body["n_tp"] == 1
-    assert body["n_fp"] == 1
-    assert body["n_fn"] == 0
-    assert body["image_status"] == "not_started"
-
-
-def test_review_image_statuses_batch(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
-    # A prediction file with a box (reviewable), a confirmed-negative empty file (nothing to review),
-    # and a third image with no file at all: only the first should surface as a detection stem.
-    pred_dir = _write_pred(dataset_root, {"IMG_0000.JPG": [(40, 32, 60, 48, 0.9)],
-                                          "IMG_0001.JPG": []})  # IMG_0001's document is empty
-
-    # Give one image a review status so the engine has state to return.
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [(40, 32, 60, 48)])
-    client.post(
-        "/api/review/mark_complete",
-        json={"dataset_root": str(dataset_root), "image_name": "IMG_0000.JPG", "gt_path": str(gt)},
-    )
-
-    resp = client.get(
-        "/api/review/image_statuses",
-        params={"dataset_root": str(dataset_root), "pred_dir": str(pred_dir)},
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["detection_stems"] == ["IMG_0000"]  # empty + missing files excluded
-    assert body["statuses"]["IMG_0000.JPG"] == "completed"
-    assert body["unreadable"] == []
 
 
 def test_a_document_the_bucket_record_does_not_name_is_no_prediction_of_it(
     client: TestClient, dataset_root: Path,
 ) -> None:
     """A bucket's documents are the ones its record names: a file dropped beside them afterward
-    is read by no reader, neither as the image's document nor as a stem with something to
-    review."""
+    is read by no reader as the image's document."""
     from tcip_mcp.buckets import read_bucket
 
     pred_dir = _write_pred(dataset_root, {"IMG_0000.JPG": [(40, 32, 60, 48, 0.9)]})
@@ -1016,648 +894,6 @@ def test_a_document_the_bucket_record_does_not_name_is_no_prediction_of_it(
     bucket = read_bucket(pred_dir)
     assert bucket.document("IMG_0000.JPG") == pred_dir / "IMG_0000.json"
     assert bucket.document("IMG_0001.JPG") is None
-    resp = client.get("/api/review/image_statuses",
-                      params={"dataset_root": str(dataset_root), "pred_dir": str(pred_dir)})
-    assert resp.status_code == 200
-    assert resp.json()["detection_stems"] == ["IMG_0000"]
-
-
-def test_review_image_statuses_batch_reports_an_unreadable_prediction(
-    client: TestClient, dataset_root: Path, tmp_path: Path,
-) -> None:
-    """A corrupt prediction document costs its own stem, never the whole batch: the good stem
-    still surfaces as a detection, and the bad one is named by its document's path in unreadable
-    instead of silently reading as nothing to review."""
-    pred_dir = _write_pred(dataset_root, {"IMG_0000.JPG": [(40, 32, 60, 48, 0.9)],
-                                          "IMG_0002.JPG": [(40, 32, 60, 48, 0.9)]})
-    bad = pred_dir / "IMG_0002.json"
-    bad.write_text("not json {][", encoding="utf-8")
-
-    resp = client.get(
-        "/api/review/image_statuses",
-        params={"dataset_root": str(dataset_root), "pred_dir": str(pred_dir)},
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["detection_stems"] == ["IMG_0000"]
-    assert body["unreadable"] == [str(bad)]
-
-
-def test_review_image_statuses_checks_a_prediction_even_when_gt_already_has_objects(
-    client: TestClient, dataset_root: Path, tmp_path: Path,
-) -> None:
-    """A stem the GT directory already resolved to "has objects" must still have its own
-    prediction document opened: an unreadable prediction must not go unnoticed just because
-    another directory already answered for the same stem."""
-    gt_dir = tmp_path / "gt"
-    gt_dir.mkdir(parents=True)
-    _write_gt(gt_dir / "IMG_0000.json", [(40, 32, 60, 48)])
-    pred_dir = _write_pred(dataset_root, {"IMG_0000.JPG": [(40, 32, 60, 48, 0.9)]})
-    bad = pred_dir / "IMG_0000.json"
-    bad.write_text("not json {][", encoding="utf-8")
-
-    resp = client.get(
-        "/api/review/image_statuses",
-        params={"dataset_root": str(dataset_root), "gt_dir": str(gt_dir), "pred_dir": str(pred_dir)},
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["unreadable"] == [str(bad)]
-
-
-def test_review_image_statuses_admits_a_published_bucket(
-    client: TestClient, dataset_root: Path, opened_project: Path,
-) -> None:
-    """A bucket's own record is not a label document and is never read as one, or enumerated as
-    an image with nothing to review."""
-    pred_dir = _published_bucket(
-        opened_project, dataset_root / "predictions" / "baseline" / "2-11-26",
-        dataset_root / "images" / "2-11-26" / "IMG_0000.JPG", [1],
-        scope={"subject": "bud", "id_map": {"bud": 0}})
-    assert (pred_dir / "bucket.json").is_file()
-
-    resp = client.get(
-        "/api/review/image_statuses",
-        params={"dataset_root": str(dataset_root), "pred_dir": str(pred_dir)},
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["detection_stems"] == ["IMG_0000"]
-    assert body["unreadable"] == []
-
-
-def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [(40, 32, 60, 48)])
-    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
-
-    resp = client.post(
-        "/api/review/action",
-        json={
-            "dataset_root": str(dataset_root),
-            "image_name": "IMG_0000.JPG",
-            "image_path": str(img_path),
-            "gt_path": str(gt),
-            "pred_path": str(pred),
-            "det_type": "tp",
-            "class_name": "bud",
-            "conf": 0.9,
-            "iou": 0.95,
-            "gt_idx": 0,
-            "pred_idx": 0,
-            "bbox": [40.0, 32.0, 60.0, 48.0],
-            "action": "accepted",
-        },
-    )
-    assert resp.status_code == 200
-    # the image's review verdict should now exist (a shard keyed by image, not one whole-state record)
-    state = _shard_state(dataset_root / ".tcip" / "state", "IMG_0000.JPG")
-    assert state["detections"][0]["action"] == "accepted"
-
-
-def test_review_action_records_before_building_the_response_so_a_build_failure_still_logs(
-    dataset_root: Path, tmp_path: Path, opened_project: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The order is record, then build, then answer: a response build that fails after a
-    recorded line answers 500 with the line already on the log (coverage of the order)."""
-    import tcip_web.routes.review as review_mod
-
-    def _raise(*args: object, **kwargs: object) -> None:
-        raise RuntimeError("boom building the response")
-
-    monkeypatch.setattr(review_mod, "_matches_response", _raise)
-
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [(40, 32, 60, 48)])
-    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
-
-    no_raise_client = TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
-    resp = no_raise_client.post(
-        "/api/review/action",
-        json={
-            "dataset_root": str(dataset_root),
-            "image_name": "IMG_0000.JPG",
-            "image_path": str(img_path),
-            "gt_path": str(gt),
-            "pred_path": str(pred),
-            "det_type": "tp", "class_name": "bud", "conf": 0.9, "iou": 0.95,
-            "gt_idx": 0, "pred_idx": 0,
-            "bbox": [40.0, 32.0, 60.0, 48.0], "action": "accepted",
-        },
-    )
-    assert resp.status_code == 500
-    assert any(e.get("tool") == "gui_review_action" for e in _audit_entries(dataset_root))
-
-
-_STAGED_SCOPE = {"subject": "bud", "attribute": "phenology_stage",
-                 "id_map": {"closed": 0, "open": 1}}
-
-
-def test_review_action_resolves_class_id_from_bucket_id_map(
-    client: TestClient, dataset_root: Path, tmp_path: Path, opened_project: Path,
-) -> None:
-    """The verdict entry's ``class_id`` is resolved from the producing bucket's own recorded
-    ``id_map`` at record time, never defaulted to 0."""
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [(40, 32, 60, 48)])
-    pred_dir = _published_bucket(opened_project, dataset_root / "predictions" / "staged" / "2-11-26",
-                                 img_path, [2], scope=_STAGED_SCOPE)
-
-    resp = _review_action(
-        client, img_path, gt, dataset_root,
-        pred_path=str(pred_dir / "IMG_0000.json"), det_type="tp", class_name="open",
-        action="accepted",
-    )
-    assert resp.status_code == 200
-    state = _shard_state(dataset_root / ".tcip" / "state", "IMG_0000.JPG")
-    assert state["detections"][0]["class_id"] == 1  # resolved via the bucket's id_map
-
-
-def test_review_action_records_unresolvable_class_id_as_none(
-    client: TestClient, dataset_root: Path, tmp_path: Path, opened_project: Path,
-) -> None:
-    """A verdict class_name the producing bucket's id_map does not recognize (e.g. an attribute-
-    scoped bucket handed a GT annotation's raw subject name) records ``class_id: null``, an honest
-    unresolved fact, never a guessed 0/1."""
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [(40, 32, 60, 48)])
-    pred_dir = _published_bucket(opened_project, dataset_root / "predictions" / "staged" / "2-11-26",
-                                 img_path, [1], scope=_STAGED_SCOPE)
-    pred = pred_dir / "IMG_0000.json"
-
-    resp = _review_action(
-        client, img_path, gt, dataset_root,
-        pred_path=str(pred), det_type="tp", class_name="bud", action="accepted",
-    )
-    assert resp.status_code == 200
-    state = _shard_state(dataset_root / ".tcip" / "state", "IMG_0000.JPG")
-    assert state["detections"][0]["class_id"] is None
-
-
-def test_review_action_on_staged_proposals_records_unresolvable_class_id(
-    client: TestClient, dataset_root: Path, tmp_path: Path
-) -> None:
-    """Staged proposals record no ``id_map``, so the verdict records ``class_id: null``, never
-    silently defaulting to a guessed single class."""
-    from tcip_mcp.tools.proposal_tools import stage_proposals
-
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [(40, 32, 60, 48)])
-    staged = stage_proposals(tmp_path, str(img_path), model_name="sam", boxes=[
-        {"subject": "bud", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.2, "h": 0.2}])
-    assert "error" not in staged, staged
-    pred = staged["path"]
-
-    resp = _review_action(
-        client, img_path, gt, dataset_root,
-        pred_path=str(pred), det_type="tp", class_name="bud", action="accepted",
-    )
-    assert resp.status_code == 200
-    state = _shard_state(dataset_root / ".tcip" / "state", "IMG_0000.JPG")
-    assert state["detections"][0]["class_id"] is None
-
-
-def _review_action(client, img_path, gt, dataset_root, **over):
-    body = {
-        "dataset_root": str(dataset_root),
-        "image_name": "IMG_0000.JPG",
-        "image_path": str(img_path),
-        "gt_path": str(gt),
-        "det_type": "tp",
-        "class_name": "bud",
-        "gt_idx": 0,
-        "pred_idx": 0,
-        "bbox": [40.0, 32.0, 60.0, 48.0],
-        "action": "accepted",
-    }
-    body.update(over)
-    return client.post("/api/review/action", json=body)
-
-
-def test_review_action_swept_records_verdict_without_mutating_gt(
-    client: TestClient, dataset_root: Path, tmp_path: Path
-) -> None:
-    """A sweep attestation ("checked this image for missed objects, found none") records a
-    verdict entry but writes nothing to ground truth: no geometry, no gt/pred index."""
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [(40, 32, 60, 48)])
-    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
-
-    resp = _review_action(
-        client, img_path, gt, dataset_root,
-        pred_path=str(pred), det_type="sweep", class_name="", gt_idx=None, pred_idx=None,
-        bbox=[0.0, 0.0, 100.0, 80.0], action="swept",
-    )
-    assert resp.status_code == 200
-    state = _shard_state(dataset_root / ".tcip" / "state", "IMG_0000.JPG")
-    assert state["detections"][0]["action"] == "swept"
-    assert state["detections"][0]["gt_bbox_norm"] is None
-    assert state["detections"][0]["pred_bbox_norm"] is None
-    assert len(read_annotations(str(gt))) == 1  # unchanged from the pristine GT
-
-
-def test_review_action_refuses_an_action_outside_the_declared_vocabulary(
-    client: TestClient, dataset_root: Path, tmp_path: Path
-) -> None:
-    """An action the vocabulary doesn't declare is refused at the route, before anything is
-    recorded or written."""
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [(40, 32, 60, 48)])
-    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
-
-    resp = _review_action(
-        client, img_path, gt, dataset_root,
-        pred_path=str(pred), det_type="tp", class_name="bud", action="approved",
-    )
-    assert resp.status_code == 422
-    assert not (dataset_root / ".tcip" / "state").exists()
-    assert len(read_annotations(str(gt))) == 1  # unchanged
-
-
-def test_review_accept_fp_adds_prediction_to_gt(client, dataset_root, tmp_path) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [], keep_empty=True)  # start with a confirmed negative (empty GT)
-    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
-
-    resp = _review_action(
-        client, img_path, gt, dataset_root,
-        pred_path=str(pred), det_type="fp", action="accepted",
-    )
-    assert resp.status_code == 200
-    assert resp.json()["annotation_status"] == "partial"  # GT now has the promoted box
-    anns = read_annotations(str(gt))
-    assert len(anns) == 1 and anns[0].subject == "bud"
-
-
-def test_review_reject_deletes_reviewed_gt(client, dataset_root, tmp_path) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [(40, 32, 60, 48)])  # one GT box (a missed FN)
-
-    resp = _review_action(client, img_path, gt, dataset_root,
-                          det_type="fn", pred_idx=None, action="rejected")
-    assert resp.status_code == 200
-    # Emptying GT does not auto-confirm a negative (that needs an explicit Complete): it reads as
-    # needing review. The label file is kept (empty record), not deleted.
-    assert resp.json()["annotation_status"] == "unannotated"
-    assert gt.is_file()
-    assert read_annotations(str(gt)) == []
-
-
-def test_review_accept_tp_keeps_gt_untouched(client, dataset_root, tmp_path) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [(40, 32, 60, 48)])
-    before = gt.read_text()
-
-    resp = _review_action(client, img_path, gt, dataset_root, det_type="tp", action="accepted")
-    assert resp.status_code == 200
-    assert resp.json()["annotation_status"] is None  # GT unchanged → no status update
-    assert gt.read_text() == before
-
-
-def test_review_edit_writes_edited_box_as_gt(client, dataset_root, tmp_path) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [(40, 32, 60, 48)])
-
-    resp = _review_action(
-        client, img_path, gt, dataset_root,
-        det_type="tp", action="edited", edited_box=[10.0, 10.0, 30.0, 30.0],
-    )
-    assert resp.status_code == 200
-    assert resp.json()["annotation_status"] == "partial"
-    anns = read_annotations(str(gt))
-    assert len(anns) == 1  # replaced the matched GT, still one annotation
-    b = anns[0].geometry
-    assert (b.x1, b.y1, b.x2, b.y2) == (10.0, 10.0, 30.0, 30.0)  # the edited geometry
-
-
-def test_review_edited_detection_stays_reviewed_after_reload(client, dataset_root, tmp_path) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [(40, 32, 60, 48)])  # one GT box, no predictions → an FN
-
-    resp = _review_action(
-        client, img_path, gt, dataset_root,
-        det_type="fn", pred_idx=None,
-        action="edited", edited_box=[10.0, 10.0, 30.0, 30.0],
-    )
-    assert resp.status_code == 200
-
-    # The next reload rebuilds the FN from the edited GT file: the verdict must still be
-    # recognized, i.e. the entry is keyed to the post-edit geometry, not the pre-edit one.
-    m = client.post(
-        "/api/review/matches",
-        json={
-            "dataset_root": str(dataset_root),
-            "image_name": "IMG_0000.JPG",
-            "image_path": str(img_path),
-            "gt_path": str(gt),
-        },
-    ).json()
-    assert len(m["detections"]) == 1
-    assert m["detections"][0]["det_type"] == "fn"
-    assert m["detections"][0]["reviewed"] is True
-    assert m["detections"][0]["reviewed_action"] == "edited"
-
-
-def test_review_gt_write_without_path_is_rejected(client, dataset_root, tmp_path) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
-
-    # Accepting an FP writes GT; with no GT path configured the route must refuse loudly rather
-    # than report ok while writing nothing.
-    resp = _review_action(
-        client, img_path, "unused", dataset_root,
-        gt_path=None, pred_path=str(pred), det_type="fp", action="accepted",
-    )
-    assert resp.status_code == 400
-    assert "no annotations path" in resp.json()["detail"]
-    # The refused verdict must not have been recorded as reviewed.
-    review_dir = dataset_root / ".tcip" / "state" / "review"
-    for shard_path in review_dir.rglob("IMG_0000.JPG.json"):
-        data = json.loads(shard_path.read_text(encoding="utf-8"))
-        assert not data.get("state", {}).get("detections")
-
-
-def test_review_action_auto_completes_and_audits(
-    client: TestClient, dataset_root: Path, tmp_path: Path
-) -> None:
-    """A single detection on the image: reviewing it flips the image to 'completed' (the only
-    GUI path to that status) and leaves an audit-trail entry. That entry belongs beside the
-    labels rather than in the open project the breeder is working out of, a different directory
-    from the dataset root here, so a log written there is a log in the wrong place rather than
-    the same file under another name."""
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [(40, 32, 60, 48)])
-    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])  # one matching prediction -> one TP
-
-    resp = client.post(
-        "/api/review/action",
-        json={
-            "dataset_root": str(dataset_root),
-            "image_name": "IMG_0000.JPG",
-            "image_path": str(img_path),
-            "gt_path": str(gt),
-            "pred_path": str(pred),
-            "det_type": "tp", "class_name": "bud", "conf": 0.9, "iou": 0.95,
-            "gt_idx": 0, "pred_idx": 0,
-            "bbox": [40.0, 32.0, 60.0, 48.0], "action": "accepted",
-            "iou_threshold": 0.3, "conf_threshold": 0.1,
-        },
-    )
-    assert resp.status_code == 200
-    assert resp.json()["image_status"] == "completed"
-    assert any(e.get("tool") == "gui_review_action" for e in _audit_entries(dataset_root))
-    assert not any(e.get("tool") == "gui_review_action" for e in _audit_entries(tmp_path))
-
-
-def test_review_action_answers_409_with_the_committed_body_on_a_lost_audit_line(
-    client: TestClient, dataset_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The verdict and any GT write already committed; a client that adopts ``committed`` reaches
-    the state a 200 would have, never re-rejecting a detection whose GT this call already wrote.
-    An accept-TP verdict leaves GT untouched, so replaying the identical call is idempotent and
-    its second, refused-append pass is compared field by field against the first call's real
-    200 body."""
-    import tcip_mcp.audit as audit_module
-
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [(40, 32, 60, 48)])
-    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
-    payload = {
-        "dataset_root": str(dataset_root),
-        "image_name": "IMG_0000.JPG",
-        "image_path": str(img_path),
-        "gt_path": str(gt),
-        "pred_path": str(pred),
-        "det_type": "tp", "class_name": "bud", "conf": 0.9, "iou": 0.95,
-        "gt_idx": 0, "pred_idx": 0,
-        "bbox": [40.0, 32.0, 60.0, 48.0], "action": "accepted",
-    }
-
-    healthy = client.post("/api/review/action", json=payload)
-    assert healthy.status_code == 200, healthy.text
-    healthy_body = healthy.json()
-
-    monkeypatch.setattr(audit_module, "append", _refuse_append)
-    resp = client.post("/api/review/action", json=payload)
-    assert resp.status_code == 409
-    detail = resp.json()["detail"]
-    assert detail["error"] == "audit_entry_not_written"
-    committed = detail["committed"]
-    assert committed["status"] == "ok"
-    assert committed["matches"]["n_tp"] == 1
-    assert committed == healthy_body
-    state = _shard_state(dataset_root / ".tcip" / "state", "IMG_0000.JPG")
-    assert state["detections"][0]["action"] == "accepted"
-
-
-def test_review_action_requires_dataset_root(
-    client: TestClient, dataset_root: Path, tmp_path: Path,
-) -> None:
-    """No read or write happens before the refusal: an empty ``dataset_root`` is named rather
-    than resolving to the process cwd. In this test environment the process cwd does not
-    resolve under an allowed root, and the 400 assertion is the guard. The location a
-    lost guard would leave a mark at is the process cwd, not this fixture's own
-    ``dataset_root`` tree, so the write probe reads the cwd's review-verdict store and audit
-    store (coverage on the gate's tree, where the cwd's ``.tcip`` already exists)."""
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
-
-    cwd = Path.cwd()
-    before = _cwd_write_fingerprint(cwd)
-
-    resp = client.post(
-        "/api/review/action",
-        json={
-            "dataset_root": "",
-            "image_name": "IMG_0000.JPG",
-            "image_path": str(img_path),
-            "gt_path": None,
-            "pred_path": str(pred),
-            "det_type": "tp", "class_name": "bud", "conf": 0.9, "iou": 0.95,
-            "gt_idx": 0, "pred_idx": 0,
-            "bbox": [40.0, 32.0, 60.0, 48.0], "action": "accepted",
-        },
-    )
-    assert resp.status_code == 400
-    assert "dataset root" in resp.json()["detail"]
-    assert _cwd_write_fingerprint(cwd) == before
-
-
-def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> None:
-    dataset_root = tmp_path / "data"
-
-    resp = client.post(
-        "/api/review/mark_complete",
-        json={"dataset_root": str(dataset_root), "image_name": "IMG_9.JPG"},
-    )
-    assert resp.status_code == 200
-    assert resp.json()["image_status"] == "completed"
-
-    status = client.get(
-        "/api/review/image_statuses",
-        params={"dataset_root": str(dataset_root)},
-    )
-    assert status.json()["statuses"]["IMG_9.JPG"] == "completed"
-    assert any(e.get("tool") == "gui_review_mark_complete" for e in _audit_entries(dataset_root))
-
-
-def test_review_mark_complete_answers_409_with_the_committed_body_on_a_lost_audit_line(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A repeat mark_complete on an already-completed image is idempotent, so the refused-append
-    pass's ``committed`` is compared field by field against the first pass's real 200 body."""
-    import tcip_mcp.audit as audit_module
-
-    dataset_root = tmp_path / "data"
-    payload = {"dataset_root": str(dataset_root), "image_name": "IMG_9.JPG"}
-
-    healthy = client.post("/api/review/mark_complete", json=payload)
-    assert healthy.status_code == 200, healthy.text
-    healthy_body = healthy.json()
-
-    monkeypatch.setattr(audit_module, "append", _refuse_append)
-    resp = client.post("/api/review/mark_complete", json=payload)
-    assert resp.status_code == 409
-    detail = resp.json()["detail"]
-    assert detail["error"] == "audit_entry_not_written"
-    assert detail["committed"]["image_status"] == "completed"
-    assert detail["committed"] == healthy_body
-
-    status = client.get(
-        "/api/review/image_statuses",
-        params={"dataset_root": str(dataset_root)},
-    )
-    assert status.json()["statuses"]["IMG_9.JPG"] == "completed"
-
-
-def test_review_mark_complete_requires_dataset_root(client: TestClient) -> None:
-    """No read or write happens before the refusal: an empty ``dataset_root`` is named rather
-    than resolving to the process cwd. In this test environment the process cwd does not
-    resolve under an allowed root, and the 400 assertion is the guard. The location a
-    lost guard would leave a mark at is the process cwd, not a directory this test never
-    creates, so the write probe reads the cwd's review-verdict store and audit store (coverage
-    on the gate's tree, where the cwd's ``.tcip`` already exists)."""
-    cwd = Path.cwd()
-    before = _cwd_write_fingerprint(cwd)
-
-    resp = client.post(
-        "/api/review/mark_complete",
-        json={"dataset_root": "", "image_name": "IMG_9.JPG"},
-    )
-    assert resp.status_code == 400
-    assert "dataset root" in resp.json()["detail"]
-    assert _cwd_write_fingerprint(cwd) == before
-
-
-def test_review_mark_complete_refuses_an_unreadable_gt(
-    client: TestClient, dataset_root: Path, tmp_path: Path,
-) -> None:
-    gt = tmp_path / "gt.json"
-    gt.write_text("not json {][", encoding="utf-8")
-
-    resp = client.post(
-        "/api/review/mark_complete",
-        json={
-            "dataset_root": str(dataset_root), "image_name": "IMG_0000.JPG",
-            "gt_path": str(gt), "subject": "bud",
-        },
-    )
-    assert resp.status_code == 400
-    assert str(gt) in resp.json()["detail"]
-
-
-def test_review_mark_complete_refusal_persists_nothing(
-    client: TestClient, dataset_root: Path, tmp_path: Path,
-) -> None:
-    """A 400 on the unreadable GT read must leave the image exactly as it was: no review mark, no
-    audit line."""
-    gt = tmp_path / "gt.json"
-    gt.write_text("not json {][", encoding="utf-8")
-
-    before = client.get(
-        "/api/review/image_statuses",
-        params={"dataset_root": str(dataset_root)},
-    ).json()
-    assert before["statuses"].get("IMG_0000.JPG", "not_started") == "not_started"
-    lines_before = _audit_entries(dataset_root)
-
-    resp = client.post(
-        "/api/review/mark_complete",
-        json={
-            "dataset_root": str(dataset_root), "image_name": "IMG_0000.JPG",
-            "gt_path": str(gt), "subject": "bud",
-        },
-    )
-    assert resp.status_code == 400
-
-    after = client.get(
-        "/api/review/image_statuses",
-        params={"dataset_root": str(dataset_root)},
-    ).json()
-    assert after["statuses"].get("IMG_0000.JPG", "not_started") == "not_started"
-    assert _audit_entries(dataset_root) == lines_before
-
-
-def test_review_mark_complete_refuses_an_unreadable_prediction(
-    client: TestClient, dataset_root: Path, tmp_path: Path,
-) -> None:
-    pred_dir = tmp_path / "predictions"
-    pred_dir.mkdir(parents=True)
-    (pred_dir / "IMG_0000.json").write_text("not json {][", encoding="utf-8")
-
-    resp = client.post(
-        "/api/review/mark_complete",
-        json={
-            "dataset_root": str(dataset_root), "image_name": "IMG_0000.JPG",
-            "pred_dir": str(pred_dir),
-        },
-    )
-    assert resp.status_code == 400
-
-
-def test_review_action_records_subject_name_and_reviewer(
-    client: TestClient, dataset_root: Path, tmp_path: Path
-) -> None:
-    # A prediction stores its subject name on disk, so the recorded verdict carries the real name
-    # ("bud") directly: no registry lookup, no "class_{id}" placeholder.
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [(40, 32, 60, 48)])
-    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
-    state = dataset_root / ".tcip" / "state"
-
-    resp = client.post(
-        "/api/review/action",
-        json={
-            "dataset_root": str(dataset_root),
-            "image_name": "IMG_0000.JPG",
-            "image_path": str(img_path),
-            "gt_path": str(gt),
-            "pred_path": str(pred),
-            "det_type": "tp", "class_name": "bud", "conf": 0.9, "iou": 0.95,
-            "gt_idx": 0, "pred_idx": 0,
-            "bbox": [40.0, 32.0, 60.0, 48.0], "action": "accepted",
-            "iou_threshold": 0.3, "conf_threshold": 0.1,
-        },
-    )
-    assert resp.status_code == 200
-    entry = _shard_state(state, "IMG_0000.JPG")["detections"][0]
-    assert entry["class_name"] == "bud"  # real name, straight from the annotation's subject
-    assert entry["reviewed_by"]  # non-empty reviewer
 
 
 def _launch_setup(tmp_path, monkeypatch):
@@ -1881,18 +1117,19 @@ def test_state_snapshot_available(client: TestClient) -> None:
 def test_state_tab_push_mutates_the_store(client: TestClient) -> None:
     from tcip_mcp.web_client import TAB_NAMES
 
-    assert "review" in TAB_NAMES
-    resp = client.post("/api/state/tab", json={"active_tab": "review"})
+    assert "results" in TAB_NAMES
+    resp = client.post("/api/state/tab", json={"active_tab": "results"})
     assert resp.status_code == 200
-    assert client.get("/api/state").json()["active_tab"] == "review"
+    assert client.get("/api/state").json()["active_tab"] == "results"
     client.post("/api/state/tab", json={"active_tab": "annotate"})
 
 
 def test_state_tab_push_rejects_unknown_tabs(client: TestClient) -> None:
     before = client.get("/api/state").json()["active_tab"]
-    resp = client.post("/api/state/tab", json={"active_tab": "dashboard"})
-    assert resp.status_code == 400
-    assert "dashboard" in resp.json()["detail"]
+    for retired in ("dashboard", "review"):
+        resp = client.post("/api/state/tab", json={"active_tab": retired})
+        assert resp.status_code == 400
+        assert retired in resp.json()["detail"]
     assert client.get("/api/state").json()["active_tab"] == before
 
 
@@ -1993,52 +1230,18 @@ def test_annotate_save_polygon_stamps_author(client, dataset_root, tmp_path) -> 
     assert json.loads(label_path.read_text())["annotations"][0]["created_by"] == "user:emily"
 
 
-def test_annotate_save_falls_back_to_os_user(client, dataset_root, tmp_path) -> None:
-    """Omitting user still stamps a user:<...> author (backend OS/env fallback), never bare/None."""
+def test_annotate_save_naming_no_one_refuses_and_writes_nothing(
+        client, dataset_root, tmp_path, monkeypatch) -> None:
+    """A save whose request names no one refuses, whatever the backend process runs as."""
+    monkeypatch.setenv("TCIP_USER", "osuser")
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_path = tmp_path / "labels" / "IMG_0000.json"
     resp = client.post("/api/annotate/labels", json={
         "image_path": str(img_path), "label_path": str(label_path),
-        "annotations": [{"subject": "bud", "bbox": [50, 40, 70, 60]}],
+        "annotations": [{"subject": "bud", "bbox": [50, 40, 70, 60]}], "user": " ",
     })
-    assert resp.status_code == 200
-    obj = json.loads(label_path.read_text())["annotations"][0]
-    assert obj["created_by"].startswith("user:")
-
-
-def test_review_accept_fp_carries_created_by_and_stamps_accepted_by(client, dataset_root, tmp_path) -> None:
-    """Accepting an FP prediction into GT carries the prediction's created_by and stamps
-    accepted_by=reviewer: the origin travels, and the acceptance is recorded."""
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [], keep_empty=True)  # confirmed negative → the pred shows as FP
-    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
-    produced_by = read_annotations(str(pred))[0].created_by
-
-    resp = _review_action(
-        client, img_path, gt, dataset_root,
-        pred_path=str(pred), det_type="fp", action="accepted", user="breeder",
-    )
-    assert resp.status_code == 200
-    obj = json.loads(gt.read_text())["annotations"][0]
-    assert obj["created_by"] == produced_by    # prediction origin carried into GT
-    assert obj["accepted_by"] == "user:breeder"   # reviewer stamped
-    assert obj["accepted_at"]
-
-
-def test_review_edit_stamps_created_by(client, dataset_root, tmp_path) -> None:
-    """A reviewer-drawn edit authors GT with created_by=user:<reviewer>."""
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    gt = tmp_path / "gt.json"
-    _write_gt(gt, [(40, 32, 60, 48)])
-
-    resp = _review_action(
-        client, img_path, gt, dataset_root,
-        det_type="tp", action="edited", edited_box=[10.0, 10.0, 30.0, 30.0], user="breeder",
-    )
-    assert resp.status_code == 200
-    obj = json.loads(gt.read_text())["annotations"][0]
-    assert obj["created_by"] == "user:breeder"
+    assert resp.status_code == 400 and "names no one" in resp.text
+    assert not label_path.exists()
 
 
 # ── Provenance round-trip fidelity (load → edit → save keeps the original creator) ──
@@ -2066,14 +1269,14 @@ def test_annotate_resave_preserves_original_creator(client, dataset_root, tmp_pa
     original creator survives (keep-original-creator policy); only new shapes get stamped."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_path = tmp_path / "labels" / "IMG_0000.json"
+    write_annotations(str(label_path), [Annotation(
+        subject="bud", geometry=BBox(10, 10, 40, 40), created_by="derived:user:breeder",
+        created_at="2026-02-11T00:00:00+00:00", accepted_by="user:breeder")], 100, 80)
+    loaded = client.get("/api/annotate/labels", params={
+        "image_path": str(img_path), "label_path": str(label_path)}).json()["annotations"]
     resp = client.post("/api/annotate/labels", json={
         "image_path": str(img_path), "label_path": str(label_path),
-        "annotations": [
-            {"subject": "bud", "bbox": [10, 10, 40, 40],
-             "created_by": "derived:user:breeder", "created_at": "2026-02-11T00:00:00+00:00",
-             "accepted_by": "user:breeder"},
-            {"subject": "bud", "bbox": [50, 50, 70, 70]},
-        ],
+        "annotations": [*loaded, {"subject": "bud", "bbox": [50, 50, 70, 70]}],
         "user": "emily",
     })
     assert resp.status_code == 200
@@ -2082,32 +1285,6 @@ def test_annotate_resave_preserves_original_creator(client, dataset_root, tmp_pa
     assert objs[0]["created_at"] == "2026-02-11T00:00:00+00:00"  # original timestamp kept
     assert objs[0]["accepted_by"] == "user:breeder"                 # acceptance carried
     assert objs[1]["created_by"] == "user:emily"                 # only the new shape is Emily's
-
-
-def test_annotate_resave_preserves_accepted_by_rule(client, dataset_root, tmp_path) -> None:
-    """A loaded record carrying the rule marker saves back with it; a new shape saves without
-    one, and the load route emits the key only for the record that holds it."""
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    label_path = tmp_path / "labels" / "IMG_0000.json"
-    resp = client.post("/api/annotate/labels", json={
-        "image_path": str(img_path), "label_path": str(label_path),
-        "annotations": [
-            {"subject": "bud", "bbox": [10, 10, 40, 40], "created_by": "sam",
-             "accepted_by": "user:breeder", "accepted_by_rule": "exp-1:0123456789abcdef"},
-            {"subject": "bud", "bbox": [50, 50, 70, 70]},
-        ],
-        "user": "emily",
-    })
-    assert resp.status_code == 200
-    objs = json.loads(label_path.read_text())["annotations"]
-    assert objs[0]["accepted_by_rule"] == "exp-1:0123456789abcdef"
-    assert "accepted_by_rule" not in objs[1]
-
-    load = client.get(
-        "/api/annotate/labels", params={"image_path": str(img_path), "label_path": str(label_path)})
-    loaded = load.json()["annotations"]
-    assert loaded[0]["accepted_by_rule"] == "exp-1:0123456789abcdef"
-    assert "accepted_by_rule" not in loaded[1]
 
 
 def test_annotate_resave_keeps_the_crowd_flag(client, dataset_root, tmp_path) -> None:
@@ -2145,6 +1322,7 @@ def test_annotate_save_reads_the_crowd_flag_through_the_decoders_check(
     resp = client.post("/api/annotate/labels", json={
         "image_path": str(img_path), "label_path": str(label_path),
         "annotations": [{"subject": "bud", "bbox": [10, 10, 40, 40], "iscrowd": flag}],
+        "user": "breeder",
     })
     assert resp.status_code == status, resp.text
     if status == 400:
@@ -2180,51 +1358,17 @@ def test_the_mcp_read_and_the_web_load_project_an_annotation_alike(
 def test_annotate_polygons_keep_and_stamp_provenance(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_path = tmp_path / "labels" / "IMG_0000.json"
+    write_annotations(str(label_path), [Annotation(
+        subject="bud", geometry=Polygon([[(10.0, 10.0), (30.0, 10.0), (30.0, 30.0)]]),
+        created_by="user:emily", created_at="2026-03-02T00:00:00+00:00")], 100, 80)
+    loaded = client.get("/api/annotate/labels", params={
+        "image_path": str(img_path), "label_path": str(label_path)}).json()["annotations"]
     resp = client.post("/api/annotate/labels", json={
         "image_path": str(img_path), "label_path": str(label_path),
-        "annotations": [
-            {"subject": "bud", "points": [[10, 10], [30, 10], [30, 30]],
-             "created_by": "user:emily", "created_at": "2026-03-02T00:00:00+00:00"},
-            {"subject": "bud", "points": [[50, 50], [70, 50], [70, 70]]},
-        ],
+        "annotations": [*loaded, {"subject": "bud", "points": [[50, 50], [70, 50], [70, 70]]}],
         "user": "breeder",
     })
     assert resp.status_code == 200
     objs = json.loads(label_path.read_text())["annotations"]
     assert objs[0]["created_by"] == "user:emily"   # round-tripped shape keeps its author
     assert objs[1]["created_by"] == "user:breeder"    # new polygon -> stamped to the current annotator
-
-
-def test_review_subject_names_flow_from_annotations(
-    client: TestClient, dataset_root: Path, tmp_path: Path
-) -> None:
-    """The recorded class name is the annotation's own subject: reviewing a bud records
-    'bud', reviewing an efb records 'efb'; the name rides on the label, so one subject's name
-    can never bleed onto another's (the bug a project-cached numeric-id engine would have)."""
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-
-    def _class_name_for(subject: str) -> str:
-        gt = tmp_path / f"gt_{subject}.json"
-        _write_gt(gt, [(40, 32, 60, 48)], subject=subject)
-        pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)], subject=subject, name=subject)
-        resp = client.post(
-            "/api/review/action",
-            json={
-                "dataset_root": str(dataset_root), "image_name": "IMG_0000.JPG",
-                "image_path": str(img_path), "gt_path": str(gt),
-                "pred_path": str(pred), "det_type": "tp", "class_name": subject, "conf": 0.9,
-                "iou": 0.95, "gt_idx": 0, "pred_idx": 0,
-                "bbox": [40.0, 32.0, 60.0, 48.0], "action": "accepted",
-                "iou_threshold": 0.3, "conf_threshold": 0.1,
-            },
-        )
-        assert resp.status_code == 200
-        from tcip_annotation.review_engine import review_verdict_key
-        from tcip_mcp.buckets import bucket_key_of
-
-        key = review_verdict_key(dataset_root / ".tcip" / "state", bucket_key_of(pred.parent),
-                                 "IMG_0000.JPG")
-        return tcip_store.read(key)["state"]["detections"][0]["class_name"]
-
-    assert _class_name_for("bud") == "bud"
-    assert _class_name_for("efb") == "efb"  # different subject, its own name, no bleed

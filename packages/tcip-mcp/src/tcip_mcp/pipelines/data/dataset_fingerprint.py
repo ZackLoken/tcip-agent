@@ -1,5 +1,5 @@
 """Whole-dataset content identity: the ``dataset_fingerprint`` formula (labels + image files +
-registry + confirmed negatives), recompute-on-read authority for the cached value a dataset's own ``dataset.json`` carries.
+registry), recompute-on-read authority for the cached value a dataset's own ``dataset.json`` carries.
 
 No torch, safe to import anywhere.
 """
@@ -96,50 +96,27 @@ def _registry_term(dataset_root: Path) -> str:
     reorder/addition does. Empty string when the dataset has no registry; a registry
     ``read_registry`` refuses raises as it does.
     """
+    from tcip_annotation.json_io import canonical_digest
+
     from tcip_mcp.subject_registry import read_registry, registry_to_dict
     from tcip_mcp.dataset_layout import subjects_path
 
     if not subjects_path(dataset_root).is_file():
         return ""
-    canonical = json.dumps(registry_to_dict(read_registry(dataset_root)), separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
-
-
-def _confirmations_term(dataset_root: Path) -> str:
-    """Digest over the dataset-native confirmed-negative store's raw content (all buckets, sorted),
-    read through ``dataset_layout.read_image_status_store``: the stored membership, not the
-    quarantine-filtered view. Empty string when there is no store or no negative entries.
-    """
-    from tcip_mcp.dataset_layout import (
-        is_confirmed_negative, status_tokens, read_image_status_store,
-    )
-
-    statuses = status_tokens(read_image_status_store(dataset_root))
-    h = hashlib.sha256()
-    any_negatives = False
-    for bucket in sorted(statuses):
-        names = sorted(n for n, s in statuses[bucket].items() if is_confirmed_negative(s))
-        if not names:
-            continue
-        any_negatives = True
-        h.update(bucket.encode("utf-8"))
-        h.update(b"\0")
-        for n in names:
-            h.update(n.encode("utf-8"))
-            h.update(b"\0")
-    return h.hexdigest()[:16] if any_negatives else ""
+    return canonical_digest(registry_to_dict(read_registry(dataset_root)))
 
 
 def dataset_fingerprint(dataset_root: str | Path) -> str | None:
-    """Whole-dataset content identity: labels + image files + registry + confirmed negatives.
+    """Whole-dataset content identity: labels with their completion marks + image files +
+    registry.
 
-    The label term digests each label document's bytes; the image term hashes
-    each file's raw bytes (walking ``image_utils.IMAGE_EXTS``, a ``.bandgroup`` manifest hashed as
-    its own bytes); the registry term digests the canonical subject registry; the confirmations
-    term digests the dataset-native confirmed-negative store. Content-addressed, so a moved dataset
-    keeps its fingerprint and a change to any of the four changes it. ``None`` for a dataset with
-    no images or no labels (e.g. a bespoke ``dataset_source``). Authority is recompute-on-read; a
-    stored fingerprint (``dataset.json``) is a cache.
+    The label term digests each label document's bytes, its completion marks included; the image
+    term hashes each file's raw bytes (walking ``image_utils.IMAGE_EXTS``, a ``.bandgroup``
+    manifest hashed as its own bytes); the registry term digests the canonical subject registry.
+    Content-addressed, so a moved dataset keeps its fingerprint and a change to any of the three
+    changes it. ``None`` for a dataset with no images or no labels (e.g. a bespoke
+    ``dataset_source``). Authority is recompute-on-read; a stored fingerprint (``dataset.json``)
+    is a cache.
     """
     from tcip_mcp.dataset_layout import annotation_root, image_root
     from tcip_mcp.project_paths import project_state_dir
@@ -156,6 +133,4 @@ def dataset_fingerprint(dataset_root: str | Path) -> str | None:
     h.update(images.encode("utf-8"))
     h.update(b"\0classes:")
     h.update(_registry_term(root).encode("utf-8"))
-    h.update(b"\0confirmations:")
-    h.update(_confirmations_term(root).encode("utf-8"))
     return h.hexdigest()[:16]

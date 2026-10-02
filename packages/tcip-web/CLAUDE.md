@@ -7,9 +7,9 @@ FastAPI backend + Vite/React/TS/Tailwind/Konva frontend: the human's UI. Loads o
 
 ```
 src/tcip_web/
-  routes/          # annotate, canvas, coverage, dataset, fs, images, inference, meta,
-                    # projects, results, review, sessions, subjects, terminal, training, tuning, validation
-  app.py, state.py, jobstore.py, paths.py, identity.py, __main__.py
+  routes/          # annotate, audit_gap, canvas, dataset, fs, images, inference, meta,
+                    # projects, results, sessions, subjects, terminal, training, tuning
+  app.py, state.py, jobstore.py, paths.py, __main__.py
   terminal.py + agent_terminal.settings.json
                     # the breeder-facing in-app agent terminal, its provider table and the
                     # Claude row's permission lists
@@ -77,8 +77,8 @@ them.
   port record under that workspace and hands both to `StateStore.configure` before serving; an
   unset `TCIP_WORKSPACE` refuses there. A test or script configures the store itself, with a
   scratch workspace.
-- Reviews save the one label shape, the per-image JSON document (see
-  `packages/tcip-annotation/CLAUDE.md`); don't add a frontend format option.
+- The editor saves the one label shape, the per-image JSON document, through the one label save
+  (see `packages/tcip-annotation/CLAUDE.md`); don't add a frontend format option.
 - The GUI follows minimalist design without dropping functionality: prefer nesting related
   actions into one structure (a menu, a split button, a grouped control)
   over adding sibling buttons, and combine existing buttons into nested structures where the

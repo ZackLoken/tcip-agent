@@ -386,7 +386,7 @@ def write_archive(
 
     Every database under the tree is exported to its loose files first, through
     :func:`tcip_store.export.export_root`. The archive refuses only when that export fails, a store
-    becomes unreadable, or a split/curated manifest sits somewhere the derivation constraints
+    becomes unreadable, or a split manifest sits somewhere the derivation constraints
     exclude.
 
     ``left_behind`` names what this door declined to bundle, per class: ``unaccounted`` (a render
@@ -828,8 +828,8 @@ def delete_stray_state_file(project: Path, relative_path: str, reason: str) -> d
     outside the state root; a path under the state root's own database home; a path that does not
     exist; a directory; a link or junction; a path the accounting classifies as the storage
     backend's own bookkeeping, as a claimed store's own file (naming the store), or as a recognized
-    blob; and a state root whose own accounting refuses (a misplaced split or curated manifest
-    anchor, or two stores claiming one file equally).
+    blob; and a state root whose own accounting refuses (a misplaced split manifest anchor, or
+    two stores claiming one file equally).
 
     Only the named file is removed (``os.remove``); an emptied parent directory is left exactly as
     it stands.

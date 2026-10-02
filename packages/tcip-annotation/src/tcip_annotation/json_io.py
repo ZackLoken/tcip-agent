@@ -6,32 +6,35 @@ Schema::
     { "image": "<stem>", "width": W, "height": H,
       "annotations": [
         { "subject": "<subject>",
-          "bbox": [x, y, w, h],                 # COCO xywh, pixel      (optional)
+          "bbox": [x, y, w, h],                 # COCO xywh, pixel, a box only
           "segmentation": [[x1,y1, ...], ...],  # pixel polygon, one or more rings (optional)
           "point": [x, y],                      # pixel point, a prompt or keypoint (optional)
           "attributes": {"<attribute>": "<value>"},   # attr name -> value name
           "score": 0.91,                        # predictions only
           "iscrowd": true,                      # a region of unseparated objects (optional)
-          "created_by": "sam", "created_at": "...",
-          "accepted_by": "user:breeder", "accepted_at": "...",
-          "accepted_by_rule": "<assessment_id>" } ] }
+          "created_by": "model:<sha>", "created_at": "...",
+          "accepted_by": "user:breeder", "accepted_at": "..." } ],
+      "complete": {"<subject>": [
+        { "rect": [x, y, w, h], "by": "user:breeder", "at": "...",
+          "digest": "<the subject's annotations>", "proposals_hidden": false } ]} }
 
 A missing file reads as unannotated (``[]``), and so does an empty document
 (``{"annotations": []}``). A present document this format cannot make sense of (undecodable text, a
-non-dict document, an ``annotations`` that is not a list, or a record :func:`annotation_of_record`
-refuses) raises :class:`UnreadableLabelDocument`. A record the writer stores is one the reader
-accepts.
+non-dict document, an ``annotations`` that is not a list, a record :func:`annotation_of_record`
+refuses, or a completion mark :func:`completion_marks` refuses) raises
+:class:`UnreadableLabelDocument`. A record the writer stores is one the reader accepts.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import tcip_store
 from tcip_store import (
@@ -53,10 +56,10 @@ from tcip_annotation.state import (
 ANNOTATIONS_KEY = "annotations"  # the one top-level list key
 LABEL_SUFFIX = ".json"
 """The suffix of every per-image label and prediction document, stated once for every package."""
-_PROV_KEYS = ("created_by", "created_at", "accepted_by", "accepted_at", "accepted_by_rule")
+_PROV_KEYS = ("created_by", "created_at", "accepted_by", "accepted_at")
 
 
-# ── the store (tcip-annotation must not depend on tcip-mcp) ───────────────────
+# ── the store ─────────────────────────────────────────────────────────────────
 
 ANNOTATION_RECORDS_STORE = "annotation_records"
 _ANNOTATION_RECORD_LOCATOR = RootedFileLocator(suffix=LABEL_SUFFIX)
@@ -139,19 +142,14 @@ def parse_label_document(text: str, *, source: str) -> dict:
 
     Raises :class:`UnreadableLabelDocument`, naming ``source``, for text that does not decode as
     JSON, that decodes to something other than a dict (:func:`parse_json_document`), that carries a
-    dataset-level COCO's keys or the old ``objects`` schema, or that carries a ``schema_version``
-    this reader does not accept (:func:`check_annotation_record_version`).
+    dataset-level COCO's keys, or that carries a ``schema_version`` this reader does not accept
+    (:func:`check_annotation_record_version`).
     """
     data = parse_json_document(text, source=source)
     if is_dataset_level_document(data):
         raise UnreadableLabelDocument(
             f"{source} is a dataset-level COCO document (an 'images' or 'categories' key), not a "
             "per-image label document: convert it with import_coco"
-        )
-    if "objects" in data:
-        raise UnreadableLabelDocument(
-            f"{source} is the old 'objects' label schema, which is not read in place: convert it "
-            "to the name-based per-image schema"
         )
     check_annotation_record_version(data, source=source)
     return data
@@ -327,8 +325,8 @@ def ring_vertex(vertex) -> tuple:
     raise ValueError(f"ring vertex {vertex!r} is not an [x, y] pair or an {{x, y}} mapping")
 
 
-def annotation_from_payload(payload: Mapping, *, author: str | None, now: str) -> Annotation:
-    """One client payload dict as an :class:`Annotation`.
+def annotation_from_payload(payload: Mapping) -> Annotation:
+    """One client payload dict's content as an :class:`Annotation`, carrying no provenance.
 
     The payload is translated into the document's own record shape and decoded by
     :func:`annotation_of_record`, so a supplied value that route refuses raises ``ValueError`` here
@@ -336,14 +334,8 @@ def annotation_from_payload(payload: Mapping, *, author: str | None, now: str) -
     h]``; ``rings`` (a list of rings) and ``points`` (one ring) become ``segmentation``, ``rings``
     winning when both are given, each vertex an ``[x, y]`` pair or an ``{"x", "y"}`` mapping;
     ``point`` (a single placed prompt or keypoint) is kept as it is. A polygon then wins over a box
-    and a box over a point, as in a stored record.
-
-    Provenance: a payload carrying ``created_by`` (any value but ``null``) keeps every provenance
-        key it carries verbatim, its review sign-off included. One that does not is new: it is
-        stamped to ``author`` at ``now`` and claims no sign-off; with no ``author`` resolved
-        either, it carries no provenance. A payload's ``score`` is not read: a saved shape is
-        ground truth. A payload box quantizes to the stored two-decimal grid (:func:`xywh`) in
-        translation.
+    and a box over a point, as in a stored record. A payload's provenance keys and ``score`` are
+    not read. A payload box quantizes to the stored two-decimal grid (:func:`xywh`).
     """
     payload = annotation_object(payload)
     rings, corners = payload.get("rings"), payload.get("bbox")
@@ -352,8 +344,6 @@ def annotation_from_payload(payload: Mapping, *, author: str | None, now: str) -
     segmentation = rings if not isinstance(rings, list) else [
         [c for v in ring for c in ring_vertex(v)] if isinstance(ring, list) else ring
         for ring in rings]
-    provenance = ({k: payload.get(k) for k in _PROV_KEYS} if payload.get("created_by") is not None
-                  else {"created_by": author, "created_at": now if author else None})
     return annotation_of_record({
         "subject": payload.get("subject"),
         "segmentation": segmentation,
@@ -361,8 +351,30 @@ def annotation_from_payload(payload: Mapping, *, author: str | None, now: str) -
         "point": payload.get("point"),
         "attributes": payload.get("attributes"),
         "iscrowd": payload.get("iscrowd"),
-        **provenance,
     })
+
+
+def stamped(contents: Iterable[Annotation], stored: Iterable[Annotation], *, actor: str | None,
+            now: str) -> list[Annotation]:
+    """``contents`` with their provenance: each one whose stored content (:func:`stored_content`)
+    equals a not yet claimed record of ``stored`` takes that record's provenance, and every other
+    one is authored by ``actor`` at ``now`` with no sign-off (no provenance at all when ``actor``
+    is ``None``)."""
+    unclaimed: dict[str, list[Annotation]] = {}
+    for record in stored:
+        unclaimed.setdefault(_content_key(record), []).append(record)
+    out = []
+    for content in contents:
+        held = unclaimed.get(_content_key(content))
+        source = held.pop(0) if held else Annotation(
+            content.subject, created_by=actor, created_at=now if actor else None)
+        out.append(replace(content, **_held_provenance(source)))
+    return out
+
+
+def _content_key(a: Annotation) -> str:
+    """``a``'s stored content as one canonical string."""
+    return json.dumps(stored_content(a), sort_keys=True)
 
 
 def annotation_object(o) -> dict:
@@ -440,8 +452,154 @@ def annotations_of_document(document: dict) -> list[Annotation]:
     return _annotations_of(document)
 
 
+# ── completion marks ───────────────────────────────────────────────────────
+
+COMPLETION_KEY = "complete"
+"""The document key holding each subject's completion marks."""
+
+SubjectState = Literal["complete", "negative", "partial", "unannotated"]
+"""What one document says about one subject: finished with or without annotations of it
+(``complete``, ``negative``), or not finished with or without them (``partial``,
+``unannotated``)."""
+
+
+@dataclass(frozen=True)
+class CompletionMark:
+    """A person's attestation that every instance of one subject inside ``rect`` (pixel ``[x, y,
+    w, h]``) is annotated: who (``by``) and when (``at``), the :func:`subject_digest` of that
+    subject's annotations when it was made, and whether proposals were hidden while it was made.
+    """
+
+    rect: tuple[float, float, float, float]
+    by: str
+    at: str
+    digest: str
+    proposals_hidden: bool
+
+
+def canonical_digest(value) -> str:
+    """The platform's content digest of a JSON value: sha256 over its compact serialization, in
+    the value's own key order, first sixteen hex digits."""
+    canonical = json.dumps(value, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def subject_digest(annotations: Iterable[Annotation], subject: str) -> str:
+    """The :func:`canonical_digest` of ``subject``'s annotations as stored, provenance aside, in
+    an order independent of the order they were drawn in."""
+    return canonical_digest(sorted(_content_key(a) for a in annotations if a.subject == subject))
+
+
+def _live(marks: Mapping[str, list[CompletionMark]],
+          annotations: list[Annotation]) -> dict[str, list[CompletionMark]]:
+    """Each subject's marks whose digest still names that subject's annotations."""
+    live = {}
+    for subject, held in marks.items():
+        digest = subject_digest(annotations, subject)
+        kept = [m for m in held if m.digest == digest]
+        if kept:
+            live[subject] = kept
+    return live
+
+
+def completion_marks(data: dict | None,
+                     annotations: list[Annotation]) -> dict[str, list[CompletionMark]]:
+    """The live completion marks a parsed document holds, by subject: the ones whose digest still
+    names that subject's ``annotations``. Raises :class:`UnreadableLabelDocument` naming the
+    subject and index of a mark that is not a rect of four numbers, a person, a time, a digest and
+    a ``proposals_hidden`` flag."""
+    raw = (data or {}).get(COMPLETION_KEY) or {}
+    if not isinstance(raw, dict):
+        raise UnreadableLabelDocument(f"{COMPLETION_KEY!r} is {raw!r}, not marks by subject")
+    marks: dict[str, list[CompletionMark]] = {}
+    for subject, held in raw.items():
+        if not isinstance(held, list):
+            raise UnreadableLabelDocument(f"{subject!r} completion marks are {held!r}, not a list")
+        for i, m in enumerate(held):
+            try:
+                marks.setdefault(subject, []).append(CompletionMark(
+                    rect=cast(tuple, tuple(_numbers(m["rect"], "rect", 4))),
+                    by=_text(m["by"], "by"), at=_text(m["at"], "at"),
+                    digest=_text(m["digest"], "digest"),
+                    proposals_hidden=_flag(m["proposals_hidden"])))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise UnreadableLabelDocument(
+                    f"{subject!r} completion mark {i} is not a mark: {exc!r}") from exc
+    return _live(marks, annotations)
+
+
+def _text(value, key: str) -> str:
+    """``value`` when it is a non-empty string, else ``ValueError`` naming ``key``."""
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{key} {value!r} is not a non-empty string")
+    return value
+
+
+def _flag(value) -> bool:
+    """``value`` when it is a boolean, else ``ValueError``."""
+    if not isinstance(value, bool):
+        raise ValueError(f"proposals_hidden {value!r} is not true or false")
+    return value
+
+
+def covers(marks: Iterable[CompletionMark], rect: tuple[float, float, float, float]) -> bool:
+    """Whether the union of ``marks``' rects covers the half-open pixel ``rect`` ``(x0, y0, x1,
+    y1)``, every point of it."""
+    boxes = [(x, y, x + w, y + h) for x, y, w, h in (m.rect for m in marks)]
+    x0, y0, x1, y1 = rect
+    xs = sorted({x0, x1, *(min(max(v, x0), x1) for b in boxes for v in (b[0], b[2]))})
+    ys = sorted({y0, y1, *(min(max(v, y0), y1) for b in boxes for v in (b[1], b[3]))})
+    return all(
+        any(b[0] <= (ax + bx) / 2 <= b[2] and b[1] <= (ay + by) / 2 <= b[3] for b in boxes)
+        for ax, bx in zip(xs, xs[1:]) for ay, by in zip(ys, ys[1:]))
+
+
+@dataclass(frozen=True)
+class LabelDocument:
+    """One image's label document as read: its annotations, its ``width`` and ``height``
+    (``None`` for a document that states none), and each subject's live completion marks."""
+
+    annotations: list[Annotation]
+    width: int | None
+    height: int | None
+    marks: dict[str, list[CompletionMark]]
+
+    def finished(self, subject: str) -> bool:
+        """Whether this document's live marks for ``subject`` cover the whole image."""
+        return bool(self.width and self.height and covers(
+            self.marks.get(subject, []), (0, 0, self.width, self.height)))
+
+    def state(self, subject: str) -> SubjectState:
+        """What this document says about ``subject``: :meth:`finished` or not, holding it by
+        :func:`annotations_hold_subject` or not."""
+        held = annotations_hold_subject(self.annotations, subject)
+        if self.finished(subject):
+            return "complete" if held else "negative"
+        return "partial" if held else "unannotated"
+
+
+def annotations_hold_subject(annotations: Iterable[Annotation], subject: str) -> bool:
+    """Whether any of ``annotations`` names ``subject``, geometry or not: an image-level record
+    counts."""
+    return any(a.subject == subject for a in annotations)
+
+
+def label_document(data: dict | None) -> LabelDocument:
+    """A parsed per-image document (``None`` for no document) as a :class:`LabelDocument`;
+    refuses as :func:`_annotations_of` and :func:`completion_marks` do."""
+    annotations = _annotations_of(data)
+    return LabelDocument(annotations=annotations, width=(data or {}).get("width"),
+                         height=(data or {}).get("height"),
+                         marks=completion_marks(data, annotations))
+
+
 # ── reader ─────────────────────────────────────────────────────────────────
-# A missing file reads as []; a present, unreadable document raises UnreadableLabelDocument.
+
+
+def read_label_document(path) -> LabelDocument:
+    """The label document at ``path`` (:func:`label_document`), an empty one with no marks when
+    there is no file."""
+    return label_document(_load(str(path)))
 
 
 def read_annotations(path) -> list[Annotation]:
@@ -468,24 +626,26 @@ def detection_annotations(path: str | Path) -> list[Annotation]:
     return [a for a in read_annotations(str(path)) if is_detection(a)]
 
 
-def read_annotations_versioned(target: Key | str | Path) -> tuple[list[Annotation], Version]:
-    """An image's annotations and the version of the document they came from, read together.
+def read_document_versioned(target: Key | str | Path) -> tuple[LabelDocument, Version]:
+    """An image's label document (:func:`label_document`) and the version it was read at.
 
-    The token names exactly the bytes the client was shown. An absent document reads as no
-    annotations at ``Version.ABSENT``; a present document is told apart by the store's own version,
-    never by the bytes (a present document can be zero bytes long). A present document that will
-    not decode or will not parse raises :class:`UnreadableLabelDocument`, decoded through the same
+    The token names exactly the bytes the client was shown. An absent document reads as an empty
+    one at ``Version.ABSENT``; a present document is told apart by the store's own version, never
+    by the bytes (a present document can be zero bytes long). A present document that will not
+    decode or will not parse raises :class:`UnreadableLabelDocument`, decoded through the same
     strict policy as :func:`read_annotations`.
     """
     stored = tcip_store.read_blob_versioned(_record_key(target), default=b"")
     if stored.version == Version.ABSENT:
-        return [], stored.version
-    return annotations_from_bytes(stored.value, source=str(target)), stored.version
+        return label_document(None), stored.version
+    source = str(target)
+    return label_document(parse_label_document(
+        decode_document_bytes(stored.value, source=source), source=source)), stored.version
 
 
 # ── reference admissibility ────────────────────────────────────────────────
 
-PERSON_IDENTITY_PREFIX = "user:"  # spelled here, not imported: this package depends only on tcip-store
+PERSON_IDENTITY_PREFIX = "user:"
 
 
 def is_person_signoff(a: Annotation) -> bool:
@@ -532,9 +692,8 @@ def authorship_of(a: Annotation) -> str:
 class ProvenanceFacts:
     """The provenance classification over one list of annotations: ``scored``
     (:func:`is_unadjudicated_prediction`) and ``machine_authored``
-    (:func:`is_unadjudicated_agent_authorship`), plus
-    ``no_created_by``/``not_positively_a_persons``/``rule_admitted_unsigned``, index lists into the
-    annotations passed in.
+    (:func:`is_unadjudicated_agent_authorship`), plus ``no_created_by`` and
+    ``not_positively_a_persons``, index lists into the annotations passed in.
     """
 
     total: int
@@ -547,10 +706,6 @@ class ProvenanceFacts:
     ``accepted_by``'s identity rather than merely its presence the way
     :func:`is_unadjudicated_agent_authorship` does. Never includes a record already counted under
     ``no_created_by``: that record's ``created_by`` names nobody to test as a person or not."""
-    rule_admitted_unsigned: list[int]
-    """Index of every record whose ``accepted_by_rule`` is not ``None`` (an empty string counts:
-    never a truthiness test) and which carries no person's sign-off
-    (:func:`is_person_signoff`): the reference rail's own third arm."""
 
 
 def provenance_facts(annotations: list[Annotation]) -> ProvenanceFacts:
@@ -559,7 +714,6 @@ def provenance_facts(annotations: list[Annotation]) -> ProvenanceFacts:
     machine_authored: list[str] = []
     no_created_by: list[int] = []
     not_positively_a_persons: list[int] = []
-    rule_admitted_unsigned: list[int] = []
     for i, a in enumerate(annotations):
         if is_unadjudicated_prediction(a):
             scored += 1
@@ -570,12 +724,9 @@ def provenance_facts(annotations: list[Annotation]) -> ProvenanceFacts:
         elif not a.created_by.startswith(PERSON_IDENTITY_PREFIX):
             if not is_person_signoff(a):
                 not_positively_a_persons.append(i)
-        if a.accepted_by_rule is not None and not is_person_signoff(a):
-            rule_admitted_unsigned.append(i)
     return ProvenanceFacts(
         total=len(annotations), scored=scored, machine_authored=machine_authored,
         no_created_by=no_created_by, not_positively_a_persons=not_positively_a_persons,
-        rule_admitted_unsigned=rule_admitted_unsigned,
     )
 
 
@@ -583,18 +734,11 @@ def require_reference_ground_truth(documents: Iterable[str | Path]) -> None:
     """Refuse the label ``documents`` as a measurement reference when only the model stands behind
     them.
 
-    Refuses on a record carrying a prediction ``score``; on a record an agent authored as ground
-    truth with no reviewer's ``accepted_by``; and on a record carrying ``accepted_by_rule`` with no
-    person's sign-off. Refuses the whole reference, never by dropping the offending records.
+    Refuses on a record carrying a prediction ``score`` and on a record an agent authored as
+    ground truth with no person's ``accepted_by``. Refuses the whole reference, never by dropping
+    the offending records.
     """
-    annotations: list[Annotation] = []
-    # (path, index within that document): the third arm's own walk, so its refusal can name a
-    # file to open rather than an index into the concatenation nothing else reconstructs.
-    sources: list[tuple[Path, int]] = []
-    for path in map(Path, documents):
-        doc = read_annotations(path)
-        annotations.extend(doc)
-        sources.extend((path, i) for i in range(len(doc)))
+    annotations = [a for path in map(Path, documents) for a in read_annotations(path)]
     facts = provenance_facts(annotations)
     scored, total, agent_authored = facts.scored, facts.total, facts.machine_authored
     if scored:
@@ -602,7 +746,7 @@ def require_reference_ground_truth(documents: Iterable[str | Path]) -> None:
             f"{scored} of {total} annotations in the reference carry a prediction score, so they are "
             "the model's own output that no human has ruled on, and a reference built from them "
             "measures the model against itself rather than against a measurement. Annotate this "
-            "reference, accept the model's proposals through review so each record is a reviewer's "
+            "reference, accept the model's proposals in the editor so each record is a person's "
             "call and carries their accepted_by, or validate against a breeder-confirmed sample of "
             "the model's outputs instead."
         )
@@ -613,18 +757,8 @@ def require_reference_ground_truth(documents: Iterable[str | Path]) -> None:
             f"{producers}, which names no person under this platform's {PERSON_IDENTITY_PREFIX}"
             "<name> convention, and carry no accepted_by. Ground truth an agent wrote and no "
             "human has adjudicated is not a calibration or holdout reference. The lighter path "
-            "is the review-confirmation loop: have a reviewer confirm these records so each one "
-            "carries their accepted_by, rather than hand-annotating the whole reference."
-        )
-    if facts.rule_admitted_unsigned:
-        indices = facts.rule_admitted_unsigned
-        named = ", ".join(f"{sources[i][0]} record {sources[i][1]}" for i in indices)
-        raise ValueError(
-            f"{len(indices)} of {total} annotations in the reference ({named}) carry "
-            "accepted_by_rule with no person's accepted_by: a rule-based admission was verified "
-            "for these records, but nobody has signed off on them, so no person stands behind "
-            "them yet. Confirm each one through Review so it carries the person's sign-off, or "
-            "delete it."
+            "is to have a person confirm these records in the editor so each one carries their "
+            "accepted_by, rather than hand-annotating the whole reference."
         )
 
 
@@ -680,12 +814,10 @@ def stored_content(a: Annotation) -> dict:
     rec: dict = {"subject": a.subject}
     geom = a.geometry
     if polygonal(geom):
-        rounded_rings = _rounded_rings(geom.rings)
-        rec["segmentation"] = [[c for xy in ring for c in xy] for ring in rounded_rings]
-        # Boxed from the rounded rings the document stores, not the raw ones, so a ring that
-        # only collapses at the stored grid can't write a box claiming extent it lost.
-        poly_box = bbox_of(Polygon(rounded_rings))
-        rec["bbox"] = _stored_bbox_or_raise(poly_box, where=f"{a.subject!r} annotation's polygon")
+        if not geometry_extent_ok(geom):
+            raise ValueError(f"{a.subject!r} annotation's polygon rounds to no positive extent at "
+                             "the document's stored grid")
+        rec["segmentation"] = [[c for xy in ring for c in xy] for ring in _rounded_rings(geom.rings)]
     elif isinstance(geom, BBox):
         rec["bbox"] = _stored_bbox_or_raise(geom, where=f"{a.subject!r} annotation")
     elif isinstance(geom, Point):
@@ -727,30 +859,44 @@ def client_annotation(a: Annotation) -> dict:
 
 
 def encode_annotations(target, annotations, img_w: int, img_h: int, *,
-                       keep_empty: bool = False) -> tuple[Key, bytes | None]:
+                       keep_empty: bool = False,
+                       marks: Mapping[str, list[CompletionMark]] | None = None,
+                       ) -> tuple[Key, bytes | None]:
     """The key ``target`` names and the exact bytes its per-image document holds.
 
     The writer's one encoder, apart from the write so a caller placing several documents can
     encode every one of them, and refuse on the first geometry the stored grid collapses
     (``ValueError``), before any lands; a document of a reserved stem (:func:`is_reserved_stem`)
-    refuses the same way. ``None`` for the bytes when no record survives encoding and
+    refuses the same way. Of ``marks`` it keeps each subject's whose digest still names that
+    subject's annotations here, so an edit of one subject's annotations drops that subject's marks
+    in the same write. ``None`` for the bytes when neither a record nor a mark survives and
     ``keep_empty`` is not set: such a document is removed rather than written.
     """
     key = _record_key(target)
     if is_reserved_stem(key.parts[-1]):
         raise ValueError(f"{key.parts[-1]} would name its document after a prediction bucket's "
                          "own record, so it can never have a per-image document.")
+    annotations = list(annotations)
     records = [{**stored_content(a), **_held_provenance(a)} for a in annotations]
-    if not records and not keep_empty:
+    live = _live(marks or {}, annotations)
+    if not records and not live and not keep_empty:
         return key, None
-    payload = {"image": key.parts[-1], "width": int(img_w), "height": int(img_h),
-               ANNOTATIONS_KEY: records}
+    payload: dict = {"image": key.parts[-1], "width": int(img_w), "height": int(img_h),
+                     ANNOTATIONS_KEY: records}
+    if live:
+        payload[COMPLETION_KEY] = {
+            subject: [{"rect": list(m.rect), "by": m.by, "at": m.at, "digest": m.digest,
+                       "proposals_hidden": m.proposals_hidden} for m in held]
+            for subject, held in sorted(live.items())}
     return key, _document_bytes(payload)
 
 
 def write_annotations(target, annotations, img_w: int, img_h: int, *,
-                      keep_empty: bool = False, expect: Version | None = None) -> Version | None:
-    """Write all of an image's annotations to its per-image JSON document.
+                      keep_empty: bool = False, expect: Version | None = None,
+                      marks: Mapping[str, list[CompletionMark]] | None = None,
+                      ) -> Version | None:
+    """Write all of an image's annotations, and the completion ``marks`` still live over them
+    (:func:`encode_annotations`), to its per-image JSON document.
 
     ``target`` is either the document's storage key, minted by whichever resolver owns the tree it
     lives in, or its path, which is placed generically by :func:`annotation_record_key`.
@@ -762,7 +908,8 @@ def write_annotations(target, annotations, img_w: int, img_h: int, *,
     write into a compare-and-set: anything that changed underneath raises ``VersionConflict`` and
     nothing is written. Returns the new version, or ``None`` when the document was removed.
     """
-    key, data = encode_annotations(target, annotations, img_w, img_h, keep_empty=keep_empty)
+    key, data = encode_annotations(target, annotations, img_w, img_h, keep_empty=keep_empty,
+                                   marks=marks)
     if data is None:
         tcip_store.delete(key, expect=expect)
         return None
@@ -784,10 +931,23 @@ def assessed_key(a: Annotation, subject: str, attribute: str | None) -> str | No
     return a.attributes.get(attribute) if attribute else subject
 
 
+class ClassKeyUnknown(ValueError):
+    """A class key the id map in hand does not decode."""
+
+
+def class_id(key: str, id_map: Mapping[str, int]) -> int:
+    """The 0-indexed class id ``id_map`` decodes the class key ``key`` under. Refuses
+    (:class:`ClassKeyUnknown`) a key the map does not hold, naming it and the keys it does."""
+    if key not in id_map:
+        raise ClassKeyUnknown(f"class key {key!r} is not in the id map (known: {sorted(id_map)})")
+    return id_map[key]
+
+
 def target_class_id(a: Annotation, subject: str, attribute: str | None,
                     id_map: dict[str, int], *, allow_unlabeled: bool = False
                     ) -> int | None | str:
-    """The 0-indexed class id ``a`` trains as for ``(subject, attribute)``.
+    """The 0-indexed class id ``a`` trains as for ``(subject, attribute)``: its
+    :func:`assessed_key` decoded by :func:`class_id`.
 
     Returns ``None`` if ``a`` is of a different subject. For a genuine target, an instance never
     assessed for ``attribute`` (``a.attributes.get(attribute) is None``) returns the sentinel
@@ -803,11 +963,11 @@ def target_class_id(a: Annotation, subject: str, attribute: str | None,
         raise ValueError(
             f"annotation of subject {subject!r} has no value for attribute {attribute!r}: "
             "the registry cannot decode its own labels")
-    if key not in id_map:
-        raise ValueError(
-            f"annotation of subject {subject!r} has class key {key!r} not in the run's id map "
-            f"(known: {sorted(id_map)}): the registry cannot decode its own labels")
-    return id_map[key]
+    try:
+        return class_id(key, id_map)
+    except ClassKeyUnknown as exc:
+        raise ClassKeyUnknown(f"annotation of subject {subject!r}: {exc}: the registry cannot "
+                              "decode its own labels") from exc
 
 
 class ClassifiedRecordRefused(ValueError):
@@ -815,15 +975,6 @@ class ClassifiedRecordRefused(ValueError):
     under the attribute, or a value outside the bucket's own vocabulary. Named for one prediction
     document and record index (``source``).
     """
-
-
-def classified_value_of(a: Annotation, *, subject: str, attribute: str) -> str | None:
-    """The value a record carries under ``(subject, attribute)``, or ``None`` when it carries none
-    (a record of a different subject, or one with nothing recorded under ``attribute``).
-    """
-    if a.subject != subject:
-        return None
-    return a.attributes.get(attribute)
 
 
 def require_classified_record(

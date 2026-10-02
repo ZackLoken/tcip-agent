@@ -25,7 +25,12 @@ describe("annotate.save lost-update handling", () => {
     // A 2026 st_mtime_ns (~1.78e18) exceeds 2**53: as a JSON number it would be rounded
     // by JSON.parse and every echo would 409. String tokens must survive byte-for-byte.
     stubFetch(200, { base_mtime: "1783702599549301100" });
-    const res = await api.annotate.save({ image_path: "x", label_path: "x.json", annotations: [] });
+    const res = await api.annotate.save({
+      image_path: "x",
+      label_path: "x.json",
+      annotations: [],
+      user: "breeder",
+    });
     expect(res.status).toBe("ok");
     if (res.status === "ok") expect(res.base_mtime).toBe("1783702599549301100");
   });
@@ -37,6 +42,7 @@ describe("annotate.save lost-update handling", () => {
       label_path: "x.json",
       annotations: [],
       base_mtime: "1",
+      user: "breeder",
     });
     expect(res.status).toBe("conflict");
   });
@@ -48,6 +54,7 @@ describe("annotate.save lost-update handling", () => {
       label_path: "x.json",
       annotations: [],
       base_mtime: "1",
+      user: "breeder",
     });
     expect(res.status).toBe("conflict");
   });
@@ -57,7 +64,13 @@ describe("annotate.save lost-update handling", () => {
       detail: {
         error: "audit_entry_not_written",
         message: "save_label_document completed and its audit entry could not be written",
-        committed: { status: "ok", image_path: "x", n_annotations: 0, base_mtime: "2" },
+        committed: {
+          status: "ok",
+          image_path: "x",
+          n_annotations: 0,
+          base_mtime: "2",
+          completion: {},
+        },
       },
     });
     const res = await api.annotate.save({
@@ -65,6 +78,7 @@ describe("annotate.save lost-update handling", () => {
       label_path: "x.json",
       annotations: [],
       base_mtime: "1",
+      user: "breeder",
     });
     expect(res.status).toBe("unrecorded");
     if (res.status === "unrecorded") {
@@ -161,9 +175,11 @@ describe("query string assembly", () => {
   });
 
   it("drops a null parameter instead of sending the text null", async () => {
-    stubFetch(200, { coverage: null });
-    await api.coverage.get("mosaic.tif", "bush", null);
-    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/coverage?path=mosaic.tif&subject=bush");
+    stubFetch(200, { bucket: "b", proposals: [] });
+    await api.annotate.proposals("img.jpg", "b", null);
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe(
+      "/api/annotate/proposals?image_path=img.jpg&bucket=b",
+    );
   });
 
   it("drops an omitted parameter instead of sending the text undefined", async () => {
@@ -247,34 +263,6 @@ describe("images.url region params", () => {
   it("omits every rect param when no region is requested", () => {
     const params = parseQuery(api.images.url("C:/data/images/2026-01-01/img1.jpg"));
     for (const key of ["x0", "y0", "x1", "y1"]) expect(params.has(key)).toBe(false);
-  });
-});
-
-describe("review request scoping", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("names the dataset root in the label-backup body, the root that opens the review engine", async () => {
-    stubFetch(200, { status: "ok", files_backed_up: 3 });
-    await api.review.backupLabels("C:/data", ["C:/data/annotations/2026-01-01"]);
-    const init = vi.mocked(fetch).mock.calls[0][1];
-    expect(init?.body).toBe(
-      JSON.stringify({ dataset_root: "C:/data", label_dirs: ["C:/data/annotations/2026-01-01"] }),
-    );
-  });
-
-  it("names the dataset root in the batch image-status query string", async () => {
-    stubFetch(200, { statuses: {}, detection_stems: [] });
-    await api.review.imageStatuses({
-      dataset_root: "C:/data",
-      gt_dir: "C:/data/annotations/2026-01-01",
-      pred_dir: null,
-    });
-    const params = parseQuery(String(vi.mocked(fetch).mock.calls[0][0]));
-    expect(params.get("dataset_root")).toBe("C:/data");
-    expect(params.has("project_root")).toBe(false);
-    expect(params.get("gt_dir")).toBe("C:/data/annotations/2026-01-01");
   });
 });
 

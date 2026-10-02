@@ -2,36 +2,30 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Rect } from "react-konva";
 import Konva from "konva";
 
-import { api } from "@/api/client";
-import { subjectsApi, subjectColor, type ImageStatus } from "@/api/subjects";
-import { isAuditEntryNotWritten } from "@/api/http";
+import { api, type SaveLabelsBody } from "@/api/client";
+import { subjectColor } from "@/api/subjects";
 import { sessionsApi } from "@/api/sessions";
 import { AnnotateLegend } from "@/components/annotate/AnnotateLegend";
 import { AnnotationShapes } from "@/components/annotate/AnnotationShapes";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
 import { InProgressPolygon } from "@/components/annotate/InProgressPolygon";
+import { ProposalShapes } from "@/components/annotate/ProposalShapes";
 import { SnapIndicator } from "@/components/annotate/SnapIndicator";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
-import { CoverageChrome } from "@/components/Canvas/CoverageChrome";
-import { CoverageOverlay } from "@/components/Canvas/CoverageOverlay";
 import { TabHeading } from "@/components/TabHeading";
 import { useBandSelection } from "@/hooks/useBandSelection";
-import { useCoverageGrid } from "@/hooks/useCoverageGrid";
-import { useCoverageTracking } from "@/hooks/useCoverageTracking";
-import { useDisclosure } from "@/hooks/useDisclosure";
 import { useImageBands } from "@/hooks/useImageBands";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
-import { useRegionCompleteness } from "@/hooks/useRegionCompleteness";
 import { useRegionServes } from "@/hooks/useRegionServes";
+import { useServingGrid } from "@/hooks/useServingGrid";
 import { compositeParams } from "@/lib/bandSelection";
-import { cellAt, currentCoverageCell, stepUnsweptCell, type GridCell } from "@/lib/coverage";
+import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
 import type { LoadedImage } from "@/lib/imageLoader";
-import { canvasHoldsSubject } from "@/lib/imageStatus";
 import { currentImage, labelPath } from "@/lib/paths";
-import { fitView, zoomToRect } from "@/lib/viewGeometry";
+import { fitView } from "@/lib/viewGeometry";
 import {
   buildAnnotateShapes,
   computeViewport,
@@ -46,15 +40,22 @@ import {
   cutRing,
   findHitPoint,
   findHoveredPolygon,
+  MIN_BOX_SIDE,
   pointInRings,
   pointToSegmentDist,
   withRing,
 } from "@/lib/polygonGeometry";
-import { applyEditDrag, hitTestEdit, MIN_BOX_SIDE, type EditDrag } from "@/lib/editGeometry";
+import { applyEditDrag, hitTestEdit, type EditDrag } from "@/lib/editGeometry";
 import { useSubjectColors } from "@/lib/subjectColors";
 import { nextMode } from "@/lib/toolMode";
 import { useStore } from "@/store";
-import type { Box, PolygonShape } from "@/store/types";
+import type { Box, PolygonShape, Proposal } from "@/store/types";
+
+/** The gestures a save adjudicates beside the canvas content (one save door, its own fields). */
+type Gestures = Pick<
+  SaveLabelsBody,
+  "bucket" | "accept" | "reject" | "complete" | "rect" | "proposals_hidden"
+>;
 
 const SNAP_RADIUS_CANVAS = 15;
 const VERTEX_HANDLE_RADIUS = 4;
@@ -98,8 +99,6 @@ export function AnnotateTab() {
 
   const annotateUi = useStore((s) => s.annotateUi);
   const setHoveredPolygon = useStore((s) => s.setHoveredPolygon);
-  const imageStatus = useStore((s) => s.imageStatus);
-  const setImageStatus = useStore((s) => s.setImageStatus);
   const startImageSessionTracking = useStore((s) => s.startImageSessionTracking);
   const incrementAnnotationsAdded = useStore((s) => s.incrementAnnotationsAdded);
   const markSessionFlushed = useStore((s) => s.markSessionFlushed);
@@ -150,10 +149,7 @@ export function AnnotateTab() {
 
   const imgPath = currentImage(dataset).path;
   const currentImageName = dataset.image_list[dataset.current_image_index] ?? null;
-  // A confirmed negative is a completed review (empty): lock it like "complete".
-  const currentStatus = currentImageName ? imageStatus.byImage[currentImageName] : undefined;
-  const isLocked = currentStatus === "complete" || currentStatus === "negative";
-  const saveDisabled = !imgPath || isLocked || saveBlocked;
+  const saveDisabled = !imgPath || saveBlocked;
 
   const bandsInfo = useImageBands(imgPath);
   const [bandSelection, setBandSelection] = useBandSelection(bandsInfo);
@@ -162,136 +158,100 @@ export function AnnotateTab() {
   // of band params, so the two never warm and read different renders of the same image.
   const composite = compositeParams(bandsInfo, bandSelection);
 
-  // Image navigation (shared with TopBar + Review; honors the status filter).
   const nav = useImageNav();
   usePrefetchAdjacentImages(composite.bands, composite.stretch);
 
-  // ── Coverage: lattice, region serves, session accumulation ────────────────
   const [baseFacts, setBaseFacts] = useState<LoadedImage | null>(null);
-  const coverageGrid = useCoverageGrid({
-    imagePath: imgPath,
-    subject: activeSubject,
-    date: dataset.date,
-    datasetRoot: dataset.dataset_root,
-  });
-  const coverageViewing = useMemo(
-    () => ({
-      bands: composite.bands,
-      stretch: composite.stretch,
-      stats_source: baseFacts?.statsSource ?? null,
-      display_bounds: baseFacts?.displayBounds ?? null,
-      base_served_size: baseFacts?.servedSizeRaw ?? null,
-    }),
-    [composite.bands, composite.stretch, baseFacts],
-  );
-  const completeness = useRegionCompleteness({
-    imagePath: imgPath,
-    datasetRoot: dataset.dataset_root,
-    subject: activeSubject,
-    grid: coverageGrid.grid,
-  });
-  const coverage = useCoverageTracking({
-    imagePath: imgPath,
-    datasetRoot: dataset.dataset_root,
-    subject: activeSubject,
-    date: dataset.date,
-    grid: coverageGrid.grid,
-    cells: coverageGrid.cells,
-    view,
-    imgW: canvas.imgWidth,
-    imgH: canvas.imgHeight,
-    viewing: coverageViewing,
-    workingScale: completeness.workingScale,
-  });
+  const serving = useServingGrid(imgPath);
   const regions = useRegionServes({
     imagePath: imgPath,
     imgW: canvas.imgWidth,
     imgH: canvas.imgHeight,
     view,
-    servingCells: coverageGrid.servingCells,
-    servingTileSize: coverageGrid.serving?.tile_size ?? null,
-    coverageCells: coverageGrid.cells,
+    serving,
     baseFacts,
     composite,
-    onCellServedAtNative: coverage.noteServedAtNative,
   });
-  const coverageMultiCell = coverageGrid.cells.length > 1;
-  const { open: coverageOverlayOn, toggle: toggleCoverageOverlay } = useDisclosure(
-    "tcip.annotate.coverageGridOverlayOpen",
-  );
-  // The cell a Map click just opened (currentCoverageCell names it while it stays in view);
-  // cleared on an image change so a stale selection cannot outlive its own raster.
-  const [mapSelectedCell, setMapSelectedCell] = useState<GridCell | null>(null);
-  useEffect(() => {
-    setMapSelectedCell(null);
-  }, [imgPath]);
 
-  // A tool must always be shown active: when the Map tool is withdrawn and settled (not merely
-  // a grid still loading), fall back to a drawing tool rather than leaving the canvas inert.
-  useEffect(() => {
-    if (mode === "map" && !coverageMultiCell && coverageGrid.settled) {
-      useStore.getState().setMode("box");
-    }
-  }, [mode, coverageMultiCell, coverageGrid.settled]);
-
-  function jumpToCell(cell: GridCell) {
-    const host = measureCanvasHost();
-    if (!host || !coverageGrid.grid) return;
-    // Half the cell stride per axis; the lattice pins overlap to 0, so stride = tile size.
-    const pad = coverageGrid.grid.tile_size / 2;
-    setView(
-      zoomToRect(
-        { x0: cell.x0, y0: cell.y0, x1: cell.x1, y1: cell.y1 },
-        { host, imgW: canvas.imgWidth, imgH: canvas.imgHeight, padX: pad, padY: pad },
-      ),
-    );
-  }
-
-  function coverageViewportRect() {
+  function viewportRect(): [number, number, number, number] | null {
     const host = measureCanvasHost();
     if (!host) return null;
     const vp = computeViewport(view, host, canvas.imgWidth, canvas.imgHeight);
-    return vp ? { x0: vp.x, y0: vp.y, x1: vp.x + vp.w, y1: vp.y + vp.h } : null;
+    return vp ? [vp.x, vp.y, vp.w, vp.h] : null;
   }
-
-  function imageFitScale(): number | null {
-    const host = measureCanvasHost();
-    if (!host || canvas.imgWidth <= 0 || canvas.imgHeight <= 0) return null;
-    return fitView(host, canvas.imgWidth, canvas.imgHeight).scale;
-  }
+  // A region mark is offered only while the view holds less than the whole image.
+  const viewRect = viewportRect();
+  const viewIsRegion =
+    !!viewRect &&
+    (viewRect[0] > 0 ||
+      viewRect[1] > 0 ||
+      viewRect[0] + viewRect[2] < canvas.imgWidth ||
+      viewRect[1] + viewRect[3] < canvas.imgHeight);
 
   function overview() {
     const host = measureCanvasHost();
     if (!host || canvas.imgWidth <= 0 || canvas.imgHeight <= 0) return;
-    setMapSelectedCell(null);
     setView(fitView(host, canvas.imgWidth, canvas.imgHeight));
   }
 
-  function stepCoverageCell(delta: 1 | -1) {
-    if (!coverageMultiCell) return;
-    const host = measureCanvasHost();
-    if (!host) return;
-    const v = useStore.getState().gui.view;
-    const viewport = computeViewport(v, host, canvas.imgWidth, canvas.imgHeight);
-    const center = viewport
-      ? { x: viewport.x + viewport.w / 2, y: viewport.y + viewport.h / 2 }
-      : { x: canvas.imgWidth / 2, y: canvas.imgHeight / 2 };
-    const target = stepUnsweptCell(coverageGrid.cells, coverage.swept, center, delta);
-    if (!target) {
-      useStore
-        .getState()
-        .pushToast(
-          `All ${coverageGrid.cells.length} grid cells are swept at the working zoom.`,
-          "info",
-        );
-      return;
-    }
-    jumpToCell(target);
+  // ── Proposals: the selected bucket's, paired and decided server-side ────────
+  const bucket = dataset.predictions_dir;
+  // Per image: hiding proposals while annotating is recorded on the mark the person then makes.
+  const [hideProposals, setHideProposals] = useState(false);
+  const [proposalTick, setProposalTick] = useState(0);
+  const [served, setServed] = useState<{ key: string; proposals: Proposal[] } | null>(null);
+  const proposalKey = `${imgPath ?? ""}\0${bucket ?? ""}`;
+  useEffect(() => {
+    if (!imgPath || !currentImageName || !bucket || hideProposals) return;
+    let canceled = false;
+    const label = labelPath(dataset, currentImageName);
+    api.annotate.proposals(imgPath, bucket, label).then(
+      (r) => {
+        if (!canceled) setServed({ key: proposalKey, proposals: r.proposals });
+      },
+      (e: unknown) => {
+        if (!canceled)
+          useStore
+            .getState()
+            .pushToast(`Could not load proposals: ${e instanceof Error ? e.message : String(e)}`);
+      },
+    );
+    return () => {
+      canceled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposalKey, hideProposals, proposalTick]);
+  const proposals = !hideProposals && served?.key === proposalKey ? served.proposals : [];
+  const focusedProposal = useStore((s) => s.annotateUi.focusedProposal);
+  const [selectedProposal, setSelectedProposal] = useState<number | null>(null);
+  useEffect(() => {
+    setSelectedProposal(focusedProposal);
+  }, [focusedProposal, currentImageName]);
+  const pending = proposals.filter((p) => p.decision === null);
+
+  function decide(action: "accept" | "reject") {
+    const target =
+      proposals.find((p) => p.index === selectedProposal && p.decision === null) ?? pending[0];
+    if (!target || !bucket) return;
+    void save({ gestures: { bucket, [action]: [target.index] } });
+  }
+
+  function markComplete(next: boolean, rect?: [number, number, number, number]) {
+    const subject = dataset.subject;
+    if (!subject) return;
+    void save({
+      gestures: {
+        complete: { [subject]: next },
+        rect: rect ?? null,
+        proposals_hidden: hideProposals,
+      },
+    });
   }
 
   // A box selection belongs to one image; leaving it drops the selection + any drag (and ends a
   // live freehand stream so it can't bleed vertices onto the next image).
   useEffect(() => {
+    setHideProposals(false);
     setSelectedBoxIdx(null);
     setHoveredBoxIdx(null);
     setHoveredDerivedIdx(null);
@@ -317,15 +277,6 @@ export function AnnotateTab() {
   useEffect(() => {
     if (!annotateUi.cut) setCutStart(null);
   }, [annotateUi.cut]);
-
-  // Confirming the image (Complete/Negative) locks editing: a pending cut and its flag must not
-  // survive into a state where every click on it is refused.
-  useEffect(() => {
-    if (isLocked) {
-      setCutStart(null);
-      useStore.getState().setCut(false);
-    }
-  }, [isLocked]);
 
   // ── Live canvas push (agent visibility: capture_live_canvas) ──────────────
   // The ref always holds the freshest closure so the debounced pusher never reads stale state.
@@ -380,6 +331,8 @@ export function AnnotateTab() {
           ? { point: cutStart.point, color: subjectColor(cutStart.polygon.subject) }
           : null,
         cursor,
+        proposals: pending,
+        selectedProposal,
       }),
     };
   };
@@ -412,6 +365,9 @@ export function AnnotateTab() {
     annotateUi.draggingVertex,
     drawing,
     cutStart,
+    served,
+    hideProposals,
+    selectedProposal,
   ]);
   useEffect(() => {
     canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), false);
@@ -432,18 +388,16 @@ export function AnnotateTab() {
 
   // ── Label load + save ───────────────────────────────────────────────
 
-  // Save the current canvas to the path it was actually loaded from. Reads the live store + refs
-  // (not render closures), so it stays correct even when called from an effect while the app is
-  // mid-transition to another image.
-  async function save(opts?: { interactive?: boolean }) {
-    // interactive=false is the auto-flush on navigate/unmount: it can't show the Reload
-    // banner (the user is on another image), but a dropped save must never be silent:
-    // it surfaces as a toast naming the image whose edits were lost.
+  /** Save the current canvas, with any gestures it adjudicates, to the path it was loaded from,
+   *  reading the live store and refs so a call mid-transition writes the right image. With
+   *  `interactive` false (the auto-flush on navigate/unmount) a dropped save is a toast. */
+  async function save(opts?: { interactive?: boolean; gestures?: Gestures }) {
     const interactive = opts?.interactive ?? true;
+    const gestures = opts?.gestures;
     const paths = loadedPathsRef.current;
     if (!paths) return; // no confirmed load → refuse to overwrite on-disk labels
     const c = useStore.getState().canvas;
-    if (!c.dirty) return;
+    if (!c.dirty && !gestures) return;
     if (!paths.label) {
       // No annotations directory is set for this dataset, so there is nowhere to write; a
       // server round trip would only come back with the same refusal.
@@ -466,13 +420,15 @@ export function AnnotateTab() {
         }),
         base_mtime: paths.mtime,
         user: useStore.getState().user,
+        ...gestures,
       });
-    } catch {
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
       // Identity check: a stale failure for a since-left image must not raise a
       // banner over the image now on screen.
       if (interactive && loadedPathsRef.current === paths) {
         setIoError(
-          "Could not save annotations. Your edits are kept in the editor; press Save to retry.",
+          `Could not save annotations (${detail}). Your edits are kept in the editor; press Save to retry.`,
         );
       } else {
         useStore.getState().pushToast(`Save failed: ${imgFileName}'s edits were not written.`);
@@ -503,46 +459,6 @@ export function AnnotateTab() {
       useStore.getState().pushToast(result.message);
     }
 
-    // Heals an unconfirmed status from the saved content; a confirmed name (complete or
-    // negative) is a human mark, rewritten only through the toolbar's re-confirm action.
-    const name = paths.image.split(/[/\\]/).pop() ?? "";
-    if (name) {
-      const current = useStore.getState().imageStatus.byImage[name];
-      const confirmed = current === "complete" || current === "negative";
-      if (!confirmed) {
-        const hasContent = canvasHoldsSubject(
-          {
-            boxes: c.boxes,
-            polygons: c.polygons,
-            points: c.points,
-            imageAnnotations: c.imageAnnotations,
-          },
-          dataset.subject,
-        );
-        const newStatus: ImageStatus = hasContent ? "partial" : "unannotated";
-        if (current !== newStatus) {
-          setImageStatus(name, newStatus);
-          if (dataset.subject && dataset.dataset_root) {
-            // Best-effort status write; the labels are already saved.
-            void subjectsApi
-              .setImageStatus(
-                name,
-                newStatus,
-                dataset.subject,
-                dataset.date,
-                dataset.dataset_root,
-                useStore.getState().user || undefined,
-              )
-              .catch((e: unknown) => {
-                if (isAuditEntryNotWritten(e)) {
-                  useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
-                }
-              });
-          }
-        }
-      }
-    }
-
     // Staleness guard: flushLeaving() fires this save without awaiting it, so by
     // the time the POST resolves the load effect may already have loaded the next
     // image and repointed loadedPathsRef. Rewinding the ref here would make every
@@ -552,12 +468,15 @@ export function AnnotateTab() {
     if (loadedPathsRef.current !== paths) return;
 
     loadedPathsRef.current = { ...paths, mtime: result.base_mtime };
-    markClean();
     setIoError(null);
     setConflict(false);
-    // The saved content may have made an attested cell stale or changed a saved count; the
-    // store is the only source of truth, so the open image's completeness read runs again.
-    completeness.reload();
+    if (!gestures) {
+      markClean(result.completion);
+      return;
+    }
+    // An adjudication writes server-side content (an accepted proposal), so the document reloads.
+    await reloadCurrent();
+    if (gestures.bucket) setProposalTick((t) => t + 1);
   }
 
   // Re-fetch the current image's labels from disk, discarding local edits. Used to
@@ -643,9 +562,7 @@ export function AnnotateTab() {
         startImageSessionTracking(currentImageName);
       } catch {
         if (canceled) return;
-        // Show a blank canvas but block saving so a transient load failure can't let an
-        // empty canvas overwrite the labels still on disk. image_path stays empty so the
-        // Complete checkbox won't derive a status from this blank canvas either.
+        // A blank canvas with saving blocked: a transient load failure never overwrites the labels.
         loadLabels({
           image_path: "",
           img_width: 0,
@@ -654,6 +571,7 @@ export function AnnotateTab() {
           polygons: [],
           points: [],
           imageAnnotations: [],
+          completion: {},
         });
         loadedKeyRef.current = key;
         loadedPathsRef.current = null;
@@ -704,7 +622,6 @@ export function AnnotateTab() {
   }
 
   function commitPolygonAndTrack() {
-    if (isLocked) return;
     // Closing always ends a live stream: a double-click's leading clicks re-arm streaming,
     // and a stale flag would immediately stream a fresh polygon from the next mouse move.
     streamingRef.current = false;
@@ -721,13 +638,6 @@ export function AnnotateTab() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  function stepImage(delta: number) {
-    // Shared filtered traversal; the label-load effect flushes the outgoing image
-    // (save + telemetry) when the index changes, so no explicit save is needed here.
-    nav.stepImage(delta);
-    selectPolygon(null);
-  }
 
   function selectSubjectByIndex(idx: number) {
     // Number keys pick the Nth declared subject (0-based).
@@ -765,29 +675,51 @@ export function AnnotateTab() {
     );
   }
 
+  const subjectCompletion = canvas.loadedImagePath
+    ? (canvas.completion[dataset.subject ?? ""] ?? { state: "unannotated", finished: false })
+    : null;
+  const subjectFinished = subjectCompletion?.finished ?? false;
+
+  const K = ANNOTATE_KEYS;
   useKeyboardShortcuts([
-    { keys: "ctrl+z", action: () => undo(), when: () => !isLocked },
-    { keys: "ctrl+shift+z", action: () => redo(), when: () => !isLocked },
-    { keys: "ctrl+y", action: () => redo(), when: () => !isLocked },
-    { keys: "ctrl+s", action: () => void save(), when: () => !isLocked },
-    { keys: "m", action: () => useStore.getState().setMode(nextMode(mode)) },
+    { keys: K.undo.keys, action: () => undo() },
+    { keys: K.redo.keys, action: () => redo() },
+    { keys: K.redoAlias.keys, action: () => redo() },
+    { keys: K.save.keys, action: () => void save() },
+    { keys: K.mode.keys, action: () => useStore.getState().setMode(nextMode(mode)) },
+    { keys: K.accept.keys, action: () => decide("accept"), when: () => pending.length > 0 },
+    { keys: K.reject.keys, action: () => decide("reject"), when: () => pending.length > 0 },
     {
-      keys: "v",
+      keys: K.complete.keys,
+      action: () => markComplete(!subjectFinished),
+      when: () => !!dataset.subject && subjectCompletion !== null,
+    },
+    { keys: K.hideProposals.keys, action: () => setHideProposals((h) => !h), when: () => !!bucket },
+    {
+      keys: K.nextProposal.keys,
+      action: () => {
+        const at = pending.findIndex((p) => p.index === selectedProposal);
+        setSelectedProposal(pending[(at + 1) % pending.length].index);
+      },
+      when: () => pending.length > 0,
+    },
+    {
+      keys: K.stream.keys,
       action: () => useStore.getState().setStream(!annotateUi.stream),
       when: () => mode === "polygon",
     },
     {
-      keys: "s",
+      keys: K.snap.keys,
       action: () => useStore.getState().setSnap(!annotateUi.snap),
       when: () => mode === "polygon",
     },
     {
-      keys: "x",
+      keys: K.cut.keys,
       action: () => useStore.getState().setCut(!annotateUi.cut),
-      when: () => mode === "polygon" && !isLocked,
+      when: () => mode === "polygon",
     },
     {
-      keys: "delete",
+      keys: K.delete.keys,
       action: () => {
         if (canvas.selectedPolygonIdx !== null) deletePolygon(canvas.selectedPolygonIdx);
         else if (selectedBoxIdx !== null) {
@@ -795,10 +727,9 @@ export function AnnotateTab() {
           setSelectedBoxIdx(null);
         } else if (canvas.selectedPointIdx !== null) deletePoint(canvas.selectedPointIdx);
       },
-      when: () => !isLocked,
     },
     {
-      keys: "escape",
+      keys: K.cancel.keys,
       action: () => {
         setCurrentPolygon([]);
         setDrawing(null);
@@ -811,35 +742,26 @@ export function AnnotateTab() {
     },
     // Held-key auto-repeat (~30/s) would queue a full image render per tick: one flip per press.
     {
-      keys: "arrowleft",
+      keys: K.previous.keys,
       action: (e) => {
-        if (!e.repeat) stepImage(-1);
+        if (!e.repeat) nav.stepImage(-1);
       },
     },
     {
-      keys: "arrowright",
+      keys: K.next.keys,
       action: (e) => {
-        if (!e.repeat) stepImage(1);
+        if (!e.repeat) nav.stepImage(1);
       },
     },
     {
-      keys: "enter",
+      keys: K.close.keys,
       action: () => commitPolygonAndTrack(),
-      when: () => !isLocked && mode === "polygon" && canvas.currentPolygon.length >= 3,
+      when: () => mode === "polygon" && canvas.currentPolygon.length >= 3,
     },
-    // Coverage cell navigation, multi-cell grids only: previous/next unswept cell.
-    { keys: "[", action: () => stepCoverageCell(-1), when: () => coverageMultiCell },
-    { keys: "]", action: () => stepCoverageCell(1), when: () => coverageMultiCell },
-    { keys: "0", action: () => selectSubjectByIndex(0) },
-    { keys: "1", action: () => selectSubjectByIndex(1) },
-    { keys: "2", action: () => selectSubjectByIndex(2) },
-    { keys: "3", action: () => selectSubjectByIndex(3) },
-    { keys: "4", action: () => selectSubjectByIndex(4) },
-    { keys: "5", action: () => selectSubjectByIndex(5) },
-    { keys: "6", action: () => selectSubjectByIndex(6) },
-    { keys: "7", action: () => selectSubjectByIndex(7) },
-    { keys: "8", action: () => selectSubjectByIndex(8) },
-    { keys: "9", action: () => selectSubjectByIndex(9) },
+    ...Array.from(K.subject.keys, (key, i) => ({
+      keys: key,
+      action: () => selectSubjectByIndex(i),
+    })),
   ]);
 
   // ── Snap helper (image-space) ───────────────────────────────────────
@@ -891,14 +813,12 @@ export function AnnotateTab() {
     (ix < 0 || iy < 0 || ix > canvas.imgWidth || iy > canvas.imgHeight);
 
   const onDown = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
-    if (isLocked) return;
     if (ev.evt.button !== 0) return; // right-button drags must not fabricate boxes
     // A fresh press starts a new gesture: clear the drag flag first. A completed vertex drag
     // fires no trailing click, so without this the stale flag would swallow the next click
     // (e.g. an outside click meant to deselect), forcing a second click.
     didDragRef.current = false;
     if (outsideImage(ix, iy)) return;
-    if (mode === "map") return; // navigation only; the click (onClick) does the jump
     if (mode === "point") {
       // A press on an existing point selects it and picks it up; the whole mark is the handle.
       // Missing every point does nothing here: the click (see onClick) places a new one, so a
@@ -1011,7 +931,6 @@ export function AnnotateTab() {
   const processMoveRef = useRef<(ix: number, iy: number) => void>(() => {});
   processMoveRef.current = (ix: number, iy: number) => {
     setCursor([ix, iy]);
-    if (isLocked || mode === "map") return; // Map mode authors nothing on hover either
 
     // Point drag (repositioning a placed point)
     const pDrag = pointDragRef.current;
@@ -1145,7 +1064,6 @@ export function AnnotateTab() {
   }, []);
 
   const onUp = (ix: number, iy: number) => {
-    if (isLocked || mode === "map") return;
     if (pointDragRef.current !== null) {
       pointDragRef.current = null;
       // didDragRef stays set: the trailing click of this release must not place a second point
@@ -1201,17 +1119,6 @@ export function AnnotateTab() {
   const onClick = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
     if (ev.evt.button !== 0) return;
     if (outsideImage(ix, iy)) return;
-    if (mode === "map") {
-      // Navigation only: a click opens the cell's tile, no annotation handler runs, and this
-      // is offered even while the image is locked (viewing coverage is not an edit).
-      const cell = cellAt(coverageGrid.cells, ix, iy);
-      if (cell) {
-        jumpToCell(cell);
-        setMapSelectedCell(cell);
-      }
-      return;
-    }
-    if (isLocked) return;
     if (mode === "point") {
       if (didDragRef.current) {
         didDragRef.current = false; // the trailing click of a point select/drag release
@@ -1364,7 +1271,6 @@ export function AnnotateTab() {
   };
 
   const onDoubleClick = (ix: number, iy: number) => {
-    if (isLocked) return;
     if (outsideImage(ix, iy)) return;
     if (mode !== "polygon") return;
     streamingRef.current = false; // a double-click ends laying even when too short to close
@@ -1375,7 +1281,6 @@ export function AnnotateTab() {
 
   const onContextMenu = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
     ev.evt.preventDefault();
-    if (isLocked) return;
     if (outsideImage(ix, iy)) return;
     // Point mode: right-click deletes the point under the cursor (a box's right-click delete,
     // scoped to one coordinate). Nothing under the cursor just clears the selection.
@@ -1482,7 +1387,10 @@ export function AnnotateTab() {
           onSave={() => void save()}
           saveDisabled={saveDisabled}
           dirty={canvas.dirty}
-          isLocked={isLocked}
+          subjectCompletion={null}
+          onComplete={markComplete}
+          hideProposals={hideProposals}
+          onHideProposals={setHideProposals}
         />
         <div className="flex-1 flex items-center justify-center bg-tcip-canvas px-4">
           <div className="max-w-lg rounded-lg border border-tcip-border bg-tcip-panel px-5 py-4 text-center">
@@ -1501,37 +1409,6 @@ export function AnnotateTab() {
   const renderLabels = annotateUi.visible;
   const hoveredIdx = annotateUi.hoveredPolygonIdx;
   const draggingIdx = annotateUi.draggingVertex?.[0];
-  const coverageViewport = coverageViewportRect();
-  const activeCoverageCell = currentCoverageCell(
-    coverageGrid.cells,
-    coverageViewport,
-    mapSelectedCell,
-  );
-  // Every raster the grid route serves a lattice for, single-cell rasters included, so a
-  // one-cell image's own attestation stays reachable; only the Map tool stays multi-cell only.
-  const showCoverageChrome =
-    !!coverageGrid.grid ||
-    !!coverageGrid.error ||
-    !!completeness.error ||
-    (coverageGrid.settled && !!coverageGrid.reason);
-
-  function setGridZoom(zoom: number) {
-    if (!activeSubject || !dataset.dataset_root) return;
-    void api.coverage
-      .setGridZoom({
-        subject: activeSubject,
-        zoom,
-        dataset_root: dataset.dataset_root,
-        user: useStore.getState().user,
-      })
-      .then(
-        () => coverageGrid.refetch(),
-        (err: unknown) => {
-          const detail = err instanceof Error ? err.message : String(err);
-          useStore.getState().pushToast(`Could not set the grid zoom: ${detail}`);
-        },
-      );
-  }
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -1540,15 +1417,14 @@ export function AnnotateTab() {
         onSave={() => void save()}
         saveDisabled={saveDisabled}
         dirty={canvas.dirty}
-        isLocked={isLocked}
         bandsInfo={bandsInfo}
         bandSelection={bandSelection}
         onBandSelectionChange={setBandSelection}
-        completeWarning={coverage.completeWarning}
-        workingScaleReason={completeness.workingScaleReason}
-        workingScaleSubject={activeSubject}
-        coverageMultiCell={coverageMultiCell}
-        replaceRequired={coverage.replaceRequired}
+        subjectCompletion={subjectCompletion}
+        onComplete={markComplete}
+        onCompleteView={viewIsRegion && viewRect ? () => markComplete(true, viewRect) : undefined}
+        hideProposals={hideProposals}
+        onHideProposals={setHideProposals}
       />
       <div className="relative flex-1 flex flex-col min-h-0">
         <CanvasStage
@@ -1614,17 +1490,12 @@ export function AnnotateTab() {
             </>
           }
         >
-          {coverageMultiCell && coverageOverlayOn && coverageGrid.grid && (
-            <CoverageOverlay
-              cells={coverageGrid.cells}
-              viewport={coverageViewport}
-              scale={s}
-              swept={coverage.swept}
-              pending={coverage.pending}
-              activeComplete={completeness.activeComplete}
-              activeStale={completeness.activeStale}
-              otherComplete={completeness.otherComplete}
-              annotationCounts={completeness.annotationCounts}
+          {renderLabels && (
+            <ProposalShapes
+              proposals={pending}
+              selected={selectedProposal}
+              strokeW={boxStroke}
+              scaleLineW={scaleLineW}
             />
           )}
           {/* Committed shapes: memoized, cursor-independent (see AnnotationShapes) */}
@@ -1690,59 +1561,20 @@ export function AnnotateTab() {
           Overview
         </button>
 
-        <AttributePanel selectedBoxIdx={mode === "box" ? selectedBoxIdx : null} locked={isLocked} />
+        <AttributePanel selectedBoxIdx={mode === "box" ? selectedBoxIdx : null} />
 
         <AnnotateLegend />
 
-        {showCoverageChrome && (
-          <CoverageChrome
-            subject={activeSubject}
-            derivation={coverageGrid.derivation ?? ""}
-            reason={coverageGrid.reason}
-            settled={coverageGrid.settled}
-            freshDerivationDiffers={coverageGrid.freshDerivationDiffers}
-            onRederiveLattice={coverageGrid.rederiveLattice}
-            onSetGridZoom={setGridZoom}
-            gridFetchError={coverageGrid.error}
-            readError={completeness.error}
-            countsError={completeness.countsError}
-            canOverlay={coverageMultiCell && !!coverageGrid.grid}
-            overlayOn={coverageOverlayOn}
-            onToggleOverlay={toggleCoverageOverlay}
-            currentCellName={activeCoverageCell?.name ?? null}
-            currentCellComplete={
-              !!activeCoverageCell &&
-              (completeness.activeComplete.has(activeCoverageCell.name) ||
-                completeness.activeStale.has(activeCoverageCell.name))
-            }
-            currentCellStale={
-              !!activeCoverageCell && completeness.activeStale.has(activeCoverageCell.name)
-            }
-            otherLattice={completeness.otherLattice}
-            replaceRequired={coverage.replaceRequired}
-            onArmReplace={coverage.armReplace}
-            swept={coverage.swept}
-            pending={coverage.pending}
-            coarserCount={coverage.coarserCount}
-            workingScale={completeness.workingScale}
-            workingScaleReason={completeness.workingScaleReason}
-            fitScale={imageFitScale()}
-            activeComplete={completeness.activeComplete}
-            activeStale={completeness.activeStale}
-            activeCellsAttestedView={completeness.activeCellsAttestedView}
-            otherComplete={completeness.otherCompleteBySubject}
-            annotationCounts={completeness.annotationCounts}
-            onAttest={(complete) => {
-              if (activeCoverageCell && coverageGrid.grid) {
-                completeness.write(
-                  activeCoverageCell.name,
-                  coverageGrid.grid,
-                  complete,
-                  view.scale,
-                );
-              }
-            }}
-          />
+        {pending.length > 0 && (
+          <div className="absolute bottom-3 right-3 z-20 flex items-center gap-2 rounded-md border border-tcip-border bg-tcip-panel/95 px-3 py-1.5 text-[11px] text-tcip-fg">
+            <span className="font-mono text-tcip-muted">{pending.length} proposals to decide</span>
+            <button type="button" className="tcip-btn text-[11px]" onClick={() => decide("accept")}>
+              Accept (a)
+            </button>
+            <button type="button" className="tcip-btn text-[11px]" onClick={() => decide("reject")}>
+              Reject (r)
+            </button>
+          </div>
         )}
       </div>
     </div>

@@ -11,21 +11,21 @@ import pytest
 
 import tcip_store as ts
 from tcip_mcp.audit import audit_log_key
-from tcip_mcp.dataset_layout import region_completeness_key
+from tcip_mcp.web_client import gui_snapshot_key
 from tcip_store.adoption import adopt_root
 from tcip_store.file_backend import FileBackend
 from tcip_store.layout_claims import ROOT
 
 
 def test_a_record_above_its_stores_ceiling_refuses_at_the_seam(tmp_path):
-    key = region_completeness_key(tmp_path)
+    key = gui_snapshot_key(tmp_path)
     with pytest.raises(Exception, match="above the 1 this reader knows"):
         ts.replace(key, {"schema_version": 99}, expect=ts.Version.ABSENT)
         ts.read(key)
 
 
 def test_a_version_that_is_not_a_plain_integer_refuses_at_the_seam(tmp_path):
-    key = region_completeness_key(tmp_path)
+    key = gui_snapshot_key(tmp_path)
     with pytest.raises(Exception, match="not a version number"):
         ts.replace(key, {"schema_version": "high"}, expect=ts.Version.ABSENT)
         ts.read(key)
@@ -50,7 +50,7 @@ def test_a_log_line_above_the_ceiling_is_never_served_as_content(tmp_path):
 
 def test_adoptions_preflight_refuses_a_document_above_the_ceiling_naming_the_version(tmp_path):
     # Planted directly on disk: the seam's own writer now refuses this same document.
-    key = region_completeness_key(tmp_path)
+    key = gui_snapshot_key(tmp_path)
     path = FileBackend().path_for(key)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(ts.get_descriptor(key.store).codec.encode({"schema_version": 99}))

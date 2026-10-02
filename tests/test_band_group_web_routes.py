@@ -63,7 +63,7 @@ def test_dataset_select_route_folds_the_group(
     assert sorted(images) == ["cap_001.bandgroup", "plain_002.jpg"]
 
 
-# ── routes/review.py + routes/annotate.py image dimensions ──────────────────────────────
+# ── routes/annotate.py image dimensions ──────────────────────────────────────────────────
 
 
 def test_annotate_labels_route_measures_a_grouped_captures_real_frame(
@@ -71,20 +71,6 @@ def test_annotate_labels_route_measures_a_grouped_captures_real_frame(
 ):
     manifest = grouped_dataset / "images" / "2026-05-01" / "cap_001.bandgroup"
     resp = client.get("/api/annotate/labels", params={"image_path": str(manifest)})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert (body["img_width"], body["img_height"]) == (24, 20)
-
-
-def test_review_matches_route_measures_a_grouped_captures_real_frame(
-    client: TestClient, grouped_dataset: Path,
-):
-    manifest = grouped_dataset / "images" / "2026-05-01" / "cap_001.bandgroup"
-    resp = client.post("/api/review/matches", json={
-        "dataset_root": str(grouped_dataset),
-        "image_name": "cap_001.bandgroup",
-        "image_path": str(manifest),
-    })
     assert resp.status_code == 200
     body = resp.json()
     assert (body["img_width"], body["img_height"]) == (24, 20)

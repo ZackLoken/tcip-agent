@@ -51,7 +51,7 @@ breeder or an operator runs against a project are documented in `README.md` and
   server's proxy config from the backend's registered FastAPI routes, so the frontend
   references a path by name instead of restating the string a second time.
 - `generate_frontend_types.py` - renders `frontend/src/api/types.generated.ts` from the pydantic
-  models that declare the view-coverage record's shape and the GUI's tab/mode vocabulary
+  models that declare the backend's response shapes and the GUI's tab/mode vocabulary
   (`tcip_web.state.GuiVocabulary`), so the browser's types are a projection of the backend's
   rather than hand-transcribed. Run after changing a declared model;
   `tests/test_generated_frontend_types.py` fails when the checked-in module is stale.

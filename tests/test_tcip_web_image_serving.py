@@ -1,5 +1,5 @@
 """Image serving through one raster read: regions, the display caps, the plain-serve rule, the
-stretch bounds a response reports, and the overview build a scaled read of an oversized raster
+stretch bounds a render uses, and the overview build a scaled read of an oversized raster
 needs first (routes/images.py).
 """
 
@@ -79,28 +79,24 @@ def _served(resp) -> np.ndarray:
     return np.asarray(Image.open(io.BytesIO(resp.content)))
 
 
-def _reject_non_finite_token(token: str) -> float:
-    """``json.loads``'s ``parse_constant`` hook: raises on ``NaN``/``Infinity``/``-Infinity``, the
-    three tokens Python's own JSON extension accepts and a browser's ``JSON.parse`` refuses, so a
-    header that parses here is one a real browser would parse too."""
-    raise ValueError(f"header carries a JSON token no strict parser accepts: {token!r}")
+QUALITY = 90
+"""The JPEG quality these renders are requested and re-encoded at, so bytes compare exactly."""
 
 
-def _stats_source(resp) -> dict:
-    """``X-TCIP-Stats-Source`` parsed as the ``StatsSource`` JSON it now carries, under a strict
-    parser that rejects what ``JSON.parse`` rejects (see ``_reject_non_finite_token``)."""
-    import json
+def _renders_as(resp, owed: np.ndarray) -> None:
+    """The served JPEG is ``owed``'s pixels, encoded at :data:`QUALITY`, byte for byte."""
+    assert resp.status_code == 200, resp.text
+    buf = io.BytesIO()
+    Image.fromarray(owed, mode="RGB").save(buf, "JPEG", quality=QUALITY)
+    assert resp.content == buf.getvalue()
 
-    return json.loads(resp.headers["x-tcip-stats-source"], parse_constant=_reject_non_finite_token)
 
+def _composite(arr: np.ndarray, stretch: str, bounds=None) -> np.ndarray:
+    """``arr``'s first three bands through the shared display stretch, between ``bounds`` (per
+    band ``(low, high)``) or, for ``None``, the array's own."""
+    from tcip_mcp.pipelines.band_stats import composite_display_rgb
 
-def _display_bounds(resp) -> list[list[float]]:
-    """``X-TCIP-Display-Bounds`` parsed as the JSON list of pairs it now carries, under the same
-    strict parser as ``_stats_source``."""
-    import json
-
-    return json.loads(
-        resp.headers["x-tcip-display-bounds"], parse_constant=_reject_non_finite_token)
+    return composite_display_rgb(arr, [0, 1, 2], stretch, bounds)
 
 
 # ── Regions ──────────────────────────────────────────────────────────────────────────────
@@ -243,8 +239,8 @@ def test_a_uint8_raster_serves_its_own_pixels_with_no_stretch(client: TestClient
     resp = client.get("/api/images", params={"path": str(path)})
     served = _served(resp)
     assert np.allclose(served.mean(axis=(0, 1)), (100, 120, 140), atol=3)
-    assert _stats_source(resp) == {"read": "none", "seed": None, "pixel_fraction": None,
-                                   "overview_scale": None}
+    assert "x-tcip-stats-source" not in resp.headers
+    assert "x-tcip-display-bounds" not in resp.headers
 
 
 def test_a_uint16_raster_serves_on_its_dtypes_full_scale(client: TestClient, tmp_path: Path):
@@ -256,8 +252,6 @@ def test_a_uint16_raster_serves_on_its_dtypes_full_scale(client: TestClient, tmp
     resp = client.get("/api/images", params={"path": str(path)})
     served = _served(resp)
     assert np.allclose(served.mean(axis=(0, 1)), 127.5, atol=3)
-    assert _stats_source(resp) == {"read": "dtype_full_scale", "seed": None,
-                                   "pixel_fraction": None, "overview_scale": None}
 
 
 def test_a_multi_band_uint16_raster_serves_on_that_same_scale(client: TestClient, tmp_path: Path):
@@ -280,23 +274,17 @@ def test_a_float_regions_full_scale_is_the_rasters_own_maximum(client: TestClien
         "path": str(path), "x0": 0, "y0": 0, "x1": 20, "y1": 32})
     served = _served(resp)
     assert np.allclose(served.mean(axis=(0, 1)), 100.0 / 1000.0 * 255.0, atol=3)
-    source = _stats_source(resp)
-    assert source["read"] == "window_sample" and source["seed"] == 0
-    assert _display_bounds(resp) == [[0.0, 1000.0]]
 
 
-def test_a_non_positive_float_bands_display_bounds_are_its_own_divisor(
-    client: TestClient, tmp_path: Path,
-):
-    """A float band with no positive data renders black and reports (0.0, divisor), the pair it
-    actually stretched between, not its own negative sampled range."""
+def test_a_non_positive_float_band_renders_black(client: TestClient, tmp_path: Path):
+    """A float band with no positive data renders black, never stretched to its own negative
+    sampled range."""
     path = tmp_path / "negative.tif"
     arr = (-np.abs(np.random.default_rng(0).standard_normal((32, 40))) - 1.0).astype(np.float32)
     tifffile.imwrite(str(path), arr)
     resp = client.get("/api/images", params={"path": str(path)})
     served = _served(resp)
     assert np.allclose(served, 0, atol=2)
-    assert _display_bounds(resp) == [[0.0, float(-arr.min())]]
 
 
 def test_a_single_band_raster_serves_as_replicated_gray(client: TestClient, tmp_path: Path):
@@ -321,19 +309,15 @@ def test_a_four_band_raster_serves_as_plain_rgb_with_the_fourth_band_dropped(
     served = _served(resp)
     assert served.shape == (32, 40, 3)
     assert np.allclose(served.mean(axis=(0, 1)), (100, 120, 140), atol=3)
-    assert _stats_source(resp) == {"read": "none", "seed": None, "pixel_fraction": None,
-                                   "overview_scale": None}
 
 
 def test_a_five_band_raster_composites_its_first_three_bands(client: TestClient, tmp_path: Path):
-    """Past the band counts an RGB reading covers, a default request is a composite, which is a
-    stretched render and says so."""
+    """Past the band counts an RGB reading covers, a default request is a composite: a stretched
+    render of the first three bands between the served array's own bounds."""
     path = tmp_path / "five.tif"
-    _multiband(path, channels=5)
-    resp = client.get("/api/images", params={"path": str(path)})
-    assert _served(resp).shape == (24, 40, 3)
-    assert _stats_source(resp) == {"read": "served_array", "seed": None, "pixel_fraction": None,
-                                   "overview_scale": None}
+    arr = _multiband(path, channels=5)
+    resp = client.get("/api/images", params={"path": str(path), "quality": QUALITY})
+    _renders_as(resp, _composite(arr, "minmax"))
 
 
 def _pinned_stretch_raster(path: Path) -> tuple[np.ndarray, np.ndarray]:
@@ -387,66 +371,53 @@ def test_the_served_composite_is_the_shared_display_primitives_own_pixels(
     assert resp.content == buf.getvalue()
 
 
-# ── Stretch bounds and what a response reports about them ────────────────────────────────
+# ── Stretch bounds ───────────────────────────────────────────────────────────────────────
 
 
 def test_two_regions_of_one_raster_stretch_against_the_same_bounds(
     client: TestClient, tmp_path: Path,
 ):
     """Region renders read their bounds from the raster's own sample, never from the region in
-    hand, so a viewer panning across a raster is not looking at a stretch that moves under them.
+    hand, so a viewer panning across a raster is not looking at a stretch that moves under them:
+    each half renders between the whole raster's bounds, not its own.
     """
     path = tmp_path / "capture.tif"
-    _multiband(path)
+    arr = _multiband(path)
+    raster_bounds = [(float(arr[:, :, i].min()), float(arr[:, :, i].max())) for i in range(3)]
     left = client.get("/api/images", params={
-        "path": str(path), "bands": "0,1,2", "x0": 0, "y0": 0, "x1": 20, "y1": 24})
+        "path": str(path), "bands": "0,1,2", "x0": 0, "y0": 0, "x1": 20, "y1": 24,
+        "quality": QUALITY})
     right = client.get("/api/images", params={
-        "path": str(path), "bands": "0,1,2", "x0": 20, "y0": 0, "x1": 40, "y1": 24})
-    assert left.status_code == right.status_code == 200
-    assert _display_bounds(left) == _display_bounds(right)
-    left_source, right_source = _stats_source(left), _stats_source(right)
-    assert left_source["read"] == "window_sample" and left_source["seed"] == 0
-    assert right_source == left_source
+        "path": str(path), "bands": "0,1,2", "x0": 20, "y0": 0, "x1": 40, "y1": 24,
+        "quality": QUALITY})
+    _renders_as(left, _composite(arr[:, :20], "minmax", raster_bounds))
+    _renders_as(right, _composite(arr[:, 20:], "minmax", raster_bounds))
 
 
-def test_a_regions_bounds_are_the_rasters_sampled_bounds(client: TestClient, tmp_path: Path):
+def test_a_whole_view_renders_between_the_bounds_of_the_array_it_served(
+        client: TestClient, tmp_path: Path):
     path = tmp_path / "capture.tif"
     arr = _multiband(path)
     resp = client.get("/api/images", params={
-        "path": str(path), "bands": "0,1,2", "x0": 0, "y0": 0, "x1": 20, "y1": 24})
-    assert resp.status_code == 200
-    reported = [tuple(pair) for pair in _display_bounds(resp)]
-    assert reported == [(float(arr[:, :, i].min()), float(arr[:, :, i].max())) for i in range(3)]
+        "path": str(path), "bands": "0,1,2", "quality": QUALITY})
+    _renders_as(resp, _composite(arr, "minmax"))
 
 
-def test_a_whole_view_reports_the_bounds_of_the_array_it_served(client: TestClient, tmp_path: Path):
-    path = tmp_path / "capture.tif"
-    arr = _multiband(path)
-    resp = client.get("/api/images", params={"path": str(path), "bands": "0,1,2"})
-    assert resp.status_code == 200
-    assert _stats_source(resp) == {"read": "served_array", "seed": None, "pixel_fraction": None,
-                                   "overview_scale": None}
-    reported = [tuple(pair) for pair in _display_bounds(resp)]
-    assert reported == [(float(arr[:, :, i].min()), float(arr[:, :, i].max())) for i in range(3)]
-
-
-def test_a_composited_non_positive_float_bands_display_bounds_are_its_own_divisor(
+def test_a_composited_non_positive_float_band_renders_black_beside_its_lit_bands(
     client: TestClient, tmp_path: Path,
 ):
-    """The composite route under ``stretch=none`` reports (0.0, divisor) for a selected band with
-    no positive data, the same rule the plain serve reports it under, not its sampled (min, max)."""
+    """The composite route under ``stretch=none`` renders a selected band with no positive data
+    black, the same rule the plain serve renders it under, while the others keep their level."""
     path = tmp_path / "capture.tif"
     rng = np.random.default_rng(5)
     arr = rng.uniform(1.0, 100.0, size=(24, 40, 3)).astype(np.float32)
     arr[:, :, 0] = -np.abs(arr[:, :, 0]) - 1.0
     tifffile.imwrite(str(path), arr)
-    resp = client.get("/api/images", params={
-        "path": str(path), "bands": "0,1,2", "stretch": "none"})
-    assert resp.status_code == 200
-    reported = [tuple(pair) for pair in _display_bounds(resp)]
-    assert reported[0] == (0.0, float(-arr[:, :, 0].min()))
-    assert reported[1] == (0.0, float(arr[:, :, 1].max()))
-    assert reported[2] == (0.0, float(arr[:, :, 2].max()))
+    owed = _composite(arr, "none")
+    assert (owed[:, :, 0] == 0).all()
+    assert owed[:, :, 1].mean() > 50 and owed[:, :, 2].mean() > 50
+    _renders_as(client.get("/api/images", params={
+        "path": str(path), "bands": "0,1,2", "stretch": "none", "quality": QUALITY}), owed)
 
 
 def test_a_percent_clip_region_stretches_between_the_cached_cut_points(
@@ -455,15 +426,12 @@ def test_a_percent_clip_region_stretches_between_the_cached_cut_points(
     from tcip_mcp.pipelines import raster_source
 
     path = tmp_path / "capture.tif"
-    _multiband(path)
+    arr = _multiband(path)
     resp = client.get("/api/images", params={
         "path": str(path), "bands": "0,1,2", "stretch": "percent_clip",
-        "x0": 0, "y0": 0, "x1": 20, "y1": 24})
-    assert resp.status_code == 200
+        "x0": 0, "y0": 0, "x1": 20, "y1": 24, "quality": QUALITY})
     stats = images_route._raster_stats(path, 4, raster_source.source_pool_key(path, 4))
-    reported = [v for pair in _display_bounds(resp) for v in pair]
-    expected = [v for i in range(3) for v in stats.clip_bounds[i]]
-    assert reported == pytest.approx(expected, rel=1e-5)
+    _renders_as(resp, _composite(arr[:, :20], "percent_clip", stats.clip_bounds[:3]))
 
 
 def _five_band_float_with_one_nan(path: Path, *, height: int = 24, width: int = 40) -> np.ndarray:
@@ -477,23 +445,12 @@ def _five_band_float_with_one_nan(path: Path, *, height: int = 24, width: int = 
     return arr
 
 
-def test_a_nan_pixel_reports_a_null_bound_under_a_strict_parser(
-    client: TestClient, tmp_path: Path,
-):
-    """A NaN pixel would otherwise poison ``X-TCIP-Display-Bounds`` with Python's own ``NaN``
-    token, a JSON extension a browser's ``JSON.parse`` refuses outright, which is what left the
-    canvas blank on a raster the server had in fact rendered. The route still serves (200), the
-    poisoned band's bound comes back ``null`` rather than that token, and the header parses under
-    the same strict parser ``_display_bounds`` uses (refusing exactly what ``JSON.parse`` refuses).
-    """
+def test_a_nan_pixel_still_serves_the_raster(client: TestClient, tmp_path: Path):
+    """A NaN pixel poisons its band's bounds, and the route still serves the raster it rendered."""
     path = tmp_path / "nan.tif"
-    arr = _five_band_float_with_one_nan(path)
+    _five_band_float_with_one_nan(path)
     resp = client.get("/api/images", params={"path": str(path), "bands": "0,1,2"})
-    assert resp.status_code == 200, resp.text
-    bounds = _display_bounds(resp)
-    assert bounds[0] == [None, None]
-    assert bounds[1] == [float(arr[:, :, 1].min()), float(arr[:, :, 1].max())]
-    assert bounds[2] == [float(arr[:, :, 2].min()), float(arr[:, :, 2].max())]
+    assert _served(resp).shape == (24, 40, 3)
 
 
 # ── /api/images/bands ────────────────────────────────────────────────────────────────────
@@ -602,23 +559,24 @@ def test_a_raster_within_the_sampling_budget_keeps_reading_native_pixels(
     assert [b["max"] for b in body["bands"]] == [float(arr[:, :, i].max()) for i in range(4)]
 
 
-def test_a_region_of_an_oversized_raster_reports_the_overview_scale_it_stretched_by(
+def test_a_region_of_an_oversized_raster_stretches_by_its_overview_bounds(
     client: TestClient, tmp_path: Path, monkeypatch,
 ):
+    from tcip_mcp.pipelines import raster_source
     from tcip_mcp.pipelines.overviews import build_overviews
 
     monkeypatch.setattr(images_route, "_STATS_SAMPLE_BUDGET", 100_000)
     path = tmp_path / "wide_ms.tif"
-    _wide_multiband(path)
+    arr = _wide_multiband(path)
     build_overviews(path)
 
     resp = client.get("/api/images", params={
-        "path": str(path), "bands": "0,1,2", "x0": 0, "y0": 0, "x1": 256, "y1": 64})
-    assert resp.status_code == 200
-    source = _stats_source(resp)
-    assert source["read"] == "overview"
-    assert source["overview_scale"] == pytest.approx(1024 / 5000, rel=1e-5)
-    assert "x-tcip-display-bounds" in resp.headers
+        "path": str(path), "bands": "0,1,2", "x0": 0, "y0": 0, "x1": 256, "y1": 64,
+        "quality": QUALITY})
+    stats = images_route._raster_stats(path, 4, raster_source.source_pool_key(path, 4))
+    assert stats.overview_scale == pytest.approx(1024 / 5000, rel=1e-5)
+    bounds = [(r.minimum, r.maximum) for r in stats.ranges[:3]]
+    _renders_as(resp, _composite(arr[:, :256], "minmax", bounds))
 
 
 def test_get_bands_carries_the_band_interpretations_a_backend_reads(

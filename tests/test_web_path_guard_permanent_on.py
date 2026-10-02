@@ -302,22 +302,28 @@ def test_session_routes_confine_the_dataset_root_they_record(
     assert loaded.json()["sessions"][0]["images"]["a.jpg"]["dataset_root"] == str(inside.resolve())
 
 
-def test_review_routes_confine_the_dataset_root_and_the_label_files_they_read(
+def test_the_proposals_route_confines_the_bucket_and_the_label_file_it_reads(
     client: TestClient, tmp_path: Path, outside: Path,
 ) -> None:
+    from tcip_mcp.tools.proposal_tools import stage_proposals
+
     inside = open_new_project(tmp_path / "proj")
     image = _image(inside / "images" / "2026-02-11" / "a.jpg")
-    assert client.get("/api/review/image_statuses", params={
-        "dataset_root": str(outside)}).status_code == 403
-    assert client.post("/api/review/matches", json={
-        "dataset_root": str(inside), "image_name": "a.jpg", "image_path": str(image),
-        "gt_path": str(outside / "a.json")}).status_code == 403
+    staged = stage_proposals(inside, str(image), model_name="sketch", boxes=[
+        {"subject": "bud", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.2, "h": 0.2}])
+    assert "error" not in staged, staged
+    bucket = str(Path(staged["path"]).parent)
+
+    assert client.get("/api/annotate/proposals", params={
+        "image_path": str(image), "bucket": str(outside)}).status_code == 403
+    assert client.get("/api/annotate/proposals", params={
+        "image_path": str(image), "bucket": bucket,
+        "label_path": str(outside / "a.json")}).status_code == 403
     assert not (outside / ".tcip").exists()
 
-    assert client.get("/api/review/image_statuses", params={
-        "dataset_root": str(inside)}).status_code == 200
-    assert client.post("/api/review/matches", json={
-        "dataset_root": str(inside), "image_name": "a.jpg", "image_path": str(image)}).status_code == 200
+    resp = client.get("/api/annotate/proposals", params={"image_path": str(image), "bucket": bucket})
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()["proposals"]) == 1
 
 
 def test_a_label_write_is_refused_before_it_happens_when_its_dataset_root_is_outside(
@@ -332,14 +338,15 @@ def test_a_label_write_is_refused_before_it_happens_when_its_dataset_root_is_out
     label = outside / "dataset" / "annotations" / "2026-02-11" / "a.json"
     store.configure(store.workspace, ((outside / "dataset" / "images").resolve(),))
     resp = client.post("/api/annotate/labels", json={
-        "image_path": str(image), "label_path": str(label), "annotations": []})
+        "image_path": str(image), "label_path": str(label), "annotations": [], "user": "breeder"})
     assert resp.status_code == 403
     assert not label.exists()
 
     inside_image = _image(tmp_path / "proj" / "images" / "2026-02-11" / "a.jpg")
     inside_label = tmp_path / "proj" / "annotations" / "2026-02-11" / "a.json"
     ok = client.post("/api/annotate/labels", json={
-        "image_path": str(inside_image), "label_path": str(inside_label), "annotations": []})
+        "image_path": str(inside_image), "label_path": str(inside_label), "annotations": [],
+        "user": "breeder"})
     assert ok.status_code == 200, ok.text
     assert inside_label.exists()
 

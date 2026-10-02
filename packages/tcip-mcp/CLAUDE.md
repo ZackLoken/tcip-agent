@@ -24,14 +24,14 @@ src/tcip_mcp/
     model_build.py          # build_model: the one seam from a model_source config to an nn.Module
     model_contract.py        # the measurement boundary a bespoke model must pass
                               # (check_model_contract, overfit_check)
-    proposal.py               # auto-labeling engine seam: built-in SAM, or a bespoke Proposer
+    proposal.py               # auto-labeling engine seam: a registered or dotted Proposer
     execution.py               # one pass's execution record (conf, cap, tile geometry, merge)
                                 # and prepare_pass, the one place a pass is built
     operating_point.py          # the criteria an assessment judges against: count, classifier,
                                  # scalar, and the spatial held-out check
     schemas.py, image_utils.py
   dataset_layout.py      # the single path resolver on the backend: where an image's
-                          # labels/predictions live on disk. The frontend cannot import it: the label suffix reaches it through the generated types, and subjects.ts's ImageStatus union restates the status vocabulary, held equal by tests/test_frontend_dataset_vocabulary.py
+                          # labels/predictions live on disk, and the one label save. The frontend cannot import it: the label suffix and the completion-state vocabulary reach it through the generated types
   subject_registry.py    # subjects.json: subjects, attributes, the name<->id assignment
   traits.py               # one record per trait: its entry (spec fields and what each delivered
                             # number means) as appended revisions the breeder confirms

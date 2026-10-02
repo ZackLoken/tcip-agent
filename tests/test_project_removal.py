@@ -67,7 +67,21 @@ def test_removal_archives_moves_and_records_one_line(client, tmp_path):
     (line,) = _log(moved_to)[before:]
     assert line["tool"] == "project_removed"
     assert line["arguments"]["archive_path"] == str(archive)
+    assert line["arguments"]["requested_by"] == "user:tester"
     assert project_id not in {p["id"] for p in client.get("/api/projects").json()["projects"]}
+
+
+def test_a_removal_naming_no_one_refuses_and_leaves_the_project(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("TCIP_USER", "osuser")
+    ws = tmp_path.parent
+    project, project_id = _project(ws, "valley_block", "Valley block")
+
+    resp = client.post("/api/projects/remove", json={
+        "id": project_id, "confirm_name": "Valley block", "user": " "})
+
+    assert resp.status_code == 400 and "names no one" in resp.text
+    assert project.is_dir()
+    assert _removed_lines(project) == []
 
 
 def test_an_archive_that_refuses_leaves_the_project_where_it_was_and_still_open(

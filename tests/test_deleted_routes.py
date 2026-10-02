@@ -20,6 +20,13 @@ DELETED_ROUTES = [
     ("GET", "/api/images/dimensions"),
     ("GET", "/api/review/image_status"),
     ("POST", "/api/review/save_gt"),
+    # One editor: a proposal is accepted or rejected, and an image marked complete, through
+    # POST /api/annotate/labels; proposals are served by GET /api/annotate/proposals.
+    ("POST", "/api/review/action"),
+    ("POST", "/api/review/matches"),
+    ("GET", "/api/review/generation_conf"),
+    ("POST", "/api/subjects/image_status"),
+    ("GET", "/api/coverage/grid"),
     ("GET", "/api/dataset/images"),
     ("POST", "/api/annotate/open"),
     # The two phenology doors merged into one, POST /api/results/phenology_measurement,

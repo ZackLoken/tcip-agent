@@ -111,9 +111,7 @@ def run_full_frame_evaluation(
     from tcip_mcp.pipelines.data.label_queries import admit, require_admitted
     from tcip_mcp.pipelines.data.selection import ClassScope
 
-    contradicted_negatives: set[str] = set()
-    admitted = admit(images_dir, labels_dir, scope=ClassScope.of(checkpoint.data_config),
-                     contradicted_out=contradicted_negatives)
+    admitted = admit(images_dir, labels_dir, scope=ClassScope.of(checkpoint.data_config))
     require_admitted(admitted)
     # At the width the predictor reads at, like every other measurement door: this gate reads
     # targets and source paths off the loader, and the predictor reads each source itself.
@@ -147,9 +145,6 @@ def run_full_frame_evaluation(
         **{k: m[k] for k in keys},
         "max_dets_cap_saturated_frac": cap_saturated_frac(per_image),
         "scored_images": len(per_image), "tallies": admitted.tallies,
-        # Names recorded negative whose label file now holds subject content; scored on that
-        # content, not filtered out, but the stale confirmation needs re-review.
-        "contradicted_negatives": sorted(contradicted_negatives),
     }
     # For a count trait, the delivery-grade count that gates the phenotype is the derived
     # criterion's tp/fp/fn (center-match, for a trait so configured), not AP@0.5, kept alongside, clearly labeled.

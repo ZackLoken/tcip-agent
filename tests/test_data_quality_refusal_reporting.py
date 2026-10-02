@@ -43,7 +43,7 @@ def _errors(findings: list[tuple[str, str]]) -> list[str]:
 
 def test_an_unreadable_label_store_is_an_error_per_file(tmp_path: Path):
     """Labels present but of a shape the reader refuses are an error per file, naming the refusal;
-    a dataset with no annotations dir at all yields no finding from this check at all."""
+    a dataset with no annotations dir at all yields no error, only the count of unlabeled images."""
     root = tmp_path / "unreadable"
     labels_dir = root / "annotations" / DATE
     labels_dir.mkdir(parents=True)
@@ -63,7 +63,9 @@ def test_an_unreadable_label_store_is_an_error_per_file(tmp_path: Path):
     for stem in ("plotA_0_0", "plotA_0_1"):
         _write_image(bare / "images" / DATE / f"{stem}.jpg", 96, 64)
 
-    assert _check(bare) == []
+    findings = _check(bare)
+    assert _errors(findings) == []
+    assert [level for level, _ in findings] == ["info"]
 
 
 def test_a_label_with_no_matching_image_is_an_error(tmp_path: Path):
@@ -141,9 +143,9 @@ def test_an_undecodable_first_label_hides_no_later_finding(tmp_path: Path):
     assert any("zzz_orphan" in e and "no matching image" in e for e in errors)
 
 
-def test_an_empty_label_not_confirmed_negative_is_an_error(tmp_path: Path):
+def test_an_empty_label_not_marked_complete_is_an_error(tmp_path: Path):
     """A platform-written empty document is not a zero-byte file, so a size check never catches
-    it; an empty label with no human confirmation is unannotated, not a negative."""
+    it; an empty label no person marked complete is unannotated, not a negative."""
     root = tmp_path / "ds"
     labels_dir = root / "annotations" / DATE
     labels_dir.mkdir(parents=True)
@@ -153,23 +155,21 @@ def test_an_empty_label_not_confirmed_negative_is_an_error(tmp_path: Path):
     errors = _errors(_check(root))
 
     assert len(errors) == 1
-    assert "plotA_0_0" in errors[0] and "confirmed negative" in errors[0]
+    assert "plotA_0_0" in errors[0] and "not marked complete" in errors[0]
 
 
 def test_a_confirmed_negative_empty_label_stays_clean(tmp_path: Path):
     """The rail this suppression exists for: a human's Complete-with-nothing must not be flagged
     as though nobody had looked."""
-    from tcip_mcp.dataset_layout import replace_image_status_store, status_bucket, status_records
+    from tests._producer_fixtures import mark_complete
 
     root = tmp_path / "ds"
     labels_dir = root / "annotations" / DATE
     labels_dir.mkdir(parents=True)
-    _write_image(root / "images" / DATE / "plotA_0_0.jpg", 96, 64)
+    image = root / "images" / DATE / "plotA_0_0.jpg"
+    _write_image(image, 96, 64)
     json_io.write_annotations(labels_dir / "plotA_0_0.json", [], 96, 64, keep_empty=True)
-    replace_image_status_store(root, {
-        status_bucket("bud", DATE): status_records(
-            {"plotA_0_0.jpg": "negative"}, recorded_by="user:breeder"),
-    })
+    mark_complete(image, labels_dir / "plotA_0_0.json", "bud", project=root)
 
     assert _check(root) == []
 
@@ -190,25 +190,6 @@ def test_a_coco_at_the_dataset_root_is_not_one_of_the_datasets_labels(tmp_path: 
     assert len(errors) == 2
     assert sum("plotA_0_0" in e for e in errors) == 1
     assert sum("plotB_0_0" in e for e in errors) == 1
-
-
-def test_an_npz_capture_confirmed_negative_is_recognized(tmp_path: Path):
-    """The confirmed-negative name is resolved through the layout's own extension set, not the
-    six-extension list an ``.npz`` capture falls outside of."""
-    from tcip_mcp.dataset_layout import replace_image_status_store, status_bucket, status_records
-
-    root = tmp_path / "ds"
-    labels_dir = root / "annotations" / DATE
-    labels_dir.mkdir(parents=True)
-    (root / "images" / DATE).mkdir(parents=True)
-    (root / "images" / DATE / "plotA_0_0.npz").write_bytes(b"\x00")
-    json_io.write_annotations(labels_dir / "plotA_0_0.json", [], 8, 8, keep_empty=True)
-    replace_image_status_store(root, {
-        status_bucket("bud", DATE): status_records(
-            {"plotA_0_0.npz": "negative"}, recorded_by="user:breeder"),
-    })
-
-    assert _check(root) == []
 
 
 def test_an_undecodable_label_is_a_finding_beside_a_readable_json_file(tmp_path: Path):

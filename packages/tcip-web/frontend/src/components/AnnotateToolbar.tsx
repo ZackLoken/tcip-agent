@@ -1,48 +1,27 @@
 /**
  * Annotate-tab context toolbar. Two rows:
- *   Row 1: tool mode (Point/Box/Polygon, plus Map on a multi-cell raster), the subject picker
- *          pill, an Editor toggle, then the nav filter, image navigation, and the Complete
- *          checkbox.
+ *   Row 1: tool mode (Point/Box/Polygon), the subject picker pill, an Editor toggle, then image
+ *          navigation, the hide-proposals toggle and the Complete checkbox.
  *   Editor: a second toolbar (collapsed by default, remembered) holding the tools you
  *           flip constantly (Snap / Stream / Show labels) plus Undo / Redo / Save.
- * Lives directly under the global TopBar; Undo/Redo/Save are wired up from AnnotateTab.
+ * Lives directly under the global TopBar; every save and mark is wired up from AnnotateTab.
  */
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import type { ImageBandsResponse } from "@/api/client";
-import {
-  subjectsApi,
-  FINISHED_STATUSES,
-  subjectColor,
-  type ImageStatus,
-  type SchemaChangeSweep,
-} from "@/api/subjects";
-import { committedOf } from "@/api/http";
+import { subjectColor } from "@/api/subjects";
 import { BandPicker } from "@/components/BandPicker";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { useDisclosure } from "@/hooks/useDisclosure";
-import { stepTarget, useImageNav } from "@/hooks/useImageNav";
+import { useImageNav } from "@/hooks/useImageNav";
 import { showsBandPicker, type BandSelection } from "@/lib/bandSelection";
-import { noWorkingScaleToast, replaceRequiredToastSentence } from "@/lib/coverage";
-import type { ReplaceRequired } from "@/lib/coverageTracker";
 import { UNSET_GLYPH } from "@/lib/glyphs";
-import { canvasHoldsSubject } from "@/lib/imageStatus";
-import { imagePath } from "@/lib/paths";
-import { schemaChangeSweepToast } from "@/lib/registrySweep";
+import { saveRegistry } from "@/lib/registrySave";
 import { useSubjectColors } from "@/lib/subjectColors";
 import { useStore } from "@/store";
 import { selectProjectRoot } from "@/store/slices/gui";
-
-// Progression order (start state first, terminal states last), matches Review's parallel
-// status filter, which already reads Unreviewed before Reviewed.
-const STATUS_FILTERS: { value: "all" | ImageStatus; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "unannotated", label: "Unannotated" },
-  { value: "partial", label: "Partial" },
-  { value: "complete", label: "Complete" },
-  { value: "negative", label: "Negative" },
-];
+import type { SubjectCompletion } from "@/store/types";
 
 /** A pressed-state tool button with a status dot. */
 function Etool({
@@ -84,39 +63,30 @@ export function AnnotateToolbar({
   onSave,
   saveDisabled,
   dirty,
-  isLocked,
   bandsInfo,
   bandSelection,
   onBandSelectionChange,
-  completeWarning,
-  workingScaleReason,
-  workingScaleSubject,
-  coverageMultiCell,
-  replaceRequired,
+  subjectCompletion,
+  onComplete,
+  onCompleteView,
+  hideProposals,
+  onHideProposals,
 }: {
   onSave: () => void;
   saveDisabled: boolean;
   dirty: boolean;
-  // True when the current image's status is Complete/Negative: edits and saves are blocked.
-  isLocked?: boolean;
   // Band-composite picker (multispectral only): omitted/null for a standard RGB dataset.
   bandsInfo?: ImageBandsResponse | null;
   bandSelection?: BandSelection | null;
   onBandSelectionChange?: (next: BandSelection) => void;
-  // Coverage facts worth stating when Complete is checked (warn, never block); null = nothing.
-  completeWarning?: () => string | null;
-  // Why the active subject has no working-scale bar on this image (a read pending, a read
-  // failure, or no saved box/polygon annotation of it); null once a bar exists.
-  workingScaleReason?: string | null;
-  // The subject `workingScaleReason` was computed for (gui.active_subject, not necessarily
-  // dataset.subject): the no-bar toast names this subject, never a different one.
-  workingScaleSubject?: string | null;
-  // The Map tool is offered only once the raster's coverage grid holds more than one cell; the
-  // no-bar/coverage-warning toast is offered only then too, since there is no tracking otherwise.
-  coverageMultiCell?: boolean;
-  // The coverage tracker's replace hold, or null: the Complete toast names it beside whatever
-  // else it already says, since a hold means this lattice's own sweeps are still unsaved.
-  replaceRequired?: ReplaceRequired | null;
+  // The dataset subject's completion on this image as the backend serves it; null until loaded.
+  subjectCompletion: SubjectCompletion | null;
+  // Mark the dataset subject complete over the whole image (true) or withdraw its marks (false).
+  onComplete: (next: boolean) => void;
+  // Mark the dataset subject complete over the region in view; omitted when the view holds it all.
+  onCompleteView?: () => void;
+  hideProposals: boolean;
+  onHideProposals: (next: boolean) => void;
 }) {
   const dataset = useStore((s) => s.gui.dataset);
   const projectRoot = useStore(selectProjectRoot);
@@ -125,8 +95,6 @@ export function AnnotateToolbar({
   const activeSubject = useStore((s) => s.gui.active_subject);
   const setActiveSubject = useStore((s) => s.setActiveSubject);
   const registry = useStore((s) => s.registry.subjects);
-  const registryVersion = useStore((s) => s.registry.version);
-  const setRegistry = useStore((s) => s.setRegistry);
   const canvasBoxes = useStore((s) => s.canvas.boxes);
   const canvasPolygons = useStore((s) => s.canvas.polygons);
   const canvasPoints = useStore((s) => s.canvas.points);
@@ -136,10 +104,6 @@ export function AnnotateToolbar({
   const setSnap = useStore((s) => s.setSnap);
   const setStream = useStore((s) => s.setStream);
   const setCut = useStore((s) => s.setCut);
-  const imageStatus = useStore((s) => s.imageStatus);
-  const staleMarks = useStore((s) => s.imageStatus.staleMarks);
-  const setStatusFilter = useStore((s) => s.setStatusFilter);
-  const setImageStatus = useStore((s) => s.setImageStatus);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
 
@@ -165,20 +129,9 @@ export function AnnotateToolbar({
   }, [canvasBoxes, canvasPolygons, canvasPoints, canvasImageAnnotations]);
 
   const currentImage = dataset.image_list[dataset.current_image_index] ?? null;
-  const currentStatus: ImageStatus | undefined = currentImage
-    ? imageStatus.byImage[currentImage]
-    : undefined;
-  const loadedImagePath = useStore((s) => s.canvas.loadedImagePath);
-  const canvasReady = !!loadedImagePath && loadedImagePath === imagePath(dataset, currentImage);
   const nav = useImageNav();
-  const isStale = useCallback((name: string) => staleMarks.includes(name), [staleMarks]);
-  const staleNav = useImageNav({ activeFilter: "all", isNavigable: isStale, wrap: true });
-  const currentIsStale = !!currentImage && staleMarks.includes(currentImage);
-  // The scattered stale set has no real ends, so its step wraps; disabled only once wrapping
-  // still finds nowhere to go (no stale mark, or the current image is the only one).
-  const staleStepDisabled =
-    staleNav.total === 0 ||
-    stepTarget(staleNav.filteredIndices, dataset.current_image_index, 1, true) === null;
+  const subjectState = subjectCompletion?.state ?? null;
+  const finished = subjectCompletion?.finished ?? false;
 
   const activeCount = activeSubject ? (subjectCounts.get(activeSubject) ?? 0) : 0;
 
@@ -192,136 +145,9 @@ export function AnnotateToolbar({
       return;
     }
     const previousSubject = activeSubject;
-    const next = { ...registry, [trimmed]: {} };
-    setRegistry(next, registryVersion);
     setActiveSubject(trimmed);
-    const root = dataset.dataset_root;
-    if (projectRoot && root) {
-      try {
-        const saved = await subjectsApi.save(next, root, registryVersion);
-        setRegistry(next, saved.version);
-        const toast = schemaChangeSweepToast(saved.schema_change_sweep);
-        if (toast) useStore.getState().pushToast(toast, "info");
-      } catch (e) {
-        const saved = committedOf<{
-          status: string;
-          n_subjects: number;
-          subjects_path: string;
-          version: string;
-          schema_change_sweep: SchemaChangeSweep;
-        }>(e);
-        if (saved) {
-          setRegistry(next, saved.version);
-          const toast = schemaChangeSweepToast(saved.schema_change_sweep);
-          if (toast) useStore.getState().pushToast(toast, "info");
-          useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
-          return;
-        }
-        // A refusal means this browser's registry is not trustworthy: reload rather than keep it.
-        useStore
-          .getState()
-          .pushToast(`Could not add subject: ${e instanceof Error ? e.message : String(e)}`);
-        setActiveSubject(previousSubject);
-        try {
-          const fresh = await subjectsApi.load(root, dataset.annotations_dir);
-          setRegistry(fresh.subjects, fresh.version);
-        } catch {
-          /* the reload itself failing leaves the optimistic registry in place */
-        }
-      }
-    }
-  }
-
-  // Shared write path for the Complete toggle and the stale re-confirm action, both scoped to
-  // dataset.subject so a write here can't read back as a confirmation about a different subject.
-  async function writeCompleteStatus(newStatus: ImageStatus) {
-    const { subject, date, dataset_root: root } = dataset;
-    if (!currentImage || !projectRoot || !subject || !root) return;
-    const image = currentImage;
-    const wasStale = staleMarks.includes(image);
-    setImageStatus(image, newStatus);
-    try {
-      await subjectsApi.setImageStatus(
-        image,
-        newStatus,
-        subject,
-        date,
-        root,
-        useStore.getState().user || undefined,
-      );
-    } catch (e) {
-      if (!committedOf<{ status: string; digest_stamped: boolean }>(e)) {
-        // The optimistic write above cleared the mark; the confirmation it stood for never
-        // reached the server, so the disagreement it named still holds.
-        if (wasStale) useStore.getState().markStale(image);
-        useStore
-          .getState()
-          .pushToast(`Could not update status: ${e instanceof Error ? e.message : String(e)}`);
-        return;
-      }
-      useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
-    }
-    if (!FINISHED_STATUSES.includes(newStatus)) return;
-    // The committed status's staleness is the backend's stale_definition, its one evaluation.
-    try {
-      const { stale_definition } = await subjectsApi.loadImageStatus(subject, date, root);
-      if (!stale_definition.includes(image)) return;
-      useStore.getState().markStale(image);
-      useStore
-        .getState()
-        .pushToast(`${image} is stale under ${subject}'s attribute schema; re-confirm it.`, "info");
-    } catch (e) {
-      useStore
-        .getState()
-        .pushToast(
-          `Could not read back ${image}'s staleness: ${e instanceof Error ? e.message : e}`,
-        );
-    }
-  }
-
-  function subjectHasContent(): boolean {
-    return canvasHoldsSubject(
-      {
-        boxes: canvasBoxes,
-        polygons: canvasPolygons,
-        points: canvasPoints,
-        imageAnnotations: canvasImageAnnotations,
-      },
-      dataset.subject,
-    );
-  }
-
-  async function toggleComplete(next: boolean) {
-    if (!dataset.subject) return;
-    const hasContent = subjectHasContent();
-    const newStatus: ImageStatus = next
-      ? hasContent
-        ? "complete"
-        : "negative"
-      : hasContent
-        ? "partial"
-        : "unannotated";
-    if (next && coverageMultiCell) {
-      const warning = completeWarning?.();
-      const base =
-        warning ??
-        (workingScaleReason
-          ? noWorkingScaleToast(workingScaleSubject ?? null, workingScaleReason)
-          : null);
-      const holdSentence = replaceRequired
-        ? replaceRequiredToastSentence(replaceRequired.cellsSeen)
-        : null;
-      const message = [base, holdSentence].filter((p): p is string => !!p).join(" ");
-      if (message) useStore.getState().pushToast(message, "info");
-    }
-    await writeCompleteStatus(newStatus);
-  }
-
-  // A stale complete already reads as checked, so one click of the toggle would write
-  // unannotated instead of restating the subject's current content.
-  async function reconfirmStale() {
-    if (!dataset.subject || !canvasReady) return;
-    await writeCompleteStatus(subjectHasContent() ? "complete" : "negative");
+    const landed = await saveRegistry({ ...registry, [trimmed]: {} }, "Could not add subject");
+    if (!landed && projectRoot && dataset.dataset_root) setActiveSubject(previousSubject);
   }
 
   return (
@@ -396,25 +222,6 @@ export function AnnotateToolbar({
             </svg>
             Polygon
           </button>
-          {coverageMultiCell && (
-            <button
-              aria-pressed={mode === "map"}
-              onClick={() => setMode("map")}
-              title="Map: click a coverage cell to open it; no annotation is authored"
-              className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[12px] font-semibold transition-colors ${
-                mode === "map" ? "bg-tcip-accent text-white" : "text-tcip-muted hover:text-tcip-fg"
-              }`}
-            >
-              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
-                <path
-                  d="M1.5 3.5v10M14.5 3.5v10M1.5 3.5h13M1.5 8h13M1.5 13.5h13M6 3.5v10M11 3.5v10"
-                  stroke="currentColor"
-                  strokeWidth="1"
-                />
-              </svg>
-              Map
-            </button>
-          )}
         </div>
 
         {/* Subject picker pill */}
@@ -503,25 +310,6 @@ export function AnnotateToolbar({
 
         <div className="flex-1" />
 
-        {/* Nav filter */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-bold uppercase tracking-wide text-tcip-muted">
-            Filter
-          </span>
-          <select
-            className="tcip-select text-[11px]"
-            value={imageStatus.activeFilter}
-            onChange={(e) => setStatusFilter(e.target.value as "all" | ImageStatus)}
-            title="Status filter"
-          >
-            {STATUS_FILTERS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
         {/* Image navigation */}
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-bold uppercase tracking-wide text-tcip-muted">
@@ -533,29 +321,6 @@ export function AnnotateToolbar({
           >
             {currentImage ?? UNSET_GLYPH}
           </span>
-          {currentIsStale && (
-            <>
-              <span
-                className="rounded bg-tcip-warn/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-tcip-warn"
-                title="This subject's labeled content or attribute schema changed since this image was confirmed."
-              >
-                Stale
-              </span>
-              <button
-                type="button"
-                className="tcip-btn text-[11px]"
-                onClick={() => void reconfirmStale()}
-                disabled={!canvasReady}
-                title={
-                  canvasReady
-                    ? `Restate this image's current ${dataset.subject ?? "subject"} content as its status`
-                    : "Loading this image's labels…"
-                }
-              >
-                Re-confirm
-              </button>
-            </>
-          )}
           <button
             className="tcip-btn text-[11px]"
             onClick={() => nav.stepImage(-1)}
@@ -594,46 +359,49 @@ export function AnnotateToolbar({
           >
             ▶
           </button>
-          {staleNav.total > 0 && (
-            <>
-              <span
-                className="font-mono text-[11px] text-tcip-warn"
-                title="Confirmed images whose label file disagreed with the stored status as of the last dataset selection; a mark that goes stale mid-session shows at the next selection."
-              >
-                {staleNav.total} stale
-              </span>
-              <button
-                type="button"
-                className="tcip-btn text-[11px]"
-                onClick={() => staleNav.stepImage(1)}
-                disabled={staleStepDisabled}
-                aria-label="Next stale image"
-                title="Jump to the next image needing re-confirmation"
-              >
-                ▶!
-              </button>
-            </>
-          )}
         </div>
 
-        {/* Complete */}
+        <label
+          className="flex items-center gap-1.5 text-[12px]"
+          title="Hide the bucket's proposals while you annotate; a mark made meanwhile records it (h)"
+        >
+          <input
+            type="checkbox"
+            checked={hideProposals}
+            onChange={(e) => onHideProposals(e.target.checked)}
+          />
+          Hide proposals
+        </label>
+
+        {onCompleteView && (
+          <button
+            type="button"
+            className="tcip-btn text-[11px]"
+            onClick={onCompleteView}
+            disabled={!dataset.subject || subjectState === null}
+            title={`Mark every ${dataset.subject ?? "subject"} instance in view annotated`}
+          >
+            Complete view
+          </button>
+        )}
+
         <label
           className="flex items-center gap-1.5 text-[12px]"
           title={
             !dataset.subject
               ? "Select a subject before marking Complete."
-              : canvasReady
-                ? `Marks this image's ${dataset.subject} content complete or negative`
+              : subjectState !== null
+                ? `Marks every ${dataset.subject} instance on this image annotated (c)`
                 : "Loading this image's labels…"
           }
         >
           <input
             type="checkbox"
-            checked={currentStatus === "complete" || currentStatus === "negative"}
-            onChange={(e) => void toggleComplete(e.target.checked)}
-            disabled={!currentImage || !canvasReady || !dataset.subject}
+            checked={finished}
+            onChange={(e) => onComplete(e.target.checked)}
+            disabled={!currentImage || subjectState === null || !dataset.subject}
           />
-          Complete
+          {subjectState === "negative" ? "Complete (none)" : "Complete"}
         </label>
       </div>
 
@@ -659,13 +427,11 @@ export function AnnotateToolbar({
               label="Cut"
               pressed={annotateUi.cut}
               onClick={() => setCut(!annotateUi.cut)}
-              disabled={mode !== "polygon" || isLocked}
+              disabled={mode !== "polygon"}
               title={
                 mode !== "polygon"
                   ? "Cut: in polygon mode only"
-                  : isLocked
-                    ? "Cut: this image is confirmed; uncheck Complete to edit"
-                    : "Click two points on either side of the selected polygon to split it (x)"
+                  : "Click two points on either side of the selected polygon to split it (x)"
               }
             />
             <Etool
@@ -694,9 +460,6 @@ export function AnnotateToolbar({
             )}
           <div className="flex-1" />
           <div className="flex items-center gap-2">
-            {isLocked && (
-              <span className="text-[12px] text-tcip-muted">Complete; uncheck to edit</span>
-            )}
             <button className="tcip-btn text-[12px]" onClick={() => undo()} title="Undo (Ctrl+Z)">
               ↶&nbsp;&nbsp;Undo
             </button>

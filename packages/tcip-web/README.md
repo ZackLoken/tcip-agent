@@ -11,23 +11,21 @@ packages/tcip-web/
     app.py              # FastAPI app
     state.py            # the open project, its GuiState (written to .tcip/state/gui.json on change)
     paths.py            # safe_join + the always-on path guard (derived allow-set, identity containment)
-    identity.py         # current-user identity for created_by/accepted_by provenance stamping
     jobstore.py         # background job tracking (training/inference/tuning)
     terminal.py         # in-app agent terminal (spawns a provider table row's harness)
     routes/
-      annotate.py       # label CRUD, Annotate-tab commands
+      annotate.py       # the editor: label document load/save with gestures, proposals, review queue
+      audit_gap.py      # the 409 a committed write whose audit line was lost answers
       canvas.py         # live canvas capture for the agent's own image-capable read tool
-      classes.py        # subject/class CRUD
-      coverage.py       # view-coverage: reference grid + served/swept per-cell record
       dataset.py        # tree + select + nav position
       fs.py             # filesystem browsing for path pickers
-      images.py         # EXIF-oriented JPEG serving (+ downsample)
+      images.py         # EXIF-oriented JPEG serving (+ downsample, region-serving grid)
       inference.py      # SAHI-tiled background jobs + progress WS
       meta.py           # crop/project metadata
       projects.py       # project open/create/list
       results.py        # plant mapping + per-plant curves + onset dates + CSV
-      review.py         # compute_matches, action, backup, priority queue
       sessions.py       # GUI session state
+      subjects.py       # subject registry load/save
       terminal.py       # in-app agent terminal endpoints
       training.py       # validate / launch / list / metrics / WS stream
       tuning.py         # HPO launch + sweep listing

@@ -39,7 +39,7 @@ ADOPT_FREE = "adopt_state_free"
 ADOPT_RIVAL = "adopt_state_rival"
 _SHARED_SHAPE = RootedFileLocator(prefix=("documents",), suffix=".json")
 _CLAIMS = {
-    ADOPT_ALPHA: document_claim(literal("image_status")),
+    ADOPT_ALPHA: document_claim(literal("plot_notes")),
     ADOPT_BETA: document_claim(literal("gui")),
     ADOPT_FREE: document_claim(),
     ADOPT_RIVAL: document_claim(),
@@ -100,7 +100,7 @@ def _entries(root) -> dict[str, bytes]:
 
 def _write_a_layout(root) -> None:
     """A root written the way it would have been before any database existed."""
-    ts.replace(_key(ADOPT_ALPHA, root, "image_status"), {"a_1.jpg": "negative", "ü": "complete"})
+    ts.replace(_key(ADOPT_ALPHA, root, "plot_notes"), {"a_1.jpg": "negative", "ü": "complete"})
     ts.replace(_key(ADOPT_BETA, root, "gui"), {"active_tab": "annotate"})
     ts.replace(_key(LWW, root, "kept"), {"n": 1})
     ts.replace(_key(NESTED, root, "group", "member"), {"n": 2})
@@ -118,7 +118,7 @@ def test_files_adopted_into_a_database_and_exported_again_are_the_same_files(tmp
     adopt_root(str(tmp_path), LAYOUT, report=lambda line: None)
 
     with bound(SqliteBackend()):
-        assert ts.read(_key(ADOPT_ALPHA, tmp_path, "image_status")) == {
+        assert ts.read(_key(ADOPT_ALPHA, tmp_path, "plot_notes")) == {
             "a_1.jpg": "negative", "ü": "complete"
         }
         assert ts.read(_key(NESTED, tmp_path, "group", "member")) == {"n": 2}
@@ -196,15 +196,15 @@ def test_a_file_two_stores_claim_equally_refuses_rather_than_picking_one(tmp_pat
 
 
 def test_a_constant_key_wins_over_a_varying_one_claiming_the_same_file(tmp_path):
-    """The partner of the tie: a store that says the document is called ``image_status`` says
+    """The partner of the tie: a store that says the document is called ``plot_notes`` says
     more about that file than one whose key is any name at all, so there is no tie to refuse."""
     with bound(FileBackend()):
-        ts.replace(_key(ADOPT_ALPHA, tmp_path, "image_status"), {"n": 1})
+        ts.replace(_key(ADOPT_ALPHA, tmp_path, "plot_notes"), {"n": 1})
 
     plan = plan_root(str(tmp_path), LAYOUT)
 
     assert [(entry.store, entry.parts) for entry in plan.entries] == [
-        (ADOPT_ALPHA, ("image_status",))
+        (ADOPT_ALPHA, ("plot_notes",))
     ]
 
 
@@ -233,29 +233,23 @@ def test_a_layout_whose_files_are_all_planned_leaves_nothing_unaccounted(tmp_pat
     assert unaccounted_files((plan,)) == ()
 
 
-def test_a_shard_whose_filename_cannot_spell_its_key_adopts_under_the_key_its_bytes_state(
-    tmp_path,
-):
-    """A review shard's bucket and image both carry separators its filename sanitizes out, so
-    the path cannot be inverted back to the key. The bytes carry the real key, and adoption
-    reads them through the same recovery hook enumeration does, so the identity a caller gets
-    back from ``keys`` is the one it can read with on either backend."""
-    from tcip_annotation import review_engine
+def test_a_shard_whose_names_carry_separators_adopts_under_the_key_that_wrote_it(tmp_path):
+    """A verdict shard's bucket and image both carry separators; its key is spelled the way its
+    path spells it, so the key that wrote it on one backend reads it back on the other."""
+    from tcip_annotation import verdicts
 
-    bucket, image = "predictions/live/2026-03-04", "a/b.jpg"
-    key = review_engine.review_verdict_key(tmp_path, bucket, image)
-    payload = {"bucket": bucket, "img_name": image, "verdict": "accepted", "reviewed_by": "ü"}
+    key = verdicts.verdict_key(tmp_path, "predictions/live/2026-03-04", "a/b.jpg")
+    decided = verdicts.Verdict(proposal=1, action="rejected", by="user:ü",
+                               at="2026-03-04T12:00:00+00:00")
     with bound(FileBackend()):
-        ts.replace(key, payload, expect=ts.Version.ABSENT)
-        as_files = ts.keys(review_engine.REVIEW_VERDICTS_STORE, str(tmp_path))
-    assert [k.parts for k in as_files] == [(bucket, image)]
+        verdicts.record_verdicts(key, [decided])
+        assert ts.keys(verdicts.REVIEW_VERDICTS_STORE, str(tmp_path)) == [key]
 
     adopt_root(str(tmp_path), STATE, report=lambda line: None)
 
     with bound(SqliteBackend()):
-        as_rows = ts.keys(review_engine.REVIEW_VERDICTS_STORE, str(tmp_path))
-        assert [k.parts for k in as_rows] == [(bucket, image)]
-        assert ts.read(as_rows[0]) == payload
+        assert ts.keys(verdicts.REVIEW_VERDICTS_STORE, str(tmp_path)) == [key]
+        assert verdicts.read_verdicts(key) == [decided]
 
 
 def test_adopting_a_root_whose_database_already_holds_everything_changes_nothing(tmp_path):
@@ -304,12 +298,12 @@ def test_a_store_whose_files_arrived_after_adoption_is_taken_in_on_a_second_run(
         store_export.export_root(str(tmp_path), report=lambda line: None)
     exported = (tmp_path / "lww" / "kept.json").read_bytes()
     (tmp_path / "documents").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "documents" / "image_status.json").write_bytes(b'{\n  "a_1.jpg": "negative"\n}\n')
+    (tmp_path / "documents" / "plot_notes.json").write_bytes(b'{\n  "a_1.jpg": "negative"\n}\n')
 
     with bound(SqliteBackend()):
         with pytest.raises(ts.StoreError) as refused:
             ts.read(_key(LWW, tmp_path, "kept"))
-    assert "image_status.json" in str(refused.value)
+    assert "plot_notes.json" in str(refused.value)
 
     result = adopt_root(str(tmp_path), LAYOUT, report=lambda line: None)
 
@@ -317,7 +311,7 @@ def test_a_store_whose_files_arrived_after_adoption_is_taken_in_on_a_second_run(
     assert (tmp_path / "lww" / "kept.json").read_bytes() == exported
     with bound(SqliteBackend()):
         assert ts.read(_key(LWW, tmp_path, "kept")) == {"n": 1}
-        assert ts.read(_key(ADOPT_ALPHA, tmp_path, "image_status")) == {"a_1.jpg": "negative"}
+        assert ts.read(_key(ADOPT_ALPHA, tmp_path, "plot_notes")) == {"a_1.jpg": "negative"}
     assert store_export.stale_stores(database_path(str(tmp_path))) == ()
 
 

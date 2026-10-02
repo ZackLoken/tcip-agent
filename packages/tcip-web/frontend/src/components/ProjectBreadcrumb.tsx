@@ -20,7 +20,7 @@ import { loadRecentProjectIds } from "@/lib/recentProjects";
 import { useStore } from "@/store";
 import type { TabName } from "@/store/types";
 
-const DATASET_TABS: ReadonlySet<TabName> = new Set(["annotate", "review", "results"]);
+const DATASET_TABS: ReadonlySet<TabName> = new Set(["annotate", "results"]);
 
 export function ProjectBreadcrumb() {
   const dataset = useStore((s) => s.gui.dataset);

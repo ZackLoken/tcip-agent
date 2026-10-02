@@ -12,8 +12,6 @@ from fastapi.encoders import jsonable_encoder
 
 from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
 
-# Also coverage.py's own marker for its analogous 500, imported from here, so every route
-# names the same literal for the same fact.
 AUDIT_ENTRY_NOT_WRITTEN = "audit_entry_not_written"
 
 

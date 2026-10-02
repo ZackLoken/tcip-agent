@@ -109,27 +109,6 @@ def test_refuses_a_plant_registry_file_naming_the_store(
         assert "plant_registries" in res["error"]
 
 
-def test_refuses_image_status_json_naming_the_store(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from tcip_store.binding import is_database_backend
-
-    if is_database_backend():
-        pytest.skip("image_status.json is a store's own document, read raw only under the file "
-                    "backend; the database-backend case is covered by the plant-registries test")
-
-    from tcip_mcp.dataset_layout import replace_image_status_store
-
-    root = _project(tmp_path)
-    replace_image_status_store(root, {"bud/2026-03-04": {"a_1.jpg": {
-        "status": "negative", "recorded_by": "user:breeder", "recorded_at": "2026-03-04T00:00:00Z"}}})
-
-    res = delete_stray_state_file(
-        root, relative_path="image_status.json", reason="x")
-    assert "error" in res
-    assert "image_status" in res["error"]
-
-
 def test_refuses_the_state_roots_own_database_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

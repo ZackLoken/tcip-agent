@@ -1,8 +1,9 @@
-"""The agent to GUI review channel: focus_human_attention(tab='review') + stage_proposals.
+"""The agent to GUI proposal channel: focus_human_attention over a bucket + stage_proposals.
 
-focus_human_attention(tab='review') resolves a model's predictions on a frame and posts a ``review_focus`` event (a
-soft miss with no GUI, but the resolution must be right). stage_proposals writes agent-proposed
-detections to the predictions tree (never GT) for canvas sign-off.
+focus_human_attention with a bucket resolves a model's proposals on a frame and posts an
+``annotate_focus`` event naming that bucket (a soft miss with no GUI, but the resolution must be
+right). stage_proposals writes agent-proposed detections to the predictions tree (never GT) for
+canvas sign-off.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ def _stub_gui(monkeypatch):
 def _project_root(tmp_path: Path) -> Path:
     """A project directory that is genuinely not the dataset directory.
 
-    ``focus_human_attention(tab='review')`` resolves images and predictions from the dataset root and carries the
+    ``focus_human_attention`` resolves images and predictions from the dataset root and carries the
     project root through to the GUI event untouched, so passing one directory for both would let a
     resolution off the wrong root pass unnoticed.
     """
@@ -84,35 +85,38 @@ def _img_path(root: Path, date: str, stem: str) -> str:
     return str(Path(image_dir(root, date)) / f"{stem}.jpg")
 
 
-def test_focus_review_lands_on_first_frame_with_predictions(tmp_path: Path) -> None:
+def test_focus_over_a_bucket_lands_on_first_frame_with_proposals(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(5)]
     _images(root, date, imgs)
     bucket = _publish(root, date, {"IMG_0002.JPG": [0.9], "IMG_0003.JPG": [0.8]})
 
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", date, predictions_dir=str(bucket))
+    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud", date,
+                                predictions_dir=str(bucket))
     assert "error" not in res
-    assert res["image_index"] == 2  # first frame with predictions for this model
+    assert res["image_index"] == 2  # first frame with proposals from this model
     assert res["image"] == "IMG_0002.JPG"
-    assert res["n_with_predictions"] == 2
-    assert res["filter_type"] == "all"
+    assert res["n_holding_subject"] == 2
+    assert res["predictions_dir"] == str(bucket)
     assert isinstance(res["delivered"], bool)
 
 
-def test_focus_review_empty_prediction_file_is_not_a_target(tmp_path: Path) -> None:
+def test_focus_over_a_bucket_skips_an_empty_prediction_document(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
     # IMG_0000's document holds no detections, so it is no target.
     bucket = _publish(root, date, {"IMG_0000.JPG": [], "IMG_0002.JPG": [0.9]})
 
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", date, predictions_dir=str(bucket))
+    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud", date,
+                                predictions_dir=str(bucket))
     assert res["image_index"] == 2
-    assert res["n_with_predictions"] == 1
+    assert res["n_holding_subject"] == 1
 
 
-def test_focus_review_navigates_past_an_unreadable_prediction_on_another_frame(tmp_path: Path) -> None:
+def test_focus_over_a_bucket_navigates_past_an_unreadable_prediction_on_another_frame(
+        tmp_path: Path) -> None:
     """A corrupt prediction document elsewhere on the date does not close the call: the frame it
     lands on is readable, and the unreadable one is named instead of raising."""
     root = tmp_path / "proj"
@@ -122,46 +126,45 @@ def test_focus_review_navigates_past_an_unreadable_prediction_on_another_frame(t
     bad = bucket / "IMG_0000.json"
     bad.write_bytes(b"{not json")
 
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", date, predictions_dir=str(bucket))
+    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud", date,
+                                predictions_dir=str(bucket))
 
     assert "error" not in res
     assert res["image"] == "IMG_0002.JPG"
     assert res["unreadable"] == ["IMG_0000.JPG"]
 
 
-def test_focus_review_refuses_an_explicitly_named_unreadable_frame(tmp_path: Path) -> None:
+def test_focus_over_a_bucket_refuses_an_explicitly_named_unreadable_frame(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
     bad = _publish(root, date, {"IMG_0000.JPG": [0.7]}) / "IMG_0000.json"
     bad.write_bytes(b"{not json")
 
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", date,
+    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud", date,
                                 predictions_dir=str(bad.parent), image_index=0)
 
     assert "error" in res
     assert str(bad) in res["error"]
 
 
-def test_focus_review_explicit_index_and_filter(tmp_path: Path) -> None:
+def test_focus_over_a_bucket_carries_the_explicit_index_and_proposal(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(4)])
     bucket = _publish(root, date, {"IMG_0000.JPG": [0.9]})
 
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", date,
-                                predictions_dir=str(bucket),
-                                image_index=3, detection_idx=2,
-                                filter_type="fp")
+    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud", date,
+                                predictions_dir=str(bucket), image_index=3, proposal=2)
     assert res["image_index"] == 3
-    assert res["detection_idx"] == 2
-    assert res["filter_type"] == "fp"
+    assert res["proposal"] == 2
 
 
-def test_focus_review_rejects_bad_filter(tmp_path: Path) -> None:
+def test_focus_refuses_a_directory_that_is_no_bucket(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     _images(root, "2026-02-11", ["IMG_0000.JPG"])
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", "2026-02-11", predictions_dir=str(_bucket(root, "baseline", "2026-02-11")), filter_type="bogus")
+    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud",
+                                "2026-02-11", predictions_dir=str(_bucket(root, "baseline", "2026-02-11")))
     assert "error" in res
 
 
@@ -227,15 +230,14 @@ def test_stage_proposals_rejects_path_traversal_into_gt(tmp_path: Path) -> None:
     assert not (root / "annotations").exists()  # nothing leaked into ground truth
 
 
-def test_focus_review_rejects_path_traversal(tmp_path: Path) -> None:
+def test_focus_rejects_path_traversal(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, ["IMG_0000.JPG"])
-    # The review focus is read-only, but a traversal date still refuses: it becomes a path segment
-    # under images/, the guard stage_proposals applies.
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", "../evil",
-                                predictions_dir=str(_bucket(root, "baseline", date)))
-    assert "error" in res
+    # The focus is read-only, but a traversal date still refuses: it becomes a path segment under
+    # images/, the guard stage_proposals applies.
+    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud", "../evil")
+    assert "date must be a single safe path segment" in res["error"]
 
 
 def test_stage_proposals_rejects_box_missing_subject(tmp_path: Path) -> None:
@@ -299,10 +301,9 @@ def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
     assert len(data["annotations"]) == 1
     assert data["annotations"][0]["created_by"] == "sam"
     assert data["annotations"][0]["created_at"]
-    # It must not touch GT; the polygon is stored as a polygon (segmentation) that also carries its
-    # derived box on disk, not collapsed to a box-only record (segmentation stays the truth).
+    # It must not touch GT; the polygon is stored as its rings alone, its box derived by readers.
     assert not (root / "annotations").exists()
-    assert "segmentation" in data["annotations"][0] and "bbox" in data["annotations"][0]
+    assert "segmentation" in data["annotations"][0] and "bbox" not in data["annotations"][0]
 
 
 def test_stage_proposals_stages_boxes_and_polygons_together(tmp_path: Path) -> None:
@@ -453,15 +454,11 @@ def test_stage_proposals_refuses_boxes_or_polygons_without_model_name(tmp_path: 
 
 
 class _FakeMultiRingEngine:
-    """An engine whose one object always splits into the same two disjoint pixel rings, for both
-    the prompted-segment seam (``segment_prompt``) and the whole-image proposal seam
-    (``propose_annotations``/``stage_proposals``)."""
+    """An engine whose one object always splits into the same two disjoint pixel rings, through
+    the whole-image proposal seam (``propose_annotations``/``stage_proposals``)."""
 
     _RINGS = [[(10.0, 10.0), (50.0, 10.0), (50.0, 40.0), (10.0, 40.0)],
               [(100.0, 100.0), (140.0, 100.0), (120.0, 140.0)]]
-
-    def segment(self, image_path, *, points=None, box=None, **params):
-        return self._RINGS
 
     def propose(self, image_path, **params):
         xs = [x for ring in self._RINGS for x, _ in ring]
@@ -489,43 +486,19 @@ def test_stage_proposals_admits_a_two_ring_pixel_proposal_with_pair_vertices(tmp
     assert polys[0].geometry.rings[0][0] == pytest.approx((10.0, 10.0))
 
 
-def test_stage_proposals_admits_segment_prompts_own_mapping_vertex_rings(
+def test_a_two_ring_proposal_round_trips_through_propose_and_accept(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The admit case is the platform's own segmenter's actual return, not a hand-built shape."""
+    """The admit case is the proposer seam's actual return, not a hand-built shape: staged as
+    candidates, accepted with a class, and read back with both rings intact."""
     from tcip_mcp.pipelines import proposal
     from tcip_mcp.tools.annotation_tools import read_annotations
-    from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations, segment_prompt
+    from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations
 
     monkeypatch.setitem(proposal._ENGINES, "fake_multi_ring", _FakeMultiRingEngine())
 
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0201", size=(640, 480))
-    image_path = str(Path(image_dir(root, date)) / "IMG_0201.jpg")
-
-    prompted = segment_prompt(image_path, points=[{"x": 30, "y": 30, "label": 1}],
-                              engine="fake_multi_ring")
-    assert prompted["ring_count"] == 2
-    assert all(isinstance(v, dict) for ring in prompted["rings"] for v in ring)  # {"x":, "y":} vertices
-
-    res = stage_proposals(tmp_path, image_path, model_name="sam",
-                          polygons=[{"subject": "leaf", "conf": 0.85, "rings": prompted["rings"]}])
-    assert res["staged"] == 1 and "error" not in res
-
-    out = _staged(root, "sam", date, "IMG_0201")
-    staged_poly = json_io.read_annotations(out)[0]
-    assert [len(r) for r in staged_poly.geometry.rings] == [4, 3]
-
-    # The same mapping-vertex payload, read back through the ground-truth door's own parser.
-    from tcip_annotation.json_io import annotation_from_payload
-    gt = annotation_from_payload(
-        {"subject": "leaf", "rings": prompted["rings"]}, author="breeder", now="2026-02-11T00:00:00+00:00",
-    )
-    assert [len(r) for r in gt.geometry.rings] == [4, 3]
-
-    # The same multi-ring shape also round-trips through the propose/accept flow: staged as
-    # review candidates, accepted with a class, and read back with both rings intact.
     _image(root, date, "IMG_0201_b", size=(640, 480))
     accept_image_path = str(Path(image_dir(root, date)) / "IMG_0201_b.jpg")
     proposed = propose_annotations(tmp_path, accept_image_path, engine="fake_multi_ring")

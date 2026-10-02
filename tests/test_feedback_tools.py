@@ -1,148 +1,36 @@
-"""Review->retrain MCP tools: materialize, the review queue and triage."""
+"""Review-queue MCP tools: the ranked queue and triage, each skipping what the label documents
+mark finished."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
-from tcip_mcp.project_paths import project_state_dir
-from tcip_mcp.tools.feedback_tools import materialize_review_dataset, prioritize_review_queue
+from tcip_mcp.tools.feedback_tools import prioritize_review_queue
 
-# The prediction bucket these verdicts were recorded against, as bucket_key_of spells one.
-BUCKET = "predictions/detector/2026-03-04"
+DATE = "2026-03-04"
 
 
-def _seed_verdicts(state_dir: Path, *, bucket: str = BUCKET) -> Path:
-    """Record one accepted and one rejected image's verdicts in the store at ``state_dir``."""
-    state = {"verdicts": {
-        (bucket, "imgA.png"): {"img_status": "completed", "detections": [
-            {"action": "accepted", "class_name": "bud", "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
-        (bucket, "imgB.png"): {"img_status": "completed", "detections": [
-            {"action": "rejected", "class_name": "bud", "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
-    }}
-    # Seed through the engine so the fixture cannot drift from the real shard format.
-    from tcip_annotation.review_engine import ReviewEngine
-
-    engine = ReviewEngine(str(state_dir))
-    engine.raw_state.update(state)
-    engine.save_review_state()
-    return state_dir
-
-
-def _source_images(src: Path) -> Path:
+def _dataset(tmp_path: Path, *, marked: tuple[str, ...]) -> Path:
+    """A dataset of two images on one date, those named in ``marked`` marked complete for ``bud``
+    through the editor's own save door; its images directory."""
     from PIL import Image
-    src.mkdir(parents=True, exist_ok=True)
-    for name in ("imgA.png", "imgB.png"):
-        Image.new("RGB", (64, 64), (120, 120, 120)).save(src / name)
-    return src
 
+    from tcip_annotation import json_io
+    from tcip_mcp.dataset_layout import annotation_path, image_dir
+    from tests._producer_fixtures import mark_complete
 
-def _setup(tmp_path: Path):
-    """A dataset whose own verdict store holds the review, plus its reviewed source images."""
-    dataset_root = tmp_path / "dataset"
-    _seed_verdicts(project_state_dir(dataset_root))
-    return dataset_root, _source_images(tmp_path / "src")
-
-
-def _reviewed(dataset_root: Path) -> str:
-    """Publish the bucket the seeded verdicts were recorded against, a bucket of no documents;
-    its directory."""
-    pytest.importorskip("torch")
-    from tests._chain_fixtures import published
-
-    return str(published(dataset_root.parent, dataset_root / BUCKET, [],
-                         scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}}).path)
-
-
-def test_materialize_review_dataset_end_to_end(tmp_path):
-    dataset_root, src = _setup(tmp_path)
-    out = tmp_path / "out"
-    r = materialize_review_dataset(tmp_path, str(dataset_root), str(src), str(out),
-                                   predictions_dir=_reviewed(dataset_root))
-    assert "error" not in r
-    assert r["positive"] == 1 and r["hard_negative"] == 1
-    assert (out / "images" / "imgA.png").is_file()
-    assert (out / "annotations" / "imgA.json").is_file()
-
-
-def test_materialize_reads_the_dataset_s_own_store_when_none_is_stated(tmp_path):
-    """The dataset root alone names the store: no second argument, no second location."""
-    dataset_root, src = _setup(tmp_path)
-    r = materialize_review_dataset(tmp_path, str(dataset_root), str(src), str(tmp_path / "out"),
-                                   predictions_dir=_reviewed(dataset_root))
-    assert "error" not in r
-    assert r["dataset_root"] == str(dataset_root)
-    assert r["review_state_stated"] is False
-    assert r["review_state"] == str(project_state_dir(dataset_root) / "review")
-    assert str(project_state_dir(dataset_root)) in r["review_state_origin"]
-
-
-def test_materialize_consumes_a_stated_store_outside_the_dataset(tmp_path):
-    """A review recorded outside the dataset is still curated, and the response says from where.
-
-    The dataset here has no store of its own, so the shards can only have come from the stated
-    location, and the caller is told which one it was.
-    """
-    dataset_root = tmp_path / "dataset"
-    dataset_root.mkdir()
-    external = _seed_verdicts(tmp_path / "elsewhere" / "state")
-    src = _source_images(tmp_path / "src")
-
-    r = materialize_review_dataset(
-        tmp_path, str(dataset_root), str(src), str(tmp_path / "out"),
-        predictions_dir=_reviewed(dataset_root), review_state_dir=str(external))
-    assert "error" not in r
-    assert r["positive"] == 1 and r["hard_negative"] == 1
-    assert r["dataset_root"] == str(dataset_root)
-    assert r["review_state_stated"] is True
-    assert r["review_state"] == str(external / "review")
-    assert str(external) in r["review_state_origin"]
-    assert str(project_state_dir(dataset_root)) in r["review_state_origin"]
-
-
-def test_materialize_refuses_an_empty_stated_store_rather_than_the_dataset_s_own(tmp_path):
-    """A stated store holding no shards is refused, never answered from the dataset's own.
-
-    The dataset's own store holds a full review here, so a fallback would succeed and quietly
-    curate a review the caller did not name.
-    """
-    dataset_root, src = _setup(tmp_path)
-    stated = tmp_path / "elsewhere" / "state"
-    stated.mkdir(parents=True)
-
-    r = materialize_review_dataset(
-        tmp_path, str(dataset_root), str(src), str(tmp_path / "out"), review_state_dir=str(stated))
-    assert str(stated) in r["error"]
-    assert "positive" not in r
-
-
-def test_materialize_review_dataset_writes_no_run(tmp_path, monkeypatch):
-    """A curated dataset is data, not a run: materializing one writes its own output and opens
-    no run directory."""
-    from tcip_mcp.experiments import run_dirs
-
-    dataset_root, src = _setup(tmp_path)
-    r = materialize_review_dataset(tmp_path, str(dataset_root), str(src), str(tmp_path / "out"),
-                                   predictions_dir=_reviewed(dataset_root))
-
-    assert "error" not in r, r
-    assert "experiment_id" not in r
-    assert run_dirs(tmp_path) == []
-
-
-def test_materialize_invalid_inputs_error(tmp_path):
-    empty = tmp_path / "empty"
-    empty.mkdir()  # a dataset root whose own store holds no shards
-    r = materialize_review_dataset(tmp_path, str(empty), str(tmp_path), str(tmp_path / "o1"))
-    assert str(project_state_dir(empty)) in r["error"]
-
-    dataset_root, _src = _setup(tmp_path)
-    assert "error" in materialize_review_dataset(
-        tmp_path, str(dataset_root), str(tmp_path / "nope"), str(tmp_path / "o2"))
-
-    assert "dataset_root" in materialize_review_dataset(tmp_path, "", str(tmp_path), str(tmp_path / "o3"))["error"]
+    root = tmp_path / "dataset"
+    images = image_dir(root, DATE)
+    images.mkdir(parents=True)
+    for stem in ("imgA", "imgB"):
+        Image.new("RGB", (64, 64), (120, 120, 120)).save(images / f"{stem}.png")
+        label = annotation_path(root, DATE, stem)
+        label.parent.mkdir(parents=True, exist_ok=True)
+        json_io.write_annotations(label, [], 64, 64, keep_empty=True)
+        if stem in marked:
+            mark_complete(images / f"{stem}.png", label, "bud", project=tmp_path)
+    return images
 
 
 def test_prioritize_review_queue_checkpoint_missing(tmp_path):
@@ -150,57 +38,45 @@ def test_prioritize_review_queue_checkpoint_missing(tmp_path):
     assert "error" in r  # early guard, no torch import needed
 
 
-def test_prioritize_review_queue_skips_what_the_dataset_s_own_store_holds(tmp_path):
-    """Coverage of the ranking door's own dataset_root/skip_reviewed/predictions_dir forwarding
-    through _prepare_queue_sources: both reviewed images drop out before any scorer runs, the same
-    plumbing triage_predictions shares."""
+def test_prioritize_review_queue_skips_the_images_marked_finished(tmp_path):
+    """Both marked images drop out before any scorer runs, the plumbing triage_predictions
+    shares."""
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    dataset_root, images = _setup(tmp_path)
+    images = _dataset(tmp_path, marked=("imgA", "imgB"))
     ckpt = registered_checkpoint(tmp_path)
 
-    r = prioritize_review_queue(
-        tmp_path, checkpoint_path=ckpt, images_dir=str(images), dataset_root=str(dataset_root),
-        skip_reviewed=True, predictions_dir=_reviewed(dataset_root))
+    r = prioritize_review_queue(tmp_path, checkpoint_path=ckpt, images_dir=str(images),
+                                subject="bud")
     assert r["reviewed_skipped"] == 2
     assert r["total_candidates"] == 0
     assert r["queue"] == []
 
 
-def test_triage_predictions_skips_what_the_dataset_s_own_store_holds(tmp_path):
-    """The dataset root is enough to find the verdicts: both reviewed images drop out of the queue.
+def test_triage_predictions_skips_only_the_images_marked_finished(tmp_path, monkeypatch):
+    """A marked image drops out of the queue; an unmarked one, and every image of a subject nobody
+    marked, is still triaged."""
+    from types import SimpleNamespace
 
-    A store the tool could not find would rank every image again and send the breeder back through
-    a review they already finished.
-    """
+    import tcip_mcp.pipelines.inference.generic_predictor as predmod
     from tcip_mcp.tools.feedback_tools import triage_predictions
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    dataset_root, images = _setup(tmp_path)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    images = _dataset(tmp_path, marked=("imgA",))
+    ckpt = registered_checkpoint(tmp_path)
+    monkeypatch.setattr(predmod, "GenericPredictor", lambda *a, **k: SimpleNamespace(
+        predict_batch=lambda sources, **kw: [{"image": Path(s).name, "scores": [0.5]}
+                                             for s in sources]))
 
-    r = triage_predictions(
-        tmp_path, checkpoint_path=str(ckpt), images_dir=str(images), dataset_root=str(dataset_root),
-        predictions_dir=_reviewed(dataset_root))
-    assert r["reviewed_skipped"] == 2
-    assert r["total_images"] == 0
+    r = triage_predictions(tmp_path, checkpoint_path=str(ckpt), images_dir=str(images),
+                           subject="bud")
+    assert r["reviewed_skipped"] == 1
+    assert r["review_images"] == ["imgB.png"]
 
-
-def test_triage_predictions_skips_what_a_stated_store_holds(tmp_path):
-    """A review recorded outside the dataset still filters the queue when its store is stated."""
-    from tcip_mcp.tools.feedback_tools import triage_predictions
-
-    dataset_root = tmp_path / "dataset"
-    dataset_root.mkdir()
-    external = _seed_verdicts(tmp_path / "elsewhere" / "state")
-    images = _source_images(tmp_path / "src")
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
-
-    r = triage_predictions(
-        tmp_path, checkpoint_path=str(ckpt), images_dir=str(images), dataset_root=str(dataset_root),
-        predictions_dir=_reviewed(dataset_root), review_state_dir=str(external))
-    assert r["reviewed_skipped"] == 2
+    other = triage_predictions(tmp_path, checkpoint_path=str(ckpt), images_dir=str(images),
+                               subject="leaf")
+    assert other["reviewed_skipped"] == 0
+    assert other["review_images"] == ["imgA.png", "imgB.png"]
 
 
 def test_triage_predictions_surfaces_unscoreable(tmp_path, monkeypatch):
@@ -229,7 +105,6 @@ def test_triage_predictions_surfaces_unscoreable(tmp_path, monkeypatch):
     assert r["needs_review"] == 1
     assert r["review_images"] == ["a.jpg"]
     assert r["unscoreable_images"] == ["a.jpg"]
-    assert r["auto_accepted_images"] == []
 
 
 def _stubbed_triage_predictions(tmp_path, monkeypatch, predictions: list[dict], **kwargs):
@@ -255,42 +130,19 @@ def _stubbed_triage_predictions(tmp_path, monkeypatch, predictions: list[dict], 
         tmp_path, checkpoint_path=str(ckpt), images_dir=str(images), **kwargs)
 
 
-def test_triage_predictions_auto_threshold_none_refuses_with_zero_auto_accepts(tmp_path, monkeypatch):
-    """Coverage of the door's own auto-accept refusal: no threshold means zero auto-accepts and
-    the refusal named, while the confident, mid-confidence and unscoreable predictions are still
-    routed honestly rather than silently dropped."""
+def test_triage_predictions_routes_the_band_and_the_unscoreable_and_accepts_nothing(
+        tmp_path, monkeypatch):
+    """A confident prediction leaves the queue without being accepted: the door writes nothing,
+    while the mid-confidence and unscoreable predictions are routed to review."""
     predictions = [
         {"image": "high.jpg", "scores": [0.9]},
         {"image": "mid.jpg", "scores": [0.5]},
         {"image": "unscoreable.jpg", "head0_values": [0.42]},
     ]
     r = _stubbed_triage_predictions(tmp_path, monkeypatch, predictions)
-    assert r["total_images"] == 3
-    assert r["auto_accepted"] == 0
-    assert r["auto_accepted_images"] == []
-    assert "auto_accept_refused" in r
-    assert r["needs_review"] == 2
-    assert r["review_images"] == ["mid.jpg", "unscoreable.jpg"]
-    assert r["unscoreable_images"] == ["unscoreable.jpg"]
-
-
-def test_triage_predictions_explicit_auto_threshold_stamps_breeder_confirmation(tmp_path, monkeypatch):
-    """Coverage of the door's own breeder-confirmation stamp: an explicit auto_threshold
-    accepts exactly the predictions that clear it and carries the confirmation-required stamp,
-    with the review/unscoreable routing unchanged by its presence."""
-    predictions = [
-        {"image": "high.jpg", "scores": [0.9]},
-        {"image": "mid.jpg", "scores": [0.5]},
-        {"image": "unscoreable.jpg", "head0_values": [0.42]},
-    ]
-    r = _stubbed_triage_predictions(tmp_path, monkeypatch, predictions, auto_threshold=0.85)
-    assert r["total_images"] == 3
-    assert r["auto_accepted"] == 1
-    assert r["auto_accepted_images"] == ["high.jpg"]
-    assert "auto_accept_requires_breeder_confirmation" in r
-    assert r["needs_review"] == 2
-    assert r["review_images"] == ["mid.jpg", "unscoreable.jpg"]
-    assert r["unscoreable_images"] == ["unscoreable.jpg"]
+    assert r == {"total_images": 3, "reviewed_skipped": 0, "needs_review": 2,
+                 "review_images": ["mid.jpg", "unscoreable.jpg"],
+                 "unscoreable_images": ["unscoreable.jpg"]}
 
 
 def test_unresolvable_scorer_raises_valueerror_not_an_import_error():
@@ -609,8 +461,8 @@ def test_prioritize_review_queue_signature_drops_the_triage_only_parameters():
 
 
 def test_triage_predictions_signature_carries_the_triage_only_parameters():
-    """triage_predictions carries the confidence-triage parameters: low, high and
-    auto_threshold."""
+    """triage_predictions carries the confidence-triage band, low and high, and accepts
+    nothing."""
     import inspect
 
     from tcip_mcp.tools.feedback_tools import triage_predictions
@@ -618,191 +470,11 @@ def test_triage_predictions_signature_carries_the_triage_only_parameters():
     params = inspect.signature(triage_predictions).parameters
     assert "low" in params
     assert "high" in params
-    assert "auto_threshold" in params
+    assert "auto_threshold" not in params
 
 
 def test_feedback_tools_register_in_manifest():
     from tcip_mcp.server import list_registered_tools
     names = list_registered_tools()
-    assert "materialize_review_dataset" in names
+    assert "materialize_review_dataset" not in names
     assert "prioritize_review_queue" in names
-
-
-# --- classified-scope materialization ---------------------------------------------------------
-
-CLASSIFIED_SUBJECT = "leaf"
-CLASSIFIED_ATTRIBUTE = "condition"
-CLASSIFIED_BUCKET = "predictions/classifier/2026-03-05"
-
-
-def _seed_classified_verdicts(state_dir: Path, *, bucket: str = CLASSIFIED_BUCKET) -> Path:
-    """One accepted 'healthy' call and one rejected 'diseased' call: a classified review's own
-    verdicts, whose class_name is the confirmed/predicted value, never the object's subject."""
-    state = {"verdicts": {
-        (bucket, "imgA.png"): {"img_status": "completed", "detections": [
-            {"action": "accepted", "class_name": "healthy",
-             "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
-        (bucket, "imgB.png"): {"img_status": "completed", "detections": [
-            {"action": "rejected", "class_name": "diseased",
-             "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
-    }}
-    from tcip_annotation.review_engine import ReviewEngine
-
-    engine = ReviewEngine(str(state_dir))
-    engine.raw_state.update(state)
-    engine.save_review_state()
-    return state_dir
-
-
-def _published_classified_bucket(project: Path, dataset_root: Path) -> str:
-    """The classified bucket the seeded verdicts were recorded against, published under the scope
-    its checkpoint records; its directory."""
-    pytest.importorskip("torch")
-    from tests._chain_fixtures import published
-
-    bucket_dir = dataset_root / CLASSIFIED_BUCKET
-    published(project, bucket_dir, [], scope={
-        "subject": CLASSIFIED_SUBJECT, "attribute": CLASSIFIED_ATTRIBUTE,
-        "id_map": {"healthy": 0, "diseased": 1}})
-    return str(bucket_dir)
-
-
-def _source_dataset_with_registry(root: Path) -> Path:
-    """A dataset root carrying a real subject registry, with the two reviewed images under its
-    own images/ (the segment dataset_root_of needs to locate the root back from it)."""
-    dataset_root = root / "source_dataset"
-    images = dataset_root / "images"
-    _source_images(images)
-    (dataset_root / "subjects.json").write_text(
-        '{"leaf": {"attributes": {"condition": {"type": "categorical", '
-        '"values": ["healthy", "diseased"]}}}}',
-        encoding="utf-8",
-    )
-    return dataset_root
-
-
-def test_materialize_writes_positives_under_a_classified_scope_in_the_ground_truth_shape(tmp_path):
-    """The object class lands in subject, the confirmed value under the scope's own attribute,
-    never the verdict-name-derived subject a detector review would write."""
-    dataset_root = tmp_path / "dataset"
-    _seed_classified_verdicts(project_state_dir(dataset_root))
-    bucket = _published_classified_bucket(tmp_path, dataset_root)
-    source = _source_dataset_with_registry(tmp_path)
-
-    r = materialize_review_dataset(
-        tmp_path, str(dataset_root), str(source / "images"), str(tmp_path / "out"),
-        predictions_dir=bucket)
-
-    assert "error" not in r
-    assert r["positive"] == 1
-    assert r["subject"] == CLASSIFIED_SUBJECT
-    assert r["attribute"] == CLASSIFIED_ATTRIBUTE
-    from tcip_annotation.json_io import read_annotations
-
-    anns = read_annotations(str(tmp_path / "out" / "annotations" / "imgA.json"))
-    assert anns[0].subject == CLASSIFIED_SUBJECT
-    assert anns[0].attributes == {CLASSIFIED_ATTRIBUTE: "healthy"}
-
-
-def test_materialize_never_confirms_a_negative_under_a_classified_scope(tmp_path):
-    """A rejected value call names the model's wrong-state guess, never the object's absence, so
-    the rejected-only image is named in unconfirmed_negatives and no confirmed-negative status
-    is ever recorded for it, even though its label file is still an empty background."""
-    dataset_root = tmp_path / "dataset"
-    _seed_classified_verdicts(project_state_dir(dataset_root))
-    bucket = _published_classified_bucket(tmp_path, dataset_root)
-    source = _source_dataset_with_registry(tmp_path)
-    out = tmp_path / "out"
-
-    r = materialize_review_dataset(
-        tmp_path, str(dataset_root), str(source / "images"), str(out), predictions_dir=bucket)
-
-    assert "error" not in r
-    assert len(r["unconfirmed_negatives"]) == 1
-    assert r["unconfirmed_negatives"][0]["image"] == "imgB.png"
-    from tcip_mcp.dataset_layout import read_image_status_store
-
-    assert read_image_status_store(out) == {}
-
-
-def test_materialize_copies_the_source_registry_under_a_classified_scope(tmp_path):
-    dataset_root = tmp_path / "dataset"
-    _seed_classified_verdicts(project_state_dir(dataset_root))
-    bucket = _published_classified_bucket(tmp_path, dataset_root)
-    source = _source_dataset_with_registry(tmp_path)
-    out = tmp_path / "out"
-
-    r = materialize_review_dataset(
-        tmp_path, str(dataset_root), str(source / "images"), str(out), predictions_dir=bucket)
-
-    assert "error" not in r
-    assert (out / "subjects.json").is_file()
-    assert (out / "subjects.json").read_text(encoding="utf-8") == (
-        (source / "subjects.json").read_text(encoding="utf-8"))
-
-
-def test_materialize_refuses_a_classified_scope_with_no_source_registry(tmp_path):
-    dataset_root = tmp_path / "dataset"
-    _seed_classified_verdicts(project_state_dir(dataset_root))
-    bucket = _published_classified_bucket(tmp_path, dataset_root)
-    src = _source_images(tmp_path / "src")  # a bare directory, no dataset root to derive from
-
-    r = materialize_review_dataset(
-        tmp_path, str(dataset_root), str(src), str(tmp_path / "out"), predictions_dir=bucket)
-
-    assert "error" in r
-    assert "register_dataset" in r["error"]
-
-
-def test_materialize_refuses_a_classified_scope_into_a_populated_output(tmp_path):
-    dataset_root = tmp_path / "dataset"
-    _seed_classified_verdicts(project_state_dir(dataset_root))
-    bucket = _published_classified_bucket(tmp_path, dataset_root)
-    source = _source_dataset_with_registry(tmp_path)
-    out = tmp_path / "out"
-    out.mkdir(parents=True)
-    (out / "subjects.json").write_text('{"other": {}}', encoding="utf-8")
-
-    r = materialize_review_dataset(
-        tmp_path, str(dataset_root), str(source / "images"), str(out), predictions_dir=bucket)
-
-    assert "error" in r
-    assert "already holds a subject registry" in r["error"]
-    assert (out / "subjects.json").read_text(encoding="utf-8") == '{"other": {}}'
-
-
-@pytest.mark.parametrize("subject", [CLASSIFIED_SUBJECT, ""])
-def test_materialize_refuses_a_subject_stated_beside_a_published_bucket(tmp_path, subject):
-    dataset_root = tmp_path / "dataset"
-    _seed_classified_verdicts(project_state_dir(dataset_root))
-    bucket = _published_classified_bucket(tmp_path, dataset_root)
-    source = _source_dataset_with_registry(tmp_path)
-
-    r = materialize_review_dataset(
-        tmp_path, str(dataset_root), str(source / "images"), str(tmp_path / "out"),
-        predictions_dir=bucket, subject=subject)
-
-    assert "would be a second one" in r.get("error", ""), r
-
-
-def test_materialize_refuses_an_undecodable_bucket_record(tmp_path):
-    dataset_root = tmp_path / "dataset"
-    _seed_classified_verdicts(project_state_dir(dataset_root))
-    bucket = _published_classified_bucket(tmp_path, dataset_root)
-    (Path(bucket) / "bucket.json").write_bytes(b"{not json")
-    src = _source_images(tmp_path / "src")
-
-    r = materialize_review_dataset(
-        tmp_path, str(dataset_root), str(src), str(tmp_path / "out"), predictions_dir=bucket)
-
-    assert "does not decode" in r["error"]
-
-
-def test_materialize_names_the_reviewed_buckets_when_none_is_named(tmp_path):
-    """A store holding a bucket's verdicts, read with no bucket named, refuses naming the bucket
-    rather than guessing which review to curate."""
-    dataset_root, src = _setup(tmp_path)
-
-    r = materialize_review_dataset(tmp_path, str(dataset_root), str(src), str(tmp_path / "out"))
-
-    assert repr(BUCKET) in r["error"] and "predictions_dir" in r["error"]

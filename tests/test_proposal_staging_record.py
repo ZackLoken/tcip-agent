@@ -37,7 +37,7 @@ def _candidate(candidate_id: int, x0: float) -> dict:
         "bbox": [x0, 10.0, x1, 30.0],
         "area": 400,
         "score": 0.9,
-        "engine": "sam",
+        "engine": "stub",
         "engine_meta": {},
         "rings": [[(x0, 10.0), (x1, 10.0), (x1, 30.0), (x0, 30.0)]],
     }
@@ -62,12 +62,12 @@ def test_two_dated_buckets_with_the_same_stem_stage_and_read_back_independently(
     _make_image(second)
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
-    proposed_first = propose_annotations(tmp_path, image_path=str(first), engine="sam")
+    proposed_first = propose_annotations(tmp_path, image_path=str(first), engine="stub")
     assert "error" not in proposed_first, proposed_first
     assert proposed_first["staged"] is True
 
     _install_stub(monkeypatch, [_candidate(0, 300.0)])
-    proposed_second = propose_annotations(tmp_path, image_path=str(second), engine="sam")
+    proposed_second = propose_annotations(tmp_path, image_path=str(second), engine="stub")
     assert "error" not in proposed_second, proposed_second
     assert proposed_second["staged"] is True
 
@@ -76,7 +76,7 @@ def test_two_dated_buckets_with_the_same_stem_stage_and_read_back_independently(
     assert "error" not in accepted, accepted
 
     assert accepted["path"] == str(
-        tmp_path / "predictions" / "sam" / "2026-01-01" / "leaf" / "leaf.json")
+        tmp_path / "predictions" / "stub" / "2026-01-01" / "leaf" / "leaf.json")
     anns = json_io.read_annotations(accepted["path"])
     assert len(anns) == 1
     xs = [p[0] for ring in anns[0].geometry.rings for p in ring]
@@ -93,12 +93,12 @@ def test_an_assignment_naming_no_subject_is_refused_never_skipped(
     img_path = tmp_path / "images" / "2026-01-01" / "bur.jpg"
     _make_image(img_path)
     _install_stub(monkeypatch, [_candidate(0, 5.0), _candidate(1, 30.0)])
-    assert "error" not in propose_annotations(tmp_path, image_path=str(img_path), engine="sam")
+    assert "error" not in propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
 
     staged = stage_proposals(tmp_path, image_path=str(img_path), assignments=[
         {"candidate_id": 0, "subject": "bur"}, {"candidate_id": 1, "subject": ""}])
     assert staged["error"].startswith("assignment 1: ")
-    assert not (tmp_path / "predictions" / "sam" / "2026-01-01" / "bur").exists()
+    assert not (tmp_path / "predictions" / "stub" / "2026-01-01" / "bur").exists()
 
 
 def test_accept_refuses_when_the_images_content_has_changed_since_the_proposal_ran(
@@ -112,7 +112,7 @@ def test_accept_refuses_when_the_images_content_has_changed_since_the_proposal_r
     _make_image(img_path, fill=(50, 50, 50))
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
-    proposed = propose_annotations(tmp_path, image_path=str(img_path), engine="sam")
+    proposed = propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
     assert "error" not in proposed, proposed
 
     _make_image(img_path, fill=(200, 10, 10))
@@ -135,7 +135,7 @@ def test_the_envelope_carries_image_identity_at_the_dataset_rooted_location(
     _make_image(img_path)
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
 
-    result = propose_annotations(tmp_path, image_path=str(img_path), engine="sam")
+    result = propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
     assert "error" not in result, result
     assert result["staged"] is True
 
@@ -158,7 +158,7 @@ def test_propose_outside_a_dataset_tree_runs_the_engine_and_stages_nothing(
     _make_image(img_path)
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
 
-    result = propose_annotations(tmp_path, image_path=str(img_path), engine="sam")
+    result = propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
     assert "error" not in result, result
     assert result["staged"] is False
     assert result["candidate_count"] == 1
@@ -179,7 +179,7 @@ def test_propose_then_accept_stages_a_prediction_at_the_expected_location(
     _make_image(img_path)
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
 
-    proposed = propose_annotations(tmp_path, image_path=str(img_path), engine="sam")
+    proposed = propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
     assert "error" not in proposed, proposed
     assert proposed["staged"] is True
 
@@ -187,7 +187,7 @@ def test_propose_then_accept_stages_a_prediction_at_the_expected_location(
         tmp_path, image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" not in accepted, accepted
 
-    pred_dir = tmp_path / "predictions" / "sam"
+    pred_dir = tmp_path / "predictions" / "stub"
     if dated:
         pred_dir = pred_dir / "2026-06-01"
     assert accepted["path"] == str(pred_dir / "sample" / "sample.json")
@@ -215,7 +215,7 @@ def test_propose_then_accept_through_a_band_groups_manifest_path(
     manifest = write_band_group_manifest(images_dir, "capture", bands)
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
-    proposed = propose_annotations(tmp_path, image_path=str(manifest), engine="sam")
+    proposed = propose_annotations(tmp_path, image_path=str(manifest), engine="stub")
     assert "error" not in proposed, proposed
     assert proposed["staged"] is True
 
@@ -223,7 +223,7 @@ def test_propose_then_accept_through_a_band_groups_manifest_path(
         tmp_path, image_path=str(manifest), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" not in accepted, accepted
 
-    assert accepted["path"] == str(tmp_path / "predictions" / "sam" / "capture" / "capture.json")
+    assert accepted["path"] == str(tmp_path / "predictions" / "stub" / "capture" / "capture.json")
     anns = json_io.read_annotations(accepted["path"])
     assert len(anns) == 1
 
@@ -250,7 +250,7 @@ def test_propose_on_a_band_groups_member_path_stages_nothing_and_names_the_manif
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
     member_path = bands["Red"]
-    proposed = propose_annotations(tmp_path, image_path=str(member_path), engine="sam")
+    proposed = propose_annotations(tmp_path, image_path=str(member_path), engine="stub")
     assert "error" not in proposed, proposed
     assert proposed["staged"] is False
     assert manifest.name in proposed["summary"]
@@ -271,7 +271,7 @@ def test_a_second_accept_of_the_same_staged_run_refuses_and_keeps_the_first(
     _make_image(img_path)
     _install_stub(monkeypatch, [_candidate(0, 5.0), _candidate(1, 40.0)])
 
-    proposed = propose_annotations(tmp_path, image_path=str(img_path), engine="sam")
+    proposed = propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
     assert "error" not in proposed, proposed
 
     first = stage_proposals(
@@ -296,11 +296,11 @@ def test_a_second_proposal_run_replaces_the_first_and_accept_reads_the_newest(
     _make_image(img_path)
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
-    first = propose_annotations(tmp_path, image_path=str(img_path), engine="sam")
+    first = propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
     assert "error" not in first, first
 
     _install_stub(monkeypatch, [_candidate(0, 40.0)])
-    second = propose_annotations(tmp_path, image_path=str(img_path), engine="sam")
+    second = propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
     assert "error" not in second, second
 
     accepted = stage_proposals(
@@ -323,12 +323,12 @@ def test_a_re_run_finding_nothing_clears_the_previous_runs_record(
     _make_image(img_path)
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
-    first = propose_annotations(tmp_path, image_path=str(img_path), engine="sam")
+    first = propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
     assert "error" not in first, first
     assert first["staged"] is True
 
     _install_stub(monkeypatch, [])
-    second = propose_annotations(tmp_path, image_path=str(img_path), engine="sam")
+    second = propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
     assert "error" not in second, second
     assert second["staged"] is False
 
@@ -351,7 +351,7 @@ def test_accept_reports_an_unsampleable_image_as_an_error_dict(
     _make_image(img_path)
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
-    proposed = propose_annotations(tmp_path, image_path=str(img_path), engine="sam")
+    proposed = propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
     assert "error" not in proposed, proposed
 
     def _raises(*args: object, **kwargs: object) -> None:
@@ -375,13 +375,13 @@ def test_stage_proposals_refuses_a_reserved_stem_with_an_error_dict(
     image = tmp_path / "images" / "2026-01-01" / "bucket.jpg"
     _make_image(image)
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
-    proposed = propose_annotations(tmp_path, image_path=str(image), engine="sam")
+    proposed = propose_annotations(tmp_path, image_path=str(image), engine="stub")
     assert "error" not in proposed, proposed
 
     accepted = stage_proposals(
         tmp_path, image_path=str(image), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "a prediction bucket's own record" in accepted["error"]
-    assert not (tmp_path / "predictions" / "sam" / "2026-01-01" / "bucket").exists()
+    assert not (tmp_path / "predictions" / "stub" / "2026-01-01" / "bucket").exists()
 
 
 def test_a_staging_is_one_publication_with_one_audit_line(
@@ -402,7 +402,7 @@ def test_a_staging_is_one_publication_with_one_audit_line(
     image = tmp_path / "images" / "2026-01-01" / "leaf.jpg"
     _make_image(image)
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
-    assert "error" not in propose_annotations(tmp_path, image_path=str(image), engine="sam")
+    assert "error" not in propose_annotations(tmp_path, image_path=str(image), engine="stub")
 
     accepted = stage_proposals(
         tmp_path, image_path=str(image), assignments=[{"candidate_id": 0, "subject": "bud"}])

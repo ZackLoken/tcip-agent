@@ -2,8 +2,7 @@ import { Text } from "react-konva";
 
 /**
  * A label with a dark halo behind it (a blurred black copy, then the real fill on top) so an
- * annotation or detection name stays legible over any part of the underlying image. Shared by the
- * Annotate and Review canvases so the same shape's name reads the same on both.
+ * annotation or proposal name stays legible over any part of the underlying image.
  */
 export function HaloLabel({
   x,

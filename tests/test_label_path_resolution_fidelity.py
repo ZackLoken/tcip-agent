@@ -63,9 +63,9 @@ def test_annotation_date_refuses_a_tree_deeper_than_one_date_bucket() -> None:
     assert annotation_date("/ds/annotations/2026-02-11") == "2026-02-11"
     assert annotation_date("/ds/annotations/IMG_1.json") is None
 
-    assert annotation_date("/ds/annotations/2026-02-11/.original/IMG_1.json") is None
+    assert annotation_date("/ds/annotations/2026-02-11/backup/IMG_1.json") is None
     assert annotation_date("/ds/annotations/exports/2026-02-11/IMG_1.json") is None
-    assert annotation_date("/ds/annotations/2026-02-11/.original") is None
+    assert annotation_date("/ds/annotations/2026-02-11/backup") is None
 
 
 def test_caller_supplied_date_wins_over_the_image_paths_own_date() -> None:

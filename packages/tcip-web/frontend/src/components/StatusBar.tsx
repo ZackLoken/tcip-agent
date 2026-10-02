@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 
 import { ProjectBreadcrumb } from "@/components/ProjectBreadcrumb";
-import { useReviewColors } from "@/lib/reviewColors";
 import { useStore } from "@/store";
 import { selectCanvasMatchesDataset } from "@/store/slices/canvas";
 
@@ -25,11 +24,9 @@ export function StatusBar() {
   const boxCount = useStore((s) => s.canvas.boxes.length);
   const polyCount = useStore((s) => s.canvas.polygons.length);
   const pointCount = useStore((s) => s.canvas.points.length);
-  const matches = useStore((s) => s.review.matches);
   const activeTab = useStore((s) => s.gui.active_tab);
   const sessionTracking = useStore((s) => s.sessionTracking);
   const agentActivity = useStore((s) => s.agentActivity);
-  const [reviewColors] = useReviewColors();
 
   // Per-image timer. Compute the elapsed seconds inside the interval (not in the
   // render body) so there's no Date.now()-during-render hack.
@@ -83,18 +80,6 @@ export function StatusBar() {
         <span className="tabular-nums">{countLabel(pointCount, "point", "points")}</span>
       )}
       {activeTab === "annotate" && dirty && <span className="text-tcip-warn">Unsaved changes</span>}
-      {activeTab === "review" && matches && (
-        <span className="tabular-nums">
-          <span style={{ color: reviewColors.tp }}>TP {matches.n_tp}</span>
-          <span className="mx-1.5 text-tcip-border">|</span>
-          <span style={{ color: reviewColors.fp }}>FP {matches.n_fp}</span>
-          <span className="mx-1.5 text-tcip-border">|</span>
-          <span style={{ color: reviewColors.fn }}>FN {matches.n_fn}</span>
-        </span>
-      )}
-      {activeTab === "review" && matches && matches.n_total > 0 && (
-        <ReviewProgress reviewed={matches.n_reviewed} total={matches.n_total} />
-      )}
       <div className="flex-1" />
       {showAgent && agentActivity && (
         <span className="text-tcip-accent" title={JSON.stringify(agentActivity.data)}>
@@ -105,33 +90,5 @@ export function StatusBar() {
       {/* Project breadcrumb, lower-right: project (recent) · date (switch) · Switch Project (all). */}
       <ProjectBreadcrumb />
     </div>
-  );
-}
-
-/** Persimmon progress wheel + count of detections reviewed on the current image. */
-function ReviewProgress({ reviewed, total }: { reviewed: number; total: number }) {
-  const C = 44; // circumference of an r=7 circle (2·π·7)
-  const frac = total ? reviewed / total : 0;
-  return (
-    <span
-      className="flex items-center gap-1.5 tabular-nums"
-      title="Detections reviewed on this image, updates as you accept, edit, or reject"
-    >
-      <svg width="13" height="13" viewBox="0 0 20 20" aria-hidden="true">
-        <circle cx="10" cy="10" r="7" fill="none" stroke="#33352C" strokeWidth="3" />
-        <circle
-          cx="10"
-          cy="10"
-          r="7"
-          fill="none"
-          stroke="#E6976B"
-          strokeWidth="3"
-          strokeDasharray={`${frac * C} ${C}`}
-          strokeLinecap="round"
-          transform="rotate(-90 10 10)"
-        />
-      </svg>
-      {reviewed} / {total} reviewed
-    </span>
   );
 }

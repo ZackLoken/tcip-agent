@@ -1,16 +1,11 @@
-r"""Sort a checkpoint's own predictions by confidence into auto-accept, needs-review and unscoreable
-queues, from the command line.
+r"""Sort a checkpoint's own predictions by confidence into needs-review and unscoreable queues,
+from the command line.
 
-Wraps ``feedback_tools.triage_predictions``: returns predictions at or above ``--auto-threshold``
-as the confident set for the caller to accept as ground truth, and writes nothing itself. With
-``--auto-threshold`` omitted it refuses to auto-accept anything; the threshold is derived from the
-model's validated confidence distribution and a breeder spot-check.
+Wraps ``feedback_tools.triage_predictions``, which writes nothing.
 
 Usage:
     tcip triage-predictions --checkpoint <ckpt.pt> --images-dir <dir> \
-        --project <project> [--dataset-root <dir>] [--no-skip-reviewed] \
-        [--low 0.3] [--high 0.8] [--auto-threshold <conf>] [--predictions-dir <bucket>] \
-        [--review-state-dir <dir>]
+        --project <project> [--subject <subject>] [--low 0.3] [--high 0.8]
 
 The checkpoint must be named by a registry entry under --project (register it with register_model
 first); this command refuses one it is not, naming the digest and the project.
@@ -30,38 +25,21 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser.add_argument("--images-dir", required=True, help="Directory of candidate images.")
     parser.add_argument("--project", required=True,
                         help="The project the checkpoint's registry entry is looked up under.")
-    parser.add_argument("--dataset-root", default="",
-                        help="Root of the dataset whose review is in progress; scopes the "
-                             "verdict store --skip-reviewed reads. Omitted with "
-                             "--review-state-dir too, no store is read and every image triages.")
-    parser.add_argument("--no-skip-reviewed", action="store_true",
-                        help="Do not exclude already-completed images before triaging.")
+    parser.add_argument("--subject", default=None,
+                        help="Skip the images whose label document marks this subject finished. "
+                             "Omitted triages every image.")
     parser.add_argument("--low", type=float, default=0.3, help="Lower confidence bound for the "
                         "needs-review band.")
     parser.add_argument("--high", type=float, default=0.8, help="Upper confidence bound for the "
                         "needs-review band.")
-    parser.add_argument("--auto-threshold", type=float, default=None,
-                        help="Confidence at/above which a prediction joins the confident set. "
-                             "Omitted refuses to auto-accept anything; derive it from the "
-                             "model's validated confidence distribution and confirm with a "
-                             "breeder spot-check first.")
-    parser.add_argument("--predictions-dir", default=None,
-                        help="The published bucket whose completed reviews --skip-reviewed "
-                             "skips. Omitted reads a ground-truth-only review.")
-    parser.add_argument("--review-state-dir", default="",
-                        help="A verdict store to read instead of the dataset's own.")
     args = parser.parse_args(argv)
 
     project = bound_project(args.project)
 
     from tcip_mcp.tools.feedback_tools import triage_predictions
 
-    result = triage_predictions(
-        project, args.checkpoint, args.images_dir, dataset_root=args.dataset_root,
-        skip_reviewed=not args.no_skip_reviewed, low=args.low, high=args.high,
-        auto_threshold=args.auto_threshold, predictions_dir=args.predictions_dir,
-        review_state_dir=args.review_state_dir,
-    )
+    result = triage_predictions(project, args.checkpoint, args.images_dir, low=args.low,
+                                high=args.high, subject=args.subject)
     print(json.dumps(result, indent=2))
     return 1 if "error" in result else 0
 

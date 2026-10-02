@@ -151,16 +151,6 @@ class TestActiveLearningScoringLogic:
         scorer = CombinedScorer(task="classification", uncertainty_weight=0.5, diversity_weight=0.5)
         assert scorer.uw == 0.5
 
-    def test_auto_accept(self):
-        from tcip_mcp.pipelines.active_learning.selector import auto_accept
-        predictions = [
-            {"image": "a.png", "scores": [0.95, 0.9]},
-            {"image": "b.png", "scores": [0.3]},
-            {"image": "c.png", "scores": [0.85, 0.82]},
-        ]
-        accepted = auto_accept(predictions, threshold=0.8)
-        assert len(accepted) == 2
-
     def test_review_queue(self):
         from tcip_mcp.pipelines.active_learning.selector import review_queue
         predictions = [

@@ -18,8 +18,8 @@ from pydantic import BaseModel
 
 from tcip_mcp import dataset_layout, workspace
 from tcip_mcp.buckets import buckets_by_date
+from tcip_mcp.identity import actor
 from tcip_mcp.project_record import record_fields, rename_project
-from tcip_web import identity
 from tcip_web.state import store
 
 logger = logging.getLogger(__name__)
@@ -156,13 +156,13 @@ def _job_conflict(target: Path) -> str | None:
     ``target``."""
     from tcip_mcp.experiments import TERMINAL_STATES
 
-    from tcip_web.routes import inference, review
+    from tcip_web.routes import annotate, inference
 
     for job in inference._registry.list():
         if job.status not in TERMINAL_STATES and job.project == str(target):
             return (f"inference job {job.job_id!r} is not finished; ask the agent to cancel it "
                     "or wait for it to finish")
-    for job in review._pq_registry.list():
+    for job in annotate._pq_registry.list():
         if job.status not in TERMINAL_STATES and job.project == str(target):
             return (f"a review priority-queue scoring pass ({job.job_id!r}) is not finished; "
                     "wait for it to finish")
@@ -173,7 +173,7 @@ class RemovalRequest(BaseModel):
     id: str
     # The project's display name, typed by the person removing it.
     confirm_name: str
-    user: str = ""
+    user: str
 
 
 @router.post("/remove")
@@ -181,7 +181,8 @@ async def remove_project(req: RemovalRequest) -> dict:
     """Archive the project ``req.id`` names into the workspace's ``.removed/`` and move it there,
     closing it, when it is the open project, only once the removal is admitted. 404 for no such
     project, 400 for a confirm name that is not its display name, 409 while a job or run of it is
-    live or the archive refuses. Returns ``{archive_path, moved_to}``."""
+    live or the archive refuses, 400 for a request naming no one. Returns ``{archive_path,
+    moved_to}``."""
     try:
         project = workspace.project_by_id(store.workspace, req.id)
     except LookupError as exc:
@@ -189,10 +190,13 @@ async def remove_project(req: RemovalRequest) -> dict:
     display_name = record_fields(project)["display_name"]
     if req.confirm_name != display_name:
         raise HTTPException(400, f"type the project's name {display_name!r} to remove it")
+    try:
+        requested_by = actor(req.user)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     conflict = _job_conflict(project)
     if conflict is not None:
         raise HTTPException(409, conflict)
-    requested_by = identity.user_id(identity.resolve_user(req.user))
 
     def release() -> None:
         if store.project_id == req.id:
@@ -209,20 +213,19 @@ async def remove_project(req: RemovalRequest) -> dict:
 class RenameRequest(BaseModel):
     id: str
     display_name: str
-    user: str = ""
+    user: str
 
 
 @router.post("/rename")
 def rename_project_route(req: RenameRequest) -> dict:
     """Change the display name of the project ``req.id`` names; its directory is left as it is.
-    404 for no such project, 400 for a display name the record refuses. Returns ``{id,
-    display_name, previous_display_name}``."""
+    404 for no such project, 400 for a display name the record refuses or a request naming no
+    one. Returns ``{id, display_name, previous_display_name}``."""
     try:
         project = workspace.project_by_id(store.workspace, req.id)
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
-    requested_by = identity.user_id(identity.resolve_user(req.user))
     try:
-        return rename_project(project, req.display_name, requested_by=requested_by)
+        return rename_project(project, req.display_name, requested_by=actor(req.user))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

@@ -11,7 +11,7 @@ import { useStore } from "@/store";
 
 /** Legend, anchored lower-left of the canvas: reveals on hover, on keyboard focus within it, or
  *  by toggling the Legend button (click, Enter, Space). Lists the dataset's subjects (outline
- *  color = subject, GUI-local) plus the selected-shape blue, the same grammar as Review. In box
+ *  color = subject, GUI-local) plus the selected-shape blue. In box
  *  mode, an extra row explains the dashed boxes: a polygon's own read-only bounds, not a second
  *  editable annotation. A subject row opens this browser's color picker. */
 export function AnnotateLegend() {

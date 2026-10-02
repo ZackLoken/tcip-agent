@@ -198,7 +198,7 @@ def _withdraw(project_root: Path, trait: str) -> None:
     revision = traits.read_trait(trait, project_root).latest_confirmed
     assert revision is not None
     traits.confirm_revision(project_root, trait, revision.number, revision.entry_sha256,
-                            user="rosalind", identity_from_request=True, confirmed=False)
+                            user="rosalind", confirmed=False)
 
 
 def _web_refusal(client: TestClient, body: dict, route: str, headers=None, **extra) -> dict:
@@ -241,7 +241,7 @@ def test_both_web_doors_refuse_identically_and_an_acknowledgment_does_not_clear_
     from tests._web_fixtures import BROWSER
 
     acknowledged = _web_refusal(client, body, "export_csv", headers=BROWSER,
-                                acknowledgment={"reason": "a look now",
+                                acknowledgment={"user": "breeder", "reason": "a look now",
                                                 "result_sha256": "0" * 64})
 
     assert all(d == details[0] for d in details), details

@@ -74,11 +74,6 @@ class Sample:
     ``source``. ``row_key`` names this sample's row inside a tabular ``ground_truth``, and is
     ``None`` when the whole file answers for the sample.
 
-    ``confirmation_bucket`` is the ``image_status.json`` key whose human confirmations admitted
-    this sample (:func:`~tcip_mcp.dataset_layout.status_bucket` over a subject and a capture date),
-    stated by the producer that admitted it. It is ``None`` for a mask raster or a table row, which
-    no confirmation store answers for.
-
     ``rect`` is the half-open pixel rect ``(x0, y0, x1, y1)`` a within-image draw assigned, or
     ``None`` when the sample is the whole source. ``ground_truth_digest`` is that file's digest at
     draw time.
@@ -89,7 +84,6 @@ class Sample:
     ground_truth: str
     group: str
     side: str
-    confirmation_bucket: str | None
     rect: tuple[int, int, int, int] | None = None
     row_key: str | None = None
     ground_truth_digest: str | None = None
@@ -111,19 +105,6 @@ class Sample:
         (:func:`shape_of`)."""
         return shape_of(self.ground_truth, self.row_key)
 
-    @property
-    def ground_truth_scope(self) -> str:
-        """Where this sample's ground truth lives: the directory holding its own document, or the
-        one document that answers for many samples.
-
-        The container a bare member stem is unique within, so a record listing members per scope
-        keeps two directories' same-named images apart. A geometry sample names a document per
-        image, so its scope is that document's directory.
-        """
-        if self.row_key is None:
-            return str(Path(self.ground_truth).parent)
-        return self.ground_truth
-
 
 @dataclass(frozen=True)
 class ClassScope:
@@ -131,7 +112,7 @@ class ClassScope:
     mapping (:func:`dataclasses.asdict`) on a run's data config, a selection and a prediction
     bucket's stamp.
 
-    ``subject`` is the object class a document admission read confirmations and targets for,
+    ``subject`` is the object class a document admission read completion and targets for,
     ``attribute`` the value vocabulary it was scoped to when one was named, and ``id_map`` the
     ``assign_class_ids`` map its loader reads targets and decodes predictions under. A mask raster
     and a table row carry their own classes: a run over them records a scope whose every field is
@@ -181,12 +162,11 @@ class ClassScope:
             return set(self.id_map)
         return {self.subject} if self.subject else set()
 
-    def positive_id(self, value: str) -> int | None:
-        """The class id this classified space decodes ``value`` under, or ``None`` when it
-        classifies no attribute or its map names no such value."""
-        if not self.classified or not self.id_map or not value:
-            return None
-        return self.id_map.get(value)
+    @property
+    def value_ids(self) -> dict[str, int]:
+        """The map a classified space decodes its attribute's values under
+        (:func:`~tcip_annotation.json_io.class_id`); empty for a space that classifies none."""
+        return (self.id_map or {}) if self.classified else {}
 
     def admitted_for(self, shape: str, source: str) -> "ClassScope":
         """This class space, refused by ``source`` when ground truth of ``shape`` cannot be read
@@ -353,8 +333,6 @@ def sample_document(sample: Sample) -> dict[str, Any]:
         "member": sample.member, "source": sample.source, "ground_truth": sample.ground_truth,
         "group": sample.group, "side": sample.side,
     }
-    if sample.confirmation_bucket is not None:
-        doc["confirmation_bucket"] = sample.confirmation_bucket
     if sample.rect is not None:
         doc["rect"] = list(sample.rect)
     if sample.row_key is not None:
@@ -378,9 +356,8 @@ def selection_document(selection: Selection) -> dict[str, Any]:
 def read_sample(raw: Any, position: int, where: str) -> Sample:
     """One sample document read back as a :class:`Sample`, refusing by name (naming
     ``position`` in the record at ``where``) a non-mapping, a sample missing
-    ``member``/``source``/``ground_truth``/``group``/``side``, a side outside :data:`SIDES`, a
-    malformed ``rect``, and a sample whose ground truth is its own label document and which names
-    no ``confirmation_bucket``."""
+    ``member``/``source``/``ground_truth``/``group``/``side``, a side outside :data:`SIDES`, and
+    a malformed ``rect``."""
     if not isinstance(raw, dict):
         raise ValueError(
             f"sample {position} of the record at {where} is a {type(raw).__name__}, not a mapping.")
@@ -404,20 +381,12 @@ def read_sample(raw: Any, position: int, where: str) -> Sample:
         x0, y0, x1, y1 = (int(v) for v in rect_raw)
         rect = (x0, y0, x1, y1)
     row_key = raw.get("row_key")
-    bucket = raw.get("confirmation_bucket")
-    sample = Sample(
+    return Sample(
         member=str(raw["member"]), source=str(raw["source"]), ground_truth=str(raw["ground_truth"]),
-        group=str(raw["group"]), side=side,
-        confirmation_bucket=str(bucket) if bucket else None, rect=rect,
+        group=str(raw["group"]), side=side, rect=rect,
         row_key=str(row_key) if row_key is not None else None,
         ground_truth_digest=raw.get("ground_truth_digest"),
     )
-    if sample.confirmation_bucket is None and sample.shape == DOCUMENT:
-        raise ValueError(
-            f"sample {position} of the record at {where} names its own label document and no "
-            "confirmation_bucket: that admission reads a human confirmation store, so the bucket "
-            "it read is part of the sample. Draw it again.")
-    return sample
 
 
 def as_selection(document: Any, *, where: str) -> Selection:
@@ -426,9 +395,7 @@ def as_selection(document: Any, *, where: str) -> Selection:
 
     ``where`` names the document in every refusal. Refuses a non-mapping, a missing or empty
     ``samples`` list, a sample missing ``source``/``ground_truth``/``group``/``side``, a side
-    outside :data:`SIDES`, a malformed ``rect``, a sample whose ground truth is its own label
-    document and which names no ``confirmation_bucket`` (the bucket whose human confirmations
-    admitted it, which that shape's admission always reads), a partition whose sides cross
+    outside :data:`SIDES`, a malformed ``rect``, a partition whose sides cross
     (:func:`refuse_crossing_sides`), and a scope its samples' shape cannot be read under
     (:meth:`ClassScope.admitted_for`).
     """

@@ -103,7 +103,7 @@ class Membership(NamedTuple):
 
 def admitted_membership(
     places: "Sequence[tuple[str, Path | str, str]]", *, scope: "ClassScope", group_by: str,
-    group_key_map: "Mapping[str, str] | None", contradicted_out: set[str] | None = None,
+    group_key_map: "Mapping[str, str] | None",
 ) -> Membership:
     """Admit each place ``(name, images_dir, ground_truth)``
     (:func:`~tcip_mcp.pipelines.data.label_queries.admit`, under ``scope``, stated against that
@@ -123,7 +123,7 @@ def admitted_membership(
     admissions = []
     tallies: dict[str, int] = {}
     for _name, images_dir, ground_truth in places:
-        admitted = admit(images_dir, ground_truth, contradicted_out=contradicted_out,
+        admitted = admit(images_dir, ground_truth,
                          scope=scope if scope.id_map is not None
                          else stated_scope(ground_truth, scope.subject, scope.attribute))
         admissions.append(admitted)
@@ -152,8 +152,7 @@ def admitted_membership(
                       tallies)
 
 
-def run_membership(data_cfg: "Mapping[str, Any]", *,
-                   contradicted_out: set[str] | None = None) -> Membership:
+def run_membership(data_cfg: "Mapping[str, Any]") -> Membership:
     """:func:`admitted_membership` over a run's data section: its one place (``images_dir`` and
     ``labels_dir``), under the ``scope`` it states (the empty one when it states none), grouped by
     its ``split`` section's policy."""
@@ -166,7 +165,7 @@ def run_membership(data_cfg: "Mapping[str, Any]", *,
         [(str(labels_dir), data_cfg["images_dir"], labels_dir)],
         scope=ClassScope.of(data_cfg) if "scope" in data_cfg else ClassScope(),
         group_by=split_cfg.get("group_by", DEFAULT_GROUP_BY),
-        group_key_map=split_cfg.get("group_key_map"), contradicted_out=contradicted_out)
+        group_key_map=split_cfg.get("group_key_map"))
 
 
 def check_shares(ratios: "Mapping[str, float]") -> None:
@@ -510,11 +509,11 @@ def _sample_loaders(task: str, data_cfg: dict, recorded: "Sequence[Sample]", tra
 
 def _drawn_split(
     task: str, data_cfg: dict, *, tiling, transforms, dataset_source=None,
-    contradicted_out: set[str] | None, tallies_out: dict[str, int] | None,
+    tallies_out: dict[str, int] | None,
 ):
     """``(train_ds, val_ds, partition)`` for a run that draws its own split over ``data_cfg``'s
-    ground truth: its one place's membership (:func:`admitted_membership`, handed
-    ``contradicted_out``, its tallies copied into ``tallies_out``), then, with ``auto_val`` on,
+    ground truth: its one place's membership (:func:`admitted_membership`, its tallies copied into
+    ``tallies_out``), then, with ``auto_val`` on,
     train and val drawn through :func:`draw_sides`, or a single tiled detection source split over
     its own tile lattice (:func:`spatial_single_source_split`). ``auto_val`` off trains on every
     member with no validation. Raises when the validation requested cannot be drawn (naming
@@ -522,7 +521,7 @@ def _drawn_split(
     draws the one partition :func:`run_shares` resolves.
     """
     split_cfg = data_cfg.setdefault("split", {})
-    membership = run_membership(data_cfg, contradicted_out=contradicted_out)
+    membership = run_membership(data_cfg)
     if tallies_out is not None:
         tallies_out.update(membership.tallies)
     data_cfg["scope"] = asdict(membership.scope)
@@ -554,15 +553,14 @@ def _drawn_split(
 
 
 def auto_train_val(project: Path, task: str, data_cfg: dict, transforms, *,
-                   contradicted_out: set[str] | None = None,
                    tallies_out: dict[str, int] | None = None):
     """Build ``(train_ds, val_ds, partition)`` for a run of ``project``, deriving a leakage-free
     val split, and resolve ``data_cfg`` in place: its ``scope``, sizes, and a within-image run's
     ``split.spatial_manifest``.
 
     ``partition`` is :func:`_partition_record`'s; a within-image spatial split's holds its one
-    sample, its regions being the manifest's. ``contradicted_out`` and ``tallies_out`` receive a
-    drawn run's admission's stale confirmed negatives and tallies.
+    sample, its regions being the manifest's. ``tallies_out`` receives a drawn run's admission's
+    tallies.
 
     Two routes, and a run of any task takes one of them:
       1. ``data.split.selection_dir`` set -> train on the selection's own ``train`` and ``val``
@@ -651,7 +649,7 @@ def auto_train_val(project: Path, task: str, data_cfg: dict, transforms, *,
     # at, and every branch of the resolution order below builds from the samples it made.
     return _drawn_split(task, data_cfg, tiling=tiling, transforms=transforms,
                         dataset_source=data_cfg.get(DATASET_SOURCE_KEY) or None,
-                        contradicted_out=contradicted_out, tallies_out=tallies_out)
+                        tallies_out=tallies_out)
 
 
 class ResolvedRun(NamedTuple):
@@ -664,15 +662,13 @@ class ResolvedRun(NamedTuple):
 
 
 def resolve_run(config: dict, *, project: Path, objective: dict | None = None,
-                contradicted_out: set[str] | None = None,
                 tallies_out: dict[str, int] | None = None) -> ResolvedRun:
     """Resolve ``config`` once for a run of ``project``: a copy of its data section through
     :func:`auto_train_val`, the geometry its train dataset serves stamped on it
     (:func:`~tcip_mcp.pipelines.training.generic_trainer.stamp_effective_data_geometry`), and its
     objective (:func:`~tcip_mcp.pipelines.training.generic_trainer.resolve_objective` for a run
     with or without a val side), or ``objective`` as given, a sweep's own for its trials.
-    ``contradicted_out`` and ``tallies_out`` are :func:`auto_train_val`'s. Every refusal of the
-    resolution raises."""
+    ``tallies_out`` is :func:`auto_train_val`'s. Every refusal of the resolution raises."""
     from tcip_mcp.pipelines.model_build import run_task
     from tcip_mcp.pipelines.training.generic_trainer import (
         resolve_objective, run_transforms, stamp_effective_data_geometry,
@@ -680,8 +676,7 @@ def resolve_run(config: dict, *, project: Path, objective: dict | None = None,
 
     data = copy.deepcopy(config.get("data") or {})
     train_ds, val_ds, partition = auto_train_val(
-        project, run_task(config), data, run_transforms(config),
-        contradicted_out=contradicted_out, tallies_out=tallies_out)
+        project, run_task(config), data, run_transforms(config), tallies_out=tallies_out)
     stamp_effective_data_geometry(data, train_ds)
     if objective is None:
         objective = resolve_objective(config, project=project, has_val_loader=val_ds is not None)

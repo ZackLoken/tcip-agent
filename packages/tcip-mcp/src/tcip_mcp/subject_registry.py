@@ -19,8 +19,6 @@ contiguous 0-indexed ids in their declared order.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -146,23 +144,6 @@ def registry_to_dict(registry: SubjectRegistry) -> dict:
     return out
 
 
-def attribute_schema_digest(registry: SubjectRegistry, subject: str) -> str | None:
-    """Digest over ``subject``'s attribute vocabulary (name -> {type, declared-order values}) only.
-
-    ``None`` if ``subject`` is not in the registry at all. Excludes
-    ``description``/``defined_by``/``defined_at``. An attribute-less subject gets a real, stable
-    digest of ``{}``.
-    """
-    s = registry.subject(subject)
-    if s is None:
-        return None
-    canonical = json.dumps(
-        {a.name: {"type": a.type, "values": list(a.values)} for a in s.attributes},
-        separators=(",", ":"),
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
-
-
 def _checked_registry_document(data: bytes, *, path: str | Path) -> dict:
     """The stored registry's decoded document, version-checked.
 
@@ -228,80 +209,6 @@ def _dropped_names(outgoing: SubjectRegistry, incoming: SubjectRegistry) -> list
     return dropped
 
 
-def _sweep_schema_change(
-    dataset_root: Path, outgoing: SubjectRegistry | None, incoming: SubjectRegistry
-) -> dict:
-    """Stamp the outgoing attribute-schema digest onto every confirmation of an affected subject
-    that carries no stamp yet, before ``incoming`` is what a later read sees.
-
-    ``outgoing`` is ``None`` for a first-ever write or a stored registry that could not be
-    decoded. Stamps every status in the subject's buckets, not the negatives alone. Already-stamped
-    confirmations, and subjects whose digest is unchanged, are left alone.
-
-    Also counts, per affected subject, its finished confirmations
-    (:func:`~tcip_mcp.dataset_layout.is_finished_status`, complete or negative) whose stamped
-    digest, once this write's own stamping has landed, still disagrees with the subject's new
-    digest, computed with :func:`~tcip_mcp.pipelines.data.label_queries.stale_stamped_names`.
-
-    An absent ``outgoing`` is a no-op, and a failing sweep returns a ``warning`` rather than
-    raising.
-    Returns ``{"newly_stamped": {subject: count}, "predating_vocabulary": {subject: count},
-    "warning": str | None}``, each count over finished statuses only.
-    """
-    import tcip_store
-
-    from tcip_mcp.dataset_layout import (
-        bucket_digest_stamps, bucket_subject_date, image_status_digest_key, image_status_key,
-        is_finished_status, status_tokens, stamp_image_status_digests,
-    )
-    from tcip_mcp.pipelines.data.label_queries import stale_stamped_names
-
-    newly_stamped: dict[str, int] = {}
-    predating_vocabulary: dict[str, int] = {}
-    empty = {"newly_stamped": newly_stamped, "predating_vocabulary": predating_vocabulary}
-    if outgoing is None:
-        return {**empty, "warning": None}
-    changed = {
-        s.name: digest for s in outgoing.subjects
-        if (digest := attribute_schema_digest(outgoing, s.name)) is not None
-        and digest != attribute_schema_digest(incoming, s.name)
-    }
-    if not changed:
-        return {**empty, "warning": None}
-    try:
-        statuses = status_tokens(
-            tcip_store.read(image_status_key(dataset_root), default={}))
-        for bucket, entries in statuses.items():
-            subject, _ = bucket_subject_date(bucket)
-            outgoing_digest = changed.get(subject)
-            if outgoing_digest is None:
-                continue
-            stamped = stamp_image_status_digests(
-                dataset_root, bucket, sorted(entries), outgoing_digest, only_unstamped=True)
-            finished_stamped = [name for name in stamped if is_finished_status(entries.get(name))]
-            if finished_stamped:
-                newly_stamped[subject] = newly_stamped.get(subject, 0) + len(finished_stamped)
-        stamps_after = tcip_store.read(image_status_digest_key(dataset_root), default={})
-        for bucket, entries in statuses.items():
-            subject, _ = bucket_subject_date(bucket)
-            if subject not in changed:
-                continue
-            new_digest = attribute_schema_digest(incoming, subject)
-            if new_digest is None:
-                continue
-            finished_names = [name for name, status in entries.items() if is_finished_status(status)]
-            stale = stale_stamped_names(
-                bucket_digest_stamps(stamps_after, bucket), new_digest, finished_names)
-            if stale:
-                predating_vocabulary[subject] = predating_vocabulary.get(subject, 0) + len(stale)
-    except (OSError, tcip_store.StoreError) as exc:
-        return {**empty, "warning":
-                f"could not stamp the outgoing attribute schema onto the confirmations under "
-                f"{dataset_root} ({exc}); the unstamped ones will read as made under the new "
-                f"schema, so re-review them before they train"}
-    return {**empty, "warning": None}
-
-
 def replace_registry(
     dataset_root: str | Path, registry: SubjectRegistry, *, expect: "Version | None",
     allow_removals: bool = False, allow_type_changes: bool = False,
@@ -319,20 +226,16 @@ def replace_registry(
 
     Refuses, independently of ``allow_removals``, a write that keeps an attribute's name and values
     but changes its ``type`` (categorical to ordinal or back), unless ``allow_type_changes`` is
-    set; landing it runs the same confirmation-digest sweep a value change does.
+    set.
 
     ``expect`` is compare-and-set against the blob's actual version at write time
     (``tcip_store.VersionConflict`` on a mismatch, nothing written): pass the version the caller
     read, or ``Version.ABSENT`` for a caller asserting no registry exists yet. ``None`` checks
     against the version this call read.
 
-    The confirmation-digest sweep (:func:`_sweep_schema_change`) runs only once the write has
-    actually landed, against the registry this call read before writing, and the write's one audit
-    line follows it in the dataset's log (``AuditEntryNotWritten`` when it cannot be appended,
-    carrying that line's arguments). A crash between the put landing and the sweep completing
-    leaves the affected confirmations unstamped under the registry that did land. Returns the
-    committed save as its audit line records it: ``{"subjects_path", "n_subjects", "version"
-    (the new token), "schema_change_sweep"}``.
+    The write's one audit line follows it in the dataset's log (``AuditEntryNotWritten`` when it
+    cannot be appended, carrying that line's arguments). Returns the committed save as its audit
+    line records it: ``{"subjects_path", "n_subjects", "version"}`` (the new token).
     """
     import tcip_store
 
@@ -346,7 +249,6 @@ def replace_registry(
     key = subject_registry_key(dataset_root)
     versioned = tcip_store.read_blob_versioned(key, default=None)
     outgoing: SubjectRegistry | None = None
-    decode_warning: str | None = None
     if versioned.value is not None:
         try:
             outgoing = registry_from_dict(_checked_registry_document(versioned.value, path=path))
@@ -356,11 +258,6 @@ def replace_registry(
                     f"the stored registry at {path} does not decode ({exc}); pass allow_removals "
                     "to replace it anyway, since a repair drops whatever the stored bytes held"
                 ) from exc
-            decode_warning = (
-                f"the outgoing registry at {path} does not read ({exc}), so confirmations made "
-                "under it stay unstamped and will read as made under the new schema; re-review "
-                "them before they train"
-            )
 
     if outgoing is not None and not allow_removals:
         dropped = _dropped_names(outgoing, registry)
@@ -382,10 +279,8 @@ def replace_registry(
                     raise RegistryError(
                         f"this write changes {s.name}.{a.name}'s type from {a.type!r} to "
                         f"{new_a.type!r} at {path}; pass allow_type_changes to state the flip as "
-                        "deliberate. Every recorded value of that attribute, on confirmed and "
-                        "unconfirmed images alike, acquires the other type's meaning (a rank, or "
-                        "an unordered label), and only the finished statuses under the subject "
-                        "are quarantined by the sweep that follows"
+                        "deliberate. Every recorded value of that attribute acquires the other "
+                        "type's meaning (a rank, or an unordered label)"
                     )
 
     new_version = tcip_store.put_blob(
@@ -393,11 +288,8 @@ def replace_registry(
         expect=versioned.version if expect is None else expect,
     )
 
-    sweep = _sweep_schema_change(Path(dataset_root), outgoing, registry)
-    if decode_warning and sweep["warning"] is None:
-        sweep = {**sweep, "warning": decode_warning}
     committed = {"subjects_path": str(path), "n_subjects": len(registry.subjects),
-                 "version": new_version.token, "schema_change_sweep": sweep}
+                 "version": new_version.token}
     record_event_or_raise("replace_registry", committed, scope=dataset_root)
     return committed
 

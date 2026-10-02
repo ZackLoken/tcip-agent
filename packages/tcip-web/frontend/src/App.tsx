@@ -5,7 +5,6 @@ import { ROUTES } from "@/api/routes";
 import {
   PANEL_EVENT_ANNOTATE_FOCUS,
   PANEL_EVENT_CANVAS_STATE_REQUEST,
-  PANEL_EVENT_REVIEW_FOCUS,
   TAB_NAMES,
 } from "@/api/types.generated";
 import { sessionsApi } from "@/api/sessions";
@@ -19,26 +18,22 @@ import { Toasts } from "@/components/Toasts";
 import { TopBar, tabButtonId, tabPanelId } from "@/components/TopBar";
 import { stateSocket } from "@/api/ws";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
-import { useImageStatusHydrate } from "@/hooks/useImageStatusHydrate";
 import { applyAnnotateFocus, type AnnotateFocusData } from "@/lib/annotateFocus";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { attachCtrlWheelGuard } from "@/lib/ctrlWheelGuard";
-import { anyTrackerDirty, coverageOutbox, flushAllTrackers } from "@/lib/coverageTracker";
-import { applyReviewFocus, type ReviewFocusData } from "@/lib/reviewFocus";
 import { useStore } from "@/store";
 import { declaredClient } from "@/store/slices/agentActivity";
 import { selectProjectRoot } from "@/store/slices/gui";
 import type { TabName } from "@/store/types";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
 import { MetaTab } from "@/tabs/MetaTab";
-import { ReviewTab } from "@/tabs/ReviewTab";
 
 // Every tab has an agent panel of the same name (the backend's own panel set also carries
 // "app", handled by its own subscription below).
 const TAB_PANELS: readonly TabName[] = TAB_NAMES;
 
 // Code-split the recharts-heavy tabs (recharts + its d3 deps are ~5MB unpacked and used only
-// here) so the Annotate/Review workflow (the primary use) paints without them. App mounts
+// here) so the Annotate workflow (the primary use) paints without them. App mounts
 // exactly one tab at a time, so deferring these chunks costs no UX.
 const InferenceTab = lazy(() =>
   import("@/tabs/InferenceTab").then((m) => ({ default: m.InferenceTab })),
@@ -72,7 +67,6 @@ function App() {
   const annotationsDir = useStore((s) => s.gui.dataset.annotations_dir);
   const subject = useStore((s) => s.gui.dataset.subject);
   const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
-  const datasetDate = useStore((s) => s.gui.dataset.date);
   const setRegistry = useStore((s) => s.setRegistry);
   const endedSessionForRoot = useRef<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -122,9 +116,7 @@ function App() {
         return;
       }
 
-      // Agent → GUI "focus the Annotate tab": land on a (subject, date) in the right mode on an
-      // annotated frame (see applyAnnotateFocus, which uses local setters like Review→Edit so the
-      // deliberate "mode/index stay local" behavior of mergeSnapshot is preserved).
+      // Agent → GUI "focus the Annotate tab" through local setters (see applyAnnotateFocus).
       if (ev.event_type === PANEL_EVENT_ANNOTATE_FOCUS) {
         void applyAnnotateFocus(ev.data as AnnotateFocusData).catch(() => {
           useStore
@@ -140,28 +132,14 @@ function App() {
         notifyCanvasStateRequest();
         return;
       }
-
-      // Agent → GUI "focus the Review tab": load a model's predictions on a frame/detection so
-      // the human sees exactly what the agent flagged (a false positive, a missed detection).
-      if (ev.event_type === PANEL_EVENT_REVIEW_FOCUS) {
-        void applyReviewFocus(ev.data as ReviewFocusData).catch(() => {
-          useStore
-            .getState()
-            .pushToast("Agent tried to focus the Review tab, but it couldn't be applied.");
-        });
-        return;
-      }
     });
     return unsubscribe;
   }, []);
 
-  // Session start / end.  Browser identifier is "web" since we don't have
-  // OS user; the backend can rewrite this from a header later if needed.
   useEffect(() => {
     if (!projectRoot) return;
-    const user = useStore.getState().user || "web";
     // Best-effort telemetry: never surface a failure to the user.
-    void sessionsApi.start(user).catch(() => {});
+    void sessionsApi.start(useStore.getState().user).catch(() => {});
     endedSessionForRoot.current = null;
 
     function endSession() {
@@ -200,24 +178,13 @@ function App() {
     };
   }, [projectRoot]);
 
-  // A refresh/close with unsaved canvas edits, a non-empty coverage outbox, or a live tracker
-  // still owing the server a fact (React never unmounts on unload) gets the leave-page prompt.
+  // A refresh/close with unsaved canvas edits gets the leave-page prompt (React never unmounts).
   useEffect(() => {
     function guardUnload(e: BeforeUnloadEvent) {
-      if (useStore.getState().canvas.dirty || coverageOutbox.size > 0 || anyTrackerDirty()) {
-        e.preventDefault();
-      }
-    }
-    // pagehide fires ahead of the actual unload; flush every live tracker one last time.
-    function flushOnHide() {
-      flushAllTrackers();
+      if (useStore.getState().canvas.dirty) e.preventDefault();
     }
     window.addEventListener("beforeunload", guardUnload);
-    window.addEventListener("pagehide", flushOnHide);
-    return () => {
-      window.removeEventListener("beforeunload", guardUnload);
-      window.removeEventListener("pagehide", flushOnHide);
-    };
+    return () => window.removeEventListener("beforeunload", guardUnload);
   }, []);
 
   // Hydrate the subject registry whenever the dataset selection changes.
@@ -250,22 +217,11 @@ function App() {
     })();
   }, [projectRoot, datasetKey, imageList, subject, datasetRoot, annotationsDir, setRegistry]);
 
-  // A fresh project with no subject yet has nothing to scope image status to: the hook itself
-  // skips its load/reconcile/write sequence with no subject set.
-  useImageStatusHydrate({
-    subject,
-    datasetRoot,
-    datasetDate,
-    annotationsDir,
-    imageList,
-  });
-
-  // Only Annotate / Review / Results need an imagery dataset+date and show the picker until
-  // one is set; Setup needs an open project. Keyed by TabName, so an added tab with no entry here fails the typecheck.
+  // Only Annotate / Results need an imagery dataset+date and show the picker until one is set;
+  // Setup needs an open project. Keyed by TabName, so an added tab with no entry fails the typecheck.
   const tabPanels: Record<TabName, ReactNode> = {
     setup: projectRoot ? <SetupTab /> : <ProjectPicker />,
     annotate: datasetReady ? <AnnotateTab /> : <ProjectPicker />,
-    review: datasetReady ? <ReviewTab /> : <ProjectPicker />,
     results: datasetReady ? <ResultsTab /> : <ProjectPicker />,
     training: <TrainingTab />,
     tuning: <TuningTab />,

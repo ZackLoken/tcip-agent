@@ -1,7 +1,5 @@
 /**
- * Shared Konva Stage wrapper with pan + zoom state managed in the store.
- * AnnotationCanvas and ReviewCanvas both render inside this host so the
- * view state (scale, offset_x, offset_y) stays in sync across tabs.
+ * The Annotate canvas's Konva Stage wrapper, its pan + zoom state managed in the store.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -17,15 +15,13 @@ import type { ViewState } from "@/store/types";
 
 /** One region serve drawn above the base image, positioned in image coords. */
 export interface CanvasRegion {
-  /** Stable identity (the coverage cell name); the bitmap cache is keyed on it. */
+  /** Stable identity (the serving cell name); the bitmap cache is keyed on it. */
   key: string;
   url: string;
   x: number;
   y: number;
   width: number;
   height: number;
-  /** Called with the serve facts once this region's URL loads (served-at-native marking). */
-  onLoaded?: (facts: LoadedImage) => void;
 }
 
 export interface CanvasStageProps {
@@ -35,9 +31,6 @@ export interface CanvasStageProps {
   imagePath?: string | null;
   imgWidth: number;
   imgHeight: number;
-  /** Auto-fit the image to the canvas once per image (default true). The Review tab sets this
-   *  false so its zoom-to-detection view is not overridden by the fit. */
-  autoFit?: boolean;
   /** Cell-aligned region serves rendered above the base image while it is loading and after: a
    *  region unmounts when dropped from this list; one whose URL changes keeps its last-loaded
    *  bitmap on screen until the replacement finishes loading. */
@@ -69,7 +62,6 @@ export function CanvasStage(props: CanvasStageProps) {
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [imgError, setImgError] = useState(false);
   const [baseError, setBaseError] = useState<string | null>(null);
-  const [baseHeaderParseError, setBaseHeaderParseError] = useState<string | null>(null);
   const onBaseFactsRef = useRef(props.onBaseFacts);
   onBaseFactsRef.current = props.onBaseFacts;
   // A load the server refused for want of overviews is a wait, not a failure: the build runs and
@@ -97,7 +89,6 @@ export function CanvasStage(props: CanvasStageProps) {
       setImg(null);
       setImgError(false);
       setBaseError(null);
-      setBaseHeaderParseError(null);
       onBaseFactsRef.current?.(null);
       return;
     }
@@ -106,7 +97,6 @@ export function CanvasStage(props: CanvasStageProps) {
     setImg(null);
     setImgError(false);
     setBaseError(null);
-    setBaseHeaderParseError(null);
     onBaseFactsRef.current?.(null);
     const ac = new AbortController();
     void loadImage(props.imageUrl, { signal: ac.signal }).then((res) => {
@@ -116,7 +106,6 @@ export function CanvasStage(props: CanvasStageProps) {
       // empty canvas, otherwise overlays float on a blank stage with no explanation.
       setImgError(!res.ok);
       setBaseError(res.imageError);
-      setBaseHeaderParseError(res.headerParseError);
       onBaseFactsRef.current?.(res);
     });
     return () => ac.abort(); // cancel the abandoned download; rapid flips otherwise queue every skip
@@ -158,7 +147,6 @@ export function CanvasStage(props: CanvasStageProps) {
         if (res.aborted) return;
         if (regionLoadsRef.current.get(region.key)?.url !== region.url) return;
         regionLoadsRef.current.delete(region.key);
-        region.onLoaded?.(res);
         if (res.ok && res.image) {
           regionUrlsRef.current.set(region.key, region.url);
           setRegionBitmaps((prev) => new Map(prev).set(region.key, res.image!));
@@ -174,21 +162,17 @@ export function CanvasStage(props: CanvasStageProps) {
     };
   }, []);
 
-  // Fit the image to the canvas once per image, not on every container resize: refitting on
-  // resize resets the user's zoom/pan, and when a reflow briefly reports a near-zero height
-  // (e.g. the Review filter shelf expanding) it collapses the image to sub-pixel scale so it
-  // appears to vanish. The key omits dims so a later resize can't re-fit; it's keyed on image
-  // identity + native size so a genuine image change still fits.
+  // Fit once per image (keyed on its identity and native size), never on a resize: a refit
+  // resets the user's zoom/pan, and a reflow's near-zero height would collapse the image.
   const didFit = useRef<string | null>(null);
   useEffect(() => {
-    if (props.autoFit === false) return; // consumer controls the view (e.g. Review zoom-to-detection)
     if (!img || !props.imgWidth || !props.imgHeight) return;
     const key = `${props.imageUrl}:${props.imgWidth}x${props.imgHeight}`;
     if (didFit.current === key) return;
     if (dims.w <= 1 || dims.h <= 1) return; // wait for a real measurement before fitting
     didFit.current = key;
     setView(fitView(dims, props.imgWidth, props.imgHeight));
-  }, [img, props.imageUrl, props.imgWidth, props.imgHeight, props.autoFit, dims, setView]);
+  }, [img, props.imageUrl, props.imgWidth, props.imgHeight, dims, setView]);
 
   // Expose stage ref
   const { onStageRef } = props;
@@ -503,8 +487,6 @@ export function CanvasStage(props: CanvasStageProps) {
           <div className="max-w-sm rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-4 py-3 text-center text-[12px] text-tcip-fp">
             {overview.error ? (
               <>Could not prepare this image for display: {overview.error}</>
-            ) : baseHeaderParseError ? (
-              <>Could not load this image: {baseHeaderParseError}</>
             ) : (
               <>
                 Could not load this image: it may be missing, or its path is outside the location(s)

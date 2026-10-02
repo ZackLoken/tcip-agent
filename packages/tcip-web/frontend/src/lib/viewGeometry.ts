@@ -1,7 +1,6 @@
 /**
  * Shared view math for the canvas: fit the view to a pixel rect and clamp pan offsets.
- * One implementation for every consumer (CanvasStage's interactive writes, Review's
- * zoom-to-detection, coverage cell navigation), so the clamping semantics cannot drift.
+ * One implementation for every consumer, so the clamping semantics cannot drift.
  */
 
 import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
@@ -12,7 +11,7 @@ export interface HostSize {
   h: number;
 }
 
-/** A half-open image-pixel rect, the same convention the coverage grid's cells use. */
+/** A half-open image-pixel rect, the same convention the serving grid's cells use. */
 export interface PixelRect {
   x0: number;
   y0: number;

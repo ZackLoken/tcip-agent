@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { HelpOverlay } from "@/components/HelpOverlay";
+import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
 
 afterEach(cleanup);
 
@@ -35,34 +36,15 @@ describe("HelpOverlay", () => {
     expect(screen.getByText(/keyboard & mouse reference/i)).toBeInTheDocument();
   });
 
-  it("documents Review verdicts as writing ground truth (matches ReviewTab semantics)", () => {
-    render(<HelpOverlay activeTab="review" />);
-    fireEvent.keyDown(document.body, { key: "?" });
-
-    // Verdicts author GT: accepting an FP adds the prediction, rejecting a TP/FN
-    // deletes the object, never merely a non-destructive read of it.
-    expect(screen.getByText(/adds the prediction to GT/)).toBeInTheDocument();
-    expect(screen.getByText(/deletes the ground-truth object/)).toBeInTheDocument();
-    expect(screen.getByText(/Save the edited shape to ground truth/)).toBeInTheDocument();
-    expect(screen.queryByText(/does not change GT/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Edit in Annotate tab/)).not.toBeInTheDocument();
-  });
-
-  it("lists the Annotate shortcuts actually registered in AnnotateTab", () => {
+  it("lists every Annotate binding from the one declaration the tab binds", () => {
     render(<HelpOverlay activeTab="annotate" />);
     fireEvent.keyDown(document.body, { key: "?" });
 
-    for (const key of ["Ctrl+Y", "v", "s", "x", "0–9", "Double-click", "Right-click"]) {
+    for (const binding of Object.values(ANNOTATE_KEYS)) {
+      expect(screen.getByText(binding.desc)).toBeInTheDocument();
+    }
+    for (const key of ["0–9", "Double-click", "Right-click"]) {
       expect(screen.getByText(key)).toBeInTheDocument();
     }
-  });
-
-  it("names the cut tool's disarm and re-arm in the Annotate section's own Esc row", () => {
-    render(<HelpOverlay activeTab="annotate" />);
-    fireEvent.keyDown(document.body, { key: "?" });
-
-    expect(
-      screen.getByText(/Clear a pending cut click and disarm the cut tool/),
-    ).toBeInTheDocument();
   });
 });

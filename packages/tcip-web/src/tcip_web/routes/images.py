@@ -29,11 +29,29 @@ from pydantic import BaseModel
 from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE, DISPLAY_MAX_PIXELS
 from tcip_web import jobstore
 from tcip_web.paths import allowed_path
-from tcip_web.routes._coverage_models import StatsSource
 
 router = APIRouter(prefix="/api/images", tags=["images"])
 
-RENDER_CACHE_VERSION = 2
+
+class ServingCell(BaseModel):
+    """One region-serving cell: its name and its half-open native-pixel rect."""
+
+    name: str
+    x0: int
+    y0: int
+    x1: int
+    y1: int
+
+
+class ServingGrid(BaseModel):
+    """The region-serving grid over one raster: square cells of ``tile_size`` native pixels, each
+    one display-bounded serve at native resolution, clipped to the raster's extent."""
+
+    tile_size: int
+    cells: list[ServingCell]
+
+
+RENDER_CACHE_VERSION = 3
 """Bumped whenever the render cache key's inputs or the served headers' shape changes, so a
 warm entry written under the old shape is served by neither the disk cache nor conditional
 revalidation. Read by ``tools/generate_frontend_types.py`` and carried on every image URL the
@@ -150,12 +168,6 @@ class _RasterStats:
         """Whether these bounds describe part of the raster's pixels rather than all of them."""
         return self.pixel_fraction is not None and self.pixel_fraction < 1.0
 
-    def stats_source(self) -> StatsSource:
-        """The structured ``StatsSource`` a response reports these bounds under."""
-        if self.overview_scale is not None:
-            return StatsSource(read="overview", overview_scale=self.overview_scale)
-        return StatsSource(read="window_sample", seed=self.seed, pixel_fraction=self.pixel_fraction)
-
 
 _stats_cache: "OrderedDict[tuple, _RasterStats]" = OrderedDict()
 _stats_lock = threading.Lock()
@@ -222,6 +234,36 @@ def _checked(path: str) -> Path:
     if not src.is_file():
         raise HTTPException(404, f"not a file: {path}")
     return src
+
+
+def _resolved_source(src: Path):
+    """The logical image ``src`` names (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`):
+    a band group missing a member answers 409, and an ambiguous stem 400."""
+    from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, resolve_image_path
+
+    try:
+        return resolve_image_path(src)
+    except BandGroupIncomplete as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except AmbiguousImageStem as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/serving_grid")
+def get_serving_grid(path: str = Query(..., description="Absolute path to the image file")
+                     ) -> ServingGrid:
+    """The region-serving grid over the raster at ``path``: cells sized to one display-bounded
+    serve (:func:`~tcip_mcp.pipelines.reference_grid.derive_serving_tile_size`), measured off the
+    raster's header, never a decode."""
+    from tcip_mcp.pipelines.image_utils import image_dimensions
+    from tcip_mcp.pipelines.reference_grid import derive_serving_tile_size, reference_cells
+
+    width, height = image_dimensions(_resolved_source(_checked(path)))
+    edge = derive_serving_tile_size(width, height)
+    return ServingGrid(tile_size=edge, cells=[
+        ServingCell(name=c.name, x0=c.x0, y0=c.y0, x1=c.x1, y1=c.y1)
+        for c in reference_cells(width, height, edge, 0.0, clamp=True)])
 
 
 def _parse_band_tokens(raw: str) -> list[str]:
@@ -382,15 +424,6 @@ def _raster_stats(source, num_channels: int, key: tuple) -> _RasterStats:
     return stats
 
 
-def _finite_display_bounds(applied: "list[tuple[float, float]]"
-                           ) -> "list[tuple[float | None, float | None]]":
-    """``applied`` with every non-finite low/high (a NaN or an infinity, from a raster whose
-    sampled or served pixels held one) mapped to ``None``, so the header this feeds never carries
-    a JSON token a strict parser refuses."""
-    return [(lo if math.isfinite(lo) else None, hi if math.isfinite(hi) else None)
-            for lo, hi in applied]
-
-
 def _sampled_bounds(stats: _RasterStats, idxs: "list[int]", stretch: str
                     ) -> "list[tuple[float, float]]":
     """The ``(low, high)`` pair per selected band a region render stretches between, in the same
@@ -400,18 +433,6 @@ def _sampled_bounds(stats: _RasterStats, idxs: "list[int]", stretch: str
     if stretch == "percent_clip":
         return [stats.clip_bounds[i] for i in idxs]
     return [(stats.ranges[i].minimum, stats.ranges[i].maximum) for i in idxs]
-
-
-def _served_array_bounds(pixels, idxs: "list[int]", stretch: str) -> "list[tuple[float, float]]":
-    """The same pairs read from the served pixels themselves, through the primitives
-    ``stretch_band`` derives them with when no bounds are passed, so stating them explicitly is
-    the same render and the response can report what was applied."""
-    from tcip_mcp.pipelines.band_stats import band_ranges, clip_bounds
-
-    if stretch == "percent_clip":
-        return [clip_bounds(pixels[:, :, i]) for i in idxs]
-    ranges = band_ranges(pixels)
-    return [(ranges[i].minimum, ranges[i].maximum) for i in idxs]
 
 
 def _fit_output(rect_w: int, rect_h: int, max_width: int, whole_view: bool) -> tuple[int, int]:
@@ -448,8 +469,7 @@ def _plain_rgb(pixels, dtype, bounds: "tuple[float, float] | None"):
     A non-``uint8`` raster is scaled by ``band_stats.full_scale_denominator`` (the ``none``
     stretch), one denominator for the whole array. ``bounds`` carries the sampled ``(minimum,
     maximum)`` a float raster's denominator comes from when the pixels in hand are one region of
-    it. Returns the rendered pixels and the divisor the render divided by; ``None`` for a ``uint8``
-    raster.
+    it. Returns the rendered pixels.
     """
     import numpy as np
 
@@ -461,11 +481,11 @@ def _plain_rgb(pixels, dtype, bounds: "tuple[float, float] | None"):
     elif arr.shape[-1] == 4:
         arr = arr[:, :, :3]
     if arr.dtype == np.uint8:
-        return np.ascontiguousarray(arr), None
+        return np.ascontiguousarray(arr)
     divisor = full_scale_denominator(
         arr, dtype, sampled_maximum=None if bounds is None else bounds[1],
         sampled_minimum=None if bounds is None else bounds[0])
-    return stretch_band(arr, "none", dtype, (0.0, divisor)), divisor
+    return stretch_band(arr, "none", dtype, (0.0, divisor))
 
 
 @router.get("")
@@ -500,8 +520,7 @@ def serve_image(
     ``.bandgroup``-grouped capture, or any other band count composites three bands through the
     shared display stretch instead. Whole-view stretch bounds come from the served pixels
     themselves; a region's come from the raster's seeded per-band sample, so two regions of one
-    raster render alike. Both are reported back in ``X-TCIP-Stats-Source`` and, where bounds were
-    applied, ``X-TCIP-Display-Bounds``; a non-finite bound reports as ``null``.
+    raster render alike. The size served is reported in ``X-TCIP-Served-Size``.
 
     A scaled read of a raster larger than the display area bound needs the reduced-resolution
     overviews GDAL serves it from; without them the request is refused, naming ``POST
@@ -518,22 +537,14 @@ def serve_image(
         STRETCH_MODES,
         band_ranges,
         composite_display_rgb,
-        full_scale_denominator,
     )
-    from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, BandGroupRef
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.derivations import probe_channels
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, resolve_image_source
 
     src = _checked(path)
     if stretch not in STRETCH_MODES:
         raise HTTPException(400, f"stretch must be one of {sorted(STRETCH_MODES)}, got {stretch!r}")
-
-    try:
-        source = resolve_image_source(src.parent, src.stem)
-    except BandGroupIncomplete as exc:
-        raise HTTPException(409, str(exc)) from exc
-    except AmbiguousImageStem as exc:
-        raise HTTPException(400, str(exc)) from exc
+    source = _resolved_source(src)
 
     corners = (x0, y0, x1, y1)
     if any(c is None for c in corners) and any(c is not None for c in corners):
@@ -632,34 +643,18 @@ def serve_image(
 
         if composite and stretch == "none" and integer:
             rgb = composite_display_rgb(pixels, idxs, stretch, None)
-            stats_source, applied = StatsSource(read="dtype_full_scale"), []
         elif composite:
-            applied = (_served_array_bounds(pixels, idxs, stretch) if sampled is None
-                       else _sampled_bounds(sampled, idxs, stretch))
-            rgb = composite_display_rgb(pixels, idxs, stretch, applied)
-            if stretch == "none":
-                # The divisor each band actually rendered against, not its sampled (min, max).
-                applied = [
-                    (0.0, full_scale_denominator(pixels, dtype, sampled_maximum=hi,
-                                                 sampled_minimum=lo))
-                    for lo, hi in applied
-                ]
-            stats_source = (
-                StatsSource(read="served_array") if sampled is None else sampled.stats_source())
+            rgb = composite_display_rgb(pixels, idxs, stretch, (
+                None if sampled is None else _sampled_bounds(sampled, idxs, stretch)))
         elif integer:
-            rgb, _divisor = _plain_rgb(pixels, dtype, None)
-            stats_source = StatsSource(read="none" if dtype == np.uint8 else "dtype_full_scale")
-            applied = []
+            rgb = _plain_rgb(pixels, dtype, None)
         else:
             # Only the bands a plain serve displays: a fourth band is dropped before the viewer
             # sees it, so its level must not set the scale the other three are divided by.
             ranges = band_ranges(pixels) if sampled is None else sampled.ranges
             band_bounds = (
                 min(ranges[i].minimum for i in idxs), max(ranges[i].maximum for i in idxs))
-            rgb, divisor = _plain_rgb(pixels, dtype, band_bounds)
-            applied = [(0.0, divisor)]
-            stats_source = (
-                StatsSource(read="served_array") if sampled is None else sampled.stats_source())
+            rgb = _plain_rgb(pixels, dtype, band_bounds)
 
         buf = io.BytesIO()
         Image.fromarray(np.ascontiguousarray(rgb), mode="RGB").save(buf, "JPEG", quality=quality)
@@ -673,13 +668,7 @@ def serve_image(
     except Exception as exc:
         raise HTTPException(500, f"could not process image: {exc}") from exc
 
-    extra = {
-        "X-TCIP-Stats-Source": json.dumps(stats_source.model_dump(), allow_nan=False),
-        "X-TCIP-Served-Size": f"{out_w}x{out_h}",
-    }
-    if applied:
-        extra["X-TCIP-Display-Bounds"] = json.dumps(
-            _finite_display_bounds(applied), allow_nan=False)
+    extra = {"X-TCIP-Served-Size": f"{out_w}x{out_h}"}
 
     try:
         tmp = cache_dir / f"{key}.{threading.get_ident()}.tmp"
@@ -716,18 +705,10 @@ def get_bands(path: str = Query(...)) -> dict:
     A band carries ``interpretation`` (``red``, ``alpha``, and the rest) where the backend reads it
     from the file; the key is absent where nothing knows.
     """
-    from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, BandGroupRef
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.derivations import probe_channels
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, resolve_image_source
 
-    src = _checked(path)
-    try:
-        source = resolve_image_source(src.parent, src.stem)
-    except BandGroupIncomplete as exc:
-        raise HTTPException(409, str(exc)) from exc
-    except AmbiguousImageStem as exc:
-        raise HTTPException(400, str(exc)) from exc
-
+    source = _resolved_source(_checked(path))
     n = probe_channels(source)
     if n <= 3 and not isinstance(source, BandGroupRef):
         return {"band_count": n, "bands": []}

@@ -1,30 +1,153 @@
-"""Geometry helpers and the GT-vs-prediction matching engine, over
-:class:`~tcip_annotation.state.Annotation` lists (a prediction is an annotation whose ``score`` is
-set)."""
+"""The platform's one matcher of detections to ground truth, and geometry helpers over
+:class:`~tcip_annotation.state.Annotation` geometries: box IoU as a matrix and polygon
+containment."""
 
 from __future__ import annotations
 
-import logging
-from collections import defaultdict
-from dataclasses import replace
+from collections.abc import Callable
+from dataclasses import dataclass
 
 import numpy as np
-from shapely.errors import ShapelyError
 from shapely.geometry import MultiPolygon as ShapelyMultiPolygon
-from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry import Point as ShapelyPoint
+from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.validation import make_valid
 
 from tcip_annotation.state import (
-    Annotation, BBox, Polygon, instances, is_detection, polygonal, prediction_score,
+    Annotation, BBox, Polygon, bbox_of, box_derivable, is_detection, prediction_score,
 )
 
 REVIEW_CONF_FLOOR = 0.25
-"""The confidence below which a prediction is neither matched nor drawn when a review, a
-visualization or a scoring call states none: a viewing filter a person moves, never an execution
-record's operating point."""
+"""The confidence below which a prediction is neither matched nor drawn when a visualization or a
+scoring call states none: a viewing filter a person moves, never an execution record's operating
+point."""
 
-logger = logging.getLogger(__name__)
+
+def _centers_xywh(anns: list[dict]) -> list[tuple[float, float]]:
+    return [(a["bbox"][0] + a["bbox"][2] / 2.0, a["bbox"][1] + a["bbox"][3] / 2.0) for a in anns]
+
+
+def _match_cost(criterion: dict) -> tuple[Callable[[list[float], list[float]], float], float]:
+    """How far one xywh box is from another under ``criterion``, and the farthest a match may be:
+    the distance between centers within ``tolerance`` for a center match, one minus the IoU within
+    one minus ``iou_threshold`` for an IoU match."""
+    if criterion["kind"] == "center_match":
+        def center_distance(g: list[float], d: list[float]) -> float:
+            return (((g[0] + g[2] / 2) - (d[0] + d[2] / 2)) ** 2
+                    + ((g[1] + g[3] / 2) - (d[1] + d[3] / 2)) ** 2) ** 0.5
+
+        return center_distance, float(criterion["tolerance"])
+
+    def iou_distance(g: list[float], d: list[float]) -> float:
+        iw = max(0.0, min(g[0] + g[2], d[0] + d[2]) - max(g[0], d[0]))
+        ih = max(0.0, min(g[1] + g[3], d[1] + d[3]) - max(g[1], d[1]))
+        union = g[2] * g[3] + d[2] * d[3] - iw * ih
+        return 1.0 - (iw * ih / union if union > 0 else 0.0)
+
+    return iou_distance, 1.0 - float(criterion["iou_threshold"])
+
+
+def match_pairs(gt_boxes: list[list[float]], dt_boxes: list[list[float]], criterion: dict, *,
+                policy: str) -> list[tuple[int, int]]:
+    """A greedy 1:1 matcher of xywh boxes under ``criterion`` (a center match's ``tolerance`` or
+    an IoU match's ``iou_threshold``), the limit inclusive, under one of two stated policies.
+    Returns ``(gt_index, dt_index)`` pairs.
+
+    ``policy="score_first"`` walks ``dt_boxes`` in the order given, each claiming its nearest
+    unused ground truth; among equally near unused ground truths the last index wins.
+
+    ``policy="distance_first"`` sorts every (gt, dt) pair within the limit by distance ascending
+    and claims the closest first, ties broken by ``(gt index, dt index)`` ascending.
+    """
+    cost, limit = _match_cost(criterion)
+    pairs: list[tuple[int, int]] = []
+    if policy == "score_first":
+        used = [False] * len(gt_boxes)
+        for di, d in enumerate(dt_boxes):
+            best_gi, best = -1, limit
+            for gi, g in enumerate(gt_boxes):
+                if not used[gi] and cost(g, d) <= best:
+                    best, best_gi = cost(g, d), gi
+            if best_gi >= 0:
+                used[best_gi] = True
+                pairs.append((best_gi, di))
+        return pairs
+    if policy != "distance_first":
+        raise ValueError(f"match_pairs: unknown policy {policy!r}, expected 'score_first' or "
+                         "'distance_first'")
+    candidates = sorted((cost(g, d), gi, di) for gi, g in enumerate(gt_boxes)
+                        for di, d in enumerate(dt_boxes) if cost(g, d) <= limit)
+    matched_gt: set[int] = set()
+    matched_dt: set[int] = set()
+    for _, gi, di in candidates:
+        if gi not in matched_gt and di not in matched_dt:
+            matched_gt.add(gi)
+            matched_dt.add(di)
+            pairs.append((gi, di))
+    return pairs
+
+
+@dataclass(frozen=True)
+class Matching:
+    """One image's detections matched to its ground truth, by index into the lists matched:
+    ``pairs`` as ``(gt index, detection index)``, ``unpaired`` the detections that pair nothing
+    and no crowd region ignores (the false positives), ``ignored`` those a crowd region ignores,
+    and ``missed`` the ground-truth objects nothing pairs (the false negatives)."""
+
+    pairs: list[tuple[int, int]]
+    unpaired: list[int]
+    ignored: set[int]
+    missed: list[int]
+
+
+def pair_detections(gt: list[dict], dt: list[dict], criterion: dict) -> Matching:
+    """The platform's one matcher of detections to ground truth on one image: ``dt``
+    (``{"bbox": xywh}`` records, pre-sorted by score descending) paired score-first to ``gt``'s
+    objects (``{"bbox": xywh, "iscrowd"}``) under ``criterion``. An unpaired detection whose
+    center lies inside a crowd region's box is ignored (COCO's crowd rule), and a crowd region is
+    no object to miss.
+    """
+    objects = [i for i, a in enumerate(gt) if not a["iscrowd"]]
+    crowds = [a["bbox"] for a in gt if a["iscrowd"]]
+    pairs = [(objects[gi], di) for gi, di in match_pairs(
+        [gt[i]["bbox"] for i in objects], [d["bbox"] for d in dt], criterion,
+        policy="score_first")]
+    paired_dt, paired_gt = {di for _, di in pairs}, {gi for gi, _ in pairs}
+    ignored = {di for di, (cx, cy) in enumerate(_centers_xywh(dt)) if di not in paired_dt and any(
+        x <= cx <= x + w and y <= cy <= y + h for x, y, w, h in crowds)}
+    return Matching(pairs=pairs,
+                    unpaired=[di for di in range(len(dt)) if di not in paired_dt | ignored],
+                    ignored=ignored, missed=[gi for gi in objects if gi not in paired_gt])
+
+
+def pair_proposals(annotations: list[Annotation], proposals: list[Annotation], criterion: dict,
+                   *, conf_threshold: float | None = None) -> Matching:
+    """:func:`pair_detections` run per subject over ``annotations`` and the ``proposals`` that are
+    detections (:func:`~tcip_annotation.state.is_detection`) scoring at least ``conf_threshold``
+    (every one for ``None``), highest score first, its indices into the two lists given."""
+    from tcip_annotation.json_io import xywh
+
+    def record(a: Annotation) -> dict:
+        b = bbox_of(a.geometry)  # type: ignore[arg-type]
+        return {"bbox": xywh(b.x1, b.y1, b.x2, b.y2), "iscrowd": a.iscrowd}
+
+    out = Matching(pairs=[], unpaired=[], ignored=set(), missed=[])
+    for subject in sorted({a.subject for a in (*annotations, *proposals)}):
+        gt = [i for i, a in enumerate(annotations)
+              if a.subject == subject and box_derivable(a.geometry)]
+        dt = sorted((i for i, p in enumerate(proposals) if p.subject == subject and is_detection(p)
+                     and (conf_threshold is None or prediction_score(p) >= conf_threshold)),
+                    key=lambda i: -prediction_score(proposals[i]))
+        m = pair_detections([record(annotations[i]) for i in gt],
+                            [record(proposals[i]) for i in dt], criterion)
+        out.pairs.extend((gt[gi], dt[di]) for gi, di in m.pairs)
+        out.unpaired.extend(dt[di] for di in m.unpaired)
+        out.ignored.update(dt[di] for di in m.ignored)
+        out.missed.extend(gt[gi] for gi in m.missed)
+    out.pairs.sort(key=lambda pair: pair[1])
+    out.unpaired.sort()
+    out.missed.sort()
+    return out
 
 
 def iou_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -42,55 +165,6 @@ def iou_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return iou
 
 
-def box_iou(b1: BBox, b2: BBox) -> float:
-    """The IoU of two axis-aligned bounding boxes (:func:`iou_matrix`)."""
-    return float(iou_matrix(np.array([b1.x1, b1.y1, b1.x2, b1.y2]),
-                            np.array([b2.x1, b2.y1, b2.x2, b2.y2]))[0, 0])
-
-
-def polygon_iou(geom1: ShapelyPolygon, area1: float, geom2: ShapelyPolygon, area2: float) -> float:
-    """Compute IoU between two pre-built Shapely geometries."""
-    try:
-        inter = geom1.intersection(geom2).area
-        union = area1 + area2 - inter
-        return inter / union if union > 0 else 0.0
-    except (ShapelyError, ValueError, ZeroDivisionError) as exc:
-        # Degenerate/invalid geometry: log and treat as no overlap (don't mask other bugs).
-        logger.debug("polygon_iou failed (%s); returning 0.0", exc)
-        return 0.0
-
-
-# Row-block budget for the vectorized IoU matrix: chunk the GT axis so the transient
-# (rows x preds) float64 arrays stay bounded on very large classes, while still emitting
-# pairs in row-major (gt asc, pred asc) order.
-_IOU_MATRIX_BUDGET = 25_000_000
-
-
-def _append_box_iou_pairs(gt_arr, pred_arr, gis, pis, iou_threshold, pairs) -> None:
-    """Append ``(iou, gt_idx, pred_idx)`` for every box pair at or above ``iou_threshold``
-    (:func:`iou_matrix`), in row-major order, the ground-truth axis chunked."""
-    m = gt_arr.shape[0]
-    k = pred_arr.shape[0]
-    if m == 0 or k == 0:
-        return
-    chunk = max(1, _IOU_MATRIX_BUDGET // k)
-    for r0 in range(0, m, chunk):
-        iou = iou_matrix(gt_arr[r0 : r0 + chunk], pred_arr)
-        rows, cols = np.nonzero(iou >= iou_threshold)
-        for rr, cc in zip(rows.tolist(), cols.tolist()):
-            pairs.append((float(iou[rr, cc]), gis[r0 + rr], pis[cc]))
-
-
-def _is_box(a: Annotation) -> bool:
-    return isinstance(a.geometry, BBox)
-
-
-def _as_box(a: Annotation) -> BBox:
-    """``a``'s geometry as a :class:`BBox`, for a caller that has already checked ``_is_box(a)``."""
-    assert isinstance(a.geometry, BBox), "caller must verify _is_box(a) before calling _as_box"
-    return a.geometry
-
-
 def _rings_to_shapely(rings: list[list[tuple[float, float]]]):
     """One or more simple closed rings -> a Shapely Polygon (one ring) or MultiPolygon (several);
     every ring contributes, never just the first/largest."""
@@ -104,225 +178,6 @@ def box_ring(bbox: BBox) -> list[tuple[float, float]]:
     x1,y2).
     """
     return [(bbox.x1, bbox.y1), (bbox.x2, bbox.y1), (bbox.x2, bbox.y2), (bbox.x1, bbox.y2)]
-
-
-def _to_shapely(a: Annotation):
-    """Convert an annotation's geometry to a Shapely polygon (or multipolygon) + area."""
-    if isinstance(a.geometry, BBox):
-        g = ShapelyPolygon(box_ring(a.geometry))
-    elif polygonal(a.geometry):
-        g = _rings_to_shapely(a.geometry.rings)
-    else:  # a point or no geometry covers nothing
-        g = ShapelyPolygon([])
-    if not g.is_valid:
-        g = make_valid(g)
-    return g, g.area
-
-
-def compute_matches(
-    gt: list[Annotation],
-    preds: list[Annotation],
-    iou_threshold: float = 0.5,
-    conf_threshold: float = REVIEW_CONF_FLOOR,
-) -> dict:
-    """Match predictions to GT; classify as TP / FP / FN.
-
-    ``gt`` / ``preds`` are :class:`Annotation` lists, each prediction stating its ``score``
-    (:func:`~tcip_annotation.state.prediction_score`, which refuses one that does not). Matching is
-    per class name (``subject``) using greedy IoU. Geometry-less annotations (image-level labels)
-    carry no spatial extent and are ignored here, as is a :class:`~tcip_annotation.state.Point`,
-    which has no area and so no IoU with anything: it can be neither matched, nor a FP, nor a FN
-    without fabricating a spatial claim it does not make.
-
-    A crowd region is never one object (COCO's own semantics): a predicted crowd region is no
-    detection at all; a ground-truth crowd region is matched by no prediction and is no false
-    negative, and a prediction left unmatched by every object whose area a same-class crowd region
-    covers by ``iou_threshold`` or more is ignored, neither a true nor a false positive.
-
-    Returns a dict with keys ``'tp'`` / ``'fp'`` / ``'fn'``:
-      - ``tp``: ``{gt_idx, pred_idx, iou, class_name, conf}``
-      - ``fp``: ``{pred_idx, class_name, conf}``
-      - ``fn``: ``{gt_idx, class_name}``
-
-    ``gt_idx`` / ``pred_idx`` index into ``gt`` / ``preds`` directly.
-    """
-    gt_items: list[tuple[int, str, Annotation]] = [
-        (i, a.subject, a) for i, a in enumerate(gt) if is_detection(a)]
-    crowds: dict[str, list[Annotation]] = defaultdict(list)
-    for a in instances(gt, crowd=True):
-        crowds[a.subject].append(a)
-    pred_items: list[tuple[int, str, float, Annotation]] = [
-        (i, a.subject, prediction_score(a), a) for i, a in enumerate(preds)
-        if is_detection(a) and prediction_score(a) >= conf_threshold]
-
-    def _in_crowd(a: Annotation) -> bool:
-        geom, area = _to_shapely(a)
-        return area > 0 and any(
-            _to_shapely(c)[0].intersection(geom).area / area >= iou_threshold
-            for c in crowds[a.subject])
-
-    gt_by_class: dict[str, list[int]] = defaultdict(list)
-    for li, item in enumerate(gt_items):
-        gt_by_class[item[1]].append(li)
-    pred_by_class: dict[str, list[int]] = defaultdict(list)
-    for li, pred_item in enumerate(pred_items):
-        pred_by_class[pred_item[1]].append(li)
-
-    gt_geom_cache: dict[int, tuple] = {}
-    pred_geom_cache: dict[int, tuple] = {}
-
-    def _gt_geom(li: int):
-        if li not in gt_geom_cache:
-            gt_geom_cache[li] = _to_shapely(gt_items[li][2])
-        return gt_geom_cache[li]
-
-    def _pred_geom(li: int):
-        if li not in pred_geom_cache:
-            pred_geom_cache[li] = _to_shapely(pred_items[li][3])
-        return pred_geom_cache[li]
-
-    # Compute all same-class IoU pairs. Pure-box classes (the common detection case) use the IoU
-    # matrix; any class involving a polygon takes the per-pair loop.
-    pairs: list[tuple[float, int, int]] = []
-    for cname in gt_by_class:
-        if cname not in pred_by_class:
-            continue
-        gis = gt_by_class[cname]
-        pis = pred_by_class[cname]
-        if all(_is_box(gt_items[li][2]) for li in gis) and all(
-            _is_box(pred_items[li][3]) for li in pis
-        ):
-            gt_arr = np.array(
-                [(b.x1, b.y1, b.x2, b.y2)
-                 for b in (_as_box(gt_items[li][2]) for li in gis)],
-                dtype=np.float64,
-            )
-            pred_arr = np.array(
-                [(b.x1, b.y1, b.x2, b.y2)
-                 for b in (_as_box(pred_items[li][3]) for li in pis)],
-                dtype=np.float64,
-            )
-            _append_box_iou_pairs(gt_arr, pred_arr, gis, pis, iou_threshold, pairs)
-            continue
-        for gi in gis:
-            for pi in pis:
-                gt_ann = gt_items[gi][2]
-                pred_ann = pred_items[pi][3]
-                if _is_box(gt_ann) and _is_box(pred_ann):
-                    iou = box_iou(_as_box(gt_ann), _as_box(pred_ann))
-                else:
-                    g1, a1 = _gt_geom(gi)
-                    g2, a2 = _pred_geom(pi)
-                    iou = polygon_iou(g1, a1, g2, a2)
-                if iou >= iou_threshold:
-                    pairs.append((iou, gi, pi))
-
-    # Greedy matching (descending IoU)
-    pairs.sort(key=lambda x: x[0], reverse=True)
-    matched_gt: set[int] = set()
-    matched_pred: set[int] = set()
-    tp_list: list[dict] = []
-
-    for iou, gi, pi in pairs:
-        if gi in matched_gt or pi in matched_pred:
-            continue
-        matched_gt.add(gi)
-        matched_pred.add(pi)
-        gt_idx, gt_cname, _ = gt_items[gi]
-        p_idx, _, p_conf, _ = pred_items[pi]
-        tp_list.append({
-            "gt_idx": gt_idx,
-            "pred_idx": p_idx,
-            "iou": round(iou, 4),
-            "class_name": gt_cname,
-            "conf": round(p_conf, 4),
-        })
-
-    # Unmatched predictions → FP
-    fp_list: list[dict] = []
-    for li, (p_idx, p_cname, p_conf, p_ann) in enumerate(pred_items):
-        if li not in matched_pred and not _in_crowd(p_ann):
-            fp_list.append({"pred_idx": p_idx, "class_name": p_cname, "conf": round(p_conf, 4)})
-
-    # Unmatched GT → FN
-    fn_list: list[dict] = []
-    for li, (gt_idx, gt_cname, _) in enumerate(gt_items):
-        if li not in matched_gt:
-            fn_list.append({"gt_idx": gt_idx, "class_name": gt_cname})
-
-    return {"tp": tp_list, "fp": fp_list, "fn": fn_list}
-
-
-def _project_for_classification(
-    annotations: list[Annotation], *, subject: str, attribute: str,
-) -> list[Annotation]:
-    """A same-length, same-order view of ``annotations`` whose class identity is the confirmed
-    ``attribute`` value rather than the object type. A record outside ``subject``'s scope, or
-    carrying no value under ``attribute``
-    (:func:`~tcip_annotation.json_io.classified_value_of` ``None``), becomes a geometry-less
-    placeholder that can neither match nor be scored.
-    """
-    from tcip_annotation.json_io import classified_value_of
-
-    projected: list[Annotation] = []
-    for a in annotations:
-        value = classified_value_of(a, subject=subject, attribute=attribute)
-        projected.append(replace(a, geometry=None) if value is None else replace(a, subject=value))
-    return projected
-
-
-def compute_classified_trait_matches(
-    gt: list[Annotation],
-    preds: list[Annotation],
-    *,
-    subject: str,
-    attribute: str,
-    vocabulary,
-    iou_threshold: float = 0.5,
-    conf_threshold: float = REVIEW_CONF_FLOOR,
-) -> dict:
-    """Match predictions to GT for a classified trait: an object already isolated by ``subject``
-    whose confirmed/predicted value along ``attribute`` is under review.
-
-    A classified prediction carries the object class in ``subject`` and the classifier's decoded
-    call under ``attributes[attribute]``. Every prediction is held first through
-    :func:`~tcip_annotation.json_io.require_classified_record` under ``vocabulary`` (the bucket's
-    own recorded ``id_map`` keys): a record whose ``subject`` is not the object class, which
-    carries no value, or whose value is outside ``vocabulary``, refuses. Ground truth projects
-    leniently (:func:`_project_for_classification`).
-
-    Both sides projected to the value vocabulary are matched once through :func:`compute_matches`:
-    a ``tp`` is a correctly classified instance, an ``fp`` a value predicted where the confirmed
-    value differs (or nothing was confirmed there yet), and an ``fn`` a confirmed value the model
-    didn't predict there. The unmatched remainders are then matched a second time, by geometry
-    alone: a correct object the first pass split into one ``fp``/``fn`` pair reunites here, and the
-    paired ``fp`` gains the partner's ``gt_idx`` while the paired ``fn`` gains the partner's
-    ``pred_idx``.
-    """
-    from tcip_annotation.json_io import require_classified_record
-
-    projected_gt = _project_for_classification(gt, subject=subject, attribute=attribute)
-    projected_preds = [
-        replace(p, subject=require_classified_record(
-            p, subject=subject, attribute=attribute, vocabulary=vocabulary,
-            source=f"prediction {i}"))
-        for i, p in enumerate(preds)]
-    matches = compute_matches(projected_gt, projected_preds, iou_threshold, conf_threshold)
-
-    fn_by_gt_idx = {fn["gt_idx"]: fn for fn in matches["fn"]}
-    fp_by_pred_idx = {fp["pred_idx"]: fp for fp in matches["fp"]}
-    unmatched_gt_indices = sorted(fn_by_gt_idx)
-    unmatched_pred_indices = sorted(fp_by_pred_idx)
-    remainder = compute_matches(
-        [gt[i] for i in unmatched_gt_indices], [preds[i] for i in unmatched_pred_indices],
-        iou_threshold, conf_threshold,
-    )
-    for pair in remainder["tp"]:
-        gt_idx = unmatched_gt_indices[pair["gt_idx"]]
-        pred_idx = unmatched_pred_indices[pair["pred_idx"]]
-        fp_by_pred_idx[pred_idx]["gt_idx"] = gt_idx
-        fn_by_gt_idx[gt_idx]["pred_idx"] = pred_idx
-    return matches
 
 
 def point_in_polygon(x: float, y: float, polygon: Polygon) -> bool:

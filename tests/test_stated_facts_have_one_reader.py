@@ -1,6 +1,6 @@
 """A prediction's score, a ground-truth record's content, the target a loader builds from
 annotations, a box's stored grid, a stamp write's audit line, a split lock's recorded fields, a
-completeness digest's stored grid and a prediction bucket's dataset root: a record that does not
+completion digest's stored grid and a prediction bucket's dataset root: a record that does not
 state one of these is refused by name where it is read.
 """
 
@@ -40,9 +40,9 @@ def test_a_scored_prediction_document_reads_whole(tmp_path: Path):
     assert [a.score for a in json_io.read_predictions(path)] == [0.8]
 
 
-@pytest.mark.parametrize("reader", ["match", "evaluation_record"])
+@pytest.mark.parametrize("reader", ["pairing", "evaluation_record"])
 def test_no_reader_stands_in_a_score_for_a_prediction_stating_none(tmp_path: Path, reader: str):
-    from tcip_annotation.matching import compute_matches
+    from tcip_annotation.matching import pair_proposals
 
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
 
@@ -50,23 +50,10 @@ def test_no_reader_stands_in_a_score_for_a_prediction_stating_none(tmp_path: Pat
     preds = _read_back(tmp_path / "p.json", [Annotation(subject=SUBJECT, geometry=BOX)])
 
     with pytest.raises(ValueError, match="'score'"):
-        if reader == "match":
-            compute_matches(gt, preds)
+        if reader == "pairing":
+            pair_proposals(gt, preds, {"kind": "iou", "iou_threshold": 0.5})
         else:
             records_from_annotation(gt, preds, width=IMG, height=IMG)
-
-
-def test_a_built_in_engines_candidate_carries_the_score_its_engine_reported():
-    from tcip_mcp.pipelines.proposal import neutral_candidate
-
-    raw = {"candidate_id": 0, "bbox": [1.0, 1.0, 2.0, 2.0], "area": 1,
-           "rings": [[(1, 1), (2, 1), (2, 2)]], "predicted_iou": 0.7}
-
-    assert neutral_candidate(raw, engine="sam", score_key="predicted_iou",
-                             meta_keys=())["score"] == 0.7
-    with pytest.raises(KeyError, match="predicted_iou"):
-        neutral_candidate({k: v for k, v in raw.items() if k != "predicted_iou"}, engine="sam",
-                          score_key="predicted_iou", meta_keys=())
 
 
 def test_the_instance_loader_builds_its_target_from_the_polygons_it_reads(tmp_path: Path):
@@ -92,17 +79,13 @@ def test_the_instance_loader_builds_its_target_from_the_polygons_it_reads(tmp_pa
     assert len(target["masks"]) == 1 and int(target["masks"][0].sum()) > 0
 
 
-def test_the_completeness_digest_reads_a_box_on_the_writers_own_grid(tmp_path: Path):
+def test_the_completion_digest_reads_a_box_on_the_writers_own_grid(tmp_path: Path):
     """The digest hashes each annotation as the label writer stores it, so a box off the stored
     grid digests the same before it is written as after it is read back."""
-    from tcip_mcp.pipelines.reference_grid import reference_cells
-    from tcip_mcp.pipelines.region_completeness import cell_annotation_digest
-
-    (cell,) = reference_cells(IMG, IMG, IMG, clamp=True)
     anns = [Annotation(subject=SUBJECT, geometry=BBox(0.005, 10.0, 10.004, 20.0))]
 
-    assert cell_annotation_digest(anns, SUBJECT, cell) == cell_annotation_digest(
-        _read_back(tmp_path / "c.json", anns), SUBJECT, cell)
+    assert json_io.subject_digest(anns, SUBJECT) == json_io.subject_digest(
+        _read_back(tmp_path / "c.json", anns), SUBJECT)
 
 
 def test_every_reader_of_a_buckets_dataset_root_answers_what_dataset_root_of_answers(

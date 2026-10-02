@@ -115,8 +115,7 @@ def _scan_dataset(root: str) -> dict:
     """Scan a directory tree for images and labels.
 
     Labels are the name-based per-image JSON (one file per image, all subjects) under
-    ``annotations/<date>/``, a review baseline directory's copies excluded. The census reads no
-    document.
+    ``annotations/<date>/``. The census reads no document.
 
     ``labels`` is a raw ``rglob``, so it counts a file whose name is reserved for a prediction
     bucket's own record; ``reserved_name_labels`` names each one. ``reserved_name_images`` names
@@ -131,7 +130,6 @@ def _scan_dataset(root: str) -> dict:
     when there is no canonical ``images/`` tree.
     """
     from tcip_annotation.json_io import is_bucket_record, is_reserved_stem
-    from tcip_annotation.review_engine import BASELINE_DIRNAME
     from tcip_mcp.buckets import bucket_dirs, read_bucket
     from tcip_mcp.dataset_layout import LABEL_SUFFIX, annotation_root, image_root
     from tcip_mcp.pipelines.image_utils import BandGroupRef, IMAGE_EXTS, list_logical_images
@@ -163,14 +161,10 @@ def _scan_dataset(root: str) -> dict:
                 if is_reserved_stem(f.stem):
                     reserved_name_images.append(str(f))
 
-    # Ground-truth labels: annotations/[<date>/]<stem>.json (one file per image, every subject),
-    # a review baseline copy under BASELINE_DIRNAME excluded: it is a snapshot, not a label.
+    # Ground-truth labels: annotations/[<date>/]<stem>.json (one file per image, every subject).
     ann_dir = annotation_root(root_path)
     if ann_dir.is_dir():
-        labels = [
-            str(f) for f in sorted(ann_dir.rglob(f"*{LABEL_SUFFIX}"))
-            if f.is_file() and BASELINE_DIRNAME not in f.parts
-        ]
+        labels = [str(f) for f in sorted(ann_dir.rglob(f"*{LABEL_SUFFIX}")) if f.is_file()]
         reserved_name_labels = [f for f in labels if is_bucket_record(Path(f).name)]
 
     preds = [str(f) for bucket in bucket_dirs(root_path) for f in read_bucket(bucket).document_paths]

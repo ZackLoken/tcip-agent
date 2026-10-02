@@ -178,8 +178,7 @@ def test_label_query_functions_have_one_home():
     _assert_one_home(
         {"registered_dataset_root", "resolve_registry_id_map",
          "json_det_targets", "ground_truth_shape", "admit", "samples_over",
-         "admitted_documents", "require_admitted", "_label_record_state", "_raw_status_store",
-         "confirmed_negative_names", "_exclude_contradicted", "confirmed_negative_records"},
+         "admitted_documents", "admitted_records", "require_admitted"},
         _module_path("pipelines/data/datasets.py"),
         _module_path("pipelines/data/label_queries.py"),
     )
@@ -204,11 +203,10 @@ def _assign_name_counts(path: Path) -> Counter:
 
 
 def test_dataset_fingerprint_functions_have_one_home():
-    """The fingerprint block (``dataset_fingerprint`` and its four term helpers) lives in
+    """The fingerprint block (``dataset_fingerprint`` and its three term helpers) lives in
     ``pipelines/data/dataset_fingerprint.py`` and nowhere else."""
     _assert_one_home(
-        {"dataset_fingerprint", "_labels_term", "_images_term", "_registry_term",
-         "_confirmations_term"},
+        {"dataset_fingerprint", "_labels_term", "_images_term", "_registry_term"},
         None,
         _module_path("pipelines/data/dataset_fingerprint.py"),
     )
@@ -257,27 +255,24 @@ def test_staging_address_class_has_one_home():
 
 
 def test_annotation_side_proposal_tools_have_one_home():
-    """``segment_prompt`` and ``stage_proposals`` moved out of ``annotation_tools.py`` into
-    ``tools/proposal_tools.py``, the same one-home reshape as the vision-side pair above."""
+    """``stage_proposals`` moved out of ``annotation_tools.py`` into ``tools/proposal_tools.py``,
+    the same one-home reshape as the vision-side pair above."""
     _assert_one_home(
-        {"segment_prompt", "stage_proposals"},
+        {"stage_proposals"},
         _module_path("tools/annotation_tools.py"),
         _module_path("tools/proposal_tools.py"),
     )
 
 
 def test_gui_driving_tools_have_one_home():
-    """``push_panel_event``, ``focus_human_attention`` and their private drivers
-    ``_focus_annotate``/``_focus_review`` moved out of ``annotation_tools.py`` into
-    ``tools/gui_tools.py``, with the helpers only they used (``_subject_task``,
-    ``_logical_image_names``). The private drivers keep their old names, since neither is the
-    tool. The elsewhere-scan widens to ``tcip_web`` for this one check, not the default two
-    packages: the GUI's own route modules are where a by-name reader most plausibly re-derives
-    image naming inline instead of calling the shared one, the way ``routes/dataset.py`` once
-    did before it was pointed at the same primitive gui_tools calls."""
+    """``push_panel_event`` and ``focus_human_attention`` moved out of ``annotation_tools.py``
+    into ``tools/gui_tools.py``, with the helpers only they used (``_subject_task``,
+    ``_logical_image_names``). The elsewhere-scan widens to ``tcip_web`` for this one check, not
+    the default two packages: the GUI's own route modules are where a by-name reader most
+    plausibly re-derives image naming inline instead of calling the shared one, the way
+    ``routes/dataset.py`` once did before it was pointed at the same primitive gui_tools calls."""
     _assert_one_home(
-        {"push_panel_event", "focus_human_attention", "_focus_annotate", "_focus_review",
-         "_subject_task", "_logical_image_names"},
+        {"push_panel_event", "focus_human_attention", "_subject_task", "_logical_image_names"},
         _module_path("tools/annotation_tools.py"),
         _module_path("tools/gui_tools.py"),
         extra_roots=(_tcip_web_root(),),
@@ -359,11 +354,11 @@ def test_accept_proposals_is_absent_from_package_source():
 
 def test_review_priority_queue_defines_no_own_dict_or_lock():
     """The priority-queue registry's dict-plus-lock state lives on jobstore.JobRegistry
-    (checked below); review.py keeps only its routes and its own job dataclass and worker."""
-    path = _web_module_path("routes/review.py")
+    (checked below); annotate.py keeps only its routes and the queue's job dataclass and worker."""
+    path = _web_module_path("routes/annotate.py")
     assert path.is_file()
     stray = {"_pq_jobs", "_pq_lock"} & set(_assign_name_counts(path))
-    assert not stray, f"review.py still defines {sorted(stray)}"
+    assert not stray, f"annotate.py still defines {sorted(stray)}"
 
 
 def test_images_overview_builds_define_no_own_dict_or_lock():
@@ -376,7 +371,7 @@ def test_images_overview_builds_define_no_own_dict_or_lock():
 
 def test_job_registry_class_is_the_one_home_for_the_dict_plus_lock_registry_shape():
     """jobstore.JobRegistry is the one home for the register/get/evict shape;
-    review.py's priority queue, images.py's overview builds, inference.py and tuning.py all
+    annotate.py's priority queue, images.py's overview builds, inference.py and tuning.py all
     adopt the same class rather than each restating it around its own dict-plus-lock registry."""
     jobstore_path = _web_module_path("jobstore.py")
     assert jobstore_path.is_file()

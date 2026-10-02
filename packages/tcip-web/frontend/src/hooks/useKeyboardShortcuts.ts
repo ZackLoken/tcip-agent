@@ -12,7 +12,7 @@ const FOCUSABLE_ROLES = new Set(["button", "tab", "checkbox", "switch", "menuite
  *  control, a contenteditable, or anything carrying an interactive ARIA role): the app's
  *  shortcuts never intercept a keydown aimed at one, so Enter/Space still activate a focused
  *  button and arrow keys still move within a focused tab list or checkbox group. */
-function isFocusableControl(tgt: EventTarget | null): boolean {
+export function isFocusableControl(tgt: EventTarget | null): boolean {
   if (!tgt || !(tgt instanceof Element)) return false;
   if (
     tgt.tagName === "INPUT" ||

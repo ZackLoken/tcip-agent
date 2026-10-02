@@ -15,6 +15,7 @@ export const PolygonOverlay = memo(function PolygonOverlay({
   label,
   showLabel,
   dashed,
+  strokeOpacity,
 }: {
   polygon: PolygonShape;
   stroke: string;
@@ -26,6 +27,8 @@ export const PolygonOverlay = memo(function PolygonOverlay({
   showLabel?: boolean;
   /** A tool's own polygon that no person has accepted draws dotted; every other polygon is solid. */
   dashed?: "tool";
+  /** The outline's opacity; full when omitted. */
+  strokeOpacity?: number;
 }) {
   /** Every ring of the annotation draws, in the instance's own stroke: the shape a reviewer
    *  confirms is all of it, not the first contour. Selection/hover styling is shared, so touching
@@ -45,6 +48,7 @@ export const PolygonOverlay = memo(function PolygonOverlay({
           stroke={stroke}
           strokeWidth={width}
           dash={dash}
+          opacity={strokeOpacity}
         />
       ))}
       {showVertices &&

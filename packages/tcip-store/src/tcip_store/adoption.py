@@ -105,7 +105,7 @@ def plan_root(root: str, layout: str) -> AdoptionPlan:
         parts = _parts_under(name, directory, item.path)
         if parts is None:
             continue
-        entries.append(PlanEntry(store=name, parts=_true_parts(name, item.path, parts), path=item.path))
+        entries.append(PlanEntry(store=name, parts=parts, path=item.path))
     return AdoptionPlan(
         root=root,
         layout=layout,
@@ -156,15 +156,6 @@ def _parts_under(store: str, directory: Path, path: Path) -> tuple[str, ...] | N
     if parts is None or len(parts) != len(descriptor.key_fields):
         return None
     return parts
-
-
-def _true_parts(store: str, path: Path, parts: tuple[str, ...]) -> tuple[str, ...]:
-    """The key the entry's own bytes state, when its layout cannot spell every key it holds."""
-    recover = get_descriptor(store).true_parts_from_entry
-    if recover is None:
-        return parts
-    recovered = recover(path.read_bytes())
-    return parts if recovered is None else recovered
 
 
 def unaccounted_files(plans: tuple[AdoptionPlan, ...]) -> tuple[Path, ...]:

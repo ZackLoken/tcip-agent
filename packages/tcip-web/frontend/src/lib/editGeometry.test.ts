@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  applyEditDrag,
-  clampShapeToImage,
-  hitTestEdit,
-  seedEditShape,
-  type EditShape,
-} from "@/lib/editGeometry";
-import type { ReviewGeom } from "@/lib/reviewGeometry";
+import { applyEditDrag, hitTestEdit, type EditShape } from "@/lib/editGeometry";
 
 const box = (b: [number, number, number, number]): EditShape => ({ kind: "box", box: b });
 const poly = (points: [number, number][]): EditShape => ({ kind: "polygon", points });
@@ -132,56 +125,6 @@ describe("applyEditDrag (polygon)", () => {
         [30, 0],
         [30, 20],
         [10, 20],
-      ]),
-    );
-  });
-});
-
-describe("seedEditShape", () => {
-  it("seeds a box shape from a box detection geometry, aliasing the caller's array by design", () => {
-    const geom: ReviewGeom = { kind: "box", box: [10, 20, 100, 200] };
-    const seeded = seedEditShape(geom);
-    expect(seeded).toEqual(box([10, 20, 100, 200]));
-    // A box has no in-place mutator (unlike the polygon points below): drag math always
-    // produces a fresh box, so sharing the source array here has never been a mutation risk.
-    if (seeded.kind === "box") {
-      expect(seeded.box).toBe(geom.box);
-    }
-  });
-
-  it("seeds a polygon shape from the single ring, copying each point", () => {
-    const ring: [number, number][] = [
-      [0, 0],
-      [10, 0],
-      [10, 10],
-    ];
-    const geom: ReviewGeom = { kind: "polygon", rings: [ring] };
-    const seeded = seedEditShape(geom);
-    expect(seeded).toEqual(poly(ring));
-    if (seeded.kind === "polygon") {
-      expect(seeded.points).not.toBe(ring); // a fresh copy, so dragging can't mutate matches
-    }
-  });
-});
-
-describe("clampShapeToImage", () => {
-  it("pulls out-of-bounds seeds (tiled predictions) into the image", () => {
-    expect(clampShapeToImage(box([-8, 5, 510, 490]), 500, 500)).toEqual(box([0, 5, 500, 490]));
-    expect(
-      clampShapeToImage(
-        poly([
-          [-3, 10],
-          [505, 10],
-          [250, 600],
-        ]),
-        500,
-        500,
-      ),
-    ).toEqual(
-      poly([
-        [0, 10],
-        [500, 10],
-        [250, 500],
       ]),
     );
   });

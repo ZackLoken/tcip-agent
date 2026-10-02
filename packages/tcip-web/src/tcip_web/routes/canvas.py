@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict
 import tcip_store as ts
 
 from tcip_mcp.registry_paths import stored_path
-from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key
+from tcip_mcp.web_client import ActiveTab, canvas_geometry_key, canvas_meta_key
 from tcip_web.state import store
 
 router = APIRouter(prefix="/api/canvas", tags=["canvas"])
@@ -34,7 +34,7 @@ class CanvasStatePayload(BaseModel):
 
     # The id of the project the GUI built this push for.
     project_id: str
-    tab: str  # "annotate" | "review"
+    tab: ActiveTab
     image_path: str
     image: str
     img_width: int = 0
@@ -47,7 +47,6 @@ class CanvasStatePayload(BaseModel):
     dirty: Optional[bool] = None
     user: Optional[str] = None
     classes: list[dict] = []  # [{name, color}]
-    legend: Optional[dict] = None  # e.g. review {tp, fp, fn, active} hex colors
     counts: Optional[dict] = None
     # None = heartbeat (geometry file untouched); a list = full geometry push.
     shapes: Optional[list[dict]] = None
@@ -85,7 +84,6 @@ def push_canvas_state(payload: CanvasStatePayload) -> dict:
         "dirty": payload.dirty,
         "user": payload.user,
         "classes": payload.classes,
-        "legend": payload.legend,
         "counts": payload.counts,
     })
     return {"status": "ok", "shapes_written": payload.shapes is not None}

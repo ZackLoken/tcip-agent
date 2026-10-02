@@ -492,41 +492,6 @@ def test_full_frame_reads_each_ground_truth_box_on_the_stored_grid(tmp_path, mon
     assert [d["bbox"] for _, dt in scored for d in dt] == [[10.1, 10.1, 30.2, 20.2]]
 
 
-def test_evaluate_scores_a_contradicted_negative_on_its_actual_content_and_names_it(
-    tmp_path, monkeypatch
-):
-    """A stored negative whose label file now holds the subject is excluded from the negative
-    count (scored on its real content, not silently dropped) and named in the result's
-    contradicted_negatives so a reviewer sees the stale confirmation without a separate doctor
-    pass."""
-    from PIL import Image
-
-    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.dataset_layout import CONFIRMED_NEGATIVE, record_image_statuses, status_bucket
-    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
-
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
-    Image.new("RGB", (128, 128)).save(images_dir / "a.png")
-    json_io.write_annotations(str(labels_dir / "a.json"), [], 128, 128, keep_empty=True)
-    record_image_statuses(tmp_path, status_bucket("bud", None), {"a.png": CONFIRMED_NEGATIVE},
-                          recorded_by="user:breeder")
-    json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="bud", geometry=BBox(54, 54, 74, 74))], 128, 128)
-    monkeypatch.setattr(predictor_mod, "GenericPredictor",
-                        lambda *a, **kw: _SlicedStub([[54, 54, 74, 74]]))
-
-    r = run_full_frame_evaluation(verified_checkpoint(tmp_path), str(images_dir), str(labels_dir),
-                                  stated=Stated(tile_size=64, overlap=0.2))
-
-    assert r["contradicted_negatives"] == ["a.png"]
-    # scored against the real content, not held out as a still-trusted negative
-    assert r["scored_images"] == 1 and r["tp"] == 1 and r["fn"] == 0
-
-
 # ── the tile geometry a pass derives from its checkpoint ──────────────────
 
 class _BatchStub:

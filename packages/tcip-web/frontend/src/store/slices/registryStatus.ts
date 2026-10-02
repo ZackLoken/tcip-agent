@@ -1,9 +1,8 @@
 import type { StateCreator } from "zustand";
 
 import { setSubjectColorRegistry } from "@/api/subjects";
-import type { AttributeDef, ImageStatus, Registry } from "@/api/subjects";
+import type { AttributeDef, Registry } from "@/api/subjects";
 import type { AppState } from "@/store/appState";
-import type { ReviewImageStatus, ReviewStatusFilter } from "@/store/types";
 
 interface RegistryState {
   /** The dataset's nested subject registry (subject -> {description?, attributes?}). No integer
@@ -32,6 +31,8 @@ interface AnnotateUiState {
   /** Active vertex drag: [polygonIdx, ringIdx, vertexIdx]; a vertex belongs to one ring of one
    *  polygon, so a multi-ring shape's second ring is addressable rather than uneditable. */
   draggingVertex: [number, number, number] | null;
+  /** The proposal the agent pointed the person at, by its index in the bucket's document. */
+  focusedProposal: number | null;
 }
 
 interface SessionTrackingState {
@@ -45,33 +46,6 @@ interface SessionTrackingState {
   lastFlushedKey: string | null;
 }
 
-interface PerImageStatusState {
-  /** Loaded from backend on dataset select. */
-  byImage: Record<string, ImageStatus>;
-  /** Filter applied in top bar. */
-  activeFilter: "all" | ImageStatus;
-  /** Confirmed names (complete/negative) needing a fresh look: the label file's content changed
-   *  since a human finished the image, or the subject's attribute schema did. Populated by the
-   *  hydrate reconcile (content) unioned with the status route's stale_definition (schema),
-   *  cleared name-by-name as each is written. */
-  staleMarks: string[];
-}
-
-interface ReviewImageStatusState {
-  /** Per-image review completion status, batch-fetched from the ReviewEngine on dataset entry
-   *  and kept live as verdicts land (untouched images default to "not_started"). */
-  byImage: Record<string, ReviewImageStatus>;
-  /** Whether each image stays reachable in Review navigation: true when it has anything to
-   *  review, when its label document could not be read (stays navigable so the breeder can see
-   *  why), or when the batch fetch hasn't resolved yet; false only for a readable image with
-   *  zero detections, which Review navigation skips. */
-  hasDetections: Record<string, boolean>;
-  /** Label document paths (GT or prediction) that would not read, from the same batch fetch. */
-  unreadable: string[];
-  /** Image-level Reviewed/Unreviewed navigation filter for the Review tab. */
-  activeFilter: ReviewStatusFilter;
-}
-
 const EMPTY_SESSION_TRACKING: SessionTrackingState = {
   currentImageName: null,
   imageEnterTimeMs: null,
@@ -79,20 +53,9 @@ const EMPTY_SESSION_TRACKING: SessionTrackingState = {
   lastFlushedKey: null,
 };
 
-// Scoped to one dataset selection's own batch fetch; a switch to a different dataset must not
-// carry a prior dataset's review-status facts forward.
-export const DEFAULT_REVIEW_STATUS: ReviewImageStatusState = {
-  byImage: {},
-  hasDetections: {},
-  unreadable: [],
-  activeFilter: "all",
-};
-
 export interface RegistryStatusSlice {
-  /** Dataset subject registry + per-image status + annotate ui. */
+  /** Dataset subject registry + annotate ui + session telemetry. */
   registry: RegistryState;
-  imageStatus: PerImageStatusState;
-  reviewStatus: ReviewImageStatusState;
   annotateUi: AnnotateUiState;
   sessionTracking: SessionTrackingState;
 
@@ -103,27 +66,6 @@ export interface RegistryStatusSlice {
   subjectNames: () => string[];
   subjectAttributes: (subject: string | null) => Record<string, AttributeDef>;
 
-  /** Per-image status helpers. */
-  setImageStatuses: (byImage: Record<string, ImageStatus>, staleMarks?: string[]) => void;
-  setImageStatus: (image: string, status: ImageStatus) => void;
-  setStatusFilter: (filter: "all" | ImageStatus) => void;
-  /** Drops every stale mark, e.g. on dataset selection so a prior dataset's marks are never read
-   *  against a same-named image in the newly selected one. */
-  clearStaleMarks: () => void;
-  /** Re-adds a name to `staleMarks`: used both when a write's confirmation never reached the
-   *  server and when it landed but its schema stamp did not, since either way the mark it was
-   *  about to clear still describes reality. */
-  markStale: (image: string) => void;
-
-  /** Review-status helpers (image-level Reviewed/Unreviewed navigation). */
-  setReviewImageStatuses: (
-    byImage: Record<string, ReviewImageStatus>,
-    hasDetections: Record<string, boolean>,
-    unreadable?: string[],
-  ) => void;
-  setReviewImageStatus: (image: string, status: ReviewImageStatus) => void;
-  setReviewStatusFilter: (filter: ReviewStatusFilter) => void;
-
   /** Annotate UI flags. */
   setVisible: (v: boolean) => void;
   setSnap: (v: boolean) => void;
@@ -131,6 +73,7 @@ export interface RegistryStatusSlice {
   setCut: (v: boolean) => void;
   setHoveredPolygon: (idx: number | null) => void;
   setDraggingVertex: (v: [number, number, number] | null) => void;
+  setFocusedProposal: (index: number | null) => void;
 
   /** Per-image session telemetry helpers. */
   startImageSessionTracking: (imageName: string, imageEnterTimeMs?: number) => void;
@@ -144,8 +87,6 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
   get,
 ) => ({
   registry: { subjects: {}, loaded: false, version: null },
-  imageStatus: { byImage: {}, activeFilter: "all", staleMarks: [] },
-  reviewStatus: DEFAULT_REVIEW_STATUS,
   annotateUi: {
     visible: true,
     snap: false,
@@ -153,6 +94,7 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
     cut: false,
     hoveredPolygonIdx: null,
     draggingVertex: null,
+    focusedProposal: null,
   },
   sessionTracking: EMPTY_SESSION_TRACKING,
 
@@ -168,41 +110,6 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
     return get().registry.subjects[subject]?.attributes ?? {};
   },
 
-  setImageStatuses: (byImage, staleMarks = []) =>
-    set(() => ({ imageStatus: { byImage, activeFilter: "all", staleMarks } })),
-  setImageStatus: (image, status) =>
-    set((s) => ({
-      imageStatus: {
-        ...s.imageStatus,
-        byImage: { ...s.imageStatus.byImage, [image]: status },
-        staleMarks: s.imageStatus.staleMarks.filter((name) => name !== image),
-      },
-    })),
-  setStatusFilter: (activeFilter) =>
-    set((s) => ({ imageStatus: { ...s.imageStatus, activeFilter } })),
-  clearStaleMarks: () => set((s) => ({ imageStatus: { ...s.imageStatus, staleMarks: [] } })),
-  markStale: (image) =>
-    set((s) => ({
-      imageStatus: {
-        ...s.imageStatus,
-        staleMarks: s.imageStatus.staleMarks.includes(image)
-          ? s.imageStatus.staleMarks
-          : [...s.imageStatus.staleMarks, image].sort(),
-      },
-    })),
-
-  setReviewImageStatuses: (byImage, hasDetections, unreadable = []) =>
-    set((s) => ({ reviewStatus: { ...s.reviewStatus, byImage, hasDetections, unreadable } })),
-  setReviewImageStatus: (image, status) =>
-    set((s) => ({
-      reviewStatus: {
-        ...s.reviewStatus,
-        byImage: { ...s.reviewStatus.byImage, [image]: status },
-      },
-    })),
-  setReviewStatusFilter: (activeFilter) =>
-    set((s) => ({ reviewStatus: { ...s.reviewStatus, activeFilter } })),
-
   setVisible: (visible) => set((s) => ({ annotateUi: { ...s.annotateUi, visible } })),
   setSnap: (snap) => set((s) => ({ annotateUi: { ...s.annotateUi, snap } })),
   setStream: (stream) => set((s) => ({ annotateUi: { ...s.annotateUi, stream } })),
@@ -211,6 +118,8 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
     set((s) => ({ annotateUi: { ...s.annotateUi, hoveredPolygonIdx } })),
   setDraggingVertex: (draggingVertex) =>
     set((s) => ({ annotateUi: { ...s.annotateUi, draggingVertex } })),
+  setFocusedProposal: (focusedProposal) =>
+    set((s) => ({ annotateUi: { ...s.annotateUi, focusedProposal } })),
 
   startImageSessionTracking: (imageName, imageEnterTimeMs) =>
     set((s) => ({

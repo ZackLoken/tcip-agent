@@ -1,4 +1,4 @@
-/** Dataset subject-registry + per-image-status API helpers.
+/** Dataset subject-registry API helpers.
  *
  * The registry is one nested mapping per dataset: subject -> {description?, attributes?}. It
  * carries no integer ids and no colors: a label references names, an id is a per-training-run
@@ -29,46 +29,6 @@ export interface SubjectDef {
 /** The nested registry: subject name -> its definition. Top-level keys are the subjects. */
 export type Registry = Record<string, SubjectDef>;
 
-// "negative" = the breeder marked the image Complete with no objects: a confirmed negative,
-// recorded in image_status.json. An empty label file alone is not this: it reads as
-// "unannotated" until that Complete, which is the whole negative-sample rail.
-const IMAGE_STATUSES = ["complete", "partial", "negative", "unannotated"] as const;
-export type ImageStatus = (typeof IMAGE_STATUSES)[number];
-
-// The two statuses a human's own confirmation ends on: the frontend's declaration of
-// dataset_layout.FINISHED_STATUSES, held equal to it by test_frontend_dataset_vocabulary.py.
-export const FINISHED_STATUSES: readonly ImageStatus[] = ["complete", "negative"];
-
-export interface ImageStatusResponse {
-  statuses: Record<string, ImageStatus>;
-  stale_definition: string[];
-}
-
-function isImageStatusResponse(body: unknown): body is ImageStatusResponse {
-  if (typeof body !== "object" || body === null) return false;
-  const { statuses, stale_definition } = body as Record<string, unknown>;
-  return (
-    typeof statuses === "object" &&
-    statuses !== null &&
-    !Array.isArray(statuses) &&
-    Object.values(statuses).every((s) => (IMAGE_STATUSES as readonly unknown[]).includes(s)) &&
-    Array.isArray(stale_definition) &&
-    stale_definition.every((name) => typeof name === "string")
-  );
-}
-
-/** What a registry save's attribute-vocabulary change did to existing confirmations: for each
- *  affected subject, how many of its confirmations were stamped with the outgoing schema (so a
- *  later read tells them apart from ones made under the new vocabulary), how many of its
- *  confirmations (already stamped, by this write or an earlier one, complete or negative alike)
- *  now predate the vocabulary in effect and are quarantined from training until re-confirmed, and
- *  a warning naming any the sweep itself could not complete. */
-export interface SchemaChangeSweep {
-  newly_stamped: Record<string, number>;
-  predating_vocabulary: Record<string, number>;
-  warning: string | null;
-}
-
 export const subjectsApi = {
   // The registry lives in the dataset (not the project); pass dataset_root so a shared image
   // set carries its own subject names.
@@ -91,73 +51,7 @@ export const subjectsApi = {
       n_subjects: number;
       subjects_path: string;
       version: string;
-      schema_change_sweep: SchemaChangeSweep;
     }>(ROUTES.postSubjectsSave, { subjects, dataset_root, version }),
-
-  // A Complete is a statement about one subject on one date of one dataset, read and written
-  // scoped to all three, so confirming leaf cannot mark an image negative for another subject.
-
-  /** The subject/date's stored statuses and the finished names stale under its current attribute
-   *  schema; a response that is not that whole shape (a status object of known statuses, a list
-   *  of names) throws, naming it. */
-  loadImageStatus: (subject: string | null, date: string | null, dataset_root: string) => {
-    const params = new URLSearchParams({ dataset_root });
-    if (subject) params.set("subject", subject);
-    if (date) params.set("date", date);
-    return getJson<unknown>(`${ROUTES.getSubjectsImageStatus}?${params.toString()}`).then(
-      (body) => {
-        if (!isImageStatusResponse(body)) {
-          throw new Error(
-            `the image-status route answered a response of another shape: ${JSON.stringify(body)}`,
-          );
-        }
-        return body;
-      },
-    );
-  },
-
-  /** `user` is the GUI-set identity; omitting it stamps the backend's process identity instead. */
-  setImageStatus: (
-    image_name: string,
-    status: ImageStatus,
-    subject: string | null,
-    date: string | null,
-    dataset_root: string,
-    user?: string,
-  ) =>
-    postJson<{ status: string; digest_stamped: boolean }>(ROUTES.postSubjectsImageStatus, {
-      image_name,
-      status,
-      subject,
-      date,
-      dataset_root,
-      user,
-    }),
-
-  setImageStatusBulk: (
-    statuses: Record<string, ImageStatus>,
-    subject: string | null,
-    date: string | null,
-    dataset_root: string,
-    user?: string,
-  ) =>
-    // digest_unstamped names the statuses passed whose digest stamp did not land, empty once
-    // every one does.
-    postJson<{ status: string; n: number; digest_unstamped: string[] }>(
-      ROUTES.postSubjectsImageStatusBulk,
-      { statuses, subject, date, dataset_root, user },
-    ),
-
-  deriveImageStatus: (body: {
-    annotations_dir: string | null;
-    subject: string;
-    image_list: string[];
-    complete_override?: string[];
-  }) =>
-    postJson<{ statuses: Record<string, ImageStatus>; unreadable: string[] }>(
-      ROUTES.postSubjectsImageStatusDerive,
-      body,
-    ),
 };
 
 // High-contrast palette the GUI derives subject/value colors from. Color is GUI-local (the

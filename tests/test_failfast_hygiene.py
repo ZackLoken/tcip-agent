@@ -1,24 +1,21 @@
-"""Fail-fast hygiene: narrowed polygon_iou, delivered flag, multi-head AL."""
+"""Fail-fast hygiene: IoU over a degenerate box, delivered flag, multi-head AL."""
 
 import pytest
 
 
-def test_polygon_iou_valid_and_degenerate():
-    pytest.importorskip("shapely")
-    from shapely.geometry import Polygon as SP
+def test_iou_matrix_valid_and_degenerate():
+    from tcip_annotation.matching import iou_matrix
 
-    from tcip_annotation.matching import polygon_iou
-    a = SP([(0, 0), (10, 0), (10, 10), (0, 10)])
-    assert polygon_iou(a, a.area, a, a.area) == pytest.approx(1.0)
-    # a degenerate (zero-area) geometry must not crash -> 0.0
-    bad = SP([(0, 0), (0, 0), (0, 0)])
-    assert polygon_iou(a, a.area, bad, 0.0) == 0.0
+    a = [[0, 0, 10, 10]]
+    assert iou_matrix(a, a)[0, 0] == pytest.approx(1.0)
+    # a degenerate (zero-area) box must not crash or divide by zero -> 0.0
+    assert iou_matrix([[0, 0, 0, 0]], [[0, 0, 0, 0]])[0, 0] == 0.0
 
 
 def test_push_panel_event_reports_delivered_flag(project):
     from tcip_mcp.tools.gui_tools import push_panel_event
 
-    res = push_panel_event(project, project.parent, "review", "load_matches", {"x": 1})
+    res = push_panel_event(project, project.parent, "annotate", "load_labels", {"x": 1})
     # The delivery outcome is now an explicit bool: "backend down" can't read as success.
     assert "delivered" in res and isinstance(res["delivered"], bool)
 

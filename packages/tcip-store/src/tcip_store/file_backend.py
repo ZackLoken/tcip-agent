@@ -526,13 +526,7 @@ class FileBackend:
             txn.apply()
 
     def keys(self, store: str, root: str, prefix: tuple[str, ...] = ()) -> list[Key]:
-        """Every key of ``store`` under ``root``, as identities a caller can read back.
-
-        A store whose layout cannot spell every key it holds (one that sanitizes a separator
-        out of a filename, say) declares ``true_parts_from_entry``, and the entry's own bytes
-        are what the identity comes from there. The locator still decides which files belong
-        to the store; the hook only corrects what the path could not carry.
-        """
+        """Every key of ``store`` under ``root``, as its locator reads each file's path."""
         descriptor = get_descriptor(store)
         locator = descriptor.locator
         if locator is None:
@@ -540,7 +534,6 @@ class FileBackend:
         directory = require_absolute_root(root)
         if not directory.is_dir():
             return []
-        recover = descriptor.true_parts_from_entry
         found: list[Key] = []
         for path in directory.rglob("*"):
             if not path.is_file() or _is_bookkeeping(path.name):
@@ -548,11 +541,6 @@ class FileBackend:
             parts = locator.parts_from(PurePosixPath(path.relative_to(directory).as_posix()))
             if parts is None:
                 continue
-            if recover is not None:
-                data = self._read_bytes(path)
-                recovered = None if data is None else recover(data)
-                if recovered is not None:
-                    parts = recovered
             if len(parts) != len(descriptor.key_fields):
                 continue
             if parts[: len(prefix)] != tuple(prefix):

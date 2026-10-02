@@ -72,6 +72,6 @@ def test_scores_a_single_image_with_no_project_named(tmp_path):
     assert result.returncode == 0, result.stderr
     body = json.loads(result.stdout)
     assert "error" not in body
-    assert len(body["matches"]["tp"]) == 1
-    assert body["matches"]["tp"][0]["class_name"] == "bud"
+    assert body["matches"] == [[0, 0]]
+    assert body["tp"] == 1
     assert not (cwd / ".tcip").exists()

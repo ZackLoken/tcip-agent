@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
@@ -15,14 +14,11 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import traits
 from tcip_mcp.subject_registry import SubjectRegistry, Subject
-from tests._producer_fixtures import registry_over
+from tests._producer_fixtures import mark_complete, registry_over
 from tcip_mcp.dataset_layout import (
     annotation_dir,
     annotation_path,
     image_dir,
-    replace_image_status_store,
-    status_bucket,
-    status_records,
 )
 from tcip_mcp.model_registry import ModelRegistry
 from tests import _trait_fixtures as fx
@@ -54,30 +50,23 @@ def _project(tmp_path: Path) -> Path:
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     for name in ("IMG_A", "IMG_B", "IMG_C"):
         Image.new("RGB", (32, 32)).save(root / "images" / "2026-02-11" / f"{name}.JPG")
-    # A: confirmed negative (empty + status). B: empty without confirmation (the IMG_0150 case).
-    # C: has objects but status wrongly says negative (contradiction).
+    # A: confirmed negative (empty + a mark). B: empty with no mark (the IMG_0150 case).
+    # C: holds an object.
     json_io.write_annotations(ann / "IMG_A.json", [], 32, 32, keep_empty=True)
     json_io.write_annotations(ann / "IMG_B.json", [], 32, 32, keep_empty=True)
     json_io.write_annotations(ann / "IMG_C.json",
                               [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
-    # Scoped by subject/date: a confirmation belongs to the subject it was made in.
-    replace_image_status_store(root, {
-        status_bucket("bud", "2026-02-11"): status_records(
-            {"IMG_A.JPG": "negative", "IMG_B.JPG": "unannotated", "IMG_C.JPG": "negative"},
-            recorded_by="user:breeder"),
-    })
+    mark_complete(root / "images" / "2026-02-11" / "IMG_A.JPG", ann / "IMG_A.json", "bud",
+                  project=root)
     return root
 
 
 def _run(root: Path, *, file_layout: bool = False):
     """Run the doctor against ``root``.
 
-    ``file_layout=True`` bound to the file backend on purpose: that caller's fixture wrote
-    ``image_status.json``/``region_completeness.json``/``registry.json`` through the storage
-    seam bound to the file backend, and the check under test reads the same file layout that
-    binding serves, the exact case ``staleness_findings`` reports as invalid once a database
-    also holds the root, so the subprocess is pinned to file regardless of whatever backend the
-    outer test run selects.
+    ``file_layout=True`` bound to the file backend on purpose: that caller's fixture wrote its
+    records through the storage seam bound to the file backend, so the subprocess is pinned to
+    file regardless of whatever backend the outer test run selects.
     """
     env = {**os.environ, "TCIP_STORE_BACKEND": "file"} if file_layout else None
     return subprocess.run(
@@ -118,15 +107,15 @@ def test_doctor_flags_registry_checkpoint_path_under_a_temp_directory(tmp_path):
     res = _run(root, file_layout=True)
     assert res.returncode == 2  # errors present
     out = res.stdout
-    assert "IMG_B" in out and "not a confirmed negative" in out   # unconfirmed empty -> warn
-    assert "contradictory" in out and "IMG_C" in out              # objects + negative -> error
-    assert "junk" in out and "test/temp" in out                   # registry pollution -> error
-    assert "IMG_A" not in out.replace("IMG_A.JPG is negative", "")  # confirmed negative is clean
+    assert "IMG_B" in out and "not marked complete" in out   # unconfirmed empty -> error
+    assert "junk" in out and "test/temp" in out              # registry pollution -> error
+    assert "IMG_A" not in out                                # confirmed negative is clean
+    assert "IMG_C" not in out                                # an annotated image is clean
 
 
 def test_doctor_admits_a_confirmed_negative_under_dated_labels_flat_images(tmp_path):
-    """A confirmed negative resolves the same way the draw admits it when labels are dated but
-    images were never split into date buckets, instead of reading as an unconfirmed empty."""
+    """A confirmed negative is the document's own mark, so dated labels over images never split
+    into date buckets read the same as any other, never as an unconfirmed empty."""
     import tcip_store as ts
     from tcip_store.file_backend import FileBackend
 
@@ -138,15 +127,11 @@ def test_doctor_admits_a_confirmed_negative_under_dated_labels_flat_images(tmp_p
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     Image.new("RGB", (32, 32)).save(root / "images" / "IMG_A.JPG")
     json_io.write_annotations(ann / "IMG_A.json", [], 32, 32, keep_empty=True)
-
-    replace_image_status_store(root, {
-        status_bucket("bud", "2026-02-11"): status_records(
-            {"IMG_A.JPG": "negative"}, recorded_by="user:breeder"),
-    })
+    mark_complete(root / "images" / "IMG_A.JPG", ann / "IMG_A.json", "bud", project=root)
 
     res = _run(root, file_layout=True)
 
-    assert "not a confirmed negative" not in res.stdout
+    assert "not marked complete" not in res.stdout
 
 
 def test_doctor_reports_a_stem_collision_and_completes(tmp_path):
@@ -191,48 +176,6 @@ def test_doctor_flags_a_trait_record_that_will_not_read(tmp_path):
     assert res.returncode == 2  # errors present
     assert "'unicorn' will not read" in res.stdout
     assert "unicorn_match" in res.stdout
-
-
-def test_doctor_flags_a_stale_region_completeness_attestation(tmp_path):
-    """An attested cell whose annotation content has since changed is exactly the data-state
-    inconsistency ``tcip doctor`` exists to catch (region_completeness.json vs the label file it
-    describes); confirm the ritual surfaces it, not just the route's own read path."""
-    from tcip_mcp.dataset_layout import status_bucket
-    from tcip_mcp.pipelines.reference_grid import reference_cells
-    from tcip_mcp.pipelines.region_completeness import cell_annotation_digest
-
-    root = tmp_path / "stale_proj"
-    (root / "images" / "2026-02-11").mkdir(parents=True)
-    ann_dir = root / "annotations" / "2026-02-11"
-    ann_dir.mkdir(parents=True)
-    state_dir = root / ".tcip" / "state"
-    state_dir.mkdir(parents=True)
-    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
-    Image.new("RGB", (32, 32)).save(root / "images" / "2026-02-11" / "IMG_A.JPG")
-    ann_path = ann_dir / "IMG_A.json"
-    json_io.write_annotations(
-        ann_path, [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
-
-    grid = {"width": 32, "height": 32, "tile_size": 16, "overlap": 0.0, "cols": 2, "rows": 2}
-    cell = next(c for c in reference_cells(32, 32, 16, clamp=True) if c.name == "A1")
-    stamped = cell_annotation_digest(json_io.read_annotations(str(ann_path)), "bud", cell)
-
-    bucket = status_bucket("bud", "IMG_A")
-    (state_dir / "region_completeness.json").write_text(json.dumps({
-        bucket: {"grid": grid, "cells_complete": ["A1"], "attested_by": "user:breeder",
-                "attested_at": "t", "stem": "IMG_A", "date": "2026-02-11", "subject": "bud"},
-    }))
-    (state_dir / "region_completeness_digest.json").write_text(
-        json.dumps({bucket: {"A1": stamped}}))
-
-    # The label is edited after attestation: a real staleness scenario, not a fabricated one.
-    json_io.write_annotations(
-        ann_path, [Annotation(subject="bud", geometry=BBox(1, 1, 20, 20))], 32, 32)
-
-    res = _run(root, file_layout=True)
-    assert res.returncode == 2
-    assert "region completeness" in res.stdout
-    assert "bud" in res.stdout and "A1" in res.stdout
 
 
 def test_doctor_flags_incomplete_source_snapshot(tmp_path):
@@ -305,52 +248,24 @@ def _lines(stdout: str, needle: str) -> list[str]:
 
 
 def test_labels_are_scanned_where_the_layout_resolver_places_them(tmp_path):
-    """The contradiction ``tcip doctor`` reports is named by the path the resolver builds, so
-    the checker's scan root and the canonical annotations tree cannot drift apart unnoticed."""
+    """An unmarked empty label is named by the path the resolver builds, so the checker's scan
+    root and the canonical annotations tree cannot drift apart unnoticed."""
     date = "2026-03-04"
     root = _layout_project(tmp_path, date, file_layout=True)
     Image.new("RGB", (48, 32)).save(image_dir(root, date) / "IMG_R.JPG")
     label = annotation_path(root, date, "IMG_R")
-    json_io.write_annotations(
-        label, [Annotation(subject="bud", geometry=BBox(2, 3, 18, 9))], 48, 32)
-    replace_image_status_store(root, {
-        status_bucket("bud", date): status_records(
-            {"IMG_R.JPG": "negative"}, recorded_by="user:breeder"),
-    })
+    json_io.write_annotations(label, [], 48, 32, keep_empty=True)
 
     res = _run(root, file_layout=True)
     assert res.returncode == 2, res.stdout
-    contradictions = _lines(res.stdout, "contradictory")
-    assert len(contradictions) == 1, res.stdout
-    assert str(label.relative_to(root)) in contradictions[0]
+    unmarked = _lines(res.stdout, "not marked complete")
+    assert len(unmarked) == 1, res.stdout
+    assert str(label.relative_to(root)) in unmarked[0]
 
 
-def test_a_negative_confirmation_names_only_its_own_subject(tmp_path):
-    """A confirmation is scoped to one subject: an image holding leaf annotations and confirmed
-    negative for both subjects contradicts the leaf confirmation only, and the bud
-    confirmation on the same image stands."""
-    date = "2026-03-04"
-    root = _layout_project(tmp_path, date, file_layout=True)
-    Image.new("RGB", (48, 32)).save(image_dir(root, date) / "IMG_S.JPG")
-    json_io.write_annotations(
-        annotation_path(root, date, "IMG_S"),
-        [Annotation(subject="leaf", geometry=BBox(4, 2, 40, 11))], 48, 32)
-    replace_image_status_store(root, {
-        status_bucket("bud", date): status_records({"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),
-        status_bucket("leaf", date): status_records({"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),
-    })
-
-    res = _run(root, file_layout=True)
-    assert res.returncode == 2, res.stdout
-    contradictions = _lines(res.stdout, "contradictory")
-    assert len(contradictions) == 1, res.stdout
-    assert "'leaf'" in contradictions[0]
-    assert "'bud'" not in contradictions[0]
-
-
-def test_confirmations_are_matched_on_a_dateless_dataset(tmp_path):
-    """A dataset with no capture-date buckets keys its confirmations by subject alone; the
-    doctor still pairs a confirmation with the label file it contradicts."""
+def test_a_mark_for_any_subject_finishes_an_empty_label_on_a_dateless_dataset(tmp_path):
+    """A dataset with no capture-date buckets places its labels flat; an empty one marked
+    complete for a subject is a confirmed negative there too."""
     root = tmp_path / "flat"
     image_dir(root, None).mkdir(parents=True)
     annotation_dir(root, None).mkdir(parents=True)
@@ -360,38 +275,14 @@ def test_confirmations_are_matched_on_a_dateless_dataset(tmp_path):
 
     ts.bind(FileBackend())
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
-    Image.new("RGB", (40, 24)).save(image_dir(root, None) / "IMG_F.JPG")
-    json_io.write_annotations(
-        annotation_path(root, None, "IMG_F"),
-        [Annotation(subject="bud", geometry=BBox(3, 1, 20, 9))], 40, 24)
-    replace_image_status_store(root, {
-        status_bucket("bud", None): status_records(
-            {"IMG_F.JPG": "negative"}, recorded_by="user:breeder"),
-    })
+    image = image_dir(root, None) / "IMG_F.JPG"
+    Image.new("RGB", (40, 24)).save(image)
+    label = annotation_path(root, None, "IMG_F")
+    json_io.write_annotations(label, [], 40, 24, keep_empty=True)
+    mark_complete(image, label, "bud", project=root)
 
     res = _run(root, file_layout=True)
-    assert res.returncode == 2, res.stdout
-    contradictions = _lines(res.stdout, "contradictory")
-    assert len(contradictions) == 1, res.stdout
-    assert "'bud'" in contradictions[0]
-
-
-def test_doctor_flags_a_stale_complete_token(tmp_path):
-    """A stored 'complete' whose label file holds no annotation of the confirmed subject is a
-    token a human should re-confirm; the doctor reports it and does not rewrite it."""
-    date = "2026-03-04"
-    root = _layout_project(tmp_path, date, file_layout=True)
-    Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_S.JPG")
-    json_io.write_annotations(annotation_path(root, date, "IMG_S"), [], 32, 32, keep_empty=True)
-    replace_image_status_store(root, {
-        status_bucket("bud", date): status_records(
-            {"IMG_S.JPG": "complete"}, recorded_by="user:breeder"),
-    })
-
-    res = _run(root, file_layout=True)
-    stale = _lines(res.stdout, "re-confirm")
-    assert len(stale) == 1, res.stdout
-    assert "bud" in stale[0] and "IMG_S.JPG" in stale[0]
+    assert "not marked complete" not in res.stdout, res.stdout
 
 
 def test_registry_findings_are_read_through_the_registrys_own_entry_shape(tmp_path):
@@ -572,18 +463,13 @@ def test_doctor_errors_on_a_project_whose_record_does_not_decode(tmp_path):
     assert "does not decode" in res.stdout
 
 
-def test_doctor_flags_an_unreadable_label_behind_a_confirmed_negative(tmp_path):
-    """A corrupt label file behind a stored 'negative' is an error-level finding, never a pass:
-    the reader raises on it, and the doctor reports it rather than letting the corruption hide
-    behind the confirmed-negative status."""
+def test_doctor_flags_an_unreadable_label(tmp_path):
+    """A corrupt label file is an error-level finding, never a pass: the reader raises on it, and
+    the doctor reports it rather than letting the corruption pass as an empty document."""
     date = "2026-03-04"
     root = _layout_project(tmp_path, date, file_layout=True)
     Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_S.JPG")
     annotation_path(root, date, "IMG_S").write_text("not json {][", encoding="utf-8")
-    replace_image_status_store(root, {
-        status_bucket("bud", date): status_records(
-            {"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),
-    })
 
     res = _run(root, file_layout=True)
     assert res.returncode == 2, res.stdout
@@ -611,141 +497,54 @@ def test_doctor_flags_an_image_and_a_label_with_a_reserved_stem(tmp_path):
     assert any("bucket.json" in ln for ln in findings), res.stdout
 
 
-def test_review_baselines_are_not_counted_as_label_records(tmp_path):
-    """The pre-review snapshots under an annotations dir's .original are copies, not labels:
-    an image whose only file there is a snapshot still has no label record and trains on
-    nothing, and the snapshot itself is never reported as an empty or orphaned label."""
-    date = "2026-03-04"
-    root = _layout_project(tmp_path, date)
-    imgs = image_dir(root, date)
-    for name, size in (("IMG_A", (48, 32)), ("IMG_B", (48, 32)),
-                       ("IMG_C", (60, 40)), ("IMG_D", (48, 32))):
-        Image.new("RGB", size).save(imgs / f"{name}.JPG")
-    json_io.write_annotations(
-        annotation_path(root, date, "IMG_A"),
-        [Annotation(subject="bud", geometry=BBox(2, 3, 18, 9), created_by="user:breeder")], 48, 32)
-    json_io.write_annotations(
-        annotation_path(root, date, "IMG_B"),
-        [Annotation(subject="leaf", geometry=BBox(5, 1, 44, 12), created_by="user:breeder")], 48, 32)
-    baselines = annotation_dir(root, date) / ".original"
-    baselines.mkdir()
-    json_io.write_annotations(baselines / "IMG_B.json", [], 48, 32, keep_empty=True)
-    json_io.write_annotations(baselines / "IMG_D.json", [], 48, 32, keep_empty=True)
-    new_project(root)
-
-    res = _run(root)
-    assert res.returncode == 0, res.stdout
-    census = _lines(res.stdout, "have no label record")
-    assert len(census) == 1, res.stdout
-    assert "2 of 4 image(s)" in census[0]
-    assert "IMG_C" in census[0] and "IMG_D" in census[0]
-    assert ".original" not in res.stdout
-
-
-def test_a_seam_written_confirmation_is_seen_by_check_negatives_and_check_data_quality_alike(
-    tmp_path,
-):
-    """One confirmation written through replace_image_status_store is the single fact both the
-    doctor's negatives check and its data-quality check read, on one root under the same
-    backend."""
+def test_a_marked_empty_label_is_clean_to_the_data_quality_check(tmp_path):
+    """A mark written through the save door is the one fact the data-quality check reads off
+    the census, on one root under the same backend."""
     from tcip_mcp.cli import doctor
 
     date = "2026-03-04"
     root = _layout_project(tmp_path, date)
-    Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_S.JPG")
-    json_io.write_annotations(annotation_path(root, date, "IMG_S"), [], 32, 32, keep_empty=True)
-    replace_image_status_store(root, {
-        status_bucket("bud", date): status_records(
-            {"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),
-    })
-
-    findings: list[tuple[str, str]] = []
-    doctor.check_negatives(root, findings, census=doctor._census(root, findings, set()))
-    assert not any("not a confirmed negative" in msg for _, msg in findings)
-
-    quality_findings: list[tuple[str, str]] = []
-    doctor.check_data_quality(root, quality_findings, census=doctor._census(root, quality_findings, set()))
-    assert quality_findings == []
-
-
-def test_an_unreadable_status_store_is_its_own_error_not_a_false_negative_sweep(tmp_path, monkeypatch):
-    """A status store the backend cannot read must surface as its own refusal finding, never as
-    an empty negatives set: falling through with no negatives would report every empty label on
-    the dataset as an unconfirmed negative, a false positive sweep hiding the real failure."""
-    from tcip_mcp.cli import doctor
-    from tcip_store import StoreError
-
-    date = "2026-03-04"
-    root = _layout_project(tmp_path, date)
-    Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_S.JPG")
-    json_io.write_annotations(annotation_path(root, date, "IMG_S"), [], 32, 32, keep_empty=True)
-
-    def _raise(*args, **kwargs):
-        raise StoreError("boom")
-
-    monkeypatch.setattr("tcip_mcp.dataset_layout.read_image_status_store", _raise)
+    image = image_dir(root, date) / "IMG_S.JPG"
+    Image.new("RGB", (32, 32)).save(image)
+    label = annotation_path(root, date, "IMG_S")
+    json_io.write_annotations(label, [], 32, 32, keep_empty=True)
+    mark_complete(image, label, "bud", project=root)
 
     findings: list[tuple[str, str]] = []
     doctor.check_data_quality(root, findings, census=doctor._census(root, findings, set()))
-
-    assert len(findings) == 1, findings
-    level, message = findings[0]
-    assert level == "warn"
-    assert "will not read" in message and "boom" in message
-    assert not any("not a confirmed negative" in msg for _, msg in findings)
+    assert findings == []
 
 
 def test_a_doctor_run_reads_each_label_once_and_reports_an_unreadable_one_once(
     tmp_path, monkeypatch,
 ):
     """The census reads each label once and only the data-quality check reports one that will not
-    read: the status, negatives, provenance and region-completeness checks read the census's
-    result, never the file, for an unreadable label the status store names ``complete`` and a
-    readable one a completeness attestation covers."""
-    import tcip_store as ts
-
+    read: the provenance check reads the census's result, never the file."""
     from tcip_mcp.cli import doctor
-    from tcip_mcp.dataset_layout import (
-        record_image_statuses, region_completeness_digest_key, region_completeness_key,
-    )
-    from tcip_mcp.pipelines.reference_grid import reference_cells
-    from tcip_mcp.pipelines.region_completeness import cell_annotation_digest
 
     date = "2026-03-04"
     root = _layout_project(tmp_path, date)
     Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_U.JPG")
     annotation_path(root, date, "IMG_U").write_bytes(b"{not json")
-    record_image_statuses(root, status_bucket("bud", date), {"IMG_U.JPG": "complete"},
-                          recorded_by="user:breeder")
     Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_A.JPG")
     readable = annotation_path(root, date, "IMG_A")
     json_io.write_annotations(readable, [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
                               32, 32)
-    cell = next(c for c in reference_cells(32, 32, 16, clamp=True) if c.name == "A1")
-    bucket = status_bucket("bud", "IMG_A")
-    ts.replace(region_completeness_key(root), {bucket: {
-        "grid": {"width": 32, "height": 32, "tile_size": 16, "overlap": 0.0, "cols": 2, "rows": 2},
-        "cells_complete": ["A1"], "attested_by": "user:breeder", "attested_at": "t",
-        "stem": "IMG_A", "date": date, "subject": "bud"}}, expect=ts.Version.ABSENT)
-    ts.replace(region_completeness_digest_key(root), {bucket: {"A1": cell_annotation_digest(
-        json_io.read_annotations(str(readable)), "bud", cell)}}, expect=ts.Version.ABSENT)
 
     reads: list[str] = []
-    real_read = json_io.read_annotations
+    real_read = json_io.read_label_document
 
     def _counting_read(path, *args, **kwargs):
         reads.append(Path(path).name)
         return real_read(path, *args, **kwargs)
 
-    monkeypatch.setattr(json_io, "read_annotations", _counting_read)
+    monkeypatch.setattr(json_io, "read_label_document", _counting_read)
     findings: list[tuple[str, str]] = []
     census = doctor._census(root, findings, set())
-    for check in (doctor.check_negatives, doctor.check_data_quality, doctor.check_status_tokens,
-                  doctor.check_provenance, doctor.check_region_completeness):
+    for check in (doctor.check_data_quality, doctor.check_provenance):
         check(root, findings, census=census)
 
     assert sorted(reads) == ["IMG_A.json", "IMG_U.json"]
     unreadable = [msg for _, msg in findings if "label file will not read" in msg]
     assert len(unreadable) == 1, findings
     assert "IMG_U.json" in unreadable[0]
-    assert not any("region completeness" in msg for _, msg in findings), findings

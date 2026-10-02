@@ -55,10 +55,6 @@ class StoreDescriptor:
     ``codec_exemption`` is why this store does not encode through the canonical JSON codec,
     required of any record or log carrying some other JSON spelling.
 
-    ``true_parts_from_entry`` recovers a key's real parts from one entry's own bytes, for a store
-    whose file layout cannot spell every key it holds (a locator that sanitizes a separator out of
-    a filename). It returns None for an entry whose bytes do not state a key.
-
     ``claim`` states which files under which kind of root belong to this store, for a record or log
     store the platform's own claim table does not already speak for; without one, every database
     operation on the store refuses.
@@ -82,7 +78,6 @@ class StoreDescriptor:
     path_readable: bool = False
     locator: "Locator | None" = None
     codec_exemption: str = ""
-    true_parts_from_entry: Callable[[bytes], tuple[str, ...] | None] | None = None
     claim: "Claim | None" = None
     declared_in: str = ""
     schema_version: int = 1

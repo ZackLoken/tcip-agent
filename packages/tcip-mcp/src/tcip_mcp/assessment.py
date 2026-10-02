@@ -104,7 +104,7 @@ class Reference:
         moved = [f.path for f in self.ground_truth
                  if moved_ground_truth({f.path: f.digest, str(run_dir / f.copy): f.digest})]
         samples = {Sample(member=s.member, source=s.source, ground_truth=s.ground_truth,
-                          group=s.group, side=s.side, confirmation_bucket=None, rect=s.rect,
+                          group=s.group, side=s.side, rect=s.rect,
                           row_key=s.row_key): s.source_digest for s in self.samples}
         try:
             now = source_digests(samples)
@@ -356,11 +356,15 @@ def assess(
                             delivery_kind=delivery_kind, stated=stated, device=device,
                             tile_batch_size=tile_batch_size)
     _selection, cal, hold = _reference_sides(project, selection_dir)
-    if (delivery_kind == STATE_CROSSING_DATES
-            and p.scope.positive_id(revision.entry.positive_value) is None):
-        raise AssessmentRefused(f"{checkpoint_path} classifies no {revision.entry.positive_value!r}: "
-                                "a state fraction is measured off a classifier of the trait's "
-                                "positive value.")
+    if delivery_kind == STATE_CROSSING_DATES:
+        from tcip_annotation.json_io import ClassKeyUnknown, class_id
+
+        try:
+            class_id(revision.entry.positive_value, p.scope.value_ids)
+        except ClassKeyUnknown as exc:
+            raise AssessmentRefused(
+                f"{checkpoint_path} classifies no {revision.entry.positive_value!r}: a state "
+                "fraction is measured off a classifier of the trait's positive value.") from exc
     _admit_reference(cal + hold, p.scope)
     digest_of = source_digests(cal + hold)
     disjointness, failures = _disjointness(digest_of, cal, hold,
@@ -455,9 +459,11 @@ def _detection(p: Pass, cal: list[Sample], hold: list[Sample], entry: TraitEntry
                            _records(p, hold_ds, digest_of, execution)))
     measured: dict[str, Any] = {"count": evidence}
     if delivery_kind == STATE_CROSSING_DATES:
+        from tcip_annotation.json_io import class_id
+
         from tcip_mcp.pipelines.operating_point import classifier_criterion
 
-        positive = cast(int, p.scope.positive_id(entry.positive_value)) + 1
+        positive = class_id(entry.positive_value, p.scope.value_ids) + 1
         classifier, classifier_failures = classifier_criterion(
             _classification_items(cal_records, positive, evidence["localization"],
                                   evidence["conf"]),
@@ -473,7 +479,9 @@ def _classification_items(records: list[dict], positive: int, criterion: dict,
     """One item per reference instance matched to one detection at ``conf``, on geometry alone
     under the trait's localization ``criterion`` scaled to ``records``: whether the reference's and
     the model's call are the positive category ``positive``."""
-    from tcip_mcp.pipelines.training.evaluation import gt_objects, match_pairs, scaled_to
+    from tcip_annotation.matching import match_pairs
+
+    from tcip_mcp.pipelines.training.evaluation import gt_objects, scaled_to
 
     scaled = scaled_to(criterion, records)
     items: list[dict] = []
@@ -555,7 +563,7 @@ def assess_reserved_regions(
     import numpy as np
     from tcip_annotation.json_io import require_reference_ground_truth
 
-    from tcip_mcp.dataset_layout import dataset_root_of, label_filename
+    from tcip_mcp.dataset_layout import label_filename
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines import block_calibration as blocks
     from tcip_mcp.pipelines.data.datasets import object_rows
@@ -596,13 +604,12 @@ def assess_reserved_regions(
     gt_path = str(Path(labels_dir) / label_filename(stem))
     require_reference_ground_truth([gt_path])
     cal_rect, test_rect = (tuple(spatial[k][0]) for k in ("calibration_region", "test_region"))
-    blocks.check_completeness(str(dataset_root_of(labels_dir)), cast(str, scope.subject), stem,
+    blocks.check_completeness(gt_path, cast(str, scope.subject),
                               {"calibration_region": cal_rect, "test_region": test_rect})
     source = resolve_image_source(resolved["data"]["images_dir"], stem)
     run_dir = _open_run(project)
     retained, (measured,) = _retained(run_dir, [Sample(
-        member=stem, source=str(source), ground_truth=gt_path, group=stem, side="calibration",
-        confirmation_bucket=None)])
+        member=stem, source=str(source), ground_truth=gt_path, group=stem, side="calibration")])
     target, n_unlabeled = json_det_targets(measured.ground_truth, scope)
     if n_unlabeled:
         raise AssessmentRefused(
@@ -642,7 +649,7 @@ def assess_reserved_regions(
     for side, counts in band_counts.items():
         blocks.check_feasibility(counts, side=side)
     samples = [Sample(member=name, source=str(source), ground_truth=gt_path, group=name,
-                      side=side, confirmation_bucket=None, rect=cast(Any, tuple(rect)))
+                      side=side, rect=cast(Any, tuple(rect)))
                for side, side_bands in bands.items() for name, rect in side_bands.items()]
     digest_of = source_digests(samples)
 
@@ -707,7 +714,7 @@ def _band_records(reader: Any, bands: dict[str, tuple[int, int, int, int]], p: P
         hx0, hy0 = max(0, ix0 - halo), max(0, iy0 - halo)
         hx1, hy1 = min(reader.width, ix1 + halo), min(reader.height, iy1 + halo)
         location = Sample(member=name, source=source, ground_truth="", group=name, side="",
-                          confirmation_bucket=None, rect=inner).location
+                          rect=inner).location
         result = p.predictor.predict_sliced(
             _RegionView(reader, Rect(hx0, hy0, hx1, hy1)), execution=execution,
             tile_batch_size=p.tile_batch_size, require_masks=False, source_label=name)

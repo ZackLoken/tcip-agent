@@ -1,6 +1,6 @@
 """Every enumeration/resolution call site routed onto ``list_logical_images``/
 ``resolve_image_source``, exercised against a grouped-capture folder: datasets.py, splits.py,
-annotation_tools.py, vision_tools.py, feedback/materialize.py.
+annotation_tools.py, vision_tools.py.
 
 A minimal synthetic 2-band group (two tiny single-band TIFFs + a manifest) stands in for a real
 capture in most of these: the mechanism under test is "does the call site fold the group and
@@ -15,7 +15,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 import tifffile
-from tcip_mcp.pipelines.data.selection import ClassScope
 from tests._producer_fixtures import dataset_over, registry_over  # noqa: E402
 
 
@@ -126,7 +125,7 @@ def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaul
     band_b.unlink()  # the manifest now references a sibling that no longer exists
 
     sample = Sample(member="cap", source=str(manifest), ground_truth=str(tmp_path / "cap.json"),
-                    group="g", side="train", confirmation_bucket="bud")
+                    group="g", side="train")
     with pytest.raises(BandGroupIncomplete):
         _band_count([sample])
 
@@ -145,9 +144,8 @@ def test_image_path_dimensions_of_a_grouped_capture_path(grouped_dataset):
 def test_focus_annotate_lands_on_the_grouped_capture_by_manifest_name(grouped_dataset):
     from tcip_mcp.tools.gui_tools import focus_human_attention
 
-    res = focus_human_attention(grouped_dataset, grouped_dataset.parent, "annotate",
-                                str(grouped_dataset), "bud",
-                                "2026-04-01")
+    res = focus_human_attention(grouped_dataset, grouped_dataset.parent, str(grouped_dataset),
+                                "bud", "2026-04-01")
     assert "error" not in res
     assert res["n_images"] == 2
     # Sorted names: "capture_001.bandgroup" < "plain_002.jpg"
@@ -239,62 +237,6 @@ def test_viz_dataset_sample_folds_a_grouped_capture_into_one_entry(tmp_path, gro
     result = visualize(tmp_path, source="dataset", path=str(grouped_dataset), n=16)
     assert "error" not in result
     assert result["total_images"] == 2  # one grouped capture + one plain photo, never 3 raw files
-
-
-# ── feedback/materialize.py ──────────────────────────────────────────────────────────────
-
-
-def test_materialize_dataset_copies_every_sibling_and_the_manifest(tmp_path):
-    from tcip_mcp.pipelines.feedback.materialize import materialize_dataset
-
-    src = tmp_path / "src"
-    src.mkdir()
-    _write_group(src, "cap")
-
-    state = {"image": {"cap.bandgroup": {"img_status": "completed", "detections": [
-        {"action": "accepted", "class_name": "bud",
-         "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None},
-    ]}}}
-    out = tmp_path / "out"
-    result = materialize_dataset(state, str(src), str(out), scope=ClassScope())
-
-    assert result["positive"] == 1
-    assert (out / "images" / "cap.bandgroup").is_file()
-    assert (out / "images" / "cap_G.tif").is_file()
-    assert (out / "images" / "cap_R.tif").is_file()
-    assert (out / "annotations" / "cap.json").is_file()
-
-    import tcip_store as ts
-    from tcip_mcp.pipelines.feedback.materialize import curated_manifest_key
-    manifest = ts.read(curated_manifest_key(out))
-    assert manifest["images"][0]["image"] == "cap.bandgroup"
-
-    # The output's own manifest is independently readable (band filenames resolve alongside it).
-    from tcip_mcp.pipelines.data.band_groups import read_band_group_manifest
-    ref = read_band_group_manifest(out / "images" / "cap.bandgroup")
-    assert all(p.is_file() for p in ref.bands.values())
-
-
-def test_materialize_dataset_dims_from_the_grouped_capture(tmp_path):
-    from tcip_mcp.pipelines.feedback.materialize import materialize_dataset
-
-    src = tmp_path / "src"
-    src.mkdir()
-    _write_group(src, "cap")  # 16x16
-
-    state = {"image": {"cap.bandgroup": {"img_status": "completed", "detections": [
-        {"action": "accepted", "class_name": "bud",
-         "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.5, 0.5, 0.25, 0.25], "pred_bbox_norm": None},
-    ]}}}
-    out = tmp_path / "out"
-    materialize_dataset(state, str(src), str(out), scope=ClassScope())
-
-    from tcip_annotation import json_io
-    anns = json_io.read_annotations(str(out / "annotations" / "cap.json"))
-    assert len(anns) == 1
-    box = anns[0].geometry
-    # cx=cy=0.5, w=h=0.25 on a 16x16 frame -> [6,6,10,10]
-    assert (box.x1, box.y1, box.x2, box.y2) == (6.0, 6.0, 10.0, 10.0)
 
 
 # ── tools/data_tools.py: draw_splits(materialize=True) ───────────────────────────────────

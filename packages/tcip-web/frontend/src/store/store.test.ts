@@ -15,6 +15,7 @@ function loadPolygon(rings: [number, number][][]): void {
     polygons: [{ rings, subject: "subject_a", attributes: {} }],
     points: [],
     imageAnnotations: [],
+    completion: {},
   };
   s().loadLabelsIntoCanvas(labels);
 }
@@ -131,6 +132,7 @@ describe("canvas store", () => {
       polygons: [],
       points: [],
       imageAnnotations: [],
+      completion: {},
     });
     useStore.setState((st) => ({ gui: { ...st.gui, active_subject: "subject_a" } }));
     s().setCurrentPolygon([
@@ -167,7 +169,7 @@ describe("splitPolygon", () => {
     [10, 10],
   ];
 
-  it("replaces one polygon with two at the same index, keeping provenance and dropping the sign-off", () => {
+  it("replaces one polygon with two at the same index, keeping the parent's values", () => {
     s().loadLabelsIntoCanvas({
       image_path: "x",
       img_width: 100,
@@ -178,18 +180,12 @@ describe("splitPolygon", () => {
           rings: [RING_A],
           subject: "subject_a",
           attributes: { health: "good" },
-          created_by: "model:x",
-          created_at: "2024-01-01T00:00:00Z",
-          accepted_by: "user:jordan",
-          accepted_at: "2024-01-02T00:00:00Z",
-          accepted_by_rule: "exp-1:0123456789abcdef",
-          // The shape the load route actually produces for an accepted tool prediction
-          // (authorship_of: created_by a model plus accepted_by set derives "tool_accepted").
           authorship: "tool_accepted",
         },
       ],
       points: [],
       imageAnnotations: [],
+      completion: {},
     });
     // A second polygon after it, so the split's own effect on later indices is checked too.
     s().addPolygon({ rings: [RING_B], subject: "subject_a", attributes: {} });
@@ -204,39 +200,20 @@ describe("splitPolygon", () => {
     for (const piece of [s().canvas.polygons[0], s().canvas.polygons[1]]) {
       expect(piece.subject).toBe("subject_a");
       expect(piece.attributes).toEqual({ health: "good" });
-      expect(piece.created_by).toBe("model:x");
-      expect(piece.created_at).toBe("2024-01-01T00:00:00Z");
-      expect(piece.accepted_by).toBeNull();
-      expect(piece.accepted_at).toBeNull();
-      expect(piece.accepted_by_rule).toBeNull();
-      // The sign-off dropped: the parent's tool_accepted reads as unreviewed tool work again.
-      expect(piece.authorship).toBe("tool");
+      // Each piece is new content the save door stamps; the parent's authorship is not its own.
+      expect(piece.authorship).toBeUndefined();
     }
     expect(s().canvas.selectedPolygonIdx).toBe(0); // the first piece
     expect(s().annotateUi.hoveredPolygonIdx).toBeNull();
     expect(s().canvas.dirty).toBe(true);
 
-    // The save payload carries the dropped marker too, not just the in-memory pieces.
     const payload = canvasToAnnotations({
       boxes: s().canvas.boxes,
       polygons: s().canvas.polygons.slice(0, 2),
       points: [],
       imageAnnotations: [],
     });
-    for (const p of payload) expect(p.accepted_by_rule).toBeNull();
-  });
-
-  it("copies every other authorship value unchanged (only tool_accepted maps to tool)", () => {
-    loadOnePolygon();
-    useStore.setState((st) => ({
-      canvas: {
-        ...st.canvas,
-        polygons: [{ ...st.canvas.polygons[0], authorship: "person" }],
-      },
-    }));
-    s().splitPolygon(0, [PIECE_A, PIECE_B]);
-    expect(s().canvas.polygons[0].authorship).toBe("person");
-    expect(s().canvas.polygons[1].authorship).toBe("person");
+    expect(payload.map((p) => p.points)).toEqual([PIECE_A, PIECE_B]);
   });
 
   it("one undo restores the parent and its selection", () => {
@@ -318,6 +295,7 @@ describe("canvas store points", () => {
       polygons: [],
       points: [pt(5, 6, "tip")],
       imageAnnotations: [],
+      completion: {},
     });
     expect(s().canvas.points).toEqual([pt(5, 6, "tip")]);
     expect(s().canvas.selectedPointIdx).toBeNull();
@@ -373,7 +351,7 @@ describe("content-based dirty tracking", () => {
 
   it("a save re-baselines: deleting a saved shape then undoing it is clean again", () => {
     s().addBox(box);
-    s().markClean();
+    s().markClean({});
     s().deleteBox(0);
     expect(s().canvas.dirty).toBe(true);
     s().undo();

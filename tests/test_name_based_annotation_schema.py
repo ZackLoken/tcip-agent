@@ -18,7 +18,6 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp import subject_registry
 from tcip_mcp.subject_registry import SubjectRegistry, Subject
-from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tests._producer_fixtures import dataset_over, registry_over  # noqa: E402
 
@@ -75,8 +74,7 @@ def test_geometryless_annotation_roundtrips_and_marks_image_annotated(tmp_path):
 
     # The image carries a subject annotation, so the admission counts it as annotated rather than
     # as an empty one nobody confirmed; which geometries answer for a measurement is the loader's.
-    records, counts = admitted_documents(labels_dir, images_dir, scope=ClassScope(subject="bud"),
-                                         date=None)
+    records, counts = admitted_documents(labels_dir, images_dir, scope=ClassScope(subject="bud"))
     assert [record.member for record in records] == ["img_001"]
     assert counts["annotated"] == 1
     assert counts["skipped_unannotated"] == 0
@@ -103,25 +101,23 @@ def test_num_classes_agree_on_one_assign_class_ids_map(tmp_path):
     assert len(id_map) == subject_registry.num_classes(registry, "bud") == 1
 
 
-# (d) confirmed_negative_names recovers negatives and refuses (not silent-empty) with no subject.
-def test_confirmed_negatives_thread_subject_and_refuse_when_unthreaded(tmp_path):
-    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
+# (d) a confirmed negative is scoped to the subject its mark names.
+def test_a_confirmed_negative_is_its_own_subjects_alone(tmp_path):
+    from tests._producer_fixtures import mark_complete
 
+    images_dir = tmp_path / "images" / "2-11-26"
     labels_dir = tmp_path / "annotations" / "2-11-26"
+    _write_image(images_dir, "img_009")
     labels_dir.mkdir(parents=True)
+    label = labels_dir / "img_009.json"
+    json_io.write_annotations(label, [], 640, 480, keep_empty=True)
     # A human confirmed img_009 an empty negative for bud on this date.
-    record_image_statuses(tmp_path, status_bucket("bud", "2-11-26"),
-                          {"img_009.jpg": "negative"}, recorded_by="user:breeder")
+    mark_complete(images_dir / "img_009.jpg", label, "bud", project=tmp_path)
 
-    got = confirmed_negative_names(labels_dir, subject="bud", date="2-11-26")
-    assert got == {"img_009.jpg"}
-
-    # A different subject's bucket is not this subject's negative (scoping holds).
-    assert confirmed_negative_names(labels_dir, subject="bush", date="2-11-26") == set()
-
-    # Unthreaded subject with negatives present: refuse loudly rather than drop the human's work.
-    with pytest.raises(ValueError):
-        confirmed_negative_names(labels_dir, subject=None, date="2-11-26")
+    doc = json_io.read_label_document(label)
+    assert doc.state("bud") == "negative"
+    # A different subject's mark is not this subject's negative (scoping holds).
+    assert doc.state("bush") == "unannotated"
 
 
 # (e) geometry-less + wrong-subject annotations are excluded from a detection run's targets.
@@ -240,18 +236,15 @@ def test_save_annotations_refuses_a_polygon_that_is_no_shape(tmp_path, geometry)
     assert "polygon" in res.get("error", "") and not out.exists()
 
 
-# (g3) segment_prompt's own output is multi-ring ({x,y} dict vertices); an occlusion-split mask
-# accepted from it must not silently save as a geometry-less annotation. Both ring-vertex shapes
-# this module produces ({x,y} dicts from segment_prompt, [x,y] pairs from the client projection)
-# must round-trip through the write door.
 def test_save_annotations_accepts_rings(tmp_path):
+    """An occlusion-split instance in either ring-vertex shape (``{x, y}`` mappings or ``[x, y]``
+    pairs) saves with its geometry through the write door."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     images_dir = tmp_path / "images"
     _write_image(images_dir, "img_001")
     img = str(images_dir / "img_001.jpg")
 
-    # segment_prompt's own output shape: [[{x,y}, ...], ...], one ring per connected region.
     out = tmp_path / "rings.json"
     res = save_annotations(
         tmp_path, tmp_path.parent, img,
@@ -319,8 +312,7 @@ def test_geometryless_only_image_is_refused_by_the_loader_that_reads_no_target_f
     # geomless: a bud annotation with NO geometry (an image-level label, not a box).
     json_io.write_annotations(labels_dir / "geomless.json", [Annotation(subject="bud")], 640, 480)
 
-    records, _ = admitted_documents(labels_dir, images_dir, scope=ClassScope(subject="bud"),
-                                    date=None)
+    records, _ = admitted_documents(labels_dir, images_dir, scope=ClassScope(subject="bud"))
     assert [record.member for record in records] == ["boxed", "geomless"]
 
     with pytest.raises(ValueError, match="only in geometries a detection loader does not read"):

@@ -20,6 +20,25 @@ def registry_over(dataset_root, registry) -> None:
                      allow_type_changes=True)
 
 
+def mark_complete(image_path, label_path, subject: str, *, project, rect=None,
+                  proposals_hidden: bool = False, by: str = "user:tester"):
+    """``subject`` marked complete over ``rect`` (the whole image when ``None``) on the label
+    document at ``label_path`` through the platform's one save door, the document's annotations
+    kept as they are; an image with no annotation of ``subject`` reads as a confirmed negative.
+    Returns the new version."""
+    from tcip_annotation.json_io import client_annotation, read_label_document
+
+    from tcip_mcp.dataset_layout import Gestures, save_label_document
+    from tcip_mcp.pipelines.image_utils import image_path_dimensions
+
+    doc = read_label_document(label_path)
+    width, height = image_path_dimensions(image_path)
+    return save_label_document(
+        project, image_path, label_path, [client_annotation(a) for a in doc.annotations],
+        width=width, height=height, author=by,
+        gestures=Gestures(complete={subject: True}, rect=rect, proposals_hidden=proposals_hidden))
+
+
 def admit_over(
     images_dir, ground_truth, *, subject: str | None = None, attribute: str | None = None,
     members: list[str] | None = None,

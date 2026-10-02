@@ -5,7 +5,6 @@ import type { CanvasSlice } from "@/store/slices/canvas";
 import type { GuiSlice } from "@/store/slices/gui";
 import type { PendingTerminalMessageSlice } from "@/store/slices/pendingTerminalMessage";
 import type { RegistryStatusSlice } from "@/store/slices/registryStatus";
-import type { ReviewSlice } from "@/store/slices/review";
 import type { TerminalOpenSlice } from "@/store/slices/terminalOpen";
 import type { ToastSlice } from "@/store/slices/toasts";
 import type { UserSlice } from "@/store/slices/user";
@@ -19,7 +18,6 @@ export interface AppState
   extends
     GuiSlice,
     CanvasSlice,
-    ReviewSlice,
     BandSelectionSlice,
     RegistryStatusSlice,
     AgentActivitySlice,

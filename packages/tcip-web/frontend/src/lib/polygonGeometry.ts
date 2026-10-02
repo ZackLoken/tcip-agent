@@ -153,9 +153,7 @@ export type Ring = [number, number][];
 export type CutRingResult = { rings: [Ring, Ring] } | { reason: string };
 
 /** The smallest side, in image pixels, a drawn shape may keep: below it, a commit is refused
- *  rather than writing a sliver. Lives here (not editGeometry.ts, which imports from this module)
- *  so the box tool's own floor and the cut tool's piece floor share one primitive without a
- *  circular import; editGeometry.ts re-exports it under its established name. */
+ *  rather than writing a sliver; the box tool's floor and the cut tool's piece floor share it. */
 export const MIN_BOX_SIDE = 3;
 
 export const CUT_MISSES_REFUSAL =

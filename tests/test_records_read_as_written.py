@@ -7,7 +7,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from fastapi.testclient import TestClient
 from PIL import Image
 
 
@@ -110,48 +109,28 @@ def test_a_sweep_final_status_lacking_its_state_fails_at_the_read(
         tt.monitor_training(tmp_path, sweep_id=result["study_name"])
 
 
-def test_an_image_status_entry_lacking_its_time_fails_at_the_read(tmp_path: Path) -> None:
+def test_a_completion_mark_lacking_its_time_fails_at_the_read(tmp_path: Path) -> None:
+    import json
+
     import pytest
-    import tcip_store as ts
 
-    from tcip_mcp.dataset_layout import (
-        image_status_key, read_image_status_store, record_image_statuses, status_confirmations,
-        status_tokens,
+    from tcip_annotation.json_io import (
+        UnreadableLabelDocument, read_label_document, write_annotations,
     )
+    from tests._producer_fixtures import mark_complete
 
-    record_image_statuses(tmp_path, "bud/2026-03-01", {"IMG_1.JPG": "negative"},
-                          recorded_by="user:breeder")
-    assert status_tokens(read_image_status_store(tmp_path)) == {
-        "bud/2026-03-01": {"IMG_1.JPG": "negative"}}
+    image = tmp_path / "images" / "IMG_1.png"
+    image.parent.mkdir()
+    Image.fromarray(np.zeros((80, 100, 3), dtype=np.uint8)).save(image)
+    label = tmp_path / "labels" / "IMG_1.json"
+    label.parent.mkdir()
+    write_annotations(label, [], 100, 80)
+    mark_complete(image, label, "bud", project=tmp_path, by="user:breeder")
+    assert read_label_document(label).state("bud") == "negative"
 
-    stored = ts.read_versioned(image_status_key(tmp_path))
-    del stored.value["bud/2026-03-01"]["IMG_1.JPG"]["recorded_at"]
-    ts.replace(image_status_key(tmp_path), stored.value, expect=stored.version)
+    stored = json.loads(label.read_text(encoding="utf-8"))
+    del stored["complete"]["bud"][0]["at"]
+    label.write_text(json.dumps(stored), encoding="utf-8")
 
-    with pytest.raises(KeyError, match="recorded_at"):
-        status_confirmations(read_image_status_store(tmp_path))
-
-
-def test_an_attested_region_reads_back_through_the_completeness_route(tmp_path: Path) -> None:
-    img_dir = tmp_path / "ds" / "images" / "2026-03-01"
-    img_dir.mkdir(parents=True)
-    path = str(img_dir / "plot.tif")
-    Image.fromarray(np.zeros((80, 100, 3), dtype=np.uint8)).save(path)
-    from tcip_web.app import app
-
-    client = TestClient(app, base_url="http://127.0.0.1")
-
-    grid_resp = client.get("/api/coverage/grid", params={"path": path, "tile_size": 64})
-    assert grid_resp.status_code == 200, grid_resp.text
-    grid = {k: v for k, v in grid_resp.json()["grid"].items() if k not in ("cells", "derivation")}
-    posted = client.post("/api/coverage/completeness", json={
-        "image_path": path, "subject": "bud", "grid": grid, "cell": "A1", "complete": True,
-        "user": "breeder", "view_scale": None})
-    assert posted.status_code == 200, posted.text
-
-    got = client.get("/api/coverage/completeness", params={"path": path})
-
-    assert got.status_code == 200, got.text
-    record = got.json()["by_subject"]["bud"]
-    assert record["cells_complete"] == ["A1"]
-    assert record["stale_cells"] == []
+    with pytest.raises(UnreadableLabelDocument, match=r"KeyError\('at'\)"):
+        read_label_document(label)

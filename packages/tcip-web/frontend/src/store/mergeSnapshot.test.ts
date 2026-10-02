@@ -34,23 +34,16 @@ function snapshot(over: Partial<GuiState> = {}): GuiState {
     view: { scale: 1, offset_x: 0, offset_y: 0 },
     mode: "box",
     active_subject: "subject_a",
-    review: {
-      iou_threshold: 0.5,
-      conf_threshold: 0.25,
-      filter_type: "all",
-      filter_class: "all",
-      detection_idx: 0,
-    },
     ...over,
   };
 }
 
 describe("mergeSnapshot ownership model", () => {
   beforeEach(() => {
-    // Known populated local state: user is on Review, polygon mode, subject "bush", image 2.
+    // Known populated local state: user is on Results, polygon mode, subject "bush", image 2.
     useStore.setState({
       gui: snapshot({
-        active_tab: "review",
+        active_tab: "results",
         mode: "polygon",
         active_subject: "bush",
         dataset: dataset({ current_image_index: 2 }),
@@ -74,7 +67,7 @@ describe("mergeSnapshot ownership model", () => {
       PROJECT,
       null,
     );
-    expect(s().gui.active_tab).toBe("review");
+    expect(s().gui.active_tab).toBe("results");
     expect(s().gui.mode).toBe("polygon");
     expect(s().gui.active_subject).toBe("bush");
     expect(s().gui.dataset.current_image_index).toBe(2); // navigation kept
@@ -103,15 +96,7 @@ describe("mergeSnapshot ownership model", () => {
     expect(s().gui.dataset.dataset_root).toBeNull();
   });
 
-  it("adopts a new dataset identity and resets index + reviewStatus", () => {
-    useStore.setState(() => ({
-      reviewStatus: {
-        byImage: { "a.jpg": "completed" },
-        hasDetections: { "a.jpg": true },
-        unreadable: ["/proj/ds/annotations/2-11-26/b.json"],
-        activeFilter: "reviewed",
-      },
-    }));
+  it("adopts a new dataset identity and resets the index", () => {
     s().mergeSnapshot(
       snapshot({ dataset: dataset({ date: "3-2-26", current_image_index: 0 }) }),
       8,
@@ -120,12 +105,6 @@ describe("mergeSnapshot ownership model", () => {
     );
     expect(s().gui.dataset.date).toBe("3-2-26");
     expect(s().gui.dataset.current_image_index).toBe(0);
-    expect(s().reviewStatus).toEqual({
-      byImage: {},
-      hasDetections: {},
-      unreadable: [],
-      activeFilter: "all",
-    });
   });
 
   it("drops a stale (older-version) replay", () => {
@@ -170,8 +149,8 @@ describe("mergeSnapshot ownership model", () => {
   });
 
   it("adopts the persisted state on boot, with the tab from the project's own record", () => {
-    // Boot adopts backend mode/filters/position; the tab is the client's per-project record,
-    // since the backend's active_tab only moves on agent focus events (stale, often Review).
+    // Boot adopts backend mode/position; the tab is the client's per-project record, since the
+    // backend's active_tab only moves on agent focus events.
     localStorage.removeItem(`tcip.lasttab.${PROJECT.id}`);
     useStore.setState({
       gui: snapshot({ active_subject: null, dataset: dataset({ ...EMPTY, subject: null }) }),
@@ -180,7 +159,7 @@ describe("mergeSnapshot ownership model", () => {
     });
     s().mergeSnapshot(
       snapshot({
-        active_tab: "review",
+        active_tab: "results",
         mode: "polygon",
         active_subject: "bush",
         dataset: dataset({ current_image_index: 2 }),
@@ -203,7 +182,7 @@ describe("mergeSnapshot ownership model", () => {
       openProject: null,
       wsVersion: 0,
     });
-    s().mergeSnapshot(snapshot({ active_tab: "review" }), 1, PROJECT, null);
+    s().mergeSnapshot(snapshot({ active_tab: "results" }), 1, PROJECT, null);
     expect(s().gui.active_tab).toBe("training");
     localStorage.removeItem(`tcip.lasttab.${PROJECT.id}`);
   });
@@ -211,31 +190,7 @@ describe("mergeSnapshot ownership model", () => {
 
 describe("applyRestoredDataset", () => {
   beforeEach(() => {
-    useStore.setState({
-      gui: snapshot({ dataset: dataset() }),
-      openProject: PROJECT,
-      reviewStatus: {
-        byImage: { "a.jpg": "completed" },
-        hasDetections: { "a.jpg": true },
-        unreadable: ["/proj/ds/annotations/2-11-26/b.json"],
-        activeFilter: "reviewed",
-      },
-    });
-  });
-
-  it("clears reviewStatus on a dataset identity change", () => {
-    s().applyRestoredDataset(dataset({ dataset_root: "/proj/other", date: "3-2-26" }), PROJECT);
-    expect(s().reviewStatus).toEqual({
-      byImage: {},
-      hasDetections: {},
-      unreadable: [],
-      activeFilter: "all",
-    });
-  });
-
-  it("keeps reviewStatus when the identity is unchanged", () => {
-    s().applyRestoredDataset(dataset(), PROJECT);
-    expect(s().reviewStatus.byImage).toEqual({ "a.jpg": "completed" });
+    useStore.setState({ gui: snapshot({ dataset: dataset() }), openProject: PROJECT });
   });
 
   it("adopts the open project in the same update as the dataset", () => {
@@ -246,23 +201,9 @@ describe("applyRestoredDataset", () => {
 });
 
 describe("clearDataset", () => {
-  it("clears reviewStatus along with the dataset selection", () => {
-    useStore.setState({
-      gui: snapshot({ dataset: dataset() }),
-      reviewStatus: {
-        byImage: { "a.jpg": "completed" },
-        hasDetections: { "a.jpg": true },
-        unreadable: ["/proj/ds/annotations/2-11-26/b.json"],
-        activeFilter: "reviewed",
-      },
-    });
+  it("clears the dataset selection", () => {
+    useStore.setState({ gui: snapshot({ dataset: dataset() }) });
     s().clearDataset();
     expect(s().gui.dataset.dataset_root).toBeNull();
-    expect(s().reviewStatus).toEqual({
-      byImage: {},
-      hasDetections: {},
-      unreadable: [],
-      activeFilter: "all",
-    });
   });
 });

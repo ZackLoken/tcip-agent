@@ -1,7 +1,5 @@
-"""Data-fidelity coverage: confirmed negatives survive every save door (MCP save_annotations,
-ReviewEngine.save_gt), inference predictions carry model provenance, SAM staging carries
-created_at, review label backups capture the canonical JSON format, and stratified splits count
-JSON objects, not JSON lines.
+"""Data-fidelity coverage: an emptied document survives the MCP save door, inference predictions
+carry model provenance, and stratified splits count JSON objects, not JSON lines.
 """
 
 from __future__ import annotations
@@ -53,19 +51,6 @@ def test_mcp_save_annotations_refuses_by_index_through_the_decoders_checks(tmp_p
     assert not det.exists()
 
 
-def test_review_engine_save_gt_empty_keeps_record(tmp_path):
-    """An emptied GT keeps an ``{"annotations": []}`` record (not a negative until confirmed),
-    never deleting the label file."""
-    from tcip_annotation.review_engine import ReviewContext, ReviewEngine
-
-    eng = ReviewEngine(state_dir=str(tmp_path / "state"))
-    ctx = ReviewContext(img_name="a.jpg", img_width=100, img_height=80, gt=[], preds=[])
-    det = tmp_path / "labels" / "a.json"
-    assert eng.save_gt(ctx, path=str(det)) is True
-    assert det.is_file()
-    assert json.loads(det.read_text())["annotations"] == []
-
-
 def test_encode_predictions_stamps_model_provenance():
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
@@ -80,25 +65,11 @@ def test_encode_predictions_stamps_model_provenance():
     assert obj["score"] == pytest.approx(0.9)
 
 
-def test_backup_original_labels_captures_json(tmp_path):
-    from tcip_annotation.review_engine import ReviewEngine
-
-    eng = ReviewEngine(state_dir=str(tmp_path / "state"))
-    d = tmp_path / "detect"
-    d.mkdir()
-    json_io.write_annotations(d / "a.json", [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
-                              100, 80)
-    json_io.write_annotations(d / "b.json", [Annotation(subject="bud", geometry=BBox(2, 2, 8, 8))],
-                              100, 80)
-    captured = eng.backup_original_labels(str(d))
-    assert captured == 2                                        # both canonical .json labels
-    assert (d / ".original" / "a.json").is_file()
-
-
 def test_draw_splits_counts_json_objects_not_lines(tmp_path):
     """A pretty-printed negative ({annotations: []}) is several text lines; the stratifier sees 0."""
-    from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
     from tcip_mcp.tools.data_tools import draw_splits
+
+    from tests._producer_fixtures import mark_complete
 
     for i in range(4):
         _img(tmp_path, name=f"img_{i}.JPG")
@@ -110,11 +81,10 @@ def test_draw_splits_counts_json_objects_not_lines(tmp_path):
 
     json_io.write_annotations(labels / "img_0.json", [_box(), _box(), _box()], 100, 80)
     json_io.write_annotations(labels / "img_1.json", [_box()], 100, 80)
-    json_io.write_annotations(labels / "img_2.json", [], 100, 80, keep_empty=True)  # negative
-    json_io.write_annotations(labels / "img_3.json", [], 100, 80, keep_empty=True)  # negative
-    record_image_statuses(tmp_path, status_bucket("bud", None),
-                          {"img_2.JPG": "negative", "img_3.JPG": "negative"},
-                          recorded_by="user:tester")
+    for negative in ("img_2", "img_3"):
+        json_io.write_annotations(labels / f"{negative}.json", [], 100, 80, keep_empty=True)
+        mark_complete(tmp_path / "images" / f"{negative}.JPG", labels / f"{negative}.json", "bud",
+                      project=tmp_path)
 
     res = draw_splits(tmp_path, str(tmp_path), train_ratio=0.5, val_ratio=0.5, calibration_ratio=0.0,
                       group_by="stem", subject="bud")

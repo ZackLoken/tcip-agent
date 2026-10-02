@@ -18,34 +18,16 @@ name-based label is undecodable without it.
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from tcip_store import StoreError
-
-from tcip_mcp.dataset_layout import IMAGE_STATUSES, label_filename
-from tcip_web.identity import resolve_user, user_id
 from tcip_web.label_annotations_cache import cached_label_annotations
 from tcip_web.paths import allowed_path
 
-logger = logging.getLogger(__name__)
-
 router = APIRouter(prefix="/api/subjects", tags=["subjects"])
-
-
-def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
-    """Record a dataset-native GUI mutation in that dataset's own audit log.
-
-    A failed append raises ``AuditEntryNotWritten``: the mutation has already committed by the time
-    this runs.
-    """
-    from tcip_web.routes.audit_gap import record_committed
-
-    record_committed(tool, arguments, scope=dataset_root)
 
 
 def _subjects_in_dir(d: Path) -> tuple[set[str], list[str]]:
@@ -127,10 +109,7 @@ def save_subjects(payload: SaveSubjectsPayload) -> dict:
     declares, naming what it would have lost. Also refuses (400) a same-values attribute type
     change (categorical to ordinal or back): this route passes neither ``allow_type_changes`` nor
     ``allow_removals``; ``write_subject_registry`` states either. Refuses (409) a stale
-    ``version``. Once the write lands, the outgoing digest is recorded onto the changed subject's
-    still-unstamped confirmations; what it stamped, the confirmations that now predate the
-    vocabulary in effect, and any warning, ride back in ``schema_change_sweep``. A write whose
-    audit line could not follow answers 409.
+    ``version``. A write whose audit line could not follow answers 409.
     """
     from tcip_store import Version, VersionConflict
 
@@ -154,197 +133,4 @@ def save_subjects(payload: SaveSubjectsPayload) -> dict:
         raise audit_gap_409(exc, {"status": "ok", **exc.arguments}) from exc
     except OSError as exc:
         raise HTTPException(500, f"could not write {dataset_root}'s registry: {exc}") from exc
-    if committed["schema_change_sweep"]["warning"]:
-        logger.warning("%s", committed["schema_change_sweep"]["warning"])
     return {"status": "ok", **committed}
-
-
-# ── Per-image status (used by Complete checkbox + status filter) ─────────
-
-
-class ImageStatusPayload(BaseModel):
-    image_name: str
-    status: str  # "complete" | "partial" | "negative" | "unannotated"
-    subject: str | None = None  # the object a Complete is scoped to (not necessarily a trait)
-    date: str | None = None
-    dataset_root: str
-    # GUI-set identity (bare name), recorded as "user:<name>" against each status this write sets.
-    user: Optional[str] = None
-
-
-def _load_status_store(dataset_root: str) -> dict[str, dict[str, str]]:
-    """The dataset's status store, normalized. Absence is an empty store; a store that will not
-    decode is a 500.
-    """
-    from tcip_store import DecodeError, read
-
-    from tcip_mcp.dataset_layout import image_status_key, status_tokens
-
-    try:
-        return status_tokens(read(image_status_key(dataset_root), default={}))
-    except DecodeError as exc:
-        raise HTTPException(500, f"the image status store under {dataset_root} "
-                                 f"does not decode: {exc}") from exc
-
-
-def _bucket(subject: str | None, date: str | None) -> str:
-    from tcip_mcp.dataset_layout import status_bucket
-
-    return status_bucket(subject or "", date)
-
-
-def _require_bucket(subject: str | None, date: str | None) -> str:
-    """``_bucket``, but an image-status write (single or bulk) must name a real subject or fail."""
-    if not subject:
-        raise HTTPException(400, "cannot record image status with no subject; pass a subject")
-    return _bucket(subject, date)
-
-
-def _stamp_digest(dataset_root: str, bucket: str, subject: str,
-                  image_names: Iterable[str]) -> bool:
-    """Record the subject's current attribute-schema digest against each of ``image_names``, and
-    answer whether the stamp landed.
-
-    Never blocks the status write: no ``subjects.json``, a registry that does not declare the
-    subject, an unreadable registry or a failure writing the sidecar leaves these images unstamped
-    (admitted, not quarantined, on read; see ``stale_finished_names``) and answers ``False``.
-    """
-    from tcip_mcp.subject_registry import attribute_schema_digest, read_registry
-    from tcip_mcp.dataset_layout import stamp_image_status_digests, subjects_path
-
-    if not subjects_path(dataset_root).is_file():
-        return False
-    try:
-        digest = attribute_schema_digest(read_registry(dataset_root), subject)
-        if digest is None:
-            return False
-        stamp_image_status_digests(dataset_root, bucket, image_names, digest)
-    except (OSError, ValueError, StoreError):
-        # ValueError covers json.JSONDecodeError and subject_registry.RegistryError (its subclass).
-        logger.warning("could not stamp the attribute-schema digest for %s", bucket, exc_info=True)
-        return False
-    return True
-
-
-@router.get("/image_status")
-def get_image_status(dataset_root: str, subject: str | None = None,
-                     date: str | None = None) -> dict:
-    """Statuses for one subject/date of the dataset at ``dataset_root``, plus which finished ones
-    (complete or negative) are stale under the subject's current attribute schema
-    (``stale_definition``, sorted names)."""
-    from tcip_mcp.pipelines.data.label_queries import stale_finished_names
-
-    root = str(allowed_path(dataset_root))
-    statuses = _load_status_store(root).get(_bucket(subject, date), {})
-    stale = stale_finished_names(root, subject=subject, date=date)
-    return {"statuses": statuses, "stale_definition": sorted(stale)}
-
-
-@router.post("/image_status")
-def set_image_status(payload: ImageStatusPayload) -> dict:
-    if payload.status not in IMAGE_STATUSES:
-        raise HTTPException(400, f"invalid status: {payload.status}")
-    from tcip_mcp.dataset_layout import record_image_statuses
-
-    root = str(allowed_path(payload.dataset_root))
-    bucket = _require_bucket(payload.subject, payload.date)
-    record_image_statuses(root, bucket, {payload.image_name: payload.status},
-                          recorded_by=user_id(resolve_user(payload.user)))
-    assert payload.subject, "_require_bucket refused a status write naming no subject"
-    stamped = _stamp_digest(root, bucket, payload.subject, [payload.image_name])
-    committed = {"status": "ok", "digest_stamped": stamped}
-    from tcip_mcp.audit import AuditEntryNotWritten
-    from tcip_web.routes.audit_gap import audit_gap_409
-
-    try:
-        _audit_dataset_write(
-            root,
-            "gui_set_image_status",
-            {"image_name": payload.image_name, "status": payload.status,
-             "subject": payload.subject, "date": payload.date},
-        )
-    except AuditEntryNotWritten as exc:
-        raise audit_gap_409(exc, committed) from exc
-    return committed
-
-
-class ImageStatusBulkPayload(BaseModel):
-    statuses: dict[str, str]  # image_name → status
-    subject: str | None = None
-    date: str | None = None
-    dataset_root: str
-    # GUI-set identity (bare name), recorded as "user:<name>" against each status this write sets.
-    user: Optional[str] = None
-
-
-@router.post("/image_status/bulk")
-def set_image_status_bulk(payload: ImageStatusBulkPayload) -> dict:
-    from tcip_mcp.dataset_layout import record_image_statuses
-
-    root = str(allowed_path(payload.dataset_root))
-    bucket = _require_bucket(payload.subject, payload.date)
-    applied = {name: st for name, st in payload.statuses.items() if st in IMAGE_STATUSES}
-    if applied:
-        record_image_statuses(root, bucket, applied,
-                              recorded_by=user_id(resolve_user(payload.user)))
-    assert payload.subject, "_require_bucket refused a status write naming no subject"
-    stamped = _stamp_digest(root, bucket, payload.subject, applied)
-    not_stamped = [] if stamped else sorted(applied)
-    committed = {"status": "ok", "n": len(payload.statuses), "digest_unstamped": not_stamped}
-    # Record what was actually written, not the raw payload: an entry whose status was skipped
-    # would overstate the change, and a no-op write logged as a mutation is noise.
-    if applied:
-        from tcip_mcp.audit import AuditEntryNotWritten
-        from tcip_web.routes.audit_gap import audit_gap_409
-
-        try:
-            _audit_dataset_write(
-                root,
-                "gui_set_image_status_bulk",
-                {"statuses": applied, "subject": payload.subject, "date": payload.date},
-            )
-        except AuditEntryNotWritten as exc:
-            raise audit_gap_409(exc, committed) from exc
-    return committed
-
-
-class DerivePayload(BaseModel):
-    annotations_dir: Optional[str] = None
-    subject: str
-    image_list: list[str]
-    complete_override: list[str] = []
-
-
-@router.post("/image_status/derive")
-def derive_image_status(payload: DerivePayload) -> dict:
-    """Compute initial per-image status from the per-image label files.
-
-    The mapping itself is ``dataset_layout.derive_status``, with ``has_content`` scoped to
-    ``subject`` through ``annotations_hold_subject``. An image whose label file would not read is
-    left out of ``statuses`` and its label document's path is reported in ``unreadable`` instead.
-    """
-    from tcip_annotation.json_io import UnreadableLabelDocument
-
-    from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status
-
-    guarded_dir = (str(allowed_path(payload.annotations_dir)) if payload.annotations_dir
-                   else None)
-    adir = Path(guarded_dir) if guarded_dir else None
-    complete_set = set(payload.complete_override)
-
-    statuses: dict[str, str] = {}
-    unreadable: list[str] = []
-    for name in payload.image_list:
-        stem = name.rsplit(".", 1)[0]
-        has_any = False
-        if adir:
-            label_path = adir / label_filename(stem)
-            try:
-                annotations = cached_label_annotations(label_path)
-            except UnreadableLabelDocument:
-                unreadable.append(str(label_path))
-                continue
-            has_any = annotations_hold_subject(annotations, payload.subject)
-        statuses[name] = derive_status(completed=name in complete_set, has_content=has_any)
-
-    return {"statuses": statuses, "unreadable": unreadable}

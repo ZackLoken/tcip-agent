@@ -157,7 +157,6 @@ def test_freeze_selection_keeps_two_scopes_same_named_members_apart(tmp_path: Pa
     date's member and bind a later run to half the partition its record describes. The partition
     is composed through the resolution's own partition producer over the run's samples and set
     into a real run's launch record past its writer."""
-    from tcip_mcp.dataset_layout import status_bucket
     from tcip_mcp.pipelines.data.selection import Sample
     from tcip_mcp.pipelines.data.split_construction import _partition_record
     from tcip_mcp.tools.data_tools import freeze_selection
@@ -170,8 +169,7 @@ def test_freeze_selection_keeps_two_scopes_same_named_members_apart(tmp_path: Pa
         for index, stem in enumerate(stems):
             sample = Sample(member=stem, source=str(images_dir / f"{stem}.jpg"),
                             ground_truth=str(labels_dir / f"{stem}.json"), group=stem,
-                            side="train" if index == 0 else "val",
-                            confirmation_bucket=status_bucket(SUBJECT, date))
+                            side="train" if index == 0 else "val")
             (train if index == 0 else val).append(sample)
     assert {s.member for s in train} == {s.member for s in train[:1]}, (
         "both dates must contribute the same member name for this to bite")

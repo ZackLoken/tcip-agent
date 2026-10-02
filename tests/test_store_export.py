@@ -100,7 +100,7 @@ def _entries(root: Path) -> dict[str, bytes]:
 
 def _write_the_value_set(root: Path) -> None:
     """The same writes on either backend: two stores sharing a shape, a nested key, and a log."""
-    ts.replace(_key(STATE_ALPHA, root, "image_status"), {"a_1.jpg": "negative", "ü": "complete"})
+    ts.replace(_key(STATE_ALPHA, root, "plot_notes"), {"a_1.jpg": "negative", "ü": "complete"})
     ts.replace(_key(STATE_BETA, root, "gui"), {"active_tab": "annotate"})
     ts.replace(_key(LWW, root, "kept"), {"n": 1})
     ts.replace(_key(LWW, root, "removed"), {"n": 2})
@@ -177,13 +177,13 @@ def test_two_keys_that_would_land_on_one_file_refuse_the_export_before_it_writes
 def test_an_export_whose_keys_are_distinct_writes_both_stores_files(database):
     """The refusal above is about one file claimed twice, not about two stores sharing a shape:
     the shape is what thirteen shipped stores do."""
-    ts.replace(_key(STATE_ALPHA, database, "image_status"), {"owner": "alpha"})
+    ts.replace(_key(STATE_ALPHA, database, "plot_notes"), {"owner": "alpha"})
     ts.replace(_key(STATE_BETA, database, "gui"), {"owner": "beta"})
 
     exported = store_export.export_root(str(database), report=lambda line: None)
 
     documents = database / "documents"
-    assert ts.RECORD_JSON.decode((documents / "image_status.json").read_bytes()) == {"owner": "alpha"}
+    assert ts.RECORD_JSON.decode((documents / "plot_notes.json").read_bytes()) == {"owner": "alpha"}
     assert ts.RECORD_JSON.decode((documents / "gui.json").read_bytes()) == {"owner": "beta"}
     assert not exported.raced
 

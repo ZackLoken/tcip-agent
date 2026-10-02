@@ -68,9 +68,8 @@ class Annotation:
     attribute name to its value name. ``score`` set means this is a prediction; a classified
     prediction's ``subject`` is the object class and its decoded call sits under ``attributes``.
     ``created_by``/``created_at`` name who authored it and ``accepted_by``/``accepted_at`` who
-    accepted it into ground truth; ``accepted_by_rule`` names the assessment a rule-based
-    admission was verified against, beside ``accepted_by``. ``iscrowd`` marks a region of
-    unseparated objects of ``subject``, never one instance.
+    accepted it into ground truth. ``iscrowd`` marks a region of unseparated objects of
+    ``subject``, never one instance.
     """
 
     subject: str
@@ -82,7 +81,6 @@ class Annotation:
     created_at: str | None = None
     accepted_by: str | None = None
     accepted_at: str | None = None
-    accepted_by_rule: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.subject, str) or not self.subject:
@@ -135,33 +133,3 @@ def bbox_of(geometry: BBox | Polygon) -> BBox:
     xs = [pt[0] for ring in geometry.rings for pt in ring]
     ys = [pt[1] for ring in geometry.rings for pt in ring]
     return BBox(min(xs), min(ys), max(xs), max(ys))
-
-
-@dataclass
-class AnnotationState:
-    """All annotation data for one image.  GUI-free data model."""
-
-    image_path: str = ""
-    img_width: int = 0
-    img_height: int = 0
-
-    annotations: list[Annotation] = field(default_factory=list)
-    predictions: list[Annotation] = field(default_factory=list)
-
-    current_polygon: list[tuple[float, float]] = field(default_factory=list)
-    mode: str = "box"
-    # The subject new geometry is authored under; attribute values are set per annotation.
-    active_subject: str = ""
-
-    # Undo / redo
-    _undo_stack: list = field(default_factory=list, repr=False)
-    _redo_stack: list = field(default_factory=list, repr=False)
-
-    # Spatial index cache
-    _poly_bboxes: list[tuple[float, float, float, float]] = field(
-        default_factory=list, repr=False
-    )
-    _poly_bboxes_dirty: bool = field(default=True, repr=False)
-
-    # Selection
-    selected_polygon_idx: int | None = None

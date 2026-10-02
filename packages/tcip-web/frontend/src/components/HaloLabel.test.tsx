@@ -4,7 +4,7 @@ import { cleanup, render } from "@testing-library/react";
 import { HaloLabel } from "@/components/HaloLabel";
 
 // Konva needs a real 2D canvas; render its Text as an inspectable div (the same pattern
-// AnnotateTab.test.tsx / ReviewTab.test.tsx use for the tabs that mount this component).
+// AnnotateTab.test.tsx uses for the tab that mounts this component).
 vi.mock("react-konva", () => ({
   Text: (props: {
     text?: string;
@@ -43,7 +43,7 @@ describe("HaloLabel", () => {
     expect(nodes[1]).toHaveAttribute("data-text", "tree");
   });
 
-  it("renders ReviewTab's usage (a detection label with a confidence suffix)", () => {
+  it("renders a proposal's usage (a label with a confidence suffix)", () => {
     const { getAllByTestId } = render(
       <HaloLabel x={100} y={50} text="tree 0.87" fill="#3388ff" size={12.1} />,
     );

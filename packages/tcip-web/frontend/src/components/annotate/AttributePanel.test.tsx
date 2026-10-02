@@ -42,7 +42,6 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
       n_subjects: 1,
       subjects_path: "C:/data/subjects.json",
       version: "v2",
-      schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     };
     const message = "replace_registry completed and its audit entry could not be written";
     vi.spyOn(subjectsApi, "save").mockRejectedValue(
@@ -53,7 +52,7 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
       ),
     );
 
-    render(<AttributePanel selectedBoxIdx={null} locked={false} />);
+    render(<AttributePanel selectedBoxIdx={null} />);
     fillAttributeDraft("opening", "closed\nopen");
     await act(async () => {
       fireEvent.click(screen.getByText("Add"));
@@ -73,7 +72,7 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
       unreadable: [],
     });
 
-    render(<AttributePanel selectedBoxIdx={null} locked={false} />);
+    render(<AttributePanel selectedBoxIdx={null} />);
     fillAttributeDraft("opening", "closed\nopen");
     await act(async () => {
       fireEvent.click(screen.getByText("Add"));

@@ -2,77 +2,34 @@
 
 `propose_annotations` takes an optional `grid_cells`/`tile_size`/`overlap` region: when given, the
 tool crops the source image to the named cells' bounding rect, hands the engine only that crop, and
-offsets the returned candidates back to the source image's full-frame coordinates. `auto_mask`
-itself (`tcip_annotation.sam_wrapper`) is untouched; every hop here is on the tcip-mcp side of the
-package boundary.
+offsets the returned candidates back to the source image's full-frame coordinates.
 
-These tests drive the real crop/offset code with a fake SAM2 (the pattern
-`tests/test_sam_multiring_proposals.py` uses), so `auto_mask`'s own re-orientation call is real,
-not mocked away.
+These tests drive the real crop/offset code with an engine that reads a red patch out of whatever
+pixels it is handed, so the crop the tool writes is what decides the answer.
 """
 
 from __future__ import annotations
 
-import sys
-import types
 from pathlib import Path
 
 import numpy as np
 import pytest
 from PIL import Image
 
-pytest.importorskip("cv2")
-pytest.importorskip("torch")
 
+class PatchProposer:
+    """Reports the red patch in whatever pixels it is handed, so the crop is what decides the
+    answer."""
 
-def _install_fake_sam(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Fake only the ``sam2`` package + checkpoint file, so ``auto_mask`` (contour extraction,
-    EXIF re-orientation) is the real code under test.
-
-    ``FakeAutoMaskGenerator.generate`` reads a mask straight out of whatever pixels it is handed
-    (a bright-red patch on a dark background), so its result is genuinely driven by the crop the
-    tool passes it, not a pre-baked coordinate.
-    """
-    class FakePredictor:
-        def __init__(self, model):
-            self.model = model
-
-    class FakeAutoMaskGenerator:
-        def __init__(self, **kwargs):
-            pass
-
-        def generate(self, img_rgb: np.ndarray) -> list[dict]:
-            mask = (img_rgb[:, :, 0] > 200) & (img_rgb[:, :, 1] < 50) & (img_rgb[:, :, 2] < 50)
-            ys, xs = np.nonzero(mask)
-            if len(xs) == 0:
-                return []
-            bbox = [float(xs.min()), float(ys.min()),
-                    float(xs.max() - xs.min() + 1), float(ys.max() - ys.min() + 1)]
-            return [{"segmentation": mask, "area": int(mask.sum()), "bbox": bbox,
-                     "stability_score": 0.95, "predicted_iou": 0.92}]
-
-    build_mod = types.ModuleType("sam2.build_sam")
-    build_mod.build_sam2 = lambda config, ckpt, device: object()
-    predictor_mod = types.ModuleType("sam2.sam2_image_predictor")
-    predictor_mod.SAM2ImagePredictor = FakePredictor
-    autogen_mod = types.ModuleType("sam2.automatic_mask_generator")
-    autogen_mod.SAM2AutomaticMaskGenerator = FakeAutoMaskGenerator
-    monkeypatch.setitem(sys.modules, "sam2", types.ModuleType("sam2"))
-    monkeypatch.setitem(sys.modules, "sam2.build_sam", build_mod)
-    monkeypatch.setitem(sys.modules, "sam2.sam2_image_predictor", predictor_mod)
-    monkeypatch.setitem(sys.modules, "sam2.automatic_mask_generator", autogen_mod)
-
-    home = tmp_path / "sam_home"
-    ckpt = home / ".cache" / "tcip" / "sam2" / "sam2.1_hiera_tiny.pt"
-    ckpt.parent.mkdir(parents=True)
-    ckpt.write_bytes(b"fake")
-    monkeypatch.setattr(Path, "home", lambda: home)
-
-    from tcip_annotation import sam_wrapper
-
-    monkeypatch.setattr(sam_wrapper, "_predictor", None)
-    monkeypatch.setattr(sam_wrapper, "_current_model_type", None)
-    monkeypatch.setattr(sam_wrapper, "_current_image_path", None)
+    def propose(self, image_path, **params):
+        arr = np.asarray(Image.open(image_path).convert("RGB"))
+        mask = (arr[:, :, 0] > 200) & (arr[:, :, 1] < 50) & (arr[:, :, 2] < 50)
+        ys, xs = np.nonzero(mask)
+        bx1, by1 = float(xs.min()), float(ys.min())
+        bx2, by2 = float(xs.max() + 1), float(ys.max() + 1)
+        return [{"candidate_id": 0, "bbox": [bx1, by1, bx2, by2], "area": int(mask.sum()),
+                 "score": 0.9, "engine": "patch", "engine_meta": {},
+                 "rings": [[(bx1, by1), (bx2, by1), (bx2, by2), (bx1, by2)]]}]
 
 
 #: The upright (as-viewed) frame this fixture draws the patch against.
@@ -130,8 +87,8 @@ def test_region_crop_carries_no_exif_orientation_tag(
     exif_rotated_source: Path, tmp_path: Path,
 ) -> None:
     """The crop `propose_annotations` writes for the engine to read must carry no EXIF
-    orientation tag of its own: it is taken from the already-oriented frame, and a second
-    (wrong) rotation inside ``auto_mask`` would silently displace every coordinate."""
+    orientation tag of its own: it is taken from the already-oriented frame, and an engine that
+    honored a tag on it would rotate a second time and displace every coordinate."""
     from tcip_mcp.pipelines.raster_source import PhotographicSource
     from tcip_mcp.tools.proposal_tools import _region_rect_from_cells, _write_region_crop
     from tcip_mcp.pipelines.reference_grid import reference_cells
@@ -160,14 +117,15 @@ def test_region_scoped_proposal_lands_at_the_full_frame_coordinates(
     offset back, must report the patch at its true upright full-frame location, not a crop-local
     or a wrongly-re-rotated one.
     """
-    _install_fake_sam(monkeypatch, tmp_path)
+    from tcip_mcp.pipelines import proposal
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
+    monkeypatch.setitem(proposal._ENGINES, "patch", PatchProposer())
+
     result = propose_annotations(
-        tmp_path, image_path=str(exif_rotated_source),
+        tmp_path, image_path=str(exif_rotated_source), engine="patch",
         grid_cells=["B1", "C1"],
         tile_size=TILE_SIZE,
-        engine_params={"model_type": "hiera_t"},
     )
     assert "error" not in result, result
     assert result["candidate_count"] == 1
@@ -201,7 +159,7 @@ def test_region_scoped_proposal_cleans_up_temp_crop_on_engine_failure(
     before = set(Path(tempfile_gettempdir()).glob("tcip_propose_crop_*"))
     with pytest.raises(RuntimeError, match="engine exploded"):
         propose_annotations(
-            tmp_path, image_path=str(exif_rotated_source),
+            tmp_path, image_path=str(exif_rotated_source), engine="boom",
             grid_cells=["B1", "C1"],
             tile_size=TILE_SIZE,
         )
@@ -217,9 +175,8 @@ def _region_cells() -> list:
 
 
 class TestRegionCellNamesResolveThroughTheOneLookup:
-    """A region's cell names resolve through the lookup a point prompt's names resolve through
-    (``sam_wrapper.grid_to_rect``): the same cell shapes accepted, the same references refused, so
-    naming a region and naming a prompt cannot disagree about which cell a name is."""
+    """A region's cell names resolve through the one cell-name lookup
+    (``tcip_annotation.grid.grid_to_rect``): every accepted cell shape, every refused reference."""
 
     def test_named_cells_bound_their_combined_rect(self) -> None:
         from tcip_mcp.tools.proposal_tools import _region_rect_from_cells
@@ -291,20 +248,6 @@ class TestRegionFrameIsTheResolvedImageSources:
         frame[y1:y2, x1:x2] = (255, 0, 0)
         manifest = _write_rgb_band_group(images_dir, "capture_001", frame)
 
-        class PatchProposer:
-            """Reports the red patch in whatever pixels it is handed, so the crop is what decides
-            the answer."""
-
-            def propose(self, image_path, **params):
-                arr = np.asarray(Image.open(image_path).convert("RGB"))
-                mask = (arr[:, :, 0] > 200) & (arr[:, :, 1] < 50) & (arr[:, :, 2] < 50)
-                ys, xs = np.nonzero(mask)
-                bx1, by1 = float(xs.min()), float(ys.min())
-                bx2, by2 = float(xs.max() + 1), float(ys.max() + 1)
-                return [{"candidate_id": 0, "bbox": [bx1, by1, bx2, by2], "area": int(mask.sum()),
-                         "score": 0.9, "engine": "patch", "engine_meta": {},
-                         "rings": [[(bx1, by1), (bx2, by1), (bx2, by2), (bx1, by2)]]}]
-
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: PatchProposer())
 
         result = propose_annotations(tmp_path, image_path=str(manifest), engine="patch",
@@ -344,8 +287,8 @@ class TestRegionFrameIsTheResolvedImageSources:
 
 
 class TestWholeFrameDefaultIsUnaffected:
-    """``grid_cells=None`` (the default) must take the exact whole-frame path this tool has
-    always taken: the offset step must never even run."""
+    """``grid_cells=None`` (the default) takes the whole-frame path: the offset step never
+    runs."""
 
     def test_offset_helper_is_never_called_without_grid_cells(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -365,7 +308,7 @@ class TestWholeFrameDefaultIsUnaffected:
             def propose(self, image_path, **params):
                 return [{
                     "candidate_id": 0, "bbox": [10.0, 10.0, 30.0, 30.0], "area": 400,
-                    "score": 0.9, "engine": "sam", "engine_meta": {},
+                    "score": 0.9, "engine": "stub", "engine_meta": {},
                     "rings": [[(10, 10), (30, 10), (30, 30), (10, 30)]],
                 }]
 
@@ -374,7 +317,7 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = tmp_path / "whole_frame.jpg"
         Image.new("RGB", (64, 64), color=(50, 50, 50)).save(img_path)
 
-        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path))
+        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
         assert "error" not in result, result
         assert called == []
         assert result["candidates"][0]["bbox"] == [10.0, 10.0, 30.0, 30.0]
@@ -390,7 +333,7 @@ class TestWholeFrameDefaultIsUnaffected:
             def propose(self, image_path, **params):
                 return [{
                     "candidate_id": 0, "bbox": [1.0, 1.0, 2.0, 2.0], "area": 1,
-                    "score": 0.5, "engine": "sam", "engine_meta": {}, "rings": [[(1, 1), (2, 1), (2, 2)]],
+                    "score": 0.5, "engine": "stub", "engine_meta": {}, "rings": [[(1, 1), (2, 1), (2, 2)]],
                 }]
 
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: OneBoxProposer())
@@ -400,7 +343,7 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = images_dir / "no_region.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
-        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path))
+        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
         assert "error" not in result, result
 
         envelope = ts.read(proposal_tools._staging_key_for(str(img_path)).key)
@@ -424,7 +367,7 @@ class TestWholeFrameDefaultIsUnaffected:
             def propose(self, image_path, **params):
                 return [{
                     "candidate_id": 0, "bbox": np.array([1.0, 1.0, 2.0, 2.0]), "area": 1,
-                    "score": 0.5, "engine": "sam", "engine_meta": {}, "rings": [],
+                    "score": 0.5, "engine": "stub", "engine_meta": {}, "rings": [],
                 }]
 
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: ArrayBoxProposer())
@@ -434,7 +377,7 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = images_dir / "unstorable.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
-        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path))
+        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
 
         assert "candidates[0].bbox" in result["error"]
         assert ts.read(proposal_tools._staging_key_for(str(img_path)).key, default=None) is None
@@ -451,7 +394,7 @@ class TestWholeFrameDefaultIsUnaffected:
         class TwoPointProposer:
             def propose(self, image_path, **params):
                 return [{"candidate_id": 0, "bbox": [1.0, 1.0, 2.0, 2.0], "area": 1,
-                         "score": 0.5, "engine": "sam", "engine_meta": {},
+                         "score": 0.5, "engine": "stub", "engine_meta": {},
                          "rings": [[(1, 1), (2, 2)]]}]
 
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: TwoPointProposer())
@@ -460,7 +403,7 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = images_dir / "short_ring.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
-        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path))
+        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
 
         assert "three or more points" in result.get("error", ""), result
         assert ts.read(proposal_tools._staging_key_for(str(img_path)).key, default=None) is None
@@ -477,7 +420,7 @@ class TestWholeFrameDefaultIsUnaffected:
             def propose(self, image_path, **params):
                 return [{
                     "candidate_id": 0, "bbox": [1.0, 1.0, 2.0, 2.0], "area": 1,
-                    "score": 0.5, "engine": "sam", "engine_meta": {},
+                    "score": 0.5, "engine": "stub", "engine_meta": {},
                     "rings": [[(1, 1), (2, 1), (2, 2)]],
                 }]
 
@@ -488,7 +431,7 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = images_dir / "storable.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
-        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path))
+        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
 
         assert "error" not in result, result
         envelope = ts.read(proposal_tools._staging_key_for(str(img_path)).key)

@@ -250,8 +250,14 @@ def gate(
     if delivery_kind in DETECTOR_KINDS:
         bind(revision, delivery_kind, buckets={str(b.path): b.scope.subjects for b in buckets})
     if delivery_kind == STATE_CROSSING_DATES:
-        unclassified = [str(b.path) for b in buckets
-                        if b.scope.positive_id(revision.entry.positive_value) is None]
+        from tcip_annotation.json_io import ClassKeyUnknown, class_id
+
+        unclassified = []
+        for b in buckets:
+            try:
+                class_id(revision.entry.positive_value, b.scope.value_ids)
+            except ClassKeyUnknown:
+                unclassified.append(str(b.path))
         if unclassified:
             raise DeliveryRefused(
                 f"{unclassified} classify no {revision.entry.positive_value!r}: the classifier "

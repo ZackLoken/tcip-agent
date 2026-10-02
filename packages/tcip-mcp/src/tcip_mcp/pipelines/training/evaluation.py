@@ -14,7 +14,7 @@ import contextlib
 import io
 import logging
 import math
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -327,10 +327,6 @@ def gt_facts(rec: dict) -> list:
     return sorted([g["category_id"], g["bbox"], g["iscrowd"]] for g in rec["gt"])
 
 
-def _centers_xywh(anns: list[dict]) -> list[tuple[float, float]]:
-    return [(a["bbox"][0] + a["bbox"][2] / 2.0, a["bbox"][1] + a["bbox"][3] / 2.0) for a in anns]
-
-
 def _char_size_xywh(a: dict) -> float:
     """Characteristic size of a box = sqrt(w*h), scale-robust for a tolerance basis."""
     w, h = float(a["bbox"][2]), float(a["bbox"][3])
@@ -374,85 +370,14 @@ def gt_class_typical_count(per_image: list[dict], class_id: int | None = None) -
     return mean_of_present_counts(counts)
 
 
-def _match_cost(criterion: dict) -> tuple[Callable[[list[float], list[float]], float], float]:
-    """How far one xywh box is from another under ``criterion``, and the farthest a match may be:
-    the distance between centers within ``tolerance`` for a center match, one minus the IoU within
-    one minus ``iou_threshold`` for an IoU match."""
-    if criterion["kind"] == "center_match":
-        def center_distance(g: list[float], d: list[float]) -> float:
-            return (((g[0] + g[2] / 2) - (d[0] + d[2] / 2)) ** 2
-                    + ((g[1] + g[3] / 2) - (d[1] + d[3] / 2)) ** 2) ** 0.5
-
-        return center_distance, float(criterion["tolerance"])
-
-    def iou_distance(g: list[float], d: list[float]) -> float:
-        iw = max(0.0, min(g[0] + g[2], d[0] + d[2]) - max(g[0], d[0]))
-        ih = max(0.0, min(g[1] + g[3], d[1] + d[3]) - max(g[1], d[1]))
-        union = g[2] * g[3] + d[2] * d[3] - iw * ih
-        return 1.0 - (iw * ih / union if union > 0 else 0.0)
-
-    return iou_distance, 1.0 - float(criterion["iou_threshold"])
-
-
-def match_pairs(gt_boxes: list[list[float]], dt_boxes: list[list[float]], criterion: dict, *,
-                policy: str) -> list[tuple[int, int]]:
-    """A greedy 1:1 matcher of xywh boxes under ``criterion`` (:func:`resolve_match_criterion`),
-    the limit inclusive, under one of two stated policies. Returns ``(gt_index, dt_index)`` pairs.
-
-    ``policy="score_first"`` walks ``dt_boxes`` in the order given, each claiming its nearest
-    unused ground truth; among equally near unused ground truths the last index wins.
-
-    ``policy="distance_first"`` sorts every (gt, dt) pair within the limit by distance ascending
-    and claims the closest first, ties broken by ``(gt index, dt index)`` ascending.
-
-    Neither policy deduplicates the false-positive count: ``fp = len(dt_boxes) - len(pairs)``
-    counts every detection that never claimed a ground truth, duplicates included.
-    """
-    cost, limit = _match_cost(criterion)
-    pairs: list[tuple[int, int]] = []
-    if policy == "score_first":
-        used = [False] * len(gt_boxes)
-        for di, d in enumerate(dt_boxes):
-            best_gi, best = -1, limit
-            for gi, g in enumerate(gt_boxes):
-                if not used[gi] and cost(g, d) <= best:
-                    best, best_gi = cost(g, d), gi
-            if best_gi >= 0:
-                used[best_gi] = True
-                pairs.append((best_gi, di))
-        return pairs
-    if policy != "distance_first":
-        raise ValueError(f"match_pairs: unknown policy {policy!r}, expected 'score_first' or "
-                         "'distance_first'")
-    candidates = sorted((cost(g, d), gi, di) for gi, g in enumerate(gt_boxes)
-                        for di, d in enumerate(dt_boxes) if cost(g, d) <= limit)
-    matched_gt: set[int] = set()
-    matched_dt: set[int] = set()
-    for _, gi, di in candidates:
-        if gi not in matched_gt and di not in matched_dt:
-            matched_gt.add(gi)
-            matched_dt.add(di)
-            pairs.append((gi, di))
-    return pairs
-
-
 def _match_image(gt: list[dict], dt: list[dict], criterion: dict) -> tuple[int, int, int]:
-    """tp/fp/fn under the count's score-first policy (``dt`` pre-sorted by score descending),
-    matched under ``criterion``.
+    """tp/fp/fn on one image from the one matcher
+    (:func:`~tcip_annotation.matching.pair_detections`): a crowd region is no object to miss, and
+    an ignored detection is neither a true nor a false positive."""
+    from tcip_annotation.matching import pair_detections
 
-    COCO's crowd semantics: a crowd region is no object to miss, and a detection matching no
-    object whose center lies inside a crowd region's box is neither a true nor a false positive.
-    """
-    objects = gt_objects({"gt": gt})
-    crowds = [a["bbox"] for a in gt_objects({"gt": gt}, crowd=True)]
-    dt_centers = _centers_xywh(dt)
-    # The count's identity question: a duplicate claim on one ground truth is resolved by keeping
-    # the higher-confidence detection, never by geometry alone.
-    matched = {di for _, di in match_pairs(
-        [a["bbox"] for a in objects], [d["bbox"] for d in dt], criterion, policy="score_first")}
-    ignored = sum(1 for di, (cx, cy) in enumerate(dt_centers) if di not in matched and any(
-        x <= cx <= x + w and y <= cy <= y + h for x, y, w, h in crowds))
-    return len(matched), len(dt) - len(matched) - ignored, len(objects) - len(matched)
+    m = pair_detections(gt, dt, criterion)
+    return len(m.pairs), len(m.unpaired), len(m.missed)
 
 
 def localization_frac(trait: TraitEntry, boxes_per_image: list[list[list[float]]]

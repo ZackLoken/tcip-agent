@@ -3,37 +3,26 @@
  * All routes hit /api/* and return typed payloads.
  */
 
-import type { ImageStatus } from "@/api/subjects";
 import { AUDIT_ENTRY_NOT_WRITTEN, asJson } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import { stateSocket } from "@/api/ws";
 import {
   RENDER_CACHE_VERSION,
-  type ActionPayload,
-  type CoveragePayload,
-  type CoverageRecord,
-  type GridZoomPayload,
   type JobStatus,
   type ProjectSummary,
   type RemovalRequest,
   type RenameRequest,
+  type ServingGrid,
 } from "@/api/types.generated";
 import type { CanvasStateBody } from "@/lib/canvasSync";
-import type {
-  CompletenessResponse,
-  CompletenessSetPostBody,
-  CoverageGridResponse,
-  GridGeometry,
-} from "@/lib/coverage";
-import type { CoveragePushResponse } from "@/lib/coverageTracker";
 import { annotationsToCanvas } from "@/lib/labelSerde";
 import type {
   Annotation,
   AnnotationPayload,
   DatasetSelection,
   ImageLabels,
-  MatchesResponse,
-  ReviewImageStatus,
+  Proposal,
+  SubjectCompletion,
   TabName,
 } from "@/store/types";
 
@@ -75,6 +64,8 @@ export interface FsListing {
  *  save would 409. */
 export type LoadedLabels = ImageLabels & { base_mtime: string | null };
 
+/** One save of the one save door: the annotations and the gestures it adjudicates beside them,
+ *  by the person ``user`` names. */
 export interface SaveLabelsBody {
   image_path: string;
   // Non-empty: the backend refuses a save with nowhere to write (422); resolve that locally.
@@ -82,16 +73,30 @@ export interface SaveLabelsBody {
   annotations: AnnotationPayload[];
   /** Echo the loaded mtime token so the backend can 409 a stale (lost-update) write. */
   base_mtime?: string | null;
-  /** GUI-set annotator identity; stamped as created_by ("user:<name>") on saved GT. */
-  user?: string | null;
+  user: string;
+  /** The bucket whose proposals ``accept`` and ``reject`` name by index. */
+  bucket?: string | null;
+  accept?: number[];
+  reject?: number[];
+  /** Each subject marked complete (true) or its marks withdrawn (false). */
+  complete?: Record<string, boolean>;
+  /** The pixel ``[x, y, w, h]`` a mark covers; the whole image when absent. */
+  rect?: [number, number, number, number] | null;
+  proposals_hidden?: boolean;
+}
+
+/** What a landed save answers: the new version token and the completion it left. */
+interface Saved {
+  base_mtime: string | null;
+  completion: Record<string, SubjectCompletion>;
 }
 
 export type SaveResult =
-  | { status: "ok"; base_mtime: string | null }
+  | ({ status: "ok" } & Saved)
   | { status: "conflict" }
-  // The save committed but its audit line did not: base_mtime is the new token (the write did
-  // land), so the client heals exactly as it does on "ok"; message names the gap for a toast.
-  | { status: "unrecorded"; base_mtime: string | null; message: string };
+  // The save committed but its audit line did not: the client heals exactly as it does on "ok";
+  // message names the gap for a toast.
+  | ({ status: "unrecorded"; message: string } & Saved);
 
 /** One band's symbology, as `GET /api/images/bands` reports it: a declared name where the
  *  source has one (else its 0-index as a string), the sensor's own wavelength when known. */
@@ -267,73 +272,10 @@ export const api = {
 
     overviewJob: (job_id: string) =>
       call<OverviewJob>(`${ROUTES.getImagesOverviewsStatus}?${q({ job_id })}`),
-  },
 
-  coverage: {
-    // The coverage lattice at a subject's set grid zoom, plus the region-serving grid. Clients
-    // index the served cells and never re-derive them.
-    grid: (
-      path: string,
-      args: {
-        subject?: string | null;
-        date?: string | null;
-        datasetRoot?: string | null;
-        viewportW?: number | null;
-        viewportH?: number | null;
-        rederive?: boolean;
-      } = {},
-    ) =>
-      call<CoverageGridResponse>(
-        `${ROUTES.getCoverageGrid}?${q({
-          path,
-          subject: args.subject ?? null,
-          date: args.date ?? null,
-          dataset_root: args.datasetRoot ?? null,
-          viewport_w: args.viewportW ?? null,
-          viewport_h: args.viewportH ?? null,
-          rederive: args.rederive ?? false,
-        })}`,
-      ),
-
-    // Set one subject's coverage-lattice zoom for a dataset; no default exists anywhere.
-    setGridZoom: (body: GridZoomPayload) =>
-      call<{ status: string; subject: string; zoom: number; set_by: string; set_at: string }>(
-        ROUTES.postCoverageGridZoom,
-        { method: "POST", body: JSON.stringify(body) },
-      ),
-
-    // The stored per-image record for a (subject, date) bucket; date omitted = dateless bucket.
-    // The route wraps the record as {coverage}; unwrapped here so consumers get the bare record.
-    get: (path: string, subject: string, date: string | null) =>
-      call<{ coverage: CoverageRecord | null }>(
-        `${ROUTES.getCoverage}?${q({ path, subject, date })}`,
-      ).then((body) => body.coverage),
-
-    // Union-merged server-side; the answer also carries status/replaced/total_cells, undeclared
-    // since no caller reads them. `record` is the server's authoritative merge, never the body.
-    push: (body: CoveragePayload) =>
-      call<CoveragePushResponse>(ROUTES.postCoverage, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-
-    // Every subject's completeness record, every subject's saved-annotation count per cell, and
-    // the active subject's working-scale bar (served even absent from the file when named here).
-    completeness: (path: string, dataset_root: string | null, subject: string | null = null) =>
-      call<CompletenessResponse>(
-        `${ROUTES.getCoverageCompleteness}?${q({ path, dataset_root, subject })}`,
-      ),
-
-    // Sets one cell's completeness in the direction the caller states, never a toggle.
-    setCompleteness: (body: CompletenessSetPostBody) =>
-      call<{
-        status: string;
-        complete: boolean;
-        cells_complete: string[];
-        // The previous record's grid and cells, when a lattice mismatch replaced it wholesale;
-        // null on an ordinary write that merged into (or read) the current lattice's own record.
-        replaced: { grid: GridGeometry; cells_complete: string[] } | null;
-      }>(ROUTES.postCoverageCompleteness, { method: "POST", body: JSON.stringify(body) }),
+    // The region-serving grid over a raster: index its cells, never re-derive them.
+    servingGrid: (path: string) =>
+      call<ServingGrid>(`${ROUTES.getImagesServingGrid}?${q({ path })}`),
   },
 
   state: {
@@ -355,6 +297,7 @@ export const api = {
         img_width: number;
         img_height: number;
         annotations: Annotation[];
+        completion: Record<string, SubjectCompletion>;
         base_mtime: string | null;
       }>(`${ROUTES.getAnnotateLabels}?${q({ image_path, label_path })}`);
       const { boxes, polygons, points, imageAnnotations } = annotationsToCanvas(
@@ -368,9 +311,16 @@ export const api = {
         polygons,
         points,
         imageAnnotations,
+        completion: raw.completion,
         base_mtime: raw.base_mtime,
       };
     },
+
+    // The chosen bucket's proposals for the image, each paired, decided and admitted server-side.
+    proposals: (image_path: string, bucket: string, label_path?: string | null) =>
+      call<{ bucket: string; proposals: Proposal[] }>(
+        `${ROUTES.getAnnotateProposals}?${q({ image_path, bucket, label_path })}`,
+      ),
 
     // Not routed through call(): a 409 (the label file changed underneath the
     // client) is an expected outcome the caller resolves by reloading, not an error.
@@ -388,13 +338,11 @@ export const api = {
               ? (detail as { error?: unknown; message?: unknown; committed?: unknown })
               : null;
           if (parsed?.error === AUDIT_ENTRY_NOT_WRITTEN) {
-            const committed =
-              typeof parsed.committed === "object" && parsed.committed !== null
-                ? (parsed.committed as { base_mtime?: unknown })
-                : null;
+            const committed = parsed.committed as Saved;
             return {
               status: "unrecorded",
-              base_mtime: typeof committed?.base_mtime === "string" ? committed.base_mtime : null,
+              base_mtime: committed.base_mtime,
+              completion: committed.completion,
               message: typeof parsed.message === "string" ? parsed.message : "",
             };
           }
@@ -407,118 +355,25 @@ export const api = {
         const text = await resp.text().catch(() => "");
         throw new Error(`${resp.status} ${resp.statusText}: ${text}`);
       }
-      const data = (await resp.json()) as { base_mtime: string | null };
-      return { status: "ok", base_mtime: data.base_mtime };
-    },
-  },
-
-  review: {
-    // `signal` lets the caller cancel an in-flight recompute so a slower earlier
-    // response can't land after (and clobber) a newer one when sliders are dragged.
-    matches: (
-      body: {
-        dataset_root: string;
-        image_name: string;
-        image_path: string;
-        gt_path?: string | null;
-        pred_path?: string | null;
-        iou_threshold?: number;
-        conf_threshold?: number;
-        filter_type?: string;
-        filter_class?: string;
-      },
-      signal?: AbortSignal,
-    ) =>
-      call<MatchesResponse>(ROUTES.postReviewMatches, {
-        method: "POST",
-        body: JSON.stringify(body),
-        signal,
-      }),
-
-    action: (body: ActionPayload) =>
-      call<{
-        status: string;
-        image_status: MatchesResponse["image_status"];
-        // Per-image annotation status after the GT write (null when unchanged), for the client to sync.
-        annotation_status: ImageStatus | null;
-        // Fresh matches recomputed against the written GT; install these instead of re-fetching.
-        matches: MatchesResponse;
-      }>(ROUTES.postReviewAction, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-
-    markComplete: (body: {
-      dataset_root: string;
-      image_name: string;
-      gt_path?: string | null;
-      // The prediction bucket loaded for this image: a confirmed negative carries zero verdicts,
-      // so it has nowhere else to record which model it was reviewed against.
-      pred_dir?: string | null;
-      completed?: boolean;
-      // The subject this Complete confirms; omitted, the completion is recorded with no
-      // subject-scoped status derived.
-      subject?: string | null;
-    }) =>
-      call<{
-        status: string;
-        image_status: MatchesResponse["image_status"];
-        // Derived server-side from the GT file, scoped to subject; null when no subject was named.
-        annotation_status: ImageStatus | null;
-      }>(ROUTES.postReviewMarkComplete, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-
-    // Its files land in the label directory, but its root opens the review engine: dataset-scoped.
-    backupLabels: (dataset_root: string, label_dirs: string[]) =>
-      call<{ status: string; files_backed_up: number }>(ROUTES.postReviewBackupLabels, {
-        method: "POST",
-        body: JSON.stringify({ dataset_root, label_dirs }),
-      }),
-
-    // The bucket's generation confidence and the one its assessment admits at: read-only. Lets
-    // the Review tab warn on the "Conf >=" filter and offer the confirm-admitted button.
-    generationConf: (pred_dir: string) =>
-      call<{
-        generation_conf: number | null;
-        admission_conf: number | null;
-        admission_reason: string;
-      }>(`${ROUTES.getReviewGenerationConf}?${new URLSearchParams({ pred_dir }).toString()}`),
-
-    // Batch review status + detection presence for a whole (subject, date): drives the image-level
-    // Reviewed/Unreviewed nav filter and lets the tab skip images with nothing to review.
-    imageStatuses: (params: {
-      dataset_root: string;
-      gt_dir?: string | null;
-      pred_dir?: string | null;
-    }) => {
-      const qs = new URLSearchParams({ dataset_root: params.dataset_root });
-      if (params.gt_dir) qs.set("gt_dir", params.gt_dir);
-      if (params.pred_dir) qs.set("pred_dir", params.pred_dir);
-      return call<{
-        statuses: Record<string, ReviewImageStatus>;
-        detection_stems: string[];
-        unreadable: string[];
-      }>(`${ROUTES.getReviewImageStatuses}?${qs.toString()}`);
+      const data = (await resp.json()) as Saved;
+      return { status: "ok", base_mtime: data.base_mtime, completion: data.completion };
     },
 
-    // Launch the active-learning priority queue (ranking only; triage_predictions's
-    // auto-accept-as-GT path stays agent-only) as a background job; poll its job_id via priorityQueueJob until terminal.
-    launchPriorityQueue: (body: {
-      dataset_root: string;
+    // Launch the review queue as a background job; poll its job_id via queueJob until terminal.
+    launchQueue: (body: {
       checkpoint_path: string;
       images_dir: string;
+      subject?: string | null;
       method?: string;
       budget?: number;
     }) =>
-      call<{ status: string; job_id: string }>(ROUTES.postReviewQueueLaunch, {
+      call<{ status: string; job_id: string }>(ROUTES.postAnnotateQueueLaunch, {
         method: "POST",
         body: JSON.stringify(body),
       }),
 
     // reference_member is present only when the run was bound to a selection.
-    priorityQueueJob: (jobId: string) =>
+    queueJob: (jobId: string) =>
       call<{
         job_id: string;
         status: JobStatus;
@@ -526,8 +381,6 @@ export const api = {
         queue: { image: string; score: number; reference_member?: boolean }[];
         total_candidates: number;
         reviewed_skipped: number;
-      }>(ROUTES.getReviewQueueByJobId(jobId)),
+      }>(ROUTES.getAnnotateQueueByJobId(jobId)),
   },
 };
-
-export type { Detection } from "@/store/types";

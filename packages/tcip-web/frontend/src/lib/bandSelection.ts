@@ -1,9 +1,9 @@
 import type { ImageBandInfo, ImageBandsResponse } from "@/api/client";
-import type { CoverageViewing } from "@/api/types.generated";
+import type { StretchMode } from "@/api/types.generated";
 
 /** The stretch modes a band picker offers, the server's own vocabulary minus the ``none`` mode a
  *  composite selection never asks for. */
-export type Stretch = Exclude<NonNullable<CoverageViewing["stretch"]>, "none">;
+export type Stretch = Exclude<StretchMode, "none">;
 
 export interface BandSelection {
   r: string;
@@ -60,9 +60,8 @@ export function compositeParams(
 }
 
 /** Whether a band picker may show for this frame and selection: multispectral, not a plain color
- *  photo, and a selection whose names this metadata actually declares. The one gate every render of
- *  the picker (Annotate's toolbar, Review's own) shares, so neither shows one for the other's stale
- *  metadata mid-switch. */
+ *  photo, and a selection whose names this metadata actually declares, so the picker never shows
+ *  for stale metadata mid-switch. */
 export function showsBandPicker(
   bandsInfo: ImageBandsResponse | null | undefined,
   selection: BandSelection | null | undefined,

@@ -257,7 +257,6 @@ redrawn or not, naming the reproduction for a redrawn one (bind a later run to t
 with the same seed and the flag, with the labels this run's own `run.json` recorded unchanged,
 since the redraw reads per-stem annotation counts at run time) rather than a fresh freeze.
 
-Feeding review-corrected labels back into training? `materialize_review_dataset` (see the
-`annotation` skill) builds the curated dataset from review verdicts before you split/train.
-Curation is your job: before training on review verdicts, materialize a curated set via
-`materialize_review_dataset` if none exists yet.
+Feeding review-corrected labels back into training? A person's accepts and corrections in the
+Annotate tab are written into the label documents themselves (see the `annotation` skill), so the
+dataset already holds them: draw a fresh selection over it and train.

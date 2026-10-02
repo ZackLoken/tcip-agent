@@ -148,10 +148,10 @@ def test_scan_dataset_image_census_refuses_a_stem_collision(tmp_path):
 
 
 def test_doctor_script_reports_a_stem_collision_with_no_label_file_instead_of_crashing(tmp_path):
-    """``check_negatives`` and ``check_state`` both call ``_image_stems`` directly, ahead of any
-    per-label read that could catch the same ambiguity another way: a collision with no label
-    file for its stem at all reaches only that direct call, and must still surface as a finding,
-    not a crashed subprocess."""
+    """``check_state`` calls ``_image_stems`` directly, ahead of any per-label read that could
+    catch the same ambiguity another way: a collision with no label file for its stem at all
+    reaches only that direct call, and must still surface as a finding, not a crashed
+    subprocess."""
     import subprocess
     import sys
 
@@ -169,9 +169,9 @@ def test_doctor_script_reports_a_stem_collision_with_no_label_file_instead_of_cr
 
 
 def test_doctor_script_reports_a_stem_collision_once_not_once_per_check(tmp_path):
-    """``check_negatives``, ``check_data_quality`` and ``check_state`` each independently
-    enumerate the same ``images/`` tree and reach the identical collision; a breeder reads about
-    it once, not once per check that happens to hit it."""
+    """``check_data_quality`` and ``check_state`` each independently enumerate the same
+    ``images/`` tree and reach the identical collision; a breeder reads about it once, not once
+    per check that happens to hit it."""
     import subprocess
     import sys
 

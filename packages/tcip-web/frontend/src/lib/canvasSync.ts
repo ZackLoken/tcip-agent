@@ -11,21 +11,14 @@
  *
  * Shapes are display-resolved and display-filtered: each carries the exact hex color / dash /
  * label the GUI renders, and the builders reproduce the canvas's own visibility rules (mode
- * filters, active-class filter, derived detect boxes, the labels toggle, review's single-kind
- * rule), so the server-side render (capture_live_canvas) is faithful by construction.
+ * filters, active-class filter, derived detect boxes, the labels toggle, the undecided
+ * proposals), so the server-side render (capture_live_canvas) is faithful by construction.
  */
 
 import { authorshipLabel } from "@/lib/authorshipSymbology";
+import { annotationsToCanvas } from "@/lib/labelSerde";
 import { ringsBbox } from "@/lib/polygonGeometry";
-import type { ReviewColors } from "@/lib/reviewColors";
-import {
-  annotationGeometry,
-  detectionAdmitted,
-  detGtAnnotation,
-  detPredAnnotation,
-  type ReviewGeom,
-} from "@/lib/reviewGeometry";
-import type { Box, MatchesResponse, PointShape, PolygonShape, TabName } from "@/store/types";
+import type { Box, PointShape, PolygonShape, Proposal, TabName } from "@/store/types";
 
 export interface CanvasViewport {
   x: number;
@@ -46,16 +39,12 @@ export interface CanvasShape {
   color: string;
   fill?: boolean;
   dashed?: boolean;
-  // Which pattern a dashed shape draws (a tool's own unaccepted shape vs. a derived box); absent
-  // for a solid shape. render_canvas_state reads only `dashed`, so this extra key is inert to it.
+  // Which pattern a dashed shape draws (a tool's own unaccepted shape vs. a derived box).
   dash_kind?: "tool" | "derived";
-  // Set on an admitted prediction's own shape (buildReviewShapes): pre-admitted by the bucket's
-  // validated count operating point. render_canvas_state draws no mark for it; inert to it.
+  // On a proposal: whether the bucket's validated count operating point admits it.
   admitted?: boolean;
   label?: string;
-  tag?: string; // gt | tp | fp | fn | pred | in_progress
-  created_by?: string | null;
-  accepted_by?: string | null;
+  tag?: string; // gt | proposal | in_progress
   // The load route's authorship classification (person | tool | tool_accepted | unattributed).
   authorship?: string | null;
 }
@@ -64,7 +53,7 @@ export interface CanvasStateBody {
   /** The id of the project this body was built for; the backend writes it only while that
    *  project is the one it has open. */
   project_id: string;
-  tab: Extract<TabName, "annotate" | "review">;
+  tab: Extract<TabName, "annotate">;
   image_path: string;
   image: string;
   img_width: number;
@@ -154,6 +143,8 @@ export function buildAnnotateShapes(args: {
   // its dashed tail (or none, once the start is placed but the pointer hasn't moved yet).
   cutStart?: { point: [number, number]; color: string } | null;
   cursor?: [number, number] | null;
+  proposals?: Proposal[];
+  selectedProposal?: number | null;
 }): CanvasShape[] {
   if (!args.visible) return []; // the GUI's labels toggle hides every committed shape
 
@@ -168,8 +159,6 @@ export function buildAnnotateShapes(args: {
         ...(isTool ? { dashed: true, dash_kind: "tool" as const } : {}),
         label: i === 0 ? authorshipLabel(p.subject, p.authorship) : undefined,
         tag: "gt",
-        created_by: p.created_by ?? null,
-        accepted_by: p.accepted_by ?? null,
         authorship: p.authorship ?? null,
       });
     });
@@ -196,10 +185,30 @@ export function buildAnnotateShapes(args: {
         ...(isTool ? { dashed: true, dash_kind: "tool" as const } : {}),
         label: authorshipLabel(p.subject, p.authorship),
         tag: "gt",
-        created_by: p.created_by ?? null,
-        accepted_by: p.accepted_by ?? null,
         authorship: p.authorship ?? null,
       });
+    });
+  };
+  // The proposals the canvas shows, its dotted tool stroke; the selected one in the selection color.
+  const pushProposals = () => {
+    (args.proposals ?? []).forEach((p) => {
+      const color = p.index === args.selectedProposal ? "#00BFFF" : args.colorFor(p.subject);
+      const base = { color, dashed: true, dash_kind: "tool" as const, tag: "proposal" };
+      const extra = { label: `${p.subject} proposal`, admitted: p.admitted };
+      const { boxes, polygons } = annotationsToCanvas([p]);
+      boxes.forEach((b) =>
+        shapes.push({
+          kind: "box",
+          xyxy: [r1(b.x1), r1(b.y1), r1(b.x2), r1(b.y2)],
+          ...base,
+          ...extra,
+        }),
+      );
+      polygons.forEach((poly) =>
+        poly.rings.forEach((ring, i) =>
+          shapes.push({ kind: "polygon", points: rPts(ring), ...base, ...(i === 0 ? extra : {}) }),
+        ),
+      );
     });
   };
 
@@ -235,6 +244,7 @@ export function buildAnnotateShapes(args: {
       });
     }
     pushPoints();
+    pushProposals();
     return shapes;
   }
 
@@ -252,8 +262,6 @@ export function buildAnnotateShapes(args: {
       ...(isTool ? { dashed: true, dash_kind: "tool" as const } : {}),
       label: authorshipLabel(b.subject, b.authorship),
       tag: "gt",
-      created_by: b.created_by ?? null,
-      accepted_by: b.accepted_by ?? null,
       authorship: b.authorship ?? null,
     });
   });
@@ -273,8 +281,6 @@ export function buildAnnotateShapes(args: {
       dash_kind: "derived",
       label: authorshipLabel(p.subject, p.authorship),
       tag: "gt",
-      created_by: p.created_by ?? null,
-      accepted_by: p.accepted_by ?? null,
       authorship: p.authorship ?? null,
     });
   });
@@ -297,113 +303,8 @@ export function buildAnnotateShapes(args: {
     });
   }
   pushPoints();
+  pushProposals();
   return shapes;
-}
-
-/** Review-tab shapes, mirroring the Review canvas rules: each detection draws by its own
- *  annotation's geometry (a box stays a box, a polygon stays a polygon, no geometry kind is
- *  hidden), FP = its prediction (dashed blue when focused), TP/FN = the ground truth (focused FN
- *  goes active-blue; reviewed shapes washed), the focused TP overlays its prediction dashed, and
- *  the focused detection draws last so neighbors never bury it. `admissionConf` (the bucket's
- *  own validated count operating point, or null) marks an admitted prediction's own shape
- *  (`admitted: true`); the mark travels in the state body, never drawn as a mark of its own. */
-export function buildReviewShapes(
-  matches: MatchesResponse,
-  colors: ReviewColors,
-  focusedIdx: number,
-  vis: { showGT?: boolean; showPred?: boolean } = {},
-  admissionConf: number | null = null,
-): CanvasShape[] {
-  const showGT = vis.showGT ?? true;
-  const showPred = vis.showPred ?? true;
-
-  const rest: CanvasShape[] = [];
-  const focused: CanvasShape[] = [];
-  matches.detections.forEach((d, i) => {
-    const active = i === focusedIdx;
-    const out = active ? focused : rest;
-    const outcome = colors[d.det_type] ?? "#ffffff";
-    const label = active
-      ? `${d.class_name}${d.conf != null ? ` ${d.conf.toFixed(2)}` : ""}`
-      : undefined;
-    // An admitted prediction: at or above the bucket's own validated count operating point,
-    // never a point (matching.py never builds a detection on one, so this never applies there).
-    const admitted = detectionAdmitted(d, matches, admissionConf);
-
-    const push = (
-      geom: ReviewGeom | null,
-      color: string,
-      opts: { dashed?: boolean; fill?: boolean; tag: string; admitted?: boolean },
-    ) => {
-      if (!geom) return;
-      if (geom.kind === "box") {
-        const [x1, y1, x2, y2] = geom.box;
-        out.push({
-          kind: "box",
-          xyxy: [r1(x1), r1(y1), r1(x2), r1(y2)],
-          color,
-          dashed: opts.dashed,
-          fill: opts.fill,
-          label,
-          tag: opts.tag,
-          admitted: opts.admitted,
-        });
-      } else if (geom.kind === "point") {
-        // A point annotation travels as a point: the agent sees the location that is on screen,
-        // and no box is invented for it (a box here would be a fabricated detection target).
-        out.push({
-          kind: "point",
-          points: [[r1(geom.point[0]), r1(geom.point[1])]],
-          color,
-          label,
-          tag: opts.tag,
-        });
-      } else {
-        geom.rings.forEach((ring, i) => {
-          out.push({
-            kind: "polygon",
-            points: rPts(ring),
-            color,
-            dashed: opts.dashed,
-            fill: opts.fill,
-            label: i === 0 ? label : undefined,
-            tag: opts.tag,
-            admitted: opts.admitted,
-          });
-        });
-      }
-    };
-
-    if (d.det_type === "fp") {
-      if (!showPred) return;
-      push(annotationGeometry(detPredAnnotation(d, matches)), active ? colors.active : outcome, {
-        dashed: active,
-        fill: true,
-        tag: "fp",
-        admitted,
-      });
-    } else {
-      const activeFn = active && d.det_type === "fn";
-      if (showGT) {
-        push(annotationGeometry(detGtAnnotation(d, matches)), activeFn ? colors.active : outcome, {
-          dashed: activeFn,
-          fill: activeFn || d.reviewed,
-          tag: d.det_type,
-        });
-      }
-      // An admitted tp's prediction shape carries the flag on the canvas's own terms: focused
-      // always, unfocused only while its ground-truth shape shows (the canvas marks nothing else).
-      if (d.det_type === "tp" && showPred && (active || (admitted && showGT))) {
-        push(annotationGeometry(detPredAnnotation(d, matches)), active ? colors.active : outcome, {
-          dashed: active,
-          fill: true,
-          tag: "pred",
-          admitted,
-        });
-      }
-    }
-  });
-  return rest.concat(focused);
 }
 
 /* ── agent "push now" request (capture_live_canvas refresh ping) ─────────────── */

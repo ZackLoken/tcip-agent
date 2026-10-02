@@ -200,7 +200,7 @@ def render_comparison(
     pred_boxes: list[dict],
     *,
     native_size: tuple[int, int],
-    matches: list[dict] | None = None,
+    matches: list[tuple[int, int]] | None = None,
     class_names: dict[int, str] | None = None,
     output_path: str,
 ) -> str:
@@ -211,8 +211,8 @@ def render_comparison(
         gt_boxes: Ground truth boxes (x1, y1, x2, y2, class_id) in the native frame.
         pred_boxes: Prediction boxes (x1, y1, x2, y2, class_id, confidence) in the native frame.
         native_size: ``(width, height)`` of the frame the boxes are measured in.
-        matches: ``compute_matches``'s own ``tp`` entries (``{gt_idx, pred_idx, ...}``), indexing
-            into ``gt_boxes``/``pred_boxes`` in the order they were built from the same lists.
+        matches: ``(gt_idx, pred_idx)`` pairs indexing into ``gt_boxes``/``pred_boxes`` in the
+            order they were built from the same lists.
         class_names: Mapping from class_id to display name.
         output_path: Where to save.
     """
@@ -248,9 +248,9 @@ def render_comparison(
 
     # Draw match lines (center-to-center), resolved from the gt/pred lists already in hand.
     if matches:
-        for m in matches:
-            gt = gt_boxes[m["gt_idx"]]
-            pred = pred_boxes[m["pred_idx"]]
+        for gt_idx, pred_idx in matches:
+            gt = gt_boxes[gt_idx]
+            pred = pred_boxes[pred_idx]
             gt_cx = (gt["x1"] + gt["x2"]) / 2 * sx
             gt_cy = (gt["y1"] + gt["y2"]) / 2 * sy
             pr_cx = (pred["x1"] + pred["x2"]) / 2 * sx
@@ -415,7 +415,7 @@ def render_grid_overlay(
     """Render display pixels with the caller's labeled reference-grid cells overlaid.
 
     ``cells`` is the caller's own cell list, each entry a mapping or an object carrying ``name``
-    plus the half-open native-pixel rect ``x0, y0, x1, y1`` (see ``sam_wrapper.cell_fields``).
+    plus the half-open native-pixel rect ``x0, y0, x1, y1`` (see ``grid.cell_fields``).
     Rects scale by the rendered/native ratio like the other renderers, so the lines land on the
     true cell boundaries, which under a clamped grid are non-uniform at the edges.
 
@@ -431,7 +431,7 @@ def render_grid_overlay(
     Returns:
         Output path to the rendered image.
     """
-    from tcip_annotation.sam_wrapper import cell_fields
+    from tcip_annotation.grid import cell_fields
 
     if not cells:
         raise ValueError("cells is empty: there is no grid to render")

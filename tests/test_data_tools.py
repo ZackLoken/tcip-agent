@@ -276,17 +276,17 @@ def test_draw_splits_reports_an_unreadable_label_sorted_last(
     assert str(bad) in result["error"]
 
 
-def test_draw_splits_writes_nothing_when_a_confirmed_negative_will_not_read(
+def test_draw_splits_writes_nothing_when_a_marked_document_will_not_read(
     data_dir: Path, tmp_path: Path,
 ):
-    """An unreadable label on an image a human confirmed negative refuses the whole draw and
-    leaves no selection behind: a partial record would claim a partition nobody drew, and the
-    confirmation cannot be checked against a document that will not parse."""
-    from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
+    """An unreadable label on an image a human marked complete refuses the whole draw and leaves
+    no selection behind: a partial record would claim a partition nobody drew, and the mark cannot
+    be read from a document that will not parse."""
+    from tcip_mcp.dataset_layout import image_dir
+    from tests._producer_fixtures import mark_complete
 
     bad = data_dir / "annotations" / "2-11-26" / "img_002.json"
-    record_image_statuses(data_dir, status_bucket("bud", "2-11-26"),
-                          {bad.with_suffix(".jpg").name: "negative"}, recorded_by="user:tester")
+    mark_complete(image_dir(data_dir, "2-11-26") / "img_002.jpg", bad, "bud", project=data_dir)
     bad.write_bytes(b"{not json")
     out = tmp_path / "selection"
 
@@ -467,41 +467,6 @@ def test_draw_splits_refuses_an_incomplete_band_group_before_writing(tmp_path: P
     assert not out.exists()
 
 
-def test_place_logical_image_leaves_an_existing_destination_alone_without_writing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-):
-    """The leave-alone path is a cheap ``dst.exists()`` check in front of the store write, not a
-    read-and-hash of the whole existing destination: a destination already present is skipped
-    before ``put_blob_from_path`` is even attempted."""
-    from tcip_mcp.pipelines import image_utils
-
-    src_dir = tmp_path / "src"
-    src_dir.mkdir()
-    dest_dir = tmp_path / "dest"
-    dest_dir.mkdir()
-    source = src_dir / "img.jpg"
-    source.write_bytes(b"\xff\xd8\xff")
-    (dest_dir / "img.jpg").write_bytes(b"already there")
-
-    calls: list = []
-    real_put = image_utils.tcip_store.put_blob_from_path
-
-    def _spy(key, src_path, **kwargs):
-        calls.append(key)
-        return real_put(key, src_path, **kwargs)
-
-    monkeypatch.setattr(image_utils.tcip_store, "put_blob_from_path", _spy)
-
-    name = image_utils.place_logical_image(
-        source, dest_dir, copy_files=True,
-        dest_key=lambda filename: image_utils.flat_image_key(dest_dir, filename),
-    )
-
-    assert name == "img.jpg"
-    assert (dest_dir / "img.jpg").read_bytes() == b"already there"
-    assert calls == []
-
-
 def test_draw_splits_bad_ratios(data_dir: Path):
     result = draw_splits(data_dir, str(data_dir), train_ratio=0.5, val_ratio=0.5,
                          calibration_ratio=0.25, holdout_ratio=0.25)
@@ -580,7 +545,7 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
     from PIL import Image
 
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
-    from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
+    from tests._producer_fixtures import mark_complete
 
     root = tmp_path / "ds"
     date = "2-11-26"
@@ -601,8 +566,7 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
         labels_dir / "p4.json",
         [Annotation(subject="bud", geometry=BBox(4, 4, 12, 12))], 100, 80, keep_empty=True,
     )
-    record_image_statuses(root, status_bucket("leaf", date), {"p4.jpg": "negative"},
-                          recorded_by="user:tester")
+    mark_complete(images_dir / "p4.jpg", labels_dir / "p4.json", "leaf", project=root)
 
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf", seed=1,
@@ -618,7 +582,7 @@ def _leaf_dataset_with_negatives(root: Path, date: str, n_foreground: int, n_neg
     images, all under one capture date."""
     from PIL import Image
 
-    from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
+    from tests._producer_fixtures import mark_complete
 
     images_dir, labels_dir = root / "images" / date, root / "annotations" / date
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -630,14 +594,12 @@ def _leaf_dataset_with_negatives(root: Path, date: str, n_foreground: int, n_neg
             labels_dir / f"{stem}.json",
             [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
         )
-    negative_names = []
     for i in range(n_negative):
         stem = f"{date}_bg{i}"
         Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
         json_io.write_annotations(labels_dir / f"{stem}.json", [], 100, 80, keep_empty=True)
-        negative_names.append(f"{stem}.jpg")
-    record_image_statuses(root, status_bucket("leaf", date),
-                          {n: "negative" for n in negative_names}, recorded_by="user:tester")
+        mark_complete(images_dir / f"{stem}.jpg", labels_dir / f"{stem}.json", "leaf",
+                      project=root)
 
 
 def test_draw_splits_calibration_side_holds_real_foreground_regardless_of_stratify_foreground(
@@ -1144,16 +1106,13 @@ def test_doctor_check_data_quality_admits_a_confirmed_negative_under_dated_label
 ):
     """A human-confirmed negative resolves the same way the doctor's check reads it as the
     draw that admits it: labels dated, images never split into date buckets."""
-    from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
+    from tests._producer_fixtures import mark_complete
 
     root = _dated_labels_flat_images_dataset(tmp_path / "ds", ("p0",))
-    (root / "annotations" / "2-11-26" / "p0.json").unlink()
-    json_io.write_annotations(
-        root / "annotations" / "2-11-26" / "p0.json", [], 100, 80, keep_empty=True,
-    )
-    record_image_statuses(
-        root, status_bucket("leaf", "2-11-26"), {"p0.jpg": "negative"}, recorded_by="user:right",
-    )
+    label = root / "annotations" / "2-11-26" / "p0.json"
+    label.unlink()
+    json_io.write_annotations(label, [], 100, 80, keep_empty=True)
+    mark_complete(root / "images" / "p0.jpg", label, "leaf", project=root)
 
     assert _quality_findings(root) == []
 
@@ -1164,7 +1123,7 @@ def _write_one_sample_selection(root: Path, out: Path) -> None:
     write_selection(out, Selection(
         samples=(Sample(member="a", source=str(root / "images" / "a.jpg"),
                         ground_truth=str(root / "annotations" / "a.json"), group="a",
-                        side="train", confirmation_bucket="leaf/2-11-26"),),
+                        side="train"),),
         scope=ClassScope(subject="leaf", id_map={"leaf": 0}), seed=1, group_by="stem",
     ), project=root)
 
@@ -1201,23 +1160,6 @@ def test_read_selection_refuses_a_sample_missing_its_own_ground_truth(tmp_path: 
         read_selection(out, project=tmp_path)
 
 
-def test_read_selection_refuses_a_label_document_sample_with_no_confirmation_bucket(
-    tmp_path: Path,
-):
-    """Which human confirmations admitted a sample is a per-sample fact a later admission check
-    reads back, and a label document's admission always reads one, so a sample naming its own
-    document and no bucket names nothing to re-check it against. A mask or a table row is
-    admitted by existing, so neither carries one and neither is refused for it."""
-    out = tmp_path / "m"
-    _write_one_sample_selection(tmp_path, out)
-    document = ts.read(selection_key(out))
-    document["samples"][0].pop("confirmation_bucket")
-    ts.replace(selection_key(out), document)
-
-    with pytest.raises(ValueError, match="no confirmation_bucket"):
-        read_selection(out, project=tmp_path)
-
-
 def test_read_selection_refuses_an_empty_sample_list(tmp_path: Path):
     out = tmp_path / "m"
     _write_one_sample_selection(tmp_path, out)
@@ -1236,8 +1178,7 @@ def test_read_selection_refuses_one_source_on_two_sides(tmp_path: Path):
     document = ts.read(selection_key(out))
     document["samples"].append(
         {"member": "a", "source": "images/a.jpg", "ground_truth": "annotations/a.json",
-         "group": "b",
-         "side": "calibration", "confirmation_bucket": "leaf/2-11-26"})
+         "group": "b", "side": "calibration"})
     ts.replace(selection_key(out), document)
 
     with pytest.raises(ValueError, match="on more than one side"):
@@ -1253,7 +1194,7 @@ def test_read_selection_refuses_one_group_on_two_sides(tmp_path: Path):
     document["samples"].append(
         {"member": "a_0_1", "source": "images/a_0_1.jpg",
          "ground_truth": "annotations/a_0_1.json", "group": "a",
-         "side": "val", "confirmation_bucket": "leaf/2-11-26"})
+         "side": "val"})
     ts.replace(selection_key(out), document)
 
     with pytest.raises(ValueError, match="group"):

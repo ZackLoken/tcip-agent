@@ -9,7 +9,6 @@ import {
   saveDatasetUi,
 } from "@/lib/datasetUiState";
 import type { AppState } from "@/store/appState";
-import { DEFAULT_REVIEW_STATUS } from "@/store/slices/registryStatus";
 import type {
   DatasetSelection,
   GuiState,
@@ -21,9 +20,8 @@ import type {
 
 const DEFAULT_DATASET: DatasetSelection = GUI_STATE_DEFAULTS.dataset;
 
-/** True when two selections name a different (dataset_root, date, subject): the identity a
- *  review-status fetch is scoped to, so a fact fetched for one never gates navigation in the
- *  other. */
+/** True when two selections name a different (dataset_root, date, subject): a different dataset
+ *  whose own position the browser adopts. */
 function datasetIdentityChanged(
   a: Pick<DatasetSelection, "dataset_root" | "date" | "subject">,
   b: Pick<DatasetSelection, "dataset_root" | "date" | "subject">,
@@ -50,11 +48,11 @@ export interface GuiSlice {
   patchGui: (partial: Partial<GuiState>) => void;
   /** Clear the dataset selection, returning the GUI to the project front door. */
   clearDataset: () => void;
-  /** Persist the current dataset's UI state (position/filters) before switching away. Call
-   *  synchronously before the async /dataset/select so a broadcast can't move it mid-await. */
+  /** Persist the current dataset's position before switching away. Call synchronously before the
+   *  async /dataset/select so a broadcast can't move it mid-await. */
   saveCurrentDatasetUi: () => void;
   /** Adopt a new dataset selection of ``project`` in one store update, restoring the selection's
-   *  saved position/filters when the user has been here before (else the selection's own values).
+   *  saved position when the user has been here before (else the selection's own values).
    *  Establishes the new identity locally so a same-identity backend snapshot keeps the restored
    *  index instead of resetting it to 0. */
   applyRestoredDataset: (sel: DatasetSelection, project: OpenProject) => void;
@@ -62,7 +60,7 @@ export interface GuiSlice {
    * Apply a backend state snapshot with ownership-aware merge, not a wholesale
    * replace: a wholesale replace would clobber unsaved edits, the active tab, and
    * the scroll position. Backend owns the dataset selection and the open project; the browser
-   * owns navigation/view/mode/subject/review-filter state and keeps its own copy. ``project``
+   * owns navigation/view/mode/subject state and keeps its own copy. ``project``
    * and ``epoch`` come from the same envelope and are adopted in this one update.
    */
   mergeSnapshot: (
@@ -86,21 +84,13 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
   wsEpoch: null,
 
   patchGui: (partial) => set((s) => ({ gui: { ...s.gui, ...partial } })),
-  clearDataset: () =>
-    set((s) => ({
-      gui: { ...s.gui, dataset: DEFAULT_DATASET },
-      reviewStatus: DEFAULT_REVIEW_STATUS,
-    })),
+  clearDataset: () => set((s) => ({ gui: { ...s.gui, dataset: DEFAULT_DATASET } })),
 
   saveCurrentDatasetUi: () => {
     const s = get();
     const key = datasetKey(s.openProject, s.gui.dataset);
     if (!key) return;
-    saveDatasetUi(key, {
-      index: s.gui.dataset.current_image_index,
-      review: s.gui.review,
-      statusFilter: s.imageStatus.activeFilter,
-    });
+    saveDatasetUi(key, { index: s.gui.dataset.current_image_index });
   },
 
   applyRestoredDataset: (sel, project) =>
@@ -117,19 +107,8 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
           // Land on the project's last-used tab; a project never opened before gets Annotate.
           active_tab: loadLastTab(project.id) ?? "annotate",
           dataset: { ...sel, current_image_index: index },
-          review: restored?.review ?? s.gui.review,
         },
         openProject: project,
-        imageStatus: {
-          ...s.imageStatus,
-          activeFilter: restored?.statusFilter ?? s.imageStatus.activeFilter,
-          // A stale mark names an image in the dataset it was computed for; carrying it into a
-          // newly selected dataset could flag a same-named image that was never checked.
-          staleMarks: [],
-        },
-        reviewStatus: datasetIdentityChanged(s.gui.dataset, sel)
-          ? DEFAULT_REVIEW_STATUS
-          : s.reviewStatus,
       };
     }),
 
@@ -160,7 +139,6 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
               }
             : { ...local, dataset: DEFAULT_DATASET },
           openProject: project,
-          reviewStatus: DEFAULT_REVIEW_STATUS,
           wsVersion: nextVersion,
           wsEpoch: nextEpoch,
         };
@@ -179,18 +157,16 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
             active_tab: (project && loadLastTab(project.id)) ?? "annotate",
             active_subject: incoming.active_subject ?? null,
           },
-          reviewStatus: DEFAULT_REVIEW_STATUS,
           wsVersion: nextVersion,
           wsEpoch: nextEpoch,
         };
       }
 
       if (datasetIdentityChanged(inDs, local.dataset)) {
-        // New dataset selection: adopt it wholesale (including its index) and drop
-        // the stale reviewStatus. The active tab stays put.
+        // New dataset selection: adopt it wholesale (including its index). The active tab stays
+        // put.
         return {
           gui: { ...local, dataset: inDs },
-          reviewStatus: DEFAULT_REVIEW_STATUS,
           wsVersion: nextVersion,
           wsEpoch: nextEpoch,
         };
@@ -198,8 +174,8 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
       /** Same dataset: accept backend-owned dataset fields (e.g. a changed model's prediction
        *  dir) but keep the user's navigation position and the local image_list reference (same
        *  identity => same list; reusing the ref avoids spuriously re-firing effects keyed on it,
-       *  like registry/status hydration). Everything else (active_tab / mode / active_subject /
-       *  view / review) is client-owned; keep local. */
+       *  like registry hydration). Everything else (active_tab / mode / active_subject / view)
+       *  is client-owned; keep local. */
       return {
         gui: {
           ...local,
