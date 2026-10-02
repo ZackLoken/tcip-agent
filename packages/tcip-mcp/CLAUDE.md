@@ -46,9 +46,8 @@ src/tcip_mcp/
                                         # written once as it goes; the registry is completed runs plus
                                         # the foreign checkpoints registered beside them
   identity.py             # the user:<name> identity convention, spelled once
-  agent_identity.py       # the harness the MCP handshake declared, this run's minted session, and what
-                            # the harness exported about itself, stamped on every audit line, trait
-                            # revision and HTTP push; declarations, never verified
+  agent_identity.py       # the client the MCP handshake declared and this run's minted session,
+                            # stamped on every audit line and HTTP push; declarations, never verified
   audit.py, project_status.py, web_client.py
 ```
 

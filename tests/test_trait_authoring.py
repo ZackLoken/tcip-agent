@@ -135,9 +135,7 @@ def test_a_proposal_made_while_another_holds_the_record_lands_as_the_next_revisi
     for it and appends after it rather than overwriting it."""
     import threading
 
-    from tcip_mcp import agent_identity
-
-    real_fields = agent_identity.revision_fields
+    real_clock = traits.now_iso
     other_landed = threading.Event()
     other: list = []
 
@@ -145,13 +143,13 @@ def test_a_proposal_made_while_another_holds_the_record_lands_as_the_next_revisi
         other.append(propose(tmp_path, entry("leaf", ("leaf_length",), notes="the other writer")))
         other_landed.set()
 
-    def fields_while_holding_the_record():
-        monkeypatch.setattr(agent_identity, "revision_fields", real_fields)
+    def clock_while_holding_the_record():
+        monkeypatch.setattr(traits, "now_iso", real_clock)
         threading.Thread(target=propose_other).start()
         other_landed.wait(timeout=2)
-        return real_fields()
+        return real_clock()
 
-    monkeypatch.setattr(agent_identity, "revision_fields", fields_while_holding_the_record)
+    monkeypatch.setattr(traits, "now_iso", clock_while_holding_the_record)
     mine = propose(tmp_path, entry("leaf", ("leaf_length",), notes="this writer"))
     assert other_landed.wait(timeout=30)
 

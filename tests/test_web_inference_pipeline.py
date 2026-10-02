@@ -371,6 +371,21 @@ def test_web_worker_n_detections_agrees_with_the_persisted_document_on_a_degener
     persisted = json.loads((out_dir / "img.json").read_text())["annotations"]
     assert len(persisted) == 1
 
+    # The same publication whose one audit line cannot be written still reports its count.
+    import tcip_mcp.audit as audit_module
+
+    def unwritable(*args, **kwargs):
+        raise RuntimeError("audit log unwritable")
+
+    monkeypatch.setattr(audit_module, "append", unwritable)
+    gap = InferenceJob(
+        project=str(tmp_path), job_id="degenerate-gap", checkpoint_path=str(ckpt),
+        images_dir=str(images_dir), output_dir=str(tmp_path / "out-gap"), stated=job.stated)
+    _worker(gap)
+
+    assert gap.audit_warning is not None
+    assert (gap.status, gap.dropped_boxes) == ("completed", 1)
+
 
 def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path):
     """The worker's pass (``inference_tools._prepare_pass``) enumerates through

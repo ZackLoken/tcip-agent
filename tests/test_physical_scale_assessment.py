@@ -47,7 +47,7 @@ def _reference(project: Path, *, n: int = 8, extents_mm: list[float] | None = No
     from PIL import Image
 
     from tcip_mcp import subject_registry as cr
-    from tcip_mcp.dataset_layout import subjects_path
+    from tests._producer_fixtures import registry_over
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
@@ -56,7 +56,7 @@ def _reference(project: Path, *, n: int = 8, extents_mm: list[float] | None = No
     images, labels = root / "images" / DATE, root / "annotations" / DATE
     images.mkdir(parents=True)
     labels.mkdir(parents=True)
-    cr.write_registry(subjects_path(root), cr.SubjectRegistry(subjects=(cr.Subject(name=SUBJECT),)))
+    registry_over(root, cr.SubjectRegistry(subjects=(cr.Subject(name=SUBJECT),)))
     assert "error" not in register_dataset(project, str(root), crop=sorted(registered_crops())[0])
     rows = []
     for i in range(n):

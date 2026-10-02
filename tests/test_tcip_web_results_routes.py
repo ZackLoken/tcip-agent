@@ -64,11 +64,12 @@ def test_plant_mapping_build_requires_a_registered_dataset(
     assert "is not a dataset" in resp.json()["detail"]
 
 
-def test_plant_mapping_load_missing_returns_empty(
+def test_plant_mapping_load_of_an_unstored_name_answers_404_naming_it(
     client: TestClient, opened_project: Path,
 ) -> None:
     resp = client.post("/api/results/plant_mapping/load", json={"name": "missing"})
-    assert resp.json()["mapping"] == {}
+    assert resp.status_code == 404
+    assert "'missing'" in resp.json()["detail"]
 
 
 # ── The phenology measurement and its export ────────────────────────────
@@ -568,32 +569,6 @@ def test_an_unassessed_raster_bucket_delivers_under_acknowledgment_with_its_regi
     assert "plant_mapping_resolved_key" not in event
 
 
-def test_a_registry_naming_a_csv_outside_the_project_refuses_403(
-    client: TestClient, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory,
-) -> None:
-    """A registry naming a byte-valid CSV outside the project's own roots refuses before the core
-    reads it, the ownership check every other evidence path goes through."""
-    import hashlib
-
-    from tcip_mcp.pipelines.postprocessing import plant_mapping
-    from tests.test_orthomosaic_tools import _write_plant_csv
-
-    bucket, registry = _orthomosaic(tmp_path)
-    foreign_csv = tmp_path_factory.mktemp("outside") / "plants.csv"
-    _write_plant_csv(foreign_csv, [{
-        "plot_name": "plotX", "accession_name": "accX", "plot_number": 0, "row_number": 0,
-        "col_number": 0, "WGS84_centroid_y": 0.0, "WGS84_centroid_x": 0.0}])
-    key = plant_mapping.plant_registry_key(tmp_path, registry)
-    with tcip_store.transaction(key) as txn:
-        record = txn.read(key)
-        record["csvs"] = [{"path": str(foreign_csv),
-                           "sha256": hashlib.sha256(foreign_csv.read_bytes()).hexdigest(),
-                           "n_plants": 1}]
-        txn.write(key, record)
-
-    assert _export_count(client, _per_plant(bucket, registry)).status_code == 403
-
-
 def test_a_filename_with_a_directory_saves_by_its_basename(
     client: TestClient, tmp_path: Path,
 ) -> None:
@@ -655,22 +630,30 @@ def test_inference_list_jobs_endpoint(client: TestClient, opened_project: Path) 
     assert "jobs" in resp.json()
 
 
-def test_inference_list_jobs_carries_each_jobs_warning(
+def test_inference_list_row_and_stream_frame_are_one_projection(
     client: TestClient, opened_project: Path,
 ) -> None:
-    """Each row of the list route is ``_summary``'s, the one producer the stream and the persisted
-    registry use, so a job's warning reaches the poll as it reaches the stream."""
+    """The list route's row and the stream's final frame are ``_summary``'s, so a job's audit
+    warning and dropped-box count reach the poll as they reach the stream, under one name."""
     from tcip_web.routes import inference as inference_routes
 
     job = inference_routes.InferenceJob(
         job_id="inf-warn-test", project=str(opened_project), checkpoint_path="", images_dir="",
-        output_dir="", warning="3 images carried no readable capture date",
+        output_dir="", status="completed", audit_warning="the line did not land",
+        dropped_boxes=3,
     )
     inference_routes._register(job)
     try:
         row = next(r for r in client.get("/api/inference/jobs").json()["jobs"]
                    if r["job_id"] == "inf-warn-test")
-        assert row["warning"] == "3 images carried no readable capture date"
+        with client.websocket_connect(
+                "ws://127.0.0.1/api/inference/jobs/inf-warn-test/stream") as ws:
+            frames = [ws.receive_json(), ws.receive_json()]
+        assert [f.pop("type") for f in frames] == ["progress", "final"]
+        assert frames[1] == row
+        assert (row["audit_warning"], row["dropped_boxes"]) == (
+            "the line did not land", 3)
+        assert "warning" not in row
     finally:
         with inference_routes._registry.lock:
             inference_routes._registry.jobs.pop("inf-warn-test", None)

@@ -177,7 +177,7 @@ def test_a_withdrawn_later_revision_leaves_the_earlier_confirmed_one_answering(
     assert _deliver_counts(tmp_path, "back_to_first")["trait_revision"] == 1
 
 
-def test_the_proposal_records_the_agent_identity_and_writes_one_audit_line(tmp_path: Path) -> None:
+def test_the_proposal_writes_one_audit_line_naming_the_agent(tmp_path: Path) -> None:
     from tcip_mcp import agent_identity
 
     agent_identity.begin("claude-code", "2.1.238")
@@ -186,10 +186,10 @@ def test_the_proposal_records_the_agent_identity_and_writes_one_audit_line(tmp_p
     finally:
         agent_identity.end()
 
-    assert revision.proposing_agent["agent_client_name"] == "claude-code"
     lines = [e for e in ts.read_log(audit_log_key(tmp_path)).records if e["tool"] == "propose_trait"]
     assert [line["arguments"] for line in lines] == [
         {"trait": fx.COUNT_TRAIT, "revision": 1, "entry_sha256": revision.entry_sha256}]
+    assert lines[0]["agent_client_name"] == "claude-code"
 
 
 # ── the schema, the one statement of what an entry holds ─────────────────────

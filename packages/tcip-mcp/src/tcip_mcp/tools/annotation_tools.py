@@ -6,9 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tcip_annotation import Annotation, compute_matches
-from tcip_annotation.json_io import (
-    UnreadableLabelDocument, annotation_from_payload, client_annotation, write_annotations,
-)
+from tcip_annotation.json_io import UnreadableLabelDocument, client_annotation
 from tcip_annotation.json_io import read_annotations as read_labels
 from tcip_annotation.json_io import read_predictions
 
@@ -16,20 +14,11 @@ from tcip_annotation.matching import REVIEW_CONF_FLOOR
 
 from tcip_mcp.buckets import Bucket, read_bucket
 from tcip_mcp.dataset_layout import annotation_path_for_image, find_gt_label
-from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
+from tcip_mcp.pipelines.image_utils import image_path_dimensions
 from tcip_mcp.server import tool
-from tcip_mcp.audit import audited
 
 if TYPE_CHECKING:
     from tcip_mcp.traits import TraitEntry
-
-
-def _dims_for(image_path: str) -> tuple[int, int]:
-    """``(width, height)`` for ``image_path``, channel-aware, through ``resolve_image_source``."""
-    img = Path(image_path)
-    source = resolve_image_source(img.parent, img.stem)
-    return image_dimensions(source)
-
 
 
 def read_annotations(image_path: str, predictions_dir: str | None = None) -> dict:
@@ -46,7 +35,7 @@ def read_annotations(image_path: str, predictions_dir: str | None = None) -> dic
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    w, h = _dims_for(image_path)
+    w, h = image_path_dimensions(image_path)
     result: dict = {"image": image_path, "width": w, "height": h}
 
     gt_path = find_gt_label(image_path)
@@ -77,12 +66,11 @@ def read_annotations(image_path: str, predictions_dir: str | None = None) -> dic
 
 
 @tool()
-@audited(scope_arg="image_path")
 def save_annotations(
     project: Path,
     workspace: Path,
     image_path: str,
-    annotations: list[dict] | None = None,
+    annotations: list[dict],
     date: str | None = None,
     path: str | None = None,
     created_by: str | None = None,
@@ -101,45 +89,30 @@ def save_annotations(
     Args:
         image_path: Absolute path to the image file.
         annotations: List of ``{subject, bbox?/points?/rings?/point?, attributes?}`` dicts (pixel
-            coords).
+            coords); an empty list writes an empty document.
         date: Capture date; derived from the image path when omitted.
         path: Explicit label path (overrides the canonical location).
         created_by: Producer stamped on each written annotation. Omit to leave provenance unset.
     """
+    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.dataset_layout import save_label_document
+    from tcip_mcp.web_client import PANEL_EVENT_LABELS_WRITTEN, post_panel_event
+
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    anns_in = annotations or []
-    if not anns_in:
-        return {"error": "provide at least one annotation to save (each carrying a subject)"}
-
-    from tcip_mcp.workspace import is_valid_name
-
-    if path is None and date is not None and not is_valid_name(date):
-        return {"error": f"date must be a single safe path segment (no separators/'..'), got {date!r}"}
-
-    w, h = _dims_for(image_path)
-
-    from datetime import datetime, timezone
-    _now = datetime.now(timezone.utc).isoformat()
-
-    typed = []
-    for i, a in enumerate(anns_in):
-        try:
-            typed.append(annotation_from_payload(a, author=created_by, now=_now))
-        except ValueError as exc:
-            return {"error": f"annotation {i} {exc}"}
-
-    out_path = Path(path) if path else annotation_path_for_image(image_path, date=date)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    write_annotations(str(out_path), typed, w, h, keep_empty=True)
-
-    from tcip_mcp.web_client import PANEL_EVENT_LABELS_WRITTEN, post_panel_event
+    w, h = image_path_dimensions(image_path)
+    try:
+        out_path = Path(path) if path else annotation_path_for_image(image_path, date=date)
+        save_label_document(project, image_path, out_path, annotations, width=w, height=h,
+                            author=created_by)
+    except (ValueError, AuditEntryNotWritten) as exc:
+        return {"error": str(exc)}
 
     post_panel_event(project, workspace, "annotate", PANEL_EVENT_LABELS_WRITTEN,
                      {"image_path": image_path, "stem": img.stem, "written": [str(out_path)]})
-    return {"written": [str(out_path)], "count": len(typed)}
+    return {"written": [str(out_path)], "count": len(annotations)}
 
 
 def _scored(images: list[Path], bucket: Bucket, *, iou_threshold: float, conf_threshold: float,
@@ -165,7 +138,7 @@ def _scored(images: list[Path], bucket: Bucket, *, iou_threshold: float, conf_th
         if document is not None:
             gt_path = find_gt_label(str(img))
             read.append((img, read_labels(str(gt_path)) if gt_path else [],
-                         read_predictions(str(document)), *_dims_for(str(img))))
+                         read_predictions(str(document)), *image_path_dimensions(img)))
     annotations = [a for _img, gt, preds, _w, _h in read for a in (*gt, *preds)]
     segm = any(polygonal(a.geometry) for a in annotations)
     name_id = subject_category_ids(annotations)
@@ -313,9 +286,8 @@ def score_predictions(
 
 
 @tool()
-@audited(scope_arg="dataset_root")
 def write_subject_registry(
-    project: Path, dataset_root: str, subjects: dict, output_path: str = "",
+    project: Path, dataset_root: str, subjects: dict,
     allow_removals: bool = False, allow_type_changes: bool = False,
 ) -> dict:
     """Author the dataset's nested subject registry, a thin wrapper over ``subject_registry``.
@@ -324,10 +296,9 @@ def write_subject_registry(
     ``description`` / provenance and zero or more ``attributes`` (each ``categorical`` |
     ``ordinal`` with ordered ``values``). It is validated through
     :func:`subject_registry.registry_from_dict` (a malformed shape refuses) and written to
-    ``<dataset_root>/subjects.json`` via :func:`subject_registry.replace_registry`, which reads the
-    current version and passes it back in as that same call's own ``expect``, so it guards only the
-    store's own window between the read and the put. No numeric class ids, no colors, no id
-    enumeration.
+    ``<dataset_root>/subjects.json`` via :func:`subject_registry.replace_registry`, which guards
+    only the store's own window between its read and its put and refuses an empty registry. No
+    numeric class ids, no colors, no id enumeration.
 
     A write that would drop a subject, attribute or attribute value the stored registry declares is
     refused unless ``allow_removals`` is set; the same flag also allows replacing a stored registry
@@ -343,9 +314,6 @@ def write_subject_registry(
     Args:
         dataset_root: Dataset root; the registry is written to ``<dataset_root>/subjects.json``.
         subjects: Nested ``{subject: {description?, defined_by?, defined_at?, attributes?}}`` dict.
-        output_path: Optional explicit path whose directory, not its file name, is what the write
-            is keyed by (``_registry_key``); the write always lands at
-            ``<directory>/subjects.json``.
         allow_removals: State a dropped name, or a stored registry that will not decode, as a
             deliberate removal/repair.
         allow_type_changes: State a same-values attribute type flip (categorical to ordinal or
@@ -354,23 +322,19 @@ def write_subject_registry(
     from tcip_store import VersionConflict
 
     from tcip_mcp import subject_registry
-    from tcip_mcp.dataset_layout import subjects_path
+    from tcip_mcp.audit import AuditEntryNotWritten
 
-    if not isinstance(subjects, dict) or not subjects:
-        return {"error": "subjects must be a non-empty nested registry mapping"}
     try:
         registry = subject_registry.registry_from_dict(subjects)
     except subject_registry.RegistryError as exc:
         return {"error": f"invalid registry: {exc}"}
 
-    out = Path(output_path) if output_path else subjects_path(dataset_root)
-    expect = subject_registry.read_version(out)
     try:
         result = subject_registry.replace_registry(
-            out, registry, expect=expect, allow_removals=allow_removals,
+            dataset_root, registry, expect=None, allow_removals=allow_removals,
             allow_type_changes=allow_type_changes)
-    except (subject_registry.RegistryError, VersionConflict) as exc:
+    except (subject_registry.RegistryError, VersionConflict, AuditEntryNotWritten) as exc:
         return {"error": str(exc)}
-    return {"subjects_path": str(subjects_path(out.parent)),
+    return {"subjects_path": result["subjects_path"],
             "subjects": [s.name for s in registry.subjects],
             "schema_change_sweep": result["schema_change_sweep"]}

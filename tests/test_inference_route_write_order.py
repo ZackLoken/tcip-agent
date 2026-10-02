@@ -269,7 +269,7 @@ def test_a_full_gui_pass_writes_every_document_then_the_record(tmp_path, monkeyp
     assert record["documents"] == {"a": "a.jpg", "b": "b.jpg"}
 
     assert set(_summary(job)) == {"job_id", "status", "done", "total", "images_dir", "output_dir",
-                                 "error", "warning", "audit_warning", "dropped_nonpositive_boxes"}
+                                 "error", "audit_warning", "dropped_boxes"}
     assert [Path(p).stem for p in written] == ["a", "b"]
 
 
@@ -304,4 +304,4 @@ def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_lines(tmp_path, mon
         return [(r["tool"], sorted(r["arguments"])) for r in records]
 
     assert shape(rows["gui"]) == shape(rows["mcp"]) == [
-        ("prediction_bucket_published", ["predictions_dir"])]
+        ("prediction_bucket_published", ["dropped_boxes", "predictions_dir"])]

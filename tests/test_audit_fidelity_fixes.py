@@ -22,8 +22,9 @@ def _img(tmp_path, name="IMG_0001.JPG", size=(100, 80)):
     return p
 
 
-def test_mcp_save_annotations_empty_refuses_and_preserves_gt(tmp_path):
-    """An empty save is refused (each annotation needs a subject) and never deletes existing GT."""
+def test_mcp_save_annotations_empty_writes_the_empty_document_the_route_writes(tmp_path):
+    """An empty save writes an empty label document through the one save both label doors call:
+    the file stays, holding nothing, never deleted."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     img = _img(tmp_path)
@@ -31,9 +32,9 @@ def test_mcp_save_annotations_empty_refuses_and_preserves_gt(tmp_path):
     json_io.write_annotations(det, [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
                               100, 80)  # existing GT
     res = save_annotations(tmp_path, tmp_path.parent, str(img), annotations=[], path=str(det))
-    assert "error" in res                                       # refused, never silently applied
-    assert det.is_file()                                        # existing GT not deleted
-    assert len(json_io.read_annotations(det)) == 1              # GT preserved intact
+    assert res == {"written": [str(det)], "count": 0}
+    assert det.is_file()
+    assert json_io.read_annotations(det) == []
 
 
 @pytest.mark.parametrize("bad", ["a bur", {"bbox": [1, 1, 5, 5]}, {"subject": ""}],
@@ -96,6 +97,7 @@ def test_backup_original_labels_captures_json(tmp_path):
 
 def test_draw_splits_counts_json_objects_not_lines(tmp_path):
     """A pretty-printed negative ({annotations: []}) is several text lines; the stratifier sees 0."""
+    from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
     from tcip_mcp.tools.data_tools import draw_splits
 
     for i in range(4):
@@ -110,9 +112,12 @@ def test_draw_splits_counts_json_objects_not_lines(tmp_path):
     json_io.write_annotations(labels / "img_1.json", [_box()], 100, 80)
     json_io.write_annotations(labels / "img_2.json", [], 100, 80, keep_empty=True)  # negative
     json_io.write_annotations(labels / "img_3.json", [], 100, 80, keep_empty=True)  # negative
+    record_image_statuses(tmp_path, status_bucket("bud", None),
+                          {"img_2.JPG": "negative", "img_3.JPG": "negative"},
+                          recorded_by="user:tester")
 
     res = draw_splits(tmp_path, str(tmp_path), train_ratio=0.5, val_ratio=0.5, calibration_ratio=0.0,
-                      group_by="stem")
+                      group_by="stem", subject="bud")
     assert "error" not in res
     # foreground_annotations sums per split: true total is 3+1+0+0. Counting raw JSON text
     # lines instead reports dozens, since negatives alone read as several each.

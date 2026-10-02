@@ -85,15 +85,15 @@ def _admitted_samples(root: Path):
     producer's records, never a list a test wrote by hand."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry, write_registry
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from PIL import Image
 
-    from tests._producer_fixtures import samples_over
+    from tests._producer_fixtures import registry_over, samples_over
 
     images_dir, labels_dir = root / "images", root / "annotations"
     images_dir.mkdir(parents=True, exist_ok=True)
     labels_dir.mkdir(parents=True, exist_ok=True)
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="leaf"),)))
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="leaf"),)))
     for stem in ("s0", "s1"):
         Image.new("RGB", (16, 16), (40, 60, 80)).save(images_dir / f"{stem}.png")
         json_io.write_annotations(labels_dir / f"{stem}.json",

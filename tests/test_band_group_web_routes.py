@@ -1,6 +1,6 @@
 """Web routes for band-grouped captures: the GUI's own gallery (routes/dataset.py) folding
-sibling band files into one grouped entry, ``_image_dims`` (routes/review.py, routes/annotate.py)
-reading a grouped capture's real stacked frame, and the live band-composite serving +
+sibling band files into one grouped entry, the review and annotate routes reading a grouped
+capture's real stacked frame, and the live band-composite serving +
 ``/api/images/bands`` endpoint (routes/images.py).
 """
 
@@ -63,7 +63,7 @@ def test_dataset_select_route_folds_the_group(
     assert sorted(images) == ["cap_001.bandgroup", "plain_002.jpg"]
 
 
-# ── routes/review.py + routes/annotate.py _image_dims ───────────────────────────────────
+# ── routes/review.py + routes/annotate.py image dimensions ──────────────────────────────
 
 
 def test_annotate_labels_route_measures_a_grouped_captures_real_frame(

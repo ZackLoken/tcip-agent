@@ -1,7 +1,7 @@
 """View-coverage routes: the coverage lattice over a raster, the grid-zoom setting it is derived
 from, the per-image view-coverage record, and region-completeness attestations.
 
-The view-coverage record (``view_coverage.json``, ``dataset_layout.view_coverage_path``, bucketed
+The view-coverage record (``dataset_layout.view_coverage_key``, bucketed
 by ``status_bucket(subject, date)`` then image name) holds two per-cell facts: which cells were
 served to the browser at native resolution, and the tightest scale at which each cell has sat fully
 on screen (``cells_seen_at_scale``, a bound). Neither is an attention claim; whether a seen cell
@@ -146,9 +146,8 @@ def _grid_for_raster(src: Path, tile_size: int | None) -> tuple[dict, str]:
 
 
 def _rendered_grid(geometry: dict, derivation: str) -> dict:
-    """One grid response block: ``get_grid``'s own top-level shape, minus its
-    ``cells``/``derivation``.
-    """
+    """One grid response block: ``geometry`` with its ``derivation`` and every reference cell's
+    name and pixel bounds."""
     from tcip_mcp.pipelines.reference_grid import reference_cells
 
     cells = reference_cells(

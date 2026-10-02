@@ -30,7 +30,6 @@ function job(overrides: Partial<InferenceJob> & { job_id: string }): InferenceJo
     images_dir: "C:/data/images/2026-01-01",
     output_dir: "C:/data/predictions/baseline/2026-01-01",
     error: null,
-    warning: null,
     audit_warning: null,
     ...overrides,
   };
@@ -207,7 +206,7 @@ describe("InferenceTab job table", () => {
     ).toBeInTheDocument();
   });
 
-  it("carries a live frame's warning and counts into the watched job panel", async () => {
+  it("carries a live frame's counts into the watched job panel", async () => {
     vi.mocked(inferenceApi.listJobs).mockResolvedValue({ jobs: [job({ job_id: "inf-live" })] });
 
     render(<InferenceTab />);
@@ -221,14 +220,11 @@ describe("InferenceTab job table", () => {
         done: 4,
         total: 9,
         status: "running",
-        warning: "3 images carried no readable capture date",
+        error: null,
       }),
     );
 
-    expect(
-      await screen.findByText(/3 images carried no readable capture date/),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/Status: running · 4 \/ 9/)).toBeInTheDocument();
+    expect(await screen.findByText(/Status: running · 4 \/ 9/)).toBeInTheDocument();
   });
 
   it("carries a final frame's audit_warning into the watched job panel", async () => {

@@ -1,8 +1,5 @@
-"""Local-filesystem directory browsing for the frontend's folder picker.
-
-On a connection from this machine it lists any directory the server's user can read. A connection
-that arrived through a routable address is confined to the derived allow-set like every other
-route. Directories only, never files.
+"""Local-filesystem directory browsing for the frontend's folder picker: any directory the
+server's user can read, directories only, never files.
 """
 
 from __future__ import annotations
@@ -13,10 +10,10 @@ import stat as statmod
 import string
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query
 
 from tcip_mcp.dataset_layout import image_root
-from tcip_web.paths import allowed_path, allowed_roots, assert_path_allowed, exposed_arrival
+from tcip_web.paths import resolved_path
 
 router = APIRouter(prefix="/api/fs", tags=["fs"])
 
@@ -52,22 +49,14 @@ def _windows_drives() -> list[dict]:
     return drives
 
 
-def _roots_listing(confined: bool) -> dict:
-    """Top-level view (no path given): the allowed roots when confined, else drives (Windows) / '/'."""
-    if confined:
-        roots = allowed_roots()
-        return {
-            "path": "",
-            "parent": None,
-            "is_dataset_root": False,
-            "entries": [_entry(r) for r in roots if r.is_dir()],
-        }
+def _roots_listing() -> dict:
+    """Top-level view (no path given): the drives on Windows, '/' elsewhere."""
     if os.name == "nt":
         return {"path": "", "parent": None, "is_dataset_root": False, "entries": _windows_drives()}
-    return _list_dir(Path("/"), confined=False)
+    return _list_dir(Path("/"))
 
 
-def _list_dir(p: Path, *, confined: bool) -> dict:
+def _list_dir(p: Path) -> dict:
     entries: list[dict] = []
     try:
         children = sorted(p.iterdir(), key=lambda c: c.name.lower())
@@ -86,17 +75,9 @@ def _list_dir(p: Path, *, confined: bool) -> dict:
             continue
         entries.append(_entry(child))
 
-    # Offer a parent link, but null it when going up would escape the allowed roots.
-    parent: str | None = str(p.parent) if p.parent != p else None
-    if parent is not None and confined:
-        try:
-            assert_path_allowed(parent)
-        except ValueError:
-            parent = None
-
     return {
         "path": str(p),
-        "parent": parent,
+        "parent": str(p.parent) if p.parent != p else None,
         "is_dataset_root": image_root(p).is_dir(),
         "has_tcip": (p / ".tcip").is_dir(),
         "entries": entries,
@@ -105,24 +86,12 @@ def _list_dir(p: Path, *, confined: bool) -> dict:
 
 @router.get("/list")
 def list_dir(
-    request: Request,
     path: str | None = Query(None, description="Directory to list; empty = top level"),
 ) -> dict:
-    """List sub-directories of ``path`` (or the top-level drives/roots when empty).
-
-    Confined to the allowed roots when the connection arrived through a routable address;
-    unconfined from this machine, where browsing to new data is the picker's job.
-    """
-    confined = exposed_arrival(request.scope)
+    """List sub-directories of ``path`` (or the top-level drives/roots when empty)."""
     if not path:
-        return _roots_listing(confined)
-    if confined:
-        resolved = allowed_path(path)
-    else:
-        try:
-            resolved = Path(path).resolve()
-        except (OSError, RuntimeError) as exc:
-            raise HTTPException(400, f"cannot resolve {path}: {exc}") from exc
+        return _roots_listing()
+    resolved = resolved_path(path)
     if not resolved.is_dir():
         raise HTTPException(404, f"not a directory: {path}")
-    return _list_dir(resolved, confined=confined)
+    return _list_dir(resolved)

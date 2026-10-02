@@ -95,8 +95,7 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
     trial_dir.parent.mkdir(parents=True)
     reported: list[float] = []
     _run_hpo_trial({}, reported.append, base_config, trial_dir, project=tmp_path,
-                   objective=resolve_objective(base_config, has_val_loader=True, project=tmp_path),
-                   launched_by={"launcher": "process"})
+                   objective=resolve_objective(base_config, has_val_loader=True, project=tmp_path))
 
     # One report per epoch's metrics row, which is the trial's whole result.
     assert len(reported) == 2

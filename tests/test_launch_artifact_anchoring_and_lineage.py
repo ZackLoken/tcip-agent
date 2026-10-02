@@ -45,15 +45,14 @@ def _canonical_dataset(root: Path, date: str = "2-11-26") -> tuple[Path, Path]:
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp import subject_registry
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tests._producer_fixtures import registry_over
 
     images_dir = root / "images" / date
     labels_dir = root / "annotations" / date
     images_dir.mkdir(parents=True)
     labels_dir.mkdir(parents=True)
-    subject_registry.write_registry(root / "subjects.json",
-                                  SubjectRegistry(subjects=(Subject(name="bud"),)))
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     for i in range(2):
         Image.new("RGB", (96, 64), color=(110, 120, 130)).save(images_dir / f"img_{i}.png")
         json_io.write_annotations(

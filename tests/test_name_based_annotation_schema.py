@@ -20,7 +20,7 @@ from tcip_mcp import subject_registry
 from tcip_mcp.subject_registry import SubjectRegistry, Subject
 from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
 from tcip_mcp.pipelines.data.selection import ClassScope
-from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._producer_fixtures import dataset_over, registry_over  # noqa: E402
 
 
 def _write_image(images_dir: Path, stem: str, size=(640, 480)) -> None:
@@ -30,7 +30,7 @@ def _write_image(images_dir: Path, stem: str, size=(640, 480)) -> None:
 
 def _write_registry(root: Path, *subjects: Subject) -> SubjectRegistry:
     registry = SubjectRegistry(subjects=tuple(subjects))
-    subject_registry.write_registry(root / "subjects.json", registry)
+    registry_over(root, registry)
     return registry
 
 

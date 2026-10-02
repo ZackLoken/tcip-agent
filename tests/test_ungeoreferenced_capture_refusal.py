@@ -168,13 +168,13 @@ def _persist_synthetic_mapping(
         {
             "name": registry_name, "crop": "currant", "site": "test", "csvs": plant_csvs,
             "n_plants": sum(e["n_plants"] for e in plant_csvs), "digest": registry_digest,
-            "registered_by": "agent:test", "registered_at": "2026-02-11T00:00:00+00:00",
+            "registered_at": "2026-02-11T00:00:00+00:00",
         },
         expect=ts.Version.ABSENT,
     )
     build = MappingBuild(
         name=name, dataset_root=stored_path(dataset_root, project_root),
-        dataset_id=dataset_id, built_by="build_plant_mapping",
+        dataset_id=dataset_id,
         built_at="2026-02-11T00:00:00+00:00", dates_requested=None,
         dates=sorted(assignments), nn_tolerance_m={"value": 10.0, "source": "stated"},
         plant_registry={"name": registry_name, "digest": registry_digest},
@@ -182,7 +182,7 @@ def _persist_synthetic_mapping(
         capture_digests={d: {} for d in assignments}, unreadable={d: [] for d in assignments},
         assignments=assignments,
     )
-    plant_mapping.persist_mapping(build, project_root, name)
+    plant_mapping.persist_mapping(build, project_root)
     return build
 
 
@@ -303,7 +303,7 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(tmp_path: Path)
 
     build = MappingBuild(
         name="m", dataset_root="ds", dataset_id="ds-1",
-        built_by="test", built_at="2026-02-11T00:00:00+00:00", dates_requested=None,
+        built_at="2026-02-11T00:00:00+00:00", dates_requested=None,
         dates=[DATE], nn_tolerance_m={"value": 10.0, "source": "stated"},
         plant_registry={"name": "unregistered", "digest": "0" * 64},
         capture_identity={DATE: "0" * 16}, capture_digests={DATE: {}}, unreadable={DATE: []},
@@ -356,8 +356,8 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
     build_res = build_plant_mapping(
         tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" not in build_res, build_res
-    assert build_res["per_date"][DATE]["n_unattributed"] == 1
-    assert build_res["n_unattributed"] == 1
+    assert build_res["summary"]["per_date"][DATE]["n_unattributed"] == 1
+    assert build_res["summary"]["totals"]["n_unattributed"] == 1
 
     asyncio.run(store.open_project(tmp_path.resolve()))
     client = TestClient(app, base_url="http://127.0.0.1")
@@ -388,7 +388,7 @@ def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
     build_res = build_plant_mapping(
         tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" not in build_res, build_res
-    assert build_res["n_unattributed"] == 1
+    assert build_res["summary"]["totals"]["n_unattributed"] == 1
 
     _seed_currant_bloom_trait(tmp_path)
     pm = _delivered_disclosure(tmp_path, {dates[0]: preds_by_date[dates[0]]})
@@ -414,7 +414,7 @@ def test_a_date_recorded_with_no_capture_still_delivers_beside_an_attributed_one
         tmp_path, name="valley", images_root=str(images_root), plant_registry=registry,
         dates=[DATE, empty_date])
     assert "error" not in build_res, build_res
-    assert build_res["per_date"][empty_date]["n_images"] == 0
+    assert build_res["summary"]["per_date"][empty_date]["n_images"] == 0
 
     _seed_currant_bloom_trait(tmp_path)
     pm = _delivered_disclosure(tmp_path, preds_by_date)
@@ -431,7 +431,7 @@ def test_a_fully_positioned_scene_keeps_delivering_with_zero_unattributed(
     build_res = build_plant_mapping(
         tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" not in build_res, build_res
-    assert build_res["n_unattributed"] == 0
+    assert build_res["summary"]["totals"]["n_unattributed"] == 0
 
     _seed_currant_bloom_trait(tmp_path)
     assert _delivered_disclosure(tmp_path, preds_by_date)["images_unattributed"] == 0
@@ -471,4 +471,4 @@ def test_a_capture_at_the_origin_is_admitted_as_positioned(
     res = build_plant_mapping(
         tmp_path, name="valley", images_root=str(images_root), plant_registry=registry, nn_tolerance_m=10.0)
     assert "error" not in res, res
-    assert res["n_mapped"] == 1
+    assert res["summary"]["totals"]["n_mapped"] == 1

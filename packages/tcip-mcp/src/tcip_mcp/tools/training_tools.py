@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextvars
 import itertools
 import json
 import logging
@@ -10,17 +9,18 @@ import os
 import subprocess
 import sys
 import threading
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator, NamedTuple, Sized
+from typing import Any, NamedTuple, Sized
 
 from tcip_store import BadKey, StoreError, canonical_path, check_json_value, stored_number
 
 from tcip_mcp import experiments
 from tcip_mcp.experiments import SWEEP_FILE, TRIAL_DIR_PREFIX
 from tcip_mcp.server import tool
-from tcip_mcp.audit import audited
-from tcip_mcp.pipelines.data.split_construction import ResolvedRun, resolve_run, split_seed
+from tcip_mcp.audit import audited, record_event_or_raise
+from tcip_mcp.pipelines.data.split_construction import (
+    ResolvedRun, data_dir_issues, resolve_run, selection_compatibility, split_seed,
+)
 from tcip_mcp.pipelines.execution import Stated
 from tcip_mcp.pipelines.model_build import run_task
 
@@ -32,145 +32,6 @@ _gpu_round_robin = itertools.count()
 
 # Serializes the overfit diagnostic's reseed-run-restore, since the RNG streams are process-global.
 _OVERFIT_CHECK_LOCK = threading.Lock()
-
-# What the calling route declared about itself, read once by launch_training on the calling
-# thread before the run's record is written; unset for a caller with nothing to declare.
-declared_launcher: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "declared_launcher", default=None,
-)
-
-
-@contextmanager
-def declare_launcher(name: str) -> Iterator[None]:
-    """Declare ``name`` as this thread's launcher for the one ``launch_training`` call inside the
-    block. Scoped to the calling thread only: a launch's own background watchdog thread and the
-    training subprocess never see it.
-    """
-    token = declared_launcher.set(name)
-    try:
-        yield
-    finally:
-        declared_launcher.reset(token)
-
-
-def _resolve_launched_by() -> dict[str, Any]:
-    """The launcher declaration a created experiment is stamped with: the declared name when
-    :func:`declare_launcher` set one, else the connected MCP agent's identity when a handshake is
-    in force, else ``process`` for a caller with neither, read on the calling thread.
-    """
-    from tcip_mcp import agent_identity
-
-    name = declared_launcher.get()
-    if name is not None:
-        return {"launcher": name}
-    identity = agent_identity.current()
-    if identity is not None:
-        return {"launcher": "agent", **agent_identity.audit_fields()}
-    return {"launcher": "process"}
-
-_SELECTION_CONFLICT_KEYS = (
-    "group_by", "group_key_map", "val_ratio", "seed", "stratify_foreground",
-    "test_ratio", "reserve_calibration_fraction",
-)
-
-
-def _split_selection_drawn_conflicts(split_cfg: dict) -> list[str]:
-    """Every key under ``data.split`` that ``data.split.selection_dir`` conflicts with: a drawn
-    split's own parameters (:data:`_SELECTION_CONFLICT_KEYS`). ``seed`` is admitted only when
-    ``data.split.redraw_within_selection`` is true; a seed otherwise conflicts by name.
-    """
-    keys: tuple[str, ...] = _SELECTION_CONFLICT_KEYS
-    if split_cfg.get("redraw_within_selection"):
-        keys = tuple(k for k in keys if k != "seed")
-    return sorted(k for k in keys if split_cfg.get(k) is not None)
-
-
-def _redraw_flag_issue(split_cfg: dict) -> str | None:
-    """The objection ``data.split.redraw_within_selection`` raises that
-    :func:`_split_selection_drawn_conflicts` cannot: the flag set true with no ``seed`` beside it.
-    ``None`` when the flag is unset, false, or paired with a seed.
-    """
-    if split_cfg.get("redraw_within_selection") and split_cfg.get("seed") is None:
-        return (
-            "data.split.redraw_within_selection=true requires data.split.seed: the seed the "
-            "redraw draws train and val at."
-        )
-    return None
-
-
-def _data_dir_issues(data_cfg: dict) -> list[str]:
-    """Every objection to the data locations this run's own producer reads: ``data.images_dir``
-    or ``data.labels_dir`` missing, or naming a path that does not exist, whatever the task and
-    whatever builds its loaders. Empty for a config bound to a selection.
-    """
-    split_cfg = data_cfg.get("split")
-    if isinstance(split_cfg, dict) and split_cfg.get("selection_dir"):
-        return []
-    issues: list[str] = []
-    for name in ("images_dir", "labels_dir"):
-        path = data_cfg.get(name)
-        if not path:
-            issues.append(f"Missing 'data.{name}'")
-        elif not Path(path).exists():
-            # Named without claiming a shape: what ground truth is there is the producer's own
-            # read, and a config pointing at nothing is the only fact this check has.
-            issues.append(f"Not found: data.{name} = '{path}'")
-    return issues
-
-
-def _selection_dir_conflicts(data_cfg: dict) -> list[str]:
-    """Every objection a ``data.split.selection_dir`` binding raises from a run's data section
-    alone, computed without reading any selection: the drawn-split key conflicts
-    (:data:`_SELECTION_CONFLICT_KEYS`), and a ``redraw_within_selection`` flag with no seed beside
-    it (:func:`_redraw_flag_issue`).
-    """
-    split_cfg_raw = data_cfg.get("split")
-    split_cfg: dict = split_cfg_raw if isinstance(split_cfg_raw, dict) else {}
-
-    issues: list[str] = []
-    conflicts = _split_selection_drawn_conflicts(split_cfg)
-    if conflicts:
-        issues.append(
-            f"data.split.selection_dir conflicts with {conflicts}: a recorded partition and "
-            "a drawn split's own parameters/source cannot both govern one run."
-        )
-    flag_issue = _redraw_flag_issue(split_cfg)
-    if flag_issue:
-        issues.append(flag_issue)
-    return issues
-
-
-def _selection_dependent_issues(selection, selection_dir: str, data_cfg: dict) -> list[str]:
-    """Every objection that needs the selection itself, read at ``selection_dir``, to answer: its
-    train and val sides are both populated, and ``data_cfg`` states no ``scope``, since the
-    selection records the run's class space. Whether the selected loader can read the ground truth
-    these samples name is that loader's own refusal.
-    """
-    issues: list[str] = []
-    if "scope" in data_cfg:
-        issues.append(
-            f"data.scope is stated beside data.split.selection_dir, whose selection records its "
-            f"own class space ({selection.scope}); a second one would not be the one the run "
-            "trains in. Drop data.scope."
-        )
-    counts = selection.counts()
-    if not counts["train"] or not counts["val"]:
-        issues.append(
-            f"the selection at {selection_dir} leaves an empty side (train={counts['train']}, "
-            f"val={counts['val']}); a run needs both."
-        )
-    return issues
-
-
-def selection_compatibility(config: dict, selection, selection_dir: str) -> list[str]:
-    """Every objection a launch binding ``config`` to ``selection`` (read at ``selection_dir``)
-    would raise: :func:`_selection_dir_conflicts` (config-only) composed with
-    :func:`_selection_dependent_issues` (needs the selection in hand).
-    """
-    issues = _selection_dir_conflicts(config.get("data") or {})
-    issues.extend(_selection_dependent_issues(selection, selection_dir, config.get("data") or {}))
-    return issues
-
 
 def candidate_config_with_selection(config: dict, selection_dir: str) -> dict:
     """The launch config choosing ``selection_dir`` over ``config``'s own data section would
@@ -276,7 +137,7 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
         contradicted: set[str] = set()
         try:
             resolution = resolve_run(config, project=project, contradicted_out=contradicted,
-                                     counts_out=counts)
+                                     tallies_out=counts)
         except Exception as exc:  # noqa: BLE001, whatever stops the resolution stops the launch
             issues.append(str(exc))
         if contradicted:
@@ -395,7 +256,7 @@ def _structural_issues(config: dict) -> list[str]:
     """What stops ``config`` before anything reads its data: its schema
     (``schemas.validate_train_config_schema``), a ``model_source``, ``training_source`` or
     ``data.dataset_source`` builder that is missing or does not import, and a ``data`` section
-    that is missing or names no locations (:func:`_data_dir_issues`)."""
+    that is missing or names no locations (``split_construction.data_dir_issues``)."""
     from tcip_mcp.pipelines.schemas import validate_train_config_schema
     from tcip_mcp.pipelines.model_build import (
         DATASET_SOURCE_KEY, MODEL_SOURCE_KEY, TRAINING_SOURCE_KEY, _import_dotted,
@@ -441,13 +302,12 @@ def _structural_issues(config: dict) -> list[str]:
                     import_source_builder(dataset_source)
                 except Exception as exc:
                     issues.append(f"data.dataset_source.builder not importable: {exc}")
-        issues.extend(_data_dir_issues(data_cfg))
+        issues.extend(data_dir_issues(data_cfg))
     return issues
 
 
 def open_run(
-    run_dir: Path, config: dict, resolved: dict | None, *, launched_by: dict[str, Any] | None,
-    parent_experiment: str | None = None, resume_from: str | None = None,
+    run_dir: Path, config: dict, resolved: dict | None, *, parent_experiment: str | None = None, resume_from: str | None = None,
     max_wall_clock_seconds: float | None = None, model_contract: dict | None = None,
     trial_params: dict | None = None,
 ) -> None:
@@ -456,8 +316,8 @@ def open_run(
     (``split_construction.resolve_run``'s record, ``None`` for an HPO trial whose resolution
     failed, which then ends ``failed``), the environment and the dataset identity of
     ``config``'s own data section (``split_construction.dataset_identity``), a bespoke run's
-    sources copied into the directory, who launched it, the run it was relaunched from and the
-    checkpoint it resumes from, its wall clock, the model contract preflight proved, and an HPO
+    sources copied into the directory, the run it was relaunched from and the checkpoint it
+    resumes from, its wall clock, the model contract preflight proved, and an HPO
     trial's sampled point. A seed is drawn onto ``config`` when it states none. Refuses an
     existing directory (``experiments.RunDirectoryExists``)."""
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
@@ -468,7 +328,7 @@ def open_run(
     dataset_id, fingerprint = dataset_identity(config.get("data") or {})
     experiments.open_run_directory(run_dir, lambda directory: {
         "created": experiments.now_iso(), "config": config, "resolved": resolved,
-        "launched_by": launched_by, "environment": capture_env(),
+        "environment": capture_env(),
         "dataset": {"id": dataset_id, "fingerprint": fingerprint},
         "source": snapshot_model_source(config, directory),
         "parent_experiment": parent_experiment, "resume_from": resume_from,
@@ -478,7 +338,6 @@ def open_run(
 
 
 @tool()
-@audited
 def launch_training(
     project: Path, config: dict, resume_from: str = "",
     max_wall_clock_seconds: float | None = None, overfit_check: bool = False,
@@ -494,9 +353,9 @@ def launch_training(
     validation metric (early stopping); a run launched with no validation loader gets divergence as
     its only automatic stop.
 
-    Writes the run's ``run.json`` once, before the subprocess starts, recording who launched it
-    (``launched_by``): the name :func:`declare_launcher` declared for this thread, else the
-    connected MCP agent's identity when a handshake is in force, else ``"process"``.
+    Writes the run's ``run.json`` once, then the act's one audit line naming the minted
+    ``experiment_id`` (``AuditEntryNotWritten`` when it cannot be appended, and no subprocess
+    starts), then starts the subprocess.
 
     Args:
         config: Full training configuration dict: model_source and data, with every training
@@ -548,12 +407,14 @@ def launch_training(
     experiment_id = config.pop("experiment_id", None) or experiments.mint_experiment_id()
     try:
         run_dir = experiments.experiment_dir(experiment_id, project=project)
-        open_run(run_dir, config, resolution.record, launched_by=_resolve_launched_by(),
-                 parent_experiment=parent_experiment, resume_from=resume_from or None,
-                 max_wall_clock_seconds=max_wall_clock_seconds,
+        open_run(run_dir, config, resolution.record, parent_experiment=parent_experiment,
+                 resume_from=resume_from or None, max_wall_clock_seconds=max_wall_clock_seconds,
                  model_contract=model_contract_record)
     except (StoreError, ValueError, OSError) as exc:
         return {"error": f"launch_training: {exc}"}
+    record_event_or_raise("launch_training", {
+        "experiment_id": experiment_id, "parent_experiment": parent_experiment,
+        "resume_from": resume_from or None}, scope=project)
 
     proc = subprocess.Popen(
         [sys.executable, "-m", "tcip_mcp.pipelines.training.subprocess_worker",
@@ -627,7 +488,7 @@ def monitor_training(project: Path, experiment_id: str | None = None,
     """Check the status of a training run, or of a hyperparameter sweep.
 
     Exactly one of ``experiment_id`` and ``sweep_id`` names what to check; both or neither refuses
-    by name. The two return different shapes. A read: it changes nothing and leaves no audit line.
+    by name. The two return different shapes.
 
     ``experiment_id``: reads the run's own directory (:func:`experiments.run_summary`). Returns
         ``{"experiment_id", "status", "epoch", "best_metric", "output_dir", "error",
@@ -684,8 +545,12 @@ def monitor_training(project: Path, experiment_id: str | None = None,
 
 
 def _all_training_runs(project: Path) -> list[dict[str, Any]]:
-    """Every training run of the project (:func:`experiments.run_summary`)."""
-    return [experiments.run_summary(obs, experiments.read_rows(obs.metrics_log)[0])
+    """Every training run of the project (:func:`experiments.run_summary`), with the ``launch``
+    declaration its launch event carries (:func:`experiments.launch_declarations`), ``None`` for a
+    run no launch event names."""
+    launches = experiments.launch_declarations(project)
+    return [{**experiments.run_summary(obs, experiments.read_rows(obs.metrics_log)[0]),
+             "launch": launches.get(obs.directory.name)}
             for obs in experiments.run_observations(project)]
 
 
@@ -775,7 +640,7 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
                 f"no selection recorded under {own_selection_dir}; run draw_splits first."
             )
         else:
-            own_issues = selection_compatibility(config, own_selection, own_selection_dir)
+            own_issues = selection_compatibility(data_cfg, own_selection, own_selection_dir)
             if own_issues:
                 as_recorded["compatible"] = False
                 as_recorded["reason"] = "; ".join(own_issues)
@@ -787,7 +652,7 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
             "compatible": True, "reason": None,
         }
 
-    dir_issues = _data_dir_issues(data_cfg)
+    dir_issues = data_dir_issues(data_cfg)
     if dir_issues:
         as_recorded["compatible"] = False
         combined_reason = list(dir_issues)
@@ -848,7 +713,7 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
             })
             continue
         candidate_config = candidate_config_with_selection(config, candidate_dir)
-        issues = selection_compatibility(candidate_config, selection, candidate_dir)
+        issues = selection_compatibility(candidate_config["data"], selection, candidate_dir)
         counts = selection.counts()
         entry: dict = {
             "selection_dir": candidate_dir, "seed": selection.seed,
@@ -966,15 +831,15 @@ def _trial_row(observation: experiments.RunObservation, objective: dict) -> dict
     }
 
 
-def sweep_outcome(trials: list[dict[str, Any]], sweep_input: dict) -> dict[str, Any]:
-    """What a sweep's trials (:func:`_trial_row`) amount to under the objective its input records:
-    ``best_params`` and ``best_value`` over its completed trials in the objective's direction; above
-    one draw, the best point by mean over its draws (:func:`group_split_draws`), with
-    ``best_value_spread`` and every point's ``split_sensitivity``. ``best_params`` is ``None`` when
-    no trial or point qualifies."""
-    choose = max if sweep_input["objective"]["higher_is_better"] else min
-    if sweep_input["split_draws"] > 1:
-        groups = group_split_draws(trials, sweep_input["split_draw_seeds"])
+def sweep_outcome(trials: list[dict[str, Any]], sweep: dict) -> dict[str, Any]:
+    """What a sweep's trials (:func:`_trial_row`) amount to under the objective its record
+    ``sweep`` states: ``best_params`` and ``best_value`` over its completed trials in the
+    objective's direction; above one draw, the best point by mean over its draws
+    (:func:`group_split_draws`), with ``best_value_spread`` and every point's
+    ``split_sensitivity``. ``best_params`` is ``None`` when no trial or point qualifies."""
+    choose = max if sweep["objective"]["higher_is_better"] else min
+    if sweep["input"]["split_draws"] > 1:
+        groups = group_split_draws(trials, sweep["input"]["split_draw_seeds"])
         eligible = [g for g in groups if g["eligible"]]
         best_group = choose(eligible, key=lambda g: g["block"]["mean"]) if eligible else None
         return {
@@ -1000,13 +865,14 @@ def sweep_observation(sweep_id: str, *, project: Path | str) -> experiments.RunO
 
 
 def sweep_record(observation: experiments.RunObservation) -> dict[str, Any]:
-    """An observed sweep's own fields: ``{"sweep_id", "status", "error", "input",
-    "cancel_requested"}``, the input its ``sweep.json``."""
+    """An observed sweep's own fields: ``{"sweep_id", "status", "error", "input", "objective",
+    "cancel_requested"}``, the input and objective its ``sweep.json`` records."""
     return {
         "sweep_id": observation.directory.name,
         "status": observation.state,
         "error": observation.final["error"] if observation.final is not None else None,
-        "input": observation.record,
+        "input": observation.record["input"],
+        "objective": observation.record["objective"],
         "cancel_requested": experiments.cancel_requested(observation.directory),
     }
 
@@ -1021,7 +887,6 @@ def read_sweep(observation: experiments.RunObservation) -> dict[str, Any]:
 
 def _run_hpo_trial(
     point: dict, report, base_config: dict, trial_dir: Path, *, project: Path, objective: dict,
-    launched_by: dict[str, Any] | None,
 ) -> None:
     """Train one HPO trial of a sweep of ``project`` as a run directory under its sweep, reporting
     every ``selection`` its metrics log records, which is the trial's result (:func:`_trial_row`).
@@ -1047,7 +912,7 @@ def _run_hpo_trial(
         resolved, error = resolve_run(config, project=project, objective=objective).record, None
     except Exception as exc:  # noqa: BLE001, whatever stops the resolution fails the trial
         resolved, error = None, str(exc)
-    open_run(trial_dir, config, resolved, launched_by=launched_by, trial_params=point)
+    open_run(trial_dir, config, resolved, trial_params=point)
     if error is not None:
         experiments.write_final_status(trial_dir, "failed", error, checkpoint=None)
         return
@@ -1058,7 +923,6 @@ def _run_hpo_trial(
 
 
 @tool()
-@audited
 def run_hyperparameter_search(
     project: Path,
     base_config: dict,
@@ -1197,13 +1061,13 @@ def open_sweep(
     study_name: str | None, split_draws: int, split_draw_seeds: list[int] | None,
     search_seed: int, trial_budget: int | None, relaunched_from: str | None,
 ) -> OpenedSweep | dict:
-    """Check a sweep's arguments against every refusal :func:`run_hyperparameter_search` names:
-    the structure (:func:`_structural_issues`) of every point the search space could resolve a
-    trial to (:func:`_preflight_points`), then the first of them resolved once
-    (:func:`_preflight`), whose objective every trial records. Create the sweep's directory under
-    ``project`` with its ``sweep.json`` written once, carrying every argument resolved and the
-    objective. Returns the opened sweep, or the refusal ``{"error", "issues"}`` with nothing
-    created."""
+    """Check a sweep's arguments: the structure (:func:`_structural_issues`) of every point the
+    search space could resolve a trial to (:func:`_preflight_points`), then the first of them
+    resolved once (:func:`_preflight`), whose objective every trial records. Create the sweep's
+    directory under ``project`` with its ``sweep.json`` written once, carrying the objective and
+    every argument resolved as its ``input``, then the act's one audit line naming the sweep (``AuditEntryNotWritten`` when it
+    cannot be appended). Returns the opened sweep, or the refusal ``{"error", "issues"}`` with
+    nothing created."""
     from tcip_mcp.pipelines.training.hpo import get_default_space, split_draw_search_space
 
     if param_space is None:
@@ -1285,19 +1149,28 @@ def open_sweep(
                 "issues": []}
     except (StoreError, ValueError, OSError) as exc:
         return {"error": str(exc), "issues": []}
-    record = {
-        "created": experiments.now_iso(), "launched_by": _resolve_launched_by(),
-        "objective": objective, "n_trials": n_trials, "search_alg": search_alg,
-        "scheduler": scheduler, "grace_period": grace_period,
-        "reduction_factor": reduction_factor, "max_concurrent": max_concurrent,
-        "warm_start": warm_start, "baseline_params": baseline_params,
-        "resources_per_trial": resources_per_trial, "param_space": param_space,
-        "base_config": base_config, "relaunched_from": relaunched_from,
-        "split_draws": split_draws, "split_draw_seeds": resolved_draw_seeds,
-        "search_seed": search_seed, "trial_budget": trial_budget,
-    }
+    record = {"created": experiments.now_iso(), "objective": objective, "input": {
+        "n_trials": n_trials, "search_alg": search_alg, "scheduler": scheduler,
+        "grace_period": grace_period, "reduction_factor": reduction_factor,
+        "max_concurrent": max_concurrent, "warm_start": warm_start,
+        "baseline_params": baseline_params, "resources_per_trial": resources_per_trial,
+        "param_space": param_space, "base_config": base_config,
+        "relaunched_from": relaunched_from, "split_draws": split_draws,
+        "split_draw_seeds": resolved_draw_seeds, "search_seed": search_seed,
+        "trial_budget": trial_budget,
+    }}
     experiments.write_record(directory / SWEEP_FILE, record)
+    record_event_or_raise("open_sweep", {"sweep_id": directory.name,
+                                         "relaunched_from": relaunched_from}, scope=project)
     return OpenedSweep(project, directory, record, search_param_space)
+
+
+def reopen_sweep(project: Path, source: experiments.RunObservation) -> OpenedSweep | dict:
+    """Open a new sweep of ``project`` (:func:`open_sweep`, which mints its id) from the recorded
+    input of the observed sweep ``source`` (:func:`sweep_observation`), relaunched from it; the
+    refusal dict when that input no longer opens."""
+    return open_sweep(project, **{**source.record["input"], "study_name": None,
+                                  "relaunched_from": source.directory.name})
 
 
 def _sweep_trials(sweep: experiments.RunObservation) -> list[dict[str, Any]]:
@@ -1336,10 +1209,11 @@ def run_sweep(sweep: OpenedSweep, *, auto_tensorboard: bool) -> dict:
             tid = _tune.get_context().get_trial_id()
         except Exception:
             tid = uuid.uuid4().hex[:8]
-        _run_hpo_trial(config, report, record["base_config"],
+        _run_hpo_trial(config, report, given["base_config"],
                        directory / f"{TRIAL_DIR_PREFIX}{tid}", project=sweep.project,
-                       objective=record["objective"], launched_by=record["launched_by"])
+                       objective=record["objective"])
 
+    given = record["input"]
     stop_heartbeat = experiments.keep_heartbeat(directory)
     try:
         tb_logdir = tune_search(
@@ -1348,19 +1222,19 @@ def run_sweep(sweep: OpenedSweep, *, auto_tensorboard: bool) -> dict:
             project=sweep.project,
             metric="objective",
             mode="max" if record["objective"]["higher_is_better"] else "min",
-            num_samples=record["n_trials"],
-            search_alg=record["search_alg"],
-            scheduler=record["scheduler"],
-            grace_period=record["grace_period"],
-            reduction_factor=record["reduction_factor"],
-            seed=record["search_seed"],
-            warm_start=record["warm_start"],
-            baseline_params=record["baseline_params"],
-            max_concurrent=record["max_concurrent"],
+            num_samples=given["n_trials"],
+            search_alg=given["search_alg"],
+            scheduler=given["scheduler"],
+            grace_period=given["grace_period"],
+            reduction_factor=given["reduction_factor"],
+            seed=given["search_seed"],
+            warm_start=given["warm_start"],
+            baseline_params=given["baseline_params"],
+            max_concurrent=given["max_concurrent"],
             storage_path=str(directory.parent),
             study_name=directory.name,
-            resources_per_trial=record["resources_per_trial"],
-            split_draws=record["split_draws"],
+            resources_per_trial=given["resources_per_trial"],
+            split_draws=given["split_draws"],
         )
     except Exception as exc:
         if experiments.cancel_requested(directory):
@@ -1413,14 +1287,13 @@ def cancel_hyperparameter_search(project: Path, study_name: str) -> dict:
 
 
 def _apply_hpo_params(base_config: dict, params: dict) -> dict:
-    """Apply flat HPO params onto a deep copy of ``base_config``, where ``train()`` reads them.
-    ``base_config``'s own progressive-unfreeze schedule is left untouched:
+    """Apply flat HPO params onto a deep copy of ``base_config``, its progressive-unfreeze
+    schedule left untouched:
 
       - ``lr``           -> ``optimizer["head_lr"]``, plus ``optimizer["backbone_lr"]`` scaled by
                             whatever backbone/head ratio ``base_config`` already expressed
       - ``weight_decay`` -> ``optimizer["weight_decay"]``
-      - anything else    -> the top level of ``cfg`` (``batch_size`` included), where
-                            ``train()`` reads every key of its own
+      - anything else    -> the top level of ``cfg`` (``batch_size`` included)
     """
     import copy
 
@@ -1625,19 +1498,18 @@ def _split_draws_refusal(
 
 
 def _bound_redraw_starvation_issue(split_cfg: dict, project: Path) -> str | None:
-    """Whether redrawing train and val inside the selection of ``project`` that ``split_cfg``
-    binds starves a side (:func:`~tcip_mcp.pipelines.data.splits.redraw_starved_issue`), or
-    ``None``."""
+    """The refusal redrawing train and val inside the selection of ``project`` that ``split_cfg``
+    binds raises (``split_construction.redrawn_selection`` at its seed), or ``None``."""
     from tcip_mcp.pipelines.data.selection import read_selection
-    from tcip_mcp.pipelines.data.splits import redraw_pool, redraw_starved_issue
+    from tcip_mcp.pipelines.data.split_construction import redrawn_selection
 
     selection_dir = split_cfg["selection_dir"]
     try:
-        selection = read_selection(selection_dir, project=project)
+        redrawn_selection(read_selection(selection_dir, project=project), selection_dir,
+                          split_seed(split_cfg))
     except ValueError as exc:
         return f"split_draws: {exc}"
-    return redraw_starved_issue(*redraw_pool(selection), selection_dir=selection_dir,
-                                seed=split_cfg.get("seed"))
+    return None
 
 
 def _unbound_single_source_spatial_issue(task: str, data_cfg: dict, split_draws: int) -> str | None:
@@ -1663,20 +1535,19 @@ def _unbound_single_source_spatial_issue(task: str, data_cfg: dict, split_draws:
     if not isinstance(tiling, dict) or not tiling or not tiling.get("enabled", True):
         return None
 
-    from tcip_mcp.pipelines.data.label_queries import admit_run
+    from tcip_mcp.pipelines.data.split_construction import run_membership
 
     try:
-        admitted = admit_run(data_cfg)
+        membership = run_membership(data_cfg)
     except Exception:
         return None
-    if len(admitted.records) != 1:
+    if len(membership.samples) != 1:
         return None
     return (
         f"split_draws={split_draws} redraws the split, and base_config admits one trainable "
         "source under data.labels_dir: a detection sweep with tiling on takes the single-source "
         "spatial strip path, whose partition is placed by declared order and does not vary with "
-        "data.split.seed, or trains with no validation, or fails on a reserved calibration "
-        "fraction; in every case no draw holds a different partition out and the spread would be "
+        "data.split.seed, or refuses the validation it cannot draw; in every case no draw holds a different partition out and the spread would be "
         "training-seed noise. Run at split_draws=1, or sweep a dataset with two or more admitted "
         "sources or a config bound to a selection."
     )

@@ -17,7 +17,6 @@ coverage.
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 import pytest
@@ -34,7 +33,6 @@ from tests._verified_checkpoint_fixtures import partition_side as recorded_side 
 
 IMG = 64
 SUBJECT = "bud"
-SPLIT_LOGGER = "tcip_mcp.pipelines.data.split_construction"
 GEOMETRY_TASKS = ("detection", "instance_seg")
 """The tasks the known geometry loaders cover, which is the set the producer names membership for.
 Every route below that either can take is parametrized over both."""
@@ -161,9 +159,9 @@ def test_auto_val_off_trains_on_every_admitted_sample_and_records_them(tmp_path:
 
 
 @pytest.mark.parametrize("task", GEOMETRY_TASKS)
-def test_a_starved_draw_trains_without_validation_and_says_so(tmp_path: Path, caplog, task: str):
-    """A group policy that collapses every sample into one group leaves no side to hold out; the
-    run still trains on every admitted sample and the log names the failure."""
+def test_a_starved_draw_refuses_by_the_draws_own_floor(tmp_path: Path, task: str):
+    """A group policy that collapses every sample into one group leaves no side to hold out, so
+    the run refuses naming the floor rather than training without validation."""
     stems = ["a_0_0", "b_0_0"]
     images_dir, labels_dir = _labeled(tmp_path / "ds", stems, task=task)
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
@@ -171,14 +169,8 @@ def test_a_starved_draw_trains_without_validation_and_says_so(tmp_path: Path, ca
                 "split": {"val_ratio": 0.5, "seed": 1,
                           "group_key_map": {s: "one_group" for s in stems}}}
 
-    with caplog.at_level(logging.WARNING, logger=SPLIT_LOGGER):
-        train_ds, val_ds, partition = auto_train_val(tmp_path, task, data_cfg, None)
-
-    assert val_ds is None
-    assert _membership(train_ds) == set(stems)
-    assert recorded_side(partition, "val") == []
-    assert "no grouping policy could populate both sides" in caplog.text
-    assert "training without validation" in caplog.text
+    with pytest.raises(ValueError, match="fewer than the 2 the requested sides need"):
+        auto_train_val(tmp_path, task, data_cfg, None)
 
 
 def test_one_tiled_source_still_splits_spatially_over_its_own_samples(tmp_path: Path):
@@ -210,9 +202,7 @@ def test_one_tiled_source_still_splits_spatially_over_its_own_samples(tmp_path: 
 
 
 def test_the_train_only_and_drawn_routes_record_one_directory_the_same_way(tmp_path: Path):
-    """Two producers of one fact, compared against each other rather than against a fixture.
-
-    The same training directory is admitted twice, once by a run training on every admitted sample
+    """The same training directory is admitted twice, once by a run training on every admitted sample
     and once by a run that drew its own split over it. The two runs partition it differently,
     which is what each route is for; what they may not do is disagree about which members that
     directory holds, where it is, or what each member's ground truth digests to now.

@@ -99,10 +99,9 @@ def _registry_term(dataset_root: Path) -> str:
     from tcip_mcp.subject_registry import read_registry, registry_to_dict
     from tcip_mcp.dataset_layout import subjects_path
 
-    cp = subjects_path(dataset_root)
-    if not cp.is_file():
+    if not subjects_path(dataset_root).is_file():
         return ""
-    canonical = json.dumps(registry_to_dict(read_registry(cp)), separators=(",", ":"))
+    canonical = json.dumps(registry_to_dict(read_registry(dataset_root)), separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 

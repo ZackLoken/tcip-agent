@@ -161,7 +161,7 @@ describe("TrainingTab run list", () => {
     render(<TrainingTab />);
     expect(
       await screen.findByRole("button", {
-        name: "train-named-row running, launcher not recorded",
+        name: "train-named-row running, no launch event recorded",
       }),
     ).toBeInTheDocument();
   });
@@ -198,7 +198,7 @@ describe("TrainingTab run list", () => {
     render(<TrainingTab />);
     expect(
       await screen.findByRole("button", {
-        name: "train-named-value completed, launcher not recorded, best loss 0.4130041",
+        name: "train-named-value completed, no launch event recorded, best loss 0.4130041",
       }),
     ).toBeInTheDocument();
   });
@@ -249,58 +249,33 @@ describe("TrainingTab run list", () => {
 });
 
 describe("TrainingTab run launcher mark", () => {
-  it("states who launched the run from launched_by alone", async () => {
+  it("states who launched the run from its launch event alone", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
-        run({ experiment_id: "train-gui", status: "running", launched_by: { launcher: "gui" } }),
         run({
           experiment_id: "train-agent",
           status: "running",
-          launched_by: {
-            launcher: "agent",
-            agent_client_name: "claude-code",
-            agent_client_version: "2.1.238",
-          },
+          launch: { agent_client_name: "claude-code", agent_client_version: "2.1.238" },
         }),
-        run({
-          experiment_id: "train-process",
-          status: "running",
-          launched_by: { launcher: "process" },
-        }),
-        run({
-          experiment_id: "train-done-unrecorded",
-          status: "completed",
-          launched_by: null,
-        }),
-        run({
-          experiment_id: "train-other-value",
-          status: "running",
-          launched_by: { launcher: "bespoke-cli" },
-        }),
+        run({ experiment_id: "train-undeclared", status: "running", launch: {} }),
+        run({ experiment_id: "train-no-event", status: "completed", launch: null }),
       ],
     });
 
     render(<TrainingTab />);
-    await screen.findByText("train-gui");
+    await screen.findByText("train-agent");
 
-    expect(
-      screen.getByRole("button", { name: "train-gui running, started through this app" }),
-    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "train-agent running, started by the agent" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "train-process running, started by another process" }),
-    ).toBeInTheDocument();
-    expect(
       screen.getByRole("button", {
-        name: "train-done-unrecorded completed, launcher not recorded",
+        name: "train-undeclared running, started with no agent declared",
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "train-other-value running, started by bespoke-cli" }),
+      screen.getByRole("button", { name: "train-no-event completed, no launch event recorded" }),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/started elsewhere/)).not.toBeInTheDocument();
   });
 
   it("names the declared client in the agent row's accessible description", async () => {
@@ -309,11 +284,7 @@ describe("TrainingTab run launcher mark", () => {
         run({
           experiment_id: "train-agent-desc",
           status: "running",
-          launched_by: {
-            launcher: "agent",
-            agent_client_name: "claude-code",
-            agent_client_version: "2.1.238",
-          },
+          launch: { agent_client_name: "claude-code", agent_client_version: "2.1.238" },
         }),
       ],
     });
@@ -328,43 +299,20 @@ describe("TrainingTab run launcher mark", () => {
     expect(document.getElementById(describedBy as string)).toHaveTextContent("claude-code 2.1.238");
   });
 
-  it("makes an unrecorded launcher's explanation reachable by assistive technology", async () => {
+  it("makes a missing launch event's explanation reachable by assistive technology", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [run({ experiment_id: "train-no-launcher", status: "running" })],
     });
 
     render(<TrainingTab />);
     const button = await screen.findByRole("button", {
-      name: "train-no-launcher running, launcher not recorded",
+      name: "train-no-launcher running, no launch event recorded",
     });
 
     const describedBy = button.getAttribute("aria-describedby");
     expect(describedBy).toBeTruthy();
     expect(document.getElementById(describedBy as string)).toHaveTextContent(
-      "This run's record carries no launcher",
-    );
-  });
-
-  it("describes a process launch by what the record rules out, not a browser claim it can't carry", async () => {
-    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [
-        run({
-          experiment_id: "train-process-desc",
-          status: "running",
-          launched_by: { launcher: "process" },
-        }),
-      ],
-    });
-
-    render(<TrainingTab />);
-    const button = await screen.findByRole("button", {
-      name: "train-process-desc running, started by another process",
-    });
-
-    const describedBy = button.getAttribute("aria-describedby");
-    expect(describedBy).toBeTruthy();
-    expect(document.getElementById(describedBy as string)).toHaveTextContent(
-      "This run was launched outside this app's own route and outside the agent, by something other than both.",
+      "No launch event in this project's audit log names this run.",
     );
   });
 });

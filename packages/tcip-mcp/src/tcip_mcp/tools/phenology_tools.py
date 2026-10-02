@@ -30,8 +30,7 @@ def register_plant_registry(project: Path, name: str, csv_paths: list[str], *, c
     Reads every path in ``csv_paths`` through ``read_plant_csvs``, one file at a time, and refuses
     naming any file that parses to no georeferenced, named plant. The stored, frozen,
     project-scoped record holds each file's ``{path, sha256, n_plants}``, ``crop``, ``site``,
-    ``registered_by`` (always this door's own identity), ``registered_at``, and a content digest
-    over every parsed row.
+    ``registered_at``, and a content digest over every parsed row.
 
     A second registration under a taken ``name`` is read before it writes (this store's own
     ``concurrency="cas"``): it returns the existing record unchanged when the digest matches (the
@@ -49,17 +48,10 @@ def register_plant_registry(project: Path, name: str, csv_paths: list[str], *, c
     Refuses (``{"error": ...}``) naming any missing file, naming any shapefile part by suffix
     (``.shp``/``.shx``/``.dbf``/``.prj``; convert it first with ``tcip shp-to-plant-csv``), naming
     any file that parsed no georeferenced, named plant or is not UTF-8 text, and naming a name
-    conflict's two digests. A name outside ``NAME_SEGMENT`` refuses at the door. This does not
-    require a project record.
+    conflict's two digests or a name outside ``NAME_SEGMENT``. This does not require a project
+    record.
     """
-    from tcip_store.layout_claims import NAME_SEGMENT
-
     from tcip_mcp.pipelines.postprocessing import plant_mapping
-
-    if not NAME_SEGMENT.fullmatch(name):
-        return {"error": (
-            f"name {name!r} is not lowercase letters, digits and single hyphens "
-            f"({NAME_SEGMENT.pattern})")}
 
     missing = [p for p in csv_paths if not Path(p).is_file()]
     if missing:
@@ -75,24 +67,11 @@ def register_plant_registry(project: Path, name: str, csv_paths: list[str], *, c
             "tcip shp-to-plant-csv <plants.shp> <plants.csv> and register the CSV instead")}
 
     try:
-        record = plant_mapping.register_plant_registry_record(
-            project, name, [Path(p) for p in csv_paths],
-            crop=crop, site=site, registered_by="register_plant_registry",
-        )
-    except (plant_mapping.NoGeoreferencedPlantsRefusal,
-            plant_mapping.PlantRegistryNameConflict) as exc:
+        return plant_mapping.register_plant_registry_record(
+            project, name, [Path(p) for p in csv_paths], crop=crop, site=site)
+    except (plant_mapping.NoGeoreferencedPlantsRefusal, plant_mapping.PlantRegistryNameConflict,
+            ValueError) as exc:
         return {"error": str(exc)}
-
-    return {
-        "name": record["name"],
-        "crop": record["crop"],
-        "site": record["site"],
-        "n_plants": record["n_plants"],
-        "digest": record["digest"],
-        "csvs": record["csvs"],
-        "registered_by": record["registered_by"],
-        "registered_at": record["registered_at"],
-    }
 
 
 @tool()
@@ -129,88 +108,29 @@ def build_plant_mapping(
             ``supersedes`` names the archived digest, and the archived record stays readable by
             that digest. An uncited rebuild replaces as it always has, ignoring this.
 
-    Refuses (a plain ``{"error": ...}``) naming ``register_dataset`` when ``images_root`` is not a
-    registered dataset's own ``images/`` directory, and naming ``register_plant_registry`` when
-    ``plant_registry`` names no stored
-    registry. A name outside ``tcip_store.layout_claims.NAME_SEGMENT`` (lowercase letters, digits,
-    single hyphens) refuses at the door. No capture at all under the requested dates, or captures
-    that carry no position this door reads (no GPS EXIF, or a raster/band-group capture), also
-    refuses, naming the plant-tag mechanism the platform does not yet have. A receipt that cannot
-    be written fails the call naming the receipt: the record it would have named is left on disk
-    but :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.load_mapping` refuses to read it
-    until a rebuild replaces it. A rebuild a delivery event still cites, with ``supersede`` left
-    ``False``, refuses naming those events.
+    Refuses (a plain ``{"error": ...}``) with each refusal of
+    :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.build_plant_mapping`; a rebuild a
+    delivery event still cites, with ``supersede`` left ``False``, also names those events as
+    ``citing_events``. A receipt that cannot be written fails the call naming the receipt: the
+    record it would have named is left on disk but
+    :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.load_mapping` refuses to read it until
+    a rebuild replaces it.
 
-    Returns a compact per-date summary (images, mapped count, unattributed count, avg GPS distance)
-    plus totals, the mapping's ``name``, the resolved ``dataset_root``,
-    ``nn_tolerance_m`` (the persisted record's own ``{"value": ..., "source": ...}``),
-    ``max_match_distance_m`` (the tolerance's own loosest accepted distance, derived from it
-    through ``plant_mapping.match_gates``), and ``unreadable`` (per date, the captures PIL could
-    not open), not the full per-image mapping (that lives in the persisted record).
+    Returns the build as ``MappingBuild.served`` states it, never the full per-image mapping (that
+    lives in the persisted record).
     """
-    from tcip_store.layout_claims import NAME_SEGMENT
-
     from tcip_mcp.audit import AuditEntryNotWritten
-    from tcip_mcp.dataset_layout import dataset_root_of, image_root, require_dataset_identity
-    from tcip_mcp.pipelines.data.splits import same_directory
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
     from tcip_mcp.pipelines.postprocessing import plant_mapping
 
-    if not NAME_SEGMENT.fullmatch(name):
-        return {"error": (
-            f"name {name!r} is not lowercase letters, digits and single hyphens "
-            f"({NAME_SEGMENT.pattern})")}
-
-    resolved_images_root = Path(images_root).resolve()
-    if not resolved_images_root.is_dir():
-        return {"error": f"images_root not found: {images_root}"}
-
-    candidate = dataset_root_of(resolved_images_root)
-    if candidate is None or not same_directory(image_root(candidate), resolved_images_root):
-        return {"error": (
-            f"{images_root} is not a dataset's own images/ root; build_plant_mapping maps a "
-            "registered dataset's image tree")}
     try:
-        identity = require_dataset_identity(candidate)
-        registry_record = plant_mapping.load_registry(project, plant_registry)
-    except ValueError as exc:
-        return {"error": str(exc)}
-    registry_ref = {"name": plant_registry, "digest": registry_record["digest"]}
-    registry_paths = [Path(e["path"])
-                      for e in plant_mapping.registry_csv_entries(registry_record, project)]
-
-    try:
-        build = plant_mapping.build_mapping(
-            resolved_images_root, registry_paths,
-            name=name, dataset_root=candidate, dataset_id=identity["id"],
-            project=project, built_by="build_plant_mapping",
-            plant_registry=registry_ref, dates=dates, nn_tolerance_m=nn_tolerance_m,
-        )
-    except (AmbiguousImageStem, plant_mapping.UngeoreferencedCaptureRefusal,
-            plant_mapping.NoMatchTolerance) as exc:
-        return {"error": str(exc)}
-
-    try:
-        plant_mapping.persist_mapping(build, project, name, supersede=supersede)
-    except AuditEntryNotWritten as exc:
-        return {"error": str(exc)}
+        return plant_mapping.build_plant_mapping(
+            project, name, images_root, plant_registry, dates=dates,
+            nn_tolerance_m=nn_tolerance_m, supersede=supersede).served()
     except plant_mapping.MappingRebuildRefusal as exc:
         return {"error": str(exc), "citing_events": exc.event_ids}
-
-    summary = build.summary()
-    return {
-        "name": name,
-        "dataset_root": str(candidate),
-        "unreadable": build.unreadable,
-        "n_dates": summary["totals"]["n_dates"],
-        "n_images": summary["totals"]["n_images"],
-        "n_mapped": summary["totals"]["n_mapped"],
-        "n_unattributed": summary["totals"]["n_unattributed"],
-        "per_date": summary["per_date"],
-        "nn_tolerance_m": build.nn_tolerance_m,
-        "max_match_distance_m": plant_mapping.match_gates(
-            build.nn_tolerance_m["value"])["max_match_distance_m"],
-    }
+    except (plant_mapping.UngeoreferencedCaptureRefusal, AuditEntryNotWritten,
+            ValueError) as exc:
+        return {"error": str(exc)}
 
 
 @tool()

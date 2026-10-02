@@ -345,11 +345,11 @@ def test_list_runs_route_is_a_pure_pass_through_to_the_tool(opened_project) -> N
     assert list_runs_route()["runs"] == list_experiments(opened_project, launched_only=True)["runs"]
 
 
-def test_relaunch_route_stamps_the_run_as_launched_through_this_app(
+def test_a_route_launch_shows_its_declaration_from_its_launch_event(
     tmp_path, monkeypatch, client: TestClient
 ) -> None:
-    """The route wraps its call in declare_launcher('gui'), so the run it starts through the
-    browser-facing door reads back as launched by this app, not by a bare process. Mocks
+    """A run started through the browser-facing door shows the declaration its launch event
+    carries: none, since no agent declared itself to the serving process. Mocks
     subprocess.Popen so the assertion runs against the launch record without waiting on a real
     child (test_relaunch_route_forks_a_run_s_config_and_names_the_parent covers the real
     subprocess path)."""
@@ -378,10 +378,13 @@ def test_relaunch_route_stamps_the_run_as_launched_through_this_app(
     resp = client.post("/api/training/runs", json={"experiment_id": "exp-gui-relaunch"})
     assert resp.status_code == 200, resp.json()
 
-    relaunched = read_record(experiment_dir(resp.json()["experiment_id"], project=tmp_path)
-                             / RUN_FILE)
-    assert relaunched["launched_by"] == {"launcher": "gui"}
+    minted = resp.json()["experiment_id"]
+    relaunched = read_record(experiment_dir(minted, project=tmp_path) / RUN_FILE)
+    assert "launched_by" not in relaunched
     assert relaunched["parent_experiment"] == "exp-gui-relaunch"
+    row = next(r for r in client.get("/api/training/runs").json()["runs"]
+               if r["experiment_id"] == minted)
+    assert row["launch"] == {}
 
 
 def _regression_config(tmp_path: Path) -> dict:
@@ -468,6 +471,6 @@ def test_list_runs_excludes_hpo_trials(opened_project) -> None:
     config = detection_config(opened_project / "trial-data")
     open_run(sweeps_dir(opened_project) / "hpo_study" / "trial_b", config,
              resolve_run(config, project=opened_project).record,
-             launched_by={"launcher": "process"}, trial_params={"lr": 0.01})
+             trial_params={"lr": 0.01})
 
     assert [r["experiment_id"] for r in list_runs_route()["runs"]] == ["run-a"]

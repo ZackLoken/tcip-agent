@@ -56,7 +56,7 @@ describe("annotate.save lost-update handling", () => {
     stubFetch(409, {
       detail: {
         error: "audit_entry_not_written",
-        message: "gui_save_labels completed and its audit entry could not be written",
+        message: "save_label_document completed and its audit entry could not be written",
         committed: { status: "ok", image_path: "x", n_annotations: 0, base_mtime: "2" },
       },
     });
@@ -70,7 +70,7 @@ describe("annotate.save lost-update handling", () => {
     if (res.status === "unrecorded") {
       expect(res.base_mtime).toBe("2");
       expect(res.message).toBe(
-        "gui_save_labels completed and its audit entry could not be written",
+        "save_label_document completed and its audit entry could not be written",
       );
     }
   });

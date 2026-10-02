@@ -499,9 +499,7 @@ def test_a_mask_run_refuses_a_stated_class_space_and_admits_the_empty_one(tmp_pa
 
 
 def test_the_bound_and_drawn_mask_routes_record_one_directory_the_same_way(tmp_path: Path):
-    """Two producers of one fact, compared against each other rather than against a fixture.
-
-    The same mask directory is admitted twice, once by a run bound to a selection drawn over it
+    """The same mask directory is admitted twice, once by a run bound to a selection drawn over it
     and once by a run that drew its own split. The two partition it differently, which is what
     each route is for; what they may not do is disagree about which members that directory holds,
     where it is, or what each member's ground truth digests to now.
@@ -543,13 +541,14 @@ def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(tmp_p
     """
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tests._producer_fixtures import registry_over
 
     root = tmp_path / "ds"
     images_dir, masks_dir = _mask_dataset(root)
     labels_dir = root / "annotations"
     labels_dir.mkdir(parents=True, exist_ok=True)
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="leaf"),)))
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="leaf"),)))
     for stem in STEMS:
         json_io.write_annotations(labels_dir / f"{stem}.json",
                                   [Annotation(subject="leaf", geometry=BBox(2, 2, 8, 8))],

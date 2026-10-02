@@ -210,13 +210,14 @@ def test_preflight_config_warns_when_most_candidates_wont_train(tmp_path):
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"},
+                 "auto_val": False},
         "batch_size": 2,
         # One admitted image holds nothing out, so the run selects on its training loss.
         "evaluation": {"selection_metric": "loss"},
     }
     r = preflight_config(tmp_path, cfg)
-    assert r["valid"] is True  # informational only, never gating
+    assert r["valid"] is True, r  # informational only, never gating
     assert any("3/4 candidate images (75%) will not train" in w for w in r["warnings"]), r["warnings"]
     assert any("skipped_unannotated" in w for w in r["warnings"])
 
@@ -246,13 +247,14 @@ def test_preflight_config_warns_of_a_negative_the_label_file_now_contradicts(tmp
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"},
+                 "auto_val": False},
         "batch_size": 2,
         # One admitted image holds nothing out, so the run selects on its training loss.
         "evaluation": {"selection_metric": "loss"},
     }
     r = preflight_config(tmp_path, cfg)
-    assert r["valid"] is True  # informational only, never gating
+    assert r["valid"] is True, r  # informational only, never gating
     assert any("bush.jpg" in w and "stale" in w for w in r["warnings"]), r["warnings"]
 
 
@@ -834,8 +836,7 @@ def _trial(point: dict, report, base: dict, trial_dir, *, metric: str = "loss",
     from tcip_mcp.tools.training_tools import _run_hpo_trial
 
     _run_hpo_trial(point, report, base, Path(trial_dir), project=project_of_run(Path(trial_dir)),
-                   objective={"selection_metric": metric, "higher_is_better": higher_is_better},
-                   launched_by={"launcher": "process"})
+                   objective={"selection_metric": metric, "higher_is_better": higher_is_better})
 
 
 def _row(value: float, metric: str = "loss") -> dict:
@@ -995,7 +996,7 @@ def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
     objective = {"selection_metric": "accuracy", "higher_is_better": True}
     trials = [_trial_row(observe(_trial_dir(tmp_path, name)), objective)
               for name in ("trial_failed", "trial_real")]
-    outcome = sweep_outcome(trials, {"objective": objective, "split_draws": 1})
+    outcome = sweep_outcome(trials, {"objective": objective, "input": {"split_draws": 1}})
     assert (outcome["best_params"], outcome["best_value"]) == ({"lr": 3e-4}, 0.7)
 
 

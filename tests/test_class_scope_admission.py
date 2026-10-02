@@ -58,25 +58,26 @@ def _dirs(root: Path) -> tuple[str, str]:
 def test_a_run_stating_its_map_is_admitted_under_that_map_not_the_registrys(
     tmp_path: Path,
 ) -> None:
-    from tcip_mcp.pipelines.data.label_queries import admit_run
+    from tcip_mcp.pipelines.data.split_construction import run_membership
 
     images_dir, labels_dir = _dirs(_attribute_scoped_dataset(tmp_path / "ds"))
-    admitted = admit_run({"images_dir": images_dir, "labels_dir": labels_dir,
-                          "scope": {"subject": SUBJECT, "attribute": "condition",
-                                    "id_map": REVERSED}})
+    membership = run_membership({"images_dir": images_dir, "labels_dir": labels_dir,
+                                 "scope": {"subject": SUBJECT, "attribute": "condition",
+                                           "id_map": REVERSED}})
 
-    assert admitted.scope.id_map == REVERSED
+    assert membership.scope.id_map == REVERSED
 
 
 def test_a_recorded_document_scope_with_no_map_refuses_and_a_fresh_statement_gets_one(
     tmp_path: Path,
 ) -> None:
-    from tcip_mcp.pipelines.data.label_queries import admit, admit_run
+    from tcip_mcp.pipelines.data.label_queries import admit
+    from tcip_mcp.pipelines.data.split_construction import run_membership
 
     images_dir, labels_dir = _dirs(_attribute_scoped_dataset(tmp_path / "ds"))
     with pytest.raises(ValueError, match="records no id_map"):
         admit(images_dir, labels_dir, scope=ClassScope(SUBJECT, "condition"))
 
-    fresh = admit_run({"images_dir": images_dir, "labels_dir": labels_dir,
-                       "scope": {"subject": SUBJECT, "attribute": "condition"}})
+    fresh = run_membership({"images_dir": images_dir, "labels_dir": labels_dir,
+                            "scope": {"subject": SUBJECT, "attribute": "condition"}})
     assert fresh.scope.id_map == {"healthy": 0, "damaged": 1}

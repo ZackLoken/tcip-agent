@@ -569,10 +569,11 @@ def _build_attribute_scoped_experiment(
     registry reordered after the run resolved and recorded its own name to id map."""
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.data.selection import ClassScope
-    from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry, write_registry
+    from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
+    from tests._producer_fixtures import registry_over
 
     def _write_registry(values: tuple[str, ...]) -> None:
-        write_registry(root / "subjects.json", SubjectRegistry(subjects=(
+        registry_over(root, SubjectRegistry(subjects=(
             Subject(name="bud", attributes=(
                 Attribute(name="stage", type="categorical", values=values),)),)))
 
@@ -620,7 +621,7 @@ def test_ground_truth_decodes_through_the_checkpoints_own_recorded_id_map(tmp_pa
     exp = _build_attribute_scoped_experiment(
         tmp_path, trained_values=("closed", "open", "shed"),
         reordered_values=("open", "closed", "shed"), labeled_value="open")
-    live_id_map = assign_class_ids(read_registry(exp["root"] / "subjects.json"), "bud", "stage")
+    live_id_map = assign_class_ids(read_registry(exp["root"]), "bud", "stage")
     recorded_category = str(exp["recorded_id_map"]["open"] + 1)
     live_category = str(live_id_map["open"] + 1)
     assert recorded_category != live_category

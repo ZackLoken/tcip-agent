@@ -17,8 +17,8 @@ from PIL import Image
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp import subject_registry
 from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
+from tests._producer_fixtures import registry_over
 from tcip_mcp.pipelines.data import dataset_fingerprint as fingerprint_mod
 from tcip_mcp.pipelines.data import selection
 from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
@@ -33,9 +33,7 @@ def _make_dataset(root: Path, *, pixel=(120, 120, 120), bud_box=(10, 10, 40, 40)
     json_io.write_annotations(
         root / "annotations" / date / "IMG_1.json",
         [Annotation(subject="bud", geometry=BBox(*bud_box))], 64, 64)
-    subject_registry.write_registry(
-        root / "subjects.json",
-        SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
 
 
 def test_fingerprint_reuses_ground_truth_digest_for_labels(tmp_path, monkeypatch):
@@ -91,7 +89,7 @@ def test_registry_value_order_matters_but_whitespace_does_not(tmp_path):
     reg2 = SubjectRegistry(subjects=(Subject(
         name="bud", description="a currant bud",
         attributes=(Attribute(name="opening", type="categorical", values=("closed", "open")),)),))
-    subject_registry.write_registry(tmp_path / "subjects.json", reg2)
+    registry_over(tmp_path, reg2)
     with_attr = dataset_fingerprint(tmp_path)
     _make_dataset(tmp_path)  # reset registry to no-attr
     assert dataset_fingerprint(tmp_path) != with_attr
@@ -100,7 +98,7 @@ def test_registry_value_order_matters_but_whitespace_does_not(tmp_path):
     reg2_again = SubjectRegistry(subjects=(Subject(
         name="bud", description="a currant bud",
         attributes=(Attribute(name="opening", type="categorical", values=("closed", "open")),)),))
-    subject_registry.write_registry(tmp_path / "subjects.json", reg2_again)
+    registry_over(tmp_path, reg2_again)
     fp_a = dataset_fingerprint(tmp_path)
     cp = tmp_path / "subjects.json"
     cp.write_text(json.dumps(json.loads(cp.read_text()), indent=4) + "\n\n", encoding="utf-8")  # reformat
@@ -175,9 +173,8 @@ def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_
     json_io.write_annotations(
         tmp_path / "annotations" / date / "IMG_1.json",
         [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 64, 64)
-    subject_registry.write_registry(
-        tmp_path / "subjects.json",
-        SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
+    registry_over(
+        tmp_path, SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
 
     assert dataset_fingerprint(tmp_path) == "c9a045ab4545c95f"
 
@@ -197,9 +194,7 @@ def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(tmp_
     json_io.write_annotations(
         tmp_path / "annotations" / date / "capture_1.json",
         [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 16, 16)
-    subject_registry.write_registry(
-        tmp_path / "subjects.json",
-        SubjectRegistry(subjects=(Subject(name="bud"),)))
+    registry_over(tmp_path, SubjectRegistry(subjects=(Subject(name="bud"),)))
 
     fp1 = dataset_fingerprint(tmp_path)
     assert fp1 is not None

@@ -19,11 +19,10 @@ import os
 from pathlib import Path, PurePosixPath
 
 from tcip_mcp.registry_paths import nearest_containing_ancestor
-from tcip_web.trust_boundary import exposed_arrival
 
 __all__ = [
-    "allowed_optional", "allowed_path", "allowed_roots", "assert_path_allowed", "exposed_arrival", "image_roots_from_environment",
-    "safe_join", "within",
+    "allowed_optional", "allowed_path", "allowed_roots", "assert_path_allowed",
+    "image_roots_from_environment", "resolved_path", "safe_join", "within",
 ]
 
 
@@ -144,6 +143,16 @@ def assert_path_allowed(path: str | Path) -> Path:
     )
 
 
+def resolved_path(path: str) -> Path:
+    """``path`` resolved for a route, unconfined; a path that cannot be resolved answers 400."""
+    from fastapi import HTTPException
+
+    try:
+        return Path(path).resolve()
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(400, f"cannot resolve {path}: {exc}") from exc
+
+
 def allowed_path(path: str | Path) -> Path:
     """:func:`assert_path_allowed` for a route: its refusal answered as HTTP 403 naming it."""
     from fastapi import HTTPException
@@ -152,6 +161,23 @@ def allowed_path(path: str | Path) -> Path:
         return assert_path_allowed(path)
     except ValueError as exc:
         raise HTTPException(403, str(exc)) from exc
+
+
+def allowed_image_dimensions(path: str) -> tuple[int, int]:
+    """The dimensions of the image ``path`` names behind :func:`allowed_path`
+    (:func:`~tcip_mcp.pipelines.image_utils.image_path_dimensions`): no file there answers 404,
+    an ambiguous stem 400."""
+    from fastapi import HTTPException
+
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, image_path_dimensions
+
+    p = allowed_path(path)
+    if not p.is_file():
+        raise HTTPException(404, f"image not found: {path}")
+    try:
+        return image_path_dimensions(p)
+    except AmbiguousImageStem as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 def allowed_optional(path: str | None) -> str | None:

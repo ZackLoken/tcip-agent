@@ -7,7 +7,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -104,26 +103,20 @@ def _run(opened) -> None:
 
 @router.post("/sweeps")
 def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
-    """Relaunch a sweep of the open project from its own recorded input: no config, param space
-    or path is ever submitted by the browser. The new sweep's input is written
-    (``training_tools.open_sweep``), meeting every refusal the
-    source's launch passed (422 with the refusal), before its thread starts. Recorded as
-    ``launched_by: {"launcher": "gui"}``."""
-    from tcip_mcp.tools.training_tools import declare_launcher, open_sweep
+    """Relaunch a sweep of the open project from its own recorded input
+    (``training_tools.reopen_sweep``): no config, param space or path is ever submitted by the
+    browser. A source no sweep records answers 404, a refusal 422, and an opened sweep whose
+    audit line could not be written 409, before its thread starts."""
+    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.tools.training_tools import reopen_sweep
+    from tcip_web.routes.audit_gap import audit_gap_409
 
-    source = _sweep_or_404(payload.study_name).record
+    source = _sweep_or_404(payload.study_name)
     project = store.open_root()
-    with declare_launcher("gui"):
-        opened = open_sweep(
-            project, source["base_config"], source["param_space"], n_trials=source["n_trials"],
-            search_alg=source["search_alg"], scheduler=source["scheduler"],
-            grace_period=source["grace_period"], reduction_factor=source["reduction_factor"],
-            warm_start=source["warm_start"], baseline_params=source["baseline_params"],
-            max_concurrent=source["max_concurrent"],
-            resources_per_trial=source["resources_per_trial"],
-            study_name=f"hpo-{uuid.uuid4().hex[:8]}", split_draws=source["split_draws"],
-            split_draw_seeds=source["split_draw_seeds"], search_seed=source["search_seed"],
-            trial_budget=source["trial_budget"], relaunched_from=payload.study_name)
+    try:
+        opened = reopen_sweep(project, source)
+    except AuditEntryNotWritten as exc:
+        raise audit_gap_409(exc, exc.arguments) from exc
     if isinstance(opened, dict):
         raise HTTPException(422, detail=opened)
     thread = threading.Thread(target=_run, args=(opened,), daemon=True)

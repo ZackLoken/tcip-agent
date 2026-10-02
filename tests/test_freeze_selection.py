@@ -62,8 +62,8 @@ def _damage_resolved(project: Path, experiment_id: str, change) -> None:
 
 
 def test_freeze_selection_round_trips_through_a_real_bind(tmp_path: Path):
+    from tcip_mcp.pipelines.data.split_construction import selection_compatibility
     from tcip_mcp.tools.data_tools import freeze_selection
-    from tcip_mcp.tools.training_tools import selection_compatibility
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     _real_drawn_experiment(tmp_path, root, "exp-src")
@@ -87,7 +87,7 @@ def test_freeze_selection_round_trips_through_a_real_bind(tmp_path: Path):
         "model_source": {"builder": BUILDER, "task": "detection"},
         "data": {"split": {"selection_dir": selection_dir}},
     }
-    assert selection_compatibility(second_cfg, frozen, selection_dir) == []
+    assert selection_compatibility(second_cfg["data"], frozen, selection_dir) == []
 
     resolution = resolve_run(second_cfg, project=tmp_path)
     assert len(resolution.train_ds) > 0 and len(resolution.val_ds) > 0
@@ -129,8 +129,8 @@ def test_freeze_selection_from_an_empty_string_attribute_run_binds(tmp_path: Pat
     """A run whose data section carries ``data.attribute=""`` (an explicit empty string, not
     ``None``) freezes a selection a later, attribute-unscoped run still binds to: the frozen
     ``attribute`` is normalized on write, so no reader has to read one form as the other."""
+    from tcip_mcp.pipelines.data.split_construction import selection_compatibility
     from tcip_mcp.tools.data_tools import freeze_selection
-    from tcip_mcp.tools.training_tools import selection_compatibility
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     _real_drawn_experiment(tmp_path, root, "exp-empty-attribute", attribute="")
@@ -145,7 +145,7 @@ def test_freeze_selection_from_an_empty_string_attribute_run_binds(tmp_path: Pat
         "model_source": {"builder": BUILDER, "task": "detection"},
         "data": {"split": {"selection_dir": result["selection_dir"]}},
     }
-    assert selection_compatibility(second_cfg, frozen, result["selection_dir"]) == []
+    assert selection_compatibility(second_cfg["data"], frozen, result["selection_dir"]) == []
 
     resolution = resolve_run(second_cfg, project=tmp_path)
     assert len(resolution.train_ds) > 0 and len(resolution.val_ds) > 0

@@ -409,7 +409,6 @@ export interface TraitRevision {
   rationale: string;
   relayed_note: string;
   proposed_at: string;
-  proposing_agent: Record<string, string | null>;
   confirmed_by: string | null;
   confirmed_at: string | null;
   identity_from_request: boolean | null;

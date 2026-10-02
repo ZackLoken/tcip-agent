@@ -27,7 +27,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 from tcip_mcp.pipelines.postprocessing import phenology, plant_mapping
 
-from tcip_web.paths import allowed_path, exposed_arrival, within
+from tcip_web.paths import resolved_path, within
 from tcip_web.state import store
 
 if TYPE_CHECKING:
@@ -67,37 +67,13 @@ def _belonging(root: Path, *paths: Optional[str]) -> list[Optional[Path]]:
         if not p:
             out.append(None)
             continue
-        resolved = _resolved(p)
+        resolved = resolved_path(p)
         if not any(within(resolved, r) for r in roots):
             raise HTTPException(
                 403, f"{p} does not belong to project {root}: it is under neither the project "
                      f"nor a dataset registered to it ({', '.join(str(r) for r in roots)})")
         out.append(resolved)
     return out
-
-
-def _resolved(path: str) -> Path:
-    try:
-        return Path(path).resolve()
-    except (OSError, RuntimeError) as exc:
-        raise HTTPException(400, f"cannot resolve {path}: {exc}") from exc
-
-
-def _reference_file(path: str, request: Request) -> Path:
-    """A breeder-supplied input file read by a door: unconfined from this machine, confined from
-    a routable connection, the same rule the folder picker applies."""
-    if exposed_arrival(request.scope):
-        return allowed_path(path)
-    return _resolved(path)
-
-
-def _audit(project: str, tool: str, arguments: dict) -> None:
-    """Record a GUI results mutation in the project's audit log. A failed append raises
-    ``AuditEntryNotWritten``.
-    """
-    from tcip_web.routes.audit_gap import record_committed
-
-    record_committed(tool, arguments, scope=project)
 
 
 # ── Plant mapping ──────────────────────────────────────────────────────
@@ -113,125 +89,33 @@ class BuildMappingPayload(BaseModel):
 
 
 @router.post("/plant_mapping/build")
-def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
-    """Build the image-to-plant mapping from the open project's images and the breeder's plant
-    files.
+def build_plant_mapping(payload: BuildMappingPayload) -> dict:
+    """Build and persist the open project's plant mapping
+    (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.build_plant_mapping`) from an
+    ``images_root`` confined to the project, answering the build as ``MappingBuild.served``
+    states it.
 
-    The mapping persists under the open project, by name, and is audited there; ``images_root``
-    must be a registered dataset's own ``images/`` directory. ``plant_registry`` names a registry
-    already registered under this project by ``register_plant_registry``. Its registered files are
-    re-checked under the allowed roots here. A receipt that cannot be written answers 409: the
-    record it would have named is left on disk, refused until a rebuild replaces it. A rebuild a
-    delivery event still cites answers 409 too, naming the citing events, unless
-    ``supersede=True``.
-
-    Answers ``{"mapping", "summary", "unreadable", "nn_tolerance_m", "max_match_distance_m"}``;
-    ``summary`` is the mapping's own ``{"per_date": {...}, "totals": {...}}``
-    (``build.summary()``), ``nn_tolerance_m`` is the persisted record's own ``{"value": ...,
-    "source": ...}``, and ``max_match_distance_m`` is that tolerance's own loosest accepted
-    distance, derived from it through ``plant_mapping.match_gates``. No capture at all under the
-    requested dates, or captures that carry no position this door reads, refuses with 400.
+    A refusal answers 400, an unknown registry 404, a rebuild a delivery event still cites 409
+    unless ``supersede``, and a receipt that could not be written 409.
     """
-    from tcip_store.layout_claims import NAME_SEGMENT
-
     from tcip_mcp.audit import AuditEntryNotWritten
-    from tcip_mcp.dataset_layout import dataset_root_of, image_root, require_dataset_identity
     from tcip_web.routes.audit_gap import audit_gap_409
-    from tcip_mcp.pipelines.data.splits import same_directory
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
-
-    if not NAME_SEGMENT.fullmatch(payload.name):
-        raise HTTPException(
-            400,
-            f"name {payload.name!r} is not lowercase letters, digits and single hyphens "
-            f"({NAME_SEGMENT.pattern})")
 
     root = store.open_root()
-    (images_root,) = _belonging(root, payload.images_root)
-    assert images_root is not None
-
-    candidate = dataset_root_of(images_root)
-    if candidate is None or not same_directory(image_root(candidate), images_root):
-        raise HTTPException(
-            400,
-            f"{payload.images_root} is not a dataset's own images/ root; build_plant_mapping "
-            "maps a registered dataset's image tree")
+    [images_root] = _belonging(root, payload.images_root)
     try:
-        identity = require_dataset_identity(candidate)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-    try:
-        registry_record = plant_mapping.load_registry(root, payload.plant_registry)
+        return plant_mapping.build_plant_mapping(
+            root, payload.name, images_root or "", payload.plant_registry, dates=payload.dates,
+            nn_tolerance_m=payload.nn_tolerance_m, supersede=payload.supersede).served()
     except plant_mapping.PlantRegistryNotFound as exc:
         raise HTTPException(404, str(exc)) from exc
-    registry_ref = {"name": payload.plant_registry, "digest": registry_record["digest"]}
-    # register_plant_registry applies no path confinement (MCP-only, no routable caller); check
-    # the registered paths under the allowed roots now that a routable connection is reading them.
-    registry_paths = [
-        _reference_file(e["path"], request)
-        for e in plant_mapping.registry_csv_entries(registry_record, root)
-    ]
-
-    try:
-        build = plant_mapping.build_mapping(
-            images_root, registry_paths,
-            name=payload.name, dataset_root=candidate, dataset_id=identity["id"],
-            project=root, built_by="gui_build_plant_mapping",
-            plant_registry=registry_ref, dates=payload.dates,
-            nn_tolerance_m=payload.nn_tolerance_m,
-        )
-    except (AmbiguousImageStem, plant_mapping.NoMatchTolerance) as exc:
+    except AuditEntryNotWritten as exc:
+        raise audit_gap_409(exc, None) from exc
+    except (plant_mapping.MappingRebuildRefusal,
+            plant_mapping.UngeoreferencedCaptureRefusal) as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+    except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    except plant_mapping.UngeoreferencedCaptureRefusal as exc:
-        raise HTTPException(exc.status, str(exc)) from exc
-
-    def _committed() -> dict:
-        return {
-            "mapping": build.rows(),
-            "summary": build.summary(),
-            "unreadable": build.unreadable,
-            "nn_tolerance_m": build.nn_tolerance_m,
-            "max_match_distance_m": plant_mapping.match_gates(
-                build.nn_tolerance_m["value"])["max_match_distance_m"],
-        }
-
-    try:
-        plant_mapping.persist_mapping(build, root, payload.name, supersede=payload.supersede)
-    except AuditEntryNotWritten as exc:
-        # Tell the two raising appends apart by reading the record straight back, never through
-        # load_mapping (whose own receipt check can never pass for the entry that just failed).
-        import tcip_store
-
-        raw = tcip_store.read(plant_mapping.plant_mapping_key(root, payload.name), default=None)
-        if isinstance(raw, dict) and raw.get("built_at") == build.built_at:
-            raise audit_gap_409(exc, _committed()) from exc
-        raise audit_gap_409(
-            exc, None,
-            message=(
-                f"{exc} The new record was never persisted under this name (on a supersede "
-                "rebuild, only the archived copy of the old one is, on disk and unrecorded). "
-                "Rebuild with supersede=True once the audit log's destination is repaired."
-            ),
-        ) from exc
-    except plant_mapping.MappingRebuildRefusal as exc:
-        raise HTTPException(exc.status, str(exc)) from exc
-
-    try:
-        _audit(
-            str(root),
-            "gui_build_plant_mapping",
-            {
-                "name": payload.name,
-                "images_root": str(images_root),
-                "dataset_root": str(candidate),
-                "n_dates": len(build.dates),
-            },
-        )
-    except AuditEntryNotWritten as exc:
-        raise audit_gap_409(exc, _committed()) from exc
-
-    return _committed()
 
 
 class LoadMappingPayload(BaseModel):
@@ -240,19 +124,11 @@ class LoadMappingPayload(BaseModel):
 
 @router.post("/plant_mapping/load")
 def load_plant_mapping(payload: LoadMappingPayload) -> dict:
-    """The persisted mapping under ``payload.name``, or an empty one when nothing is stored.
-
-    Answers ``{"mapping", "summary", "nn_tolerance_m", "max_match_distance_m"}`` when a build is
-    found (``summary`` an empty ``{}``, the other two ``None``, otherwise).
+    """The persisted mapping under ``payload.name`` as ``MappingBuild.served`` states it. Nothing
+    stored under the name answers 404; a name the key refuses, or a record that will not load,
+    409.
     """
     from tcip_store import StoreError
-    from tcip_store.layout_claims import NAME_SEGMENT
-
-    if not NAME_SEGMENT.fullmatch(payload.name):
-        raise HTTPException(
-            400,
-            f"name {payload.name!r} is not lowercase letters, digits and single hyphens "
-            f"({NAME_SEGMENT.pattern})")
 
     root = store.open_root()
     try:
@@ -260,19 +136,13 @@ def load_plant_mapping(payload: LoadMappingPayload) -> dict:
     except (StoreError, ValueError) as exc:
         raise HTTPException(409, str(exc)) from exc
     if build is None:
-        return {"mapping": {}, "summary": {}, "nn_tolerance_m": None, "max_match_distance_m": None}
-    return {
-        "mapping": build.rows(),
-        "summary": build.summary(),
-        "nn_tolerance_m": build.nn_tolerance_m,
-        "max_match_distance_m": plant_mapping.match_gates(
-            build.nn_tolerance_m["value"])["max_match_distance_m"],
-    }
+        raise HTTPException(404, f"no plant mapping named {payload.name!r} under {root}")
+    return build.served()
 
 
 @router.get("/plant_mapping/list")
 def list_plant_mappings() -> dict:
-    """Every mapping name persisted under the open project, for the Results tab's picker."""
+    """Every mapping name persisted under the open project."""
     root = store.open_root()
     return {"names": plant_mapping.plant_mapping_names(root)}
 
@@ -336,8 +206,6 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
     in which case both are returned with the refusal as ``unvalidated_reason`` and, as
     ``result_sha256``, the digest of each projection's delivered result keyed ``curves`` and
     ``milestones``, which a breeder's acknowledgment of exporting it binds to.
-
-    Records no delivery event and no audit line.
     """
     from tcip_mcp.delivery import DeliveryRefused, gate
     from tcip_mcp.operationalization import OperationalizationRefused
@@ -515,8 +383,7 @@ def export_count_csv(payload: ExportCountCsvPayload, request: Request) -> Respon
     ``per_image_count`` is
     :func:`~tcip_mcp.pipelines.postprocessing.export.deliver_per_image_counts_csv`;
     ``orthomosaic_plant_counts`` is :func:`~tcip_mcp.tools.orthomosaic_tools.orthomosaic_plant_counts`.
-    Every entry of the named plant registry is confined before the core reads it, so a registered
-    CSV outside the project's roots refuses 403 up front. A delivery refusal answers 400 with
+    A delivery refusal answers 400 with
     ``{"kind", "message"}``, ``kind`` ``"operationalization"`` or ``"delivery"``; a delivery
     event its receipt could not follow answers 409. The response headers name the saved path,
     whether the delivery is validated and who acknowledged it when it is not.
@@ -547,8 +414,6 @@ def export_count_csv(payload: ExportCountCsvPayload, request: Request) -> Respon
                 registry_record = plant_mapping.load_registry(root, delivery.plant_registry)
             except plant_mapping.PlantRegistryNotFound as exc:
                 raise HTTPException(404, str(exc)) from exc
-            _belonging(root, *(e["path"]
-                               for e in plant_mapping.registry_csv_entries(registry_record, root)))
             from tcip_mcp.tools.orthomosaic_tools import orthomosaic_plant_counts
 
             result = orthomosaic_plant_counts(
@@ -692,7 +557,6 @@ def confirm_trait_revision(payload: ConfirmRevisionPayload) -> dict:
     from tcip_web.identity import resolve_user
 
     root = store.open_root()
-    # The writer applies the user: convention to whatever name it is given, so it is passed bare.
     actor = resolve_user(payload.user)
     audit_warning: Optional[str] = None
     try:
@@ -710,11 +574,12 @@ def confirm_trait_revision(payload: ConfirmRevisionPayload) -> dict:
     return {**_served_revision(revision), "audit_warning": audit_warning}
 
 
-# ── List registered models (used by Inference tab) ─────────────────────
+# ── Registered models ───────────────────────────────────────────────────
 
 
 @router.get("/models/registered")
 def registered_models(tag: Optional[str] = None) -> dict:
-    from tcip_mcp.tools.model_tools import rank_registered_models
+    """The open project's registered models (:func:`~tcip_mcp.tools.model_tools.registered_listing`)."""
+    from tcip_mcp.tools.model_tools import registered_listing
 
-    return rank_registered_models(store.open_root(), tag=tag)
+    return registered_listing(store.open_root(), tag=tag)

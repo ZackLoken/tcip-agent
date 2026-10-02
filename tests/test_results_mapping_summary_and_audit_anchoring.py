@@ -97,12 +97,14 @@ def test_build_reports_image_count_mapped_count_and_mean_distance_as_three_answe
     """A date's summary keeps the three quantities apart. The fixture's first date makes them three
     different numbers (four images, two plants resolved, three GPS distances recorded), so a summary
     that reused one of them for another would read wrong rather than merely coincide."""
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import NEAREST_MATCH_FACTOR
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        NEAREST_MATCH_FACTOR, load_mapping_rows,
+    )
 
     payload = _capture_fixture(tmp_path)
     body = client.post("/api/results/plant_mapping/build", json=payload).json()
 
-    rows = body["mapping"]["2026-02-11"]
+    rows = load_mapping_rows(tmp_path, payload["name"])["2026-02-11"]
     assert len(rows) == 4
     assert {r["plot_name"] for r in rows if r["plot_name"]} == {"PLOT1", "PLOT2"}
     distances = [r["distance_m"] for r in rows if r["distance_m"] is not None]
@@ -172,31 +174,72 @@ def test_build_response_carries_the_persisted_record_own_tolerance_dict(
     assert body["nn_tolerance_m"] == build.nn_tolerance_m
 
 
-def test_a_mapping_is_persisted_and_audited_into_the_open_project(
+def test_the_route_and_the_tool_build_one_mapping_with_one_audit_line_each(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    """A mapping is project state: the build always lands under the open project's own
-    ``.tcip/state/plant_mappings/<name>.json``, by the name the payload names, and the audit
-    row for it lands in that same project's log. There is no caller-chosen path left to anchor
-    it elsewhere: the payload carries a name, never a location."""
+    """Identical builds through the HTTP route and the MCP tool reach one operation: their
+    answers, their persisted records and their audit lines agree field for field once the name
+    and the build's own clock are set aside, and each build leaves exactly one line in the open
+    project's log, the receipt naming the record it wrote."""
     import tcip_store
 
     from tcip_mcp.audit import audit_log_key
     from tcip_mcp.pipelines.postprocessing import plant_mapping
+    from tcip_mcp.tools.phenology_tools import build_plant_mapping
 
     payload = _capture_fixture(tmp_path)
+    before = len(tcip_store.read_log(audit_log_key(tmp_path)).records)
     resp = client.post("/api/results/plant_mapping/build", json=payload)
     assert resp.status_code == 200, resp.text
-    build = plant_mapping.load_mapping(tmp_path, payload["name"])
-    assert build is not None
-    assert set(build.assignments.keys()) == {"2026-02-11", "2026-02-25"}
+    tool_answer = build_plant_mapping(
+        tmp_path, name="ridge", images_root=payload["images_root"],
+        plant_registry=payload["plant_registry"])
+    assert "error" not in tool_answer, tool_answer
 
-    page = tcip_store.read_log(audit_log_key(tmp_path))
-    built = [r for r in page.records if r["tool"] == "gui_build_plant_mapping"]
-    assert len(built) == 1
-    assert built[0]["arguments"]["name"] == payload["name"]
-    assert built[0]["arguments"]["n_dates"] == 2
+    def own(record: dict) -> dict:
+        return {k: v for k, v in record.items() if k not in ("name", "built_at", "record_sha256")}
+
+    assert own(resp.json()) == own(tool_answer)
+    route_record = tcip_store.read(plant_mapping.plant_mapping_key(tmp_path, payload["name"]))
+    tool_record = tcip_store.read(plant_mapping.plant_mapping_key(tmp_path, "ridge"))
+    assert own(route_record) == own(tool_record)
+
+    lines = tcip_store.read_log(audit_log_key(tmp_path)).records[before:]
+    assert [line["tool"] for line in lines] == ["plant_mapping_built"] * 2
+    assert [line["arguments"]["name"] for line in lines] == [payload["name"], "ridge"]
+    assert [line["arguments"]["record_sha256"] for line in lines] == [
+        plant_mapping.record_digest(route_record), plant_mapping.record_digest(tool_record)]
+    assert own(lines[0]["arguments"]) == own(lines[1]["arguments"])
     assert not (tmp_path / ".tcip" / ".tcip").exists()
+
+
+def test_a_mapping_or_registry_name_outside_the_segment_rule_refuses_at_its_key(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """The key producers refuse a name outside the segment rule, so every door that names a
+    mapping or a registry refuses it the same way and writes nothing; a legal name and an
+    archived one still key."""
+    from tcip_mcp.pipelines.postprocessing import plant_mapping
+    from tcip_mcp.tools.phenology_tools import build_plant_mapping, register_plant_registry
+
+    payload = _capture_fixture(tmp_path)
+    with pytest.raises(ValueError, match="Bad_Name"):
+        plant_mapping.plant_mapping_key(tmp_path, "Bad_Name")
+    with pytest.raises(ValueError, match="Bad_Name"):
+        plant_mapping.plant_registry_key(tmp_path, "Bad_Name")
+    plant_mapping.plant_mapping_key(tmp_path, "valley")
+    plant_mapping.plant_mapping_key(tmp_path, f"valley@{'0' * 12}")
+
+    resp = client.post("/api/results/plant_mapping/build",
+                       json={**payload, "name": "Bad_Name"})
+    assert resp.status_code == 400 and "Bad_Name" in resp.json()["detail"]
+    answer = build_plant_mapping(tmp_path, name="Bad_Name", images_root=payload["images_root"],
+                                 plant_registry=payload["plant_registry"])
+    assert "Bad_Name" in answer["error"]
+    registered = register_plant_registry(tmp_path, name="Bad_Name",
+                                         csv_paths=[payload["csv_path"]], crop="c", site="s")
+    assert "Bad_Name" in registered["error"]
+    assert plant_mapping.plant_mapping_names(tmp_path) == []
 
 
 def test_every_phenology_door_refuses_a_mapping_name_that_names_no_mapping(
@@ -218,7 +261,7 @@ def test_every_phenology_door_refuses_a_mapping_name_that_names_no_mapping(
     assert "error" not in built, built
     for mapping_name, expected_status, expected_detail in (
         ("partial", 400, "does not cover"),
-        ("not_written_yet", 404, "not_written_yet"),
+        ("not-written-yet", 404, "not-written-yet"),
     ):
         broken = {**body, "mapping_name": mapping_name}
         resp = client.post("/api/results/phenology_measurement", json=broken)

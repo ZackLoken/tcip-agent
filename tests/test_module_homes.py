@@ -176,7 +176,7 @@ def test_label_query_functions_have_one_home():
     lost its underscore; a helper only ``label_queries.py`` calls internally kept its private
     name."""
     _assert_one_home(
-        {"resolved_subjects_path", "resolve_registry_id_map",
+        {"registered_dataset_root", "resolve_registry_id_map",
          "json_det_targets", "ground_truth_shape", "admit", "samples_over",
          "admitted_documents", "require_admitted", "_label_record_state", "_raw_status_store",
          "confirmed_negative_names", "_exclude_contradicted", "confirmed_negative_records"},

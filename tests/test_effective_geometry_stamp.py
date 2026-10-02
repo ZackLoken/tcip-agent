@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._producer_fixtures import dataset_over, registry_over  # noqa: E402
 
 torch = pytest.importorskip("torch")
 
@@ -68,18 +68,16 @@ def test_stamp_untiled_run_replaces_tiling_record_wholesale():
 
 def _detection_dataset(tmp_path, sizes):
     """A real DetectionDataset over tiny generated images, one per (width, height) in sizes."""
-    from pathlib import Path
-
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject
 
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
     images_dir.mkdir()
     labels_dir.mkdir()
-    write_registry(Path(tmp_path) / "subjects.json", SubjectRegistry((Subject("bud"),)))
+    registry_over(tmp_path, SubjectRegistry((Subject("bud"),)))
     for i, (w, h) in enumerate(sizes):
         Image.new("RGB", (w, h)).save(images_dir / f"img{i}.png")
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
@@ -177,8 +175,7 @@ def _trial(tmp_path, base_config):
     trial_dir = sweeps_dir(tmp_path) / "hpo_study" / "trial_0"
     trial_dir.parent.mkdir(parents=True)
     _run_hpo_trial({"lr": 3e-4}, [].append, base_config, trial_dir, project=tmp_path,
-                   objective={"selection_metric": "loss", "higher_is_better": False},
-                   launched_by={"launcher": "process"})
+                   objective={"selection_metric": "loss", "higher_is_better": False})
     return trial_dir
 
 

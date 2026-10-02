@@ -15,9 +15,9 @@ export interface TrainingRunSummary {
    * run's config cannot resolve one. */
   best_metric_name?: string | null;
   output_dir?: string;
-  /** Who launched this run, from its run record: ``{"launcher": "gui" | "agent" | "process"
-   * | <other>}``, the identity fields alongside ``"agent"`` when an MCP handshake declared them. */
-  launched_by?: Record<string, unknown> | null;
+  /** The agent identity the run's launch event carries: empty for a launch no agent declared
+   * itself to, null when no launch event names the run. */
+  launch?: Record<string, unknown> | null;
   /** The run directory's last sign of life (ISO-8601): no process id is recorded anywhere, so
    * this is the one signal a stale ``running`` row (its process gone, read as live for the rest
    * of the heartbeat window) can show. */

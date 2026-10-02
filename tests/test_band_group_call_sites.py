@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 import tifffile
 from tcip_mcp.pipelines.data.selection import ClassScope
-from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._producer_fixtures import dataset_over, registry_over  # noqa: E402
 
 
 def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
@@ -37,7 +37,6 @@ def grouped_dataset(tmp_path: Path) -> Path:
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp import subject_registry
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
 
     root = tmp_path / "proj"
@@ -47,10 +46,7 @@ def grouped_dataset(tmp_path: Path) -> Path:
     images_dir.mkdir(parents=True)
     labels_dir.mkdir(parents=True)
 
-    subject_registry.write_registry(
-        root / "subjects.json",
-        SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)),
-    )
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
 
     _write_group(images_dir, "capture_001")
     Image.new("RGB", (16, 16), (5, 5, 5)).save(images_dir / "plain_002.jpg")
@@ -135,15 +131,15 @@ def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaul
         _band_count([sample])
 
 
-# ── annotation_tools.py ─────────────────────────────────────────────────────────────────
+# ── image_utils.image_path_dimensions ───────────────────────────────────────────────────
 
 
-def test_dims_for_a_grouped_capture_path(grouped_dataset):
+def test_image_path_dimensions_of_a_grouped_capture_path(grouped_dataset):
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.tools.annotation_tools import _dims_for
+    from tcip_mcp.pipelines.image_utils import image_path_dimensions
 
     manifest = image_dir(grouped_dataset, "2026-04-01") / "capture_001.bandgroup"
-    assert _dims_for(str(manifest)) == (16, 16)
+    assert image_path_dimensions(str(manifest)) == (16, 16)
 
 
 def test_focus_annotate_lands_on_the_grouped_capture_by_manifest_name(grouped_dataset):

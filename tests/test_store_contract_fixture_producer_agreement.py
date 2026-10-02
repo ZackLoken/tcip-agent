@@ -88,7 +88,6 @@ def test_the_traits_golden_carries_every_field_the_proposing_and_confirming_prod
     assert set(golden) == set(fresh)
     assert set(golden_revision) == set(fresh_revision)
     assert set(golden_revision["entry"]) == set(fresh_revision["entry"])
-    assert set(golden_revision["proposing_agent"]) == set(fresh_revision["proposing_agent"])
     (golden_op,), (fresh_op,) = (golden_revision["entry"]["operationalizations"].values(),
                                  fresh_revision["entry"]["operationalizations"].values())
     assert set(golden_op) == set(fresh_op)

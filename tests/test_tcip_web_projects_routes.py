@@ -42,10 +42,10 @@ def _make_project(ws: Path, name: str, *, dates=(), subjects=(), models=()) -> P
         ddir.mkdir(parents=True)
         Image.new("RGB", (8, 8), (0, 0, 0)).save(ddir / "img.png")
     if subjects:
-        from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
+        from tcip_mcp.subject_registry import SubjectRegistry, Subject
+        from tests._producer_fixtures import registry_over
 
-        write_registry(proj / "subjects.json",
-                       SubjectRegistry(tuple(Subject(s) for s in sorted(subjects))))
+        registry_over(proj, SubjectRegistry(tuple(Subject(s) for s in sorted(subjects))))
     for m in models:
         (proj / "predictions" / m).mkdir(parents=True)
     return proj

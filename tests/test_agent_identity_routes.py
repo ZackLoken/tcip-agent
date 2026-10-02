@@ -20,11 +20,9 @@ DECLARED_HEADERS = {
     "X-TCIP-Agent-Client-Version": "1.2.3",
     "X-TCIP-Agent-Session": "mcp_0123",
     "X-TCIP-Terminal-Session": "term_abc",
-    "X-TCIP-Harness-Session": "0b56e764",
-    "X-TCIP-Harness-Effort-At-Connect": "high",
 }
 IDENTITY_FIELDS = ("agent_client_name", "agent_client_version", "agent_session",
-                   "terminal_session", "harness_session", "harness_effort_at_connect")
+                   "terminal_session")
 
 
 @pytest.fixture
@@ -59,8 +57,9 @@ def test_a_push_with_the_identity_headers_is_replayed_with_what_it_declared(
     )
     assert posted.status_code == 200, posted.text
     assert [event[field] for field in IDENTITY_FIELDS] == [
-        "reviewing-harness", "1.2.3", "mcp_0123", "term_abc", "0b56e764", "high"
+        "reviewing-harness", "1.2.3", "mcp_0123", "term_abc"
     ]
+    assert not any("harness" in field for field in event)
 
 
 def test_a_push_without_the_headers_is_replayed_with_the_fields_empty(client: TestClient) -> None:

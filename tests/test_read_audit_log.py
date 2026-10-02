@@ -43,7 +43,7 @@ def test_read_audit_log_filters_by_tool_and_status_newest_first(
     ok2 = write_subject_registry(project, str(dataset_root), subjects=_subjects(), allow_removals=True)
     assert "error" not in ok2, ok2
 
-    result = read_audit_log(project, scope=str(dataset_root), tool="write_subject_registry", status="ok")
+    result = read_audit_log(project, scope=str(dataset_root), tool="replace_registry", status="ok")
     assert "error" not in result, result
     # The two writes each leave their line; the refused call, no act, leaves none.
     assert result["count"] == 2
@@ -52,7 +52,7 @@ def test_read_audit_log_filters_by_tool_and_status_newest_first(
     assert result["entries"][0]["timestamp"] >= result["entries"][-1]["timestamp"]
     assert result["scope_resolved"] == str(dataset_root.resolve())
     assert result["skipped"] == 0
-    assert read_audit_log(project, scope=str(dataset_root), tool="write_subject_registry",
+    assert read_audit_log(project, scope=str(dataset_root), tool="replace_registry",
                           status="exception")["count"] == 0
 
 
@@ -65,7 +65,7 @@ def test_read_audit_log_limit_states_what_it_truncated(
         res = write_subject_registry(project, str(dataset_root), subjects=_subjects(), allow_removals=True)
         assert "error" not in res, res
 
-    result = read_audit_log(project, scope=str(dataset_root), tool="write_subject_registry", limit=1)
+    result = read_audit_log(project, scope=str(dataset_root), tool="replace_registry", limit=1)
     assert result["count"] == 1
     assert result["skipped"] == 2
 
@@ -182,7 +182,7 @@ def test_read_audit_log_resolves_an_inner_path_to_its_dataset_root(
     assert "error" not in write_subject_registry(project, str(dataset_root), subjects=_subjects())
 
     inner = str(dataset_root / "annotations" / "2026-03-02")
-    result = read_audit_log(project, scope=inner, tool="write_subject_registry")
+    result = read_audit_log(project, scope=inner, tool="replace_registry")
 
     assert "error" not in result, result
     assert result["count"] == 1

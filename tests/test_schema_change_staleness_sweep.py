@@ -385,6 +385,7 @@ def test_the_save_route_records_predating_vocabulary_in_its_audit_line(
     _save_via_route(client, dataset, BUD_THREE_STATES)
 
     entries = _audit_entries(dataset)
-    save_entries = [e for e in entries if e["tool"] == "gui_save_subjects"]
-    assert save_entries[-1]["arguments"]["confirmations_predating_vocabulary"] == {"bud": 1}
-    assert save_entries[-1]["arguments"]["confirmations_stamped_with_outgoing_schema"] == {}
+    save_entries = [e for e in entries if e["tool"] == "replace_registry"]
+    sweep = save_entries[-1]["arguments"]["schema_change_sweep"]
+    assert sweep["predating_vocabulary"] == {"bud": 1}
+    assert sweep["newly_stamped"] == {}

@@ -50,22 +50,22 @@ class InferenceJob:
     done: int = 0
     status: str = "pending"  # one of jobstore.JOB_STATES
     error: Optional[str] = None
-    warning: Optional[str] = None
-    # Set when a line the publication writes for this run could not be written: a distinct fact
-    # from warning, never reused for it.
+    # Set when a line the publication writes for this run could not be written.
     audit_warning: Optional[str] = None
-    # Detections dropped for a zero-extent box, as the published bucket's record counts them.
-    dropped_boxes: int = 0
+    # Detections dropped for a zero-extent box, as the published bucket's record counts them;
+    # None until a bucket is published.
+    dropped_boxes: Optional[int] = None
     thread: Optional[threading.Thread] = field(default=None, repr=False)
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
 
 
 def _summary(job: InferenceJob) -> dict:
+    """The job as every listing and stream frame serves it."""
     return {
         "job_id": job.job_id, "status": job.status, "done": job.done, "total": job.total,
         "images_dir": job.images_dir, "output_dir": job.output_dir, "error": job.error,
-        "warning": job.warning, "audit_warning": job.audit_warning,
-        "dropped_nonpositive_boxes": job.dropped_boxes,
+        "audit_warning": job.audit_warning,
+        "dropped_boxes": job.dropped_boxes,
     }
 
 
@@ -113,10 +113,11 @@ def _worker(job: InferenceJob) -> None:
                 canceled=job.cancel_event.is_set)
         except AuditEntryNotWritten as exc:
             job.audit_warning = str(exc)
-            job.error = exc.arguments.get("error")
-        else:
-            job.error = result.get("error")
-            job.dropped_boxes = result.get("dropped_nonpositive_boxes", 0)
+            result = exc.arguments
+        # The publication's own result, or the audit line it could not write: either names the
+        # error a failed pass met, and a published bucket's dropped_boxes.
+        job.error = result.get("error")
+        job.dropped_boxes = result.get("dropped_boxes")
         terminal_status = ("failed" if job.error is not None
                            else "canceled" if job.cancel_event.is_set() else "completed")
     except Exception as exc:
@@ -147,19 +148,18 @@ class LaunchInferencePayload(BaseModel):
 def launch_inference(payload: LaunchInferencePayload) -> dict:
     project = store.open_root()
     # A caller must not name a file outside the allowed roots, registered checkpoint or not.
-    for p in (payload.checkpoint_path, payload.dataset_root):
-        allowed_path(p)
+    checkpoint_path = allowed_path(payload.checkpoint_path)
+    dataset_root = allowed_path(payload.dataset_root)
     output_dir = allowed_path(payload.output_dir)
 
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.workspace import is_valid_name
 
-    if payload.date is not None and not is_valid_name(payload.date):
-        raise HTTPException(400, f"date must be a single safe path segment (no separators/'..'), "
-                                 f"got {payload.date!r}")
-    if not Path(payload.checkpoint_path).is_file():
-        raise HTTPException(404, f"checkpoint not found: {payload.checkpoint_path}")
-    images_dir = image_dir(payload.dataset_root, payload.date)
+    try:
+        images_dir = image_dir(dataset_root, payload.date)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not checkpoint_path.is_file():
+        raise HTTPException(404, f"checkpoint not found: {checkpoint_path}")
     if not images_dir.is_dir():
         raise HTTPException(404, f"images_dir not found: {images_dir}")
 
@@ -175,7 +175,7 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
 
     job = InferenceJob(
         job_id=f"inf-{uuid.uuid4().hex[:8]}", project=str(project),
-        checkpoint_path=payload.checkpoint_path, images_dir=str(images_dir),
+        checkpoint_path=str(checkpoint_path), images_dir=str(images_dir),
         output_dir=str(output_dir), stated=payload.stated, assessment_id=payload.assessment_id)
     _register(job)
 
@@ -219,27 +219,11 @@ async def stream_job(websocket: WebSocket, job_id: str) -> None:
         while True:
             if job.done != last_done:
                 last_done = job.done
-                await websocket.send_json({
-                    "type": "progress",
-                    "job_id": job.job_id,
-                    "done": job.done,
-                    "total": job.total,
-                    "status": job.status,
-                    "warning": job.warning,
-                    "audit_warning": job.audit_warning,
-                })
+                await websocket.send_json({"type": "progress", **_summary(job)})
             # Terminate on any terminal state: a canceled/interrupted job never
             # reaches completed/failed, so keying only on those spun this loop forever.
             if job.status in TERMINAL_STATES:
-                await websocket.send_json({
-                    "type": "final",
-                    "job_id": job.job_id,
-                    "status": job.status,
-                    "error": job.error,
-                    "warning": job.warning,
-                    "audit_warning": job.audit_warning,
-                    "dropped_nonpositive_boxes": job.dropped_boxes,
-                })
+                await websocket.send_json({"type": "final", **_summary(job)})
                 break
             await asyncio.sleep(0.5)
     except WebSocketDisconnect:

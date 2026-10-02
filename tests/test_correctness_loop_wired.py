@@ -90,13 +90,14 @@ def _admitted_tree(tmp_path):
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tests._producer_fixtures import registry_over
 
     root = tmp_path / "ds"
     imgs, lbls = root / "images", root / "annotations"
     imgs.mkdir(parents=True)
     lbls.mkdir(parents=True)
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="leaf"),)))
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="leaf"),)))
     for stem in ("a", "b", "c", "d"):
         Image.new("RGB", (32, 32)).save(imgs / f"{stem}.png")
         json_io.write_annotations(lbls / f"{stem}.json",

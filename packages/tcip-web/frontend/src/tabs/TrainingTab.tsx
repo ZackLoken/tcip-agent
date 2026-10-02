@@ -24,6 +24,7 @@ import { useEmbeddedToolRetry, type EmbeddedToolStepResult } from "@/hooks/useEm
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { TERMINAL_STATES } from "@/lib/runStatus";
 import { useStore } from "@/store";
+import { declaredClient } from "@/store/slices/agentActivity";
 import { selectProjectRoot } from "@/store/slices/gui";
 import { defaultTrainingRequest } from "@/tabs/agentPrompts";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
@@ -39,41 +40,22 @@ function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** What a run's launched_by field says about who started it, from the record alone: never a
- * guess. */
-function launcherSentence(launchedBy: TrainingRunSummary["launched_by"]): string {
-  const launcher = typeof launchedBy?.launcher === "string" ? launchedBy.launcher : null;
-  if (launcher === null) return "launcher not recorded";
-  if (launcher === "gui") return "started through this app";
-  if (launcher === "agent") return "started by the agent";
-  if (launcher === "process") return "started by another process";
-  return `started by ${launcher}`;
+/** What a run's launch event says about who started it: never a guess. */
+function launcherSentence(launch: TrainingRunSummary["launch"]): string {
+  if (!launch) return "no launch event recorded";
+  return declaredClient(launch) ? "started by the agent" : "started with no agent declared";
 }
 
 /** The longer sentence behind a row's launcher mark, reachable by assistive technology through
  * aria-describedby: what the mark means, with the declared client named for an agent launch. */
-function launcherDescription(launchedBy: TrainingRunSummary["launched_by"]): string {
-  const launcher = typeof launchedBy?.launcher === "string" ? launchedBy.launcher : null;
-  if (launcher === null) {
-    return "This run's record carries no launcher: its tracking never reached the stamp, or the stamp did not land.";
+function launcherDescription(launch: TrainingRunSummary["launch"]): string {
+  if (!launch) {
+    return "No launch event in this project's audit log names this run.";
   }
-  if (launcher === "gui") {
-    return "This run was launched through this app's own route.";
-  }
-  if (launcher === "agent") {
-    const name =
-      typeof launchedBy?.agent_client_name === "string" ? launchedBy.agent_client_name : null;
-    const version =
-      typeof launchedBy?.agent_client_version === "string" ? launchedBy.agent_client_version : null;
-    const client = name ? (version ? `${name} ${version}` : name) : null;
-    return client
-      ? `This run was launched by an agent through the MCP door, declared as ${client}.`
-      : "This run was launched by an agent through the MCP door.";
-  }
-  if (launcher === "process") {
-    return "This run was launched outside this app's own route and outside the agent, by something other than both.";
-  }
-  return `This run's record names its own launcher: ${launcher}.`;
+  const client = declaredClient(launch);
+  return client
+    ? `This run was launched by an agent through the MCP door, declared as ${client}.`
+    : "This run's launch event carries no agent identity: no agent declared one to the process that launched it.";
 }
 
 /** How long ago a status record's own heartbeat instant was stamped, in whole minutes; null
@@ -93,7 +75,7 @@ function heartbeatAge(heartbeat: string | null | undefined): string | null {
 function runRowLabel(run: TrainingRunSummary): string {
   const age = run.status === "running" ? heartbeatAge(run.heartbeat) : null;
   const statusPart = age ? `${run.status}, ${age}` : run.status;
-  const base = `${run.experiment_id} ${statusPart}, ${launcherSentence(run.launched_by)}`;
+  const base = `${run.experiment_id} ${statusPart}, ${launcherSentence(run.launch)}`;
   if (run.best_metric === undefined || run.best_metric === null || !run.best_metric_name) {
     return base;
   }
@@ -702,11 +684,11 @@ export function TrainingTab() {
                       <span>
                         {r.status}
                         {heartbeatText && `, ${heartbeatText}`}
-                        <span title={launcherDescription(r.launched_by)}>
-                          {` · ${launcherSentence(r.launched_by)}`}
+                        <span title={launcherDescription(r.launch)}>
+                          {` · ${launcherSentence(r.launch)}`}
                         </span>
                         <span id={`origin-mark-${r.experiment_id}`} className="sr-only">
-                          {launcherDescription(r.launched_by)}
+                          {launcherDescription(r.launch)}
                         </span>
                       </span>
                       {r.best_metric !== undefined &&

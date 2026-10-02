@@ -29,8 +29,8 @@ def _plant_csv(path: Path, plants: list[dict] | None = None) -> Path:
 
 
 def test_registers_a_csv_and_persists_the_frozen_record(tmp_path: Path) -> None:
-    """The recorded shape: per-file {path, sha256, n_plants}, crop, site, registered_by,
-    registered_at, and a digest over the parsed rows."""
+    """The recorded shape: per-file {path, sha256, n_plants}, crop, site, registered_at, and a
+    digest over the parsed rows; who registered it is the audit line's."""
     csv_path = _plant_csv(tmp_path / "plants.csv")
 
     res = register_plant_registry(
@@ -39,7 +39,7 @@ def test_registers_a_csv_and_persists_the_frozen_record(tmp_path: Path) -> None:
     assert "error" not in res, res
     assert res["name"] == "valley-plants"
     assert res["n_plants"] == len(PLANTS)
-    assert res["registered_by"] == "register_plant_registry"
+    assert "registered_by" not in res
     assert len(res["digest"]) == 64
     from tcip_mcp.registry_paths import stored_path
 
@@ -53,6 +53,27 @@ def test_registers_a_csv_and_persists_the_frozen_record(tmp_path: Path) -> None:
     assert stored is not None
     assert stored["digest"] == res["digest"]
     assert stored["csvs"] == res["csvs"]
+
+
+def test_a_registered_csvs_hash_is_of_the_bytes_its_rows_were_parsed_from(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The file is rewritten with more plants between the parse and anything after it: the
+    recorded hash and count both answer for the bytes the rows came from."""
+    csv_path = _plant_csv(tmp_path / "plants.csv", PLANTS[:1])
+    parsed_bytes = csv_path.read_bytes()
+    real = plant_mapping.read_plant_csv_bytes
+
+    def parse_then_rewrite(data: bytes):
+        rows = real(data)
+        _plant_csv(csv_path, PLANTS)
+        return rows
+
+    monkeypatch.setattr(plant_mapping, "read_plant_csv_bytes", parse_then_rewrite)
+    csvs, _digest, n_plants = plant_mapping.parse_plant_registry_csvs([csv_path], tmp_path)
+
+    assert n_plants == csvs[0]["n_plants"] == 1
+    assert csvs[0]["sha256"] == hashlib.sha256(parsed_bytes).hexdigest()
 
 
 def test_refuses_a_name_outside_name_segment(tmp_path: Path) -> None:

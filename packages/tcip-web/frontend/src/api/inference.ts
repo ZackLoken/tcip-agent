@@ -43,9 +43,8 @@ export interface InferenceJob {
   images_dir: string;
   output_dir: string;
   error: string | null;
-  warning: string | null;
   // Set when a line the publishing library writes for this run could not be written; the
-  // predictions are on disk regardless. A distinct fact from warning, never carried on it.
+  // predictions are on disk regardless.
   audit_warning: string | null;
 }
 
@@ -107,6 +106,15 @@ export interface PlantMappingDateSummary {
 export interface PlantMappingSummary {
   per_date: { [date: string]: PlantMappingDateSummary };
   totals: { n_dates: number; n_images: number; n_mapped: number; n_unattributed: number };
+}
+
+// One persisted plant mapping as the build and load doors answer it.
+export interface ServedPlantMapping {
+  name: string;
+  summary: PlantMappingSummary;
+  unreadable: Record<string, string[]>;
+  nn_tolerance_m: MatchTolerance;
+  max_match_distance_m: number;
 }
 
 export interface PerPlantRow {
@@ -321,22 +329,11 @@ export const resultsApi = {
     dates?: string[];
     nn_tolerance_m?: number;
     supersede?: boolean;
-  }) =>
-    postJson<{
-      summary: PlantMappingSummary;
-      mapping: unknown;
-      unreadable: Record<string, string[]>;
-      nn_tolerance_m: MatchTolerance;
-      max_match_distance_m: number;
-    }>(ROUTES.postResultsPlantMappingBuild, body),
+  }) => postJson<ServedPlantMapping>(ROUTES.postResultsPlantMappingBuild, body),
 
+  // Refuses with 404 when nothing is stored under the name.
   loadPlantMapping: (name: string) =>
-    postJson<{
-      mapping: unknown;
-      summary: PlantMappingSummary | Record<string, never>;
-      nn_tolerance_m: MatchTolerance | null;
-      max_match_distance_m: number | null;
-    }>(ROUTES.postResultsPlantMappingLoad, { name }),
+    postJson<ServedPlantMapping>(ROUTES.postResultsPlantMappingLoad, { name }),
 
   // Every mapping name persisted under the open project, for the Results tab's name picker.
   listPlantMappings: () => getJson<{ names: string[] }>(ROUTES.getResultsPlantMappingList),

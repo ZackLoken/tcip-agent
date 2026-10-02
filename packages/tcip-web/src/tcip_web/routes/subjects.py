@@ -38,8 +38,7 @@ router = APIRouter(prefix="/api/subjects", tags=["subjects"])
 
 
 def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
-    """Record a dataset-native GUI mutation (this module's own ``image_status.json`` and
-    ``subjects.json`` writes) in that dataset's own audit log.
+    """Record a dataset-native GUI mutation in that dataset's own audit log.
 
     A failed append raises ``AuditEntryNotWritten``: the mutation has already committed by the time
     this runs.
@@ -85,11 +84,9 @@ def load_subjects(dataset_root: str, annotations_dir: Optional[str] = None) -> d
         RegistryError,
         Subject,
         SubjectRegistry,
-        read_registry,
-        read_version,
+        read_versioned_registry,
         registry_to_dict,
     )
-    from tcip_mcp.dataset_layout import subjects_path
 
     guarded_dir = str(allowed_path(annotations_dir)) if annotations_dir else None
 
@@ -98,13 +95,14 @@ def load_subjects(dataset_root: str, annotations_dir: Optional[str] = None) -> d
     if guarded_dir and Path(guarded_dir).is_dir():
         subjects, unreadable = _subjects_in_dir(Path(guarded_dir))
 
-    p = subjects_path(allowed_path(dataset_root))
-    if p.exists():
-        try:
-            registry = read_registry(p)
-        except (OSError, RegistryError) as exc:
-            raise HTTPException(500, f"could not parse {p}: {exc}") from exc
-        return {"subjects": registry_to_dict(registry), "version": read_version(p).token,
+    try:
+        registry, version = read_versioned_registry(allowed_path(dataset_root))
+    except FileNotFoundError:
+        pass
+    except (OSError, RegistryError) as exc:
+        raise HTTPException(500, f"could not parse the subject registry: {exc}") from exc
+    else:
+        return {"subjects": registry_to_dict(registry), "version": version.token,
                 "unreadable": unreadable}
 
     if subjects:
@@ -131,47 +129,34 @@ def save_subjects(payload: SaveSubjectsPayload) -> dict:
     ``allow_removals``; ``write_subject_registry`` states either. Refuses (409) a stale
     ``version``. Once the write lands, the outgoing digest is recorded onto the changed subject's
     still-unstamped confirmations; what it stamped, the confirmations that now predate the
-    vocabulary in effect, and any warning, ride back in ``schema_change_sweep``.
+    vocabulary in effect, and any warning, ride back in ``schema_change_sweep``. A write whose
+    audit line could not follow answers 409.
     """
     from tcip_store import Version, VersionConflict
 
+    from tcip_mcp.audit import AuditEntryNotWritten
     from tcip_mcp.subject_registry import RegistryError, registry_from_dict, replace_registry
-    from tcip_mcp.dataset_layout import subjects_path
+    from tcip_web.routes.audit_gap import audit_gap_409
 
-    root = str(allowed_path(payload.dataset_root))
     try:
         registry = registry_from_dict(payload.subjects)
     except RegistryError as exc:
         raise HTTPException(400, f"invalid subject registry: {exc}") from exc
-    path = subjects_path(root)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    dataset_root = allowed_path(payload.dataset_root)
     expect = Version(payload.version) if payload.version is not None else Version.ABSENT
     try:
-        result = replace_registry(path, registry, expect=expect)
+        committed = replace_registry(dataset_root, registry, expect=expect)
     except RegistryError as exc:
         raise HTTPException(400, str(exc)) from exc
     except VersionConflict as exc:
         raise HTTPException(409, str(exc)) from exc
-    except OSError as exc:
-        raise HTTPException(500, f"could not write {path}: {exc}") from exc
-    sweep = result["schema_change_sweep"]
-    if sweep["warning"]:
-        logger.warning("%s", sweep["warning"])
-    committed = {"status": "ok", "n_subjects": len(registry.subjects), "subjects_path": str(path),
-                 "version": result["version"].token, "schema_change_sweep": sweep}
-    from tcip_mcp.audit import AuditEntryNotWritten
-    from tcip_web.routes.audit_gap import audit_gap_409
-
-    try:
-        _audit_dataset_write(
-            root, "gui_save_subjects",
-            {"subjects_path": str(path), "n_subjects": len(registry.subjects),
-             "confirmations_stamped_with_outgoing_schema": sweep["newly_stamped"],
-             "confirmations_predating_vocabulary": sweep["predating_vocabulary"]},
-        )
     except AuditEntryNotWritten as exc:
-        raise audit_gap_409(exc, committed) from exc
-    return committed
+        raise audit_gap_409(exc, {"status": "ok", **exc.arguments}) from exc
+    except OSError as exc:
+        raise HTTPException(500, f"could not write {dataset_root}'s registry: {exc}") from exc
+    if committed["schema_change_sweep"]["warning"]:
+        logger.warning("%s", committed["schema_change_sweep"]["warning"])
+    return {"status": "ok", **committed}
 
 
 # ── Per-image status (used by Complete checkbox + status filter) ─────────
@@ -227,11 +212,10 @@ def _stamp_digest(dataset_root: str, bucket: str, subject: str,
     from tcip_mcp.subject_registry import attribute_schema_digest, read_registry
     from tcip_mcp.dataset_layout import stamp_image_status_digests, subjects_path
 
-    cp = subjects_path(dataset_root)
-    if not cp.is_file():
+    if not subjects_path(dataset_root).is_file():
         return False
     try:
-        digest = attribute_schema_digest(read_registry(cp), subject)
+        digest = attribute_schema_digest(read_registry(dataset_root), subject)
         if digest is None:
             return False
         stamp_image_status_digests(dataset_root, bucket, image_names, digest)
@@ -343,7 +327,6 @@ def derive_image_status(payload: DerivePayload) -> dict:
 
     from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status
 
-    # An absolute-path read needs its own confinement (no-op unless TCIP_IMAGE_ROOTS is set).
     guarded_dir = (str(allowed_path(payload.annotations_dir)) if payload.annotations_dir
                    else None)
     adir = Path(guarded_dir) if guarded_dir else None

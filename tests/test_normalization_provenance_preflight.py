@@ -20,7 +20,7 @@ def _cfg(images_dir, labels_dir, *, builder_kwargs, image_stats_sampling=None):
     return {
         "model_source": model_source,
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "scope": {"subject": SUBJECT}},
+                 "scope": {"subject": SUBJECT}, "auto_val": False},
         "evaluation": {"selection_metric": "loss"},
     }
 

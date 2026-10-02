@@ -93,7 +93,7 @@ def _staging_key_for(image_path: str) -> StagingAddress:
 
 
 def _unresolvable_staging_source(img: Path, exc: Exception) -> str:
-    """A reason for ``propose_annotations`` to decline staging ``img``, when
+    """A reason to decline staging ``img``, when
     :func:`~tcip_mcp.pipelines.image_utils.resolve_image_source` raised ``exc`` for it.
 
     A band-group member's own path (``capture_Red.tif`` when ``capture.bandgroup`` claims it)
@@ -508,8 +508,8 @@ def segment_prompt(
         from tcip_annotation.sam_wrapper import grid_to_pixel
 
         from tcip_mcp.pipelines.reference_grid import reference_cells
-        from tcip_mcp.tools.annotation_tools import _dims_for
-        w, h = _dims_for(image_path)
+        from tcip_mcp.pipelines.image_utils import image_path_dimensions
+        w, h = image_path_dimensions(image_path)
         try:
             cells = reference_cells(w, h, tile_size, overlap, clamp=True)
         except ValueError as e:
@@ -702,7 +702,7 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: S
     return {
         "staged": len(proposals),
         "n_detect": len(box_proposals), "n_segment": len(polygon_proposals),
-        "dropped_nonpositive_boxes": dropped_boxes,
+        "dropped_boxes": dropped_boxes,
         "path": path, "model_name": model_name, "date": address.date, "stem": img.stem,
         "note": note,
     }

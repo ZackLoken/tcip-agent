@@ -60,11 +60,11 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
 
     assert "error" not in res, res
     assert res["name"] == name
-    assert res["dataset_root"] == str(tmp_path)
-    assert res["n_dates"] == 1
-    assert res["n_images"] == 1
-    assert res["n_mapped"] + res["n_unattributed"] == 1
-    assert "2026-02-11" in res["per_date"]
+    totals = res["summary"]["totals"]
+    assert totals["n_dates"] == 1
+    assert totals["n_images"] == 1
+    assert totals["n_mapped"] + totals["n_unattributed"] == 1
+    assert "2026-02-11" in res["summary"]["per_date"]
     assert res["nn_tolerance_m"] == {"value": 10.0, "source": "stated"}
     assert res["max_match_distance_m"] == pytest.approx(10.0 * NEAREST_MATCH_FACTOR)
     persisted = ts.read(plant_mapping_key(tmp_path, name))
@@ -83,7 +83,7 @@ def test_build_plant_mapping_missing_images_root(tmp_path: Path) -> None:
         name="m",
     )
     assert "error" in res
-    assert "images_root not found" in res["error"]
+    assert "is not a dataset's own images/ root" in res["error"]
 
 
 def test_build_plant_mapping_missing_registry(tmp_path: Path) -> None:

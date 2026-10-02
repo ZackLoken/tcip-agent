@@ -160,8 +160,7 @@ def test_run_hpo_trial_reports_nothing_and_opens_no_run_when_the_sweep_is_cancel
 
     reported: list[float] = []
     _run_hpo_trial({}, reported.append, real_hpo_base_config, trial_dir, project=project,
-                   objective={"selection_metric": "loss", "higher_is_better": False},
-                   launched_by={"launcher": "process"})
+                   objective={"selection_metric": "loss", "higher_is_better": False})
 
     assert reported == []
     assert not trial_dir.exists()

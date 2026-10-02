@@ -417,18 +417,22 @@ class ModelRegistry:
         return [m if "checkpoint_path_error" in m else {**m, **entry_facts(m)} for m in resolved]
 
 
+def verified(entry: dict) -> bool:
+    """Whether a registry entry's metrics were measured by the trainer rather than asserted."""
+    return entry["metrics_source"] == "trainer"
+
+
 def best_model(
     models: list[dict], metric_key: str, *, higher_is_better: bool,
     include_unverified: bool = False,
 ) -> dict | None:
     """The one of ``models`` (:meth:`ModelRegistry.list_models`'s entries) with the best finite
-    value for ``metric_key`` in the stated direction, or ``None`` when none carries it. Only an
-    entry whose ``metrics_source`` is ``"trainer"`` is ranked unless ``include_unverified``, which
-    also ranks ``"training_source"`` and ``"caller"`` entries."""
+    value for ``metric_key`` in the stated direction, or ``None`` when none carries it. Only a
+    :func:`verified` entry is ranked unless ``include_unverified``."""
     best = None
     best_val: float | None = None
     for m in models:
-        if m["metrics_source"] != "trainer" and not include_unverified:
+        if not (include_unverified or verified(m)):
             continue
         val = m["metrics"].get(metric_key)
         if not isinstance(val, (int, float)) or isinstance(val, bool) or not math.isfinite(val):

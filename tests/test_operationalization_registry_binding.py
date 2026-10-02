@@ -17,6 +17,7 @@ from tcip_mcp import subject_registry as cr
 from tcip_mcp.operationalization import OperationalizationRefused, confirmed_revision
 from tcip_mcp.tools.trait_tools import propose_trait
 from tcip_mcp.traits import PER_IMAGE_COUNT, STATE_CROSSING_DATES
+from tests._producer_fixtures import registry_over
 from tests import _trait_fixtures as fx
 
 _CROSSING = fx.with_operationalization(
@@ -189,7 +190,6 @@ def test_registry_for_pred_dirs_resolves_the_registry_through_deliver_phenology_
     the project root: a registry written where the buckets resolve to is what a crossing
     delivery's positive-class check reads."""
     pytest.importorskip("torch")
-    from tcip_mcp.dataset_layout import subjects_path
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
     from tests._chain_fixtures import ATTRIBUTE, PLANTS, SUBJECT, classified_series
 
@@ -207,7 +207,7 @@ def test_registry_for_pred_dirs_resolves_the_registry_through_deliver_phenology_
     assert "no subject registry" not in res["error"]
     assert not (tmp_path / "out.csv").exists()
 
-    cr.write_registry(subjects_path(series.root), cr.SubjectRegistry(subjects=(
+    registry_over(series.root, cr.SubjectRegistry(subjects=(
         cr.Subject(name=SUBJECT, attributes=(
             cr.Attribute(name=ATTRIBUTE, type="categorical", values=("closed",)),)),)))
     refused = deliver("out2.csv")

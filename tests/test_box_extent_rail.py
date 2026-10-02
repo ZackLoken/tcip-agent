@@ -242,13 +242,14 @@ def test_annotate_save_admits_every_selected_dataset_save(
 
 
 def _seed_review_dataset(tmp_path: Path, *, pred_box=(10, 10, 20, 20), gt_box=None) -> tuple[Path, Path]:
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tests._producer_fixtures import registry_over
     from tests._web_fixtures import open_new_project
 
     dataset_root = open_new_project(tmp_path)
     img = dataset_root / "images" / "img_001.jpg"
     _write_image(img)
-    write_registry(dataset_root / "subjects.json", SubjectRegistry(subjects=(Subject(name="leaf"),)))
+    registry_over(dataset_root, SubjectRegistry(subjects=(Subject(name="leaf"),)))
     gt_path = dataset_root / "annotations" / "img_001.json"
     gt_annotations = (
         [Annotation(subject="leaf", geometry=BBox(*gt_box))] if gt_box is not None else []
@@ -446,7 +447,7 @@ def test_stage_proposals_drops_a_degenerate_box_and_reports_the_count(tmp_path):
     )
 
     assert "error" not in result
-    assert result["dropped_nonpositive_boxes"] == 1
+    assert result["dropped_boxes"] == 1
     assert result["n_detect"] == 1
 
 

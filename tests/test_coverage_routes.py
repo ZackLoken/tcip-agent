@@ -1144,12 +1144,6 @@ class TestCoverageRecord:
         assert _audit_entries(root, "gui_view_coverage") == []
 
 
-def test_view_coverage_path_locator(tmp_path):
-    from tcip_mcp.dataset_layout import view_coverage_path
-
-    assert view_coverage_path(tmp_path) == tmp_path / ".tcip" / "state" / "view_coverage.json"
-
-
 class TestCompletenessRoute:
     def _toggle(self, client, path, grid, cell, subject="bud", complete=True, **overrides):
         body = {"image_path": path, "subject": subject, "grid": _grid_only(grid), "cell": cell,

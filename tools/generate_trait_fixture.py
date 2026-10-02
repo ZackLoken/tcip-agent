@@ -44,8 +44,8 @@ _FIXED_TIME = "1970-01-01T00:00:00+00:00"
 
 
 def normalized(served: dict[str, dict]) -> dict[str, dict]:
-    """``served`` with each revision's set timestamps replaced by ``_FIXED_TIME`` and its proposing
-    agent's fields emptied, the facts that differ between two otherwise identical runs."""
+    """``served`` with each revision's set timestamps replaced by ``_FIXED_TIME``, the facts that
+    differ between two otherwise identical runs."""
     out = json.loads(json.dumps(served))
     for listing in out.values():
         for trait in listing["traits"]:
@@ -53,7 +53,6 @@ def normalized(served: dict[str, dict]) -> dict[str, dict]:
                 for key in ("proposed_at", "confirmed_at", "withdrawn_at"):
                     if revision[key] is not None:
                         revision[key] = _FIXED_TIME
-                revision["proposing_agent"] = dict.fromkeys(revision["proposing_agent"])
     return out
 
 

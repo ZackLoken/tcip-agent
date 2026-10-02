@@ -2056,9 +2056,6 @@ REGISTERED = {
             "entry_sha256": "7f3a1b9c2d4e5f60",
             "rationale": "the breeder described the state directly", "relayed_note": "",
             "proposed_at": "2026-03-04T12:00:00+00:00",
-            "proposing_agent": {"agent_client_name": "ü", "agent_client_version": "1",
-                                "agent_session": "mcp_1", "terminal_session": None,
-                                "harness_session": None, "harness_effort_at_connect": None},
             "confirmed_by": "user:ü", "confirmed_at": "2026-03-04T12:30:00+00:00",
             "identity_from_request": True, "withdrawn_by": None, "withdrawn_at": None}]},
         lambda root: traits.trait_key(root, TRAIT_UNDER_TEST),
@@ -2099,9 +2096,9 @@ REGISTERED = {
         lambda root: materialize.curated_manifest_key(_curated_dir(root)),
         "curated/curated_manifest.json", root_of=_curated_dir),
     "audit_log": Registered(
-        {"timestamp": "2026-03-04T12:00:00+00:00", "tool": "gui_save_labels",
+        {"timestamp": "2026-03-04T12:00:00+00:00", "tool": "save_label_document",
          "arguments": {"image_path": "images/2026-03-04/a_1.JPG", "n_annotations": 3},
-         "status": "ok", "source": "gui"},
+         "status": "ok"},
         lambda root: audit.audit_log_key(root), ".tcip/audit.jsonl"),
     "imagery": Registered(
         IMAGE_BYTES,
@@ -2116,7 +2113,7 @@ REGISTERED = {
     "plant_registries": Registered(
         {"name": "valley-plants", "crop": "currant", "site": "north orchard",
          "csvs": [{"path": "dü/plants.csv", "sha256": "0" * 64, "n_plants": 2}],
-         "n_plants": 2, "digest": "0" * 64, "registered_by": "agent:register_plant_registry",
+         "n_plants": 2, "digest": "0" * 64,
          "registered_at": "2026-03-04T12:00:00+00:00"},
         lambda root: plant_mapping.plant_registry_key(root, "valley-plants"),
         ".tcip/state/plant_registries/valley-plants.json", root_of=project_state_dir),

@@ -220,8 +220,8 @@ def data_dir(tmp_path: Path) -> Path:
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp import subject_registry
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tests._producer_fixtures import registry_over
 
     date = "2-11-26"
     subject = DATA_DIR_SUBJECT
@@ -232,10 +232,7 @@ def data_dir(tmp_path: Path) -> Path:
     preds_dir = tmp_path / "predictions" / "live" / date
 
     # One nested registry traveling with the labels: a single detection subject, no attributes.
-    subject_registry.write_registry(
-        tmp_path / "subjects.json",
-        SubjectRegistry(subjects=(Subject(name=subject, description="a bud"),)),
-    )
+    registry_over(tmp_path, SubjectRegistry(subjects=(Subject(name=subject, description="a bud"),)))
 
     for name in ("img_001", "img_002", "img_003"):
         Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{name}.jpg")

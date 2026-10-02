@@ -18,6 +18,7 @@ from tcip_mcp import subject_registry
 from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
 from tcip_mcp.dataset_layout import stamp_image_status_digests, status_bucket
 from tcip_mcp.pipelines.data.selection import ClassScope
+from tests._producer_fixtures import registry_over
 
 
 def _write_image(images_dir: Path, stem: str, size=(64, 64)) -> None:
@@ -27,7 +28,7 @@ def _write_image(images_dir: Path, stem: str, size=(64, 64)) -> None:
 
 def _write_registry(root: Path, *subjects: Subject) -> SubjectRegistry:
     registry = SubjectRegistry(subjects=tuple(subjects))
-    subject_registry.write_registry(root / "subjects.json", registry)
+    registry_over(root, registry)
     return registry
 
 
@@ -119,7 +120,7 @@ def test_quarantine_excludes_a_confirmation_stamped_under_a_since_changed_schema
             Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
     ))
-    old_registry = subject_registry.read_registry(root / "subjects.json")
+    old_registry = subject_registry.read_registry(root)
     old_digest = attribute_schema_digest(old_registry, "bud")
     _confirm_negative(root, "bud", "img_001.jpg", digest=old_digest)
 
@@ -145,7 +146,7 @@ def test_quarantine_does_not_fire_when_schema_is_unchanged(tmp_path):
             Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
     ))
-    digest = attribute_schema_digest(subject_registry.read_registry(root / "subjects.json"), "bud")
+    digest = attribute_schema_digest(subject_registry.read_registry(root), "bud")
     _confirm_negative(root, "bud", "img_001.jpg", digest=digest)
 
     quarantined: set[str] = set()
@@ -183,7 +184,7 @@ def test_the_admission_reports_quarantined_stale_definition(tmp_path):
         )),
     ))
     old_digest = attribute_schema_digest(
-        subject_registry.read_registry(root / "subjects.json"), "bud")
+        subject_registry.read_registry(root), "bud")
     _confirm_negative(root, "bud", "img_001.jpg", digest=old_digest)
     _write_registry(root, Subject(name="bud", attributes=(
         Attribute(name="opening", type="categorical",
@@ -210,7 +211,7 @@ def test_quarantine_is_per_image_not_per_bucket(tmp_path):
         )),
     ))
     old_digest = attribute_schema_digest(
-        subject_registry.read_registry(root / "subjects.json"), "bud")
+        subject_registry.read_registry(root), "bud")
     _confirm_negative(root, "bud", "img_001.jpg", digest=old_digest)
 
     # The schema changes after img_001's confirmation.
@@ -219,7 +220,7 @@ def test_quarantine_is_per_image_not_per_bucket(tmp_path):
                  values=("closed", "partial", "open")),
     )))
     new_digest = attribute_schema_digest(
-        subject_registry.read_registry(root / "subjects.json"), "bud")
+        subject_registry.read_registry(root), "bud")
 
     # An unrelated image is confirmed under the new (current) schema, into the same bucket; the
     # re-stamp must not silently un-quarantine img_001 too.
@@ -248,7 +249,7 @@ def test_materialize_dataset_carries_a_quarantine_capable_stamp(tmp_path):
     src_images = src_root / "images"
     _write_image(src_images, "imgB")
     expected_digest = subject_registry.attribute_schema_digest(
-        subject_registry.read_registry(src_root / "subjects.json"), "bud")
+        subject_registry.read_registry(src_root), "bud")
 
     review_state = {"image": {
         "imgB.jpg": {"img_status": "completed", "detections": [

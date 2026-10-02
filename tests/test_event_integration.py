@@ -285,11 +285,12 @@ class TestPortDiscovery:
         descriptor = ts.get_descriptor(web_client.BACKEND_PORT_STORE)
         assert descriptor.declared_in == web_client.__name__
 
-    def test_host_env_override(self, monkeypatch) -> None:
-        from tcip_mcp.web_client import resolve_web_host
+    def test_the_backend_binds_and_the_tools_reach_one_loopback_host(self) -> None:
+        from tcip_mcp import web_client
+        from tcip_web import __main__ as web_main
 
-        monkeypatch.setenv("TCIP_WEB_HOST", "10.0.0.1")
-        assert resolve_web_host() == "10.0.0.1"
+        assert web_main.BACKEND_HOST is web_client.BACKEND_HOST
+        assert web_client.BACKEND_HOST == "127.0.0.1"
 
 
 class TestSharedWebStateDeclarations:
@@ -510,7 +511,6 @@ def test_post_panel_event_returns_the_backends_response_body(opened_project, mon
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    monkeypatch.setenv("TCIP_WEB_HOST", "127.0.0.1")
     monkeypatch.setenv("TCIP_WEB_PORT", str(port))
 
     server = uvicorn.Server(

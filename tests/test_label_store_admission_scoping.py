@@ -54,8 +54,8 @@ def test_a_record_of_another_subject_is_not_this_subjects_annotation(tmp_path):
 
     bud_admitted = admit_over(images, labels, subject=BUD)
     assert sorted(r.member for r in bud_admitted.records) == ["both", "buds_only"]
-    assert bud_admitted.counts["annotated"] == 2
-    assert bud_admitted.counts["skipped_unconfirmed_empty"] == 1
+    assert bud_admitted.tallies["annotated"] == 2
+    assert bud_admitted.tallies["skipped_unconfirmed_empty"] == 1
 
     bud_ds = dataset_over('detection', str(images), str(labels), subject=BUD)
     for idx, stem in enumerate(bud_ds.stems):
@@ -65,8 +65,8 @@ def test_a_record_of_another_subject_is_not_this_subjects_annotation(tmp_path):
 
     bush_admitted = admit_over(images, labels, subject=BUSH)
     assert sorted(r.member for r in bush_admitted.records) == ["both", "bushes_only"]
-    assert bush_admitted.counts["annotated"] == 2
-    assert bush_admitted.counts["skipped_unconfirmed_empty"] == 1
+    assert bush_admitted.tallies["annotated"] == 2
+    assert bush_admitted.tallies["skipped_unconfirmed_empty"] == 1
 
 
 def test_a_whole_image_note_is_admitted_and_refused_by_the_detection_loader(tmp_path):
@@ -85,8 +85,8 @@ def test_a_whole_image_note_is_admitted_and_refused_by_the_detection_loader(tmp_
 
     admitted = admit_over(images, labels, subject=BUD)
     assert sorted(r.member for r in admitted.records) == ["boxed", "rated_only"]
-    assert admitted.counts["annotated"] == 2
-    assert admitted.counts["skipped_unconfirmed_empty"] == 0
+    assert admitted.tallies["annotated"] == 2
+    assert admitted.tallies["skipped_unconfirmed_empty"] == 0
 
     with pytest.raises(ValueError, match="only in geometries a detection loader does not read"):
         dataset_over('detection', str(images), str(labels), subject=BUD)
@@ -115,5 +115,5 @@ def test_the_only_status_that_confirms_a_negative_is_the_negative_one(tmp_path):
 
     admitted = admit_over(images, labels, subject=BUD)
     assert sorted(r.member for r in admitted.records) == ["confirmed_empty", "worked"]
-    assert admitted.counts["confirmed_negative"] == 1
-    assert admitted.counts["skipped_unconfirmed_empty"] == 1
+    assert admitted.tallies["confirmed_negative"] == 1
+    assert admitted.tallies["skipped_unconfirmed_empty"] == 1
