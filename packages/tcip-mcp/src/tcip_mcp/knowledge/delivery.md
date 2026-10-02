@@ -61,7 +61,7 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | `run_inference` | Run a checkpoint over images or a raster and publish the predictions as a new bucket: one document per image (one for a raster) and `bucket.json`, the record of the checkpoint, class scope, execution record, capture and assessment behind them. A bucket is published once; an existing `output_dir` refuses. With `assessment_id` the pass runs exactly that assessment's execution record and the bucket names it |
 | `deliver_per_image_counts` | Per-image detection-count CSV from one published bucket; see the Per-Image CSV Schema below |
 | `deliver_per_plant_csv` | The general per-plant CSV door: `aggregate_per_plant`'s own output over the published buckets it came from, for the case neither specialist door's own composition covers; a named `plant_mapping` is resolved and verified against the delivered buckets, and every delivered plant must be one it assigned on the delivered dates |
-| `deliver_phenology_milestones` | Per-plant milestone CSV from classified buckets and a plant mapping; its own column schema; see `phenology` skill |
+| `deliver_phenology_milestones` | Per-plant milestone CSV from buckets whose scope classifies the trait's positive state, and a plant mapping; its own column schema; see `phenology` skill |
 | `register_plant_registry` | Names a plant-locations CSV set once (per-file `sha256`/`n_plants`, `crop`, `site`, a content digest over the parsed rows), so `deliver_orthomosaic_plant_counts` and `build_plant_mapping` read the same registered version by name (`plant_registry`) instead of re-asserting file paths; a shapefile is converted first by `tcip shp-to-plant-csv` |
 | `deliver_orthomosaic_plant_counts` | Per-plant detection counts from a published whole-raster bucket plus a `plant_registry` name. Nearest-neighbor by default; `canopy_subject` switches to containment in an accepted canopy boundary instead (refused alongside a stated `nn_tolerance_m`). Fewer rows than the registry names can ship under either regime, the absent plants named on the delivery event |
 
@@ -111,21 +111,22 @@ uncharacterized, which is a claim about a quantity that has been defined.
   be inside its confirmed set.
 - A `state_crossing_dates` operationalization and every delivery under it are checked against the
   delivered dataset's own subject registry, never a bare spec value: a delivery whose buckets'
-  dataset carries no registry refuses, and a positive value the registry does not declare for the
-  measured subject refuses the proposal, or the delivery when the registry changed since.
+  dataset carries no registry refuses, and a positive state naming an attribute the registry does
+  not declare for the measured subject, or a value that attribute does not list, refuses the
+  proposal, or the delivery when the registry changed since.
 
 ## The delivery gate (measurement integrity)
 
 Every delivery clears one gate over the buckets it reads; a delivery over no bucket refuses. A
-count or phenology delivery's every bucket must cover the operationalization's measured subject:
-a classified bucket's own scope subject, its recorded `id_map`'s keys otherwise. A bucket is
-validated when the
+count or phenology delivery's every bucket must cover the operationalization's measured subject,
+its own scope's subject. A bucket is validated when the
 assessment it was published under passed, measured this delivery's kind under the revision the
 delivery ships under, was measured over a reference that has not changed since, measured the
 checkpoint and execution record the bucket's own record states, and covers the bucket's capture
 (one of its captures for an image bucket, the same mosaic for a raster bucket). The gate refuses
 outright buckets naming more than one producing checkpoint or run, staged proposals, a phenology
-delivery over a bucket that classifies no positive value, and a dimensional detector delivery no
+delivery over a bucket whose scope declares no attribute listing the positive state's value,
+and a dimensional detector delivery no
 physical-scale assessment in the delivered unit answers for.
 
 A delivery with any unvalidated finding refuses, one sentence per finding, and the refusal carries

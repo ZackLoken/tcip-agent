@@ -45,7 +45,7 @@ def _detection_checkpoint(tmp_path: Path) -> str:
         "task": "detection",
     }
     config = {"model_source": model_source,
-              "data": {"num_channels": 2, "scope": {"subject": "bud", "id_map": {"bud": 0}}}}
+              "data": {"num_channels": 2, "scope": {"subject": "bud", "attributes": []}}}
     model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "model_best.pt"
     torch.save({"model_state_dict": model.state_dict(), "config": config}, str(ckpt))

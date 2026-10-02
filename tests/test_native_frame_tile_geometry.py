@@ -24,7 +24,7 @@ from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor  # n
 TILE = 64
 IMAGE = 128
 # The band count and class space a three-band, one-subject run records on its data section.
-_RUN_DATA = {"num_channels": 3, "scope": {"subject": "bud", "id_map": {"bud": 0}}}
+_RUN_DATA = {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}}
 
 
 class _GeometryStub:
@@ -75,6 +75,7 @@ def _stub_predictor(model, *, task: str = "detection") -> GenericPredictor:
     p = GenericPredictor.__new__(GenericPredictor)
     p.task = task
     p.in_chans = 3
+    p.attribute_sizes = []
     p.device = torch.device("cpu")
     p.model_source = {}
     p.model = model.eval()

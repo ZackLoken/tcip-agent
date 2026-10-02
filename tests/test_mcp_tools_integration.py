@@ -26,7 +26,7 @@ def _empty_bucket(project: Path, *images: Path) -> Path:
     return published(project, project / "predictions" / "m", [
         {"image": str(image), "width": 8, "height": 8, "boxes": [], "scores": [], "labels": []}
         for image in images],
-        scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}}).path
+        scope={"subject": "bud"}).path
 
 
 # ── Annotation tool integration tests ───────────────────────────────────────

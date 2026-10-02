@@ -2,7 +2,7 @@
 registered trait it's computed for.
 
 The positive-state fraction is the fraction of a plant's detected objects a classifier calls the
-trait's ``positive_value``. Milestone columns come entirely from the trait's own ``TraitEntry``
+trait's ``positive_state``. Milestone columns come entirely from the trait's own ``TraitEntry``
 (``phenology_prefix`` plus each ``milestone_fractions`` entry):
 
     ``<prefix>_<NN>per_date``            = the date the positive fraction first crosses NN%,
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
     from tcip_mcp.delivery import Result
     from tcip_mcp.pipelines.data.selection import ClassScope
-    from tcip_mcp.traits import TraitRevision
+    from tcip_mcp.traits import PositiveState, TraitRevision
 
 
 def _milestone_targets(spec) -> dict[str, float]:
@@ -204,42 +204,39 @@ def plant_milestones(series: list[tuple[str, float]], spec) -> dict:
     return out
 
 
-# ── positive-fraction from classified predictions ────────────────────────
+# ── positive-fraction from predictions under the positive state's attribute ──
 
 
 def count_by_class(
-    json_path: Path, positive_value: str, *, scope: ClassScope,
+    json_path: Path, state: PositiveState | None, *, scope: ClassScope,
 ) -> tuple[int, int, int]:
     """``(n_total, n_positive, n_unclassified)`` for one image's predictions.
 
-    ``scope`` is the bucket's own recorded scope. When it classifies no ``positive_value``
-    (:func:`~tcip_annotation.json_io.class_id` over its ``value_ids``), every detection is
-    unclassified: a whole-bucket decision, so a detector bucket whose one map key happens to equal
-    ``positive_value`` never counts a positive.
-
-    Under a classified scope, every record is held to
-    :func:`~tcip_annotation.json_io.require_classified_record` under the bucket's own recorded
-    vocabulary (``id_map``'s keys): a value outside that vocabulary refuses by name. A record whose
-    value equals ``positive_value`` counts positive; every other classified record counts toward
-    neither positive nor unclassified.
-
-    Called only for a prediction file confirmed to exist.
+    ``scope`` is the bucket's own recorded scope. When it declares no attribute of ``state``
+    listing its value (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.state_ids`), every
+    detection is unclassified, a whole-bucket decision. Otherwise every record is decoded under
+    the scope's attributes (:func:`~tcip_annotation.json_io.attribute_ids`): a value its attribute
+    does not declare, a record of another subject and a record carrying no value under the state's
+    attribute refuse by name (:class:`~tcip_annotation.json_io.UndeclaredValue`). A record whose
+    id there is the state's counts positive.
     """
     from tcip_annotation import json_io
 
     annotations = json_io.detection_annotations(json_path)
     total = len(annotations)
-    try:
-        json_io.class_id(positive_value, scope.value_ids)
-    except json_io.ClassKeyUnknown:
+    found = scope.state_ids(state)
+    if found is None:
         return total, 0, total
+    column, wanted = found
     positive = 0
     for i, a in enumerate(annotations):
-        value = json_io.require_classified_record(
-            a, subject=cast(str, scope.subject), attribute=cast(str, scope.attribute),
-            vocabulary=set(cast(dict, scope.id_map)), source=f"{json_path}#{i}")
-        if value == positive_value:
-            positive += 1
+        ids = json_io.attribute_ids(a, cast(str, scope.subject), cast(tuple, scope.attributes))
+        if ids is None or ids[column] == json_io.UNASSESSED:
+            raise json_io.UndeclaredValue(
+                f"{json_path}#{i}: a record of {a.subject!r} with attributes {a.attributes}, "
+                f"where this bucket's every record is of {scope.subject!r} with a value under "
+                f"{cast('PositiveState', state).attribute!r}.")
+        positive += ids[column] == wanted
     return total, positive, 0
 
 
@@ -251,10 +248,10 @@ class EmptyPopulation(ValueError):
 
 def measurement_refusals() -> tuple[type[Exception], ...]:
     """The exceptions :func:`per_plant_phenology` refuses a measurement with, each naming why."""
-    from tcip_annotation.json_io import ClassifiedRecordRefused, UnreadableLabelDocument
+    from tcip_annotation.json_io import UndeclaredValue, UnreadableLabelDocument
     from tcip_store import StoreError
 
-    return (UnreadableLabelDocument, ClassifiedRecordRefused, StoreError, EmptyPopulation)
+    return (UnreadableLabelDocument, UndeclaredValue, StoreError, EmptyPopulation)
 
 
 def population(plants: Sequence[str]) -> list[str]:
@@ -269,11 +266,12 @@ def population(plants: Sequence[str]) -> list[str]:
 
 
 def per_plant_series(
-    mapping: dict[str, list], buckets: dict[str, Bucket], positive_value: str,
+    mapping: dict[str, list], buckets: dict[str, Bucket], state: PositiveState | None,
     plants: list[str],
 ) -> dict[str, dict]:
-    """Aggregate classified predictions into a per-plant positive-fraction series, for exactly the
-    plants in ``plants`` (:func:`population`'s list).
+    """Aggregate the predictions of buckets whose scope declares ``state``'s attribute into a
+    per-plant positive-fraction series, for exactly the plants in ``plants`` (:func:`population`'s
+    list).
 
     ``mapping`` is ``{date: [assignment, ...]}`` where each assignment has ``.stem`` /
     ``.plot_name`` / ``.accession_name`` (attributes or dict keys); ``buckets`` is each delivered
@@ -314,7 +312,7 @@ def per_plant_series(
                 acc[3] += 1
                 continue
             total, positive, unclassified = count_by_class(
-                bucket.path / label_filename(str(stem)), positive_value, scope=bucket.scope)
+                bucket.path / label_filename(str(stem)), state, scope=bucket.scope)
             acc[0] += total
             acc[1] += positive
             acc[2] += unclassified
@@ -327,20 +325,20 @@ def per_plant_phenology(
     mapping: dict[str, list], buckets: dict[str, Bucket], spec, plants: list[str], *,
     require_all_dates_complete: bool,
 ) -> dict:
-    """Full canonical pipeline: classified predictions + plant mapping -> per-plant milestones
-    against ``spec``'s ``positive_value`` and milestones, one row per plant in ``plants`` and no
+    """Full canonical pipeline: predictions + plant mapping -> per-plant milestones
+    against ``spec``'s ``positive_state`` and milestones, one row per plant in ``plants`` and no
     other, in its order (see :func:`per_plant_series`).
 
     Returns ``{rows: [...], positive_class_assessed: bool}``. Each row carries the
     positive-fraction series, the milestone dates, coverage-disclosure fields
     (``n_dates_unclassified``, ``n_dates_missing_images``, a date the mapping captured the plant on
     no image counting as missing) and ``complete``, whether every one of its dates is complete:
-    imaged, fully classified and fully observed. With ``require_all_dates_complete`` a plant's
+    imaged, every detection carrying the positive state's attribute, and fully observed. With ``require_all_dates_complete`` a plant's
     milestones are computed only when it is complete, and otherwise from its complete dates alone.
     ``positive_class_assessed`` is ``True`` iff at least one date, anywhere in the delivery, was
     complete.
     """
-    per_plant = per_plant_series(mapping, buckets, spec.positive_value, plants)
+    per_plant = per_plant_series(mapping, buckets, spec.positive_state, plants)
     rows = []
     any_classified_date = False
     for plant_id, info in per_plant.items():
@@ -424,8 +422,6 @@ def measure_phenology(
     (``plant_mapping.resolve_delivery_mapping``); each refuses as it does, and so does
     :func:`per_plant_phenology` (:func:`measurement_refusals`).
     """
-    from tcip_annotation import json_io
-
     from tcip_mcp.buckets import by_recorded_date, read_bucket
     from tcip_mcp.operationalization import confirmed_revision
     from tcip_mcp.pipelines.postprocessing import plant_mapping
@@ -436,7 +432,7 @@ def measure_phenology(
     if registry is None:
         raise ValueError(
             f"no subject registry is reachable for the dataset behind {list(map(str, buckets))}: "
-            "register the dataset or write its subjects.json, so the trait's positive value can "
+            "register the dataset or write its subjects.json, so the trait's positive state can "
             "be checked against it.")
     revision = confirmed_revision(STATE_CROSSING_DATES, project=project, trait=trait,
                                   registry=registry)
@@ -445,15 +441,11 @@ def measure_phenology(
     mapping_build, verified = plant_mapping.resolve_delivery_mapping(project, mapping_name, dated)
     measured = per_plant_phenology(mapping_build.rows(), dated, revision.entry, wanted,
                                    require_all_dates_complete=require_all_dates_complete)
-    decoded = []
-    for b in dated.values():
-        try:
-            decoded.append(json_io.class_id(revision.entry.positive_value, b.scope.value_ids))
-        except json_io.ClassKeyUnknown:
-            continue
     return PhenologyMeasurement(
         revision=revision, buckets=dated, rows=measured["rows"],
-        positive_class_assessed=measured["positive_class_assessed"] and bool(decoded),
+        positive_class_assessed=measured["positive_class_assessed"] and any(
+            b.scope.state_ids(revision.entry.positive_state) is not None
+            for b in dated.values()),
         require_all_dates_complete=require_all_dates_complete,
         plant_mapping=mapping_build.delivery_disclosure(verified, list(dated)),
         plants=wanted)

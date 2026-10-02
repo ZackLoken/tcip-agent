@@ -220,7 +220,7 @@ def gate(
 
     Refuses (:class:`DeliveryRefused`) outright no buckets at all, buckets naming more than one
     producer or proposing rather than predicting, a state-crossing delivery over a bucket that
-    classifies no positive value, a scale assessment named for a value in no unit, and a detector
+    classifies no positive state, a scale assessment named for a value in no unit, and a detector
     delivery in a unit naming none; refuses
     (:class:`~tcip_mcp.operationalization.OperationalizationRefused`) a detector delivery whose
     buckets do not count the operationalization's measured subject. A delivery with any
@@ -248,21 +248,15 @@ def gate(
             + "): one delivered series names one producer, so deliver the buckets one producer "
             "made.")
     if delivery_kind in DETECTOR_KINDS:
-        bind(revision, delivery_kind, buckets={str(b.path): b.scope.subjects for b in buckets})
+        bind(revision, delivery_kind, buckets={str(b.path): b.scope.subject for b in buckets})
     if delivery_kind == STATE_CROSSING_DATES:
-        from tcip_annotation.json_io import ClassKeyUnknown, class_id
-
-        unclassified = []
-        for b in buckets:
-            try:
-                class_id(revision.entry.positive_value, b.scope.value_ids)
-            except ClassKeyUnknown:
-                unclassified.append(str(b.path))
+        state = revision.entry.positive_state
+        unclassified = [str(b.path) for b in buckets if b.scope.state_ids(state) is None]
         if unclassified:
             raise DeliveryRefused(
-                f"{unclassified} classify no {revision.entry.positive_value!r}: the classifier "
-                "that produced them never assessed this trait's positive value, so a positive "
-                "fraction over them is not a measurement.")
+                f"{unclassified} classify no {state}: the classifier that produced them never "
+                "assessed this trait's positive state, so a positive fraction over them is not a "
+                "measurement.")
     if scale_assessment_id is not None and unit is None:
         raise DeliveryRefused("a physical scale answers for a dimensional value, and the "
                               "delivered values are in no physical unit.")

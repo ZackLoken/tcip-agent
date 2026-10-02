@@ -808,14 +808,15 @@ export function ResultsTab() {
                 />
                 <p className="text-[11px] text-tcip-muted">
                   The positive-state fraction is the share of a plant's detected objects that are in
-                  the trait's positive state. That state is a class from the assessed classifier,
-                  not a bbox measurement; predictions must be classified for it.
+                  the trait's positive state. That state is a value of one attribute the assessed
+                  model calls on every detection, not a bbox measurement; the predictions' scope
+                  must declare that attribute.
                 </p>
                 {positiveClassUnassessed && (
                   <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2">
-                    These predictions carry no positive-state class, so the curves below are not a
-                    valid phenology measurement and CSV export is disabled. Run the classifier
-                    first.
+                    These predictions carry no value of the positive state's attribute, so the
+                    curves below are not a valid phenology measurement and CSV export is disabled.
+                    Publish predictions from a model whose scope declares that attribute first.
                   </div>
                 )}
                 {unvalidatedRefusal && (
@@ -1044,14 +1045,9 @@ export function ResultsTab() {
                   </thead>
                   <tbody>
                     {onset.map((r) => {
-                      // Gate the derivation itself (matching the setOnset([]) pattern used above)
-                      // rather than a banner, so a plant with any unclassified/missing date shows as
-                      // such, not silently blank milestone cells with no explanation.
+                      // A plant with any unassessed or missing date shows as such, never as blank cells.
                       const rowValid = r.complete;
-                      // "Valid" alone doesn't distinguish real detection data from a plant that was fully
-                      // classified/observed but never had a single detection (before emergence, or a
-                      // genuinely empty scene): that reads as no observations, not blank cells next
-                      // to a reassuring "valid".
+                      // Every date assessed and observed with no detection reads as no observations.
                       const neverObserved = rowValid && r.n_observed_dates === 0;
                       return (
                         <tr
@@ -1065,7 +1061,7 @@ export function ResultsTab() {
                             {neverObserved ? (
                               <span
                                 className="text-tcip-muted"
-                                title="Fully classified and fully observed, but no detections on any date, so there is nothing to derive milestones from."
+                                title="Every date assessed for the positive state's attribute and fully observed, but no detections on any date, so there is nothing to derive milestones from."
                               >
                                 no observations
                               </span>

@@ -129,6 +129,31 @@ def test_accepting_an_unpaired_proposal_adds_it_authored_by_its_producer(tmp_pat
     assert accepted.score is None
 
 
+def test_accepting_a_model_proposal_carries_no_attribute_value_into_the_document(
+        tmp_path: Path) -> None:
+    """An accepted proposal pairing no annotation joins ground truth with its geometry and subject
+    alone: every attribute the model called is left unassessed for the person to fill in."""
+    pytest.importorskip("torch")
+    from tcip_mcp import subject_registry as cr
+    from tests._chain_fixtures import predicted, published
+
+    image = _image(tmp_path)
+    color = cr.Attribute("color", "categorical", ("red", "blue"))
+    registry = cr.SubjectRegistry(subjects=(cr.Subject(name="bud", attributes=(color,)),))
+    result = {**predicted(image.stem, ["blue"], (color,)), "image": str(image),
+              "width": WIDTH, "height": HEIGHT}
+    bucket = published(tmp_path, tmp_path / "predictions" / "model" / DATE, [result],
+                       scope={"subject": "bud"}, registry=registry)
+    (proposal,) = json_io.read_annotations(bucket.path / f"{image.stem}.json")
+    assert proposal.attributes == {"color": "blue"}
+
+    _save(tmp_path, image, [], gestures=Gestures(bucket=str(bucket.path), accept=frozenset({0})))
+
+    (accepted,) = _stored(tmp_path, image).annotations
+    assert (accepted.subject, accepted.attributes) == ("bud", {})
+    assert accepted.geometry == proposal.geometry
+
+
 def test_the_shard_records_each_decision_once_and_refuses_an_entry_it_cannot_read(
         tmp_path: Path) -> None:
     from tcip_mcp.buckets import read_bucket
@@ -300,8 +325,7 @@ def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(tmp_path: Pat
     empty document as nothing until a person marks it, and as a negative once they have."""
     from fastapi.testclient import TestClient
 
-    from tcip_mcp.pipelines.data.label_queries import admitted_records
-    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.data.label_queries import admitted_records, registry_scope
     from tcip_mcp.tools.feedback_tools import _prepare_queue_sources
     from tcip_web.app import app
     from tests._web_fixtures import open_new_project
@@ -315,7 +339,7 @@ def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(tmp_path: Pat
 
     def readers() -> tuple[int, int, str]:
         _kept, counts = admitted_records({"a": (str(_label(root, image)), image.name)},
-                                         scope=ClassScope(subject="bud", id_map={"bud": 0}))
+                                         scope=registry_scope(_label(root, image).parent, "bud"))
         _sources, skipped, _error = _prepare_queue_sources(str(checkpoint), str(image.parent),
                                                            "bud")
         listed = client.get("/api/annotate/labels", params={

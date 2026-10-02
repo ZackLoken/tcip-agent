@@ -45,7 +45,7 @@ def _config(images_dir: Path, labels_dir: Path) -> dict:
     """A :data:`BUILT_DETECTOR` run's config over ``images_dir`` and ``labels_dir``."""
     return {"model_source": dict(BUILT_DETECTOR),
             "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                     "scope": {"subject": SUBJECT, "id_map": {SUBJECT: 0}}}}
+                     "scope": {"subject": SUBJECT}}}
 
 
 def test_compare_experiments_surfaces_shared_fingerprint(tmp_path):

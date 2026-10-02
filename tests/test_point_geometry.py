@@ -87,9 +87,23 @@ def test_a_point_alongside_a_box_and_a_polygon_all_survive_one_file(tmp_path: Pa
 # ── target membership (the one shared decision) ──────────────────────────────
 
 
-def test_target_class_id_still_assigns_a_box_its_class() -> None:
+def _scope(root: Path, *values: str):
+    """The class space ``bud`` is read under over a dataset at ``root`` declaring ``opening``
+    over ``values`` on it, or no attribute for no values."""
+    from tcip_mcp import subject_registry as cr
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
+    from tests._producer_fixtures import registry_over
+
+    attributes = (cr.Attribute("opening", "categorical", values),) if values else ()
+    registry_over(root, cr.SubjectRegistry(subjects=(cr.Subject(name="bud",
+                                                                 attributes=attributes),)))
+    (root / "annotations").mkdir(exist_ok=True)
+    return registry_scope(root / "annotations", "bud")
+
+
+def test_attribute_ids_still_give_a_box_its_row() -> None:
     a = Annotation(subject="bud", geometry=BOX)
-    assert json_io.target_class_id(a, "bud", None, {"bud": 0}) == 0
+    assert json_io.attribute_ids(a, "bud", ()) == []
 
 
 # ── the loader's own per-image target read ───────────────────────────────────
@@ -97,23 +111,20 @@ def test_target_class_id_still_assigns_a_box_its_class() -> None:
 
 def test_json_det_targets_yields_no_box_for_a_point(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.data.label_queries import json_det_targets
-    from tcip_mcp.pipelines.data.selection import ClassScope
 
     label = tmp_path / "IMG_0001.json"
     json_io.write_annotations(label, [
         Annotation(subject="bud", geometry=Point(20.0, 20.0)),
         Annotation(subject="bud", geometry=BOX),
     ], 100, 80)
-    target, n_unlabeled = json_det_targets(str(label), ClassScope(subject="bud",
-                                                                  id_map={"bud": 0}))
+    target = json_det_targets(str(label), _scope(tmp_path / "plain"))
     assert target["boxes"] == [[10.0, 10.0, 30.0, 30.0]]
     assert target["labels"] == [1]
-    assert n_unlabeled == 0  # a point is not an unlabeled instance either: it is not an instance
     # An attribute scope must not turn the point into a decode failure either: it is simply not a
-    # target for this scope, which is a different thing from "a target the registry can't decode".
-    target, n_unlabeled = json_det_targets(str(label), ClassScope(
-        subject="bud", attribute="opening", id_map={"open": 0}))
-    assert target["boxes"] == [] and n_unlabeled == 1  # only the box, never assessed, is a gap
+    # target, and the box, never assessed, is one row marked unassessed.
+    target = json_det_targets(str(label), _scope(tmp_path / "attributed", "open"))
+    assert target["boxes"] == [[10.0, 10.0, 30.0, 30.0]]
+    assert target["attributes"].tolist() == [[json_io.UNASSESSED]]
 
 
 def test_a_point_only_document_carries_the_subject_and_the_detection_loader_refuses_it(
@@ -201,7 +212,7 @@ def test_worst_predictions_does_not_count_a_point_as_a_detection(tmp_path: Path)
     published(tmp_path, pred_dir, [
         {"image": "IMG_0001.jpg", "width": 100, "height": 80,
          "boxes": [[BOX.x1, BOX.y1, BOX.x2, BOX.y2]], "scores": [1.0], "labels": [1]}],
-        scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
+        scope={"subject": "bud"})
     # A point beside the published box, as an edit in place would leave it: no head emits one.
     json_io.write_annotations(pred_dir / "IMG_0001.json", [
         Annotation(subject="bud", geometry=BOX, score=1.0),
@@ -216,7 +227,7 @@ def test_worst_predictions_does_not_count_a_point_as_a_detection(tmp_path: Path)
 
 def test_phenology_detection_counts_exclude_a_point(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.postprocessing.phenology import count_by_class
-    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.traits import PositiveState
 
     path = tmp_path / "IMG_0001.json"
     json_io.write_annotations(path, [
@@ -225,8 +236,9 @@ def test_phenology_detection_counts_exclude_a_point(tmp_path: Path) -> None:
         Annotation(subject="bud", geometry=Point(60.0, 60.0), score=0.9,
                   attributes={"opening": "open"}),
     ], 100, 80)
-    scope = ClassScope(subject="bud", attribute="opening", id_map={"open": 0, "closed": 1})
-    total, positive, unclassified = count_by_class(path, "open", scope=scope)
+    total, positive, unclassified = count_by_class(
+        path, PositiveState(attribute="opening", value="open"),
+        scope=_scope(tmp_path, "open", "closed"))
     assert (total, positive, unclassified) == (1, 1, 0)
 
 
@@ -383,7 +395,7 @@ def test_the_proposals_route_pairs_no_proposal_with_a_point(
     bucket = published(tmp_path, tmp_path / "predictions" / "baseline", [
         {"image": str(img), "width": 100, "height": 80,
          "boxes": [[BOX.x1, BOX.y1, BOX.x2, BOX.y2]], "scores": [0.9], "labels": [1]}],
-        scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
+        scope={"subject": "bud"})
 
     resp = client.get("/api/annotate/proposals", params={
         "image_path": str(img), "bucket": str(bucket.path), "label_path": str(gt)})

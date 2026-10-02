@@ -370,10 +370,10 @@ def test_write_subject_registry(tmp_path):
     assert "error" not in res
     assert res["subjects"] == ["bud"]
     assert res["subjects_path"] == str(out)
-    # Declared order is the id order (assign_class_ids is the one name->id derivation): 0=closed,
-    # 1=open, and the on-disk nested shape carries the same value order.
+    # Declared order is the id order (a value's id is its position): 0=closed, 1=open, and the
+    # on-disk nested shape carries the same value order.
     reg = subject_registry.read_registry(tmp_path)
-    assert subject_registry.assign_class_ids(reg, "bud", "opening") == {"closed": 0, "open": 1}
+    assert reg.subjects[0].attribute("opening").values == ("closed", "open")  # type: ignore[union-attr]
     assert json.loads(out.read_text())["bud"]["attributes"]["opening"]["values"] == \
         ["closed", "open"]
 

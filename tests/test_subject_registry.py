@@ -1,9 +1,9 @@
-"""The nested subject registry and its deterministic name→id assignment.
+"""The nested subject registry, whose declared value order is every value's id.
 
-The assignment is the measurement apex: a non-deterministic or reordered map ships predictions that
-decode to the wrong class: a confident-wrong phenotype that passes every downstream test. These
-pin the two properties that prevent it: assignment follows the registry's *declared* order (never
-sorted, which would corrupt ordinal rank), and it is stable across calls and a file round-trip.
+A reordered value list ships predictions that decode to the wrong value: a confident-wrong
+phenotype that passes every downstream test. These pin that an id is the value's *declared*
+position (never sorted, which would corrupt ordinal rank) and that the order survives a file
+round-trip.
 """
 
 from __future__ import annotations
@@ -17,9 +17,6 @@ from tcip_mcp.subject_registry import (
     SubjectRegistry,
     RegistryError,
     Subject,
-    assign_class_ids,
-    decode_class_ids,
-    num_classes,
     read_registry,
     registry_from_dict,
     read_versioned_registry,
@@ -58,62 +55,41 @@ def test_dict_and_file_roundtrip_preserve_the_registry(tmp_path):
     assert on_disk["bud"]["attributes"]["opening"]["values"] == ["closed", "open"]
 
 
-def test_assign_ids_follow_declared_order_not_sorted():
-    # Values declared reverse-alphabetically: a sorted/set-based assignment would flip these ids and
-    # silently remap every prediction. Declared order must win.
+def _scope(tmp_path, registry, subject):
+    """The class space the admission reads for ``subject`` over a dataset declaring
+    ``registry``."""
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
+
+    registry_over(tmp_path, registry)
+    (tmp_path / "annotations").mkdir(exist_ok=True)
+    return registry_scope(tmp_path / "annotations", subject)
+
+
+def test_a_value_id_is_its_declared_position_never_a_sorted_one(tmp_path):
+    # Values declared reverse-alphabetically: a sorted/set-based id would flip these and silently
+    # remap every prediction. Declared order must win, every attribute of the subject carried.
+    from tcip_annotation.json_io import UNASSESSED, attribute_ids
+    from tcip_annotation.state import Annotation
+
     reg = SubjectRegistry(subjects=(
         Subject(name="bud", attributes=(
-            Attribute(name="opening", type="categorical", values=("open", "closed")),)),
+            Attribute(name="opening", type="categorical", values=("open", "closed")),
+            Attribute(name="severity", type="ordinal", values=("none", "light", "severe")),)),
     ))
-    assert assign_class_ids(reg, "bud", "opening") == {"open": 0, "closed": 1}
+    scope = _scope(tmp_path, reg, "bud")
+    assert scope.attributes == reg.subjects[0].attributes
+    assert attribute_ids(Annotation(subject="bud", attributes={
+        "opening": "closed", "severity": "light"}), "bud", scope.attributes) == [1, 1]
+    assert attribute_ids(Annotation(subject="bud", attributes={"opening": "open"}), "bud",
+                         scope.attributes) == [0, UNASSESSED]
 
 
-def test_ordinal_assignment_is_rank_order():
-    reg = SubjectRegistry(subjects=(
-        Subject(name="leaf", attributes=(
-            Attribute(name="efb_severity", type="ordinal",
-                      values=("none", "light", "moderate", "severe")),)),
-    ))
-    assert assign_class_ids(reg, "leaf", "efb_severity") == {
-        "none": 0, "light": 1, "moderate": 2, "severe": 3}
-    assert num_classes(reg, "leaf", "efb_severity") == 4
-
-
-def test_assignment_is_stable_across_calls_and_a_file_roundtrip(tmp_path):
-    reg = _bud_bush()
-    first = assign_class_ids(reg, "bud", "opening")
-    assert first == assign_class_ids(reg, "bud", "opening")  # repeatable
-
-    registry_over(tmp_path, reg)
-    assert assign_class_ids(read_registry(tmp_path), "bud", "opening") == first  # survives round-trip
-
-
-def test_no_attribute_scope_is_single_class():
-    reg = _bud_bush()
-    assert assign_class_ids(reg, "bush") == {"bush": 0}  # subject with no attributes
-    assert assign_class_ids(reg, "bud") == {"bud": 0}  # attributes exist but scope ignores them
-    assert num_classes(reg, "bush") == 1
-
-
-def test_decode_inverts_the_recorded_map():
-    reg = _bud_bush()
-    id_map = assign_class_ids(reg, "bud", "opening")
-    assert decode_class_ids(id_map) == {0: "closed", 1: "open"}
-
-
-def test_absent_subject_or_attribute_refuses():
-    reg = _bud_bush()
-    with pytest.raises(RegistryError):
-        assign_class_ids(reg, "acorn")
-    with pytest.raises(RegistryError):
-        assign_class_ids(reg, "bud", "sex")  # not declared on bud
-
-
-def test_a_subject_with_no_attributes_is_valid():
-    # rail admits valid work: bush (detection-only) loads and assigns, it is not treated as malformed
+def test_a_subject_with_no_attributes_reads_none_and_an_absent_subject_refuses(tmp_path):
+    # rail admits valid work: bush (detection-only) loads and reads an empty attribute tuple
     reg = registry_from_dict({"bush": {"description": "a bush"}})
-    assert reg.subject("bush") is not None
-    assert assign_class_ids(reg, "bush") == {"bush": 0}
+    assert _scope(tmp_path, reg, "bush").attributes == ()
+    with pytest.raises(RegistryError):
+        _scope(tmp_path, reg, "acorn")
 
 
 @pytest.mark.parametrize("bad", [
@@ -140,12 +116,12 @@ def test_ordinal_file_roundtrip_preserves_type_and_rank(tmp_path):
     assert back == reg  # type and declared value order both survive the round-trip
     leaf = back.subject("leaf")
     assert leaf is not None and leaf.attribute("efb_severity").type == "ordinal"  # type: ignore[union-attr]
-    assert assign_class_ids(back, "leaf", "efb_severity") == {
-        "none": 0, "light": 1, "moderate": 2, "severe": 3}
+    assert leaf.attribute("efb_severity").values == (  # type: ignore[union-attr]
+        "none", "light", "moderate", "severe")
 
 
 def test_attribute_refuses_bad_values_at_construction():
-    # The invariant travels with the type, so assign_class_ids can never silently collapse a class,
+    # The invariant travels with the type, so a positional id can never silently collapse a value,
     # however the Attribute was built, not only via the JSON parser.
     with pytest.raises(ValueError):
         Attribute(name="opening", type="categorical", values=("closed", "closed"))  # duplicate
@@ -225,7 +201,7 @@ def test_copy_registry_refuses_when_the_destination_already_holds_one(tmp_path):
 
 
 def _leaf_bush() -> SubjectRegistry:
-    """A generic two-subject registry (a detection-only subject, a classified one), for the
+    """A generic two-subject registry (a subject declaring no attribute, one declaring one), for the
     registry-write tests below."""
     return SubjectRegistry(subjects=(
         Subject(name="bush", description="one plant crown", defined_by="user:breeder"),

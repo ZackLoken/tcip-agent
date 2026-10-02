@@ -103,7 +103,7 @@ def _checkpoint(tmp_path, builder: str) -> str:
         tmp_path, name=builder,
         model_source={"builder": f"tests.bespoke_models:{builder}", "task": "detection"},
         data={"tiling": {"enabled": False}, "num_channels": 3,
-              "scope": {"subject": "bud", "id_map": {"bud": 0}}})
+              "scope": {"subject": "bud"}})
 
 
 def _assessed(tmp_path: Path, builder: str) -> dict:

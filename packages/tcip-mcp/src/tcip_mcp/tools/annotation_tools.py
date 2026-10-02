@@ -256,8 +256,8 @@ def score_predictions(
     images directory returns aggregate metrics plus ``per_image`` TP/FP/FN. Both regimes share
     ``coco_detection_metrics``.
 
-    A classified bucket's predictions carry the object class in ``subject``, so this scores the
-    localization of the object class, never the classifier's own call.
+    A prediction carries its object class in ``subject``, so this scores the localization of the
+    object class, never an attribute head's call.
 
     Args:
         path: Absolute path to an image file (single-image match) or an images directory

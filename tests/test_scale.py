@@ -20,6 +20,7 @@ def test_predict_batch_detection_uses_one_forward_per_batch(tmp_path):
     pred = GenericPredictor.__new__(GenericPredictor)
     pred.device = torch.device("cpu")
     pred.in_chans = 3
+    pred.attribute_sizes = []
     pred.task = "detection"
 
     calls = {"n": 0, "sizes": []}

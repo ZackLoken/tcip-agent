@@ -185,7 +185,7 @@ def _bespoke_checkpoint_payload() -> dict:
         "task": "detection",
     }
     config = {"model_source": src,
-              "data": {"num_channels": 3, "scope": {"subject": "bud", "id_map": {"bud": 0}}}}
+              "data": {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}}}
     model = build_model(config, recorded_model_dims(config))
     return {"config": config, "model_state_dict": model.state_dict()}
 
@@ -300,7 +300,7 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(tm
                       "builder_kwargs": {"min_size": 64, "max_size": 128, "image_mean": [0.4],
                                          "image_std": [0.2]},
                       "task": "detection"},
-        data={"num_channels": 1, "scope": {"subject": "bud", "id_map": {"bud": 0}}})
+        data={"num_channels": 1, "scope": {"subject": "bud"}})
     images = tmp_path / "images"
     images.mkdir()
     for stem in ("a", "b"):

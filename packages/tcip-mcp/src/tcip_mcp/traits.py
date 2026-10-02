@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -64,7 +64,7 @@ else:
 _COUNT_FIELDS = ("count_objective", "localization", "count_bias_tolerance_frac",
                  "count_error_tolerance", "holdout_match_quality_floor")
 CONSTITUTING_FIELDS: dict[str, tuple[str, ...]] = {
-    STATE_CROSSING_DATES: ("positive_value", "milestone_on", "milestone_fractions",
+    STATE_CROSSING_DATES: ("positive_state", "milestone_on", "milestone_fractions",
                            *_COUNT_FIELDS, "classifier_agreement_floor"),
     PER_IMAGE_COUNT: _COUNT_FIELDS,
     PER_PLANT_COUNT_AGGREGATE: _COUNT_FIELDS,
@@ -159,6 +159,21 @@ class Operationalization(BaseModel):
     empty for the others, whose row schema is fixed by their writer."""
 
 
+class PositiveState(BaseModel):
+    """The state a fraction counts: one attribute of the measured subject, and its value that is
+    positive."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, use_attribute_docstrings=True)
+
+    attribute: Text
+    """The measured subject's attribute, as ``subjects.json`` declares it."""
+    value: Text
+    """The value of that attribute that is the positive state."""
+
+    def __str__(self) -> str:
+        return f"{self.attribute}={self.value!r}"
+
+
 class TraitEntry(BaseModel):
     """One trait's complete entry: its spec fields and its operationalization per delivery kind.
     Every field is required; a field not yet decided is stated as empty or null. A proposal is
@@ -170,8 +185,8 @@ class TraitEntry(BaseModel):
     """The trait's name in this project; its record is keyed by it."""
     delivers: tuple[str, ...]
     """The crops.yml phenotype names this trait delivers."""
-    positive_value: str
-    """The value one of the measured subject's attributes declares for the positive state, or empty."""
+    positive_state: PositiveState | None
+    """The state a fraction counts, or null for a trait that counts none."""
     milestone_fractions: tuple[float, ...]
     """Crossing fractions for a milestone-delivering trait."""
     milestone_on: str
@@ -251,7 +266,8 @@ QUESTIONS: dict[str, str] = {
     "scale_tolerance_frac": (
         "By what fraction may two physical measurements of the same reference object disagree "
         "before the scale behind a length is no use to you?"),
-    "positive_value": "Which of the subject's states is the one a fraction counts?",
+    "positive_state": "Which attribute of the subject, and which of its values, is the state a "
+                      "fraction counts?",
 }
 """The breeder's question for each spec field a measurement criterion compares against, asked
 when the field is still unauthored."""
@@ -417,7 +433,7 @@ def read_trait(trait: str, project: str | Path) -> TraitRecord:
 
 
 def resolve_statement_registry(project: str | Path, dataset_root: str) -> SubjectRegistry:
-    """The registry a ``state_crossing_dates`` operationalization's positive class is checked
+    """The registry a ``state_crossing_dates`` operationalization's positive state is checked
     against.
 
     ``dataset_root`` given: that dataset's own registry. Empty: the project root's own registry,
@@ -434,7 +450,7 @@ def resolve_statement_registry(project: str | Path, dataset_root: str) -> Subjec
         except FileNotFoundError as exc:
             raise ValueError(
                 f"dataset_root {dataset_root!r} carries no subject registry of its own. Write one "
-                "(write_subject_registry) before a crossing's classes can be checked against it."
+                "(write_subject_registry) before a crossing's state can be checked against it."
             ) from exc
 
     registered = read_datasets(project)
@@ -466,25 +482,27 @@ def propose_trait(
     """Append ``entry`` to its trait's record as a new, unconfirmed revision, creating the record
     for a trait the project does not have yet, then write the proposal's audit line.
 
-    Refuses an entry :func:`check_proposed_entry` refuses, and a ``state_crossing_dates`` operationalization whose
-    positive class the registry :func:`resolve_statement_registry` resolves (``dataset_root``
-    names the dataset, empty the project's own) does not declare for the measured subject. A
-    rationale that says nothing refuses. Returns the revision as written; an audit line that
-    cannot be written raises ``AuditEntryNotWritten`` with the revision already appended.
+    Refuses an entry :func:`check_proposed_entry` refuses, and a ``state_crossing_dates``
+    operationalization whose positive state names an attribute the registry
+    :func:`resolve_statement_registry` resolves (``dataset_root`` names the dataset, empty the
+    project's own) does not declare for the measured subject, or a value that attribute does not
+    list. A rationale that says nothing refuses. Returns the revision as written; an audit line
+    that cannot be written raises ``AuditEntryNotWritten`` with the revision already appended.
     """
     from tcip_mcp.audit import record_event_or_raise
-    from tcip_mcp.subject_registry import positive_value_problem
+    from tcip_mcp.subject_registry import positive_state_problem
 
     check_proposed_entry(entry)
     crossing = entry.operationalizations.get(STATE_CROSSING_DATES)
     if crossing is not None:
         registry = resolve_statement_registry(project, dataset_root)
-        problem = positive_value_problem(registry, crossing.measured_subject, entry.positive_value)
+        problem = positive_state_problem(registry, crossing.measured_subject,
+                                         cast(PositiveState, entry.positive_state))
         if problem is not None:
             raise ValueError(
                 f"the {STATE_CROSSING_DATES} operationalization of {entry.name!r} names positive "
-                f"class {entry.positive_value!r} for subject {crossing.measured_subject!r}, and "
-                f"{problem}. Name a class the registry declares, or update the registry first."
+                f"state {entry.positive_state} for subject {crossing.measured_subject!r}, and "
+                f"{problem}. Name a state the registry declares, or update the registry first."
             )
     key = trait_key(project, entry.name)
     with ts.transaction(key) as txn:

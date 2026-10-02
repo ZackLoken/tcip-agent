@@ -75,7 +75,8 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
     Args:
         config: Full training configuration dict.
         smoke: When True, actually build the model and run ``check_model_contract`` (a train+eval
-            forward at the resolved in_chans/num_classes/img_size). A contract failure is appended
+            forward at the run's resolved dims and img_size, every attribute head included). A
+            contract failure is appended
             to ``issues`` and blocks the launch. For a task the contract has no synthetic batch
             schema for, one real batch of the resolved train dataset is used instead; if it yields
             none, that also blocks.

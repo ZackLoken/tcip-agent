@@ -117,8 +117,7 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(tmp_pa
     image = tmp_path / "ds" / "images" / DATE / "r0.png"
     bucket = read_bucket(published(
         tmp_path, tmp_path / "ds" / "predictions" / "m" / DATE,
-        [{**predicted("r0", [SUBJECT], {SUBJECT: 0}), "image": str(image)}],
-        scope={"subject": SUBJECT, "attribute": None, "id_map": {SUBJECT: 0}}).path)
+        [{**predicted("r0", [SUBJECT]), "image": str(image)}], scope={"subject": SUBJECT}).path)
     rows = [{"plant_id": "p1", "value": 12.5, "observations": 1, "value_key": "area_mm2",
              "plant_attribution": "image"}]
     def deliver(out: Path, **kw):

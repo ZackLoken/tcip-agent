@@ -9,7 +9,8 @@ builder it names and calling it.
                                            # for the import and snapshotted as provenance
      "task": "detection"}                  # the run's task
 
-The builder is also handed the run's width and count (:func:`model_dims`), never stated here.
+The builder is also handed the run's width, count and attributes (:func:`model_dims`), never
+stated here.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ DATASET_SOURCE_KEY = "dataset_source"
 STATE_DICT_KEY = "model_state_dict"
 """The config keys naming a run's bespoke sources, and the checkpoint key holding its weights."""
 
-RESERVED_DIMS = ("in_chans", "num_classes", "num_ranks")
+RESERVED_DIMS = ("in_chans", "num_classes", "num_ranks", "attributes")
 """The dimensions the platform hands a model builder (:func:`model_dims`), never its
 ``builder_kwargs``."""
 
@@ -147,16 +148,21 @@ def child_pythonpath() -> str:
     return os.pathsep.join(path_entries)
 
 
-def model_dims(scope: "ClassScope", sizes: "Mapping[str, int]") -> dict[str, int]:
+def model_dims(scope: "ClassScope", sizes: "Mapping[str, int]") -> dict[str, Any]:
     """The dimensions a run's model is built at, each handed to its builder under its own name.
 
     ``in_chans`` is the band count the run's sources are read at, ``sizes["num_channels"]``
-    (:func:`~tcip_mcp.pipelines.data.datasets.resolve_sizes`). The one count is the one the ground
-    truth derives: ``num_classes``, the length of ``scope``'s map, for a scoped run; otherwise the
-    ``num_classes`` or ``num_ranks`` ``sizes`` carries, and none for a run whose ground truth
-    carries no count. Refuses by name a ``sizes`` recording no band count, and a second count.
+    (:func:`~tcip_mcp.pipelines.data.datasets.resolve_sizes`). For a run over label documents
+    (``scope`` naming a subject), ``num_classes`` is 1, since a ``ClassScope`` isolates one subject,
+    and ``attributes``, present when the scope declares any, is its tuple of
+    :class:`~tcip_mcp.subject_registry.Attribute` records, one head per record sized by its
+    values; a ``sizes`` stating a count beside it refuses by name. Otherwise the ``num_classes``
+    or ``num_ranks`` ``sizes`` carries, and none for a run whose ground truth carries no count.
+    Refuses by name a ``sizes`` recording no band count, and a document scope the admission did
+    not read attributes for (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.admitted_for`).
     """
     from tcip_mcp.pipelines.data.datasets import GROUND_TRUTH_COUNTS
+    from tcip_mcp.pipelines.data.selection import DOCUMENT
 
     if sizes.get("num_channels") is None:
         raise ValueError(
@@ -164,20 +170,22 @@ def model_dims(scope: "ClassScope", sizes: "Mapping[str, int]") -> dict[str, int
             "is unknown, and building at a guess would feed it something other than what it "
             "trained on. Build from a run this platform trained, or state data.num_channels."
         )
-    counts = [(name, int(sizes[name])) for name in GROUND_TRUTH_COUNTS
-              if sizes.get(name) is not None]
-    if scope.id_map:
-        counts.append(("num_classes", len(scope.id_map)))
-    if len(counts) > 1:
+    counts = {name: int(sizes[name]) for name in GROUND_TRUTH_COUNTS
+              if sizes.get(name) is not None}
+    if scope.subject is None:
+        return {"in_chans": int(sizes["num_channels"]), **counts}
+    if counts:
         raise ValueError(
-            f"this run records two counts ({counts}): a model has one head size, the class map's "
-            "length for a scoped run and the one count its ground truth derives otherwise. Drop "
-            "the count the run's ground truth does not derive."
+            f"this run over label documents records {sorted(counts)}: its head sizes are the "
+            "subject its scope isolates and the attributes the registry declares for it, so a "
+            f"stated count would be a second one. Drop {sorted(counts)} from data."
         )
-    return {"in_chans": int(sizes["num_channels"]), **dict(counts)}
+    attributes = scope.admitted_for(DOCUMENT, "this run's data.scope").attributes
+    return {"in_chans": int(sizes["num_channels"]), "num_classes": 1,
+            **({"attributes": attributes} if attributes else {})}
 
 
-def recorded_model_dims(config: "Mapping[str, Any]") -> dict[str, int]:
+def recorded_model_dims(config: "Mapping[str, Any]") -> dict[str, Any]:
     """:func:`model_dims` over what a run's config records on its data section: its ``scope`` and
     its sizes. Refuses by name a run of a built-in loader's task that records no count its ground
     truth derives (``num_ranks`` for an ordinal run)."""
@@ -208,7 +216,7 @@ def run_task(config: "Mapping[str, Any]") -> str:
     return task
 
 
-def build_from_model_source(model_source: dict, dims: "Mapping[str, int]") -> Any:
+def build_from_model_source(model_source: dict, dims: "Mapping[str, Any]") -> Any:
     """Import the agent's builder and call it with its ``builder_kwargs`` and ``dims``
     (:func:`model_dims`). Only ``builder`` is required to construct the model.
 
@@ -232,7 +240,7 @@ def build_from_model_source(model_source: dict, dims: "Mapping[str, int]") -> An
     return fn(**kwargs, **dims)
 
 
-def build_model(config: "Mapping[str, Any]", dims: "Mapping[str, int]") -> Any:
+def build_model(config: "Mapping[str, Any]", dims: "Mapping[str, Any]") -> Any:
     """Build a model from a run config (a checkpoint's own ``config`` included) via its
     ``model_source`` builder, at ``dims`` (:func:`model_dims`)."""
     model_source = config.get(MODEL_SOURCE_KEY)
@@ -241,9 +249,10 @@ def build_model(config: "Mapping[str, Any]", dims: "Mapping[str, int]") -> Any:
     raise ValueError("Config has no 'model_source'.")
 
 
-def resolve_contract_dims(config: dict, task: str, dims: "Mapping[str, int]") -> dict:
-    """The dimensions a synthetic smoke batch is shaped at: the width and count the model is built
-    at (``dims``, :func:`model_dims`, a rank count carried as ``num_classes``) and an ``img_size``.
+def resolve_contract_dims(config: dict, task: str, dims: "Mapping[str, Any]") -> dict:
+    """The dimensions a synthetic smoke batch is shaped at: the width, count and attributes the
+    model is built at (``dims``, :func:`model_dims`, a rank count carried as ``num_classes``) and
+    an ``img_size``.
 
     ``img_size`` is the tile edge when detection tiling is on (the real training input), else a
     safe non-tiny fallback that clears typical stride-32 backbones. The count is the one ``dims``
@@ -255,7 +264,8 @@ def resolve_contract_dims(config: dict, task: str, dims: "Mapping[str, int]") ->
     if task == "detection" and isinstance(tiling, dict) and tiling.get("enabled", True) and tiling.get("tile_size"):
         img_size = int(tiling["tile_size"])
     return {"in_chans": dims["in_chans"], "img_size": img_size,
-            **({} if count is None else {"num_classes": count})}
+            **({} if count is None else {"num_classes": count}),
+            **({"attributes": dims["attributes"]} if "attributes" in dims else {})}
 
 
 # The checkout's commit can't change within a process, resolve it once (a subprocess per training

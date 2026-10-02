@@ -65,8 +65,8 @@ class Annotation:
 
     ``subject`` is the object it is about, a non-empty string or ``ValueError``. ``geometry`` is a
     box, a polygon, a point, or ``None`` for an image/plant-level label. ``attributes`` maps an
-    attribute name to its value name. ``score`` set means this is a prediction; a classified
-    prediction's ``subject`` is the object class and its decoded call sits under ``attributes``.
+    attribute name to its value name. ``score`` set means this is a prediction; a prediction's
+    ``subject`` is the object class and each attribute head's call sits under ``attributes``.
     ``created_by``/``created_at`` name who authored it and ``accepted_by``/``accepted_at`` who
     accepted it into ground truth. ``iscrowd`` marks a region of unseparated objects of
     ``subject``, never one instance.

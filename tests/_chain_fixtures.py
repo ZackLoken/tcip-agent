@@ -200,19 +200,24 @@ def deliver_acknowledged(project: Path, results: list[dict], out: Path, delivere
         **kwargs))
 
 
-def predicted(stem: str, names: list[str], id_map: dict[str, int]) -> dict:
-    """One predictor result for the image ``<stem>.png``: a detection per entry of ``names``, each
-    labeled with its class under ``id_map``."""
-    return {"image": f"{stem}.png", "width": IMG, "height": IMG,
-            "boxes": [[4.0 * k, 0.0, 4.0 * k + 3.0, 3.0] for k in range(len(names))],
-            "scores": [0.9] * len(names), "labels": [id_map[n] + 1 for n in names]}
+def predicted(stem: str, values: list[str], attributes: tuple = ()) -> dict:
+    """One predictor result for the image ``<stem>.png``: a detection of the subject per entry of
+    ``values``, each carrying that value's id under the first of ``attributes`` (the scope's
+    attribute records) and the first value of every other; no ``attributes`` row for none."""
+    result = {"image": f"{stem}.png", "width": IMG, "height": IMG,
+              "boxes": [[4.0 * k, 0.0, 4.0 * k + 3.0, 3.0] for k in range(len(values))],
+              "scores": [0.9] * len(values), "labels": [1] * len(values)}
+    if attributes:
+        result["attributes"] = [[attributes[0].values.index(v)] + [0] * (len(attributes) - 1)
+                                for v in values]
+    return result
 
 
 def published(project: Path, out: Path, results: list[dict], *, scope: dict,
-              raster_path: Path | None = None) -> Any:
+              registry: Any = None, raster_path: Path | None = None) -> Any:
     """``results`` published as the bucket ``out`` (:func:`~tcip_mcp.buckets.publish`), under the
-    untiled pass a registered checkpoint recording ``scope`` runs, over the raster
-    ``raster_path`` when one is named; the bucket."""
+    untiled pass a registered checkpoint stating ``scope`` runs (its frames' dataset declaring
+    ``registry``), over the raster ``raster_path`` when one is named; the bucket."""
     from tcip_mcp.buckets import pass_documents, publish
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.data.split_construction import raster_identity
@@ -222,7 +227,8 @@ def published(project: Path, out: Path, results: list[dict], *, scope: dict,
     from tcip_store import RECORD_JSON
 
     checkpoint = load_registered_checkpoint(
-        project_checkpoint(project, data={"num_channels": 3, "scope": scope}), project=project)
+        project_checkpoint(project, data={"num_channels": 3, "scope": scope}, registry=registry),
+        project=project)
     identity = (RECORD_JSON.decode(RECORD_JSON.encode(raster_identity(raster_path)))
                 if raster_path is not None else None)
     p = prepare_pass(checkpoint, Stated(tile=False))
@@ -233,18 +239,18 @@ def published(project: Path, out: Path, results: list[dict], *, scope: dict,
 
 
 VALUES = ("open", "closed")
-"""The classified chain's attribute values, in the registry's declared order: a value's index is
+"""The attributed chain's attribute values, in the registry's declared order: a value's index is
 the band its blobs are bright in, and the class the blob detector calls them."""
 ATTRIBUTE = "opening"
 SERIES_DATES = ("2026-02-11", "2026-02-25", "2026-03-10", "2026-03-24")
 PLANTS = {"PLANT_A": (43.19700, -90.05800), "PLANT_B": (43.19700, -90.05780)}
-"""Where each plant of the classified chain's registry stands (WGS84 lat, lon), about 16 m
+"""Where each plant of the attributed chain's registry stands (WGS84 lat, lon), about 16 m
 apart."""
 REFERENCE_SITE = (43.20300, -90.05000)
 """Where the labeled reference frames of each date were taken, about 900 m from every plant, so
 the mapping attributes none of them."""
 BLOB_BUILDER = {"builder": "tests.bespoke_models:build_bright_blob_detector",
-                "builder_kwargs": {"classes_by_channel": True}, "task": "detection"}
+                "builder_kwargs": {}, "task": "detection"}
 
 
 def blob_boxes(values: list[str], index: int) -> list[tuple[str, BBox]]:
@@ -271,13 +277,13 @@ def blob_frame(values: list[str], index: int):
     return frame
 
 
-def write_classified_registry(*roots: Path) -> None:
-    """Declare :data:`SUBJECT` with :data:`ATTRIBUTE` over :data:`VALUES` in each root's subject
-    registry."""
+def write_attributed_registry(*roots: Path, attributes: tuple | None = None) -> None:
+    """Declare :data:`SUBJECT` with ``attributes`` (by default :data:`ATTRIBUTE`, categorical over
+    :data:`VALUES`) in each root's subject registry."""
     from tcip_mcp import subject_registry as cr
     from tests._producer_fixtures import registry_over
 
-    registry = cr.SubjectRegistry(subjects=(cr.Subject(name=SUBJECT, attributes=(
+    registry = cr.SubjectRegistry(subjects=(cr.Subject(name=SUBJECT, attributes=attributes or (
         cr.Attribute(name=ATTRIBUTE, type="categorical", values=VALUES),)),))
     for root in roots:
         root.mkdir(parents=True, exist_ok=True)
@@ -302,7 +308,7 @@ def confirm_crossing_trait(project_root: Path, **fields: Any):
 
 @dataclass
 class Series:
-    """What the classified chain leaves behind: its dataset, the checkpoint, the assessment (when
+    """What the attributed chain leaves behind: its dataset, the checkpoint, the assessment (when
     one was run), the plant mapping and one published bucket per date."""
 
     root: Path
@@ -318,19 +324,22 @@ class Series:
                 "buckets": list(self.buckets.values()), "plants": list(PLANTS), **extra}
 
 
-def classified_series(
+def attributed_series(
     project: Path, *, fractions: tuple[float, ...] = (0.0, 0.25, 0.75, 1.0), detections: int = 4,
-    images_per_plant: int = 1, assessed: bool = True, experiment_id: str = "exp-classified",
+    images_per_plant: int = 1, assessed: bool = True, experiment_id: str = "exp-attributed",
+    attributes: tuple | None = None, model_source: dict | None = None, stated: Any = None,
 ) -> Series:
     """Ingest a geotagged series of :data:`PLANTS` over ``len(fractions)`` of
     :data:`SERIES_DATES`, each date beside labeled reference frames taken at
-    :data:`REFERENCE_SITE`; draw the labeled frames into a selection, train the blob classifier on
-    it, confirm the crossing trait, assess it when ``assessed``, publish one bucket per date (under
-    the assessment when there is one), build the plant mapping, and open ``project`` in the web
-    backend.
+    :data:`REFERENCE_SITE`; draw the labeled frames into a selection, train ``model_source``
+    (by default the blob detector) on it, confirm the crossing trait, assess it when ``assessed``,
+    publish one bucket per date under the ``stated`` execution values (under the assessment when
+    there is one), build the plant mapping, and open ``project`` in the web backend.
 
-    On each date every plant's frames hold ``detections`` blobs of which ``fractions[i]`` are
-    open."""
+    The registry declares ``attributes`` on :data:`SUBJECT` (:func:`write_attributed_registry`),
+    one of them :data:`ATTRIBUTE` over :data:`VALUES`; every labeled object carries a value of
+    each, :data:`ATTRIBUTE`'s the band its blob is bright in. On each date every plant's frames
+    hold ``detections`` blobs of which ``fractions[i]`` are open."""
     from datetime import datetime, timedelta
 
     from tcip_mcp.tools.data_tools import draw_splits
@@ -345,8 +354,11 @@ def classified_series(
     from tests._verified_checkpoint_fixtures import worker_run
     from tests._web_fixtures import open_new_project
 
+    from tcip_mcp import subject_registry as cr
+
     root = project / "ds"
-    write_classified_registry(project, root)
+    attributes = attributes or (cr.Attribute(name=ATTRIBUTE, type="categorical", values=VALUES),)
+    write_attributed_registry(project, root, attributes=attributes)
     raw = project.parent / f"{project.name}-raw"
     dates = SERIES_DATES[: len(fractions)]
     per_date = 40 // len(dates)
@@ -374,17 +386,20 @@ def classified_series(
         labels_dir.mkdir(parents=True, exist_ok=True)
         for stem, (index, frame_values) in labeled.items():
             json_io.write_annotations(str(labels_dir / f"{stem}.json"), [
-                Annotation(subject=SUBJECT, geometry=box, attributes={ATTRIBUTE: value})
-                for value, box in blob_boxes(frame_values, index)], IMG, IMG)
+                Annotation(subject=SUBJECT, geometry=box, attributes={
+                    a.name: value if a.name == ATTRIBUTE else a.values[(index + k) % len(a.values)]
+                    for a in attributes})
+                for k, (value, box) in enumerate(blob_boxes(frame_values, index))], IMG, IMG)
     registered = register_dataset(project, str(root), crop=sorted(registered_crops())[0])
     assert "error" not in registered, registered
 
     selection_dir = project / "selection"
     drawn = draw_splits(project, str(root), output_path=str(selection_dir), subject=SUBJECT,
-                        attribute=ATTRIBUTE, seed=2, train_ratio=0.4, val_ratio=0.2,
-                        calibration_ratio=0.2, holdout_ratio=0.2)
+                        seed=2, train_ratio=0.4, val_ratio=0.2, calibration_ratio=0.2,
+                        holdout_ratio=0.2)
     assert "error" not in drawn, drawn
-    config = {**run_config(selection_dir), "model_source": dict(BLOB_BUILDER)}
+    config = {**run_config(selection_dir), "model_source": dict(model_source or BLOB_BUILDER),
+              "seed": 2}
     from tcip_mcp.experiments import observe
 
     checkpoint = observe(worker_run(project, config, experiment_id=experiment_id)).checkpoint
@@ -405,7 +420,7 @@ def classified_series(
         out = root / "predictions" / "series" / date
         published = run_inference(
             project, checkpoint_path=checkpoint_path, images_dir=str(root / "images" / date),
-            output_dir=str(out),
+            output_dir=str(out), stated=stated,
             assessment_id=assessment["assessment_id"] if assessment else None)
         assert "error" not in published, published
         predictions[date] = str(out)

@@ -112,7 +112,7 @@ def test_a_run_that_recorded_no_subject_is_refused_assessment_by_name(tmp_path: 
                 "dataset_source": {"builder": f"{__name__}:build_mask_box_ds"}}
     checkpoint = _train_and_register(data_cfg, tmp_path / "unscoped", tmp_path)
     # The producer admitted by shape and recorded an empty scope.
-    assert data_cfg["scope"] == {"subject": None, "attribute": None, "id_map": None}
+    assert data_cfg["scope"] == {"subject": None, "attributes": None}
     chain.synthetic_capture(tmp_path / "ds")
     chain.draw_reference_selection(tmp_path, tmp_path / "ds", tmp_path / "selection")
     chain.confirm_count_trait(tmp_path)

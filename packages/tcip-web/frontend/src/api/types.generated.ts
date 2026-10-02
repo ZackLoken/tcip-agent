@@ -303,10 +303,15 @@ export interface Operationalization {
   delivered_value_keys: string[];
 }
 
+export interface PositiveState {
+  attribute: string;
+  value: string;
+}
+
 export interface TraitEntry {
   name: string;
   delivers: string[];
-  positive_value: string;
+  positive_state: PositiveState | null;
   milestone_fractions: number[];
   milestone_on: string;
   majority_milestone: string;

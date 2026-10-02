@@ -16,10 +16,12 @@ from pathlib import Path
 import pytest
 
 from tcip_annotation.json_io import (
-    UNLABELED,
+    UNASSESSED,
+    UndeclaredValue,
+    attribute_ids,
+    attribute_values,
     read_annotations,
     require_reference_ground_truth,
-    target_class_id,
     write_annotations,
 )
 from tcip_annotation.state import Annotation, BBox, Polygon, bbox_of
@@ -101,26 +103,6 @@ def test_a_record_naming_no_subject_is_refused_where_an_annotation_is_made(
     path.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(UnreadableLabelDocument, match=r"^record 1 .*non-empty string subject"):
         read_annotations(path)
-
-
-def test_a_record_and_a_bare_value_decode_through_one_lookup() -> None:
-    """An annotation's class id and a value's are one lookup: they agree on every key of the map
-    and refuse the same unknown key by name."""
-    from tcip_annotation.json_io import ClassKeyUnknown, class_id, target_class_id
-
-    id_map = {"closed": 0, "open": 1}
-
-    def record(value: str) -> Annotation:
-        return Annotation(subject="bud", geometry=BBox(1.0, 1.0, 2.0, 2.0),
-                          attributes={"stage": value})
-
-    for value, cid in id_map.items():
-        assert target_class_id(record(value), "bud", "stage", id_map) == class_id(value, id_map)
-        assert class_id(value, id_map) == cid
-    with pytest.raises(ClassKeyUnknown, match="'shed'"):
-        class_id("shed", id_map)
-    with pytest.raises(ClassKeyUnknown, match="'shed'"):
-        target_class_id(record("shed"), "bud", "stage", id_map)
 
 
 def test_provenance_is_the_stored_records_or_the_actors_never_the_payloads() -> None:
@@ -765,49 +747,48 @@ def test_polygon_wins_over_a_disagreeing_stored_box(tmp_path: Path) -> None:
     assert (b.x1, b.y1, b.x2, b.y2) == (10.0, 20.0, 110.0, 220.0)
 
 
-# -- target_class_id: unlabeled vs. undecodable -------------------------------
+# -- attribute ids: unassessed vs. undeclared ---------------------------------
 
 
-def test_target_class_id_distinguishes_unlabeled_from_undecodable() -> None:
-    id_map = {"open": 0, "closed": 1}
-    unlabeled = Annotation(subject="bud", geometry=BBox(0, 0, 1, 1), attributes={})
-    undecodable = Annotation(subject="bud", geometry=BBox(0, 0, 1, 1),
-                             attributes={"opening": "not-a-real-value"})
+def test_attribute_ids_distinguish_unassessed_from_undeclared() -> None:
+    """An instance carrying no value for an attribute is unassessed for it and reads the mark in
+    that column; a value the attribute does not declare refuses naming both; a record of another
+    subject is no row at all; the encoder reads an id row back into values."""
+    from tcip_mcp.subject_registry import Attribute
+
+    attributes = (Attribute("opening", "categorical", ("open", "closed")),
+                  Attribute("grade", "ordinal", ("low", "high")))
+    unassessed = Annotation(subject="bud", geometry=BBox(0, 0, 1, 1), attributes={"grade": "high"})
+    undeclared = Annotation(subject="bud", geometry=BBox(0, 0, 1, 1),
+                            attributes={"opening": "not-a-real-value"})
     labeled = Annotation(subject="bud", geometry=BBox(0, 0, 1, 1),
-                         attributes={"opening": "closed"})
+                         attributes={"opening": "closed", "grade": "low"})
 
-    # Default (allow_unlabeled=False): both failure shapes raise, unchanged original behavior.
-    try:
-        target_class_id(unlabeled, "bud", "opening", id_map)
-        raise AssertionError("expected a ValueError")
-    except ValueError:
-        pass
-
-    # allow_unlabeled=True: the soft gap becomes the distinguishable UNLABELED sentinel...
-    assert target_class_id(unlabeled, "bud", "opening", id_map, allow_unlabeled=True) == UNLABELED
-    # ...but a genuine decode bug (a value the registry doesn't know) still raises regardless.
-    try:
-        target_class_id(undecodable, "bud", "opening", id_map, allow_unlabeled=True)
-        raise AssertionError("expected a ValueError")
-    except ValueError:
-        pass
-
-    assert target_class_id(labeled, "bud", "opening", id_map, allow_unlabeled=True) == 1
+    assert attribute_ids(unassessed, "bud", attributes) == [UNASSESSED, 1]
+    with pytest.raises(UndeclaredValue, match="opening='not-a-real-value'"):
+        attribute_ids(undeclared, "bud", attributes)
+    assert attribute_ids(labeled, "bud", attributes) == [1, 0]
+    assert attribute_ids(labeled, "bush", attributes) is None
+    assert attribute_values([1, 0], attributes) == {"opening": "closed", "grade": "low"}
+    assert attribute_values([UNASSESSED, 1], attributes) == {"grade": "high"}
 
 
 def test_whole_image_rating_never_becomes_a_target(tmp_path) -> None:
     """A geometry-less annotation is a whole-image rating, not a detection or segmentation target:
-    it has no box to train or match on, so it takes no class id, and it carries no attribute gap."""
-    from tcip_mcp.pipelines.data.label_queries import json_det_targets
-    from tcip_mcp.pipelines.data.selection import ClassScope
+    it has no box to train or match on, so it takes no row, whatever attributes its scope
+    declares."""
+    from tcip_mcp import subject_registry as cr
+    from tcip_mcp.pipelines.data.label_queries import json_det_targets, registry_scope
+    from tests._producer_fixtures import registry_over
 
-    path = tmp_path / "rating.json"
+    labels = tmp_path / "annotations"
+    labels.mkdir()
+    path = labels / "rating.json"
     write_annotations(path, [Annotation(subject="bud", attributes={"vigor": "high"})], 10, 10)
-    assert json_det_targets(
-        str(path), ClassScope(subject="bud", id_map={"bud": 0}))[0]["boxes"] == []
-    target, n_unlabeled = json_det_targets(str(path), ClassScope(
-        subject="bud", attribute="opening", id_map={"closed": 7, "open": 3}))
-    assert target["boxes"] == [] and n_unlabeled == 0
+    registry_over(tmp_path, cr.SubjectRegistry(subjects=(cr.Subject(name="bud", attributes=(
+        cr.Attribute("opening", "categorical", ("closed", "open")),)),)))
+    target = json_det_targets(str(path), registry_scope(labels, "bud"))
+    assert target["boxes"] == [] and target["attributes"].shape == (0, 1)
 
 
 # -- the loader, the parser, and the sidecar exclusion ------------------------

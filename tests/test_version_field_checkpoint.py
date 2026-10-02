@@ -21,7 +21,7 @@ def _bespoke_checkpoint(path: Path) -> str:
         "task": "detection",
     }
     config = {"model_source": model_source,
-              "data": {"num_channels": 3, "scope": {"subject": "bud", "id_map": {"bud": 0}}}}
+              "data": {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}}}
     payload = {
         "config": config,
         "model_state_dict": build_model(config, recorded_model_dims(config)).state_dict(),

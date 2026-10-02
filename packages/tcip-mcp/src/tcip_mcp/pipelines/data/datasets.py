@@ -219,16 +219,19 @@ def indexed_sample_keys(dataset: Any) -> set[str]:
 
 
 def target_tensors(target: Any) -> dict[str, torch.Tensor]:
-    """A ``{"boxes", "labels", "iscrowd"}`` target of parallel per-box values as the tensors every
-    detection loader emits, ``iscrowd`` under torchvision's reference key."""
+    """A ``{"boxes", "labels", "iscrowd"}`` target of parallel per-box values, with its
+    ``attributes`` rows when it carries them, as the tensors every detection loader emits,
+    ``iscrowd`` under torchvision's reference key."""
     return {
         "boxes": torch.tensor(target["boxes"], dtype=torch.float32).reshape(-1, 4),
         "labels": torch.tensor(target["labels"], dtype=torch.int64),
         "iscrowd": torch.tensor(target["iscrowd"], dtype=torch.int64),
+        **({"attributes": torch.as_tensor(target["attributes"], dtype=torch.int64)}
+           if "attributes" in target else {}),
     }
 
 
-PER_BOX_KEYS = ("boxes", "labels", "masks", "iscrowd")
+PER_BOX_KEYS = ("boxes", "labels", "masks", "iscrowd", "attributes")
 """The target keys holding one row per box, which every row filter keeps in step."""
 
 
@@ -289,17 +292,10 @@ class DetectionDataset(DocumentDataset):
     reads_geometry = staticmethod(box_derivable)
     reads_description = "a box or a polygon of its subject"
 
-    def det_targets(self, stem: str) -> dict[str, list]:
-        """One sample's own label document as ``{"boxes", "labels", "iscrowd"}`` parallel lists
-        (pixel xyxy, 1-indexed label, crowd flag), under this run's own class map, the target shape
-        ``json_det_targets`` reads.
-
-        The samples were admitted with any image carrying an instance unlabeled for ``attribute``
-        held out, so the unlabeled count ``json_det_targets`` also returns is always 0 here.
-        """
-        target, _n_unlabeled = json_det_targets(
-            str(self._label_path(stem)), self.scope, reads=self.reads_geometry)
-        return target
+    def det_targets(self, stem: str) -> dict[str, Any]:
+        """One sample's own label document as the target :func:`json_det_targets` reads under this
+        run's own class space."""
+        return json_det_targets(str(self._label_path(stem)), self.scope, reads=self.reads_geometry)
 
     @property
     def class_distribution(self) -> dict[int, int]:
@@ -520,7 +516,7 @@ class TiledDetectionDataset(BaseImageDataset):
         # so the seam-sliver cutoff is derived from this dataset's class-average object size, not a
         # fixed fraction (derive-don't-pin). skip_empty defaults False: empty tiles are valid
         # negatives.
-        stems_data: list[tuple[str, np.ndarray, np.ndarray, np.ndarray, int, int]] = []
+        stems_data: list[tuple[str, np.ndarray, dict[str, np.ndarray], int, int]] = []
         # xywh per image (char_sizes_from_boxes's own expected shape), converted from the xyxy boxes
         # this loop otherwise deals in, so the class-average size uses the same computation
         # derive_iou_match_threshold already uses, never a second formula.
@@ -567,14 +563,15 @@ class TiledDetectionDataset(BaseImageDataset):
             # Through the base dataset's own targeting, over this sample's own document.
             full = base.det_targets(stem)
             fb = np.asarray(full["boxes"], dtype=np.float32).reshape(-1, 4)
-            fl = np.asarray(full["labels"], dtype=np.int64)
-            fc = np.asarray(full["iscrowd"], dtype=np.int64)
+            # Every per-box value beside the boxes, each indexed by row with them below.
+            rows_of: dict[str, np.ndarray] = {k: np.asarray(full[k], dtype=np.int64)
+                                              for k in PER_BOX_KEYS if k != "boxes" and k in full}
             # A crowd region is not one object, so its extent says nothing about object size.
-            objects = fb[object_rows(fc)]
+            objects = fb[object_rows(rows_of["iscrowd"])]
             if len(objects):
                 gt_boxes_per_image.append(
                     [(x1, y1, x2 - x1, y2 - y1) for x1, y1, x2, y2 in objects.tolist()])
-            stems_data.append((stem, fb, fl, fc, w, h))
+            stems_data.append((stem, fb, rows_of, w, h))
 
         char_sizes = char_sizes_from_boxes(gt_boxes_per_image)
         class_avg_size = float(np.mean(char_sizes)) if char_sizes else 0.0
@@ -588,7 +585,7 @@ class TiledDetectionDataset(BaseImageDataset):
         min_box_size = sliver_frac * class_avg_size
 
         # Pass 2: slice using the derived sliver cutoff, boxes clipped in bulk per stem.
-        for stem, fb, fl, fc, w, h in stems_data:
+        for stem, fb, rows_of, w, h in stems_data:
             slices = slice_lattice(h, w, tile_size, overlap)
             if regions is not None:
                 kept: list[tuple[int, int, int, int]] = []
@@ -600,16 +597,16 @@ class TiledDetectionDataset(BaseImageDataset):
                     else:
                         self.tiles_dropped_outside_regions += 1
                 slices = kept
-            # Clipped by row index, so each kept box's label and crowd flag are read by that row.
+            # Clipped by row index, so each kept box's per-box values are read by that row.
             per_slice = clipped_boxes_per_slice(fb, np.arange(len(fb)), slices, min_box_size)
             for s, (tb, rows) in zip(slices, per_slice):
                 if len(tb) > 1:
-                    keep = dedup_boxes(tb, fl[rows], dedup_iou)
+                    keep = dedup_boxes(tb, rows_of["labels"][rows], dedup_iou)
                     tb, rows = tb[keep], rows[keep]
                 if skip_empty and len(tb) == 0:
                     continue
-                self._index.append({"stem": stem, "slice": s,
-                                    "boxes": tb, "labels": fl[rows], "iscrowd": fc[rows]})
+                self._index.append({"stem": stem, "slice": s, "boxes": tb,
+                                    **{k: v[rows] for k, v in rows_of.items()}})
 
     @property
     def stems(self) -> list[str]:
@@ -708,8 +705,8 @@ class InstanceSegDataset(DocumentDataset):
         img = self._open_image(stem)
         w, h = self._image_size(img)
 
-        target, _n_unlabeled = json_det_targets(
-            str(self._label_path(stem)), self.scope, reads=self.reads_geometry)
+        target = json_det_targets(str(self._label_path(stem)), self.scope,
+                                  reads=self.reads_geometry)
         from PIL import ImageDraw
 
         masks = []

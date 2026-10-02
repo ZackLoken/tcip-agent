@@ -2,7 +2,7 @@ r"""Validate a training configuration before launching, from the command line.
 
 Wraps ``training_tools.preflight_config``: structural checks and a builder import always run;
 ``--smoke`` also builds the model and runs ``check_model_contract`` (a train+eval forward at the
-resolved in_chans/num_classes/img_size); ``--overfit`` (with ``--smoke``) additionally runs the
+run's resolved dims and img_size, every attribute head included); ``--overfit`` (with ``--smoke``) additionally runs the
 voluntary ``overfit_check`` diagnostic, reported but never gating.
 
 Usage:

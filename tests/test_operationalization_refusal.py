@@ -35,7 +35,7 @@ def project(tmp_path: Path) -> Path:
     root = tmp_path / "project"
     fx.propose_and_confirm(root, fx.CROSSING_SPEC)
     fx.propose_and_confirm(root, fx.COUNT_SPEC)
-    fx.seed_positive_class(root, "flower", fx.CROSSING_SPEC.positive_value)
+    fx.seed_positive_class(root, "flower", fx.CROSSING_SPEC.positive_state)
     return root
 
 
@@ -103,12 +103,12 @@ def test_a_bucket_not_counting_the_measured_subject_refuses(project: Path):
     revision = fx.seed_confirmed_count(project)
 
     with pytest.raises(OperationalizationRefused) as excinfo:
-        bind(revision, PER_IMAGE_COUNT, buckets={"predictions/live/2026-03-04": {"leaf"}})
+        bind(revision, PER_IMAGE_COUNT, buckets={"predictions/live/2026-03-04": "leaf"})
 
     assert "stem" in str(excinfo.value) and "predictions/live/2026-03-04" in str(excinfo.value)
 
 
-def test_a_registry_no_longer_declaring_the_positive_class_refuses_with_its_problem(
+def test_a_registry_no_longer_declaring_the_positive_state_refuses_with_its_problem(
     project: Path,
 ):
     from tcip_mcp import subject_registry as cr
@@ -121,7 +121,7 @@ def test_a_registry_no_longer_declaring_the_positive_class_refuses_with_its_prob
         confirmed_revision(STATE_CROSSING_DATES, project=project, trait=fx.CROSSING_TRAIT,
                            registry=registry)
 
-    problem = cr.positive_value_problem(registry, "flower", "open")
+    problem = cr.positive_state_problem(registry, "flower", fx.CROSSING_SPEC.positive_state)
     assert problem is not None and problem in excinfo.value.as_detail()["message"]
 
 
@@ -180,9 +180,9 @@ def client() -> TestClient:
 
 def _series(tmp_path: Path, *, assessed: bool = True) -> dict:
     pytest.importorskip("torch")
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
-    return classified_series(tmp_path, fractions=(0.0, 1.0), assessed=assessed).body()
+    return attributed_series(tmp_path, fractions=(0.0, 1.0), assessed=assessed).body()
 
 
 def _compute(project: Path, body: dict, out_csv: Path) -> dict:
@@ -378,9 +378,9 @@ def test_the_count_tool_hands_back_no_counts_when_it_refuses(delivery_root: Path
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
     from tests._chain_fixtures import predicted, published
 
-    scope = {"subject": fx.COUNT_SUBJECT, "attribute": None, "id_map": {fx.COUNT_SUBJECT: 0}}
     bucket = published(tmp_path, tmp_path / "ds" / "predictions" / "m" / "d",
-                       [predicted("a", [fx.COUNT_SUBJECT], scope["id_map"])], scope=scope).path
+                       [predicted("a", [fx.COUNT_SUBJECT])],
+                       scope={"subject": fx.COUNT_SUBJECT}).path
 
     res = deliver_per_image_counts(tmp_path, str(bucket), str(tmp_path / "o.csv"),
                                    trait=fx.COUNT_TRAIT)

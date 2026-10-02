@@ -30,84 +30,64 @@ def registered_dataset_root(dataset_dir) -> Path | None:
     return root if root is not None and subjects_path(root).is_file() else None
 
 
-def resolve_registry_id_map(labels_dir, scope: "ClassScope"):
-    """``(registry, id_map)`` for ``scope``'s subject and attribute from the dataset's
-    ``subjects.json``, through :func:`subject_registry.assign_class_ids`. ``scope`` names its
-    subject.
-
-    A plain single-class detector (no attribute) needs no registry file: its map is derived from a
-    synthesized single-subject registry. Attribute classification needs the registry to order its
-    values, and refuses when there is none.
-    """
+def registry_scope(labels_dir, subject: str | None) -> "ClassScope":
+    """The class space ``subject`` is read under over ``labels_dir``: the subject with every
+    attribute its dataset's ``subjects.json`` declares for it, none for a dataset holding no
+    registry; no subject is the empty class space, reading no registry. A registry not declaring
+    ``subject`` refuses by name."""
     from tcip_mcp import subject_registry
-
-    subject, attribute = cast(str, scope.subject), scope.attribute
-    root = registered_dataset_root(labels_dir)
-    if root is not None:
-        registry = subject_registry.read_registry(root)
-    elif attribute is not None:
-        raise ValueError(
-            f"attribute {attribute!r} classification needs a subjects.json to order its values, "
-            f"but none was found for {labels_dir}.")
-    else:
-        registry = subject_registry.SubjectRegistry(
-            subjects=(subject_registry.Subject(name=subject),))
-    return registry, subject_registry.assign_class_ids(registry, subject, attribute)
-
-
-def stated_scope(labels_dir, subject: str | None, attribute: str | None) -> "ClassScope":
-    """A fresh statement of ``subject`` and ``attribute`` over ``labels_dir``, given the map that
-    dataset's registry assigns them (:func:`resolve_registry_id_map`); no subject states the empty
-    class space and reads no registry."""
     from tcip_mcp.pipelines.data.selection import ClassScope
 
-    stated = ClassScope(subject=subject, attribute=attribute)
-    if stated.subject is None:
-        return stated
-    return ClassScope(subject=subject, attribute=attribute,
-                      id_map=resolve_registry_id_map(labels_dir, stated)[1])
+    if not subject:
+        return ClassScope()
+    root = registered_dataset_root(labels_dir)
+    if root is None:
+        return ClassScope(subject=subject, attributes=())
+    declared = subject_registry.read_registry(root).subject(subject)
+    if declared is None:
+        raise subject_registry.RegistryError(
+            f"subject {subject!r} is not in the registry at {root}; declare it there first.")
+    return ClassScope(subject=subject, attributes=declared.attributes)
 
 
 def json_det_targets(path, scope: "ClassScope",
-                     reads: Callable[[Any], bool] = box_derivable):
-    """``(target, n_unlabeled)`` for one image from the name-based per-image JSON, read under
-    ``scope``, an admitted document class space.
+                     reads: Callable[[Any], bool] = box_derivable) -> dict[str, Any]:
+    """One image's detection target from the name-based per-image JSON, read under ``scope``, an
+    admitted document class space.
 
-    ``target`` is the detection target shape, ``{"boxes", "labels", "iscrowd"}`` as parallel lists
-    (pixel xyxy, 1-indexed label, crowd flag), and ``"geometry"``, each row's own geometry, which a
-    mask is rasterized from. Filters to the scope's subject and the geometry the caller reads
-    (``reads``, a loader's own ``reads_geometry``; :func:`~tcip_annotation.state.box_derivable`
-    unless stated), then maps each kept annotation to its 0-indexed id via the scope's map, +1 for
-    background. An annotation the map cannot decode raises.
-
-    ``n_unlabeled`` counts instances of the subject never assessed for the scope's attribute yet,
-    excluded from ``boxes``/``labels`` rather than raising.
+    ``{"boxes", "labels", "iscrowd"}`` as parallel lists (pixel xyxy, the subject's label 1, crowd
+    flag), ``"geometry"``, each row's own geometry, which a mask is rasterized from, and, when the
+    scope declares attributes, ``"attributes"``, an int64 array of rows by attributes holding each
+    row's id per attribute in declared order (:func:`~tcip_annotation.json_io.attribute_ids`,
+    ``UNASSESSED`` where unassessed). Filters to the scope's subject and the geometry the caller
+    reads (``reads``, a loader's own ``reads_geometry``;
+    :func:`~tcip_annotation.state.box_derivable` unless stated). A value its attribute does not
+    declare refuses.
     """
+    import numpy as np
     from tcip_annotation import json_io
     from tcip_annotation.state import bbox_of
 
-    target: dict[str, list] = {"boxes": [], "labels": [], "iscrowd": [], "geometry": []}
-    n_unlabeled = 0
+    attributes = cast(tuple, scope.attributes)
+    target: dict[str, Any] = {"boxes": [], "labels": [], "iscrowd": [], "geometry": []}
+    rows: list[list[int]] = []
     for a in json_io.read_annotations(path):
         if not reads(a.geometry):
             continue
+        ids = json_io.attribute_ids(a, cast(str, scope.subject), attributes)
+        if ids is None:
+            continue
         # Every reads predicate admits a box or a region only (box_derivable or narrower).
         geometry = cast(BBox | Polygon, a.geometry)
-        # allow_unlabeled=True: an instance never assessed for `attribute` yet is a soft, expected
-        # gap, not a decode bug, must not raise and abort the whole read.
-        cid = json_io.target_class_id(a, cast(str, scope.subject), scope.attribute,
-                                      cast(dict, scope.id_map), allow_unlabeled=True)
-        if cid == json_io.UNLABELED:
-            n_unlabeled += 1
-            continue
-        if cid is None:
-            continue
         box = bbox_of(geometry)
         target["boxes"].append([box.x1, box.y1, box.x2, box.y2])
-        target["labels"].append(int(cid) + 1)
+        target["labels"].append(1)
         target["iscrowd"].append(a.iscrowd)
         target["geometry"].append(geometry)
-    return target, n_unlabeled
+        rows.append(ids)
+    if attributes:
+        target["attributes"] = np.asarray(rows, dtype=np.int64).reshape(-1, len(attributes))
+    return target
 
 
 def ground_truth_shape(ground_truth) -> str:
@@ -153,22 +133,16 @@ def admitted_records(
     store holds nothing for. A key is admitted when its document holds the scope's subject, or
     holds none of it and its marks finish it
     (:meth:`~tcip_annotation.json_io.LabelDocument.state`). The counts are ``annotated`` /
-    ``confirmed_negative`` / ``skipped_unannotated`` / ``skipped_unconfirmed_empty`` /
-    ``skipped_incomplete_attribute``; under a classified scope an image carrying any instance never
-    assessed for the attribute is dropped whole, through :func:`json_det_targets`, ahead of every
-    other reason.
+    ``confirmed_negative`` / ``skipped_unannotated`` / ``skipped_unconfirmed_empty``.
     """
     from tcip_annotation.json_io import read_label_document
 
     counts = {"annotated": 0, "confirmed_negative": 0, "skipped_unannotated": 0,
-              "skipped_unconfirmed_empty": 0, "skipped_incomplete_attribute": 0}
+              "skipped_unconfirmed_empty": 0}
     keep: list[str] = []
     for key, (label_path, image_name) in records.items():
         if image_name is None or label_path is None or not Path(label_path).is_file():
             counts["skipped_unannotated"] += 1
-            continue
-        if scope.classified and json_det_targets(label_path, scope)[1]:
-            counts["skipped_incomplete_attribute"] += 1
             continue
         state = read_label_document(label_path).state(cast(str, scope.subject))
         reason = {"complete": "annotated", "partial": "annotated",
@@ -255,8 +229,7 @@ def foreground_counts(
 
     A member is an :class:`Admitted` record or the
     :class:`~tcip_mcp.pipelines.data.selection.Sample` it became. A label document carries a count
-    of its own annotations of ``scope``'s subject (scoped to its attribute when one is named), read
-    from the path the sample records. A mask raster and a table row count as one each.
+    of its own annotations of ``scope``'s subject, read from the path the sample records. A mask raster and a table row count as one each.
 
     The caller's own index is the result's index.
     """
@@ -430,9 +403,9 @@ def refuse_inadmissible_samples(samples: "Sequence[Sample]", scope: "ClassScope"
         f"{len(refused) + len(unresolved)} of this selection's samples are no longer admissible "
         f"({sorted(refused)[:5] + unresolved[:5]}): {named}.{sources} The data moved under the "
         "selection since it was drawn: a label emptied with nobody marking that image complete, "
-        "a mask or a label file deleted, a row dropped from its table, an image moved, or an "
-        "instance left unassessed for this run's attribute. Restore what those name, finish the "
-        "annotation or the mark, or draw the selection again over the current data."
+        "a mask or a label file deleted, a row dropped from its table, or an image moved. "
+        "Restore what those name, finish the annotation or the mark, or draw the selection "
+        "again over the current data."
     )
 
 
@@ -460,21 +433,13 @@ def require_admitted(admitted: "Admission") -> None:
             f"train. Fix the row keys, or point data.images_dir at the directory holding those "
             f"images."
         )
-    incomplete = counts["skipped_incomplete_attribute"]
-    incomplete_note = (
-        f" {incomplete} more carry at least one instance never assessed for this run's attribute, "
-        f"so their ground truth is incomplete for this scope and the whole image is held out "
-        f"rather than trained on its labeled subset, finish attributing them, or run without "
-        f"an attribute scope."
-        if incomplete else ""
-    )
     raise ValueError(
         f"no trainable samples in {ground_truth}: "
         f"{counts['skipped_unannotated']} image(s) "
         f"have no label record and {counts['skipped_unconfirmed_empty']} have an empty one "
         f"nobody confirmed. An empty label file is a negative only once a human marks that image "
         f"Complete; until then it reads as unannotated. Annotate some images, or mark the "
-        f"genuinely-empty ones Complete.{incomplete_note}"
+        f"genuinely-empty ones Complete."
     )
 
 
@@ -527,11 +492,11 @@ def admit(
     reads.
 
     Dispatches once on :func:`ground_truth_shape`: the label documents and their completion marks
-    for per-image documents, under ``scope`` and its map; the mask's own existence beside the image for
-    mask rasters, and the row's own presence beside a resolvable image for a table, both under an
-    empty scope. The admitted scope is held to its shape
+    for per-image documents, under ``scope``; the mask's own existence beside the image for mask
+    rasters, and the row's own presence beside a resolvable image for a table, both under an empty
+    scope. The admitted scope is held to its shape
     (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.admitted_for`), so a document scope with
-    no subject or no map refuses by name, and a scope naming anything over a mask or a table
+    no subject or no attributes read refuses by name, and a scope naming anything over a mask or a table
     refuses by name, since that ground truth carries its own classes.
 
     A place that names no ground truth this platform reads, or a directory holding a dataset-level

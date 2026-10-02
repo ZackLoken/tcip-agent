@@ -24,21 +24,25 @@ WIDE_BLOB = (20, 95, 190, 120)
 BLOBS = (SEAM_BLOB, INNER_BLOB, WIDE_BLOB)
 
 
+COLOR = {"name": "color", "type": "categorical", "values": ["red", "green", "blue"]}
+"""An attribute whose value is the band a blob is bright in, as the blob detector calls it."""
+
+
 def _checkpoint(tmp_path: Path, *, in_chans: int = 3, with_masks: bool = False,
-                classes_by_channel: bool = False, tiling: dict | None = None,
+                by_band: bool = False, tiling: dict | None = None,
                 data: dict | None = None):
-    """A registered bright-blob checkpoint, loaded through the platform's own loader."""
+    """A registered bright-blob checkpoint, loaded through the platform's own loader; with
+    ``by_band`` its recorded scope declares :data:`COLOR`."""
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.tools.model_tools import register_model
 
     task = "instance_seg" if with_masks else "detection"
     model_source = {"builder": "tests.bespoke_models:build_bright_blob_detector",
-                    "builder_kwargs": {"with_masks": with_masks,
-                                       "classes_by_channel": classes_by_channel},
-                    "task": task}
+                    "builder_kwargs": {"with_masks": with_masks}, "task": task}
     ckpt = tmp_path / "model_best.pt"
-    data_cfg = {"num_channels": in_chans, "scope": {"subject": "bud", "id_map": {"bud": 0}},
+    scope = {"subject": "bud", "attributes": [COLOR] if by_band else []}
+    data_cfg = {"num_channels": in_chans, "scope": scope,
                 **(data or {}), **({"tiling": tiling} if tiling else {})}
     config = {"model_source": model_source, "data": data_cfg}
     model = build_model(config, recorded_model_dims(config))
@@ -154,10 +158,13 @@ def _mask_extents(record: dict) -> list[tuple]:
     return sorted(extents)
 
 
-def test_instance_masks_merged_across_a_seam_are_one_polygon_per_object_and_class(tmp_path):
-    """Two objects of two classes over one footprint wider than any slice: each class's partial
-    masks merge into one polygon spanning the whole object, and the two classes never merge."""
-    _path, checkpoint = _checkpoint(tmp_path, with_masks=True, classes_by_channel=True)
+def test_instance_masks_merged_across_a_seam_are_one_polygon_per_object_whatever_its_values(
+    tmp_path,
+):
+    """Calls of one footprint wider than any slice, differing in their attribute value: every
+    slice's partial masks merge into one polygon spanning the whole object, carrying one value of
+    its attribute, since the merge compares the one subject and never its attribute values."""
+    _path, checkpoint = _checkpoint(tmp_path, with_masks=True, by_band=True)
     arr = np.zeros((FRAME, FRAME, 3), dtype=np.uint8)
     x0, y0, x1, y1 = WIDE_BLOB
     arr[y0:y1, x0:x1, 0] = 255
@@ -165,9 +172,10 @@ def test_instance_masks_merged_across_a_seam_are_one_polygon_per_object_and_clas
 
     result = _sliced(_pass(checkpoint), _png(tmp_path, arr))
 
-    assert sorted(result["labels"]) == [1, 2]
+    assert result["labels"] == [1]
+    assert result["attributes"][0][0] in (0, 1)
     # Contours run through pixel centers, so a blob's polygon ends one pixel inside its box.
-    assert _mask_extents(result) == [(x0, y0, x1 - 1, y1 - 1)] * 2
+    assert _mask_extents(result) == [(x0, y0, x1 - 1, y1 - 1)]
 
 
 def test_an_untiled_record_carries_the_polygons_the_sliced_record_does(tmp_path):

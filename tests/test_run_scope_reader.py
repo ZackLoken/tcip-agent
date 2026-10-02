@@ -3,9 +3,12 @@ records on ``data``."""
 
 from __future__ import annotations
 
+from dataclasses import asdict
+
 import pytest
 
 from tcip_mcp.pipelines.data.selection import ClassScope
+from tcip_mcp.subject_registry import Attribute
 
 
 def _scope(scope: dict) -> ClassScope:
@@ -13,26 +16,22 @@ def _scope(scope: dict) -> ClassScope:
     return ClassScope.of({"scope": scope})
 
 
-def test_the_decoder_reads_the_recorded_class_space() -> None:
-    scope = _scope({"subject": "bud", "attribute": "bud_opening", "id_map": {"open": 0}})
-    assert scope == ClassScope("bud", "bud_opening", {"open": 0})
+def test_the_decoder_reads_back_the_attribute_records_the_writer_wrote() -> None:
+    written = ClassScope("bud", (Attribute("color", "categorical", ("red", "blue")),
+                                 Attribute("grade", "ordinal", ("low", "high"))))
+    assert _scope(asdict(written)) == written
 
 
-def test_the_decoder_reads_a_detector_runs_bare_subject() -> None:
-    assert _scope({"subject": "bud"}) == ClassScope("bud", None, None)
+def test_the_decoder_reads_a_stated_bare_subject_as_attributes_not_yet_read() -> None:
+    assert _scope({"subject": "bud"}) == ClassScope("bud", None)
 
 
 def test_the_decoder_reads_an_explicit_empty_scope_as_an_empty_class_space() -> None:
     """A mask or table run's admission records the empty scope explicitly."""
-    assert _scope({"subject": None, "attribute": None, "id_map": None}) == ClassScope()
+    assert _scope(asdict(ClassScope())) == ClassScope()
 
 
 def test_the_decoder_refuses_a_data_section_recording_no_scope() -> None:
     """A missing scope is not an empty one: it names nothing a reader could hold predictions to."""
     with pytest.raises(ValueError, match="carries no scope"):
         ClassScope.of({"num_channels": 3})
-
-
-def test_the_decoder_refuses_a_recorded_attribute_with_no_subject() -> None:
-    with pytest.raises(ValueError, match="attribute 'bud_opening' is stated with no subject"):
-        _scope({"attribute": "bud_opening"})

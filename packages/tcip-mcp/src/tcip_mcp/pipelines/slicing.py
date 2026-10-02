@@ -4,6 +4,7 @@ SAHI detection model, and the one cross-tile merge every tiled path runs."""
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -19,8 +20,23 @@ from tcip_annotation.mask_contours import mask_to_polygon_rings
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.execution import Execution
 
-CLASS_AGNOSTIC = False
-"""Whether the cross-tile merge compares detections across classes; it never does."""
+def packed_category(label: int, ids: Sequence[int], sizes: Sequence[int]) -> int:
+    """One detection's label and attribute ids as the one integer a SAHI category carries: mixed
+    radix, the first attribute's id least significant, each attribute's radix its value count
+    ``sizes``, the label most significant; the label alone for no attributes."""
+    packed = int(label)
+    for value, size in zip(reversed(ids), reversed(sizes), strict=True):
+        packed = packed * size + int(value)
+    return packed
+
+
+def unpacked_category(packed: int, sizes: Sequence[int]) -> tuple[int, list[int]]:
+    """``(label, attribute ids)`` from a :func:`packed_category` integer."""
+    ids = []
+    for size in sizes:
+        packed, value = divmod(packed, size)
+        ids.append(value)
+    return packed, ids
 
 
 def slice_lattice(
@@ -43,32 +59,40 @@ def is_full_slice(box: tuple[int, int, int, int], tile_size: int) -> bool:
     return x1 - x0 == tile_size and y1 - y0 == tile_size
 
 
-def prediction_rows(predictions: list[ObjectPrediction]) -> list[dict]:
-    """Full-frame predictions as plain rows (xyxy ``bbox``, ``category_id``, ``score``,
-    ``segmentation`` polygons or ``None``): the one projection a paused pass records and a detection
-    record is built from."""
-    return [{"bbox": [float(v) for v in p.bbox.to_xyxy()], "category_id": p.category.id,
-             "score": float(p.score.value),
-             "segmentation": p.mask.segmentation if p.mask else None} for p in predictions]
+def prediction_rows(predictions: list[ObjectPrediction], sizes: Sequence[int]) -> list[dict]:
+    """Full-frame predictions as plain rows (xyxy ``bbox``, ``category_id`` the label, the
+    ``attributes`` ids :func:`unpacked_category` reads off the category under the value counts
+    ``sizes``, ``score``, ``segmentation`` polygons or ``None``)."""
+    rows = []
+    for p in predictions:
+        label, ids = unpacked_category(p.category.id, sizes)
+        rows.append({"bbox": [float(v) for v in p.bbox.to_xyxy()], "category_id": label,
+                     "attributes": ids, "score": float(p.score.value),
+                     "segmentation": p.mask.segmentation if p.mask else None})
+    return rows
 
 
-def predictions_from_rows(rows: list[dict], full_shape: list[int]) -> list[ObjectPrediction]:
+def predictions_from_rows(rows: list[dict], full_shape: list[int],
+                          sizes: Sequence[int]) -> list[ObjectPrediction]:
     """The predictions :func:`prediction_rows` recorded, over a ``[height, width]`` frame."""
-    return [ObjectPrediction(bbox=r["bbox"], category_id=int(r["category_id"]), score=r["score"],
+    return [ObjectPrediction(bbox=r["bbox"], score=r["score"],
+                             category_id=packed_category(r["category_id"], r["attributes"], sizes),
                              segmentation=r["segmentation"],
                              full_shape=full_shape if r["segmentation"] else None) for r in rows]
 
 
 def cross_tile_merge(execution: Execution) -> PostprocessPredictions:
     """The SAHI postprocess a tiled execution record names, at its threshold over its own match
-    metric and class-aware, on SAHI's numpy backend, so the merge leaves the process environment
-    as it found it."""
+    metric, class-agnostic over the one subject so two slices' calls of one object merge whatever
+    their attribute values (a merged box keeps the category of the member SAHI keeps, the
+    higher-scoring), on SAHI's numpy backend, so the merge leaves the process environment as it
+    found it."""
     # SAHI's torchvision backend picks its device by writing CUDA_VISIBLE_DEVICES for the process.
     set_postprocess_backend("numpy")
     assert execution.merge_type is not None, "a tiled record names its merge"
     return POSTPROCESS_NAME_TO_CLASS[execution.merge_type](
         match_threshold=execution.cross_tile_nms, match_metric=execution.match_metric,
-        class_agnostic=CLASS_AGNOSTIC)
+        class_agnostic=True)
 
 
 class TcipDetectionModel(DetectionModel):
@@ -79,7 +103,9 @@ class TcipDetectionModel(DetectionModel):
     faithfully to that ``(width, height)`` and maps its boxes and masks back per axis, and a batch
     holding a slice PIL does not represent logs that the resize was skipped for it. Detections
     scoring at least ``conf`` (all of them for ``None``) become ``ObjectPrediction``s clipped to
-    the slice, each mask cut at ``mask_binarize``'s value into the rings
+    the slice, each carrying its label and its ``attributes`` ids under the predictor's
+    ``attribute_sizes`` as one :func:`packed_category`, each mask cut at ``mask_binarize``'s value
+    into the rings
     :func:`~tcip_annotation.mask_contours.mask_to_polygon_rings` extracts when ``collect_masks``.
     ``mask_binarize`` is the threshold's provenance, kept whole on the model it cut masks for.
     """
@@ -151,7 +177,11 @@ class TcipDetectionModel(DetectionModel):
             boxes[:, [0, 2]] = np.clip(boxes[:, [0, 2]] / sx, 0, w)
             boxes[:, [1, 3]] = np.clip(boxes[:, [1, 3]] / sy, 0, h)
             scores = out["scores"][keep].cpu().tolist()
-            labels = out["labels"][keep].cpu().tolist()
+            sizes = self._predictor.attribute_sizes
+            categories = [packed_category(label, ids, sizes) for label, ids in zip(
+                out["labels"][keep].cpu().tolist(),
+                out["attributes"][keep].cpu().tolist() if sizes else [[]] * len(scores),
+                strict=True)]
             segmentations: list = [None] * len(scores)
             if self.collect_masks:
                 masks = out["masks"][keep]
@@ -166,7 +196,7 @@ class TcipDetectionModel(DetectionModel):
                      for ring in mask_to_polygon_rings(m, threshold=self.mask_threshold)] or None
                     for m in masks.cpu().numpy()]
             per_image.append([
-                ObjectPrediction(bbox=box.tolist(), category_id=int(label), score=float(score),
+                ObjectPrediction(bbox=box.tolist(), category_id=category, score=float(score),
                                  segmentation=seg, shift_amount=shift, full_shape=full)
-                for box, score, label, seg in zip(boxes, scores, labels, segmentations)])
+                for box, score, category, seg in zip(boxes, scores, categories, segmentations)])
         self._object_prediction_list_per_image = per_image

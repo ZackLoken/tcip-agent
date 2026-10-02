@@ -19,6 +19,8 @@ class BaseHead(nn.Module, abc.ABC):
 
     task_type: str = ""
     default_loss: str = ""
+    target_key: str = ""
+    """The key a head's target carries its truth under and its decode its prediction under."""
 
     @abc.abstractmethod
     def forward(self, features: Any, targets: Any = None) -> dict[str, torch.Tensor]:
@@ -44,6 +46,7 @@ class ClassificationHead(BaseHead):
 
     task_type = "classification"
     default_loss = "cross_entropy"
+    target_key = "labels"
 
     def __init__(self, in_channels: int, num_classes: int, dropout: float = 0.0,
                  loss: str | None = None, class_weights: list | None = None) -> None:
@@ -65,14 +68,14 @@ class ClassificationHead(BaseHead):
 
     def compute_loss(self, outputs, targets):
         if self._loss is not None:
-            return {"cls_loss": self._loss(outputs["logits"], targets["labels"])}
-        return {"cls_loss": F.cross_entropy(outputs["logits"], targets["labels"])}
+            return {"cls_loss": self._loss(outputs["logits"], targets[self.target_key])}
+        return {"cls_loss": F.cross_entropy(outputs["logits"], targets[self.target_key])}
 
     def decode(self, outputs):
         probs = F.softmax(outputs["logits"], dim=-1)
         preds = probs.argmax(dim=-1)
         confs = probs.max(dim=-1).values
-        return {"labels": preds, "confidences": confs, "probabilities": probs}
+        return {self.target_key: preds, "confidences": confs, "probabilities": probs}
 
 
 # ====================================================================
@@ -88,6 +91,7 @@ class OrdinalHead(BaseHead):
 
     task_type = "ordinal"
     default_loss = "corn"
+    target_key = "ranks"
 
     def __init__(self, in_channels: int, num_ranks: int, dropout: float = 0.0) -> None:
         super().__init__()
@@ -102,7 +106,7 @@ class OrdinalHead(BaseHead):
 
     def compute_loss(self, outputs, targets):
         logits = outputs["logits"]  # [B, K-1]
-        ranks = targets["ranks"]  # [B] int, 0-indexed
+        ranks = targets[self.target_key]  # [B] int, 0-indexed
         loss = _corn_loss(logits, ranks, self.num_ranks)
         return {"ordinal_loss": loss}
 
@@ -124,7 +128,7 @@ class OrdinalHead(BaseHead):
         p_eq = p_ge[:, :-1] - p_ge[:, 1:]  # [B, num_ranks], marginal P(Y=k)
         confidences = p_eq.gather(1, predicted_ranks.unsqueeze(-1).long()).squeeze(-1)
         return {
-            "ranks": predicted_ranks,
+            self.target_key: predicted_ranks,
             "cumulative_probs": cum_probs,
             "confidences": confidences,
         }

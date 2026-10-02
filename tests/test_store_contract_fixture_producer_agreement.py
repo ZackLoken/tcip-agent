@@ -17,6 +17,8 @@ def test_the_selection_golden_carries_each_sample_s_own_source_label_group_and_s
     than a shared root, so the golden cannot carry a per-date members block or a bare id list."""
     import tcip_store as ts
 
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
+
     selection.write_selection(
         tmp_path / "splits",
         selection.Selection(
@@ -26,7 +28,7 @@ def test_the_selection_golden_carries_each_sample_s_own_source_label_group_and_s
                                  group="a", side="train",
                                  ground_truth_digest="7f3a1b9c2d4e5f60"),
             ),
-            scope=selection.ClassScope(subject="bud", id_map={"bud": 0}), seed=42,
+            scope=registry_scope(tmp_path, "bud"), seed=42,
             group_by="stem", dataset_fingerprint="7ac1",
         ),
         project=tmp_path,

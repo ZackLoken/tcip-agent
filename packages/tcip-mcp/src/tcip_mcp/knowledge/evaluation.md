@@ -41,7 +41,7 @@ measurement-agreement/method-comparison contexts specifically because of that de
 | `evaluate_model` | Evaluate a checkpoint on a held-out dataset; returns the result and writes nothing |
 | `assess_checkpoint` | Assess a checkpoint for one delivery kind of a confirmed trait against a drawn selection's calibration and holdout sides, recording the assessment a delivery rests on |
 | `assess_reserved_regions` | The same assessment over a mosaic's reserved, attested-complete regions, for a checkpoint trained on a within-image split |
-| `annotation_tools.score_predictions` (library call) / `tcip score-predictions` (logged command) | Score on-disk predictions vs GT: an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN. On a classified bucket this scores the object's localization, never the classifier's own confirmed-state call |
+| `annotation_tools.score_predictions` (library call) / `tcip score-predictions` (logged command) | Score on-disk predictions vs GT: an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN. It scores the object's localization, never an attribute head's call |
 | `tcip render-failure-cases` (logged command) | Surface + render the N images with highest triage error |
 | `experiment_tools.compare_experiments` (library call) | Side-by-side metrics across experiments |
 | `get_experiment` (`view='lineage'`) | Trace data → model → predictions chain |
@@ -118,9 +118,9 @@ When metrics are poor, investigate systematically:
    `tcip score-predictions`) on a dataset dir; find images with the highest FP/FN counts
    (no built-in per-class breakdown for detection; use
    `annotation_tools.score_predictions(<image>, detail=True)` per image and aggregate by
-   `class_id` if class-level numbers are needed). On a classified bucket the breakdown is the
-   object's localization, not the classifier's own call: an assessment's classifier criterion
-   triages the confirmed-state axis instead
+   `class_id` if class-level numbers are needed). The breakdown is the object's localization,
+   never an attribute head's call: `evaluate`'s `attribute_agreement` (per attribute, over the
+   matched pairs) and an assessment's classifier criterion triage the attribute axes instead
 4. Training dynamics: Check metrics.jsonl; is loss still decreasing? Overfitting?
 5. Architecture: Is the model appropriate for the task and data scale?
 

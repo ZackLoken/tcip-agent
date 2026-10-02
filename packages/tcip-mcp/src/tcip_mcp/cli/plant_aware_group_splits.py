@@ -15,7 +15,7 @@ admission and refuses to write a selection without one.
 
 Usage:
     tcip plant-aware-group-splits <dataset_root> --project <project> --plant-csv <plants.csv> \
-        [--plant-csv <more_plants.csv> ...] --subject <subject> [--attribute <attribute>] \
+        [--plant-csv <more_plants.csv> ...] --subject <subject> \
         --train-ratio <ratio> --val-ratio <ratio> --calibration-ratio <ratio> \
         --holdout-ratio <ratio> [--seed 42] [--tolerance-m 5.0] [--output-path <dir>]
 
@@ -141,9 +141,6 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser.add_argument("--subject", required=True,
                          help="The object class draw_splits draws its members for and the "
                               "confirmed negatives are keyed under.")
-    parser.add_argument("--attribute", default=None,
-                         help="Scope the draw to instances already assessed for this attribute "
-                              "of --subject; omitted, every instance of --subject counts.")
     args = parser.parse_args(argv)
 
     from tcip_mcp.cli import bound_project
@@ -190,7 +187,6 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         group_key_map=group_key_map,
         output_path=args.output_path,
         subject=args.subject,
-        attribute=args.attribute,
     )
     if "error" in result:
         print(f"error: draw_splits refused: {result['error']}", file=sys.stderr)

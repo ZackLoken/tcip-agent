@@ -14,8 +14,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from tcip_mcp import subject_registry  # noqa: E402
-from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map  # noqa: E402
-from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
+from tcip_mcp.pipelines.data.label_queries import registry_scope  # noqa: E402
 from tcip_mcp.pipelines.model_build import (  # noqa: E402
     build_model,
     recorded_model_dims,
@@ -27,9 +26,10 @@ from tests._producer_fixtures import registry_over  # noqa: E402
 from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 
 
-def build_probe_net(*, num_classes: int = 2, in_chans: int = 3):
-    """A tiny module whose parameter shapes follow its builder kwargs. Its forward is never run
-    here; these tests read parameter shapes only."""
+def build_probe_net(*, num_classes: int = 2, in_chans: int = 3, attributes: tuple = ()):
+    """A tiny module whose parameter shapes follow its builder kwargs, one head per attribute
+    sized by its values. Its forward is never run here; these tests read parameter shapes
+    only."""
     import torch.nn as nn
 
     class ProbeNet(nn.Module):
@@ -37,6 +37,8 @@ def build_probe_net(*, num_classes: int = 2, in_chans: int = 3):
             super().__init__()
             self.stem = nn.Conv2d(in_chans, 6, 3)
             self.head = nn.Conv2d(6, num_classes, 1)
+            self.attribute_heads = nn.ModuleList(
+                nn.Conv2d(6, len(a.values), 1) for a in attributes)
 
         def forward(self, images, targets=None):
             return self.head(self.stem(images))
@@ -78,15 +80,16 @@ def _agent_package(root: Path, name: str, modules: dict) -> Path:
     return pkg
 
 
-def test_contract_dims_take_the_admitted_count_without_the_loader_background_offset(tmp_path):
-    """A scoped detection config smokes at the class count the run was admitted under, with no
-    background class added: the +1 is the loader's own offset on the labels it builds, so applying
-    it here too would prove the model against a head one class wider than the one that trains.
+def test_contract_dims_take_the_admitted_attributes_without_the_loader_background_offset(tmp_path):
+    """A scoped detection config smokes at the subject count and the attributes the run was
+    admitted under, with no background class added: the +1 is the loader's own offset on the
+    labels it builds, so applying it here too would prove the model against a head one class
+    wider than the one that trains.
 
-    The count is the scope the run was admitted under, not a reading of the registry as it stands
-    now: this run was admitted when its subject declared two condition values, the registry has
-    since gained a third, and a re-resolution would smoke it one class wider than the head that
-    trains."""
+    The attributes are the scope the run was admitted under, not a reading of the registry as it
+    stands now: this run was admitted when its subject declared two condition values, the registry
+    has since gained a third, and a re-resolution would smoke a head one value wider than the head
+    that trains."""
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
@@ -109,8 +112,8 @@ def test_contract_dims_take_the_admitted_count_without_the_loader_background_off
             [Annotation(subject="leaf", geometry=BBox(8, 8, 24, 24),
                         attributes={"condition": condition})], 64, 64)
 
-    scope = admit_over(images_dir, labels_dir, subject="leaf", attribute="condition").scope
-    assert scope.id_map is not None and len(scope.id_map) == 2  # the class space this run trains over
+    scope = admit_over(images_dir, labels_dir, subject="leaf").scope
+    assert [len(a.values) for a in scope.attributes] == [2]  # the head this run trains
     cfg = {
         "model_source": {"builder_kwargs": {}, "task": "detection"},
         "data": {"scope": asdict(scope), "num_channels": 5, "labels_dir": str(labels_dir),
@@ -118,35 +121,32 @@ def test_contract_dims_take_the_admitted_count_without_the_loader_background_off
     }
 
     _write_registry(dataset_root)  # a third condition value declared since
-    _registry, id_map = resolve_registry_id_map(
-        str(labels_dir), ClassScope(subject="leaf", attribute="condition"))
-    assert len(id_map) == 3
+    assert len(registry_scope(labels_dir, "leaf").attributes[0].values) == 3
 
     dims = resolve_contract_dims(cfg, "detection", recorded_model_dims(cfg))
 
-    assert dims == {"in_chans": 5, "num_classes": 2, "img_size": 640}
-    assert dims["num_classes"] != len(id_map)
+    assert dims == {"in_chans": 5, "num_classes": 1, "attributes": scope.attributes,
+                    "img_size": 640}
 
 
-def test_contract_dims_count_only_the_subject_for_a_single_class_scope(tmp_path):
-    """An instance_seg scope with no attribute trains one class, the subject itself. The resolved
-    count stays at that one class rather than gaining a background slot."""
-    dataset_root = tmp_path / "chestnut_2026"
+def test_contract_dims_count_only_the_subject_for_a_scope_declaring_no_attributes(tmp_path):
+    """An instance_seg scope whose subject declares no attribute trains one class, the subject
+    itself, and hands no attributes. The resolved count stays at that one class rather than
+    gaining a background slot."""
+    dataset_root = tmp_path / "subject_2026"
     labels_dir = dataset_root / "annotations"
     labels_dir.mkdir(parents=True)
     _write_registry(dataset_root)
 
-    _registry, id_map = resolve_registry_id_map(str(labels_dir), ClassScope(subject="bud"))
-    assert len(id_map) == 1
     cfg = {
         "model_source": {"builder_kwargs": {}, "task": "instance_seg"},
-        "data": {"scope": {"subject": "bud", "id_map": id_map}, "num_channels": 3,
+        "data": {"scope": asdict(registry_scope(labels_dir, "bud")), "num_channels": 3,
                  "labels_dir": str(labels_dir)},
     }
 
     dims = resolve_contract_dims(cfg, "instance_seg", recorded_model_dims(cfg))
 
-    assert dims["num_classes"] == len(id_map)
+    assert dims == {"in_chans": 3, "num_classes": 1, "img_size": 224}
 
 
 def test_snapshot_captures_each_dotted_module_not_its_top_level_package(tmp_path, monkeypatch):
@@ -217,7 +217,7 @@ def _probe_config() -> dict:
     }
 
 
-@pytest.mark.parametrize("restated", ["in_chans", "num_classes", "num_ranks"])
+@pytest.mark.parametrize("restated", ["in_chans", "num_classes", "num_ranks", "attributes"])
 def test_builder_kwargs_restating_a_dimension_refuses_by_name(restated):
     """The band count and the one count reach the builder from the run's data section alone; a
     builder_kwargs carrying any dimension refuses naming it before any build, the rank count
@@ -248,22 +248,23 @@ def test_an_ordinal_run_recording_no_rank_count_refuses_by_name():
         recorded_model_dims(config)
 
 
-def test_a_scoped_run_recording_a_second_count_refuses():
-    """A scoped run's class count is its map's length; a count recorded beside the map would be a
-    second one, so the dimensions refuse rather than choose."""
+def test_a_run_over_label_documents_recording_a_count_refuses():
+    """A run over label documents is sized by its scope, the subject and its attributes; a count
+    recorded beside it would be a second size, so the dimensions refuse rather than choose."""
     config = {"model_source": {"builder": f"{__name__}:build_probe_net", "task": "detection"},
               "data": {"num_channels": 3, "num_classes": 5,
-                       "scope": {"subject": "bud", "id_map": {"bud": 0}}}}
+                       "scope": {"subject": "bud", "attributes": []}}}
 
-    with pytest.raises(ValueError, match="two counts"):
+    with pytest.raises(ValueError, match=r"records \['num_classes'\]"):
         recorded_model_dims(config)
 
 
-def test_a_run_builds_at_the_width_and_count_its_admitted_data_records(tmp_path):
+def test_a_run_builds_at_the_width_and_heads_its_admitted_data_records(tmp_path):
     """The admitting case, through the producer: a run whose data section the platform wrote from
-    its own admission builds a model reading that run's band count and scoring its class map. The
-    single-band sources and the three-value map both differ from ``build_probe_net``'s defaults,
-    so a build that dropped either would come out at the default shape."""
+    its own admission builds a model reading that run's band count, its one subject and one head
+    per attribute its registry declares. The single-band sources, the one subject and the
+    three-value attribute all differ from ``build_probe_net``'s defaults, so a build that dropped
+    any of them would come out at the default shape."""
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
@@ -281,15 +282,16 @@ def test_a_run_builds_at_the_width_and_count_its_admitted_data_records(tmp_path)
             str(labels_dir / f"{stem}.json"),
             [Annotation(subject="leaf", geometry=BBox(8, 8, 24, 24),
                         attributes={"condition": condition})], 64, 64)
-    _dataset, data = run_over("detection", images_dir, labels_dir, subject="leaf",
-                              attribute="condition")
+    _dataset, data = run_over("detection", images_dir, labels_dir, subject="leaf")
     config = {"model_source": {"builder": f"{__name__}:build_probe_net", "task": "detection"},
               "data": data}
 
     shapes = _param_shapes(build_model(config, recorded_model_dims(config)))
 
     assert shapes["stem.weight"][1] == data["num_channels"] == 1
-    assert shapes["head.weight"][0] == len(data["scope"]["id_map"]) == 3
+    assert shapes["head.weight"][0] == 1
+    assert shapes["attribute_heads.0.weight"][0] == len(
+        data["scope"]["attributes"][0]["values"]) == 3
 
 
 def test_a_saved_checkpoint_rebuilds_the_architecture_its_config_builds(tmp_path):

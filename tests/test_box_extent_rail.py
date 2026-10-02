@@ -13,7 +13,7 @@ from PIL import Image
 
 from tcip_annotation.json_io import read_annotations, write_annotations
 from tcip_annotation.state import Annotation, BBox, Polygon
-from tcip_mcp.pipelines.data.selection import ClassScope
+from tcip_mcp.pipelines.data.label_queries import registry_scope
 
 
 def _write_image(path: Path, size=(200, 150)) -> None:
@@ -31,7 +31,7 @@ def client() -> TestClient:
 # ── the shared constructor ──────────────────────────────────────────────────
 
 
-def test_the_encoding_keeps_only_what_has_extent_on_the_stored_grid():
+def test_the_encoding_keeps_only_what_has_extent_on_the_stored_grid(tmp_path):
     """A box that rounds to no width, and a mask whose rings have none, are no detection: the
     encoding keeps the one detection with extent, and the count it reports is the document's."""
     import numpy as np
@@ -54,7 +54,7 @@ def test_the_encoding_keeps_only_what_has_extent_on_the_stored_grid():
                 "masks": [past_the_edge, blob], "count": 3}
 
     written = result()
-    data, _dropped = encode_predictions(written, scope=ClassScope(subject="bur", id_map={"bur": 0}))
+    data, _dropped = encode_predictions(written, scope=registry_scope(tmp_path, "bur"))
     (kept,) = annotations_from_bytes(data, source="a.json")
     assert written["count"] == 1
     assert kept.score == written["scores"][0] == 0.8
@@ -264,7 +264,7 @@ def _seed_review_dataset(tmp_path: Path, *, pred_box=(10, 10, 20, 20), gt_box=No
     bucket = published(dataset_root, dataset_root / "predictions" / "m", [
         {"image": str(img), "width": 200, "height": 150,
          "boxes": [list(pred_box) if ordered else [10, 10, 20, 20]], "scores": [0.9],
-         "labels": [1]}], scope={"subject": "leaf", "attribute": None, "id_map": {"leaf": 0}})
+         "labels": [1]}], scope={"subject": "leaf"})
     pred_path = bucket.path / "img_001.json"
     if not ordered:
         # A degenerate box can reach a document only by an edit in place after publication,
@@ -351,7 +351,8 @@ def test_the_save_door_admits_accepting_an_ordered_proposal(
 # ── prediction writers drop a degenerate box and report it, rather than fail ─
 
 
-LEAF = ClassScope(subject="leaf", id_map={"leaf": 0})
+LEAF = registry_scope(Path(__file__).parent, "leaf")
+"""The class space a dataset with no registry reads ``leaf`` under: the subject, no attributes."""
 
 
 def test_encode_predictions_drops_a_degenerate_box_and_reports_the_count():

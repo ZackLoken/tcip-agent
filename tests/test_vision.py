@@ -71,7 +71,7 @@ def viz_bucket(viz_dataset: Path) -> Path:
         {"image": f"{name}.jpg", "width": 640, "height": 480,
          "boxes": [[288, 216, 352, 264], [496, 372, 528, 396]], "scores": [0.95, 0.6],
          "labels": [1, 1]} for name in ("img_001", "img_002", "img_003", "img_004")],
-        scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
+        scope={"subject": "bud"})
     return viz_dataset
 
 
@@ -382,7 +382,7 @@ def test_scoring_and_the_comparison_render_state_one_count_for_one_image(tmp_pat
     published(tmp_path, tmp_path / PUBLISHED, [
         {"image": "img_001.jpg", "width": 640, "height": 480,
          "boxes": [[288, 216, 352, 264], [100, 350, 200, 450]], "scores": [0.95, 0.9],
-         "labels": [1, 1]}], scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
+         "labels": [1, 1]}], scope={"subject": "bud"})
 
     scored = score_predictions(str(image), str(tmp_path / PUBLISHED), detail=True)
     rendered = visualize(tmp_path, "comparison", str(image), predictions_dir=PUBLISHED)

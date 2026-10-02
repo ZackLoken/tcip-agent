@@ -25,9 +25,9 @@ def test_the_csv_row_count_equals_the_population(tmp_path: Path) -> None:
     never covers delivers exactly those two rows, in that order, and never PLANT_B; the uncovered
     plant is imaged on none of the delivered dates, so it is incomplete on every one."""
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
-    body = classified_series(tmp_path).body()
+    body = attributed_series(tmp_path).body()
     out_csv = tmp_path / "out" / "bud.csv"
 
     res = deliver_phenology_milestones(
@@ -49,9 +49,9 @@ def test_the_csv_row_count_equals_the_population(tmp_path: Path) -> None:
 
 def test_an_empty_population_refuses_naming_the_argument(tmp_path: Path) -> None:
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
-    body = classified_series(tmp_path, fractions=(0.0, 1.0), assessed=False).body()
+    body = attributed_series(tmp_path, fractions=(0.0, 1.0), assessed=False).body()
 
     res = deliver_phenology_milestones(
         tmp_path, trait=body["trait"], mapping_name=body["mapping_name"],
@@ -66,10 +66,10 @@ def test_the_web_route_delivers_the_population_it_was_given(tmp_path: Path) -> N
     from fastapi.testclient import TestClient
 
     from tcip_web.app import app
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
     client = TestClient(app, base_url="http://127.0.0.1")
-    body = classified_series(tmp_path).body(plants=["PLANT_B"])
+    body = attributed_series(tmp_path).body(plants=["PLANT_B"])
 
     resp = client.post("/api/results/phenology_measurement", json=body)
 
@@ -84,10 +84,10 @@ def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:
     from tcip_mcp.experiments import observe
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
-    from tests._chain_fixtures import BLOB_BUILDER, classified_series, run_config
+    from tests._chain_fixtures import BLOB_BUILDER, attributed_series, run_config
     from tests._verified_checkpoint_fixtures import worker_run
 
-    series = classified_series(tmp_path, fractions=(0.0, 1.0))
+    series = attributed_series(tmp_path, fractions=(0.0, 1.0))
     body = series.body()
     first, second = sorted(series.buckets)
     one = tmp_path / "out" / "one_producer.csv"

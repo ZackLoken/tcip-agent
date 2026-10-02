@@ -241,7 +241,7 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, 
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     images_dir, labels_dir = _det_dataset(tmp_path)  # three-band sources
-    scope = {"subject": "bud", "id_map": {"bud": 0}}
+    scope = {"subject": "bud"}
     one_band = {"builder": "tests.bespoke_models:build_bespoke_detection",
                 "builder_kwargs": {"min_size": 64, "max_size": 128,
                                    "image_mean": [0.4], "image_std": [0.2]},
@@ -483,7 +483,7 @@ def test_full_frame_reads_each_ground_truth_box_on_the_stored_grid(tmp_path, mon
         return real_record(w, h, gt, dt, **kw)
 
     monkeypatch.setattr(evaluation, "build_coco_image_record", recording)
-    bur = {"num_channels": 3, "scope": {"subject": "bur", "id_map": {"bur": 0}}}
+    bur = {"num_channels": 3, "scope": {"subject": "bur"}}
     _full_frame(tmp_path, monkeypatch, _SlicedStub([[10.1, 10.1, 40.3, 30.3]]),
                 [Annotation(subject="bur", geometry=BBox(10.1, 10.1, 40.3, 30.3))],
                 checkpoint=verified_checkpoint(tmp_path, data=bur), tile_size=64, overlap=0.2)

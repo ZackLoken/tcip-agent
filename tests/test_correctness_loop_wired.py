@@ -158,15 +158,23 @@ def test_model_dims_states_only_what_the_run_holds():
         "in_chans": 3, "num_classes": 4, "img_size": 224}
 
 
-def test_model_dims_counts_the_admitted_map():
-    """The count a scoped run's model is built at is its admitted map's length: the class space
-    its samples were admitted under, never a count stated beside it."""
-    from tcip_mcp.pipelines.data.selection import ClassScope
+def test_model_dims_hands_the_admitted_subject_and_every_attribute(tmp_path):
+    """A scoped run's model is built at the one subject its samples were admitted under and one
+    head per attribute the registry declares, never a count stated beside them."""
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.model_build import model_dims
+    from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
+    from tests._producer_fixtures import registry_over
 
-    scope = ClassScope(subject="bud", attribute="opening", id_map={"open": 0, "closed": 1})
+    attributes = (Attribute("color", "categorical", ("red", "blue")),
+                  Attribute("grade", "ordinal", ("low", "mid", "high")))
+    registry_over(tmp_path, SubjectRegistry(subjects=(Subject(name="bud",
+                                                               attributes=attributes),)))
+    (tmp_path / "annotations").mkdir()
+    scope = registry_scope(tmp_path / "annotations", "bud")
 
-    assert model_dims(scope, {"num_channels": 3}) == {"in_chans": 3, "num_classes": 2}
+    assert model_dims(scope, {"num_channels": 3}) == {"in_chans": 3, "num_classes": 1,
+                                                      "attributes": attributes}
 
 
 # --------------------------------------------------------------------------

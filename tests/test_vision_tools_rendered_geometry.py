@@ -100,7 +100,7 @@ def test_every_region_of_a_split_prediction_is_drawn_on_the_mask_render(
         "image": str(image), "width": 320, "height": 180,
         "boxes": [[30.0, 15.0, 305.0, 165.0]], "scores": [0.8], "labels": [1],
         "masks": [{"segmentation": [_flat(PRED_RING_LOW), _flat(PRED_RING_HIGH)]}],
-    }], scope={"subject": "leaf", "id_map": {"leaf": 0}})
+    }], scope={"subject": "leaf"})
 
     result = visualize(root, "predictions", str(image), task="segment",
                        predictions_dir=str(bucket))
@@ -153,7 +153,7 @@ def mislocalized_prediction_dataset(tmp_path: Path) -> Path:
     published(tmp_path, tmp_path / "predictions" / "live", [
         {"image": str(images / "miss.png"), "width": 300, "height": 200,
          "boxes": [list(PRED_BOX)], "scores": [0.4], "labels": [1]}],
-        scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
+        scope={"subject": "bud"})
     return tmp_path
 
 

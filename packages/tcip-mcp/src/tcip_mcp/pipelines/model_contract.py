@@ -70,12 +70,14 @@ def no_batch_reason(task: str, dims: "Mapping[str, int] | None", sample_batch: A
 
 
 def _synth_batch(task: str, *, in_chans: int, img_size: int, device: Any,
-                 num_classes: int | None = None):
+                 num_classes: int | None = None, attributes: Any = ()):
     """A minimal batch in the exact shape ``generic_trainer`` feeds ``model.forward`` for ``task``:
     per-sample ``(image, target)`` items shaped like a dataset's ``__getitem__``, collated with the
     trainer's own ``task_collate``.
 
-    ``num_classes`` is the run's own count, which only a ``_COUNTED_TASKS`` target reads.
+    ``num_classes`` is the run's own count, which only a ``_COUNTED_TASKS`` target reads; a
+    detection target carries an ``attributes`` row, each attribute's first value, when the run's
+    ``attributes`` name any, so every head is driven.
     """
     import torch
 
@@ -88,7 +90,9 @@ def _synth_batch(task: str, *, in_chans: int, img_size: int, device: Any,
         img = torch.rand(in_chans, img_size, img_size, device=device)
         box = [img_size * 0.2, img_size * 0.2, img_size * 0.7, img_size * 0.7]
         # One foreground instance (labels are 1-indexed), through the loaders' own tensor builder.
-        tensors = target_tensors({"boxes": [box], "labels": [1], "iscrowd": [False]})
+        tensors = target_tensors({"boxes": [box], "labels": [1], "iscrowd": [False],
+                                  **({"attributes": [[0] * len(attributes)]} if attributes
+                                     else {})})
         target: dict[str, Any] = {k: v.to(device) for k, v in tensors.items()}
         target["image_id"] = 0
         if task == "instance_seg":
@@ -170,7 +174,8 @@ def check_model_contract(
     """Behavioral smoke test of the measurement boundary. Returns a report; never raises.
 
     ``dims`` is :func:`~tcip_mcp.pipelines.model_build.resolve_contract_dims`' output, stated only
-    when a batch is synthesized here; a caller handing over ``sample_batch`` states none.
+    when a batch is synthesized here; a caller handing over ``sample_batch`` states none. A
+    detector whose ``dims`` carry ``attributes`` must also return ``attributes`` per image.
 
     ``{"ok": bool, "issues": [...], "train_loss": float|None, "eval_output_type": str|None,
     "operating_point_knobs": list[str]|None}``. ``operating_point_knobs`` is which of
@@ -253,6 +258,8 @@ def check_model_contract(
                 # target["masks"]); a model whose eval output drops them passes as a detector
                 # while the platform's only sanctioned dimensional measurement can never reach it.
                 required = required | {"masks"}
+            if dims and dims.get("attributes"):
+                required = required | {"attributes"}
             if not (isinstance(out, list) and out and isinstance(out[0], dict)
                     and required <= set(out[0])):
                 issues.append(f"detection eval output is not list[dict] with {sorted(required)}")

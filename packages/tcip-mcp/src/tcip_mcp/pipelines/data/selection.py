@@ -10,13 +10,17 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence, cast
 
 import tcip_store
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.registry_paths import PathFields, recorded_paths, runtime_paths, within
+from tcip_mcp.subject_registry import Attribute, named
+
+if TYPE_CHECKING:
+    from tcip_mcp.traits import PositiveState
 
 SIDES = ("train", "val", "calibration", "holdout")
 """The sides a draw assigns. ``train`` and ``val`` build the run's two loaders; ``calibration`` and
@@ -112,34 +116,25 @@ class ClassScope:
     mapping (:func:`dataclasses.asdict`) on a run's data config, a selection and a prediction
     bucket's stamp.
 
-    ``subject`` is the object class a document admission read completion and targets for,
-    ``attribute`` the value vocabulary it was scoped to when one was named, and ``id_map`` the
-    ``assign_class_ids`` map its loader reads targets and decodes predictions under. A mask raster
-    and a table row carry their own classes: a run over them records a scope whose every field is
-    ``None``.
-
-    An empty subject, attribute or map is ``None``; an attribute with no subject refuses by name.
+    ``subject`` is the object class a document admission read completion and targets for, and
+    ``attributes`` every attribute the registry declares for it, each an
+    :class:`~tcip_mcp.subject_registry.Attribute` whose value ids are positions in its declared
+    order: ``None`` until the registry is read, empty for a subject that declares none. A mask
+    raster and a table row carry their own classes: a run over them records a scope whose every
+    field is ``None``. An empty subject is ``None``.
     """
 
     subject: str | None = None
-    attribute: str | None = None
-    id_map: dict[str, int] | None = None
+    attributes: tuple[Attribute, ...] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "subject", self.subject or None)
-        object.__setattr__(self, "attribute", self.attribute or None)
-        object.__setattr__(self, "id_map", (
-            {str(name): int(cid) for name, cid in self.id_map.items()} if self.id_map else None))
-        if self.attribute is not None and self.subject is None:
-            raise ValueError(
-                f"attribute {self.attribute!r} is stated with no subject: a value with no object "
-                "class names nothing a reader could hold it to. State the subject beside it."
-            )
 
     @classmethod
     def of(cls, record: "Mapping[str, Any]") -> "ClassScope":
         """The class space ``record`` carries under ``scope``: a run's data section, a selection
-        document or a prediction bucket's stamp. A record carrying no ``scope`` refuses by name.
+        document or a prediction bucket's stamp, each attribute rebuilt from the mapping
+        :func:`dataclasses.asdict` wrote. A record carrying no ``scope`` refuses by name.
         """
         if "scope" not in record:
             raise ValueError(
@@ -147,36 +142,35 @@ class ClassScope:
                 "under is not recorded, so no reader can hold targets or predictions to it. "
                 "Produce it through an admission, which records one."
             )
-        return cls(**record["scope"])
+        stated = dict(record["scope"])
+        if stated.get("attributes") is not None:
+            stated["attributes"] = tuple(Attribute(**{**a, "values": tuple(a["values"])})
+                                         for a in stated["attributes"])
+        return cls(**stated)
 
-    @property
-    def classified(self) -> bool:
-        """Whether this class space classifies its subject along an attribute."""
-        return self.attribute is not None
-
-    @property
-    def subjects(self) -> set[str]:
-        """The object classes this class space's detections are of: its map's names for a
-        detector, its one subject for a classified space or a single-subject read."""
-        if self.id_map and not self.classified:
-            return set(self.id_map)
-        return {self.subject} if self.subject else set()
-
-    @property
-    def value_ids(self) -> dict[str, int]:
-        """The map a classified space decodes its attribute's values under
-        (:func:`~tcip_annotation.json_io.class_id`); empty for a space that classifies none."""
-        return (self.id_map or {}) if self.classified else {}
+    def state_ids(self, state: "PositiveState | None") -> tuple[int, int] | None:
+        """``(column, value id)`` of ``state`` under this class space: its attribute's position
+        among the declared attributes and its value's among that attribute's values. ``None`` for
+        no state, a space naming no subject, or one whose attributes do not list ``state``; a
+        subject's space whose attributes were never read refuses (:meth:`admitted_for`)."""
+        if state is None or self.subject is None:
+            return None
+        attributes = cast(tuple, self.admitted_for(DOCUMENT, f"class space {self}").attributes)
+        found = named(attributes, state.attribute)
+        if found is None or state.value not in found.values:
+            return None
+        return attributes.index(found), found.values.index(state.value)
 
     def admitted_for(self, shape: str, source: str) -> "ClassScope":
         """This class space, refused by ``source`` when ground truth of ``shape`` cannot be read
-        under it: per-image label documents are read for a named subject under its class map, and a
-        mask raster or a table row, carrying its own classes, only under the empty class space.
+        under it: per-image label documents are read for a named subject under the attributes the
+        registry declares for it, and a mask raster or a table row, carrying its own classes, only
+        under the empty class space.
         """
         if shape != DOCUMENT and self != ClassScope():
             raise ValueError(
                 f"{source} states a class space ({self}) over {SHAPE_DESCRIPTIONS[shape]}, which "
-                "carries its own classes and reads no subject, attribute or map. State the empty "
+                "carries its own classes and reads no subject or attributes. State the empty "
                 "scope for it."
             )
         if shape == DOCUMENT and self.subject is None:
@@ -185,10 +179,10 @@ class ClassScope:
                 "whose records of a per-image label document it reads. State the subject the run "
                 "or draw is scoped by."
             )
-        if shape == DOCUMENT and self.id_map is None:
+        if shape == DOCUMENT and self.attributes is None:
             raise ValueError(
-                f"{source} records no id_map: per-image label documents are read under the class "
-                "map their admission assigned."
+                f"{source} records no attributes: per-image label documents are read under every "
+                "attribute the registry declares for their subject, which their admission reads."
             )
         return self
 

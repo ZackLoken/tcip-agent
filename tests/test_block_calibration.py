@@ -471,8 +471,8 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(tmp_path: Path):
     import numpy as np
 
     from tcip_mcp.assessment import _band_records
-    from tcip_mcp.pipelines.data.label_queries import json_det_targets
-    from tcip_mcp.pipelines.data.selection import ClassScope, Sample
+    from tcip_mcp.pipelines.data.label_queries import json_det_targets, registry_scope
+    from tcip_mcp.pipelines.data.selection import Sample
 
     class _OneDetection:
         def predict_sliced(self, view, **kwargs):
@@ -484,7 +484,7 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(tmp_path: Path):
         Annotation(subject="bur", geometry=BBox(20.3, 20.7, 40.1, 60.9)),
         Annotation(subject="bur", geometry=BBox(100.0, 100.0, 180.0, 180.0), iscrowd=True)],
         200, 200)
-    target, _ = json_det_targets(str(label), ClassScope(subject="bur", id_map={"bur": 0}))
+    target = json_det_targets(str(label), registry_scope(tmp_path, "bur"))
     gt = {"boxes": np.asarray(target["boxes"], dtype=np.float32).reshape(-1, 4),
           "labels": np.asarray(target["labels"], dtype=np.int64),
           "iscrowd": np.asarray(target["iscrowd"], dtype=bool)}
@@ -548,8 +548,8 @@ def _build_attribute_scoped_experiment(
     tmp_path: Path, *, trained_values: tuple[str, ...], reordered_values: tuple[str, ...],
     labeled_value: str, experiment_id: str = "exp_block_attribute",
 ) -> dict:
-    """An experiment whose subject is scoped by a categorical attribute, with the dataset's
-    registry reordered after the run resolved and recorded its own name to id map."""
+    """An experiment whose subject declares a categorical attribute, with the dataset's registry
+    reordered after the run resolved and recorded its own attributes."""
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
@@ -576,47 +576,40 @@ def _build_attribute_scoped_experiment(
 
     data_cfg = {
         "images_dir": str(images_dir), "labels_dir": str(labels_dir),
-        "scope": {"subject": "bud", "attribute": "stage"}, "auto_val": True,
+        "scope": {"subject": "bud"}, "auto_val": True,
         "tiling": {"enabled": True, "tile_size": TILE, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.15, "seed": 1,
                   "reserve_calibration_fraction": 0.15},
     }
     completed = _completed_over(tmp_path, data_cfg, experiment_id)
     recorded_scope = ClassScope.of(run_resolution(experiment_id, project=tmp_path)["data"])
-    assert recorded_scope.subject and recorded_scope.id_map
+    assert recorded_scope.subject and recorded_scope.attributes
 
     _write_registry(reordered_values)
     manifest = completed["spatial_manifest"]
     _attest_regions_complete(root, stem, [manifest["calibration_region"],
                                           manifest["test_region"]])
     return {"project": tmp_path, "root": root, "labels_dir": labels_dir, "stem": stem,
-            "experiment_id": experiment_id, **completed,
-            "recorded_id_map": dict(recorded_scope.id_map)}
+            "experiment_id": experiment_id, **completed, "recorded_scope": recorded_scope}
 
 
-def test_ground_truth_decodes_through_the_checkpoints_own_recorded_id_map(tmp_path: Path):
-    """The mosaic's ground truth is read through the map the training run recorded, never a live
-    re-derivation off the dataset's registry: the reserved regions carry one attribute value, so
-    the two orders put the whole reference in two different classes and cannot agree by
-    accident."""
-    from tcip_mcp.subject_registry import assign_class_ids, read_registry
+def test_ground_truth_decodes_through_the_checkpoints_own_recorded_attributes(tmp_path: Path):
+    """The mosaic's ground truth is read through the attributes the training run recorded, never
+    a live re-read of the dataset's registry: the registry reorders the values after the run, and
+    the assessment still reads the reference in the order the run trained."""
+    from tcip_mcp.subject_registry import read_registry
 
     exp = _build_attribute_scoped_experiment(
         tmp_path, trained_values=("closed", "open", "shed"),
         reordered_values=("open", "closed", "shed"), labeled_value="open")
-    live_id_map = assign_class_ids(read_registry(exp["root"]), "bud", "stage")
-    recorded_category = str(exp["recorded_id_map"]["open"] + 1)
-    live_category = str(live_id_map["open"] + 1)
-    assert recorded_category != live_category
+    live = read_registry(exp["root"]).subjects[0].attributes
+    assert exp["recorded_scope"].attributes[0].values == ("closed", "open", "shed")
+    assert live[0].values != exp["recorded_scope"].attributes[0].values
 
-    per_class = _assess(exp)["criterion"]["count"]["per_class"]
-
-    # typical_count reads the ground truth alone, never the model's own detections.
-    assert per_class[recorded_category]["typical_count"] > 0
-    assert per_class.get(live_category, {"typical_count": 0.0})["typical_count"] == 0.0
+    assert _band_total(_assess(exp)) > 0
 
 
-def test_a_recorded_id_map_needs_no_registry_on_disk(tmp_path: Path):
+def test_a_recorded_scope_needs_no_registry_on_disk(tmp_path: Path):
     exp = _build_attribute_scoped_experiment(
         tmp_path, trained_values=("closed", "open", "shed"),
         reordered_values=("closed", "open", "shed"), labeled_value="open",

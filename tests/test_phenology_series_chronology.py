@@ -1,5 +1,6 @@
 """Phenology milestones on curves that are not tidy: noisy series, exact-on-target first
-observations, sparse class ids, and a bucket written by the real prediction writer.
+observations, a positive value past an unused one, and a bucket written by the real prediction
+writer.
 
 A positive-fraction curve measured from real imagery moves up and down: weather, occlusion and
 sampling noise all push a plant's fraction back down between captures. The milestone a breeder
@@ -18,13 +19,13 @@ import pytest
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.pipelines.data.selection import ClassScope
+from tcip_mcp import subject_registry as cr
 from tcip_mcp.pipelines.postprocessing import phenology
 from tests._trait_fixtures import BUD_OPENING
 
-# A registry whose ids are not consecutive: the positive class sits at id 2 with nothing at id 1.
-SPARSE_ID_MAP = {"closed": 0, "open": 2}
-SPARSE = {"subject": "bud", "attribute": "opening", "id_map": SPARSE_ID_MAP}
+# An attribute whose positive value sits at id 2 with no record ever carrying id 1.
+SPARSE = cr.Attribute("opening", "categorical", ("closed", "partial", "open"))
+REGISTRY = cr.SubjectRegistry(subjects=(cr.Subject(name="bud", attributes=(SPARSE,)),))
 
 
 class _Assignment:
@@ -121,8 +122,9 @@ def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture
         "2026-03-13": {"P1": (9, 1), "P2": (4, 0)},
     }
     buckets = {d: published(tmp_path, tmp_path / "ds" / "predictions" / "run" / d, [
-        predicted(f"{plant}_{d}", _states(pos, neg), SPARSE_ID_MAP)
-        for plant, (pos, neg) in counts[d].items()], scope=SPARSE) for d in dates}
+        predicted(f"{plant}_{d}", _states(pos, neg), (SPARSE,))
+        for plant, (pos, neg) in counts[d].items()], scope={"subject": "bud"},
+        registry=REGISTRY) for d in dates}
     mapping = {d: [_Assignment(f"P1_{d}", "P1", "acc-noisy"),
                    _Assignment(f"P2_{d}", "P2", "acc-steady")]
                for d in ["2026-03-09", "2026-03-01", "2026-03-13", "2026-03-05"]}
@@ -148,11 +150,14 @@ def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture
 # -- the counts the fraction is built from --------------------------------
 
 
-def test_positive_detections_are_the_named_class_not_a_position_in_the_id_map(tmp_path):
-    """The positive state is whichever class the trait names, wherever it sits in the registry's id
-    space. A registry with a gap in its ids (the positive class at id 2, nothing at id 1) counts the
-    same as a consecutive one.
+def test_positive_detections_are_the_named_value_not_a_fixed_position(tmp_path):
+    """The positive state is whichever value the trait names, wherever it sits in its attribute's
+    declared order. An attribute whose positive value sits at id 2 with no record at id 1 counts
+    the same as one whose values are all in use.
     """
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
+    from tests._producer_fixtures import registry_over
+
     p = tmp_path / "img.json"
     json_io.write_annotations(
         p,
@@ -165,27 +170,31 @@ def test_positive_detections_are_the_named_class_not_a_position_in_the_id_map(tm
         40, 24,
     )
 
-    scope = ClassScope(subject="bud", attribute="opening", id_map=SPARSE_ID_MAP)
-    total, positive, unclassified = phenology.count_by_class(p, "open", scope=scope)
+    registry_over(tmp_path, REGISTRY)
+    (tmp_path / "annotations").mkdir()
+    scope = registry_scope(tmp_path / "annotations", "bud")
+    total, positive, unclassified = phenology.count_by_class(p, BUD_OPENING.positive_state,
+                                                             scope=scope)
 
     assert (total, positive, unclassified) == (3, 2, 0)
 
 
 def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes(tmp_path):
     """A bucket published through the real publication reads back through the readers here with
-    the classes the run decoded through: the record's map and each detection's own decoded name
-    have to line up, or a fully classified bucket counts as unclassified.
+    the values the run decoded through: the record's attribute and each detection's own decoded
+    value have to line up, or a bucket whose every detection carries the state's attribute counts
+    as unassessed.
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import predicted, published
 
     bucket = published(tmp_path, tmp_path / "ds" / "predictions" / "run" / "2026-03-05",
-                       [predicted("P1_2026-03-05", ["open", "closed", "open"], SPARSE_ID_MAP)],
-                       scope=SPARSE)
+                       [predicted("P1_2026-03-05", ["open", "closed", "open"], (SPARSE,))],
+                       scope={"subject": "bud"}, registry=REGISTRY)
 
-    assert bucket.scope.id_map == SPARSE_ID_MAP
-    counts = phenology.count_by_class(bucket.path / "P1_2026-03-05.json", "open",
-                                      scope=bucket.scope)
+    assert bucket.scope.attributes == (SPARSE,)
+    counts = phenology.count_by_class(bucket.path / "P1_2026-03-05.json",
+                                      BUD_OPENING.positive_state, scope=bucket.scope)
     assert counts == (3, 2, 0)
 
 
@@ -199,9 +208,9 @@ def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path:
     """
     pytest.importorskip("torch")
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
-    body = classified_series(tmp_path, fractions=(0.5, 0.25, 1.0)).body()
+    body = attributed_series(tmp_path, fractions=(0.5, 0.25, 1.0)).body()
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(

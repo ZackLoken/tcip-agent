@@ -1922,8 +1922,9 @@ def _construct_via_scratch_backend(build: Callable[[Path], dict]) -> dict:
 
 def _real_selection() -> dict:
     """The record ``selection.write_selection`` writes, into a scratch project."""
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.data.selection import (
-        ClassScope, Sample, Selection, selection_key, write_selection,
+        Sample, Selection, selection_key, write_selection,
     )
 
     def build(scratch: Path) -> dict:
@@ -1933,7 +1934,7 @@ def _real_selection() -> dict:
                        ground_truth=str(scratch / "ü/annotations/2026-03-04/a_1.json"),
                        group="a", side="train", ground_truth_digest="7f3a1b9c2d4e5f60"),
             ),
-            scope=ClassScope(subject="bud", id_map={"bud": 0}), seed=42,
+            scope=registry_scope(scratch, "bud"), seed=42,
             group_by="stem", dataset_fingerprint="7ac1",
         ), project=scratch)
         return ts.read(selection_key(scratch))
@@ -2007,7 +2008,8 @@ REGISTERED = {
         {"revisions": [{
             "number": 1,
             "entry": {
-                "name": TRAIT_UNDER_TEST, "delivers": ["measure_one"], "positive_value": "büsch",
+                "name": TRAIT_UNDER_TEST, "delivers": ["measure_one"],
+                "positive_state": {"attribute": "stage", "value": "büsch"},
                 "milestone_fractions": [0.5], "milestone_on": "positive_fraction",
                 "majority_milestone": "",
                 "phenology_prefix": "", "majority_label": "", "count_objective": "",

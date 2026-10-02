@@ -134,20 +134,25 @@ def test_predict_sliced_whole_decode_admits_a_photographic_rgba_file_at_in_chans
     assert result["width"] == 128 and result["height"] == 128
 
 
-def test_the_pass_decodes_through_the_checkpoints_own_recorded_id_map(tmp_path):
-    """A checkpoint whose config carries a recorded id_map decodes through it, reachable with no
-    subjects.json at all, never a map re-derived from a live registry."""
+def test_the_pass_decodes_through_the_checkpoints_own_recorded_attributes(tmp_path):
+    """A checkpoint whose config records its scope's attributes decodes through them, every
+    detection carrying one id per attribute, never an order re-read from a live registry."""
+    from tcip_mcp import subject_registry as cr
     from tests._verified_checkpoint_fixtures import predicted_over, registered_checkpoint
 
-    recorded_id_map = {"closed": 0, "open": 1}
+    attributes = (cr.Attribute("color", "categorical", ("red", "blue")),
+                  cr.Attribute("grade", "ordinal", ("low", "mid", "high")))
     ckpt = registered_checkpoint(
         tmp_path,
         model_source={"builder": "tests.bespoke_models:build_bespoke_detection",
                       "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
                       "task": "detection"},
-        data={"num_channels": 3, "scope": {"subject": "bud", "attribute": "opening",
-                                           "id_map": recorded_id_map}})
+        data={"num_channels": 3, "scope": {"subject": "bud"}},
+        registry=cr.SubjectRegistry(subjects=(cr.Subject(name="bud", attributes=attributes),)))
 
-    p, _results = predicted_over(tmp_path, ckpt, str(Path(_image(tmp_path)).parent), conf=0.0)
+    p, results = predicted_over(tmp_path, ckpt, str(Path(_image(tmp_path)).parent), conf=0.0)
 
-    assert p.scope.id_map == recorded_id_map
+    assert p.scope.attributes == attributes
+    for result in results:
+        assert len(result["attributes"]) == len(result["boxes"])
+        assert all(len(row) == len(attributes) for row in result["attributes"])

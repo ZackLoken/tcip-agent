@@ -68,13 +68,12 @@ def test_every_sample_groups_each_member_the_way_the_stem_policy_records_it(tmp_
     """On a dated tree the ``stem`` policy's group key names the capture date, so a member
     standing alone in its group carries the key a draw would record for it, never the bare name
     another date's same-named image shares."""
-    from tcip_mcp.pipelines.data.label_queries import admit, stated_scope
+    from tcip_mcp.pipelines.data.label_queries import admit, registry_scope
     from tcip_mcp.pipelines.data.splits import recorded_group_key_fn
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     labels = root / "annotations" / DATES[0]
-    admitted = admit(root / "images" / DATES[0], labels,
-                     scope=stated_scope(labels, SUBJECT, None))
+    admitted = admit(root / "images" / DATES[0], labels, scope=registry_scope(labels, SUBJECT))
     key = recorded_group_key_fn("stem", date=admitted.date)
     samples = admitted.every_sample()
 
@@ -84,8 +83,8 @@ def test_every_sample_groups_each_member_the_way_the_stem_policy_records_it(tmp_
 
 
 def _attribute_scoped_dataset(root: Path) -> Path:
-    """One date, five stems: four have their instance assessed for ``condition`` (clearing an
-    attribute-scoped draw's floor), the fifth carries an instance never assessed for it."""
+    """One date, five stems of a subject declaring ``condition``: four have their instance
+    assessed for it, the fifth carries an instance never assessed for it."""
     registry_over(root,SubjectRegistry(subjects=(
         Subject(name=SUBJECT, attributes=(
             Attribute(name="condition", type="categorical", values=("healthy", "damaged")),
@@ -159,9 +158,8 @@ def build_recording_dataset(samples=None, scope=None, **kwargs) -> _RecordingDat
     return built
 
 
-def _draw(project: Path, root: Path, out: Path, *, subject: str = SUBJECT,
-          attribute: str | None = None, seed: int = 2):
-    result = draw_splits(project, str(root), output_path=str(out), subject=subject, attribute=attribute,
+def _draw(project: Path, root: Path, out: Path, *, subject: str = SUBJECT, seed: int = 2):
+    result = draw_splits(project, str(root), output_path=str(out), subject=subject,
                          seed=seed, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in result, result
     return read_selection(out, project=project)
@@ -269,15 +267,15 @@ def test_a_multi_date_selection_trains_without_copying_anything(tmp_path: Path):
     # The checkpoint speaks the selection's own vocabulary, not one re-read from the registry.
     checkpoint = torch.load(run_dir / "model_final.pt", map_location="cpu", weights_only=False)
     stamped = (checkpoint.get("config") or {}).get("data") or {}
-    assert ClassScope(**stamped["scope"]) == drawn.scope
+    assert ClassScope.of(stamped) == drawn.scope
     assert drawn.scope.subject == SUBJECT
 
 
-def test_a_bound_run_keeps_its_selections_class_map_when_the_registry_is_reordered(
+def test_a_bound_run_keeps_its_selections_attributes_when_the_registry_is_reordered(
     tmp_path: Path,
 ):
     """The registry's declared order changes between the draw and the run. The checkpoint must
-    still speak the vocabulary its samples were admitted under: a map re-resolved from the live
+    still speak the vocabulary its samples were admitted under: an order re-read from the live
     registry here would stamp ids the model never trained in, which is a wrong value rather than
     a missing one."""
     from tcip_mcp.pipelines.training.subprocess_worker import run_directory
@@ -285,11 +283,11 @@ def test_a_bound_run_keeps_its_selections_class_map_when_the_registry_is_reorder
 
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(tmp_path, root, out, attribute="condition", seed=1)
-    assert drawn.scope.id_map == {"healthy": 0, "damaged": 1}
+    drawn = _draw(tmp_path, root, out, seed=1)
+    assert [a.values for a in drawn.scope.attributes] == [("healthy", "damaged")]
 
-    # The same attribute, its values declared the other way round: a map re-derived here would
-    # be {"damaged": 0, "healthy": 1}, a different class space than the samples were admitted in.
+    # The same attribute, its values declared the other way round: an order re-read here would
+    # give each value the other's id, a different class space than the samples were admitted in.
     registry_over(root,SubjectRegistry(subjects=(
         Subject(name=SUBJECT, attributes=(
             Attribute(name="condition", type="categorical", values=("damaged", "healthy")),
@@ -314,8 +312,8 @@ def test_a_bound_run_keeps_its_selections_class_map_when_the_registry_is_reorder
     run_directory(run_dir)
 
     checkpoint = torch.load(run_dir / "model_final.pt", map_location="cpu", weights_only=False)
-    stamped = ((checkpoint.get("config") or {}).get("data") or {})["scope"]
-    assert stamped["id_map"] == drawn.scope.id_map
+    stamped = (checkpoint.get("config") or {}).get("data") or {}
+    assert ClassScope.of(stamped) == drawn.scope
 
 
 def test_a_scope_stated_beside_a_selection_refuses_the_bound_run(tmp_path: Path):
@@ -436,7 +434,9 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
         ), scope=ClassScope() if row_key else scope, seed=0, group_by="stem"), project=tmp_path)
         return read_selection(out, project=tmp_path)
 
-    scope = ClassScope(subject=SUBJECT, id_map={SUBJECT: 0})
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
+
+    scope = registry_scope(labels_dir, SUBJECT)
     with pytest.raises(ValueError, match="a detection loader does not read"):
         resolve_sizes("detection", {}, _selection("a.jpg").samples)
 
@@ -515,23 +515,24 @@ def test_an_unconfirmed_empty_label_never_reaches_a_bound_run(tmp_path: Path):
     assert "n" not in {Path(s.ground_truth).stem for s in drawn.samples}
 
 
-def test_a_bound_run_reads_class_ids_from_the_selections_own_map(tmp_path: Path):
-    """The selection records the ``assign_class_ids`` map its admission used, and the loaders
-    read that map: an edited registry cannot relabel a bound run's targets."""
+def test_a_bound_run_reads_attribute_ids_from_the_selections_own_scope(tmp_path: Path):
+    """The selection records the attributes its admission read, and the loaders read them: an
+    edited registry cannot relabel a bound run's targets, and the unassessed stem trains with its
+    row marked rather than being held out."""
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(tmp_path, root, out, attribute="condition")
-    assert drawn.scope.id_map == {"healthy": 0, "damaged": 1}
+    drawn = _draw(tmp_path, root, out)
+    assert [a.values for a in drawn.scope.attributes] == [("healthy", "damaged")]
+    assert "unassessed" in {s.member for s in drawn.samples}
 
     data_cfg = _run_data_cfg(root, out)
     train_ds, _val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
 
     assert train_ds.scope == drawn.scope
-    assert data_cfg.get("num_classes") is None  # the map's length is the one class count
+    assert data_cfg.get("num_classes") is None  # the scope's subject is the one class
     assert drawn.scope.subject == SUBJECT
-    assert drawn.scope.attribute == "condition"
 
 
 def test_a_bound_run_threads_a_bespoke_dataset_source(tmp_path: Path):
@@ -679,7 +680,7 @@ def test_the_selection_writer_refuses_a_document_selection_with_no_subject(tmp_p
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     drawn = _draw(tmp_path, root, tmp_path / "m")
-    unscoped = dataclasses.replace(drawn, scope=ClassScope(id_map=drawn.scope.id_map))
+    unscoped = dataclasses.replace(drawn, scope=dataclasses.replace(drawn.scope, subject=None))
 
     with pytest.raises(ValueError, match="no subject"):
         write_selection(tmp_path / "unscoped", unscoped, project=tmp_path)
@@ -868,6 +869,7 @@ def test_the_explicit_draw_the_runs_own_draw_and_the_redraw_agree_member_for_mem
 def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
     """A dataset plus a selection over it whose train-and-val members hold one foreground group:
     the val side's only group is a confirmed negative. Returns ``(root, selection_dir)``."""
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.data.selection import Sample, Selection, write_selection
     from tests._producer_fixtures import mark_complete
 
@@ -887,7 +889,7 @@ def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
     write_selection(out, Selection(
         samples=(_sample("fg", "train"), _sample("neg", "val"),
                  _sample("held_a", "calibration"), _sample("held_b", "calibration")),
-        scope=ClassScope(subject=SUBJECT, id_map={SUBJECT: 0}), seed=1, group_by="explicit_map"),
+        scope=registry_scope(labels_dir, SUBJECT), seed=1, group_by="explicit_map"),
         project=tmp_path)
     return root, out
 

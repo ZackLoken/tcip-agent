@@ -17,7 +17,7 @@ import pytest
 from tcip_mcp.delivery import DeliveryRefused, record_acknowledgment
 from tests import _trait_fixtures as fx
 
-SCOPE = {"subject": fx.COUNT_SUBJECT, "attribute": None, "id_map": {fx.COUNT_SUBJECT: 0}}
+SCOPE = {"subject": fx.COUNT_SUBJECT}
 
 
 @pytest.fixture(autouse=True)
@@ -63,7 +63,7 @@ def test_an_acknowledgment_names_who_and_why_both_non_empty(tmp_path, who, why):
 def test_an_unassessed_bucket_refuses_with_no_acknowledgment_and_writes_nothing(tmp_path):
     from tests._chain_fixtures import predicted
 
-    bucket = _bucket(tmp_path, [predicted("a", [fx.COUNT_SUBJECT], SCOPE["id_map"])])
+    bucket = _bucket(tmp_path, [predicted("a", [fx.COUNT_SUBJECT])])
 
     with pytest.raises(DeliveryRefused, match="no assessment answers") as refused:
         _deliver(tmp_path, bucket)
@@ -76,7 +76,7 @@ def test_an_acknowledged_delivery_ships_stamped_unvalidated_with_the_act_on_its_
     from tcip_mcp.delivery import read_delivery_events
     from tests._chain_fixtures import acknowledged, predicted
 
-    bucket = _bucket(tmp_path, [predicted("a", [fx.COUNT_SUBJECT], SCOPE["id_map"])])
+    bucket = _bucket(tmp_path, [predicted("a", [fx.COUNT_SUBJECT])])
 
     result = acknowledged(tmp_path, lambda ack: _deliver(tmp_path, bucket, ack),
                           reason="a look before assessing")
@@ -97,8 +97,8 @@ def test_an_acknowledgment_given_for_another_result_refuses(tmp_path):
     result's digest ships nothing, and the refusal names the result this delivery computed."""
     from tests._chain_fixtures import predicted
 
-    bucket = _bucket(tmp_path, [predicted("a", [fx.COUNT_SUBJECT], SCOPE["id_map"])])
-    elsewhere = _bucket(tmp_path, [predicted("b", [fx.COUNT_SUBJECT], SCOPE["id_map"])], "n")
+    bucket = _bucket(tmp_path, [predicted("a", [fx.COUNT_SUBJECT])])
+    elsewhere = _bucket(tmp_path, [predicted("b", [fx.COUNT_SUBJECT])], "n")
     with pytest.raises(DeliveryRefused) as other:
         _deliver(tmp_path, elsewhere)
     act = record_acknowledgment(tmp_path, acknowledged_by="user:breeder", reason="the other one",
@@ -121,7 +121,7 @@ def test_an_acknowledgment_binds_the_rows_and_refuses_once_a_document_changes(tm
 
     import tcip_store
 
-    bucket = _bucket(tmp_path, [predicted("a", [fx.COUNT_SUBJECT] * 6, SCOPE["id_map"])])
+    bucket = _bucket(tmp_path, [predicted("a", [fx.COUNT_SUBJECT] * 6)])
     with pytest.raises(DeliveryRefused) as six:
         _deliver(tmp_path, bucket)
     act = record_acknowledgment(tmp_path, acknowledged_by="user:breeder", reason="six of them",
@@ -151,7 +151,7 @@ def test_an_mcp_door_executes_a_recorded_acknowledgment_and_never_originates_one
 
     assert not {"acknowledged_by", "reason", "acknowledgment"} & set(
         inspect.signature(deliver_per_image_counts).parameters)
-    bucket = _bucket(tmp_path, [predicted("a", [fx.COUNT_SUBJECT], SCOPE["id_map"])])
+    bucket = _bucket(tmp_path, [predicted("a", [fx.COUNT_SUBJECT])])
 
     refused = deliver_per_image_counts(tmp_path, str(bucket), "out/counts.csv",
                                        trait=fx.COUNT_TRAIT, acknowledgment_id="invented")
@@ -184,7 +184,7 @@ def test_the_delivery_skill_documents_the_per_image_csv_the_door_writes(tmp_path
     from tcip_mcp.knowledge import document_path
     from tests._chain_fixtures import predicted
 
-    bucket = _bucket(tmp_path, [predicted("a", [fx.COUNT_SUBJECT], SCOPE["id_map"])])
+    bucket = _bucket(tmp_path, [predicted("a", [fx.COUNT_SUBJECT])])
     result = _acknowledged(tmp_path, bucket)
     with open(result["csv_path"], newline="") as f:
         written = next(csv.reader(f))
@@ -258,8 +258,7 @@ def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(tmp_pa
     def deliver(subject: str, name: str) -> dict:
         pytest.importorskip("torch")
         bucket = published(tmp_path, tmp_path / "ds" / "predictions" / name / "2026-01-01",
-                           [predicted("a", [subject], {subject: 0})],
-                           scope={"subject": subject, "attribute": None, "id_map": {subject: 0}})
+                           [predicted("a", [subject])], scope={"subject": subject})
         return deliver_acknowledged(
             tmp_path, rows, tmp_path / f"{name}.csv", "stem_count",
             delivery_kind=PER_PLANT_COUNT_AGGREGATE, buckets=[read_bucket(bucket.path)])

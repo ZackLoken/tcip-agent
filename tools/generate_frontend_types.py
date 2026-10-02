@@ -65,7 +65,7 @@ def declared_models() -> list[type[BaseModel]]:
         OrthomosaicPlantCountsDelivery, PerImageCountDelivery, PhenologyPayload,
     )
     from tcip_mcp.pipelines.execution import Stated
-    from tcip_mcp.traits import Operationalization, TraitEntry, TraitRevision
+    from tcip_mcp.traits import Operationalization, PositiveState, TraitEntry, TraitRevision
     from tcip_mcp.pipelines.delivery_events_schema import (
         Acknowledgment, BucketFinding, CanopySegmentDisclosure, CanopySegmentsDocument,
         DeliveryEventRecord, MatchTolerance, PlantMappingDisclosure, PlantRegistryDisclosure,
@@ -87,7 +87,7 @@ def declared_models() -> list[type[BaseModel]]:
             PlantRegistryReference, PlantMappingDisclosure, PlantRegistryDisclosure,
             CanopySegmentsDocument, SegmentTieDisclosure, UnattributedDetectionsBySource,
             CanopySegmentDisclosure, Producer, BucketFinding, Acknowledgment,
-            DeliveryEventRecord, Operationalization, TraitEntry, TraitRevision,
+            DeliveryEventRecord, Operationalization, PositiveState, TraitEntry, TraitRevision,
             ConfirmRevisionPayload, Stated]
 
 

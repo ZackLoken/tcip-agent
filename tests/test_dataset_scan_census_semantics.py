@@ -76,7 +76,7 @@ def test_a_buckets_record_is_not_counted_as_a_prediction(tmp_path: Path):
     published(tmp_path, bucket, [
         {"image": str(root / "images" / DATE / f"{stem}.jpg"), "width": 96, "height": 64,
          "boxes": [[12.0, 8.0, 40.0, 52.0]], "scores": [0.8], "labels": [1]}
-        for stem in ("plotA_0_0", "plotB_0_0")], scope={"subject": SUBJECT, "id_map": {SUBJECT: 0}})
+        for stem in ("plotA_0_0", "plotB_0_0")], scope={"subject": SUBJECT})
     staged = root / "predictions" / "staged" / DATE
     staged.mkdir(parents=True)
     json_io.write_annotations(

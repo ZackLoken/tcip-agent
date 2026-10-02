@@ -1,5 +1,4 @@
-"""The dataset's subject registry, subjects, their attributes, and the deterministic name→id
-assignment a training run uses (and records, so predictions stay decodable).
+"""The dataset's subject registry: its subjects and the attributes each declares.
 
 The on-disk registry (``<dataset_root>/subjects.json``) is self-describing and name-based; for
 example, with ``tree`` and ``fruit`` as the subjects::
@@ -13,19 +12,20 @@ example, with ``tree`` and ``fruit`` as the subjects::
     }
 
 An attribute is an axis a subject's instances carry, ``categorical`` (unordered) or ``ordinal``
-(the ``values`` order is the rank). :func:`assign_class_ids` maps the names in a training scope to
-contiguous 0-indexed ids in their declared order.
+(the ``values`` order is the rank). A value's id is its position in that declared order.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
 if TYPE_CHECKING:
     from tcip_store import Version
+
+    from tcip_mcp.traits import PositiveState
 
 #: The attribute kinds a subject may carry. Numeric is deliberately absent, see the module docstring.
 ATTR_TYPES = ("categorical", "ordinal")
@@ -51,6 +51,19 @@ class Attribute:
             raise ValueError(f"duplicate values: {list(self.values)}")
 
 
+class _Named(Protocol):
+    @property
+    def name(self) -> str: ...
+
+
+_N = TypeVar("_N", bound=_Named)
+
+
+def named(records: Iterable[_N], name: str) -> _N | None:
+    """The one of ``records`` (subjects or attributes) named ``name``, or ``None`` when none is."""
+    return next((r for r in records if r.name == name), None)
+
+
 @dataclass(frozen=True)
 class Subject:
     """The object a label set is about. ``attributes`` may be empty, such a subject is only detected."""
@@ -62,10 +75,8 @@ class Subject:
     attributes: tuple[Attribute, ...] = ()
 
     def attribute(self, name: str) -> Attribute | None:
-        for a in self.attributes:
-            if a.name == name:
-                return a
-        return None
+        """:func:`named` over this subject's attributes."""
+        return named(self.attributes, name)
 
 
 @dataclass(frozen=True)
@@ -75,10 +86,8 @@ class SubjectRegistry:
     subjects: tuple[Subject, ...] = ()
 
     def subject(self, name: str) -> Subject | None:
-        for s in self.subjects:
-            if s.name == name:
-                return s
-        return None
+        """:func:`named` over this registry's subjects."""
+        return named(self.subjects, name)
 
 
 class RegistryError(ValueError):
@@ -316,59 +325,21 @@ def copy_registry(source: str | Path, destination: str | Path) -> None:
         ) from exc
 
 
-def assign_class_ids(registry: SubjectRegistry, subject: str, attribute: str | None = None) -> dict[str, int]:
-    """The deterministic name→id map for one training scope, in the registry's declared order.
-
-    - ``attribute`` given: one class per value of that attribute (``{value: 0..N-1}``), in the
-      order the registry declares them, the rank order for an ordinal attribute.
-    - ``attribute`` is ``None``: the subject is trained as a single detection class (``{subject:
-      0}``), whether or not it carries attributes.
-
-    Same registry + scope → identical map, every call. Raises :class:`RegistryError` for an absent
-    subject/attribute.
-    """
-    subj = registry.subject(subject)
-    if subj is None:
-        known = [s.name for s in registry.subjects]
-        raise RegistryError(f"subject {subject!r} not in registry (subjects: {known})")
-    if attribute is None:
-        return {subject: 0}
-    attr = subj.attribute(attribute)
-    if attr is None:
-        known = [a.name for a in subj.attributes]
-        raise RegistryError(f"attribute {attribute!r} not on subject {subject!r} (attributes: {known})")
-    return {value: idx for idx, value in enumerate(attr.values)}
-
-
-def num_classes(registry: SubjectRegistry, subject: str, attribute: str | None = None) -> int:
-    """Class count for a training scope, the size of :func:`assign_class_ids` (0 = background is the
-    detector's own offset, applied by the loader, not counted here)."""
-    return len(assign_class_ids(registry, subject, attribute))
-
-
-def decode_class_ids(id_map: dict[str, int]) -> dict[int, str]:
-    """Invert a recorded name→id map to id→name, for decoding a run's predictions."""
-    return {cid: name for name, cid in id_map.items()}
-
-
-def positive_value_problem(registry: SubjectRegistry, subject_name: str, value: str) -> str | None:
-    """Why ``value`` cannot be ``subject_name``'s positive value in ``registry``, or ``None`` when
-    some attribute of that subject lists it among its values. A subject with no attributes cannot
-    carry a positive value.
-    """
+def positive_state_problem(registry: SubjectRegistry, subject_name: str,
+                           state: "PositiveState") -> str | None:
+    """Why ``state`` cannot be ``subject_name``'s positive state in ``registry``, or ``None`` when
+    that subject declares ``state``'s attribute and the attribute lists ``state``'s value."""
     subject = registry.subject(subject_name)
     if subject is None:
         known = [s.name for s in registry.subjects]
         return f"no subject {subject_name!r} in the registry (subjects: {known})"
-    if not subject.attributes:
-        return (
-            f"subject {subject_name!r} has no attributes, so a bare detector decodes it as a "
-            "single class keyed by the subject's own name; a single-class detector with no "
-            "classification axis never assessed a trait's positive state, so it cannot carry one"
-        )
-    values = sorted({v for a in subject.attributes for v in a.values})
-    if value not in values:
-        return f"value {value!r} is not among subject {subject_name!r}'s attributes' values {values}"
+    attribute = subject.attribute(state.attribute)
+    if attribute is None:
+        return (f"subject {subject_name!r} declares no attribute {state.attribute!r} (it declares "
+                f"{[a.name for a in subject.attributes]})")
+    if state.value not in attribute.values:
+        return (f"attribute {state.attribute!r} of {subject_name!r} declares no value "
+                f"{state.value!r} (it declares {list(attribute.values)})")
     return None
 
 

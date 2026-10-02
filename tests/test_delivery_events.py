@@ -24,8 +24,7 @@ def _bucket(project: Path):
     from tests._chain_fixtures import published
 
     return published(project, project / "ds" / "predictions" / "m" / "2026-01-01", [],
-                     scope={"subject": COUNT_SUBJECT, "attribute": None,
-                            "id_map": {COUNT_SUBJECT: 0}})
+                     scope={"subject": COUNT_SUBJECT})
 
 
 def _cleared(project: Path, revision, bucket, result):
@@ -59,9 +58,9 @@ def _deliver(project: Path, body: dict, out_csv: Path) -> dict:
 
 def test_a_completed_crossing_delivery_writes_the_gates_finding_for_every_bucket(tmp_path):
     pytest.importorskip("torch")
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
-    series = classified_series(tmp_path, fractions=(0.0, 1.0))
+    series = attributed_series(tmp_path, fractions=(0.0, 1.0))
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = _deliver(tmp_path, series.body(), out_csv)
@@ -86,9 +85,9 @@ def test_a_completed_crossing_delivery_writes_the_gates_finding_for_every_bucket
 
 def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(tmp_path):
     pytest.importorskip("torch")
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
-    body = classified_series(tmp_path, fractions=(0.0, 1.0)).body()
+    body = attributed_series(tmp_path, fractions=(0.0, 1.0)).body()
     first_csv, second_csv = tmp_path / "out" / "first.csv", tmp_path / "out" / "second.csv"
     for out_csv in (first_csv, second_csv):
         assert "error" not in _deliver(tmp_path, body, out_csv)
@@ -106,11 +105,11 @@ def test_a_web_route_writes_its_delivery_event_under_the_open_project_only(tmp_p
     from fastapi.testclient import TestClient
 
     from tcip_web.app import app
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
     other_project = tmp_path / "other_project"
     other_project.mkdir()
-    body = classified_series(tmp_path, fractions=(0.0, 1.0)).body()
+    body = attributed_series(tmp_path, fractions=(0.0, 1.0)).body()
 
     resp = TestClient(app, base_url="http://127.0.0.1").post(
         "/api/results/export_csv", json={**body, "payload": "milestones", "filename": "x.csv"})
@@ -127,9 +126,9 @@ def test_a_look_on_screen_records_no_delivery_event_and_no_audit_line(tmp_path):
 
     from tcip_mcp.audit import audit_log_key
     from tcip_web.app import app
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
-    series = classified_series(tmp_path, fractions=(0.0, 1.0))
+    series = attributed_series(tmp_path, fractions=(0.0, 1.0))
     logs = (audit_log_key(tmp_path), audit_log_key(series.root))
     before = [list(ts.read_log(k).records) for k in logs]
 
@@ -293,9 +292,9 @@ def test_delivery_events_route_serves_a_delivered_plant_mapping_disclosure_uncha
     """The disclosure a phenology delivery records over a built mapping is the one the route
     serves."""
     pytest.importorskip("torch")
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
-    series = classified_series(tmp_path, fractions=(0.0, 1.0))
+    series = attributed_series(tmp_path, fractions=(0.0, 1.0))
     assert "error" not in _deliver(tmp_path, series.body(), tmp_path / "out" / "bud.csv")
     (recorded,) = read_delivery_events(tmp_path)
 

@@ -100,7 +100,8 @@ derive from the data, not from the phrasing (see
 - Subjects: register the subject/attribute vocabulary in `subjects.json` via the audited
   `write_subject_registry(dataset_root, subjects)` tool (never hand-edit the file) for what the
   breeder actually distinguishes: it validates the nested subject/attribute shape and writes the
-  file plus an audit record. Keep it minimal first (progressive disclosure); subject semantics
+  file plus an audit record. A run over a subject reads every attribute declared for it, one
+  per-instance head each. Keep it minimal first (progressive disclosure); subject semantics
   live in `subjects.json`, never in filenames. Verify crop traits against
   `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/` before asserting them.
 
@@ -136,7 +137,8 @@ launch path honors one). It copies nothing: a selection lists, per sample, the i
 label document, a group key and a side, so a draw spanning capture dates trains in place. Nothing
 is written without `output_path` (the same draw's stats only). A side whose ratio is zero is not
 drawn, and `subject` is required whenever its ground truth is per-image label documents,
-whose admission is subject-scoped; a selection over `<stem>.png` masks or a `.csv` table of one
+whose admission is subject-scoped and whose scope carries every attribute the registry declares
+for that subject; a selection over `<stem>.png` masks or a `.csv` table of one
 row per image takes none, since each is admitted by existing. Its samples are
 drawn through the same admission a training run
 uses, and a run names it with `data.split.selection_dir` to train against that exact partition

@@ -19,7 +19,7 @@ def _labeled(tmp_path: Path) -> dict:
     (``_verified_checkpoint_fixtures.detection_images``)."""
     from tests._verified_checkpoint_fixtures import detection_images
 
-    scope = {"subject": "bud", "id_map": {"bud": 0}}
+    scope = {"subject": "bud"}
     return {**detection_images(tmp_path / "labeled", scope), "scope": scope}
 
 
@@ -1202,7 +1202,7 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path, monkeypatch)
         {"image": f"{stem}.png", "width": 100, "height": 100,
          "boxes": [[10.0, 10.0, 40.0, 22.0]] * len(scores), "scores": scores,
          "labels": [1] * len(scores)} for stem, scores in scored.items()],
-        scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
+        scope={"subject": "bud"})
 
     out = get_worst_predictions(bucket, str(gts), top_k=2)
     by_stem = {w["stem"]: w["error_score"] for w in out["worst_images"]}

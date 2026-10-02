@@ -69,10 +69,10 @@ def test_a_phenology_look_on_screen_leaves_no_line(tmp_path: Path) -> None:
     from tcip_web.app import app
 
     pytest.importorskip("torch")
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
     client = TestClient(app, base_url="http://127.0.0.1")
-    body = classified_series(tmp_path).body()
+    body = attributed_series(tmp_path).body()
     before = _rows(tmp_path)
 
     resp = client.post("/api/results/phenology_measurement", json=body)

@@ -110,7 +110,9 @@ def read_bucket(path: str | Path) -> Bucket:
     except DecodeError as exc:
         raise NotABucket(str(exc)) from exc
     execution = record.pop("execution")
-    return Bucket(path=directory, scope=ClassScope(**record.pop("scope")),
+    scope = ClassScope.of(record)
+    del record["scope"]
+    return Bucket(path=directory, scope=scope,
                   execution=Execution.of(execution) if execution is not None else None, **record)
 
 
@@ -127,22 +129,6 @@ def by_recorded_date(buckets: Iterable[Bucket]) -> dict[str, Bucket]:
                              f"date {bucket.date}: a series takes one bucket per date.")
         dated[bucket.date] = bucket
     return dated
-
-
-def input_scope(bucket: Bucket | None, subject: str | None, attribute: str | None) -> ClassScope:
-    """The class space documents are read under: a model's ``bucket`` states its own, and a
-    subject or attribute stated beside it refuses (``ValueError``). With no bucket, or a bucket of
-    proposals, which decodes no labels, it is the stated subject, and a stated attribute refuses,
-    since only a model's record carries a classified map."""
-    if bucket is None or bucket.scope == ClassScope():
-        if attribute is not None:
-            raise ValueError("these documents record no class map; a classified read takes a "
-                             "model bucket's own.")
-        return ClassScope(subject=subject)
-    if subject is not None or attribute is not None:
-        raise ValueError(f"{bucket.path}'s record states its own class space; a subject or "
-                         "attribute stated beside it would be a second one.")
-    return bucket.scope
 
 
 def bucket_dirs(dataset_root: str | Path) -> list[Path]:

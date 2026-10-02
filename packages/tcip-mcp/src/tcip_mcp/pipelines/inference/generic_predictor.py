@@ -37,6 +37,10 @@ logger = logging.getLogger(__name__)
 # the task type ``detection`` / ``instance_seg``, both route through the detection formatter.
 _DETECTION_TASKS = frozenset({"detection", "instance_seg"})
 
+DETECTION_ROWS = ("boxes", "scores", "labels", "attributes", "masks")
+"""The keys of a detection record (:meth:`GenericPredictor._detection_record`) holding one entry
+per detection, which every row filter over a record keeps in step."""
+
 
 class WindowedRasterReader(Protocol):
     """A source read window by window: full-raster pixel dimensions, band count, and a windowed
@@ -86,6 +90,7 @@ class GenericPredictor:
         # The width and count the run that produced this checkpoint recorded on its own config.
         dims = recorded_model_dims(self.config)
         self.in_chans = dims["in_chans"]
+        self.attribute_sizes = [len(a.values) for a in dims.get("attributes", ())]
         self.model = build_model(self.config, dims)  # re-imported bespoke builder (no exec)
         self.model.load_state_dict(ckpt[STATE_DICT_KEY])
         self.model.to(self.device)
@@ -176,7 +181,8 @@ class GenericPredictor:
                           max_dets: int | None) -> dict:
         """The platform's detection record from ``ObjectPrediction``s in full-frame pixels, highest
         score first under the full-frame ``max_dets`` cap: ``image``, ``width``, ``height``,
-        ``boxes`` (xyxy), ``scores``, ``labels`` (1-indexed), ``count`` and ``cap_hit``; where
+        ``boxes`` (xyxy), ``scores``, ``labels`` (1-indexed), ``count`` and ``cap_hit``; where the
+        checkpoint carries attributes, ``attributes``, one id per attribute per detection; where
         ``model`` collected masks, ``masks`` as one ``{"segmentation": [[x0, y0, x1, y1, ...],
         ...]}`` per detection, empty where the mask binarized to nothing, and ``mask_binarize``,
         the provenance of the threshold ``model`` cut them at."""
@@ -185,12 +191,15 @@ class GenericPredictor:
         ranked = sorted(predictions, key=lambda p: -p.score.value)
         # cap_hit uses >=, matching records_from_detector.
         cap_hit = bool(max_dets is not None and len(ranked) >= max_dets)
-        kept = prediction_rows(ranked[:max_dets] if max_dets is not None else ranked)
+        kept = prediction_rows(ranked[:max_dets] if max_dets is not None else ranked,
+                               self.attribute_sizes)
         record = {
             "image": label, "width": int(width), "height": int(height),
             "boxes": [row["bbox"] for row in kept], "scores": [row["score"] for row in kept],
             "labels": [row["category_id"] for row in kept], "count": len(kept), "cap_hit": cap_hit,
         }
+        if self.attribute_sizes:
+            record["attributes"] = [row["attributes"] for row in kept]
         if model.collect_masks:
             record["masks"] = [{"segmentation": row["segmentation"] or []} for row in kept]
             record["mask_binarize"] = model.mask_binarize
@@ -283,7 +292,8 @@ class GenericPredictor:
         slices = slice_lattice(height, width, tile_size, cast(float, execution.overlap))
         prior = prior or {"slices": [], "predictions": []}
         done = {tuple(s) for s in prior["slices"]}
-        predictions = predictions_from_rows(prior["predictions"], [height, width])
+        predictions = predictions_from_rows(prior["predictions"], [height, width],
+                                            self.attribute_sizes)
         pending = [(i, s) for i, s in enumerate(slices) if s not in done]
         for start in range(0, len(pending), tile_batch_size):
             batch = pending[start:start + tile_batch_size]
@@ -295,7 +305,8 @@ class GenericPredictor:
             predictions.extend(new)
             if progress is not None:
                 progress(batch[0][0], batch[-1][0], {"slices": [list(s) for _, s in batch],
-                                                     "predictions": prediction_rows(new)})
+                                                     "predictions": prediction_rows(
+                                                         new, self.attribute_sizes)})
 
         merged = merge(predictions) if predictions else []
         # The in-model cap only caps per slice; the record's cap is the full frame's.
