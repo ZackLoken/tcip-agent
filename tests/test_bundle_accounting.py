@@ -13,7 +13,9 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.subject_registry import SubjectRegistry, Subject
 from tcip_mcp.tools.bundle import AnchorMisplaced, account_for
+from tcip_store.sqlite_backend import SqliteBackend
 from tests._producer_fixtures import registry_over
+from tests.test_archive_store_gate import bound
 
 
 def _dataset_tree(root: Path) -> None:
@@ -34,7 +36,8 @@ def _plan_paths(accounting) -> set[str]:
 
 def test_a_plain_dataset_tree_is_all_blob_and_nothing_unaccounted(tmp_path: Path):
     root = tmp_path / "proj"
-    _dataset_tree(root)
+    with bound(SqliteBackend()):
+        _dataset_tree(root)
 
     accounting = account_for(root)
 
