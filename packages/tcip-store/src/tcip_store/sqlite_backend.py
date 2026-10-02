@@ -823,11 +823,12 @@ class SqliteBackend:
         descriptor = get_descriptor(store)
         if descriptor.kind == "blob":
             return self._files.keys(store, root, prefix)
+        table = "log_entries" if descriptor.kind == "log" else "records"
         with self._mapped(()), self._serving(root, (store,)) as conn:
             if conn is None:
                 return []
             rows = conn.execute(
-                "select parts from records where store = ?", (store,)
+                f"select distinct parts from {table} where store = ?", (store,)
             ).fetchall()
         found = [
             Key(store, root, parts)
