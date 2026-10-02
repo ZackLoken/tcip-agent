@@ -236,8 +236,7 @@ def _copy_source_registry_for_classified_scope(source_images_dir: str, output_di
     from tcip_mcp.dataset_layout import dataset_root_of, subjects_path
 
     src_root = dataset_root_of(source_images_dir)
-    src_registry = subjects_path(src_root) if src_root is not None else None
-    if src_registry is None or not src_registry.is_file():
+    if src_root is None or not subjects_path(src_root).is_file():
         raise ValueError(
             f"{source_images_dir} names no dataset root with a subject registry to copy: a "
             "classified scope's output cannot train without the registry that decodes it. "
@@ -245,11 +244,11 @@ def _copy_source_registry_for_classified_scope(source_images_dir: str, output_di
             "(write_subject_registry) first."
         )
     try:
-        read_registry(src_registry)
+        read_registry(src_root)
     except (OSError, RegistryError) as exc:
         raise ValueError(
-            f"{src_registry} does not decode as a subject registry ({exc}); repair it before "
-            "materializing this classified review."
+            f"{subjects_path(src_root)} does not decode as a subject registry ({exc}); repair it "
+            "before materializing this classified review."
         ) from exc
     out_registry = subjects_path(output_dir)
     if out_registry.is_file():
@@ -258,7 +257,7 @@ def _copy_source_registry_for_classified_scope(source_images_dir: str, output_di
             "classified review into it again would silently overwrite the registry an earlier "
             "harvest wrote there."
         )
-    copy_registry(src_registry, out_registry)
+    copy_registry(src_root, output_dir)
 
 
 def materialize_dataset(
@@ -379,14 +378,13 @@ def materialize_dataset(
         )
 
         src_root = dataset_root_of(source_images_dir)
-        src_registry = subjects_path(src_root) if src_root is not None else None
-        if src_registry is not None and src_registry.is_file():
+        if src_root is not None and subjects_path(src_root).is_file():
             try:
-                digest = attribute_schema_digest(read_registry(src_registry), cast(str, neg_subject))
+                digest = attribute_schema_digest(read_registry(src_root), cast(str, neg_subject))
             except (OSError, RegistryError):
                 digest = None
             if digest is not None:
-                copy_registry(src_registry, subjects_path(out))
+                copy_registry(src_root, out)
                 stamp_image_status_digests(out, bucket_key, negatives, digest)
 
     manifest = {

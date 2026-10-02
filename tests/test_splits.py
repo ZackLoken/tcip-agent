@@ -31,9 +31,21 @@ def _grouped(stems):
     return [f"src{g}_{r}_0" for g in range(stems) for r in range(3)]
 
 
+_SIDES = {"train": 0.6, "val": 0.2, "calibration": 0.2}
+
+
+def _split(stems, *, counts=None, splits=_SIDES, seed=1, weighted=True, minimums=None):
+    """The draw over ``stems`` grouped by tile prefix, every member counted (one each unless
+    ``counts`` says otherwise), at a minimum of one foreground group per side unless stated."""
+    return group_balanced_split(
+        stems, counts=counts if counts is not None else dict.fromkeys(stems, 1),
+        weighted=weighted, group_key_fn=default_group_key, splits=splits, seed=seed,
+        min_foreground_groups=minimums if minimums is not None else dict.fromkeys(splits, 1))
+
+
 def test_group_split_no_group_spans_splits():
     stems = _grouped(6)  # 6 sources x 3 tiles
-    parts = group_balanced_split(stems, splits=(0.6, 0.2, 0.2), seed=1)
+    parts = _split(stems)
     group_to_splits = defaultdict(set)
     for split, ss in parts.items():
         for s in ss:
@@ -43,8 +55,8 @@ def test_group_split_no_group_spans_splits():
 
 def test_group_split_deterministic_and_partition():
     stems = _grouped(8)
-    a = group_balanced_split(stems, seed=7)
-    b = group_balanced_split(stems, seed=7)
+    a = _split(stems, seed=7)
+    b = _split(stems, seed=7)
     assert a == b
     union = a["train"] + a["val"] + a["calibration"]
     assert sorted(union) == sorted(stems)
@@ -56,10 +68,8 @@ def test_group_split_foreground_stratification():
     bg = [f"bg{g}_0_0" for g in range(4)]
     stems = fg + bg
     counts = {s: (2 if s.startswith("fg") else 0) for s in stems}
-    parts = group_balanced_split(
-        stems, annotation_counts=counts, splits=(0.6, 0.4, 0.0), seed=3
-    )
-    assert parts["calibration"] == []  # 0.0 fraction -> empty
+    parts = _split(stems, counts=counts, splits={"train": 0.6, "val": 0.4}, seed=3)
+    assert set(parts) == {"train", "val"}
 
     def has_fg(ss):
         return any(counts[s] > 0 for s in ss)
@@ -67,24 +77,28 @@ def test_group_split_foreground_stratification():
     assert has_fg(parts["train"]) and has_fg(parts["val"])
 
 
-def test_group_split_calibration_side_gets_its_stated_minimum():
-    """Over six foreground groups at a skewed (0.6, 0.2, 0.2) ratio, the default one-per-side
-    minimum lands 4/1/1 (train's floor absorbs every group the balancing pass would otherwise
-    give the smaller sides); stating a per-side minimum of two for the third side raises its own
-    floor to two groups, taking from train's share instead."""
-    stems = _grouped(6)
-    counts = {s: 1 for s in stems}
+def test_group_split_refuses_a_member_with_no_measured_count():
+    """A member the counts do not name refuses at the algorithm rather than balancing as a
+    background member."""
+    stems = _grouped(4)
+    counts = {s: 1 for s in stems[1:]}
+    with pytest.raises(ValueError, match="no foreground count"):
+        _split(stems, counts=counts)
 
-    default_parts = group_balanced_split(
-        stems, annotation_counts=counts, splits=(0.6, 0.2, 0.2), seed=1)
+
+def test_group_split_calibration_side_gets_its_stated_minimum():
+    """Over six foreground groups at a skewed (0.6, 0.2, 0.2) ratio, a one-per-side minimum
+    lands 4/1/1 (train's floor absorbs every group the balancing pass would otherwise give the
+    smaller sides); stating a per-side minimum of two for the third side raises its own floor to
+    two groups, taking from train's share instead."""
+    stems = _grouped(6)
+
+    default_parts = _split(stems)
     assert len({default_group_key(s) for s in default_parts["train"]}) == 4
     assert len({default_group_key(s) for s in default_parts["val"]}) == 1
     assert len({default_group_key(s) for s in default_parts["calibration"]}) == 1
 
-    stated_parts = group_balanced_split(
-        stems, annotation_counts=counts, splits=(0.6, 0.2, 0.2), seed=1,
-        min_foreground_groups={"train": 1, "val": 1, "calibration": 2},
-    )
+    stated_parts = _split(stems, minimums={"train": 1, "val": 1, "calibration": 2})
     assert len({default_group_key(s) for s in stated_parts["calibration"]}) == 2
 
 
@@ -108,8 +122,7 @@ def test_refuse_insufficient_foreground_groups_names_the_sides_and_the_shortfall
 
 def test_refuse_insufficient_foreground_groups_carries_the_callers_own_remedy():
     """The caller states what to add, since what counts as foreground differs by the ground
-    truth a draw reads; writing a selection requires every side's ratio non-zero, so no side can
-    be dropped by zeroing its ratio and no remedy offers that."""
+    truth a draw reads."""
     from tcip_mcp.pipelines.data.splits import refuse_insufficient_foreground_groups
 
     with pytest.raises(ValueError) as exc_info:
@@ -121,16 +134,11 @@ def test_refuse_insufficient_foreground_groups_carries_the_callers_own_remedy():
     assert "annotate or confirm more foreground groups" in message
 
 
-def test_group_split_no_foreground_fallback():
+def test_group_split_with_no_foreground_balances_by_tile_count():
     stems = _grouped(4)
-    counts = {s: 0 for s in stems}
-    parts = group_balanced_split(
-        stems, annotation_counts=counts, splits=(0.7, 0.3, 0.0),
-        seed=5, require_foreground=False,
-    )
-    assert parts["train"] and parts["val"]  # fallback splits by tile count
-    with pytest.raises(ValueError):
-        group_balanced_split(stems, annotation_counts=counts, seed=5, require_foreground=True)
+    parts = _split(stems, counts=dict.fromkeys(stems, 0), splits={"train": 0.7, "val": 0.3},
+                   seed=5)
+    assert parts["train"] and parts["val"]
 
 
 # --- resolve_group_key_fn ---

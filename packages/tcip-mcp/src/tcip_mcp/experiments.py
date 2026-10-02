@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 from typing import Any, BinaryIO
 
+import tcip_store
 from tcip_store import LOG_JSON, RECORD_JSON, BadKey, DecodeError, check_json_value
 
 from tcip_mcp.pipelines.data.selection import SAMPLE_PATHS
@@ -69,9 +70,9 @@ RECORD_PATHS: dict[str, PathFields] = {
         ("resolved", "partition", "selection", "selection_dir"),
         ("resume_from",), *within(("trial_params",), _PARAMETER_PATHS)),
     SWEEP_FILE: (
-        *within(("base_config", "data"), DATA_PATHS),
-        *within(("baseline_params",), _PARAMETER_PATHS),
-        *within(("param_space",), _SPACE_PATHS)),
+        *within(("input", "base_config", "data"), DATA_PATHS),
+        *within(("input", "baseline_params"), _PARAMETER_PATHS),
+        *within(("input", "param_space"), _SPACE_PATHS)),
     FINAL_STATUS_FILE: (("checkpoint", "path"),),
 }
 """The fields of each record of a run or sweep directory that name a path, each stored against
@@ -436,9 +437,8 @@ def best_selection(rows: list[dict[str, Any]], objective: dict) -> float | None:
 def run_summary(observation: RunObservation, rows: list[dict[str, Any]]) -> dict[str, Any]:
     """One run's status row over its metrics-log ``rows`` (:func:`read_rows` of its
     ``metrics_log``): its state, its last logged epoch, its directory, its final status's error,
-    who launched it, its last sign of life, and its best selection value under the objective its
-    launch recorded, folded from ``rows`` (:func:`best_selection`), with that objective's metric
-    name."""
+    its last sign of life, and its best selection value under the objective its launch recorded,
+    folded from ``rows`` (:func:`best_selection`), with that objective's metric name."""
     run_dir = observation.directory
     objective = observation.record["resolved"]["objective"]
     final = observation.final
@@ -450,9 +450,20 @@ def run_summary(observation: RunObservation, rows: list[dict[str, Any]]) -> dict
         "best_metric_name": objective["selection_metric"],
         "output_dir": str(run_dir),
         "error": final["error"] if final is not None else None,
-        "launched_by": observation.record["launched_by"],
         "heartbeat": datetime.fromtimestamp(observation.alive, timezone.utc).isoformat(),
     }
+
+
+def launch_declarations(project: Path | str) -> dict[str, dict[str, Any]]:
+    """The agent identity each run's ``launch_training`` line in ``project``'s audit log carries,
+    by the experiment id it names: empty for a launch no agent declared itself to."""
+    from tcip_mcp import agent_identity
+    from tcip_mcp.audit import audit_log_key
+
+    return {entry["arguments"]["experiment_id"]:
+            {field: entry[field] for field in agent_identity.RECORD_FIELDS if field in entry}
+            for entry in tcip_store.read_log(audit_log_key(project)).records
+            if entry.get("tool") == "launch_training"}
 
 
 def _distinct_epoch_count(rows: list[dict[str, Any]]) -> int:

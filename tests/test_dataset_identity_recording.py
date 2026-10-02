@@ -27,8 +27,8 @@ def _make_dataset(root: Path, *, shade: int = 0,
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp import subject_registry
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tests._producer_fixtures import registry_over
 
     images_dir, labels_dir = root / images / "2-11-26", root / "annotations" / "2-11-26"
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -37,8 +37,7 @@ def _make_dataset(root: Path, *, shade: int = 0,
         Image.new("RGB", (32, 32), color=(shade, 10 * i, 0)).save(images_dir / f"img_{i:03d}.jpg")
         json_io.write_annotations(str(labels_dir / f"img_{i:03d}.json"),
                                   [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 9, 9))], 32, 32)
-    subject_registry.write_registry(root / "subjects.json",
-                                  SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    registry_over(root, SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
     return images_dir, labels_dir
 
 
@@ -123,8 +122,7 @@ def test_a_trial_over_a_data_axis_records_the_dataset_its_own_input_names(tmp_pa
 
     _run_hpo_trial({"data.images_dir": str(other_images), "data.labels_dir": str(other_labels)},
                    [].append, _config(base_images, base_labels), trial_dir, project=tmp_path,
-                   objective={"selection_metric": "loss", "higher_is_better": False},
-                   launched_by={"launcher": "process"})
+                   objective={"selection_metric": "loss", "higher_is_better": False})
 
     dataset = read_record(trial_dir / RUN_FILE)["dataset"]
     assert dataset == {"id": other["id"], "fingerprint": other["fingerprint"]}

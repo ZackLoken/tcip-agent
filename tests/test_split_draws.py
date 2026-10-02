@@ -193,7 +193,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_wo
     tmp_path, monkeypatch,
 ):
     """A selection whose train-plus-val members hold one foreground group refuses the sweep
-    before minting, the same distinct-groups check preflight_config runs for one config."""
+    before minting, through the same redraw a run's launch makes."""
     import tcip_mcp.tools.training_tools as tt
 
     from tests.test_selection_binding import one_foreground_group_selection
@@ -210,7 +210,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_wo
     result = tt.run_hyperparameter_search(tmp_path, base_config=cfg, n_trials=1,
                         scheduler="none", split_draws=2, search_seed=0)
 
-    assert "error" in result and "would starve" in result["error"]
+    assert "fewer than the 2 the requested sides need" in result["error"]
     assert not ran
     assert list(tmp_path.glob("hpo_*")) == []
 
@@ -1440,14 +1440,12 @@ def test_run_hyperparameter_search_admits_split_draws_over_a_two_source_tiled_co
     assert "error" not in result
 
 
-def test_run_hyperparameter_search_admits_split_draws_over_a_bespoke_dataset_source(
+def test_split_draws_over_one_bespoke_source_refuse_the_validation_they_cannot_draw(
     tmp_path, monkeypatch,
 ):
-    """A bespoke dataset_source is excluded from this leg outright: the single-source config the
-    built-in leg refuses when tiled is admitted with a builder named (which takes no platform
-    tiling), because the spatial-strip route serves datasets the platform builds itself, so a
-    bespoke run never takes it however few sources it admits. Its own samples still come from
-    the platform's producer, so every draw varies the same admitted set."""
+    """A bespoke dataset_source never takes the spatial-strip route, so one admitted source
+    leaves nothing to hold a validation side out of: the sweep refuses naming
+    ``auto_val=False`` rather than training each draw without validation."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     import tcip_mcp.tools.training_tools as tt
@@ -1470,7 +1468,7 @@ def test_run_hyperparameter_search_admits_split_draws_over_a_bespoke_dataset_sou
     result = tt.run_hyperparameter_search(tmp_path, base_config=cfg, n_trials=1,
                         scheduler="none", split_draws=2, trial_budget=2, search_seed=0)
 
-    assert "error" not in result, result
+    assert any("auto_val=False" in issue for issue in result["issues"]), result
 
 
 def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(

@@ -1,26 +1,17 @@
-"""The network trust boundary: which connections the backend serves and which names it answers to.
+"""The network trust boundary: the backend serves connections that arrived through this machine,
+and answers only to loopback names.
 
-Exposure is a property of the accepted connection, never of a configured bind host. The ASGI
-``scope["server"]`` is the local address the connection arrived on, so a connection through a
-loopback address is local, one through a routable address is exposed, and one the backend cannot
-classify is refused. An exposed arrival is served only when the operator has opted in with
-``TCIP_WEB_ALLOW_INSECURE=1``.
-
-One canonical authority parser serves the arrival, the Host header, the Origin header and the
-operator's advertised list (``TCIP_WEB_ADVERTISED_HOSTS``, comma-separated ``host[:port]`` entries
-for a name clients reach this machine by that it does not know itself, such as a DNS alias or a
-same-machine reverse proxy), which is consulted only under the opt-in. There is no wildcard
-anywhere.
+Locality is a property of the accepted connection, never of a configured bind host: the ASGI
+``scope["server"]`` is the local address the connection arrived on, and a connection through
+anything but a loopback address or a UNIX socket is refused. One canonical authority parser serves
+the arrival, the Host header and the Origin header.
 """
 
 from __future__ import annotations
 
 import ipaddress
 import logging
-import os
-import socket
 from collections.abc import Awaitable, Callable, Mapping, MutableMapping
-from functools import cache
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -35,8 +26,6 @@ Authority = tuple[str, int | None]
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 _LOOPBACK_NAMES = frozenset({"localhost"})
-_ADVERTISED_ENV = "TCIP_WEB_ADVERTISED_HOSTS"
-_OPT_IN_ENV = "TCIP_WEB_ALLOW_INSECURE"
 
 STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 """HTTP methods the trust boundary treats as mutating: a request using one of these must carry
@@ -48,10 +37,9 @@ _ORIGIN_REFUSAL_HTTP = (
 )
 
 EXPOSURE_REFUSAL = (
-    "this connection arrived through a network address and the backend is not opted into network "
-    "exposure: an exposed GUI hands an unauthenticated network client filesystem reads and writes "
-    "and an interactive agent terminal, which is keyboard access to a coding agent. Set "
-    f"{_OPT_IN_ENV}=1 only on a trusted network."
+    "this connection arrived through a network address: the backend serves this machine only, "
+    "since it hands an unauthenticated client filesystem reads and writes and an interactive "
+    "agent terminal, which is keyboard access to a coding agent."
 )
 
 
@@ -124,48 +112,6 @@ def is_loopback_host(host: str) -> bool:
         return False
 
 
-def _is_routable_ip(host: str) -> bool:
-    try:
-        ip = ipaddress.ip_address(canonical_host(host))
-    except ValueError:
-        return False
-    return not ip.is_loopback and not ip.is_unspecified
-
-
-def insecure_opt_in() -> bool:
-    """Whether the operator has opted into serving network clients with no authentication."""
-    return os.environ.get(_OPT_IN_ENV) == "1"
-
-
-def advertised_authorities() -> list[Authority]:
-    """The operator's advertised authorities, validated; ``ValueError`` names a bad entry.
-
-    An entry with no port stands for the arrival's own port. A wildcard is refused by name.
-    """
-    raw = os.environ.get(_ADVERTISED_ENV, "")
-    out: list[Authority] = []
-    for entry in (e for e in raw.split(",") if e.strip()):
-        if "*" in entry:
-            raise ValueError(f"{_ADVERTISED_ENV} entry {entry!r} is a wildcard; advertise names")
-        try:
-            out.append(parse_authority(entry, None))
-        except ValueError as exc:
-            raise ValueError(f"{_ADVERTISED_ENV} entry {entry!r} is not a host[:port]") from exc
-    return out
-
-
-@cache
-def _own_names() -> frozenset[str]:
-    """The machine's own names, resolved once per process; addresses come from the arrival."""
-    names = set()
-    for getter in (socket.gethostname, socket.getfqdn):
-        try:
-            names.add(canonical_host(getter()))
-        except (OSError, ValueError):
-            continue
-    return frozenset(names)
-
-
 def arrival(scope: Mapping[str, Any]) -> tuple[str, int | None] | None:
     """The local address a connection was accepted on, or None when the scope carries none."""
     server = scope.get("server")
@@ -182,12 +128,6 @@ def local_arrival(scope: Mapping[str, Any]) -> bool:
         return False
     host = at[0]
     return is_loopback_host(host) or "/" in host or "\\" in host
-
-
-def exposed_arrival(scope: Mapping[str, Any]) -> bool:
-    """True when the connection arrived through a routable address."""
-    at = arrival(scope)
-    return at is not None and _is_routable_ip(at[0])
 
 
 def _http_scheme(scheme: str) -> str:
@@ -215,40 +155,13 @@ def request_authority(scope: Mapping[str, Any]) -> Authority | None:
         return None
 
 
-def _advertised_match(authority: Authority, arrival_port: int | None) -> bool:
-    if not insecure_opt_in():
-        return False
-    for host, port in advertised_authorities():
-        if host == authority[0] and (port if port is not None else arrival_port) == authority[1]:
-            return True
-    return False
-
-
 def host_allowed(scope: Mapping[str, Any]) -> bool:
-    """Whether the request's Host names this backend as reached through its arrival.
-
-    The authority must equal the arrival's address and port, or be a loopback name at the
-    arrival port on a local arrival, the machine's own name at the arrival port, or an advertised
-    authority under the opt-in.
-    """
+    """Whether the request's Host is a loopback name at the port the connection arrived on."""
     at = arrival(scope)
     authority = request_authority(scope)
     if at is None or authority is None:
         return False
-    host, port = authority
-    arrival_host, arrival_port = at
-    try:
-        arrival_canonical = canonical_host(arrival_host)
-    except ValueError:
-        return False
-    port_matches = arrival_port is None or port == arrival_port
-    if host == arrival_canonical and port_matches:
-        return True
-    if local_arrival(scope) and is_loopback_host(host) and port_matches:
-        return True
-    if host in _own_names() and port_matches:
-        return True
-    return _advertised_match(authority, arrival_port)
+    return is_loopback_host(authority[0]) and (at[1] is None or authority[1] == at[1])
 
 
 def _parse_origin(origin: str) -> tuple[str, Authority] | None:
@@ -265,53 +178,39 @@ def _parse_origin(origin: str) -> tuple[str, Authority] | None:
 
 
 def origin_allowed(origin: str | None, scope: Mapping[str, Any]) -> bool:
-    """Whether an Origin is one this backend serves for the connection it arrived on.
+    """Whether an Origin is one this backend serves.
 
     Only an absent Origin (``None``) is a non-browser client and is allowed. A present Origin,
-    empty included, is refused if it does not parse as a bare authority. A present Origin must be
-    exactly the request's own origin (the validated Host at the request scheme), or a loopback host
-    at any port on a local arrival, or an advertised authority under the opt-in.
+    empty included, is refused unless it parses as a bare authority naming a loopback host, at any
+    port.
     """
     if origin is None:
         return True
     parsed = _parse_origin(origin)
-    if parsed is None:
-        return False
-    scheme, authority = parsed
-    at = arrival(scope)
-    request = request_authority(scope)
-    if at is None or request is None:
-        return False
-    if scheme == _request_scheme(scope) and authority == request:
-        return True
-    if local_arrival(scope) and is_loopback_host(authority[0]):
-        return True
-    return _advertised_match(authority, at[1])
+    return parsed is not None and is_loopback_host(parsed[1][0])
 
 
 class TrustBoundaryMiddleware:
     """Refuse connections the backend must not serve, before any route runs.
 
     Applies to ``http`` and ``websocket`` scopes only; a ``lifespan`` scope carries no arrival. An
-    arrival the backend cannot classify, and an exposed arrival without the opt-in, are refused
-    with the exposure message; a Host the backend does not answer to is refused as an invalid host.
-    After the Host check, every WebSocket scope and every ``http`` scope whose method is in
-    :data:`STATE_CHANGING_METHODS` must also carry an Origin :func:`origin_allowed` admits; a
-    duplicated Origin header is refused the same way a duplicated Host is. On a loopback arrival
-    every loopback origin at every port is admitted. A refused exposed arrival is logged once per
-    client and arrival address pair.
+    arrival that is not :func:`local_arrival` is refused with the exposure message; a Host the
+    backend does not answer to is refused as an invalid host. After the Host check, every
+    WebSocket scope and every ``http`` scope whose method is in :data:`STATE_CHANGING_METHODS` must
+    also carry an Origin :func:`origin_allowed` admits; a duplicated Origin header is refused the
+    same way a duplicated Host is. A refused arrival is logged once per client and arrival address
+    pair.
     """
 
     def __init__(self, app: Callable[[Scope, Receive, Send], Awaitable[None]]) -> None:
         self.app = app
-        advertised_authorities()
         self._logged: set[str] = set()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
-        if not local_arrival(scope) and not (exposed_arrival(scope) and insecure_opt_in()):
+        if not local_arrival(scope):
             self._log_refusal(scope)
             await _refuse(scope, send, 403, EXPOSURE_REFUSAL)
             return
@@ -355,11 +254,3 @@ async def _refuse(scope: Mapping[str, Any], send: Send, status: int, detail: str
                     (b"content-length", str(len(body)).encode("ascii"))],
     })
     await send({"type": "http.response.body", "body": body})
-
-
-def log_exposure_opt_in() -> None:
-    """Name, at startup, what an opted-in exposed bind hands out; silent otherwise."""
-    if insecure_opt_in():
-        logger.warning(
-            "%s=1: network clients are served with no authentication; they get filesystem reads "
-            "and writes and the interactive agent terminal", _OPT_IN_ENV)

@@ -50,15 +50,15 @@ def test_registry_write_records_in_the_dataset_named_by_its_root_argument(
 
     assert "error" not in write_subject_registry(project, str(dataset_root), subjects=_subjects())
 
-    rows = _rows_for(dataset_root, "write_subject_registry")
+    rows = _rows_for(dataset_root, "replace_registry")
     assert len(rows) == 1, _entries(dataset_root)
-    assert _rows_for(project, "write_subject_registry") == []
+    assert _rows_for(project, "replace_registry") == []
 
 
 def test_label_write_records_in_the_dataset_holding_the_image_it_names(
     project: Path, dataset_root: Path
 ) -> None:
-    """The scope argument carries a path inside the dataset, not the root itself."""
+    """The label path lies inside the dataset, not at its root."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     image = dataset_root / "images" / CAPTURE_DATE / "IMG_0001.JPG"
@@ -68,9 +68,9 @@ def test_label_write_records_in_the_dataset_holding_the_image_it_names(
     )
     assert "error" not in result
 
-    rows = _rows_for(dataset_root, "save_annotations")
+    rows = _rows_for(dataset_root, "save_label_document")
     assert len(rows) == 1, _entries(dataset_root)
-    assert _rows_for(project, "save_annotations") == []
+    assert _rows_for(project, "save_label_document") == []
 
 
 def test_propose_annotations_records_in_the_dataset_named_by_the_image_it_ran_against(
@@ -148,7 +148,7 @@ def test_scope_argument_naming_no_dataset_leaves_the_call_in_the_project(
     )
     assert "error" not in result
 
-    assert len(_rows_for(project, "save_annotations")) == 1
+    assert len(_rows_for(project, "save_label_document")) == 1
     assert _entries(loose) == []
 
 

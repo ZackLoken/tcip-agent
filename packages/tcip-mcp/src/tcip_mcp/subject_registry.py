@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from tcip_store import Key, Version
+    from tcip_store import Version
 
 #: The attribute kinds a subject may carry. Numeric is deliberately absent, see the module docstring.
 ATTR_TYPES = ("categorical", "ordinal")
@@ -163,13 +163,6 @@ def attribute_schema_digest(registry: SubjectRegistry, subject: str) -> str | No
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
-def _registry_key(path: str | Path) -> "Key":
-    """The stored registry a ``subjects.json`` path names, addressed by the dataset root holding it."""
-    from tcip_mcp.dataset_layout import subject_registry_key
-
-    return subject_registry_key(Path(path).parent)
-
-
 def _checked_registry_document(data: bytes, *, path: str | Path) -> dict:
     """The stored registry's decoded document, version-checked.
 
@@ -188,8 +181,9 @@ def _checked_registry_document(data: bytes, *, path: str | Path) -> dict:
     return document
 
 
-def read_registry(path: str | Path) -> SubjectRegistry:
-    """Read ``subjects.json`` into a :class:`SubjectRegistry`.
+def read_versioned_registry(dataset_root: str | Path) -> tuple[SubjectRegistry, "Version"]:
+    """Read ``dataset_root``'s subject registry into a :class:`SubjectRegistry`, beside the
+    version of the bytes it decoded, both from one read.
 
     No registry raises ``FileNotFoundError``, and a registry whose bytes are present but will not
     decode raises :class:`RegistryError`, the same refusal a structurally invalid registry raises.
@@ -198,35 +192,20 @@ def read_registry(path: str | Path) -> SubjectRegistry:
     """
     import tcip_store
 
+    from tcip_mcp.dataset_layout import subject_registry_key, subjects_path
+
+    path = subjects_path(dataset_root)
     try:
-        data = tcip_store.read_blob_versioned(_registry_key(path)).value
+        versioned = tcip_store.read_blob_versioned(subject_registry_key(dataset_root))
     except tcip_store.NotFound as exc:
         raise FileNotFoundError(f"no subject registry at {path}") from exc
-    document = _checked_registry_document(data, path=path)
-    return registry_from_dict(document)
+    document = _checked_registry_document(versioned.value, path=path)
+    return registry_from_dict(document), versioned.version
 
 
-def write_registry(path: str | Path, registry: SubjectRegistry) -> None:
-    """Write a :class:`SubjectRegistry` to ``subjects.json``, unconditionally.
-
-    Encoded through the canonical record codec. A plain overwrite, with no compare-and-set and no
-    refusal for a dropped name; :func:`replace_registry` is the checked write.
-    """
-    import tcip_store
-
-    tcip_store.put_blob(
-        _registry_key(path), tcip_store.RECORD_JSON.encode(registry_to_dict(registry))
-    )
-
-
-def read_version(path: str | Path) -> "Version":
-    """The subject registry blob's current version token (``Version.ABSENT`` if it does not exist).
-
-    Reads the version alone, never the content, so it never raises on bytes that will not decode.
-    """
-    import tcip_store
-
-    return tcip_store.read_blob_versioned(_registry_key(path), default=None).version
+def read_registry(dataset_root: str | Path) -> SubjectRegistry:
+    """:func:`read_versioned_registry`'s registry alone."""
+    return read_versioned_registry(dataset_root)[0]
 
 
 def _dropped_names(outgoing: SubjectRegistry, incoming: SubjectRegistry) -> list[str]:
@@ -324,10 +303,10 @@ def _sweep_schema_change(
 
 
 def replace_registry(
-    path: str | Path, registry: SubjectRegistry, *, expect: "Version | None", allow_removals: bool = False,
-    allow_type_changes: bool = False,
+    dataset_root: str | Path, registry: SubjectRegistry, *, expect: "Version | None",
+    allow_removals: bool = False, allow_type_changes: bool = False,
 ) -> dict:
-    """Write the registry, reading what it replaces and refusing a silent drop.
+    """Write ``dataset_root``'s registry, reading what it replaces and refusing a silent drop.
 
     Refuses an empty ``registry`` outright, whether or not ``allow_removals`` is set. Reads the
     stored registry (absent reads as no prior registry, not a refusal) and refuses a write that
@@ -344,20 +323,27 @@ def replace_registry(
 
     ``expect`` is compare-and-set against the blob's actual version at write time
     (``tcip_store.VersionConflict`` on a mismatch, nothing written): pass the version the caller
-    read, or ``Version.ABSENT`` for a caller asserting no registry exists yet. ``None`` skips the
-    check.
+    read, or ``Version.ABSENT`` for a caller asserting no registry exists yet. ``None`` checks
+    against the version this call read.
 
     The confirmation-digest sweep (:func:`_sweep_schema_change`) runs only once the write has
-    actually landed, against the registry this call read before writing. A crash between the put
-    landing and the sweep completing leaves the affected confirmations unstamped under the registry
-    that did land. Returns ``{"version": Version, "schema_change_sweep": dict}``.
+    actually landed, against the registry this call read before writing, and the write's one audit
+    line follows it in the dataset's log (``AuditEntryNotWritten`` when it cannot be appended,
+    carrying that line's arguments). A crash between the put landing and the sweep completing
+    leaves the affected confirmations unstamped under the registry that did land. Returns the
+    committed save as its audit line records it: ``{"subjects_path", "n_subjects", "version"
+    (the new token), "schema_change_sweep"}``.
     """
     import tcip_store
+
+    from tcip_mcp.audit import record_event_or_raise
+    from tcip_mcp.dataset_layout import subject_registry_key, subjects_path
 
     if not registry.subjects:
         raise RegistryError("a subject registry write must declare at least one subject")
 
-    key = _registry_key(path)
+    path = subjects_path(dataset_root)
+    key = subject_registry_key(dataset_root)
     versioned = tcip_store.read_blob_versioned(key, default=None)
     outgoing: SubjectRegistry | None = None
     decode_warning: str | None = None
@@ -403,27 +389,32 @@ def replace_registry(
                     )
 
     new_version = tcip_store.put_blob(
-        key, tcip_store.RECORD_JSON.encode(registry_to_dict(registry)), expect=expect
+        key, tcip_store.RECORD_JSON.encode(registry_to_dict(registry)),
+        expect=versioned.version if expect is None else expect,
     )
 
-    sweep = _sweep_schema_change(Path(path).parent, outgoing, registry)
+    sweep = _sweep_schema_change(Path(dataset_root), outgoing, registry)
     if decode_warning and sweep["warning"] is None:
         sweep = {**sweep, "warning": decode_warning}
-    return {"version": new_version, "schema_change_sweep": sweep}
+    committed = {"subjects_path": str(path), "n_subjects": len(registry.subjects),
+                 "version": new_version.token, "schema_change_sweep": sweep}
+    record_event_or_raise("replace_registry", committed, scope=dataset_root)
+    return committed
 
 
 def copy_registry(source: str | Path, destination: str | Path) -> None:
-    """Place one dataset's registry beside another dataset's data, once: the stored document
-    byte-for-byte, written create-only (``expect=Version.ABSENT``), refusing when the destination
-    already holds a registry.
+    """Place dataset root ``source``'s registry beside dataset root ``destination``'s data, once:
+    the stored document byte-for-byte, written create-only (``expect=Version.ABSENT``), refusing
+    when the destination already holds a registry.
     """
     import tcip_store
 
-    dest_key = _registry_key(destination)
+    from tcip_mcp.dataset_layout import subject_registry_key
+
     try:
         tcip_store.put_blob(
-            dest_key,
-            tcip_store.read_blob_versioned(_registry_key(source)).value,
+            subject_registry_key(destination),
+            tcip_store.read_blob_versioned(subject_registry_key(source)).value,
             expect=tcip_store.Version.ABSENT,
         )
     except tcip_store.VersionConflict as exc:
@@ -492,18 +483,15 @@ def positive_value_problem(registry: SubjectRegistry, subject_name: str, value: 
 def registry_for_dataset_root(dataset_root: str | Path) -> SubjectRegistry | None:
     """The registry at ``dataset_root``, or ``None`` when no ``subjects.json`` has been written there
     yet (a dataset with no registry is not corrupt, only unregistered so far)."""
-    from tcip_mcp.dataset_layout import subjects_path
-
     try:
-        return read_registry(subjects_path(dataset_root))
+        return read_registry(dataset_root)
     except FileNotFoundError:
         return None
 
 
 def distinct_dataset_root(pred_dirs: Sequence[str | Path]) -> Path | None:
     """The single dataset root every one of ``pred_dirs`` resolves under, or ``None`` when none
-    do. Refuses (``RegistryError``) when the directories span more than one: no delivery this
-    platform ships mixes datasets, so that can only be a caller error.
+    do. Refuses (``RegistryError``) when the directories span more than one.
     """
     from tcip_mcp.dataset_layout import dataset_root_of
 

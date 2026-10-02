@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tcip_mcp.server import tool
-from tcip_mcp.model_registry import ModelRegistry, best_model
+from tcip_mcp.model_registry import ModelRegistry, best_model, verified
 
 
 @tool()
@@ -103,25 +103,51 @@ def rank_registered_models(
             narrowing that leaves nothing returns an empty listing rather than refusing.
         tag: Optional tag filter, applied to both the listing and the ranking.
     """
+    if not metric:
+        return registered_listing(project, tag=tag, experiment_ids=experiment_ids)
+    return ranked_registered_model(
+        project, metric, higher_is_better=higher_is_better,
+        include_unverified=include_unverified, experiment_ids=experiment_ids, tag=tag)
+
+
+def _narrowed(models: list[dict], experiment_ids: list[str] | None) -> list[dict]:
+    """``models`` narrowed to ``experiment_ids`` when given."""
+    if experiment_ids is None:
+        return models
+    return [m for m in models if m["experiment_id"] in set(experiment_ids)]
+
+
+def registered_listing(project: Path, *, tag: str | None = None,
+                       experiment_ids: list[str] | None = None) -> dict:
+    """``{"models", "count", "available_metrics"}`` over the project's registered models under
+    ``tag``, narrowed to ``experiment_ids`` when given; an empty registry or narrowing lists
+    nothing."""
+    models = _narrowed(ModelRegistry(str(project)).list_models(tag), experiment_ids)
+    return {"models": models, "count": len(models),
+            "available_metrics": _labeled_available_metrics(models)}
+
+
+def ranked_registered_model(
+    project: Path, metric: str, *, higher_is_better: bool | None, include_unverified: bool,
+    experiment_ids: list[str] | None, tag: str | None,
+) -> dict:
+    """The registered model ``metric`` ranks best under ``tag``, among ``experiment_ids`` when
+    given, with the direction used, its source and the unverified exclusions; or the error dict
+    naming why none ranks: an empty ``metric``, nothing registered, nothing registered by the
+    marked experiments, an undeclared direction, every carrier unverified, no carrier."""
     from tcip_store.values import NOT_FINITE_SUFFIX
 
     from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC, VAL_METRIC_PREFIX
 
-    registry = ModelRegistry(str(project))
-    models = registry.list_models(tag)
-    if experiment_ids is not None:
-        wanted = set(experiment_ids)
-        filtered = [m for m in models if m["experiment_id"] in wanted]
-        if metric and not filtered and models:
-            return {"error": "none of the marked experiments registered a checkpoint"}
-        models = filtered
     if not metric:
-        return {
-            "models": models, "count": len(models),
-            "available_metrics": _labeled_available_metrics(models),
-        }
-    if not models:
+        return {"error": "a ranking names the metric it ranks by; list the registered models "
+                         "and their available_metrics to pick one."}
+    registered = ModelRegistry(str(project)).list_models(tag)
+    if not registered:
         return {"error": "No models registered"}
+    models = _narrowed(registered, experiment_ids)
+    if not models:
+        return {"error": "none of the marked experiments registered a checkpoint"}
     if metric.endswith(NOT_FINITE_SUFFIX):
         companion = metric[: -len(NOT_FINITE_SUFFIX)]
         return {
@@ -147,7 +173,7 @@ def rank_registered_models(
             "n_models": len(models),
         }
 
-    unverified = [m for m in models if m["metrics_source"] != "trainer"]
+    unverified = [m for m in models if not verified(m)]
     excluded_unverified = [] if include_unverified else [
         {"name": m["name"], "metrics_source": m["metrics_source"]} for m in unverified
     ]

@@ -14,6 +14,7 @@ from tcip_mcp.pipelines.data.selection import (
     ClassScope, Sample, Selection, read_selection, selection_key, write_selection,
 )
 from tcip_mcp.tools.data_tools import scan_dataset, draw_splits
+from tests._producer_fixtures import registry_over
 
 
 def _quality_findings(root) -> list[tuple[str, str]]:
@@ -146,6 +147,83 @@ def test_draw_splits_basic(data_dir: Path, tmp_path: Path):
         assert sample.ground_truth_digest
 
 
+LEAF_DATE = "2-11-26"
+
+
+def _leaf_scene(root: Path, n: int = 6) -> Path:
+    """``n`` captures of one date, the ``i``-th label holding ``i + 1`` leaves and ``5 * (n - i)``
+    buds, so a count scoped to the leaf and one over every record disagree."""
+    from PIL import Image
+
+    images, labels = root / "images" / LEAF_DATE, root / "annotations" / LEAF_DATE
+    images.mkdir(parents=True)
+    labels.mkdir(parents=True)
+    for i in range(n):
+        Image.new("RGB", (100, 80), (128, 128, 128)).save(images / f"s{i}.jpg")
+        json_io.write_annotations(labels / f"s{i}.json", [
+            *(Annotation(subject="leaf", geometry=BBox(2, 2, 6, 6)) for _ in range(i + 1)),
+            *(Annotation(subject="bud", geometry=BBox(8, 8, 12, 12)) for _ in range(5 * (n - i))),
+        ], 100, 80)
+    return root
+
+
+def test_a_draw_without_stratification_reports_the_counted_annotations(tmp_path: Path):
+    """Turning the balancing off changes how the draw sides its members, never what it counts:
+    every side's foreground is the subject's own annotations it holds."""
+    root = _leaf_scene(tmp_path / "ds")
+    result = draw_splits(tmp_path, str(root), subject="leaf", stratify_foreground=False)
+    assert "error" not in result, result
+    assert result["stratified"] is False
+    assert result["total_annotations"] == sum(range(1, 7))
+    assert sum(result["foreground_annotations"].values()) == result["total_annotations"]
+
+
+def test_draw_splits_and_a_runs_own_draw_side_the_same_members(tmp_path: Path):
+    """``draw_splits`` and a run's own train/val draw over the same ground truth, seed, policy
+    and val share answer the same sides: the tool's per-side sizes and foreground equal what the
+    run's partition holds, its foreground recounted here from each member's own leaves."""
+    pytest.importorskip("torch")
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+
+    root = _leaf_scene(tmp_path / "ds")
+    drawn = draw_splits(tmp_path, str(root), subject="leaf", train_ratio=0.5, val_ratio=0.5,
+                        group_by="stem", seed=7)
+    assert "error" not in drawn, drawn
+    data_cfg = {"images_dir": str(root / "images" / LEAF_DATE),
+                "labels_dir": str(root / "annotations" / LEAF_DATE), "scope": {"subject": "leaf"},
+                "split": {"val_ratio": 0.5, "seed": 7, "group_by": "stem"}}
+    _train, _val, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
+
+    by_side: dict[str, list[int]] = {"train": [], "val": []}
+    for sample in partition["samples"]:
+        by_side[sample["side"]].append(int(sample["member"].removeprefix("s")) + 1)
+    assert {side: len(v) for side, v in by_side.items()} == {
+        side: drawn["splits"][side] for side in by_side}
+    assert {side: sum(v) for side, v in by_side.items()} == {
+        side: drawn["foreground_annotations"][side] for side in by_side}
+
+
+def test_every_draw_refuses_a_tree_short_of_its_floor_the_same_way(tmp_path: Path):
+    """``draw_splits`` and a run's own draw hold one floor: two captures mapped into one group
+    are one foreground group, short of a train and a val side, and both refuse with that floor's
+    words rather than one of them training without validation."""
+    pytest.importorskip("torch")
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+
+    root = _leaf_scene(tmp_path / "ds", n=2)
+    one_group = {f"{LEAF_DATE}/s{i}": "plot" for i in range(2)}
+    floor = "1 foreground group(s), fewer than the 2 the requested sides need"
+
+    drawn = draw_splits(tmp_path, str(root), subject="leaf", train_ratio=0.5, val_ratio=0.5,
+                        group_key_map=one_group)
+    assert floor in drawn["error"]
+    data_cfg = {"images_dir": str(root / "images" / LEAF_DATE),
+                "labels_dir": str(root / "annotations" / LEAF_DATE), "scope": {"subject": "leaf"},
+                "split": {"val_ratio": 0.5, "group_key_map": one_group}}
+    with pytest.raises(ValueError, match=floor.replace("(", r"\(").replace(")", r"\)")):
+        auto_train_val(tmp_path, "detection", data_cfg, None)
+
+
 def test_draw_splits_refuses_a_version_refused_subject_registry_as_an_error(data_dir: Path, tmp_path: Path):
     from tcip_mcp.dataset_layout import subject_registry_key
 
@@ -162,9 +240,11 @@ def test_draw_splits_refuses_a_version_refused_subject_registry_as_an_error(data
 def test_draw_splits_stats_only_admits_a_nonzero_calibration_ratio(data_dir: Path):
     """A stats-only call (no output_path) may pass any calibration_ratio, a zero holdout_ratio
     included; only writing a selection requires every ratio non-zero."""
-    result = draw_splits(data_dir, str(data_dir), train_ratio=0.7, val_ratio=0.2, calibration_ratio=0.1)
+    result = draw_splits(data_dir, str(data_dir), train_ratio=0.7, val_ratio=0.2,
+                         calibration_ratio=0.1, subject="bud")
     assert "error" not in result, result
     assert result["splits"]["calibration"] > 0
+    assert result["splits"]["holdout"] == 0
 
 
 def test_draw_splits_reports_an_unreadable_label_by_name(data_dir: Path, tmp_path: Path):
@@ -219,25 +299,24 @@ def test_draw_splits_writes_nothing_when_a_confirmed_negative_will_not_read(
 
 
 def test_draw_splits_stats_only_reports_an_unreadable_first_sorted_label(data_dir: Path):
-    """A stats-only call (no output_path) draws no subject-scoped admission at all: its own scan
-    raises on the first-sorted candidate, the same as scan_dataset would."""
+    """A stats-only call (no output_path) draws through the same admission a written one does, so
+    an unreadable first-sorted candidate is an error naming it."""
     bad = data_dir / "annotations" / "2-11-26" / "img_001.json"
     bad.write_bytes(b"{not json")
 
-    result = draw_splits(data_dir, str(data_dir))
+    result = draw_splits(data_dir, str(data_dir), subject="bud")
 
     assert "error" in result
     assert str(bad) in result["error"]
 
 
 def test_draw_splits_stats_only_reports_an_unreadable_label_during_stratification(data_dir: Path):
-    """A stats-only call still reads every stem's label to count its annotations for stratified
-    balancing, so a corrupt label reached after a readable first candidate is an error naming the
-    file, not a raw raise."""
+    """A stats-only call still reads every stem's label, so a corrupt label reached after a
+    readable first candidate is an error naming the file, not a raw raise."""
     bad = data_dir / "annotations" / "2-11-26" / "img_003.json"
     bad.write_bytes(b"{not json")
 
-    result = draw_splits(data_dir, str(data_dir))
+    result = draw_splits(data_dir, str(data_dir), subject="bud")
 
     assert "error" in result
     assert str(bad) in result["error"]
@@ -270,9 +349,8 @@ def test_draw_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(tmp_pa
 
 
 def test_draw_splits_stats_only_answers_an_ambiguous_image_stem_as_an_error(tmp_path: Path):
-    """The stats-only branch (no output_path) answers the identical stem collision the
-    selection-writing branch already reports as an error, never a raw raise: both branches route
-    their image census through ``_scan_dataset``."""
+    """A stats-only call (no output_path) answers the identical stem collision a selection-writing
+    call reports as an error, never a raw raise: both draw through the one admission."""
     import numpy as np
 
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
@@ -280,6 +358,7 @@ def test_draw_splits_stats_only_answers_an_ambiguous_image_stem_as_an_error(tmp_
     root = tmp_path / "ds"
     images_dir = root / "images" / "2-11-26"
     images_dir.mkdir(parents=True)
+    (root / "annotations" / "2-11-26").mkdir(parents=True)
 
     band_a, band_b = images_dir / "plotA_B1.npy", images_dir / "plotA_B2.npy"
     np.save(band_a, np.zeros((4, 4), dtype=np.uint8))
@@ -287,7 +366,7 @@ def test_draw_splits_stats_only_answers_an_ambiguous_image_stem_as_an_error(tmp_
     write_band_group_manifest(images_dir, "plotA", {"B1": band_a, "B2": band_b})
     (images_dir / "plotA.jpg").write_bytes(b"\xff\xd8\xff")
 
-    result = draw_splits(tmp_path, str(root))
+    result = draw_splits(tmp_path, str(root), subject="leaf")
 
     assert "error" in result
     assert "plotA" in result["error"]
@@ -429,26 +508,13 @@ def test_draw_splits_bad_ratios(data_dir: Path):
     assert "error" in result
 
 
-def test_draw_splits_ratios_not_summing_to_one_names_all_four(data_dir: Path):
-    """The sum-check message names all four standing constraints, not just the raw sum."""
-    result = draw_splits(data_dir, str(data_dir), train_ratio=0.7, val_ratio=0.2,
-                         calibration_ratio=0.1, holdout_ratio=0.1)
-    assert "error" in result
-    assert "calibration_ratio" in result["error"] and "holdout_ratio" in result["error"]
-    assert "train_ratio" in result["error"] and "val_ratio" in result["error"]
-
-
-def test_draw_splits_manifest_write_refuses_zero_reference_ratios(tmp_path: Path):
-    """A selection's calibration and holdout sides are the reference an assessment reads, so
-    writing one states both ratios non-zero; the keywords name the missing inputs."""
+def test_draw_splits_ratios_not_summing_to_one_names_every_share(tmp_path: Path):
+    """The sum refusal names every share it was given, not just the raw sum."""
     root = _multi_source_dataset(tmp_path / "ds")
-    out = tmp_path / "m"
-
-    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="bud")
-
-    assert "error" in result
-    assert "calibration_ratio" in result["error"] and "holdout_ratio" in result["error"]
-    assert not out.exists()
+    result = draw_splits(tmp_path, str(root), subject="bud", train_ratio=0.7, val_ratio=0.2,
+                         calibration_ratio=0.1, holdout_ratio=0.1)
+    assert "summing to exactly 1" in result["error"]
+    assert all(side in result["error"] for side in ("train", "val", "calibration", "holdout"))
 
 
 def test_draw_splits_selection_carries_all_four_sides(tmp_path: Path):
@@ -482,20 +548,28 @@ def test_draw_splits_floor_refuses_before_any_write_regardless_of_stratify_foreg
     assert not out.exists()
 
 
-def test_draw_splits_manifest_write_refuses_a_zero_ratio_on_any_side_by_name(tmp_path: Path):
-    """Writing a selection requires all four ratios non-zero, refused by name naming the zero
-    one, before the foreground floor is ever reached: no side is dropped by zeroing its ratio."""
+def test_draw_splits_answers_one_draw_whether_or_not_it_writes(tmp_path: Path):
+    """A zero ratio draws no side of that name and a negative one refuses, with or without
+    ``output_path``: what is drawn never depends on whether it is written."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
+    ratios = {"train_ratio": 0.75, "val_ratio": 0.0, "calibration_ratio": 0.125,
+              "holdout_ratio": 0.125}
 
-    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="bud", seed=1,
-                         train_ratio=0.75, val_ratio=0.0, calibration_ratio=0.125,
-                         holdout_ratio=0.125)
+    stats = draw_splits(tmp_path, str(root), subject="bud", seed=1, **ratios)
+    written = draw_splits(tmp_path, str(root), output_path=str(out), subject="bud", seed=1,
+                          **ratios)
 
-    assert "error" in result
-    assert "val_ratio" in result["error"] and "must be non-zero" in result["error"]
-    assert "foreground group" not in result["error"]  # never reaches the floor
-    assert not out.exists()
+    assert "error" not in written, written
+    assert {key: value for key, value in written.items() if key != "selection_dir"} == {
+        key: value for key, value in stats.items() if key != "selection_dir"}
+    assert written["splits"]["val"] == 0
+    for output_path in (None, str(tmp_path / "negative")):
+        refused = draw_splits(tmp_path, str(root), output_path=output_path, subject="bud",
+                              seed=1, train_ratio=0.875, val_ratio=-0.25,
+                              calibration_ratio=0.25, holdout_ratio=0.125)
+        assert "share in (0, 1)" in refused["error"]
+    assert not (tmp_path / "negative").exists()
 
 
 def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(tmp_path: Path):
@@ -505,7 +579,7 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
     floor of four), the same tree an unscoped counter would have read as four and written."""
     from PIL import Image
 
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject
     from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
 
     root = tmp_path / "ds"
@@ -513,7 +587,7 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
     images_dir, labels_dir = root / "images" / date, root / "annotations" / date
     images_dir.mkdir(parents=True)
     labels_dir.mkdir(parents=True)
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(
+    registry_over(root,SubjectRegistry(subjects=(
         Subject(name="leaf"), Subject(name="bud"),
     )))
     for stem in ("p1", "p2", "p3"):
@@ -601,6 +675,61 @@ def _multi_source_dataset(root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"),
                                       [Annotation(subject="bud", geometry=BBox(19, 13, 45, 51))],
                                       64, 64)
     return root
+
+
+def _bud_membership(root: Path):
+    from tcip_mcp.pipelines.data.split_construction import admitted_membership
+
+    date = "2-11-26"
+    return admitted_membership(
+        [(date, root / "images" / date, str(root / "annotations" / date))],
+        scope=ClassScope(subject="bud"), group_by="tile_prefix", group_key_map=None)
+
+
+def _spied_draws(monkeypatch) -> list[bool]:
+    """Each ``weighted`` the draw hands the split algorithm, in call order."""
+    import tcip_mcp.pipelines.data.splits as splits
+
+    calls: list[bool] = []
+    real = splits.group_balanced_split
+
+    def spy(stems, **kwargs):
+        calls.append(kwargs["weighted"])
+        return real(stems, **kwargs)
+
+    monkeypatch.setattr(splits, "group_balanced_split", spy)
+    return calls
+
+
+@pytest.mark.parametrize("ratios", [
+    {"train": 1.0}, {"train": 0.75, "val": 0.0, "calibration": 0.25},
+    {"train": 1.25, "val": -0.25}, {"train": 0.5, "val": 0.495}],
+    ids=["one", "zero", "negative", "short_of_one"])
+def test_draw_sides_refuses_a_share_outside_zero_to_one_before_any_draw(
+    tmp_path: Path, monkeypatch, ratios,
+):
+    from tcip_mcp.pipelines.data.split_construction import draw_sides
+
+    membership = _bud_membership(_multi_source_dataset(tmp_path / "ds"))
+    draws = _spied_draws(monkeypatch)
+    with pytest.raises(ValueError, match=r"share in \(0, 1\)"):
+        draw_sides(membership.samples, membership.scope, ratios=ratios, seed=1, stratify=True)
+    assert draws == []
+
+
+@pytest.mark.parametrize("stratify", [True, False])
+def test_draw_sides_cuts_the_reference_under_the_balancing_it_was_given(
+    tmp_path: Path, monkeypatch, stratify,
+):
+    from tcip_mcp.pipelines.data.split_construction import draw_sides
+
+    membership = _bud_membership(_multi_source_dataset(tmp_path / "ds"))
+    draws = _spied_draws(monkeypatch)
+    drawn, _counted = draw_sides(
+        membership.samples, membership.scope, seed=1, stratify=stratify,
+        ratios={"train": 0.5, "val": 0.25, "calibration": 0.125, "holdout": 0.125})
+    assert draws == [stratify, stratify]
+    assert {sample.side for sample in drawn.values()} == {"train", "val", "calibration", "holdout"}
 
 
 def test_draw_splits_groups_tiles_together(tmp_path: Path):
@@ -718,14 +847,14 @@ def _two_subject_dataset(root: Path) -> Path:
     stem carries both; four ``leaf`` stems clear a leaf-scoped draw's foreground floor."""
     from PIL import Image
 
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject
 
     date = "2-11-26"
     images_dir = root / "images" / date
     labels_dir = root / "annotations" / date
     images_dir.mkdir(parents=True)
     labels_dir.mkdir(parents=True)
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(
+    registry_over(root,SubjectRegistry(subjects=(
         Subject(name="leaf"), Subject(name="bud"),
     )))
     for stem, subject in (
@@ -758,14 +887,14 @@ def _attribute_scoped_dataset(root: Path) -> Path:
     assessed for it."""
     from PIL import Image
 
-    from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
 
     date = "2-11-26"
     images_dir = root / "images" / date
     labels_dir = root / "annotations" / date
     images_dir.mkdir(parents=True)
     labels_dir.mkdir(parents=True)
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(
+    registry_over(root,SubjectRegistry(subjects=(
         Subject(name="leaf", attributes=(
             Attribute(name="condition", type="categorical", values=("healthy", "damaged")),
         )),
@@ -871,11 +1000,9 @@ def test_draw_splits_refuses_a_dated_dir_and_loose_labels_sharing_a_flat_images_
     assert not out.exists()
 
 
-def test_draw_splits_nothing_admitted_names_the_searched_directories_and_the_unpaired_move(
-    tmp_path: Path,
-):
+def test_draw_splits_nothing_admitted_names_the_searched_directories(tmp_path: Path):
     """A tree whose labels sit flat while its images were split into a date bucket admits
-    nothing: the refusal names each entry's searched directory and the unpaired bucket."""
+    nothing: the refusal names each entry's searched directory."""
     from PIL import Image
 
     root = tmp_path / "ds"
@@ -895,7 +1022,6 @@ def test_draw_splits_nothing_admitted_names_the_searched_directories_and_the_unp
     assert "error" in result
     assert "annotations/ (loose labels)" in result["error"]
     assert str(root / "images") in result["error"]
-    assert str(dated_images) in result["error"]
     assert not out.exists()
 
 
@@ -924,7 +1050,7 @@ def test_draw_splits_manifest_admits_dated_labels_over_flat_images(tmp_path: Pat
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in result
     assert result["total_stems"] == 5
-    assert result["admission_counts"]["annotated"] == 5
+    assert result["tallies"]["annotated"] == 5
 
 
 def test_draw_splits_manifest_admits_a_loose_label_beside_a_dated_one(tmp_path: Path):
@@ -956,44 +1082,28 @@ def test_draw_splits_manifest_admits_a_loose_label_beside_a_dated_one(tmp_path: 
 
     assert "error" not in result
     assert result["total_stems"] == 5
-    assert result["admission_counts"]["annotated"] == 5
+    assert result["tallies"]["annotated"] == 5
     drawn = read_selection(out, project=tmp_path)
     assert {Path(s.ground_truth).stem for s in drawn.samples} == {"a", "b", "c", "loose1", "loose2"}
     assert {str(Path(s.ground_truth).parent.relative_to(root)) for s in drawn.samples} == {
         str(Path("annotations") / "2-11-26"), "annotations"}
 
 
-def test_split_date_dirs_ignores_a_stray_bucket_record(tmp_path: Path):
-    """A bucket's own record sitting loose directly under ``annotations/`` is not a loose label:
-    it must never mint a dateless entry the way a real loose label would, the same exclusion
-    every bucket walk through ``prediction_documents`` already applies."""
-    from tcip_mcp.tools.data_tools import _split_date_dirs
-
+def test_a_stray_bucket_record_under_annotations_is_not_searched_as_loose_labels(
+    tmp_path: Path,
+):
+    """A bucket's own record sitting loose directly under ``annotations/`` is not a loose label,
+    so a draw that admits nothing names only the dated place it searched."""
     root = tmp_path / "ds"
     (root / "annotations" / "2-11-26").mkdir(parents=True)
     (root / "images" / "2-11-26").mkdir(parents=True)
     (root / "annotations" / "bucket.json").write_text('{"checkpoint": "m"}', encoding="utf-8")
 
-    entries = _split_date_dirs(root)
+    result = draw_splits(tmp_path, str(root), subject="leaf")
 
-    assert [date for date, _, _ in entries] == ["2-11-26"]
-
-
-def test_split_date_dirs_still_admits_a_real_loose_label(tmp_path: Path):
-    from tcip_mcp.tools.data_tools import _split_date_dirs
-
-    root = tmp_path / "ds"
-    (root / "annotations" / "2-11-26").mkdir(parents=True)
-    (root / "images" / "2-11-26").mkdir(parents=True)
-    (root / "images").mkdir(parents=True, exist_ok=True)
-    json_io.write_annotations(
-        root / "annotations" / "loose.json",
-        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
-    )
-
-    entries = _split_date_dirs(root)
-
-    assert {date for date, _, _ in entries} == {None, "2-11-26"}
+    assert "error" in result
+    assert "2-11-26 ->" in result["error"]
+    assert "loose labels" not in result["error"]
 
 
 def test_draw_splits_holds_no_sample_for_a_date_that_admits_nothing(tmp_path: Path):

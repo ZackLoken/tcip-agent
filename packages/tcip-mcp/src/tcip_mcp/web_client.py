@@ -18,7 +18,8 @@ from tcip_store.file_backend import RootedFileLocator
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_HOST = "127.0.0.1"
+BACKEND_HOST = "127.0.0.1"
+"""The loopback address the backend binds, the only arrival its trust boundary serves."""
 DEFAULT_PORT = 8765
 
 _PORT_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".txt")
@@ -334,10 +335,6 @@ PLATFORM_PANEL_EVENTS = (
 )
 
 
-def resolve_web_host() -> str:
-    return os.environ.get("TCIP_WEB_HOST", DEFAULT_HOST)
-
-
 def resolve_web_port(workspace: Path) -> int:
     """The port the backend serving ``workspace`` listens on: the one it recorded under the
     workspace, else ``TCIP_WEB_PORT``, else the default. Raises ``ValueError`` naming a recorded
@@ -355,11 +352,10 @@ def resolve_web_port(workspace: Path) -> int:
 
 def backend_url(workspace: Path, path: str) -> str:
     """Build a full URL to the tcip-web backend serving ``workspace`` for the given path."""
-    host = resolve_web_host()
     port = resolve_web_port(workspace)
     if not path.startswith("/"):
         path = "/" + path
-    return f"http://{host}:{port}{path}"
+    return f"http://{BACKEND_HOST}:{port}{path}"
 
 
 def post_panel_event(

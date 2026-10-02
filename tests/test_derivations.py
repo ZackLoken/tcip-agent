@@ -366,54 +366,20 @@ def test_write_subject_registry(tmp_path):
         subjects={"bud": {"description": "a currant bud",
                              "attributes": {"opening": {"type": "categorical",
                                                            "values": ["closed", "open"]}}}},
-        output_path=str(out),
     )
     assert "error" not in res
     assert res["subjects"] == ["bud"]
     assert res["subjects_path"] == str(out)
     # Declared order is the id order (assign_class_ids is the one name->id derivation): 0=closed,
     # 1=open, and the on-disk nested shape carries the same value order.
-    reg = subject_registry.read_registry(out)
+    reg = subject_registry.read_registry(tmp_path)
     assert subject_registry.assign_class_ids(reg, "bud", "opening") == {"closed": 0, "open": 1}
     assert json.loads(out.read_text())["bud"]["attributes"]["opening"]["values"] == \
         ["closed", "open"]
 
 
-def test_write_subject_registry_response_names_the_store_written_path_not_a_foreign_name(
-    tmp_path,
-):
-    """``output_path``'s directory is what the write is keyed by; the store's own file name is
-    ``subjects.json`` regardless of what file name the caller passed, and the response says so."""
-    from tcip_mcp.tools.annotation_tools import write_subject_registry
-
-    foreign = tmp_path / "c.json"
-    res = write_subject_registry(
-        tmp_path, str(tmp_path), subjects={"bud": {}}, output_path=str(foreign))
-
-    assert "error" not in res
-    assert res["subjects_path"] == str(tmp_path / "subjects.json")
-    assert (tmp_path / "subjects.json").is_file()
-    assert not foreign.exists()
-
-
 def test_write_subject_registry_no_labels(tmp_path):
     from tcip_mcp.tools.annotation_tools import write_subject_registry
     # An empty registry mapping is not authorable: the tool refuses rather than writing nothing.
-    res = write_subject_registry(tmp_path, str(tmp_path), subjects={}, output_path=str(tmp_path / "c.json"))
+    res = write_subject_registry(tmp_path, str(tmp_path), subjects={})
     assert "error" in res
-
-
-
-def test_write_subject_registry_defaults_into_the_dataset(tmp_path):
-    """No output_path: the registry lands at the dataset's canonical subjects.json."""
-    from tcip_mcp.tools.annotation_tools import write_subject_registry
-
-    res = write_subject_registry(
-        tmp_path, str(tmp_path),
-        subjects={"bud": {"description": "a currant bud",
-                             "attributes": {"opening": {"type": "categorical",
-                                                           "values": ["closed", "open"]}}}},
-    )
-    assert "error" not in res
-    assert res["subjects_path"] == str(tmp_path / "subjects.json")
-    assert (tmp_path / "subjects.json").is_file()

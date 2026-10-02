@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { committedOf, StructuredRefusalError } from "@/api/http";
+import { StructuredRefusalError } from "@/api/http";
 import { resultsApi, type PlantMappingSummary } from "@/api/inference";
 import type { MatchTolerance } from "@/api/types.generated";
 import { TabHeading } from "@/components/TabHeading";
@@ -50,7 +50,7 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
   async function loadMapping(name: string) {
     try {
       const res = await resultsApi.loadPlantMapping(name);
-      setBuildSummary("per_date" in res.summary ? (res.summary as PlantMappingSummary) : null);
+      setBuildSummary(res.summary);
       setBuildTolerance(res.nn_tolerance_m);
       setBuildMaxMatchDistance(res.max_match_distance_m);
     } catch (e) {
@@ -89,20 +89,8 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
       setBuildMsg(`Mapping built + saved as ${mappingName}`);
       refreshMappingNames();
     } catch (e) {
-      const committed = committedOf<Awaited<ReturnType<typeof resultsApi.buildPlantMapping>>>(e);
-      if (committed) {
-        setBuildSummary(committed.summary);
-        setBuildTolerance(committed.nn_tolerance_m);
-        setBuildMaxMatchDistance(committed.max_match_distance_m);
-        refreshMappingNames();
-        setBuildMsg(
-          `Mapping built + saved as ${mappingName}. ` +
-            (e instanceof Error ? e.message : String(e)),
-        );
-        return;
-      }
       if (e instanceof StructuredRefusalError && e.status === 409) {
-        // A rebuild cited by a delivery event, or an audit-gap refusal with no mapping saved.
+        // A rebuild cited by a delivery event, or a receipt that could not be written.
         setBuildMsg(e.message);
       } else {
         useStore

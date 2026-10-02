@@ -15,8 +15,9 @@ import tcip_store
 from tcip_annotation.json_io import read_annotations, write_annotations
 from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.audit import audit_log_key
-from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
+from tcip_mcp.subject_registry import SubjectRegistry, Subject
 from tcip_store.file_backend import _is_bookkeeping
+from tests._producer_fixtures import registry_over
 from tcip_web.app import app
 from tcip_web.paths import safe_join
 
@@ -107,7 +108,7 @@ def dataset_root(tmp_path: Path) -> Path:
     (root / "images" / "3-2-26").mkdir(parents=True)
     (root / "predictions" / "baseline").mkdir(parents=True)
     # The dataset's subjects come from its nested registry, not from listing annotations/.
-    write_registry(root / "subjects.json", SubjectRegistry((Subject("bud"), Subject("bush"))))
+    registry_over(root, SubjectRegistry((Subject("bud"), Subject("bush"))))
     # Add some images
     for i in range(3):
         img = Image.new("RGB", (100, 80), color=(128, 128, 128))
@@ -796,14 +797,27 @@ def test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     """Labels travel with their dataset, so the trail of a label write is recorded beside them
-    and not in the log of the project that happened to have the dataset open."""
+    and not in the log of the project that happened to have the dataset open. The route and the
+    tool save through one library function, so one save through each leaves exactly one line
+    apiece in the dataset's log, the same facts recorded."""
+    from tcip_mcp.tools.annotation_tools import save_annotations
+
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_path = dataset_root / "annotations" / "2-11-26" / "IMG_0000.json"
+    before = len(_audit_entries(dataset_root))
     resp = _save_box(client, img_path, label_path)
     assert resp.status_code == 200
+    answer = save_annotations(tmp_path, tmp_path.parent, str(img_path), path=str(label_path),
+                              annotations=[{"subject": "bud", "bbox": [1, 1, 5, 5]}])
+    assert "error" not in answer, answer
 
-    assert any(e.get("tool") == "gui_save_labels" for e in _audit_entries(dataset_root))
-    assert not any(e.get("tool") == "gui_save_labels" for e in _audit_entries(tmp_path))
+    lines = _audit_entries(dataset_root)[before:]
+    assert [line["tool"] for line in lines] == ["save_label_document"] * 2
+    assert [{k: v for k, v in line["arguments"].items() if k != "version"}
+            for line in lines] == [
+        {"image_path": str(img_path), "label_path": str(label_path.resolve()),
+         "n_annotations": 1}] * 2
+    assert not any(e.get("tool") == "save_label_document" for e in _audit_entries(tmp_path))
 
 
 def test_annotate_save_with_no_dataset_root_audits_the_open_projects_log(
@@ -817,7 +831,7 @@ def test_annotate_save_with_no_dataset_root_audits_the_open_projects_log(
     assert resp.status_code == 200
 
     entries = _audit_entries(tmp_path)
-    assert any(e.get("tool") == "gui_save_labels" for e in entries), entries
+    assert any(e.get("tool") == "save_label_document" for e in entries), entries
 
 
 class _AppendRefused(RuntimeError):
@@ -1579,6 +1593,7 @@ def test_review_mark_complete_refusal_persists_nothing(
         params={"dataset_root": str(dataset_root)},
     ).json()
     assert before["statuses"].get("IMG_0000.JPG", "not_started") == "not_started"
+    lines_before = _audit_entries(dataset_root)
 
     resp = client.post(
         "/api/review/mark_complete",
@@ -1594,7 +1609,7 @@ def test_review_mark_complete_refusal_persists_nothing(
         params={"dataset_root": str(dataset_root)},
     ).json()
     assert after["statuses"].get("IMG_0000.JPG", "not_started") == "not_started"
-    assert _audit_entries(dataset_root) == []
+    assert _audit_entries(dataset_root) == lines_before
 
 
 def test_review_mark_complete_refuses_an_unreadable_prediction(

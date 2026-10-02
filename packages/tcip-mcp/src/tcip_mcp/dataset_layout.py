@@ -124,6 +124,13 @@ def capture_of(source: str | Path) -> tuple[Optional[str], Optional[str]]:
 
 
 def _date_seg(date: Optional[str]) -> tuple[str, ...]:
+    """A capture date as the path segment it names; ``ValueError`` for one that is not a single
+    safe segment."""
+    from tcip_mcp.workspace import is_valid_name
+
+    if date and not is_valid_name(date):
+        raise ValueError(
+            f"date must be a single safe path segment (no separators/'..'), got {date!r}")
     return (date,) if date else ()
 
 
@@ -206,12 +213,14 @@ def image_key(dataset_root: str | Path, date: str, stem: str, ext: str) -> Key:
     return Key(IMAGERY_STORE, str(dataset_root), (date, image_filename(stem, ext)))
 
 
-def list_dates(dataset_root: str | Path) -> list[str]:
-    """Sorted bucket names under ``images/``: an ISO ``YYYY-MM-DD`` date, ``UNDATED_BUCKET``, or a
-    literal bucket (e.g. a plot name) ``ingest_images`` was told to use. A dot-prefixed directory
-    is never a bucket (see ``is_bucket_name``) and is excluded, so a hidden directory under
-    ``images/`` is invisible to every listing here."""
-    imgs = image_root(dataset_root)
+def list_dates(dataset_root: str | Path,
+               tree: Callable[[str | Path], Path] | None = None) -> list[str]:
+    """Sorted bucket names under ``images/``, or under the tree ``tree`` names
+    (:func:`annotation_root`, say): an ISO ``YYYY-MM-DD`` date, ``UNDATED_BUCKET``, or a literal
+    bucket (e.g. a plot name) ``ingest_images`` was told to use. A dot-prefixed directory is never
+    a bucket (see ``is_bucket_name``) and is excluded, so a hidden directory is invisible to every
+    listing here."""
+    imgs = (tree or image_root)(dataset_root)
     if not imgs.is_dir():
         return []
     return sorted(p.name for p in imgs.iterdir() if p.is_dir() and is_bucket_name(p.name))
@@ -400,23 +409,6 @@ def read_image_status_store(dataset_root: str | Path) -> dict:
     return tcip_store.read(image_status_key(dataset_root), default={})
 
 
-def view_coverage_path(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/.tcip/state/view_coverage.json``: per-image record of two per-cell facts,
-    the reference-grid cells the GUI has served at native resolution (a delivery fact) and, per
-    cell, the tightest scale bound at which every one of its sub-cells has sat fully on screen
-    (``cells_seen_at_scale``). Whether a seen cell counts as swept is derived in the browser
-    against a subject's working-scale bar, never stored here.
-
-    Shape: ``{bucket: {image_name: record}}``, bucket via :func:`status_bucket`; the record's own
-        shape is declared once, by the web layer's coverage models (``CoverageRecord``: ``grid``,
-        ``cells_served_at_native``, ``cells_seen_at_scale``, ``viewing``, ``updated_at``), with
-        ``viewing`` the display context that layer's own ``CoverageViewing`` declares (bands,
-        stretch, stats_source, display_bounds, base_served_size). Each record carries the grid
-        geometry it was accumulated against.
-    """
-    return _entry_path(_STATE_DOC, dataset_root, _VIEW_COVERAGE_PARTS)
-
-
 VIEW_COVERAGE_STORE = "view_coverage"
 _VIEW_COVERAGE_PARTS = _document_of("view_coverage.json")
 register_store(
@@ -433,7 +425,9 @@ register_store(
 
 
 def view_coverage_key(dataset_root: str | Path) -> Key:
-    """The per-image view-coverage record, written compare-and-set."""
+    """The per-image view-coverage records, ``{bucket: {image_name: record}}`` (bucket via
+    :func:`status_bucket`, the record declared by the web layer's ``CoverageRecord``), written
+    compare-and-set."""
     return Key(VIEW_COVERAGE_STORE, str(dataset_root), _VIEW_COVERAGE_PARTS)
 
 
@@ -526,17 +520,6 @@ register_store(
 )
 
 
-def coverage_grid_zoom_path(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/.tcip/state/coverage_grid_zoom.json``: the breeder-set inspection zoom the
-    coverage lattice's cell size is derived from, one entry per subject.
-
-    Shape: ``{subject: {zoom, set_by, set_at}}``. Advisory, like :func:`view_coverage_path`: no
-        default zoom exists, and a subject absent from this store simply has no coverage lattice
-        yet.
-    """
-    return _entry_path(_STATE_DOC, dataset_root, _COVERAGE_GRID_ZOOM_PARTS)
-
-
 COVERAGE_GRID_ZOOM_STORE = "coverage_grid_zoom"
 _COVERAGE_GRID_ZOOM_PARTS = _document_of("coverage_grid_zoom.json")
 register_store(
@@ -553,7 +536,9 @@ register_store(
 
 
 def coverage_grid_zoom_key(dataset_root: str | Path) -> Key:
-    """The per-subject coverage-lattice zoom, written compare-and-set."""
+    """The breeder-set inspection zoom each subject's coverage-lattice cell size is derived from,
+    ``{subject: {zoom, set_by, set_at}}``, written compare-and-set; a subject absent from it has
+    no coverage lattice yet."""
     return Key(COVERAGE_GRID_ZOOM_STORE, str(dataset_root), _COVERAGE_GRID_ZOOM_PARTS)
 
 
@@ -801,6 +786,45 @@ def annotation_path_for_image(image_path: str | Path, *, date: Optional[str] = N
     return annotation_path(root, date if date is not None else img_date, stem)
 
 
+def save_label_document(
+    project: str | Path | None, image_path: str | Path, label_path: str | Path,
+    payloads: Iterable[dict], *, width: int, height: int, author: Optional[str],
+    expect: Optional[tcip_store.Version] = None,
+) -> Optional[tcip_store.Version]:
+    """Write ``image_path``'s label document at ``label_path``: every annotation parsed from
+    ``payloads`` (``annotation_from_payload``, stamped by ``author`` at the save's time), an empty
+    list kept as an empty document; then the save's one audit line, in the log of the dataset
+    ``label_path`` lies in or ``project``'s when it lies in none. Returns the new version.
+
+    Raises ``ValueError``, before writing, for a label path in no dataset with no ``project`` and
+    for a payload that does not parse; ``VersionConflict`` when ``expect`` is not the stored
+    version, and ``AuditEntryNotWritten`` when the write landed and its line could not follow.
+    """
+    from tcip_annotation.json_io import annotation_from_payload, write_annotations
+
+    from tcip_mcp.audit import dataset_scope_of, record_event_or_raise
+
+    scope = dataset_scope_of(label_path) or project
+    if scope is None:
+        raise ValueError(f"{label_path} lies in no dataset and no project is open to record the "
+                         "save in; open the project the labels belong to")
+    now = datetime.now(timezone.utc).isoformat()
+    annotations = []
+    for i, payload in enumerate(payloads):
+        try:
+            annotations.append(annotation_from_payload(payload, author=author, now=now))
+        except ValueError as exc:
+            raise ValueError(f"annotation {i} {exc}") from exc
+    Path(label_path).parent.mkdir(parents=True, exist_ok=True)
+    version = write_annotations(str(label_path), annotations, width, height, keep_empty=True,
+                                expect=expect)
+    record_event_or_raise("save_label_document", {
+        "image_path": str(image_path), "label_path": str(Path(label_path).resolve()),
+        "n_annotations": len(annotations), "version": version.token if version else None,
+    }, scope=scope)
+    return version
+
+
 def list_subjects(dataset_root: str | Path) -> list[str]:
     """The dataset's subjects, in the registry's declared order. ``[]`` when there is no registry.
 
@@ -808,11 +832,10 @@ def list_subjects(dataset_root: str | Path) -> list[str]:
     """
     from tcip_mcp import subject_registry
 
-    sp = subjects_path(dataset_root)
-    if not sp.is_file():
+    if not subjects_path(dataset_root).is_file():
         return []
     try:
-        registry = subject_registry.read_registry(sp)
+        registry = subject_registry.read_registry(dataset_root)
     except OSError:
         return []
     return [s.name for s in registry.subjects]

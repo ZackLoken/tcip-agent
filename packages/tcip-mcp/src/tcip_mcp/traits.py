@@ -16,7 +16,6 @@ import tcip_store as ts
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
 from tcip_store.file_backend import RootedFileLocator
 
-from tcip_mcp import agent_identity
 from tcip_mcp.experiments import now_iso
 from tcip_mcp.identity import user_identity
 
@@ -317,8 +316,9 @@ def entry_sha256(entry: TraitEntry) -> str:
 
 
 class TraitRevision(BaseModel):
-    """One proposed entry, as appended: its number, the entry, the entry's content hash, who
-    proposed it and why, and the breeder's confirmation or withdrawal once made."""
+    """One proposed entry, as appended: its number, the entry, the entry's content hash, why it
+    was proposed, and the breeder's confirmation or withdrawal once made. Who proposed it is the
+    ``propose_trait`` audit line's identity."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, use_attribute_docstrings=True)
 
@@ -332,8 +332,6 @@ class TraitRevision(BaseModel):
     relayed_note: str
     """What the breeder said away from the GUI, relayed by the agent; never a confirmation."""
     proposed_at: str
-    proposing_agent: dict[str, str | None]
-    """The agent identity the proposing MCP session declared (``agent_identity.RECORD_FIELDS``)."""
     confirmed_by: str | None
     confirmed_at: str | None
     identity_from_request: bool | None
@@ -429,13 +427,12 @@ def resolve_statement_registry(project: str | Path, dataset_root: str) -> Subjec
     ``subjects.json`` exists, and the project's dataset registry names at most one dataset).
     Otherwise refuses by name, naming the registered datasets and the ``dataset_root`` parameter.
     """
-    from tcip_mcp.dataset_layout import subjects_path
     from tcip_mcp.subject_registry import read_registry
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 
     if dataset_root:
         try:
-            return read_registry(subjects_path(dataset_root))
+            return read_registry(dataset_root)
         except FileNotFoundError as exc:
             raise ValueError(
                 f"dataset_root {dataset_root!r} carries no subject registry of its own. Write one "
@@ -451,7 +448,7 @@ def resolve_statement_registry(project: str | Path, dataset_root: str) -> Subjec
             "this crossing's classes belong to cannot be guessed. Pass dataset_root naming it."
         )
     try:
-        return read_registry(subjects_path(project))
+        return read_registry(project)
     except FileNotFoundError as exc:
         raise ValueError(
             f"project root {project!r} carries no subject registry of its own (registered "
@@ -498,7 +495,6 @@ def propose_trait(
         revision = TraitRevision(
             number=len(revisions) + 1, entry=entry, entry_sha256=entry_sha256(entry),
             rationale=rationale, relayed_note=relayed_note, proposed_at=now_iso(),
-            proposing_agent=agent_identity.revision_fields(),
             confirmed_by=None, confirmed_at=None, identity_from_request=None,
             withdrawn_by=None, withdrawn_at=None,
         )

@@ -6,8 +6,6 @@ annotations by name) via :mod:`tcip_annotation.json_io`, at the label path the c
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -15,19 +13,14 @@ from pydantic import BaseModel, Field
 
 from tcip_annotation.json_io import (
     UnreadableLabelDocument,
-    annotation_from_payload,
     authorship_of,
     client_annotation,
     read_annotations_versioned,
-    write_annotations,
 )
 from tcip_annotation.state import Annotation
-from tcip_mcp.pipelines.image_utils import (
-    AmbiguousImageStem, image_dimensions, resolve_image_source,
-)
 from tcip_store import Version, VersionConflict
 from tcip_web.identity import resolve_user, user_id
-from tcip_web.paths import allowed_optional, allowed_path
+from tcip_web.paths import allowed_image_dimensions, allowed_optional, allowed_path
 
 router = APIRouter(prefix="/api/annotate", tags=["annotate"])
 
@@ -72,35 +65,6 @@ class SavePayload(BaseModel):
     user: Optional[str] = None
 
 
-def _image_dims(path: str) -> tuple[int, int]:
-    p = allowed_path(path)
-    if not p.is_file():
-        raise HTTPException(404, f"image not found: {path}")
-    # Channel-aware: resolve_image_source folds a `.bandgroup` manifest (or a genuinely
-    # multi-band raster) into the frame image_dimensions measures, not a bare PIL header read.
-    try:
-        return image_dimensions(resolve_image_source(p.parent, p.stem))
-    except AmbiguousImageStem as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-def _guarded_audit_root(label_path: Optional[str]) -> Path:
-    """The dataset root a label write is audited under, confined before anything is written.
-
-    A label path outside a dataset tree names no such root, so the write is recorded in the open
-    project's log instead (409 while none is open); a dataset root the allow-set does not admit
-    refuses the write before it happens.
-    """
-    from tcip_mcp.dataset_layout import dataset_root_of
-
-    from tcip_web.state import store
-
-    root = dataset_root_of(label_path) if label_path else None
-    if root is None:
-        return store.open_root()
-    return allowed_path(root)
-
-
 def annotation_dict(a: Annotation) -> dict:
     """An :class:`Annotation` for the canvas: the library's client projection
     (:func:`~tcip_annotation.json_io.client_annotation`) plus this response's own ``authorship``,
@@ -109,29 +73,10 @@ def annotation_dict(a: Annotation) -> dict:
     return {**client_annotation(a), "authorship": authorship_of(a)}
 
 
-def _audit_gui_write(payload: "SavePayload", label_path: str, root: Path) -> None:
-    """Record a GUI label-write in ``root``'s audit log.
-
-    ``root`` is what :func:`_guarded_audit_root` admitted before the write. A failed append
-    raises ``AuditEntryNotWritten``: the write has already committed by the time this runs.
-    """
-    from tcip_web.routes.audit_gap import record_committed
-
-    record_committed(
-        "gui_save_labels",
-        {
-            "image_path": payload.image_path,
-            "label_path": label_path,
-            "n_annotations": len(payload.annotations),
-        },
-        scope=root,
-    )
-
-
 @router.get("/labels")
 def load_labels(image_path: str, label_path: Optional[str] = None) -> dict:
     """Read existing labels for an image and return them in pixel coords."""
-    w, h = _image_dims(image_path)
+    w, h = allowed_image_dimensions(image_path)
     label_path = allowed_optional(label_path)
     annotations: list[dict] = []
     token: Optional[str] = None
@@ -154,57 +99,38 @@ def load_labels(image_path: str, label_path: Optional[str] = None) -> dict:
 
 @router.post("/labels")
 def save_labels(payload: SavePayload) -> dict:
-    """Write labels for an image to its single per-image JSON file.
+    """Write labels for an image to its single per-image JSON file, an empty list as an empty
+    document.
 
-    An empty annotation list is written as ``{"annotations": []}`` (``keep_empty=True``) rather
-    than deleted. That record trains as a negative only once the breeder marks the image Complete
-    (``image_status.json``); until then it reads as unannotated.
-
-    A save under a dataset root records to that dataset's own audit log; a save under no dataset
-    root records to the open project's log instead (:func:`_guarded_audit_root`). Either way, a
-    write that commits and cannot be recorded answers 409 with the marker and the response the
-    write would have returned.
+    The save is :func:`~tcip_mcp.dataset_layout.save_label_document`; a write that commits and
+    cannot be recorded answers 409 with the marker and the save's recorded facts.
     """
-    w, h = _image_dims(payload.image_path)
-    label_path = allowed_optional(payload.label_path)
-    assert label_path is not None  # payload.label_path is non-empty; the guard only confines it
-    audit_root = _guarded_audit_root(label_path)
+    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.dataset_layout import save_label_document
+    from tcip_web.routes.audit_gap import audit_gap_409
+    from tcip_web.state import store
 
-    author = user_id(resolve_user(payload.user))
-    now_iso = datetime.now(timezone.utc).isoformat()
-    try:
-        annotations = [
-            annotation_from_payload(ap.model_dump(), author=author, now=now_iso)
-            for ap in payload.annotations
-        ]
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+    def saved(token: Optional[str]) -> dict:
+        # The new version token, so the client can save again without a reload.
+        return {"status": "ok", "image_path": payload.image_path,
+                "n_annotations": len(payload.annotations), "base_mtime": token}
 
+    w, h = allowed_image_dimensions(payload.image_path)
+    label_path = allowed_path(payload.label_path)
     # The lost-update guard, inside the store's own lock: with a token the write is refused
     # unless the stored document still matches it, and the client resolves the 409 by reloading.
     expect = Version(payload.base_mtime) if payload.base_mtime is not None else None
     try:
-        version = write_annotations(label_path, annotations, w, h, keep_empty=True, expect=expect)
+        version = save_label_document(
+            store.project_root, payload.image_path, label_path,
+            [ap.model_dump() for ap in payload.annotations], width=w, height=h,
+            author=user_id(resolve_user(payload.user)), expect=expect)
     except VersionConflict as exc:
         raise HTTPException(409, {"error": "label file changed since it was loaded"}) from exc
+    except AuditEntryNotWritten as exc:
+        raise audit_gap_409(exc, saved(exc.arguments["version"])) from exc
     except OSError as exc:
         raise HTTPException(500, f"could not write labels: {exc}") from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    token = version.token if version is not None else None
-    committed = {
-        "status": "ok",
-        "image_path": payload.image_path,
-        "n_annotations": len(annotations),
-        # New version token so the client can save again without a reload.
-        "base_mtime": token,
-    }
-    from tcip_mcp.audit import AuditEntryNotWritten
-    from tcip_web.routes.audit_gap import audit_gap_409
-
-    try:
-        _audit_gui_write(payload, label_path, audit_root)
-    except AuditEntryNotWritten as exc:
-        raise audit_gap_409(exc, committed) from exc
-
-    return committed
+    return saved(version.token if version is not None else None)

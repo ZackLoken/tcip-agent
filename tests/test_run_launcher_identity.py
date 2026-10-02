@@ -1,6 +1,6 @@
-"""Who launched a run, written once into its ``run.json``: ``launch_training``'s resolution of
-``launched_by`` (a declared launcher, an MCP agent's identity, or a bare process), and the launch's
-refusals before and after its directory exists.
+"""Who launched a run, as its launch event states it (the agent identity the ``launch_training``
+line naming the run carries, empty outside an MCP handshake), and the launch's refusals before
+and after its directory exists.
 """
 
 from __future__ import annotations
@@ -68,13 +68,16 @@ def _launch_record(project, experiment_id: str) -> dict:
     return read_record(experiment_dir(experiment_id, project=project) / RUN_FILE)
 
 
-def _launched_by(project, experiment_id: str) -> dict:
-    return _launch_record(project, experiment_id)["launched_by"]
+def _row(project, experiment_id: str) -> dict:
+    from tcip_mcp.tools import training_tools
+
+    return next(r for r in training_tools._all_training_runs(project)
+                if r["experiment_id"] == experiment_id)
 
 
-def test_a_bare_launch_writes_launcher_process(tmp_path, monkeypatch):
-    """A launch through neither a declared launcher nor an MCP handshake records ``process``: the
-    fact available, never a guess about who."""
+def test_a_launch_no_agent_declared_itself_to_shows_an_empty_declaration(tmp_path, monkeypatch):
+    """A launch outside an MCP handshake leaves its launch event carrying no identity, and that
+    is what the run's row shows: the fact available, never a guess about who."""
     from tcip_mcp.tools import training_tools
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
@@ -84,17 +87,16 @@ def test_a_bare_launch_writes_launcher_process(tmp_path, monkeypatch):
     result = training_tools.launch_training(
         tmp_path, _detection_cfg(images_dir, labels_dir, "exp-bare-launch"))
     assert "error" not in result, result
-    assert _launched_by(tmp_path, result["experiment_id"]) == {"launcher": "process"}
+    assert _row(tmp_path, "exp-bare-launch")["launch"] == {}
+    assert "launched_by" not in _launch_record(tmp_path, "exp-bare-launch")
 
 
-def test_a_launch_inside_an_mcp_handshake_writes_launcher_agent_with_identity_fields(
+def test_a_launch_inside_an_mcp_handshake_shows_the_agents_declaration_from_its_event(
     tmp_path, monkeypatch,
 ):
-    """A launch made while an MCP handshake is in force records the connected agent's own
-    identity, the same fields its audit line already carries."""
+    """A launch made while an MCP handshake is in force shows the connected agent's identity,
+    read off the launch event that names the run, never off the run's own record."""
     monkeypatch.delenv("TCIP_TERMINAL_SESSION", raising=False)
-    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
-    monkeypatch.delenv("CLAUDE_EFFORT", raising=False)
     from tcip_mcp import agent_identity
     from tcip_mcp.tools import training_tools
 
@@ -105,59 +107,21 @@ def test_a_launch_inside_an_mcp_handshake_writes_launcher_agent_with_identity_fi
     identity = agent_identity.begin("claude-code", "2.1.238")
     result = training_tools.launch_training(
         tmp_path, _detection_cfg(images_dir, labels_dir, "exp-agent-launch"))
+    agent_identity.end()
     assert "error" not in result, result
-    assert _launched_by(tmp_path, result["experiment_id"]) == {
-        "launcher": "agent", "agent_client_name": "claude-code", "agent_client_version": "2.1.238",
-        "agent_session": identity.session,
+    assert _row(tmp_path, "exp-agent-launch")["launch"] == {
+        "agent_client_name": "claude-code", "agent_client_version": "2.1.238",
+        "agent_session": identity.agent_session,
     }
-
-
-def test_declare_launcher_stamps_the_declared_name(tmp_path, monkeypatch):
-    """A launch made inside ``declare_launcher(name)`` records that name whatever the connected
-    identity: an identity is begun on this thread first, so the precedence branch of
-    ``_resolve_launched_by`` is the one exercised."""
-    from tcip_mcp import agent_identity
-    from tcip_mcp.tools import training_tools
-
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    _seed_one_image(images_dir, labels_dir)
-    _fake_popen(monkeypatch, [])
-
-    agent_identity.begin("claude-code", "2.1.238")
-    try:
-        with training_tools.declare_launcher("gui"):
-            result = training_tools.launch_training(
-                tmp_path, _detection_cfg(images_dir, labels_dir, "exp-gui-launch"))
-    finally:
-        agent_identity.end()
-    assert "error" not in result, result
-    assert _launched_by(tmp_path, result["experiment_id"]) == {"launcher": "gui"}
-
-
-def test_all_training_runs_reads_launched_by_from_the_runs_own_record(tmp_path, monkeypatch):
-    """The Training view's row for a launched run carries the ``launched_by`` its ``run.json``
-    holds."""
-    from tcip_mcp.tools import training_tools
-
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    _seed_one_image(images_dir, labels_dir)
-    _fake_popen(monkeypatch, [])
-
-    with training_tools.declare_launcher("gui"):
-        result = training_tools.launch_training(
-            tmp_path, _detection_cfg(images_dir, labels_dir, "exp-row-launcher"))
-    assert "error" not in result, result
-
-    row = next(r for r in training_tools._all_training_runs(tmp_path)
-               if r["experiment_id"] == "exp-row-launcher")
-    assert row["launched_by"] == {"launcher": "gui"}
+    assert "launched_by" not in _launch_record(tmp_path, "exp-agent-launch")
 
 
 def test_launch_refuses_a_dataset_identity_above_the_readers_ceiling(tmp_path, monkeypatch):
     """A version-refused dataset identity document refuses the launch by name, before the run's
     directory exists and before Popen is ever reached. The document is written through the
     store's own put_blob, the platform's own producer for a schema_version this reader does not
-    accept. The admitting half is test_a_bare_launch_writes_launcher_process above."""
+    accept. The admitting half is
+    test_a_launch_no_agent_declared_itself_to_shows_an_empty_declaration above."""
     import tcip_store as ts
 
     from tcip_mcp.dataset_layout import dataset_identity_key

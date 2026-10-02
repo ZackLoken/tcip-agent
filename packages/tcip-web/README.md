@@ -48,7 +48,7 @@ python -m tcip_web
 On startup, the backend:
 
 - Resolves the workspace `TCIP_WORKSPACE` names, once, and refuses to start when it is unset.
-- Binds to `TCIP_WEB_HOST:TCIP_WEB_PORT` (defaults `127.0.0.1:8765`).
+- Binds the loopback address `127.0.0.1` at `TCIP_WEB_PORT` (default `8765`).
 - Writes the workspace root's `.tcip/state/web_port.txt` so MCP tools can discover it, the
   one location every process on the machine resolves the same way regardless of which
   project each has open.
@@ -85,8 +85,8 @@ MCP tools HTTP POST to `POST /api/events/{panel}` on the backend, which broadcas
 events to any browser subscribed to `/ws/panel/{panel}`.
 
 Port discovery inside MCP tools: the workspace root's `.tcip/state/web_port.txt` (the port
-bound) > `TCIP_WEB_PORT` env (read only when no record parses) > 8765. Host
-defaults to `127.0.0.1` unless `TCIP_WEB_HOST` is set.
+bound) > `TCIP_WEB_PORT` env (read only when no record parses) > 8765, always at
+`127.0.0.1`.
 
 ## Keyboard map
 
@@ -107,24 +107,13 @@ Calls made for this single-operator desktop GUI:
 - Sourcemaps. The shipped `static/` bundle is built without sourcemaps. Use
   `npm run dev` (HMR + sourcemaps) to debug.
 - Trust boundary. A connection from this machine (a loopback address) is served with no auth;
-  a connection through a network address is refused, whatever the bind, until the operator sets
-  `TCIP_WEB_ALLOW_INSECURE=1`, because an exposed GUI hands a network client filesystem reads
-  and writes and the interactive agent terminal (keyboard access to a coding agent) with no login.
-  The Host header must name this backend as reached (its arrival address, its own hostname, or
-  an entry of `TCIP_WEB_ADVERTISED_HOSTS`, consulted only under the opt-in; never a wildcard),
-  and every WebSocket connect and every state-changing HTTP request (`POST`/`PUT`/`PATCH`/
-  `DELETE`) either carries no Origin at all (the non-browser allowance; the MCP tools send
-  none) or must carry one the backend serves: the request's own origin, a loopback origin at
-  any port on a local arrival, or an advertised authority under the opt-in. On a
-  loopback arrival another local server's page is admitted by this layer too; only the
-  JSON-body guard's unanswered preflight stops its browser from mutating. The port
-  compared is the Origin's own, with its scheme's default port filled in when none is written,
-  so a same-machine reverse proxy that terminates HTTPS and forwards a bare `Host: gui.example`
-  needs two `TCIP_WEB_ADVERTISED_HOSTS` entries (`gui.example:80` for the Host check,
-  `gui.example:443` for the Origin), while one that forwards `Host: gui.example:443` needs only
-  that one; an advertised name is scheme-blind, so it admits an `http` or `https` Origin alike.
-  Token auth for an intentionally exposed GUI is a planned follow-on (needs the frontend to
-  attach a token).
+  a connection through a network address is refused, because the GUI hands its client filesystem
+  reads and writes and the interactive agent terminal (keyboard access to a coding agent) with no
+  login. The Host header must be a loopback name at the port the connection arrived on, and every
+  WebSocket connect and every state-changing HTTP request (`POST`/`PUT`/`PATCH`/`DELETE`) either
+  carries no Origin at all (the non-browser allowance; the MCP tools send none) or carries a
+  loopback origin at any port. Another local server's page is admitted by this layer too; only
+  the JSON-body guard's unanswered preflight stops its browser from mutating.
 
 ### Packaging the GUI into a wheel
 

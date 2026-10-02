@@ -23,7 +23,7 @@ from tcip_mcp.subject_registry import (  # noqa: E402
     Attribute, SubjectRegistry, Subject, assign_class_ids,
 )
 
-from tests._producer_fixtures import admit_over, dataset_over  # noqa: E402
+from tests._producer_fixtures import admit_over, dataset_over, registry_over  # noqa: E402
 
 BUD = "bud"
 BUD_SCOPE = ClassScope(subject=BUD, id_map={BUD: 0})
@@ -358,9 +358,10 @@ def test_count_label_lines_reads_json_objects(tmp_path):
     labels.mkdir()
     json_io.write_annotations(labels / "a.json", [_box(0, 0, 10, 10), _box(0, 0, 20, 20)], 100, 100)
     json_io.write_annotations(labels / "neg.json", [], 100, 100, keep_empty=True)
-    assert count_label_lines(labels / "a.json") == 2
-    assert count_label_lines(labels / "neg.json") == 0
-    assert count_label_lines(labels / "missing.json") == 0
+    assert count_label_lines(labels / "a.json", ClassScope()) == 2
+    assert count_label_lines(labels / "neg.json", ClassScope()) == 0
+    with pytest.raises(FileNotFoundError):
+        count_label_lines(labels / "missing.json", ClassScope())
 
 
 # ── the label store's own rails ─────────────────────────────────────────────
@@ -386,9 +387,9 @@ def test_only_annotated_and_confirmed_negatives_train(tmp_path):
 
     admitted = admit_over(images, labels, subject=BUD)
     assert sorted(r.member for r in admitted.records) == ["ann", "neg"]
-    assert admitted.counts["annotated"] == 1
-    assert admitted.counts["confirmed_negative"] == 1
-    assert admitted.counts["skipped_unannotated"] >= 1
+    assert admitted.tallies["annotated"] == 1
+    assert admitted.tallies["confirmed_negative"] == 1
+    assert admitted.tallies["skipped_unannotated"] >= 1
 
 
 def test_a_corrupt_confirmed_negative_refuses_the_admission(tmp_path):
@@ -457,17 +458,15 @@ def test_instance_seg_excludes_a_partially_labeled_stem_from_training(tmp_path):
 
     assert [r.member for r in admitted.records] == ["complete"]
     assert admitted.scope.id_map == id_map
-    assert admitted.counts["skipped_incomplete_attribute"] == 1
-    assert admitted.counts["annotated"] == 1
+    assert admitted.tallies["skipped_incomplete_attribute"] == 1
+    assert admitted.tallies["annotated"] == 1
 
 
 def _write_registry_for(root, *, attribute=None, values=()):
     """The dataset's own subjects.json, which an attribute-scoped admission reads its class order
     from."""
-    from tcip_mcp.subject_registry import write_registry
-
     reg, _ = _reg_id_map(attribute=attribute, values=values)
-    write_registry(root / "subjects.json", reg)
+    registry_over(root, reg)
     return reg
 
 
@@ -496,7 +495,7 @@ def test_confirmed_negative_survives_an_uppercase_extension(tmp_path, ext):
 
     admitted = admit_over(images, labels, subject=BUD)
     assert sorted(r.member for r in admitted.records) == ["IMG_0001", "IMG_0002"]
-    assert admitted.counts["confirmed_negative"] == 1
+    assert admitted.tallies["confirmed_negative"] == 1
 
 
 def test_semantic_seg_requires_a_mask_but_admits_an_all_background_one(tmp_path):
@@ -520,7 +519,7 @@ def test_sample_counts_distinguish_unannotated_from_unconfirmed_empty(tmp_path):
     """"Annotate this" and "confirm this empty one" are different jobs: the count must say which."""
     images, labels = _rail_fixture(tmp_path)
     admitted = admit_over(images, labels, subject=BUD)
-    assert admitted.counts == {"annotated": 1, "confirmed_negative": 1, "skipped_unannotated": 1,
+    assert admitted.tallies == {"annotated": 1, "confirmed_negative": 1, "skipped_unannotated": 1,
                                "skipped_unconfirmed_empty": 1, "skipped_incomplete_attribute": 0,
                                "quarantined_stale_definition": 0}
 
@@ -693,7 +692,6 @@ def test_a_complete_under_an_unchanged_subject_trains(tmp_path):
     only bud's digest moves, so bush's complete, stamped under its own still-current digest,
     admits."""
     from tcip_mcp import subject_registry
-    from tcip_mcp.subject_registry import write_registry
     from tcip_mcp.pipelines.data.label_queries import admitted_documents
 
     images = tmp_path / "images"
@@ -705,7 +703,7 @@ def test_a_complete_under_an_unchanged_subject_trains(tmp_path):
         )),
         Subject(name="bush"),
     ))
-    write_registry(tmp_path / "subjects.json", registry)
+    registry_over(tmp_path, registry)
     bush_digest = subject_registry.attribute_schema_digest(registry, "bush")
 
     _make_images(images, ["a"])
@@ -840,9 +838,9 @@ def test_detection_excludes_a_partially_labeled_stem_from_training(tmp_path):
     admitted = admit_over(images_dir, labels_dir, subject=BUD, attribute="opening")
     assert [r.member for r in admitted.records] == ["complete"]
     # The drop is recorded under its real reason, never one its absence downstream resembles.
-    assert admitted.counts["skipped_incomplete_attribute"] == 1
-    assert admitted.counts["annotated"] == 1
-    assert admitted.counts["skipped_unconfirmed_empty"] == 0
+    assert admitted.tallies["skipped_incomplete_attribute"] == 1
+    assert admitted.tallies["annotated"] == 1
+    assert admitted.tallies["skipped_unconfirmed_empty"] == 0
 
     ds = dataset_over("detection", images_dir, labels_dir, subject=BUD, attribute="opening")
     assert len(ds.det_targets(ds.stems[0])["boxes"]) == 1

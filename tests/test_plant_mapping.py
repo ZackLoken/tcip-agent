@@ -47,7 +47,7 @@ def _build(assignments: dict[str, list[Assignment]]) -> MappingBuild:
     placeholder these tests do not exercise."""
     return MappingBuild(
         name="mapping", dataset_root="ds", dataset_id="ds-1",
-        built_by="build_plant_mapping", built_at="2026-02-11T00:00:00+00:00",
+        built_at="2026-02-11T00:00:00+00:00",
         dates_requested=None, dates=sorted(assignments),
         nn_tolerance_m={"value": 10.0, "source": "stated"},
         plant_registry={"name": "unregistered", "digest": "0" * 64},
@@ -234,7 +234,7 @@ def test_persist_and_load_mapping_round_trip(tmp_path: Path) -> None:
             )
         ]
     })
-    persist_mapping(build, tmp_path, "mapping")
+    persist_mapping(build, tmp_path)
     assert tcip_store.exists(plant_mapping_key(tmp_path, "mapping"))
     loaded = load_mapping(tmp_path, "mapping")
     assert loaded is not None
@@ -257,7 +257,7 @@ def test_load_mapping_refuses_an_older_record_missing_capture_digests(tmp_path: 
             )
         ]
     })
-    persist_mapping(build, tmp_path, "mapping")
+    persist_mapping(build, tmp_path)
     key = plant_mapping_key(tmp_path, "mapping")
     record = tcip_store.read(key)
     del record["capture_digests"]
@@ -281,7 +281,7 @@ def test_load_mapping_refuses_a_date_capture_identity_names_but_capture_digests_
             )
         ]
     })
-    persist_mapping(build, tmp_path, "mapping")
+    persist_mapping(build, tmp_path)
     key = plant_mapping_key(tmp_path, "mapping")
     record = tcip_store.read(key)
     del record["capture_digests"]["2-11-26"]
@@ -311,7 +311,7 @@ def test_scan_receipts_refuses_a_version_refused_log_line_not_as_corruption(
                 )
             ]
         })
-        persist_mapping(build, tmp_path, "mapping")
+        persist_mapping(build, tmp_path)
         key = audit_log_key(tmp_path)
         poisoned = tcip_store.get_descriptor(key.store).codec.encode(
             {"tool": "a_future_tool", "schema_version": 99})
@@ -335,7 +335,7 @@ def test_scan_receipts_still_admits_a_real_receipt_with_no_version_refused_lines
             )
         ]
     })
-    persist_mapping(build, tmp_path, "mapping")
+    persist_mapping(build, tmp_path)
 
     loaded = load_mapping(tmp_path, "mapping")
 
@@ -350,7 +350,7 @@ def test_build_mapping_empty_dir_refuses_naming_no_capture(tmp_path: Path) -> No
     with pytest.raises(Exception, match="no capture under") as exc:
         build_mapping(
             tmp_path / "nope", [], name="mapping", dataset_root=tmp_path / "ds",
-            dataset_id="ds-1", project=tmp_path, built_by="build_plant_mapping",
+            dataset_id="ds-1", project=tmp_path,
             plant_registry={"name": "unregistered", "digest": "0" * 64}, nn_tolerance_m=10.0,
         )
     assert type(exc.value).__name__ == "UngeoreferencedCaptureRefusal"
@@ -380,7 +380,7 @@ def test_persisting_a_mapping_into_a_directory_that_does_not_exist_yet_still_lan
     The state directory of a fresh project has nothing in it, so a persist that required the
     location to exist already would refuse the very first build.
     """
-    persist_mapping(_one_build(), tmp_path, "mapping")
+    persist_mapping(_one_build(), tmp_path)
 
     assert tcip_store.exists(plant_mapping_key(tmp_path, "mapping"))
     loaded = load_mapping(tmp_path, "mapping")
@@ -421,7 +421,7 @@ def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
     try:
         assert holding.wait(30)
         with pytest.raises(StoreBusy):
-            persist_mapping(_one_build(), tmp_path, "mapping")
+            persist_mapping(_one_build(), tmp_path)
         assert not out.exists()
     finally:
         release.set()

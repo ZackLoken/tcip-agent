@@ -45,8 +45,9 @@ def infer(
     progress: Callable[[int, int], None] | None = None,
     canceled: Callable[[], bool] | None = None,
 ) -> dict:
-    """Run a checkpoint's pass and publish its predictions as :func:`run_inference` states, with
-    ``progress`` called with ``(done, total)`` images once the pass is prepared and after each
+    """Run a registered checkpoint's pass over ``images_dir`` or ``raster_path`` and publish its
+    predictions as the bucket ``output_dir`` (the arguments are ``run_inference``'s), answering
+    the publication's result or the error dict naming a refusal, with ``progress`` called with ``(done, total)`` images once the pass is prepared and after each
     image, and ``canceled`` asked before each image: once it answers true the pass stops at that
     image boundary and publishes the documents written."""
     from tcip_mcp.assessment import read_assessment
@@ -133,7 +134,7 @@ def infer(
         "output_dir": str(out), "image_count": len(bucket.documents),
         "total_detections": sum(r["count"] for r in rows) if rows is not None else None,
         "execution": p.execution.record(), "assessment_id": bucket.assessment_id,
-        **bucket.producer, "date": bucket.date, "dropped_nonpositive_boxes": bucket.dropped_boxes,
+        **bucket.producer, "date": bucket.date, "dropped_boxes": bucket.dropped_boxes,
     }
 
 

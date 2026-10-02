@@ -327,7 +327,7 @@ describe("AnnotateTab audit-gap handling", () => {
     saveSpy.mockResolvedValueOnce({
       status: "unrecorded",
       base_mtime: "101",
-      message: "gui_save_labels completed and its audit entry could not be written",
+      message: "save_label_document completed and its audit entry could not be written",
     });
     act(addBox);
     pressSave();
@@ -335,7 +335,7 @@ describe("AnnotateTab audit-gap handling", () => {
 
     expect(useStore.getState().canvas.dirty).toBe(false);
     expect(useStore.getState().toasts.at(-1)?.message).toBe(
-      "gui_save_labels completed and its audit entry could not be written",
+      "save_label_document completed and its audit entry could not be written",
     );
 
     // The echoed token from the unrecorded save is what the next save sends.

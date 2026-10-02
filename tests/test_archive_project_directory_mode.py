@@ -12,8 +12,8 @@ from tcip_mcp.tools.project_tools import archive_project, import_project
 def _project(tmp_path: Path) -> Path:
     """A minimal project: one image, one label, and the registry that decodes it."""
     from tcip_annotation import json_io
-    from tcip_mcp import subject_registry
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tests._producer_fixtures import registry_over
 
     root = tmp_path / "project"
     (root / "images" / "2026-03-04").mkdir(parents=True)
@@ -21,9 +21,7 @@ def _project(tmp_path: Path) -> Path:
     (root / "annotations" / "2026-03-04").mkdir(parents=True)
     json_io.write_annotations(
         str(root / "annotations" / "2026-03-04" / "a_1.json"), [], 10, 10, keep_empty=True)
-    subject_registry.write_registry(
-        root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),))
-    )
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     return root
 
 
@@ -133,7 +131,7 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
 
     from tcip_mcp import subject_registry
 
-    restored = subject_registry.read_registry(dest / "subjects.json")
+    restored = subject_registry.read_registry(dest)
     assert [s.name for s in restored.subjects] == ["bud"]
 
     import json
@@ -152,8 +150,8 @@ def _populate_project(src: Path) -> tuple[Path, Path]:
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp import subject_registry
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tests._producer_fixtures import registry_over
 
     date = "2026-03-04"
     images = src / "images" / date
@@ -163,8 +161,7 @@ def _populate_project(src: Path) -> tuple[Path, Path]:
     Image.new("RGB", (32, 32)).save(images / "a_1.jpg")
     json_io.write_annotations(
         str(labels / "a_1.json"), [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
-    subject_registry.write_registry(
-        src / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
+    registry_over(src, SubjectRegistry(subjects=(Subject(name="bud"),)))
 
     # A multispectral capture written one file per band: the manifest beside the bands is what
     # makes those files one logical image, so a directory bundle has to carry all of them too.

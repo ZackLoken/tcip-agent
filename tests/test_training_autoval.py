@@ -108,11 +108,10 @@ def test_auto_train_val_malformed_group_by_raises(tmp_path: Path):
         auto_train_val(tmp_path, "detection", data_cfg, None)
 
 
-def test_auto_train_val_malformed_val_ratio_degrades(tmp_path: Path):
-    """The narrowed except ValueError scope must not widen to a malformed val_ratio/seed: those
-    still degrade to (full_train_ds, None) exactly as every other non-grouping failure in this
-    function does."""
-    images_dir, labels_dir, all_stems = _detection_dataset(tmp_path / "ds")
+def test_auto_train_val_malformed_val_ratio_refuses(tmp_path: Path):
+    """A malformed val_ratio is a caller-config error the run refuses, never a draw it skips by
+    training without validation."""
+    images_dir, labels_dir, _all_stems = _detection_dataset(tmp_path / "ds")
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(labels_dir),
@@ -120,13 +119,8 @@ def test_auto_train_val_malformed_val_ratio_degrades(tmp_path: Path):
         "auto_val": True,
         "split": {"val_ratio": "not_a_number"},
     }
-    train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
-    assert val_ds is None
-    # Still the producer's own samples, indexed by source identity, with every admitted stem
-    # recorded as trained: a failed draw drops the validation side, never the membership.
-    assert sorted(Path(s).stem for s in train_ds.stems) == sorted(all_stems)
-    assert recorded_side(partition, "train") == sorted(all_stems)
-    assert recorded_side(partition, "val") == []
+    with pytest.raises(ValueError, match="not_a_number"):
+        auto_train_val(tmp_path, "detection", data_cfg, None)
 
 
 def test_auto_train_val_ordinal_draws_over_the_tables_own_rows(tmp_path: Path):
@@ -161,28 +155,11 @@ def test_auto_train_val_ordinal_draws_over_the_tables_own_rows(tmp_path: Path):
         assert train_ds[idx][1]["ranks"] == by_row[train_ds.sample_of(key).member]
 
 
-def test_auto_train_val_tiny_dataset_guard(tmp_path: Path):
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    labels_dir.mkdir(parents=True, exist_ok=True)
-    _save_png(images_dir / "src_0_0.png")
-    json_io.write_annotations(
-        str(labels_dir / "src_0_0.json"),
-        [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
-        IMG,
-        IMG,
-        keep_empty=True,
-    )
-
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "scope": {"subject": "bud"}, "auto_val": True}
-    _train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
-    assert val_ds is None  # single group -> no leakage-free val possible
-
-
-def test_auto_train_val_single_source_untiled_still_no_val(tmp_path: Path):
-    """A single-image detection source with tiling absent degrades to (train_ds, None): there is
-    no tiling geometry to block-split by."""
+def test_auto_train_val_single_untiled_source_refuses_validation_and_trains_without_it(
+    tmp_path: Path,
+):
+    """A single untiled source has no second group and no tiling geometry to validate on: a
+    requested validation refuses naming ``auto_val=False``, and that stated choice trains."""
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir(parents=True, exist_ok=True)
@@ -194,9 +171,12 @@ def test_auto_train_val_single_source_untiled_still_no_val(tmp_path: Path):
     )
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                 "scope": {"subject": "bud"}, "auto_val": True}
+    with pytest.raises(ValueError, match="auto_val=False"):
+        auto_train_val(tmp_path, "detection", data_cfg, None)
+
+    data_cfg["auto_val"] = False
     train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
-    assert val_ds is None
-    assert not hasattr(train_ds, "tile_size")
+    assert val_ds is None and train_ds.num_samples == 1
 
 
 def _big_single_source(root: Path, width: int, height: int) -> tuple[Path, Path, str]:
@@ -238,6 +218,19 @@ def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
     assert set(manifest["train_identities"]).isdisjoint(set(manifest["val_identities"]))
     assert all(i.startswith(f"{stem}::strip_") for i in manifest["train_identities"])
     assert manifest["kept_test_tiles"] > 0
+
+
+def test_a_single_tiled_source_with_no_val_share_refuses_by_name(tmp_path: Path):
+    """The spatial geometry draws the run's one requested partition: a zero val share refuses as
+    every draw refuses it, before any strip is laid."""
+    images_dir, labels_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
+        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {"val_ratio": 0.0, "seed": 1},
+    }
+    with pytest.raises(ValueError, match=r"share in \(0, 1\).*'val': 0\.0"):
+        auto_train_val(tmp_path, "detection", data_cfg, None)
 
 
 def test_spatial_manifest_tied_val_test_fractions_place_by_declared_order(tmp_path: Path):
@@ -339,9 +332,10 @@ def test_auto_train_val_single_source_spatial_split_ignores_a_stray_keep_regions
     assert val_ds is not None
 
 
-def test_auto_train_val_degenerate_group_retries_at_stem_level(tmp_path: Path):
-    """Two stems whose default tile_prefix grouping collapses to one group starve val (too few
-    groups, not too few stems); the retry at stem-level grouping must still populate both sides."""
+def test_auto_train_val_degenerate_grouping_refuses_and_a_stem_grouping_draws(tmp_path: Path):
+    """Two stems whose default tile_prefix grouping collapses to one group hold one foreground
+    group, short of a train and a val side: the run refuses through the draw's own floor rather
+    than regrouping on its own, and the same tree grouped by stem draws both sides."""
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir(parents=True, exist_ok=True)
@@ -356,6 +350,9 @@ def test_auto_train_val_degenerate_group_retries_at_stem_level(tmp_path: Path):
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                 "scope": {"subject": "bud"}, "auto_val": True,
                 "split": {"val_ratio": 0.5, "seed": 1}}
+    with pytest.raises(ValueError, match="fewer than the 2 the requested sides need"):
+        auto_train_val(tmp_path, "detection", data_cfg, None)
+    data_cfg["split"]["group_by"] = "stem"
     train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
     assert val_ds is not None
     assert set(train_ds.stems).isdisjoint(set(val_ds.stems))
@@ -363,9 +360,9 @@ def test_auto_train_val_degenerate_group_retries_at_stem_level(tmp_path: Path):
     assert partition["group_by"] == "stem"
 
 
-def test_auto_train_val_explicit_group_key_map_not_overridden_by_retry(tmp_path: Path):
+def test_auto_train_val_explicit_group_key_map_starving_val_refuses(tmp_path: Path):
     """A caller-supplied group_key_map that starves val is a deliberate leakage policy, not a
-    data limitation: the retry must never silently discard it for stem-level grouping."""
+    data limitation: the run refuses it rather than discard it for another grouping."""
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir(parents=True, exist_ok=True)
@@ -381,9 +378,8 @@ def test_auto_train_val_explicit_group_key_map_not_overridden_by_retry(tmp_path:
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                 "scope": {"subject": "bud"}, "auto_val": True,
                 "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": group_key_map}}
-    train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
-    assert val_ds is None  # the explicit map still collapses everything into one group
-    assert partition["group_by"] == "explicit_map"
+    with pytest.raises(ValueError, match="fewer than the 2 the requested sides need"):
+        auto_train_val(tmp_path, "detection", data_cfg, None)
 
 
 # reserve_calibration_fraction: the four-way split (train/val/test/calibration).
@@ -597,7 +593,7 @@ def test_reserve_calibration_fraction_raises_on_unresolvable_extent(tmp_path: Pa
     lacks. The one source is admitted through the producer the run itself admits through, so the
     split is derived over the dataset the run would build."""
     from tcip_mcp.pipelines.data.datasets import resolve_sizes
-    from tcip_mcp.pipelines.data.split_construction import spatial_single_source_split
+    from tcip_mcp.pipelines.data.split_construction import run_shares, spatial_single_source_split
     from tests._producer_fixtures import admit_over
 
     images_dir = tmp_path / "images"
@@ -615,7 +611,7 @@ def test_reserve_calibration_fraction_raises_on_unresolvable_extent(tmp_path: Pa
     with pytest.raises(ValueError, match="mosaic.json states no positive width and height"):
         spatial_single_source_split(
             admitted.every_sample()[0], admitted.scope, tiling, split_cfg,
-            resolve_sizes("detection", {}, admitted.every_sample()))
+            resolve_sizes("detection", {}, admitted.every_sample()), run_shares(split_cfg))
 
 
 def test_single_tiled_source_raises_on_an_unreadable_label_regardless_of_reserve(

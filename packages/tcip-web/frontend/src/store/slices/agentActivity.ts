@@ -13,6 +13,18 @@ export interface AgentActivity {
   actor: string | null;
 }
 
+/** The client a record or a push declared: its name with its version appended when declared, or
+ * null when it declared none. */
+export function declaredClient(fields: {
+  agent_client_name?: unknown;
+  agent_client_version?: unknown;
+}): string | null {
+  const name = typeof fields.agent_client_name === "string" ? fields.agent_client_name : null;
+  if (!name) return null;
+  const version = fields.agent_client_version;
+  return typeof version === "string" && version ? `${name} ${version}` : name;
+}
+
 export interface AgentActivitySlice {
   /** The last panel event and the actor it declared, or null when none has arrived. */
   agentActivity: AgentActivity | null;

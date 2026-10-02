@@ -27,9 +27,9 @@ from tcip_mcp.subject_registry import (
     num_classes,
     read_registry,
     registry_to_dict,
-    write_registry,
 )
 from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
+from tests._producer_fixtures import registry_over
 
 
 def _severity_registry(attr_type: str) -> SubjectRegistry:
@@ -106,8 +106,8 @@ def test_confirmation_is_quarantined_when_an_attribute_type_is_redefined(tmp_pat
     Image.new("RGB", (96, 40), color=(120, 120, 120)).save(root / "images" / "img_001.jpg")
     json_io.write_annotations(labels_dir / "img_001.json", [], 96, 40, keep_empty=True)
 
-    write_registry(root / "subjects.json", _severity_registry("categorical"))
-    old_digest = attribute_schema_digest(read_registry(root / "subjects.json"), "leaf")
+    registry_over(root, _severity_registry("categorical"))
+    old_digest = attribute_schema_digest(read_registry(root), "leaf")
     assert old_digest is not None
     bucket = status_bucket("leaf", None)
     record_image_statuses(root, bucket, {"img_001.jpg": "negative"}, recorded_by="user:breeder")
@@ -116,7 +116,7 @@ def test_confirmation_is_quarantined_when_an_attribute_type_is_redefined(tmp_pat
     tcip_store.replace(image_status_digest_key(root), {bucket: {"img_001.jpg": old_digest}},
                        expect=tcip_store.Version.ABSENT)
 
-    write_registry(root / "subjects.json", _severity_registry("ordinal"))
+    registry_over(root, _severity_registry("ordinal"))
 
     quarantined: set[str] = set()
     admitted = confirmed_negative_names(labels_dir, subject="leaf", date=None, quarantined_out=quarantined)
@@ -198,12 +198,12 @@ def test_case_variant_subjects_survive_a_file_roundtrip_as_distinct_subjects(tmp
     which would merge two label populations into a single scope."""
     reg = _case_variant_subjects()
     path = tmp_path / "subjects.json"
-    write_registry(path, reg)
+    registry_over(tmp_path, reg)
 
     on_disk = json.loads(path.read_text(encoding="utf-8"))
     assert set(on_disk) == {"bud", "Bud"}
 
-    back = read_registry(path)
+    back = read_registry(tmp_path)
     assert [s.name for s in back.subjects] == ["bud", "Bud"]
     assert back == reg
     assert registry_to_dict(back) == on_disk

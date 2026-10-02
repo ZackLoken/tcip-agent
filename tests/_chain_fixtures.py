@@ -275,13 +275,13 @@ def write_classified_registry(*roots: Path) -> None:
     """Declare :data:`SUBJECT` with :data:`ATTRIBUTE` over :data:`VALUES` in each root's subject
     registry."""
     from tcip_mcp import subject_registry as cr
-    from tcip_mcp.dataset_layout import subjects_path
+    from tests._producer_fixtures import registry_over
 
     registry = cr.SubjectRegistry(subjects=(cr.Subject(name=SUBJECT, attributes=(
         cr.Attribute(name=ATTRIBUTE, type="categorical", values=VALUES),)),))
     for root in roots:
         root.mkdir(parents=True, exist_ok=True)
-        cr.write_registry(subjects_path(root), registry)
+        registry_over(root, registry)
 
 
 def confirm_crossing_trait(project_root: Path, **fields: Any):

@@ -104,5 +104,5 @@ def test_an_image_with_no_mask_is_skipped_never_served_as_background(tmp_path: P
 
     ds = dataset_over("semantic_seg", str(images_dir), str(masks_dir))
     assert [ds.sample_of(k).member for k in ds.stems] == ["img0"]
-    assert admit_over(images_dir, masks_dir).counts == {
+    assert admit_over(images_dir, masks_dir).tallies == {
         "annotated": 1, "skipped_unannotated": 1}

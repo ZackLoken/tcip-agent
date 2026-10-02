@@ -29,8 +29,8 @@ def _make_dataset(root: Path) -> None:
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp import subject_registry
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tests._producer_fixtures import registry_over
 
     (root / "images" / "2-11-26").mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (32, 32)).save(root / "images" / "2-11-26" / "img_000.jpg")
@@ -38,8 +38,7 @@ def _make_dataset(root: Path) -> None:
     json_io.write_annotations(
         str(root / "annotations" / "2-11-26" / "img_000.json"),
         [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
-    subject_registry.write_registry(
-        root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
 
 
 def _initialized(path: Path) -> dict:
@@ -200,6 +199,7 @@ def test_export_import_roundtrip(tmp_path: Path):
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp import subject_registry
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tests._producer_fixtures import registry_over
 
     Image.new("RGB", (64, 64)).save(images / "img_000.jpg")
     json_io.write_annotations(
@@ -227,10 +227,7 @@ def test_export_import_roundtrip(tmp_path: Path):
     np.savez(npz_image, bands=np.zeros((2, 64, 64), dtype=np.uint16))
     # The subject registry decodes the labels' names: a self-contained bundle must carry it, or the
     # archived annotations are unreadable on the other end. One nested subjects.json at the root.
-    subject_registry.write_registry(
-        src / "subjects.json",
-        SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)),
-    )
+    registry_over(src, SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
     reg = register_dataset(src, str(src), crop="currant")  # identity travels with the data
 
     zip_path = tmp_path / "export.zip"
@@ -272,7 +269,7 @@ def test_export_import_roundtrip(tmp_path: Path):
         list_logical_images(images)
     ) == ["cap_001", "cap_002", "img_000"]
     # The registry survived, so the restored labels are still decodable.
-    restored = subject_registry.read_registry(dest / "subjects.json")
+    restored = subject_registry.read_registry(dest)
     assert [s.name for s in restored.subjects] == ["bud"]
     # dataset.json traveled with the data: identity (id/crop/fingerprint) survives the round-trip.
     import json

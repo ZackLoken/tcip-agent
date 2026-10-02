@@ -238,7 +238,7 @@ def test_a_non_finite_best_value_names_why_in_the_outcome():
     trials = [{"trial_id": "a", "status": "completed", "error": None, "has_metrics": True,
                "params": {"lr": 0.01}, "value": float("nan")}]
     outcome = tt.sweep_outcome(trials, {"objective": {"higher_is_better": False},
-                                        "split_draws": 1})
+                                        "input": {"split_draws": 1}})
 
     assert outcome["best_value"] is None
     assert outcome["best_value_state"] == "nan"

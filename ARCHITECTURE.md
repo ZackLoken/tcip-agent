@@ -707,7 +707,7 @@ count; a count written here drifts, so none is. Every registered tool's name mat
 decorator site in `packages/tcip-mcp/src/tcip_mcp/tools/*.py`. A mutating tool's site is
 followed by an `@audited` decorator (some spelled `@audited(scope_arg=...)`) unless its library
 records each of its acts itself, and a tool that only reads need carry none. The "audited" column
-says which.
+says which: `yes` for the decorator, `library` for a line its library operation writes.
 
 Tables below group by defining module. Column "line" is the `def`/`async def` line.
 Docstring is the function's docstring first line, verbatim.
@@ -716,15 +716,15 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `save_annotations` | `annotation_tools.py:81` | yes | Write an image's annotations to its single per-image label file (all subjects, one file). |
-| `write_subject_registry` | `annotation_tools.py:317` | yes | Author the dataset's nested subject registry, a thin wrapper over ``subject_registry``. |
+| `save_annotations` | `annotation_tools.py:69` | library | Write an image's annotations to its single per-image label file (all subjects, one file). |
+| `write_subject_registry` | `annotation_tools.py:289` | library | Author the dataset's nested subject registry, a thin wrapper over ``subject_registry``. |
 
 ### data_tools.py (2 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `freeze_selection` | `data_tools.py:18` | yes | Freeze a finished run's own drawn train/val partition into a selection, so a later run can |
-| `draw_splits` | `data_tools.py:264` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
+| `draw_splits` | `data_tools.py:234` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
 
 ### experiment_tools.py (2 tools)
 
@@ -751,8 +751,8 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `run_inference` | `inference_tools.py:156` | no, its library event | Run a trained model over images or a raster, and publish the predictions as a bucket. |
-| `deliver_per_image_counts` | `inference_tools.py:276` | no, its library event | Deliver a published bucket's per-image detection counts as a CSV. |
+| `run_inference` | `inference_tools.py:157` | no, its library event | Run a trained model over images or a raster, and publish the predictions as a bucket. |
+| `deliver_per_image_counts` | `inference_tools.py:277` | no, its library event | Deliver a published bucket's per-image detection counts as a CSV. |
 
 ### calibration_tools.py (3 tools)
 
@@ -815,8 +815,8 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `register_plant_registry` | `phenology_tools.py:26` | yes | Register a plant-locations CSV set under a name, so `build_plant_mapping` and |
-| `build_plant_mapping` | `phenology_tools.py:99` | no, its library event | Assign each geolocated image to a plant, then persist the mapping under this project. |
-| `deliver_phenology_milestones` | `phenology_tools.py:217` | no, its library event | Per-plant phenology milestones from classified prediction buckets and a plant mapping. |  <!-- queued: P5-43 unify -->
+| `build_plant_mapping` | `phenology_tools.py:78` | no, its library event | Assign each geolocated image to a plant, then persist the mapping under this project. |
+| `deliver_phenology_milestones` | `phenology_tools.py:137` | no, its library event | Per-plant phenology milestones from classified prediction buckets and a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (4 tools)
 
@@ -851,12 +851,12 @@ anything.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `launch_training` | `training_tools.py:482` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `monitor_training` | `training_tools.py:625` | yes | Check the status of a training run, or of a hyperparameter sweep. |
-| `cancel_training` | `training_tools.py:872` | yes | Request graceful cancellation of a running training run. |
-| `run_hyperparameter_search` | `training_tools.py:1062` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `cancel_hyperparameter_search` | `training_tools.py:1392` | yes | Request cooperative cancellation of a running HPO sweep. |
-| `evaluate_model` | `training_tools.py:1848` | no | Evaluate a trained checkpoint on a (held-out) dataset and return the result. |
+| `launch_training` | `training_tools.py:341` | library | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
+| `monitor_training` | `training_tools.py:486` | yes | Check the status of a training run, or of a hyperparameter sweep. |
+| `cancel_training` | `training_tools.py:737` | yes | Request graceful cancellation of a running training run. |
+| `run_hyperparameter_search` | `training_tools.py:926` | library | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `cancel_hyperparameter_search` | `training_tools.py:1266` | yes | Request cooperative cancellation of a running HPO sweep. |
+| `evaluate_model` | `training_tools.py:1719` | no | Evaluate a trained checkpoint on a (held-out) dataset and return the result. |
 
 ### vision_tools.py (1 tool)
 
@@ -896,20 +896,20 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/api/state` | `get_state` | `app.py:156` |
-| POST | `/api/state/tab` | `set_active_tab` | `app.py:165` |
-| WS | `/ws/state` | `state_ws` | `app.py:174` |
-| GET | `/health` | `health` | `app.py:258` |
-| GET | `/` | `index` | `app.py:273` |
-| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:296` |
-| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:342` |
+| GET | `/api/state` | `get_state` | `app.py:152` |
+| POST | `/api/state/tab` | `set_active_tab` | `app.py:161` |
+| WS | `/ws/state` | `state_ws` | `app.py:170` |
+| GET | `/health` | `health` | `app.py:260` |
+| GET | `/` | `index` | `app.py:268` |
+| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:291` |
+| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:337` |
 
 ### routes/annotate.py, prefix `/api/annotate` (2 routes)
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/labels` | `load_labels` | `routes/annotate.py:132` |
-| POST | `/labels` | `save_labels` | `routes/annotate.py:156` |
+| GET | `/labels` | `load_labels` | `routes/annotate.py:77` |
+| POST | `/labels` | `save_labels` | `routes/annotate.py:101` |
 
 ### routes/canvas.py, prefix `/api/canvas` (1 route)
 
@@ -921,12 +921,12 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/grid` | `get_grid` | `routes/coverage.py:222` |
-| POST | `/grid_zoom` | `post_grid_zoom` | `routes/coverage.py:346` |
-| GET | `` (root) | `get_coverage` | `routes/coverage.py:386` |
-| POST | `` (root) | `post_coverage` | `routes/coverage.py:430` |
-| GET | `/completeness` | `get_completeness` | `routes/coverage.py:574` |
-| POST | `/completeness` | `post_completeness` | `routes/coverage.py:681` |
+| GET | `/grid` | `get_grid` | `routes/coverage.py:221` |
+| POST | `/grid_zoom` | `post_grid_zoom` | `routes/coverage.py:345` |
+| GET | `` (root) | `get_coverage` | `routes/coverage.py:385` |
+| POST | `` (root) | `post_coverage` | `routes/coverage.py:429` |
+| GET | `/completeness` | `get_completeness` | `routes/coverage.py:573` |
+| POST | `/completeness` | `post_completeness` | `routes/coverage.py:680` |
 
 ### routes/dataset.py, prefix `/api/dataset` (3 routes)
 
@@ -940,7 +940,7 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/list` | `list_dir` | `routes/fs.py:107` |
+| GET | `/list` | `list_dir` | `routes/fs.py:88` |
 
 ### routes/images.py, prefix `/api/images` (4 routes)
 
@@ -955,7 +955,7 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_inference` | `routes/inference.py:147` |
+| POST | `/launch` | `launch_inference` | `routes/inference.py:148` |
 | GET | `/jobs` | `list_jobs` | `routes/inference.py:191` |
 | POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:196` |
 | WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:206` |
@@ -980,29 +980,29 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:116` |
-| POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:242` |
-| GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:274` |
-| POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:332` |
-| POST | `/export_csv` | `export_csv` | `routes/results.py:432` |
-| POST | `/export_count_csv` | `export_count_csv` | `routes/results.py:510` |
-| GET | `/traits` | `list_traits` | `routes/results.py:635` |
-| POST | `/traits/confirm` | `confirm_trait_revision` | `routes/results.py:680` |
-| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:579` |
-| GET | `/models/registered` | `registered_models` | `routes/results.py:717` |
+| POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:92` |
+| POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:126` |
+| GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:144` |
+| POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:201` |
+| POST | `/export_csv` | `export_csv` | `routes/results.py:300` |
+| POST | `/export_count_csv` | `export_count_csv` | `routes/results.py:378` |
+| GET | `/traits` | `list_traits` | `routes/results.py:500` |
+| POST | `/traits/confirm` | `confirm_trait_revision` | `routes/results.py:545` |
+| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:444` |
+| GET | `/models/registered` | `registered_models` | `routes/results.py:581` |
 
 ### routes/review.py, prefix `/api/review` (8 routes)
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/matches` | `compute_image_matches` | `routes/review.py:323` |
-| POST | `/action` | `record_action` | `routes/review.py:579` |
-| POST | `/mark_complete` | `mark_complete` | `routes/review.py:736` |
-| POST | `/backup_labels` | `backup_labels` | `routes/review.py:812` |
+| POST | `/matches` | `compute_image_matches` | `routes/review.py:308` |
+| POST | `/action` | `record_action` | `routes/review.py:564` |
+| POST | `/mark_complete` | `mark_complete` | `routes/review.py:721` |
+| POST | `/backup_labels` | `backup_labels` | `routes/review.py:797` |
 | GET | `/image_statuses` | `image_statuses` | `routes/review.py:856` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:899` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:994` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1021` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:884` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:979` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1006` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -1017,12 +1017,12 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/load` | `load_subjects` | `routes/subjects.py:71` |
-| POST | `/save` | `save_subjects` | `routes/subjects.py:125` |
-| GET | `/image_status` | `get_image_status` | `routes/subjects.py:246` |
-| POST | `/image_status` | `set_image_status` | `routes/subjects.py:260` |
-| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/subjects.py:297` |
-| POST | `/image_status/derive` | `derive_image_status` | `routes/subjects.py:335` |
+| GET | `/load` | `load_subjects` | `routes/subjects.py:70` |
+| POST | `/save` | `save_subjects` | `routes/subjects.py:123` |
+| GET | `/image_status` | `get_image_status` | `routes/subjects.py:230` |
+| POST | `/image_status` | `set_image_status` | `routes/subjects.py:244` |
+| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/subjects.py:281` |
+| POST | `/image_status/derive` | `derive_image_status` | `routes/subjects.py:319` |
 
 ### routes/terminal.py, prefix `/api/terminal` (3 HTTP + 1 WS)
 
@@ -1041,29 +1041,29 @@ registered at HEAD.
 | GET | `/configs` | `list_configs_route` | `routes/training.py:24` |
 | GET | `/configs/{experiment_id}/splits` | `list_split_choices_route` | `routes/training.py:32` |
 | POST | `/runs` | `relaunch_config_route` | `routes/training.py:50` |
-| GET | `/runs` | `list_runs_route` | `routes/training.py:97` |
-| GET | `/runs/{experiment_id}` | `get_run` | `routes/training.py:105` |
-| POST | `/runs/{experiment_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:112` |
-| POST | `/runs/{experiment_id}/cancel` | `cancel_run_route` | `routes/training.py:142` |
-| POST | `/compare` | `compare_runs_route` | `routes/training.py:162` |
-| POST | `/compare/best` | `compare_best_route` | `routes/training.py:176` |
-| GET | `/metric-directions` | `metric_directions_route` | `routes/training.py:217` |
-| WS | `/runs/{experiment_id}/stream` (full path `/api/training/runs/{experiment_id}/stream`) | `training_stream_ws` | `routes/training.py:291` |
+| GET | `/runs` | `list_runs_route` | `routes/training.py:84` |
+| GET | `/runs/{experiment_id}` | `get_run` | `routes/training.py:92` |
+| POST | `/runs/{experiment_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:99` |
+| POST | `/runs/{experiment_id}/cancel` | `cancel_run_route` | `routes/training.py:129` |
+| POST | `/compare` | `compare_runs_route` | `routes/training.py:149` |
+| POST | `/compare/best` | `compare_best_route` | `routes/training.py:163` |
+| GET | `/metric-directions` | `metric_directions_route` | `routes/training.py:199` |
+| WS | `/runs/{experiment_id}/stream` (full path `/api/training/runs/{experiment_id}/stream`) | `training_stream_ws` | `routes/training.py:271` |
 
 ### routes/tuning.py, prefix `/api/tuning` (10 routes)
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/sweeps` | `relaunch_sweep` | `routes/tuning.py:106` |
-| POST | `/sweeps/{sweep_id}/cancel` | `cancel_sweep_route` | `routes/tuning.py:137` |
-| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:149` |
-| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:162` |
-| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:176` |
-| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:184` |
-| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:202` |
-| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:263` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:274` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:288` |
+| POST | `/sweeps` | `relaunch_sweep` | `routes/tuning.py:105` |
+| POST | `/sweeps/{sweep_id}/cancel` | `cancel_sweep_route` | `routes/tuning.py:130` |
+| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:142` |
+| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:155` |
+| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:169` |
+| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:177` |
+| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:195` |
+| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:256` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:267` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:281` |
 
 ### 5 routes with no located frontend caller
 
@@ -1147,30 +1147,28 @@ every function a `@tool()` decorator (`server.py:31`) in
 (`python tools/list_tools.py` lists them; the count is never written down, since it drifts).
 
 `python -m tcip_web`: `packages/tcip-web/src/tcip_web/__main__.py` defines `main()`
-(`packages/tcip-web/src/tcip_web/__main__.py:38`), which reads the workspace once
+(`packages/tcip-web/src/tcip_web/__main__.py:34`), which reads the workspace once
 (`tcip_mcp.workspace.workspace_from_environment`, `workspace.py:32`, refusing an unset
-`TCIP_WORKSPACE`), reads `TCIP_WEB_HOST` / `TCIP_WEB_PORT` (default `127.0.0.1:8765`, declared
-at `packages/tcip-web/src/tcip_web/__main__.py:20` (`DEFAULT_HOST = "127.0.0.1"`), read at
-`packages/tcip-web/src/tcip_web/__main__.py:48`
-(`host = os.environ.get("TCIP_WEB_HOST", DEFAULT_HOST)`)), writes the bound port under that
+`TCIP_WORKSPACE`), reads `TCIP_WEB_PORT` (default `8765`) and binds the loopback address
+`BACKEND_HOST` (`packages/tcip-mcp/src/tcip_mcp/web_client.py:21`, `"127.0.0.1"`, the one host the
+MCP tools reach too), writes the bound port under that
 workspace (`replace(backend_port_key(workspace), str(port))`,
-`packages/tcip-web/src/tcip_web/__main__.py:51`), configures the app's `StateStore` with the
+`packages/tcip-web/src/tcip_web/__main__.py:44`), configures the app's `StateStore` with the
 same workspace (`store.configure(workspace, image_roots_from_environment())`,
-`packages/tcip-web/src/tcip_web/__main__.py:59`), and serves the app via
-`uvicorn.run(app, host=host, port=port)` (`packages/tcip-web/src/tcip_web/__main__.py:60`). The
-app's lifespan (`app.py:43`) opens the project the workspace's last-opened pointer names
+`packages/tcip-web/src/tcip_web/__main__.py:52`), and serves the app via
+`uvicorn.run(app, host=BACKEND_HOST, port=port)` (`packages/tcip-web/src/tcip_web/__main__.py:53`).
+The app's lifespan (`app.py:42`) opens the project the workspace's last-opened pointer names
 (`open_last_opened`, `packages/tcip-web/src/tcip_web/routes/projects.py:120`); with no pointer
 the backend starts with no project open and every project-scoped route answers 409 until one is
 opened from the picker. Every process reads the workspace once at its entry and hands it on as a
-value; a test configures its own `StateStore`. Exposure is a property
-of the accepted connection rather than the configured bind host, so this entry point always
-binds the requested host and port; whether an arrival through a non-loopback address is served
-is decided per request by `tcip_web.trust_boundary.TrustBoundaryMiddleware` (`trust_boundary.py:
-296`), which refuses one unless `TCIP_WEB_ALLOW_INSECURE=1` is set (`insecure_opt_in`,
-`trust_boundary.py:135`). The same middleware applies one Origin policy
-(`origin_allowed`, `trust_boundary.py:267`) to every WebSocket scope and to every HTTP scope
-whose method is state-changing (`STATE_CHANGING_METHODS`, `trust_boundary.py:41`), rather than
-leaving each handler to call it for itself.
+value; a test configures its own `StateStore`. Locality is a property
+of the accepted connection rather than the bind host: every request is checked by
+`tcip_web.trust_boundary.TrustBoundaryMiddleware` (`trust_boundary.py:193`), which refuses an
+arrival that is not through this machine (`local_arrival`, `trust_boundary.py:123`). The same
+middleware applies one Origin policy (`origin_allowed`, `trust_boundary.py:180`) to every
+WebSocket scope and to every HTTP scope whose method is state-changing
+(`STATE_CHANGING_METHODS`, `trust_boundary.py:30`), rather than leaving each handler to call it
+for itself.
 
 `.mcp.json` (repo root): declares one MCP server, `tcip`, which launches
 `conda run -n tcip-agent --no-capture-output python -m tcip_mcp`. A semantic code-search server
@@ -1217,10 +1215,10 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 Readers: `tcip_annotation.json_io.read_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/json_io.py:447`;
 `tcip_mcp.dataset_layout.subjects_on_date`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:821`.
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:844`.
 
 A prediction record's `created_by` is one spelling, `buckets.prediction_producer`,
-`packages/tcip-mcp/src/tcip_mcp/buckets.py:261`, so every checkpoint-backed writer
+`packages/tcip-mcp/src/tcip_mcp/buckets.py:263`, so every checkpoint-backed writer
 stamps the same `model:<checkpoint-stem>@<sha256-prefix>` producer identity rather than each door
 composing its own string.
 
@@ -1248,24 +1246,24 @@ refused by every registry writer until the file is renamed to `subjects.json` by
 platform door conforms it. See S20 below.
 
 Writer: `tcip_mcp.subject_registry.replace_registry`,
-`packages/tcip-mcp/src/tcip_mcp/subject_registry.py:326`, the one write both registry doors call
+`packages/tcip-mcp/src/tcip_mcp/subject_registry.py:305`, the one write both registry doors call
 (the GUI's `save_subjects` and the tool's `write_subject_registry`,
-`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:317`).
+`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:289`).
 
-Readers: `tcip_mcp.subject_registry.read_registry`, `subject_registry.py:191`;
+Readers: `tcip_mcp.subject_registry.read_registry`, `subject_registry.py:206`;
 `tcip_mcp.dataset_layout.list_subjects` (delegates to `subject_registry`),
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:744`.
 
-`assign_class_ids`, `subject_registry.py:436`, derives the training-time name-to-id map from this
+`assign_class_ids`, `subject_registry.py:427`, derives the training-time name-to-id map from this
 file's declared attribute order; no integer id is stored in the file itself.
 `attribute_schema_digest`, `subject_registry.py:149`, hashes a subject's attribute
 name/type/values for the `image_status_digest.json` staleness stamp (format 6).
 
 Seam S20 ("subjects.json subject registry"), verdict `both-sides-one-implementation`,
 `phase0_implementation: once, shared`: `tests/test_name_based_annotation_schema.py:84` writes the
-registry through the real `write_registry` and reads `num_classes` back through the real training
+registry through the real `replace_registry` and reads `num_classes` back through the real training
 loader's call to `subject_registry.assign_class_ids`,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:57`
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:55`
 (`return registry, subject_registry.assign_class_ids(registry, subject, attribute)`).
 Gap: no test drives the actual `/api/subjects/save` HTTP route in the same test as the
 training-side read.
@@ -1279,7 +1277,7 @@ Writer: `tcip_mcp.tools.project_tools.register_dataset`,
 
 Reader: `tcip_mcp.pipelines.data.dataset_fingerprint.dataset_fingerprint` (recompute-on-read is
 the stated authority; the stored value is a cache),
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/dataset_fingerprint.py:134`
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/dataset_fingerprint.py:133`
 (`def dataset_fingerprint(dataset_root: str | Path) -> str | None:`).
 
 Seam S26 ("dataset.json identity and fingerprint"), verdict `both-sides-one-implementation`,
@@ -1293,29 +1291,29 @@ named third consumer, `tcip check-dataset-identity`, is never executed by any te
 Path: `<dataset_root>/.tcip/state/image_status.json`.
 
 Writers: `set_image_status`,
-`packages/tcip-web/src/tcip_web/routes/subjects.py:260`; `set_image_status_bulk`,
-`routes/subjects.py:297`. A selection writes none: it lists the samples the admission
+`packages/tcip-web/src/tcip_web/routes/subjects.py:244`; `set_image_status_bulk`,
+`routes/subjects.py:281`. A selection writes none: it lists the samples the admission
 (`label_queries.admit`) already admitted, each by its own source and label path, so a confirmed
 negative stays a fact about the dataset it was confirmed in and is never re-attributed to a
 side's own copy of it.
 
 Readers: `tcip_mcp.pipelines.data.label_queries.confirmed_negative_names`,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:662`; `_status_bucket_for`,
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:657`; `_status_bucket_for`,
 `packages/tcip-web/src/tcip_web/routes/sessions.py:205`;
 `tcip_mcp.subject_registry._sweep_schema_change`,
-`packages/tcip-mcp/src/tcip_mcp/subject_registry.py:252`, which enumerates every bucket of a
+`packages/tcip-mcp/src/tcip_mcp/subject_registry.py:231`, which enumerates every bucket of a
 subject whose attribute schema is about to change so the confirmations under it can be stamped
 before the outgoing digest is gone; `routes.subjects.get_image_status`,
-`packages/tcip-web/src/tcip_web/routes/subjects.py:246`, through
+`packages/tcip-web/src/tcip_web/routes/subjects.py:230`, through
 `tcip_mcp.pipelines.data.label_queries.stale_finished_names`,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:638`, the public reader over a
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:633`, the public reader over a
 resolved dataset root.
 
 `IMAGE_STATUSES = ("complete", "partial", CONFIRMED_NEGATIVE, "unannotated")`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:639`, imported by the web route module.
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:624`, imported by the web route module.
 
 The token a Complete stores here is subject-scoped before it ever reaches a writer: `mark_complete`,
-`packages/tcip-web/src/tcip_web/routes/review.py:736`, derives it from the GT file through
+`packages/tcip-web/src/tcip_web/routes/review.py:721`, derives it from the GT file through
 `annotations_hold_subject`, scoped to the confirmed subject, and the browser posts that value on
 through `set_image_status`.
 
@@ -1332,27 +1330,27 @@ has not been re-verified; MCP-side readers test membership through
 
 Path: `<dataset_root>/.tcip/state/image_status_digest.json`.
 
-Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/subjects.py:218`, called from
+Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/subjects.py:203`, called from
 `set_image_status`/`set_image_status_bulk` at confirmation time; and
 `tcip_mcp.subject_registry._sweep_schema_change`,
-`packages/tcip-mcp/src/tcip_mcp/subject_registry.py:252`, called through `replace_registry`
-(`packages/tcip-mcp/src/tcip_mcp/subject_registry.py:326`) by both registry writers,
-`save_subjects` (`packages/tcip-web/src/tcip_web/routes/subjects.py:125`) and `write_subject_registry`
-(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:317`), before the new registry lands.
+`packages/tcip-mcp/src/tcip_mcp/subject_registry.py:231`, called through `replace_registry`
+(`packages/tcip-mcp/src/tcip_mcp/subject_registry.py:305`) by both registry writers,
+`save_subjects` (`packages/tcip-web/src/tcip_web/routes/subjects.py:123`) and `write_subject_registry`
+(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:289`), before the new registry lands.
 A status and its stamp are two transactions, status first, so unstamped confirmations
 legitimately exist; the outgoing registry is the last moment their digest is recoverable, so the
 sweep records it there and they read as predating the change instead of as made under the new
 vocabulary. Both writers reach the store through the one transactional writer
 `dataset_layout.stamp_image_status_digests`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:757`, whose `only_unstamped` argument keeps
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:742`, whose `only_unstamped` argument keeps
 the sweep from re-dating a stamp the confirmation-time writer already set.
 
 Reader: `tcip_mcp.pipelines.data.label_queries._stale_finished`,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:604`, the quarantine logic
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:600`, the quarantine logic
 shared by `confirmed_negative_records` and the public `stale_finished_names`; a name whose stamp
 no longer matches the registry's current schema is dropped as `quarantined_stale_definition`
 rather than trained by its stored confirmation, complete or negative alike,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:209`
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:206`
 (`counts["quarantined_stale_definition"] += 1`).
 
 Seam S23 ("image_status_digest.json attribute-schema stamp"), verdict `both-sides-restated`,
@@ -1369,10 +1367,10 @@ sidecar, `confirmed_negative_names` reads it) and in
 
 Path: `<dataset_root>/.tcip/state/view_coverage.json`.
 
-Path/shape definition: `tcip_mcp.dataset_layout.view_coverage_path`, `dataset_layout.py:403`,
+Key/shape definition: `tcip_mcp.dataset_layout.view_coverage_key`, `dataset_layout.py:427`,
 naming the stored record's own shape as `tcip_web.routes._coverage_models.CoverageRecord`.
-Writer and reader: `routes/coverage.py`'s `post_coverage` (`routes/coverage.py:430`) and
-`get_coverage` (`routes/coverage.py:386`), each validating the stored record against
+Writer and reader: `routes/coverage.py`'s `post_coverage` (`routes/coverage.py:429`) and
+`get_coverage` (`routes/coverage.py:385`), each validating the stored record against
 `CoverageRecord` before merging into or serving it.
 
 Seam S24 ("view_coverage.json advisory coverage record"), verdict: single. `_coverage_models.py`
@@ -1395,8 +1393,8 @@ Path: `<dataset_root>/.tcip/state/region_completeness.json` and
 `region_completeness_digest.json`, siblings of `image_status.json`.
 
 Path/shape definition: `tcip_mcp.dataset_layout.region_completeness_path`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:472`;
-`region_completeness_digest_path`, `dataset_layout.py:503`. Every reader reads the store as
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:466`;
+`region_completeness_digest_path`, `dataset_layout.py:497`. Every reader reads the store as
 written, so a record lacking a key fails at the read.
 
 Writer/reader named by phase0 but not independently opened this session:
@@ -1405,8 +1403,8 @@ Writer/reader named by phase0 but not independently opened this session:
 Seam S25 ("region_completeness.json attestation store"), verdict `both-sides-one-implementation`,
 `phase0_implementation: once, shared`: `tests/test_coverage_routes.py:449`,
 `tests/test_block_calibration.py:126,164,203`. The shared functions across the HTTP-route side and
-the calibration-gate side are `region_completeness_path` (`dataset_layout.py:472`),
-`region_completeness_key` and `status_bucket` (`dataset_layout.py:569`). Gap: `test_block_calibration.py`'s
+the calibration-gate side are `region_completeness_path` (`dataset_layout.py:466`),
+`region_completeness_key` and `status_bucket` (`dataset_layout.py:554`). Gap: `test_block_calibration.py`'s
 `_attest_regions_complete` helper bypasses the HTTP route, writing the store via the same shared
 functions the route calls internally rather than via a POST to `/api/coverage/completeness`, so a
 bug confined to the route's own HTTP layer would not be caught by the calibration-gate tests.
@@ -1433,14 +1431,14 @@ act has no library owner: `audited` covers the platform's mutating doors (the MC
 `tools/`, plus the script-invoked doors demoted from them) except a door whose libraries record
 each of its acts (`import_coco`, `build_plant_mapping`, `deliver_per_plant_csv`,
 `deliver_orthomosaic_plant_counts`, `deliver_phenology_milestones`, `register_model`,
-`run_inference`, `deliver_per_image_counts`, `propose_trait`, and the three assessment doors
+`run_inference`, `deliver_per_image_counts`, `propose_trait`, `save_annotations`,
+`write_subject_registry`, `run_hyperparameter_search`, and the three assessment doors
 `assess_checkpoint`, `assess_reserved_regions` and `calibrate_physical_scale`, whose assessment
 leaves its library's line): bare, the project's own log;
 `@audited(scope_arg=...)` names the argument carrying
 a dataset or project location, resolved via `dataset_scope_of` (`audit.py:154`) (through the tool's own
-canonicalizer when the declaration passes one as `scope_via`). Seven doors declare one: six
-dataset-scoped (`save_annotations`, `tools/annotation_tools.py:81`; `write_subject_registry`,
-`tools/annotation_tools.py:317`; `materialize_review_dataset`, `tools/feedback_tools.py:102`;
+canonicalizer when the declaration passes one as `scope_via`). Five doors declare one: four
+dataset-scoped (`materialize_review_dataset`, `tools/feedback_tools.py:102`;
 `register_dataset`, `tools/project_tools.py:97`; `propose_annotations`,
 `tools/proposal_tools.py:165`; `stage_proposals`, `tools/proposal_tools.py:712`). A resolution that answers "no dataset" leaves
 the entry in the project's own log; a resolver that raises refuses the call rather than filing it
@@ -1456,9 +1454,10 @@ doors span every category by whatever root their declared argument resolves; thi
 names the explicit-emitter files, not a closed census of the decorator's doors.
 Dataset-scoped: two GUI route writers passing the dataset root their own guard resolved
 (`routes/subjects.py`'s `_audit_dataset_write`, `routes/subjects.py:40`; `routes/review.py`'s `_audit`,
-`routes/review.py:86`), plus `routes/annotate.py`'s `_audit_gui_write` (`routes/annotate.py:112`), dataset-scoped
-when its guard resolves one and project-scoped otherwise (a label path confined to an allowed
-root but outside any dataset tree), `delivery.py`'s `delivery_event` line
+`routes/review.py:83`), plus the label save both doors call (`save_label_document`,
+`dataset_layout.py`), dataset-scoped when the label lies in a dataset and project-scoped
+otherwise, the registry write both doors call (`replace_registry`, `subject_registry.py`),
+`delivery.py`'s `delivery_event` line
 (`delivery.py`'s `deliver_csv`, dataset-scoped when a
 delivery's buckets share one dataset root, project-scoped otherwise),
 the COCO import's `coco_document_imported` (`pipelines/data/coco_import.py`), written
@@ -1469,10 +1468,12 @@ published it (the GUI's inference worker included), under status
 `failed` naming the documents written and the error when a pass raises after its first document
 and before its `bucket.json`, filed under the bucket's dataset root or the project's log when the
 bucket sits under none.
-Project-scoped: `routes/results.py`'s `_audit` (`routes/results.py:94`, its delivery and confirmation routes) and
-`pipelines/postprocessing/plant_mapping.py`'s `persist_mapping` (`pipelines/postprocessing/plant_mapping.py:1325`), whose two callers file
-its receipt in the project's own log: the MCP tool `build_plant_mapping` passes the project its
-server was started for and the web build route passes the backend's open project.
+Project-scoped: `pipelines/postprocessing/plant_mapping.py`'s `persist_mapping`, reached from
+both doors through the one build (`build_plant_mapping`, `pipelines/postprocessing/plant_mapping.py`),
+whose receipt is the build's one line in the project's own log: the MCP tool passes the project
+its server was started for and the web build route passes the backend's open project; and a
+sweep's opening (`open_sweep`, `tools/training_tools.py`), which both the tool and the GUI's
+relaunch reach.
 
 What a failed append means is where the three write paths part: `record_event` warns and
 returns, because its callers bracket work rather than follow a
@@ -1487,8 +1488,8 @@ archive unredacted, since a project archive is provenance-preserving, not path-s
 Readers: one production parser, reading through the storage seam's `read_log` rather than
 decoding lines by hand, and refusing (never scanning past) a page reporting corruption or an
 unknown `schema_version`. `plant_mapping._scan_receipts`
-(`pipelines/postprocessing/plant_mapping.py:1502`) and `_require_receipt`
-(`pipelines/postprocessing/plant_mapping.py:1529`), the hard receipt gate `load_mapping` runs
+(`pipelines/postprocessing/plant_mapping.py:1451`) and `_require_receipt`
+(`pipelines/postprocessing/plant_mapping.py:1511`), the hard receipt gate `load_mapping` runs
 before trusting a persisted mapping record:
 every `plant_mapping_built` entry in the record's own project log is scanned for a receipt naming
 the record's digest, and a page reporting `page.corrupt` or `page.version_refused` raises rather
@@ -1503,53 +1504,53 @@ for every consumer beside the two parsers above.
 ## 10-15. `.tcip/experiments/<experiment_id>/`, a run directory
 
 Path root: `.tcip/experiments/<experiment_id>/`, resolved via `experiments_dir`,
-`packages/tcip-mcp/src/tcip_mcp/experiments.py:91`, under the project the caller names. A run
+`packages/tcip-mcp/src/tcip_mcp/experiments.py:92`, under the project the caller names. A run
 is a directory of plain files, not store records: each file is written by one process, the launch
 record once by the parent and the final status once by the child, and nothing in it is rewritten.
-Immutability is the files' own: `publish_once`, `experiments.py:188`, writes a file's whole bytes
+Immutability is the files' own: `publish_once`, `experiments.py:189`, writes a file's whole bytes
 to a staging name and publishes them under the final name without replacing anything, so a file
 under its final name is always whole. A relaunch or a resume is a new directory naming its source
-(`parent_experiment`, `resume_from`); `create_run_directory`, `experiments.py:153`, refuses a
+(`parent_experiment`, `resume_from`); `create_run_directory`, `experiments.py:154`, refuses a
 directory that already exists (`RunDirectoryExists`). A sweep is the same shape one level up,
-`.tcip/hpo/<study_name>/` (`sweeps_dir`, `experiments.py:96`): its `sweep.json` input written
+`.tcip/hpo/<study_name>/` (`sweeps_dir`, `experiments.py:97`): its `sweep.json` input written
 once before its thread starts, a heartbeat, its final status, and one `trial_<id>/` run directory
 per trial, from which its projection derives.
 
-- `run.json` (`RUN_FILE`, `experiments.py:42`): written once by `open_run`,
-  `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:448` (`def open_run(`), before the child
+- `run.json` (`RUN_FILE`, `experiments.py:43`): written once by `open_run`,
+  `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:309` (`def open_run(`), before the child
   starts: the config as launched with its seed drawn onto it, what the launcher resolved it to
   (`resolved`: the data section, the partition and the objective with its direction, from
   `split_construction.resolve_run`; `null` for an HPO trial whose point failed to resolve, whose
-  final status is written `failed` naming why), the environment, the dataset identity, who launched it, the
+  final status is written `failed` naming why), the environment, the dataset identity, the
   run it relaunched and the checkpoint it resumes from, its wall clock, the model contract
   preflight proved, the source snapshot, and an HPO trial's sampled point. The child builds its
   loaders from `resolved` and resolves nothing again. Read through `observe`,
-  `experiments.py:356`, and `run_resolution`, `experiments.py:413`, which `assessment.py` takes the
+  `experiments.py:357`, and `run_resolution`, `experiments.py:414`, which `assessment.py` takes the
   partition from.
-- `metrics.jsonl` (`METRICS_FILE`, `experiments.py:43`, append-only): created empty with the
-  directory, appended through `append_row`, `experiments.py:229`, by the training envelope's one
+- `metrics.jsonl` (`METRICS_FILE`, `experiments.py:44`, append-only): created empty with the
+  directory, appended through `append_row`, `experiments.py:230`, by the training envelope's one
   sink, `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:223`
-  (`def _epoch_sink(`). Read by `read_rows`, `experiments.py:248`. A row landing after the final
+  (`def _epoch_sink(`). Read by `read_rows`, `experiments.py:249`. A row landing after the final
   status is reported as late (`rows_after_end`), never read as reopening the run.
-- `heartbeat` (`HEARTBEAT_FILE`, `experiments.py:44`): touched by `keep_heartbeat`,
-  `experiments.py:274`, while the run's process lives; `last_alive`, `experiments.py:291`, falls
+- `heartbeat` (`HEARTBEAT_FILE`, `experiments.py:45`): touched by `keep_heartbeat`,
+  `experiments.py:275`, while the run's process lives; `last_alive`, `experiments.py:292`, falls
   back to the launch record before the first touch.
-- `cancel_requested.json` (`CANCEL_FILE`, `experiments.py:45`): written once by `request_cancel`,
-  `experiments.py:310`, which keeps the first request's time and refuses a directory whose final
+- `cancel_requested.json` (`CANCEL_FILE`, `experiments.py:46`): written once by `request_cancel`,
+  `experiments.py:311`, which keeps the first request's time and refuses a directory whose final
   status is written.
-- `final_status.json` (`FINAL_STATUS_FILE`, `experiments.py:46`): written once through
-  `write_final_status`, `experiments.py:217`, by the envelope or by the child's pre-envelope
+- `final_status.json` (`FINAL_STATUS_FILE`, `experiments.py:47`): written once through
+  `write_final_status`, `experiments.py:218`, by the envelope or by the child's pre-envelope
   failure path: the state, when it ended, its error, and for a completed run the checkpoint
   (path inside the run directory and sha256) the verified checkpoint reader admitted. `observe`
   answers that state once written, else `running` or `interrupted` by the heartbeat window; a
   run's summary, completed or live, is the best selection over its own metrics rows under its
-  recorded objective (`run_summary`, `experiments.py:436`).
+  recorded objective (`run_summary`, `experiments.py:437`).
 - The checkpoints: the files the run's body saves (`model_best.pt`, held in memory until the run
   ends, `model_final.pt`, `checkpoint_epoch_*.pt`, a bespoke loop's own tags), each written once
   under a name no other write takes. An evaluation of the run writes nothing here.
 
-Readers over the whole directory: `get_experiment`, `experiments.py:463`; `compare_experiments`,
-`experiments.py:511`; `get_experiment_lineage`, `experiments.py:575`.
+Readers over the whole directory: `get_experiment`, `experiments.py:474`; `compare_experiments`,
+`experiments.py:522`; `get_experiment_lineage`, `experiments.py:586`.
 
 The run directory's lifecycle, each case through the real launcher and a real child process
 (launch to completion, cancel by id, resume into a new directory, a child killed before its
@@ -1599,8 +1600,8 @@ searches for a moved checkpoint by suffix, basename or digest.
 
 Readers: `read_registry_index`, `model_registry.py:95`, the read path for anything outside the
 module (`packages/tcip-mcp/src/tcip_mcp/cli/doctor.py:409`, `"metrics_source"`), and the accessors built on
-it: `ModelRegistry.list_models`, `model_registry.py:424`, and the module's `best_model`,
-`model_registry.py:420`, over its entries. `best_model` takes `metric_key` and `higher_is_better`
+it: `ModelRegistry.list_models`, `model_registry.py:429`, and the module's `best_model`,
+`model_registry.py:425`, over its entries. `best_model` takes `metric_key` and `higher_is_better`
 as required keywords, no default and no name heuristic, and by default ranks only entries whose
 `metrics_source` is `"trainer"` (`include_unverified=True` also ranks the rest). The
 `rank_registered_models` tool (`tools/model_tools.py:123`) resolves `higher_is_better` from
@@ -1628,7 +1629,7 @@ only two web-route tests check a 403-confinement case and an empty-registry case
 A prediction bucket is not a score bin or a quota allocation: it is one directory holding a
 single model run's per-image prediction documents and one `bucket.json` (format 18), its identity
 the directory's own path (relative to the dataset root under one, its own resolved path otherwise,
-`bucket_key_of`, `packages/tcip-mcp/src/tcip_mcp/buckets.py:266`). A bucket is published once:
+`bucket_key_of`, `packages/tcip-mcp/src/tcip_mcp/buckets.py:268`). A bucket is published once:
 `publish`, `buckets.py:189`, creates the directory through `create_run_directory` before it
 consumes a document and refuses an existing one (`BucketExists`), so a new run names a new bucket
 and nothing rewrites a published one. A directory holding documents and no `bucket.json` is not a
@@ -1673,14 +1674,14 @@ date for its checks (format 27).
 ## 19. `.tcip/state/gui.json`, live GUI state snapshot
 
 Path: `<project_root>/.tcip/state/gui.json`, addressed by `gui_snapshot_key`,
-`packages/tcip-mcp/src/tcip_mcp/web_client.py:66`.
+`packages/tcip-mcp/src/tcip_mcp/web_client.py:67`.
 
-Writer: `write_gui_snapshot`, `tcip_mcp/web_client.py:285`, called by `StateStore.mutate`
+Writer: `write_gui_snapshot`, `tcip_mcp/web_client.py:286`, called by `StateStore.mutate`
 (`tcip_web/state.py:170`) for the project open when the change is made, before the change is
 held; a write that fails raises and the change is not held. The store is declared
 `durable=False`: losing the last snapshot costs a re-selection, not history.
 
-Reader: `read_gui_snapshot`, `tcip_mcp/web_client.py:299`, run by `StateStore.open_project`
+Reader: `read_gui_snapshot`, `tcip_mcp/web_client.py:300`, run by `StateStore.open_project`
 (`tcip_web/state.py:101`) each time a project is opened and by the MCP `view_gui_state` tool; a
 snapshot that does not decode as its whole shape raises.
 
@@ -1809,7 +1810,7 @@ Path: `<output_path>/selection.json`, addressed by `selection_key`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/selection.py:334`, under whatever directory the
 caller asked the partition to be written to; no dataset resolver owns this layout.
 
-Writer: `draw_splits`, `data_tools.py:264`, when `output_path` is given. A finished run's own
+Writer: `draw_splits`, `data_tools.py:234`, when `output_path` is given. A finished run's own
 drawn train/val partition freezes into the identical shape through `freeze_selection`
 (`data_tools.py:18`), the second writer; both go through the one `write_selection`
 (`selection.py:464`), which composes the document through `selection_document`
@@ -1836,11 +1837,9 @@ resolved policy), `dataset_fingerprint`, `admission_counts` (the summed admissio
 a frozen selection records `{}`, since freezing a training run's own drawn partition records no
 admission draw), `realized_ratios` and `origin`.
 
-A selection write states all three ratios (`train_ratio`, `val_ratio`, `calibration_ratio`)
-non-zero, refusing whichever is zero by name, since a draw always cuts all three sides. It
+A side whose ratio is zero is not drawn, written or not, and a negative ratio refuses. The draw
 refuses, before any write, when the tree holds fewer foreground groups of `subject` (and
-`attribute`, when scoped) than the three sides need at minimum (one each for `train`/`val`, two
-for `calibration`), counted through a subject-scoped `count_label_lines` on every draw,
+`attribute`, when scoped) than one per side it draws, counted through a subject-scoped `count_label_lines` on every draw,
 independent of `stratify_foreground` (which only gates the balancing pass's own foreground
 signal). `realized_ratios` records each side's delivered member share: at a floor-sized tree the
 minimum pass can consume every foreground group before the balancing pass ever sees the caller's
@@ -1848,12 +1847,7 @@ fractions, so the delivered shares can diverge from the ratios asked for. The an
 `calibration_foreground_groups`, how many of the calibration side's own groups carry foreground
 at all, since the floor above is over the whole draw and the calibration slice can still land
 short of two; the calibration door's own floor is where that absence bites. A stats-only call (no
-`output_path`) writes nothing, admits a zero or non-zero `calibration_ratio` either way, carries
-neither `calibration_foreground_groups` nor `realized_ratios` (both write-only fields), but
-answers `dataset_hashes_by_date` the same way, over whatever labels directories its plain
-image/label scan found, plus a single `dataset_hash` only when that scan found exactly one such
-directory; over more than one, `dataset_hash` is `null` rather than one directory's hash blind to
-the rest.
+`output_path`) is the same draw with the same answer, written nowhere.
 
 Readers: `selection.read_selection` (`selection.py:479`), the one reader a training or tuning
 run's `data.split.selection_dir` resolves through (`split_construction.auto_train_val`) and a
@@ -1913,18 +1907,18 @@ No seam id in `seam-coverage.json`'s inventory names this record.
 ## 28. `coverage_grid_zoom.json`, breeder-set inspection zoom, advisory
 
 Path: `<dataset_root>/.tcip/state/coverage_grid_zoom.json`, addressed by `coverage_grid_zoom_key`
-(`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:555`), built on
+(`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:538`), built on
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:65` (`_STATE_DOC` locator), `frozen: false`, the
 same declared classification `view_coverage.json` carries.
 
-Path/shape definition: `tcip_mcp.dataset_layout.coverage_grid_zoom_path`, `dataset_layout.py:529`.
+Key/shape definition: `tcip_mcp.dataset_layout.coverage_grid_zoom_key`, `dataset_layout.py:538`.
 Shape: `{subject: {zoom, set_by, set_at}}`, one entry per subject, no default anywhere: a subject
 absent from the store has no coverage lattice until the breeder sets one.
 
-Writer: `routes/coverage.py`'s `post_grid_zoom` (`routes/coverage.py:346`), replacing one subject's entry wholesale
-under the store's own lock. Readers: `get_grid` (`routes/coverage.py:222`) and `get_completeness` (`routes/coverage.py:574`) both read
+Writer: `routes/coverage.py`'s `post_grid_zoom` (`routes/coverage.py:345`), replacing one subject's entry wholesale
+under the store's own lock. Readers: `get_grid` (`routes/coverage.py:221`) and `get_completeness` (`routes/coverage.py:573`) both read
 it through the shared `_subject_zoom` helper (`routes/coverage.py:239`); `get_completeness` and `post_completeness`
-(`routes/coverage.py:681`) render it as the served/stored `WorkingScale` shape through the same `_working_scale_of`
+(`routes/coverage.py:680`) render it as the served/stored `WorkingScale` shape through the same `_working_scale_of`
 helper (`routes/coverage.py:277`), so the lattice a breeder sees and the scale an attestation is judged against can
 never read the same entry two different ways.
 
@@ -1968,14 +1962,14 @@ end.
 ## S03. Backend port discovery file .tcip/state/web_port.txt
 
 Must agree: the MCP process finds the port the web backend actually bound.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:27` (`BACKEND_PORT_STORE`, declared beside the reader because the reader cannot import `tcip_web`; `backend_port_key`, `web_client.py:42`, is the one address, read at `web_client.py:342`).
-Side B: `packages/tcip-web/src/tcip_web/__main__.py:51` (`replace(backend_port_key(workspace), str(port))`, publishing through that same key under the workspace `main` resolved once, and raising rather than swallowing a failure, since the fallback silently misses an OS-picked port).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:28` (`BACKEND_PORT_STORE`, declared beside the reader because the reader cannot import `tcip_web`; `backend_port_key`, `web_client.py:43`, is the one address, read at `web_client.py:342`).
+Side B: `packages/tcip-web/src/tcip_web/__main__.py:44` (`replace(backend_port_key(workspace), str(port))`, publishing through that same key under the workspace `main` resolved once, and raising rather than swallowing a failure, since the fallback silently misses an OS-picked port).
 Phase 3 verdict: single.
 
 ## S04. Panel-event panel vocabulary (VALID_PANELS)  <!-- queued: P5-324 unify -->
 
 Must agree: sender and receiver accept the same set of panel names.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:320` (`VALID_PANELS = frozenset(`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:321` (`VALID_PANELS = frozenset(`).
 Side B: `packages/tcip-web/src/tcip_web/app.py:28` (`VALID_PANELS,`).
 Phase 3 verdict: duplicated.
 
@@ -1983,7 +1977,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
 Side A: `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:295` (`result = post_panel_event("app", "annotate_focus", payload)`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:321` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:316` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
 Phase 3 verdict: single. The posted payload carries `subject` beside `active_subject` (`packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:206`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus_human_attention tool's own event and asserts the advisory state's `active_subject`.
 
 ## S06. `audit_log`, one append-only store under two kinds of root
@@ -1999,22 +1993,21 @@ that is neither an MCP tool nor a script-invoked door demoted from one; all thre
 one `audit_log_key`, `audit.py:74`, and differ only in what a failed append means: `record_event`
 warns; `record_event_or_raise` raises `AuditEntryNotWritten`; the decorator refuses
 (`MutationCommittedWithoutAuditLine`), since its append runs after the tool body.
-Side B: `packages/tcip-web/src/tcip_web/routes/review.py:86`
+Side B: `packages/tcip-web/src/tcip_web/routes/review.py:83`
 (`def _audit(scope: str, tool: str, arguments: dict) -> None:`,
-which calls `record_committed` (`review.py:90`, `routes/audit_gap.py`)
+which calls `record_committed` (`review.py:89`, `routes/audit_gap.py`)
 with the dataset root its own guard resolved, so a failed append raises `AuditEntryNotWritten`
-rather than only warning; `routes/annotate.py:120` (`record_committed(`) does the same for its own
-dataset, or the open project's log for a label path outside any dataset tree;
-`routes/subjects.py:49` (`record_committed(`) likewise; the GUI
+rather than only warning; `routes/subjects.py:48` (`record_committed(`) likewise; the label save
+and the registry write record through their library (`save_label_document`,
+`replace_registry`) whichever door calls them; the GUI
 inference worker writes no line of its own and publishes through the one publisher,
-`routes/inference.py:138` (`bucket = publish(`),
+`routes/inference.py:139` (`bucket = publish(`),
 whose receipts are the library's, catching `AuditEntryNotWritten` into the job's
-`audit_warning`; `routes/results.py:100`
-(`record_committed(`) does the same for a project root instead. Reader:
-`pipelines/postprocessing/plant_mapping.py:1529` (`_require_receipt`)
+`audit_warning`. Reader:
+`pipelines/postprocessing/plant_mapping.py:1511` (`_require_receipt`)
 trusts only a `plant_mapping_built` entry it finds in the log under the project its caller names
 (the MCP server's started project; the web backend's open project), scanned by `_scan_receipts`
-(`pipelines/postprocessing/plant_mapping.py:1502`), which refuses (never scans past) a page
+(`pipelines/postprocessing/plant_mapping.py:1451`), which refuses (never scans past) a page
 reporting corruption or an unknown `schema_version`.
 Phase 3 verdict: single. Each writer is exercised through a real append and checked for its own
 tool name landing in the log its own scope names: `tests/test_tcip_web_routes.py:766,1193,1229`
@@ -2032,7 +2025,7 @@ and the web route alike).
 ## S07. Experiment record .tcip/experiments/<id>/
 
 Must agree: the launching process and the run's own child agree on the run directory's layout, and each file is written by one of them once.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:121` (`def experiment_dir(` plus the file names beside it, the one declaration of the directory's path and members).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:122` (`def experiment_dir(` plus the file names beside it, the one declaration of the directory's path and members).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:68` (`def run_directory(`, the child reading the launch record `open_run` wrote and writing the resolved record and final status beside it).
 Phase 3 verdict: single.
 
@@ -2040,19 +2033,19 @@ Phase 3 verdict: single.
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:223` (`def _epoch_sink(`, the one writer; the trainer and a bespoke loop hand rows to it).
-Side B: `packages/tcip-web/src/tcip_web/routes/training.py:275` (`rows, cursor = await asyncio.to_thread(read_rows, observation.metrics_log, after=cursor)`, the training stream's incremental tail read off the event loop, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:184` (`def get_trial_metrics(`, reading a trial's log through `read_rows`, answered in the shape `_metrics_common.metrics_response` builds).
+Side B: `packages/tcip-web/src/tcip_web/routes/training.py:255` (`rows, cursor = await asyncio.to_thread(read_rows, observation.metrics_log, after=cursor)`, the training stream's incremental tail read off the event loop, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:177` (`def get_trial_metrics(`, reading a trial's log through `read_rows`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial is a run directory, so its log is the same file shape written by the same sink.
 
 ## S10. Live GUI state .tcip/state/gui.json  <!-- queued: P5-284 unify -->
 
 Must agree: the MCP agent reading GUI context parses the snapshot the web backend wrote.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:285` (`def write_gui_snapshot(`, the one writer, through the one address `gui_snapshot_key`, which `StateStore.mutate` in `tcip_web/state.py` calls).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:286` (`def write_gui_snapshot(`, the one writer, through the one address `gui_snapshot_key`, which `StateStore.mutate` in `tcip_web/state.py` calls).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:213` (`state = read_gui_snapshot(project)`, the one reader, which the backend's own `open_project` also calls).
 Phase 3 verdict: single.
 
 ## S11. Live canvas state files canvas_live.json / canvas_shapes.json, under the backend's open project
 
-Must agree: the push route writes canvas_live.json/canvas_shapes.json under the project the backend has open, and capture_live_canvas reads them from the project its MCP server was started for, so a capture reads the GUI's live canvas only while the two are the same project. Both sides address the documents through one locator pair (`canvas_meta_key`, `packages/tcip-mcp/src/tcip_mcp/web_client.py:96`; `canvas_geometry_key`, `web_client.py:101`). The push carries the project id the browser drew for (`packages/tcip-web/src/tcip_web/routes/canvas.py:57`, `def push_canvas_state(`), compared with the open project's own id (`StateStore.project_id`, `packages/tcip-web/src/tcip_web/state.py:108`) before anything is written, and a panel event from the MCP side carries its project's id the same way (`web_client.py:286`), delivered only when that project is open.
+Must agree: the push route writes canvas_live.json/canvas_shapes.json under the project the backend has open, and capture_live_canvas reads them from the project its MCP server was started for, so a capture reads the GUI's live canvas only while the two are the same project. Both sides address the documents through one locator pair (`canvas_meta_key`, `packages/tcip-mcp/src/tcip_mcp/web_client.py:97`; `canvas_geometry_key`, `web_client.py:102`). The push carries the project id the browser drew for (`packages/tcip-web/src/tcip_web/routes/canvas.py:57`, `def push_canvas_state(`), compared with the open project's own id (`StateStore.project_id`, `packages/tcip-web/src/tcip_web/state.py:108`) before anything is written, and a panel event from the MCP side carries its project's id the same way (`web_client.py:286`), delivered only when that project is open.
 Phase 3 verdict: single.
 
 ## S12. Friction reports and retrospectives under .tcip/
@@ -2071,21 +2064,21 @@ and nothing ever read it back out: the dataset's real confirmed-negative store i
 `image_status.json`, addressed by `image_status_key`, the seam this entry once asked to agree
 with. The key stopped being written; a project's existing record still carrying it was corrected
 by a one-off operator script, since applied and retired.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:676` (`def is_confirmed_negative(`, the one membership predicate, beside `is_finished_status` at `:926` for the wider complete-or-negative pair; `status_confirmations` is the one decoder of the stored records, and `status_tokens` its status-token projection, instead of inline re-implementations).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:661` (`def is_confirmed_negative(`, the one membership predicate, beside `is_finished_status` at `:926` for the wider complete-or-negative pair; `status_confirmations` is the one decoder of the stored records, and `status_tokens` its status-token projection, instead of inline re-implementations).
 Side B: `packages/tcip-web/src/tcip_web/routes/subjects.py` (`set_image_status`, writing through the registered store).
 Phase 3 verdict: single. `packages/tcip-web/src/tcip_web/routes/sessions.py:250` (`if is_confirmed_negative(status):`, session time classification) calls the same predicate against the real `image_status.json` rather than restating it.
 
 ## S14. dataset_layout.py as the on-disk path resolver
 
 Must agree: agent writes and GUI reads resolve to the same files.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:130` (`def image_root(`, with `annotation_root`/`prediction_root` and the dated dir calls built on them, plus `bucket_subject_date`, `dataset_layout.py:578`, as the published inverse of `status_bucket`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:137` (`def image_root(`, with `annotation_root`/`prediction_root` and the dated dir calls built on them, plus `bucket_subject_date`, `dataset_layout.py:563`, as the published inverse of `status_bucket`).
 Side B: `packages/tcip-web/src/tcip_web/routes/dataset.py` (`select_dataset` resolves every directory through the resolver; `tcip_mcp.cli.doctor`, `data_tools`, `project_tools` and `annotation_tools` no longer re-spell the tree).
 Phase 3 verdict: single.
 
 ## S15. Per-image label filename convention
 
 Must agree: the browser's label path and the Python resolver's label path name the same file.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:789` (`def label_filename(`, with `annotation_path`/`prediction_path` built on it).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:774` (`def label_filename(`, with `annotation_path`/`prediction_path` built on it).
 Side B: `packages/tcip-web/frontend/src/lib/paths.ts:24` (`labelPath`, the browser's one join site over the directories the backend resolves; a gate test pins the record extension against the resolver).
 Phase 3 verdict: single. The browser still joins directory plus filename client-side at that one site; handing fully resolved per-image paths across the API would add a backend round trip to image navigation, an open owner question in the batch report.
 
@@ -2107,7 +2100,7 @@ Phase 3 verdict: single.
 ## S18. Bounding-box coordinate convention across the HTTP boundary
 
 Must agree: the browser and the route use corner coordinates while the file uses xywh, with the conversion happening once.
-Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:46` (`bbox: Optional[list[float]] = None          # [x1, y1, x2, y2], pixel`, the wire form).
+Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:39` (`bbox: Optional[list[float]] = None          # [x1, y1, x2, y2], pixel`, the wire form).
 Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:634` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:26` (`from tcip_annotation.json_io import xywh`), to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload` (`json_io.py:330`), and `_annotations_of` (`json_io.py:411`) is the inverse read).
 Phase 3 verdict: single.
 
@@ -2122,27 +2115,27 @@ Phase 3 verdict: single.
 
 Must agree: the GUI editor, the path resolver, and the training loader read one registry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/subject_registry.py:4` (`The on-disk registry (`` `<dataset_root>/subjects.json` ``) is self-describing and name-based::`).
-Side B: `packages/tcip-web/src/tcip_web/routes/subjects.py:139` (`from tcip_mcp.dataset_layout import subjects_path`).
+Side B: `packages/tcip-web/src/tcip_web/routes/subjects.py:99` (`registry, version = read_versioned_registry(allowed_path(dataset_root))`).
 Phase 3 verdict: single.
 
 ## S21. Training name-to-id assignment versus inference decode map
 
 Must agree: a prediction's integer label decodes to the class name the run trained it as.
-Side A: `packages/tcip-mcp/src/tcip_mcp/subject_registry.py:436` (`def assign_class_ids(`, the one assignment, reached by the loader through `pipelines/data/label_queries.py:57` (`return registry, subject_registry.assign_class_ids(registry, subject, attribute)`)).
+Side A: `packages/tcip-mcp/src/tcip_mcp/subject_registry.py:427` (`def assign_class_ids(`, the one assignment, reached by the loader through `pipelines/data/label_queries.py:55` (`return registry, subject_registry.assign_class_ids(registry, subject, attribute)`)).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/execution.py:229` (`scope=ClassScope.of(checkpoint.data_config)`, the checkpoint's own recorded `scope`, map included, taken by the prepared pass every inference regime, the GUI worker and every assessment share; the reserved-regions assessment reads it off that pass at `assessment.py:595` (`scope = p.scope.admitted_for(DOCUMENT`); nothing re-derives a map from a live registry).
 Phase 3 verdict: single.
 
 ## S22. image_status.json confirmed-negative store
 
 Must agree: a negative is empty labels plus an explicit human Complete, every consumer applies the same bucket keying and status vocabulary, and each stored status carries the actor who set it and when, so a person's Complete and a status a harvest wrote stay distinguishable.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:656` (`def derive_status(`, with `dataset_layout.py:639` (`IMAGE_STATUSES`) as the one vocabulary, `dataset_layout.py:586` (`status_of`) as the one predicate for what the store holds, and `record_image_statuses`/`replace_image_status_store` as the two declared writers, both through the registered store).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:641` (`def derive_status(`, with `dataset_layout.py:624` (`IMAGE_STATUSES`) as the one vocabulary, `dataset_layout.py:571` (`status_of`) as the one predicate for what the store holds, and `record_image_statuses`/`replace_image_status_store` as the two declared writers, both through the registered store).
 Side B: `packages/tcip-web/src/tcip_web/routes/subjects.py` and `routes/review.py` call `derive_status`; the browser imports one `ImageStatus` type from `api/subjects.ts`, pinned against the Python vocabulary by a gate test.
 Phase 3 verdict: single.
 
 ## S23. image_status_digest.json attribute-schema stamp
 
 Must agree: writer and reader compute the digest the same way for a stale stamp to be detectable.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:757` (`def stamp_image_status_digests(`, the one transactional read-merge writer, called by the web route, the materializer, the split tools and the schema-change sweep `subject_registry._sweep_schema_change`, which passes `only_unstamped` so a confirmation-time stamp is never re-dated).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:742` (`def stamp_image_status_digests(`, the one transactional read-merge writer, called by the web route, the materializer, the split tools and the schema-change sweep `subject_registry._sweep_schema_change`, which passes `only_unstamped` so a confirmation-time stamp is never re-dated).
 Side B: `packages/tcip-mcp/src/tcip_mcp/subject_registry.py:149` (`attribute_schema_digest`, the one digest computation).
 Phase 3 verdict: single.
 
@@ -2156,7 +2149,7 @@ Phase 3 verdict: single.
 ## S25. region_completeness.json attestation store
 
 Must agree: an attestation written by the GUI is readable, and staleness-checkable, by the calibration path that relies on it.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:472` (`def region_completeness_path(dataset_root: str | Path) -> Path:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:466` (`def region_completeness_path(dataset_root: str | Path) -> Path:`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/region_completeness.py:152` (`def stale_cells(`).
 Phase 3 verdict: restated-in-test.
 Differs from phase0 record: phase0 cited a line inside the function's body rather than its header; the function itself is defined at `region_completeness.py:152` (`def stale_cells(`).
@@ -2164,15 +2157,15 @@ Differs from phase0 record: phase0 cited a line inside the function's body rathe
 ## S26. dataset.json identity and fingerprint
 
 Must agree: the stored fingerprint and the recomputed one cover the same inputs.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:295` (`def dataset_identity_path(dataset_root: str | Path) -> Path:`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/dataset_fingerprint.py:134` (`def dataset_fingerprint(dataset_root: str | Path) -> str | None:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:304` (`def dataset_identity_path(dataset_root: str | Path) -> Path:`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/dataset_fingerprint.py:133` (`def dataset_fingerprint(dataset_root: str | Path) -> str | None:`).
 Phase 3 verdict: single.
 
 ## S27. Trained-model registry .tcip/models/registry.json
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:121` (`def registered_entries(`, the one read every consumer goes through: one owner per sha256, the completed run whose final status names the bytes, else the index's foreign entry; `_write_registry_entry`, `model_registry.py:295`, replaces one foreign entry by sha256 inside one `tcip_store.transaction` on the key `registry_index_key`, `model_registry.py:85`, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:716` (`@router.get("/models/registered")`, serving `model_tools.rank_registered_models`'s listing view) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:29` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:580` (`@router.get("/models/registered")`, serving `model_tools.rank_registered_models`'s listing view) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:29` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. bucket.json prediction-bucket record
@@ -2193,7 +2186,7 @@ Phase 3 verdict: single.
 
 Must agree: an assessment's reference is disjoint from the split the producing run actually
 trained and selected on.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:413` (`def run_resolution(`, the one reader of the partition the launcher resolved and wrote into the run's `run.json`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:414` (`def run_resolution(`, the one reader of the partition the launcher resolved and wrote into the run's `run.json`).
 Side B: `assessment.py`'s `_disjointness`, a set intersection over group keys and source digests between the reference sides and the run's train and val sides read through it, and the reserved-regions assessment, which takes its regions from the same reader.
 Phase 3 verdict: single.
 
@@ -2228,22 +2221,22 @@ Phase 3 verdict: single.
 ## S36. Count-objective vocabulary versus registered pickers
 
 Must agree: every named count objective has a registered picker function.
-Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:28` (`COUNT_UNBIASED = "count_unbiased"`, with `DETECTION_F1` and `PRESENCE` declared beside it).
+Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:27` (`COUNT_UNBIASED = "count_unbiased"`, with `DETECTION_F1` and `PRESENCE` declared beside it).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/operating_point.py:27` (`COUNT_OBJECTIVE_PICKERS`, keyed by those three names; an objective with no picker refuses in the count criterion). A picker's provenance label is read off that registry by `pipelines/derivations.py:647`, so registering a picker registers its label.
 Phase 3 verdict: single.
 
 ## S37. Trait entries against crops.yml controlled vocabulary
 
 Must agree: a trait entry's delivered phenotypes exist in the crops.yml vocabulary.
-Side A: `packages/tcip-mcp/src/tcip_mcp/knowledge/__init__.py:124` (`def crops_yml_path(`, the one placement of `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/crops.yml`), reached through `packages/tcip-mcp/src/tcip_mcp/traits.py:101` (`def crops_yml_path(`, delegating), read whole or raising by `_crops_traits`, `traits.py:108`.
-Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:277` (`def check_proposed_entry(`, a proposal's one check of `delivers` against that read; a stored record decodes without it) and `tools/verify_skill_traits.py:26` (`load_vocab` checks a skill's trait tokens through that same read).
+Side A: `packages/tcip-mcp/src/tcip_mcp/knowledge/__init__.py:124` (`def crops_yml_path(`, the one placement of `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/crops.yml`), reached through `packages/tcip-mcp/src/tcip_mcp/traits.py:100` (`def crops_yml_path(`, delegating), read whole or raising by `_crops_traits`, `traits.py:107`.
+Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:276` (`def check_proposed_entry(`, a proposal's one check of `delivers` against that read; a stored record decodes without it) and `tools/verify_skill_traits.py:26` (`load_vocab` checks a skill's trait tokens through that same read).
 Phase 3 verdict: single.
 
 ## S38. Per-project trait records .tcip/state/traits/*.json
 
 Must agree: the proposing tool, the confirmation door, the delivery doors and the GUI trait list read one record per trait and agree on which revision a delivery ships under.
-Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:392` (`def trait_key(`, the one placement, with `TRAITS_STORE`, `traits.py:377`, the store every reader and writer addresses).
-Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:463` (`def propose_trait(`, the one append) and `packages/tcip-mcp/src/tcip_mcp/operationalization.py:46` (`def confirmed_revision(`, the one read of the latest confirmed revision every delivery door makes). `packages/tcip-web/src/tcip_web/routes/results.py:635` (`def list_traits(`) and `packages/tcip-mcp/src/tcip_mcp/cli/doctor.py:464` (`def check_traits(`) read the same record through `read_trait`.
+Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:390` (`def trait_key(`, the one placement, with `TRAITS_STORE`, `traits.py:375`, the store every reader and writer addresses).
+Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:460` (`def propose_trait(`, the one append) and `packages/tcip-mcp/src/tcip_mcp/operationalization.py:46` (`def confirmed_revision(`, the one read of the latest confirmed revision every delivery door makes). `packages/tcip-web/src/tcip_web/routes/results.py:500` (`def list_traits(`) and `packages/tcip-mcp/src/tcip_mcp/cli/doctor.py:464` (`def check_traits(`) read the same record through `read_trait`.
 Phase 3 verdict: single.
 
 ## S39. Phenology CSV column vocabulary
@@ -2271,7 +2264,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: a bespoke train(ctx) callable is importable and accepts the TrainContext the envelope hands it.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:341` (`training_source = run.config.get("training_source")`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:418` (`training_source = normalized.get(TRAINING_SOURCE_KEY)`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:279` (`training_source = normalized.get(TRAINING_SOURCE_KEY)`).
 Phase 3 verdict: duplicated.
 
 ## S43. dataset_source bespoke dataset seam
@@ -2306,14 +2299,14 @@ Phase 3 verdict: single. The api/ helpers keep their hand-written signatures and
 ## S47. GuiState shape between state.py and store/types.ts  <!-- queued: P5-287 unify -->
 
 Must agree: the snapshot the backend serializes deserializes into the store's typed shape.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:202` (`class GuiState(_GuiFields):`).
-Side B: `packages/tcip-web/frontend/src/api/types.generated.ts:438` (`export interface GuiState {`), generated from Side A by `tools/generate_frontend_types.py` and re-exported by `store/types.ts`.
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:203` (`class GuiState(_GuiFields):`).
+Side B: `packages/tcip-web/frontend/src/api/types.generated.ts:437` (`export interface GuiState {`), generated from Side A by `tools/generate_frontend_types.py` and re-exported by `store/types.ts`.
 Phase 3 verdict: single.
 
 ## S48. State WebSocket snapshot protocol  <!-- queued: P5-288 unify -->
 
 Must agree: the browser knows which slices of a broadcast snapshot are backend-authoritative and orders them by version.
-Side A: `packages/tcip-web/src/tcip_web/app.py:173` (`@app.websocket("/ws/state")`).
+Side A: `packages/tcip-web/src/tcip_web/app.py:169` (`@app.websocket("/ws/state")`).
 Side B: `packages/tcip-web/src/tcip_web/state.py:157` (`def version(self) -> int:`, "Monotonic version, bumped on every state change.").
 Phase 3 verdict: duplicated.
 
@@ -2328,13 +2321,13 @@ Phase 3 verdict: duplicated.
 
 Must agree: the browser recognizes the terminal frame and the status vocabulary the backend uses.
 Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:205` (`@router.websocket("/jobs/{job_id}/stream")`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/experiments.py:82` (`TERMINAL_STATES = frozenset({*FINAL_STATES, "interrupted"})`, the one declaration the job registry and the generated frontend vocabulary both read).
+Side B: `packages/tcip-mcp/src/tcip_mcp/experiments.py:83` (`TERMINAL_STATES = frozenset({*FINAL_STATES, "interrupted"})`, the one declaration the job registry and the generated frontend vocabulary both read).
 Phase 3 verdict: duplicated.
 
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
 
 Must agree: the status payload the MCP tool returns is renderable by the browser's training view.
-Side A: `packages/tcip-web/src/tcip_web/routes/training.py:290` (`@router.websocket("/runs/{experiment_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/training.py:270` (`@router.websocket("/runs/{experiment_id}/stream")`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py` (`monitor_training` supplies the status payload).
 Phase 3 verdict: duplicated.
 
@@ -2348,7 +2341,7 @@ Phase 3 verdict: duplicated.
 ## S53. Optimistic-concurrency token for label saves
 
 Must agree: the token the browser echoes is the same token the backend minted for that label file.
-Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:151` (`"base_mtime": token,`, the token the load route mints; the save route compares the echoed one at `routes/annotate.py:200`).
+Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:96` (`"base_mtime": token,`, the token the load route mints; the save route compares the echoed one at `routes/annotate.py:200`).
 Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:467` (`base_mtime: paths.mtime,`).
 Phase 3 verdict: single.
 
@@ -2356,20 +2349,20 @@ Phase 3 verdict: single.
 
 Must agree: the directory Vite writes is one of the directories the backend looks in.
 Side A: `packages/tcip-web/frontend/vite.config.ts:26` (`outDir: "../static",`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:230` (`def _find_static_dir() -> Path:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:226` (`def _find_static_dir() -> Path:`).
 Phase 3 verdict: duplicated.
 
 ## S55. Vite dev-server proxy prefixes  <!-- queued: P5-306 unify -->
 
 Must agree: every backend path the browser calls in dev falls under a proxied prefix.
 Side A: `packages/tcip-web/frontend/vite.config.ts:20` (`proxy: {`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:173` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
+Side B: `packages/tcip-web/src/tcip_web/app.py:169` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
 Phase 3 verdict: duplicated. The prefix literals still stand on their own, but `tests/test_frontend_route_paths.py` now fails when a path the frontend references falls outside them, sockets under the API prefix included.
 
 ## S56. Tab-name vocabulary  <!-- queued: P5-290 unify -->
 
 Must agree: the tab a panel event targets, the tab the browser can restore, and the tab the backend persists are the same set of names.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:128` (`ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]`, with `TAB_NAMES = get_args(ActiveTab)` beside it, `tcip_web.state` importing both).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:129` (`ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]`, with `TAB_NAMES = get_args(ActiveTab)` beside it, `tcip_web.state` importing both).
 Side B: `packages/tcip-web/frontend/src/api/types.generated.ts:17` (`export const TAB_NAMES = [`, generated from the same declaration).
 Phase 3 verdict: duplicated.
 
@@ -2377,22 +2370,22 @@ Phase 3 verdict: duplicated.
 
 Must agree: the TP/FP/FN classification the browser draws is the one the matching library computed.
 Side A: `packages/tcip-annotation/src/tcip_annotation/matching.py` (`compute_matches` / `compute_classified_trait_matches`).
-Side B: `packages/tcip-web/src/tcip_web/routes/review.py:246` (`class MatchesResponse(BaseModel):`).
+Side B: `packages/tcip-web/src/tcip_web/routes/review.py:231` (`class MatchesResponse(BaseModel):`).
 Phase 3 verdict: restated-in-test.
 
 ## S58. Reference-grid geometry
 
 Must agree: the cell name the agent points at and the cell the GUI highlights are the same rectangle.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/reference_grid.py:41` (`def reference_cells(`, which builds the cells, with `grid_geometry`, `reference_grid.py:122`, the geometry handed over beside them).
-Side B: `packages/tcip-annotation/src/tcip_annotation/sam_wrapper.py:319` (`def grid_to_rect(`, the one cell-name lookup, with `grid_to_pixel`, `sam_wrapper.py:347`, built on it) and `packages/tcip-web/src/tcip_web/routes/coverage.py:221` (`@router.get("/grid")`, `get_grid`, whose cell list the browser consumes verbatim).
+Side B: `packages/tcip-annotation/src/tcip_annotation/sam_wrapper.py:319` (`def grid_to_rect(`, the one cell-name lookup, with `grid_to_pixel`, `sam_wrapper.py:347`, built on it) and `packages/tcip-web/src/tcip_web/routes/coverage.py:220` (`@router.get("/grid")`, `get_grid`, whose cell list the browser consumes verbatim).
 Phase 3 verdict: single.
 
 ## S59. Path confinement (the derived allow-set)
 
 Must agree: every route that accepts a client-supplied path confines it to the same allowed roots.
-Side A: `packages/tcip-web/src/tcip_web/paths.py:41`
+Side A: `packages/tcip-web/src/tcip_web/paths.py:40`
 (`def allowed_roots() -> list[Path]:`).
-Side B: `packages/tcip-web/src/tcip_web/routes/annotate.py:76` (`p = allowed_path(path)`, the one adapter every route shares, `paths.py:147`).
+Side B: `packages/tcip-web/src/tcip_web/paths.py:174` (`p = allowed_path(path)`, the one adapter every route shares, `paths.py:156`).
 Phase 3 verdict: single.
 
 ## S64. MCP tool registry against documented tool names  <!-- queued: P5-303 unify -->

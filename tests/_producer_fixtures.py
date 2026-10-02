@@ -11,6 +11,15 @@ from __future__ import annotations
 from typing import Any
 
 
+def registry_over(dataset_root, registry) -> None:
+    """``dataset_root``'s subject registry replaced by ``registry`` through the platform's own save
+    (:func:`~tcip_mcp.subject_registry.replace_registry`), whatever it held before."""
+    from tcip_mcp.subject_registry import replace_registry
+
+    replace_registry(dataset_root, registry, expect=None, allow_removals=True,
+                     allow_type_changes=True)
+
+
 def admit_over(
     images_dir, ground_truth, *, subject: str | None = None, attribute: str | None = None,
     members: list[str] | None = None,

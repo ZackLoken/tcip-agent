@@ -4,7 +4,7 @@ A stdio MCP server runs one process per connected client, and the client declare
 initialize handshake (``client_info``: a name and a version, such as ``claude-code 2.1.238`` or
 ``codex-mcp-client 0.147.0``). This module keeps that declaration for the life of one server run,
 beside a session id the server mints itself, and projects the pair onto every record the process
-writes: the audit line, the trait revisions it proposes, and the headers of the one HTTP push the tools make.
+writes: the audit line and the headers of the one HTTP push the tools make.
 The in-app terminal's own session id, when the web backend passed it down through
 ``TCIP_TERMINAL_SESSION``, rides along as a correlation.
 
@@ -14,12 +14,12 @@ on it. A process that never completed a handshake has no identity, and its recor
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 import secrets
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, unquote
 
@@ -33,63 +33,28 @@ TERMINAL_SESSION_ENV = "TCIP_TERMINAL_SESSION"
 inherited by the MCP server that agent launches. A correlation, not a credential: any launcher can
 set it, so a record carrying it says only what the launcher declared."""
 
-RECORD_FIELDS = (
-    "agent_client_name", "agent_client_version", "agent_session", "terminal_session",
-    "harness_session", "harness_effort_at_connect",
-)
-"""The fields a record gains, in the order a statement's field tuple lists them."""
 
-HEADERS = {
-    "agent_client_name": "X-TCIP-Agent-Client-Name",
-    "agent_client_version": "X-TCIP-Agent-Client-Version",
-    "agent_session": "X-TCIP-Agent-Session",
-    "terminal_session": "X-TCIP-Terminal-Session",
-    "harness_session": "X-TCIP-Harness-Session",
-    "harness_effort_at_connect": "X-TCIP-Harness-Effort-At-Connect",
-}
-"""The header each field travels under on the tools' HTTP push; the backend reads the same map."""
-
-HARNESS_EXPORTS: dict[str, dict[str, str]] = {
-    "claude-code": {
-        "harness_session": "CLAUDE_CODE_SESSION_ID",
-        "harness_effort_at_connect": "CLAUDE_EFFORT",
-    },
-}
-"""What each harness, by the name it declares, exports to the MCP servers it spawns: a session id
-(for Claude Code, the key to the transcript it keeps, where the model that actually ran is
-written) and the effort it was running at when it spawned the server. Both are read once, at the
-handshake: a child's environment does not follow a later change in the harness, so the effort is
-a connect-time snapshot and is named as one. Read only under the declaring harness's own entry,
-so a harness that declares another name and passes an enclosing harness's variables through is
-not attributed them; a client declaring the same name is, which is the trusted-user residual.
-Observed by execution for a fresh Claude Code 2.1.238 launch (nested launches, ``--resume`` and
-the SDK entry point were not probed); Codex 0.147.0 scrubs the environment its servers receive
-and exports nothing of the kind, so a Codex session records these as absent."""
-
-
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class AgentIdentity:
-    """What the connecting harness declared, the session this server minted, the terminal session
-    the launcher declared, and what the harness exported about itself, each absent when not
-    declared."""
+    """What the connecting harness declared, the session this server minted, and the terminal
+    session the launcher declared, absent when not declared. Its attributes are the fields a
+    record gains, in order."""
 
-    client_name: str
-    client_version: str
-    session: str
+    agent_client_name: str
+    agent_client_version: str
+    agent_session: str
     terminal_session: str | None
-    harness_session: str | None = None
-    harness_effort_at_connect: str | None = None
 
     def fields(self) -> dict[str, Any]:
-        return {
-            "agent_client_name": self.client_name,
-            "agent_client_version": self.client_version,
-            "agent_session": self.session,
-            "terminal_session": self.terminal_session,
-            "harness_session": self.harness_session,
-            "harness_effort_at_connect": self.harness_effort_at_connect,
-        }
+        return dataclasses.asdict(self)
 
+
+RECORD_FIELDS = tuple(f.name for f in dataclasses.fields(AgentIdentity))
+"""The fields a record gains, in declaration order."""
+
+HEADERS = {field: "X-TCIP-" + "-".join(w.capitalize() for w in field.split("_"))
+           for field in RECORD_FIELDS}
+"""The header each field travels under on an HTTP push."""
 
 _current: AgentIdentity | None = None
 
@@ -105,24 +70,21 @@ def begin(client_name: str, client_version: str) -> AgentIdentity:
         logger.warning(
             "a second MCP handshake (%s %s) reached a server already serving %s %s; the identity "
             "of the first connection stands for this run",
-            client_name, client_version, _current.client_name, _current.client_version,
+            client_name, client_version, _current.agent_client_name,
+            _current.agent_client_version,
         )
         return _current
-    exports = HARNESS_EXPORTS.get(client_name, {})
     _current = AgentIdentity(
-        client_name=client_name,
-        client_version=client_version,
-        session="mcp_" + secrets.token_hex(8),
+        agent_client_name=client_name,
+        agent_client_version=client_version,
+        agent_session="mcp_" + secrets.token_hex(8),
         terminal_session=os.environ.get(TERMINAL_SESSION_ENV) or None,
-        harness_session=os.environ.get(exports.get("harness_session", "")) or None,
-        harness_effort_at_connect=os.environ.get(exports.get("harness_effort_at_connect", ""))
-        or None,
     )
     return _current
 
 
 def end() -> None:
-    """Forget the identity; called when the server run that established it ends."""
+    """Forget the identity."""
     global _current
     _current = None
 
@@ -138,13 +100,6 @@ def audit_fields() -> dict[str, Any]:
     if _current is None:
         return {}
     return {key: value for key, value in _current.fields().items() if value is not None}
-
-
-def revision_fields() -> dict[str, Any]:
-    """What a proposed trait revision carries: every field, ``None`` where nothing was declared."""
-    if _current is None:
-        return {field: None for field in RECORD_FIELDS}
-    return _current.fields()
 
 
 def http_headers() -> dict[str, str]:

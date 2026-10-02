@@ -195,7 +195,8 @@ def publish(
     (:class:`BucketExists`) before anything is consumed or written, then write each of
     ``documents`` once as ``documents`` yields them, a stem already written refusing
     (``ValueError``), then ``bucket.json`` once, then the publication's one audit line,
-    ``prediction_bucket_published``.
+    ``prediction_bucket_published``, naming the bucket and its ``dropped_boxes``, which an
+    ``AuditEntryNotWritten`` carries when that line cannot be written.
 
     The record states ``producer``, ``scope``, ``execution``, the raster and the assessment as
     given, and the capture of the raster, else of the first document's source image
@@ -253,7 +254,8 @@ def publish(
                 {"predictions_dir": str(out), "written": sorted(written), "error": str(exc)},
                 status="failed", scope=audit_scope)
         raise
-    record_event_or_raise("prediction_bucket_published", {"predictions_dir": str(out)},
+    record_event_or_raise("prediction_bucket_published",
+                          {"predictions_dir": str(out), "dropped_boxes": dropped_boxes},
                           scope=audit_scope)
     return read_bucket(out)
 

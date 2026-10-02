@@ -429,7 +429,7 @@ describe("AnnotateToolbar subject authoring", () => {
       version: "v2",
       schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     };
-    const message = "gui_save_subjects completed and its audit entry could not be written";
+    const message = "replace_registry completed and its audit entry could not be written";
     vi.spyOn(subjectsApi, "save").mockRejectedValue(
       new StructuredRefusalError(
         { error: "audit_entry_not_written", message, committed },

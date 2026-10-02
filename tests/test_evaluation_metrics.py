@@ -685,7 +685,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
         "iou_threshold", "execution", "eval_regime",
     }
     full_frame_only_fields = {
-        "scored_images", "sample_counts", "contradicted_negatives",
+        "scored_images", "tallies", "contradicted_negatives",
         "max_dets_cap_saturated_frac",
     }
 
@@ -1026,4 +1026,4 @@ def test_a_crowd_region_is_no_object_in_a_ground_truth_count(tmp_path):
         Annotation(subject="bur", geometry=BBox(1, 1, 9, 9)),
         Annotation(subject="bur", geometry=BBox(20, 20, 60, 60), iscrowd=True)], 100, 100)
     assert count_label_lines(label, ClassScope(subject="bur")) == 1
-    assert count_label_lines(label) == 1
+    assert count_label_lines(label, ClassScope()) == 1

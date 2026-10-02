@@ -15,10 +15,8 @@ from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Sequence
 
 from tcip_store import canonical_path
 
-from tcip_mcp.pipelines.data.selection import SIDES
-
 if TYPE_CHECKING:
-    from tcip_mcp.pipelines.data.selection import ClassScope, Selection
+    from tcip_mcp.pipelines.data.selection import ClassScope
 
 # A tiled stem looks like ``<source>_<x>_<y>`` (two trailing integer fields).
 # Strip that suffix so all tiles of one source share a group key. A stem with a
@@ -47,26 +45,21 @@ GROUP_KEY_FNS: dict[str, Callable[[str], str]] = {
 }
 
 
-def count_label_lines(label_path: str | Path, scope: "ClassScope | None" = None) -> int:
-    """Annotation count for one per-image label document, by its own path, a foreground-density
-    proxy for stratified splitting.
-
-    With no subject in ``scope``, every record in the file counts regardless of subject; given one,
-    only that subject's records count, further narrowed to those already assessed for the scope's
-    attribute when one is named.
-
-    A missing file scores 0 foreground; a present, unreadable one raises
+def count_label_lines(label_path: str | Path, scope: "ClassScope") -> int:
+    """How many instances of ``scope``'s subject (of any subject when it names none) one per-image
+    label document carries, narrowed to those already assessed for the scope's attribute when one
+    is named. A missing document raises
+    ``FileNotFoundError``, an unreadable one
     :class:`~tcip_annotation.json_io.UnreadableLabelDocument`.
     """
     from tcip_annotation import json_io
     from tcip_annotation.state import instances
 
-    jp = Path(label_path)
-    if not jp.is_file():
-        return 0
+    if not Path(label_path).is_file():
+        raise FileNotFoundError(f"no label document at {label_path} to count foreground in")
     # A crowd region is never one object, so it is never counted as one.
-    records = instances(json_io.read_annotations(str(jp)))
-    if scope is None or scope.subject is None:
+    records = instances(json_io.read_annotations(str(label_path)))
+    if scope.subject is None:
         return len(records)
     return sum(1 for a in records
                if json_io.assessed_key(a, scope.subject, scope.attribute) is not None)
@@ -91,81 +84,48 @@ def label_document_extent(label_path: str | Path) -> tuple[int, int]:
 
 
 def group_balanced_split(
-    stems: Sequence[str],
-    annotation_counts: dict[str, int] | None = None,
-    group_key_fn: Callable[[str], str] | None = None,
-    splits: tuple[float, float, float] = (0.7, 0.2, 0.1),
-    seed: int = DEFAULT_SEED,
-    require_foreground: bool = False,
-    min_foreground_groups: dict[str, int] | None = None,
-    foreground_counts: dict[str, int] | None = None,
+    stems: Sequence[str], *, counts: Mapping[str, int], weighted: bool,
+    group_key_fn: Callable[[str], str], splits: Mapping[str, float], seed: int,
+    min_foreground_groups: Mapping[str, int],
 ) -> dict[str, list[str]]:
-    """Partition ``stems`` into train/val/calibration, keeping each group intact.
+    """Partition ``stems`` onto the sides ``splits`` names, each at its positive fraction, keeping
+    each group (``group_key_fn``) whole; deterministic in ``seed`` and the groups, whatever the
+    stems are named.
 
-    Parameters
-    ----------
-    stems:
-        Image stems to partition.
-    annotation_counts:
-        Optional ``{stem: annotation_line_count}``. When omitted or all-zero, the no-foreground
-        fallback weights groups purely by tile count.
-    group_key_fn:
-        Maps a stem to its group key (default: strip ``_<x>_<y>`` tile offset).
-    splits:
-        ``(train, val, calibration)`` fractions. A 0.0 fraction disables that split.
-    seed:
-        Deterministic seed.
-    require_foreground:
-        Raise ``ValueError`` when there is no foreground signal at all.
-    min_foreground_groups:
-        Per-side minimum count of foreground groups the balancing pass guarantees before it runs
-        its ordinary largest-first assignment, met first with the smallest foreground groups so the
-        dense ones remain for balancing. Omitted, every active side gets a minimum of one; a side
-        named here with no active fraction is ignored. A tree with fewer foreground groups than a
-        minimum asks for gets fewer than that side's floor met; this function never raises on it
-        (:func:`refuse_insufficient_foreground_groups` is the hard floor).
-    foreground_counts:
-        The minimum pass's own foreground signal, independent of ``annotation_counts`` (the
-        balancing pass's signal). Omitted, the minimum pass draws from ``annotation_counts``;
-        given, a group counts toward a side's minimum only when its ``foreground_counts`` sum is
-        positive, even when ``annotation_counts`` is ``None``.
-
-    Returns
-    -------
-    ``{"train": [...], "val": [...], "calibration": [...]}``, a partition of ``stems``.
+    ``counts`` is every stem's measured foreground count, and a stem it does not name refuses
+    (``ValueError``). Each side first takes ``min_foreground_groups`` groups carrying foreground,
+    smallest first, without raising on a short tree
+    (:func:`refuse_insufficient_foreground_groups` is the floor). The rest is balanced by a
+    blended foreground/tile imbalance when ``weighted`` and any group carries foreground, the
+    groups carrying none then filling the largest tile deficit; otherwise by tile count alone.
+    Returns each side's sorted stems.
     """
-    if group_key_fn is None:
-        group_key_fn = GROUP_KEY_FNS[DEFAULT_GROUP_BY]
     stems = list(stems)
-    fracs = dict(zip(SIDES, splits))
-    active = [n for n in fracs if fracs[n] > 0]
+    missing = sorted(s for s in stems if s not in counts)
+    if missing:
+        raise ValueError(f"no foreground count for {len(missing)} member(s) {missing[:10]}: a "
+                         "draw balances only on counts measured for every member")
+    fracs = dict(splits)
+    active = list(fracs)
 
     # Group stems and tally tiles + annotations per group.
     groups: dict[str, list[str]] = defaultdict(list)
     for s in stems:
         groups[group_key_fn(s)].append(s)
-
-    counts = annotation_counts or {}
-    has_fg_signal = any(int(counts.get(s, 0)) > 0 for s in stems)
-    if not has_fg_signal and require_foreground:
-        raise ValueError("No foreground annotations and require_foreground=True.")
-
     group_tiles = {gk: len(gs) for gk, gs in groups.items()}
-    if has_fg_signal:
-        group_ann = {gk: sum(int(counts.get(s, 0)) for s in gs) for gk, gs in groups.items()}
-        fg_groups = [gk for gk, a in group_ann.items() if a > 0]
-        bg_groups = [gk for gk, a in group_ann.items() if a == 0]
+    group_fg = {gk: sum(counts[s] for s in gs) for gk, gs in groups.items()}
+
+    if weighted and any(group_fg.values()):
+        group_ann = group_fg
+        fg_groups = [gk for gk in sorted(groups) if group_ann[gk] > 0]
+        bg_groups = [gk for gk in sorted(groups) if group_ann[gk] == 0]
     else:
-        # No-foreground fallback: balance by tile count, every group foreground.
         group_ann = dict(group_tiles)
-        fg_groups = list(groups.keys())
+        fg_groups = sorted(groups)
         bg_groups = []
 
     result: dict[str, list[str]] = {n: [] for n in fracs}
-    if not fg_groups or not active:
-        # Nothing to stratify on; dump everything into the first active split.
-        target = active[0] if active else "train"
-        result[target] = sorted(stems)
+    if not fg_groups:
         return result
 
     total_ann = sum(group_ann[gk] for gk in fg_groups) or 1
@@ -181,22 +141,11 @@ def group_balanced_split(
     rng = random.Random(seed)
     rng.shuffle(fg_groups)
 
-    # Each active side's minimum, met first with the smallest foreground groups (dense ones stay
-    # for the balancing pass); a short tree just meets fewer minimums, nothing here raises on it.
-    if min_foreground_groups is None:
-        min_fg = {n: 1 for n in active}
-    else:
-        min_fg = {n: min_foreground_groups[n] for n in active if n in min_foreground_groups}
-
-    if foreground_counts is None:
-        min_pass_pool = fg_groups
-    else:
-        min_pass_pool = [
-            gk for gk in fg_groups
-            if sum(int(foreground_counts.get(s, 0)) for s in groups[gk]) > 0
-        ]
+    # Each side's minimum, met first with the smallest foreground groups (dense ones stay for the
+    # balancing pass); a short tree just meets fewer minimums, nothing here raises on it.
+    min_pass_pool = [gk for gk in fg_groups if group_fg[gk] > 0]
     fg_smallest_first = sorted(min_pass_pool, key=lambda gk: group_ann[gk])
-    for split_name, need in min_fg.items():
+    for split_name, need in min_foreground_groups.items():
         taken = 0
         for gk in fg_smallest_first:
             if taken >= need:
@@ -246,10 +195,9 @@ def foreground_group_count(
 ) -> int:
     """How many distinct groups among ``members`` carry foreground. ``counts`` is each member's own
     foreground count under the caller's own key for it
-    (:func:`~tcip_mcp.pipelines.data.label_queries.foreground_counts`); a member the map does not
-    name carries none.
+    (:func:`~tcip_mcp.pipelines.data.label_queries.foreground_counts`), naming every member.
     """
-    return len({group_of(member) for member in members if counts.get(member, 0) > 0})
+    return len({group_of(member) for member in members if counts[member] > 0})
 
 
 def refuse_insufficient_foreground_groups(
@@ -312,71 +260,12 @@ def recorded_group_key_fn(
     the stem becomes its member identity (:func:`member_identity`) and the policy is resolved
     against those identities (:func:`resolve_group_key_fn`).
 
-    ``stems`` and ``group_key_map`` are the producer's own: the map is checked for coverage of
-    those stems' identities before any key is handed out. A reader passes neither, and the named
-    policy alone answers.
+    With ``stems``, ``group_key_map`` is checked for coverage of their identities before any key
+    is handed out; with neither, the named policy alone answers.
     """
     identities = [member_identity(date, stem) for stem in stems]
     key_fn = resolve_group_key_fn(group_by, identities, group_key_map=group_key_map)
     return lambda stem: key_fn(member_identity(date, stem))
-
-
-def draw_train_val(
-    stems: Sequence[str], *, annotation_counts: dict[str, int] | None,
-    group_key_fn: Callable[[str], str], val_ratio: float, seed: int,
-) -> tuple[list[str], list[str]]:
-    """``(train, val)`` for ``stems``: one :func:`group_balanced_split` at ``(1 - val_ratio,
-    val_ratio, 0.0)``; never retries or degrades on a starved side.
-    """
-    parts = group_balanced_split(
-        list(stems), annotation_counts=annotation_counts, group_key_fn=group_key_fn,
-        splits=(1.0 - val_ratio, val_ratio, 0.0), seed=seed,
-    )
-    return parts["train"], parts["val"]
-
-
-def redraw_pool(selection: "Selection") -> tuple[dict[str, str], dict[str, int]]:
-    """A redraw's pool: each train-plus-val sample's recorded group key and foreground count, by
-    sample location."""
-    from tcip_mcp.pipelines.data.label_queries import foreground_counts
-
-    pool = selection.trainable()
-    return ({s.location: s.group for s in pool},
-            foreground_counts({s.location: s for s in pool}, selection.scope))
-
-
-def redraw_starved_issue(
-    group_of: dict[str, str], counts: dict[str, int], *, selection_dir: str | None,
-    seed: int | None,
-) -> str | None:
-    """Whether a selection's train-plus-val members resolve to too few foreground groups for a
-    redraw to populate both a train and a val side.
-
-    :func:`group_balanced_split`'s own per-side minimum needs one foreground group for each active
-    side; a background-only group (zero foreground signal, e.g. a confirmed negative) is placed
-    afterwards by tile deficit and can concentrate entirely onto one side, so only foreground
-    groups count here.
-
-    ``group_of`` and ``counts`` are the selection's :func:`redraw_pool`.
-
-    ``None`` when at least two foreground groups are available; the refusal otherwise, naming the
-    selection, the seed and the two counts, with the two remedies: drop the redraw to bind the
-    selection's recorded partition instead, or draw a selection with at least two foreground groups
-    across train and val.
-    """
-    distinct = set(group_of.values())
-    foreground = foreground_group_count(group_of, counts, group_of.__getitem__)
-    if foreground >= 2:
-        return None
-    name = f"the selection at {selection_dir!r}" if selection_dir else "the selection"
-    return (
-        f"redrawing train and val inside {name}'s own members at seed {seed} would starve a "
-        f"side: they resolve to only {foreground} foreground group(s) among "
-        f"{len(distinct)} distinct group(s), short of the two a train side and a val side each "
-        "need at least one of. Drop data.split.redraw_within_selection and data.split.seed to "
-        "bind the selection's recorded partition instead, or draw a selection with at least two "
-        "foreground groups across train and val."
-    )
 
 
 def same_directory(a: str | Path | None, b: str | Path | None) -> bool:
@@ -428,8 +317,7 @@ class SpatialStripSplit:
 
     ``regions`` maps each split name to its list of half-open pixel rects (already merged where two
     same-split strips landed adjacent, and buffer-shrunk on any side bordering a different-split
-    neighbor): :class:`TiledDetectionDataset`'s ``keep_regions`` consumes these directly.
-    ``realized_fractions`` is each side's kept tile count over the total kept across every side
+    neighbor). ``realized_fractions`` is each side's kept tile count over the total kept across every side
     (post-buffer), not the requested fractions.
     """
 
@@ -554,10 +442,8 @@ def spatial_strip_split(
     the case where there are too few source images to hold one out whole: a strip is train, val, or
     test instead of a stem.
 
-    The tile lattice comes from :func:`~tcip_mcp.pipelines.slicing.slice_lattice`, so the regions
-    this returns tile the same slices a :class:`TiledDetectionDataset` built at this
-    ``tile_size``/``overlap`` will index. The split
-    runs along whichever axis (width or height) offers more distinct tile positions. Piece count
+    The tile lattice is :func:`~tcip_mcp.pipelines.slicing.slice_lattice`'s at this
+    ``tile_size``/``overlap``. The split runs along whichever axis (width or height) offers more distinct tile positions. Piece count
     and order follow :class:`SpatialStripSplit` (``stripes_per_split``, capped by
     ``discard_ceiling``).
 

@@ -2,7 +2,7 @@
 
 Every mutating door leaves one line per act it made, the decorator's or its library's, and a
 refusal made none: an undecorated door refused before it acts, a decorated door returning its
-error dict, and a library refusing a write (the registry's ownership rail) alike. A body that raises keeps its exception line. The admitting halves
+error dict, and a library refusing a write (the registry's ownership rail) alike. The admitting halves
 (one row per act when the door does act) live beside each door's own tests.
 """
 
@@ -118,9 +118,12 @@ def test_a_door_refused_before_it_acts_leaves_no_row(tmp_path: Path, door):
     assert _rows(tmp_path) == []
 
 
-def test_a_decorated_door_whose_body_raises_keeps_its_exception_row(tmp_path: Path, monkeypatch):
+def test_a_label_write_that_raises_leaves_no_line(tmp_path: Path, monkeypatch):
+    """The label save's library writes its line once the document lands, so a write that raises
+    leaves none, through the tool that calls it."""
     from PIL import Image
 
+    import tcip_annotation.json_io as json_io
     import tcip_mcp.tools.annotation_tools as annotation_tools
 
     image = tmp_path / "images" / "2025-09-14" / "a.png"
@@ -130,8 +133,8 @@ def test_a_decorated_door_whose_body_raises_keeps_its_exception_row(tmp_path: Pa
     def _refused_write(*args, **kwargs):
         raise OSError("the label store refused the write")
 
-    monkeypatch.setattr(annotation_tools, "write_annotations", _refused_write)
+    monkeypatch.setattr(json_io, "write_annotations", _refused_write)
     with pytest.raises(OSError):
-        annotation_tools.save_annotations(tmp_path, tmp_path.parent, str(image), annotations=[{"subject": "cyme",
-                                                                     "bbox": [1, 1, 5, 5]}])
-    assert [(r["tool"], r["status"]) for r in _rows(tmp_path)] == [("save_annotations", "exception")]
+        annotation_tools.save_annotations(tmp_path, tmp_path.parent, str(image),
+                                          annotations=[{"subject": "cyme", "bbox": [1, 1, 5, 5]}])
+    assert _rows(tmp_path) == []

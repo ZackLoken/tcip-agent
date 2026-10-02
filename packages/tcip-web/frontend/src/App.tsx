@@ -26,6 +26,7 @@ import { attachCtrlWheelGuard } from "@/lib/ctrlWheelGuard";
 import { anyTrackerDirty, coverageOutbox, flushAllTrackers } from "@/lib/coverageTracker";
 import { applyReviewFocus, type ReviewFocusData } from "@/lib/reviewFocus";
 import { useStore } from "@/store";
+import { declaredClient } from "@/store/slices/agentActivity";
 import { selectProjectRoot } from "@/store/slices/gui";
 import type { TabName } from "@/store/types";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
@@ -35,18 +36,6 @@ import { ReviewTab } from "@/tabs/ReviewTab";
 // Every tab has an agent panel of the same name (the backend's own panel set also carries
 // "app", handled by its own subscription below).
 const TAB_PANELS: readonly TabName[] = TAB_NAMES;
-
-/** The harness a panel event declared, from its own identity fields: the client name with its
- * version appended when declared, or null when the sender declared none (a plain process's own
- * write, never a guess at who that process was). */
-function panelEventActor(ev: {
-  agent_client_name?: string | null;
-  agent_client_version?: string | null;
-}): string | null {
-  const name = ev.agent_client_name;
-  if (!name) return null;
-  return ev.agent_client_version ? `${name} ${ev.agent_client_version}` : name;
-}
 
 // Code-split the recharts-heavy tabs (recharts + its d3 deps are ~5MB unpacked and used only
 // here) so the Annotate/Review workflow (the primary use) paints without them. App mounts
@@ -117,7 +106,7 @@ function App() {
         if (ev.panel === "annotate") {
           useStore
             .getState()
-            .pushAgentActivity(ev.panel, ev.event_type, ev.data, panelEventActor(ev));
+            .pushAgentActivity(ev.panel, ev.event_type, ev.data, declaredClient(ev));
         }
       }),
     );

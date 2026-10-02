@@ -18,7 +18,7 @@ import torch  # noqa: E402
 from tcip_mcp.pipelines.components.heads import OrdinalHead  # noqa: E402
 from tcip_mcp.pipelines.model_contract import check_model_contract, overfit_check  # noqa: E402
 from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
-from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._producer_fixtures import dataset_over, registry_over  # noqa: E402
 
 # What the smokes below synthesize their batch at, the shape a run resolves for itself.
 DET_DIMS = {"in_chans": 3, "num_classes": 1, "img_size": 64}
@@ -67,13 +67,12 @@ def _real_detection_item(tmp_path):
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import SubjectRegistry, Subject
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
     images_dir.mkdir()
     labels_dir.mkdir()
-    write_registry(tmp_path / "subjects.json",
-                   SubjectRegistry((Subject("bush"), Subject("bud"))))
+    registry_over(tmp_path, SubjectRegistry((Subject("bush"), Subject("bud"))))
     Image.new("RGB", (96, 48)).save(images_dir / "a.png")
     json_io.write_annotations(str(labels_dir / "a.json"),
                               [Annotation(subject="bud", geometry=BBox(4, 6, 40, 19))], 96, 48)

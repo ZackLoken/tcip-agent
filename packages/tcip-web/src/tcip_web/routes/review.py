@@ -47,13 +47,10 @@ from tcip_annotation.verdicts import (
 from tcip_mcp.buckets import Bucket
 from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status
 from tcip_mcp.pipelines.data.selection import ClassScope
-from tcip_mcp.pipelines.image_utils import (
-    AmbiguousImageStem, image_dimensions, resolve_image_source,
-)
 from tcip_web import jobstore
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.label_annotations_cache import cached_label_annotations
-from tcip_web.paths import allowed_optional, allowed_path
+from tcip_web.paths import allowed_image_dimensions, allowed_optional, allowed_path
 from tcip_web.routes.annotate import annotation_dict
 from tcip_web.state import store
 
@@ -128,18 +125,6 @@ def _verdict_class_id(scope: ClassScope, class_name: str) -> Optional[int]:
     return (scope.id_map or {}).get(class_name)
 
 
-def _image_dims(path: str) -> tuple[int, int]:
-    p = allowed_path(path)
-    if not p.is_file():
-        raise HTTPException(404, f"image not found: {path}")
-    # Channel-aware: resolve_image_source folds a `.bandgroup` manifest (or a genuinely
-    # multi-band raster) into the frame image_dimensions measures, not a bare PIL header read.
-    try:
-        return image_dimensions(resolve_image_source(p.parent, p.stem))
-    except AmbiguousImageStem as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
 def _ensure_original_backup(label_path: Optional[str]) -> None:
     """Capture one label file's pristine bytes before its first mutation, if none is held yet.
 
@@ -201,7 +186,7 @@ def _read_annotations_or_400(read, path: str) -> list:
 
 def _load_ctx(image_name: str, image_path: str, *, gt_path: Optional[str],
               pred_path: Optional[str]) -> ReviewContext:
-    w, h = _image_dims(image_path)
+    w, h = allowed_image_dimensions(image_path)
     ctx = ReviewContext(img_name=image_name, img_width=w, img_height=h)
     gt_path = allowed_optional(gt_path)
     pred_path = allowed_optional(pred_path)

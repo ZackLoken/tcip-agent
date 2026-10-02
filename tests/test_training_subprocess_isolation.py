@@ -15,17 +15,13 @@ from tcip_mcp.pipelines.data.selection import ClassScope
 
 
 def _write_classes_json(dataset_root, subject="bud", attribute=None, values=None):
-    # subjects.json lives at the dataset root, the parent of the canonical labels/images/annotations
-    # segment (dataset_layout.py's _DATASET_SEGMENTS), not inside the labels dir itself.
-    from pathlib import Path
-
-    from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject, write_registry
+    from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
+    from tests._producer_fixtures import registry_over
 
     attrs = ()
     if attribute:
         attrs = (Attribute(name=attribute, type="categorical", values=tuple(values)),)
-    write_registry(Path(dataset_root) / "subjects.json",
-                   SubjectRegistry((Subject(subject, attributes=attrs),)))
+    registry_over(dataset_root, SubjectRegistry((Subject(subject, attributes=attrs),)))
 
 
 def _document_dataset(root, subject="bud", attribute=None, values=None):

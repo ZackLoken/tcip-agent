@@ -80,7 +80,7 @@ def test_run_inference_writes_each_document_then_the_record_and_one_audit_line(
     assert bucket.producer["checkpoint_sha256"] == digest and bucket.assessment_id is None
     rows = [r for key in dict.fromkeys((audit_log_key(tmp_path), audit_log_key(out)))
             for r in ts.read_log(key).records if r["tool"] == "prediction_bucket_published"]
-    assert [r["arguments"] for r in rows] == [{"predictions_dir": str(out)}]
+    assert [r["arguments"] for r in rows] == [{"predictions_dir": str(out), "dropped_boxes": 0}]
 
 
 def test_a_second_run_into_a_published_bucket_refuses_before_any_pass_and_leaves_it(

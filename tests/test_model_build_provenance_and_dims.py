@@ -14,7 +14,6 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from tcip_mcp import subject_registry  # noqa: E402
-from tcip_mcp.dataset_layout import subjects_path  # noqa: E402
 from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map  # noqa: E402
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.pipelines.model_build import (  # noqa: E402
@@ -24,6 +23,7 @@ from tcip_mcp.pipelines.model_build import (  # noqa: E402
     snapshot_model_source,
 )
 from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
+from tests._producer_fixtures import registry_over  # noqa: E402
 from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 
 
@@ -64,7 +64,7 @@ def _write_registry(dataset_root: Path) -> None:
         subject_registry.Subject(name="bud"),
     ))
     dataset_root.mkdir(parents=True, exist_ok=True)
-    subject_registry.write_registry(subjects_path(dataset_root), registry)
+    registry_over(dataset_root,registry)
 
 
 def _agent_package(root: Path, name: str, modules: dict) -> Path:
@@ -98,7 +98,7 @@ def test_contract_dims_take_the_admitted_count_without_the_loader_background_off
     labels_dir = dataset_root / "annotations"
     images_dir.mkdir(parents=True)
     labels_dir.mkdir(parents=True)
-    subject_registry.write_registry(subjects_path(dataset_root), subject_registry.SubjectRegistry(
+    registry_over(dataset_root,subject_registry.SubjectRegistry(
         subjects=(subject_registry.Subject(
             name="leaf", attributes=(subject_registry.Attribute(
                 name="condition", type="ordinal", values=("healthy", "mild")),)),)))

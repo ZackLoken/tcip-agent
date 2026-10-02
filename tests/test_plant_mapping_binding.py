@@ -280,7 +280,7 @@ def test_deliver_phenology_milestones_refuses_a_hand_written_record_missing_prov
         tmp_path, trait="currant_bloom", mapping_name="forged", plants=POPULATION, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" in res
-    assert "is missing" in res["error"]
+    assert "is not a record this reader decodes" in res["error"]
     assert not out_csv.exists()
 
 
@@ -292,11 +292,9 @@ def test_deliver_phenology_milestones_refuses_a_record_with_provenance_and_no_re
     _, _, preds_by_date = _write_scene(dataset_root)
     _seed_currant_bloom_trait(tmp_path)
 
-    # A literal dict, not a MappingBuild().to_record(): this shape is the record's own contract
-    # (_REQUIRED_TOP_KEYS), independent of whatever the dataclass's constructor happens to take.
     record = {
         "name": "forged", "dataset_root": "ds",
-        "dataset_id": "whatever-id", "built_by": "build_plant_mapping",
+        "dataset_id": "whatever-id",
         "built_at": "2026-02-11T00:00:00+00:00", "dates_requested": None, "dates": list(DATES),
         "nn_tolerance_m": {"value": 10.0, "source": "stated"},
         "plant_registry": {"name": "unregistered", "digest": "0" * 64},
@@ -662,7 +660,7 @@ def test_a_receipt_that_cannot_be_written_fails_persist_mapping_and_the_record_s
     images_root, plant_csv, _ = _write_scene(dataset_root)
     build = plant_mapping.build_mapping(
         images_root, [plant_csv], name="valley", dataset_root=dataset_root,
-        dataset_id="whatever-id", project=tmp_path, built_by="build_plant_mapping",
+        dataset_id="whatever-id", project=tmp_path,
         plant_registry={"name": "unregistered", "digest": "0" * 64})
 
     audit_path = tmp_path / ".tcip" / "audit.jsonl"
@@ -680,7 +678,7 @@ def test_a_receipt_that_cannot_be_written_fails_persist_mapping_and_the_record_s
     try:
         assert holding.wait(30)
         with pytest.raises(AuditEntryNotWritten, match="plant_mapping_built"):
-            plant_mapping.persist_mapping(build, tmp_path, "valley")
+            plant_mapping.persist_mapping(build, tmp_path)
     finally:
         release.set()
         holder.join(30)
@@ -705,15 +703,6 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
     asyncio.run(store.open_project(tmp_path.resolve()))
 
     client = TestClient(app, base_url="http://127.0.0.1")
-
-    # A real 200 body from the route itself, not the MCP tool's differently-shaped one, taken
-    # before the audit log is locked below.
-    healthy_resp = client.post("/api/results/plant_mapping/build", json={
-        "name": "untouched", "images_root": str(images_root), "plant_registry": registry,
-    })
-    assert healthy_resp.status_code == 200, healthy_resp.text
-    healthy = healthy_resp.json()
-
     audit_path = tmp_path / ".tcip" / "audit.jsonl"
     audit_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -736,20 +725,14 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
         assert isinstance(detail, dict), detail
         assert detail.get("error") == "audit_entry_not_written"
         assert "plant_mapping_built" in (detail.get("message") or "")
-        # The record write itself lands before the receipt append is attempted, so the
-        # read-back confirms it and the 409 carries the same body a 200 would.
-        committed = detail.get("committed")
-        assert isinstance(committed, dict), committed
-        assert set(committed) == {"mapping", "summary", "unreadable", "nn_tolerance_m",
-                                  "max_match_distance_m"}
-        assert committed["nn_tolerance_m"]["source"] == "grid_pitch"
-        # rows(), summary(), unreadable and the tolerance (plant_mapping.py:222-276) are all
-        # derived from the scene's own assignments, never from the build's name or built_at.
-        for key in committed:
-            assert committed[key] == healthy[key], key
+        # A record no receipt names is no mapping a reader loads, so nothing is offered as
+        # committed.
+        assert detail.get("committed") is None
     finally:
         release.set()
         holder.join(30)
+    with pytest.raises(ValueError, match="no plant_mapping_built receipt"):
+        plant_mapping.load_mapping(tmp_path, "valley")
 
 
 def _cite_mapping(tmp_path: Path, name: str, preds_by_date: dict[str, str]) -> None:
@@ -762,14 +745,12 @@ def _cite_mapping(tmp_path: Path, name: str, preds_by_date: dict[str, str]) -> N
     assert "error" not in res, res
 
 
-def test_the_web_build_route_answers_409_null_when_the_supersede_archive_receipt_fails(
+def test_a_supersede_whose_receipt_fails_answers_409_and_the_archive_still_loads(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A rebuild that supersedes a cited mapping archives the old record first, then appends its
-    own receipt for the archive, then writes the new record. When that archive receipt is the
-    call refused, the new record is never written (the old one under ``name`` stays exactly as
-    it was), so the route cannot say what committed: ``committed`` is null, and the message
-    names the archived copy on disk and ``supersede=True`` as the recovery."""
+    """A rebuild that supersedes a cited mapping moves the old record to its archive name, then
+    writes the new record and its one receipt. When that receipt is refused the door answers 409
+    with ``committed`` null, and the archived record still loads on its own build's receipt."""
     from fastapi.testclient import TestClient
     from tcip_web.app import app
     from tcip_web.state import store
@@ -787,8 +768,7 @@ def test_the_web_build_route_answers_409_null_when_the_supersede_archive_receipt
     assert first.status_code == 200, first.text
     old_record = ts.read(plant_mapping.plant_mapping_key(tmp_path, "valley"))
 
-    # A delivery event citing this build, so the rebuild below is the supersede path: an
-    # uncited rebuild never reaches the archive-receipt append at all.
+    # A delivery event citing this build, so the rebuild below is the supersede path.
     _cite_mapping(tmp_path, "valley", preds_by_date)
 
     import tcip_mcp.audit as audit_module
@@ -810,15 +790,11 @@ def test_the_web_build_route_answers_409_null_when_the_supersede_archive_receipt
     detail = resp.json()["detail"]
     assert detail["error"] == "audit_entry_not_written"
     assert detail["committed"] is None
-    assert "supersede=True" in detail["message"]
-    assert "archived" in detail["message"]
 
-    # The old record under "valley" is untouched: the new record write never ran.
-    assert ts.read(plant_mapping.plant_mapping_key(tmp_path, "valley")) == old_record
     archived_digest = plant_mapping.record_digest(old_record)
-    archived = ts.read(
-        plant_mapping.plant_mapping_key(tmp_path, f"valley@{archived_digest[:12]}"))
-    assert archived is not None
+    archived = plant_mapping.load_mapping(
+        tmp_path, plant_mapping.archived_mapping_name("valley", archived_digest))
+    assert archived is not None and archived.record_sha256 == archived_digest
 
 
 # ── rails 9, 10: the full round trip through the platform's own producers ───────────────
@@ -834,7 +810,7 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
     build_res = build_plant_mapping(
         tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
-    assert build_res["n_dates"] == len(DATES)
+    assert build_res["summary"]["totals"]["n_dates"] == len(DATES)
 
     build = plant_mapping.load_mapping(tmp_path, "valley")
     assert build is not None
@@ -1082,9 +1058,12 @@ def test_plant_mapping_names_lists_legal_names_and_omits_a_stray_file(
         tmp_path, name="valley-b", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in res_b, res_b
 
-    # A record written straight through the store, bypassing the door's NAME_SEGMENT check,
-    # stands in for a stray file under either backend.
-    ts.replace(plant_mapping.plant_mapping_key(tmp_path, "Not A Legal Name"), {})
+    # A record written straight through the store under a key the key producer refuses to
+    # build stands in for a stray file under either backend.
+    from tcip_mcp.project_paths import project_state_dir
+
+    ts.replace(ts.Key(plant_mapping.PLANT_MAPPING_STORE, str(project_state_dir(tmp_path)),
+                      ("Not A Legal Name",)), {})
 
     assert plant_mapping.plant_mapping_names(tmp_path) == ["valley-a", "valley-b"]
 

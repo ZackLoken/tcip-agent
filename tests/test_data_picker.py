@@ -88,13 +88,13 @@ def _selection_with_an_empty_val_side(project: Path, root: Path, out: Path):
 
 
 def test_selection_compatibility_flags_an_empty_side(tmp_path: Path):
-    from tcip_mcp.tools.training_tools import selection_compatibility
+    from tcip_mcp.pipelines.data.split_construction import selection_compatibility
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     selection = _selection_with_an_empty_val_side(tmp_path, root, out)
 
-    issues = selection_compatibility(_bound_config(root, out), selection, str(out))
+    issues = selection_compatibility(_bound_config(root, out)["data"], selection, str(out))
 
     assert any("empty side" in i for i in issues)
 
@@ -118,13 +118,13 @@ def test_selection_compatibility_admits_a_draw_splits_selection_with_no_empty_si
 ):
     """A selection draw_splits itself drew, never hand-mutated: valid work still passes once the
     empty-side check lives in the shared function."""
-    from tcip_mcp.tools.training_tools import selection_compatibility
+    from tcip_mcp.pipelines.data.split_construction import selection_compatibility
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     selection = _draw(tmp_path, root, out)
 
-    assert selection_compatibility(_bound_config(root, out), selection, str(out)) == []
+    assert selection_compatibility(_bound_config(root, out)["data"], selection, str(out)) == []
 
 
 def test_preflight_reports_the_conflict_issues_even_when_the_manifest_is_unreadable(
@@ -576,11 +576,11 @@ def test_list_split_choices_offers_a_case_respelled_duplicate_manifest_once(
 # -- POST /api/training/runs's selection_dir --------------------------------
 
 
-def test_relaunch_route_409s_for_a_selection_dir_outside_the_enabled_set(
+def test_relaunch_route_refuses_a_selection_dir_the_launch_cannot_bind(
     tmp_path: Path, opened_project: Path, monkeypatch, client: TestClient,
 ) -> None:
-    """The browser's string is verified against the platform's own listing: a string this
-    listing never offered, and one it offered but disabled, both refuse the same way."""
+    """The browser's string is checked by the launch it reaches: a directory nothing is recorded
+    under, and one whose record is broken, both answer the launch's own refusal."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.pipelines.data.selection import selection_key
 
@@ -595,12 +595,13 @@ def test_relaunch_route_409s_for_a_selection_dir_outside_the_enabled_set(
     resp_unknown = client.post("/api/training/runs", json={
         "experiment_id": "exp-picker-guard", "selection_dir": str(tmp_path / "never-listed"),
     })
-    assert resp_unknown.status_code == 409
+    assert resp_unknown.status_code == 422
+    assert "no selection recorded" in str(resp_unknown.json()["detail"]["issues"])
 
     resp_disabled = client.post("/api/training/runs", json={
         "experiment_id": "exp-picker-guard", "selection_dir": str(broken_dir),
     })
-    assert resp_disabled.status_code == 409
+    assert resp_disabled.status_code == 422
 
 
 def test_relaunch_route_launches_the_stated_data_unchanged_when_no_partition_is_chosen(

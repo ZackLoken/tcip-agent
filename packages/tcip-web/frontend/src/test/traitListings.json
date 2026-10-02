@@ -44,14 +44,6 @@
             "rationale": "The breeder counts every stem.",
             "relayed_note": "",
             "proposed_at": "1970-01-01T00:00:00+00:00",
-            "proposing_agent": {
-              "agent_client_name": null,
-              "agent_client_version": null,
-              "agent_session": null,
-              "terminal_session": null,
-              "harness_session": null,
-              "harness_effort_at_connect": null
-            },
             "confirmed_by": "user:grower",
             "confirmed_at": "1970-01-01T00:00:00+00:00",
             "identity_from_request": true,
@@ -99,14 +91,6 @@
             "rationale": "The breeder counts every stem.",
             "relayed_note": "",
             "proposed_at": "1970-01-01T00:00:00+00:00",
-            "proposing_agent": {
-              "agent_client_name": null,
-              "agent_client_version": null,
-              "agent_session": null,
-              "terminal_session": null,
-              "harness_session": null,
-              "harness_effort_at_connect": null
-            },
             "confirmed_by": null,
             "confirmed_at": null,
             "identity_from_request": null,
@@ -163,14 +147,6 @@
             "rationale": "The breeder counts every stem.",
             "relayed_note": "",
             "proposed_at": "1970-01-01T00:00:00+00:00",
-            "proposing_agent": {
-              "agent_client_name": null,
-              "agent_client_version": null,
-              "agent_session": null,
-              "terminal_session": null,
-              "harness_session": null,
-              "harness_effort_at_connect": null
-            },
             "confirmed_by": null,
             "confirmed_at": null,
             "identity_from_request": null,
@@ -227,14 +203,6 @@
             "rationale": "The breeder counts every stem.",
             "relayed_note": "",
             "proposed_at": "1970-01-01T00:00:00+00:00",
-            "proposing_agent": {
-              "agent_client_name": null,
-              "agent_client_version": null,
-              "agent_session": null,
-              "terminal_session": null,
-              "harness_session": null,
-              "harness_effort_at_connect": null
-            },
             "confirmed_by": "user:grower",
             "confirmed_at": "1970-01-01T00:00:00+00:00",
             "identity_from_request": true,

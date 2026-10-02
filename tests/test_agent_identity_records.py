@@ -1,7 +1,7 @@
 """What a record says about the harness that wrote it, proven through the real server.
 
 The MCP server learns which harness connected from the initialize handshake and mints a session id
-of its own; every audit line and trait revision the process then writes carries both, and the
+of its own; every audit line the process then writes carries both, and the
 tools' one HTTP push sends them as headers. These cases run the real ``tcip-pipeline`` server in
 memory over the SDK's own streams with a client that declares a name and version, call the tools
 through that handshake, and read what landed. A call made with no handshake at all is the control:
@@ -29,7 +29,7 @@ from tests import _trait_fixtures as fx
 
 DECLARED = mcp_types.Implementation(name="reviewing-harness", version="1.2.3")
 IDENTITY_FIELDS = ("agent_client_name", "agent_client_version", "agent_session",
-                   "terminal_session", "harness_session", "harness_effort_at_connect")
+                   "terminal_session")
 
 
 def _body(result: Any) -> dict:
@@ -142,29 +142,12 @@ def test_a_call_with_no_handshake_records_no_identity(project: Path) -> None:
     assert not set(IDENTITY_FIELDS) & set(row)
 
 
-def test_what_claude_code_exports_about_itself_rides_on_its_lines_and_nothing_else_s(
-    project: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Claude Code hands its MCP servers its own session id and effort; a harness that declares
-    another name gets none of them even with the variables in its environment."""
-    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "0b56e764-5533-408a-bb5d-d5dd17b4e6b9")
-    monkeypatch.setenv("CLAUDE_EFFORT", "high")
-    claude = mcp_types.Implementation(name="claude-code", version="2.1.238")
-
-    call_through_handshake([_report_call("from claude code")], declared=claude, project=project)
-    call_through_handshake([_report_call("from another harness")], project=project)
-
-    claude_row, other_row = _project_rows(project, "report_friction")
-    assert claude_row["harness_session"] == "0b56e764-5533-408a-bb5d-d5dd17b4e6b9"
-    assert claude_row["harness_effort_at_connect"] == "high"
-    assert "harness_session" not in other_row and "harness_effort_at_connect" not in other_row
+# ── the trait proposal ───────────────────────────────────────────────────────
 
 
-# ── the trait revision ───────────────────────────────────────────────────────
-
-
-def test_a_trait_proposed_through_a_handshake_names_the_harness(project: Path) -> None:
-    """The entry travels as the tool's declared input schema, JSON over the real server."""
+def test_a_trait_proposed_through_a_handshake_is_named_by_its_audit_line(project: Path) -> None:
+    """The entry travels as the tool's declared input schema, JSON over the real server; the
+    proposal's own audit line names the harness, and the revision carries no copy of it."""
     entry = fx.with_operationalization(
         fx.COUNT_SPEC, traits.PER_IMAGE_COUNT, measured_subject=fx.COUNT_SUBJECT)
 
@@ -173,21 +156,14 @@ def test_a_trait_proposed_through_a_handshake_names_the_harness(project: Path) -
         "rationale": "the breeder described the count in their own field-scoring terms",
     })], project=project)
 
-    agent = revision["proposing_agent"]
-    assert agent["agent_client_name"] == "reviewing-harness"
-    assert agent["agent_client_version"] == "1.2.3"
-    assert agent["agent_session"].startswith("mcp_")
-    assert agent["terminal_session"] is None
+    assert not set(IDENTITY_FIELDS) & set(revision)
+    (row,) = _project_rows(project, "propose_trait")
+    assert row["arguments"]["revision"] == revision["number"]
+    assert row["agent_client_name"] == "reviewing-harness"
+    assert row["agent_client_version"] == "1.2.3"
+    assert row["agent_session"].startswith("mcp_")
     stored = traits.read_trait(fx.COUNT_TRAIT, project).latest
-    assert stored.proposing_agent == agent
     assert stored.entry == entry and stored.entry_sha256 == traits.entry_sha256(entry)
-
-
-def test_a_trait_proposed_with_no_handshake_carries_the_fields_empty(tmp_path: Path) -> None:
-    revision = fx.propose(tmp_path, fx.COUNT_SPEC)
-
-    assert set(revision.proposing_agent) == set(IDENTITY_FIELDS)
-    assert set(revision.proposing_agent.values()) == {None}
 
 
 # ── the HTTP push ────────────────────────────────────────────────────────────

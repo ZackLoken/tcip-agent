@@ -20,8 +20,9 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.pipelines.data.selection import ClassScope, read_selection
 from tcip_mcp.pipelines.data.split_construction import partition_samples
-from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject, write_registry
+from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
 from tcip_mcp.tools.data_tools import draw_splits
+from tests._producer_fixtures import registry_over
 
 SUBJECT = "leaf"
 OTHER_SUBJECT = "bud"
@@ -47,7 +48,7 @@ def _two_subject_two_date_dataset(root: Path) -> Path:
     clearing a leaf-scoped draw's floor), and four of the six also carry the unrelated ``bud``
     (eight foreground groups, clearing a bud-scoped draw's floor too), so a selection drawn for
     either subject binds to a real, differently-sized draw over the identical tree."""
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(
+    registry_over(root,SubjectRegistry(subjects=(
         Subject(name=SUBJECT), Subject(name=OTHER_SUBJECT),
     )))
     for date in DATES:
@@ -85,7 +86,7 @@ def test_every_sample_groups_each_member_the_way_the_stem_policy_records_it(tmp_
 def _attribute_scoped_dataset(root: Path) -> Path:
     """One date, five stems: four have their instance assessed for ``condition`` (clearing an
     attribute-scoped draw's floor), the fifth carries an instance never assessed for it."""
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(
+    registry_over(root,SubjectRegistry(subjects=(
         Subject(name=SUBJECT, attributes=(
             Attribute(name="condition", type="categorical", values=("healthy", "damaged")),
         )),
@@ -106,7 +107,7 @@ def _attribute_scoped_dataset(root: Path) -> Path:
 def _dataset_with_a_confirmed_negative(root: Path) -> Path:
     """One date, four annotated stems (clearing a draw's foreground floor) plus a fifth stem
     whose label file is empty, for a caller to confirm negative."""
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    registry_over(root,SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
     images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
     for stem in ("a", "b", "c", "d"):
         _write_stem(images_dir, labels_dir, stem,
@@ -118,7 +119,7 @@ def _dataset_with_a_confirmed_negative(root: Path) -> Path:
 def _tiled_dataset(root: Path) -> Path:
     """Four parents, three crops each, named ``<parent>_<x>_<y>`` so the default tile-prefix
     grouping puts every crop of one parent in one group."""
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    registry_over(root,SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
     images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
     for parent in ("srcA", "srcB", "srcC", "srcD"):
         for x in range(3):
@@ -289,7 +290,7 @@ def test_a_bound_run_keeps_its_selections_class_map_when_the_registry_is_reorder
 
     # The same attribute, its values declared the other way round: a map re-derived here would
     # be {"damaged": 0, "healthy": 1}, a different class space than the samples were admitted in.
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(
+    registry_over(root,SubjectRegistry(subjects=(
         Subject(name=SUBJECT, attributes=(
             Attribute(name="condition", type="categorical", values=("damaged", "healthy")),
         )),
@@ -427,7 +428,7 @@ def test_a_positive_named_unlike_its_image_contradicts_a_stale_negative(tmp_path
     images_dir.mkdir(parents=True, exist_ok=True)
     labels_dir.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (64, 64), (100, 120, 90)).save(images_dir / "photo.jpg")
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    registry_over(root,SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
     # The positive this sample records is the only one there is, and it is not beside the image.
     json_io.write_annotations(labels_dir / "reviewed.json",
                               [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))],
@@ -472,7 +473,7 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
     images_dir.mkdir(parents=True, exist_ok=True)
     labels_dir.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (64, 64), (100, 120, 90)).save(images_dir / "a.jpg")
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    registry_over(root,SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
     json_io.write_annotations(labels_dir / "a.json",
                               [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))],
                               64, 64, keep_empty=True)
@@ -607,9 +608,7 @@ def test_a_bound_run_threads_a_bespoke_dataset_source(tmp_path: Path):
 
 @pytest.mark.parametrize("task", ["detection", "canopy_extent"])
 def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(tmp_path: Path, task):
-    """Two producers of one fact, compared against each other rather than against a fixture.
-
-    The same tree is trained twice through a bespoke builder, once bound to a selection drawn over
+    """The same tree is trained twice through a bespoke builder, once bound to a selection drawn over
     it and once unbound over the same directory; the builder records what it was handed each time.
     The two runs partition the tree differently, which is what each route is for; what they may
     not do is disagree about which samples that tree holds, where each one's ground truth is, or
@@ -865,28 +864,57 @@ def test_a_seed_without_the_redraw_flag_still_conflicts(tmp_path: Path):
         auto_train_val(tmp_path, "detection", data_cfg, None)
 
 
-def test_redraw_starved_issue_names_the_selection_the_seed_and_both_counts(tmp_path: Path):
-    """The check every pre-Start caller shares, over a selection's own record: fewer than two
-    foreground groups among its train-plus-val members is a redraw that can only leave a side
-    empty, named with the selection, the seed and both group counts rather than a bare failure.
-    A selection whose members do hold two is admitted."""
+def test_a_redraw_refuses_a_starved_pool_through_the_draws_own_floor(tmp_path: Path):
+    """A redraw is the one draw over a selection's own train-plus-val members: fewer than two
+    foreground groups among them refuses with the floor every draw states, naming the selection
+    and the redraw's remedy. A selection whose members do hold two is admitted."""
     from tcip_mcp.pipelines.data.selection import read_selection
-    from tcip_mcp.pipelines.data.splits import redraw_pool, redraw_starved_issue
+    from tcip_mcp.pipelines.data.split_construction import redrawn_selection
 
     drawn_dir = tmp_path / "drawn"
     _draw(tmp_path, _two_subject_two_date_dataset(tmp_path / "ds"), drawn_dir)
-    assert redraw_starved_issue(
-        *redraw_pool(read_selection(drawn_dir, project=tmp_path)), selection_dir=str(drawn_dir),
-        seed=3) is None
+    redrawn = redrawn_selection(read_selection(drawn_dir, project=tmp_path), str(drawn_dir), 3)
+    assert redrawn.counts()["train"] and redrawn.counts()["val"]
 
     _root, one_group = one_foreground_group_selection(tmp_path / "one")
-    starved = redraw_starved_issue(
-        *redraw_pool(read_selection(one_group, project=tmp_path / "one")),
-        selection_dir=str(one_group), seed=3)
-    assert starved is not None
-    assert f"{str(one_group)!r}" in starved and "seed 3" in starved
-    assert "1 foreground group" in starved and "2 distinct group" in starved
+    with pytest.raises(ValueError) as refused:
+        redrawn_selection(read_selection(one_group, project=tmp_path / "one"), str(one_group), 3)
+    starved = str(refused.value)
+    assert f"{str(one_group)!r}" in starved
+    assert "1 foreground group(s), fewer than the 2 the requested sides need" in starved
     assert "redraw_within_selection" in starved
+
+
+def test_the_explicit_draw_the_runs_own_draw_and_the_redraw_agree_member_for_member(
+    tmp_path: Path,
+):
+    """One membership and one draw: ``draw_splits`` over a dated tree, a run drawing its own
+    train and val over that date's directories and a redraw of the written selection at the same
+    seed place every member on the same side. The stems sort differently by identity than by
+    location, so a draw that depended on how its members are keyed would part them."""
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, redrawn_selection
+
+    root = tmp_path / "ds"
+    images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
+    for stem in ("a", "a-", "b", "b-", "c", "c-", "d", "d-"):
+        _write_stem(images_dir, labels_dir, stem,
+                    [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))])
+    registry_over(root, SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    out = tmp_path / "m"
+    explicit = draw_splits(tmp_path, str(root), output_path=str(out), subject=SUBJECT, seed=2,
+                           train_ratio=0.75, val_ratio=0.25)
+    assert explicit["splits"]["val"] == 2, explicit
+    selection = read_selection(out, project=tmp_path)
+
+    _train, _val, partition = auto_train_val(tmp_path, "detection", {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir),
+        "scope": {"subject": SUBJECT}, "auto_val": True,
+        "split": {"val_ratio": 0.25, "seed": 2}}, None)
+    redrawn = redrawn_selection(selection, str(out), 2)
+
+    drawn = {s.member: s.side for s in selection.samples}
+    assert {s.member: s.side for s in partition_samples(partition)} == drawn
+    assert {s.member: s.side for s in redrawn.samples} == drawn
 
 
 def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
@@ -896,7 +924,7 @@ def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
     from tcip_mcp.pipelines.data.selection import Sample, Selection, write_selection
 
     root = tmp_path / "ds"
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    registry_over(root,SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
     images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
     for stem in ("fg", "neg", "held_a", "held_b"):
         _write_stem(images_dir, labels_dir, stem, [] if stem == "neg" else

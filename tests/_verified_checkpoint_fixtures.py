@@ -99,8 +99,7 @@ def opened_run(root: str | Path, config: dict, *, experiment_id: str | None = No
     run_dir = experiments.experiment_dir(experiment_id or experiments.mint_experiment_id(),
                                          project=root)
     config = dict(config)
-    open_run(run_dir, config, resolve_run(config, project=Path(root)).record,
-             launched_by={"launcher": "process"}, **facts)
+    open_run(run_dir, config, resolve_run(config, project=Path(root)).record, **facts)
     return run_dir
 
 

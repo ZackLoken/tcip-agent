@@ -14,7 +14,8 @@ from PIL import Image
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import traits
-from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
+from tcip_mcp.subject_registry import SubjectRegistry, Subject
+from tests._producer_fixtures import registry_over
 from tcip_mcp.dataset_layout import (
     annotation_dir,
     annotation_path,
@@ -46,7 +47,11 @@ def _project(tmp_path: Path) -> Path:
     ann.mkdir(parents=True)
     state = root / ".tcip" / "state"
     state.mkdir(parents=True)
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+
+    ts.bind(FileBackend())
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     for name in ("IMG_A", "IMG_B", "IMG_C"):
         Image.new("RGB", (32, 32)).save(root / "images" / "2026-02-11" / f"{name}.JPG")
     # A: confirmed negative (empty + status). B: empty without confirmation (the IMG_0150 case).
@@ -56,10 +61,6 @@ def _project(tmp_path: Path) -> Path:
     json_io.write_annotations(ann / "IMG_C.json",
                               [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
     # Scoped by subject/date: a confirmation belongs to the subject it was made in.
-    import tcip_store as ts
-    from tcip_store.file_backend import FileBackend
-
-    ts.bind(FileBackend())
     replace_image_status_store(root, {
         status_bucket("bud", "2026-02-11"): status_records(
             {"IMG_A.JPG": "negative", "IMG_B.JPG": "unannotated", "IMG_C.JPG": "negative"},
@@ -133,11 +134,11 @@ def test_doctor_admits_a_confirmed_negative_under_dated_labels_flat_images(tmp_p
     (root / "images").mkdir(parents=True)
     ann = root / "annotations" / "2026-02-11"
     ann.mkdir(parents=True)
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
+    ts.bind(FileBackend())
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     Image.new("RGB", (32, 32)).save(root / "images" / "IMG_A.JPG")
     json_io.write_annotations(ann / "IMG_A.json", [], 32, 32, keep_empty=True)
 
-    ts.bind(FileBackend())
     replace_image_status_store(root, {
         status_bucket("bud", "2026-02-11"): status_records(
             {"IMG_A.JPG": "negative"}, recorded_by="user:breeder"),
@@ -159,7 +160,7 @@ def test_doctor_reports_a_stem_collision_and_completes(tmp_path):
     images.mkdir(parents=True)
     ann = root / "annotations" / "2026-02-11"
     ann.mkdir(parents=True)
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bloom"),)))
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="bloom"),)))
     Image.new("RGB", (32, 32)).save(images / "foo.jpg")
     Image.new("RGB", (32, 32)).save(images / "foo.png")
     json_io.write_annotations(ann / "foo.json", [], 32, 32, keep_empty=True)
@@ -206,7 +207,7 @@ def test_doctor_flags_a_stale_region_completeness_attestation(tmp_path):
     ann_dir.mkdir(parents=True)
     state_dir = root / ".tcip" / "state"
     state_dir.mkdir(parents=True)
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     Image.new("RGB", (32, 32)).save(root / "images" / "2026-02-11" / "IMG_A.JPG")
     ann_path = ann_dir / "IMG_A.json"
     json_io.write_annotations(
@@ -243,7 +244,7 @@ def test_doctor_flags_incomplete_source_snapshot(tmp_path):
     ann = root / "annotations" / "d"
     ann.mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     Image.new("RGB", (32, 32)).save(root / "images" / "d" / "IMG_A.JPG")
     json_io.write_annotations(
         ann / "IMG_A.json",
@@ -270,7 +271,7 @@ def test_doctor_clean_project_exits_zero(tmp_path):
     ann = root / "annotations" / "d"
     ann.mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     Image.new("RGB", (32, 32)).save(root / "images" / "d" / "IMG_A.JPG")
     json_io.write_annotations(
         ann / "IMG_A.json",
@@ -280,14 +281,21 @@ def test_doctor_clean_project_exits_zero(tmp_path):
     assert res.returncode == 0, res.stdout
 
 
-def _layout_project(tmp_path: Path, date: str | None, name: str = "resolved") -> Path:
+def _layout_project(tmp_path: Path, date: str | None, name: str = "resolved", *,
+                    file_layout: bool = False) -> Path:
     """A project whose image and label trees are placed by the layout resolver, so a scan root
-    that drifts from the canonical layout shows up as findings the doctor never makes."""
+    that drifts from the canonical layout shows up as findings the doctor never makes; with
+    ``file_layout`` every record of it is written on the file backend, bound first."""
+    if file_layout:
+        import tcip_store as ts
+        from tcip_store.file_backend import FileBackend
+
+        ts.bind(FileBackend())
     root = tmp_path / name
     image_dir(root, date).mkdir(parents=True)
     annotation_dir(root, date).mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
-    write_registry(root / "subjects.json",
+    registry_over(root,
                    SubjectRegistry(subjects=(Subject(name="bud"), Subject(name="leaf"))))
     return root
 
@@ -300,15 +308,11 @@ def test_labels_are_scanned_where_the_layout_resolver_places_them(tmp_path):
     """The contradiction ``tcip doctor`` reports is named by the path the resolver builds, so
     the checker's scan root and the canonical annotations tree cannot drift apart unnoticed."""
     date = "2026-03-04"
-    root = _layout_project(tmp_path, date)
+    root = _layout_project(tmp_path, date, file_layout=True)
     Image.new("RGB", (48, 32)).save(image_dir(root, date) / "IMG_R.JPG")
     label = annotation_path(root, date, "IMG_R")
     json_io.write_annotations(
         label, [Annotation(subject="bud", geometry=BBox(2, 3, 18, 9))], 48, 32)
-    import tcip_store as ts
-    from tcip_store.file_backend import FileBackend
-
-    ts.bind(FileBackend())
     replace_image_status_store(root, {
         status_bucket("bud", date): status_records(
             {"IMG_R.JPG": "negative"}, recorded_by="user:breeder"),
@@ -326,15 +330,11 @@ def test_a_negative_confirmation_names_only_its_own_subject(tmp_path):
     negative for both subjects contradicts the leaf confirmation only, and the bud
     confirmation on the same image stands."""
     date = "2026-03-04"
-    root = _layout_project(tmp_path, date)
+    root = _layout_project(tmp_path, date, file_layout=True)
     Image.new("RGB", (48, 32)).save(image_dir(root, date) / "IMG_S.JPG")
     json_io.write_annotations(
         annotation_path(root, date, "IMG_S"),
         [Annotation(subject="leaf", geometry=BBox(4, 2, 40, 11))], 48, 32)
-    import tcip_store as ts
-    from tcip_store.file_backend import FileBackend
-
-    ts.bind(FileBackend())
     replace_image_status_store(root, {
         status_bucket("bud", date): status_records({"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),
         status_bucket("leaf", date): status_records({"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),
@@ -355,15 +355,15 @@ def test_confirmations_are_matched_on_a_dateless_dataset(tmp_path):
     image_dir(root, None).mkdir(parents=True)
     annotation_dir(root, None).mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
-    Image.new("RGB", (40, 24)).save(image_dir(root, None) / "IMG_F.JPG")
-    json_io.write_annotations(
-        annotation_path(root, None, "IMG_F"),
-        [Annotation(subject="bud", geometry=BBox(3, 1, 20, 9))], 40, 24)
     import tcip_store as ts
     from tcip_store.file_backend import FileBackend
 
     ts.bind(FileBackend())
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
+    Image.new("RGB", (40, 24)).save(image_dir(root, None) / "IMG_F.JPG")
+    json_io.write_annotations(
+        annotation_path(root, None, "IMG_F"),
+        [Annotation(subject="bud", geometry=BBox(3, 1, 20, 9))], 40, 24)
     replace_image_status_store(root, {
         status_bucket("bud", None): status_records(
             {"IMG_F.JPG": "negative"}, recorded_by="user:breeder"),
@@ -380,13 +380,9 @@ def test_doctor_flags_a_stale_complete_token(tmp_path):
     """A stored 'complete' whose label file holds no annotation of the confirmed subject is a
     token a human should re-confirm; the doctor reports it and does not rewrite it."""
     date = "2026-03-04"
-    root = _layout_project(tmp_path, date)
+    root = _layout_project(tmp_path, date, file_layout=True)
     Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_S.JPG")
     json_io.write_annotations(annotation_path(root, date, "IMG_S"), [], 32, 32, keep_empty=True)
-    import tcip_store as ts
-    from tcip_store.file_backend import FileBackend
-
-    ts.bind(FileBackend())
     replace_image_status_store(root, {
         status_bucket("bud", date): status_records(
             {"IMG_S.JPG": "complete"}, recorded_by="user:breeder"),
@@ -581,13 +577,9 @@ def test_doctor_flags_an_unreadable_label_behind_a_confirmed_negative(tmp_path):
     the reader raises on it, and the doctor reports it rather than letting the corruption hide
     behind the confirmed-negative status."""
     date = "2026-03-04"
-    root = _layout_project(tmp_path, date)
+    root = _layout_project(tmp_path, date, file_layout=True)
     Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_S.JPG")
     annotation_path(root, date, "IMG_S").write_text("not json {][", encoding="utf-8")
-    import tcip_store as ts
-    from tcip_store.file_backend import FileBackend
-
-    ts.bind(FileBackend())
     replace_image_status_store(root, {
         status_bucket("bud", date): status_records(
             {"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),

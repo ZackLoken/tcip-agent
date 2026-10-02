@@ -27,7 +27,7 @@ from tcip_mcp.web_client import (
     PANEL_EVENT_REVIEW_FOCUS,
     VALID_PANELS,
 )
-from tcip_web.trust_boundary import TrustBoundaryMiddleware, log_exposure_opt_in
+from tcip_web.trust_boundary import TrustBoundaryMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,6 @@ async def _lifespan(_app: FastAPI):
     """Open the project the last-opened pointer of the workspace the backend was configured with
     names, size GDAL's block cache and warm the agent terminal, before the app serves. Refuses a
     backend configured with no workspace (``StateStore.workspace``)."""
-    log_exposure_opt_in()
     from tcip_web.routes.projects import open_last_opened
 
     await open_last_opened()
@@ -73,8 +72,8 @@ app = FastAPI(title="TCIP Pipeline", version="0.1.0", lifespan=_lifespan)
 # CORS is not enabled by default: the browser hits the same origin via the Vite dev proxy.
 # Serving the frontend elsewhere would add fastapi.middleware.cors.CORSMiddleware here.
 
-# Exposure is decided per connection from its arrival address and the Host must name this
-# backend; the middleware also applies the Origin policy before a route runs (trust_boundary).
+# A connection must arrive through this machine and name a loopback Host; the middleware also
+# applies the Origin policy before a route runs (trust_boundary).
 app.add_middleware(TrustBoundaryMiddleware)
 
 # Compress JSON/text responses above ~1KB. The /api/review/matches payload scales with
@@ -92,16 +91,13 @@ from tcip_web.state import (  # noqa: E402  (needs `app`)
 _state_watchers: set[WebSocket] = set()
 
 
-@app.exception_handler(GuiMutationInvalid)
-async def _gui_mutation_invalid_handler(_request: Request, exc: GuiMutationInvalid) -> JSONResponse:
-    """Every route that mutates GUI state answers an invalid mutation with 400 and the reason."""
+async def _bad_request_handler(_request: Request, exc: Exception) -> JSONResponse:
+    """An invalid GUI mutation or a directory read as a bucket it is not: 400 with the reason."""
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
-@app.exception_handler(NotABucket)
-async def _not_a_bucket_handler(_request: Request, exc: NotABucket) -> JSONResponse:
-    """Every route that reads a directory as a published bucket answers 400 when it is none."""
-    return JSONResponse(status_code=400, content={"detail": str(exc)})
+app.add_exception_handler(GuiMutationInvalid, _bad_request_handler)
+app.add_exception_handler(NotABucket, _bad_request_handler)
 
 
 @app.exception_handler(NoProjectOpen)
@@ -232,8 +228,7 @@ def _find_static_dir() -> Path:
 
     Prefers a copy packaged inside the installed package (``tcip_web/static/``, how a
     wheel should ship it) and falls back to the src-layout checkout
-    (``packages/tcip-web/static/``). Returns the src-layout path if neither is built yet,
-    so ``/`` can render build instructions rather than 404.
+    (``packages/tcip-web/static/``). Returns the src-layout path if neither is built yet.
     """
     candidates = _static_dir_candidates()
     for c in candidates:

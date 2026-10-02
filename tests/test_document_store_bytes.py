@@ -7,7 +7,7 @@ here, so a codec swapped for a re-spelled serializer, a dropped trailing newline
 ``ensure_ascii`` flip shows up as a failing byte comparison rather than as a dataset that reads
 differently a season later.
 
-Two cases drive the owning module's own writer end to end: ``write_registry`` and
+Two cases drive the owning module's own writer end to end: ``replace_registry`` and
 ``write_band_group_manifest``. ``propose_trait`` has no case here: a trait record writes
 through the same ``RECORD_JSON`` codec every other record store uses, so its byte spelling is the
 one ``test_the_canonical_record_codec_writes_the_bytes_this_test_spells_out`` pins centrally in
@@ -120,13 +120,14 @@ RETROSPECTIVE_BYTES = (
 ).encode("utf-8")
 
 def test_the_subject_registry_lands_as_the_ordered_json_document_labels_are_decoded_by(tmp_path):
-    """Written through ``write_registry``, which encodes with the canonical record codec: the
+    """Written through ``replace_registry``, which encodes with the canonical record codec: the
     subject and attribute sequences keep their declared order rather than being sorted."""
     from tcip_mcp import subject_registry
     from tcip_mcp.dataset_layout import subjects_path
 
     path = subjects_path(tmp_path)
-    subject_registry.write_registry(path, subject_registry.registry_from_dict(REGISTRY_VALUE))
+    subject_registry.replace_registry(
+        tmp_path, subject_registry.registry_from_dict(REGISTRY_VALUE), expect=None)
 
     assert path.read_bytes() == REGISTRY_BYTES
 

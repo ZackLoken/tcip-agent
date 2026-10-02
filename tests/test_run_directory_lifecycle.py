@@ -292,8 +292,7 @@ def _trial(tmp_path, monkeypatch, **extra) -> tuple[Path, list[float]]:
     trial_dir.parent.mkdir(parents=True)
     reported: list[float] = []
     _run_hpo_trial({"lr": 0.01}, reported.append, base_config, trial_dir, project=tmp_path,
-                   objective={"selection_metric": "loss", "higher_is_better": False},
-                   launched_by={"launcher": "process"})
+                   objective={"selection_metric": "loss", "higher_is_better": False})
     return trial_dir, reported
 
 
@@ -332,7 +331,7 @@ def test_a_trial_whose_resolution_fails_is_a_directory_whose_final_status_names_
     assert reported == []
     write_once(trial_dir.parent / SWEEP_FILE,
                {"objective": {"selection_metric": "loss", "higher_is_better": False},
-                "split_draws": 1})
+                "input": {"split_draws": 1}})
     (row,) = read_sweep(observe(trial_dir.parent, SWEEP_FILE))["trials"]
     assert (row["trial_id"], row["status"], row["error"]) == ("a", "failed", final["error"])
 

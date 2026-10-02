@@ -180,7 +180,7 @@ def test_save_with_a_null_version_refuses_over_a_registry_written_meanwhile(
               "version": None},
     )
     assert resp.status_code == 409
-    assert read_registry(tmp_path / "subjects.json").subject("bush") is None
+    assert read_registry(tmp_path).subject("bush") is None
 
 
 def test_save_with_a_null_version_succeeds_over_a_still_absent_registry(
@@ -934,21 +934,88 @@ def test_set_image_status_bulk_audit_entry_records_only_what_was_applied(
     assert not _gui_entries(opened_project)
 
 
-def test_save_subjects_writes_a_dataset_scoped_audit_entry(
+def test_a_registry_save_leaves_one_library_line_through_either_door(
     client: TestClient, opened_project: Path
 ) -> None:
-    dataset_root = opened_project / "shared_dataset"
+    """The route and the tool both save through ``replace_registry``, which writes the act's one
+    line into the dataset's own log: the same registry saved through each leaves exactly one line
+    apiece, the same facts recorded, and nothing in the project's log."""
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
+
+    subjects = {"bud": {"description": "a bud"}}
+    through_route, through_tool = opened_project / "route_dataset", opened_project / "tool_dataset"
+    through_route.mkdir()
+    through_tool.mkdir()
+    resp = client.post("/api/subjects/save", json={
+        "dataset_root": str(through_route), "subjects": subjects, "version": None})
+    assert resp.status_code == 200, resp.text
+    assert "error" not in write_subject_registry(opened_project, str(through_tool), subjects)
+
+    (route_line,), (tool_line,) = (_read_audit_entries(through_route),
+                                   _read_audit_entries(through_tool))
+    assert route_line["tool"] == tool_line["tool"] == "replace_registry"
+
+    def facts(line: dict) -> dict:
+        return {k: v for k, v in line["arguments"].items()
+                if k not in ("subjects_path", "version")}
+
+    assert facts(route_line) == facts(tool_line)
+    assert route_line["arguments"]["version"] == resp.json()["version"]
+    assert not [e for e in _read_audit_entries(opened_project) if e["tool"] == "replace_registry"]
+
+
+def test_a_registry_save_answers_and_audits_the_location_it_wrote(
+    client: TestClient, opened_project: Path
+) -> None:
+    """The save is keyed by the dataset root it names: the answer, the audit line and the stored
+    registry all name the one location the write landed at."""
+    from tcip_mcp.dataset_layout import subjects_path
+    from tcip_mcp.subject_registry import read_registry
+
+    dataset_root = opened_project / "named_dataset"
     dataset_root.mkdir()
-    client.post(
-        "/api/subjects/save",
-        json={"dataset_root": str(dataset_root),
-              "subjects": {"bud": {"description": "a bud"}}, "version": None},
-    )
-    entries = _read_audit_entries(dataset_root)
-    assert len(entries) == 1
-    assert entries[0]["tool"] == "gui_save_subjects"
-    assert entries[0]["arguments"]["n_subjects"] == 1
-    assert not _gui_entries(opened_project)
+    resp = client.post("/api/subjects/save", json={
+        "dataset_root": str(dataset_root), "subjects": {"bud": {}}, "version": None})
+    assert resp.status_code == 200, resp.text
+
+    written = str(subjects_path(dataset_root))
+    (line,) = _read_audit_entries(dataset_root)
+    assert resp.json()["subjects_path"] == line["arguments"]["subjects_path"] == written
+    assert read_registry(dataset_root).subject("bud") is not None
+
+
+def test_a_registry_load_answers_content_and_version_from_one_read(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A save landing just after the load reads the registry cannot pair the old content with the
+    new version: the load's version is the one its content was read at, so posting it back
+    refuses as stale."""
+    import tcip_store
+
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
+
+    assert "error" not in write_subject_registry(tmp_path, str(tmp_path), {"bud": {}})
+    real = tcip_store.read_blob_versioned
+    interleaved: list[dict] = []
+
+    def read_then_save(key, *args, **kwargs):
+        answer = real(key, *args, **kwargs)
+        if not interleaved:
+            interleaved.append({})
+            interleaved[0] = write_subject_registry(tmp_path, str(tmp_path),
+                                                    {"bud": {}, "bush": {}})
+        return answer
+
+    monkeypatch.setattr(tcip_store, "read_blob_versioned", read_then_save)
+    load = client.get("/api/subjects/load", params={"dataset_root": str(tmp_path)}).json()
+    monkeypatch.setattr(tcip_store, "read_blob_versioned", real)
+
+    assert "error" not in interleaved[0]
+    assert set(load["subjects"]) == {"bud"}
+    stale = client.post("/api/subjects/save", json={
+        "dataset_root": str(tmp_path), "subjects": {"bud": {}, "bush": {}, "tip": {}},
+        "version": load["version"]})
+    assert stale.status_code == 409
 
 
 def test_image_status_bulk_writes_no_audit_entry_when_every_status_is_invalid(

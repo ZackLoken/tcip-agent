@@ -78,7 +78,7 @@ def _record_trial(project: Path, sweep_root: Path, trial_id: str, *, params: dic
     trial = sweep_root / f"trial_{trial_id}"
     config = detection_config(project / "trial-data" / trial_id)
     open_run(trial, config, resolve_run(config, project=project).record,
-             launched_by={"launcher": "process"}, trial_params=params)
+             trial_params=params)
     for epoch, row in enumerate(metrics, 1):
         log_epoch(trial, epoch, row)
     return trial
@@ -187,20 +187,31 @@ def test_a_relaunched_sweep_is_listed_once_as_this_processs_own(
 def test_a_relaunch_records_its_source_and_its_row_agrees_with_the_sources(
     client, opened_project, real_hpo_base_config, monkeypatch,
 ) -> None:
-    """A relaunch through the route drives the platform's own ``run_hyperparameter_search``: the
-    new sweep's input names the sweep it replayed, and its row projects the same search shape
-    the source's disk row does."""
+    """A relaunch through the route opens its sweep through the one operation the tool opens one
+    through: the new sweep's id is minted the tool's way, the act leaves one audit line naming
+    the sweep and its source, its input names the sweep it replayed, and its row projects the
+    same search shape the source's disk row does."""
+    import tcip_mcp.tools.training_tools as tt
+    from tcip_mcp.audit import audit_log_key
+    from tcip_store import read_log
     from tcip_web.routes import tuning
 
     _stub_search(monkeypatch)
     _record_sweep(opened_project, "hpo_relsrc001", real_hpo_base_config, n_trials=3,
                   param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}})
+    minted = tt.run_hyperparameter_search(
+        opened_project, base_config=real_hpo_base_config, n_trials=1, scheduler="none",
+        search_seed=0, auto_tensorboard=False)["study_name"]
+    before = len(read_log(audit_log_key(opened_project)).records)
 
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_relsrc001"})
     assert resp.status_code == 200
     sweep_id = resp.json()["sweep_id"]
-    assert sweep_id.startswith("hpo-")
     assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+    assert sweep_id.split("_")[0] == minted.split("_")[0] and len(sweep_id) == len(minted)
+    lines = read_log(audit_log_key(opened_project)).records[before:]
+    assert [(line["tool"], line["arguments"]) for line in lines] == [
+        ("open_sweep", {"sweep_id": sweep_id, "relaunched_from": "hpo_relsrc001"})]
 
     body = client.get(f"/api/tuning/sweeps/{sweep_id}").json()
     assert body["input"]["relaunched_from"] == "hpo_relsrc001"

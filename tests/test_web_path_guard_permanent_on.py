@@ -323,9 +323,9 @@ def test_review_routes_confine_the_dataset_root_and_the_label_files_they_read(
 def test_a_label_write_is_refused_before_it_happens_when_its_dataset_root_is_outside(
     client: TestClient, tmp_path: Path, outside: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The audit scope is derived and guarded before the label is written, so a refused write
-    leaves no label behind. The image is admitted through the additive roots so that only the
-    label's own dataset root is what refuses."""
+    """The label path is guarded before the label is written, so a refused write leaves no label
+    behind. The image is admitted through the additive roots so that only the label's own place
+    is what refuses."""
     from tcip_web.state import store
 
     image = _image(outside / "dataset" / "images" / "2026-02-11" / "a.jpg")
@@ -444,7 +444,7 @@ def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
                      json={**payload, "plant_registry": moved_registry})
     assert ok.status_code == 200, ok.text
     built = [r for r in tcip_store.read_log(audit_log_key(tmp_path)).records
-             if r["tool"] == "gui_build_plant_mapping"]
+             if r["tool"] == "plant_mapping_built"]
     assert len(built) == 2
     assert built[-1]["arguments"]["name"] == payload["name"]
     from tcip_mcp.pipelines.postprocessing import plant_mapping
@@ -454,7 +454,7 @@ def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
     assert set(build.assignments.keys()) == {"2026-02-11", "2026-02-25"}
 
 
-# ── the picker: unconfined from this machine, confined from the network ───
+# ── the picker: the whole machine, the only arrival the backend serves ───
 
 
 def test_the_picker_browses_the_whole_machine_from_a_local_connection(
@@ -464,24 +464,3 @@ def test_the_picker_browses_the_whole_machine_from_a_local_connection(
     resp = client.get("/api/fs/list", params={"path": str(outside)})
     assert resp.status_code == 200
     assert "somewhere" in {e["name"] for e in resp.json()["entries"]}
-
-
-def test_the_picker_is_confined_to_the_allowed_roots_on_a_routable_connection(
-    tmp_path: Path, outside: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A connection accepted on a routable address (the TestClient base URL sets the ASGI server
-    address), served under the operator's exposure opt-in, lists only the allowed roots and
-    refuses anything outside them."""
-    monkeypatch.setenv("TCIP_WEB_ALLOW_INSECURE", "1")
-    (outside / "somewhere").mkdir()
-    workspace = tmp_path.parent
-    lan = TestClient(app, base_url="http://192.168.1.23:8765")
-    refused = lan.get("/api/fs/list", params={"path": str(outside)})
-    assert refused.status_code == 403
-    top = lan.get("/api/fs/list")
-    assert top.status_code == 200
-    assert str(workspace.resolve()) in [e["path"] for e in top.json()["entries"]]
-    assert str(outside.resolve()) not in [e["path"] for e in top.json()["entries"]]
-    inside = lan.get("/api/fs/list", params={"path": str(workspace)})
-    assert inside.status_code == 200
-    assert inside.json()["parent"] is None

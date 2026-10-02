@@ -141,12 +141,12 @@ def run_full_frame_evaluation(
         "iou_threshold": iou_threshold, "execution": execution.record(),
         "eval_regime": "full-frame-tiled-inference",
     }
-    # scored_images/sample_counts: which images this number was computed over and which the
+    # scored_images/tallies: which images this number was computed over and which the
     # admission held out, so a reviewer can reconstruct the denominator.
     extra: dict = {
         **{k: m[k] for k in keys},
         "max_dets_cap_saturated_frac": cap_saturated_frac(per_image),
-        "scored_images": len(per_image), "sample_counts": admitted.counts,
+        "scored_images": len(per_image), "tallies": admitted.tallies,
         # Names recorded negative whose label file now holds subject content; scored on that
         # content, not filtered out, but the stale confirmation needs re-review.
         "contradicted_negatives": sorted(contradicted_negatives),

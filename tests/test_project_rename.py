@@ -135,11 +135,11 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     assert "error" not in published, published
     other_images = str(project / "data" / "other")
     sweep = create_run_directory(sweeps_dir(project) / "study")
-    write_record(sweep / SWEEP_FILE, {
+    write_record(sweep / SWEEP_FILE, {"input": {
         "base_config": {"data": {"images_dir": str(project / "data" / "images")}},
         "baseline_params": {"data.images_dir": other_images},
         "param_space": {"data.labels_dir": {"type": "categorical", "choices": [other_images]}},
-    })
+    }})
 
     moved = ws / "valley_block_moved"
     ts.release_root(project)
@@ -170,7 +170,7 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     assert all((record.path / f"{stem}.json").is_file() for stem in record.documents)
 
     moved_other = str(moved.resolve() / "data" / "other")
-    swept = observe(sweeps_dir(moved) / "study", SWEEP_FILE).record
+    swept = observe(sweeps_dir(moved) / "study", SWEEP_FILE).record["input"]
     assert swept["base_config"]["data"]["images_dir"] == str(moved.resolve() / "data" / "images")
     assert swept["baseline_params"] == {"data.images_dir": moved_other}
     assert swept["param_space"]["data.labels_dir"]["choices"] == [moved_other]

@@ -205,11 +205,9 @@ export function InferenceTab() {
                 done: asNum(msg.done, prev.done),
                 total: asNum(msg.total, prev.total),
                 status: (msg.status as InferenceJob["status"]) ?? prev.status,
-                warning: (msg.warning as string | null | undefined) ?? prev.warning,
                 audit_warning:
                   (msg.audit_warning as string | null | undefined) ?? prev.audit_warning,
-                // A progress frame carries no error key at all and must not clear one already
-                // shown; a final frame's presence of the key decides, including error: null.
+                // A frame's presence of the key decides, including error: null.
                 error: "error" in msg ? (msg.error as string | null) : prev.error,
               } as InferenceJob)
             : prev,
@@ -254,7 +252,6 @@ export function InferenceTab() {
           images_dir: res.images_dir,
           output_dir: res.output_dir,
           error: null,
-          warning: null,
           audit_warning: null,
         };
         setJobs((prev) => [stub, ...prev]);
@@ -309,7 +306,6 @@ export function InferenceTab() {
           images_dir: "",
           output_dir: refusal.requested_output_dir ?? "",
           error: null,
-          warning: null,
         } as InferenceJob),
     );
     setActiveJobListed(row !== undefined);
@@ -544,9 +540,6 @@ export function InferenceTab() {
             )}
             {activeJob.error && (
               <div className="text-[11px] text-tcip-fp mt-1">Error: {activeJob.error}</div>
-            )}
-            {activeJob.warning && (
-              <div className="text-[11px] text-tcip-warn mt-1">Warning: {activeJob.warning}</div>
             )}
             {activeJob.audit_warning && (
               <div className="text-[11px] text-tcip-warn mt-1">

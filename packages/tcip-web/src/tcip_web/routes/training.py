@@ -53,39 +53,26 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
     browser.
 
     An optional ``selection_dir`` names a partition the browser picked instead of the launch's own
-    "As recorded" data section: checked against this same config's own
-    :func:`~tcip_mcp.tools.training_tools.list_split_choices` listing (an enabled offer or 409)
-    through ``tcip_store.canonical_path``, so a symlinked or differently cased spelling of an
-    offered directory is admitted. The launch config then carries ``data.split`` replaced
-    wholesale by ``{"selection_dir": chosen}``.
-
-    The launch is wrapped in ``declare_launcher("gui")``, so the run's ``run.json`` records
-    ``launched_by: {"launcher": "gui"}``, whatever client posted here.
+    "As recorded" data section: the launch config then carries ``data.split`` replaced wholesale
+    by ``{"selection_dir": chosen}``, and the launch's own refusal of it answers 422. A launch
+    whose audit line could not be written answers 409.
     """
+    from tcip_mcp.audit import AuditEntryNotWritten
     from tcip_mcp.tools.training_tools import (
-        candidate_config_with_selection, declare_launcher, launch_training, list_split_choices,
-        stated_config,
+        candidate_config_with_selection, launch_training, stated_config,
     )
-    from tcip_store import canonical_path
+    from tcip_web.routes.audit_gap import audit_gap_409
 
     project = store.open_root()
     config = stated_config(project, payload.experiment_id)
     if config is None:
         raise HTTPException(404, f"no launchable config named {payload.experiment_id}")
-
     if payload.selection_dir:
-        choices = list_split_choices(project, payload.experiment_id)
-        enabled = {canonical_path(s["selection_dir"])
-                   for s in choices.get("selections", []) if s.get("enabled")}
-        if canonical_path(payload.selection_dir) not in enabled:
-            raise HTTPException(
-                409, f"{payload.selection_dir!r} is not an offered partition for "
-                     f"{payload.experiment_id}",
-            )
         config = candidate_config_with_selection(config, payload.selection_dir)
     try:
-        with declare_launcher("gui"):
-            result = launch_training(project, config, parent_experiment=payload.experiment_id)
+        result = launch_training(project, config, parent_experiment=payload.experiment_id)
+    except AuditEntryNotWritten as exc:
+        raise audit_gap_409(exc, exc.arguments) from exc
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc
     if result.get("error"):
@@ -174,31 +161,26 @@ class CompareBestPayload(BaseModel):
 
 @router.post("/compare/best")
 def compare_best_route(payload: CompareBestPayload) -> dict:
-    """Rank the marked comparison's own registered checkpoints by one metric.
+    """Rank the marked comparison's own registered checkpoints by one metric
+    (:func:`~tcip_mcp.tools.model_tools.ranked_registered_model`).
 
-    Narrowed to the marked experiments. A project with no registered checkpoint
-    (``model_registry.registered_entries``) answers 404; a registry index that will not decode or
-    is not the entries mapping answers 409 naming why. The tool's own error dicts map to 422 with
-    the whole dict as ``detail``. The answer is projected to name, experiment id, stamped
-    metrics, source, the direction used and its source, and the exclusions.
+    A registry index that will not decode or is not the entries mapping answers 409 naming why;
+    the ranking's own error dicts map to 422 with the whole dict as ``detail``. The answer is
+    projected to name, experiment id, stamped metrics, source, the direction used and its source,
+    and the exclusions.
     """
     from tcip_store.errors import DecodeError, SchemaVersionRefused
 
-    from tcip_mcp.model_registry import RegistryVersionRefused, registered_entries
-    from tcip_mcp.tools.model_tools import rank_registered_models
+    from tcip_mcp.model_registry import RegistryVersionRefused
+    from tcip_mcp.tools.model_tools import ranked_registered_model
 
-    project = store.open_root()
     try:
-        entries = registered_entries(project)
+        result = ranked_registered_model(
+            store.open_root(), payload.metric, higher_is_better=payload.higher_is_better,
+            include_unverified=payload.include_unverified, experiment_ids=payload.experiment_ids,
+            tag=None)
     except (DecodeError, RegistryVersionRefused, SchemaVersionRefused) as exc:
         raise HTTPException(409, f"registry unreadable: {exc}") from exc
-    if not entries:
-        raise HTTPException(404, "no model registry in this project")
-
-    result = rank_registered_models(
-        project, metric=payload.metric, higher_is_better=payload.higher_is_better,
-        include_unverified=payload.include_unverified, experiment_ids=payload.experiment_ids,
-    )
     if "error" in result:
         raise HTTPException(422, detail=result)
 
@@ -215,9 +197,7 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
 
 @router.get("/metric-directions")
 def metric_directions_route() -> dict:
-    """Every metric name evaluation.py declares a ranking direction for, a plain read with no audit
-    line and no registry touch.
-    """
+    """Every metric name evaluation.py declares a ranking direction for, with that direction."""
     from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
 
     return {"higher_is_better": dict(HIGHER_IS_BETTER_BY_METRIC)}

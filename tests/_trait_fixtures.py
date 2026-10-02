@@ -153,7 +153,7 @@ def seed_positive_class(project_root: Path, subject_name: str, positive_value: s
     """Ensure the project's subject registry declares ``positive_value`` as a value of
     ``subject_name``'s own attribute, adding both the subject and the value on first mention and
     leaving an existing declaration alone; returns the registry as stored."""
-    from tcip_mcp.dataset_layout import subjects_path
+    from tests._producer_fixtures import registry_over
 
     registry = cr.registry_for_dataset_root(project_root) or cr.SubjectRegistry()
     subjects = {s.name: s for s in registry.subjects}
@@ -169,7 +169,7 @@ def seed_positive_class(project_root: Path, subject_name: str, positive_value: s
             attrs = [cr.Attribute(name="state", type="categorical", values=(positive_value,))]
     subjects[subject_name] = cr.Subject(name=subject_name, attributes=tuple(attrs))
     updated = cr.SubjectRegistry(subjects=tuple(subjects.values()))
-    cr.write_registry(subjects_path(project_root), updated)
+    registry_over(project_root, updated)
     return updated
 
 

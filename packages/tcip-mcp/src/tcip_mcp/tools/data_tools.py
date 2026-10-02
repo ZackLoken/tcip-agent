@@ -229,42 +229,12 @@ def scan_dataset(folder_path: str) -> dict:
     }
 
 
-
-def _split_date_dirs(folder_path: str | Path) -> list[tuple[str | None, Path, Path]]:
-    """Every ``(date, labels_dir, images_dir)`` a dataset's per-image label tree holds: one entry
-    per ``annotations/<date>/`` beside its images (``images/<date>/`` when that bucket exists, else
-    the flat ``images/`` root), plus one dateless entry for any label loose directly in
-    ``annotations/`` beside a dated tree, so a mixed layout's flat labels are never dropped from
-    the draw. A fully flat dataset (no date subdirectories at all) yields exactly that one
-    dateless entry.
-
-    Empty when the dataset holds no per-image label tree at all.
-    """
-    from tcip_annotation.json_io import prediction_documents
-    from tcip_mcp.dataset_layout import (
-        annotation_dir, annotation_root, is_bucket_name, resolve_images_dir,
-    )
-
-    root = Path(folder_path)
-    ann_root = annotation_root(root)
-    if not ann_root.is_dir():
-        return []
-    subdirs = sorted(d.name for d in ann_root.iterdir() if d.is_dir() and is_bucket_name(d.name))
-    entries: list[tuple[str | None, Path, Path]] = [
-        (d, annotation_dir(root, d), resolve_images_dir(root, d)) for d in subdirs
-    ]
-    loose_labels = bool(prediction_documents(ann_root))
-    if loose_labels or not subdirs:
-        entries.append((None, ann_root, resolve_images_dir(root, None)))
-    return entries
-
-
 @tool()
 @audited
 def draw_splits(
     project: Path,
     folder_path: str,
-    train_ratio: float = 0.8,
+    train_ratio: float = 1.0 - DEFAULT_VAL_RATIO,
     val_ratio: float = DEFAULT_VAL_RATIO,
     calibration_ratio: float = 0.0,
     holdout_ratio: float = 0.0,
@@ -281,23 +251,22 @@ def draw_splits(
 
     Non-destructive: it copies nothing and moves nothing. With ``output_path`` it writes a
     selection record listing, per sample, the image source, the label document, the group key and
-    the side; without one it answers statistics over the tree and writes nothing. Sibling tiles of
-    one source image are kept in the same split, and, when ``stratify_foreground`` is set, splits
-    are balanced by annotation count. Groups whole source images; a within-image split for a folder
-    holding a single source is a training run's own route (``data.tiling`` in the run config).
+    the side; without one it answers the same draw's statistics and writes nothing. Sibling tiles
+    of one source image are kept in the same split, and, when ``stratify_foreground`` is set,
+    splits are balanced by annotation count. Groups whole source images; a within-image split for
+    a folder holding a single source is a training run's own route (``data.tiling`` in the run
+    config).
 
-    Writing a selection is one draw, through the platform's own admission
-    (``tcip_mcp.pipelines.data.label_queries.admit``) over whichever ground truth the place it is
-    pointed at holds. The draw's group policy, its three-way group-balanced split and its per-side
-    floor are the same whatever that shape is.
+    The draw is :func:`~tcip_mcp.pipelines.data.split_construction.admitted_membership` over
+    whichever ground truth the place it is pointed at holds, then
+    :func:`~tcip_mcp.pipelines.data.split_construction.draw_sides`.
 
     Without ``ground_truth``, the ground truth is the dataset's per-image label tree: for each
     capture date the dataset holds, every image carrying an annotation of ``subject`` (with every
     instance assessed for ``attribute``, when one is given) or a human's negative confirmation for
-    it. ``subject`` is therefore required to write such a selection; a call with no ``output_path``
-    answers over every image in the tree instead. Every admitted date enters one selection: a
-    sample names its own source and its own label, and two dates holding a same-named image are two
-    samples. ``stratify_foreground`` only toggles the annotation-count balancing.
+    it, so ``subject`` is required. Every admitted date enters one draw: a sample names its own
+    source and its own label, and two dates holding a same-named image are two samples.
+    ``stratify_foreground`` only toggles the annotation-count balancing.
 
     With ``ground_truth`` naming a directory of ``<stem>.png`` rasters, the ground truth is a
     per-image mask and a sample is admitted when its mask sits there beside its image; with
@@ -306,26 +275,20 @@ def draw_splits(
     Balancing by foreground count applies to label documents only.
 
     The ``calibration`` and ``holdout`` sides are the reference an assessment fits an operating
-    point on and checks it against. The draw is one group-balanced split into train, val and the
-    reference, then one :func:`~tcip_mcp.pipelines.data.splits.draw_train_val` of the reference's
-    groups into calibration and holdout at the same seed; writing a selection has no default for
-    any of the four ratios and refuses a zero one, naming it. The draw refuses, before any write,
-    when the tree holds fewer foreground groups of ``subject`` (and ``attribute``, when scoped)
-    than the sides need at minimum (one each for ``train``/``val``, two for the reference). The
-    answer's ``calibration_foreground_groups`` reports how many of the reference's groups carry a
-    foreground annotation. Both the answer and the record also carry ``realized_ratios``, each
-    side's share of the draw actually delivered, which can diverge from the ratios asked for on a
-    tree sized at the floor.
+    point on and checks it against, drawn as one share and cut between the two at the same seed;
+    a side whose ratio is zero is not drawn, and a negative ratio refuses. The draw refuses,
+    before any write, when the tree holds fewer foreground groups of ``subject`` (and
+    ``attribute``, when scoped) than one per requested side. The answer's
+    ``calibration_foreground_groups`` reports how many of the reference's groups carry a
+    foreground annotation, and ``realized_ratios`` each side's share of the draw actually
+    delivered, which can diverge from the ratios asked for on a tree sized at the floor.
 
     Args:
         folder_path: Path to the dataset root directory.
-        train_ratio: Fraction for training set. Defaults to 0.8.
+        train_ratio: Fraction for training set.
         val_ratio: Fraction for validation set.
         calibration_ratio: Fraction held out for an assessment to fit its operating point on.
-            Defaults to 0.0 for a stats-only call.
         holdout_ratio: Fraction held out for an assessment to check its operating point against.
-            Defaults to 0.0 for a stats-only call. Writing a selection (``output_path`` given)
-            refuses a zero ratio on any of the four, naming it.
         seed: Random seed for reproducibility.
         group_by: Group selector: ``"tile_prefix"`` (strip a trailing ``_<x>_<y>`` tile offset) or
             ``"stem"`` (one group per member). Ignored when ``group_key_map`` is given. The
@@ -335,131 +298,50 @@ def draw_splits(
             admitted member. Recorded as ``group_by="explicit_map"``.
         stratify_foreground: Balance splits by foreground annotation count.
         output_path: Where to write the selection. Omitted, nothing is written and the answer is
-            statistics only.
-        subject: The object class the selection is drawn for. Required to write one over the
-            dataset's own per-image label tree (``output_path`` given and no ``ground_truth``). A
-            ``ground_truth`` naming label documents takes one too.
+            the draw's statistics only.
+        subject: The object class the selection is drawn for. Required over label documents,
+            the dataset's own per-image label tree or a ``ground_truth`` naming them.
         attribute: Scope the draw to instances already assessed for this attribute of ``subject``;
             an image carrying an instance never assessed for it is excluded entirely. ``None``
             draws over every instance of ``subject`` regardless of attribute state.
         ground_truth: Where this dataset's ground truth lives, named explicitly: a directory of
             label documents, a directory of ``<stem>.png`` masks, or a ``.csv`` table of one row
-            per image. Only with ``output_path``; the images are the dataset's own ``images/`` tree
-            either way.
+            per image; the images are the dataset's own ``images/`` tree either way.
     """
-    if abs(train_ratio + val_ratio + calibration_ratio + holdout_ratio - 1.0) > 0.01:
-        return {"error": "train_ratio, val_ratio, calibration_ratio and holdout_ratio must sum to "
-                         f"1.0 (got {train_ratio}, {val_ratio}, {calibration_ratio}, "
-                         f"{holdout_ratio})."}
     if not Path(folder_path).is_dir():
         return {"error": f"Directory not found: {folder_path}"}
 
-    from tcip_annotation.json_io import UnreadableLabelDocument
-    from tcip_mcp.pipelines.data.selection import SIDES, Sample, Selection, write_selection
-    from tcip_mcp.pipelines.data.splits import (
-        count_label_lines,
-        draw_train_val,
-        foreground_group_count,
-        group_balanced_split,
-        member_identity,
-        recorded_group_by,
-        refuse_insufficient_foreground_groups,
-        resolve_group_key_fn,
-    )
-    from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
-    from tcip_store import SchemaVersionRefused
-
-    kept_splits = SIDES
-    reference_ratio = calibration_ratio + holdout_ratio
-
-    def cut(parts: dict[str, list[str]], counts: dict[str, int] | None, key_fn) -> dict:
-        """The three-way draw's reference share cut into calibration and holdout, by group."""
-        calibration, holdout = draw_train_val(
-            parts.pop("calibration"), annotation_counts=counts, group_key_fn=key_fn,
-            val_ratio=holdout_ratio / reference_ratio if reference_ratio else 0.0, seed=seed)
-        return {**parts, "calibration": calibration, "holdout": holdout}
-
-    out_dir = Path(output_path) if output_path else None
-    if ground_truth is not None:
-        if out_dir is None:
-            return {"error": "draw_splits takes ground_truth only with output_path: a stats-only "
-                             "call scans the tree's images and labels and admits nothing."}
-    if out_dir is not None:
-        zero_ratios = [name for name, ratio in (
-            ("train_ratio", train_ratio), ("val_ratio", val_ratio),
-            ("calibration_ratio", calibration_ratio), ("holdout_ratio", holdout_ratio),
-        ) if ratio == 0]
-        if zero_ratios:
-            return {"error": f"{', '.join(zero_ratios)} must be non-zero to write a selection: "
-                             "every side of a selection is drawn from, so writing one states all "
-                             "four ratios as non-zero. Omit output_path for a stats-only call, "
-                             "whose ratios may include a zero."}
-
-    if out_dir is None:
-        # A stats-only call writes nothing, so the draw is a plain image/label scan: no subject
-        # required, every image eligible.
-        try:
-            scan = _scan_dataset(folder_path)
-        except (UnreadableLabelDocument, AmbiguousImageStem) as exc:
-            return {"error": str(exc)}
-        except SchemaVersionRefused as exc:
-            return {"error": f"a .bandgroup manifest under {folder_path} could not be read: {exc}"}
-        image_map = {Path(p).stem: p for p in scan["images"]}
-        label_map = {Path(p).stem: p for p in scan["labels"]}
-
-        stratified = bool(stratify_foreground and label_map)
-        stems = sorted(set(image_map) & set(label_map)) if stratified else sorted(image_map)
-        if not stems:
-            return {"error": "No images found to split"}
-
-        annotation_counts = None
-        if stratified:
-            # count_label_lines is JSON-aware; raw count_lines would count pretty-printed JSON
-            # lines as annotations (a {objects: []} negative reads as ~5 foreground objects).
-            try:
-                annotation_counts = {s: count_label_lines(label_map[s]) for s in stems}
-            except UnreadableLabelDocument as exc:
-                return {"error": str(exc)}
-
-        try:
-            group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
-        except ValueError as exc:
-            return {"error": str(exc)}
-        resolved_group_by = recorded_group_by(group_by, group_key_map)
-        parts = cut(group_balanced_split(
-            stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
-            splits=(train_ratio, val_ratio, reference_ratio), seed=seed,
-        ), annotation_counts, group_key_fn)
-        return _draw_response(
-            parts, {k: len(parts[k]) for k in kept_splits}, annotation_counts, stems,
-            group_key_fn, seed=seed, group_by=resolved_group_by, selection_dir=None)
-
-    # Writing a selection: one draw, over whatever ground truth the dataset carries, through the
-    # producer's own admission for that shape.
+    from tcip_annotation.json_io import UnreadableLabelDocument, prediction_documents
+    from tcip_mcp.dataset_layout import annotation_dir, annotation_root, list_dates
     from tcip_mcp.dataset_layout import resolve_images_dir
-    from tcip_mcp.pipelines.data.label_queries import (
-        Admission, Admitted, admit, foreground_counts, require_admitted, stated_scope,
+    from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
+    from tcip_mcp.pipelines.data.selection import (
+        REFERENCE_SIDES, SIDES, ClassScope, Selection, write_selection,
     )
-    from tcip_mcp.pipelines.data.selection import ground_truth_digests, with_sides
+    from tcip_mcp.pipelines.data.split_construction import admitted_membership, draw_sides
+    from tcip_mcp.pipelines.data.splits import foreground_group_count
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, BandGroupIncomplete
 
-    date_dirs: list[tuple[str | None, Path, Path]] = []
+    # Each place holding ground truth: (its name, images directory, ground truth).
+    places: list[tuple[str, Path, str]]
     if ground_truth is not None:
-        sources: list[tuple[Path, str]] = [
-            (resolve_images_dir(folder_path, None), ground_truth)]
+        places = [(ground_truth, resolve_images_dir(folder_path, None), ground_truth)]
     else:
-        date_dirs = _split_date_dirs(folder_path)
-        if not date_dirs:
+        labels = annotation_root(folder_path)
+        dates = list_dates(folder_path, tree=annotation_root)
+        places = [(d, resolve_images_dir(folder_path, d), str(annotation_dir(folder_path, d)))
+                  for d in dates]
+        if labels.is_dir() and (prediction_documents(labels) or not dates):
+            places.append(("annotations/ (loose labels)", resolve_images_dir(folder_path, None),
+                           str(labels)))
+        if not places:
             return {"error": f"{folder_path} holds no per-image label tree (annotations/<date>/ "
                              "or a flat annotations/) for draw_splits to draw a subject-scoped "
                              "selection from; an external COCO document is converted into one "
                              "by import_coco first."}
         entries_by_images_dir: dict[Path, list[str]] = {}
-        for entry_date, _, entry_images_dir in date_dirs:
-            entries_by_images_dir.setdefault(entry_images_dir, []).append(
-                entry_date if entry_date is not None else "annotations/ (loose labels)"
-            )
+        for name, entry_images_dir, _labels in places:
+            entries_by_images_dir.setdefault(entry_images_dir, []).append(name)
         colliding = {d: names for d, names in entries_by_images_dir.items() if len(names) > 1}
         if colliding:
             detail = "; ".join(
@@ -470,140 +352,50 @@ def draw_splits(
                              "entry and could land on both sides of the split. Give each date its "
                              "own images/<date>/ bucket, or merge the colliding label entries "
                              "into one."}
-        sources = [(entry_images, str(entry_labels))
-                   for _date, entry_labels, entry_images in date_dirs]
 
-    admissions: list[Admission] = []
-    admission_counts: dict[str, int] = {}
-    # identity -> (source index, admitted record); the identity keys the draw and is what a
-    # caller-supplied group_key_map is keyed by.
-    located: dict[str, tuple[int, Admitted]] = {}
+    ratios = {"train": train_ratio, "val": val_ratio, "calibration": calibration_ratio,
+              "holdout": holdout_ratio}
     try:
-        for where, (source_images, source_ground_truth) in enumerate(sources):
-            admitted = admit(source_images, source_ground_truth,
-                             scope=stated_scope(source_ground_truth, subject, attribute))
-            admissions.append(admitted)
-            for key, value in admitted.counts.items():
-                admission_counts[key] = admission_counts.get(key, 0) + value
-            for record in admitted.records:
-                located[member_identity(admitted.date, record.member)] = (where, record)
-    except (UnreadableLabelDocument, AmbiguousImageStem, BandGroupIncomplete) as exc:
-        return {"error": str(exc)}
+        membership = admitted_membership(
+            places, scope=ClassScope(subject=subject, attribute=attribute), group_by=group_by,
+            group_key_map=group_key_map)
+        drawn, counted = draw_sides(
+            membership.samples, membership.scope, seed=seed, stratify=stratify_foreground,
+            ratios={side: share for side, share in ratios.items() if share != 0})
     except tcip_store.SchemaVersionRefused as exc:
         return {"error": f"a .bandgroup manifest under {folder_path} could not be read: {exc}"}
-    except (FileNotFoundError, ValueError, OSError) as exc:
+    except (UnreadableLabelDocument, AmbiguousImageStem, BandGroupIncomplete,
+            FileNotFoundError, ValueError, OSError) as exc:
         return {"error": str(exc)}
 
-    stems = sorted(located)
-    if not stems:
-        searched = ", ".join(
-            f"{entry_date or 'annotations/ (loose labels)'} -> {entry_images}"
-            for entry_date, _labels, entry_images in date_dirs
-        ) or ", ".join(f"{gt} -> {images}" for images, gt in sources)
-        unpaired = ""
-        if date_dirs:
-            from tcip_mcp.dataset_layout import image_dir as _image_dir, list_dates as _list_dates
-
-            used = {entry_images for _d, _l, entry_images in date_dirs}
-            buckets = sorted(d for d in _list_dates(folder_path)
-                             if _image_dir(folder_path, d) not in used)
-            if buckets:
-                listed = ", ".join(str(_image_dir(folder_path, d)) for d in buckets)
-                unpaired = (f" {listed} exist with no label entry resolved against them; move the "
-                            "labels into a matching annotations/<date>/ bucket, or move the "
-                            "images to the flat images/ root, to pair them.")
-        try:
-            require_admitted(admissions[0])
-        except ValueError as exc:
-            return {"error": f"{exc} Searched {searched} ({admission_counts}).{unpaired}"}
-
-    try:
-        group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
-    except ValueError as exc:
-        return {"error": str(exc)}
-    resolved_group_by = recorded_group_by(group_by, group_key_map)
-
-    # Through the one producer, once: every admitted member as a sample under the group key this
-    # draw groups by, with its ground-truth digest as it reads now. The draw sides them below.
-    digest_of = ground_truth_digests(record.ground_truth for _where, record in located.values())
-    sample_of: dict[str, Sample] = {}
-    try:
-        for where, admitted in enumerate(admissions):
-            mine = {identity: record for identity, (source, record) in located.items()
-                    if source == where}
-            groups = {record.member: group_key_fn(identity)
-                      for identity, record in mine.items()}
-            digests = {record.member: digest_of[record.ground_truth]
-                       for record in mine.values()}
-            built = admitted.samples({record.member: "train" for record in mine.values()},
-                                     groups.__getitem__, digests=digests)
-            by_member = sorted(mine.items(), key=lambda entry: entry[1].member)
-            sample_of.update(
-                (identity, sample) for (identity, _record), sample in zip(by_member, built))
-    except (FileNotFoundError, AmbiguousImageStem, BandGroupIncomplete) as exc:
-        return {"error": str(exc)}
-
-    # The one foreground count, over the samples themselves: a label document carries its own
-    # annotation count, and a mask or a row is admitted by existing, so it counts as one.
-    counted = foreground_counts(sample_of, admissions[0].scope)
-    annotation_counts = counted if stratify_foreground else None
-    min_foreground_groups = {"train": 1, "val": 1, "calibration": 2}
-    try:
-        refuse_insufficient_foreground_groups(
-            foreground_group_count(stems, counted, group_key_fn), min_foreground_groups,
-            remedy=("add ground truth for more images: annotate or confirm more of them for this "
-                    "subject, or write the masks or rows that answer for them."))
-    except ValueError as exc:
-        return {"error": str(exc)}
-    three_way = group_balanced_split(
-        stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
-        splits=(train_ratio, val_ratio, reference_ratio), seed=seed,
-        min_foreground_groups=min_foreground_groups, foreground_counts=counted,
-    )
-    calibration_foreground_groups = foreground_group_count(
-        three_way["calibration"], counted, group_key_fn)
-    drawn = cut(three_way, counted, group_key_fn)
-
-    # The sides the draw assigned, onto the samples already built, by each one's own location.
-    drew = {sample_of[key].location: side for side in kept_splits for key in drawn[side]}
-    try:
-        fingerprint = dataset_fingerprint(folder_path)
-    except tcip_store.SchemaVersionRefused as exc:
-        return {"error": f"cannot fingerprint the dataset for the selection: {exc}"}
-    try:
-        written = write_selection(out_dir, with_sides(Selection(
-            samples=tuple(sample for _key, sample in sorted(sample_of.items())
-                          if sample.location in drew),
-            scope=admissions[0].scope,
-            seed=seed, group_by=resolved_group_by, dataset_fingerprint=fingerprint,
-        ), drew), project=project)
-    except ValueError as exc:
-        return {"error": str(exc)}
-
-    sizes = {k: written.counts()[k] for k in kept_splits}
-    total_drawn = sum(sizes.values())
-    return _draw_response(
-        drawn, sizes, annotation_counts, stems, group_key_fn, seed=seed,
-        group_by=resolved_group_by, scope=asdict(written.scope),
-        admission_counts=admission_counts, selection_dir=str(out_dir),
-        calibration_foreground_groups=calibration_foreground_groups,
-        realized_ratios={k: (sizes[k] / total_drawn if total_drawn else 0.0) for k in sizes})
-
-
-def _draw_response(parts: dict, sizes: dict[str, int], annotation_counts: dict | None,
-                   stems: list[str], group_key_fn, **recorded) -> dict:
-    """A draw's response: each kept side's size (``sizes``) and foreground
-    annotations over ``parts``, the totals, the group count and whether the draw stratified by
-    ``annotation_counts``, beside the call's own ``recorded`` facts.
-    """
-    counts = annotation_counts or {}
-    return {
+    by_side = {side: [key for key, sample in drawn.items() if sample.side == side]
+               for side in SIDES}
+    sizes = {side: len(keys) for side, keys in by_side.items()}
+    group_of = {key: sample.group for key, sample in drawn.items()}.__getitem__
+    response = {
         "splits": sizes,
         "foreground_annotations": {
-            k: sum(int(counts.get(s, 0)) for s in parts[k]) for k in sizes},
-        "total_stems": len(stems),
-        "total_annotations": sum(int(v) for v in counts.values()),
-        "groups": len({group_key_fn(s) for s in stems}),
-        "stratified": annotation_counts is not None,
-        **recorded,
+            side: sum(counted[key] for key in keys) for side, keys in by_side.items()},
+        "total_stems": len(drawn),
+        "total_annotations": sum(counted.values()),
+        "groups": len({sample.group for sample in drawn.values()}),
+        "stratified": stratify_foreground,
+        "seed": seed, "group_by": membership.group_by, "scope": asdict(membership.scope),
+        "tallies": membership.tallies,
+        "selection_dir": str(output_path) if output_path else None,
+        "calibration_foreground_groups": foreground_group_count(
+            [key for side in REFERENCE_SIDES for key in by_side[side]], counted, group_of),
+        "realized_ratios": {side: size / len(drawn) for side, size in sizes.items()},
     }
+    if not output_path:
+        return response
+    try:
+        write_selection(output_path, Selection(
+            samples=tuple(drawn[key] for key in sorted(drawn)), scope=membership.scope, seed=seed,
+            group_by=membership.group_by, dataset_fingerprint=dataset_fingerprint(folder_path),
+        ), project=project)
+    except tcip_store.SchemaVersionRefused as exc:
+        return {"error": f"cannot fingerprint the dataset for the selection: {exc}"}
+    except ValueError as exc:
+        return {"error": str(exc)}
+    return response

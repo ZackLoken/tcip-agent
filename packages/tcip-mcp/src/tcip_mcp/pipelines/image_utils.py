@@ -49,12 +49,9 @@ class AmbiguousImageStem(ValueError):
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".heic", ".tif", ".tiff", ".npy", ".npz", MANIFEST_EXT}
 
 def stem_collision_key(name: str) -> str:
-    """The fold that decides whether two stems name one logical identity: ``str.lower()``.
-
-    Exact for ASCII names; not ``casefold()`` and not a filesystem's own table, so a pair differing
-    only by Unicode normalization, or by a casefold-but-not-``lower()`` difference, is two keys
-    here.
-    """
+    """The fold that decides whether two stems name one logical identity: ``str.lower()``, so a
+    pair differing only by Unicode normalization, or by a casefold-but-not-``lower()`` difference,
+    is two keys."""
     return name.lower()
 
 
@@ -172,6 +169,14 @@ def resolve_image_source(images_dir: str | Path, stem: str) -> "Path | BandGroup
     if src is None:
         raise FileNotFoundError(f"No image for stem: {stem}")
     return refuse_incomplete_band_group(src)
+
+
+def image_path_dimensions(image_path: str | Path) -> tuple[int, int]:
+    """``(width, height)`` of the logical image ``image_path`` names in its own directory
+    (:func:`resolve_image_source`, a grouped capture folded into its one frame), as
+    :func:`image_dimensions` measures it. Its refusals propagate."""
+    path = Path(image_path)
+    return image_dimensions(resolve_image_source(path.parent, path.stem))
 
 
 def resolve_source_path(source: str | Path) -> "Path | BandGroupRef":

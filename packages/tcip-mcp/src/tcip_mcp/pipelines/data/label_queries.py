@@ -21,15 +21,13 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.selection import ClassScope, Sample
 
 
-def resolved_subjects_path(dataset_dir) -> Path | None:
-    """The real ``subjects.json`` path for the dataset containing ``dataset_dir``, or ``None`` if
-    it doesn't exist.
-    """
+def registered_dataset_root(dataset_dir) -> Path | None:
+    """The root of the dataset containing ``dataset_dir`` when it holds a subject registry, else
+    ``None``."""
     from tcip_mcp.dataset_layout import dataset_root_of, subjects_path
 
     root = dataset_root_of(dataset_dir)
-    cp = subjects_path(root) if root is not None else None
-    return Path(cp) if cp is not None and Path(cp).is_file() else None
+    return root if root is not None and subjects_path(root).is_file() else None
 
 
 def resolve_registry_id_map(labels_dir, scope: "ClassScope"):
@@ -44,9 +42,9 @@ def resolve_registry_id_map(labels_dir, scope: "ClassScope"):
     from tcip_mcp import subject_registry
 
     subject, attribute = cast(str, scope.subject), scope.attribute
-    cp = resolved_subjects_path(labels_dir)
-    if cp is not None:
-        registry = subject_registry.read_registry(cp)
+    root = registered_dataset_root(labels_dir)
+    if root is not None:
+        registry = subject_registry.read_registry(root)
     elif attribute is not None:
         raise ValueError(
             f"attribute {attribute!r} classification needs a subjects.json to order its values, "
@@ -83,8 +81,7 @@ def json_det_targets(path, scope: "ClassScope",
     background. An annotation the map cannot decode raises.
 
     ``n_unlabeled`` counts instances of the subject never assessed for the scope's attribute yet,
-    excluded from ``boxes``/``labels`` rather than raising; a caller excludes the whole image when
-    it is above zero.
+    excluded from ``boxes``/``labels`` rather than raising.
     """
     from tcip_annotation import json_io
     from tcip_annotation.state import bbox_of
@@ -513,14 +510,13 @@ def refuse_inadmissible_samples(samples: "Sequence[Sample]", scope: "ClassScope"
 
 def require_admitted(admitted: "Admission") -> None:
     """Refuse an empty admission, naming why nothing was admitted and what would fix it, for every
-    ground-truth shape. A draw spanning several places calls it once over what they admitted
-    between them.
+    ground-truth shape.
     """
     if admitted.records:
         return
     from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK
 
-    shape, counts = admitted.shape, admitted.counts
+    shape, counts = admitted.shape, admitted.tallies
     ground_truth, images_dir = admitted.ground_truth, admitted.images_dir
     if shape == MASK:
         raise ValueError(
@@ -626,10 +622,9 @@ def _stale_finished(
     stamped_by_image = bucket_digest_stamps(stamps, bucket_key)
     if not stamped_by_image:
         return set()
-    cp = subjects_path(root)
-    if not cp.is_file():
+    if not subjects_path(root).is_file():
         return set()
-    current_digest = attribute_schema_digest(read_registry(cp), subject)
+    current_digest = attribute_schema_digest(read_registry(root), subject)
     if current_digest is None:
         return set()
     return stale_stamped_names(stamped_by_image, current_digest, finished)
@@ -803,7 +798,8 @@ class Admission:
     images_dir: str
     ground_truth: str
     records: list[Admitted]
-    counts: dict[str, int]
+    tallies: dict[str, int]
+    """How many places the admission kept and skipped, by reason; never a foreground count."""
     scope: "ClassScope"
     date: str | None = None
 
@@ -827,21 +823,6 @@ class Admission:
 
         return self.samples({record.member: "train" for record in self.records},
                             recorded_group_key_fn("stem", date=self.date))
-
-
-def admit_run(data_cfg: Mapping[str, Any], *,
-              contradicted_out: set[str] | None = None) -> "Admission":
-    """:func:`admit` over a run's data section: its ``images_dir`` and ``labels_dir``, under the
-    ``scope`` it states, when it states one. A scope carrying a map is read under that map; one
-    stating only a subject and attribute is a fresh statement, given its registry's map
-    (:func:`stated_scope`)."""
-    from tcip_mcp.pipelines.data.selection import ClassScope
-
-    scope = ClassScope.of(data_cfg) if "scope" in data_cfg else None
-    if scope is not None and scope.id_map is None:
-        scope = stated_scope(data_cfg["labels_dir"], scope.subject, scope.attribute)
-    return admit(data_cfg["images_dir"], data_cfg["labels_dir"], scope=scope,
-                 contradicted_out=contradicted_out)
 
 
 def admit(
@@ -881,7 +862,7 @@ def admit(
         )
         return Admission(
             shape=shape, images_dir=str(images_dir), ground_truth=str(ground_truth),
-            records=records, counts=counts, scope=admitted, date=date,
+            records=records, tallies=counts, scope=admitted, date=date,
         )
     return Admission(shape=shape, images_dir=str(images_dir), ground_truth=str(ground_truth),
-                     records=records, counts=counts, scope=admitted)
+                     records=records, tallies=counts, scope=admitted)

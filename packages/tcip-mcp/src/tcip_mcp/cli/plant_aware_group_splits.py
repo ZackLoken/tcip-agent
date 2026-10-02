@@ -19,8 +19,7 @@ Usage:
         --train-ratio <ratio> --val-ratio <ratio> --calibration-ratio <ratio> \
         --holdout-ratio <ratio> [--seed 42] [--tolerance-m 5.0] [--output-path <dir>]
 
-The four ratios have no default and are required: they must sum to 1.0, and a selection write
-(``--output-path``) additionally refuses any of them being zero, by name.
+The four ratios have no default and are required, as ``draw_splits`` takes them.
 """
 
 from __future__ import annotations
@@ -131,8 +130,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                          help="Fraction an assessment fits its operating point on. No default.")
     parser.add_argument("--holdout-ratio", type=float, required=True,
                          help="Fraction an assessment checks its operating point against. No "
-                              "default. A selection write (--output-path) refuses a zero ratio on "
-                              "any of the four, naming it.")
+                              "default. A side whose ratio is zero is not drawn.")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--tolerance-m", type=float, default=None,
                          help="Max GPS distance (m) to the nearest plant. Defaults to "

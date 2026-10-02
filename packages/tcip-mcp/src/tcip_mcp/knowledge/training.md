@@ -136,7 +136,7 @@ naming why. Whole-frame training and whole-decode sources gain nothing from it; 
 
 Every launch is a run directory, `.tcip/experiments/<experiment_id>/`, written as the run goes and
 never rewritten: `run.json`, written by the launcher before the run starts (the config as
-launched, its seed, environment, dataset identity, who launched it, the run it was relaunched from,
+launched, its seed, environment, dataset identity, the run it was relaunched from,
 and what the launch resolved: the data section, the partition it trains on and the objective it
 selects by), `metrics.jsonl`, a heartbeat, and `final_status.json` once it ends (its state, error,
 and the path and sha256 of the checkpoint its completion registers). Every checkpoint is written
@@ -191,9 +191,9 @@ Use `draw_splits` to draw a train/val/calibration selection: `draw_splits` has n
 parameter at all, no launch path honors a held-out test list (a separate, within-image
 mechanism, `reserve_calibration_fraction` on the spatial_strip route, not this one). The samples
 are drawn through the same admission a training run uses, and which admission that is depends on
-where the dataset's ground truth lives. Writing a selection over the per-image label tree
-(`output_path` given, no `ground_truth`) requires `subject`, since that admission is
-subject-scoped, and takes `attribute` when the run is attribute-scoped. `ground_truth` names a
+where the dataset's ground truth lives. A draw over the per-image label tree (no `ground_truth`)
+requires `subject`, since that admission is subject-scoped, and takes `attribute` when the run is
+attribute-scoped. `ground_truth` names a
 place explicitly instead of walking that tree, and the producer reads what is there: a directory
 of label documents (subject-scoped the same way), a directory of `<stem>.png` masks, or a `.csv`
 table of one row per image. A mask and a row are admitted by existing beside their image, and the
@@ -211,13 +211,14 @@ measure (a count needs detections to compare, a scalar needs table rows).
   Every capture date the dataset holds enters one selection, so a trait needing examples from two
   dates trains in place: no derived folder, no copied imagery, and two dates holding a same-named
   image are two samples rather than one
-- A stats-only call (no `output_path`) defaults to `train_ratio=0.8`, `val_ratio=0.2`,
-  `calibration_ratio=0.0`, `holdout_ratio=0.0`; leakage-free (sibling tiles of one source image
-  stay in the same split). Writing a selection has no default for any of the four and refuses a
-  zero one, naming it: state all four ratios explicitly
+- A stats-only call (no `output_path`) is the same draw, written nowhere; it defaults to
+  `train_ratio=0.8`, `val_ratio=0.2`, `calibration_ratio=0.0`, `holdout_ratio=0.0`; leakage-free
+  (sibling tiles of one source image stay in the same split). A side whose ratio is zero is not
+  drawn, written or not; a negative ratio refuses
 - The draw refuses, before any write, when the tree holds fewer foreground groups of `subject`
-  than the requested sides need at minimum, counted for the draw's own subject regardless of
-  `stratify_foreground`
+  than one per requested side, counted for the draw's own subject regardless of
+  `stratify_foreground`; a run's own train/val draw and a redraw inside a selection refuse by the
+  same floor rather than training without validation
 - `stratify_foreground=True` (default) balances splits by each source's foreground annotation
   count, not per-class distribution; the minimum-foreground floor above sees real foreground
   either way

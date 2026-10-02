@@ -34,8 +34,8 @@ def bound(backend):
 
 def _project(root: Path) -> Path:
     """A dataset root with one image, one empty label, and the registry that decodes it."""
-    from tcip_mcp import subject_registry
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tests._producer_fixtures import registry_over
 
     (root / "images" / "2026-03-04").mkdir(parents=True, exist_ok=True)
     (root / "images" / "2026-03-04" / "a_1.jpg").write_bytes(b"\xff\xd8\xff")
@@ -43,9 +43,7 @@ def _project(root: Path) -> Path:
     (root / "annotations" / "2026-03-04" / "a_1.json").write_text(
         '{"annotations": []}', encoding="utf-8"
     )
-    subject_registry.write_registry(
-        root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),))
-    )
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     return root
 
 
@@ -283,9 +281,9 @@ def test_import_refuses_a_corrupt_zip_without_stranding_a_staging_tree(tmp_path)
 
 
 def test_import_under_file_backend_lands_files_and_builds_no_database(tmp_path):
-    root = _project(tmp_path / "source")
     negative = {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:x"}}}
     with bound(FileBackend()):
+        root = _project(tmp_path / "source")
         ts.replace(dataset_layout.image_status_key(root), negative, expect=ts.Version.ABSENT)
         assert "error" not in archive_project(root, str(tmp_path / "bundle.zip"))
 
@@ -420,8 +418,8 @@ def _annotated_dataset(root: Path, n: int) -> None:
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp import subject_registry
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tests._producer_fixtures import registry_over
 
     images_dir = root / "images" / "2026-03-04"
     labels_dir = root / "annotations" / "2026-03-04"
@@ -434,9 +432,7 @@ def _annotated_dataset(root: Path, n: int) -> None:
             labels_dir / f"{stem}.json",
             [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))], 640, 480,
         )
-    subject_registry.write_registry(
-        root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),))
-    )
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
 
 
 def test_a_splits_root_nested_under_a_curated_root_archives_and_round_trips(tmp_path):
@@ -499,11 +495,11 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
 
     finished_run(root, experiment_id="exp1", rows=[{"epoch": 1, "loss": 0.5}])
 
-    def fake_trial(point, report, base_config, trial_dir, *, project, objective, launched_by):
+    def fake_trial(point, report, base_config, trial_dir, *, project, objective):
         config = tt._apply_hpo_params(base_config, point)
         tt.open_run(trial_dir, config,
                     resolve_run(config, project=project, objective=objective).record,
-                    launched_by=launched_by, trial_params=point)
+                    trial_params=point)
         report(0.2)
 
     def fake_search(**kw):

@@ -181,9 +181,30 @@ def test_rank_registered_models_names_the_marked_set_when_the_filter_empties_a_n
     assert res["error"] == "none of the marked experiments registered a checkpoint"
 
 
-def test_compare_best_route_404s_with_no_registered_checkpoint(client: TestClient, tmp_path):
-    """A project with no completed run and no foreign registration answers 404, and the asking
-    writes no registry index."""
+def test_a_ranking_over_a_marked_set_that_registered_nothing_reads_the_registry_once(
+    tmp_path, monkeypatch,
+):
+    import tcip_mcp.model_registry as model_registry
+    from tcip_mcp.tools.model_tools import ranked_registered_model
+
+    _register(tmp_path, "exp-other", 0.7)
+    reads: list[object] = []
+    real = model_registry.read_registry_index
+
+    def counted(project_path):
+        reads.append(project_path)
+        return real(project_path)
+
+    monkeypatch.setattr(model_registry, "read_registry_index", counted)
+    res = ranked_registered_model(tmp_path, "val_map50", higher_is_better=None,
+                                  include_unverified=False, experiment_ids=["exp-marked"], tag=None)
+    assert res["error"] == "none of the marked experiments registered a checkpoint"
+    assert len(reads) == 1
+
+
+def test_compare_best_route_422s_with_no_registered_checkpoint(client: TestClient, tmp_path):
+    """A project with no completed run and no foreign registration answers the ranking's own
+    refusal as 422, and the asking writes no registry index."""
     import tcip_store
 
     from tcip_mcp.model_registry import registry_index_key
@@ -191,8 +212,8 @@ def test_compare_best_route_404s_with_no_registered_checkpoint(client: TestClien
     resp = client.post("/api/training/compare/best", json={
         "experiment_ids": ["exp-a"], "metric": "val_map50",
     })
-    assert resp.status_code == 404
-    assert resp.json()["detail"] == "no model registry in this project"
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["error"] == "No models registered"
     assert tcip_store.read(registry_index_key(tmp_path), default=None) is None
 
 
@@ -235,6 +256,21 @@ def test_compare_best_route_422s_when_the_marked_set_registered_nothing(client: 
     })
     assert resp.status_code == 422
     assert resp.json()["detail"]["error"] == "none of the marked experiments registered a checkpoint"
+
+
+def test_an_empty_metric_lists_through_the_listing_route_and_refuses_through_the_ranking_one(
+    client: TestClient, tmp_path,
+):
+    _register(tmp_path, "exp-a", 0.7)
+
+    listed = client.get("/api/results/models/registered")
+    assert listed.status_code == 200
+    assert [m["experiment_id"] for m in listed.json()["models"]] == ["exp-a"]
+
+    resp = client.post("/api/training/compare/best", json={
+        "experiment_ids": ["exp-a"], "metric": ""})
+    assert resp.status_code == 422
+    assert "names the metric it ranks by" in resp.json()["detail"]["error"]
 
 
 def test_compare_best_route_projects_the_answer(client: TestClient, tmp_path):

@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import tcip_store as ts
+
 from tcip_mcp.delivery import read_delivery_events
 from tcip_mcp.pipelines.delivery_events_schema import PlantMappingDisclosure
 from tcip_mcp.pipelines.postprocessing import plant_mapping
@@ -74,18 +76,28 @@ def test_a_cited_rebuild_with_supersede_archives_the_old_record_and_keeps_it_rea
 ) -> None:
     """Admits valid work: supersede=True archives the current record under
     <name>@<digest[:12]>, the new record's own supersedes names the archived digest, the
-    archived record stays readable, and plant_mapping_names never lists it."""
+    archived record stays readable on its own build's receipt, the supersede writing one receipt
+    alone, and plant_mapping_names never lists it."""
+    from tcip_mcp.audit import audit_log_key
+
+    def receipts() -> list[dict]:
+        return [entry["arguments"] for entry in ts.read_log(audit_log_key(tmp_path)).records
+                if entry.get("tool") == "plant_mapping_built"]
+
     images_root, preds_by_date = _cited_mapping(tmp_path)
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
     archived_digest = before.record_sha256
     archived_name = f"valley@{archived_digest[:12]}"
+    receipts_before = receipts()
 
     res = build_plant_mapping(
         tmp_path, name="valley", images_root=images_root,
         plant_registry=before.plant_registry["name"], supersede=True)
 
     assert "error" not in res, res
+    [receipt] = receipts()[len(receipts_before):]
+    assert (receipt["name"], receipt["supersedes"]) == ("valley", archived_digest)
     after = plant_mapping.load_mapping(tmp_path, "valley")
     assert after is not None
     assert after.record_sha256 != archived_digest
@@ -157,6 +169,51 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
     assert resp2.status_code == 200, resp2.text
     record2 = next(r for r in resp2.json()["records"] if r.get("plant_mapping"))
     assert record2["plant_mapping_resolved_key"] == f"valley@{before.record_sha256[:12]}"
+
+
+def _built(tmp_path: Path) -> tuple[Path, str]:
+    """A mapping ``valley`` built through the platform's own door; its images root and registry."""
+    _init(tmp_path)
+    images_root, plant_csv, _ = _write_scene(_dataset(tmp_path), dates=[DATES[0]])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
+    built = build_plant_mapping(
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
+    assert "error" not in built, built
+    return images_root, registry
+
+
+def test_a_mapping_record_without_assignments_refuses_to_decode_by_name(tmp_path: Path) -> None:
+    import pytest
+
+    _built(tmp_path)
+    raw = ts.read(plant_mapping.plant_mapping_key(tmp_path, "valley"))
+    del raw["assignments"]
+    with pytest.raises(ValueError, match="assignments"):
+        plant_mapping.MappingBuild.from_record(raw, tmp_path, "valley")
+
+
+def test_a_rebuild_over_a_record_that_will_not_decode_proceeds_on_its_raw_digest(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """The record being replaced is identified by its raw digest, whatever its shape: the rebuild
+    asks the citation check about that digest and lands."""
+    images_root, registry = _built(tmp_path)
+    key = plant_mapping.plant_mapping_key(tmp_path, "valley")
+    malformed = {"name": "valley", "an old shape": True}
+    ts.replace(key, malformed)
+    asked: list[str] = []
+    real = plant_mapping._citing_delivery_event_ids
+
+    def citing(project, name, digest):
+        asked.append(digest)
+        return real(project, name, digest)
+
+    monkeypatch.setattr(plant_mapping, "_citing_delivery_event_ids", citing)
+    rebuilt = build_plant_mapping(
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
+    assert "error" not in rebuilt, rebuilt
+    assert asked == [plant_mapping.record_digest(malformed)]
+    assert plant_mapping.load_mapping(tmp_path, "valley") is not None
 
 
 def test_an_uncited_rebuild_replaces_as_today_recording_nothing_extra(tmp_path: Path) -> None:

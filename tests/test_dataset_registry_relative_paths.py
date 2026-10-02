@@ -16,9 +16,9 @@ from PIL import Image
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp import subject_registry
 from tcip_mcp.subject_registry import SubjectRegistry, Subject
 from tcip_mcp.tools.project_tools import read_datasets, register_dataset
+from tests._producer_fixtures import registry_over
 
 
 def _make_dataset(root: Path) -> None:
@@ -30,8 +30,7 @@ def _make_dataset(root: Path) -> None:
     json_io.write_annotations(
         str(root / "annotations" / "2-11-26" / "img_000.json"),
         [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
-    subject_registry.write_registry(
-        root / "subjects.json", SubjectRegistry(subjects=(Subject(name="bud"),)))
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
 
 
 def _run_check(*args: str) -> subprocess.CompletedProcess:

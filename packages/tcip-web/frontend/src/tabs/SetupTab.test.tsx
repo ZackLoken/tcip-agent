@@ -162,7 +162,7 @@ describe("SetupTab plant-mapping build: match-tolerance phrase", () => {
 
   async function buildWithTolerance(nn_tolerance_m: { value: number; source: string }) {
     vi.spyOn(resultsApi, "buildPlantMapping").mockResolvedValue({
-      mapping: {},
+      name: "valley-2026",
       unreadable: {},
       summary: {
         per_date: {
@@ -237,41 +237,9 @@ describe("SetupTab plant-mapping build: match-tolerance phrase", () => {
     expect(await screen.findByText(/cited by delivery event\(s\)/)).toBeInTheDocument();
   });
 
-  it("adopts the committed mapping and appends the gap message when the route's own line is lost", async () => {
-    const gapMessage = "gui_build_plant_mapping completed and its audit entry could not be written";
-    const committed = {
-      mapping: {},
-      unreadable: {},
-      summary: {
-        per_date: {
-          "2026-01-01": { n_images: 3, n_mapped: 2, n_unattributed: 1, avg_distance_m: 1.4 },
-        },
-        totals: { n_dates: 1, n_images: 3, n_mapped: 2, n_unattributed: 1 },
-      },
-      nn_tolerance_m: { value: 0.75, source: "grid_pitch" },
-      max_match_distance_m: 2.25,
-    };
-    vi.spyOn(resultsApi, "buildPlantMapping").mockRejectedValue(
-      new StructuredRefusalError(
-        { error: "audit_entry_not_written", message: gapMessage, committed },
-        409,
-        gapMessage,
-      ),
-    );
-
-    render(<SetupTab />);
-    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
-    fillAndBuild();
-
-    expect(await screen.findByText(/0\.75 m/)).toBeInTheDocument();
-    expect(screen.getByText(new RegExp(gapMessage))).toBeInTheDocument();
-  });
-
-  it("adopts nothing and shows the panel message when the archive receipt failed (committed: null)", async () => {
+  it("adopts nothing and shows the panel message when the receipt could not be written", async () => {
     const gapMessage =
-      "gui_build_plant_mapping completed and its audit entry could not be written. The new " +
-      "record was never persisted under this name. Rebuild with supersede=True once the " +
-      "audit log's destination is repaired.";
+      "plant_mapping_built completed and its audit entry could not be written: the log refused";
     vi.spyOn(resultsApi, "buildPlantMapping").mockRejectedValue(
       new StructuredRefusalError(
         { error: "audit_entry_not_written", message: gapMessage, committed: null },
@@ -302,7 +270,7 @@ describe("SetupTab plant-mapping build: match-tolerance phrase", () => {
     const totalImages = Object.values(perDate).reduce((sum, d) => sum + d.n_images, 0);
     const totalMapped = Object.values(perDate).reduce((sum, d) => sum + d.n_mapped, 0);
     vi.spyOn(resultsApi, "buildPlantMapping").mockResolvedValue({
-      mapping: {},
+      name: "valley-2026",
       unreadable: {},
       summary: {
         per_date: perDate,
@@ -360,7 +328,8 @@ describe("SetupTab plant-mapping build: match-tolerance phrase", () => {
   });
 
   const LOADED = {
-    mapping: {},
+    name: "valley-2026",
+    unreadable: {},
     summary: {
       per_date: {
         "2026-01-01": { n_images: 4, n_mapped: 4, n_unattributed: 0, avg_distance_m: 0.9 },
