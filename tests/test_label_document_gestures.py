@@ -36,7 +36,8 @@ def _label(root: Path, image: Path) -> Path:
 def _save(root: Path, image: Path, payloads: list[dict], *, author: str = "user:breeder",
           expect: ts.Version | None = None, gestures: Gestures = Gestures()):
     return save_label_document(root, image, _label(root, image), payloads, width=WIDTH,
-                               height=HEIGHT, author=author, expect=expect, gestures=gestures)
+                               height=HEIGHT, author=author, actor=author, expect=expect,
+                               gestures=gestures)
 
 
 def _stored(root: Path, image: Path) -> json_io.LabelDocument:
@@ -286,7 +287,7 @@ def test_the_proposals_payload_carries_what_the_editor_reads_and_no_more(tmp_pat
         "image_path": str(image), "label_path": str(_label(root, image))}).json()
 
     assert set(proposals) == {"bucket", "proposals"}
-    assert loaded["completion"] == {"bud": {"state": "negative", "finished": True}}
+    assert loaded["completion"] == {"bud": "negative"}
 
 
 # ── completion marks ───────────────────────────────────────────────────────
@@ -325,7 +326,7 @@ def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(tmp_path: Pat
     empty document as nothing until a person marks it, and as a negative once they have."""
     from fastapi.testclient import TestClient
 
-    from tcip_mcp.pipelines.data.label_queries import admitted_records, registry_scope
+    from tcip_mcp.pipelines.data.label_queries import admit, registry_scope
     from tcip_mcp.tools.feedback_tools import _prepare_queue_sources
     from tcip_web.app import app
     from tests._web_fixtures import open_new_project
@@ -338,14 +339,13 @@ def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(tmp_path: Pat
     client = TestClient(app, base_url="http://127.0.0.1")
 
     def readers() -> tuple[int, int, str]:
-        _kept, counts = admitted_records({"a": (str(_label(root, image)), image.name)},
-                                         scope=registry_scope(_label(root, image).parent, "bud"))
+        counts = admit(image.parent, _label(root, image).parent, members=[image.stem],
+                       scope=registry_scope(_label(root, image).parent, "bud")).tallies
         _sources, skipped, _error = _prepare_queue_sources(str(checkpoint), str(image.parent),
                                                            "bud")
         listed = client.get("/api/annotate/labels", params={
             "image_path": str(image), "label_path": str(_label(root, image))}).json()
-        return counts["confirmed_negative"], skipped, listed["completion"].get(
-            "bud", {"state": "unannotated"})["state"]
+        return counts.get("negative", 0), skipped, listed["completion"].get("bud", "unannotated")
 
     assert readers() == (0, 0, "unannotated")
 
@@ -452,7 +452,7 @@ def test_the_editor_pairs_a_bucket_under_its_assessments_center_match(tmp_path: 
                                                 g.x2 + 0.2 * size, g.y2 + 0.2 * size]}
     label = tmp_path / "editor" / f"{image.stem}.json"
     save_label_document(tmp_path, image, label, [shifted], width=IMG, height=IMG,
-                        author="user:breeder")
+                        author="user:breeder", actor="user:breeder")
     annotations = json_io.read_label_document(label).annotations
     criterion = read_assessment(tmp_path, bucket.assessment_id).criterion["count"]["localization"]
 

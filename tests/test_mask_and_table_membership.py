@@ -122,6 +122,70 @@ def test_a_bound_classification_run_trains_over_exactly_its_selections_samples(t
     assert {s.ground_truth for s in partition_samples(partition)} == {str(csv_path)}
 
 
+def _document_dataset(root: Path) -> tuple[Path, Path]:
+    """A dataset whose ground truth is one label document per image, each holding one ``bud``."""
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    images_dir, labels_dir = root / "images", root / "annotations"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    for stem in STEMS:
+        Image.new("RGB", (16, 16), (10, 20, 30)).save(images_dir / f"{stem}.png")
+        json_io.write_annotations(str(labels_dir / f"{stem}.json"),
+                                  [Annotation(subject="bud", geometry=BBox(1, 1, 8, 8))], 16, 16)
+    return images_dir, labels_dir
+
+
+def _drop_ground_truth_of_a(ground_truth: Path) -> None:
+    """Remove member ``a``'s ground truth: its row from a table, its file from a directory."""
+    if ground_truth.suffix == ".csv":
+        rows = [r for r in csv.reader(ground_truth.open(newline="")) if r[0] != "a"]
+        with open(ground_truth, "w", newline="") as handle:
+            csv.writer(handle).writerows(rows)
+    else:
+        next(p for p in ground_truth.iterdir() if p.stem == "a").unlink()
+
+
+def _drop_image_of_a(images_dir: Path, ground_truth: Path) -> None:
+    """Remove member ``a``'s image, and empty its label document when it has one, so the truth
+    left behind reads ``unannotated`` rather than admitted."""
+    from tcip_annotation import json_io
+
+    (images_dir / "a.png").unlink()
+    if ground_truth.is_dir() and (ground_truth / "a.json").is_file():
+        json_io.write_annotations(str(ground_truth / "a.json"), [], 16, 16, keep_empty=True)
+
+
+@pytest.mark.parametrize("dataset", [_document_dataset, _mask_dataset, _table_dataset],
+                         ids=["document", "mask", "table"])
+@pytest.mark.parametrize("drop", ["ground_truth", "image"])
+def test_a_recorded_sample_is_tallied_as_a_fresh_admission_tallies_it(
+    tmp_path: Path, dataset, drop: str,
+):
+    """One admission evaluates a directory's candidates and a selection's recorded samples alike:
+    with one member's ground truth or image gone, the refusal of the recorded samples names the
+    tallies a fresh admission over the same members answers."""
+    from tcip_mcp.pipelines.data.label_queries import admit, admits, refuse_inadmissible_samples
+
+    images_dir, ground_truth = dataset(tmp_path / "ds")
+    scope = ClassScope(subject="bud", attributes=()) if dataset is _document_dataset else None
+    admission = admit(images_dir, ground_truth, scope=scope)
+    samples = admission.every_sample()
+    if drop == "image":
+        _drop_image_of_a(images_dir, ground_truth)
+    else:
+        _drop_ground_truth_of_a(ground_truth)
+
+    fresh = admit(images_dir, ground_truth, scope=admission.scope,
+                  members=[s.member for s in samples])
+    refused = ", ".join(f"{name}={count}" for name, count in sorted(fresh.tallies.items())
+                        if not admits(name))
+    assert refused == "absent=1"
+    with pytest.raises(ValueError, match=f"a\\.png'\\]\\): {refused}\\."):
+        refuse_inadmissible_samples(samples, admission.scope)
+
+
 def test_a_directory_named_like_a_mask_is_admitted_by_neither_read_of_it(tmp_path: Path):
     """What a mask is is one predicate, so the admission that enumerates a directory and the
     re-admission that checks a recorded sample's own path cannot disagree: a directory named
@@ -531,9 +595,7 @@ def test_the_bound_and_drawn_mask_routes_record_one_directory_the_same_way(tmp_p
 
 
 def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(tmp_path: Path):
-    """Two shapes of one producer, compared against each other rather than against a fixture.
-
-    The same images are trained twice, once over a per-image label document each and once over a
+    """The same images are trained twice, once over a per-image label document each and once over a
     ``<stem>.png`` mask each, at the same seed and grouping policy. The two ground truths are
     genuinely different files, so the digests and the scopes differ; what the one producer may not
     do is name a different membership, a different partition, a differently shaped record or a

@@ -15,6 +15,7 @@ import tcip_store as ts
 from tcip_mcp import delivery
 from tcip_mcp.delivery import read_delivery_events
 from tcip_mcp.traits import PER_IMAGE_COUNT, STATE_CROSSING_DATES, read_trait
+from tests._chain_fixtures import deliver_milestones
 from tests._trait_fixtures import COUNT_SUBJECT, seed_confirmed_count
 
 
@@ -45,15 +46,7 @@ def _record(project: Path, revision, bucket=None, **disclosed) -> dict:
                          result)
     return delivery.deliver_csv(project, project / "out" / "counts.csv", result,
                                 clearance=clearance, revision=revision, door="test_door",
-                                delivery_kind=PER_IMAGE_COUNT)
-
-
-def _deliver(project: Path, body: dict, out_csv: Path) -> dict:
-    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
-
-    return deliver_phenology_milestones(
-        project, trait=body["trait"], mapping_name=body["mapping_name"], plants=body["plants"],
-        buckets=body["buckets"], output_csv_path=str(out_csv))
+                                delivery_kind=PER_IMAGE_COUNT, actor=None)
 
 
 def test_a_completed_crossing_delivery_writes_the_gates_finding_for_every_bucket(tmp_path):
@@ -63,7 +56,7 @@ def test_a_completed_crossing_delivery_writes_the_gates_finding_for_every_bucket
     series = attributed_series(tmp_path, fractions=(0.0, 1.0))
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
-    res = _deliver(tmp_path, series.body(), out_csv)
+    res = deliver_milestones(tmp_path, series.body(), out_csv)
 
     assert "error" not in res, res
     (record,) = read_delivery_events(tmp_path)
@@ -90,7 +83,7 @@ def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(tmp
     body = attributed_series(tmp_path, fractions=(0.0, 1.0)).body()
     first_csv, second_csv = tmp_path / "out" / "first.csv", tmp_path / "out" / "second.csv"
     for out_csv in (first_csv, second_csv):
-        assert "error" not in _deliver(tmp_path, body, out_csv)
+        assert "error" not in deliver_milestones(tmp_path, body, out_csv)
 
     records = read_delivery_events(tmp_path)
     assert len(records) == 2, records
@@ -112,7 +105,8 @@ def test_a_web_route_writes_its_delivery_event_under_the_open_project_only(tmp_p
     body = attributed_series(tmp_path, fractions=(0.0, 1.0)).body()
 
     resp = TestClient(app, base_url="http://127.0.0.1").post(
-        "/api/results/export_csv", json={**body, "payload": "milestones", "filename": "x.csv"})
+        "/api/results/export_csv",
+        json={**body, "payload": "milestones", "filename": "x.csv", "user": "tester"})
 
     assert resp.status_code == 200, resp.text
     assert [r.door for r in read_delivery_events(tmp_path)] == ["results.export_csv"]
@@ -163,7 +157,7 @@ def test_a_record_that_cannot_be_written_raises_before_any_audit_line(
     with pytest.raises(OSError, match="disk full"):
         delivery.deliver_csv(tmp_path, tmp_path / "out" / "counts.csv", result,
                              clearance=clearance, revision=revision, door="test_door",
-                             delivery_kind=PER_IMAGE_COUNT)
+                             delivery_kind=PER_IMAGE_COUNT, actor=None)
 
     monkeypatch.undo()
     assert read_delivery_events(tmp_path.resolve()) == []
@@ -295,7 +289,8 @@ def test_delivery_events_route_serves_a_delivered_plant_mapping_disclosure_uncha
     from tests._chain_fixtures import attributed_series
 
     series = attributed_series(tmp_path, fractions=(0.0, 1.0))
-    assert "error" not in _deliver(tmp_path, series.body(), tmp_path / "out" / "bud.csv")
+    assert "error" not in deliver_milestones(tmp_path, series.body(),
+                                             tmp_path / "out" / "bud.csv")
     (recorded,) = read_delivery_events(tmp_path)
 
     resp = _client().get(DELIVERY_EVENTS_ROUTE)

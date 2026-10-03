@@ -44,7 +44,7 @@ def stored_geometries(image_result: dict) -> dict[int, BBox | Polygon]:
 
 
 def encode_predictions(
-    result: dict, created_by: str | None = None, *, scope: "ClassScope",
+    result: dict, created_by: str, *, scope: "ClassScope",
 ) -> tuple[bytes, int]:
     """A detection result encoded as its name-based per-image prediction document
     (:func:`~tcip_annotation.json_io.encode_annotations`), and the number of detections dropped.
@@ -66,10 +66,9 @@ def encode_predictions(
     the same entries are dropped from ``result``'s ``boxes``/``scores``/``labels``/
     ``attributes``/``masks``/``count`` in place.
     """
-    from datetime import datetime, timezone
-
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation
+    from tcip_mcp.audit import now_iso
     from tcip_mcp.pipelines.data.selection import DOCUMENT
     from tcip_mcp.pipelines.inference.generic_predictor import DETECTION_ROWS
 
@@ -87,7 +86,7 @@ def encode_predictions(
                          f"and {len(labels)} labels, which name no one set of detections.")
     rows = result["attributes"] if attributes else [()] * len(boxes)
     w, h = result["width"], result["height"]
-    created_at = datetime.now(timezone.utc).isoformat() if created_by else None
+    created_at = now_iso()
     stored = stored_geometries(result)
     preds: list[Annotation] = []
     kept_indices: list[int] = []
@@ -160,11 +159,11 @@ def _mask_geometry_for_export(
 
 def deliver_per_image_counts_csv(
     project: Path, bucket_path: Path, output_path: str, *, trait: str,
-    acknowledgment_id: str | None, door: str,
+    acknowledgment_id: str | None, door: str, actor: str | None,
 ) -> dict:
     """Deliver the per-image counts of the published bucket at ``bucket_path`` as the CSV at
-    ``output_path``, under ``trait``'s latest confirmed revision stating a ``per_image_count``
-    operationalization.
+    ``output_path``, by ``actor``, under ``trait``'s latest confirmed revision stating a
+    ``per_image_count`` operationalization.
 
     The population is the bucket's own documents, as its record names them, and a raster bucket
     refuses. It clears the one gate (:func:`~tcip_mcp.delivery.gate`), the recorded
@@ -195,6 +194,6 @@ def deliver_per_image_counts_csv(
     clearance = gate(project, [bucket], delivery_kind=PER_IMAGE_COUNT, revision=revision,
                      result=result, acknowledgment_id=acknowledgment_id)
     delivered = deliver_csv(project, output_path, result, clearance=clearance, revision=revision,
-                            door=door, delivery_kind=PER_IMAGE_COUNT)
+                            door=door, delivery_kind=PER_IMAGE_COUNT, actor=actor)
     return {**delivered, "image_count": len(rows),
             "total_detections": sum(r["count"] for r in rows), "predictions_dir": str(bucket_path)}

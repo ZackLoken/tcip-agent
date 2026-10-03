@@ -3,12 +3,19 @@
  * All routes hit /api/* and return typed payloads.
  */
 
-import { AUDIT_ENTRY_NOT_WRITTEN, asJson } from "@/api/http";
+import {
+  committedOf,
+  getJson,
+  isAuditEntryNotWritten,
+  postJson,
+  StructuredRefusalError,
+} from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import { stateSocket } from "@/api/ws";
 import {
   RENDER_CACHE_VERSION,
   type JobStatus,
+  type LaunchPriorityQueuePayload,
   type ProjectSummary,
   type RemovalRequest,
   type RenameRequest,
@@ -22,18 +29,13 @@ import type {
   DatasetSelection,
   ImageLabels,
   Proposal,
-  SubjectCompletion,
+  SubjectState,
   TabName,
 } from "@/store/types";
 
-async function call<T>(url: string, init?: RequestInit): Promise<T> {
-  const resp = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
-  // One error-surfacing path shared with getJson/postJson: throw the backend's clean `detail`
-  // (or "<status> <statusText>"), not a raw JSON blob, so toasts are consistent everywhere.
-  return asJson<T>(resp);
+/** Whether `e` is the backend answering 409, an outcome a caller resolves rather than an error. */
+function isConflict(e: unknown): e is StructuredRefusalError {
+  return e instanceof StructuredRefusalError && e.status === 409;
 }
 
 function q(params: Record<string, string | number | boolean | null | undefined>) {
@@ -59,9 +61,8 @@ export interface FsListing {
   entries: FsEntry[];
 }
 
-/** The unified per-image label version token (stringified mtime ns), echoed back opaquely on save.
- *  A string because the ns value exceeds 2**53: as a number, JSON.parse would round it and every
- *  save would 409. */
+/** The unified per-image label version token (stringified mtime ns), echoed back opaquely on
+ *  save. */
 export type LoadedLabels = ImageLabels & { base_mtime: string | null };
 
 /** One save of the one save door: the annotations and the gestures it adjudicates beside them,
@@ -88,7 +89,7 @@ export interface SaveLabelsBody {
 /** What a landed save answers: the new version token and the completion it left. */
 interface Saved {
   base_mtime: string | null;
-  completion: Record<string, SubjectCompletion>;
+  completion: Record<string, SubjectState>;
 }
 
 export type SaveResult =
@@ -141,7 +142,7 @@ export type { ProjectSummary };
 export const api = {
   projects: {
     list: () =>
-      call<{
+      getJson<{
         workspace: string;
         // The id of the project the backend has open, or null.
         open_id: string | null;
@@ -150,28 +151,21 @@ export const api = {
         projects: ProjectSummary[];
       }>(ROUTES.getProjects),
     open: (id: string) =>
-      call<{ id: string; display_name: string; path: string }>(ROUTES.postProjectsOpen, {
-        method: "POST",
-        body: JSON.stringify({ id }),
+      postJson<{ id: string; display_name: string; path: string }>(ROUTES.postProjectsOpen, {
+        id,
       }),
     remove: (body: RemovalRequest) =>
-      call<{ archive_path: string; moved_to: string }>(ROUTES.postProjectsRemove, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+      postJson<{ archive_path: string; moved_to: string }>(ROUTES.postProjectsRemove, body),
     rename: (body: RenameRequest) =>
-      call<{ id: string; display_name: string; previous_display_name: string }>(
+      postJson<{ id: string; display_name: string; previous_display_name: string }>(
         ROUTES.postProjectsRename,
-        {
-          method: "POST",
-          body: JSON.stringify(body),
-        },
+        body,
       ),
   },
 
   dataset: {
     tree: (dataset_root: string) =>
-      call<{
+      getJson<{
         dataset_root: string;
         dates_with_images: string[];
         subjects: string[];
@@ -190,7 +184,7 @@ export const api = {
       date?: string | null;
       predictions_dir?: string | null;
     }) =>
-      call<{
+      postJson<{
         status: string;
         selection: DatasetSelection;
         // Advisory: whether the resolved (subject,date) has labels / the bucket has
@@ -200,41 +194,37 @@ export const api = {
         // Set when annotations_present read false because the label document would not read,
         // naming the file; the selection still succeeds.
         label_problem?: string | null;
-      }>(ROUTES.postDatasetSelect, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+      }>(ROUTES.postDatasetSelect, body),
 
     // Persist the current image position so the agent (view_gui_state) sees the last
     // image the human looked at. Debounced by the caller; fire-and-forget on the FE side.
     nav: (current_image_index: number) =>
-      call<{ status: string; current_image_index: number }>(ROUTES.postDatasetNav, {
-        method: "POST",
-        body: JSON.stringify({ current_image_index }),
+      postJson<{ status: string; current_image_index: number }>(ROUTES.postDatasetNav, {
+        current_image_index,
       }),
   },
 
   fs: {
     // List sub-directories of `path` (omit for the top-level drives/roots view).
-    list: (path?: string) => call<FsListing>(`${ROUTES.getFsList}?${q({ path })}`),
+    list: (path?: string) => getJson<FsListing>(`${ROUTES.getFsList}?${q({ path })}`),
   },
 
   canvas: {
-    // Live canvas-state push (heartbeat or full geometry): fire-and-forget from the tabs.
-    // Not routed through call(): a 409 (another project open) resolves by resync.
+    // Live canvas-state push (heartbeat or full geometry): fire-and-forget from the tabs. A 409
+    // (another project open) resolves by resync.
     pushState: async (
       body: CanvasStateBody,
     ): Promise<{ status: string; shapes_written: boolean } | { status: "conflict" }> => {
-      const resp = await fetch(ROUTES.postCanvasState, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (resp.status === 409) {
+      try {
+        return await postJson<{ status: string; shapes_written: boolean }>(
+          ROUTES.postCanvasState,
+          body,
+        );
+      } catch (e) {
+        if (!isConflict(e)) throw e;
         stateSocket.resync();
         return { status: "conflict" };
       }
-      return asJson<{ status: string; shapes_written: boolean }>(resp);
     },
   },
 
@@ -260,44 +250,36 @@ export const api = {
 
     // Per-band symbology plus the one fact that gates the band picker's visibility
     // (band_count > 3), never shown for a standard RGB dataset.
-    bands: (path: string) => call<ImageBandsResponse>(`${ROUTES.getImagesBands}?${q({ path })}`),
+    bands: (path: string) => getJson<ImageBandsResponse>(`${ROUTES.getImagesBands}?${q({ path })}`),
 
     // Build the reduced-resolution pyramid a whole view of an oversized raster is served from.
     // One build per raster: a request for one already running joins it.
-    buildOverviews: (path: string) =>
-      call<OverviewJob>(ROUTES.postImagesOverviews, {
-        method: "POST",
-        body: JSON.stringify({ path }),
-      }),
+    buildOverviews: (path: string) => postJson<OverviewJob>(ROUTES.postImagesOverviews, { path }),
 
     overviewJob: (job_id: string) =>
-      call<OverviewJob>(`${ROUTES.getImagesOverviewsStatus}?${q({ job_id })}`),
+      getJson<OverviewJob>(`${ROUTES.getImagesOverviewsStatus}?${q({ job_id })}`),
 
     // The region-serving grid over a raster: index its cells, never re-derive them.
     servingGrid: (path: string) =>
-      call<ServingGrid>(`${ROUTES.getImagesServingGrid}?${q({ path })}`),
+      getJson<ServingGrid>(`${ROUTES.getImagesServingGrid}?${q({ path })}`),
   },
 
   state: {
     // Mirror the active tab into the backend GUI state (debounced by the caller) so
     // view_gui_state reports the tab the human actually sees.
-    tab: (active_tab: TabName) =>
-      call<{ status: string }>(ROUTES.postStateTab, {
-        method: "POST",
-        body: JSON.stringify({ active_tab }),
-      }),
+    tab: (active_tab: TabName) => postJson<{ status: string }>(ROUTES.postStateTab, { active_tab }),
   },
 
   annotate: {
     // Read the one unified per-image label file, splitting the annotation list into the canvas'
     // box / polygon / point / geometry-less buckets (shared with save via labelSerde).
     load: async (image_path: string, label_path?: string | null): Promise<LoadedLabels> => {
-      const raw = await call<{
+      const raw = await getJson<{
         image_path: string;
         img_width: number;
         img_height: number;
         annotations: Annotation[];
-        completion: Record<string, SubjectCompletion>;
+        completion: Record<string, SubjectState>;
         base_mtime: string | null;
       }>(`${ROUTES.getAnnotateLabels}?${q({ image_path, label_path })}`);
       const { boxes, polygons, points, imageAnnotations } = annotationsToCanvas(
@@ -318,63 +300,34 @@ export const api = {
 
     // The chosen bucket's proposals for the image, each paired, decided and admitted server-side.
     proposals: (image_path: string, bucket: string, label_path?: string | null) =>
-      call<{ bucket: string; proposals: Proposal[] }>(
+      getJson<{ bucket: string; proposals: Proposal[] }>(
         `${ROUTES.getAnnotateProposals}?${q({ image_path, bucket, label_path })}`,
       ),
 
-    // Not routed through call(): a 409 (the label file changed underneath the
-    // client) is an expected outcome the caller resolves by reloading, not an error.
+    // A 409 (the label file changed underneath the client, or the save committed and its audit
+    // line did not) is an expected outcome the caller resolves, not an error.
     save: async (body: SaveLabelsBody): Promise<SaveResult> => {
-      const resp = await fetch(ROUTES.postAnnotateLabels, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (resp.status === 409) {
-        try {
-          const detail = ((await resp.json()) as { detail?: unknown })?.detail;
-          const parsed =
-            typeof detail === "object" && detail !== null
-              ? (detail as { error?: unknown; message?: unknown; committed?: unknown })
-              : null;
-          if (parsed?.error === AUDIT_ENTRY_NOT_WRITTEN) {
-            const committed = parsed.committed as Saved;
-            return {
-              status: "unrecorded",
-              base_mtime: committed.base_mtime,
-              completion: committed.completion,
-              message: typeof parsed.message === "string" ? parsed.message : "",
-            };
-          }
-        } catch {
-          /* an unparseable 409 body stays conflict below */
+      try {
+        const data = await postJson<Saved>(ROUTES.postAnnotateLabels, body);
+        return { status: "ok", base_mtime: data.base_mtime, completion: data.completion };
+      } catch (e) {
+        if (!isConflict(e)) throw e;
+        const committed = committedOf<Saved>(e);
+        if (isAuditEntryNotWritten(e) && committed) {
+          const { base_mtime, completion } = committed;
+          return { status: "unrecorded", base_mtime, completion, message: e.message };
         }
         return { status: "conflict" };
       }
-      if (!resp.ok) {
-        const text = await resp.text().catch(() => "");
-        throw new Error(`${resp.status} ${resp.statusText}: ${text}`);
-      }
-      const data = (await resp.json()) as Saved;
-      return { status: "ok", base_mtime: data.base_mtime, completion: data.completion };
     },
 
     // Launch the review queue as a background job; poll its job_id via queueJob until terminal.
-    launchQueue: (body: {
-      checkpoint_path: string;
-      images_dir: string;
-      subject?: string | null;
-      method?: string;
-      budget?: number;
-    }) =>
-      call<{ status: string; job_id: string }>(ROUTES.postAnnotateQueueLaunch, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+    launchQueue: (body: LaunchPriorityQueuePayload) =>
+      postJson<{ status: string; job_id: string }>(ROUTES.postAnnotateQueueLaunch, body),
 
     // reference_member is present only when the run was bound to a selection.
     queueJob: (jobId: string) =>
-      call<{
+      getJson<{
         job_id: string;
         status: JobStatus;
         error: string | null;

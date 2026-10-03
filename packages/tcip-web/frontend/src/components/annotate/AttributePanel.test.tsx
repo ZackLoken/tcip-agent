@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import { subjectsApi } from "@/api/subjects";
 import { StructuredRefusalError } from "@/api/http";
+import { ATTR_TYPES } from "@/api/types.generated";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
 import { useStore } from "@/store";
 
@@ -34,6 +35,15 @@ function fillAttributeDraft(name: string, values: string) {
     target: { value: values },
   });
 }
+
+describe("AttributePanel attribute kinds", () => {
+  it("offers exactly the kinds the backend's registry declares", () => {
+    render(<AttributePanel selectedBoxIdx={null} />);
+    fireEvent.click(screen.getByText("+ Attribute"));
+    const options = screen.getByLabelText("attribute type").querySelectorAll("option");
+    expect(Array.from(options, (o) => o.value)).toEqual([...ATTR_TYPES]);
+  });
+});
 
 describe("AttributePanel registry-growing on a lost audit line", () => {
   it("adopts the committed registry and toasts the gap message on the audit-gap 409", async () => {
@@ -68,6 +78,7 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
     vi.spyOn(subjectsApi, "save").mockRejectedValue(new Error("409 stale version"));
     vi.spyOn(subjectsApi, "load").mockResolvedValue({
       subjects: { bud: {} },
+      discovered: [],
       version: "v3",
       unreadable: [],
     });

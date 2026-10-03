@@ -141,6 +141,6 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
                     raise ValueError(f"{source} was not imported, nothing written: {path} "
                                      "already exists")
                 txn.write(key, data)
-        record_event_or_raise("coco_document_imported", arguments, scope=root,
+        record_event_or_raise("coco_document_imported", arguments, actor=None, scope=root,
                               document_digest=digest_bytes(raw))
     return arguments

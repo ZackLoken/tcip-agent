@@ -209,7 +209,7 @@ def test_a_per_plant_count_assessment_validates_a_per_plant_count_delivery(tmp_p
     delivered = deliver_per_plant_aggregate(
         tmp_path, _ROWS, str(tmp_path / "matched.csv"), delivered_phenotype="stem_count",
         delivery_kind=PER_PLANT_COUNT_AGGREGATE, buckets=[bucket], plants=["PLANT_A"],
-        door="test")
+        door="test", actor=None)
 
     assert delivered["validated"] is True
 
@@ -227,5 +227,5 @@ def test_a_per_image_count_assessment_never_answers_for_a_per_plant_delivery(tmp
         deliver_per_plant_aggregate(
             tmp_path, _ROWS, str(tmp_path / "crossed.csv"), delivered_phenotype="stem_count",
             delivery_kind=PER_PLANT_COUNT_AGGREGATE, buckets=[bucket], plants=["PLANT_A"],
-            door="test")
+            door="test", actor=None)
     assert not (tmp_path / "crossed.csv").exists()

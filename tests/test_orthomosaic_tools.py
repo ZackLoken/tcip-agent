@@ -154,7 +154,8 @@ def _deliver(project: Path, bucket: Path, registry: str, plants: list[str], **kw
     try:
         return acknowledged(project, lambda ack: orthomosaic_plant_counts(
             project, str(bucket), load_registry(project, registry), str(project / "counts.csv"),
-            "stem_count", plants, acknowledgment_id=ack, door="test_orthomosaic", **kwargs),
+            "stem_count", plants, acknowledgment_id=ack, door="test_orthomosaic", actor=None,
+            **kwargs),
             reason="an unassessed bucket")
     except (DeliveryRefused, OperationalizationRefused, ValueError) as exc:
         return {"error": str(exc)}

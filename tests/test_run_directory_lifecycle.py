@@ -58,7 +58,7 @@ def launch(tmp_path, monkeypatch, children):
             "mixed_precision": False, "device": "cpu",
             "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False}, **extra,
         }
-        return launch_training(tmp_path, config, resume_from=resume_from)
+        return launch_training(tmp_path, config, resume_from=resume_from, actor=None)
 
     return _launch
 
@@ -122,7 +122,7 @@ def test_a_cancel_requested_by_id_ends_the_child_canceled(launch, tmp_path):
     run_dir = Path(res["output_dir"])
     _until("the child's first epoch row", lambda: read_rows(run_dir / METRICS_FILE)[0])
 
-    assert cancel_training(tmp_path, res["experiment_id"])["cancel_requested"] is True
+    assert cancel_training(tmp_path, res["experiment_id"], actor=None)["cancel_requested"] is True
     final = _wait_final(run_dir)
 
     assert final["state"] == "canceled", final

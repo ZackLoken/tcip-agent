@@ -19,6 +19,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from tcip_mcp.pipelines.active_learning import DEFAULT_SCORER
+
 logger = logging.getLogger(__name__)
 
 
@@ -196,7 +198,7 @@ class CombinedScorer(BaseScorer):
 SCORER_REGISTRY: dict[str, Callable[[str], BaseScorer]] = {
     "uncertainty": lambda task: UncertaintyScorer(task=task),
     "diversity": lambda task: DiversityScorer(),
-    "combined": lambda task: CombinedScorer(task=task),
+    DEFAULT_SCORER: lambda task: CombinedScorer(task=task),
 }
 
 

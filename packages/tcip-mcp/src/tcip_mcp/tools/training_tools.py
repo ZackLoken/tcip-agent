@@ -17,7 +17,7 @@ from tcip_store import BadKey, StoreError, canonical_path, check_json_value, sto
 from tcip_mcp import experiments
 from tcip_mcp.experiments import SWEEP_FILE, TRIAL_DIR_PREFIX
 from tcip_mcp.server import tool
-from tcip_mcp.audit import audited, record_event_or_raise
+from tcip_mcp.audit import audited, now_iso, record_event_or_raise
 from tcip_mcp.pipelines.data.split_construction import (
     ResolvedRun, data_dir_issues, resolve_run, selection_compatibility, split_seed,
 )
@@ -84,6 +84,7 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
             and report it under ``overfit_check``, never gating. The stored report is already
             rendered (``model_contract.render_overfit_report``), with non-finite losses rendered.
     """
+    from tcip_mcp.pipelines.data.label_queries import admits
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
     issues = _structural_issues(config)
@@ -141,8 +142,7 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
             issues.append(str(exc))
         # Trainable-sample coverage, never gating: a run admitting a fraction of its annotated
         # images would otherwise read "valid, no warnings" while training on far fewer.
-        dropped = {k: v for k, v in counts.items()
-                   if k not in ("annotated", "confirmed_negative") and v}
+        dropped = {k: v for k, v in counts.items() if not admits(k) and v}
         total, n_dropped = sum(counts.values()), sum(dropped.values())
         if n_dropped and total:
             warnings.append(
@@ -320,7 +320,7 @@ def open_run(
     draw_seed_if_unset(config)
     dataset_id, fingerprint = dataset_identity(config.get("data") or {})
     experiments.open_run_directory(run_dir, lambda directory: {
-        "created": experiments.now_iso(), "config": config, "resolved": resolved,
+        "created": now_iso(), "config": config, "resolved": resolved,
         "environment": capture_env(),
         "dataset": {"id": dataset_id, "fingerprint": fingerprint},
         "source": snapshot_model_source(config, directory),
@@ -334,9 +334,10 @@ def open_run(
 def launch_training(
     project: Path, config: dict, resume_from: str = "",
     max_wall_clock_seconds: float | None = None, overfit_check: bool = False,
-    parent_experiment: str | None = None,
+    parent_experiment: str | None = None, *, actor: str | None,
 ) -> dict:
-    """Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder.
+    """Launch a training run by ``actor`` in an isolated subprocess from a bespoke
+    ``model_source`` builder.
 
     The run's training body (dataset build, model forward/backward, checkpointing) executes in a
     separate OS process, writing into the run's own directory
@@ -407,7 +408,7 @@ def launch_training(
         return {"error": f"launch_training: {exc}"}
     record_event_or_raise("launch_training", {
         "experiment_id": experiment_id, "parent_experiment": parent_experiment,
-        "resume_from": resume_from or None}, scope=project)
+        "resume_from": resume_from or None}, actor=actor, scope=project)
 
     proc = subprocess.Popen(
         [sys.executable, "-m", "tcip_mcp.pipelines.training.subprocess_worker",
@@ -727,8 +728,8 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
 
 @tool()
 @audited
-def cancel_training(project: Path, experiment_id: str) -> dict:
-    """Request graceful cancellation of a running training run.
+def cancel_training(project: Path, experiment_id: str, *, actor: str | None) -> dict:
+    """Request graceful cancellation of a running training run, by ``actor``.
 
     The trainer stops at the next batch/epoch boundary, still saves ``model_final.pt``
     (so partial progress is recoverable), and writes the run's final status 'canceled'. The
@@ -1031,7 +1032,7 @@ def run_hyperparameter_search(
         baseline_params=baseline_params, max_concurrent=max_concurrent,
         resources_per_trial=resources_per_trial, study_name=study_name, split_draws=split_draws,
         split_draw_seeds=split_draw_seeds, search_seed=search_seed, trial_budget=trial_budget,
-        relaunched_from=relaunched_from)
+        relaunched_from=relaunched_from, actor=None)
     if isinstance(opened, dict):
         return opened
     return run_sweep(opened, auto_tensorboard=auto_tensorboard)
@@ -1052,15 +1053,15 @@ def open_sweep(
     scheduler: str, grace_period: int, reduction_factor: int, warm_start: bool,
     baseline_params: dict | None, max_concurrent: int, resources_per_trial: dict | None,
     study_name: str | None, split_draws: int, split_draw_seeds: list[int] | None,
-    search_seed: int, trial_budget: int | None, relaunched_from: str | None,
+    search_seed: int, trial_budget: int | None, relaunched_from: str | None, actor: str | None,
 ) -> OpenedSweep | dict:
     """Check a sweep's arguments: the structure (:func:`_structural_issues`) of every point the
     search space could resolve a trial to (:func:`_preflight_points`), then the first of them
     resolved once (:func:`_preflight`), whose objective every trial records. Create the sweep's
     directory under ``project`` with its ``sweep.json`` written once, carrying the objective and
-    every argument resolved as its ``input``, then the act's one audit line naming the sweep (``AuditEntryNotWritten`` when it
-    cannot be appended). Returns the opened sweep, or the refusal ``{"error", "issues"}`` with
-    nothing created."""
+    every argument resolved as its ``input``, then the act's one audit line by ``actor`` naming
+    the sweep (``AuditEntryNotWritten`` when it cannot be appended). Returns the opened sweep, or
+    the refusal ``{"error", "issues"}`` with nothing created."""
     from tcip_mcp.pipelines.training.hpo import get_default_space, split_draw_search_space
 
     if param_space is None:
@@ -1142,7 +1143,7 @@ def open_sweep(
                 "issues": []}
     except (StoreError, ValueError, OSError) as exc:
         return {"error": str(exc), "issues": []}
-    record = {"created": experiments.now_iso(), "objective": objective, "input": {
+    record = {"created": now_iso(), "objective": objective, "input": {
         "n_trials": n_trials, "search_alg": search_alg, "scheduler": scheduler,
         "grace_period": grace_period, "reduction_factor": reduction_factor,
         "max_concurrent": max_concurrent, "warm_start": warm_start,
@@ -1154,16 +1155,18 @@ def open_sweep(
     }}
     experiments.write_record(directory / SWEEP_FILE, record)
     record_event_or_raise("open_sweep", {"sweep_id": directory.name,
-                                         "relaunched_from": relaunched_from}, scope=project)
+                                         "relaunched_from": relaunched_from},
+                          actor=actor, scope=project)
     return OpenedSweep(project, directory, record, search_param_space)
 
 
-def reopen_sweep(project: Path, source: experiments.RunObservation) -> OpenedSweep | dict:
-    """Open a new sweep of ``project`` (:func:`open_sweep`, which mints its id) from the recorded
-    input of the observed sweep ``source`` (:func:`sweep_observation`), relaunched from it; the
-    refusal dict when that input no longer opens."""
+def reopen_sweep(project: Path, source: experiments.RunObservation, *,
+                 actor: str | None) -> OpenedSweep | dict:
+    """Open a new sweep of ``project`` by ``actor`` (:func:`open_sweep`, which mints its id) from
+    the recorded input of the observed sweep ``source`` (:func:`sweep_observation`), relaunched
+    from it; the refusal dict when that input no longer opens."""
     return open_sweep(project, **{**source.record["input"], "study_name": None,
-                                  "relaunched_from": source.directory.name})
+                                  "relaunched_from": source.directory.name}, actor=actor)
 
 
 def _sweep_trials(sweep: experiments.RunObservation) -> list[dict[str, Any]]:
@@ -1256,8 +1259,8 @@ def run_sweep(sweep: OpenedSweep, *, auto_tensorboard: bool) -> dict:
 
 @tool()
 @audited
-def cancel_hyperparameter_search(project: Path, study_name: str) -> dict:
-    """Request cooperative cancellation of an HPO sweep of the project
+def cancel_hyperparameter_search(project: Path, study_name: str, *, actor: str | None) -> dict:
+    """Request cooperative cancellation of an HPO sweep of the project by ``actor``
     (``experiments.request_cancel``); each running trial stops at its next batch boundary, and a
     repeated request keeps the first one's time. Returns the sweep's state as read now, which may
     still be ``running``. Refuses a name that is not a single directory name, one naming no sweep

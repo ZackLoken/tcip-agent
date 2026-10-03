@@ -268,7 +268,7 @@ class TestVisualizeAnnotations:
         result = visualize(viz_dataset, "annotations", img, task="detect")
         assert "error" not in result
         assert Path(result["image_path"]).is_file()
-        assert result["annotation_count"] == 2
+        assert result["count"] == 2
 
     def test_with_class_names(self, viz_dataset: Path):
         from tcip_mcp.tools.vision_tools import visualize
@@ -324,7 +324,7 @@ class TestVisualizePredictions:
         result = visualize(viz_bucket, "predictions", img, task="detect", predictions_dir=PUBLISHED)
         assert "error" not in result, result
         assert Path(result["image_path"]).is_file()
-        assert result["prediction_count"] == 2
+        assert result["count"] == 2
 
     def test_missing_predictions(self, viz_bucket: Path):
         from tcip_mcp.tools.vision_tools import visualize
@@ -506,7 +506,7 @@ class TestVisualizeDatasetSample:
         result = visualize(viz_dataset, "dataset", str(viz_dataset), n=4)
         assert "error" not in result
         assert Path(result["image_path"]).is_file()
-        assert result["sample_count"] == 4
+        assert result["count"] == 4
         assert result["total_images"] == 4
 
     def test_no_images(self, tmp_path: Path):

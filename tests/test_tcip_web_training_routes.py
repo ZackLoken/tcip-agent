@@ -73,7 +73,7 @@ def test_list_configs_route_reports_a_launchable_config(opened_project) -> None:
 
 
 def test_relaunch_route_404s_for_an_unknown_experiment(client: TestClient) -> None:
-    resp = client.post("/api/training/runs", json={"experiment_id": "nope"})
+    resp = client.post("/api/training/runs", json={"experiment_id": "nope", "user": "tester"})
     assert resp.status_code == 404
 
 
@@ -82,7 +82,7 @@ def test_relaunch_route_422s_with_preflight_issues_for_a_refused_config(
 ) -> None:
     _opened("exp-refused", tmp_path, builder="not.a:module")
 
-    resp = client.post("/api/training/runs", json={"experiment_id": "exp-refused"})
+    resp = client.post("/api/training/runs", json={"experiment_id": "exp-refused", "user": "tester"})
     assert resp.status_code == 422
     assert resp.json()["detail"]["issues"]
 
@@ -224,8 +224,25 @@ def test_metric_directions_route_answers_the_declared_table(client: TestClient) 
 
 
 def test_cancel_unknown_run_returns_404(client: TestClient) -> None:
-    resp = client.post("/api/training/runs/does-not-exist/cancel", json={})
+    resp = client.post("/api/training/runs/does-not-exist/cancel", json={"user": "tester"})
     assert resp.status_code == 404
+
+
+def test_a_cancel_naming_its_person_is_admitted_and_its_line_names_them(
+    tmp_path, client: TestClient
+) -> None:
+    from tcip_mcp.audit import audit_log_key
+    from tcip_store import read_log
+    from tests._verified_checkpoint_fixtures import detection_config, opened_run
+
+    opened_run(tmp_path, detection_config(tmp_path / "gui-data"), experiment_id="exp-gui-cancel")
+    before = len(read_log(audit_log_key(tmp_path)).records)
+
+    resp = client.post("/api/training/runs/exp-gui-cancel/cancel", json={"user": "tester"})
+
+    assert resp.status_code == 200, resp.text
+    (line,) = read_log(audit_log_key(tmp_path)).records[before:]
+    assert (line["tool"], line["actor"]) == ("cancel_training", "user:tester")
 
 
 def test_tensorboard_route_404s_for_unknown_run(client: TestClient) -> None:
@@ -234,11 +251,11 @@ def test_tensorboard_route_404s_for_unknown_run(client: TestClient) -> None:
     assert "does-not-exist" in resp.json()["detail"]
 
 
-def test_tensorboard_route_launches_under_the_run_output_dir(client: TestClient, monkeypatch,
-                                                             tmp_path: Path) -> None:
+def test_tensorboard_route_launches_under_the_run_output_dir(
+    client: TestClient, monkeypatch, tmp_path: Path, tb_launches: list[tuple[str, str]],
+) -> None:
     # The GUI's link comes from a TensorBoard this process started, so the route must reach
     # launch_tensorboard with the run's own log directory and hand back what it returned.
-    calls: list[tuple[str, str]] = []
     tb_dir = tmp_path / "tensorboard"
     tb_dir.mkdir()
     (tb_dir / "events.out.tfevents.1.host").write_bytes(b"")
@@ -246,21 +263,14 @@ def test_tensorboard_route_launches_under_the_run_output_dir(client: TestClient,
     def fake_status(project: Path, experiment_id: str) -> dict:
         return {"experiment_id": experiment_id, "status": "running", "output_dir": str(tmp_path)}
 
-    def fake_launch(logdir: str, key: str | None = None) -> dict:
-        calls.append((logdir, key or ""))
-        return {"url": "http://localhost:6006", "port": 6006, "pid": 1, "logdir": logdir}
-
     monkeypatch.setattr("tcip_mcp.tools.training_tools.monitor_training", fake_status)
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", fake_launch
-    )
 
     resp = client.post("/api/training/runs/run-42/tensorboard", json={})
     assert resp.status_code == 200
     assert resp.json()["url"] == "http://localhost:6006"
     # No key of its own: keyed by log directory, so a repeat call here reuses the run's own
     # TensorBoard entry rather than starting a second one.
-    assert calls == [(f"{tmp_path}/tensorboard", "")]
+    assert tb_launches == [(f"{tmp_path}/tensorboard", "")]
 
 
 def test_tensorboard_route_404s_with_no_logs_for_a_run_with_no_output_dir(
@@ -375,10 +385,16 @@ def test_a_route_launch_shows_its_declaration_from_its_launch_event(
         tmp_path / "gui-data", batch_size=1, stages=[{"freeze_to": -1, "epochs": 1}],
         mixed_precision=False, device="cpu"), experiment_id="exp-gui-relaunch")
 
-    resp = client.post("/api/training/runs", json={"experiment_id": "exp-gui-relaunch"})
+    from tcip_mcp.audit import audit_log_key
+    from tcip_store import read_log
+
+    before = len(read_log(audit_log_key(tmp_path)).records)
+    resp = client.post("/api/training/runs", json={"experiment_id": "exp-gui-relaunch", "user": "tester"})
     assert resp.status_code == 200, resp.json()
 
     minted = resp.json()["experiment_id"]
+    (line,) = read_log(audit_log_key(tmp_path)).records[before:]
+    assert (line["tool"], line["actor"]) == ("launch_training", "user:tester")
     relaunched = read_record(experiment_dir(minted, project=tmp_path) / RUN_FILE)
     assert "launched_by" not in relaunched
     assert relaunched["parent_experiment"] == "exp-gui-relaunch"
@@ -411,12 +427,12 @@ def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
     from tcip_mcp.tools.training_tools import launch_training
 
-    first = launch_training(tmp_path, _regression_config(tmp_path))
+    first = launch_training(tmp_path, _regression_config(tmp_path), actor=None)
     assert "error" not in first, first
     parent_id = first["experiment_id"]
     assert _wait_terminal(tmp_path, parent_id)["status"] == "completed"
 
-    resp = client.post("/api/training/runs", json={"experiment_id": parent_id})
+    resp = client.post("/api/training/runs", json={"experiment_id": parent_id, "user": "tester"})
     assert resp.status_code == 200, resp.json()
     forked_id = resp.json()["experiment_id"]
     assert forked_id != parent_id
@@ -444,7 +460,7 @@ def test_list_runs_route_names_the_run_s_selection_metric(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
     from tcip_mcp.tools.training_tools import launch_training
 
-    result = launch_training(tmp_path, _regression_config(tmp_path))
+    result = launch_training(tmp_path, _regression_config(tmp_path), actor=None)
     assert "error" not in result, result
     _wait_terminal(tmp_path, result["experiment_id"])
 

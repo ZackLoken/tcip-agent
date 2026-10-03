@@ -157,7 +157,7 @@ def test_launch_training_real_subprocess_reports_the_diverged_stop(tmp_path, mon
                      "mixed_precision": False, "device": "cpu",
                      "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
-    res = launch_training(tmp_path, cfg)
+    res = launch_training(tmp_path, cfg, actor=None)
     assert "error" not in res, res
     experiment_id = res["experiment_id"]
 

@@ -35,10 +35,11 @@ def orthomosaic_plant_counts(
     acknowledgment_id: str | None = None,
     *,
     door: str,
+    actor: str | None,
 ) -> dict:
     """Per-plant detection counts from a published whole-raster prediction bucket, for exactly the
     plants ``plants`` names, delivered as a ``per_plant_count_aggregate`` CSV under ``project`` by
-    the door ``door`` names, over the registered plant registry ``registry_record``
+    ``actor`` through the door ``door`` names, over the registered plant registry ``registry_record``
     (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.load_registry`).
 
     The raster is the one the bucket's record names; it must still be the raster its recorded
@@ -138,7 +139,7 @@ def orthomosaic_plant_counts(
         project, results, str(Path(project, output_csv_path)),
         delivered_phenotype=delivered_phenotype, delivery_kind=PER_PLANT_COUNT_AGGREGATE,
         buckets=[bucket], plants=wanted, crop=crop, pipeline_version=pipeline_version,
-        door=door, plant_mapping=disclosure, acknowledgment_id=acknowledgment_id)
+        door=door, plant_mapping=disclosure, acknowledgment_id=acknowledgment_id, actor=actor)
     return {**delivered, "n_detections": len(boxes),
             "detections_unattributed": disclosure["detections_unattributed"],
             "plants_outside_raster": disclosure["plants_outside_raster"]}
@@ -245,6 +246,7 @@ def deliver_orthomosaic_plant_counts(
             project, predictions_dir, load_registry(project, plant_registry), output_csv_path,
             delivered_phenotype, plants, crop=crop, pipeline_version=pipeline_version,
             nn_tolerance_m=nn_tolerance_m, canopy_subject=canopy_subject,
-            acknowledgment_id=acknowledgment_id, door="deliver_orthomosaic_plant_counts")
+            acknowledgment_id=acknowledgment_id, door="deliver_orthomosaic_plant_counts",
+            actor=None)
     except ValueError as exc:
         return {"error": str(exc)}

@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
 from tcip_web.app import app
+from tests._audit_fixtures import AUDIT_ENTRY_KEYS, audit_rows
 
 
 @pytest.fixture
@@ -23,10 +24,21 @@ def _bud(x1, y1, x2, y2, *, subject: str = "bud") -> Annotation:
     return Annotation(subject=subject, geometry=BBox(x1, y1, x2, y2))
 
 
-def test_load_empty_registry(client: TestClient, tmp_path: Path) -> None:
+def test_a_missing_registry_answers_discovery_never_a_registry(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """With no registry stored, the load answers no registry and the names the labels hold as
+    discovery, never a registry made of those names."""
+    ann = tmp_path / "annotations" / "d"
+    ann.mkdir(parents=True)
+    write_annotations(str(ann / "IMG_A.json"), [_bud(50, 50, 60, 60)], 100, 100)
+
     resp = client.get("/api/subjects/load", params={"dataset_root": str(tmp_path)})
     assert resp.status_code == 200
-    assert resp.json() == {"subjects": {}, "version": None, "unreadable": []}
+    assert resp.json() == {"subjects": None, "discovered": [], "version": None, "unreadable": []}
+    found = client.get("/api/subjects/load", params={
+        "dataset_root": str(tmp_path), "annotations_dir": str(ann)}).json()
+    assert found == {"subjects": None, "discovered": ["bud"], "version": None, "unreadable": []}
 
 
 def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
@@ -45,6 +57,7 @@ def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
                 "bush": {"description": "one currant bush crown"},
             },
             "version": None,
+            "user": "tester",
         },
     )
     assert save.status_code == 200
@@ -67,7 +80,7 @@ def test_save_refuses_an_empty_registry(client: TestClient, tmp_path: Path) -> N
     r = client.post(
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path), "subjects": {},
-              "version": None},
+              "version": None, "user": "tester"},
     )
     assert r.status_code == 400
     assert not (tmp_path / "subjects.json").exists()
@@ -80,14 +93,14 @@ def test_save_refuses_dropping_a_declared_subject(client: TestClient, tmp_path: 
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path),
               "subjects": {"leaf": {"description": "one leaf"}, "bush": {"description": "b"}},
-              "version": None},
+              "version": None, "user": "tester"},
     )
     assert first.status_code == 200
 
     dropped = client.post(
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path),
-              "subjects": {"bush": {"description": "b"}}, "version": first.json()["version"]},
+              "subjects": {"bush": {"description": "b"}}, "version": first.json()["version"], "user": "tester"},
     )
     assert dropped.status_code == 400
     assert "leaf" in dropped.text
@@ -103,7 +116,7 @@ def test_load_returns_the_version_and_save_round_trips_it(
     save = client.post(
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path),
-              "subjects": {"leaf": {"description": "one leaf"}}, "version": None},
+              "subjects": {"leaf": {"description": "one leaf"}}, "version": None, "user": "tester"},
     )
     assert save.status_code == 200
 
@@ -117,7 +130,7 @@ def test_load_returns_the_version_and_save_round_trips_it(
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path),
               "subjects": {"leaf": {"description": "one leaf"}, "bush": {}},
-              "version": load["version"]},
+              "version": load["version"], "user": "tester"},
     )
     assert grown.status_code == 200
     assert grown.json()["version"]
@@ -129,7 +142,7 @@ def test_save_refuses_a_stale_version(client: TestClient, tmp_path: Path) -> Non
     client.post(
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path),
-              "subjects": {"leaf": {"description": "one leaf"}}, "version": None},
+              "subjects": {"leaf": {"description": "one leaf"}}, "version": None, "user": "tester"},
     )
     stale_load = client.get(
         "/api/subjects/load",
@@ -139,14 +152,14 @@ def test_save_refuses_a_stale_version(client: TestClient, tmp_path: Path) -> Non
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path),
               "subjects": {"leaf": {"description": "one leaf"}, "bush": {}},
-              "version": stale_load["version"]},
+              "version": stale_load["version"], "user": "tester"},
     )
 
     conflicted = client.post(
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path),
               "subjects": {"leaf": {"description": "one leaf"}, "bush": {}, "tip": {}},
-              "version": stale_load["version"]},
+              "version": stale_load["version"], "user": "tester"},
     )
     assert conflicted.status_code == 409
 
@@ -169,7 +182,7 @@ def test_save_with_a_null_version_refuses_over_a_registry_written_meanwhile(
         json={"dataset_root": str(tmp_path),
               "subjects": {"leaf": {"description": "written by the agent"},
                            "bush": {"description": "written by the browser"}},
-              "version": None},
+              "version": None, "user": "tester"},
     )
     assert resp.status_code == 409
     assert read_registry(tmp_path).subject("bush") is None
@@ -183,7 +196,7 @@ def test_save_with_a_null_version_succeeds_over_a_still_absent_registry(
     resp = client.post(
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path),
-              "subjects": {"bush": {"description": "first write"}}, "version": None},
+              "subjects": {"bush": {"description": "first write"}}, "version": None, "user": "tester"},
     )
     assert resp.status_code == 200
 
@@ -196,7 +209,7 @@ def test_save_refuses_a_same_values_attribute_type_flip(client: TestClient, tmp_
         json={"dataset_root": str(tmp_path),
               "subjects": {"bud": {"attributes": {
                   "opening": {"type": "categorical", "values": ["closed", "open"]}}}},
-              "version": None},
+              "version": None, "user": "tester"},
     )
     assert first.status_code == 200
 
@@ -205,7 +218,7 @@ def test_save_refuses_a_same_values_attribute_type_flip(client: TestClient, tmp_
         json={"dataset_root": str(tmp_path),
               "subjects": {"bud": {"attributes": {
                   "opening": {"type": "ordinal", "values": ["closed", "open"]}}}},
-              "version": first.json()["version"]},
+              "version": first.json()["version"], "user": "tester"},
     )
     assert flipped.status_code == 400
     assert "bud.opening" in flipped.text
@@ -221,7 +234,7 @@ def test_save_refuses_the_reverse_attribute_type_flip_too(
         json={"dataset_root": str(tmp_path),
               "subjects": {"bud": {"attributes": {
                   "opening": {"type": "ordinal", "values": ["closed", "open"]}}}},
-              "version": None},
+              "version": None, "user": "tester"},
     )
     assert first.status_code == 200
 
@@ -230,7 +243,7 @@ def test_save_refuses_the_reverse_attribute_type_flip_too(
         json={"dataset_root": str(tmp_path),
               "subjects": {"bud": {"attributes": {
                   "opening": {"type": "categorical", "values": ["closed", "open"]}}}},
-              "version": first.json()["version"]},
+              "version": first.json()["version"], "user": "tester"},
     )
     assert flipped.status_code == 400
     assert "bud.opening" in flipped.text
@@ -243,7 +256,7 @@ def test_save_refuses_malformed_registry(client: TestClient, tmp_path: Path) -> 
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path),
               "subjects": {"bud": {"attributes": {"opening": {"type": "categorical"}}}},
-              "version": None},
+              "version": None, "user": "tester"},
     )
     assert r.status_code == 400
 
@@ -259,6 +272,7 @@ def test_registry_holds_multiple_subjects(client: TestClient, tmp_path: Path) ->
                 "bush": {"description": "a bush"},
             },
             "version": None,
+            "user": "tester",
         },
     )
     assert save.status_code == 200
@@ -281,7 +295,7 @@ def test_a_door_naming_an_annotation_dir_and_no_dataset_is_refused_and_writes_no
     saved = client.post(
         "/api/subjects/save",
         json={"annotations_dir": str(ann),
-              "subjects": {"bud": {"description": "a bud"}}, "version": None},
+              "subjects": {"bud": {"description": "a bud"}}, "version": None, "user": "tester"},
     )
 
     assert saved.status_code == 422
@@ -291,8 +305,7 @@ def test_a_door_naming_an_annotation_dir_and_no_dataset_is_refused_and_writes_no
 def test_load_derives_subjects_from_labels_when_registry_absent(
     client: TestClient, tmp_path: Path
 ) -> None:
-    # No saved registry, but labels exist -> derive a draft (detection-only) registry from the
-    # subjects present, so the canvas never loads empty.
+    # No saved registry, but labels exist: the subjects present are discovered, sorted.
     ann = tmp_path / "annotations" / "d"
     ann.mkdir(parents=True)
     write_annotations(
@@ -304,14 +317,14 @@ def test_load_derives_subjects_from_labels_when_registry_absent(
         "/api/subjects/load",
         params={"dataset_root": str(tmp_path), "annotations_dir": str(ann)},
     ).json()
-    assert set(load["subjects"]) == {"bush", "bud"}
+    assert load["discovered"] == ["bud", "bush"]
     assert load["unreadable"] == []
 
 
 def test_load_reports_an_unreadable_label_and_still_derives_the_rest(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """One corrupt label file costs its own name, never the whole draft-registry scan."""
+    """One corrupt label file costs its own name, never the whole discovery scan."""
     ann = tmp_path / "annotations" / "d"
     ann.mkdir(parents=True)
     write_annotations(str(ann / "IMG_A.json"), [_bud(50, 50, 60, 60)], 100, 100)
@@ -321,7 +334,7 @@ def test_load_reports_an_unreadable_label_and_still_derives_the_rest(
         "/api/subjects/load",
         params={"dataset_root": str(tmp_path), "annotations_dir": str(ann)},
     ).json()
-    assert set(load["subjects"]) == {"bud"}
+    assert load["discovered"] == ["bud"]
     assert load["unreadable"] == [str(ann / "IMG_B.json")]
 
 
@@ -339,7 +352,7 @@ def test_load_reports_an_unreadable_label_beside_a_saved_registry(
     save = client.post(
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path),
-              "subjects": {"bud": {"description": "a bud"}}, "version": None},
+              "subjects": {"bud": {"description": "a bud"}}, "version": None, "user": "tester"},
     )
     assert save.status_code == 200
 
@@ -457,9 +470,8 @@ def test_cached_label_annotations_hands_out_the_same_records_on_a_hit(tmp_path: 
 def test_load_derives_subjects_excludes_a_bucket_record(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A file named as a bucket's own record is not a per-image label: it must not seed the draft
-    registry, and it is not reported under unreadable either, since it was never meant to be read
-    as one."""
+    """A file named as a bucket's own record is not a per-image label: it is not discovered from,
+    and it is not reported under unreadable either, since it was never meant to be read as one."""
     ann = tmp_path / "annotations" / "d"
     ann.mkdir(parents=True)
     write_annotations(str(ann / "IMG_A.json"), [_bud(50, 50, 60, 60)], 100, 100)
@@ -469,7 +481,7 @@ def test_load_derives_subjects_excludes_a_bucket_record(
         "/api/subjects/load",
         params={"dataset_root": str(tmp_path), "annotations_dir": str(ann)},
     ).json()
-    assert set(load["subjects"]) == {"bud"}
+    assert load["discovered"] == ["bud"]
     assert load["unreadable"] == []
 
 
@@ -485,7 +497,7 @@ def test_load_derived_registry_cache_invalidates_on_label_write(
 
     params = {"dataset_root": str(tmp_path), "annotations_dir": str(ann)}
     first = client.get("/api/subjects/load", params=params).json()
-    assert set(first["subjects"]) == {"bud"}
+    assert first["discovered"] == ["bud"]
 
     write_annotations(
         str(label), [_bud(50, 50, 60, 60), _bud(20, 20, 30, 30, subject="bush")], 100, 100
@@ -493,7 +505,7 @@ def test_load_derived_registry_cache_invalidates_on_label_write(
     os.utime(label, (2_000_000, 2_000_000))
 
     second = client.get("/api/subjects/load", params=params).json()
-    assert set(second["subjects"]) == {"bush", "bud"}
+    assert second["discovered"] == ["bud", "bush"]
 
 
 def test_save_subjects_confines_dataset_root_to_allowed_roots(
@@ -503,7 +515,7 @@ def test_save_subjects_confines_dataset_root_to_allowed_roots(
     resp = client.post(
         "/api/subjects/save",
         json={"dataset_root": str(outside),
-              "subjects": {"bud": {"description": "a bud"}}, "version": None},
+              "subjects": {"bud": {"description": "a bud"}}, "version": None, "user": "tester"},
     )
     assert resp.status_code == 403
 
@@ -541,17 +553,9 @@ def test_a_dataset_root_inside_the_workspace_clears_the_confinement_guard(
     resp = client.post(
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path),
-              "subjects": {"bud": {"description": "a bud"}}, "version": None},
+              "subjects": {"bud": {"description": "a bud"}}, "version": None, "user": "tester"},
     )
     assert resp.status_code == 200
-
-
-def _read_audit_entries(dataset_root: Path) -> list[dict]:
-    """That root's audit trail, read through the seam so the claim holds on either backend."""
-    import tcip_store as ts
-    from tcip_mcp.audit import audit_log_key
-
-    return list(ts.read_log(audit_log_key(dataset_root)).records)
 
 
 def test_a_registry_save_leaves_one_library_line_through_either_door(
@@ -567,12 +571,12 @@ def test_a_registry_save_leaves_one_library_line_through_either_door(
     through_route.mkdir()
     through_tool.mkdir()
     resp = client.post("/api/subjects/save", json={
-        "dataset_root": str(through_route), "subjects": subjects, "version": None})
+        "dataset_root": str(through_route), "subjects": subjects, "version": None, "user": "tester"})
     assert resp.status_code == 200, resp.text
     assert "error" not in write_subject_registry(opened_project, str(through_tool), subjects)
 
-    (route_line,), (tool_line,) = (_read_audit_entries(through_route),
-                                   _read_audit_entries(through_tool))
+    (route_line,), (tool_line,) = (audit_rows(through_route),
+                                   audit_rows(through_tool))
     assert route_line["tool"] == tool_line["tool"] == "replace_registry"
 
     def facts(line: dict) -> dict:
@@ -581,7 +585,10 @@ def test_a_registry_save_leaves_one_library_line_through_either_door(
 
     assert facts(route_line) == facts(tool_line)
     assert route_line["arguments"]["version"] == resp.json()["version"]
-    assert not [e for e in _read_audit_entries(opened_project) if e["tool"] == "replace_registry"]
+    assert route_line["actor"] == "user:tester" and "actor" not in tool_line
+    assert set(route_line) - {"actor"} <= AUDIT_ENTRY_KEYS and set(tool_line) <= AUDIT_ENTRY_KEYS
+    assert "tester" not in json.dumps({k: v for k, v in route_line.items() if k != "actor"})
+    assert not [e for e in audit_rows(opened_project) if e["tool"] == "replace_registry"]
 
 
 def test_a_registry_save_answers_and_audits_the_location_it_wrote(
@@ -595,11 +602,11 @@ def test_a_registry_save_answers_and_audits_the_location_it_wrote(
     dataset_root = opened_project / "named_dataset"
     dataset_root.mkdir()
     resp = client.post("/api/subjects/save", json={
-        "dataset_root": str(dataset_root), "subjects": {"bud": {}}, "version": None})
+        "dataset_root": str(dataset_root), "subjects": {"bud": {}}, "version": None, "user": "tester"})
     assert resp.status_code == 200, resp.text
 
     written = str(subjects_path(dataset_root))
-    (line,) = _read_audit_entries(dataset_root)
+    (line,) = audit_rows(dataset_root)
     assert resp.json()["subjects_path"] == line["arguments"]["subjects_path"] == written
     assert read_registry(dataset_root).subject("bud") is not None
 
@@ -634,7 +641,7 @@ def test_a_registry_load_answers_content_and_version_from_one_read(
     assert set(load["subjects"]) == {"bud"}
     stale = client.post("/api/subjects/save", json={
         "dataset_root": str(tmp_path), "subjects": {"bud": {}, "bush": {}, "tip": {}},
-        "version": load["version"]})
+        "version": load["version"], "user": "tester"})
     assert stale.status_code == 409
 
 
@@ -661,7 +668,7 @@ def test_save_subjects_answers_409_with_the_committed_body_on_a_lost_audit_line(
     healthy = client.post(
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path),
-              "subjects": {"bud": {"description": "a bud"}}, "version": None},
+              "subjects": {"bud": {"description": "a bud"}}, "version": None, "user": "tester"},
     )
     assert healthy.status_code == 200, healthy.text
     healthy_body = healthy.json()
@@ -670,7 +677,7 @@ def test_save_subjects_answers_409_with_the_committed_body_on_a_lost_audit_line(
     resp = client.post(
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path),
-              "subjects": {"bud": {"description": "a bud"}}, "version": healthy_body["version"]},
+              "subjects": {"bud": {"description": "a bud"}}, "version": healthy_body["version"], "user": "tester"},
     )
     assert resp.status_code == 409
     detail = resp.json()["detail"]

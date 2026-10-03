@@ -82,9 +82,9 @@ npm run build      # emits into ../static/
 MCP tools HTTP POST to `POST /api/events/{panel}` on the backend, which broadcasts those
 events to any browser subscribed to `/ws/panel/{panel}`.
 
-Port discovery inside MCP tools: the workspace root's `.tcip/state/web_port.txt` (the port
-bound) > `TCIP_WEB_PORT` env (read only when no record parses) > 8765, always at
-`127.0.0.1`.
+Port discovery inside MCP tools: the workspace root's `.tcip/state/web_port.txt`, the port the
+backend bound, always at `127.0.0.1`; with no record, no backend serves the workspace and an
+event is not delivered.
 
 ## Keyboard map
 

@@ -36,9 +36,7 @@ class _ProbePayload(BaseModel):
 
 
 EMPTY_BODY_ROUTES = (
-    "/api/inference/jobs/does-not-exist/cancel",
     "/api/training/runs/does-not-exist/tensorboard",
-    "/api/training/runs/does-not-exist/cancel",
     "/api/tuning/sweeps/does-not-exist/tensorboard",
     "/api/tuning/sweeps/does-not-exist/trials/does-not-exist/tensorboard",
     "/api/tuning/sweeps/does-not-exist/trials/does-not-exist/tensorboard/stop",

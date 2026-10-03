@@ -62,7 +62,7 @@ def test_draw_splits_stats_golden(tmp_path: Path):
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     result.pop("selection_dir")
     assert result.pop("scope") == {"subject": "bud", "attributes": ()}
-    assert result.pop("tallies")["annotated"] == 12
+    assert result.pop("tallies") == {"partial": 12}
     assert result.pop("calibration_foreground_groups") == GOLDEN_CALIBRATION_FOREGROUND_GROUPS
     assert result.pop("realized_ratios") == GOLDEN_REALIZED_RATIOS
     assert result == GOLDEN_DRAW_SPLITS

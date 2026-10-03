@@ -133,8 +133,7 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets(tmp
     """rows_after_end parses each row's timestamp (and the final status's ``ended``) as an
     instant and compares strictly-after, so a row stamped in a different UTC offset, or a bare
     "Z", still compares on the instant it actually names rather than on its ISO text; a row
-    whose timestamp isn't a parseable string (a bespoke loop's own integer counter, say) is
-    skipped, not raised on."""
+    whose timestamp does not decode refuses the run's comparison, naming the row."""
     from datetime import datetime, timedelta, timezone
 
     from tcip_mcp.experiments import METRICS_FILE, append_row, compare_experiments, observe
@@ -154,10 +153,13 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets(tmp
         {"epoch": 3, "timestamp": at(-1, timezone.utc).replace("+00:00", "Z"), "loss": 0.3},
         {"epoch": 4, "timestamp": at(0, timezone.utc), "loss": 0.4},  # same instant: not after
         {"epoch": 5, "timestamp": at(1, timezone.utc), "loss": 0.5},  # after
-        {"epoch": 6, "timestamp": 1704110401, "loss": 0.6},           # not a string: skipped
     ]
     for row in rows:
         append_row(run_dir / METRICS_FILE, row)
 
     rows_after_end = compare_experiments(["exp-instants"], project=tmp_path)["experiments"][0]
     assert rows_after_end["rows_after_end"] == 2
+
+    append_row(run_dir / METRICS_FILE, {"epoch": 6, "timestamp": 1704110401, "loss": 0.6})
+    (refused,) = compare_experiments(["exp-instants"], project=tmp_path)["experiments"]
+    assert "epoch': 6" in refused["error"] and "no decodable timestamp" in refused["error"]

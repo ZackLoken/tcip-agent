@@ -261,16 +261,6 @@ def test_a_completed_runs_registry_entry_answers_its_checkpoint_resolved_absolut
         experiment_dir("exp1", project=project) / "model_final.pt").resolve()
 
 
-# ── one shared at-or-under predicate, not a second copy per module ─────────────────────────
-
-
-def test_bundle_shares_the_registry_paths_at_or_under_function():
-    import tcip_mcp.tools.bundle as bundle
-    from tcip_mcp.registry_paths import is_at_or_under
-
-    assert bundle._is_at_or_under is is_at_or_under
-
-
 # ── resolved_registry_path's traversal refusal, both grammars ──────────────────────────────
 
 

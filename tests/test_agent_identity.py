@@ -135,7 +135,7 @@ def test_a_caller_cannot_hand_an_audit_line_another_identity(
     monkeypatch.delenv("TCIP_TERMINAL_SESSION", raising=False)
     identity = agent_identity.begin("claude-code", "2.1.238")
 
-    audit_module.record_event("identity_probe", {}, scope=tmp_path, agent_session="forged",
+    audit_module.record_event("identity_probe", {}, actor=None, scope=tmp_path, agent_session="forged",
                               agent_client_name="x")
 
     key = audit_module.audit_log_key(tmp_path)
@@ -167,20 +167,18 @@ def test_a_caller_cannot_supply_an_identity_key_the_handshake_left_absent(
     forged session does not land, and under a launch that declared no terminal session a forged
     terminal_session does not land either."""
     import tcip_mcp.audit as audit_module
-    import tcip_store as ts
+    from tests._audit_fixtures import audit_rows
 
-    def rows(tool: str) -> list[dict]:
-        key = audit_module.audit_log_key(tmp_path)
-        return [r for r in ts.read_log(key).records if r["tool"] == tool]
-
-    audit_module.record_event("no_handshake", {}, scope=tmp_path, agent_session="forged")
-    (row,) = rows("no_handshake")
+    audit_module.record_event("no_handshake", {}, actor=None, scope=tmp_path,
+                              agent_session="forged")
+    (row,) = audit_rows(tmp_path, "no_handshake")
     assert "agent_session" not in row
 
     monkeypatch.delenv("TCIP_TERMINAL_SESSION", raising=False)
     agent_identity.begin("codex-mcp-client", "0.147.0")
-    audit_module.record_event("codex_session", {}, scope=tmp_path, terminal_session="forged")
-    (row,) = rows("codex_session")
+    audit_module.record_event("codex_session", {}, actor=None, scope=tmp_path,
+                              terminal_session="forged")
+    (row,) = audit_rows(tmp_path, "codex_session")
     assert row["agent_client_name"] == "codex-mcp-client"
     assert "terminal_session" not in row
 

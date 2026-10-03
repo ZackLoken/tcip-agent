@@ -68,6 +68,6 @@ def deliver_per_plant_csv(
             buckets=delivered, plants=wanted, crop=crop,
             pipeline_version=pipeline_version, door="deliver_per_plant_csv",
             plant_mapping=disclosure, scale_assessment_id=scale_assessment_id,
-            acknowledgment_id=acknowledgment_id)
+            acknowledgment_id=acknowledgment_id, actor=None)
     except (TraitUnknownError, mapping.MappingDeliveryRefusal, ValueError) as exc:
         return {"error": str(exc)}

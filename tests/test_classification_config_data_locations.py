@@ -49,7 +49,7 @@ def test_a_classification_config_launches_with_images_and_csv_only(
         "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
 
-    res = launch_training(tmp_path, cfg)
+    res = launch_training(tmp_path, cfg, actor=None)
 
     assert "error" not in res, res
     assert res["pid"] != os.getpid()

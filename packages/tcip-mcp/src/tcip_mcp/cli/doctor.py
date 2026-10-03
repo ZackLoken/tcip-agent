@@ -101,6 +101,8 @@ def check_data_quality(root: Path, findings: list, *, census: dict | None) -> No
     """
     from tcip_annotation.json_io import LabelDocument
 
+    from tcip_mcp.pipelines.data.label_queries import admits
+
     if census is None:
         return
     scan = census
@@ -108,14 +110,14 @@ def check_data_quality(root: Path, findings: list, *, census: dict | None) -> No
     labeled: set[str] = set()
     for label_path in scan["labels"]:
         label = Path(label_path)
-        rel = label.relative_to(root) if root in label.parents else label
+        rel = label.relative_to(root) if label.is_relative_to(root) else label
         labeled.add(label.stem)
         if label.stem not in image_stems:
             findings.append(("error", f"{rel}: no matching image"))
         doc = scan["label_reads"][label.resolve()]
         if not isinstance(doc, LabelDocument):
             findings.append(("error", f"{rel}: label file will not read: {doc}"))
-        elif not doc.annotations and "negative" not in {doc.state(s) for s in doc.marks}:
+        elif not doc.annotations and not any(admits(doc.state(s)) for s in doc.marks):
             findings.append(("error", f"{rel}: empty label file, not marked complete for any "
                             "subject; excluded from training"))
 
@@ -164,7 +166,7 @@ def check_registry(root: Path, findings: list) -> None:
     from tcip_mcp.buckets import bucket_dirs, read_bucket
     from tcip_mcp.model_registry import RegistryVersionRefused, registered_entries
     from tcip_mcp.registry_paths import (
-        RegistryPathEmpty, RegistryPathTraversal, is_at_or_under, resolved_registry_path,
+        RegistryPathEmpty, RegistryPathTraversal, resolved_registry_path,
     )
 
     try:
@@ -183,7 +185,7 @@ def check_registry(root: Path, findings: list) -> None:
                             f"could not be resolved: {exc}"))
             continue
         ckpt = str(resolved)
-        stray = not is_at_or_under(resolved, root_resolved) and any(
+        stray = not resolved.is_relative_to(root_resolved) and any(
             marker in ckpt for marker in TEMP_TREE_MARKERS)
         if stray:
             findings.append(("error", f"registry entry {m['name']!r} points at a test/temp "

@@ -190,7 +190,7 @@ def _finish(project: Path, run_dir: Path, revision: TraitRevision,
         "assessment_recorded",
         {"assessment_id": run_dir.name, "trait": revision.entry.name,
          "delivery_kind": record["delivery_kind"], "passed": record["passed"]},
-        scope=project)
+        actor=None, scope=project)
     return read_assessment(project, run_dir.name)
 
 

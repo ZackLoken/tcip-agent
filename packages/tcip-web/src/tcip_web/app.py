@@ -9,7 +9,6 @@ import logging
 import uuid
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +20,9 @@ from pydantic import BaseModel
 
 from tcip_store.binding import bind_default
 
+from tcip_mcp.audit import now_iso
 from tcip_mcp.buckets import NotABucket
+from tcip_mcp.identity import NoActor
 from tcip_mcp.web_client import PANEL_EVENT_ANNOTATE_FOCUS, VALID_PANELS
 from tcip_web.trust_boundary import TrustBoundaryMiddleware
 
@@ -88,12 +89,14 @@ _state_watchers: set[WebSocket] = set()
 
 
 async def _bad_request_handler(_request: Request, exc: Exception) -> JSONResponse:
-    """An invalid GUI mutation or a directory read as a bucket it is not: 400 with the reason."""
+    """An invalid GUI mutation, a directory read as a bucket it is not, or an act naming no
+    person: 400 with the reason."""
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
 app.add_exception_handler(GuiMutationInvalid, _bad_request_handler)
 app.add_exception_handler(NotABucket, _bad_request_handler)
+app.add_exception_handler(NoActor, _bad_request_handler)
 
 
 @app.exception_handler(NoProjectOpen)
@@ -303,7 +306,7 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
         "panel": panel,
         "event_type": event.event_type,
         "data": event.data,
-        "event_id": f"{datetime.now(timezone.utc).isoformat()}#{next(_event_counter)}",
+        "event_id": f"{now_iso()}#{next(_event_counter)}",
         **agent_identity.fields_from_headers(request.headers),
     }
     _gui_store.retain_event(panel, payload)

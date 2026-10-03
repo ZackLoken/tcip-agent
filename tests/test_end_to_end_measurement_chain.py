@@ -45,13 +45,8 @@ def test_a_drawn_reference_selection_records_each_samples_ground_truth_digest(tm
 
 
 def test_the_draw_and_the_delivery_check_digest_a_ground_truth_the_same_way(tmp_path: Path):
-    """The two sides of one fact, compared against each other rather than against a fixture.
-
-    The draw records each sample's ground-truth digest; the delivery-time check recomputes one to
-    ask whether the reference moved. If those two spelled the digest differently, the check would
-    report every untouched reference as moved, and a guard test on either side alone would stay
-    green over it.
-    """
+    """The digest the draw records for each sample's ground truth is the one the delivery-time
+    check recomputes for an untouched reference."""
     from tcip_mcp.pipelines.data.selection import ground_truth_digest
 
     root = tmp_path / "ds"
@@ -227,6 +222,6 @@ def test_publishing_the_same_bucket_twice_refuses_the_second_publish(tmp_path: P
     with pytest.raises(BucketExists):
         publish(tmp_path, chain.bucket, documents(), producer=first.producer, scope=first.scope,
                 execution=first.execution, raster_path=None, raster_identity=None,
-                assessment_id=first.assessment_id)
+                assessment_id=first.assessment_id, actor=None)
     assert consumed == []
     assert files() == before

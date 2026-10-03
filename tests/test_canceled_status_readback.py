@@ -27,7 +27,7 @@ def test_a_canceled_inference_job_reads_as_canceled(tmp_path, monkeypatch):
     Image.new("RGB", (16, 16)).save(images_dir / "img.jpg")
     ckpt = foreign_checkpoint(tmp_path)
 
-    job = inference.InferenceJob(job_id="canceled-job", checkpoint_path=ckpt,
+    job = inference.InferenceJob(job_id="canceled-job", actor="user:tester", checkpoint_path=ckpt,
                                  images_dir=str(images_dir), output_dir=str(tmp_path / "out"),
                                  project=str(tmp_path), stated=Stated(
                                      tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2))

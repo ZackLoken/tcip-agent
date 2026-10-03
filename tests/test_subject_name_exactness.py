@@ -42,6 +42,7 @@ def test_subject_names_differing_only_by_case_stay_distinct(
                 "bush": {"description": "one plant crown"},
             },
             "version": None,
+            "user": "breeder",
         },
     )
     assert save.status_code == 200, save.text
@@ -61,7 +62,7 @@ def test_subject_names_differing_only_by_case_stay_distinct(
 def test_registry_derived_from_labels_keeps_each_name_exactly_as_labeled(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """With no saved registry, the draft one lists the names a readable label document
+    """With no saved registry, the discovered names are the ones a readable label document
     actually carries, each unchanged."""
     labels = tmp_path / "annotations" / "2026-03-02"
     labels.mkdir(parents=True)
@@ -79,7 +80,8 @@ def test_registry_derived_from_labels_keeps_each_name_exactly_as_labeled(
         "/api/subjects/load",
         params={"dataset_root": str(tmp_path), "annotations_dir": str(labels)},
     ).json()
-    assert set(body["subjects"]) == {"bud", "Bud", "bush"}
+    assert body["subjects"] is None
+    assert set(body["discovered"]) == {"bud", "Bud", "bush"}
     assert body["unreadable"] == []
 
 
@@ -101,7 +103,7 @@ def test_registry_derivation_reports_a_document_it_cannot_read(
         "/api/subjects/load",
         params={"dataset_root": str(tmp_path), "annotations_dir": str(labels)},
     ).json()
-    assert set(body["subjects"]) == {"bud"}
+    assert body["discovered"] == ["bud"]
     assert body["unreadable"] == [str(labels / "IMG_B.json")]
 
 
@@ -113,7 +115,8 @@ def test_a_new_subject_is_addable_alongside_the_saved_ones(
     first = client.post(
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path),
-              "subjects": {"bud": {"description": "first pass"}}, "version": None},
+              "subjects": {"bud": {"description": "first pass"}}, "version": None,
+              "user": "breeder"},
     )
     assert first.status_code == 200, first.text
 
@@ -122,7 +125,7 @@ def test_a_new_subject_is_addable_alongside_the_saved_ones(
         json={"dataset_root": str(tmp_path),
               "subjects": {"bud": {"description": "corrected"},
                            "hazel_leaf": {"description": "one leaf blade"}},
-              "version": first.json()["version"]},
+              "version": first.json()["version"], "user": "breeder"},
     )
     assert second.status_code == 200, second.text
     assert second.json()["n_subjects"] == 2

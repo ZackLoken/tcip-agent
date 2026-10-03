@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from tcip_annotation.state import BBox, Polygon, box_derivable
 
-from tcip_mcp.pipelines.image_utils import list_logical_images, logical_image_name
+from tcip_mcp.pipelines.image_utils import list_logical_images
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.selection import ClassScope, Sample
@@ -122,63 +122,98 @@ def ground_truth_shape(ground_truth) -> str:
     return MASK if MASK in held else DOCUMENT
 
 
-def admitted_records(
-    records: Mapping[str, tuple[str | None, str | None]], *, scope: "ClassScope",
-) -> tuple[list[str], dict[str, int]]:
-    """The keys of ``records`` the label store accounts for under ``scope``, an admitted document
-    class space, plus the partition that produced them.
-
-    ``records`` maps a caller's own key to ``(label document path, logical image name)``; a
-    ``None`` image name is a key with no image at all and a ``None`` document is a key the label
-    store holds nothing for. A key is admitted when its document holds the scope's subject, or
-    holds none of it and its marks finish it
-    (:meth:`~tcip_annotation.json_io.LabelDocument.state`). The counts are ``annotated`` /
-    ``confirmed_negative`` / ``skipped_unannotated`` / ``skipped_unconfirmed_empty``.
-    """
-    from tcip_annotation.json_io import read_label_document
-
-    counts = {"annotated": 0, "confirmed_negative": 0, "skipped_unannotated": 0,
-              "skipped_unconfirmed_empty": 0}
-    keep: list[str] = []
-    for key, (label_path, image_name) in records.items():
-        if image_name is None or label_path is None or not Path(label_path).is_file():
-            counts["skipped_unannotated"] += 1
-            continue
-        state = read_label_document(label_path).state(cast(str, scope.subject))
-        reason = {"complete": "annotated", "partial": "annotated",
-                  "negative": "confirmed_negative"}.get(state, "skipped_unconfirmed_empty")
-        counts[reason] += 1
-        if reason != "skipped_unconfirmed_empty":
-            keep.append(key)
-    return keep, counts
+ABSENT = "absent"
+"""The tally of a sample whose ground truth or image does not exist; every other tally is the
+:data:`~tcip_annotation.json_io.SubjectState` its ground truth reads as."""
 
 
-def admitted_documents(
-    labels_dir, images_dir, members=None, *, scope: "ClassScope",
-) -> tuple[list[Admitted], dict[str, int]]:
-    """The members a directory of per-image label documents admits under ``scope``, an admitted
-    document class space, resolved, plus the partition that produced them: :func:`admitted_records`
-    over each candidate stem paired with the document this directory holds for it (``None`` when
-    it holds none) and its real on-disk image name.
-    """
+def admits(tally: str) -> bool:
+    """Whether a sample tallied ``tally`` is admitted: its ground truth exists and holds the
+    subject or a person finished it."""
+    return tally not in (ABSENT, "unannotated")
+
+
+@dataclass(frozen=True)
+class Candidate:
+    """One member as a place holding ground truth or a recorded sample names it: its image source
+    path (``None`` when no image exists for it), its ground truth (``None`` when the place holds
+    none for it) and its row key when one table answers for many."""
+
+    member: str
+    source: str | None
+    ground_truth: str | None
+    row_key: str | None = None
+
+
+def _candidates(shape: str, ground_truth, images_dir, members,
+                tables: dict[str, dict[str, str]]) -> list[Candidate]:
+    """Every candidate one place holding ground truth of ``shape`` offers: ``members`` when named,
+    else every image (a document or a mask directory) or every row (a table). A mask directory
+    holding another format beside an image of the same stem, and no ``<stem>.png``, refuses."""
     from tcip_annotation.json_io import prediction_documents
-    from tcip_mcp.pipelines.image_utils import refuse_incomplete_band_group, source_path_of
+    from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK
+    from tcip_mcp.pipelines.image_utils import source_path_of
 
-    sources = list_logical_images(images_dir)
-    documents = {p.stem: p for p in prediction_documents(labels_dir)}
-    candidates = list(members) if members is not None else sorted(sources)
-    keep, counts = admitted_records(
-        {stem: (str(documents[stem]) if stem in documents else None,
-                logical_image_name(sources[stem]) if stem in sources else None)
-         for stem in candidates},
-        scope=scope,
-    )
-    return [
-        Admitted(member=stem,
-                 source=source_path_of(refuse_incomplete_band_group(sources[stem])),
-                 ground_truth=str(documents[stem]))
-        for stem in keep
-    ], counts
+    sources = {stem: source_path_of(src) for stem, src in list_logical_images(images_dir).items()}
+    if shape == DOCUMENT:
+        documents = {p.stem: str(p) for p in prediction_documents(ground_truth)}
+        names = list(members) if members is not None else sorted(sources)
+        return [Candidate(m, sources.get(m), documents.get(m)) for m in names]
+    if shape == MASK:
+        labels_p = Path(ground_truth)
+        entries = list(labels_p.iterdir()) if labels_p.is_dir() else []
+        masks = {p.stem: str(p) for p in entries if is_mask(p)}
+        names = list(members) if members is not None else sorted(sources)
+        unreadable = sorted(p.name for p in entries if p.is_file() and not is_mask(p)
+                            and p.stem in names and p.stem not in masks)
+        if unreadable:
+            raise ValueError(
+                f"{labels_p} holds {unreadable} beside an image of the same stem, and a "
+                f"mask is read only as <stem>.png; nothing here reads another format, and "
+                f"training the image without its mask would train it as entirely background."
+            )
+        return [Candidate(m, sources.get(m), masks.get(m)) for m in names]
+    table = tables.setdefault(str(ground_truth), ground_truth_table(ground_truth))
+    names = list(members) if members is not None else sorted(table)
+    return [Candidate(k, sources.get(k), str(ground_truth), row_key=k) for k in names]
+
+
+def _tally(shape: str, candidate: Candidate, scope: "ClassScope",
+           tables: dict[str, dict[str, str]]) -> str:
+    """What one candidate's ground truth reads as: its label document's state for ``scope``'s
+    subject, ``complete`` for a mask or a row that is there, :data:`ABSENT` for anything missing."""
+    from tcip_annotation.json_io import read_label_document
+    from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK
+
+    found = candidate.ground_truth
+    if candidate.source is None or found is None:
+        return ABSENT
+    if shape == DOCUMENT:
+        return (read_label_document(found).state(cast(str, scope.subject))
+                if Path(found).is_file() else ABSENT)
+    if shape == MASK:
+        return "complete" if is_mask(Path(found)) else ABSENT
+    if found not in tables:
+        tables[found] = ground_truth_table(found) if Path(found).is_file() else {}
+    return "complete" if holds_row(tables[found], candidate.row_key) else ABSENT
+
+
+def _admission(shape: str, candidates: "Sequence[Candidate]", scope: "ClassScope",
+               tables: dict[str, dict[str, str]]) -> tuple[list[Admitted], dict[str, int]]:
+    """The candidates :func:`admits` admits by their :func:`_tally`, each with its source resolved
+    (a grouped capture missing a band refuses), and how many were tallied each way."""
+    from tcip_mcp.pipelines.image_utils import resolve_source_path, source_path_of
+
+    records: list[Admitted] = []
+    tallies: dict[str, int] = {}
+    for candidate in candidates:
+        tally = _tally(shape, candidate, scope, tables)
+        if admits(tally):
+            source = source_path_of(resolve_source_path(cast(str, candidate.source)))
+            records.append(Admitted(candidate.member, source, cast(str, candidate.ground_truth),
+                                    candidate.row_key))
+        tallies[tally] = tallies.get(tally, 0) + 1
+    return records, tallies
 
 
 @dataclass(frozen=True)
@@ -248,42 +283,6 @@ def is_mask(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() == ".png"
 
 
-def admitted_masks(labels_dir, images_dir, members=None) -> tuple[list[Admitted], dict[str, int]]:
-    """The members a mask directory admits, resolved, plus the admission counts
-    ``{"annotated", "skipped_unannotated"}``.
-
-    A sample needs a mask, and a mask is exactly ``<stem>.png`` under ``labels_dir``
-    (:func:`is_mask`): an all-background mask is an explicit annotation, and an image with no mask
-    is unannotated rather than a negative. A candidate stem with a file in another format and no
-    ``<stem>.png`` refuses by name.
-    """
-    from tcip_mcp.pipelines.image_utils import refuse_incomplete_band_group, source_path_of
-
-    labels_p = Path(labels_dir)
-    entries = list(labels_p.iterdir()) if labels_p.is_dir() else []
-    masks = {p.stem: p for p in entries if is_mask(p)}
-    sources = list_logical_images(images_dir)
-    candidates = list(members) if members is not None else sorted(sources)
-    unreadable = sorted(
-        p.name for p in entries
-        if p.is_file() and not is_mask(p) and p.stem in candidates and p.stem not in masks
-    )
-    if unreadable:
-        raise ValueError(
-            f"{labels_p} holds {unreadable} beside an image of the same stem, and a "
-            f"mask is read only as <stem>.png; nothing here reads another format, and "
-            f"training the image without its mask would train it as entirely background."
-        )
-    admitted = [
-        Admitted(member=stem,
-                 source=source_path_of(refuse_incomplete_band_group(sources[stem])),
-                 ground_truth=str(masks[stem]))
-        for stem in candidates if stem in masks and stem in sources
-    ]
-    return admitted, {"annotated": len(admitted),
-                      "skipped_unannotated": len(candidates) - len(admitted)}
-
-
 def ground_truth_table(csv_path) -> dict[str, str]:
     """One ground-truth table as ``{row key: value}``, the row key being the image stem its first
     column names and the value its second, both as written. A key naming more than one row refuses
@@ -316,131 +315,59 @@ def holds_row(table: Mapping[str, str], row_key: str | None) -> bool:
     return row_key is not None and row_key in table
 
 
-def admitted_rows(csv_path, images_dir, members=None) -> tuple[list[Admitted], dict[str, int]]:
-    """The rows a ground-truth table admits, resolved, plus the partition that produced them.
-
-    A row is admitted when the table holds it (:func:`holds_row`) and the image it names exists
-    under ``images_dir`` (:func:`~tcip_mcp.pipelines.image_utils.list_logical_images`, so a grouped
-    capture is admitted by its ``.bandgroup`` manifest).
-    """
-    from tcip_mcp.pipelines.image_utils import refuse_incomplete_band_group, source_path_of
-
-    table = ground_truth_table(csv_path)
-    sources = list_logical_images(images_dir)
-    candidates = list(members) if members is not None else sorted(table)
-    admitted = [
-        Admitted(member=key,
-                 source=source_path_of(refuse_incomplete_band_group(sources[key])),
-                 ground_truth=str(csv_path), row_key=key)
-        for key in candidates if holds_row(table, key) and key in sources
-    ]
-    return admitted, {
-        "annotated": len(admitted),
-        "skipped_no_image": sum(1 for k in candidates if holds_row(table, k) and k not in sources),
-        "skipped_no_row": sum(1 for k in candidates if not holds_row(table, k)),
-    }
+def _refused(tallies: Mapping[str, int]) -> str:
+    """The tallies :func:`admits` refuses, as ``name=count`` pairs."""
+    return ", ".join(f"{name}={count}" for name, count in sorted(tallies.items())
+                     if not admits(name))
 
 
 def refuse_inadmissible_samples(samples: "Sequence[Sample]", scope: "ClassScope") -> None:
-    """Refuse a recorded sample the platform's own admission would no longer admit, naming which.
-
-    ``scope`` is the class space those samples are read under, whole
-    (:class:`~tcip_mcp.pipelines.data.selection.ClassScope`), held to each sample's shape as
-    :func:`admit` holds it (``ClassScope.admitted_for``), so a document read under a scope naming
-    no subject refuses by name.
-
-    Dispatches once on each sample's own shape: the label document and its marks for a document,
-    the mask's own existence for a mask raster, the row's own presence in its table for a table
-    row, each over the paths the sample recorded. Every sample's recorded source is resolved once
-    (:func:`~tcip_mcp.pipelines.image_utils.resolve_source_path`, which also catches a band group
-    missing a sibling).
-
-    Membership is never changed here: a sample the admission no longer holds refuses the run by
-    name.
-    """
-    from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK
-    from tcip_mcp.pipelines.image_utils import BandGroupIncomplete, resolve_source_path
-
+    """Refuse recorded samples the admission no longer admits, naming which and the tallies that
+    refused them. Each sample is re-admitted as a :class:`Candidate` through the same evaluation
+    :func:`admit` runs, under ``scope`` held to its shape (``ClassScope.admitted_for``, so a
+    document read under a scope naming no subject refuses by name). Membership is never changed
+    here."""
     refused: list[str] = []
-    unresolved: list[str] = []
-    reasons: dict[str, int] = {}
+    tallies: dict[str, int] = {}
     tables: dict[str, dict[str, str]] = {}
-    documents: dict[str, tuple[str | None, str | None]] = {}
-    for shape in {s.shape for s in samples}:
-        scope.admitted_for(shape, "the class space these samples are read under")
-    for sample in samples:
-        try:
-            image_name: str | None = logical_image_name(resolve_source_path(sample.source))
-        except (FileNotFoundError, BandGroupIncomplete):
-            unresolved.append(sample.source)
-            continue
-        if sample.shape == DOCUMENT:
-            documents[sample.location] = (sample.ground_truth, image_name)
-        elif sample.shape == MASK:
-            if not is_mask(Path(sample.ground_truth)):
-                refused.append(sample.location)
-                reasons["ground_truth_gone"] = reasons.get("ground_truth_gone", 0) + 1
-        else:
-            table = sample.ground_truth
-            if table not in tables:
-                tables[table] = (ground_truth_table(table)
-                                 if Path(table).is_file() else {})
-            if not holds_row(tables[table], sample.row_key):
-                refused.append(sample.location)
-                reasons["row_gone"] = reasons.get("row_gone", 0) + 1
-    if documents:
-        admitted, counts = admitted_records(documents, scope=scope)
-        for name, value in counts.items():
-            if name.startswith("skipped_"):
-                reasons[name] = reasons.get(name, 0) + value
-        refused.extend(sorted(set(documents) - set(admitted)))
-    if not refused and not unresolved:
-        return
-    named = ", ".join(f"{name}={value}" for name, value in sorted(reasons.items()) if value)
-    sources = (f" {len(unresolved)} name a source that no longer resolves ({unresolved[:5]})."
-               if unresolved else "")
-    raise ValueError(
-        f"{len(refused) + len(unresolved)} of this selection's samples are no longer admissible "
-        f"({sorted(refused)[:5] + unresolved[:5]}): {named}.{sources} The data moved under the "
-        "selection since it was drawn: a label emptied with nobody marking that image complete, "
-        "a mask or a label file deleted, a row dropped from its table, or an image moved. "
-        "Restore what those name, finish the annotation or the mark, or draw the selection "
-        "again over the current data."
-    )
+    for shape in sorted({s.shape for s in samples}):
+        held = [s for s in samples if s.shape == shape]
+        records, counts = _admission(
+            shape, [Candidate(s.location, s.source if Path(s.source).exists() else None,
+                              s.ground_truth, s.row_key) for s in held],
+            scope.admitted_for(shape, "the class space these samples are read under"), tables)
+        refused += sorted({s.location for s in held} - {r.member for r in records})
+        for name, count in counts.items():
+            tallies[name] = tallies.get(name, 0) + count
+    if refused:
+        raise ValueError(
+            f"{len(refused)} of this selection's samples are no longer admissible "
+            f"({refused[:5]}): {_refused(tallies)}. The data moved under the selection since it "
+            "was drawn: a label emptied with nobody marking that image complete, a mask or a "
+            "label file deleted, a row dropped from its table, or an image moved. Restore what "
+            "those name, finish the annotation or the mark, or draw the selection again over the "
+            "current data."
+        )
 
 
 def require_admitted(admitted: "Admission") -> None:
-    """Refuse an empty admission, naming why nothing was admitted and what would fix it, for every
-    ground-truth shape.
-    """
+    """Refuse an empty admission, naming the tallies that refused every candidate and what would
+    fix it for its ground-truth shape."""
     if admitted.records:
         return
     from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK
 
-    shape, counts = admitted.shape, admitted.tallies
-    ground_truth, images_dir = admitted.ground_truth, admitted.images_dir
-    if shape == MASK:
-        raise ValueError(
-            f"no trainable samples: none of the {counts['skipped_unannotated']} image(s) "
-            f"in {images_dir} have a <stem>.png mask in {ground_truth}. An image with no mask "
-            f"would train as entirely background, so nothing here admits one. Write the masks, or "
-            f"point data.labels_dir at the directory holding them."
-        )
-    if shape != DOCUMENT:
-        raise ValueError(
-            f"no trainable samples in {ground_truth}: {counts['skipped_no_image']} row(s) "
-            f"name an image that is not under {images_dir}. A row naming no image has nothing to "
-            f"train. Fix the row keys, or point data.images_dir at the directory holding those "
-            f"images."
-        )
-    raise ValueError(
-        f"no trainable samples in {ground_truth}: "
-        f"{counts['skipped_unannotated']} image(s) "
-        f"have no label record and {counts['skipped_unconfirmed_empty']} have an empty one "
-        f"nobody confirmed. An empty label file is a negative only once a human marks that image "
-        f"Complete; until then it reads as unannotated. Annotate some images, or mark the "
-        f"genuinely-empty ones Complete."
-    )
+    fix = {
+        MASK: f"An image needs its <stem>.png mask in {admitted.ground_truth}, since one with "
+              "no mask would train as entirely background. Write the masks, or point "
+              "data.labels_dir at the directory holding them.",
+        DOCUMENT: "An empty label file is a negative only once a human marks that image "
+                  "Complete; until then it reads as unannotated. Annotate some images, or mark "
+                  "the genuinely-empty ones Complete.",
+    }.get(admitted.shape, f"A row needs an image under {admitted.images_dir}. Fix the row keys, "
+                          "or point data.images_dir at the directory holding those images.")
+    raise ValueError(f"no trainable samples in {admitted.ground_truth} over "
+                     f"{admitted.images_dir}: {_refused(admitted.tallies)}. {fix}")
 
 
 @dataclass(frozen=True)
@@ -463,7 +390,8 @@ class Admission:
     ground_truth: str
     records: list[Admitted]
     tallies: dict[str, int]
-    """How many places the admission kept and skipped, by reason; never a foreground count."""
+    """How many places the admission tallied each way (:func:`admits`); never a foreground
+    count."""
     scope: "ClassScope"
     date: str | None = None
 
@@ -503,21 +431,14 @@ def admit(
     COCO, refuses by name. An empty admission is returned as such; :func:`require_admitted` refuses
     it where a non-empty membership is needed.
     """
-    from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK, ClassScope
+    from tcip_mcp.dataset_layout import annotation_date
+    from tcip_mcp.pipelines.data.selection import DOCUMENT, ClassScope
 
     shape = ground_truth_shape(ground_truth)
     admitted = (scope or ClassScope()).admitted_for(shape, f"the run over {ground_truth}")
-    if shape == MASK:
-        records, counts = admitted_masks(ground_truth, images_dir, members)
-    elif shape != DOCUMENT:
-        records, counts = admitted_rows(ground_truth, images_dir, members)
-    else:
-        from tcip_mcp.dataset_layout import annotation_date
-
-        records, counts = admitted_documents(ground_truth, images_dir, members, scope=admitted)
-        return Admission(
-            shape=shape, images_dir=str(images_dir), ground_truth=str(ground_truth),
-            records=records, tallies=counts, scope=admitted, date=annotation_date(ground_truth),
-        )
+    tables: dict[str, dict[str, str]] = {}
+    records, counts = _admission(
+        shape, _candidates(shape, ground_truth, images_dir, members, tables), admitted, tables)
     return Admission(shape=shape, images_dir=str(images_dir), ground_truth=str(ground_truth),
-                     records=records, tallies=counts, scope=admitted)
+                     records=records, tallies=counts, scope=admitted,
+                     date=annotation_date(ground_truth) if shape == DOCUMENT else None)

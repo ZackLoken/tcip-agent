@@ -32,7 +32,7 @@ import math
 import re
 import statistics
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import (
     TYPE_CHECKING, Any, ClassVar, Iterable, Literal, NamedTuple, Optional, Sequence,
@@ -44,6 +44,7 @@ from pydantic import ConfigDict, TypeAdapter
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
 from tcip_store.file_backend import RootedFileLocator
 
+from tcip_mcp.audit import now_iso
 from tcip_mcp.project_paths import project_state_dir
 
 if TYPE_CHECKING:
@@ -872,7 +873,7 @@ def register_plant_registry_record(
             "csvs": csvs_meta,
             "n_plants": n_plants,
             "digest": digest,
-            "registered_at": datetime.now(timezone.utc).isoformat(),
+            "registered_at": now_iso(),
         }
         txn.write(key, record)
     return record
@@ -1250,7 +1251,7 @@ def build_mapping(
         name=name,
         dataset_root=stored_path(dataset_root, project),
         dataset_id=dataset_id,
-        built_at=datetime.now(timezone.utc).isoformat(),
+        built_at=now_iso(),
         dates_requested=list(dates) if dates is not None else None,
         dates=sorted(dates_walked),
         nn_tolerance_m=tolerance,
@@ -1344,9 +1345,10 @@ def _citing_delivery_event_ids(project: Path | str, name: str, digest: str) -> l
         and (event.plant_mapping.name, event.plant_mapping.record_sha256) == (name, digest))
 
 
-def persist_mapping(build: MappingBuild, project: Path | str, *, supersede: bool = False) -> None:
-    """Write the mapping record under ``build.name``, then the receipt that binds it to this
-    build.
+def persist_mapping(build: MappingBuild, project: Path | str, *, supersede: bool = False,
+                    actor: str | None) -> None:
+    """Write the mapping record under ``build.name``, then the receipt by ``actor`` that binds it
+    to this build.
 
     The record is committed before the receipt (a log append cannot join a record transaction): a
     receipt that cannot be written fails loudly (``AuditEntryNotWritten`` propagates) and leaves a
@@ -1397,17 +1399,17 @@ def persist_mapping(build: MappingBuild, project: Path | str, *, supersede: bool
             "record_sha256": record_sha256,
             "supersedes": archived_digest,
         },
-        scope=project,
+        actor=actor, scope=project,
     )
 
 
 def build_plant_mapping(
     project: Path | str, name: str, images_root: Path | str, plant_registry: str, *,
     dates: Optional[list[str]] = None, nn_tolerance_m: Optional[float] = None,
-    supersede: bool = False,
+    supersede: bool = False, actor: str | None,
 ) -> MappingBuild:
     """Map the captures under ``images_root`` to the plants of ``project``'s registry
-    ``plant_registry`` (:func:`build_mapping`) and persist the mapping under ``name``
+    ``plant_registry`` (:func:`build_mapping`) and persist the mapping under ``name`` by ``actor``
     (:func:`persist_mapping`, whose receipt is the act's one audit line); return the build.
 
     Raises ``ValueError`` for a name the key refuses, for an ``images_root`` that is not a
@@ -1430,7 +1432,7 @@ def build_plant_mapping(
         name=name, dataset_root=dataset, dataset_id=identity["id"], project=project,
         plant_registry={"name": plant_registry, "digest": registry["digest"]},
         dates=dates, nn_tolerance_m=nn_tolerance_m)
-    persist_mapping(build, project, supersede=supersede)
+    persist_mapping(build, project, supersede=supersede, actor=actor)
     return build
 
 

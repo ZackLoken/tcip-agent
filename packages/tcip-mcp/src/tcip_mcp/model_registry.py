@@ -15,7 +15,6 @@ import io
 import logging
 import math
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,6 +22,7 @@ import tcip_store
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, check_json_value, register_store
 from tcip_store.file_backend import RootedFileLocator
 
+from tcip_mcp.audit import now_iso
 from tcip_mcp.registry_paths import (
     RegistryPathEmpty,
     RegistryPathTraversal,
@@ -324,7 +324,7 @@ def _audit_entry_write(project_path: str, superseded: dict | None, entry: dict) 
     }
     record_event_or_raise("model_registered",
                           {"name": entry["name"], "new_sha256": entry["sha256"], **replaced},
-                          scope=project_path)
+                          actor=None, scope=project_path)
 
 
 def _resolve_entry_checkpoint(project_path: str, entry: dict) -> dict:
@@ -391,7 +391,7 @@ class ModelRegistry:
             "name": name,
             "checkpoint_path": checkpoint_registry_path_for(ckpt, self._project_path),
             "sha256": admitted_digest(ckpt),
-            "registered_at": datetime.now(timezone.utc).isoformat(),
+            "registered_at": now_iso(),
             "config": config,
             "metrics": metrics or {},
             "tags": tags or [],

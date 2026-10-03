@@ -8,12 +8,16 @@
 
 import { getJson, postJson } from "@/api/http";
 import { ROUTES } from "@/api/routes";
+import type { ATTR_TYPES } from "@/api/types.generated";
 import { subjectColorOverride } from "@/lib/subjectColors";
+
+/** An attribute's kind, as the backend's registry declares them. */
+export type AttrType = (typeof ATTR_TYPES)[number];
 
 /** One attribute of a subject: categorical (unordered) or ordinal (ranked). ``values`` are the
  *  declared value names, in order (the rank order for an ordinal). */
 export interface AttributeDef {
-  type: "categorical" | "ordinal";
+  type: AttrType;
   values: string[];
 }
 
@@ -33,25 +37,28 @@ export const subjectsApi = {
   // The registry lives in the dataset (not the project); pass dataset_root so a shared image
   // set carries its own subject names.
 
-  // The annotations dir is the labels the server scans for a draft registry (detection-only, no
-  // attributes) when no subjects.json is saved yet.
+  // `subjects` is null when no registry is stored; `discovered` names the subjects the labels
+  // under the annotations dir hold either way.
   load: (dataset_root: string, annotations_dir: string | null) => {
     const params = new URLSearchParams({ dataset_root });
     if (annotations_dir) params.set("annotations_dir", annotations_dir);
-    return getJson<{ subjects: Registry; version: string | null; unreadable: string[] }>(
-      `${ROUTES.getSubjectsLoad}?${params.toString()}`,
-    );
+    return getJson<{
+      subjects: Registry | null;
+      discovered: string[];
+      version: string | null;
+      unreadable: string[];
+    }>(`${ROUTES.getSubjectsLoad}?${params.toString()}`);
   },
 
   // `version`: the token `load` returned beside this registry, required on every call.
   // `null` asserts the registry was absent at load, never an unconditional write.
-  save: (subjects: Registry, dataset_root: string, version: string | null) =>
+  save: (subjects: Registry, dataset_root: string, version: string | null, user: string) =>
     postJson<{
       status: string;
       n_subjects: number;
       subjects_path: string;
       version: string;
-    }>(ROUTES.postSubjectsSave, { subjects, dataset_root, version }),
+    }>(ROUTES.postSubjectsSave, { subjects, dataset_root, version, user }),
 };
 
 // High-contrast palette the GUI derives subject/value colors from. Color is GUI-local (the
@@ -104,8 +111,7 @@ let registrySlots: Map<string, number> = new Map();
  *  take their FNV-1a slot when free, else the next free slot going forward (wrapping past the
  *  last). Past `SUBJECT_COLORS.length` names, free slots run out and later names share one again,
  *  exactly as the bare hash always could; a subject's derived color therefore depends on the
- *  registry it sits in, not on its name alone. Called once per registry load (`setRegistry`);
- *  `subjectColor` reads the result, never recomputes it. */
+ *  registry it sits in, not on its name alone. */
 export function setSubjectColorRegistry(subjectNames: Iterable<string>): void {
   const size = SUBJECT_COLORS.length;
   const sorted = Array.from(new Set(subjectNames)).sort();

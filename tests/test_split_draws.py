@@ -22,6 +22,21 @@ def _never_search(ran: list):
     return fake_search
 
 
+def _search(monkeypatch, **answer) -> dict:
+    """Replace ``tune_search`` with a search that records the keywords it ran with into the
+    returned dict and answers finished: no best params, a best value of 0.1, one trial per sample,
+    each overridden by ``answer``."""
+    captured: dict = {}
+
+    def fake_search(**kw):
+        captured.update(kw)
+        return {"best_params": {}, "best_value": 0.1, "n_trials": kw["num_samples"],
+                "study_name": kw["study_name"], "all_trials": [], **answer}
+
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    return captured
+
+
 def test_real_hpo_base_config_is_admitted_by_preflight(tmp_path, real_hpo_base_config):
     """Holds the fixture's own claim: preflight_config, the sweep door's own admissibility
     check, reports the fixture valid with no issues."""
@@ -128,14 +143,7 @@ def test_run_hyperparameter_search_admits_n_trials_not_a_count_at_one_draw_with_
     search is reached and n_trials is passed through unread by the door."""
     import tcip_mcp.tools.training_tools as tt
 
-    captured: dict = {}
-
-    def fake_search(**kw):
-        captured.update(kw)
-        return {"best_params": {}, "best_value": 0.1, "n_trials": kw["num_samples"],
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    captured = _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, n_trials=value, search_seed=0
@@ -444,11 +452,7 @@ def test_run_hyperparameter_search_admits_distinct_split_draw_seeds_beside_the_r
     refusal above, so the refusal is proven to reject only the repeat, not the pair."""
     import tcip_mcp.tools.training_tools as tt
 
-    def fake_search(**kw):
-        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, n_trials=1,
@@ -467,14 +471,7 @@ def test_run_hyperparameter_search_admits_the_paired_path_with_a_param_space_bes
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.pipelines.training.hpo import get_default_space
 
-    captured: dict = {}
-
-    def fake_search(**kw):
-        captured.update(kw)
-        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    captured = _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=get_default_space(),
@@ -494,13 +491,7 @@ def test_run_hyperparameter_search_admits_the_default_space_at_one_draw(
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.pipelines.training.hpo import get_default_space
 
-    captured: dict = {}
-
-    def fake_search(**kw):
-        captured.update(kw)
-        return {"study_name": kw["study_name"]}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    captured = _search(monkeypatch)
 
     space = get_default_space()
     result = tt.run_hyperparameter_search(
@@ -569,14 +560,7 @@ def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection_and_s
                               seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in make_result, make_result
 
-    captured: dict = {}
-
-    def fake_search(**kw):
-        captured.update(kw)
-        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    captured = _search(monkeypatch)
 
     cfg = _bound_hpo_config(selection_dir)
     result = tt.run_hyperparameter_search(tmp_path, base_config=cfg, n_trials=1,
@@ -608,11 +592,7 @@ def test_run_hyperparameter_search_admits_split_draws_bound_with_auto_val_false(
                               seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in make_result, make_result
 
-    def fake_search(**kw):
-        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    _search(monkeypatch)
 
     cfg = _bound_hpo_config(selection_dir, auto_val=False)
     result = tt.run_hyperparameter_search(tmp_path, base_config=cfg, n_trials=1,
@@ -628,14 +608,7 @@ def test_run_hyperparameter_search_admits_split_draws_and_derives_seeds_from_the
     draw index, and the space Ray actually searches carries the paired grid axis."""
     import tcip_mcp.tools.training_tools as tt
 
-    captured: dict = {}
-
-    def fake_search(**kw):
-        captured.update(kw)
-        return {"best_params": {"lr": 0.1}, "best_value": 0.2, "n_trials": 1,
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    captured = _search(monkeypatch, best_params={"lr": 0.1}, best_value=0.2)
 
     result = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=2,
                         scheduler="none", split_draws=3, trial_budget=6, search_seed=0)
@@ -655,14 +628,7 @@ def test_run_hyperparameter_search_admits_split_draws_and_derives_seeds_from_the
 def test_run_hyperparameter_search_admits_split_draws_with_explicit_seeds(tmp_path, real_hpo_base_config, monkeypatch):
     import tcip_mcp.tools.training_tools as tt
 
-    captured: dict = {}
-
-    def fake_search(**kw):
-        captured.update(kw)
-        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    captured = _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=1,
                         scheduler="none", split_draws=2, split_draw_seeds=[7, 99], trial_budget=2, search_seed=0)
@@ -681,14 +647,7 @@ def test_run_hyperparameter_search_admits_split_draws_with_a_native_search_alg(
     under variant_generator."""
     import tcip_mcp.tools.training_tools as tt
 
-    captured: dict = {}
-
-    def fake_search(**kw):
-        captured.update(kw)
-        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    captured = _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=1,
                         search_alg=search_alg, scheduler="none", split_draws=2, trial_budget=budget, search_seed=0)
@@ -708,11 +667,7 @@ def test_run_hyperparameter_search_admits_split_draws_for_instance_seg(tmp_path,
     cfg["data"] = {**detection_images(tmp_path / "polygons", scope, polygons=True),
                    "scope": scope}
 
-    def fake_search(**kw):
-        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(tmp_path, base_config=cfg, n_trials=1,
                         scheduler="none", split_draws=2, trial_budget=2, search_seed=0)
@@ -730,11 +685,7 @@ def test_run_hyperparameter_search_admits_split_draws_with_explicit_auto_val_tru
     cfg = dict(real_hpo_base_config)
     cfg["data"] = {**cfg["data"], "auto_val": True}
 
-    def fake_search(**kw):
-        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(tmp_path, base_config=cfg, n_trials=1,
                         scheduler="none", split_draws=2, trial_budget=2, search_seed=0)
@@ -749,14 +700,7 @@ def test_run_hyperparameter_search_admits_split_draws_with_a_warm_start_not_nami
     baseline over the ordinary space stays admitted."""
     import tcip_mcp.tools.training_tools as tt
 
-    captured: dict = {}
-
-    def fake_search(**kw):
-        captured.update(kw)
-        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    captured = _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, n_trials=1,
@@ -775,14 +719,7 @@ def test_run_hyperparameter_search_admits_a_bare_seed_axis_beside_split_draws(
     admitted beside the draws."""
     import tcip_mcp.tools.training_tools as tt
 
-    captured: dict = {}
-
-    def fake_search(**kw):
-        captured.update(kw)
-        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    captured = _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config,
@@ -873,11 +810,7 @@ def test_run_hyperparameter_search_admits_a_budget_the_count_fits_and_records_it
     trial_budget=6 admits exactly; the manifest records trial_budget verbatim."""
     import tcip_mcp.tools.training_tools as tt
 
-    def fake_search(**kw):
-        return {"best_params": {}, "best_value": 0.1, "n_trials": kw["num_samples"],
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, n_trials=2,
@@ -919,11 +852,7 @@ def test_run_hyperparameter_search_admits_a_one_draw_launch_with_no_stated_budge
     gains the key, null, so a relaunch has something to read back."""
     import tcip_mcp.tools.training_tools as tt
 
-    def fake_search(**kw):
-        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, n_trials=1, scheduler="none", search_seed=0
@@ -957,11 +886,7 @@ def test_run_hyperparameter_search_relaunch_with_no_budget_replays_as_recorded(
 
     _record_source_sweep(tmp_path, "hpo_relaunch_src1", real_hpo_base_config, monkeypatch)
 
-    def fake_search(**kw):
-        return {"best_params": {}, "best_value": 0.1, "n_trials": kw["num_samples"],
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, n_trials=1, scheduler="none",
@@ -1020,11 +945,7 @@ def test_run_hyperparameter_search_admits_the_same_uncountable_space_at_one_draw
     exactly as it does today."""
     import tcip_mcp.tools.training_tools as tt
 
-    def fake_search(**kw):
-        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space={"x": {"type": "categorical"}},
@@ -1119,11 +1040,7 @@ def test_run_hyperparameter_search_an_empty_param_space_above_one_draw_counts_th
     assert "error" in result and "2" in result["error"] and "1 per draw" in result["error"]
     assert not ran
 
-    def fake_search(**kw):
-        return {"best_params": {}, "best_value": 0.1, "n_trials": kw["num_samples"],
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space={}, n_trials=1,
@@ -1154,7 +1071,7 @@ def _two_draw_input(project, real_hpo_base_config) -> dict:
         n_trials=2, search_alg="random", scheduler="none", grace_period=5, reduction_factor=3,
         warm_start=False, baseline_params=None, max_concurrent=1, resources_per_trial=None,
         study_name=None, split_draws=2, split_draw_seeds=[42, 43], search_seed=0,
-        trial_budget=4, relaunched_from=None)
+        trial_budget=4, relaunched_from=None, actor=None)
     assert not isinstance(opened, dict), opened
     return opened.record
 
@@ -1403,11 +1320,7 @@ def test_run_hyperparameter_search_admits_a_single_source_spatial_config_at_one_
     images_dir, labels_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     cfg = _one_source_tiled_cfg(images_dir, labels_dir)
 
-    def fake_search(**kw):
-        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(tmp_path, base_config=cfg, n_trials=1,
                         scheduler="none", split_draws=1, search_seed=0)
@@ -1428,11 +1341,7 @@ def test_run_hyperparameter_search_admits_split_draws_over_a_two_source_tiled_co
     images_dir, labels_dir, _stems = _detection_dataset(tmp_path / "ds")
     cfg = _one_source_tiled_cfg(images_dir, labels_dir)
 
-    def fake_search(**kw):
-        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(tmp_path, base_config=cfg, n_trials=1,
                         scheduler="none", split_draws=2, trial_budget=2, search_seed=0)
@@ -1459,11 +1368,7 @@ def test_split_draws_over_one_bespoke_source_refuse_the_validation_they_cannot_d
     # One source holds nothing out, so the run selects on its training loss.
     cfg["evaluation"] = {"selection_metric": "loss"}
 
-    def fake_search(**kw):
-        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
-                "study_name": kw["study_name"], "all_trials": []}
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(tmp_path, base_config=cfg, n_trials=1,
                         scheduler="none", split_draws=2, trial_budget=2, search_seed=0)

@@ -55,7 +55,7 @@ def test_registry_decodes_its_own_labels(tmp_path):
 
 # (b) a geometry-less annotation round-trips and its image is not collapsed to empty/negative.
 def test_geometryless_annotation_roundtrips_and_marks_image_annotated(tmp_path):
-    from tcip_mcp.pipelines.data.label_queries import admitted_documents
+    from tcip_mcp.pipelines.data.label_queries import admit
 
     _write_registry(tmp_path, Subject(name="bud"))
     images_dir = tmp_path / "images"
@@ -71,12 +71,9 @@ def test_geometryless_annotation_roundtrips_and_marks_image_annotated(tmp_path):
 
     # The image carries a subject annotation, so the admission counts it as annotated rather than
     # as an empty one nobody confirmed; which geometries answer for a measurement is the loader's.
-    records, counts = admitted_documents(labels_dir, images_dir,
-                                         scope=registry_scope(labels_dir, "bud"))
-    assert [record.member for record in records] == ["img_001"]
-    assert counts["annotated"] == 1
-    assert counts["skipped_unannotated"] == 0
-    assert counts["skipped_unconfirmed_empty"] == 0
+    admitted = admit(images_dir, labels_dir, scope=registry_scope(labels_dir, "bud"))
+    assert [record.member for record in admitted.records] == ["img_001"]
+    assert admitted.tallies == {"partial": 1}
 
 
 # (c) the admitted scope carries every attribute the registry declares, in declared order.
@@ -296,7 +293,7 @@ def test_save_annotations_accepts_rings(tmp_path):
 def test_geometryless_only_image_is_refused_by_the_loader_that_reads_no_target_from_it(tmp_path):
     """Never trained as a fabricated zero-object negative: admission asks whether the document
     carries the subject, and the loader owns which geometries answer for its measurement."""
-    from tcip_mcp.pipelines.data.label_queries import admitted_documents
+    from tcip_mcp.pipelines.data.label_queries import admit
 
     from tests._producer_fixtures import dataset_over
 
@@ -311,9 +308,8 @@ def test_geometryless_only_image_is_refused_by_the_loader_that_reads_no_target_f
     # geomless: a bud annotation with NO geometry (an image-level label, not a box).
     json_io.write_annotations(labels_dir / "geomless.json", [Annotation(subject="bud")], 640, 480)
 
-    records, _ = admitted_documents(labels_dir, images_dir,
-                                    scope=registry_scope(labels_dir, "bud"))
-    assert [record.member for record in records] == ["boxed", "geomless"]
+    admitted = admit(images_dir, labels_dir, scope=registry_scope(labels_dir, "bud"))
+    assert [record.member for record in admitted.records] == ["boxed", "geomless"]
 
     with pytest.raises(ValueError, match="only in geometries a detection loader does not read"):
         dataset_over("detection", images_dir, labels_dir, subject="bud")

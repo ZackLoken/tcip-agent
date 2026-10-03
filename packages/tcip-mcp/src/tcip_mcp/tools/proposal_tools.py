@@ -22,7 +22,7 @@ from tcip_annotation.grid import grid_to_rect
 from tcip_annotation.json_io import stored_box_extent_ok
 from tcip_annotation.viz import render_candidates, render_detections
 
-from tcip_mcp.audit import audited
+from tcip_mcp.audit import audited, now_iso
 from tcip_mcp.pipelines.image_utils import (
     BandGroupIncomplete, image_dimensions, resolve_image_path,
 )
@@ -402,8 +402,7 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
 
     # Build name-based predictions (created_by=<engine>, score = the proposal score); each keeps
     # every ring, so an occlusion-split object stays split rather than its largest fragment.
-    from datetime import datetime, timezone
-    staged_at = datetime.now(timezone.utc).isoformat()
+    staged_at = now_iso()
     proposals: list[Annotation] = []
     n_poly = 0
 
@@ -471,7 +470,7 @@ def _stage_document(project: Path, address: StagingAddress, producer: str, image
     bucket = publish(project, out, [Document(str(image), data)],
                      producer={"proposed_by": producer},
                      scope=ClassScope(), execution=None, raster_path=None, raster_identity=None,
-                     assessment_id=None)
+                     assessment_id=None, actor=None)
     return str(bucket.document(image))
 
 
@@ -519,8 +518,7 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: S
         return (any(x < -_PIXEL_MARGIN or x > img_w + _PIXEL_MARGIN for x, _ in ring)
                 or any(y < -_PIXEL_MARGIN or y > img_h + _PIXEL_MARGIN for _, y in ring))
 
-    from datetime import datetime, timezone
-    created_at = datetime.now(timezone.utc).isoformat()
+    created_at = now_iso()
 
     # Each polygon carries exactly one of two keys, folded into pixel-space rings as it is parsed;
     # the fold needs img_w/img_h, resolved above.

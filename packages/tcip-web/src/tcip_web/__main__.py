@@ -1,8 +1,8 @@
 """Entry point: ``python -m tcip_web``.
 
 Resolves the workspace ``TCIP_WORKSPACE`` names once, binds the loopback address at
-``TCIP_WEB_PORT`` (default 8765), publishes the chosen port under the workspace so MCP tools in
-other processes can discover the backend, and serves the app configured with that workspace.
+``TCIP_WEB_PORT`` (default 8765), records the port it bound under the workspace, then serves the
+app configured with that workspace.
 """
 
 from __future__ import annotations
@@ -14,7 +14,10 @@ import uvicorn
 from tcip_store import replace
 from tcip_store.binding import bind_default
 
-from tcip_mcp.web_client import BACKEND_HOST, DEFAULT_PORT, backend_port_key
+from tcip_mcp.web_client import BACKEND_HOST, backend_port_key
+
+DEFAULT_PORT = 8765
+"""The port asked for when ``TCIP_WEB_PORT`` is unset."""
 
 
 def _pick_port(host: str, requested: int) -> int:

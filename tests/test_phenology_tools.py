@@ -21,7 +21,8 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     NEAREST_MATCH_FACTOR,
     plant_mapping_key,
 )
-from tcip_mcp.tools.phenology_tools import build_plant_mapping, deliver_phenology_milestones
+from tcip_mcp.tools.phenology_tools import build_plant_mapping
+from tests._chain_fixtures import deliver_milestones
 
 
 def _plant_csv(path: Path) -> None:
@@ -107,14 +108,6 @@ def test_build_plant_mapping_missing_registry(tmp_path: Path) -> None:
 # ── deliver_phenology_milestones over a published, assessed series ─────────────────────────
 
 
-def _deliver(project: Path, body: dict, out_csv: Path, **overrides) -> dict:
-    return deliver_phenology_milestones(
-        project, trait=overrides.get("trait", body["trait"]),
-        mapping_name=overrides.get("mapping_name", body["mapping_name"]),
-        buckets=overrides.get("buckets", body["buckets"]),
-        output_csv_path=str(out_csv), plants=overrides.get("plants", body["plants"]))
-
-
 def _rows(out_csv: Path) -> list[dict]:
     with out_csv.open(newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
@@ -130,7 +123,7 @@ def test_an_assessed_series_delivers_validated_milestones_under_its_revision(tmp
     series = attributed_series(tmp_path)
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
-    res = _deliver(tmp_path, series.body(), out_csv)
+    res = deliver_milestones(tmp_path, series.body(), out_csv)
 
     assert "error" not in res, res
     revision = latest_confirmed("bud_opening", tmp_path)
@@ -157,7 +150,7 @@ def test_the_delivery_line_lands_in_the_log_of_the_dataset_its_buckets_sit_in(tm
     from tests._chain_fixtures import attributed_series
 
     series = attributed_series(tmp_path, fractions=(0.0, 1.0))
-    res = _deliver(tmp_path, series.body(), tmp_path / "out" / "bud.csv")
+    res = deliver_milestones(tmp_path, series.body(), tmp_path / "out" / "bud.csv")
     assert "error" not in res, res
 
     (event,) = read_delivery_events(tmp_path)
@@ -175,7 +168,7 @@ def test_an_unassessed_series_refuses_at_the_door_that_takes_no_acknowledgment(t
     body = attributed_series(tmp_path, fractions=(0.0, 1.0), assessed=False).body()
     out_csv = tmp_path / "out" / "bud.csv"
 
-    res = _deliver(tmp_path, body, out_csv)
+    res = deliver_milestones(tmp_path, body, out_csv)
 
     assert "no assessment answers" in res["error"], res
     assert not out_csv.exists()
@@ -192,7 +185,7 @@ def test_an_unreadable_prediction_document_is_reported_by_name(tmp_path: Path):
     bad = Path(series.buckets[date]) / f"PLANT_A_{date}_0.json"
     bad.write_text("not json {][", encoding="utf-8")
 
-    res = _deliver(tmp_path, series.body(), tmp_path / "out" / "bud.csv")
+    res = deliver_milestones(tmp_path, series.body(), tmp_path / "out" / "bud.csv")
 
     assert str(bad) in res["error"], res
 
@@ -212,7 +205,7 @@ def test_predictions_that_never_classified_the_positive_state_refuse(tmp_path: P
                                   results, scope={"subject": "bud"}).path))
     out_csv = tmp_path / "out" / "bud.csv"
 
-    res = _deliver(tmp_path, series.body(), out_csv, buckets=bare)
+    res = deliver_milestones(tmp_path, series.body(buckets=bare), out_csv)
 
     assert "classify no opening='open'" in res["error"], res
     assert not out_csv.exists()
@@ -238,10 +231,12 @@ def test_each_bucket_stands_for_the_date_its_record_states_and_two_on_one_date_r
     assert "error" not in published, published
     assert published["date"] == second
 
-    shipped = _deliver(tmp_path, series.body(), tmp_path / "out" / "a.csv",
-                       buckets=[series.buckets[first], str(misnamed)])
-    both = _deliver(tmp_path, series.body(), tmp_path / "out" / "b.csv",
-                    buckets=[*series.buckets.values(), str(misnamed)])
+    shipped = deliver_milestones(
+        tmp_path, series.body(buckets=[series.buckets[first], str(misnamed)]),
+        tmp_path / "out" / "a.csv")
+    both = deliver_milestones(
+        tmp_path, series.body(buckets=[*series.buckets.values(), str(misnamed)]),
+        tmp_path / "out" / "b.csv")
 
     assert "error" not in shipped, shipped
     assert _rows(tmp_path / "out" / "a.csv")[0]["n_dates"] == "2"
@@ -255,8 +250,9 @@ def test_a_missing_mapping_and_an_unknown_trait_each_refuse(tmp_path: Path):
 
     body = attributed_series(tmp_path, fractions=(0.0, 1.0)).body()
 
-    missing = _deliver(tmp_path, body, tmp_path / "a.csv", mapping_name="nope")
-    unknown = _deliver(tmp_path, body, tmp_path / "b.csv", trait="not-a-real-trait")
+    missing = deliver_milestones(tmp_path, {**body, "mapping_name": "nope"}, tmp_path / "a.csv")
+    unknown = deliver_milestones(tmp_path, {**body, "trait": "not-a-real-trait"},
+                                 tmp_path / "b.csv")
 
     assert "not found" in missing["error"]
     assert "error" in unknown

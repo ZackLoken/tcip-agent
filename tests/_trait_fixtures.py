@@ -105,9 +105,11 @@ def propose(project_root: Path, proposed: TraitEntry, *, dataset_root: str = "")
 
 def confirm(project_root: Path, revision: TraitRevision, *, user: str = "grüne") -> TraitRevision:
     """Confirm ``revision`` the way the Setup tab posts it: by number and the hash it showed."""
+    from tcip_mcp.identity import actor
+
     return traits.confirm_revision(
         project_root, revision.entry.name, revision.number, revision.entry_sha256,
-        user=user, confirmed=True)
+        actor=actor(user), confirmed=True)
 
 
 def propose_and_confirm(project_root: Path, proposed: TraitEntry) -> TraitRevision:

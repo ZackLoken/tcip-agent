@@ -32,6 +32,7 @@ from typing import Any, BinaryIO
 import tcip_store
 from tcip_store import LOG_JSON, RECORD_JSON, BadKey, DecodeError, check_json_value
 
+from tcip_mcp.audit import now_iso
 from tcip_mcp.pipelines.data.selection import SAMPLE_PATHS
 from tcip_mcp.registry_paths import PathFields, recorded_paths, runtime_paths, within
 
@@ -137,11 +138,6 @@ def find_run(experiment_id: str, *, project: Path | str) -> Path | None:
 def mint_experiment_id(prefix: str = "run") -> str:
     """A fresh run id: ``<prefix>_<epoch-seconds>_<6 hex chars>``."""
     return f"{prefix}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
-
-
-def now_iso() -> str:
-    """The current instant as an ISO-8601 UTC string."""
-    return datetime.now(timezone.utc).isoformat()
 
 
 # ── the files ────────────────────────────────────────────────────────────────
@@ -519,6 +515,16 @@ def _split_summary(resolved: dict) -> dict[str, Any]:
     return {"case": "drawn", "seed": partition["seed"]}
 
 
+def _row_instant(row: dict, experiment_id: str) -> datetime:
+    """A metric row's own ``timestamp`` as an instant. Refuses (``ValueError``) a row whose
+    timestamp is absent or does not decode, naming the row and the run."""
+    try:
+        return datetime.fromisoformat(row["timestamp"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"metric row {row} of {experiment_id} carries no decodable timestamp "
+                         f"({exc!r}); the run's metrics log cannot be compared") from exc
+
+
 def compare_experiments(experiment_ids: list[str], *, project: Path | str) -> dict[str, Any]:
     """Side-by-side comparison of training runs.
 
@@ -552,14 +558,13 @@ def compare_experiments(experiment_ids: list[str], *, project: Path | str) -> di
         }
         if metrics:
             summary["last_logged_metrics"] = metrics[-1]
-        rows_after_end = None
-        if final is not None:
-            ended = datetime.fromisoformat(final["ended"])
-            rows_after_end = sum(
-                1 for row in metrics
-                if isinstance(row.get("timestamp"), str)
-                and datetime.fromisoformat(row["timestamp"]) > ended
-            )
+        try:
+            instants = [_row_instant(row, eid) for row in metrics]
+        except ValueError as exc:
+            comparisons.append({"experiment_id": eid, "error": str(exc)})
+            continue
+        rows_after_end = None if final is None else sum(
+            1 for at in instants if at > datetime.fromisoformat(final["ended"]))
         summary["rows_after_end"] = rows_after_end
         summary["status_error"] = final["error"] if final is not None else None
         entry = run_entry(observation)

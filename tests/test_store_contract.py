@@ -705,6 +705,23 @@ def test_a_reader_interleaved_between_the_unlink_and_the_watermark_install_reads
     assert not marker_exists
 
 
+class _SimulatedCrash(Exception):
+    """A process dying right after one backend step."""
+
+
+def _crash_after(monkeypatch, backend, step: str):
+    """Make ``backend``'s ``step`` run and then raise :class:`_SimulatedCrash`; returns the real
+    step."""
+    real = getattr(backend, step)
+
+    def crashing(*args, **kwargs):
+        real(*args, **kwargs)
+        raise _SimulatedCrash
+
+    monkeypatch.setattr(backend, step, crashing)
+    return real
+
+
 def test_a_crash_after_the_unlink_replays_no_entry(store, monkeypatch):
     """A process that dies right after the unlink commits, before the pending watermark is
     installed onto the marker, must leave a state a later, fully independent read_log call
@@ -720,16 +737,7 @@ def test_a_crash_after_the_unlink_replays_no_entry(store, monkeypatch):
     path = store.path(key)
     old_size = path.stat().st_size
 
-    class _SimulatedCrash(Exception):
-        pass
-
-    real_remove = backend._remove_entry
-
-    def crash_after_remove(*args, **kwargs):
-        real_remove(*args, **kwargs)
-        raise _SimulatedCrash
-
-    monkeypatch.setattr(backend, "_remove_entry", crash_after_remove)
+    _crash_after(monkeypatch, backend, "_remove_entry")
 
     with pytest.raises(_SimulatedCrash):
         ts.clear_log(key)
@@ -758,16 +766,7 @@ def test_a_crash_after_the_unlink_then_new_entries_replays_only_the_new_ones(
     before = ts.read_log(key)
     old_end = int(before.cursor)
 
-    class _SimulatedCrash(Exception):
-        pass
-
-    real_remove = backend._remove_entry
-
-    def crash_after_remove(*args, **kwargs):
-        real_remove(*args, **kwargs)
-        raise _SimulatedCrash
-
-    monkeypatch.setattr(backend, "_remove_entry", crash_after_remove)
+    _crash_after(monkeypatch, backend, "_remove_entry")
 
     with pytest.raises(_SimulatedCrash):
         ts.clear_log(key)
@@ -805,16 +804,7 @@ def test_a_crash_after_staging_the_pending_watermark_abandons_it_on_the_next_app
         ts.append(key, {"i": i})
     path = store.path(key)
 
-    class _SimulatedCrash(Exception):
-        pass
-
-    real_write_pending = backend._write_pending_clear_base
-
-    def crash_after_write(*args, **kwargs):
-        real_write_pending(*args, **kwargs)
-        raise _SimulatedCrash
-
-    monkeypatch.setattr(backend, "_write_pending_clear_base", crash_after_write)
+    _crash_after(monkeypatch, backend, "_write_pending_clear_base")
 
     with pytest.raises(_SimulatedCrash):
         ts.clear_log(key)
@@ -845,16 +835,7 @@ def test_a_second_clear_log_after_a_crash_mid_staging_clears_normally(store, mon
     path = store.path(key)
     old_size = path.stat().st_size
 
-    class _SimulatedCrash(Exception):
-        pass
-
-    real_write_pending = backend._write_pending_clear_base
-
-    def crash_after_write(*args, **kwargs):
-        real_write_pending(*args, **kwargs)
-        raise _SimulatedCrash
-
-    monkeypatch.setattr(backend, "_write_pending_clear_base", crash_after_write)
+    real_write_pending = _crash_after(monkeypatch, backend, "_write_pending_clear_base")
 
     with pytest.raises(_SimulatedCrash):
         ts.clear_log(key)
@@ -888,16 +869,7 @@ def test_settling_through_append_after_a_crash_installs_the_pending_watermark(
     path = store.path(key)
     old_size = path.stat().st_size
 
-    class _SimulatedCrash(Exception):
-        pass
-
-    real_remove = backend._remove_entry
-
-    def crash_after_remove(*args, **kwargs):
-        real_remove(*args, **kwargs)
-        raise _SimulatedCrash
-
-    monkeypatch.setattr(backend, "_remove_entry", crash_after_remove)
+    _crash_after(monkeypatch, backend, "_remove_entry")
 
     with pytest.raises(_SimulatedCrash):
         ts.clear_log(key)
@@ -927,16 +899,7 @@ def test_a_second_clear_log_after_a_crash_settles_and_returns_zero(store, monkey
     path = store.path(key)
     old_size = path.stat().st_size
 
-    class _SimulatedCrash(Exception):
-        pass
-
-    real_remove = backend._remove_entry
-
-    def crash_after_remove(*args, **kwargs):
-        real_remove(*args, **kwargs)
-        raise _SimulatedCrash
-
-    monkeypatch.setattr(backend, "_remove_entry", crash_after_remove)
+    real_remove = _crash_after(monkeypatch, backend, "_remove_entry")
 
     with pytest.raises(_SimulatedCrash):
         ts.clear_log(key)
@@ -1101,13 +1064,8 @@ def test_clear_log_repairs_a_torn_tail_before_counting_and_removing(store):
 
 
 def test_a_committed_entry_is_never_a_torn_tail_and_a_damaged_one_is_still_reported(store):
-    """What replaces the torn-tail cases where an entry is a row rather than a line of a file.
-
-    An entry is committed or it is not there, so no read can catch a partial one and
-    ``torn_tail`` is structurally False. ``corrupt`` still has to answer, because the tuning
-    route branches on both fields and a metrics stream that drops a row and one that says it
-    dropped a row are different things.
-    """
+    """Where an entry is a row, it is committed or not there, so ``torn_tail`` is always False,
+    and ``corrupt`` still names a damaged entry."""
     only_on(store, SQLITE, "there is no partial row for a reader to catch, which is the fact "
                            "this pins; the cases above pin the file backend's torn tail")
     key = store.key(LOG, "damaged")
@@ -2035,8 +1993,9 @@ REGISTERED = {
         LABEL_BYTES, lambda root: json_io.annotation_record_key(_generic_label_dir(root), "a_1"),
         "labels/a_1.json", root_of=_generic_label_dir),
     "annotation_stats": Registered(
-        {"sessions": [{"user": "ü", "images_annotated": 1, "total_annotations": 3,
-                       "total_time_seconds": 42.5}]},
+        {"sessions": [{"user": "user:ü", "started": "2026-02-01T10:00:00+00:00", "ended": None,
+                       "entries": [{"image_name": "a.jpg", "seconds": 42.5,
+                                    "annotations_added": 3, "activity": "new_annotation"}]}]},
         lambda root: web_client.annotation_stats_key(str(root)), ".tcip/state/annotation_stats.json"),
     "band_group_manifest": Registered(
         BAND_GROUP_MANIFEST_BYTES,

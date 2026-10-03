@@ -51,8 +51,8 @@ def _meta(root: Path) -> dict | None:
     return tcip_store.read(canvas_meta_key(str(root)), default=None)
 
 
-def _shapes_doc(root: Path) -> dict:
-    return tcip_store.read(canvas_geometry_key(str(root)))
+def _shapes_doc(root: Path) -> dict | None:
+    return tcip_store.read(canvas_geometry_key(str(root)), default=None)
 
 
 A_IMG, B_IMG = "C:/img/a.jpg", "C:/img/b.jpg"
@@ -121,6 +121,16 @@ def test_a_push_while_no_project_is_open_is_answered_as_a_mismatch(client, proje
     assert r.status_code == 409
     assert r.json()["detail"]["open_project_id"] is None
     assert _meta(project) is None
+
+
+def test_a_push_naming_no_one_is_refused_before_anything_is_written(client, opened_project):
+    """A push may state no person, but one stating a person must name one: a blank name is
+    refused before the geometry or the meta document is written."""
+    r = client.post("/api/canvas/state",
+                    json={**_payload(opened_project, A_IMG, shapes=SHAPES), "user": "  "})
+
+    assert r.status_code == 400
+    assert _shapes_doc(opened_project) is None and _meta(opened_project) is None
 
 
 def test_a_push_naming_a_project_root_refuses_as_an_unknown_field(client, opened_project):
@@ -353,19 +363,19 @@ def _write_state(project: Path, img: str, shapes=SHAPES, *, shapes_image: str | 
                  cut_armed: bool | None = None) -> None:
     """The two documents the push route writes, in the shape it writes them: the image path
     spelled against the project the way the route stores it."""
-    import time
-
+    from tcip_mcp.audit import now_iso
     from tcip_mcp.registry_paths import stored_path
 
     root = str(project)
     stored = stored_path(img, project)
+    now = now_iso()
     if shapes is not None:
         tcip_store.replace(canvas_geometry_key(root), {
             "image_path": stored_path(shapes_image, project) if shapes_image else stored,
-            "tab": shapes_tab or tab, "shapes": shapes, "received_at": time.time(),
+            "tab": shapes_tab or tab, "shapes": shapes, "received_at": now,
         })
     tcip_store.replace(canvas_meta_key(root), {
-        "received_at": time.time(), "tab": tab,
+        "received_at": now, "tab": tab,
         "image": Path(img).name, "image_path": stored,
         "viewport": {"x": 0, "y": 0, "w": 200, "h": 100}, "user": "breeder", "mode": "polygon",
         "cut_armed": cut_armed,

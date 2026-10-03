@@ -226,7 +226,8 @@ class TrainContext:
         the body produced, so a diverged loss keeps comparing as the worst one. A row JSON cannot
         hold raises, naming the field.
         """
-        from tcip_mcp.experiments import METRICS_FILE, append_row, now_iso, require_open
+        from tcip_mcp.audit import now_iso
+        from tcip_mcp.experiments import METRICS_FILE, append_row, require_open
         from tcip_mcp.pipelines.training.generic_trainer import _checkpoint_metrics
 
         require_open(self.run_dir)
@@ -363,7 +364,7 @@ def run_training_envelope(ctx: TrainContext) -> None:
     run = ctx.run
     audit_args = {"experiment_id": run.id, "task": ctx.task}
 
-    record_event("training_run", audit_args, status="running", scope=run.project)
+    record_event("training_run", audit_args, actor=None, status="running", scope=run.project)
     t0 = time.monotonic()
     try:
         dispatch_train_body(ctx)
@@ -377,7 +378,7 @@ def run_training_envelope(ctx: TrainContext) -> None:
         _finalize_run(ctx)
     finally:
         record_event("training_run", {**audit_args, **stored_number("best_metric", run.best_metric)},
-                     status=run.status or "failed", scope=run.project,
+                     actor=None, status=run.status or "failed", scope=run.project,
                      duration_ms=round((time.monotonic() - t0) * 1000, 1))
 
 

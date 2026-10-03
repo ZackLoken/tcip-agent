@@ -13,29 +13,21 @@ import pytest
 torch = pytest.importorskip("torch")
 
 
-class _OneBoxPredictor:
-    task = "detection"
-    in_chans = 3
-
-    def predict_batch(self, paths, execution=None, **kw):
-        return [{"image": str(p), "width": 160, "height": 120, "boxes": [[10, 10, 30, 30]],
-                 "scores": [0.95], "labels": [1], "count": 1, "cap_hit": False} for p in paths]
-
-
 def _publish(tmp_path, monkeypatch, **stated) -> dict:
     """``run_inference`` over one dated capture of the dataset ``dataset``, its predictor
     stubbed."""
     from PIL import Image
 
-    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
+    from tests._predictor_fixtures import StubPredictor, install
     from tests._verified_checkpoint_fixtures import project_checkpoint
 
     images_dir = tmp_path / "dataset" / "images" / "2026-03-01"
     images_dir.mkdir(parents=True)
     Image.new("RGB", (160, 120), color=(70, 90, 110)).save(images_dir / "capture_a.png")
-    monkeypatch.setattr(predictor_mod, "GenericPredictor", lambda *a, **kw: _OneBoxPredictor())
+    install(monkeypatch, StubPredictor(width=160, height=120, scores=(0.95,), task="detection",
+                                       in_chans=3))
     return run_inference(tmp_path, project_checkpoint(tmp_path), images_dir=str(images_dir),
                          output_dir=str(tmp_path / "dataset" / "predictions" / "baseline"
                                         / "2026-03-01"), device="cpu", stated=Stated(**stated))

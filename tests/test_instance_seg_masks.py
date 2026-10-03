@@ -265,7 +265,7 @@ def test_a_masked_bucket_delivers_the_same_counts_on_every_read(instance_seg_ckp
         out = tmp_path / f"{name}.csv"
         acknowledged(tmp_path, lambda ack: deliver_per_image_counts_csv(
             tmp_path, bucket, str(out), trait=fx.COUNT_TRAIT, acknowledgment_id=ack,
-            door="test_instance_seg"))
+            door="test_instance_seg", actor=None))
         rows.append([{k: v for k, v in r.items() if k != "delivery_event_id"}
                      for r in csv.DictReader(out.open(newline="", encoding="utf-8"))])
 
@@ -345,7 +345,7 @@ def _encoded(result: dict) -> tuple[list, int]:
     from tcip_annotation.json_io import annotations_from_bytes
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
-    data, dropped = encode_predictions(result, scope=LEAF)
+    data, dropped = encode_predictions(result, "model:fixture", scope=LEAF)
     return annotations_from_bytes(data, source=result["image"]), dropped
 
 

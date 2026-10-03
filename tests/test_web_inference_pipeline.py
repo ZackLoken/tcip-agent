@@ -1,11 +1,11 @@
-"""The web inference job runs through the tcip pipeline GenericPredictor, the only detector
-code path; there is no separate ultralytics+SAHI-specific one."""
+"""The web inference job runs through the pipeline's GenericPredictor."""
 
 from pathlib import Path
 
 import pytest
 
 from tcip_mcp.pipelines.execution import Stated
+from tests._predictor_fixtures import BOX, StubPredictor, install
 
 
 def _checkpoint(project: Path, **kwargs) -> Path:
@@ -26,7 +26,7 @@ def test_encode_predictions_roundtrip_and_negative(tmp_path):
     encoded, _dropped = encode_predictions({
         "image": "img.jpg", "width": 100, "height": 100,
         "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1,
-    }, scope=scope)
+    }, "model:fixture", scope=scope)
     ann = json.loads(encoded)["annotations"][0]
     assert ann["subject"] == "bud"                       # the scope's one subject
     assert ann["bbox"] == [10.0, 10.0, 20.0, 20.0]
@@ -37,7 +37,7 @@ def test_encode_predictions_roundtrip_and_negative(tmp_path):
     # Negative invariant: a zero-detection image still yields an {"annotations": []} record.
     empty, _dropped = encode_predictions({"image": "empty.jpg", "width": 100, "height": 100,
                                           "boxes": [], "scores": [], "labels": [], "count": 0},
-                                         scope=scope)
+                                         "model:fixture", scope=scope)
     assert json.loads(empty)["annotations"] == []
 
 
@@ -53,28 +53,12 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
     out_dir = tmp_path / "out"
     ckpt = _checkpoint(tmp_path)
 
-    captured = {}
-
-    class FakePredictor:
-        # A tiled run clears the worker's tile-geometry delivery gate only on a real basis for the
-        # scale; this checkpoint persisted its own training geometry.
-        train_tile_size = 640
-
-        def __init__(self, checkpoint_path=None, **kwargs):
-            captured["checkpoint"] = getattr(checkpoint_path, "path", checkpoint_path)
-            captured["kwargs"] = kwargs
-
-        def predict_batch(self, paths, execution=None, **kw):
-            captured["execution"] = execution
-            return [{"image": p, "width": 100, "height": 100,
-                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
-                     "count": 1, "cap_hit": False} for p in paths]
-
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
+    # A tiled run clears the worker's tile-geometry delivery gate only on a real basis for the
+    # scale; this checkpoint persisted its own training geometry.
+    predictor = install(monkeypatch, StubPredictor(train_tile_size=640))
 
     job = InferenceJob(
-        project=str(tmp_path), job_id="t", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        actor="user:tester", project=str(tmp_path),job_id="t", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), stated=Stated(
             tile=True, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nmm"),
     )
@@ -82,9 +66,10 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
 
     assert job.status == "completed"
     assert job.done == 1 and job.total == 1
-    assert captured["checkpoint"] == str(ckpt)
-    assert captured["execution"].tile_size == 640    # tile=True -> pipeline tiling
-    assert captured["execution"].postprocess == "nmm"  # the GUI's merge choice reaches inference
+    assert predictor.checkpoint == str(ckpt)
+    (execution,) = predictor.executions
+    assert execution.tile_size == 640    # tile=True -> pipeline tiling
+    assert execution.postprocess == "nmm"  # the GUI's merge choice reaches inference
     import hashlib
     import json
 
@@ -114,20 +99,10 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_scope(tmp_path, monkeyp
                        registry=cr.SubjectRegistry(subjects=(
                            cr.Subject(name="bud", attributes=(opening,)),)))
 
-    class FakePredictor:
-        def __init__(self, checkpoint_path=None, **kwargs):
-            pass
-
-        def predict_batch(self, paths, execution=None, **kw):
-            return [{"image": p, "width": 100, "height": 100,
-                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
-                     "attributes": [[1]], "count": 1, "cap_hit": False} for p in paths]
-
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
+    install(monkeypatch, StubPredictor(attributes=[[1]]))
 
     job = InferenceJob(
-        project=str(tmp_path), job_id="t3", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        actor="user:tester", project=str(tmp_path),job_id="t3", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), stated=Stated(
             tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nms"),
     )
@@ -147,8 +122,7 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_scope(tmp_path, monkeyp
 
 def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, monkeypatch):
     """An instance_seg checkpoint launched with the GUI's tile checkbox checked runs tiled as
-    requested: tiled inference now threads masks through the cross-tile reconstruction/merge, so
-    this door no longer needs to silently override the breeder's own checkbox choice."""
+    requested, its stated merge threshold recorded as stated."""
     pytest.importorskip("fastapi")
     from PIL import Image
 
@@ -160,33 +134,18 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, mo
     out_dir = tmp_path / "out"
     ckpt = _checkpoint(tmp_path)
 
-    captured = {}
-
-    class FakeInstanceSegPredictor:
-        task = "instance_seg"
-        train_tile_size = 640  # a real basis for the tile scale, or the delivery gate refuses
-
-        def __init__(self, checkpoint_path=None, **kwargs):
-            pass
-
-        def predict_batch(self, paths, execution=None, **kw):
-            captured["execution"] = execution
-            return [{"image": p, "width": 100, "height": 100,
-                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
-                     "count": 1, "cap_hit": False} for p in paths]
-
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakeInstanceSegPredictor)
+    # A real basis for the tile scale, or the delivery gate refuses.
+    predictor = install(monkeypatch, StubPredictor(task="instance_seg", train_tile_size=640))
 
     job = InferenceJob(
-        project=str(tmp_path), job_id="t3", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        actor="user:tester", project=str(tmp_path),job_id="t3", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), stated=Stated(
             tile=True, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nms"),
     )
     _worker(job)
 
     assert job.status == "completed"        # no crash
-    assert captured["execution"].tiled       # the breeder's own checkbox choice is honored
+    assert predictor.executions[0].tiled     # the breeder's own checkbox choice is honored
     assert job.stated.tile is True
     from tcip_mcp.buckets import read_bucket
 
@@ -211,34 +170,19 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
     ckpt = _checkpoint(tmp_path)
-    captured = {}
-
-    class FakeNativeFramePredictor:
-        task = "detection"
-        train_tile_size = None
-        train_native_size = [64, 64]
-        train_augmentation = {"resize": [128, 128]}
-
-        def __init__(self, checkpoint_path=None, **kwargs):
-            pass
-
-        def predict_batch(self, paths, execution=None, **kw):
-            captured["execution"] = execution
-            return [{"image": p, "count": 0, "width": 100, "height": 100, "boxes": [],
-                     "scores": [], "labels": [], "cap_hit": False} for p in paths]
-
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakeNativeFramePredictor)
+    predictor = install(monkeypatch, StubPredictor(
+        boxes=(), scores=(), task="detection", train_tile_size=None, train_native_size=[64, 64],
+        train_augmentation={"resize": [128, 128]}))
 
     job = InferenceJob(
-        project=str(tmp_path), job_id="t4", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        actor="user:tester", project=str(tmp_path),job_id="t4", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(tmp_path / "out"), stated=Stated(
             tile=True, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nms"),
     )
     _worker(job)
 
     assert job.status == "completed", job.error
-    execution = captured["execution"]
+    (execution,) = predictor.executions
     assert (execution.tile_size, execution.tile_resize) == (64, (128, 128))
     assert execution.sources["tile_size"] == "native_ratio"
 
@@ -250,18 +194,7 @@ def _stub_predictor_for_conf_source(monkeypatch, tmp_path):
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
     ckpt = _checkpoint(tmp_path)
-
-    class FakePredictor:
-        def __init__(self, checkpoint_path=None, **kwargs):
-            pass
-
-        def predict_batch(self, paths, execution=None, **kw):
-            return [{"image": p, "width": 100, "height": 100,
-                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
-                     "count": 1, "cap_hit": False} for p in paths]
-
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
+    install(monkeypatch, StubPredictor())
     return str(ckpt), str(images_dir)
 
 
@@ -284,7 +217,7 @@ def test_web_worker_stamps_explicit_conf_and_max_dets_source_at_the_platform_def
     out_dir = tmp_path / "out"
 
     job = InferenceJob(
-        project=str(tmp_path), job_id="conf-explicit", checkpoint_path=ckpt, images_dir=images_dir,
+        actor="user:tester", project=str(tmp_path),job_id="conf-explicit", checkpoint_path=ckpt, images_dir=images_dir,
         output_dir=str(out_dir), stated=Stated(
             tile=False, conf=DEFAULT_CONF, cross_tile_nms=0.7, max_dets=DEFAULT_MAX_DETS),
     )
@@ -307,7 +240,7 @@ def test_web_worker_stamps_default_conf_and_max_dets_source_when_unstated(tmp_pa
     out_dir = tmp_path / "out"
 
     job = InferenceJob(
-        project=str(tmp_path), job_id="conf-default", checkpoint_path=ckpt, images_dir=images_dir,
+        actor="user:tester", project=str(tmp_path),job_id="conf-default", checkpoint_path=ckpt, images_dir=images_dir,
         output_dir=str(out_dir), stated=Stated(tile=False, cross_tile_nms=0.7),
     )
     _worker(job)
@@ -339,23 +272,11 @@ def test_web_worker_n_detections_agrees_with_the_persisted_document_on_a_degener
     out_dir = tmp_path / "out"
     ckpt = _checkpoint(tmp_path)
 
-    class FakePredictor:
-        train_tile_size = 640
-
-        def __init__(self, checkpoint_path=None, **kwargs):
-            pass
-
-        def predict_batch(self, paths, execution=None, **kw):
-            return [{"image": p, "width": 100, "height": 100,
-                     "boxes": [[10.0, 10.0, 30.0, 30.0], [50.0, 50.0, 50.0, 60.0]],
-                     "scores": [0.9, 0.4], "labels": [1, 1], "count": 2, "cap_hit": False}
-                    for p in paths]
-
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
+    install(monkeypatch, StubPredictor(boxes=(BOX, (50.0, 50.0, 50.0, 60.0)), scores=(0.9, 0.4),
+                                       train_tile_size=640))
 
     job = InferenceJob(
-        project=str(tmp_path), job_id="degenerate", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        actor="user:tester", project=str(tmp_path),job_id="degenerate", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), stated=Stated(
             tile=True, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nmm"),
     )
@@ -374,7 +295,7 @@ def test_web_worker_n_detections_agrees_with_the_persisted_document_on_a_degener
 
     monkeypatch.setattr(audit_module, "append", unwritable)
     gap = InferenceJob(
-        project=str(tmp_path), job_id="degenerate-gap", checkpoint_path=str(ckpt),
+        actor="user:tester", project=str(tmp_path),job_id="degenerate-gap", checkpoint_path=str(ckpt),
         images_dir=str(images_dir), output_dir=str(tmp_path / "out-gap"), stated=job.stated)
     _worker(gap)
 
@@ -398,7 +319,7 @@ def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path):
     ckpt = _checkpoint(tmp_path)
 
     job = InferenceJob(
-        project=str(tmp_path), job_id="collision", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        actor="user:tester", project=str(tmp_path),job_id="collision", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(tmp_path / "out"), stated=Stated(
             tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nms"),
     )

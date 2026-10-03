@@ -65,7 +65,7 @@ def _deliver_counts(root: Path, name: str) -> dict:
     bucket = _bucket(root)
     acknowledged(root, lambda ack: deliver_per_image_counts_csv(
         root, bucket, str(out), trait=fx.COUNT_TRAIT, acknowledgment_id=ack,
-        door="test_trait_revisions"), by="user:tester", reason="no assessment backs these counts")
+        door="test_trait_revisions", actor=None), by="user:tester", reason="no assessment backs these counts")
     (event,) = [e for e in read_delivery_events(root) if e.output_path == str(out)]
     return event.model_dump(mode="json")
 
@@ -154,7 +154,8 @@ def test_a_withdrawn_confirmation_marks_the_revision_and_leaves_the_entry(tmp_pa
     revision = fx.propose_and_confirm(tmp_path, _count_entry())
 
     withdrawn = traits.confirm_revision(
-        tmp_path, fx.COUNT_TRAIT, 1, revision.entry_sha256, user="rosalind", confirmed=False)
+        tmp_path, fx.COUNT_TRAIT, 1, revision.entry_sha256, actor="user:rosalind",
+        confirmed=False)
 
     assert withdrawn.withdrawn_by == "user:rosalind" and not withdrawn.confirmed
     assert withdrawn.entry == revision.entry and withdrawn.confirmed_by == revision.confirmed_by
@@ -169,8 +170,8 @@ def test_a_withdrawn_later_revision_leaves_the_earlier_confirmed_one_answering(
 ) -> None:
     fx.propose_and_confirm(tmp_path, _count_entry())
     second = fx.propose_and_confirm(tmp_path, _count_entry(statement="stems per frame, tips excluded"))
-    traits.confirm_revision(tmp_path, fx.COUNT_TRAIT, 2, second.entry_sha256, user="rosalind",
-                            confirmed=False)
+    traits.confirm_revision(tmp_path, fx.COUNT_TRAIT, 2, second.entry_sha256,
+                            actor="user:rosalind", confirmed=False)
 
     assert _deliver_counts(tmp_path, "back_to_first")["trait_revision"] == 1
 
@@ -388,7 +389,7 @@ def test_confirming_and_withdrawing_land_in_the_project_log_with_the_actor(
                if e["tool"] == "confirm_trait_revision"]
 
     assert [e["arguments"]["confirmed"] for e in entries] == [True, False]
-    assert all(e["user"] == "user:rosalind" for e in entries)
+    assert all(e["actor"] == "user:rosalind" for e in entries)
     assert all(e["arguments"]["revision"] == 1 for e in entries)
 
 

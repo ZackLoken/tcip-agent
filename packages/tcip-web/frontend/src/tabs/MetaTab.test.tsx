@@ -52,31 +52,24 @@ describe("MetaTab annotation sessions", () => {
     vi.spyOn(sessionsApi, "load").mockResolvedValue({
       sessions: [
         {
-          user: "alice",
-          started: "01-02-2026 10:00:00",
-          ended: "",
+          user: "user:alice",
+          started: "2026-02-01T10:00:00+00:00",
+          ended: null,
+          entries: [
+            { image_name: "a.jpg", seconds: 9, annotations_added: 2, activity: "new_annotation" },
+          ],
           images_annotated: 1,
           total_annotations: 2,
           total_time_seconds: 9,
+          seconds_by_activity: { new_annotation: 9, review: 0, negative_confirmation: 0 },
           avg_seconds_per_annotation: 4.5,
-          negative_confirmation_seconds: 0,
-          review_seconds: 0,
-          new_annotation_seconds: 9,
-          images: {
-            "a.jpg": {
-              session_seconds: 9,
-              annotations_added: 2,
-              final_annotation_count: 2,
-              avg_seconds_per_annotation: 4.5,
-            },
-          },
         },
       ],
     });
 
     render(<MetaTab />);
 
-    expect(await screen.findByText("alice")).toBeInTheDocument();
+    expect(await screen.findByText("user:alice")).toBeInTheDocument();
     expect(screen.getByText("1 recorded")).toBeInTheDocument();
   });
 });

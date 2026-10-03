@@ -7,7 +7,6 @@ import {
   PANEL_EVENT_CANVAS_STATE_REQUEST,
   TAB_NAMES,
 } from "@/api/types.generated";
-import { sessionsApi } from "@/api/sessions";
 import { ProjectPicker } from "@/components/ProjectPicker";
 import { TerminalRail } from "@/components/TerminalRail";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -136,10 +135,10 @@ function App() {
     return unsubscribe;
   }, []);
 
+  // A session opens at its person's first recorded contribution (sessionsApi.imageEvent); this
+  // ends the open one when the page or the project goes.
   useEffect(() => {
     if (!projectRoot) return;
-    // Best-effort telemetry: never surface a failure to the user.
-    void sessionsApi.start(useStore.getState().user).catch(() => {});
     endedSessionForRoot.current = null;
 
     function endSession() {
@@ -193,7 +192,8 @@ function App() {
     void (async () => {
       try {
         const reg = await subjectsApi.load(datasetRoot, annotationsDir);
-        setRegistry(reg.subjects, reg.version);
+        const declared = reg.subjects ?? {};
+        setRegistry(declared, reg.version, reg.discovered);
         if (reg.unreadable.length) {
           useStore
             .getState()
@@ -203,7 +203,7 @@ function App() {
         }
         // Default the active authoring subject to the selection's subject when it exists in the
         // registry, else the first declared subject: a shape can't be authored with none set.
-        const names = Object.keys(reg.subjects);
+        const names = Object.keys(declared);
         const active = useStore.getState().gui.active_subject;
         if (!active || !names.includes(active)) {
           useStore

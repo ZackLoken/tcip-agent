@@ -83,7 +83,7 @@ export function StatusBar() {
       <div className="flex-1" />
       {showAgent && agentActivity && (
         <span className="text-tcip-accent" title={JSON.stringify(agentActivity.data)}>
-          ⚡ {agentActivity.actor ?? "Process"}: {agentActivity.eventType}
+          ⚡ {agentActivity.client ?? "Process"}: {agentActivity.eventType}
           {agentStem ? ` (${agentStem})` : ""}
         </span>
       )}

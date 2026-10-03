@@ -296,8 +296,8 @@ describe("ResultsTab evidence gate", () => {
     fireEvent.click(screen.getByRole("button", { name: /curves csv/i }));
 
     await waitFor(() => expect(downloadCsv).toHaveBeenCalled());
+    expect(downloadCsv.mock.calls[0][0].user).toBe("breeder");
     expect(downloadCsv.mock.calls[0][0].acknowledgment).toEqual({
-      user: "breeder",
       reason: "calibration is not ready yet",
       result_sha256: "c".repeat(64),
     });

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 
 import { metaApi, type FrictionReport, type Retrospective } from "@/api/meta";
-import { sessionsApi, type SessionEntry } from "@/api/sessions";
+import { sessionsApi } from "@/api/sessions";
+import type { SessionSummary } from "@/api/types.generated";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { TabHeading } from "@/components/TabHeading";
 import { UNSET_GLYPH } from "@/lib/glyphs";
@@ -61,7 +62,7 @@ export function MetaTab() {
   const [reports, setReports] = useState<FrictionReport[]>([]);
   const [retros, setRetros] = useState<Retrospective[]>([]);
   // null once a load has failed: the panel then says so instead of claiming no sessions exist.
-  const [sessions, setSessions] = useState<SessionEntry[] | null>([]);
+  const [sessions, setSessions] = useState<SessionSummary[] | null>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -90,12 +91,10 @@ export function MetaTab() {
     void refresh();
   }, [refresh]);
 
-  // A session with no image entries touched nothing: the backend drops an image entry that ends up
-  // with no time, no adds and no final count, so an empty `images` map is the honest "nothing
-  // happened" signal. Zero new annotation records is not, since confirming a negative and
-  // reviewing an existing label are both real effort that adds no record.
+  // No entries means nothing happened; zero added annotations does not, since confirming a
+  // negative and reviewing a label are real effort that adds no record.
   const shownSessions = useMemo(
-    () => (sessions ?? []).filter((s) => Object.keys(s.images).length > 0),
+    () => (sessions ?? []).filter((s) => s.entries.length > 0),
     [sessions],
   );
 
@@ -208,14 +207,14 @@ export function MetaTab() {
                   <td className="pr-3 tabular-nums">{s.total_annotations}</td>
                   <td
                     className="pr-3 tabular-nums"
-                    title={`New annotations: ${fmtDuration(s.new_annotation_seconds)} · Review: ${fmtDuration(s.review_seconds)} · Negative confirmation: ${fmtDuration(s.negative_confirmation_seconds)}`}
+                    title={`New annotations: ${fmtDuration(s.seconds_by_activity.new_annotation)} · Review: ${fmtDuration(s.seconds_by_activity.review)} · Negative confirmation: ${fmtDuration(s.seconds_by_activity.negative_confirmation)}`}
                   >
                     {fmtDuration(s.total_time_seconds)}
                   </td>
                   <td className="pr-3 tabular-nums">
-                    {s.avg_seconds_per_annotation
-                      ? `${s.avg_seconds_per_annotation}s`
-                      : UNSET_GLYPH}
+                    {s.avg_seconds_per_annotation === null
+                      ? UNSET_GLYPH
+                      : `${s.avg_seconds_per_annotation}s`}
                   </td>
                 </tr>
               ))}

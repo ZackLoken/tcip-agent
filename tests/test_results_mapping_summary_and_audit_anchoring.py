@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from tcip_web.app import app
+from tests._audit_fixtures import AUDIT_ENTRY_KEYS
 
 PLANTS = (
     ("PLOT1", "AccA", 43.20000, -90.00000),
@@ -84,7 +85,7 @@ def _capture_fixture(root: Path) -> dict:
     register_dataset(root, str(root), sorted(registered_crops())[0])
     registry = register_plant_registry_for(root, [csv_path])
     return {
-        "name": "valley", "images_root": str(images), "plant_registry": registry,
+        "name": "valley", "images_root": str(images), "plant_registry": registry, "user": "tester",
         # Not a BuildMappingPayload field (ignored by the route); carried for a test that needs
         # the registry's own source file, e.g. to prove it may live outside the project.
         "csv_path": str(csv_path),
@@ -180,7 +181,10 @@ def test_the_route_and_the_tool_build_one_mapping_with_one_audit_line_each(
     """Identical builds through the HTTP route and the MCP tool reach one operation: their
     answers, their persisted records and their audit lines agree field for field once the name
     and the build's own clock are set aside, and each build leaves exactly one line in the open
-    project's log, the receipt naming the record it wrote."""
+    project's log, the receipt naming the record it wrote. The person who made the act is the
+    lines' one ``actor`` key, the route's naming them and the tool's naming no one, and nothing
+    else on either line names a person."""
+    import json
     import tcip_store
 
     from tcip_mcp.audit import audit_log_key
@@ -210,6 +214,9 @@ def test_the_route_and_the_tool_build_one_mapping_with_one_audit_line_each(
     assert [line["arguments"]["record_sha256"] for line in lines] == [
         plant_mapping.record_digest(route_record), plant_mapping.record_digest(tool_record)]
     assert own(lines[0]["arguments"]) == own(lines[1]["arguments"])
+    assert lines[0]["actor"] == "user:tester" and "actor" not in lines[1]
+    assert set(lines[0]) - {"actor"} <= AUDIT_ENTRY_KEYS and set(lines[1]) <= AUDIT_ENTRY_KEYS
+    assert "tester" not in json.dumps({k: v for k, v in lines[0].items() if k != "actor"})
     assert not (tmp_path / ".tcip" / ".tcip").exists()
 
 
@@ -269,6 +276,6 @@ def test_every_phenology_door_refuses_a_mapping_name_that_names_no_mapping(
         assert expected_detail in resp.json()["detail"]
         resp = client.post(
             "/api/results/export_csv",
-            json={**broken, "payload": "milestones", "filename": "x.csv"})
+            json={**broken, "payload": "milestones", "filename": "x.csv", "user": "tester"})
         assert resp.status_code == expected_status
         assert expected_detail in resp.json()["detail"]

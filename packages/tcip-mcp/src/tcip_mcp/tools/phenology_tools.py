@@ -126,7 +126,7 @@ def build_plant_mapping(
     try:
         return plant_mapping.build_plant_mapping(
             project, name, images_root, plant_registry, dates=dates,
-            nn_tolerance_m=nn_tolerance_m, supersede=supersede).served()
+            nn_tolerance_m=nn_tolerance_m, supersede=supersede, actor=None).served()
     except plant_mapping.MappingRebuildRefusal as exc:
         return {"error": str(exc), "citing_events": exc.event_ids}
     except (plant_mapping.UngeoreferencedCaptureRefusal, AuditEntryNotWritten,
@@ -184,7 +184,7 @@ def deliver_phenology_milestones(
             require_all_dates_complete=require_all_dates_complete)
         delivered = phenology.deliver_phenology(
             project, measurement, curves=False, output_path=Path(project, output_csv_path),
-            acknowledgment_id=acknowledgment_id, door="deliver_phenology_milestones")
+            acknowledgment_id=acknowledgment_id, door="deliver_phenology_milestones", actor=None)
     except phenology.measurement_refusals() as exc:
         return {"error": str(exc)}
     except (DeliveryRefused, OperationalizationRefused, TraitUnknownError, RegistryError,

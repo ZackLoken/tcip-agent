@@ -1,13 +1,9 @@
-"""Tiny deterministic models and datasets for driving ``generic_trainer.train`` end to end.
+"""Tiny deterministic models, their ``model_source`` builders, and datasets.
 
 Every model here holds a single parameter initialized from a constant, so a run's trajectory is
-decided by the data it is fed and never by random init: two runs on the same batches take the
-same path, and two runs on different batches take visibly different ones.
-
-Not a ``test_*`` module: the trainer imports these builders by dotted name through
-``model_source``, the same seam a real bespoke model comes through, so each accepts the width
-(``in_chans``) and, for the classifier, the class count the platform hands every builder; a model
-here reads a frame's mean intensity whatever its width.
+decided by the data it is fed and never by random init. Each builder accepts the width
+(``in_chans``) and, for the classifier, the class count a builder is handed; a model reads a
+frame's mean intensity whatever its width.
 """
 
 from __future__ import annotations
@@ -19,44 +15,60 @@ from torch.utils.data import Dataset
 
 
 class ConstantImageDataset(Dataset):
-    """Non-square single-channel frames, one intensity per frame, paired with a regression value.
+    """Non-square single-channel frames, one intensity per frame, each paired with a target under
+    ``key`` (``"values"``, a regression value, by default; ``"labels"`` with ``cast=int`` for a
+    class label).
 
     A frame is filled with a single value, so a sample's mean intensity is exactly its
-    ``intensity`` and the loss landscape a loader presents is fixed by its (intensity, value)
+    ``intensity`` and the loss landscape a loader presents is fixed by its (intensity, target)
     pairs alone.
     """
 
-    def __init__(self, intensities, values, height: int = 6, width: int = 10) -> None:
-        if len(intensities) != len(values):
-            raise ValueError("intensities and values must be the same length")
+    def __init__(self, intensities, targets, height: int = 6, width: int = 10, *,
+                 key: str = "values", cast=float) -> None:
+        if len(intensities) != len(targets):
+            raise ValueError("intensities and targets must be the same length")
         self.intensities = [float(i) for i in intensities]
-        self.values = [float(v) for v in values]
+        self.targets = [cast(v) for v in targets]
+        self.key = key
         self.height = int(height)
         self.width = int(width)
 
     def __len__(self) -> int:
-        return len(self.values)
+        return len(self.targets)
 
     def __getitem__(self, idx: int):
         image = torch.full((1, self.height, self.width), self.intensities[idx])
-        return image, {"values": self.values[idx]}
+        return image, {self.key: self.targets[idx]}
+
+
+def _phantom_nan() -> torch.Tensor:
+    """A non-finite loss on a leaf disconnected from any weight's graph, so a bad call's optimizer
+    step never poisons the weight a later good call relies on."""
+    return torch.zeros((), requires_grad=True) + float("nan")
 
 
 class MeanIntensityRegressor(nn.Module):
     """Predicts ``weight * mean(image)``, with a squared-error loss in train mode.
 
-    One parameter, so which data a pass is run over is the only thing that can move its loss.
+    One parameter, so which data a pass is run over is the only thing that can move its loss. A
+    subclass changes only which training calls it answers with that loss.
     """
 
     def __init__(self, init_weight: float = 0.0) -> None:
         super().__init__()
         self.weight = nn.Parameter(torch.tensor([float(init_weight)]))
 
+    def predict(self, images):
+        return self.weight * images.mean(dim=(1, 2, 3))
+
+    def fit_loss(self, images, targets) -> dict:
+        return {"mse": ((self.predict(images) - targets["values"].float()) ** 2).mean()}
+
     def forward(self, images, targets=None):
-        pred = self.weight * images.mean(dim=(1, 2, 3))
         if self.training and targets is not None:
-            return {"mse": ((pred - targets["values"].float()) ** 2).mean()}
-        return {"head0_values": pred}
+            return self.fit_loss(images, targets)
+        return {"head0_values": self.predict(images)}
 
 
 def build_mean_intensity_regressor(
@@ -76,33 +88,13 @@ class NanEvalRegressor(MeanIntensityRegressor):
 
     def forward(self, images, targets=None):
         if self.training and targets is not None:
-            return super().forward(images, targets)
-        pred = self.weight * images.mean(dim=(1, 2, 3))
-        return {"head0_values": pred + float("nan")}
+            return self.fit_loss(images, targets)
+        return {"head0_values": self.predict(images) + float("nan")}
 
 
 def build_nan_eval_regressor(*, in_chans: int = 1, init_weight: float = 0.0) -> NanEvalRegressor:
     """``model_source`` builder for :class:`NanEvalRegressor`."""
     return NanEvalRegressor(init_weight=init_weight)
-
-
-class ConstantImageClassDataset(Dataset):
-    """Non-square single-channel frames, one intensity per frame, paired with a class label."""
-
-    def __init__(self, intensities, labels, height: int = 6, width: int = 10) -> None:
-        if len(intensities) != len(labels):
-            raise ValueError("intensities and labels must be the same length")
-        self.intensities = [float(i) for i in intensities]
-        self.labels = [int(v) for v in labels]
-        self.height = int(height)
-        self.width = int(width)
-
-    def __len__(self) -> int:
-        return len(self.labels)
-
-    def __getitem__(self, idx: int):
-        image = torch.full((1, self.height, self.width), self.intensities[idx])
-        return image, {"labels": self.labels[idx]}
 
 
 class MeanIntensityClassifier(nn.Module):
@@ -133,7 +125,7 @@ def build_mean_intensity_classifier(
     return MeanIntensityClassifier(init_weight=init_weight)
 
 
-class DataScaledGradientModel(nn.Module):
+class DataScaledGradientModel(MeanIntensityRegressor):
     """Loss linear in the parameter: ``weight * sum(batch values)``.
 
     A batch's gradient is that batch's summed target value and nothing else, independent of the
@@ -141,14 +133,8 @@ class DataScaledGradientModel(nn.Module):
     step separable and checkable on its own.
     """
 
-    def __init__(self) -> None:
-        super().__init__()
-        self.weight = nn.Parameter(torch.zeros(1))
-
-    def forward(self, images, targets=None):
-        if self.training and targets is not None:
-            return {"linear": (self.weight * targets["values"].float().sum()).squeeze()}
-        return {"head0_values": self.weight * images.mean(dim=(1, 2, 3))}
+    def fit_loss(self, images, targets) -> dict:
+        return {"linear": (self.weight * targets["values"].float().sum()).squeeze()}
 
 
 def build_data_scaled_gradient_model(*, in_chans: int = 1) -> DataScaledGradientModel:
@@ -156,7 +142,7 @@ def build_data_scaled_gradient_model(*, in_chans: int = 1) -> DataScaledGradient
     return DataScaledGradientModel()
 
 
-class AlwaysDivergedModel(nn.Module):
+class AlwaysDivergedModel(MeanIntensityRegressor):
     """Reports a non-finite loss unconditionally, for exercising a diverged run end to end.
 
     ``on_forward``, when given, is called with the one-based training-forward-call count after
@@ -167,17 +153,14 @@ class AlwaysDivergedModel(nn.Module):
 
     def __init__(self, on_forward=None) -> None:
         super().__init__()
-        self.weight = nn.Parameter(torch.zeros(1))
         self.on_forward = on_forward
         self._calls = 0
 
-    def forward(self, images, targets=None):
-        if self.training and targets is not None:
-            self._calls += 1
-            if self.on_forward is not None:
-                self.on_forward(self._calls)
-            return {"nan_loss": self.weight * float("nan")}
-        return {"head0_values": self.weight * images.mean(dim=(1, 2, 3))}
+    def fit_loss(self, images, targets) -> dict:
+        self._calls += 1
+        if self.on_forward is not None:
+            self.on_forward(self._calls)
+        return {"nan_loss": self.weight * float("nan")}
 
 
 def build_always_diverged_model(*, in_chans: int = 1, on_forward=None) -> AlwaysDivergedModel:
@@ -220,29 +203,35 @@ def trainer_run(config: dict, output_dir, *, project, has_val_loader: bool, id: 
                     project=Path(project), output_dir=str(output_dir))
 
 
-class TransientlyDivergedModel(nn.Module):
+class _CallScheduledModel(MeanIntensityRegressor):
+    """A :class:`MeanIntensityRegressor` answering its weight-fit loss on the one-based
+    training-forward calls ``finite(call)`` admits and a non-finite loss on every other."""
+
+    def __init__(self, init_weight: float = 0.0) -> None:
+        super().__init__(init_weight)
+        self._calls = 0
+
+    def finite(self, call: int) -> bool:
+        raise NotImplementedError
+
+    def fit_loss(self, images, targets) -> dict:
+        self._calls += 1
+        if self.finite(self._calls):
+            return super().fit_loss(images, targets)
+        return {"nan_loss": _phantom_nan()}
+
+
+class TransientlyDivergedModel(_CallScheduledModel):
     """Reports a non-finite loss for its first ``bad_batches`` forward calls, then a normal
     weight-fit loss for every call after, for proving one diverged epoch short of the trainer's
     own two-pass divergence rule does not kill a run."""
 
     def __init__(self, bad_batches: int = 2, init_weight: float = 0.0) -> None:
-        super().__init__()
-        self.weight = nn.Parameter(torch.tensor([float(init_weight)]))
+        super().__init__(init_weight)
         self.bad_batches = int(bad_batches)
-        self._calls = 0
 
-    def forward(self, images, targets=None):
-        if self.training and targets is not None:
-            self._calls += 1
-            if self._calls <= self.bad_batches:
-                # A leaf disconnected from `weight`'s graph, so a bad batch's optimizer step
-                # never poisons the weight the later recovery relies on.
-                phantom = torch.zeros((), requires_grad=True) + float("nan")
-                return {"nan_loss": phantom}
-            pred = self.weight * images.mean(dim=(1, 2, 3))
-            return {"mse": ((pred - targets["values"].float()) ** 2).mean()}
-        pred = self.weight * images.mean(dim=(1, 2, 3))
-        return {"head0_values": pred}
+    def finite(self, call: int) -> bool:
+        return call > self.bad_batches
 
 
 def build_transiently_diverged_model(
@@ -252,30 +241,17 @@ def build_transiently_diverged_model(
     return TransientlyDivergedModel(bad_batches=bad_batches, init_weight=init_weight)
 
 
-class StepCountedDivergenceModel(nn.Module):
+class StepCountedDivergenceModel(_CallScheduledModel):
     """Reports a normal weight-fit loss on the one-based training-forward calls named in
-    ``finite_at``, and a non-finite loss on every other call, for constructing an exact
-    call-by-call (and so, given a known batches-per-epoch count, epoch-by-epoch) divergence
-    pattern up front rather than inferring one from a bad-batch prefix."""
+    ``finite_at``, and a non-finite loss on every other call: an exact call-by-call divergence
+    pattern."""
 
     def __init__(self, finite_at=(), init_weight: float = 0.0) -> None:
-        super().__init__()
-        self.weight = nn.Parameter(torch.tensor([float(init_weight)]))
+        super().__init__(init_weight)
         self.finite_at = set(finite_at)
-        self._calls = 0
 
-    def forward(self, images, targets=None):
-        if self.training and targets is not None:
-            self._calls += 1
-            if self._calls in self.finite_at:
-                pred = self.weight * images.mean(dim=(1, 2, 3))
-                return {"mse": ((pred - targets["values"].float()) ** 2).mean()}
-            # A leaf disconnected from `weight`'s graph, so a bad call's optimizer step never
-            # poisons the weight a later good call relies on.
-            phantom = torch.zeros((), requires_grad=True) + float("nan")
-            return {"nan_loss": phantom}
-        pred = self.weight * images.mean(dim=(1, 2, 3))
-        return {"head0_values": pred}
+    def finite(self, call: int) -> bool:
+        return call in self.finite_at
 
 
 def build_step_counted_divergence_model(
@@ -285,28 +261,18 @@ def build_step_counted_divergence_model(
     return StepCountedDivergenceModel(finite_at=finite_at, init_weight=init_weight)
 
 
-class DivergesAfterModel(nn.Module):
+class DivergesAfterModel(_CallScheduledModel):
     """Reports a normal weight-fit loss for its first ``good_calls`` forward calls, then a
     non-finite loss for every call after: the reverse of :class:`TransientlyDivergedModel`, for
     proving a run that trains one real epoch and then dies must not let that epoch's real score
     win a comparison against a config that only ever scored worse."""
 
     def __init__(self, good_calls: int, init_weight: float = 0.0) -> None:
-        super().__init__()
-        self.weight = nn.Parameter(torch.tensor([float(init_weight)]))
+        super().__init__(init_weight)
         self.good_calls = int(good_calls)
-        self._calls = 0
 
-    def forward(self, images, targets=None):
-        if self.training and targets is not None:
-            self._calls += 1
-            if self._calls <= self.good_calls:
-                pred = self.weight * images.mean(dim=(1, 2, 3))
-                return {"mse": ((pred - targets["values"].float()) ** 2).mean()}
-            phantom = torch.zeros((), requires_grad=True) + float("nan")
-            return {"nan_loss": phantom}
-        pred = self.weight * images.mean(dim=(1, 2, 3))
-        return {"head0_values": pred}
+    def finite(self, call: int) -> bool:
+        return call <= self.good_calls
 
 
 def build_diverges_after_model(
@@ -316,22 +282,13 @@ def build_diverges_after_model(
     return DivergesAfterModel(good_calls=good_calls, init_weight=init_weight)
 
 
-class PixelSumDivideModel(nn.Module):
+class PixelSumDivideModel(MeanIntensityRegressor):
     """Divides its prediction by the batch's own per-sample pixel sum: a real fp32
-    division-by-zero divergence on a batch of zero-intensity images, rather than a hand-authored
-    nan, while a random synthetic smoke batch (never exactly zero) passes the measurement-boundary
-    contract cleanly."""
+    division-by-zero divergence on a batch of zero-intensity images, while a random synthetic
+    smoke batch (never exactly zero) passes the measurement-boundary contract cleanly."""
 
-    def __init__(self) -> None:
-        super().__init__()
-        self.weight = nn.Parameter(torch.zeros(1))
-
-    def forward(self, images, targets=None):
-        pixel_sum = images.sum(dim=(1, 2, 3))
-        pred = (self.weight + images.mean(dim=(1, 2, 3))) / pixel_sum
-        if self.training and targets is not None:
-            return {"mse": ((pred - targets["values"].float()) ** 2).mean()}
-        return {"head0_values": pred}
+    def predict(self, images):
+        return (self.weight + images.mean(dim=(1, 2, 3))) / images.sum(dim=(1, 2, 3))
 
 
 def build_pixel_sum_divide_model(*, in_chans: int = 1) -> PixelSumDivideModel:
@@ -341,9 +298,7 @@ def build_pixel_sum_divide_model(*, in_chans: int = 1) -> PixelSumDivideModel:
 
 def write_regression_dataset(root, intensities, values, *, height: int = 6, width: int = 10):
     """Write a small on-disk regression dataset (uint8 RGB PNGs + a CSV of ``stem,value`` rows),
-    the real-file counterpart to :class:`ConstantImageDataset` for a run that must go through the
-    known ``RegressionDataset`` loader (a real subprocess launch, or ``_run_hpo_trial``'s own
-    ``auto_train_val`` build) rather than a tensor dataset passed straight to ``train()``.
+    the real-file counterpart to :class:`ConstantImageDataset`.
 
     Every frame is filled with one uint8 intensity (``round(255 * fraction)``), so
     ``intensities=[0.0, ...]`` decodes to exactly zero-valued pixels (``pil_to_tensor`` scales a

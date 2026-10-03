@@ -4,8 +4,7 @@
       ``AnchorGenerator`` is built from the dataset's own GT box shapes
       (``pipelines.derivations.gt_aspect_ratios`` and the GT size distribution); and
 
-  (b) a custom ``train(ctx)`` loop (``train_bespoke``) that trains through the ``ctx`` sinks
-      rather than ``ctx.default_train()``.
+  (b) a custom ``train(ctx)`` loop (``train_bespoke``) that trains through the ``ctx`` sinks.
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ from tcip_mcp.pipelines.derivations import gt_aspect_ratios
 # ---------------------------------------------------------------------------
 
 class _GNBlock(nn.Module):
-    """Conv -> GroupNorm -> ReLU. GroupNorm because detector batches are tiny (BN stats are noisy)."""
+    """Conv -> GroupNorm -> ReLU."""
 
     def __init__(self, cin: int, cout: int, stride: int, groups: int) -> None:
         super().__init__()
@@ -62,13 +61,11 @@ class _GNBackboneFPN(nn.Module):
         return self.act(self.smooth_norm(self.smooth(p2)))
 
 
-class BespokeGNDetector(nn.Module):
-    """The torchvision Faster R-CNN held as ``.detector``: a loss dict in train mode, ``list[dict]``
-    predictions in eval mode."""
+class _HeldDetector(nn.Module):
+    """A torchvision detector held as ``.detector``: a loss dict in train mode, ``list[dict]``
+    predictions in eval mode, a batched tensor split into its images first."""
 
-    def __init__(self, detector: nn.Module) -> None:
-        super().__init__()
-        self.detector = detector
+    detector: nn.Module
 
     def forward(self, images, targets=None):
         if isinstance(images, torch.Tensor):
@@ -76,6 +73,24 @@ class BespokeGNDetector(nn.Module):
         if self.training and targets is not None:
             return self.detector(images, targets)
         return self.detector(images)
+
+
+class _FreezesBackbone:
+    """``freeze_backbone`` over a ``.backbone`` that may declare ``freeze_to``."""
+
+    backbone: nn.Module
+
+    def freeze_backbone(self, to_stage: int) -> None:
+        if hasattr(self.backbone, "freeze_to"):
+            self.backbone.freeze_to(to_stage)
+
+
+class BespokeGNDetector(_HeldDetector):
+    """The torchvision Faster R-CNN held as ``.detector``."""
+
+    def __init__(self, detector: nn.Module) -> None:
+        super().__init__()
+        self.detector = detector
 
 
 def gt_anchor_sizes(gt_boxes_wh) -> tuple[int, ...]:
@@ -217,7 +232,7 @@ def _resnet18(in_chans: int = 3):
     return BackboneWrapper(m, m.feature_info.channels())
 
 
-class BespokeComposed(nn.Module):
+class BespokeComposed(_FreezesBackbone, nn.Module):
     """Backbone + neck + task head: the sibling of the removed ``ComposedModel``."""
 
     def __init__(self, backbone: nn.Module, neck: nn.Module, head: nn.Module) -> None:
@@ -240,10 +255,6 @@ class BespokeComposed(nn.Module):
                     out[f"head{i}_{k}"] = v
         return out
 
-    def freeze_backbone(self, to_stage: int) -> None:
-        if hasattr(self.backbone, "freeze_to"):
-            self.backbone.freeze_to(to_stage)
-
     def get_param_groups(self, backbone_lr: float = 1e-4, head_lr: float = 1e-3) -> list[dict]:
         head_params = [p for h in self.heads for p in h.parameters()]
         return [
@@ -253,7 +264,7 @@ class BespokeComposed(nn.Module):
         ]
 
 
-class BespokeDetection(nn.Module):
+class BespokeDetection(_FreezesBackbone, _HeldDetector):
     """Real backbone + FPN fed into a torchvision detector via ``BackboneNeckAdapter``:
     the detection / instance-seg sibling of the removed ``DetectionModel``."""
 
@@ -270,17 +281,6 @@ class BespokeDetection(nn.Module):
             featmap_names=names, num_levels=len(names),
             min_size=min_size, max_size=max_size, **det_kwargs,
         )
-
-    def forward(self, images, targets=None):
-        if isinstance(images, torch.Tensor):
-            images = [images[i] for i in range(images.shape[0])]
-        if self.training and targets is not None:
-            return self.detector(images, targets)
-        return self.detector(images)
-
-    def freeze_backbone(self, to_stage: int) -> None:
-        if hasattr(self.backbone, "freeze_to"):
-            self.backbone.freeze_to(to_stage)
 
 
 def build_bespoke_classifier(*, num_classes: int, in_chans: int = 3, dropout: float = 0.0):
@@ -319,18 +319,26 @@ def build_bespoke_detection(*, num_classes: int = 1, in_chans: int = 3, detector
                             min_size=min_size, max_size=max_size, **det_kwargs)
 
 
-class FixedMaskSegmenter(nn.Module):
-    """An instance segmenter whose eval forward returns, per image, one box over its central half
-    scored 0.9 and a mask of ones filling that box, so every pass carries a real mask."""
+class _OneConvDetector(nn.Module):
+    """A detector whose one parameter is a 1x1 convolution, carrying ``score_thresh`` on itself;
+    :meth:`zero_loss` is its training forward's answer."""
 
     def __init__(self, in_chans: int = 3) -> None:
         super().__init__()
         self.conv = nn.Conv2d(in_chans, 1, 1)
         self.score_thresh = 0.0
 
+    def zero_loss(self, images) -> dict:
+        return {"loss": sum(self.conv(im.unsqueeze(0)).sum() for im in images) * 0.0}
+
+
+class FixedMaskSegmenter(_OneConvDetector):
+    """An instance segmenter whose eval forward returns, per image, one box over its central half
+    scored 0.9 and a mask of ones filling that box, so every pass carries a real mask."""
+
     def forward(self, images, targets=None):
         if self.training:
-            return {"loss": sum(self.conv(im.unsqueeze(0)).sum() for im in images) * 0.0}
+            return self.zero_loss(images)
         results = []
         for im in images:
             h, w = int(im.shape[-2]), int(im.shape[-1])
@@ -348,21 +356,16 @@ def build_fixed_mask_instance_seg(*, num_classes: int = 1, in_chans: int = 3):
 
 
 # A non-torchvision detector, no .detector to route through.
-class BareScoreThreshDetector(nn.Module):
+class BareScoreThreshDetector(_OneConvDetector):
     """A hand-rolled detector with no ``.detector``: exposes ``score_thresh`` on itself, and
     honors it in its own eval-mode forward, one fixed box per image kept only when it clears the
     threshold. The proof that the operating-point holder resolves to the module itself when it is
     the only thing exposing a knob.
     """
 
-    def __init__(self, in_chans: int = 3) -> None:
-        super().__init__()
-        self.conv = nn.Conv2d(in_chans, 1, 1)
-        self.score_thresh = 0.0
-
     def forward(self, images):
         if self.training:
-            return {"loss": sum(self.conv(im.unsqueeze(0)).sum() for im in images) * 0.0}
+            return self.zero_loss(images)
         results = []
         for im in images:
             h, w = int(im.shape[-2]), int(im.shape[-1])

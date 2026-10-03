@@ -2,7 +2,7 @@
 ``--project`` names, and refuses one that names no project.
 
 Exercised as the real process entry point (a subprocess, the way an operator runs it), through
-overlay-reference-grid, a door that writes an artifact and so leaves an audit line.
+overlay-reference-grid, a render that leaves no audit line.
 """
 
 from __future__ import annotations
@@ -29,9 +29,9 @@ def _image(tmp_path: Path) -> Path:
     return image
 
 
-def test_a_writing_command_files_its_audit_line_under_the_named_project(tmp_path):
-    """The audit line of a door that writes lands in the named project's own log, and the
-    operator's cwd and the image's directory get nothing."""
+def test_a_render_command_leaves_no_audit_line_anywhere(tmp_path):
+    """A render is a read: the named project's log gains no line, and the operator's cwd and the
+    image's directory get no state."""
     import tcip_store as ts
 
     from tcip_mcp.audit import audit_log_key
@@ -47,7 +47,7 @@ def test_a_writing_command_files_its_audit_line_under_the_named_project(tmp_path
 
     assert result.returncode == 0, result.stderr
     rows = ts.read_log(audit_log_key(project)).records
-    assert "overlay_reference_grid" in [r["tool"] for r in rows], rows
+    assert [r["tool"] for r in rows] == ["project_created"], rows
     assert not (cwd / ".tcip").exists()
     assert not (image.parent / ".tcip").exists()
 

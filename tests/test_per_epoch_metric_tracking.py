@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 
 from tcip_mcp.pipelines.training.collation import task_collate
 from tcip_mcp.pipelines.training.generic_trainer import train
-from tests.tiny_trainer_fixtures import ConstantImageClassDataset, trainer_run
+from tests.tiny_trainer_fixtures import ConstantImageDataset, trainer_run
 
 CLASSIFIER_BUILDER = "tests.tiny_trainer_fixtures:build_mean_intensity_classifier"
 
@@ -27,30 +27,10 @@ def _scalar_steps(log_dir: Path, tag: str) -> list[int]:
     return [e.step for e in acc.Scalars(tag)]
 
 
-def _seed_leaf_detection_dataset(root: Path) -> tuple[Path, Path, Path, Path]:
-    from PIL import Image
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
-
-    images_dir, labels_dir = root / "images", root / "labels"
-    val_images, val_labels = root / "val_images", root / "val_labels"
-    for d in (images_dir, labels_dir, val_images, val_labels):
-        d.mkdir(parents=True)
-    box = BBox(10, 10, 30, 30)
-    for i in range(2):
-        Image.new("RGB", (128, 128)).save(images_dir / f"t{i}.png")
-        json_io.write_annotations(str(labels_dir / f"t{i}.json"),
-                                  [Annotation(subject="leaf", geometry=box)], 128, 128)
-    Image.new("RGB", (128, 128)).save(val_images / "v0.png")
-    json_io.write_annotations(str(val_labels / "v0.json"),
-                              [Annotation(subject="leaf", geometry=box)], 128, 128)
-    return images_dir, labels_dir, val_images, val_labels
-
-
 def test_classification_training_writes_train_and_val_scalars_every_epoch(tmp_path):
-    train_ds = ConstantImageClassDataset(
-        [-2.0, -1.5, -1.0, 1.0, 1.5, 2.0], [0, 0, 0, 1, 1, 1])
-    val_ds = ConstantImageClassDataset([-1.8, -0.4, 0.4, 1.8], [0, 0, 1, 1])
+    train_ds = ConstantImageDataset(
+        [-2.0, -1.5, -1.0, 1.0, 1.5, 2.0], [0, 0, 0, 1, 1, 1], key="labels", cast=int)
+    val_ds = ConstantImageDataset([-1.8, -0.4, 0.4, 1.8], [0, 0, 1, 1], key="labels", cast=int)
     collate = task_collate("classification")
     train_loader = DataLoader(train_ds, batch_size=3, collate_fn=collate)
     val_loader = DataLoader(val_ds, batch_size=4, collate_fn=collate)
@@ -81,7 +61,9 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
     from tcip_mcp.pipelines.training.generic_trainer import resolve_objective
     from tcip_mcp.tools.training_tools import _run_hpo_trial, sweep_dir
 
-    images_dir, labels_dir, val_images, val_labels = _seed_leaf_detection_dataset(tmp_path / "ds")
+    from tests._producer_fixtures import seed_leaf_detection_dataset
+
+    images_dir, labels_dir, val_images, val_labels = seed_leaf_detection_dataset(tmp_path / "ds")
     base_config = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 128},
@@ -110,9 +92,9 @@ def test_the_epoch_console_line_carries_validation_metrics_beyond_loss(tmp_path,
     not only the loss a plain reader would take for the whole story."""
     import logging
 
-    train_ds = ConstantImageClassDataset(
-        [-2.0, -1.5, -1.0, 1.0, 1.5, 2.0], [0, 0, 0, 1, 1, 1])
-    val_ds = ConstantImageClassDataset([-1.8, -0.4, 0.4, 1.8], [0, 0, 1, 1])
+    train_ds = ConstantImageDataset(
+        [-2.0, -1.5, -1.0, 1.0, 1.5, 2.0], [0, 0, 0, 1, 1, 1], key="labels", cast=int)
+    val_ds = ConstantImageDataset([-1.8, -0.4, 0.4, 1.8], [0, 0, 1, 1], key="labels", cast=int)
     collate = task_collate("classification")
     train_loader = DataLoader(train_ds, batch_size=3, collate_fn=collate)
     val_loader = DataLoader(val_ds, batch_size=4, collate_fn=collate)

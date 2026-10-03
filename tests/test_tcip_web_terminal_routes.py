@@ -17,9 +17,10 @@ from fastapi.testclient import TestClient
 from tcip_web import terminal as pty_host
 from tcip_web.app import app
 from tcip_web.routes import terminal as terminal_routes
+from tests._audit_fixtures import audit_rows
 
 FAKE = Path(__file__).parent / "fake_terminal_app.py"
-LAUNCH = {"provider": pty_host.PROVIDERS[0].id}
+LAUNCH = {"provider": pty_host.PROVIDERS[0].id, "user": "tester"}
 ABSENT = "definitely-not-a-real-cli-xyz"
 
 if pty_host.os.name == "nt":
@@ -101,7 +102,7 @@ def test_a_row_whose_executable_is_absent_reports_its_own_reason_and_refuses_cre
         row.unavailable_reason for row in rows]
     assert all(ABSENT in entry["unavailable_reason"] for entry in body["providers"])
 
-    resp = client.post("/api/terminal/sessions", json={"provider": rows[0].id})
+    resp = client.post("/api/terminal/sessions", json={**LAUNCH, "provider": rows[0].id})
     assert resp.status_code == 503
     assert ABSENT in resp.json()["detail"]
     assert terminal_routes._SESSIONS == {}
@@ -109,7 +110,7 @@ def test_a_row_whose_executable_is_absent_reports_its_own_reason_and_refuses_cre
 
 def test_a_create_naming_an_unlisted_provider_refuses_by_name_and_a_listed_one_launches(client):
     for unlisted in ("no-such-harness", LAUNCH["provider"].upper()):
-        resp = client.post("/api/terminal/sessions", json={"provider": unlisted})
+        resp = client.post("/api/terminal/sessions", json={**LAUNCH, "provider": unlisted})
         assert resp.status_code == 422
         assert unlisted in resp.json()["detail"]
     assert client.post("/api/terminal/sessions", json={}).status_code == 422
@@ -225,7 +226,8 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
 
     monkeypatch.setattr(pty_host, "render_argv", _recording_render)
 
-    sid = client.post("/api/terminal/sessions", json={"provider": row.id}).json()["session_id"]
+    sid = client.post("/api/terminal/sessions",
+                      json={**LAUNCH, "provider": row.id}).json()["session_id"]
     with client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}") as ws:
         _read_until(ws, "FAKE_TERMINAL_READY")
 
@@ -457,7 +459,7 @@ def test_restart_on_a_survivor_answers_an_error_without_calling_start(
         raise AssertionError("start() must not run on a survivor")
 
     monkeypatch.setattr(session, "start", _fail_if_called)
-    err = session.restart(24, 80, pty_host.PROVIDERS[0])
+    err = session.restart(24, 80, pty_host.PROVIDERS[0], "user:tester")
     assert err is not None
     assert "could not be stopped" in err
     assert session.alive() is True
@@ -470,12 +472,12 @@ def test_restart_on_a_died_cleanly_process_calls_start(monkeypatch: pytest.Monke
     session._pty = _StubPty(survives=False)
     calls = {"n": 0}
 
-    def _record(rows: int, cols: int, provider: pty_host.Provider) -> None:
+    def _record(rows: int, cols: int, provider: pty_host.Provider, actor: str) -> None:
         calls["n"] += 1
         return None
 
     monkeypatch.setattr(session, "start", _record)
-    err = session.restart(24, 80, pty_host.PROVIDERS[0])
+    err = session.restart(24, 80, pty_host.PROVIDERS[0], "user:tester")
     assert err is None
     assert calls["n"] == 1
 
@@ -510,7 +512,7 @@ def _refuse_record_start(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make every launch's audit line fail to append."""
     from tcip_mcp.audit import AuditEntryNotWritten
 
-    def _refuse(session_id: str, launched: object, project: Path | None) -> None:
+    def _refuse(session_id: str, launched: object, project: Path | None, actor: str) -> None:
         raise AuditEntryNotWritten("agent_terminal_started", RuntimeError("audit log unwritable"))
 
     monkeypatch.setattr(terminal_routes, "_record_start", _refuse)
@@ -640,14 +642,6 @@ def test_concurrent_creates_spawn_single_session():
 # ── what a session records about the program it launched ───────────────
 
 
-def _terminal_start_rows(project: Path) -> list[dict]:
-    import tcip_mcp.audit as audit_module
-    import tcip_store as ts
-
-    key = audit_module.audit_log_key(project)
-    return [row for row in ts.read_log(key).records if row["tool"] == "agent_terminal_started"]
-
-
 def test_create_answers_the_launched_executable_and_no_version_for_an_override(client):
     """An override's launch records its executable and no version."""
     body = client.post("/api/terminal/sessions", json=LAUNCH).json()
@@ -692,11 +686,13 @@ def test_each_launch_leaves_one_audit_line_in_the_open_projects_log(client, open
         _read_until(ws, "the agent exited")
     client.post(f"/api/terminal/sessions/{sid}/restart", json=LAUNCH)
 
-    rows = _terminal_start_rows(opened_project)
+    rows = audit_rows(opened_project, "agent_terminal_started")
     assert [row["arguments"]["session_id"] for row in rows] == [sid, sid]
     assert [row["arguments"]["provider"] for row in rows] == [LAUNCH["provider"]] * 2
     assert Path(rows[0]["arguments"]["executable"]).name == Path(sys.executable).name
     assert rows[0]["arguments"]["version"] is None
+    assert [row["actor"] for row in rows] == ["user:tester"] * 2
+    assert "source" not in rows[0]
 
 
 def test_create_session_answers_503_and_terminates_the_process_when_the_start_line_fails(
@@ -713,7 +709,7 @@ def test_create_session_answers_503_and_terminates_the_process_when_the_start_li
     resp = client.post("/api/terminal/sessions", json=LAUNCH)
     assert resp.status_code == 503
     assert "could not be written" in resp.json()["detail"]
-    assert _terminal_start_rows(opened_project) == []
+    assert audit_rows(opened_project, "agent_terminal_started") == []
     assert all(not s.alive() for s in terminal_routes._SESSIONS.values())
 
 

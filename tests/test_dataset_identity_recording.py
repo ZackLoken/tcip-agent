@@ -160,7 +160,7 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(tmp_path, mon
                  "scope": {"subject": SUBJECT}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}], "device": "cpu",
         "experiment_id": "exp-identity",
-    })
+    }, actor=None)
     assert "error" not in launched, launched
 
     dataset = read_record(experiment_dir("exp-identity", project=tmp_path) / RUN_FILE)["dataset"]

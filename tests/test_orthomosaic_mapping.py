@@ -476,7 +476,8 @@ def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(tmp_p
     # point is where export places it, not the from-scratch-weights mask content.
     result["masks"][0] = {"segmentation": [[40.0, 44.0, 46.0, 44.0, 46.0, 50.0, 40.0, 50.0]]}
 
-    data, _dropped = encode_predictions(result, scope=registry_scope(tmp_path, "leaf"))
+    data, _dropped = encode_predictions(result, "model:fixture",
+                                        scope=registry_scope(tmp_path, "leaf"))
     anns = json_io.annotations_from_bytes(data, source=str(path))
     assert isinstance(anns[0].geometry, Polygon)
     xs = [x for ring in anns[0].geometry.rings for x, _ in ring]

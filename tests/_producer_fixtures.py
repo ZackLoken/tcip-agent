@@ -11,13 +11,62 @@ from __future__ import annotations
 from typing import Any
 
 
+def seed_leaf_detection_dataset(root) -> tuple:
+    """Two training and one validation 128px image under ``root``, each with a label document
+    holding one ``leaf`` box; ``(images, labels, val_images, val_labels)``."""
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    images_dir, labels_dir = root / "images", root / "labels"
+    val_images, val_labels = root / "val_images", root / "val_labels"
+    for d in (images_dir, labels_dir, val_images, val_labels):
+        d.mkdir(parents=True)
+    leaf = [Annotation(subject="leaf", geometry=BBox(10, 10, 30, 30))]
+    for images, labels, stem in ((images_dir, labels_dir, "t0"), (images_dir, labels_dir, "t1"),
+                                 (val_images, val_labels, "v0")):
+        Image.new("RGB", (128, 128)).save(images / f"{stem}.png")
+        json_io.write_annotations(str(labels / f"{stem}.json"), leaf, 128, 128)
+    return images_dir, labels_dir, val_images, val_labels
+
+
+def seed_two_bud_images(images_dir, labels_dir) -> None:
+    """Make ``images_dir`` and ``labels_dir`` and write two 32px images, each with a label
+    document holding one ``bud`` box, so a drawn split holds one out for validation."""
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    for i in range(2):
+        Image.new("RGB", (32, 32), color=(10 * i, 0, 0)).save(images_dir / f"img{i}.png")
+        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
+                                  [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
+
+
+def small_detection_config(images_dir, labels_dir, experiment_id: str) -> dict:
+    """A one-epoch CPU detection run of the bespoke detector over ``images_dir`` and
+    ``labels_dir`` under ``experiment_id``."""
+    return {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"min_size": 64, "max_size": 128},
+                         "task": "detection"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                 "scope": {"subject": "bud"}},
+        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
+        "mixed_precision": False, "device": "cpu",
+        "experiment_id": experiment_id,
+    }
+
+
 def registry_over(dataset_root, registry) -> None:
     """``dataset_root``'s subject registry replaced by ``registry`` through the platform's own save
     (:func:`~tcip_mcp.subject_registry.replace_registry`), whatever it held before."""
     from tcip_mcp.subject_registry import replace_registry
 
     replace_registry(dataset_root, registry, expect=None, allow_removals=True,
-                     allow_type_changes=True)
+                     allow_type_changes=True, actor=None)
 
 
 def mark_complete(image_path, label_path, subject: str, *, project, rect=None,
@@ -35,7 +84,7 @@ def mark_complete(image_path, label_path, subject: str, *, project, rect=None,
     width, height = image_path_dimensions(image_path)
     return save_label_document(
         project, image_path, label_path, [client_annotation(a) for a in doc.annotations],
-        width=width, height=height, author=by,
+        width=width, height=height, author=by, actor=by,
         gestures=Gestures(complete={subject: True}, rect=rect, proposals_hidden=proposals_hidden))
 
 

@@ -12,3 +12,10 @@ from pydantic import BaseModel
 
 class EmptyBodyPayload(BaseModel):
     """A JSON body with no required fields, for a route that takes only path parameters."""
+
+
+class PersonPayload(BaseModel):
+    """A JSON body naming the person making the act, for a route whose other parameters are its
+    path's."""
+
+    user: str

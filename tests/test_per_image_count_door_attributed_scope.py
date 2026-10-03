@@ -36,7 +36,7 @@ def test_an_attributed_bucket_delivers_its_object_count_not_its_value_count(
 
     acknowledged(tmp_path, lambda ack: deliver_per_image_counts_csv(
         tmp_path, bucket, str(out), trait=fx.COUNT_TRAIT, acknowledgment_id=ack,
-        door="test_door"), reason="unassessed fixture")
+        door="test_door", actor=None), reason="unassessed fixture")
 
     rows = list(csv.DictReader(out.read_text(encoding="utf-8").splitlines()))
     assert len(rows) == 1

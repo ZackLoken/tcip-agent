@@ -114,6 +114,7 @@ def test_build_route_refuses_when_every_capture_carries_no_position(
     client = TestClient(app, base_url="http://127.0.0.1")
     resp = client.post("/api/results/plant_mapping/build", json={
         "name": "valley", "images_root": str(images_root), "plant_registry": registry,
+        "user": "tester",
     })
     assert resp.status_code == 400
     assert "plant-tag mechanism" in resp.json()["detail"]
@@ -140,6 +141,7 @@ def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_a
     client = TestClient(app, base_url="http://127.0.0.1")
     resp = client.post("/api/results/plant_mapping/build", json={
         "name": "valley", "images_root": str(images_root), "plant_registry": registry,
+        "user": "tester",
         "dates": ["2099-01-01"],
     })
     assert resp.status_code == 400
@@ -182,7 +184,7 @@ def _persist_synthetic_mapping(
         capture_digests={d: {} for d in assignments}, unreadable={d: [] for d in assignments},
         assignments=assignments,
     )
-    plant_mapping.persist_mapping(build, project_root)
+    plant_mapping.persist_mapping(build, project_root, actor=None)
     return build
 
 
@@ -226,7 +228,8 @@ def _assert_all_doors_refuse(
         "plants": ["P1"],
     }
     resp = client.post("/api/results/export_csv",
-                       json={**payload, "payload": "milestones", "filename": "x.csv"})
+                       json={**payload, "payload": "milestones", "filename": "x.csv",
+                             "user": "tester"})
     assert resp.status_code == 400, resp.text
     assert expected_fragment in resp.json()["detail"]
 

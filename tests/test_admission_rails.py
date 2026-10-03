@@ -375,9 +375,9 @@ def test_only_annotated_and_confirmed_negatives_train(tmp_path):
 
     admitted = admit_over(images, labels, subject=BUD)
     assert sorted(r.member for r in admitted.records) == ["ann", "neg"]
-    assert admitted.tallies["annotated"] == 1
-    assert admitted.tallies["confirmed_negative"] == 1
-    assert admitted.tallies["skipped_unannotated"] >= 1
+    assert admitted.tallies["partial"] == 1
+    assert admitted.tallies["negative"] == 1
+    assert admitted.tallies["absent"] >= 1
 
 
 def test_a_corrupt_confirmed_negative_refuses_the_admission(tmp_path):
@@ -445,7 +445,7 @@ def test_instance_seg_admits_a_partially_assessed_stem_on_its_subject_marks(tmp_
 
     assert [r.member for r in admitted.records] == ["complete", "partial"]
     assert admitted.scope.attributes == reg.subjects[0].attributes
-    assert admitted.tallies["annotated"] == 2
+    assert admitted.tallies["partial"] == 2
 
 
 def _write_registry_for(root, *, attribute=None, values=()):
@@ -476,11 +476,11 @@ def test_semantic_seg_requires_a_mask_but_admits_an_all_background_one(tmp_path)
 
 
 def test_sample_counts_distinguish_unannotated_from_unconfirmed_empty(tmp_path):
-    """"Annotate this" and "confirm this empty one" are different jobs: the count must say which."""
+    """"Annotate this" and "confirm this empty one" are different jobs: the count must say which,
+    each tally the state its ground truth reads as, or absent."""
     images, labels = _rail_fixture(tmp_path)
     admitted = admit_over(images, labels, subject=BUD)
-    assert admitted.tallies == {"annotated": 1, "confirmed_negative": 1, "skipped_unannotated": 1,
-                               "skipped_unconfirmed_empty": 1}
+    assert admitted.tallies == {"partial": 1, "negative": 1, "absent": 1, "unannotated": 1}
 
 
 def test_a_confirmation_does_not_leak_across_subjects(tmp_path):
@@ -512,7 +512,7 @@ def test_a_negative_mark_dies_with_an_edit_of_its_subject(tmp_path):
 
     assert json_io.read_label_document(labels / "neg.json").marks == {}
     tallies = admit_over(images, labels, subject=BUD).tallies
-    assert (tallies["annotated"], tallies["confirmed_negative"]) == (2, 0)
+    assert (tallies["partial"], tallies.get("negative", 0)) == (2, 0)
 
 
 def test_json_det_targets_marks_an_unassessed_row_and_refuses_an_undeclared_value(tmp_path):

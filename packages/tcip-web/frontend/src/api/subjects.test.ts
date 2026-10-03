@@ -48,7 +48,12 @@ describe("registry save", () => {
 
   it("carries the version it was loaded at, so a stale save is refused", async () => {
     stubFetch({ status: "ok", n_subjects: 1, subjects_path: "s", version: "v2" });
-    await subjectsApi.save({ bush: {} }, "C:/data", "v1");
-    expect(sentBody()).toEqual({ subjects: { bush: {} }, dataset_root: "C:/data", version: "v1" });
+    await subjectsApi.save({ bush: {} }, "C:/data", "v1", "jordan");
+    expect(sentBody()).toEqual({
+      subjects: { bush: {} },
+      dataset_root: "C:/data",
+      version: "v1",
+      user: "jordan",
+    });
   });
 });

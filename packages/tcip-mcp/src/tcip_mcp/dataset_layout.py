@@ -24,9 +24,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, Optional
 
 import tcip_store
 from tcip_store import (
@@ -473,12 +472,13 @@ def proposal_pairs(project: str | Path | None, bucket: "Bucket", annotations: li
 
 def save_label_document(
     project: str | Path | None, image_path: str | Path, label_path: str | Path,
-    payloads: Iterable[dict], *, width: int, height: int, author: Optional[str],
-    expect: Optional[tcip_store.Version] = None, gestures: Gestures = Gestures(),
+    payloads: Iterable[dict], *, width: int, height: int, author: str,
+    actor: Optional[str], expect: Optional[tcip_store.Version] = None,
+    gestures: Gestures = Gestures(),
 ) -> Optional[tcip_store.Version]:
-    """Write ``image_path``'s label document at ``label_path`` and the save's one audit line, in
-    the log of the dataset ``label_path`` lies in or ``project``'s when it lies in none. Returns
-    the new version.
+    """Write ``image_path``'s label document at ``label_path`` and the save's one audit line by
+    ``actor``, in the log of the dataset ``label_path`` lies in or ``project``'s when it lies in
+    none. Returns the new version.
 
     The document holds every annotation parsed from ``payloads``, provenance stamped
     (:func:`~tcip_annotation.json_io.stamped`): a record unchanged since it was stored keeps its
@@ -493,8 +493,7 @@ def save_label_document(
 
     Raises, before writing anything: ``ValueError`` for a label path in no dataset with no
     ``project``, a payload that does not parse, a proposal index the bucket's document does not
-    hold or that is both accepted and rejected, and a mark or a verdict with no ``author`` to
-    record; ``VersionConflict`` when ``expect`` is not the version read. A document changed
+    hold or that is both accepted and rejected; ``VersionConflict`` when ``expect`` is not the version read. A document changed
     between that read and the write raises ``VersionConflict`` with the verdicts appended, and a
     landed write whose line cannot follow raises ``AuditEntryNotWritten``.
     """
@@ -504,16 +503,13 @@ def save_label_document(
     )
     from tcip_annotation.verdicts import Verdict, VerdictAction, record_verdicts
 
-    from tcip_mcp.audit import dataset_scope_of, record_event_or_raise
+    from tcip_mcp.audit import dataset_scope_of, now_iso, record_event_or_raise
 
     scope = dataset_scope_of(label_path) or project
     if scope is None:
         raise ValueError(f"{label_path} lies in no dataset and no project is open to record the "
                          "save in; open the project the labels belong to")
-    if not author and (gestures.accept or gestures.reject or gestures.complete):
-        raise ValueError("a completion mark and a verdict each record who made them; name the "
-                         "person saving")
-    now = datetime.now(timezone.utc).isoformat()
+    now = now_iso()
     contents = []
     for i, payload in enumerate(payloads):
         try:
@@ -545,11 +541,11 @@ def save_label_document(
                 if action == "accepted" and i not in paired:
                     annotations.append(replace(proposals[i], score=None, attributes={},
                                                accepted_by=author, accepted_at=now))
-                verdicts.append(Verdict(proposal=i, action=action, by=cast(str, author), at=now))
+                verdicts.append(Verdict(proposal=i, action=action, by=author, at=now))
     marks = {s: held for s, held in stored.marks.items() if gestures.complete.get(s, True)}
     for subject in (s for s, made in gestures.complete.items() if made):
         marks.setdefault(subject, []).append(CompletionMark(
-            rect=gestures.rect or (0, 0, width, height), by=cast(str, author), at=now,
+            rect=gestures.rect or (0, 0, width, height), by=author, at=now,
             digest=subject_digest(annotations, subject),
             proposals_hidden=gestures.proposals_hidden))
     if verdicts:
@@ -562,7 +558,7 @@ def save_label_document(
         "n_annotations": len(annotations), "version": version.token if version else None,
         "accepted": sorted(gestures.accept), "rejected": sorted(gestures.reject),
         "complete": dict(gestures.complete),
-    }, scope=scope)
+    }, actor=actor, scope=scope)
     return version
 
 
@@ -575,11 +571,7 @@ def list_subjects(dataset_root: str | Path) -> list[str]:
 
     if not subjects_path(dataset_root).is_file():
         return []
-    try:
-        registry = subject_registry.read_registry(dataset_root)
-    except OSError:
-        return []
-    return [s.name for s in registry.subjects]
+    return [s.name for s in subject_registry.read_registry(dataset_root).subjects]
 
 
 def subjects_on_date(

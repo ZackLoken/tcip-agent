@@ -172,7 +172,7 @@ def test_launch_with_overfit_check_records_the_rendered_report(
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
     res = training_tools.launch_training(
-        project, _detection_config(images_dir, labels_dir), overfit_check=True)
+        project, _detection_config(images_dir, labels_dir), overfit_check=True, actor=None)
     assert "error" not in res, res
     assert res["overfit_check"] is not None
     assert "passed" in res["overfit_check"]
@@ -206,7 +206,7 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
                      "mixed_precision": False, "device": "cpu",
         "evaluation": {"selection_metric": "loss"},
     }
-    res = training_tools.launch_training(project, config, overfit_check=True)
+    res = training_tools.launch_training(project, config, overfit_check=True, actor=None)
     assert "error" not in res, res
 
     record = _launch_record(res)["model_contract"]
@@ -246,6 +246,6 @@ def training_tools_launch(project: Path, config: dict) -> dict:
     never reads as a provenance failure in the tests above."""
     from tcip_mcp.tools import training_tools
 
-    res = training_tools.launch_training(project, config)
+    res = training_tools.launch_training(project, config, actor=None)
     assert "error" not in res, res
     return res

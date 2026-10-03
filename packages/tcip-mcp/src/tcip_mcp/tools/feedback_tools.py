@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from tcip_mcp.pipelines.active_learning import DEFAULT_REVIEW_BUDGET, DEFAULT_SCORER
 from tcip_mcp.server import tool
 
 
@@ -98,8 +99,8 @@ def prioritize_review_queue(
     project: Path,
     checkpoint_path: str,
     images_dir: str,
-    method: str = "combined",
-    budget: int = 50,
+    method: str = DEFAULT_SCORER,
+    budget: int = DEFAULT_REVIEW_BUDGET,
     subject: str | None = None,
 ) -> dict:
     """Rank unfinished images by active-learning informativeness for the next review batch.
@@ -143,17 +144,18 @@ def prioritize_review_queue(
     p, refusal = _untiled_pass(checkpoint)
     if refusal is not None:
         return refusal
-    from tcip_mcp.pipelines.active_learning.helpers import build_scorer
+    from tcip_mcp.pipelines.active_learning.scorer import resolve_scorer
 
     predictor = p.predictor
     try:
-        scorer = build_scorer(method, task)
+        scorer = resolve_scorer(method, task)
     except ValueError as e:  # unknown scorer: refuse rather than silently reordering the queue
         return {"error": str(e)}
 
     from tcip_mcp.pipelines.image_utils import logical_image_name, stem_of
 
-    scored = scorer.score(sources, predictor)[:budget]
+    # A scorer answers the candidates it was handed, whatever their type.
+    scored: list[tuple[Any, float]] = list(scorer.score(sources, predictor)[:budget])
     reference_stems = _reference_stems(checkpoint, Path(images_dir), project)
     queue = []
     for p, s in scored:

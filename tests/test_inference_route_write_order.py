@@ -8,6 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from tests._audit_fixtures import audit_rows
+from tests._predictor_fixtures import StubPredictor, install
+
 DATE = "2025-06-01"
 
 
@@ -20,24 +23,12 @@ def _two_images(images_dir):
     return images_dir
 
 
-class _FakePredictor:
-    """A detector that returns one detection per image, enough for a real prediction write."""
-
-    def __init__(self, checkpoint_path=None, **kwargs):
-        pass
-
-    def predict_batch(self, paths, *args, **kw):
-        return [{"image": p, "width": 100, "height": 100,
-                 "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1}
-                for p in paths]
-
-
 def _job(job_id, images_dir, out_dir, ckpt, project):
     from tcip_mcp.pipelines.execution import Stated
     from tcip_web.routes.inference import InferenceJob
 
     return InferenceJob(
-        job_id=job_id, project=str(project), checkpoint_path=str(ckpt),
+        job_id=job_id, actor="user:tester", project=str(project), checkpoint_path=str(ckpt),
         images_dir=str(images_dir), output_dir=str(out_dir),
         stated=Stated(tile=False, conf=0.25, postprocess="nms"))
 
@@ -52,21 +43,12 @@ def _launch_through_the_route(dataset, output_dir, ckpt, *, tile: bool):
 
     client = TestClient(app, base_url="http://127.0.0.1")
     resp = client.post("/api/inference/launch", json={
-        "checkpoint_path": str(ckpt), "dataset_root": str(dataset), "date": DATE,
+        "user": "tester", "checkpoint_path": str(ckpt), "dataset_root": str(dataset), "date": DATE,
         "output_dir": str(output_dir), "stated": {"tile": tile}})
     assert resp.status_code == 200, resp.text
     job = _get(resp.json()["job_id"])
     job.thread.join(60)
     return job
-
-
-def _dataset_rows(dataset) -> list[dict]:
-    """Every row in the dataset's own audit log."""
-    import tcip_store as ts
-
-    from tcip_mcp.audit import audit_log_key
-
-    return ts.read_log(audit_log_key(dataset)).records
 
 
 def _documents(bucket: Path) -> list[str]:
@@ -94,8 +76,7 @@ def test_the_gui_worker_and_the_mcp_door_publish_the_same_bucket_record(tmp_path
 
     images_dir = _two_images(tmp_path / "images")
     ckpt = registered_checkpoint(tmp_path)
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _FakePredictor)
+    install(monkeypatch, StubPredictor())
     job = _job("prepared", images_dir, tmp_path / "gui", ckpt, tmp_path)
     _worker(job)
     assert job.status == "completed", job.error
@@ -124,8 +105,7 @@ def test_a_pass_failing_after_its_first_document_leaves_one_failure_line_on_each
     dataset = tmp_path / "orchard"
     images_dir = _two_images(image_dir(dataset, DATE))
     ckpt = registered_checkpoint(tmp_path)
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _FakePredictor)
+    install(monkeypatch, StubPredictor())
 
     real_encode = export.encode_predictions
     calls: list[str] = []
@@ -141,13 +121,13 @@ def test_a_pass_failing_after_its_first_document_leaves_one_failure_line_on_each
     gui_out = prediction_root(dataset) / "gui" / DATE
     job = _launch_through_the_route(dataset, gui_out, ckpt, tile=False)
     assert job.status == "failed" and job.error == "disk full"
-    gui_rows = _dataset_rows(dataset)
+    gui_rows = audit_rows(dataset)
 
     mcp_out = prediction_root(dataset) / "mcp" / DATE
     with pytest.raises(OSError, match="disk full"):
         run_inference(tmp_path, ckpt, str(images_dir), output_dir=str(mcp_out),
                       stated=Stated(tile=False))
-    mcp_rows = _dataset_rows(dataset)[len(gui_rows):]
+    mcp_rows = audit_rows(dataset)[len(gui_rows):]
 
     def shape(rows: list[dict]) -> list[tuple]:
         return [(r["tool"], r["status"], sorted(r["arguments"]),
@@ -177,8 +157,7 @@ def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_publishe
 
     dataset = tmp_path / "orchard"
     images_dir = _two_images(image_dir(dataset, DATE))
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _FakePredictor)
+    install(monkeypatch, StubPredictor())
     ckpt = registered_checkpoint(tmp_path)
 
     job = _launch_through_the_route(dataset, dataset / "predictions" / "run" / DATE, ckpt,
@@ -193,7 +172,7 @@ def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_publishe
     bucket = Path(job.output_dir)
     assert _documents(bucket) == []
     assert not (bucket / BUCKET_RECORD).exists()
-    assert _dataset_rows(dataset) == []
+    assert audit_rows(dataset) == []
 
 
 def test_a_canceled_gui_pass_publishes_what_it_wrote(tmp_path, monkeypatch):
@@ -210,20 +189,19 @@ def test_a_canceled_gui_pass_publishes_what_it_wrote(tmp_path, monkeypatch):
     ckpt = registered_checkpoint(tmp_path)
     job = _job("canceled-after-one", images_dir, out, ckpt, tmp_path)
 
-    class CancelAfterFirstImage(_FakePredictor):
+    class CancelAfterFirstImage(StubPredictor):
         def predict_batch(self, paths, *args, **kw):
             job.cancel_event.set()
             return super().predict_batch(paths, *args, **kw)
 
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", CancelAfterFirstImage)
+    install(monkeypatch, CancelAfterFirstImage())
 
     _worker(job)
 
     assert (job.status, job.done, job.total, job.error) == ("canceled", 1, 2, None)
     assert _documents(out) == ["a"]
     assert _record(out)["documents"] == {"a": "a.jpg"}
-    assert [(r["tool"], r["status"]) for r in _dataset_rows(dataset)] == [
+    assert [(r["tool"], r["status"]) for r in audit_rows(dataset)] == [
         ("prediction_bucket_published", "ok")]
 
 
@@ -239,8 +217,7 @@ def test_a_full_gui_pass_writes_every_document_then_the_record(tmp_path, monkeyp
     out_dir = tmp_path / "out"
     ckpt = registered_checkpoint(tmp_path)
 
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _FakePredictor)
+    install(monkeypatch, StubPredictor())
 
     real_encode = export.encode_predictions
     written = []
@@ -283,21 +260,20 @@ def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_lines(tmp_path, mon
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     images_dir = _two_images(tmp_path / "images")
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _FakePredictor)
+    install(monkeypatch, StubPredictor())
     dataset = tmp_path / "orchard"
     rows: dict[str, list[dict]] = {}
     for door in ("gui", "mcp"):
         ckpt = registered_checkpoint(tmp_path)
         out = dataset / "predictions" / door / DATE
-        before = len(_dataset_rows(dataset))
+        before = len(audit_rows(dataset))
         if door == "gui":
             _worker(_job(door, images_dir, out, ckpt, tmp_path))
         else:
             result = run_inference(tmp_path, ckpt, str(images_dir), output_dir=str(out),
                                    stated=Stated(tile=False))
             assert "error" not in result, result
-        rows[door] = _dataset_rows(dataset)[before:]
+        rows[door] = audit_rows(dataset)[before:]
         assert _record(out)["producer"]["experiment_id"] == Path(ckpt).parent.name
 
     def shape(records: list[dict]) -> list[tuple]:
@@ -305,3 +281,5 @@ def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_lines(tmp_path, mon
 
     assert shape(rows["gui"]) == shape(rows["mcp"]) == [
         ("prediction_bucket_published", ["dropped_boxes", "predictions_dir"])]
+    assert rows["gui"][0]["actor"] == "user:tester"
+    assert "actor" not in rows["mcp"][0]

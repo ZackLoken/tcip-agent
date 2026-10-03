@@ -12,34 +12,15 @@ torch = pytest.importorskip("torch")
 from PIL import Image  # noqa: E402
 
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
+from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
 from tests._verified_checkpoint_fixtures import project_checkpoint  # noqa: E402
 
 UNTILED = Stated(tile=False)
 """The one execution value every run here states."""
 
 
-class _OneBoxPredictor:
-    """A predictor answering one box at 0.9 per image, counting its calls."""
-
-    task = "detection"
-    in_chans = 3
-
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def predict_batch(self, paths, execution=None, **kw):
-        self.calls += 1
-        return [{"image": str(p), "width": 100, "height": 100,
-                 "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
-                 "count": 1, "cap_hit": False} for p in paths]
-
-
-def _stubbed(monkeypatch) -> _OneBoxPredictor:
-    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
-
-    predictor = _OneBoxPredictor()
-    monkeypatch.setattr(predictor_mod, "GenericPredictor", lambda *a, **kw: predictor)
-    return predictor
+def _stubbed(monkeypatch) -> StubPredictor:
+    return install(monkeypatch, StubPredictor(task="detection", in_chans=3))
 
 
 def _images(directory: Path) -> Path:

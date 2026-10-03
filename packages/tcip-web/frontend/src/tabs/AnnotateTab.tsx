@@ -4,7 +4,9 @@ import Konva from "konva";
 
 import { api, type SaveLabelsBody } from "@/api/client";
 import { subjectColor } from "@/api/subjects";
+import { committedOf } from "@/api/http";
 import { sessionsApi } from "@/api/sessions";
+import type { ImageEventPayload } from "@/api/types.generated";
 import { AnnotateLegend } from "@/components/annotate/AnnotateLegend";
 import { AnnotationShapes } from "@/components/annotate/AnnotationShapes";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
@@ -49,7 +51,13 @@ import { applyEditDrag, hitTestEdit, type EditDrag } from "@/lib/editGeometry";
 import { useSubjectColors } from "@/lib/subjectColors";
 import { nextMode } from "@/lib/toolMode";
 import { useStore } from "@/store";
-import type { Box, PolygonShape, Proposal } from "@/store/types";
+import {
+  isFinished,
+  type Box,
+  type PolygonShape,
+  type Proposal,
+  type SubjectState,
+} from "@/store/types";
 
 /** The gestures a save adjudicates beside the canvas content (one save door, its own fields). */
 type Gestures = Pick<
@@ -64,6 +72,32 @@ const STREAM_MIN_DIST_CANVAS = 6; // screen px between vertices laid down in Str
 // Screen-px grab radius for a placed point: the whole mark is its own handle, so this matches the
 // mark's outer reach (see the tick geometry in PointOverlay) rather than a hidden smaller target.
 const POINT_HIT_CANVAS = 11;
+
+const contributionsInFlight = new Set<ImageEventPayload>();
+
+/** Post every held image visit of the open project not already in flight. Each is retired once
+ *  the backend accepts it, or committed it and could not record the line (the gap toasted),
+ *  and stays held for the next send otherwise. */
+function sendHeldContributions() {
+  const { heldContributions, openProject, retireContribution, pushToast } = useStore.getState();
+  for (const contribution of heldContributions) {
+    if (contribution.project_id !== openProject?.id || contributionsInFlight.has(contribution)) {
+      continue;
+    }
+    contributionsInFlight.add(contribution);
+    void sessionsApi
+      .imageEvent(contribution)
+      .then(
+        () => retireContribution(contribution),
+        (e: unknown) => {
+          if (committedOf(e) === null) return;
+          retireContribution(contribution);
+          pushToast(e instanceof Error ? e.message : String(e));
+        },
+      )
+      .finally(() => contributionsInFlight.delete(contribution));
+  }
+}
 
 export function AnnotateTab() {
   const dataset = useStore((s) => s.gui.dataset);
@@ -101,8 +135,10 @@ export function AnnotateTab() {
   const setHoveredPolygon = useStore((s) => s.setHoveredPolygon);
   const startImageSessionTracking = useStore((s) => s.startImageSessionTracking);
   const incrementAnnotationsAdded = useStore((s) => s.incrementAnnotationsAdded);
-  const markSessionFlushed = useStore((s) => s.markSessionFlushed);
-  const clearSessionTracking = useStore((s) => s.clearSessionTracking);
+  const closeSessionInterval = useStore((s) => s.closeSessionInterval);
+  const heldContributions = useStore((s) => s.heldContributions);
+  const openProjectId = useStore((s) => s.openProject?.id);
+  useEffect(() => sendHeldContributions(), [heldContributions, openProjectId]);
 
   const [drawing, setDrawing] = useState<Box | null>(null);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
@@ -236,16 +272,21 @@ export function AnnotateTab() {
     void save({ gestures: { bucket, [action]: [target.index] } });
   }
 
-  function markComplete(next: boolean, rect?: [number, number, number, number]) {
+  async function markComplete(next: boolean, rect?: [number, number, number, number]) {
     const subject = dataset.subject;
     if (!subject) return;
-    void save({
+    const stateOf = () => useStore.getState().canvas.completion[subject];
+    const before = stateOf();
+    await save({
       gestures: {
         complete: { [subject]: next },
         rect: rect ?? null,
         proposals_hidden: hideProposals,
       },
     });
+    if (before !== "negative" && stateOf() === "negative") {
+      useStore.getState().markNegativeConfirmed();
+    }
   }
 
   // A box selection belongs to one image; leaving it drops the selection + any drag (and ends a
@@ -499,8 +540,7 @@ export function AnnotateTab() {
   // Flush telemetry + any unsaved edits for the image being left, using the path
   // that canvas belongs to. Called before loading a different image and on unmount.
   function flushLeaving() {
-    const leaving = useStore.getState().sessionTracking.currentImageName;
-    if (leaving) emitImageSessionEvent(leaving);
+    closeSessionInterval();
     void save({ interactive: false });
   }
 
@@ -523,9 +563,9 @@ export function AnnotateTab() {
     if (!current || !written.some((w) => norm(w) === current)) return;
     if (useStore.getState().canvas.dirty) {
       setConflict(true);
-      const actor = agentActivity.actor ?? "A process";
+      const client = agentActivity.client ?? "A process";
       setIoError(
-        `${actor} just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.`,
+        `${client} just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.`,
       );
     } else {
       void reloadCurrent();
@@ -591,36 +631,6 @@ export function AnnotateTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imgPath, currentImageName, dataset.annotations_dir]);
 
-  function emitImageSessionEvent(imageName: string) {
-    const state = useStore.getState();
-    const tracking = state.sessionTracking;
-    if (!state.openProject) return;
-    if (tracking.currentImageName !== imageName || tracking.imageEnterTimeMs === null) return;
-
-    const c = state.canvas;
-    const finalAnnotationCount =
-      c.boxes.length + c.polygons.length + c.points.length + c.imageAnnotations.length;
-    const elapsedSeconds = Math.max(0, (Date.now() - tracking.imageEnterTimeMs) / 1000);
-    const key = `${imageName}|${tracking.imageEnterTimeMs}|${tracking.annotationsAddedDelta}|${finalAnnotationCount}`;
-    if (tracking.lastFlushedKey === key) return;
-
-    markSessionFlushed(key);
-    clearSessionTracking();
-    void sessionsApi
-      .imageEvent({
-        image_name: imageName,
-        session_seconds_delta: Number(elapsedSeconds.toFixed(2)),
-        annotations_added_delta: tracking.annotationsAddedDelta,
-        final_annotation_count: finalAnnotationCount,
-        dataset_root: state.gui.dataset.dataset_root,
-        subject: state.gui.dataset.subject,
-        date: state.gui.dataset.date,
-      })
-      .catch(() => {
-        // Best-effort telemetry; annotation flow should never block on this.
-      });
-  }
-
   function commitPolygonAndTrack() {
     // Closing always ends a live stream: a double-click's leading clicks re-arm streaming,
     // and a stale flag would immediately stream a fresh polygon from the next mouse move.
@@ -675,10 +685,10 @@ export function AnnotateTab() {
     );
   }
 
-  const subjectCompletion = canvas.loadedImagePath
-    ? (canvas.completion[dataset.subject ?? ""] ?? { state: "unannotated", finished: false })
+  const subjectState: SubjectState | null = canvas.loadedImagePath
+    ? (canvas.completion[dataset.subject ?? ""] ?? "unannotated")
     : null;
-  const subjectFinished = subjectCompletion?.finished ?? false;
+  const subjectFinished = isFinished(subjectState);
 
   const K = ANNOTATE_KEYS;
   useKeyboardShortcuts([
@@ -692,7 +702,7 @@ export function AnnotateTab() {
     {
       keys: K.complete.keys,
       action: () => markComplete(!subjectFinished),
-      when: () => !!dataset.subject && subjectCompletion !== null,
+      when: () => !!dataset.subject && subjectState !== null,
     },
     { keys: K.hideProposals.keys, action: () => setHideProposals((h) => !h), when: () => !!bucket },
     {
@@ -1387,7 +1397,7 @@ export function AnnotateTab() {
           onSave={() => void save()}
           saveDisabled={saveDisabled}
           dirty={canvas.dirty}
-          subjectCompletion={null}
+          subjectState={null}
           onComplete={markComplete}
           hideProposals={hideProposals}
           onHideProposals={setHideProposals}
@@ -1420,7 +1430,7 @@ export function AnnotateTab() {
         bandsInfo={bandsInfo}
         bandSelection={bandSelection}
         onBandSelectionChange={setBandSelection}
-        subjectCompletion={subjectCompletion}
+        subjectState={subjectState}
         onComplete={markComplete}
         onCompleteView={viewIsRegion && viewRect ? () => markComplete(true, viewRect) : undefined}
         hideProposals={hideProposals}

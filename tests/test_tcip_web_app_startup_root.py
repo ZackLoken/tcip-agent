@@ -51,7 +51,6 @@ def test_main_publishes_the_port_and_configures_the_backend_on_one_workspace(
     entry.main()
 
     bind_default()
-    monkeypatch.delenv("TCIP_WEB_PORT")
     assert store.workspace == elsewhere.resolve()
     assert store.image_roots == (extra.resolve(),)
     assert served[0] != 0

@@ -220,7 +220,7 @@ def _dropped_names(outgoing: SubjectRegistry, incoming: SubjectRegistry) -> list
 
 def replace_registry(
     dataset_root: str | Path, registry: SubjectRegistry, *, expect: "Version | None",
-    allow_removals: bool = False, allow_type_changes: bool = False,
+    allow_removals: bool = False, allow_type_changes: bool = False, actor: str | None,
 ) -> dict:
     """Write ``dataset_root``'s registry, reading what it replaces and refusing a silent drop.
 
@@ -242,7 +242,7 @@ def replace_registry(
     read, or ``Version.ABSENT`` for a caller asserting no registry exists yet. ``None`` checks
     against the version this call read.
 
-    The write's one audit line follows it in the dataset's log (``AuditEntryNotWritten`` when it
+    The write's one audit line by ``actor`` follows it in the dataset's log (``AuditEntryNotWritten`` when it
     cannot be appended, carrying that line's arguments). Returns the committed save as its audit
     line records it: ``{"subjects_path", "n_subjects", "version"}`` (the new token).
     """
@@ -299,7 +299,7 @@ def replace_registry(
 
     committed = {"subjects_path": str(path), "n_subjects": len(registry.subjects),
                  "version": new_version.token}
-    record_event_or_raise("replace_registry", committed, scope=dataset_root)
+    record_event_or_raise("replace_registry", committed, actor=actor, scope=dataset_root)
     return committed
 
 

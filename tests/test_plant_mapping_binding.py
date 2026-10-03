@@ -88,7 +88,7 @@ def _deliver(project: Path, *, trait: str, mapping_name: str, plants: list[str],
             require_all_dates_complete=phenology.REQUIRE_ALL_DATES_COMPLETE)
         return acknowledged(project, lambda ack: phenology.deliver_phenology(
             project, measurement, curves=False, output_path=Path(output_csv_path),
-            acknowledgment_id=ack, door=DOOR), reason="mapping rails, not the assessment")
+            acknowledgment_id=ack, door=DOOR, actor=None), reason="mapping rails, not the assessment")
     except (ValueError, MappingDeliveryRefusal, *phenology.measurement_refusals()) as exc:
         return {"error": str(exc)}
 
@@ -679,7 +679,7 @@ def test_a_receipt_that_cannot_be_written_fails_persist_mapping_and_the_record_s
     try:
         assert holding.wait(30)
         with pytest.raises(AuditEntryNotWritten, match="plant_mapping_built"):
-            plant_mapping.persist_mapping(build, tmp_path)
+            plant_mapping.persist_mapping(build, tmp_path, actor=None)
     finally:
         release.set()
         holder.join(30)
@@ -720,6 +720,7 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
         assert holding.wait(30)
         resp = client.post("/api/results/plant_mapping/build", json={
             "name": "valley", "images_root": str(images_root), "plant_registry": registry,
+        "user": "tester",
         })
         assert resp.status_code == 409, resp.text
         detail = resp.json()["detail"]
@@ -765,6 +766,7 @@ def test_a_supersede_whose_receipt_fails_answers_409_and_the_archive_still_loads
     client = TestClient(app, base_url="http://127.0.0.1")
     first = client.post("/api/results/plant_mapping/build", json={
         "name": "valley", "images_root": str(images_root), "plant_registry": registry,
+        "user": "tester",
     })
     assert first.status_code == 200, first.text
     old_record = ts.read(plant_mapping.plant_mapping_key(tmp_path, "valley"))
@@ -785,6 +787,7 @@ def test_a_supersede_whose_receipt_fails_answers_409_and_the_archive_still_loads
     monkeypatch.setattr(audit_module, "append", _refuse_first)
     resp = client.post("/api/results/plant_mapping/build", json={
         "name": "valley", "images_root": str(images_root), "plant_registry": registry,
+        "user": "tester",
         "supersede": True,
     })
     assert resp.status_code == 409, resp.text

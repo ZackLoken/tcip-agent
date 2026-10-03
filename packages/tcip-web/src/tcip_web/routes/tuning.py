@@ -13,8 +13,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from tcip_mcp.experiments import TRIAL_DIR_PREFIX
+from tcip_mcp.identity import actor
 
-from tcip_web.routes._body_common import EmptyBodyPayload
+from tcip_web.routes._body_common import EmptyBodyPayload, PersonPayload
 from tcip_web.routes._metrics_common import metrics_response
 from tcip_web.state import store
 
@@ -88,6 +89,7 @@ def _sweep_fields(observation) -> dict:
 
 class RelaunchSweepPayload(BaseModel):
     study_name: str
+    user: str
 
 
 def _run(opened) -> None:
@@ -104,17 +106,18 @@ def _run(opened) -> None:
 @router.post("/sweeps")
 def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
     """Relaunch a sweep of the open project from its own recorded input
-    (``training_tools.reopen_sweep``): no config, param space or path is ever submitted by the
-    browser. A source no sweep records answers 404, a refusal 422, and an opened sweep whose
-    audit line could not be written 409, before its thread starts."""
+    (``training_tools.reopen_sweep``), by the person ``user`` names: no config, param space or
+    path is ever submitted by the browser. A source no sweep records answers 404, a refusal 422,
+    and an opened sweep whose audit line could not be written 409, before its thread starts."""
     from tcip_mcp.audit import AuditEntryNotWritten
     from tcip_mcp.tools.training_tools import reopen_sweep
     from tcip_web.routes.audit_gap import audit_gap_409
 
+    person = actor(payload.user)
     source = _sweep_or_404(payload.study_name)
     project = store.open_root()
     try:
-        opened = reopen_sweep(project, source)
+        opened = reopen_sweep(project, source, actor=person)
     except AuditEntryNotWritten as exc:
         raise audit_gap_409(exc, exc.arguments) from exc
     if isinstance(opened, dict):
@@ -127,12 +130,13 @@ def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
 
 
 @router.post("/sweeps/{sweep_id}/cancel")
-def cancel_sweep_route(sweep_id: str, payload: EmptyBodyPayload) -> dict:
+def cancel_sweep_route(sweep_id: str, payload: PersonPayload) -> dict:
     """Request cooperative cancellation of a sweep of the open project
-    (``cancel_hyperparameter_search``); its refusal answers 404."""
+    (``cancel_hyperparameter_search``), by the person ``user`` names; its refusal answers 404."""
     from tcip_mcp.tools.training_tools import cancel_hyperparameter_search
 
-    result = cancel_hyperparameter_search(store.open_root(), sweep_id)
+    result = cancel_hyperparameter_search(store.open_root(), sweep_id,
+                                          actor=actor(payload.user))
     if result.get("error"):
         raise HTTPException(404, result["error"])
     return result

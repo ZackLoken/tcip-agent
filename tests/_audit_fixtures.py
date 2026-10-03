@@ -1,8 +1,25 @@
-"""A fault injected into the audit log's append."""
+"""Audit lines read back through the store seam, the shape a line may take, and a fault injected
+into the log's append."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+
+import tcip_store as ts
+from tcip_mcp import agent_identity
+from tcip_mcp.audit import audit_log_key
+
+AUDIT_ENTRY_KEYS = frozenset({"timestamp", "tool", "arguments", "status",
+                              *agent_identity.RECORD_FIELDS})
+"""Every key an audit line may carry besides ``actor``."""
+
+
+def audit_rows(scope: Path, tool: str | None = None) -> list[dict]:
+    """Every line in the log ``scope`` names, or only ``tool``'s lines when one is named."""
+    return [row for row in ts.read_log(audit_log_key(scope)).records
+            if tool is None or row["tool"] == tool]
 
 
 def refuse_audit_appends(monkeypatch: pytest.MonkeyPatch, *, error: BaseException | None = None,

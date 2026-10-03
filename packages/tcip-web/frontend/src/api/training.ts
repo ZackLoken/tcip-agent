@@ -4,6 +4,7 @@ import { getJson, postJson, wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import type { TrainingMetricFrame, TrainingStatusFrame } from "@/api/types.generated";
 import { createReconnectingSocket, jsonFrameHandlers } from "@/lib/reconnectingSocket";
+import type { DeclaredIdentity } from "@/store/slices/agentActivity";
 
 export interface TrainingRunSummary {
   /** A training run's own id: an experiment record's, always (no record, no run). */
@@ -17,7 +18,7 @@ export interface TrainingRunSummary {
   output_dir?: string;
   /** The agent identity the run's launch event carries: empty for a launch no agent declared
    * itself to, null when no launch event names the run. */
-  launch?: Record<string, unknown> | null;
+  launch?: DeclaredIdentity | null;
   /** The run directory's last sign of life (ISO-8601): no process id is recorded anywhere, so
    * this is the one signal a stale ``running`` row (its process gone, read as live for the rest
    * of the heartbeat window) can show. */
@@ -160,10 +161,10 @@ export const trainingApi = {
   listSplitChoices: (experiment_id: string) =>
     getJson<SplitChoices>(ROUTES.getTrainingConfigsByExperimentIdSplits(experiment_id)),
 
-  relaunch: (experiment_id: string, selection_dir?: string | null) =>
+  relaunch: (experiment_id: string, user: string, selection_dir?: string | null) =>
     postJson<{ experiment_id?: string; [k: string]: unknown }>(
       ROUTES.postTrainingRuns,
-      selection_dir ? { experiment_id, selection_dir } : { experiment_id },
+      selection_dir ? { experiment_id, selection_dir, user } : { experiment_id, user },
     ),
 
   listRuns: () => getJson<{ runs: TrainingRunSummary[] }>(ROUTES.getTrainingRuns),
@@ -177,10 +178,10 @@ export const trainingApi = {
       {},
     ),
 
-  cancel: (experiment_id: string) =>
+  cancel: (experiment_id: string, user: string) =>
     postJson<{ experiment_id: string; status: string; cancel_requested: boolean }>(
       ROUTES.postTrainingRunsByExperimentIdCancel(experiment_id),
-      {},
+      { user },
     ),
 
   compare: (experiment_ids: string[]) =>

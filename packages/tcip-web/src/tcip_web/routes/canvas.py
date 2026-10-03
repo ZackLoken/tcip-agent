@@ -14,14 +14,14 @@ built for by id; one naming any project but the backend's open one answers 409 a
 
 from __future__ import annotations
 
-import time
-from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict
 import tcip_store as ts
 
+from tcip_mcp.audit import now_iso
+from tcip_mcp.identity import actor
 from tcip_mcp.registry_paths import stored_path
 from tcip_mcp.web_client import ActiveTab, canvas_geometry_key, canvas_meta_key
 from tcip_web.state import store
@@ -45,6 +45,7 @@ class CanvasStatePayload(BaseModel):
     # Whether the Annotate cut tool is armed (sticky across a completed cut or a refusal alike).
     cut_armed: Optional[bool] = None
     dirty: Optional[bool] = None
+    # The person the GUI names, if any: a fresh GUI shows its canvas before anyone is named.
     user: Optional[str] = None
     classes: list[dict] = []  # [{name, color}]
     counts: Optional[dict] = None
@@ -54,10 +55,13 @@ class CanvasStatePayload(BaseModel):
 
 @router.post("/state")
 def push_canvas_state(payload: CanvasStatePayload) -> dict:
+    """Store the pushed canvas for the open project, stamped with the instant it arrived; a push
+    stating a ``user`` that names no one is refused before anything is written."""
+    person = None if payload.user is None else actor(payload.user)
     project = store.admit(payload.project_id)
     root = str(project)
     image_path = stored_path(payload.image_path, project)
-    now = time.time()
+    now = now_iso()
 
     if payload.shapes is not None:
         # Geometry first, meta second: a reader pairing the new meta with the old geometry
@@ -71,7 +75,6 @@ def push_canvas_state(payload: CanvasStatePayload) -> dict:
 
     ts.replace(canvas_meta_key(root), {
         "received_at": now,
-        "received_at_iso": datetime.now(timezone.utc).isoformat(),
         "tab": payload.tab,
         "image_path": image_path,
         "image": payload.image,
@@ -82,7 +85,7 @@ def push_canvas_state(payload: CanvasStatePayload) -> dict:
         "active_subject": payload.active_subject,
         "cut_armed": payload.cut_armed,
         "dirty": payload.dirty,
-        "user": payload.user,
+        "user": person,
         "classes": payload.classes,
         "counts": payload.counts,
     })

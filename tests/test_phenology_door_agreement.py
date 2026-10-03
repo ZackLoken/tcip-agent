@@ -28,7 +28,7 @@ def test_the_web_and_mcp_deliveries_agree_on_the_majority_column_and_the_revisio
     body = series.body()
     resp = client.post(
         "/api/results/export_csv",
-        json={**body, "payload": "milestones", "filename": "delivery.csv"})
+        json={**body, "payload": "milestones", "filename": "delivery.csv", "user": "breeder"})
     assert resp.status_code == 200, resp.text[:300]
     web_row = next(iter(csv.DictReader(StringIO(resp.text))))
 

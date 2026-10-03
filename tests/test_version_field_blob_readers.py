@@ -91,7 +91,7 @@ def test_a_version_one_registry_reads_back_through_the_platforms_own_writer(tmp_
             Attribute(name="condition", type="categorical", values=("healthy", "diseased")),
         )),
     ))
-    subject_registry.replace_registry(tmp_path, registry, expect=None)
+    subject_registry.replace_registry(tmp_path, registry, expect=None, actor=None)
     assert subject_registry.read_registry(tmp_path) == registry
 
 
@@ -120,7 +120,8 @@ def test_a_registry_above_the_ceiling_refuses_replace_registry_rather_than_repai
 
     incoming = SubjectRegistry(subjects=(Subject(name="leaf"),))
     with pytest.raises(SchemaVersionRefused):
-        subject_registry.replace_registry(tmp_path, incoming, expect=None, allow_removals=True)
+        subject_registry.replace_registry(tmp_path, incoming, expect=None, allow_removals=True,
+                                          actor=None)
     # Nothing was overwritten: the newer document is still exactly what was stored.
     assert ts.RECORD_JSON.decode(ts.read_blob_versioned(key).value) == document
 

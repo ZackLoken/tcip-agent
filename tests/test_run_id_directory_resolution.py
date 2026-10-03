@@ -34,7 +34,7 @@ def test_a_custom_named_run_is_canceled_by_its_own_id(tmp_path):
 
     run_dir = opened_run(tmp_path, _config(tmp_path), experiment_id="exp-002-bud-det")
 
-    result = cancel_training(tmp_path, "exp-002-bud-det")
+    result = cancel_training(tmp_path, "exp-002-bud-det", actor=None)
     assert result["cancel_requested"] is True
     assert result["experiment_id"] == "exp-002-bud-det"
     assert cancel_requested(run_dir)
@@ -48,4 +48,4 @@ def test_an_id_naming_no_run_resolves_to_nothing(tmp_path):
 
     assert find_run("exp-never-launched", project=tmp_path) is None
     assert "error" in monitor_training(tmp_path, "exp-never-launched")
-    assert "error" in cancel_training(tmp_path, "exp-never-launched")
+    assert "error" in cancel_training(tmp_path, "exp-never-launched", actor=None)

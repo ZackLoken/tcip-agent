@@ -9,7 +9,7 @@ import { StructuredRefusalError } from "@/api/http";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
 import { useStore } from "@/store";
-import type { SubjectCompletion } from "@/store/types";
+import type { SubjectState } from "@/store/types";
 
 const initialStoreState = useStore.getState();
 
@@ -41,7 +41,7 @@ function renderToolbar(
   bandsInfo?: ImageBandsResponse | null,
   bandSelection?: BandSelection | null,
   extra?: {
-    subjectCompletion?: SubjectCompletion | null;
+    subjectState?: SubjectState | null;
     onComplete?: (next: boolean) => void;
     onCompleteView?: () => void;
     hideProposals?: boolean;
@@ -56,7 +56,7 @@ function renderToolbar(
       bandsInfo={bandsInfo}
       bandSelection={bandSelection}
       onBandSelectionChange={() => {}}
-      subjectCompletion={extra?.subjectCompletion ?? null}
+      subjectState={extra?.subjectState ?? null}
       onComplete={extra?.onComplete ?? (() => {})}
       onCompleteView={extra?.onCompleteView}
       hideProposals={extra?.hideProposals ?? false}
@@ -315,6 +315,7 @@ describe("AnnotateToolbar subject authoring", () => {
     vi.spyOn(subjectsApi, "save").mockRejectedValue(new Error("409 stale version"));
     vi.spyOn(subjectsApi, "load").mockResolvedValue({
       subjects: { leaf: {} },
+      discovered: [],
       version: "v3",
       unreadable: [],
     });
@@ -340,6 +341,7 @@ describe("AnnotateToolbar subject authoring", () => {
     vi.spyOn(subjectsApi, "save").mockRejectedValue(new Error("409 stale version"));
     vi.spyOn(subjectsApi, "load").mockResolvedValue({
       subjects: { leaf: {} },
+      discovered: [],
       version: "v3",
       unreadable: [],
     });
@@ -454,38 +456,35 @@ describe("AnnotateToolbar image stepping", () => {
   });
 });
 
-const NEGATIVE: SubjectCompletion = { state: "negative", finished: true };
-const PARTIAL: SubjectCompletion = { state: "partial", finished: false };
-
 describe("AnnotateToolbar Complete toggle", () => {
-  it("reads checked from the served finished flag, with or without annotations", () => {
+  it("reads checked from the served state, with or without annotations", () => {
     seedSubject("subject_a");
-    renderToolbar(null, null, { subjectCompletion: NEGATIVE });
+    renderToolbar(null, null, { subjectState: "negative" });
     expect(screen.getByRole("checkbox", { name: /Complete/ })).toBeChecked();
     cleanup();
-    renderToolbar(null, null, { subjectCompletion: PARTIAL });
+    renderToolbar(null, null, { subjectState: "partial" });
     expect(screen.getByRole("checkbox", { name: /Complete/ })).not.toBeChecked();
   });
 
   it("asks the tab to mark or withdraw, and is disabled until the document loads", () => {
     seedSubject("subject_a");
     const onComplete = vi.fn();
-    renderToolbar(null, null, { subjectCompletion: PARTIAL, onComplete });
+    renderToolbar(null, null, { subjectState: "partial", onComplete });
     fireEvent.click(screen.getByRole("checkbox", { name: /Complete/ }));
     expect(onComplete).toHaveBeenCalledWith(true);
     cleanup();
-    renderToolbar(null, null, { subjectCompletion: null, onComplete });
+    renderToolbar(null, null, { subjectState: null, onComplete });
     expect(screen.getByRole("checkbox", { name: /Complete/ })).toBeDisabled();
   });
 
   it("offers the region mark only when the tab supplies one", () => {
     seedSubject("subject_a");
     const onCompleteView = vi.fn();
-    renderToolbar(null, null, { subjectCompletion: PARTIAL, onCompleteView });
+    renderToolbar(null, null, { subjectState: "partial", onCompleteView });
     fireEvent.click(screen.getByRole("button", { name: "Complete view" }));
     expect(onCompleteView).toHaveBeenCalledTimes(1);
     cleanup();
-    renderToolbar(null, null, { subjectCompletion: PARTIAL });
+    renderToolbar(null, null, { subjectState: "partial" });
     expect(screen.queryByRole("button", { name: "Complete view" })).not.toBeInTheDocument();
   });
 

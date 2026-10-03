@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type { AttributeDef, Registry } from "@/api/subjects";
+import type { AttrType, AttributeDef, Registry } from "@/api/subjects";
+import { ATTR_TYPES } from "@/api/types.generated";
 import { AttributeEditors } from "@/components/annotate/AttributeEditors";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { saveRegistry } from "@/lib/registrySave";
@@ -64,12 +65,7 @@ export function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | nu
     void saveRegistry(next, "Could not update attributes");
   }
 
-  function addAttribute(
-    subject: string,
-    name: string,
-    type: "categorical" | "ordinal",
-    values: string[],
-  ) {
+  function addAttribute(subject: string, name: string, type: AttrType, values: string[]) {
     const current = registry[subject] ?? {};
     const attrDef: AttributeDef = { type, values };
     const next: Registry = {
@@ -98,14 +94,14 @@ export function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | nu
 
   const [addingAttribute, setAddingAttribute] = useState(false);
   const [attrName, setAttrName] = useState("");
-  const [attrType, setAttrType] = useState<"categorical" | "ordinal">("categorical");
+  const [attrType, setAttrType] = useState<AttrType>(ATTR_TYPES[0]);
   const [attrValues, setAttrValues] = useState("");
   const [attrNameError, setAttrNameError] = useState<string | null>(null);
 
   function resetAttrDraft() {
     setAddingAttribute(false);
     setAttrName("");
-    setAttrType("categorical");
+    setAttrType(ATTR_TYPES[0]);
     setAttrValues("");
     setAttrNameError(null);
   }
@@ -233,10 +229,13 @@ export function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | nu
                 className="tcip-select w-full text-[11px]"
                 aria-label="attribute type"
                 value={attrType}
-                onChange={(e) => setAttrType(e.target.value as "categorical" | "ordinal")}
+                onChange={(e) => setAttrType(e.target.value as AttrType)}
               >
-                <option value="categorical">categorical</option>
-                <option value="ordinal">ordinal</option>
+                {ATTR_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
               </select>
               <textarea
                 className="tcip-input w-full text-[11px]"

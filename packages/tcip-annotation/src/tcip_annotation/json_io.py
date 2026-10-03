@@ -354,20 +354,22 @@ def annotation_from_payload(payload: Mapping) -> Annotation:
     })
 
 
-def stamped(contents: Iterable[Annotation], stored: Iterable[Annotation], *, actor: str | None,
+def stamped(contents: Iterable[Annotation], stored: Iterable[Annotation], *, actor: str,
             now: str) -> list[Annotation]:
     """``contents`` with their provenance: each one whose stored content (:func:`stored_content`)
     equals a not yet claimed record of ``stored`` takes that record's provenance, and every other
-    one is authored by ``actor`` at ``now`` with no sign-off (no provenance at all when ``actor``
-    is ``None``)."""
+    one is authored by ``actor`` at ``now`` with no sign-off. Refuses (``ValueError``) a blank
+    ``actor``."""
+    if not actor.strip():
+        raise ValueError("a saved annotation records its producer; name who or what wrote it")
     unclaimed: dict[str, list[Annotation]] = {}
     for record in stored:
         unclaimed.setdefault(_content_key(record), []).append(record)
     out = []
     for content in contents:
         held = unclaimed.get(_content_key(content))
-        source = held.pop(0) if held else Annotation(
-            content.subject, created_by=actor, created_at=now if actor else None)
+        source = held.pop(0) if held else Annotation(content.subject, created_by=actor,
+                                                     created_at=now)
         out.append(replace(content, **_held_provenance(source)))
     return out
 
@@ -461,6 +463,14 @@ SubjectState = Literal["complete", "negative", "partial", "unannotated"]
 """What one document says about one subject: finished with or without annotations of it
 (``complete``, ``negative``), or not finished with or without them (``partial``,
 ``unannotated``)."""
+
+_STATE_OF: dict[tuple[bool, bool], SubjectState] = {
+    (True, True): "complete", (True, False): "negative",
+    (False, True): "partial", (False, False): "unannotated"}
+"""Each subject state by whether the subject is finished and whether annotations hold it."""
+
+FINISHED_STATES = frozenset(s for (finished, _), s in _STATE_OF.items() if finished)
+"""The states :meth:`LabelDocument.state` answers for a subject :meth:`LabelDocument.finished`."""
 
 
 @dataclass(frozen=True)
@@ -572,10 +582,8 @@ class LabelDocument:
     def state(self, subject: str) -> SubjectState:
         """What this document says about ``subject``: :meth:`finished` or not, holding it by
         :func:`annotations_hold_subject` or not."""
-        held = annotations_hold_subject(self.annotations, subject)
-        if self.finished(subject):
-            return "complete" if held else "negative"
-        return "partial" if held else "unannotated"
+        return _STATE_OF[self.finished(subject),
+                         annotations_hold_subject(self.annotations, subject)]
 
 
 def annotations_hold_subject(annotations: Iterable[Annotation], subject: str) -> bool:
@@ -648,10 +656,16 @@ def read_document_versioned(target: Key | str | Path) -> tuple[LabelDocument, Ve
 PERSON_IDENTITY_PREFIX = "user:"
 
 
+def is_person(identity: str | None) -> bool:
+    """Whether ``identity`` names a person: :data:`PERSON_IDENTITY_PREFIX` followed by a
+    non-blank name."""
+    return (identity is not None and identity.startswith(PERSON_IDENTITY_PREFIX)
+            and bool(identity.removeprefix(PERSON_IDENTITY_PREFIX).strip()))
+
+
 def is_person_signoff(a: Annotation) -> bool:
-    """True when ``a`` carries a person's own sign-off: ``accepted_by`` is set and opens with
-    :data:`PERSON_IDENTITY_PREFIX`."""
-    return a.accepted_by is not None and a.accepted_by.startswith(PERSON_IDENTITY_PREFIX)
+    """True when ``a``'s ``accepted_by`` names a person (:func:`is_person`)."""
+    return is_person(a.accepted_by)
 
 
 def is_unadjudicated_prediction(a: Annotation) -> bool:
@@ -665,12 +679,12 @@ def is_unadjudicated_prediction(a: Annotation) -> bool:
 def is_unadjudicated_agent_authorship(a: Annotation) -> bool:
     """True when ``a`` names a producer that is not a person and no reviewer has signed off on it.
 
-    A person's recorded identity opens with :data:`PERSON_IDENTITY_PREFIX`, while a tool producer
-    stays bare (``sam``, an agent's own name) or carries a ``model:<checkpoint>`` stamp. An
-    annotation carrying no ``created_by`` at all is not claimed by this rule. A set ``accepted_by``
-    is a reviewer taking responsibility for the record.
+    A person's recorded identity is :func:`is_person`'s, while a tool producer stays bare
+    (``sam``, an agent's own name) or carries a ``model:<checkpoint>`` stamp. An annotation
+    carrying no ``created_by`` at all is not claimed by this rule. A set ``accepted_by`` is a
+    reviewer taking responsibility for the record.
     """
-    if not a.created_by or a.created_by.startswith(PERSON_IDENTITY_PREFIX):
+    if not a.created_by or is_person(a.created_by):
         return False
     return not a.accepted_by
 
@@ -683,7 +697,7 @@ def authorship_of(a: Annotation) -> str:
         return "unattributed"
     if is_unadjudicated_agent_authorship(a):
         return "tool"
-    if a.created_by.startswith(PERSON_IDENTITY_PREFIX):
+    if is_person(a.created_by):
         return "person"
     return "tool_accepted"
 
@@ -721,7 +735,7 @@ def provenance_facts(annotations: list[Annotation]) -> ProvenanceFacts:
             machine_authored.append(str(a.created_by))
         if not a.created_by:
             no_created_by.append(i)
-        elif not a.created_by.startswith(PERSON_IDENTITY_PREFIX):
+        elif not is_person(a.created_by):
             if not is_person_signoff(a):
                 not_positively_a_persons.append(i)
     return ProvenanceFacts(

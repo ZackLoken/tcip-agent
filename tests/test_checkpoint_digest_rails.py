@@ -102,7 +102,7 @@ def test_web_inference_worker_refuses_an_unregistered_checkpoint(tmp_path):
     images_dir, _ = _images(tmp_path)
     out_dir = tmp_path / "out"
 
-    job = InferenceJob(job_id="rail1", checkpoint_path=ckpt, images_dir=str(images_dir),
+    job = InferenceJob(job_id="rail1", actor="user:tester", checkpoint_path=ckpt, images_dir=str(images_dir),
                        output_dir=str(out_dir), project=str(tmp_path),
                        stated=Stated(tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2))
     _worker(job)
@@ -183,14 +183,14 @@ def test_review_priority_route_worker_completes_the_job_with_a_registered_checkp
     pytest.importorskip("fastapi")
     from types import SimpleNamespace
 
-    import tcip_mcp.pipelines.active_learning.helpers as al_helpers
+    import tcip_mcp.pipelines.active_learning.scorer as al_scorer
     from tcip_web.routes.annotate import PriorityQueueJob, _pq_worker
 
     ckpt = registered_checkpoint(tmp_path)
     images_dir, _ = _images(tmp_path)
 
     monkeypatch.setattr(
-        al_helpers, "build_scorer",
+        al_scorer, "resolve_scorer",
         lambda method, task: SimpleNamespace(score=lambda sources, predictor: []))
 
     job = PriorityQueueJob(job_id="rail7-pq", checkpoint_path=ckpt, images_dir=str(images_dir),

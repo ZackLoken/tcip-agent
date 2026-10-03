@@ -190,10 +190,7 @@ async def remove_project(req: RemovalRequest) -> dict:
     display_name = record_fields(project)["display_name"]
     if req.confirm_name != display_name:
         raise HTTPException(400, f"type the project's name {display_name!r} to remove it")
-    try:
-        requested_by = actor(req.user)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+    person = actor(req.user)
     conflict = _job_conflict(project)
     if conflict is not None:
         raise HTTPException(409, conflict)
@@ -204,8 +201,7 @@ async def remove_project(req: RemovalRequest) -> dict:
 
     try:
         return await anyio.to_thread.run_sync(functools.partial(
-            workspace.remove_project, store.workspace, project, requested_by=requested_by,
-            release=release))
+            workspace.remove_project, store.workspace, project, actor=person, release=release))
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 
@@ -226,6 +222,6 @@ def rename_project_route(req: RenameRequest) -> dict:
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
     try:
-        return rename_project(project, req.display_name, requested_by=actor(req.user))
+        return rename_project(project, req.display_name, actor=actor(req.user))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

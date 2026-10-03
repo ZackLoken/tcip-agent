@@ -120,10 +120,11 @@ def project_by_id(workspace: Path, project_id: str) -> Path:
     return found[0]
 
 
-def remove_project(workspace: Path, project: Path, *, requested_by: str,
+def remove_project(workspace: Path, project: Path, *, actor: str,
                    release: Callable[[], None]) -> dict:
     """Archive a workspace project, models included, into the workspace's ``.removed/``, then move
-    its directory there, and record one ``project_removed`` line in the moved project's own log.
+    its directory there, and record one ``project_removed`` line by ``actor`` in the moved
+    project's own log.
 
     Refuses (``ValueError``) while a run or sweep of the project is live, and when the archive
     refuses; nothing is written and ``release`` is not called then. Once admitted and archived,
@@ -156,8 +157,6 @@ def remove_project(workspace: Path, project: Path, *, requested_by: str,
     except OSError:
         archive_path.unlink(missing_ok=True)
         raise
-    record_event_or_raise(
-        "project_removed", {"archive_path": str(archive_path), "requested_by": requested_by},
-        scope=moved_to,
-    )
+    record_event_or_raise("project_removed", {"archive_path": str(archive_path)}, actor=actor,
+                          scope=moved_to)
     return {"archive_path": str(archive_path), "moved_to": str(moved_to)}

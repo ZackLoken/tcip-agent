@@ -1,6 +1,6 @@
 /** Inference + Results API helpers for the Inference and Results tabs. */
 
-import { decodeRefusal, getJson, postJson, StructuredRefusalError, wsUrl } from "@/api/http";
+import { getJson, postForBlob, postJson, StructuredRefusalError, wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import type {
   CanopySegmentDisclosure,
@@ -18,14 +18,7 @@ import type {
 } from "@/api/types.generated";
 import { createReconnectingSocket, jsonFrameHandlers } from "@/lib/reconnectingSocket";
 
-/**
- * One entry from the project's trained-model registry, as the browser reads it.
- *
- * The backend's model_registry owns the entry and writes every key on it; the fields below are
- * the ones this UI uses, and tests/test_registry_entry_shape_agreement.py holds each of them
- * against an entry the real registry wrote, so a renamed or dropped key fails there instead of
- * arriving here as undefined.
- */
+/** One entry from the project's trained-model registry: the fields of it this UI reads. */
 export interface RegisteredModel {
   name: string;
   checkpoint_path: string;
@@ -58,6 +51,7 @@ export interface LaunchInferenceBody {
   output_dir: string;
   stated: Stated;
   assessment_id: string | null;
+  user: string;
 }
 
 export const inferenceApi = {
@@ -71,10 +65,10 @@ export const inferenceApi = {
 
   listJobs: () => getJson<{ jobs: InferenceJob[] }>(ROUTES.getInferenceJobs),
 
-  cancel: (jobId: string) =>
+  cancel: (jobId: string, user: string) =>
     postJson<{ job_id: string; status: string; cancel_requested: boolean }>(
       ROUTES.postInferenceJobsByJobIdCancel(jobId),
-      {},
+      { user },
     ),
 };
 
@@ -238,12 +232,8 @@ export interface DeliveryRefusal {
   result_sha256: string | null;
 }
 
-/**
- * The delivery refusal a thrown error carries, or null for every other failure.
- *
- * Read by kind off the parsed detail, the same dispatch `operationalizationRefusalOf` uses for
- * its own family, so a delivery refusal is never matched by a prose regex either.
- */
+/** The delivery refusal a thrown error carries, read by kind off its parsed detail, or null for
+ *  every other failure. */
 export function deliveryRefusalOf(e: unknown): DeliveryRefusal | null {
   if (!(e instanceof StructuredRefusalError)) return null;
   const detail = e.detail;
@@ -265,12 +255,8 @@ export interface BucketExistsRefusal {
   job_id: string;
 }
 
-/**
- * The launch's bucket refusal a thrown error carries, or null for every other failure.
- *
- * Read by kind off the parsed detail, the same dispatch `deliveryRefusalOf` uses for its own
- * family, so a bucket refusal is never matched by a prose regex either.
- */
+/** The launch's bucket refusal a thrown error carries, read by kind off its parsed detail, or
+ *  null for every other failure. */
 export function bucketRefusalOf(e: unknown): BucketExistsRefusal | null {
   if (!(e instanceof StructuredRefusalError)) return null;
   const detail = e.detail;
@@ -331,6 +317,7 @@ export const resultsApi = {
     dates?: string[];
     nn_tolerance_m?: number;
     supersede?: boolean;
+    user: string;
   }) => postJson<ServedPlantMapping>(ROUTES.postResultsPlantMappingBuild, body),
 
   // Refuses with 404 when nothing is stored under the name.
@@ -349,39 +336,21 @@ export const resultsApi = {
 
   // The server computes what it exports, never a caller-composed table of rows. Its own request
   // shape is distinct from the measurement request's shape, never a spread of it.
-  downloadCsv: async (body: ExportCsvPayload): Promise<Blob> => {
-    const resp = await fetch(ROUTES.postResultsExportCsv, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!resp.ok) {
-      // The same decoder every JSON call uses, so a structured refusal arrives parsed, not stringified.
-      throw await decodeRefusal(resp, `export_csv failed: ${resp.status}`);
-    }
-    return await resp.blob();
-  },
+  downloadCsv: async (body: ExportCsvPayload): Promise<Blob> =>
+    (await postForBlob(ROUTES.postResultsExportCsv, body)).blob,
 
   // Unlike downloadCsv, this reports from the response headers: there is no prior screen
   // measurement for a count, so the headers travel back beside the blob rather than discarded.
   downloadCountCsv: async (
     body: ExportCountCsvPayload,
   ): Promise<{ blob: Blob; headers: ExportCountCsvHeaders }> => {
-    const resp = await fetch(ROUTES.postResultsExportCountCsv, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!resp.ok) {
-      throw await decodeRefusal(resp, `export_count_csv failed: ${resp.status}`);
-    }
-    const blob = await resp.blob();
+    const { blob, headers } = await postForBlob(ROUTES.postResultsExportCountCsv, body);
     return {
       blob,
       headers: {
-        savedTo: resp.headers.get("X-TCIP-Saved-To") ?? "",
-        validated: resp.headers.get("X-TCIP-Validated") === "true",
-        acknowledgedBy: decodeURIComponent(resp.headers.get("X-TCIP-Acknowledged-By") ?? ""),
+        savedTo: headers.get("X-TCIP-Saved-To") ?? "",
+        validated: headers.get("X-TCIP-Validated") === "true",
+        acknowledgedBy: decodeURIComponent(headers.get("X-TCIP-Acknowledged-By") ?? ""),
       },
     };
   },

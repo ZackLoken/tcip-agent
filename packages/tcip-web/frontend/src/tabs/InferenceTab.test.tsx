@@ -119,6 +119,7 @@ describe("InferenceTab date selection", () => {
     const launchSpy = vi
       .spyOn(inferenceApi, "launch")
       .mockImplementation((body) => Promise.resolve(launched(body.date, body.output_dir)));
+    useStore.setState({ user: "jordan" });
 
     render(<InferenceTab />);
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
@@ -137,6 +138,7 @@ describe("InferenceTab date selection", () => {
         output_dir: "C:/data/predictions/baseline/2026-01-01",
         stated: {},
         assessment_id: null,
+        user: "jordan",
       },
       {
         checkpoint_path: "C:/proj/.tcip/models/baseline/best.pt",
@@ -145,6 +147,7 @@ describe("InferenceTab date selection", () => {
         output_dir: "C:/data/predictions/baseline/2026-01-08",
         stated: {},
         assessment_id: null,
+        user: "jordan",
       },
     ]);
   });
@@ -176,6 +179,7 @@ describe("InferenceTab job table", () => {
       status: "canceled",
       cancel_requested: true,
     });
+    useStore.setState({ user: "jordan" });
 
     render(<InferenceTab />);
     expect(await screen.findByText("inf-live")).toBeInTheDocument();
@@ -184,7 +188,7 @@ describe("InferenceTab job table", () => {
     const stops = screen.getAllByRole("button", { name: "Cancel" });
     expect(stops).toHaveLength(1);
     fireEvent.click(stops[0]);
-    await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith("inf-live"));
+    await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith("inf-live", "jordan"));
   });
 
   it("shows a failed job's reason, not just its status badge", async () => {

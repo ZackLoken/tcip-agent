@@ -20,16 +20,15 @@ import pytest
 from mcp.client.session import ClientSession
 from mcp.shared.memory import create_client_server_memory_streams
 
-import tcip_mcp.audit as audit_module
 import tcip_store as ts
 from tcip_mcp import traits
 from tcip_mcp.server import build_server
 from tcip_mcp.workspace import workspace_from_environment
 from tests import _trait_fixtures as fx
+from tcip_mcp.agent_identity import RECORD_FIELDS as IDENTITY_FIELDS
+from tests._audit_fixtures import audit_rows
 
 DECLARED = mcp_types.Implementation(name="reviewing-harness", version="1.2.3")
-IDENTITY_FIELDS = ("agent_client_name", "agent_client_version", "agent_session",
-                   "terminal_session")
 
 
 def _body(result: Any) -> dict:
@@ -86,11 +85,6 @@ def results_through_handshake(
     return anyio.run(run)
 
 
-def _project_rows(project: Path, tool: str) -> list[dict]:
-    key = audit_module.audit_log_key(project)
-    return [row for row in ts.read_log(key).records if row["tool"] == tool]
-
-
 def _report_call(detail: str) -> tuple[str, dict]:
     return ("report_friction", {"category": "unexpected_behavior", "detail": detail})
 
@@ -103,7 +97,7 @@ def test_an_audited_call_through_a_handshake_records_the_declared_harness_and_a_
 ) -> None:
     call_through_handshake([_report_call("first"), _report_call("second")], project=project)
 
-    rows = _project_rows(project, "report_friction")
+    rows = audit_rows(project, "report_friction")
     assert [row["arguments"]["detail"] for row in rows] == ["first", "second"]
     for row in rows:
         assert row["agent_client_name"] == "reviewing-harness"
@@ -119,7 +113,7 @@ def test_the_terminal_session_rides_along_only_when_the_launcher_declared_one(
     monkeypatch.setenv("TCIP_TERMINAL_SESSION", "term_abc123")
     call_through_handshake([_report_call("under a terminal")], project=project)
 
-    (row,) = _project_rows(project, "report_friction")
+    (row,) = audit_rows(project, "report_friction")
     assert row["terminal_session"] == "term_abc123"
 
 
@@ -127,7 +121,7 @@ def test_two_handshakes_in_two_runs_mint_two_sessions(project: Path) -> None:
     call_through_handshake([_report_call("run one")], project=project)
     call_through_handshake([_report_call("run two")], project=project)
 
-    first, second = _project_rows(project, "report_friction")
+    first, second = audit_rows(project, "report_friction")
     assert first["agent_session"] != second["agent_session"]
 
 
@@ -138,7 +132,7 @@ def test_a_call_with_no_handshake_records_no_identity(project: Path) -> None:
 
     report_friction(project, "unexpected_behavior", "no handshake")
 
-    (row,) = _project_rows(project, "report_friction")
+    (row,) = audit_rows(project, "report_friction")
     assert not set(IDENTITY_FIELDS) & set(row)
 
 
@@ -157,7 +151,7 @@ def test_a_trait_proposed_through_a_handshake_is_named_by_its_audit_line(project
     })], project=project)
 
     assert not set(IDENTITY_FIELDS) & set(revision)
-    (row,) = _project_rows(project, "propose_trait")
+    (row,) = audit_rows(project, "propose_trait")
     assert row["arguments"]["revision"] == revision["number"]
     assert row["agent_client_name"] == "reviewing-harness"
     assert row["agent_client_version"] == "1.2.3"
@@ -183,10 +177,14 @@ class _CapturingResponse:
 
 
 @pytest.fixture
-def captured_requests(monkeypatch: pytest.MonkeyPatch) -> list:
-    """Every ``urllib`` request the tools' push makes, with the backend answered as up."""
+def captured_requests(monkeypatch: pytest.MonkeyPatch, project: Path) -> list:
+    """Every ``urllib`` request the tools' push makes, with a backend recorded as serving the
+    workspace and answered as up."""
     import urllib.request
 
+    from tcip_mcp.web_client import backend_port_key
+
+    ts.replace(backend_port_key(workspace_from_environment()), "8765")
     seen: list = []
 
     def fake_urlopen(req, timeout=None):  # noqa: ANN001
@@ -217,7 +215,7 @@ def test_the_push_with_no_handshake_sends_only_the_content_type(
 ) -> None:
     from tcip_mcp.web_client import post_panel_event
 
-    post_panel_event(project, project.parent, "meta", "identity_probe", {"n": 1})
+    post_panel_event(project, workspace_from_environment(), "meta", "identity_probe", {"n": 1})
 
     (req,) = captured_requests
     assert {name.lower() for name in req.headers} == {"content-type"}

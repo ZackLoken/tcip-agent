@@ -15,6 +15,7 @@ torch = pytest.importorskip("torch")
 
 from tcip_mcp import subject_registry as cr  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
+from tests._predictor_fixtures import BOX, StubPredictor, install  # noqa: E402
 
 SUBJECT = "bud"
 COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
@@ -31,31 +32,10 @@ def _checkpoint(tmp_path: Path, *attributes: cr.Attribute) -> str:
         registry=cr.SubjectRegistry(subjects=(cr.Subject(name=SUBJECT, attributes=attributes),)))
 
 
-class _AttributedPredictor:
+def _attributed_predictor() -> StubPredictor:
     """A predictor over :data:`COLOR` and :data:`GRADE`: two detections, different values."""
-
-    def __init__(self, checkpoint_path=None, **kwargs):
-        pass
-
-    def predict_batch(self, paths, execution=None, **kw):
-        return [{"image": p, "width": 100, "height": 100,
-                 "boxes": [[10.0, 10.0, 30.0, 30.0], [40.0, 40.0, 60.0, 60.0]],
-                 "scores": [0.9, 0.8], "labels": [1, 1], "attributes": [[0, 2], [1, 0]],
-                 "count": 2, "cap_hit": False}
-                for p in paths]
-
-
-class _DetectorPredictor:
-    """A detector run's predictor: one detection of its one subject."""
-
-    def __init__(self, checkpoint_path=None, **kwargs):
-        pass
-
-    def predict_batch(self, paths, execution=None, **kw):
-        return [{"image": p, "width": 100, "height": 100,
-                 "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1,
-                 "cap_hit": False}
-                for p in paths]
+    return StubPredictor(boxes=(BOX, (40.0, 40.0, 60.0, 60.0)), scores=(0.9, 0.8),
+                         attributes=[[0, 2], [1, 0]])
 
 
 def _one_image(images_dir: Path) -> None:
@@ -73,8 +53,7 @@ def test_an_attributed_run_writes_every_attribute_value_and_stamps_its_scope(
     images_dir = tmp_path / "images"
     _one_image(images_dir)
     checkpoint = _checkpoint(tmp_path, COLOR, GRADE)
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _AttributedPredictor)
+    install(monkeypatch, _attributed_predictor())
     from tcip_mcp.tools.inference_tools import run_inference
 
     out = tmp_path / "out"
@@ -98,8 +77,7 @@ def test_a_detector_run_declaring_no_attribute_writes_the_ordinary_shape_and_sta
     images_dir = tmp_path / "images"
     _one_image(images_dir)
     checkpoint = _checkpoint(tmp_path)
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _DetectorPredictor)
+    install(monkeypatch, StubPredictor())
     from tcip_mcp.tools.inference_tools import run_inference
 
     out = tmp_path / "out"

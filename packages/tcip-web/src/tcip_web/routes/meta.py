@@ -27,7 +27,7 @@ def get_reports(limit: int = 50) -> dict[str, Any]:
     reports: list[dict[str, Any]] = [
         {
             "file": report_document_name(document.name),
-            "timestamp": document.value.get("timestamp"),
+            "timestamp": document.timestamp,
             "category": document.value.get("category", ""),
             "detail": document.value.get("detail", ""),
             "context": document.value.get("context", {}),

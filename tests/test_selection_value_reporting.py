@@ -17,7 +17,6 @@ from torch.utils.data import DataLoader
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.collation import task_collate
 from tests.tiny_trainer_fixtures import (
-    ConstantImageClassDataset,
     ConstantImageDataset,
     trainer_run,
     write_regression_dataset,
@@ -131,9 +130,9 @@ def test_epoch_record_follows_a_configured_selection_metric(tmp_path):
 def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(tmp_path):
     """``f1`` is higher-is-better; model_best.pt must hold the epoch with the highest val f1,
     not the lowest, and early stopping must track improvement in the same direction."""
-    train_ds = ConstantImageClassDataset(
-        [-2.0, -1.5, -1.0, 1.0, 1.5, 2.0], [0, 0, 0, 1, 1, 1])
-    val_ds = ConstantImageClassDataset([-1.8, -0.4, 0.4, 1.8], [0, 0, 1, 1])
+    train_ds = ConstantImageDataset(
+        [-2.0, -1.5, -1.0, 1.0, 1.5, 2.0], [0, 0, 0, 1, 1, 1], key="labels", cast=int)
+    val_ds = ConstantImageDataset([-1.8, -0.4, 0.4, 1.8], [0, 0, 1, 1], key="labels", cast=int)
     collate = task_collate("classification")
     train_loader = DataLoader(train_ds, batch_size=3, collate_fn=collate)
     val_loader = DataLoader(val_ds, batch_size=4, collate_fn=collate)
