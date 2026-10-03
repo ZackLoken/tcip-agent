@@ -55,7 +55,7 @@ def test_project_scoped_writer_lands_under_the_resolved_project(tmp_path: Path) 
         plant_registry={"name": "unregistered", "digest": "0" * 64},
         capture_identity={}, capture_digests={}, unreadable={}, assignments={},
     )
-    persist_mapping(build, noncanonical)
+    persist_mapping(build, noncanonical, actor=None)
 
     rows = list(ts.read_log(audit_module.audit_log_key(project_root)).records)
     matches = [r for r in rows if r["tool"] == "plant_mapping_built"]

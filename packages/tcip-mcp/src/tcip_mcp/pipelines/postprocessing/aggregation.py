@@ -221,9 +221,10 @@ def deliver_per_plant_aggregate(
     delivery_kind: str, buckets: Sequence[Bucket], plants: list[str], crop: str = "",
     pipeline_version: str = "", door: str, plant_mapping: dict | None = None,
     scale_assessment_id: str | None = None, acknowledgment_id: str | None = None,
+    actor: str | None,
 ) -> dict:
     """Deliver per-plant aggregated ``results`` (:func:`aggregate_per_plant`'s own output) as a
-    ``delivery_kind`` CSV at ``output_path``, for exactly the population ``plants``
+    ``delivery_kind`` CSV at ``output_path``, by ``actor``, for exactly the population ``plants``
     (:func:`~tcip_mcp.pipelines.postprocessing.phenology.population`'s list), over the published
     ``buckets`` the values came from.
 
@@ -280,5 +281,5 @@ def deliver_per_plant_aggregate(
                      result=result, acknowledgment_id=acknowledgment_id,
                      scale_assessment_id=scale_assessment_id, unit=linear_basis)
     delivered = deliver_csv(project, output_path, result, clearance=clearance, revision=revision,
-                            door=door, delivery_kind=delivery_kind)
+                            door=door, delivery_kind=delivery_kind, actor=actor)
     return {**delivered, "n_plants": len(plants)}

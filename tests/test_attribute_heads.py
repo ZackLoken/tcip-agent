@@ -95,7 +95,7 @@ def test_two_attributes_train_two_heads_publish_both_values_and_deliver(tmp_path
     out = tmp_path / "out" / "milestones.csv"
     delivered = acknowledged(tmp_path, lambda ack: deliver_phenology(
         tmp_path, measurement, curves=False, output_path=out, acknowledgment_id=ack,
-        door="test_delivery"))
+        door="test_delivery", actor=None))
     assert delivered["n_rows"] == len(PLANTS), delivered
     assert out.exists()
 

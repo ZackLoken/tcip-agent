@@ -38,7 +38,7 @@ def _deliver(project: Path, bucket: Path, acknowledgment_id: str | None = None) 
 
     return deliver_per_image_counts_csv(project, bucket, str(project / "out" / "counts.csv"),
                                         trait=fx.COUNT_TRAIT, acknowledgment_id=acknowledgment_id,
-                                        door="test_door")
+                                        door="test_door", actor=None)
 
 
 def _acknowledged(project: Path, bucket: Path) -> dict:

@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-import tcip_mcp.audit as audit_module
 import tcip_store as ts
 from tcip_annotation import json_io
+from tests._audit_fixtures import audit_rows
 
 DATE = "2025-09-14"
 IMG = 64
@@ -178,10 +178,6 @@ def test_an_imported_record_keeps_the_provenance_the_document_carried_and_gains_
     assert (bare.created_by, bare.created_at, bare.accepted_by) == (None, None, None)
 
 
-def _rows(root: Path) -> list[dict]:
-    return list(ts.read_log(audit_module.audit_log_key(root)).records)
-
-
 def test_the_import_leaves_one_row_with_the_documents_path_and_digest(tmp_path: Path):
     """Every row the import leaves in the dataset's log is counted, and there is one: the
     library's import event. The digest is recomputed here from the document's bytes by the stated
@@ -190,11 +186,11 @@ def test_the_import_leaves_one_row_with_the_documents_path_and_digest(tmp_path: 
 
     root = _dataset(tmp_path)
     document = _document(tmp_path / "external.json")
-    before = len(_rows(root))
+    before = len(audit_rows(root))
 
     assert "error" not in _import(document, root)
 
-    rows = _rows(root)[before:]
+    rows = audit_rows(root)[before:]
     assert [(row["tool"], row["status"]) for row in rows] == [("coco_document_imported", "ok")]
     (event,) = rows
     assert event["arguments"]["document"] == str(document.resolve())
@@ -222,7 +218,7 @@ def test_the_digest_names_the_bytes_the_labels_came_from(tmp_path: Path, monkeyp
     monkeypatch.setattr(ts, "transaction", replacing)
     assert "error" not in _import(document, root)
 
-    (event,) = [row for row in _rows(root) if row["tool"] == "coco_document_imported"]
+    (event,) = [row for row in audit_rows(root) if row["tool"] == "coco_document_imported"]
     assert event["document_digest"] == hashlib.sha256(read_bytes).hexdigest()[:16]
     assert document.read_bytes() != read_bytes
 
@@ -412,7 +408,7 @@ def test_an_import_whose_second_document_conflicts_leaves_no_document_written(
     (kept,) = json_io.read_annotations(second)
     assert (kept.subject, kept.created_by) == ("leaf", "user:breeder")
     assert not (_labels(root) / "tree_01.json").exists()
-    assert not [row for row in _rows(root) if row["tool"] == "coco_document_imported"]
+    assert not [row for row in audit_rows(root) if row["tool"] == "coco_document_imported"]
 
 
 def test_an_import_failing_while_it_publishes_leaves_no_document(tmp_path: Path, monkeypatch):
@@ -440,7 +436,7 @@ def test_an_import_failing_while_it_publishes_leaves_no_document(tmp_path: Path,
 
     assert len(published) == 2, "the failure must land after one document was published"
     assert not any(_labels(root).glob("*.json"))
-    assert not [row for row in _rows(root) if row["tool"] == "coco_document_imported"]
+    assert not [row for row in audit_rows(root) if row["tool"] == "coco_document_imported"]
 
 
 def test_a_partial_publish_records_the_documents_written_and_the_error(
@@ -453,20 +449,11 @@ def test_a_partial_publish_records_the_documents_written_and_the_error(
     import tcip_mcp.tools.inference_tools as itools
     from tcip_mcp.dataset_layout import prediction_root
     from tcip_mcp.pipelines.execution import Stated
+    from tests._predictor_fixtures import StubPredictor, install
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     root = _dataset(tmp_path)
-
-    class Detector:
-        def __init__(self, checkpoint_path=None, **kwargs):
-            pass
-
-        def predict_batch(self, paths, execution=None, **kw):
-            return [{"image": p, "width": IMG, "height": IMG, "boxes": [BOX], "scores": [0.9],
-                     "labels": [1], "count": 1, "cap_hit": False} for p in paths]
-
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", Detector)
+    install(monkeypatch, StubPredictor(width=IMG, height=IMG, boxes=(BOX,)))
     real_encode = export.encode_predictions
     calls: list[str] = []
 
@@ -483,7 +470,7 @@ def test_a_partial_publish_records_the_documents_written_and_the_error(
                              output_dir=str(prediction_root(root) / "detector" / DATE),
                              stated=Stated(tile=False))
 
-    failed = {row["tool"]: row for row in _rows(root) if row["status"] == "failed"}
+    failed = {row["tool"]: row for row in audit_rows(root) if row["status"] == "failed"}
     published = failed["prediction_bucket_published"]["arguments"]
     assert set(published) - {"predictions_dir"} == {"written", "error"}
     assert published["written"] == ["tree_01"]
@@ -498,7 +485,7 @@ def test_an_import_that_committed_no_document_leaves_no_event(tmp_path: Path, mo
 
     root = _dataset(tmp_path)
     assert _import(_document(tmp_path / "empty.json", annotations=[]), root)["written"] == []
-    assert not [row for row in _rows(root) if row["tool"] == "coco_document_imported"]
+    assert not [row for row in audit_rows(root) if row["tool"] == "coco_document_imported"]
 
     person = [json_io.stamped([json_io.annotation_from_payload(
         {"subject": "leaf", "bbox": [1, 1, 5, 5]})], [], actor="user:breeder", now="2025-09-16")[0]]
@@ -506,7 +493,7 @@ def test_an_import_that_committed_no_document_leaves_no_event(tmp_path: Path, mo
     with pytest.raises(ValueError, match="already exists"):
         import_coco_document(_document(tmp_path / "external.json"), root, date=DATE)
     assert not (_labels(root) / "tree_02.json").exists()
-    assert not [row for row in _rows(root) if row["tool"] == "coco_document_imported"]
+    assert not [row for row in audit_rows(root) if row["tool"] == "coco_document_imported"]
 
 
 def test_an_annotation_naming_no_listed_image_refuses_the_whole_import(tmp_path: Path):

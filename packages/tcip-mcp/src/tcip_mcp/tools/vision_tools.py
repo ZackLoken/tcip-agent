@@ -7,6 +7,7 @@ so the agent can call its client's own image-capable read tool on it to visually
 from __future__ import annotations
 
 import random
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, NamedTuple
 
@@ -25,7 +26,6 @@ from tcip_annotation.viz import (
     render_segmentations,
 )
 
-from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.display_bounds import VIZ_ARTIFACT_MAX_EDGE
 from tcip_annotation.matching import REVIEW_CONF_FLOOR
 from tcip_mcp.project_paths import viz_output_path
@@ -211,7 +211,6 @@ def _poly_dict(a: Annotation, index: Callable[[str], int], *, scope=None) -> dic
             "class_id": index(_legend_name(a, scope=scope))}
 
 
-@audited
 def visualize(
     project: Path,
     source: str,
@@ -284,7 +283,7 @@ def _viz_annotations(
     task: str = "detect",
     class_names: str = "",
 ) -> dict:
-    """Render ground-truth annotations on a single image. See ``visualize``."""
+    """Render ground-truth annotations on a single image."""
     from tcip_mcp.dataset_layout import find_gt_label
 
     img = Path(image_path)
@@ -327,7 +326,6 @@ def _viz_annotations(
         "summary": summary,
         # `count` is the stable key across all visualize sources; the source-specific alias stays.
         "count": len(shapes),
-        "annotation_count": len(shapes),
         # Disclosed, not folded into `count`: these annotations are real but this renderer can't draw
         # them, and a silently smaller count would read as "the image has fewer annotations".
         "points_not_rendered": n_points,
@@ -352,7 +350,7 @@ def _viz_predictions(
     class_names: str = "",
     conf_threshold: float = 0.0,
 ) -> dict:
-    """Render a bucket's predictions on a single image. See ``visualize``.
+    """Render a bucket's predictions on a single image.
 
     The legend keys each detection by its subject and the values it carries under the attributes
     the bucket's recorded scope declares (:func:`_legend_name`).
@@ -393,7 +391,6 @@ def _viz_predictions(
         "summary": summary,
         # `count` is the stable key across all visualize sources; the source-specific alias stays.
         "count": len(shapes),
-        "prediction_count": len(shapes),
         "points_not_rendered": n_points,
     }
 
@@ -407,7 +404,7 @@ def _viz_comparison(
     class_names: str = "",
     conf_threshold: float = REVIEW_CONF_FLOOR,
 ) -> dict:
-    """Render GT vs prediction comparison with match indicators. See ``visualize``.
+    """Render GT vs prediction comparison with match indicators.
 
     Green = ground truth, Red = predictions, Yellow lines = matched pairs, and the TP/FP/FN
     counts, all as the single-image scoring
@@ -531,7 +528,6 @@ def get_worst_predictions(bucket: Bucket, labels_dir: str, top_k: int = 8) -> di
     }
 
 
-@audited
 def render_failure_cases(
     project: Path,
     predictions_dir: str,
@@ -638,10 +634,10 @@ def _viz_dataset_sample(
     task: str = "detect",
     class_names: str = "",
 ) -> dict:
-    """Render a grid of random annotated dataset samples. See ``visualize``."""
+    """Render a grid of random annotated dataset samples."""
     from tcip_mcp.dataset_layout import find_gt_label, image_root
     from tcip_mcp.pipelines.image_utils import (
-        BandGroupIncomplete, BandGroupRef, list_logical_images, resolve_image_source,
+        BandGroupIncomplete, list_logical_images, refuse_incomplete_band_group, source_path_of,
     )
 
     root = Path(folder_path)
@@ -649,25 +645,22 @@ def _viz_dataset_sample(
     if not images_dir.is_dir():
         return {"error": f"Images directory not found: {images_dir}"}
 
-    # Every logical image at or under images_dir, folding sibling band files into one grouped
-    # entry per capture: recurses into images/<date>/ subfolders (the canonical layout) and any
-    # deeper nesting.
+    # Every logical image at or under images_dir, a grouped capture as one entry, at any depth.
     dirs = {images_dir} | {p for p in images_dir.rglob("*") if p.is_dir()}
-    all_images: list[tuple[Path, str]] = [
-        (d, stem) for d in sorted(dirs) for stem in sorted(list_logical_images(d))
-    ]
+    all_images = [(stem, src) for d in sorted(dirs)
+                  for stem, src in sorted(list_logical_images(d).items())]
     if not all_images:
         return {"error": "No images found in dataset"}
 
     sample = random.sample(all_images, min(n, len(all_images)))
     rendered_paths = []
     titles = []
-    for d, stem in sample:
+    for stem, enumerated in sample:
         try:
-            source = resolve_image_source(d, stem)
-        except (FileNotFoundError, BandGroupIncomplete):
+            source = refuse_incomplete_band_group(enumerated)
+        except BandGroupIncomplete:
             continue
-        rep_path = source.manifest_path if isinstance(source, BandGroupRef) else source
+        rep_path = source_path_of(source)
         label_path = find_gt_label(str(rep_path))
         read = _read_for_display(source)
         if label_path is not None:
@@ -703,15 +696,20 @@ def _viz_dataset_sample(
     return {
         "image_path": grid_path,
         "summary": f"Grid of {len(sample)} annotated samples from {root.name}",
-        # `count` is the stable key across all visualize sources; the source-specific alias stays.
         "count": len(sample),
-        "sample_count": len(sample),
         "total_images": len(all_images),
     }
 
 
+def _received_at(document: dict, name: str) -> datetime:
+    """The instant the backend received the canvas document ``name``. Refuses (``ValueError``) a
+    document that carries none."""
+    if "received_at" not in document:
+        raise ValueError(f"the canvas document {name} carries no received_at")
+    return datetime.fromisoformat(document["received_at"])
+
+
 @tool()
-@audited
 def capture_live_canvas(
     project: Path,
     workspace: Path,
@@ -747,7 +745,8 @@ def capture_live_canvas(
     meta_doc = canvas_meta_key(str(project))
     shapes_doc = canvas_geometry_key(str(project))
 
-    prev_ts = (ts.read(meta_doc, default=None) or {}).get("received_at", 0)
+    previous = ts.read(meta_doc, default=None)
+    since = None if previous is None else _received_at(previous, "canvas_live")
     refreshed = False
     ping: dict = {}
     if refresh:
@@ -756,7 +755,7 @@ def capture_live_canvas(
             for _ in range(12):  # ~2.4s for the GUI's flush to land
                 _time.sleep(0.2)
                 cur = ts.read(meta_doc, default=None)
-                if cur and cur.get("received_at", 0) > prev_ts:
+                if cur and (since is None or _received_at(cur, "canvas_live") > since):
                     refreshed = True
                     break
 
@@ -792,7 +791,7 @@ def capture_live_canvas(
                               output_path=viz_output_path(project, "canvas", suffix=".jpg"))
     ping_delivered = bool(ping.get("delivered"))
 
-    now = _time.time()
+    now = datetime.now(timezone.utc)
     tag_counts: dict[str, int] = {}
     creator_counts: dict[str, int] = {}
     for s in shapes:
@@ -802,7 +801,7 @@ def capture_live_canvas(
             if cb:
                 creator_counts[str(cb)] = creator_counts.get(str(cb), 0) + 1
 
-    age = round(max(0.0, now - float(state.get("received_at") or now)), 1)
+    age = round((now - _received_at(state, "canvas_live")).total_seconds(), 1)
     if refreshed or age < 5.0:
         summary = f"Rendered the live {state.get('tab')} canvas for {state.get('image')} ({len(shapes)} shapes)."
     else:
@@ -828,8 +827,8 @@ def capture_live_canvas(
         "shape_counts_by_tag": tag_counts,
         "shape_counts_by_creator": creator_counts,
         "state_age_seconds": age,
-        "shapes_age_seconds": (round(max(0.0, now - float(sdoc.get("received_at") or 0)), 1)
-                               if shapes_valid and sdoc.get("received_at") else None),
+        "shapes_age_seconds": (round((now - _received_at(sdoc, "canvas_shapes")).total_seconds(), 1)
+                               if shapes_valid else None),
         # True when no valid geometry exists for this image/tab yet (heartbeat-only or stale).
         "shapes_missing": not shapes_valid,
         # Did a fresh push land after our ping? False + delivered ping = GUI not listening here.
@@ -840,7 +839,6 @@ def capture_live_canvas(
     }
 
 
-@audited
 def overlay_reference_grid(
     project: Path,
     image_path: str,

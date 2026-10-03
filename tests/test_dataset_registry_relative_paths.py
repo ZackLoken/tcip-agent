@@ -52,8 +52,7 @@ def test_register_dataset_stores_a_relative_path_for_the_projects_own_tree(tmp_p
     registered = register_dataset(src, str(src), crop="currant")
 
     assert "error" not in registered
-    regs = read_datasets(src)
-    assert regs[0]["path"] == "."
+    assert read_datasets(src) == [{"id": registered["id"], "path": "."}]
 
 
 # ── the accessor: resolves a relative entry, leaves an absolute one alone ──────
@@ -164,7 +163,9 @@ def test_project_roots_reaches_a_relatively_registered_datasets_state(tmp_path: 
 
 
 def test_check_dataset_identity_stays_quiet_for_a_self_registered_project(tmp_path: Path):
-    src = tmp_path / "proj"
+    from tests._web_fixtures import new_project
+
+    src = new_project(tmp_path / "proj")
     _make_dataset(src)
     register_dataset(src, str(src), crop="currant")
 
@@ -177,7 +178,9 @@ def test_check_dataset_identity_stays_quiet_for_a_self_registered_project(tmp_pa
 def test_check_dataset_identity_still_fires_for_a_genuinely_moved_dataset(tmp_path: Path):
     import shutil
 
-    orig = tmp_path / "orig"
+    from tests._web_fixtures import new_project
+
+    orig = new_project(tmp_path / "orig")
     _make_dataset(orig)
     register_dataset(orig, str(orig), crop="currant")
 

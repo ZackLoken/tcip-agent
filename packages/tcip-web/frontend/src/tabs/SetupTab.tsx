@@ -82,6 +82,7 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
         plant_registry: plantRegistry,
         supersede: supersedeMapping,
         ...(nnTolerance === "" ? {} : { nn_tolerance_m: nnTolerance }),
+        user: useStore.getState().user,
       });
       setBuildSummary(res.summary);
       setBuildTolerance(res.nn_tolerance_m);

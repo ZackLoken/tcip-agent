@@ -61,9 +61,8 @@ def test_register_dataset_writes_identity_and_registers(tmp_path: Path):
     # dataset.json holds {crop, id, fingerprint}.
     ident = json.loads((src / "dataset.json").read_text())
     assert ident == {"crop": "currant", "id": res["id"], "fingerprint": res["fingerprint"]}
-    # the project registry knows the dataset.
-    regs = read_datasets(tmp_path)
-    assert len(regs) == 1 and regs[0]["id"] == res["id"] and regs[0]["crop"] == "currant"
+    # the project registry knows the dataset by id and path, its identity held by dataset.json.
+    assert read_datasets(tmp_path) == [{"id": res["id"], "path": stored_path(src, tmp_path)}]
 
 
 def test_register_dataset_requires_crop_and_keeps_id_stable(tmp_path: Path):
@@ -92,8 +91,7 @@ def test_register_dataset_reconciles_a_move_by_id(tmp_path: Path):
     regs = read_datasets(tmp_path)
     same = [r for r in regs if r["id"] == reg["id"]]
     assert len(same) == 1  # one entry for the id: the move updated the path, not duplicated
-    assert same[0]["path"] == stored_path(moved, tmp_path)
-    assert same[0]["fingerprint"] == reg["fingerprint"]  # unchanged content -> same fingerprint
+    assert same[0] == {"id": reg["id"], "path": stored_path(moved, tmp_path)}
 
 
 def test_initialize_project(tmp_path: Path):
@@ -695,8 +693,7 @@ def test_concurrent_registrations_both_survive_in_the_registry(tmp_path: Path):
 
     def register(name: str) -> None:
         try:
-            upsert_dataset(project, {"id": _BarrierId(name), "path": str(tmp_path / name),
-                                     "crop": "currant", "fingerprint": f"v1:{name}"})
+            upsert_dataset(project, {"id": _BarrierId(name), "path": str(tmp_path / name)})
         except BaseException as exc:  # recorded, never swallowed into a passing test
             failures.append(exc)
 
@@ -720,7 +717,7 @@ def test_an_undecodable_dataset_registry_refuses_and_an_absent_one_reads_empty(t
 
     assert read_datasets(project) == []  # a project with nothing registered yet
 
-    upsert_dataset(project, {"id": "aaa", "path": str(project), "crop": "currant"})
+    upsert_dataset(project, {"id": "aaa", "path": str(project)})
     damage_record(dataset_registry_key(project), b'[{"id": "aaa"')  # truncated mid-list
     with pytest.raises(tcip_store.DecodeError):
         read_datasets(project)

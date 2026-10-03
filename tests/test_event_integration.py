@@ -183,7 +183,6 @@ class TestPushPanelDataTool:
         from tcip_mcp.tools.gui_tools import push_panel_event
 
         monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
-        monkeypatch.setenv("TCIP_WEB_PORT", "59999")  # very unlikely to be bound
         result = push_panel_event(project, project.parent, "training", "metrics_update",
                                   {"epoch": 1})
         # Either the connection was refused (no_subscribers) or a URL error;
@@ -201,11 +200,11 @@ class TestPushPanelDataTool:
 
 
 class TestPortDiscovery:
-    """The record (the port actually bound) outranks the env var (a request), which outranks
-    the default."""
+    """The port the backend recorded under the workspace is the one place a client reads it."""
 
-    def test_record_wins_over_the_env_var(self, tmp_path: Path, monkeypatch) -> None:
-        """The record names the port actually bound, so it outranks a request for a different one."""
+    def test_the_recorded_port_is_read_whatever_the_environment_requests(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
         import tcip_store as ts
         from tcip_mcp.web_client import backend_port_key, resolve_web_port
 
@@ -213,27 +212,16 @@ class TestPortDiscovery:
         ts.replace(backend_port_key(tmp_path.parent), "34567")
         assert resolve_web_port(tmp_path.parent) == 34567
 
-    def test_env_var_used_when_no_record_exists(self, tmp_path: Path, monkeypatch) -> None:
-        """A failed publication or a bare ``uvicorn`` launch leaves no record: with none to trust,
-        the request is the best information there is."""
-        from tcip_mcp.web_client import resolve_web_port
+    def test_no_recorded_port_refuses_naming_what_records_one(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """No record means no backend serves the workspace; a requested port in the environment
+        is not where one listens."""
+        from tcip_mcp.web_client import NoBackendPort, resolve_web_port
 
         monkeypatch.setenv("TCIP_WEB_PORT", "12345")
-        assert resolve_web_port(tmp_path.parent) == 12345
-
-    def test_port_file_used_when_env_absent(self, tmp_path: Path, monkeypatch) -> None:
-        import tcip_store as ts
-        from tcip_mcp.web_client import backend_port_key, resolve_web_port
-
-        ts.replace(backend_port_key(tmp_path.parent), "34567")
-        monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
-        assert resolve_web_port(tmp_path.parent) == 34567
-
-    def test_default_when_neither_available(self, tmp_path: Path, monkeypatch) -> None:
-        from tcip_mcp.web_client import DEFAULT_PORT, resolve_web_port
-
-        monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
-        assert resolve_web_port(tmp_path.parent) == DEFAULT_PORT
+        with pytest.raises(NoBackendPort, match="python -m tcip_web"):
+            resolve_web_port(tmp_path.parent)
 
     def test_an_unreadable_recorded_port_raises_and_names_it(
         self, tmp_path: Path, monkeypatch
@@ -353,7 +341,7 @@ class TestTrainingToolOutputSchema:
             "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                          "mixed_precision": False, "device": "cpu",
         }
-        res = training_tools.launch_training(tmp_path, cfg)
+        res = training_tools.launch_training(tmp_path, cfg, actor=None)
 
         assert "error" not in res, res
         assert res["status"] == "launched"
@@ -461,8 +449,11 @@ def test_post_panel_event_suppressed_under_pytest(tmp_path, monkeypatch):
 def test_post_panel_event_opt_in_bypasses_suppression(project, monkeypatch):
     from tcip_mcp.web_client import post_panel_event
 
+    import tcip_store as ts
+    from tcip_mcp.web_client import backend_port_key
+
     monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
-    monkeypatch.setenv("TCIP_WEB_PORT", "1")        # nothing listens on port 1
+    ts.replace(backend_port_key(project.parent), "1")  # nothing listens on port 1
     res = post_panel_event(project, project.parent, "annotate", "annotate_focus", {})
     assert res["delivered"] is False
     assert res["status"] != "suppressed_under_pytest"   # it really attempted the send
@@ -476,14 +467,15 @@ def test_post_panel_event_returns_the_backends_response_body(opened_project, mon
 
     import uvicorn
 
-    from tcip_mcp.web_client import post_panel_event
+    import tcip_store as ts
+    from tcip_mcp.web_client import backend_port_key, post_panel_event
     from tcip_web.app import app
 
     monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    monkeypatch.setenv("TCIP_WEB_PORT", str(port))
+    ts.replace(backend_port_key(opened_project.parent), str(port))
 
     server = uvicorn.Server(
         uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error", lifespan="off")

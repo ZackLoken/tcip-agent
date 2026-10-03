@@ -86,27 +86,31 @@ class BuildMappingPayload(BaseModel):
     dates: Optional[list[str]] = None
     nn_tolerance_m: Optional[float] = None
     supersede: bool = False
+    user: str
 
 
 @router.post("/plant_mapping/build")
 def build_plant_mapping(payload: BuildMappingPayload) -> dict:
     """Build and persist the open project's plant mapping
     (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.build_plant_mapping`) from an
-    ``images_root`` confined to the project, answering the build as ``MappingBuild.served``
-    states it.
+    ``images_root`` confined to the project, by the person ``user`` names, answering the build as
+    ``MappingBuild.served`` states it.
 
     A refusal answers 400, an unknown registry 404, a rebuild a delivery event still cites 409
     unless ``supersede``, and a receipt that could not be written 409.
     """
     from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.identity import actor
     from tcip_web.routes.audit_gap import audit_gap_409
 
+    person = actor(payload.user)
     root = store.open_root()
     [images_root] = _belonging(root, payload.images_root)
     try:
         return plant_mapping.build_plant_mapping(
             root, payload.name, images_root or "", payload.plant_registry, dates=payload.dates,
-            nn_tolerance_m=payload.nn_tolerance_m, supersede=payload.supersede).served()
+            nn_tolerance_m=payload.nn_tolerance_m, supersede=payload.supersede,
+            actor=person).served()
     except plant_mapping.PlantRegistryNotFound as exc:
         raise HTTPException(404, str(exc)) from exc
     except AuditEntryNotWritten as exc:
@@ -244,29 +248,27 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
 
 
 class AcknowledgmentPayload(BaseModel):
-    """Who ships the unvalidated result shown (``user``), why, and that result's digest
+    """Why the exporting person ships the unvalidated result shown, and that result's digest
     (``result_sha256``, as the refusal or the screen measurement served it)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    user: str
     reason: str
     result_sha256: str
 
 
-def _recorded_acknowledgment(payload, request: Request) -> Optional[str]:
+def _recorded_acknowledgment(payload, person: str, request: Request) -> Optional[str]:
     """Record the acknowledgment ``payload`` carries (:func:`~tcip_mcp.delivery.
-    record_acknowledgment`) by the person it names, and return its id; ``None`` when it carries
-    none. A request with no browser ``Origin``, or one declaring an agent identity
-    (:data:`~tcip_mcp.agent_identity.HEADERS`), refuses (403), and a blank reason or name refuses
-    (400), before anything runs; an act recorded whose audit line could not follow answers 409.
+    record_acknowledgment`) by ``person``, and return its id; ``None`` when it carries none. A
+    request with no browser ``Origin``, or one declaring an agent identity
+    (:data:`~tcip_mcp.agent_identity.HEADERS`), refuses (403), and a blank reason refuses (400),
+    before anything runs; an act recorded whose audit line could not follow answers 409.
     """
     if payload.acknowledgment is None:
         return None
     from tcip_mcp import agent_identity
     from tcip_mcp.audit import AuditEntryNotWritten
     from tcip_mcp.delivery import record_acknowledgment
-    from tcip_mcp.identity import actor
     from tcip_web.routes.audit_gap import audit_gap_409
 
     if request.headers.get("origin") is None or any(
@@ -275,7 +277,7 @@ def _recorded_acknowledgment(payload, request: Request) -> Optional[str]:
                                  "request from no browser, or from an agent, cannot record one.")
     try:
         return record_acknowledgment(
-            store.open_root(), acknowledged_by=actor(payload.acknowledgment.user),
+            store.open_root(), acknowledged_by=person,
             reason=payload.acknowledgment.reason,
             result_sha256=payload.acknowledgment.result_sha256).acknowledgment_id
     except AuditEntryNotWritten as exc:
@@ -285,13 +287,14 @@ def _recorded_acknowledgment(payload, request: Request) -> Optional[str]:
 
 
 class ExportCsvPayload(PhenologyInputs):
-    """The export door's payload: the measurement inputs, which computation to export, and the
-    acknowledgment fields."""
+    """The export door's payload: the measurement inputs, which computation to export, the person
+    exporting it and the acknowledgment fields."""
 
     # Which server computation to export: a choice of producer, never a claim about what the rows
     # mean or whether they are valid. Picking the "wrong" one yields a correctly-gated CSV.
     payload: Literal["curves", "milestones"]
     filename: Optional[str] = None
+    user: str
     # The breeder's own act of shipping this delivery unvalidated, or None for an ordinary
     # validated export.
     acknowledgment: Optional[AcknowledgmentPayload] = None
@@ -308,17 +311,19 @@ def export_csv(payload: ExportCsvPayload, request: Request) -> Response:
     """
     from tcip_mcp.audit import AuditEntryNotWritten
     from tcip_mcp.delivery import DeliveryRefused
+    from tcip_mcp.identity import actor
     from tcip_web.routes.audit_gap import audit_gap_409
 
+    person = actor(payload.user)
     measurement = _measure(payload)
-    acknowledgment_id = _recorded_acknowledgment(payload, request)
+    acknowledgment_id = _recorded_acknowledgment(payload, person, request)
     filename = payload.filename or f"{payload.trait}_{payload.payload}.csv"
     saved_path = store.open_root() / "results_export" / Path(filename).name
     try:
         phenology.deliver_phenology(
             store.open_root(), measurement, curves=payload.payload == "curves",
             output_path=saved_path, acknowledgment_id=acknowledgment_id,
-            door="results.export_csv")
+            door="results.export_csv", actor=person)
     except AuditEntryNotWritten as exc:
         raise audit_gap_409(exc, {"saved_path": str(saved_path)}) from exc
     except DeliveryRefused as exc:
@@ -364,7 +369,7 @@ class OrthomosaicPlantCountsDelivery(BaseModel):
 
 class ExportCountCsvPayload(BaseModel):
     """The count-export door's own payload: a discriminated ``delivery`` naming which of the two
-    count kinds this posts, plus the acknowledgment fields.
+    count kinds this posts, the person exporting it, plus the acknowledgment fields.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -372,6 +377,7 @@ class ExportCountCsvPayload(BaseModel):
     delivery: Union[PerImageCountDelivery, OrthomosaicPlantCountsDelivery] = Field(
         discriminator="kind")
     filename: str = Field(min_length=1)
+    user: str
     acknowledgment: Optional[AcknowledgmentPayload] = None
 
 
@@ -393,23 +399,26 @@ def export_count_csv(payload: ExportCountCsvPayload, request: Request) -> Respon
 
     from tcip_mcp.audit import AuditEntryNotWritten
     from tcip_mcp.delivery import DeliveryRefused
+    from tcip_mcp.identity import actor
     from tcip_mcp.operationalization import OperationalizationRefused
     from tcip_mcp.traits import TraitUnknownError
     from tcip_web.routes.audit_gap import audit_gap_409
 
+    person = actor(payload.user)
     root = store.open_root()
     saved_path = root / "results_export" / Path(payload.filename).name
     delivery = payload.delivery
     (predictions_dir,) = _belonging(root, delivery.predictions_dir)
     assert predictions_dir is not None, "the payload requires a non-empty predictions_dir"
-    acknowledgment_id = _recorded_acknowledgment(payload, request)
+    acknowledgment_id = _recorded_acknowledgment(payload, person, request)
     try:
         if delivery.kind == "per_image_count":
             from tcip_mcp.pipelines.postprocessing.export import deliver_per_image_counts_csv
 
             result = deliver_per_image_counts_csv(
                 root, predictions_dir, str(saved_path), trait=delivery.trait,
-                acknowledgment_id=acknowledgment_id, door="results.export_count_csv")
+                acknowledgment_id=acknowledgment_id, door="results.export_count_csv",
+                actor=person)
         else:
             try:
                 registry_record = plant_mapping.load_registry(root, delivery.plant_registry)
@@ -422,7 +431,7 @@ def export_count_csv(payload: ExportCountCsvPayload, request: Request) -> Respon
                 delivery.delivered_phenotype, delivery.plants, crop=delivery.crop,
                 pipeline_version=delivery.pipeline_version,
                 canopy_subject=delivery.canopy_subject, acknowledgment_id=acknowledgment_id,
-                door="results.export_count_csv")
+                door="results.export_count_csv", actor=person)
     except AuditEntryNotWritten as exc:
         raise audit_gap_409(exc, {"saved_path": str(saved_path)}) from exc
     except (OperationalizationRefused, DeliveryRefused) as exc:
@@ -552,13 +561,15 @@ def confirm_trait_revision(payload: ConfirmRevisionPayload) -> dict:
     name the request supplied, refusing a blank one; it is not authentication.
     """
     from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.identity import actor
     from tcip_mcp.traits import RevisionMoved, TraitUnknownError, confirm_revision, read_trait
 
+    person = actor(payload.user)
     root = store.open_root()
     audit_warning: Optional[str] = None
     try:
         revision = confirm_revision(
-            root, payload.trait, payload.revision, payload.entry_sha256, user=payload.user,
+            root, payload.trait, payload.revision, payload.entry_sha256, actor=person,
             confirmed=payload.confirmed)
     except AuditEntryNotWritten as e:
         revision = read_trait(payload.trait, root).revisions[payload.revision - 1]

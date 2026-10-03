@@ -43,7 +43,7 @@ def _result(*, boxes, scores, labels, attributes=None, width=100, height=80) -> 
 
 
 def _decoded(result: dict, scope: ClassScope) -> list:
-    data, _dropped = encode_predictions(result, scope=scope)
+    data, _dropped = encode_predictions(result, "model:fixture", scope=scope)
     return annotations_from_bytes(data, source="img1.json")
 
 
@@ -61,7 +61,7 @@ def test_an_empty_scope_publishes_no_name_it_cannot_decode() -> None:
     written as a subject would read as a class no vocabulary declares."""
     with pytest.raises(ValueError, match="records no subject"):
         encode_predictions(_result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1]),
-                           scope=ClassScope())
+                           "model:fixture", scope=ClassScope())
 
 
 def test_a_detector_run_declaring_no_attributes_writes_the_subject_alone(tmp_path) -> None:
@@ -80,7 +80,7 @@ def test_a_result_missing_a_field_a_document_holds_refuses_naming_it(tmp_path, d
     del result[dropped]
 
     with pytest.raises(ValueError, match=f"carries no \\['{dropped}'\\]"):
-        encode_predictions(result, scope=scope)
+        encode_predictions(result, "model:fixture", scope=scope)
 
     assert len(_decoded(_result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1],
                                 attributes=[[0]]), scope)) == 1
@@ -108,7 +108,7 @@ def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(tmp
     bucket = publish(tmp_path, tmp_path / "ds" / "predictions" / "r" / "2026-01-01",
                      pass_documents(p, p.predict(p.paths)), producer=checkpoint.producer,
                      scope=p.scope, execution=p.execution, raster_path=None,
-                     raster_identity=None, assessment_id=None)
+                     raster_identity=None, assessment_id=None, actor=None)
 
     document = bucket.document("a.png")
     assert document is not None

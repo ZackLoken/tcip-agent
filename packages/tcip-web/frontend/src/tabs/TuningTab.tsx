@@ -254,7 +254,7 @@ export function TuningTab() {
       return rest;
     });
     try {
-      await tuningApi.cancel(sweepId);
+      await tuningApi.cancel(sweepId, useStore.getState().user);
       void refresh();
     } catch (e) {
       const message = `Cancel failed: ${messageOf(e)}`;
@@ -275,7 +275,7 @@ export function TuningTab() {
       return rest;
     });
     try {
-      const result = await tuningApi.relaunch(sweepId);
+      const result = await tuningApi.relaunch(sweepId, useStore.getState().user);
       void refresh();
       if (typeof result.sweep_id === "string") setSelectedId(result.sweep_id);
     } catch (e) {

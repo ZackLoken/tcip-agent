@@ -2,12 +2,12 @@ import type { StateCreator } from "zustand";
 
 import { setSubjectColorRegistry } from "@/api/subjects";
 import type { AttributeDef, Registry } from "@/api/subjects";
+import type { ImageEventPayload } from "@/api/types.generated";
 import type { AppState } from "@/store/appState";
 
 interface RegistryState {
-  /** The dataset's nested subject registry (subject -> {description?, attributes?}). No integer
-   *  ids, no colors: color is GUI-local (see subjectColor). Source of truth for the subject
-   *  picker and per-instance attribute editing. */
+  /** The dataset's nested subject registry (subject -> {description?, attributes?}), by name:
+   *  no integer ids, no colors. */
   subjects: Registry;
   /** Set after the first successful load for the current dataset. */
   loaded: boolean;
@@ -15,6 +15,9 @@ interface RegistryState {
    *  nothing has been saved yet. Carried back into the next save so a stale save is refused
    *  instead of silently overwriting a registry this browser never saw. */
   version: string | null;
+  /** The subject names the dataset's labels hold, as the last load discovered them: a starting
+   *  point for declaring subjects, never a registry. */
+  discovered: string[];
 }
 
 interface AnnotateUiState {
@@ -42,15 +45,20 @@ interface SessionTrackingState {
   imageEnterTimeMs: number | null;
   /** Number of new annotations created during this image visit. */
   annotationsAddedDelta: number;
-  /** Signature of the last flushed event to avoid duplicate emits. */
-  lastFlushedKey: string | null;
+  /** Whether a save during this image visit left the dataset subject a confirmed negative. */
+  negativeMarked: boolean;
+  /** The person and the project the visit was opened under, which it keeps. */
+  user: string;
+  projectId: string | null;
 }
 
 const EMPTY_SESSION_TRACKING: SessionTrackingState = {
   currentImageName: null,
   imageEnterTimeMs: null,
   annotationsAddedDelta: 0,
-  lastFlushedKey: null,
+  negativeMarked: false,
+  user: "",
+  projectId: null,
 };
 
 export interface RegistryStatusSlice {
@@ -58,11 +66,14 @@ export interface RegistryStatusSlice {
   registry: RegistryState;
   annotateUi: AnnotateUiState;
   sessionTracking: SessionTrackingState;
+  /** Finished image visits, each with its person, project and activity, not yet accepted by the
+   *  backend. */
+  heldContributions: ImageEventPayload[];
 
   /** Registry helpers. ``version`` is the stored registry's compare-and-set token to carry into
-   *  the next save; omitted (or null) for a caller with no version to assert, such as a test
-   *  seeding the registry directly. */
-  setRegistry: (subjects: Registry, version?: string | null) => void;
+   *  the next save, null when none is asserted. ``discovered`` is what a load found in the
+   *  labels. */
+  setRegistry: (subjects: Registry, version?: string | null, discovered?: string[]) => void;
   subjectNames: () => string[];
   subjectAttributes: (subject: string | null) => Record<string, AttributeDef>;
 
@@ -75,18 +86,21 @@ export interface RegistryStatusSlice {
   setDraggingVertex: (v: [number, number, number] | null) => void;
   setFocusedProposal: (index: number | null) => void;
 
-  /** Per-image session telemetry helpers. */
+  /** Per-image session telemetry helpers. A visit opens under the current person and project;
+   *  closing it holds its contribution when a person and a project were named, and drops it
+   *  otherwise. */
   startImageSessionTracking: (imageName: string, imageEnterTimeMs?: number) => void;
   incrementAnnotationsAdded: (delta?: number) => void;
-  markSessionFlushed: (key: string) => void;
-  clearSessionTracking: () => void;
+  markNegativeConfirmed: () => void;
+  closeSessionInterval: () => void;
+  retireContribution: (contribution: ImageEventPayload) => void;
 }
 
 export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryStatusSlice> = (
   set,
   get,
 ) => ({
-  registry: { subjects: {}, loaded: false, version: null },
+  registry: { subjects: {}, loaded: false, version: null, discovered: [] },
   annotateUi: {
     visible: true,
     snap: false,
@@ -97,10 +111,11 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
     focusedProposal: null,
   },
   sessionTracking: EMPTY_SESSION_TRACKING,
+  heldContributions: [],
 
-  setRegistry: (subjects, version = null) => {
+  setRegistry: (subjects, version = null, discovered = []) => {
     setSubjectColorRegistry(Object.keys(subjects));
-    set(() => ({ registry: { subjects, loaded: true, version } }));
+    set(() => ({ registry: { subjects, loaded: true, version, discovered } }));
   },
 
   subjectNames: () => Object.keys(get().registry.subjects),
@@ -124,11 +139,12 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
   startImageSessionTracking: (imageName, imageEnterTimeMs) =>
     set((s) => ({
       sessionTracking: {
-        ...s.sessionTracking,
         currentImageName: imageName,
         imageEnterTimeMs: imageEnterTimeMs ?? Date.now(),
         annotationsAddedDelta: 0,
-        lastFlushedKey: null,
+        negativeMarked: false,
+        user: s.user,
+        projectId: s.openProject?.id ?? null,
       },
     })),
 
@@ -143,21 +159,39 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
       };
     }),
 
-  markSessionFlushed: (key) =>
-    set((s) => ({
-      sessionTracking: {
-        ...s.sessionTracking,
-        lastFlushedKey: key,
-      },
-    })),
+  markNegativeConfirmed: () =>
+    set((s) =>
+      s.sessionTracking.currentImageName
+        ? { sessionTracking: { ...s.sessionTracking, negativeMarked: true } }
+        : s,
+    ),
 
-  clearSessionTracking: () =>
-    set((s) => ({
-      sessionTracking: {
-        ...s.sessionTracking,
-        currentImageName: null,
-        imageEnterTimeMs: null,
-        annotationsAddedDelta: 0,
-      },
-    })),
+  closeSessionInterval: () =>
+    set((s) => {
+      const t = s.sessionTracking;
+      if (t.currentImageName === null || t.imageEnterTimeMs === null) return s;
+      if (!t.user.trim() || t.projectId === null) {
+        return { sessionTracking: EMPTY_SESSION_TRACKING };
+      }
+      const contribution: ImageEventPayload = {
+        image_name: t.currentImageName,
+        seconds: Number((Math.max(0, Date.now() - t.imageEnterTimeMs) / 1000).toFixed(2)),
+        annotations_added: t.annotationsAddedDelta,
+        activity:
+          t.annotationsAddedDelta > 0
+            ? "new_annotation"
+            : t.negativeMarked
+              ? "negative_confirmation"
+              : "review",
+        user: t.user,
+        project_id: t.projectId,
+      };
+      return {
+        sessionTracking: EMPTY_SESSION_TRACKING,
+        heldContributions: [...s.heldContributions, contribution],
+      };
+    }),
+
+  retireContribution: (contribution) =>
+    set((s) => ({ heldContributions: s.heldContributions.filter((c) => c !== contribution) })),
 });

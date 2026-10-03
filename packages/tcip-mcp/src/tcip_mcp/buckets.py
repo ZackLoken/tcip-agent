@@ -175,10 +175,10 @@ def pass_documents(p: Pass, results: Iterable[dict]) -> Iterator[Document]:
 def publish(
     project: Path, out: Path, documents: Iterable[Document], *, producer: dict[str, str | None],
     scope: ClassScope, execution: Execution | None, raster_path: str | None,
-    raster_identity: dict | None, assessment_id: str | None,
+    raster_identity: dict | None, assessment_id: str | None, actor: str | None,
 ) -> Bucket:
-    """Publish the bucket ``out``: create its directory, refusing one that already exists
-    (:class:`BucketExists`) before anything is consumed or written, then write each of
+    """Publish the bucket ``out`` by ``actor``: create its directory, refusing one that already
+    exists (:class:`BucketExists`) before anything is consumed or written, then write each of
     ``documents`` once as ``documents`` yields them, a stem already written refusing
     (``ValueError``), then ``bucket.json`` once, then the publication's one audit line,
     ``prediction_bucket_published``, naming the bucket and its ``dropped_boxes``, which an
@@ -238,11 +238,11 @@ def publish(
             record_event_or_raise(
                 "prediction_bucket_published",
                 {"predictions_dir": str(out), "written": sorted(written), "error": str(exc)},
-                status="failed", scope=audit_scope)
+                actor=actor, status="failed", scope=audit_scope)
         raise
     record_event_or_raise("prediction_bucket_published",
                           {"predictions_dir": str(out), "dropped_boxes": dropped_boxes},
-                          scope=audit_scope)
+                          actor=actor, scope=audit_scope)
     return read_bucket(out)
 
 

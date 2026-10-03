@@ -93,7 +93,7 @@ def _opened(project: Path, study: str, base_config: dict):
         project, base_config, None, n_trials=1, search_alg="random", scheduler="none", grace_period=5,
         reduction_factor=3, warm_start=False, baseline_params=None, max_concurrent=1,
         resources_per_trial=None, study_name=study, split_draws=1, split_draw_seeds=None,
-        search_seed=0, trial_budget=None, relaunched_from=None)
+        search_seed=0, trial_budget=None, relaunched_from=None, actor=None)
     assert not isinstance(opened, dict), opened
     return opened
 
@@ -174,7 +174,7 @@ def test_a_relaunched_sweep_is_listed_once_as_this_processs_own(
 
     _stub_search(monkeypatch)
     _record_sweep(opened_project, "hpo_dup00001", real_hpo_base_config)
-    sweep_id = client.post("/api/tuning/sweeps", json={"study_name": "hpo_dup00001"}).json()[
+    sweep_id = client.post("/api/tuning/sweeps", json={"study_name": "hpo_dup00001", "user": "tester"}).json()[
         "sweep_id"]
     assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
 
@@ -204,14 +204,14 @@ def test_a_relaunch_records_its_source_and_its_row_agrees_with_the_sources(
         search_seed=0, auto_tensorboard=False)["study_name"]
     before = len(read_log(audit_log_key(opened_project)).records)
 
-    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_relsrc001"})
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_relsrc001", "user": "tester"})
     assert resp.status_code == 200
     sweep_id = resp.json()["sweep_id"]
     assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
     assert sweep_id.split("_")[0] == minted.split("_")[0] and len(sweep_id) == len(minted)
     lines = read_log(audit_log_key(opened_project)).records[before:]
-    assert [(line["tool"], line["arguments"]) for line in lines] == [
-        ("open_sweep", {"sweep_id": sweep_id, "relaunched_from": "hpo_relsrc001"})]
+    assert [(line["tool"], line["arguments"], line["actor"]) for line in lines] == [
+        ("open_sweep", {"sweep_id": sweep_id, "relaunched_from": "hpo_relsrc001"}, "user:tester")]
 
     body = client.get(f"/api/tuning/sweeps/{sweep_id}").json()
     assert body["input"]["relaunched_from"] == "hpo_relsrc001"
@@ -244,7 +244,7 @@ def test_a_relaunch_replays_every_argument_its_source_recorded(
         return real_open(project, base_config, param_space, **kwargs)
 
     monkeypatch.setattr(tt, "open_sweep", spy)
-    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_fields001"})
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_fields001", "user": "tester"})
     assert resp.status_code == 200
     assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
 
@@ -271,7 +271,7 @@ def test_a_relaunch_whose_data_moved_is_refused_with_the_refusals_own_words(
     shutil.rmtree(real_hpo_base_config["data"]["images_dir"])
     before = sorted(p.name for p in sweeps_dir(opened_project).iterdir())
 
-    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_moved0001"})
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_moved0001", "user": "tester"})
 
     assert resp.status_code == 422
     assert resp.json()["detail"]["error"]
@@ -279,7 +279,7 @@ def test_a_relaunch_whose_data_moved_is_refused_with_the_refusals_own_words(
 
 
 def test_relaunch_route_404s_for_an_unknown_sweep(client: TestClient, opened_project) -> None:
-    assert client.post("/api/tuning/sweeps", json={"study_name": "nope"}).status_code == 404
+    assert client.post("/api/tuning/sweeps", json={"study_name": "nope", "user": "tester"}).status_code == 404
 
 
 def test_the_launch_route_is_not_registered(client: TestClient, opened_project) -> None:
@@ -363,21 +363,27 @@ def test_a_sweep_id_cannot_walk_out_of_the_sweeps_directory(opened_project) -> N
 
 
 def test_cancel_route_404s_for_an_unknown_sweep(client: TestClient, opened_project) -> None:
-    assert client.post("/api/tuning/sweeps/nope/cancel", json={}).status_code == 404
+    assert client.post("/api/tuning/sweeps/nope/cancel",
+                       json={"user": "tester"}).status_code == 404
 
 
 def test_cancel_route_records_the_cancellation_its_trials_poll(
     client, opened_project, real_hpo_base_config, monkeypatch,
 ) -> None:
-    """A cancel lands in the sweep's own directory, which every trial of it polls; the listing
-    reports it."""
+    """A cancel lands in the sweep's own directory, which every trial of it polls, and its line
+    names the person who asked; the listing reports it."""
+    from tcip_mcp.audit import audit_log_key
     from tcip_mcp.experiments import cancel_requested
+    from tcip_store import read_log
 
     _opened(opened_project, "hpo_cancel01", real_hpo_base_config)
+    before = len(read_log(audit_log_key(opened_project)).records)
 
-    resp = client.post("/api/tuning/sweeps/hpo_cancel01/cancel", json={})
+    resp = client.post("/api/tuning/sweeps/hpo_cancel01/cancel", json={"user": "tester"})
     assert resp.status_code == 200
     assert resp.json()["cancel_requested"] is True
+    (line,) = read_log(audit_log_key(opened_project)).records[before:]
+    assert (line["tool"], line["actor"]) == ("cancel_hyperparameter_search", "user:tester")
     assert cancel_requested(_sweep_root(opened_project, "hpo_cancel01"))
     row = next(s for s in client.get("/api/tuning/sweeps").json()["sweeps"]
                if s["sweep_id"] == "hpo_cancel01")
@@ -405,31 +411,16 @@ def test_cancel_reaches_a_relaunch_before_its_first_trial(
         return real_run(sweep, **kwargs)
 
     monkeypatch.setattr(tt, "run_sweep", held)
-    sweep_id = client.post("/api/tuning/sweeps", json={"study_name": "hpo_precancel1"}).json()[
+    sweep_id = client.post("/api/tuning/sweeps", json={"study_name": "hpo_precancel1", "user": "tester"}).json()[
         "sweep_id"]
 
-    cancel_resp = client.post(f"/api/tuning/sweeps/{sweep_id}/cancel", json={})
+    cancel_resp = client.post(f"/api/tuning/sweeps/{sweep_id}/cancel", json={"user": "tester"})
     assert cancel_resp.status_code == 200 and cancel_resp.json()["cancel_requested"] is True
 
     release.set()
     assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
     body = client.get(f"/api/tuning/sweeps/{sweep_id}").json()
     assert (body["status"], body["error"]) == ("canceled", tt._CANCEL_BEFORE_START_REASON)
-
-
-@pytest.fixture
-def tb_launches(monkeypatch) -> list[tuple[str, str]]:
-    """Record what the routes hand ``launch_tensorboard`` instead of starting a real one."""
-    calls: list[tuple[str, str]] = []
-
-    def fake_launch(logdir: str, key: str | None = None) -> dict:
-        calls.append((logdir, key or ""))
-        return {"url": "http://localhost:6006", "port": 6006, "pid": 1, "logdir": logdir}
-
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", fake_launch
-    )
-    return calls
 
 
 def test_ray_dashboard_is_null_when_no_cluster_is_up(client, opened_project) -> None:
@@ -544,7 +535,7 @@ def test_a_launched_sweep_is_reached_only_through_its_own_project_once_another_i
     _stub_search(monkeypatch, during=lambda study, root: _trial_with_tensorboard(
         opened_project, root, "aaa_00000"))
     _record_sweep(opened_project, "hpo_seed00003", real_hpo_base_config)
-    sweep_id = client.post("/api/tuning/sweeps", json={"study_name": "hpo_seed00003"}).json()[
+    sweep_id = client.post("/api/tuning/sweeps", json={"study_name": "hpo_seed00003", "user": "tester"}).json()[
         "sweep_id"]
     assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
 
@@ -572,7 +563,7 @@ def test_a_web_launched_sweep_runs_only_the_routes_own_tensorboard(
     _stub_search(monkeypatch, during=during)
     _record_sweep(opened_project, "hpo_seed00004", real_hpo_base_config, auto_tensorboard=False)
 
-    sweep_id = client.post("/api/tuning/sweeps", json={"study_name": "hpo_seed00004"}).json()[
+    sweep_id = client.post("/api/tuning/sweeps", json={"study_name": "hpo_seed00004", "user": "tester"}).json()[
         "sweep_id"]
     assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
     assert tb_launches == []

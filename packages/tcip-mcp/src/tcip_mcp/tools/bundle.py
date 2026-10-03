@@ -19,8 +19,6 @@ from tcip_store.adoption import AdoptionPlan, plan_root
 from tcip_store.file_backend import _is_bookkeeping
 from tcip_store.layout_claims import ROOT, RUN, SPLITS, STATE
 
-from tcip_mcp.registry_paths import is_at_or_under as _is_at_or_under
-
 SELECTION_NAME = "selection.json"
 
 
@@ -68,14 +66,14 @@ def _validate_anchor(
     member = directory / filename
     if directory == tree:
         raise AnchorMisplaced(f"{member} sits at the tree root, which no {filename} may claim")
-    if _is_at_or_under(directory, tree / ".tcip"):
+    if directory.is_relative_to(tree / ".tcip"):
         raise AnchorMisplaced(f"{member} sits under .tcip, which no {filename} may claim")
-    if _is_at_or_under(directory, image_root):
+    if directory.is_relative_to(image_root):
         raise AnchorMisplaced(f"{member} sits under the image tree, which no {filename} may claim")
-    if _is_at_or_under(directory, annotation_root):
+    if directory.is_relative_to(annotation_root):
         raise AnchorMisplaced(f"{member} sits under the annotation tree, which no {filename} may claim")
     for other in others:
-        if _is_at_or_under(directory, other) or _is_at_or_under(other, directory):
+        if directory.is_relative_to(other) or other.is_relative_to(directory):
             raise AnchorMisplaced(f"{member} sits under or above another derived root, {other}")
 
 
@@ -121,7 +119,7 @@ def _resolve_checkpoint_entry(tree: Path, raw: str) -> Path | None:
         resolved = resolved_registry_path(tree, raw).resolve()
     except (RegistryPathEmpty, RegistryPathTraversal):
         return None
-    return resolved if resolved.is_file() and _is_at_or_under(resolved, tree) else None
+    return resolved if resolved.is_file() and resolved.is_relative_to(tree) else None
 
 
 def _stored_checkpoint_paths(tree: Path) -> list[str]:
@@ -273,11 +271,11 @@ def blob_home(
         return BLOB_SUBJECT_REGISTRY
     if path == dataset_identity_path(tree):
         return BLOB_DATASET_IDENTITY
-    if _is_at_or_under(path, _image_root(tree)):
+    if path.is_relative_to(_image_root(tree)):
         return BLOB_IMAGERY
-    if _is_at_or_under(path, _annotation_root(tree)):
+    if path.is_relative_to(_annotation_root(tree)):
         return BLOB_LABELS
-    in_run = any(_is_at_or_under(path, runs) for runs in _run_homes(tree))
+    in_run = any(path.is_relative_to(runs) for runs in _run_homes(tree))
     if (path.parent == tree / ".tcip" / "models" or path in registered_checkpoints
             or (in_run and path.suffix == ".pt" and (path.parent / RUN_FILE).is_file())):
         return BLOB_CHECKPOINTS

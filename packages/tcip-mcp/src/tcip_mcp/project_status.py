@@ -8,7 +8,6 @@ treated as "no history yet."
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -23,6 +22,8 @@ from tcip_store import (
     transaction,
 )
 from tcip_store.file_backend import RootedFileLocator
+
+from tcip_mcp.audit import now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -107,8 +108,8 @@ def _update(project_path: str | Path, mutate: Callable[[dict[str, Any]], None]) 
 
 
 def record_report(project_path: str | Path) -> None:
-    """Call after a ``report_friction`` write: bump both since-last-X counters."""
-    now = datetime.now(timezone.utc).isoformat()
+    """Count one friction report written: bump both since-last-X counters."""
+    now = now_iso()
 
     def mutate(data: dict[str, Any]) -> None:
         data["last_activity"] = now
@@ -123,10 +124,9 @@ def record_report(project_path: str | Path) -> None:
 
 
 def record_retrospective(project_path: str | Path, project_id: str) -> None:
-    """Call after a ``write_retrospective`` write: reset the report counter, bump the
-    distillation-retrospective counter, and point at the retrospective by its project_id.
-    """
-    now = datetime.now(timezone.utc).isoformat()
+    """Count one retrospective written: reset the report counter, bump the
+    distillation-retrospective counter, and point at the retrospective by its project_id."""
+    now = now_iso()
 
     def mutate(data: dict[str, Any]) -> None:
         data["last_activity"] = now
@@ -143,10 +143,9 @@ def record_retrospective(project_path: str | Path, project_id: str) -> None:
 
 
 def record_distillation(project_path: str | Path) -> None:
-    """Call after a distillation pass (``record_distillation_pass`` MCP tool): reset both
-    distillation counters. Records only that a pass happened, not what came of it.
-    """
-    now = datetime.now(timezone.utc).isoformat()
+    """Count one distillation pass: reset both distillation counters. Records only that a pass
+    happened, not what came of it."""
+    now = now_iso()
 
     def mutate(data: dict[str, Any]) -> None:
         data["reports_since_last_distillation"] = 0

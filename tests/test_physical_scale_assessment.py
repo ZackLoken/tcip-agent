@@ -124,7 +124,7 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(tmp_pa
         return acknowledged(tmp_path, lambda ack: deliver_per_plant_aggregate(
             tmp_path, rows, str(out), delivered_phenotype="plant_surface_area",
             delivery_kind="per_plant_count_aggregate", buckets=[bucket], plants=["p1"],
-            door="test_scale", acknowledgment_id=ack, **kw),
+            door="test_scale", acknowledgment_id=ack, actor=None, **kw),
             reason="the count is not yet assessed")
 
     with pytest.raises(ValueError, match="calibrate_physical_scale"):

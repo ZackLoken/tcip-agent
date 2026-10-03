@@ -15,22 +15,16 @@ from pathlib import Path
 import pytest
 
 import tcip_mcp.audit as audit_module
-import tcip_store as ts
 from tcip_mcp.audit import audited
+from tests._audit_fixtures import audit_rows, refuse_audit_appends
 
 
 class _AppendRefused(RuntimeError):
     """Stands in for whatever stops a real append: a busy lock, a refused root, a bad key."""
 
 
-def _refuse_append(*args: object, **kwargs: object) -> None:
-    raise _AppendRefused("the audit log could not be appended to")
-
-
-def _rows_for(project: Path, tool: str) -> list[dict]:
-    """Every row a call left behind in ``project``'s log, read through the seam."""
-    key = audit_module.audit_log_key(project)
-    return [row for row in ts.read_log(key).records if row["tool"] == tool]
+def _refuse_append(monkeypatch: pytest.MonkeyPatch) -> None:
+    refuse_audit_appends(monkeypatch, error=_AppendRefused("the audit log could not be appended to"))
 
 
 def test_append_failure_after_a_successful_body_refuses_and_names_the_committed_call(
@@ -42,7 +36,7 @@ def test_append_failure_after_a_successful_body_refuses_and_names_the_committed_
     def stage_something(project: Path, count: int) -> dict:
         return {"ok": True, "count": count}
 
-    monkeypatch.setattr(audit_module, "append", _refuse_append)
+    _refuse_append(monkeypatch)
 
     # Raising at all is the property; the type is asserted after, so a decorator that returns
     # normally here fails on the behavior rather than on a name it does not carry.
@@ -64,7 +58,7 @@ def test_a_failed_body_keeps_its_own_exception_when_the_audit_of_it_cannot_be_wr
     def stage_something(project: Path) -> dict:
         raise KeyError("the body's own failure")
 
-    monkeypatch.setattr(audit_module, "append", _refuse_append)
+    _refuse_append(monkeypatch)
 
     with pytest.raises(KeyError, match="the body's own failure"):
         stage_something(tmp_path)
@@ -81,7 +75,7 @@ def test_an_ordinary_call_against_a_healthy_log_returns_its_result_and_writes_on
 
     assert stage_something(tmp_path, 3) == {"ok": True, "count": 3}
 
-    rows = _rows_for(tmp_path, "stage_something")
+    rows = audit_rows(tmp_path, "stage_something")
     assert len(rows) == 1, rows
     assert rows[0]["status"] == "ok"
     assert rows[0]["arguments"] == {"count": 3}
@@ -99,7 +93,7 @@ def test_a_failing_body_against_a_healthy_log_still_records_the_call_and_re_rais
     with pytest.raises(ValueError, match="the body refused"):
         stage_something(tmp_path)
 
-    rows = _rows_for(tmp_path, "stage_something")
+    rows = audit_rows(tmp_path, "stage_something")
     assert len(rows) == 1, rows
     assert rows[0]["status"] == "exception"
     assert rows[0]["error"] == "the body refused"
@@ -119,10 +113,11 @@ def test_record_event_or_raise_raises_audit_entry_not_written_when_the_append_fa
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A confirmation that already committed must not be reported as silently unrecorded."""
-    monkeypatch.setattr(audit_module, "append", _refuse_append)
+    _refuse_append(monkeypatch)
 
     with pytest.raises(audit_module.AuditEntryNotWritten) as caught:
-        audit_module.record_event_or_raise("confirm_something", {"trait": "bloom"}, scope=tmp_path)
+        audit_module.record_event_or_raise("confirm_something", {"trait": "bloom"}, actor=None,
+                                           scope=tmp_path)
 
     assert caught.value.tool == "confirm_something"
     assert "do not retry it blind" in str(caught.value)
@@ -134,10 +129,11 @@ def test_record_event_or_raise_against_a_healthy_log_writes_one_entry_and_return
 ) -> None:
     """The rail admits the work it exists beside: a healthy append behaves like record_event's."""
     audit_module.record_event_or_raise(
-        "confirm_something", {"trait": "bloom"}, status="ok", scope=tmp_path, note="confirmed"
+        "confirm_something", {"trait": "bloom"}, actor=None, status="ok", scope=tmp_path,
+        note="confirmed",
     )
 
-    rows = _rows_for(tmp_path, "confirm_something")
+    rows = audit_rows(tmp_path, "confirm_something")
     assert len(rows) == 1, rows
     assert rows[0]["status"] == "ok"
     assert rows[0]["arguments"] == {"trait": "bloom"}

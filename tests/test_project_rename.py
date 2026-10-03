@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 import tcip_store as ts
 from tcip_mcp.tools.project_tools import initialize_project
 from tcip_web.app import app
+from tests._audit_fixtures import audit_rows
 
 
 @pytest.fixture
@@ -29,13 +30,6 @@ def _project(ws: Path, directory: str, display_name: str) -> tuple[Path, str]:
     return ws / directory, result["id"]
 
 
-def _renamed_lines(root: Path) -> list[dict]:
-    from tcip_mcp import audit
-
-    return [line for line in ts.read_log(audit.audit_log_key(root)).records
-            if line["tool"] == "project_renamed"]
-
-
 def _files(root: Path) -> dict[str, bytes]:
     """Every file under ``root`` but the database, by its path relative to ``root``."""
     return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*"))
@@ -45,7 +39,6 @@ def _files(root: Path) -> dict[str, bytes]:
 def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_as_they_were(
     client, tmp_path,
 ):
-    from tcip_mcp import audit
     from tcip_mcp.experiments import list_experiments
     from tcip_mcp.project_record import read_record
     from tcip_mcp.tools.project_tools import read_datasets, register_dataset
@@ -57,7 +50,7 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
     (project / "ds").mkdir()
     assert "error" not in register_dataset(project, str(project / "ds"), "currant")
     files, runs, datasets = _files(project), list_experiments(project), read_datasets(project)
-    audit_lines = ts.read_log(audit.audit_log_key(project)).records
+    audit_lines = audit_rows(project)
 
     resp = client.post("/api/projects/rename", json={
         "id": project_id, "display_name": "Valley block, north half", "user": "tester"})
@@ -73,10 +66,10 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
         k: v for k, v in files.items() if k not in rename_writes}
     assert list_experiments(project) == runs
     assert read_datasets(project) == datasets
-    assert ts.read_log(audit.audit_log_key(project)).records[:-1] == audit_lines
-    (line,) = _renamed_lines(project)
+    assert audit_rows(project)[:-1] == audit_lines
+    (line,) = audit_rows(project, "project_renamed")
     assert line["arguments"]["previous_display_name"] == "Valley block"
-    assert line["arguments"]["requested_by"] == "user:tester"
+    assert line["actor"] == "user:tester"
     listed = {p["id"]: p for p in client.get("/api/projects").json()["projects"]}
     assert listed[project_id]["display_name"] == "Valley block, north half"
 
@@ -91,7 +84,7 @@ def test_a_display_name_the_record_refuses_answers_400_and_changes_nothing(clien
 
     assert resp.status_code == 400
     assert read_record(project)["display_name"] == "Valley block"
-    assert _renamed_lines(project) == []
+    assert audit_rows(project, "project_renamed") == []
 
 
 def test_a_rename_naming_no_one_answers_400_and_changes_nothing(client, tmp_path, monkeypatch):
@@ -105,7 +98,7 @@ def test_a_rename_naming_no_one_answers_400_and_changes_nothing(client, tmp_path
 
     assert resp.status_code == 400 and "names no one" in resp.text
     assert read_record(project)["display_name"] == "Valley block"
-    assert _renamed_lines(project) == []
+    assert audit_rows(project, "project_renamed") == []
 
 
 def test_an_id_no_project_holds_answers_404(client, tmp_path):

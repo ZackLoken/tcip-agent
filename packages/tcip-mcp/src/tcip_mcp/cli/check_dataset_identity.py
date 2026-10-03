@@ -1,20 +1,21 @@
 """Check a dataset's on-disk content against its recorded identity: detect changed / moved data.
 
-Recomputes the dataset's fingerprint (the authority) and compares it to (a) the fingerprint cached
-in ``<dataset_root>/dataset.json`` (a mismatch means the data changed since it was registered) and
-(b) the project's ``.tcip/datasets.json`` by id, so a dataset found at a new path but with the same
-fingerprint reads as moved, not changed. Recomputing touches every image on disk.
+Recomputes the dataset's fingerprint (the authority) and compares it to the fingerprint recorded in
+``<dataset_root>/dataset.json`` (a mismatch means the data changed since it was registered), then
+reads the identity at the path the project's dataset registry holds for the same id and compares
+it record to record: the same identity elsewhere is moved, another identity there diverged, none
+readable there gone. Recomputing touches every image on disk.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
 from tcip_store import SchemaVersionRefused
 
+from tcip_mcp.cli import bound_project
 from tcip_mcp.dataset_layout import require_dataset_identity
 from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
 from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
@@ -23,14 +24,10 @@ from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, prog=prog)
     ap.add_argument("dataset_root", type=Path)
-    ap.add_argument("--project", type=Path, default=None,
-                    help="project root holding .tcip/datasets.json (default: dataset_root)")
+    ap.add_argument("--project", required=True,
+                    help="the project whose dataset registry names this dataset")
     args = ap.parse_args(argv)
-
-    # Its own process entry point, so it binds the storage backend the seam has no default for.
-    from tcip_store.binding import bind_default
-
-    bind_default()
+    project = bound_project(args.project)
 
     root: Path = args.dataset_root
     try:
@@ -65,19 +62,21 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
               f"(recorded={recorded} current={current}); a number reproduced from it is no longer valid")
         status = 2
 
-    # Moved: the project registry knows this id at a different path, by identity rather than a
-    # stored-versus-passed spelling.
-    project = args.project or root
     for r in read_datasets(project):
-        if r.get("id") != ds_id:
+        if r["id"] != ds_id:
             continue
         entry_path = dataset_entry_path(project, r)
         try:
-            same_as_root = os.path.samefile(entry_path, root)
-        except OSError:
-            same_as_root = False
-        if not same_as_root and r["fingerprint"] == current:
-            print(f"  MOVED: id {ds_id} is registered at {entry_path} but the same content is now at {root}")
+            registered = require_dataset_identity(entry_path)
+        except (ValueError, OSError, SchemaVersionRefused) as exc:
+            print(f"  GONE: id {ds_id} is registered at {entry_path}, which holds no readable "
+                  f"identity ({exc}); it is now at {root}")
+            continue
+        if registered != identity:
+            print(f"  DIVERGED: id {ds_id} is registered at {entry_path}, whose identity "
+                  f"{registered} is not {root}'s {identity}")
+        elif entry_path.resolve() != root.resolve():
+            print(f"  MOVED: id {ds_id} is registered at {entry_path} and is now at {root}")
     return status
 
 

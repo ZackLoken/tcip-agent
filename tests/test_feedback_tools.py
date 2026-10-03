@@ -148,18 +148,18 @@ def test_triage_predictions_routes_the_band_and_the_unscoreable_and_accepts_noth
 def test_unresolvable_scorer_raises_valueerror_not_an_import_error():
     """The refusal is a ValueError whatever the name looks like.
 
-    ``build_scorer``'s callers catch ``ValueError`` to turn a refusal into an error dict: a
+    ``resolve_scorer``'s callers catch ``ValueError`` to turn a refusal into an error dict: a
     dotted name that fails to import must raise ``ValueError`` too, never
     ``ModuleNotFoundError`` straight out of the audited MCP tool.
     """
     import pytest
 
-    from tcip_mcp.pipelines.active_learning.helpers import build_scorer
+    from tcip_mcp.pipelines.active_learning.scorer import resolve_scorer
 
     with pytest.raises(ValueError):
-        build_scorer("no_such_scorer", "detection")
+        resolve_scorer("no_such_scorer", "detection")
     with pytest.raises(ValueError, match="Could not import scorer"):
-        build_scorer("not_a_module.at_all:make", "detection")
+        resolve_scorer("not_a_module.at_all:make", "detection")
 
 
 def test_unresolvable_proposal_engine_raises_valueerror():
@@ -212,13 +212,13 @@ def _stub_scorer(monkeypatch) -> None:
     """Scores every candidate 1.0 in order: the real scorer reads model logits, which this rail
     has no need to exercise, since the calibration mark is computed from the candidate's own
     path and the selection, never from a score."""
-    import tcip_mcp.pipelines.active_learning.helpers as al_helpers
+    import tcip_mcp.pipelines.active_learning.scorer as al_scorer
 
     class _Scorer:
         def score(self, sources, predictor):
             return [(s, 1.0) for s in sources]
 
-    monkeypatch.setattr(al_helpers, "build_scorer", lambda method, task: _Scorer())
+    monkeypatch.setattr(al_scorer, "resolve_scorer", lambda method, task: _Scorer())
 
 
 def _reference_samples(drawn) -> list:

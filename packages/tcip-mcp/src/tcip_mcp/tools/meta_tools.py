@@ -31,7 +31,7 @@ from tcip_store import (
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.server import tool
-from tcip_mcp.audit import audited
+from tcip_mcp.audit import audited, now_iso
 
 
 REPORT_CATEGORIES = {
@@ -160,7 +160,7 @@ def report_documents(project_path: str) -> list[MemoryDocument]:
         except DecodeError as exc:
             entry = {"detail": str(exc), "category": "", "malformed": True}
         documents.append(
-            MemoryDocument(name, entry, str(entry.get("timestamp") or ""))
+            MemoryDocument(name, entry, "" if entry.get("malformed") else entry["timestamp"])
         )
     return _newest_first(documents)
 
@@ -218,13 +218,11 @@ def report_friction(
             "valid_categories": sorted(REPORT_CATEGORIES),
         }
 
-    now = datetime.now(timezone.utc)
-    timestamp_compact = now.strftime("%Y%m%dT%H%M%SZ")
-    suffix = secrets.token_hex(2)
-    report_id = f"{timestamp_compact}_{category}_{suffix}"
+    now = now_iso()
+    report_id = f"{datetime.fromisoformat(now):%Y%m%dT%H%M%SZ}_{category}_{secrets.token_hex(2)}"
 
     entry = {
-        "timestamp": now.isoformat(),
+        "timestamp": now,
         "category": category,
         "detail": detail,
         "context": context or {},
@@ -276,35 +274,29 @@ def load_project_memory(
     return {"error": f"unknown kind '{kind}'", "valid_kinds": ["reports", "retrospectives"]}
 
 
-def _parse_audit_timestamp(value: str | None) -> datetime | None:
-    """Parse an audit entry's own stated timestamp, or ``None`` when it is absent or will not
-    parse. A naive result is treated as UTC.
-    """
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
+def _entry_time(entry: Mapping[str, Any]) -> datetime:
+    """An audit entry's own timestamp, as :func:`~tcip_mcp.audit.now_iso` wrote it. Refuses
+    (``ValueError``) an entry carrying none, which no producer writes."""
+    if "timestamp" not in entry:
+        raise ValueError(f"an audit entry carries no timestamp, so no producer wrote it: {entry}")
+    return datetime.fromisoformat(entry["timestamp"])
 
 
 def _parse_audit_bound(label: str, value: str, *, end_of_day: bool = False) -> datetime:
-    """Parse a caller-supplied ``since``/``until`` bound, or raise naming which bound and why.
+    """Parse a caller-supplied ``since``/``until`` bound (ISO-8601, a trailing ``Z`` accepted, a
+    naive value read as UTC), or raise naming which bound and why.
 
     A date-only bound (no ``T`` separator) names a whole day, not an instant: ``since`` already
     starts at that day's midnight once parsed, and ``until`` with ``end_of_day=True`` is pushed
     to the last microsecond of that day, so ``until="2026-03-02"`` includes every entry from that
     date rather than only one landing on midnight exactly.
     """
-    parsed = _parse_audit_timestamp(value)
-    if parsed is None:
-        raise ValueError(f"{label} {value!r} is not a parseable ISO-8601 timestamp")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError(f"{label} {value!r} is not a parseable ISO-8601 timestamp") from None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
     if end_of_day and "T" not in value:
         parsed = parsed + timedelta(days=1) - timedelta(microseconds=1)
     return parsed
@@ -391,29 +383,19 @@ def read_audit_log(
         until_dt = (
             _parse_audit_bound("until", until, end_of_day=True) if until is not None else None
         )
+        timed = [(_entry_time(entry), entry) for entry in page.records]
     except ValueError as exc:
         return {"error": str(exc), "scope_resolved": key.root}
 
-    def _matches(entry: Mapping[str, Any]) -> bool:
-        if tool is not None and entry.get("tool") != tool:
-            return False
-        if status is not None and entry.get("status") != status:
-            return False
-        entry_ts = _parse_audit_timestamp(entry.get("timestamp"))
-        if since_dt is not None and (entry_ts is None or entry_ts < since_dt):
-            return False
-        if until_dt is not None and (entry_ts is None or entry_ts > until_dt):
-            return False
-        return True
+    def _matches(at: datetime, entry: Mapping[str, Any]) -> bool:
+        return ((tool is None or entry.get("tool") == tool)
+                and (status is None or entry.get("status") == status)
+                and (since_dt is None or at >= since_dt)
+                and (until_dt is None or at <= until_dt))
 
-    filtered = [entry for entry in page.records if _matches(entry)]
-
-    def _sort_key(entry: Mapping[str, Any]) -> datetime:
-        return _parse_audit_timestamp(entry.get("timestamp")) or datetime.min.replace(
-            tzinfo=timezone.utc
-        )
-
-    newest_first = sorted(filtered, key=_sort_key, reverse=True)
+    filtered = [(at, entry) for at, entry in timed if _matches(at, entry)]
+    newest_first = [entry for _at, entry in sorted(filtered, key=lambda pair: pair[0],
+                                                   reverse=True)]
     truncated = max(0, len(newest_first) - limit)
     entries = newest_first[:limit]
     skipped = (len(page.records) - len(filtered)) + truncated
@@ -461,7 +443,7 @@ def _load_reports(
             "file": filename,
             "report_id": document.name,
             "path": _path_if_written(_document_path(_REPORT_DOC, project_path, document.name)),
-            "timestamp": entry.get("timestamp"),
+            "timestamp": document.timestamp,
             "category": entry.get("category", ""),
             "detail": entry.get("detail", ""),
             "context": entry.get("context", {}),
@@ -501,11 +483,11 @@ def write_retrospective(
         would_do_differently: With hindsight, what would you change about
             your approach?
     """
-    now = datetime.now(timezone.utc)
+    now = now_iso()
     project_path = str(project)
     retro_path = _document_path(_RETROSPECTIVE_DOC, project_path, project_id)
 
-    section_header = f"## Retrospective: {now.isoformat()}"
+    section_header = f"## Retrospective: {now}"
     body = f"""{section_header}
 
 ### Task
@@ -563,7 +545,7 @@ def write_retrospective(
     return {
         "retrospective_path": _path_if_written(retro_path),
         "project_id": project_id,
-        "timestamp": now.isoformat(),
+        "timestamp": now,
         "appended_to_existing": appended,
     }
 

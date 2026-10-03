@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests._producer_fixtures import seed_two_bud_images, small_detection_config
+
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
@@ -35,33 +37,6 @@ def _fake_popen(monkeypatch: pytest.MonkeyPatch, captured: list[list[str]]) -> N
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
 
 
-def _detection_cfg(images_dir, labels_dir, experiment_id: str) -> dict:
-    return {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"min_size": 64, "max_size": 128},
-                         "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "scope": {"subject": "bud"}},
-        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-        "mixed_precision": False, "device": "cpu",
-        "experiment_id": experiment_id,
-    }
-
-
-def _seed_one_image(images_dir, labels_dir) -> None:
-    """Two labeled images, so a drawn split holds one out for validation."""
-    from PIL import Image
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
-
-    images_dir.mkdir()
-    labels_dir.mkdir()
-    for i in range(2):
-        Image.new("RGB", (32, 32), color=(10 * i, 0, 0)).save(images_dir / f"img{i}.png")
-        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
-
-
 def _launch_record(project, experiment_id: str) -> dict:
     from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
 
@@ -81,11 +56,11 @@ def test_a_launch_no_agent_declared_itself_to_shows_an_empty_declaration(tmp_pat
     from tcip_mcp.tools import training_tools
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    _seed_one_image(images_dir, labels_dir)
+    seed_two_bud_images(images_dir, labels_dir)
     _fake_popen(monkeypatch, [])
 
     result = training_tools.launch_training(
-        tmp_path, _detection_cfg(images_dir, labels_dir, "exp-bare-launch"))
+        tmp_path, small_detection_config(images_dir, labels_dir, "exp-bare-launch"), actor=None)
     assert "error" not in result, result
     assert _row(tmp_path, "exp-bare-launch")["launch"] == {}
     assert "launched_by" not in _launch_record(tmp_path, "exp-bare-launch")
@@ -101,12 +76,12 @@ def test_a_launch_inside_an_mcp_handshake_shows_the_agents_declaration_from_its_
     from tcip_mcp.tools import training_tools
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    _seed_one_image(images_dir, labels_dir)
+    seed_two_bud_images(images_dir, labels_dir)
     _fake_popen(monkeypatch, [])
 
     identity = agent_identity.begin("claude-code", "2.1.238")
     result = training_tools.launch_training(
-        tmp_path, _detection_cfg(images_dir, labels_dir, "exp-agent-launch"))
+        tmp_path, small_detection_config(images_dir, labels_dir, "exp-agent-launch"), actor=None)
     agent_identity.end()
     assert "error" not in result, result
     assert _row(tmp_path, "exp-agent-launch")["launch"] == {
@@ -129,7 +104,7 @@ def test_launch_refuses_a_dataset_identity_above_the_readers_ceiling(tmp_path, m
     from tcip_mcp.tools import training_tools
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    _seed_one_image(images_dir, labels_dir)
+    seed_two_bud_images(images_dir, labels_dir)
     captured: list[list[str]] = []
     _fake_popen(monkeypatch, captured)
 
@@ -139,7 +114,7 @@ def test_launch_refuses_a_dataset_identity_above_the_readers_ceiling(tmp_path, m
     ts.put_blob(key, ts.RECORD_JSON.encode(document))
 
     result = training_tools.launch_training(
-        tmp_path, _detection_cfg(images_dir, labels_dir, "exp-identity-refused"))
+        tmp_path, small_detection_config(images_dir, labels_dir, "exp-identity-refused"), actor=None)
 
     assert result["error"].startswith("launch_training:")
     assert "schema_version" in result["error"]
@@ -154,12 +129,12 @@ def test_launch_refuses_an_experiment_id_that_is_not_a_legal_directory_name(tmp_
     from tcip_mcp.tools import training_tools
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    _seed_one_image(images_dir, labels_dir)
+    seed_two_bud_images(images_dir, labels_dir)
     captured: list[list[str]] = []
     _fake_popen(monkeypatch, captured)
 
     result = training_tools.launch_training(
-        tmp_path, _detection_cfg(images_dir, labels_dir, "not/legal"))
+        tmp_path, small_detection_config(images_dir, labels_dir, "not/legal"), actor=None)
 
     assert result["error"].startswith("launch_training:")
     assert "not/legal" in result["error"]
@@ -177,7 +152,7 @@ def test_launch_refuses_when_the_launch_record_cannot_be_written(tmp_path, monke
     from tcip_mcp.tools import training_tools
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    _seed_one_image(images_dir, labels_dir)
+    seed_two_bud_images(images_dir, labels_dir)
     captured: list[list[str]] = []
     _fake_popen(monkeypatch, captured)
 
@@ -187,7 +162,7 @@ def test_launch_refuses_when_the_launch_record_cannot_be_written(tmp_path, monke
     monkeypatch.setattr(experiments_mod, "write_once", _raise)
 
     result = training_tools.launch_training(
-        tmp_path, _detection_cfg(images_dir, labels_dir, "exp-write-raises"))
+        tmp_path, small_detection_config(images_dir, labels_dir, "exp-write-raises"), actor=None)
 
     assert result["error"] == "launch_training: disk full"
     assert not any("tcip_mcp.pipelines.training.subprocess_worker" in argv for argv in captured)
@@ -200,11 +175,11 @@ def test_a_launch_records_the_seed_it_draws(tmp_path, monkeypatch):
     from tcip_mcp.tools import training_tools
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    _seed_one_image(images_dir, labels_dir)
+    seed_two_bud_images(images_dir, labels_dir)
     _fake_popen(monkeypatch, [])
 
-    cfg = _detection_cfg(images_dir, labels_dir, "exp-fresh-seed")
-    result = training_tools.launch_training(tmp_path, cfg)
+    cfg = small_detection_config(images_dir, labels_dir, "exp-fresh-seed")
+    result = training_tools.launch_training(tmp_path, cfg, actor=None)
     assert "error" not in result, result
     assert "seed" not in cfg
     assert isinstance(_launch_record(tmp_path, "exp-fresh-seed")["config"]["seed"], int)
@@ -221,7 +196,7 @@ def test_a_spawn_failure_leaves_a_directory_that_reads_interrupted(tmp_path, mon
     from tcip_mcp.tools import training_tools
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    _seed_one_image(images_dir, labels_dir)
+    seed_two_bud_images(images_dir, labels_dir)
 
     def _raise_popen(*args, **kwargs):
         raise OSError("no such executable")
@@ -230,12 +205,12 @@ def test_a_spawn_failure_leaves_a_directory_that_reads_interrupted(tmp_path, mon
 
     with pytest.raises(OSError):
         training_tools.launch_training(
-            tmp_path, _detection_cfg(images_dir, labels_dir, "exp-spawn-fails"))
+            tmp_path, small_detection_config(images_dir, labels_dir, "exp-spawn-fails"), actor=None)
 
     monkeypatch.setattr(experiments_mod, "HEARTBEAT_STALE_SECONDS", -1.0)
     assert observe(experiment_dir("exp-spawn-fails", project=tmp_path)).state == "interrupted"
 
     _fake_popen(monkeypatch, [])
     relaunch = training_tools.launch_training(
-        tmp_path, _detection_cfg(images_dir, labels_dir, "exp-spawn-fails"))
+        tmp_path, small_detection_config(images_dir, labels_dir, "exp-spawn-fails"), actor=None)
     assert "already exists" in relaunch["error"]

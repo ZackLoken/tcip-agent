@@ -73,7 +73,7 @@ def save_annotations(
     annotations: list[dict],
     date: str | None = None,
     path: str | None = None,
-    created_by: str | None = None,
+    created_by: str = "save_annotations",
 ) -> dict:
     """Write an image's annotations to its single per-image label file (all subjects, one file).
 
@@ -92,7 +92,8 @@ def save_annotations(
             coords); an empty list writes an empty document.
         date: Capture date; derived from the image path when omitted.
         path: Explicit label path (overrides the canonical location).
-        created_by: Producer stamped on each written annotation. Omit to leave provenance unset.
+        created_by: Producer stamped on each written annotation; this tool's own name when the
+            caller names none.
     """
     from tcip_mcp.audit import AuditEntryNotWritten
     from tcip_mcp.dataset_layout import save_label_document
@@ -106,7 +107,7 @@ def save_annotations(
     try:
         out_path = Path(path) if path else annotation_path_for_image(image_path, date=date)
         save_label_document(project, image_path, out_path, annotations, width=w, height=h,
-                            author=created_by)
+                            author=created_by, actor=None)
     except (ValueError, AuditEntryNotWritten) as exc:
         return {"error": str(exc)}
 
@@ -327,7 +328,7 @@ def write_subject_registry(
     try:
         result = subject_registry.replace_registry(
             dataset_root, registry, expect=None, allow_removals=allow_removals,
-            allow_type_changes=allow_type_changes)
+            allow_type_changes=allow_type_changes, actor=None)
     except (subject_registry.RegistryError, VersionConflict, AuditEntryNotWritten) as exc:
         return {"error": str(exc)}
     return {"subjects_path": result["subjects_path"],

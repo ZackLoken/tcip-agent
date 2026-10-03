@@ -278,7 +278,7 @@ export function TrainingTab() {
   }, [pickerOpen, refreshConfigs]);
 
   async function startFromConfig(experimentId: string, selectionDir: string | null) {
-    const result = await trainingApi.relaunch(experimentId, selectionDir);
+    const result = await trainingApi.relaunch(experimentId, useStore.getState().user, selectionDir);
     setPickerOpen(false);
     void refreshRuns();
     if (typeof result.experiment_id === "string") setSelectedRun(result.experiment_id);
@@ -396,7 +396,7 @@ export function TrainingTab() {
       return rest;
     });
     try {
-      await trainingApi.cancel(experimentId);
+      await trainingApi.cancel(experimentId, useStore.getState().user);
       void refreshRuns();
     } catch (e) {
       const message = `Cancel failed: ${messageOf(e)}`;

@@ -8,7 +8,7 @@ push as the canvas the human is looking at now.
 
 from __future__ import annotations
 
-import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -42,7 +42,12 @@ def _canvas_image(tmp_path: Path) -> str:
     return str(path)
 
 
-def _push_state(tmp_path: Path, image: str, *, received_at: float,
+def _ago(seconds: float) -> str:
+    """The instant ``seconds`` before now, in the spelling the push route stamps."""
+    return (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
+
+
+def _push_state(tmp_path: Path, image: str, *, received_at: str,
                 shapes: list[dict] | None = None) -> None:
     """Write the two documents the GUI pushes for the project ``tmp_path``: the meta heartbeat
     and the geometry blob, the image named relative to the project as the push route stores it."""
@@ -84,7 +89,7 @@ def test_canvas_shapes_are_drawn_at_the_resolution_the_pixels_were_served_at(
     from tcip_mcp.tools.vision_tools import capture_live_canvas
 
     image = _canvas_image(tmp_path)
-    _push_state(tmp_path, image, received_at=time.time())
+    _push_state(tmp_path, image, received_at=_ago(0))
 
     result = capture_live_canvas(tmp_path, tmp_path.parent, refresh=False, crop_to_viewport=False,
                                  max_edge=SERVED_MAX_EDGE)
@@ -113,7 +118,7 @@ def test_a_capture_no_gui_answered_reports_the_state_as_last_known(
     from tcip_mcp.tools.vision_tools import capture_live_canvas
 
     image = _canvas_image(tmp_path)
-    _push_state(tmp_path, image, received_at=time.time() - 600)
+    _push_state(tmp_path, image, received_at=_ago(600))
 
     pings: list[tuple[str, str]] = []
 
@@ -142,11 +147,11 @@ def test_a_capture_the_gui_answered_reports_the_state_as_live(
     from tcip_mcp.tools.vision_tools import capture_live_canvas
 
     image = _canvas_image(tmp_path)
-    _push_state(tmp_path, image, received_at=time.time() - 600)
+    _push_state(tmp_path, image, received_at=_ago(600))
 
     def answering_hub(project: Path, workspace: Path, panel: str, event_type: str, data: dict,
                       **kwargs: object) -> dict:
-        _push_state(tmp_path, image, received_at=time.time())
+        _push_state(tmp_path, image, received_at=_ago(0))
         return {"status": "ok", "delivered": True}
 
     monkeypatch.setattr(web_client, "post_panel_event", answering_hub)
@@ -156,3 +161,20 @@ def test_a_capture_the_gui_answered_reports_the_state_as_live(
     assert result["refreshed"] is True
     assert "last known" not in result["summary"]
     assert result["shape_counts_by_tag"] == {"gt": 2}
+
+
+def test_a_canvas_record_without_its_arrival_instant_is_refused_by_name(tmp_path: Path) -> None:
+    """No producer writes a canvas record without ``received_at``, so its age is unknown, never
+    zero: the capture refuses rather than describing it as live."""
+    import tcip_store
+    from tcip_mcp.tools.vision_tools import capture_live_canvas
+    from tcip_mcp.web_client import canvas_meta_key
+
+    image = _canvas_image(tmp_path)
+    _push_state(tmp_path, image, received_at=_ago(0))
+    meta = dict(tcip_store.read(canvas_meta_key(str(tmp_path))))
+    del meta["received_at"]
+    tcip_store.replace(canvas_meta_key(str(tmp_path)), meta)
+
+    with pytest.raises(ValueError, match="canvas_live carries no received_at"):
+        capture_live_canvas(tmp_path, tmp_path.parent, refresh=False)

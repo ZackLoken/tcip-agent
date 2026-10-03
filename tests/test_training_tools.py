@@ -219,7 +219,7 @@ def test_preflight_config_warns_when_most_candidates_wont_train(tmp_path):
     r = preflight_config(tmp_path, cfg)
     assert r["valid"] is True, r  # informational only, never gating
     assert any("3/4 candidate images (75%) will not train" in w for w in r["warnings"]), r["warnings"]
-    assert any("skipped_unannotated" in w for w in r["warnings"])
+    assert any("{'absent': 3}" in w for w in r["warnings"])
 
 
 def test_preflight_config_no_coverage_warning_when_everything_trains(tmp_path):
@@ -851,6 +851,27 @@ def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
     monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())
 
 
+def _spaces_searched(monkeypatch) -> list:
+    """Replace ``tune_search`` with a search that answers its study directory, and the list it
+    records each param space it ran over into."""
+    from tcip_mcp.pipelines.training import hpo
+
+    seen: list = []
+
+    def fake_search(*args, **kwargs):
+        seen.append(kwargs.get("param_space", args[1] if len(args) > 1 else None))
+        return str(Path(kwargs["storage_path"]) / kwargs["study_name"])
+
+    monkeypatch.setattr(hpo, "tune_search", fake_search)
+    return seen
+
+
+def _completed_train(run, train_loader, val_loader, epoch_callback=None, resume_from=""):
+    """A training call that completes the run at once, reporting no epoch."""
+    run.status = "completed"
+    return run
+
+
 def test_run_hpo_trial_reports_each_epoch_and_its_result_is_the_best_of_them(
         monkeypatch, tmp_path):
     """Every epoch's selection value is reported as the trial logs it, and the trial's result is
@@ -999,13 +1020,7 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_data_cfg_handed_to_auto_trai
     pytest.importorskip("torch")
 
     captured: dict = {}
-
-    def fake_train(run, train_loader, val_loader,
-                   epoch_callback=None, resume_from=""):
-        run.status = "completed"
-        return run
-
-    _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=captured)
+    _patch_hpo_trial_machinery(monkeypatch, _completed_train, captured=captured)
     _trial({"data.split.seed": 7}, [].append, _detection_base(), _trial_dir(tmp_path, "trial_0"))
     assert captured["data_cfg"]["split"]["seed"] == 7
 
@@ -1030,12 +1045,7 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_trials_own_records(monkeypat
     pytest.importorskip("torch")
     from tcip_mcp.experiments import RUN_FILE, read_record
 
-    def fake_train(run, train_loader, val_loader,
-                   epoch_callback=None, resume_from=""):
-        run.status = "completed"
-        return run
-
-    _patch_hpo_trial_machinery(monkeypatch, fake_train)
+    _patch_hpo_trial_machinery(monkeypatch, _completed_train)
     from tcip_mcp.pipelines.data import split_construction as sc
     monkeypatch.setattr(sc, "auto_train_val", _fake_auto_train_val_reading_seed_like_split_construction)
 
@@ -1057,12 +1067,7 @@ def test_run_hpo_trial_geometry_stamp_from_a_tiled_dataset_reaches_the_resolved_
     pytest.importorskip("torch")
     from tcip_mcp.experiments import RUN_FILE, read_record
 
-    def fake_train(run, train_loader, val_loader,
-                   epoch_callback=None, resume_from=""):
-        run.status = "completed"
-        return run
-
-    _patch_hpo_trial_machinery(monkeypatch, fake_train)
+    _patch_hpo_trial_machinery(monkeypatch, _completed_train)
     from tcip_mcp.pipelines.data import split_construction as sc
     monkeypatch.setattr(sc, "auto_train_val", _fake_auto_train_val_reading_seed_like_split_construction)
 
@@ -1094,15 +1099,10 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
         "batch_size": 2,
     }
 
-    def fake_train(run, train_loader, val_loader,
-                   epoch_callback=None, resume_from=""):
-        run.status = "completed"
-        return run
-
     import torch.utils.data as tud
     from tcip_mcp.pipelines.data import samplers
     from tcip_mcp.pipelines.training import generic_trainer as gt
-    monkeypatch.setattr(gt, "train", fake_train)
+    monkeypatch.setattr(gt, "train", _completed_train)
     monkeypatch.setattr(samplers, "build_sampler", lambda *a, **k: None)
     monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())
 
@@ -1225,7 +1225,8 @@ def test_a_launch_config_that_json_cannot_hold_is_refused_before_the_run_starts(
                             {"valid": False, "issues": ["stub"]}, None))
 
     with pytest.raises(TypeError) as refused:
-        training_tools.launch_training(tmp_path, {"model_source": {"builder": Path("m.py")}})
+        training_tools.launch_training(tmp_path, {"model_source": {"builder": Path("m.py")}},
+                                       actor=None)
     assert "config.model_source.builder" in str(refused.value)
 
 
@@ -1243,7 +1244,8 @@ def test_an_ordinary_launch_config_passes_the_boundary_to_preflight(tmp_path, mo
 
     monkeypatch.setattr(training_tools, "_preflight", stub_preflight)
 
-    result = training_tools.launch_training(tmp_path, {"model_source": {"builder": "m:f"}})
+    result = training_tools.launch_training(tmp_path, {"model_source": {"builder": "m:f"}},
+                                            actor=None)
 
     assert result == {"error": "Invalid config", "issues": ["stub"]}
     assert seen == [{"model_source": {"builder": "m:f"}}]
@@ -1277,17 +1279,10 @@ def test_a_sweep_payload_that_json_cannot_hold_is_refused_before_any_trial_runs(
 def test_an_ordinary_sweep_payload_still_runs_its_search(tmp_path, monkeypatch):
     """The refusal above must not cost a legitimate sweep its search: admits valid work through
     the sweep door's structural preflight (an importable builder, a real data section)."""
-    from tcip_mcp.pipelines.training import hpo
     from tcip_mcp.tools import training_tools
 
     monkeypatch.chdir(tmp_path)
-    seen = []
-
-    def fake_search(*args, **kwargs):
-        seen.append(kwargs.get("param_space", args[1] if len(args) > 1 else None))
-        return str(Path(kwargs["storage_path"]) / kwargs["study_name"])
-
-    monkeypatch.setattr(hpo, "tune_search", fake_search)
+    seen = _spaces_searched(monkeypatch)
 
     base_config = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
@@ -1305,17 +1300,10 @@ def test_run_hyperparameter_search_admits_an_lr_sweep_beside_a_base_config_selec
 ):
     """The selection-metric refusal targets param_space, never base_config: a config that
     states its own selection metric still runs an ordinary lr sweep."""
-    from tcip_mcp.pipelines.training import hpo
     from tcip_mcp.tools import training_tools
 
     monkeypatch.chdir(tmp_path)
-    seen = []
-
-    def fake_search(*args, **kwargs):
-        seen.append(kwargs.get("param_space", args[1] if len(args) > 1 else None))
-        return str(Path(kwargs["storage_path"]) / kwargs["study_name"])
-
-    monkeypatch.setattr(hpo, "tune_search", fake_search)
+    seen = _spaces_searched(monkeypatch)
 
     base_config = {**real_hpo_base_config, "evaluation": {"selection_metric": "map"}}
     result = training_tools.run_hyperparameter_search(tmp_path, base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1, search_seed=0)
@@ -1329,17 +1317,10 @@ def test_run_hyperparameter_search_admits_a_categorical_evaluation_axis_naming_t
 ):
     """A categorical evaluation axis is admitted: every trial records the sweep's one
     objective."""
-    from tcip_mcp.pipelines.training import hpo
     from tcip_mcp.tools import training_tools
 
     monkeypatch.chdir(tmp_path)
-    seen = []
-
-    def fake_search(*args, **kwargs):
-        seen.append(kwargs.get("param_space", args[1] if len(args) > 1 else None))
-        return str(Path(kwargs["storage_path"]) / kwargs["study_name"])
-
-    monkeypatch.setattr(hpo, "tune_search", fake_search)
+    seen = _spaces_searched(monkeypatch)
 
     base_config = {**real_hpo_base_config, "evaluation": {"selection_metric": "map"}}
     param_space = {"evaluation": {
@@ -1355,10 +1336,7 @@ def test_run_hyperparameter_search_admits_a_categorical_evaluation_axis_naming_t
 # dataset_identity: a version-refused identity propagates rather than reading as unregistered.
 
 def test_dataset_identity_propagates_a_version_refused_identity(tmp_path):
-    """``except ValueError: ds_id = None`` must not swallow a version refusal identically to
-    not-registered: the two are different facts, and this call's own caller already wraps it in a
-    best-effort ``except Exception`` that logs and continues the run, so propagating here
-    surfaces the fact rather than silently recording ``(None, fp)``."""
+    """A version-refused identity propagates; it is not read as an unregistered dataset."""
     import tcip_store as ts
     from tcip_store import SchemaVersionRefused
 

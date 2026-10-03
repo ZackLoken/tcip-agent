@@ -28,6 +28,7 @@ from tcip_annotation.json_io import (
 )
 from tcip_annotation.state import Annotation
 from tcip_store import Version, VersionConflict
+from tcip_mcp.pipelines.active_learning import DEFAULT_REVIEW_BUDGET, DEFAULT_SCORER
 from tcip_web import jobstore
 from tcip_web.paths import allowed_image_dimensions, allowed_optional, allowed_path
 from tcip_web.state import store
@@ -84,9 +85,8 @@ def annotation_dict(a: Annotation) -> dict:
 
 def _completion(doc: LabelDocument) -> dict:
     """Each subject ``doc`` holds or marks, with its state
-    (:meth:`~tcip_annotation.json_io.LabelDocument.state`) and whether it is finished
-    (:meth:`~tcip_annotation.json_io.LabelDocument.finished`)."""
-    return {subject: {"state": doc.state(subject), "finished": doc.finished(subject)}
+    (:meth:`~tcip_annotation.json_io.LabelDocument.state`)."""
+    return {subject: doc.state(subject)
             for subject in sorted({a.subject for a in doc.annotations} | set(doc.marks))}
 
 
@@ -144,11 +144,12 @@ def save_labels(payload: SavePayload) -> dict:
         bucket=str(allowed_path(payload.bucket)) if payload.bucket else None,
         accept=frozenset(payload.accept), reject=frozenset(payload.reject),
         complete=payload.complete, rect=payload.rect, proposals_hidden=payload.proposals_hidden)
+    person = actor(payload.user)
     try:
         save_label_document(
             store.project_root, payload.image_path, label_path,
             [ap.model_dump() for ap in payload.annotations], width=w, height=h,
-            author=actor(payload.user), expect=expect, gestures=gestures)
+            author=person, actor=person, expect=expect, gestures=gestures)
     except VersionConflict as exc:
         raise HTTPException(409, {"error": "label file changed since it was loaded"}) from exc
     except AuditEntryNotWritten as exc:
@@ -197,8 +198,8 @@ class PriorityQueueJob:
     checkpoint_path: str
     images_dir: str
     subject: Optional[str]
-    method: str = "combined"
-    budget: int = 50
+    method: str
+    budget: int
     status: str = "pending"  # pending | running | completed | failed
     error: Optional[str] = None
     # [{image, score, reference_member?}], highest first.
@@ -235,8 +236,8 @@ class LaunchPriorityQueuePayload(BaseModel):
     checkpoint_path: str
     images_dir: str
     subject: Optional[str] = None
-    method: str = "combined"
-    budget: int = 50
+    method: str = DEFAULT_SCORER
+    budget: int = DEFAULT_REVIEW_BUDGET
 
 
 @router.post("/queue/launch")

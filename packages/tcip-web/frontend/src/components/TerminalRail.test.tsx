@@ -145,7 +145,8 @@ describe("TerminalRail", () => {
     expect(await screen.findByTestId("terminal-host")).toBeInTheDocument();
   });
 
-  it("creates a session and attaches the terminal when available", async () => {
+  it("creates a session by the named person and attaches the terminal when available", async () => {
+    useStore.setState({ user: "jordan" });
     render(<TerminalRail />);
     expect(await screen.findByTestId("terminal-host")).toBeInTheDocument();
     await waitFor(() =>
@@ -153,6 +154,7 @@ describe("TerminalRail", () => {
         provider: "harness",
         rows: 30,
         cols: 100,
+        user: "jordan",
       }),
     );
     await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
@@ -201,6 +203,7 @@ describe("TerminalRail", () => {
   });
 
   it("restart calls the API with the terminal's dimensions and resets the emulator", async () => {
+    useStore.setState({ user: "jordan" });
     render(<TerminalRail />);
     await screen.findByTestId("terminal-host");
     await waitFor(() => expect(terminalApi.createSession).toHaveBeenCalled());
@@ -212,6 +215,7 @@ describe("TerminalRail", () => {
         provider: "harness",
         rows: 41,
         cols: 133,
+        user: "jordan",
       }),
     );
     expect(termInstances[0].reset).toHaveBeenCalled();

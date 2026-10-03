@@ -78,6 +78,11 @@ def audit_log_key(scope: str | Path) -> Key:
     return Key(AUDIT_LOG_STORE, str(Path(scope).resolve()), _AUDIT_PARTS)
 
 
+def now_iso() -> str:
+    """The current instant as an ISO-8601 UTC string."""
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _redact(args: dict[str, Any]) -> dict[str, Any]:
     """Redact sensitive fields from tool arguments."""
     return {
@@ -86,26 +91,35 @@ def _redact(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+ACTOR_KEY = "actor"
+"""The entry key naming the person who performed the act, absent for an act no person made."""
+
+
 def _entry(
     tool: str,
     arguments: dict[str, Any] | None,
+    actor: str | None,
     status: str | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """The shape every audit entry starts from: the clock, the tool, its redacted arguments, a
-    caller's extra facts, and the agent identity this process established at its MCP handshake, if
-    it has one.
+    """The shape every audit entry starts from: the clock, the tool, its redacted arguments, the
+    person who performed the act when one did (``actor``, :func:`~tcip_mcp.identity.actor`'s
+    spelling), a caller's extra facts, and the agent identity this process established at its MCP
+    handshake, if it has one.
 
-    The identity keys are reserved: a caller's ``extra`` cannot set one.
+    The actor and identity keys are reserved: a caller's ``extra`` cannot set one.
     """
     entry: dict[str, Any] = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": now_iso(),
         "tool": tool,
         "arguments": _redact(arguments) if arguments else {},
     }
+    if actor is not None:
+        entry[ACTOR_KEY] = actor
     if status is not None:
         entry["status"] = status
-    entry.update({k: v for k, v in (extra or {}).items() if k not in agent_identity.RECORD_FIELDS})
+    reserved = {ACTOR_KEY, *agent_identity.RECORD_FIELDS}
+    entry.update({k: v for k, v in (extra or {}).items() if k not in reserved})
     entry.update(agent_identity.audit_fields())
     return entry
 
@@ -114,15 +128,17 @@ def record_event(
     tool: str,
     arguments: dict[str, Any] | None = None,
     *,
+    actor: str | None,
     status: str = "ok",
     scope: str | Path,
     **extra: Any,
 ) -> None:
-    """Emit one best-effort audit line for a caller that is not an ``@audited`` door. ``scope``
-    names the root whose log the entry belongs in (see :func:`audit_log_key`). Never raises.
+    """Emit one best-effort audit line for a caller that is not an ``@audited`` door, performed by
+    ``actor``. ``scope`` names the root whose log the entry belongs in (see
+    :func:`audit_log_key`). Never raises.
     """
     try:
-        append(audit_log_key(scope), _entry(tool, arguments, status, extra))
+        append(audit_log_key(scope), _entry(tool, arguments, actor, status, extra))
     except Exception:
         # A dropped audit line is a real provenance gap, surface it, don't bury it at debug.
         logger.warning("Failed to write audit entry", exc_info=True)
@@ -132,18 +148,16 @@ def record_event_or_raise(
     tool: str,
     arguments: dict[str, Any] | None = None,
     *,
+    actor: str | None,
     status: str = "ok",
     scope: str | Path,
     **extra: Any,
 ) -> None:
-    """Emit one audit line for a confirmation write that must not land silently unrecorded.
-
-    Identical shape to :func:`record_event`, for a caller recording a mutation it already made,
-    with no tool body of its own for ``@audited`` to bracket. A failed append is raised as
-    :class:`AuditEntryNotWritten`, naming the mutation that already committed and is now
-    unrecorded.
+    """Emit one audit line, performed by ``actor``, for a mutation already made, in
+    :func:`record_event`'s shape. A failed append is raised as :class:`AuditEntryNotWritten`,
+    naming the mutation that committed unrecorded.
     """
-    entry = _entry(tool, arguments, status, extra)
+    entry = _entry(tool, arguments, actor, status, extra)
     try:
         append(audit_log_key(scope), entry)
     except Exception as exc:
@@ -188,29 +202,13 @@ def audited(
     *,
     scope_arg: str | None = None,
 ) -> Callable:
-    """Decorator that logs a mutating door's calls to the audit log their scope names.
-
-    The decorated door takes a ``project`` parameter, and refuses decoration without one. Bare
-    (``@audited``), a call is recorded in that project's log. ``@audited(scope_arg=...)`` declares
-    which of the tool's own arguments carries the dataset location the call mutates a record of:
-    that argument's value, read against the project, is resolved at call time
-    (:func:`dataset_scope_of`), and the entry goes to that root's log. An argument that is
-    ``None``, absent, or resolves to no root leaves the entry in the project's log. Exactly one log
-    receives each entry, and ``project`` is not among its recorded arguments.
-
-    A body that returns leaves its ``ok`` line, except a body returning a dict whose ``"error"`` is
-    set, which leaves no line; a body that raises leaves its ``exception`` line.
-
-    Outcomes when the entry cannot be written:
-
-    - The body returned and the append failed: :class:`MutationCommittedWithoutAuditLine`.
-    - The body raised: the body's exception is what the caller gets; the failed audit-of-failure is
-      logged.
-    - A declared scope argument was given and resolving it raised: the call refuses. A resolution
-      that cleanly answers "no dataset" leaves the entry in the project's log.
-
-    Binds positional args to their parameter names, so a positional call is recorded like a keyword
-    one; a call that does not bind raises the body's own ``TypeError``.
+    """Decorate a door taking a ``project`` parameter (refused without one) so each call leaves one
+    line in one log: the project's, or with ``scope_arg`` the dataset root that argument resolves
+    to at call time (:func:`dataset_scope_of`; no root means the project's). ``project`` and
+    ``workspace`` are not recorded as arguments; an ``actor`` parameter is recorded as the entry's
+    actor. A failed append after a return raises
+    :class:`MutationCommittedWithoutAuditLine`; after a raise the body's exception propagates and
+    the failed append is logged. A declared scope that cannot be resolved refuses the call.
     """
     def decorate(func: Callable) -> Callable:
         sig = inspect.signature(func)
@@ -231,7 +229,7 @@ def audited(
             logged_args: dict[str, Any] = dict(bound.arguments)
             project = logged_args.pop("project")
             logged_args.pop("workspace", None)
-            entry = _entry(tool_name, logged_args)
+            entry = _entry(tool_name, logged_args, logged_args.pop(ACTOR_KEY, None))
 
             def record() -> None:
                 """Resolve the scope, stamp the duration, and append. Raises what it cannot do."""

@@ -197,7 +197,7 @@ def deliver_acknowledged(project: Path, results: list[dict], out: Path, delivere
         project, results, str(out), delivered_phenotype=delivered_phenotype,
         delivery_kind=delivery_kind, buckets=delivered,
         plants=[r["plant_id"] for r in results], door="test_delivery", acknowledgment_id=ack,
-        **kwargs))
+        actor=None, **kwargs))
 
 
 def predicted(stem: str, values: list[str], attributes: tuple = ()) -> dict:
@@ -235,7 +235,7 @@ def published(project: Path, out: Path, results: list[dict], *, scope: dict,
     return publish(project, out, pass_documents(p, results), producer=checkpoint.producer,
                    scope=p.scope, execution=p.execution,
                    raster_path=str(raster_path) if raster_path is not None else None,
-                   raster_identity=identity, assessment_id=None)
+                   raster_identity=identity, assessment_id=None, actor=None)
 
 
 VALUES = ("open", "closed")
@@ -322,6 +322,16 @@ class Series:
         """The request body a phenology door takes over this series."""
         return {"mapping_name": self.mapping_name, "trait": self.trait,
                 "buckets": list(self.buckets.values()), "plants": list(PLANTS), **extra}
+
+
+def deliver_milestones(project: Path, body: dict, out_csv: Path) -> dict:
+    """``deliver_phenology_milestones`` over a phenology door's request ``body`` (a
+    :meth:`Series.body`), writing ``out_csv``."""
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
+
+    return deliver_phenology_milestones(
+        project, trait=body["trait"], mapping_name=body["mapping_name"], plants=body["plants"],
+        buckets=body["buckets"], output_csv_path=str(out_csv))
 
 
 def attributed_series(

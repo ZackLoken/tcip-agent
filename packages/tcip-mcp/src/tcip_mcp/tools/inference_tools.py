@@ -43,13 +43,13 @@ def infer(
     output_dir: str, assessment_id: str | None, stated: Stated | None, device: str | None,
     tile_batch_size: int, dry_run: bool, require_masks: bool, resume: bool,
     progress: Callable[[int, int], None] | None = None,
-    canceled: Callable[[], bool] | None = None,
+    canceled: Callable[[], bool] | None = None, actor: str | None,
 ) -> dict:
     """Run a registered checkpoint's pass over ``images_dir`` or ``raster_path`` and publish its
-    predictions as the bucket ``output_dir`` (the arguments are ``run_inference``'s), answering
-    the publication's result or the error dict naming a refusal, with ``progress`` called with ``(done, total)`` images once the pass is prepared and after each
-    image, and ``canceled`` asked before each image: once it answers true the pass stops at that
-    image boundary and publishes the documents written."""
+    predictions as the bucket ``output_dir`` by ``actor``, answering the publication's result or
+    the error dict naming a refusal. ``progress`` is called with ``(done, total)`` images once the
+    pass is prepared and after each image, and ``canceled`` asked before each image: once it
+    answers true the pass stops at that image boundary and publishes the documents written."""
     from tcip_mcp.assessment import read_assessment
     from tcip_mcp.buckets import BucketExists, pass_documents, publish
     from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
@@ -122,7 +122,8 @@ def infer(
     try:
         bucket = publish(project, out, pass_documents(p, results), producer=p.checkpoint.producer,
                          scope=p.scope, execution=p.execution, raster_path=raster_path,
-                         raster_identity=raster_identity, assessment_id=assessment_id)
+                         raster_identity=raster_identity, assessment_id=assessment_id,
+                         actor=actor)
     except BucketExists as exc:
         return {"error": str(exc)}
     if raster_path is not None:
@@ -208,7 +209,7 @@ def run_inference(
     return infer(project, checkpoint_path=checkpoint_path, images_dir=images_dir,
                  raster_path=raster_path, output_dir=output_dir, assessment_id=assessment_id,
                  stated=stated, device=device, tile_batch_size=tile_batch_size, dry_run=dry_run,
-                 require_masks=require_masks, resume=resume)
+                 require_masks=require_masks, resume=resume, actor=None)
 
 
 def _progress_key(project: Path, bucket: Path, segment: str) -> Key:
@@ -300,6 +301,7 @@ def deliver_per_image_counts(project: Path, predictions_dir: str, output_path: s
     try:
         return deliver_per_image_counts_csv(
             project, Path(project, predictions_dir), str(Path(project, output_path)),
-            trait=trait, acknowledgment_id=acknowledgment_id, door="deliver_per_image_counts")
+            trait=trait, acknowledgment_id=acknowledgment_id, door="deliver_per_image_counts",
+            actor=None)
     except (DeliveryRefused, OperationalizationRefused, TraitUnknownError, ValueError) as exc:
         return {"error": str(exc)}

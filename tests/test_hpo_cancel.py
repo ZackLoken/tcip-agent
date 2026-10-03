@@ -39,7 +39,7 @@ def _opened(project: Path, base_config: dict, study_name: str):
         project, base_config, None, n_trials=1, search_alg="random", scheduler="asha", grace_period=5,
         reduction_factor=3, warm_start=False, baseline_params=None, max_concurrent=1,
         resources_per_trial=None, study_name=study_name, split_draws=1, split_draw_seeds=None,
-        search_seed=0, trial_budget=None, relaunched_from=None)
+        search_seed=0, trial_budget=None, relaunched_from=None, actor=None)
     assert not isinstance(opened, dict), opened
     return opened
 
@@ -47,7 +47,7 @@ def _opened(project: Path, base_config: dict, study_name: str):
 def test_cancel_hyperparameter_search_refuses_a_study_no_directory_holds(project) -> None:
     from tcip_mcp.tools.training_tools import cancel_hyperparameter_search, sweep_dir
 
-    result = cancel_hyperparameter_search(project, "hpo_totally_unknown")
+    result = cancel_hyperparameter_search(project, "hpo_totally_unknown", actor=None)
     assert "error" in result
     assert not sweep_dir("hpo_totally_unknown", project=project).exists()
 
@@ -111,7 +111,7 @@ def test_a_cancel_after_the_sweep_ended_refuses_and_leaves_its_final_status_as_w
     run_hyperparameter_search(project, base_config=real_hpo_base_config, n_trials=1,
                               study_name="hpo_alreadydone1", search_seed=0)
 
-    result = cancel_hyperparameter_search(project, "hpo_alreadydone1")
+    result = cancel_hyperparameter_search(project, "hpo_alreadydone1", actor=None)
 
     assert "has ended" in result["error"]
     assert not cancel_requested(sweep_dir("hpo_alreadydone1", project=project))
@@ -141,11 +141,11 @@ def test_cancel_hyperparameter_search_reaches_only_a_sweep_of_the_project_it_is_
     _opened(project, real_hpo_base_config, "hpo_other01")
     elsewhere = tmp_path_factory.mktemp("elsewhere")
 
-    result = cancel_hyperparameter_search(project, "hpo_other01")
+    result = cancel_hyperparameter_search(project, "hpo_other01", actor=None)
 
     assert result["cancel_requested"] is True
     assert cancel_requested(sweep_dir("hpo_other01", project=project))
-    assert "error" in cancel_hyperparameter_search(elsewhere, "hpo_other01")
+    assert "error" in cancel_hyperparameter_search(elsewhere, "hpo_other01", actor=None)
 
 
 def test_run_hpo_trial_reports_nothing_and_opens_no_run_when_the_sweep_is_canceled(

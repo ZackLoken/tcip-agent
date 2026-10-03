@@ -205,8 +205,6 @@ def safe_join(root: Path | str, *parts: str) -> Path:
                 raise ValueError(f"path traversal not allowed: {part!r}")
             rel_parts.append(seg)
     candidate = base.joinpath(*rel_parts).resolve()
-    try:
-        candidate.relative_to(base)
-    except ValueError as exc:
-        raise ValueError(f"resolved path {candidate} is outside {base}") from exc
+    if not candidate.is_relative_to(base):
+        raise ValueError(f"resolved path {candidate} is outside {base}")
     return candidate

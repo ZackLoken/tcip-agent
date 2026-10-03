@@ -214,26 +214,25 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     out_dir = tmp_path / "out"
     ckpt = foreign_checkpoint(tmp_path)
 
+    from tcip_mcp.pipelines.image_utils import logical_image_name
+    from tests._predictor_fixtures import StubPredictor, install
+
     seen = []
 
-    class FakePredictor:
-        task = "detection"
+    class ObservingPredictor(StubPredictor):
+        """The stub's empty prediction, named by each source's logical image name, recording
+        every source it is handed."""
 
-        def __init__(self, checkpoint_path=None, **kwargs):
-            pass
-
-        def predict_batch(self, paths, tile=False, tile_size=224, overlap=0.2, **kw):
+        def predict_batch(self, paths, execution=None, **kw):
             seen.extend(paths)
-            return [{"image": (p.manifest_path.name if isinstance(p, BandGroupRef) else p.name),
-                     "width": 20, "height": 24,
-                     "boxes": [], "scores": [], "labels": [], "count": 0}
-                    for p in paths]
+            return [{**result, "image": logical_image_name(p)}
+                    for p, result in zip(paths, super().predict_batch(paths, execution, **kw))]
 
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
+    install(monkeypatch, ObservingPredictor(width=20, height=24, boxes=(), scores=(),
+                                            task="detection"))
 
     job = InferenceJob(
-        job_id="t2", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        job_id="t2", actor="user:tester", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), project=str(tmp_path), stated=Stated(
             tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nms"),
     )

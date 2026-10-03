@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from tcip_mcp.agent_identity import RECORD_FIELDS as IDENTITY_FIELDS
 from tcip_web.app import app
 
 DECLARED_HEADERS = {
@@ -21,10 +22,6 @@ DECLARED_HEADERS = {
     "X-TCIP-Agent-Session": "mcp_0123",
     "X-TCIP-Terminal-Session": "term_abc",
 }
-IDENTITY_FIELDS = ("agent_client_name", "agent_client_version", "agent_session",
-                   "terminal_session")
-
-
 @pytest.fixture
 def client(opened_project) -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")

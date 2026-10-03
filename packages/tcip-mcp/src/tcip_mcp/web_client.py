@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 BACKEND_HOST = "127.0.0.1"
 """The loopback address the backend binds, the only arrival its trust boundary serves."""
-DEFAULT_PORT = 8765
 
 _PORT_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".txt")
 """The backend's port handoff, one document under the workspace root."""
@@ -313,16 +312,20 @@ PLATFORM_PANEL_EVENTS = (
 )
 
 
+class NoBackendPort(LookupError):
+    """No backend has recorded the port it serves a workspace on."""
+
+
 def resolve_web_port(workspace: Path) -> int:
-    """The port the backend serving ``workspace`` listens on: the one it recorded under the
-    workspace, else ``TCIP_WEB_PORT``, else the default. Raises ``ValueError`` naming a recorded
-    port or a ``TCIP_WEB_PORT`` that is not an integer."""
+    """The port the backend serving ``workspace`` recorded under it. Refuses
+    (:class:`NoBackendPort`) when none is recorded, and (``ValueError``) a recorded port that is
+    not an integer."""
     recorded = tcip_store.read(backend_port_key(workspace), default=None)
+    if recorded is None:
+        raise NoBackendPort(f"no backend has recorded a port under {workspace}; "
+                            "`python -m tcip_web` serving it records one")
     try:
-        if recorded is not None:
-            return int(recorded)
-        env = os.environ.get("TCIP_WEB_PORT")
-        return int(env) if env else DEFAULT_PORT
+        return int(recorded)
     except ValueError as exc:
         raise ValueError(f"the backend's port under {workspace} does not read as a port: "
                          f"{exc}") from exc
@@ -354,7 +357,8 @@ def post_panel_event(
         ``response`` is the parsed JSON body (``None`` for a body that does not decode as JSON).
       * ``{"error": ..., "delivered": False, "open_project_id": ...}`` when the backend has another
         project open, or none.
-      * ``{"status": "no_subscribers", "delivered": False, ...}`` if the backend is down.
+      * ``{"status": "no_subscribers", "delivered": False, ...}`` if the backend is down, with
+        ``error`` naming why when no backend has recorded its port.
       * ``{"error": ..., "delivered": False, ...}`` on any HTTP/serialization failure.
     """
     import json
@@ -370,7 +374,10 @@ def post_panel_event(
     from tcip_mcp import agent_identity
     from tcip_mcp.project_record import read_record
 
-    url = backend_url(workspace, f"/api/events/{panel}")
+    try:
+        url = backend_url(workspace, f"/api/events/{panel}")
+    except NoBackendPort as exc:
+        return {"status": "no_subscribers", "delivered": False, "url": "", "error": str(exc)}
     payload = json.dumps({"panel": panel, "event_type": event_type, "data": data,
                           "project_id": read_record(project)["id"]}).encode("utf-8")
 

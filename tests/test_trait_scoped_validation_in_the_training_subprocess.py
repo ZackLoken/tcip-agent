@@ -15,26 +15,6 @@ from pathlib import Path
 import pytest
 
 
-def _seed_dataset(root: Path) -> tuple[Path, Path, Path, Path]:
-    from PIL import Image
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
-
-    images_dir, labels_dir = root / "images", root / "labels"
-    val_images, val_labels = root / "val_images", root / "val_labels"
-    for d in (images_dir, labels_dir, val_images, val_labels):
-        d.mkdir(parents=True)
-    box = BBox(10, 10, 30, 30)
-    for i in range(2):
-        Image.new("RGB", (128, 128)).save(images_dir / f"t{i}.png")
-        json_io.write_annotations(str(labels_dir / f"t{i}.json"),
-                                  [Annotation(subject="leaf", geometry=box)], 128, 128)
-    Image.new("RGB", (128, 128)).save(val_images / "v0.png")
-    json_io.write_annotations(str(val_labels / "v0.json"),
-                              [Annotation(subject="leaf", geometry=box)], 128, 128)
-    return images_dir, labels_dir, val_images, val_labels
-
-
 def _wait_terminal(project: Path, run_id: str, seconds: float) -> str:
     from tcip_mcp.tools import training_tools
 
@@ -61,7 +41,9 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
-    images_dir, labels_dir, val_images, val_labels = _seed_dataset(tmp_path / "ds")
+    from tests._producer_fixtures import seed_leaf_detection_dataset
+
+    images_dir, labels_dir, val_images, val_labels = seed_leaf_detection_dataset(tmp_path / "ds")
     proposed = propose_and_confirm(
         tmp_path, entry("leaf", ("leaf_length",), localization=CENTER_MATCH))
 
@@ -75,7 +57,7 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
     }
-    res = training_tools.launch_training(tmp_path, cfg)
+    res = training_tools.launch_training(tmp_path, cfg, actor=None)
     assert "error" not in res, res
     assert res["pid"] != os.getpid()
 

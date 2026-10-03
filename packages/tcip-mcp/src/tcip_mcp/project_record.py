@@ -198,19 +198,19 @@ def replace_site(project_path: str | Path, site: str) -> dict:
     return {"site": record["site"], "previous_site": previous}
 
 
-def rename_project(project: Path, display_name: str, *, requested_by: str) -> dict:
-    """Change the project's display name and record one ``project_renamed`` line in its own log;
-    its directory and every other record are left as they are. Returns ``{"id", "display_name",
-    "previous_display_name"}``. Refuses what :func:`validate_text` and :func:`read_record`
-    refuse."""
+def rename_project(project: Path, display_name: str, *, actor: str) -> dict:
+    """Change the project's display name and record one ``project_renamed`` line by ``actor`` in
+    its own log; its directory and every other record are left as they are. Returns ``{"id",
+    "display_name", "previous_display_name"}``. Refuses what :func:`validate_text` and
+    :func:`read_record` refuse."""
     from tcip_mcp.audit import record_event_or_raise
 
     record, previous = _update(project, "display_name", validate_text("display name", display_name))
     record_event_or_raise(
         "project_renamed",
         {"id": record["id"], "display_name": record["display_name"],
-         "previous_display_name": previous, "requested_by": requested_by},
-        scope=project,
+         "previous_display_name": previous},
+        actor=actor, scope=project,
     )
     return {"id": record["id"], "display_name": record["display_name"],
             "previous_display_name": previous}

@@ -63,10 +63,12 @@ import tcip_mcp.tools.delivery_tools  # noqa: F401, E402
 
 def _bound(fn: Callable[..., Any], binding: tuple[Path, Path] | None) -> Callable[..., Any]:
     """``fn`` as the server registers it: a ``project`` or ``workspace`` parameter is registered
-    without it, every call passing the server's own ``binding``. With no binding, a call to a
-    function taking either raises :class:`NoProject` naming ``--project``."""
+    without it, every call passing the server's own ``binding``, and an ``actor`` parameter is
+    registered without it, every call passing ``None``, since no person makes an act an MCP client
+    calls. With no binding, a call to a function taking a project or workspace raises
+    :class:`NoProject` naming ``--project``."""
     sig = inspect.signature(fn, eval_str=True)
-    bound = {"project", "workspace"} & sig.parameters.keys()
+    bound = {"project", "workspace", "actor"} & sig.parameters.keys()
     if not bound:
         return fn
 
@@ -75,7 +77,7 @@ def _bound(fn: Callable[..., Any], binding: tuple[Path, Path] | None) -> Callabl
         if binding is None:
             raise NoProject("this MCP server was started for no project, so no tool that acts on "
                             "one can run; restart it with --project <path> naming the project")
-        values = dict(zip(("project", "workspace"), binding))
+        values = {**dict(zip(("project", "workspace"), binding)), "actor": None}
         return fn(*args, **{name: values[name] for name in bound}, **kwargs)
 
     entry.__signature__ = sig.replace(  # type: ignore[attr-defined]

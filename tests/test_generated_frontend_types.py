@@ -29,7 +29,7 @@ _TS_BLOCK_RE = re.compile(r"(?:interface|type)\s+\w+\s*=?\s*\{(.*?)\n\}", re.S)
 _TS_FIELD_RE = re.compile(r"^\s+(\w+)(\??):", re.M)
 _FIELD_UNION_RE = re.compile(r'\w+\??:\s*((?:"[^"]+"\s*\|\s*)+"[^"]+")(?:\s*\|\s*null)?[;,]')
 _TYPE_ALIAS_UNION_RE = re.compile(
-    r'^\s*export\s+type\s+(\w+)\s*=\s*((?:"[^"]+"\s*\|\s*)+"[^"]+")\s*;', re.M
+    r'^\s*(?:export\s+)?type\s+(\w+)\s*=\s*((?:"[^"]+"\s*\|\s*)+"[^"]+")\s*;', re.M
 )
 _QUOTED_RE = re.compile(r'"([^"]+)"')
 
@@ -155,18 +155,22 @@ def test_no_other_frontend_module_declares_an_interface_with_a_generated_field_s
     )
 
 
-def _generated_field_unions() -> list[set[str]]:
+def _generated_vocabularies() -> list[set[str]]:
+    """Every vocabulary the generator emits: each generated field's literal union, each runtime
+    constant, and each literal alias."""
     text = GENERATED.read_text(encoding="utf-8")
-    return [set(_QUOTED_RE.findall(m.group(1))) for m in _FIELD_UNION_RE.finditer(text)]
+    generator = _generator()
+    return ([set(_QUOTED_RE.findall(m.group(1))) for m in _FIELD_UNION_RE.finditer(text)]
+            + [set(v) for v in generator.tuple_constants().values()]
+            + [set(v) for v in generator.literal_aliases().values()])
 
 
-def test_no_frontend_module_hand_declares_a_generated_fields_literal_union() -> None:
-    """A bare ``export type X = "a" | "b" | ...;`` alias parses as neither an interface nor an
-    object type, so the field-set check above never sees it: this catches one whose members
-    exactly match a generated interface field's literal union, the shape a field-set comparison
-    misses entirely."""
-    generated_sets = [s for s in _generated_field_unions() if len(s) > 1]
-    assert generated_sets, "no literal unions parsed out of the generated module's fields"
+def test_no_frontend_module_hand_declares_a_generated_vocabulary() -> None:
+    """A bare ``type X = "a" | "b" | ...;`` alias parses as neither an interface nor an object
+    type, so the field-set check above never sees it: this catches one whose members exactly
+    match a vocabulary the generator emits."""
+    generated_sets = [s for s in _generated_vocabularies() if len(s) > 1]
+    assert generated_sets, "no vocabularies read from the generator"
 
     sources = [
         p for p in sorted(list(FRONTEND_SRC.rglob("*.ts")) + list(FRONTEND_SRC.rglob("*.tsx")))
@@ -179,6 +183,6 @@ def test_no_frontend_module_hand_declares_a_generated_fields_literal_union() -> 
             if set(_QUOTED_RE.findall(m.group(2))) in generated_sets:
                 offenders.append(f"{source.relative_to(REPO_ROOT).as_posix()}: {m.group(1)}")
     assert not offenders, (
-        "these declare a union alias matching a generated field's literal union by hand:\n"
+        "these declare a union alias matching a generated vocabulary by hand:\n"
         + "\n".join(offenders)
     )

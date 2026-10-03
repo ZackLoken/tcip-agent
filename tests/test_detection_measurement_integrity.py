@@ -15,6 +15,7 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
 
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
+from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     SCOPED_DATA, project_checkpoint, verified_checkpoint,
 )
@@ -26,12 +27,6 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
 
 _DIMS = {"in_chans": 3, "num_classes": 1}
 """What a one-subject detector over three-band sources is built at."""
-
-
-def _patch_predictor(monkeypatch, predictor_mod, stub_factory):
-    """Stub the predictor a pass builds so the registered checkpoint a test loads runs no forward
-    pass."""
-    monkeypatch.setattr(predictor_mod, "GenericPredictor", lambda *a, **kw: stub_factory())
 
 
 # ── detection val-loss includes all-negative images ──────────────────────
@@ -494,39 +489,28 @@ def test_full_frame_reads_each_ground_truth_box_on_the_stored_grid(tmp_path, mon
 
 # ── the tile geometry a pass derives from its checkpoint ──────────────────
 
-class _BatchStub:
+def _geometry_stub(*, train_tile_size=None, train_overlap=None) -> StubPredictor:
     """A predictor carrying the given persisted training geometry, answering empty results."""
-
-    task = "detection"
-    in_chans = 3
-
-    def __init__(self, *, train_tile_size=None, train_overlap=None):
-        self.train_tile_size, self.train_overlap = train_tile_size, train_overlap
-        self.executions: list = []
-
-    def predict_batch(self, paths, execution=None, **kw):
-        self.executions.append(execution)
-        return [{"image": p, "width": 100, "height": 100, "boxes": [], "scores": [],
-                 "labels": [], "count": 0, "cap_hit": False} for p in paths]
+    return StubPredictor(boxes=(), scores=(), task="detection", in_chans=3,
+                         train_tile_size=train_tile_size, train_overlap=train_overlap)
 
 
 def _pass_over(tmp_path, monkeypatch, stub, **stated):
     """The pass a registered checkpoint prepares over one image with ``stub`` as its predictor."""
     from PIL import Image
 
-    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     from tests._verified_checkpoint_fixtures import predicted_over
 
     images_dir = tmp_path / "one"
     images_dir.mkdir()
     Image.new("RGB", (100, 100)).save(images_dir / "a.png")
-    _patch_predictor(monkeypatch, predictor_mod, lambda: stub)
+    install(monkeypatch, stub)
     return predicted_over(tmp_path, project_checkpoint(tmp_path), str(images_dir), device="cpu",
                           **stated)
 
 
 def test_a_tiled_pass_derives_its_tile_edge_from_the_checkpoint(tmp_path, monkeypatch):
-    stub = _BatchStub(train_tile_size=224, train_overlap=0.1)
+    stub = _geometry_stub(train_tile_size=224, train_overlap=0.1)
 
     p, _results = _pass_over(tmp_path, monkeypatch, stub, tile=True)
 
@@ -541,11 +525,11 @@ def test_a_tiled_pass_with_no_basis_for_its_edge_refuses_naming_it(tmp_path, mon
     from tcip_mcp.pipelines.execution import ExecutionRefused
 
     with pytest.raises(ExecutionRefused, match="tile_size"):
-        _pass_over(tmp_path, monkeypatch, _BatchStub(), tile=True)
+        _pass_over(tmp_path, monkeypatch, _geometry_stub(), tile=True)
 
 
 def test_a_stated_edge_agreeing_with_the_checkpoint_is_recorded_as_stated(tmp_path, monkeypatch):
-    p, _results = _pass_over(tmp_path, monkeypatch, _BatchStub(train_tile_size=224), tile=True,
+    p, _results = _pass_over(tmp_path, monkeypatch, _geometry_stub(train_tile_size=224), tile=True,
                              tile_size=224)
 
     assert (p.execution.tile_size, p.execution.sources["tile_size"]) == (224, "explicit")
@@ -555,7 +539,7 @@ def test_a_stated_edge_contradicting_the_checkpoint_refuses_naming_both(tmp_path
     from tcip_mcp.pipelines.execution import ExecutionRefused
 
     with pytest.raises(ExecutionRefused) as exc_info:
-        _pass_over(tmp_path, monkeypatch, _BatchStub(train_tile_size=224), tile=True,
+        _pass_over(tmp_path, monkeypatch, _geometry_stub(train_tile_size=224), tile=True,
                    tile_size=512)
     assert "512" in str(exc_info.value) and "224" in str(exc_info.value)
 
@@ -644,7 +628,7 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
         "mixed_precision": False, "device": "cpu",
     }
-    res = training_tools.launch_training(tmp_path, cfg)
+    res = training_tools.launch_training(tmp_path, cfg, actor=None)
     assert res["pid"] != os.getpid()  # a different OS process, not this one
     eid = res["experiment_id"]
 

@@ -12,7 +12,8 @@ from pydantic import BaseModel
 
 from tcip_store.errors import BadKey
 
-from tcip_web.routes._body_common import EmptyBodyPayload
+from tcip_mcp.identity import actor
+from tcip_web.routes._body_common import EmptyBodyPayload, PersonPayload
 from tcip_web.state import store
 
 logger = logging.getLogger(__name__)
@@ -44,13 +45,14 @@ def list_split_choices_route(experiment_id: str) -> dict:
 class RelaunchConfigPayload(BaseModel):
     experiment_id: str
     selection_dir: str | None = None
+    user: str
 
 
 @router.post("/runs")
 def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
     """Start a new run from the config a run of this project was launched with, as a fresh run id
-    with the picked one as parent: no config, param space or path is ever submitted by the
-    browser.
+    with the picked one as parent, by the person ``user`` names: no config, param space or path is
+    ever submitted by the browser.
 
     An optional ``selection_dir`` names a partition the browser picked instead of the launch's own
     "As recorded" data section: the launch config then carries ``data.split`` replaced wholesale
@@ -63,6 +65,7 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
     )
     from tcip_web.routes.audit_gap import audit_gap_409
 
+    person = actor(payload.user)
     project = store.open_root()
     config = stated_config(project, payload.experiment_id)
     if config is None:
@@ -70,7 +73,8 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
     if payload.selection_dir:
         config = candidate_config_with_selection(config, payload.selection_dir)
     try:
-        result = launch_training(project, config, parent_experiment=payload.experiment_id)
+        result = launch_training(project, config, parent_experiment=payload.experiment_id,
+                                 actor=person)
     except AuditEntryNotWritten as exc:
         raise audit_gap_409(exc, exc.arguments) from exc
     except Exception as exc:
@@ -126,8 +130,9 @@ def launch_run_tensorboard(experiment_id: str, payload: EmptyBodyPayload) -> dic
 
 
 @router.post("/runs/{experiment_id}/cancel")
-def cancel_run_route(experiment_id: str, payload: EmptyBodyPayload) -> dict:
-    """Request graceful cancellation of a running run (stops at the next batch boundary).
+def cancel_run_route(experiment_id: str, payload: PersonPayload) -> dict:
+    """Request graceful cancellation of a running run (stops at the next batch boundary), by the
+    person ``user`` names.
 
     Wraps the ``cancel_training`` MCP tool: the trainer still writes ``model_final.pt``
     so partial progress is recoverable. Status flips to 'canceled' asynchronously, unless the
@@ -135,7 +140,7 @@ def cancel_run_route(experiment_id: str, payload: EmptyBodyPayload) -> dict:
     """
     from tcip_mcp.tools.training_tools import cancel_training
 
-    result = cancel_training(store.open_root(), experiment_id)
+    result = cancel_training(store.open_root(), experiment_id, actor=actor(payload.user))
     if result.get("error"):
         raise HTTPException(404, result["error"])
     return result

@@ -8,7 +8,7 @@ import type {
   ImageLabels,
   PointShape,
   PolygonShape,
-  SubjectCompletion,
+  SubjectState,
 } from "@/store/types";
 
 /**
@@ -36,8 +36,8 @@ export interface CanvasState {
   /** Which image's labels the canvas holds: a save must not read shapes that still belong to the
    *  previous image (or a failed load) mid-flip. */
   loadedImagePath: string | null;
-  /** Each subject's completion as the backend last served it for the loaded image. */
-  completion: Record<string, SubjectCompletion>;
+  /** Each subject's state as the backend last served it for the loaded image. */
+  completion: Record<string, SubjectState>;
 }
 
 /** The saved-content fields only: selection, undo stacks and draft state don't make a save. */
@@ -50,7 +50,7 @@ function contentSignature(c: {
   return JSON.stringify([c.boxes, c.polygons, c.points, c.imageAnnotations]);
 }
 
-/** Recompute dirty from content vs the saved baseline (drags skip this per tick; see dragVertex). */
+/** Recompute dirty from content vs the saved baseline. */
 function withContentDirty(c: CanvasState): CanvasState {
   return { ...c, dirty: contentSignature(c) !== c.savedSignature };
 }
@@ -118,9 +118,7 @@ export interface CanvasSlice {
   deleteBox: (idx: number) => void;
   addPolygon: (polygon: PolygonShape) => void;
   updatePolygon: (idx: number, polygon: PolygonShape) => void;
-  /** Move a single polygon vertex (of one ring) without pushing an undo snapshot. Used during a
-   *  live vertex drag (undo is captured once at drag start) so a 50px drag doesn't
-   *  push dozens of snapshots and evict the whole 30-entry undo history. */
+  /** Move a single polygon vertex (of one ring) without pushing an undo snapshot. */
   dragVertex: (
     polygonIdx: number,
     ringIdx: number,
@@ -148,7 +146,7 @@ export interface CanvasSlice {
   updateImageAnnotation: (idx: number, ann: Annotation) => void;
   deleteImageAnnotation: (idx: number) => void;
   /** Re-baseline after a save, adopting the completion the save answered with. */
-  markClean: (completion: Record<string, SubjectCompletion>) => void;
+  markClean: (completion: Record<string, SubjectState>) => void;
   /** Settle dirty from content after a drag (drags flag it per tick without comparing). */
   recomputeDirty: () => void;
 }

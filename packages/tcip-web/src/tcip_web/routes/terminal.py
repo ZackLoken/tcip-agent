@@ -19,6 +19,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ValidationError
 
+from tcip_mcp.identity import actor
 from tcip_web import terminal as pty_host
 
 logger = logging.getLogger(__name__)
@@ -88,16 +89,18 @@ class TerminalStatus(BaseModel):
     providers: list[ProviderStatus]
 
 
-def _record_start(session_id: str, launched: LaunchedProgram, project: Path | None) -> None:
-    """One audit line in ``project``'s log per launch for it, naming the session id and the
-    provider and program it launched; a launch for no project has no log to land in and records
-    nothing. A failed append raises ``AuditEntryNotWritten``.
+def _record_start(session_id: str, launched: LaunchedProgram, project: Path | None,
+                  actor: str) -> None:
+    """One audit line by ``actor`` in ``project``'s log per launch for it, naming the session id
+    and the provider and program it launched; a launch for no project has no log to land in and
+    records nothing. A failed append raises ``AuditEntryNotWritten``.
     """
-    from tcip_web.routes.audit_gap import record_committed
+    from tcip_mcp.audit import record_event_or_raise
 
     if project is not None:
-        record_committed("agent_terminal_started",
-                         {"session_id": session_id, **launched.model_dump()}, scope=project)
+        record_event_or_raise("agent_terminal_started",
+                              {"session_id": session_id, **launched.model_dump()}, actor=actor,
+                              scope=project)
 
 
 @dataclass
@@ -137,10 +140,10 @@ class TerminalSession:
 
     # ── lifecycle ───────────────────────────────────────────────────────
 
-    def start(self, rows: int, cols: int, provider: pty_host.Provider) -> Optional[str]:
-        """Spawn ``provider``'s harness in a PTY for the open project as the current launch, or a
-        new one when the current launch already spawned. Returns an error reason, or None on
-        success."""
+    def start(self, rows: int, cols: int, provider: pty_host.Provider, actor: str) -> Optional[str]:
+        """Spawn ``provider``'s harness in a PTY for the open project as the current launch by
+        ``actor``, or a new one when the current launch already spawned. Returns an error reason,
+        or None on success."""
         with self._lock:
             if self._pty is not None and self._pty.isalive():
                 return None
@@ -176,7 +179,7 @@ class TerminalSession:
         from tcip_mcp.audit import AuditEntryNotWritten
 
         try:
-            _record_start(self.id, launched, project)
+            _record_start(self.id, launched, project, actor)
         except AuditEntryNotWritten as exc:
             stopped = self.terminate()
             reason = str(exc)
@@ -188,10 +191,11 @@ class TerminalSession:
             return reason
         return None
 
-    def restart(self, rows: int, cols: int, provider: pty_host.Provider) -> Optional[str]:
+    def restart(self, rows: int, cols: int, provider: pty_host.Provider,
+                actor: str) -> Optional[str]:
         """Open the next launch, holding the current launch's undelivered requests and every
         request submitted from here on behind its ritual, end the current process and start
-        ``provider`` as that launch. Returns an error reason, or None on success."""
+        ``provider`` as that launch by ``actor``. Returns an error reason, or None on success."""
         with self._lock:
             self._launch = _Launch(gen=self._launch.gen + 1, queued=self._launch.queued)
         # A survivor here stays attached: start() below would find self._pty alive and report
@@ -204,7 +208,7 @@ class TerminalSession:
         with self._lock:
             self._scrollback = []
             self._scrollback_len = 0
-        return self.start(rows, cols, provider)
+        return self.start(rows, cols, provider, actor)
 
     def submit(self, text: str) -> None:
         """Queue ``text`` for the current launch's agent, delivered after its ritual."""
@@ -378,12 +382,13 @@ class TerminalResizeFrame(BaseModel):
 
 
 class CreateSessionRequest(BaseModel):
-    """A launch: the id of the :data:`~tcip_web.terminal.PROVIDERS` row to run and the terminal
-    dimensions."""
+    """A launch: the id of the :data:`~tcip_web.terminal.PROVIDERS` row to run, the terminal
+    dimensions and the person launching it."""
 
     provider: str
     rows: int = pty_host.DEFAULT_ROWS
     cols: int = pty_host.DEFAULT_COLS
+    user: str
 
 
 def _clamp(v: int) -> int:
@@ -403,7 +408,8 @@ def _provider(provider_id: str) -> pty_host.Provider:
 @router.post("/sessions")
 def create_session(req: CreateSessionRequest) -> TerminalLaunch:
     """Return the live session (attach semantics, like tmux) or spawn a fresh one running the
-    requested provider."""
+    requested provider by the person ``req.user`` names."""
+    person = actor(req.user)
     provider = _provider(req.provider)
     with _SESSIONS_LOCK:
         for s in _SESSIONS.values():
@@ -411,7 +417,7 @@ def create_session(req: CreateSessionRequest) -> TerminalLaunch:
                 return s.launch.model_copy(update={"existing": True})
         session_id = "term_" + os.urandom(6).hex()
         session = TerminalSession(session_id)
-        err = session.start(_clamp(req.rows), _clamp(req.cols), provider)
+        err = session.start(_clamp(req.rows), _clamp(req.cols), provider, person)
         if err:
             # A survivor of the failed start's own termination attempt stays reachable, so a
             # retry attaches to it instead of spawning a second process beside it.
@@ -431,7 +437,9 @@ def _require(session_id: str) -> TerminalSession:
 
 @router.post("/sessions/{session_id}/restart")
 def restart_session(session_id: str, req: CreateSessionRequest) -> TerminalLaunch:
-    """End the session's process and launch the requested provider in its place."""
+    """End the session's process and launch the requested provider in its place, by the person
+    ``req.user`` names."""
+    person = actor(req.user)
     session = _require(session_id)
     provider = _provider(req.provider)
     with _SESSIONS_LOCK:
@@ -442,7 +450,7 @@ def restart_session(session_id: str, req: CreateSessionRequest) -> TerminalLaunc
                 raise HTTPException(
                     409, f"another agent session is live ({other.id}); attach to it instead"
                 )
-        err = session.restart(_clamp(req.rows), _clamp(req.cols), provider)
+        err = session.restart(_clamp(req.rows), _clamp(req.cols), provider, person)
     if err:
         raise HTTPException(503, err)
     return session.launch

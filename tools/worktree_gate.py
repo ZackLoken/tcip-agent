@@ -1,10 +1,8 @@
 """Run ruff, mypy and pytest inside a worktree, its own editable-install resolution proven first.
 
-The conda environment's editable installs point at the main checkout, so a worktree needs
-PYTHONPATH set to its own four `packages/*/src` directories on every command, or a gate silently
-measures the main checkout instead of the worktree. This wrapper builds that environment, proves
-`tcip_mcp` actually resolves under the worktree before running anything, then runs each requested
-gate in the foreground, stopping at the first failure with its exit code.
+Each gate runs with PYTHONPATH set to the worktree's four `packages/*/src` directories, after
+`tcip_mcp` is proven to resolve under the worktree, in the foreground, stopping at the first
+failure with its exit code.
 
     python tools/worktree_gate.py <worktree> --ruff --mypy --pytest tests/test_foo.py --backend file
 """
@@ -20,11 +18,6 @@ import tempfile
 from pathlib import Path
 
 PACKAGE_SRC_DIRS = ("tcip-store", "tcip-annotation", "tcip-mcp", "tcip-web")
-
-
-def _is_under(path: Path, ancestor: Path) -> bool:
-    path, ancestor = path.resolve(), ancestor.resolve()
-    return path == ancestor or ancestor in path.parents
 
 
 def build_environ(worktree: Path, backend: str) -> dict[str, str]:
@@ -53,7 +46,7 @@ def prove_resolution(worktree: Path, env: dict[str, str]) -> Path:
     if proc.returncode != 0:
         raise SystemExit(f"could not import tcip_mcp under the worktree environment: {proc.stderr.strip()}")
     resolved = Path(proc.stdout.strip()).resolve()
-    if not _is_under(resolved, worktree):
+    if not resolved.is_relative_to(worktree.resolve()):
         raise SystemExit(
             f"tcip_mcp resolved to {resolved}, outside the worktree {worktree}; the editable "
             "install still points at another checkout, so no gate here would measure this one"

@@ -25,11 +25,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def _is_under(path: Path, ancestor: Path) -> bool:
-    path, ancestor = path.resolve(), ancestor.resolve()
-    return path == ancestor or ancestor in path.parents
-
-
 def _existing_workspace_conflict(root: Path) -> str | None:
     """``None`` when ``root`` looks safe to seed a fresh harness workspace under; otherwise the
     reason it does not: ``root`` itself already carries a ``.tcip`` directory (it is already a
@@ -50,12 +45,13 @@ def _refuse_unsafe_root(root: Path) -> None:
     when no ``TCIP_WORKSPACE`` is bound, the root must not already look like a workspace, by
     :func:`_existing_workspace_conflict`. Any of these would point a scratch server at real
     state."""
-    if _is_under(root, REPO_ROOT):
+    resolved = root.resolve()
+    if resolved.is_relative_to(REPO_ROOT):
         raise SystemExit(f"{root} is under the repository ({REPO_ROOT}); name a root outside it")
     current_workspace = os.environ.get("TCIP_WORKSPACE")
     if current_workspace:
-        workspace_path = Path(current_workspace)
-        if _is_under(root, workspace_path) or _is_under(workspace_path, root):
+        workspace_path = Path(current_workspace).resolve()
+        if resolved.is_relative_to(workspace_path) or workspace_path.is_relative_to(resolved):
             raise SystemExit(
                 f"{root} and this process's own TCIP_WORKSPACE ({current_workspace}) alias one "
                 "another (one contains the other, or they are the same directory); a harness "

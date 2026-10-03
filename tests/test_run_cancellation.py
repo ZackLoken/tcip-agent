@@ -21,10 +21,10 @@ def test_cancel_training_reaches_the_runs_own_poll(tmp_path):
                    output_dir=str(run_dir))
     assert not run.should_cancel()
 
-    res = cancel_training(tmp_path, run.id)
+    res = cancel_training(tmp_path, run.id, actor=None)
     assert res["cancel_requested"] is True and res["experiment_id"] == run.id
     assert run.should_cancel()
-    assert "error" in cancel_training(tmp_path, "missing-run")
+    assert "error" in cancel_training(tmp_path, "missing-run", actor=None)
 
 
 def test_cancel_before_training_yields_canceled(tmp_path):

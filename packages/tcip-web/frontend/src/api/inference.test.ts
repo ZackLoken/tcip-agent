@@ -44,6 +44,7 @@ describe("downloadCsv refusal decoding", () => {
     plants: ["PLOT-01"],
     payload: "curves" as const,
     filename: "x.csv",
+    user: "jordan",
   };
 
   afterEach(() => {
@@ -66,7 +67,7 @@ describe("downloadCsv refusal decoding", () => {
 
   it("keeps the status-only message when the refusal body carries no detail", async () => {
     stubFetch(500, {});
-    await expect(resultsApi.downloadCsv(REQUEST)).rejects.toThrow("export_csv failed: 500");
+    await expect(resultsApi.downloadCsv(REQUEST)).rejects.toThrow("500");
   });
 });
 
@@ -83,11 +84,11 @@ describe("inferenceApi.cancel", () => {
     } as Response);
     vi.stubGlobal("fetch", fetchMock);
 
-    const res = await inferenceApi.cancel("j1");
+    const res = await inferenceApi.cancel("j1", "jordan");
     expect(res.cancel_requested).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/inference/jobs/j1/cancel",
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ user: "jordan" }) }),
     );
   });
 });

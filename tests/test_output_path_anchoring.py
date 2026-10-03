@@ -58,7 +58,7 @@ def test_launch_training_defaults_into_the_projects_experiment_store(
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
     }
-    res = training_tools.launch_training(tmp_path, cfg)
+    res = training_tools.launch_training(tmp_path, cfg, actor=None)
     assert "error" not in res, res
     run_dir = Path(res["output_dir"])
     assert run_dir == tmp_path / ".tcip" / "experiments" / res["experiment_id"]

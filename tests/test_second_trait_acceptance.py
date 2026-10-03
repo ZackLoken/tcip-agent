@@ -74,7 +74,8 @@ def _currant_bloom_body(tmp_path: Path) -> dict:
 
 def _export(client: TestClient, body: dict, payload: str = "milestones", **extra):
     return client.post("/api/results/export_csv",
-                       json={**body, "payload": payload, "filename": "x.csv", **extra})
+                       json={**body, "payload": payload, "filename": "x.csv", "user": "breeder",
+                             **extra})
 
 
 def test_currant_bloom_is_registered_and_distinct_from_bud_opening(tmp_path: Path):

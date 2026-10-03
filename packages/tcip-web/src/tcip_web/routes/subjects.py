@@ -52,45 +52,30 @@ def _subjects_in_dir(d: Path) -> tuple[set[str], list[str]]:
 def load_subjects(dataset_root: str, annotations_dir: Optional[str] = None) -> dict:
     """Load the subject registry of the dataset at ``dataset_root``.
 
-    Resolution: the dataset's saved ``subjects.json`` -> else a draft registry of the subjects
-        actually present in the labels under ``annotations_dir`` (detection-only, no attributes)
-        -> else empty. Returns ``{"subjects": <nested registry mapping>, "version": <token> |
-        None, "unreadable": [paths]}``: ``version`` is the stored registry's compare-and-set token
-        when one was saved, else ``None``; ``unreadable`` names every per-image label file under
-        ``annotations_dir`` that would not read, scanned whether or not a registry is saved, and
-        left out of a draft subject scan. A save posting this ``version`` back is refused with 409
-        if the stored registry has moved on since; a save posting ``None`` asserts no registry is
-        stored and is refused with 409 when one is.
+    Returns ``{"subjects": <nested registry mapping> | None, "discovered": [names], "version":
+    <token> | None, "unreadable": [paths]}``: ``subjects`` and ``version`` (its compare-and-set
+    token) are the stored registry's, both ``None`` when none is stored; ``discovered`` names the
+    subjects present in the labels under ``annotations_dir``, and ``unreadable`` every per-image
+    label file there that would not read, both scanned whether or not a registry is stored. A save
+    posting this ``version`` back is refused with 409 if the stored registry has moved on since; a
+    save posting ``None`` asserts no registry is stored and is refused with 409 when one is.
     """
-    from tcip_mcp.subject_registry import (
-        RegistryError,
-        Subject,
-        SubjectRegistry,
-        read_versioned_registry,
-        registry_to_dict,
-    )
+    from tcip_mcp.subject_registry import RegistryError, read_versioned_registry, registry_to_dict
 
-    guarded_dir = str(allowed_path(annotations_dir)) if annotations_dir else None
-
-    subjects: set[str] = set()
+    discovered: set[str] = set()
     unreadable: list[str] = []
-    if guarded_dir and Path(guarded_dir).is_dir():
-        subjects, unreadable = _subjects_in_dir(Path(guarded_dir))
-
+    if annotations_dir and (guarded := allowed_path(annotations_dir)).is_dir():
+        discovered, unreadable = _subjects_in_dir(guarded)
+    subjects, token = None, None
     try:
         registry, version = read_versioned_registry(allowed_path(dataset_root))
+        subjects, token = registry_to_dict(registry), version.token
     except FileNotFoundError:
         pass
     except (OSError, RegistryError) as exc:
         raise HTTPException(500, f"could not parse the subject registry: {exc}") from exc
-    else:
-        return {"subjects": registry_to_dict(registry), "version": version.token,
-                "unreadable": unreadable}
-
-    if subjects:
-        reg = SubjectRegistry(subjects=tuple(Subject(name=s) for s in sorted(subjects)))
-        return {"subjects": registry_to_dict(reg), "version": None, "unreadable": unreadable}
-    return {"subjects": {}, "version": None, "unreadable": unreadable}
+    return {"subjects": subjects, "discovered": sorted(discovered), "version": token,
+            "unreadable": unreadable}
 
 
 class SaveSubjectsPayload(BaseModel):
@@ -99,11 +84,13 @@ class SaveSubjectsPayload(BaseModel):
     # Required: the version load_subjects returned beside the registry this save was built from.
     # None means the registry was absent at load, asserted as Version.ABSENT, never skipped.
     version: Optional[str]
+    user: str
 
 
 @router.post("/save")
 def save_subjects(payload: SaveSubjectsPayload) -> dict:
-    """Write the dataset's subject registry through :func:`subject_registry.replace_registry`.
+    """Write the dataset's subject registry through :func:`subject_registry.replace_registry`, by
+    the person ``user`` names.
 
     Refuses (400) a write dropping a subject, attribute or attribute value the stored registry
     declares, naming what it would have lost. Also refuses (400) a same-values attribute type
@@ -114,9 +101,11 @@ def save_subjects(payload: SaveSubjectsPayload) -> dict:
     from tcip_store import Version, VersionConflict
 
     from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.identity import actor
     from tcip_mcp.subject_registry import RegistryError, registry_from_dict, replace_registry
     from tcip_web.routes.audit_gap import audit_gap_409
 
+    person = actor(payload.user)
     try:
         registry = registry_from_dict(payload.subjects)
     except RegistryError as exc:
@@ -124,7 +113,7 @@ def save_subjects(payload: SaveSubjectsPayload) -> dict:
     dataset_root = allowed_path(payload.dataset_root)
     expect = Version(payload.version) if payload.version is not None else Version.ABSENT
     try:
-        committed = replace_registry(dataset_root, registry, expect=expect)
+        committed = replace_registry(dataset_root, registry, expect=expect, actor=person)
     except RegistryError as exc:
         raise HTTPException(400, str(exc)) from exc
     except VersionConflict as exc:

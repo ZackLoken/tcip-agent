@@ -16,7 +16,6 @@ import io
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -25,6 +24,7 @@ from pydantic import TypeAdapter
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
 from tcip_store.file_backend import RootedFileLocator
 
+from tcip_mcp.audit import now_iso, record_event_or_raise
 from tcip_mcp.pipelines.delivery_events_schema import (
     Acknowledgment, BucketFinding, DeliveryEventRecord, Producer,
 )
@@ -328,19 +328,18 @@ def _acknowledgment_key(project: str | Path, acknowledgment_id: str) -> Key:
 def record_acknowledgment(project: Path, *, acknowledged_by: str, reason: str,
                           result_sha256: str) -> Acknowledgment:
     """Record ``acknowledged_by``'s acknowledgment of shipping the unvalidated result
-    ``result_sha256`` names (:func:`result_digest`), once, with its one audit line, ``delivery_acknowledged``, in the
-    project's log; a blank name or reason refuses (``ValueError``)."""
-    from tcip_mcp.audit import record_event_or_raise
-
+    ``result_sha256`` names (:func:`result_digest`), once, with its one audit line by that person,
+    ``delivery_acknowledged``, in the project's log; a blank name or reason refuses
+    (``ValueError``)."""
     acknowledgment = Acknowledgment(
         acknowledgment_id=uuid.uuid4().hex, acknowledged_by=acknowledged_by, reason=reason,
-        result_sha256=result_sha256, recorded_at=datetime.now(timezone.utc).isoformat())
+        result_sha256=result_sha256, recorded_at=now_iso())
     tcip_store.replace(_acknowledgment_key(project, acknowledgment.acknowledgment_id),
                        acknowledgment.model_dump(), expect=tcip_store.Version.ABSENT)
     record_event_or_raise("delivery_acknowledged",
                           {"acknowledgment_id": acknowledgment.acknowledgment_id,
-                           "acknowledged_by": acknowledged_by, "result_sha256": result_sha256},
-                          scope=project)
+                           "result_sha256": result_sha256},
+                          actor=acknowledged_by, scope=project)
     return acknowledgment
 
 
@@ -383,18 +382,17 @@ def delivery_event_key(project: str | Path, event_id: str) -> Key:
 
 def deliver_csv(
     project: Path, output_path: str | Path, result: Result, *, clearance: Clearance,
-    revision: TraitRevision, door: str, delivery_kind: str,
+    revision: TraitRevision, door: str, delivery_kind: str, actor: str | None,
 ) -> dict[str, Any]:
     """Compose ``result`` as a CSV (each row carrying the :data:`DELIVERY_COLUMNS` cells of this
     delivery) and its one delivery event (the door, the kind, the trait revision it ships under,
     the delivered file and its sha256, the producer, each bucket's finding, the scale assessment,
     whether it is validated, the acknowledgment it ships under, and the result's population,
     missingness rule and plant-mapping disclosure), validating the event before anything is
-    written; then write the CSV at ``output_path``, the event, and its one audit line,
-    ``delivery_event``, in the log of the dataset the buckets sit in (the project's when they sit
-    in none). Returns what was delivered: ``csv_path``, ``validated``, ``delivery_event_id``,
-    ``trait_revision``, ``producer`` and ``acknowledged_by``."""
-    from tcip_mcp.audit import record_event_or_raise
+    written; then write the CSV at ``output_path``, the event, and its one audit line by
+    ``actor``, ``delivery_event``, in the log of the dataset the buckets sit in (the project's
+    when they sit in none). Returns what was delivered: ``csv_path``, ``validated``,
+    ``delivery_event_id``, ``trait_revision``, ``producer`` and ``acknowledged_by``."""
     from tcip_mcp.subject_registry import distinct_dataset_root
 
     event_id = uuid.uuid4().hex
@@ -408,12 +406,12 @@ def deliver_csv(
         "scale_assessment_id": clearance.scale_assessment_id, "validated": clearance.validated,
         "acknowledgment": clearance.acknowledgment, "population": list(result.population),
         "require_all_dates_complete": result.require_all_dates_complete,
-        "plant_mapping": result.plant_mapping, "produced_at": datetime.now(timezone.utc).isoformat()})
+        "plant_mapping": result.plant_mapping, "produced_at": now_iso()})
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
     tcip_store.replace(delivery_event_key(project, event_id),
                        recorded_paths(event.model_dump(mode="json"), DELIVERY_EVENT_PATHS, project))
-    record_event_or_raise("delivery_event", {"event_id": event_id},
+    record_event_or_raise("delivery_event", {"event_id": event_id}, actor=actor,
                           scope=distinct_dataset_root([b.path for b in clearance.buckets])
                           or project)
     ack = clearance.acknowledgment

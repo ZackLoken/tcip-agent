@@ -1,10 +1,8 @@
 """2D object-detector builders: plain torchvision detector factories.
 
-Bespoke model code imports these directly: build a ``BackboneNeckAdapter`` over an
-agent-composed backbone+neck, then call ``build_detector`` (or a ``_build_*`` builder
-directly) to get an ``nn.Module`` honoring the torchvision-detection forward contract:
-``model(images, targets)`` returns a loss dict in train mode and ``list[dict]``
-predictions in eval mode.
+``build_detector`` over a ``BackboneNeckAdapter`` answers an ``nn.Module`` honoring the
+torchvision-detection forward contract: ``model(images, targets)`` returns a loss dict in train
+mode and ``list[dict]`` predictions in eval mode.
 """
 
 from __future__ import annotations
@@ -114,6 +112,22 @@ def _normalization(adapter: Any, in_chans: int | None, image_mean, image_std,
     return {"image_mean": mean, "image_std": std}
 
 
+def _rcnn_anchors_and_box_pool(
+    featmap_names: list[str], num_levels: int, anchor_base_size: int,
+    aspect_ratios: tuple[float, ...],
+) -> tuple[Any, Any]:
+    """The anchor generator and box RoI pool a two-stage R-CNN reads its feature levels with,
+    ``aspect_ratios`` at every level."""
+    from torchvision.models.detection.rpn import AnchorGenerator
+    from torchvision.ops import MultiScaleRoIAlign
+
+    ratios = tuple(float(r) for r in aspect_ratios)
+    return (AnchorGenerator(sizes=_default_anchor_sizes(num_levels, anchor_base_size),
+                            aspect_ratios=(ratios,) * num_levels),
+            MultiScaleRoIAlign(featmap_names=featmap_names, output_size=ROI_OUTPUT_SIZE,
+                               sampling_ratio=2))
+
+
 def _build_faster_rcnn(
     adapter: Any, num_classes: int, *, featmap_names: list[str], num_levels: int,
     anchor_base_size: int = 32, min_size: int = 800, max_size: int = 1333,
@@ -121,16 +135,9 @@ def _build_faster_rcnn(
     image_mean: Any = None, image_std: Any = None, **kwargs: Any,
 ) -> Any:
     from torchvision.models.detection import FasterRCNN
-    from torchvision.models.detection.rpn import AnchorGenerator
-    from torchvision.ops import MultiScaleRoIAlign
 
-    sizes = _default_anchor_sizes(num_levels, anchor_base_size)
-    # aspect_ratios is a builder kwarg: set/derive it per trait, since an elongated
-    # object class (~1:3-1:6) needs a tall ratio the default (0.5,1,2) can't match.
-    ar = tuple(float(r) for r in aspect_ratios)
-    anchor_generator = AnchorGenerator(sizes=sizes, aspect_ratios=(ar,) * num_levels)
-    roi_pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=ROI_OUTPUT_SIZE,
-                                  sampling_ratio=2)
+    anchor_generator, roi_pool = _rcnn_anchors_and_box_pool(
+        featmap_names, num_levels, anchor_base_size, aspect_ratios)
     return FasterRCNN(
         adapter, num_classes=num_classes + 1,  # +1 for background
         rpn_anchor_generator=anchor_generator, box_roi_pool=roi_pool,
@@ -186,14 +193,10 @@ def _build_mask_rcnn(
     image_mean: Any = None, image_std: Any = None, **kwargs: Any,
 ) -> Any:
     from torchvision.models.detection import MaskRCNN
-    from torchvision.models.detection.rpn import AnchorGenerator
     from torchvision.ops import MultiScaleRoIAlign
 
-    sizes = _default_anchor_sizes(num_levels, anchor_base_size)
-    ar = tuple(float(r) for r in aspect_ratios)
-    anchor_generator = AnchorGenerator(sizes=sizes, aspect_ratios=(ar,) * num_levels)
-    box_roi_pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=ROI_OUTPUT_SIZE,
-                                      sampling_ratio=2)
+    anchor_generator, box_roi_pool = _rcnn_anchors_and_box_pool(
+        featmap_names, num_levels, anchor_base_size, aspect_ratios)
     mask_roi_pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=14, sampling_ratio=2)
     return MaskRCNN(
         adapter, num_classes=num_classes + 1,  # +1 for background
@@ -282,13 +285,14 @@ class AttributeDetector(nn.Module):
         from torchvision.ops import MultiScaleRoIAlign
 
         from tcip_mcp.pipelines.components.heads import ClassificationHead, OrdinalHead
+        from tcip_mcp.subject_registry import ATTR_TYPES
 
         super().__init__()
         self.detector = detector
         self.attributes = tuple(attributes)
         self.pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=ROI_OUTPUT_SIZE,
                                        sampling_ratio=2)
-        head_of = {"categorical": ClassificationHead, "ordinal": OrdinalHead}
+        head_of = dict(zip(ATTR_TYPES, (ClassificationHead, OrdinalHead), strict=True))
         self.attribute_heads = nn.ModuleList(
             head_of[a.type](in_channels, len(a.values)) for a in self.attributes)
         self._seen: dict[str, Any] = {}

@@ -8,13 +8,17 @@ STATED = Stated(tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2)
 """The execution values every inference job here states."""
 
 
+class J:
+    """A job as the registry reads one: its status, the project it runs for, and its id."""
+
+    def __init__(self, status: str, root: str = "root-a", job_id: str = "") -> None:
+        self.status = status
+        self.project = root
+        self.job_id = job_id
+
+
 def test_evict_terminal_caps_and_keeps_running():
     from tcip_web.jobstore import evict_terminal
-
-    class J:
-        def __init__(self, status):
-            self.status = status
-            self.project = "root-a"
 
     jobs = {f"done{i}": J("completed") for i in range(5)}
     jobs["live"] = J("running")
@@ -30,11 +34,6 @@ def test_evict_terminal_drops_the_oldest_terminal_jobs_whichever_root_they_belon
     recent job from a different root survives while older ones are still there to go."""
     from tcip_web.jobstore import evict_terminal
 
-    class J:
-        def __init__(self, status, root):
-            self.status = status
-            self.project = root
-
     jobs = {f"a{i}": J("completed", "root-a") for i in range(5)}
     jobs["b_done"] = J("completed", "root-b")
     evict_terminal(jobs, max_jobs=3)
@@ -48,11 +47,6 @@ def test_evict_terminal_bounds_the_whole_dict_across_roots():
     not just each root's own share: a root that has stopped receiving launches is trimmed too,
     the leak this helper exists to close."""
     from tcip_web.jobstore import evict_terminal
-
-    class J:
-        def __init__(self, status, root):
-            self.status = status
-            self.project = root
 
     jobs: dict[str, J] = {}
     for i in range(7):
@@ -71,14 +65,8 @@ def test_job_registry_registers_gets_lists_by_root_and_finds_or_registers():
     by id from any root, listed only under its own, and found again rather than made twice."""
     from tcip_web.jobstore import JobRegistry
 
-    class J:
-        def __init__(self, job_id, root):
-            self.job_id = job_id
-            self.status = "pending"
-            self.project = root
-
     registry = JobRegistry()
-    job = J("j1", "root-a")
+    job = J("pending", "root-a", "j1")
     registry.register(job.job_id, job)
 
     assert registry.get("j1") is job
@@ -86,24 +74,17 @@ def test_job_registry_registers_gets_lists_by_root_and_finds_or_registers():
     assert registry.list("root-b") == []
 
     found, created = registry.find_or_register(lambda j: j.job_id == "j1",
-                                               lambda: J("j2", "root-a"))
+                                               lambda: J("pending", "root-a", "j2"))
     assert (found, created) == (job, False)
     made, created = registry.find_or_register(lambda j: j.job_id == "j3",
-                                              lambda: J("j3", "root-b"))
+                                              lambda: J("pending", "root-b", "j3"))
     assert created is True and registry.get("j3") is made
 
 
 def _fake_predictor(monkeypatch) -> None:
-    class FakePredictor:
-        def __init__(self, checkpoint_path=None, **kw):
-            pass
+    from tests._predictor_fixtures import StubPredictor, install
 
-        def predict_batch(self, paths, **kw):
-            return [{"image": p, "boxes": [], "scores": [], "labels": [], "width": 16,
-                     "height": 16} for p in paths]
-
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
+    install(monkeypatch, StubPredictor(width=16, height=16, boxes=(), scores=()))
 
 
 def _one_image(tmp_path):
@@ -120,25 +101,28 @@ def test_inference_cancel_endpoint_and_worker(tmp_path, opened_project, monkeypa
     monkeypatch.chdir(tmp_path)
     from fastapi import HTTPException
 
-    from tcip_web.routes._body_common import EmptyBodyPayload
+    from tcip_web.routes._body_common import PersonPayload
     from tcip_web.routes.inference import InferenceJob, _register, _worker, cancel_job
+    from tests._audit_fixtures import audit_rows
     from tests._verified_checkpoint_fixtures import project_checkpoint
 
     images_dir = _one_image(tmp_path)
     _fake_predictor(monkeypatch)
 
-    job = InferenceJob(job_id="j1", project=str(tmp_path),
+    job = InferenceJob(job_id="j1", actor="user:tester", project=str(tmp_path),
                        checkpoint_path=project_checkpoint(tmp_path),
                        images_dir=str(images_dir), output_dir=str(tmp_path / "out"),
                        stated=STATED)
     _register(job)
 
-    res = cancel_job("j1", EmptyBodyPayload())
+    res = cancel_job("j1", PersonPayload(user="Alice"))
     assert res["cancel_requested"] is True and job.cancel_event.is_set()
+    (line,) = audit_rows(tmp_path, "inference_canceled")
+    assert (line["actor"], line["arguments"]["job_id"]) == ("user:Alice", "j1")
     # Canceling a job that was never registered is a client-side miss, so it has to reach the
     # browser as a 404 and name the id: any other status reads to the caller as a real outcome.
     with pytest.raises(HTTPException) as cancel_miss:
-        cancel_job("missing", EmptyBodyPayload())
+        cancel_job("missing", PersonPayload(user="Alice"))
     assert cancel_miss.value.status_code == 404
     assert "missing" in cancel_miss.value.detail
 
@@ -169,7 +153,7 @@ def test_inference_worker_sets_audit_warning_on_a_lost_audit_line(
     monkeypatch.setattr(audit_module, "append", _refuse_append)
 
     output_dir = tmp_path / "ds" / "predictions" / "model" / "2026-01-01"
-    job = InferenceJob(job_id="j-audit", project=str(tmp_path), checkpoint_path=ckpt, images_dir=str(images_dir),
+    job = InferenceJob(job_id="j-audit", actor="user:tester", project=str(tmp_path), checkpoint_path=ckpt, images_dir=str(images_dir),
                        output_dir=str(output_dir), stated=STATED)
     _register(job)
 
@@ -196,7 +180,7 @@ def test_inference_worker_healthy_run_serves_audit_warning_none(
     _fake_predictor(monkeypatch)
 
     output_dir = tmp_path / "ds" / "predictions" / "model" / "2026-01-01"
-    job = InferenceJob(job_id="j-healthy", project=str(tmp_path),
+    job = InferenceJob(job_id="j-healthy", actor="user:tester", project=str(tmp_path),
                        checkpoint_path=project_checkpoint(tmp_path),
                        images_dir=str(images_dir), output_dir=str(output_dir), stated=STATED)
     _register(job)
@@ -240,7 +224,7 @@ def test_inference_stream_final_frame_never_precedes_the_audit_attempt(
     monkeypatch.setattr(audit_module, "append", _blocking_refusal)
 
     output_dir = tmp_path / "ds" / "predictions" / "model" / "2026-01-01"
-    job = InferenceJob(job_id="j-stream-order", project=str(tmp_path), checkpoint_path=ckpt,
+    job = InferenceJob(job_id="j-stream-order", actor="user:tester", project=str(tmp_path), checkpoint_path=ckpt,
                        images_dir=str(images_dir), output_dir=str(output_dir), stated=STATED)
     _register(job)
 
@@ -279,14 +263,14 @@ def test_inference_cancel_reaches_a_job_launched_for_a_previously_open_project(
     the job invisible to cancel or stream, only to the list route."""
     from fastapi import HTTPException
 
-    from tcip_web.routes._body_common import EmptyBodyPayload
+    from tcip_web.routes._body_common import PersonPayload
     from tcip_web.routes.inference import (
         InferenceJob, _get, _register, _registry, cancel_job, list_jobs,
     )
     from tests._web_fixtures import open_new_project
 
     job = InferenceJob(
-        job_id="launched-under-a", project=str(opened_project), checkpoint_path="c",
+        job_id="launched-under-a", actor="user:tester", project=str(opened_project), checkpoint_path="c",
         images_dir="i", output_dir="o", stated=STATED,
     )
     _register(job)
@@ -297,12 +281,12 @@ def test_inference_cancel_reaches_a_job_launched_for_a_previously_open_project(
         assert _get("launched-under-a") is job
         assert list_jobs()["jobs"] == []
 
-        res = cancel_job("launched-under-a", EmptyBodyPayload())
+        res = cancel_job("launched-under-a", PersonPayload(user="Alice"))
         assert res["cancel_requested"] is True
         assert job.cancel_event.is_set()
 
         with pytest.raises(HTTPException) as miss:
-            cancel_job("never-launched", EmptyBodyPayload())
+            cancel_job("never-launched", PersonPayload(user="Alice"))
         assert miss.value.status_code == 404
     finally:
         _registry.jobs.clear()
@@ -320,7 +304,8 @@ def test_priority_queue_by_id_reaches_a_job_launched_for_a_previously_open_proje
 
     job = PriorityQueueJob(
         job_id="pq-under-a", project=str(opened_project), checkpoint_path="c", images_dir="i",
-        subject=None, status="completed", queue=[{"image": "a.jpg", "score": 0.9}],
+        subject=None, method="combined", budget=50, status="completed",
+        queue=[{"image": "a.jpg", "score": 0.9}],
     )
     _pq_registry.register(job.job_id, job)
 

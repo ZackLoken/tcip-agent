@@ -8,6 +8,7 @@ import { subjectsApi, subjectColor } from "@/api/subjects";
 import * as canvasSync from "@/lib/canvasSync";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { CUT_MISSES_REFUSAL } from "@/lib/polygonGeometry";
+import { StructuredRefusalError } from "@/api/http";
 import { sessionsApi } from "@/api/sessions";
 import { useStore } from "@/store";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
@@ -84,7 +85,7 @@ vi.mock("@/components/Canvas/CanvasStage", () => {
 vi.mock("@/components/AnnotateToolbar", () => ({
   AnnotateToolbar: (props: {
     bandsInfo?: { band_count: number } | null;
-    subjectCompletion: { state: string; finished: boolean } | null;
+    subjectState: string | null;
     onComplete: (next: boolean) => void;
     hideProposals: boolean;
     onHideProposals: (next: boolean) => void;
@@ -92,11 +93,9 @@ vi.mock("@/components/AnnotateToolbar", () => ({
     <div
       data-testid="toolbar"
       data-band-count={props.bandsInfo?.band_count ?? ""}
-      data-subject-state={props.subjectCompletion?.state ?? ""}
+      data-subject-state={props.subjectState ?? ""}
     >
-      <button onClick={() => props.onComplete(!props.subjectCompletion?.finished)}>
-        toolbar-complete
-      </button>
+      <button onClick={() => props.onComplete(true)}>toolbar-complete</button>
       <button onClick={() => props.onHideProposals(!props.hideProposals)}>toolbar-hide</button>
     </div>
   ),
@@ -196,6 +195,95 @@ beforeEach(() => {
 });
 
 afterEach(cleanup);
+
+describe("AnnotateTab session contributions", () => {
+  async function leaveFirstImage() {
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(() => {
+      const s = useStore.getState();
+      s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
+    });
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    await flush();
+  }
+
+  it("posts a named visit with its person and activity, and retires it once accepted", async () => {
+    useStore.setState({ user: "jordan" });
+    await leaveFirstImage();
+
+    expect(sessionsApi.imageEvent).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sessionsApi.imageEvent).mock.calls[0][0]).toMatchObject({
+      image_name: "img1.jpg",
+      activity: "review",
+      user: "jordan",
+    });
+    expect(useStore.getState().heldContributions).toEqual([]);
+  });
+
+  it("holds a visit the backend did not accept", async () => {
+    useStore.setState({ user: "jordan" });
+    vi.mocked(sessionsApi.imageEvent).mockRejectedValueOnce(new Error("backend down"));
+    await leaveFirstImage();
+
+    expect(useStore.getState().heldContributions).toHaveLength(1);
+  });
+
+  it("posts nothing for a viewer no one has named", async () => {
+    useStore.setState({ user: "" });
+    await leaveFirstImage();
+
+    expect(sessionsApi.imageEvent).not.toHaveBeenCalled();
+    expect(useStore.getState().heldContributions).toEqual([]);
+  });
+
+  it("attributes a visit to the person it was opened under when the person changes", async () => {
+    useStore.setState({ user: "jordan" });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    act(() => useStore.getState().setUser("casey"));
+    await flush();
+
+    expect(vi.mocked(sessionsApi.imageEvent).mock.calls[0][0]).toMatchObject({
+      image_name: "img1.jpg",
+      user: "jordan",
+      project_id: "a1b2c3d4e5f6",
+    });
+    expect(useStore.getState().sessionTracking.user).toBe("casey");
+  });
+
+  it("never posts a held visit into a project other than its own", async () => {
+    useStore.setState({ user: "jordan" });
+    vi.mocked(sessionsApi.imageEvent).mockRejectedValueOnce(new Error("backend down"));
+    await leaveFirstImage();
+
+    act(() => useStore.setState({ openProject: { id: "other0000000", path: "C:/other" } }));
+    await flush();
+
+    expect(sessionsApi.imageEvent).toHaveBeenCalledTimes(1);
+    expect(useStore.getState().heldContributions).toHaveLength(1);
+  });
+
+  it("retires a visit the backend committed without its line, and never sends it again", async () => {
+    useStore.setState({ user: "jordan" });
+    vi.mocked(sessionsApi.imageEvent).mockRejectedValueOnce(
+      new StructuredRefusalError(
+        { error: "audit_entry_not_written", message: "unrecorded", committed: { status: "ok" } },
+        409,
+        "unrecorded",
+      ),
+    );
+    await leaveFirstImage();
+    act(() => useStore.setState({ openProject: { ...useStore.getState().openProject! } }));
+    await flush();
+
+    expect(sessionsApi.imageEvent).toHaveBeenCalledTimes(1);
+    expect(useStore.getState().heldContributions).toEqual([]);
+  });
+});
 
 describe("AnnotateTab save/load race", () => {
   it("saves to the loaded path and re-echoes the returned mtime on the next save", async () => {
@@ -803,6 +891,7 @@ describe("AnnotateTab AttributePanel authoring", () => {
     vi.spyOn(subjectsApi, "save").mockRejectedValue(new Error("409 stale version"));
     vi.spyOn(subjectsApi, "load").mockResolvedValue({
       subjects: { subject_a: {} },
+      discovered: [],
       version: "v3",
       unreadable: [],
     });
@@ -1791,7 +1880,7 @@ describe("AnnotateTab completion marks", () => {
     loadSpy.mockImplementation((imagePath) =>
       Promise.resolve({
         ...labelsFor(imagePath),
-        completion: { subject_a: { state: "negative" as const, finished: true } },
+        completion: { subject_a: "negative" as const },
       }),
     );
 

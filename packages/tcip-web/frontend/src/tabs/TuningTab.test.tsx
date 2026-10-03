@@ -32,6 +32,7 @@ function sweepDetail(overrides: Partial<SweepDetail> & { sweep_id: string }): Sw
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
+  useStore.setState({ user: "jordan" });
 });
 
 afterEach(() => {
@@ -76,7 +77,7 @@ describe("TuningTab sweep row actions", () => {
     render(<TuningTab />);
     expect(await screen.findByText("hpo-done-2")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Run again hpo-done-2" }));
-    await waitFor(() => expect(relaunchSpy).toHaveBeenCalledWith("hpo-done-2"));
+    await waitFor(() => expect(relaunchSpy).toHaveBeenCalledWith("hpo-done-2", "jordan"));
   });
 
   it("shows no Cancel control on an interrupted sweep row, only Run again", async () => {
@@ -124,7 +125,7 @@ describe("TuningTab sweep row actions", () => {
     render(<TuningTab />);
     expect(await screen.findByText("hpo-cancelme")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel hpo-cancelme" }));
-    await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith("hpo-cancelme"));
+    await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith("hpo-cancelme", "jordan"));
 
     expect(await screen.findByText(/stop requested/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Cancel hpo-cancelme" })).not.toBeInTheDocument();

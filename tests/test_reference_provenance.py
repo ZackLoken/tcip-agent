@@ -85,6 +85,14 @@ def test_a_bare_tool_name_reads_as_a_machine_author(tmp_path):
         json_io.require_reference_ground_truth(documents)
 
 
+@pytest.mark.parametrize("producer", ["user:", "user:   "])
+def test_the_prefix_naming_no_one_is_no_persons_authorship(tmp_path, producer):
+    documents = _documents(tmp_path, ["a"], lambda s: [_hand(created_by=producer)])
+
+    with pytest.raises(ValueError, match=f"authored by {producer}"):
+        json_io.require_reference_ground_truth(documents)
+
+
 @pytest.mark.parametrize("record", [
     _hand(),
     _hand(created_by="user:breeder", created_at="2026-01-01T00:00:00+00:00"),

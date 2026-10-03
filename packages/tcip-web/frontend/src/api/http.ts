@@ -1,13 +1,7 @@
 /**
- * Shared fetch helpers. Every API call goes through `asJson`, so a non-2xx response
- * surfaces as a thrown Error carrying the backend's `detail`, instead of being
- * silently parsed as if it were a success body, which yields `undefined` fields and
- * crashes callers on the next render. Callers catch and route errors to a toast.
- *
- * A backend refusal carries `detail` as either a string or an object. `decodeRefusal` reads a
- * non-2xx body once and is the only place either shape is turned into an error, so a path that
- * reads its own body (a blob download) branches on the same object a JSON call would see rather
- * than stringifying it to `[object Object]`.
+ * Shared fetch helpers. A non-2xx response throws an Error carrying the backend's `detail`, a
+ * string or, as a `StructuredRefusalError`, an object, decoded once by `decodeRefusal` whatever
+ * the body is read as.
  */
 
 /** A refusal whose `detail` is an object, kept parsed so a caller can branch on its own fields. */
@@ -82,10 +76,21 @@ export function getJson<T>(url: string): Promise<T> {
   return fetch(url).then((r) => asJson<T>(r));
 }
 
+function postBody(url: string, body: unknown): Promise<Response> {
+  return fetch(url, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body) });
+}
+
 export function postJson<T>(url: string, body: unknown): Promise<T> {
-  return fetch(url, {
-    method: "POST",
-    headers: JSON_HEADERS,
-    body: JSON.stringify(body),
-  }).then((r) => asJson<T>(r));
+  return postBody(url, body).then((r) => asJson<T>(r));
+}
+
+/** POST a JSON body and read the answer as a file, with the headers it came with; a refusal
+ *  throws through `decodeRefusal`, as `asJson`'s does. */
+export async function postForBlob(
+  url: string,
+  body: unknown,
+): Promise<{ blob: Blob; headers: Headers }> {
+  const r = await postBody(url, body);
+  if (!r.ok) throw await decodeRefusal(r);
+  return { blob: await r.blob(), headers: r.headers };
 }

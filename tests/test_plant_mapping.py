@@ -234,7 +234,7 @@ def test_persist_and_load_mapping_round_trip(tmp_path: Path) -> None:
             )
         ]
     })
-    persist_mapping(build, tmp_path)
+    persist_mapping(build, tmp_path, actor=None)
     assert tcip_store.exists(plant_mapping_key(tmp_path, "mapping"))
     loaded = load_mapping(tmp_path, "mapping")
     assert loaded is not None
@@ -257,7 +257,7 @@ def test_load_mapping_refuses_an_older_record_missing_capture_digests(tmp_path: 
             )
         ]
     })
-    persist_mapping(build, tmp_path)
+    persist_mapping(build, tmp_path, actor=None)
     key = plant_mapping_key(tmp_path, "mapping")
     record = tcip_store.read(key)
     del record["capture_digests"]
@@ -281,7 +281,7 @@ def test_load_mapping_refuses_a_date_capture_identity_names_but_capture_digests_
             )
         ]
     })
-    persist_mapping(build, tmp_path)
+    persist_mapping(build, tmp_path, actor=None)
     key = plant_mapping_key(tmp_path, "mapping")
     record = tcip_store.read(key)
     del record["capture_digests"]["2-11-26"]
@@ -311,7 +311,7 @@ def test_scan_receipts_refuses_a_version_refused_log_line_not_as_corruption(
                 )
             ]
         })
-        persist_mapping(build, tmp_path)
+        persist_mapping(build, tmp_path, actor=None)
         key = audit_log_key(tmp_path)
         poisoned = tcip_store.get_descriptor(key.store).codec.encode(
             {"tool": "a_future_tool", "schema_version": 99})
@@ -335,7 +335,7 @@ def test_scan_receipts_still_admits_a_real_receipt_with_no_version_refused_lines
             )
         ]
     })
-    persist_mapping(build, tmp_path)
+    persist_mapping(build, tmp_path, actor=None)
 
     loaded = load_mapping(tmp_path, "mapping")
 
@@ -380,7 +380,7 @@ def test_persisting_a_mapping_into_a_directory_that_does_not_exist_yet_still_lan
     The state directory of a fresh project has nothing in it, so a persist that required the
     location to exist already would refuse the very first build.
     """
-    persist_mapping(_one_build(), tmp_path)
+    persist_mapping(_one_build(), tmp_path, actor=None)
 
     assert tcip_store.exists(plant_mapping_key(tmp_path, "mapping"))
     loaded = load_mapping(tmp_path, "mapping")
@@ -421,7 +421,7 @@ def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
     try:
         assert holding.wait(30)
         with pytest.raises(StoreBusy):
-            persist_mapping(_one_build(), tmp_path)
+            persist_mapping(_one_build(), tmp_path, actor=None)
         assert not out.exists()
     finally:
         release.set()

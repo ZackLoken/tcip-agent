@@ -3,7 +3,12 @@
  * label schema below mirrors routes/annotate.py.
  */
 
-import type { GuiState, SubjectState, VerdictAction } from "@/api/types.generated";
+import {
+  FINISHED_STATES,
+  type GuiState,
+  type SubjectState,
+  type VerdictAction,
+} from "@/api/types.generated";
 
 export type { DatasetSelection, GuiState, SubjectState, ViewState } from "@/api/types.generated";
 
@@ -93,10 +98,9 @@ export interface PointShape extends CanvasShape {
   y: number;
 }
 
-/** One subject's completion on an image, derived by the backend from the label document. */
-export interface SubjectCompletion {
-  state: SubjectState;
-  finished: boolean;
+/** Whether a subject in `state` on its image is finished (the backend's FINISHED_STATES). */
+export function isFinished(state: SubjectState | null | undefined): boolean {
+  return (FINISHED_STATES as readonly string[]).includes(state ?? "");
 }
 
 /** The Annotate canvas' load payload, split from the unified annotation list by geometry kind. */
@@ -109,8 +113,8 @@ export interface ImageLabels {
   points: PointShape[];
   // Geometry-less (image/plant-level) ratings, kept so they round-trip losslessly on save.
   imageAnnotations: Annotation[];
-  // Each subject the document holds or marks; a subject absent here is unannotated.
-  completion: Record<string, SubjectCompletion>;
+  // Each subject the document holds or marks, by state; a subject absent here is unannotated.
+  completion: Record<string, SubjectState>;
 }
 
 /** One proposal the chosen bucket offers for the image (GET /api/annotate/proposals): its index

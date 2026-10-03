@@ -93,7 +93,8 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
     saveDatasetUi(key, { index: s.gui.dataset.current_image_index });
   },
 
-  applyRestoredDataset: (sel, project) =>
+  applyRestoredDataset: (sel, project) => {
+    if (project.id !== get().openProject?.id) get().closeSessionInterval();
     set((s) => {
       const key = datasetKey(project, sel);
       const restored = key ? loadDatasetUi(key) : null;
@@ -110,9 +111,11 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
         },
         openProject: project,
       };
-    }),
+    });
+  },
 
-  mergeSnapshot: (incoming, version, project, epoch) =>
+  mergeSnapshot: (incoming, version, project, epoch) => {
+    if (project?.id !== get().openProject?.id) get().closeSessionInterval();
     set((s) => {
       // A moved epoch is a restarted backend's own replay: accepted regardless of version, since
       // its lower-numbered first snapshot would otherwise drop as a stale one.
@@ -188,7 +191,8 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
         wsVersion: nextVersion,
         wsEpoch: nextEpoch,
       };
-    }),
+    });
+  },
 
   setWsStatus: (wsStatus) => set({ wsStatus }),
   setActiveTab: (active_tab) =>

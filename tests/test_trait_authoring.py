@@ -274,7 +274,7 @@ def _deliver_series(tmp_path: Path, *, attributed: bool) -> dict:
             plants=list(PLOTS), require_all_dates_complete=phenology.REQUIRE_ALL_DATES_COMPLETE)
         return acknowledged(tmp_path, lambda ack: phenology.deliver_phenology(
             tmp_path, measurement, curves=False, output_path=tmp_path / "out.csv",
-            acknowledgment_id=ack, door="test_trait_authoring"),
+            acknowledgment_id=ack, door="test_trait_authoring", actor=None),
             reason="no assessment in this fixture")
     except ValueError as exc:
         return {"error": str(exc)}

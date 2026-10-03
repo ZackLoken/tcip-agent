@@ -453,10 +453,10 @@ def measure_phenology(
 
 def deliver_phenology(
     project: Path, measurement: PhenologyMeasurement, *, curves: bool, output_path: Path,
-    acknowledgment_id: str | None, door: str,
+    acknowledgment_id: str | None, door: str, actor: str | None,
 ) -> dict[str, Any]:
     """Deliver ``measurement``'s milestone rows, or its per-(plant, date) curve rows with
-    ``curves``, as the CSV at ``output_path``.
+    ``curves``, as the CSV at ``output_path``, by ``actor``.
 
     The buckets clear the one gate for a ``state_crossing_dates`` delivery, the recorded
     acknowledgment ``acknowledgment_id`` shipping them unvalidated when it does not validate them.
@@ -473,6 +473,6 @@ def deliver_phenology(
                      result=result, acknowledgment_id=acknowledgment_id)
     delivered = deliver_csv(project, output_path, result, clearance=clearance,
                             revision=measurement.revision, door=door,
-                            delivery_kind=STATE_CROSSING_DATES)
+                            delivery_kind=STATE_CROSSING_DATES, actor=actor)
     return {**delivered, "n_rows": len(result.rows), "columns": list(result.columns),
             "require_all_dates_complete": measurement.require_all_dates_complete}

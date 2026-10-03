@@ -26,6 +26,7 @@ from tcip_mcp.traits import (
 )
 from tcip_web.app import app
 from tests import _trait_fixtures as fx
+from tests._chain_fixtures import deliver_milestones
 
 
 @pytest.fixture
@@ -185,24 +186,16 @@ def _series(tmp_path: Path, *, assessed: bool = True) -> dict:
     return attributed_series(tmp_path, fractions=(0.0, 1.0), assessed=assessed).body()
 
 
-def _compute(project: Path, body: dict, out_csv: Path) -> dict:
-    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
-
-    return deliver_phenology_milestones(
-        project, trait=body["trait"], mapping_name=body["mapping_name"], plants=body["plants"],
-        buckets=body["buckets"], output_csv_path=str(out_csv))
-
-
 def _withdraw(project_root: Path, trait: str) -> None:
     """Withdraw the breeder's confirmation of the trait's latest confirmed revision."""
     revision = traits.read_trait(trait, project_root).latest_confirmed
     assert revision is not None
     traits.confirm_revision(project_root, trait, revision.number, revision.entry_sha256,
-                            user="rosalind", confirmed=False)
+                            actor="user:rosalind", confirmed=False)
 
 
 def _web_refusal(client: TestClient, body: dict, route: str, headers=None, **extra) -> dict:
-    sent = ({**body, "payload": "milestones", "filename": "x.csv", **extra}
+    sent = ({**body, "payload": "milestones", "filename": "x.csv", "user": "breeder", **extra}
             if route == "export_csv" else {**body, **extra})
     resp = client.post(f"/api/results/{route}", json=sent, headers=headers)
     assert resp.status_code == 400, (route, resp.status_code, resp.text)
@@ -221,7 +214,7 @@ def test_unconfirmed_crossing_door_refuses(tmp_path: Path):
     _withdraw(tmp_path, "bud_opening")
     out_csv = tmp_path / "delivered.csv"
 
-    res = _compute(tmp_path, body, out_csv)
+    res = deliver_milestones(tmp_path, body, out_csv)
 
     assert "is confirmed by the breeder" in res["error"]
     assert "Setup tab" in res["error"]
@@ -241,7 +234,7 @@ def test_both_web_doors_refuse_identically_and_an_acknowledgment_does_not_clear_
     from tests._web_fixtures import BROWSER
 
     acknowledged = _web_refusal(client, body, "export_csv", headers=BROWSER,
-                                acknowledgment={"user": "breeder", "reason": "a look now",
+                                acknowledgment={"reason": "a look now",
                                                 "result_sha256": "0" * 64})
 
     assert all(d == details[0] for d in details), details
@@ -274,10 +267,11 @@ def test_the_tool_and_the_web_export_write_the_same_rows(client: TestClient, tmp
 
     body = _series(tmp_path)
     out_csv = tmp_path / "delivered.csv"
-    assert "error" not in _compute(tmp_path, body, out_csv)
+    assert "error" not in deliver_milestones(tmp_path, body, out_csv)
 
     resp = client.post("/api/results/export_csv",
-                       json={**body, "payload": "milestones", "filename": "x.csv"})
+                       json={**body, "payload": "milestones", "filename": "x.csv",
+                             "user": "breeder"})
 
     assert resp.status_code == 200, resp.text
     tool_text = out_csv.read_text(encoding="utf-8")
@@ -299,12 +293,12 @@ def test_a_changed_majority_crossing_ships_only_once_confirmed_and_then_needs_as
     changed = fx.propose(tmp_path, fx.with_fields(shipped, majority_milestone="50per"))
 
     out = tmp_path / "before.csv"
-    assert "error" not in _compute(tmp_path, body, out)
+    assert "error" not in deliver_milestones(tmp_path, body, out)
     row = next(csv.DictReader(out.read_text(encoding="utf-8").splitlines()))
     assert row["bud_majority_date"] == row["bud_95per_date"]
 
     fx.confirm(tmp_path, changed)
-    res = _compute(tmp_path, body, tmp_path / "after.csv")
+    res = deliver_milestones(tmp_path, body, tmp_path / "after.csv")
     assert "assess again under the revision delivered" in res["error"]
 
 
@@ -321,7 +315,7 @@ def test_an_assessment_answers_for_its_own_revision_never_a_later_one_of_equal_c
     assert (again.number, again.entry_sha256) == (first.number + 1, first.entry_sha256)
     fx.confirm(tmp_path, again)
 
-    res = _compute(tmp_path, body, tmp_path / "out.csv")
+    res = deliver_milestones(tmp_path, body, tmp_path / "out.csv")
 
     assert "assess again under the revision delivered" in res["error"]
     assert not (tmp_path / "out.csv").exists()

@@ -62,7 +62,7 @@ def dataset_registry_key(project: str | Path) -> Key:
 
 
 def read_datasets(project: str | Path) -> list[dict]:
-    """The project's dataset registry (``[{id, path, crop, fingerprint}]``), or [] when absent.
+    """The project's dataset registry (``[{id, path}]``), or [] when absent.
 
     A registry present but undecodable raises rather than reading as empty.
     """
@@ -98,7 +98,8 @@ def register_dataset(project: Path, dataset_root: str, crop: str) -> dict:
     """Record a dataset's identity so a delivered number can be traced to the exact data behind it.
 
     Writes ``<dataset_root>/dataset.json = {crop, id, fingerprint}`` (identity travels with the
-    data) and upserts the dataset into the project's ``.tcip/datasets.json``. ``crop`` is the
+    data) and upserts the dataset's id and path into the project's ``.tcip/datasets.json``.
+    ``crop`` is the
     human's fact and is required, never inferred from a path or slug. ``id`` is minted once and
     preserved across re-runs and path moves; ``fingerprint`` is the whole-dataset content digest
     (labels + image pixels + registry + confirmed negatives), recomputed here, but the stored value
@@ -164,8 +165,7 @@ def register_dataset(project: Path, dataset_root: str, crop: str) -> dict:
         identity = candidate
         break
 
-    upsert_dataset(project, {"id": identity["id"], "path": stored_path(root, project),
-                             "crop": crop, "fingerprint": fingerprint})
+    upsert_dataset(project, {"id": identity["id"], "path": stored_path(root, project)})
     return {"dataset_root": str(root), **identity}
 
 
@@ -197,7 +197,7 @@ def initialize_project(project_path: str, display_name: str, site: str) -> dict:
     tcip = _project_dir(str(project))
     (tcip / "artifacts").mkdir(exist_ok=True)
     (tcip / "models").mkdir(exist_ok=True)
-    record_event_or_raise("project_created", dict(record), scope=project)
+    record_event_or_raise("project_created", dict(record), actor=None, scope=project)
     return {"project_path": str(project), **record}
 
 
@@ -420,11 +420,7 @@ def write_archive(
     resolved_output_dir: Path | None = None
     if output_dir:
         resolved_output_dir = Path(project, output_dir).resolve()
-        try:
-            resolved_output_dir.relative_to(root)
-        except ValueError:
-            pass
-        else:
+        if resolved_output_dir.is_relative_to(root):
             return {"error": f"output_dir {resolved_output_dir} is inside the project being "
                              f"archived ({root}); choose a destination outside the project"}
         if resolved_output_dir.exists():
@@ -534,12 +530,8 @@ def _extract_zip(zp: Path, staging: Path) -> int:
     with zipfile.ZipFile(str(zp), "r") as zf:
         staged = staging.resolve()
         for info in zf.infolist():
-            target = staging / info.filename
-            resolved = target.resolve()
-            try:
-                resolved.relative_to(staged)
-            except ValueError:
-                raise ValueError(f"Unsafe path in archive: {info.filename}") from None
+            if not (staging / info.filename).resolve().is_relative_to(staged):
+                raise ValueError(f"Unsafe path in archive: {info.filename}")
         for info in zf.infolist():
             if info.is_dir():
                 (staging / info.filename).mkdir(parents=True, exist_ok=True)
@@ -715,7 +707,8 @@ def import_project(bundle_path: str, destination: str) -> dict:
     finally:
         lock_file_for(staging).unlink(missing_ok=True)
     if "error" not in result:
-        record_event_or_raise("import_project", {"bundle_path": bundle_path}, scope=dest)
+        record_event_or_raise("import_project", {"bundle_path": bundle_path}, actor=None,
+                              scope=dest)
     return result
 
 

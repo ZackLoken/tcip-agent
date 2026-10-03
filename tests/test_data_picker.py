@@ -2,9 +2,6 @@
 
 Covers the shared ``selection_compatibility`` check, the checked selection reader,
 ``list_split_choices`` and its route, and the launch route's ``selection_dir`` field.
-
-The binding mechanics themselves (``auto_train_val``'s selection branch, ``read_selection``) are
-``test_selection_binding.py``'s; this file reuses its dataset fixture rather than restating it.
 """
 
 from __future__ import annotations
@@ -237,7 +234,7 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
 
     elsewhere = tmp_path / "elsewhere"
     _draw(tmp_path, root, elsewhere, seed=2)
-    launched = launch_training(tmp_path, _bound_config(root, elsewhere))
+    launched = launch_training(tmp_path, _bound_config(root, elsewhere), actor=None)
     assert "error" not in launched, launched
 
     other_subject_dir = tmp_path / "other_subject"
@@ -594,12 +591,13 @@ def test_relaunch_route_refuses_a_selection_dir_the_launch_cannot_bind(
 
     resp_unknown = client.post("/api/training/runs", json={
         "experiment_id": "exp-picker-guard", "selection_dir": str(tmp_path / "never-listed"),
+        "user": "tester",
     })
     assert resp_unknown.status_code == 422
     assert "no selection recorded" in str(resp_unknown.json()["detail"]["issues"])
 
     resp_disabled = client.post("/api/training/runs", json={
-        "experiment_id": "exp-picker-guard", "selection_dir": str(broken_dir),
+        "experiment_id": "exp-picker-guard", "selection_dir": str(broken_dir), "user": "tester",
     })
     assert resp_disabled.status_code == 422
 
@@ -623,14 +621,14 @@ def test_relaunch_route_launches_the_stated_data_unchanged_when_no_partition_is_
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     drawn = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
     opened_run(tmp_path, drawn, experiment_id="exp-drawn")
-    resp = client.post("/api/training/runs", json={"experiment_id": "exp-drawn"})
+    resp = client.post("/api/training/runs", json={"experiment_id": "exp-drawn", "user": "tester"})
     assert resp.status_code == 200, resp.json()
     assert captured["data"] == drawn["data"]
 
     _draw(tmp_path, root, tmp_path / "manifest")
     bound = _bound_config(root, tmp_path / "manifest")
     opened_run(tmp_path, bound, experiment_id="exp-bound")
-    resp = client.post("/api/training/runs", json={"experiment_id": "exp-bound"})
+    resp = client.post("/api/training/runs", json={"experiment_id": "exp-bound", "user": "tester"})
     assert resp.status_code == 200, resp.json()
     assert captured["data"] == bound["data"]
 
@@ -662,7 +660,7 @@ def test_relaunch_route_launches_a_new_run_with_the_chosen_partition(
     source_before = read_record(source_path)
 
     resp = client.post("/api/training/runs", json={
-        "experiment_id": "exp-choose-partition", "selection_dir": str(chosen),
+        "experiment_id": "exp-choose-partition", "selection_dir": str(chosen), "user": "tester",
     })
     assert resp.status_code == 200, resp.json()
 
@@ -710,6 +708,7 @@ def test_relaunch_route_admits_a_symlinked_spelling_of_an_offered_split_director
 
     resp = client.post("/api/training/runs", json={
         "experiment_id": "exp-symlink-relaunch", "selection_dir": other_spelling,
+        "user": "tester",
     })
     assert resp.status_code == 200, resp.json()
 

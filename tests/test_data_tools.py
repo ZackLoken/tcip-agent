@@ -1013,7 +1013,7 @@ def test_draw_splits_manifest_admits_dated_labels_over_flat_images(tmp_path: Pat
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in result
     assert result["total_stems"] == 5
-    assert result["tallies"]["annotated"] == 5
+    assert result["tallies"] == {"partial": 5}
 
 
 def test_draw_splits_manifest_admits_a_loose_label_beside_a_dated_one(tmp_path: Path):
@@ -1045,7 +1045,7 @@ def test_draw_splits_manifest_admits_a_loose_label_beside_a_dated_one(tmp_path: 
 
     assert "error" not in result
     assert result["total_stems"] == 5
-    assert result["tallies"]["annotated"] == 5
+    assert result["tallies"] == {"partial": 5}
     drawn = read_selection(out, project=tmp_path)
     assert {Path(s.ground_truth).stem for s in drawn.samples} == {"a", "b", "c", "loose1", "loose2"}
     assert {str(Path(s.ground_truth).parent.relative_to(root)) for s in drawn.samples} == {

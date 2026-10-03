@@ -54,7 +54,8 @@ def test_the_encoding_keeps_only_what_has_extent_on_the_stored_grid(tmp_path):
                 "masks": [past_the_edge, blob], "count": 3}
 
     written = result()
-    data, _dropped = encode_predictions(written, scope=registry_scope(tmp_path, "bur"))
+    data, _dropped = encode_predictions(written, "model:fixture",
+                                        scope=registry_scope(tmp_path, "bur"))
     (kept,) = annotations_from_bytes(data, source="a.json")
     assert written["count"] == 1
     assert kept.score == written["scores"][0] == 0.8
@@ -365,7 +366,7 @@ def test_encode_predictions_drops_a_degenerate_box_and_reports_the_count():
         "labels": [1, 1],
     }
 
-    data, dropped = encode_predictions(result, scope=LEAF)
+    data, dropped = encode_predictions(result, "model:fixture", scope=LEAF)
 
     assert dropped == 1
     assert len(json.loads(data)["annotations"]) == 1
@@ -384,7 +385,7 @@ def test_encode_predictions_drops_a_box_that_rounds_to_zero_extent():
         "labels": [1, 1],
     }
 
-    data, dropped = encode_predictions(result, scope=LEAF)
+    data, dropped = encode_predictions(result, "model:fixture", scope=LEAF)
 
     assert dropped == 1
     assert len(json.loads(data)["annotations"]) == 1
@@ -400,7 +401,7 @@ def test_encode_predictions_refuses_the_buckets_record_name():
               "scores": [0.9], "labels": [1]}
 
     with pytest.raises(ValueError, match="bucket"):
-        encode_predictions(result, scope=LEAF)
+        encode_predictions(result, "model:fixture", scope=LEAF)
 
 
 def test_encode_predictions_still_encodes_an_ordinary_stem():
@@ -409,7 +410,7 @@ def test_encode_predictions_still_encodes_an_ordinary_stem():
     result = {"image": "IMG_0001.jpg", "width": 100, "height": 100, "boxes": [[1, 1, 5, 5]],
               "scores": [0.9], "labels": [1]}
 
-    data, _dropped = encode_predictions(result, scope=LEAF)
+    data, _dropped = encode_predictions(result, "model:fixture", scope=LEAF)
     assert json.loads(data)["image"] == "IMG_0001"
     assert len(json.loads(data)["annotations"]) == 1
 

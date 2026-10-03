@@ -41,9 +41,8 @@ export interface SweepTrial {
   params: Record<string, unknown>;
 }
 
-/** One split_draws point's own summary over its draws (training_tools.group_split_draws's own
- *  block); a malformed count narrows to null rather than a counted zero. The block's ninth key,
- *  values, is not mirrored here: the table renders no raw list. */
+/** One split_draws point's own summary over its draws; a malformed count narrows to null rather
+ *  than a counted zero. */
 export interface SplitDrawBlock {
   mean: number | null;
   std: number | null;
@@ -128,13 +127,16 @@ export const tuningApi = {
       ROUTES.getTuningSweepsBySweepIdTrialsByTrialIdMetrics(sweep_id, trial_id),
     ),
 
-  relaunch: (study_name: string) =>
-    postJson<{ sweep_id?: string; [k: string]: unknown }>(ROUTES.postTuningSweeps, { study_name }),
+  relaunch: (study_name: string, user: string) =>
+    postJson<{ sweep_id?: string; [k: string]: unknown }>(ROUTES.postTuningSweeps, {
+      study_name,
+      user,
+    }),
 
-  cancel: (sweep_id: string) =>
+  cancel: (sweep_id: string, user: string) =>
     postJson<{ study_name: string; status: string; cancel_requested: boolean }>(
       ROUTES.postTuningSweepsBySweepIdCancel(sweep_id),
-      {},
+      { user },
     ),
 
   /** Ray runs one cluster per process, so its dashboard is not scoped to a sweep. */

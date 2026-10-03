@@ -266,6 +266,7 @@ export function TerminalRail() {
               provider,
               rows: term.rows,
               cols: term.cols,
+              user: useStore.getState().user,
             });
             if (closedByClient) throw new Error("terminal rail unmounted mid-connect");
             sessionRef.current = created.session_id;
@@ -340,6 +341,7 @@ export function TerminalRail() {
         provider: status.provider,
         rows: term.rows,
         cols: term.cols,
+        user: useStore.getState().user,
       });
       setRitual(restarted.ritual);
     } catch (e) {

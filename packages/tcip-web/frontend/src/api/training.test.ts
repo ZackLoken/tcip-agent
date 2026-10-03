@@ -7,7 +7,7 @@ describe("trainingApi.cancel", () => {
     vi.unstubAllGlobals();
   });
 
-  it("POSTs to the run's cancel endpoint", async () => {
+  it("POSTs to the run's cancel endpoint, naming the person", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -15,11 +15,11 @@ describe("trainingApi.cancel", () => {
     } as Response);
     vi.stubGlobal("fetch", fetchMock);
 
-    const res = await trainingApi.cancel("r1");
+    const res = await trainingApi.cancel("r1", "jordan");
     expect(res.cancel_requested).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/training/runs/r1/cancel",
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ user: "jordan" }) }),
     );
   });
 });

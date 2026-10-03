@@ -236,7 +236,7 @@ def test_an_annotations_link_inside_an_allowed_root_loads_in_both_routes(
     load = client.get("/api/subjects/load", params={
         "dataset_root": str(project), "annotations_dir": str(ann_dir / date)})
     assert load.status_code == 200
-    assert set(load.json()["subjects"]) == {"bud"}
+    assert load.json()["discovered"] == ["bud"]
 
     select = client.post("/api/dataset/select", json={
         "dataset_root": str(project), "subject": "bud", "date": date})
@@ -279,27 +279,6 @@ def test_an_annotations_link_outside_every_allowed_root_is_refused_by_both_route
     assert select.status_code == 200
     assert select.json()["annotations_present"] is False
     assert "outside the allowed roots" in (select.json()["label_problem"] or "")
-
-
-def test_session_routes_confine_the_dataset_root_they_record(
-    client: TestClient, tmp_path: Path, outside: Path,
-) -> None:
-    open_new_project(tmp_path)
-    inside = tmp_path / "proj"
-    inside.mkdir()
-    assert client.post("/api/sessions/start", json={}).status_code == 200
-    assert client.post("/api/sessions/image_event", json={
-        "image_name": "a.jpg", "final_annotation_count": 1,
-        "dataset_root": str(outside)}).status_code == 403
-    assert not (outside / ".tcip").exists()
-
-    ok = client.post("/api/sessions/image_event", json={
-        "image_name": "a.jpg", "final_annotation_count": 1,
-        "session_seconds_delta": 2.0, "dataset_root": str(inside)})
-    assert ok.status_code == 200
-    loaded = client.get("/api/sessions/load")
-    assert loaded.status_code == 200
-    assert loaded.json()["sessions"][0]["images"]["a.jpg"]["dataset_root"] == str(inside.resolve())
 
 
 def test_the_proposals_route_confines_the_bucket_and_the_label_file_it_reads(
@@ -391,7 +370,8 @@ def test_a_delivery_from_another_projects_evidence_is_refused_by_name(
     assert resp.status_code == 403
     assert "does not belong to project" in resp.json()["detail"]
     resp = client.post("/api/results/export_csv",
-                       json={**body, "payload": "milestones", "filename": "x.csv"})
+                       json={**body, "payload": "milestones", "filename": "x.csv",
+                             "user": "tester"})
     assert resp.status_code == 403
     assert not (b / "results_export").exists()
     assert not any(r["tool"] in ("results.export_csv", "delivery_event")
@@ -415,8 +395,7 @@ def test_a_delivery_from_a_dataset_registered_to_the_open_project_is_admitted(
     assert refused.status_code == 403
     assert "does not belong to project" in refused.json()["detail"]
 
-    upsert_dataset(tmp_path, {"id": "ds-1", "path": str(copied), "crop": "currant",
-                              "fingerprint": "v1:f"})
+    upsert_dataset(tmp_path, {"id": "ds-1", "path": str(copied)})
     resp = client.post("/api/results/phenology_measurement", json=relocated)
     assert resp.status_code not in (403, 409), resp.text
 

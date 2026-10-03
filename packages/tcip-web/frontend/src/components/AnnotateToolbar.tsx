@@ -4,7 +4,6 @@
  *          navigation, the hide-proposals toggle and the Complete checkbox.
  *   Editor: a second toolbar (collapsed by default, remembered) holding the tools you
  *           flip constantly (Snap / Stream / Show labels) plus Undo / Redo / Save.
- * Lives directly under the global TopBar; every save and mark is wired up from AnnotateTab.
  */
 
 import { useMemo, useRef, useState } from "react";
@@ -21,7 +20,7 @@ import { saveRegistry } from "@/lib/registrySave";
 import { useSubjectColors } from "@/lib/subjectColors";
 import { useStore } from "@/store";
 import { selectProjectRoot } from "@/store/slices/gui";
-import type { SubjectCompletion } from "@/store/types";
+import { isFinished, type SubjectState } from "@/store/types";
 
 /** A pressed-state tool button with a status dot. */
 function Etool({
@@ -66,7 +65,7 @@ export function AnnotateToolbar({
   bandsInfo,
   bandSelection,
   onBandSelectionChange,
-  subjectCompletion,
+  subjectState,
   onComplete,
   onCompleteView,
   hideProposals,
@@ -79,8 +78,8 @@ export function AnnotateToolbar({
   bandsInfo?: ImageBandsResponse | null;
   bandSelection?: BandSelection | null;
   onBandSelectionChange?: (next: BandSelection) => void;
-  // The dataset subject's completion on this image as the backend serves it; null until loaded.
-  subjectCompletion: SubjectCompletion | null;
+  // The dataset subject's state on this image as the backend serves it; null until loaded.
+  subjectState: SubjectState | null;
   // Mark the dataset subject complete over the whole image (true) or withdraw its marks (false).
   onComplete: (next: boolean) => void;
   // Mark the dataset subject complete over the region in view; omitted when the view holds it all.
@@ -95,6 +94,7 @@ export function AnnotateToolbar({
   const activeSubject = useStore((s) => s.gui.active_subject);
   const setActiveSubject = useStore((s) => s.setActiveSubject);
   const registry = useStore((s) => s.registry.subjects);
+  const discovered = useStore((s) => s.registry.discovered);
   const canvasBoxes = useStore((s) => s.canvas.boxes);
   const canvasPolygons = useStore((s) => s.canvas.polygons);
   const canvasPoints = useStore((s) => s.canvas.points);
@@ -130,13 +130,17 @@ export function AnnotateToolbar({
 
   const currentImage = dataset.image_list[dataset.current_image_index] ?? null;
   const nav = useImageNav();
-  const subjectState = subjectCompletion?.state ?? null;
-  const finished = subjectCompletion?.finished ?? false;
+  const finished = isFinished(subjectState);
 
   const activeCount = activeSubject ? (subjectCounts.get(activeSubject) ?? 0) : 0;
 
   async function addNewSubject() {
-    const name = window.prompt("New subject name:");
+    const found = discovered.filter((n) => !subjectNames.includes(n));
+    const name = window.prompt(
+      found.length
+        ? `New subject name (in this dataset's labels: ${found.join(", ")}):`
+        : "New subject name:",
+    );
     if (!name) return;
     const trimmed = name.trim();
     if (!trimmed) return;

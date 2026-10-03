@@ -17,12 +17,7 @@ __all__ = ["pytest_configure", "pytest_runtest_protocol", "pytest_timeout_set_ti
 
 @pytest.fixture(scope="session", autouse=True)
 def _pin_torch_single_thread():
-    """Pin torch to one intra-op thread for the test session.
-
-    The fixtures are tiny (1-2 epochs on ≤4 images), so a multi-thread pool is pure overhead;
-    single-thread is also a prerequisite for pytest-xdist (else N workers oversubscribe the
-    cores). Lazy-import so a torch-less collection still works.
-    """
+    """Pin torch to one intra-op thread for the test session, when torch is installed."""
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     try:
         import torch
@@ -32,15 +27,8 @@ def _pin_torch_single_thread():
 
 
 def _drain_background_store_writers() -> None:
-    """Join any background thread still writing through the bound backend.
-
-    A database backend closes its connections, so closing one under a thread mid-statement
-    frees the connection that statement is running on, which native SQLite answers by taking
-    the whole worker process down rather than by raising. The modules that spawn such threads
-    are looked up in ``sys.modules`` rather than imported, so a test that never touched the web
-    package pays nothing for this. A worker that outlasts the wait is raised rather than closed
-    under, so the failure is legible instead of a crash.
-    """
+    """Join any sweep worker still writing through the bound backend, when the tuning routes are
+    loaded; raises ``RuntimeError`` naming a worker that outlasts the wait."""
     tuning = sys.modules.get("tcip_web.routes.tuning")
     if tuning is None:
         return
@@ -59,15 +47,8 @@ def _drain_background_store_writers() -> None:
 
 @pytest.fixture(autouse=True)
 def _bind_storage_backend():
-    """Bind the storage backend before every test, the way a process entry point does.
-
-    Every code path that reaches a store needs one bound; a suite that left it unbound would
-    report the absence of a backend where the behavior under test is what the store does. Per
-    test rather than per session, so a test that binds its own backend and drops it on the way
-    out leaves the next one a bound process rather than an unbound one. Closed on the way out
-    so a database backend leaves no open handle on the test's tmp_path, which Windows would
-    then refuse to remove, and drained first so no background writer is still holding it.
-    """
+    """Bind the storage backend before every test, the way a process entry point does, and close
+    it after the test once background writers are drained."""
     from tcip_store.binding import bind_default
 
     backend = bind_default()
@@ -78,14 +59,7 @@ def _bind_storage_backend():
 
 @pytest.fixture(scope="session", autouse=True)
 def _stop_leaked_tensorboards():
-    """Leave no TensorBoard process behind at the end of the test session.
-
-    A test that drives the real ``launch_training`` gets TensorBoard as a best-effort side
-    effect; a test that forgets to stub it out leaks the child process, its cwd pinned to the
-    test's own (soon-deleted) directory. The module is looked up in ``sys.modules`` rather than
-    imported, so a session that never touched it pays nothing; a session with nothing tracked
-    stops nothing.
-    """
+    """Stop every TensorBoard process the session started, when the manager module is loaded."""
     yield
     tb = sys.modules.get("tcip_mcp.pipelines.training.tensorboard_manager")
     if tb is None:
@@ -153,6 +127,21 @@ def opened_project(tmp_path: Path) -> Path:
     from tests._web_fixtures import open_new_project
 
     return open_new_project(tmp_path)
+
+
+@pytest.fixture
+def tb_launches(monkeypatch) -> list[tuple[str, str]]:
+    """Record what the routes hand ``launch_tensorboard`` instead of starting a real one."""
+    calls: list[tuple[str, str]] = []
+
+    def fake_launch(logdir: str, key: str | None = None) -> dict:
+        calls.append((logdir, key or ""))
+        return {"url": "http://localhost:6006", "port": 6006, "pid": 1, "logdir": logdir}
+
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", fake_launch
+    )
+    return calls
 
 
 @pytest.fixture(autouse=True)

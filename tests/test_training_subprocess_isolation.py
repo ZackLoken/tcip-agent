@@ -147,9 +147,6 @@ def test_launch_training_child_receives_its_own_run_directory(tmp_path, monkeypa
     monkeypatch.chdir(tmp_path)
     import subprocess
 
-    from PIL import Image
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.experiments import experiment_dir, observe
     from tcip_mcp.tools import training_tools
 
@@ -167,37 +164,25 @@ def test_launch_training_child_receives_its_own_run_directory(tmp_path, monkeypa
 
     monkeypatch.setattr(subprocess, "Popen", _fake_popen)
 
+    from tests._producer_fixtures import seed_two_bud_images, small_detection_config
+
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
-    for i in range(2):
-        Image.new("RGB", (32, 32), color=(10 * i, 0, 0)).save(images_dir / f"img{i}.png")
-        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
+    seed_two_bud_images(images_dir, labels_dir)
 
     def _cfg(experiment_id: str) -> dict:
-        return {
-            "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                             "builder_kwargs": {"min_size": 64, "max_size": 128},
-                             "task": "detection"},
-            "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                     "scope": {"subject": "bud"}},
-            "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-                         "mixed_precision": False, "device": "cpu",
-            "experiment_id": experiment_id,
-        }
+        return small_detection_config(images_dir, labels_dir, experiment_id)
 
     def children() -> list[list[str]]:
         return [argv for argv in captured_argv if "--run-dir" in argv]
 
-    res = training_tools.launch_training(tmp_path, _cfg("exp_fresh"))
+    res = training_tools.launch_training(tmp_path, _cfg("exp_fresh"), actor=None)
     run_dir = experiment_dir("exp_fresh", project=tmp_path)
     assert res["experiment_id"] == "exp_fresh"
     assert children()[-1][-2:] == ["--run-dir", str(run_dir)]
     assert observe(run_dir).record["config"]["data"]["images_dir"] == str(images_dir)
 
-    again = training_tools.launch_training(tmp_path, _cfg("exp_fresh"))
+    again = training_tools.launch_training(tmp_path, _cfg("exp_fresh"), actor=None)
     assert "already exists" in again["error"]
     assert len(children()) == 1
 

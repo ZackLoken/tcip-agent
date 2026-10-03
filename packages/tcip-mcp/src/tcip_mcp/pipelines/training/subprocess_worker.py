@@ -90,8 +90,8 @@ def run_directory(
             from tcip_mcp.experiments import project_of_run
 
             write_final_status(run_dir, "failed", str(exc), checkpoint=None)
-            record_event("training_run", {"experiment_id": run_dir.name}, status="failed",
-                         scope=project_of_run(run_dir))
+            record_event("training_run", {"experiment_id": run_dir.name}, actor=None,
+                         status="failed", scope=project_of_run(run_dir))
             raise
         run_training_envelope(ctx)
         return ctx.run

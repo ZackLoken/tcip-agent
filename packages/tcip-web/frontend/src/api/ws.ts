@@ -8,6 +8,7 @@ import { ROUTES } from "@/api/routes";
 import { createReconnectingSocket, type ReconnectingSocket } from "@/lib/reconnectingSocket";
 import type { GuiState, OpenProject } from "@/store/types";
 import { useStore } from "@/store";
+import type { DeclaredIdentity } from "@/store/slices/agentActivity";
 
 type IncomingMessage =
   | {
@@ -49,9 +50,8 @@ export class StateSocket {
     this.socket.stop();
   }
 
-  /** Force a fresh connect-time replay: the read-only recovery path a canvas push's 409
-   *  triggers, re-delivering the authoritative dataset and open project in one update rather
-   *  than assuming a broadcast is still coming. */
+  /** Force a fresh connect-time replay, re-delivering the authoritative dataset and open project
+   *  in one update. */
   resync() {
     this.socket.stop();
     this.socket.start();
@@ -76,18 +76,17 @@ export class StateSocket {
    *  returned unsubscribe closes the live socket and cancels any pending reconnect. */
   subscribePanel(
     panel: string,
-    handler: (event: {
-      panel: string;
-      event_type: string;
-      data: Record<string, unknown>;
-      // Stamped per event by the backend: the ring buffer replays on every reconnect, so a
-      // handler that acts once per event (dismissing a banner) needs to tell them apart.
-      event_id: string;
-      // The declared client, spread at the top level by the backend's own broadcast payload,
-      // each null when the sender declared none (tcip_mcp.agent_identity).
-      agent_client_name?: string | null;
-      agent_client_version?: string | null;
-    }) => void,
+    // The declared identity is spread at the top level by the backend's own broadcast payload.
+    handler: (
+      event: {
+        panel: string;
+        event_type: string;
+        data: Record<string, unknown>;
+        // Stamped per event by the backend: the ring buffer replays on every reconnect, so a
+        // handler that acts once per event (dismissing a banner) needs to tell them apart.
+        event_id: string;
+      } & DeclaredIdentity,
+    ) => void,
   ) {
     const socket = createReconnectingSocket({
       url: wsUrl(ROUTES.socketWsPanelByPanel(panel)),

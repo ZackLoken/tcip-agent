@@ -57,7 +57,7 @@ def test_plant_mapping_build_requires_a_registered_dataset(
     resp = client.post(
         "/api/results/plant_mapping/build",
         json={"name": "valley", "images_root": str(opened_project / "nope"),
-              "plant_registry": "unregistered"},
+              "plant_registry": "unregistered", "user": "tester"},
     )
     assert resp.status_code == 400
     assert "is not a dataset" in resp.json()["detail"]
@@ -83,7 +83,8 @@ def _series(tmp_path: Path, **kwargs):
 
 def _export(client: TestClient, body: dict, payload: str = "milestones", headers=None, **extra):
     return client.post("/api/results/export_csv", headers=headers,
-                       json={**body, "payload": payload, "filename": "x.csv", **extra})
+                       json={**body, "payload": payload, "filename": "x.csv",
+                             "user": "breeder", **extra})
 
 
 def test_an_assessed_series_measures_its_curves_and_milestones_validated(
@@ -166,6 +167,12 @@ def test_an_acknowledged_export_ships_unvalidated_and_its_event_names_the_act(
     assert (event["acknowledgment"]["acknowledged_by"], event["acknowledgment"]["reason"]) == (
         "user:breeder", "a look before assessment")
     assert event["validated"] is False
+    lines = [e for root in (tmp_path, Path(event["buckets"][0]["path"]).parents[2])
+             for e in tcip_store.read_log(audit_log_key(root)).records
+             if e["tool"] in ("delivery_acknowledged", "delivery_event")]
+    assert sorted(e["tool"] for e in lines) == ["delivery_acknowledged", "delivery_event"]
+    assert {e["actor"] for e in lines} == {"user:breeder"}
+    assert all("acknowledged_by" not in e["arguments"] for e in lines)
 
 
 def test_an_acknowledgment_is_recorded_only_from_the_browser_and_with_a_reason(
@@ -181,14 +188,13 @@ def test_an_acknowledgment_is_recorded_only_from_the_browser_and_with_a_reason(
     body = _series(tmp_path, fractions=(0.0, 1.0), assessed=False).body()
 
     digest = _export(client, body).json()["detail"]["result_sha256"]
-    acknowledgment = {"user": "breeder", "reason": "needs a look", "result_sha256": digest}
+    acknowledgment = {"reason": "needs a look", "result_sha256": digest}
     bare = _export(client, body, acknowledgment=acknowledgment)
     agent = _export(client, body, acknowledgment=acknowledgment, headers={
         **BROWSER, agent_identity.HEADERS["agent_session"]: "mcp_0123"})
     blank = _export(client, body, acknowledgment={**acknowledgment, "reason": "   "},
                     headers=BROWSER)
-    nameless = _export(client, body, acknowledgment={**acknowledgment, "user": "  "},
-                       headers=BROWSER)
+    nameless = _export(client, body, acknowledgment=acknowledgment, user="  ", headers=BROWSER)
 
     assert (bare.status_code, agent.status_code) == (403, 403)
     assert "cannot record one" in bare.json()["detail"]
@@ -213,7 +219,8 @@ def test_an_export_saves_the_delivery_under_the_project_and_logs_it_with_its_dat
     series = _series(tmp_path, fractions=(0.0, 1.0))
 
     resp = client.post("/api/results/export_csv", json={
-        **series.body(), "payload": "milestones", "filename": "../bud_delivery.csv"})
+        **series.body(), "payload": "milestones", "filename": "../bud_delivery.csv",
+        "user": "breeder"})
 
     assert resp.status_code == 200, resp.text[:300]
     saved = tmp_path / "results_export" / "bud_delivery.csv"
@@ -263,7 +270,8 @@ def test_export_csv_answers_409_when_the_delivery_event_audit_line_cannot_be_app
     refuse_audit_appends(monkeypatch)
 
     resp = client.post("/api/results/export_csv",
-                       json={**body, "payload": "milestones", "filename": "unaudited.csv"})
+                       json={**body, "payload": "milestones", "filename": "unaudited.csv",
+                             "user": "breeder"})
 
     assert resp.status_code == 409
     detail = resp.json()["detail"]
@@ -343,7 +351,7 @@ def _unassessed_count_bucket(project: Path, *, scope: dict = COUNT_SCOPE) -> Pat
 
 def _per_image(bucket: Path, trait: str = fx.COUNT_TRAIT, **extra) -> dict:
     return {"delivery": {"kind": "per_image_count", "predictions_dir": str(bucket),
-                         "trait": trait}, "filename": "counts.csv", **extra}
+                         "trait": trait}, "filename": "counts.csv", "user": "breeder", **extra}
 
 
 COUNT_ROUTE = "/api/results/export_count_csv"
@@ -401,7 +409,7 @@ def test_an_assessed_count_bucket_delivers_validated_and_discards_an_acknowledgm
 
     bare = _export_count(client, _per_image(chain.bucket))
     posted = _export_count(client, _per_image(
-        chain.bucket, acknowledgment={"user": "breeder", "reason": "just in case",
+        chain.bucket, acknowledgment={"reason": "just in case",
                                       "result_sha256": "0" * 64}),
         headers=BROWSER)
 
@@ -413,6 +421,10 @@ def test_an_assessed_count_bucket_delivers_validated_and_discards_an_acknowledgm
     assert posted.headers["X-TCIP-Acknowledged-By"] == ""
     events = client.get("/api/results/delivery-events").json()["records"]
     assert [e["acknowledgment"] for e in events] == [None, None]
+    lines = [e for root in {tmp_path, Path(chain.bucket).parents[2]}
+             for e in tcip_store.read_log(audit_log_key(root)).records
+             if e["tool"] == "delivery_event"]
+    assert [e["actor"] for e in lines] == ["user:breeder"] * 2
 
 
 def test_export_count_csv_answers_409_when_the_delivery_event_audit_line_cannot_be_appended(
@@ -423,7 +435,7 @@ def test_export_count_csv_answers_409_when_the_delivery_event_audit_line_cannot_
     refuse_audit_appends(monkeypatch, landing=1)  # the acknowledgment's own line lands
 
     resp = _export_count(client, _per_image(
-        bucket, acknowledgment={"user": "breeder", "reason": "a look", "result_sha256": digest}),
+        bucket, acknowledgment={"reason": "a look", "result_sha256": digest}),
         headers=BROWSER)
 
     assert resp.status_code == 409
@@ -441,10 +453,10 @@ def test_export_count_csv_refuses_an_acknowledgment_from_no_browser_or_with_a_bl
 
     digest = _digest(client, _per_image(bucket))
     bare = _export_count(client, _per_image(
-        bucket, acknowledgment={"user": "breeder", "reason": "no browser",
+        bucket, acknowledgment={"reason": "no browser",
                                 "result_sha256": digest}))
     blank = _export_count(client, _per_image(
-        bucket, acknowledgment={"user": "breeder", "reason": "   ", "result_sha256": digest}),
+        bucket, acknowledgment={"reason": "   ", "result_sha256": digest}),
         headers=BROWSER)
 
     assert bare.status_code == 403 and "cannot record one" in bare.json()["detail"]
@@ -538,7 +550,7 @@ def _per_plant(bucket: Path, registry: str, *, filename: str = "plant_counts.csv
     return {"delivery": {"kind": "orthomosaic_plant_counts", "predictions_dir": str(bucket),
                          "plant_registry": registry, "delivered_phenotype": "stem_count",
                          "plants": ["plot0", "plot1", "plot2", "plot3"]},
-            "filename": filename, **extra}
+            "filename": filename, "user": "breeder", **extra}
 
 
 
@@ -626,7 +638,7 @@ def test_registered_models_answers_a_resolved_absolute_checkpoint_path(
 def test_inference_launch_missing_checkpoint(client: TestClient, opened_project: Path) -> None:
     resp = client.post("/api/inference/launch", json={
         "checkpoint_path": str(opened_project / "no.pt"), "dataset_root": str(opened_project),
-        "date": "2026-02-11",
+        "date": "2026-02-11", "user": "tester",
         "output_dir": str(opened_project / "predictions" / "baseline" / "2026-02-11")})
     assert resp.status_code == 404
 
@@ -645,7 +657,7 @@ def test_inference_list_row_and_stream_frame_are_one_projection(
     from tcip_web.routes import inference as inference_routes
 
     job = inference_routes.InferenceJob(
-        job_id="inf-warn-test", project=str(opened_project), checkpoint_path="", images_dir="",
+        job_id="inf-warn-test", actor="user:tester", project=str(opened_project), checkpoint_path="", images_dir="",
         output_dir="", status="completed", audit_warning="the line did not land",
         dropped_boxes=3,
     )
@@ -682,7 +694,7 @@ def test_inference_by_id_job_route_is_retired(client: TestClient) -> None:
     from tcip_web.routes import inference as inference_routes
 
     job = inference_routes.InferenceJob(
-        job_id="inf-retired-test", project="", checkpoint_path="", images_dir="", output_dir="",
+        job_id="inf-retired-test", actor="user:tester", project="", checkpoint_path="", images_dir="", output_dir="",
     )
     inference_routes._register(job)
     try:

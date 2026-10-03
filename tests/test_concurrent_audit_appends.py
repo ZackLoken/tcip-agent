@@ -109,9 +109,10 @@ def test_concurrent_processes_no_torn_or_lost_lines(tmp_path, unstarved_backend)
 
 def test_an_ordinary_event_lands_in_the_log_its_scope_names(tmp_path):
     """The rail admits the plain call: one event, recorded whole, in the named root's log."""
-    record_event("save_label_document", {"n_annotations": 3}, source="gui", scope=str(tmp_path))
+    record_event("save_label_document", {"n_annotations": 3}, actor="user:breeder",
+                 scope=str(tmp_path))
 
     page = ts.read_log(audit_log_key(tmp_path))
     assert [r["tool"] for r in page.records] == ["save_label_document"]
     assert page.records[0]["arguments"] == {"n_annotations": 3}
-    assert page.records[0]["source"] == "gui"
+    assert page.records[0]["actor"] == "user:breeder"

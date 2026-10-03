@@ -47,16 +47,16 @@ describe("annotate.save lost-update handling", () => {
     expect(res.status).toBe("conflict");
   });
 
-  it("returns a conflict on a 409 whose body carries no detail at all (unparseable)", async () => {
+  it("throws on a 409 whose body carries no detail, as every JSON call does", async () => {
     stubFetch(409, { error: "label file changed since it was loaded" });
-    const res = await api.annotate.save({
+    const save = api.annotate.save({
       image_path: "x",
       label_path: "x.json",
       annotations: [],
       base_mtime: "1",
       user: "breeder",
     });
-    expect(res.status).toBe("conflict");
+    await expect(save).rejects.toThrow("409");
   });
 
   it("returns unrecorded with the committed token and message on the audit-gap 409", async () => {

@@ -50,16 +50,27 @@ def test_save_annotations_stamps_created_by_when_given(tmp_path):
     assert obj["created_at"]
 
 
-def test_save_annotations_no_provenance_by_default(tmp_path):
-    """No created_by arg -> provenance stays unset (honest: don't fabricate an author)."""
+def test_save_annotations_names_itself_when_the_caller_names_no_producer(tmp_path):
+    """Every saved record carries a producer and its time: with none named, the tool's own."""
     from tcip_mcp.tools.annotation_tools import save_annotations
     img = _img(tmp_path)
     out = tmp_path / "labels.json"
     save_annotations(tmp_path, tmp_path.parent, str(img), annotations=[{"subject": "bud", "bbox": [10, 10, 30, 30]}],
                      path=str(out))
     obj = json.loads(out.read_text())["annotations"][0]
-    assert "created_by" not in obj
-    assert "created_at" not in obj
+    assert obj["created_by"] == "save_annotations"
+    assert obj["created_at"]
+
+
+def test_save_annotations_refuses_a_blank_producer_and_writes_nothing(tmp_path):
+    from tcip_mcp.tools.annotation_tools import save_annotations
+    img = _img(tmp_path)
+    out = tmp_path / "labels.json"
+    result = save_annotations(tmp_path, tmp_path.parent, str(img),
+                              annotations=[{"subject": "bud", "bbox": [10, 10, 30, 30]}],
+                              path=str(out), created_by="  ")
+    assert "records its producer" in result["error"]
+    assert not out.exists()
 
 
 def test_save_annotations_never_reads_provenance_off_a_shape(tmp_path):

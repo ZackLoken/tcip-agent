@@ -242,6 +242,7 @@ export function InferenceTab() {
         output_dir: `${bucketRoot.replace(/[/\\]+$/, "")}/${date}`,
         stated: {},
         assessment_id: assessmentId.trim() || null,
+        user: useStore.getState().user,
       });
       if (res.job_id) {
         const stub: InferenceJob = {
@@ -316,7 +317,7 @@ export function InferenceTab() {
     // the worker's next-image-boundary stop will confirm the terminal state.
     setJobs((prev) => prev.map((j) => (j.job_id === jobId ? { ...j, status: "canceled" } : j)));
     try {
-      await inferenceApi.cancel(jobId);
+      await inferenceApi.cancel(jobId, useStore.getState().user);
     } catch (e) {
       useStore.getState().pushToast(`Cancel failed: ${e instanceof Error ? e.message : String(e)}`);
     }

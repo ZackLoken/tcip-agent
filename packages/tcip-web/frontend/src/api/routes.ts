@@ -66,7 +66,6 @@ export const ROUTES = {
   postResultsTraitsConfirm: "/api/results/traits/confirm",
   postSessionsEnd: "/api/sessions/end",
   postSessionsImageEvent: "/api/sessions/image_event",
-  postSessionsStart: "/api/sessions/start",
   postStateTab: "/api/state/tab",
   postSubjectsSave: "/api/subjects/save",
   postTerminalSessions: "/api/terminal/sessions",

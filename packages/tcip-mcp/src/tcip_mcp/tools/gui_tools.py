@@ -14,7 +14,6 @@ from tcip_annotation.state import polygonal
 from tcip_annotation.json_io import UnreadableLabelDocument
 from tcip_annotation.json_io import read_annotations as read_labels
 
-from tcip_mcp.audit import audited
 from tcip_mcp.server import tool
 
 
@@ -28,7 +27,6 @@ def _logical_image_names(images_dir) -> list[str]:
 
 
 @tool()
-@audited
 def push_panel_event(project: Path, workspace: Path, panel: str, event_type: str,
                      data: dict) -> dict:
     """Push structured data to a TCIP GUI panel via the tcip-web backend serving ``workspace``,
@@ -60,7 +58,6 @@ def push_panel_event(project: Path, workspace: Path, panel: str, event_type: str
 
 
 @tool()
-@audited
 def focus_human_attention(
     project: Path,
     workspace: Path,

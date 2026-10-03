@@ -10,12 +10,11 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-import tcip_store
 from tcip_annotation.json_io import read_annotations, write_annotations
 from tcip_annotation.state import Annotation, BBox, Polygon
-from tcip_mcp.audit import audit_log_key
 from tcip_mcp.subject_registry import SubjectRegistry, Subject
 from tcip_store.file_backend import _is_bookkeeping
+from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import registry_over
 from tcip_web.app import app
 from tcip_web.paths import safe_join
@@ -806,20 +805,20 @@ def test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote(
 
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_path = dataset_root / "annotations" / "2-11-26" / "IMG_0000.json"
-    before = len(_audit_entries(dataset_root))
+    before = len(audit_rows(dataset_root))
     resp = _save_box(client, img_path, label_path)
     assert resp.status_code == 200
     answer = save_annotations(tmp_path, tmp_path.parent, str(img_path), path=str(label_path),
                               annotations=[{"subject": "bud", "bbox": [1, 1, 5, 5]}])
     assert "error" not in answer, answer
 
-    lines = _audit_entries(dataset_root)[before:]
+    lines = audit_rows(dataset_root)[before:]
     assert [line["tool"] for line in lines] == ["save_label_document"] * 2
     assert [{k: v for k, v in line["arguments"].items() if k != "version"}
             for line in lines] == [
         {"image_path": str(img_path), "label_path": str(label_path.resolve()),
          "n_annotations": 1, "accepted": [], "rejected": [], "complete": {}}] * 2
-    assert not any(e.get("tool") == "save_label_document" for e in _audit_entries(tmp_path))
+    assert not any(e.get("tool") == "save_label_document" for e in audit_rows(tmp_path))
 
 
 def test_annotate_save_with_no_dataset_root_audits_the_open_projects_log(
@@ -832,7 +831,7 @@ def test_annotate_save_with_no_dataset_root_audits_the_open_projects_log(
     resp = _save_box(client, img_path, label_path)
     assert resp.status_code == 200
 
-    entries = _audit_entries(tmp_path)
+    entries = audit_rows(tmp_path)
     assert any(e.get("tool") == "save_label_document" for e in entries), entries
 
 
@@ -876,11 +875,6 @@ def test_annotate_save_answers_409_with_the_committed_body_on_a_lost_audit_line(
     assert len(anns) == 1
 
 
-def _audit_entries(root: Path) -> list[dict]:
-    """Every audit entry recorded in the log ``root`` names, through the seam."""
-    return list(tcip_store.read_log(audit_log_key(root)).records)
-
-
 def test_a_document_the_bucket_record_does_not_name_is_no_prediction_of_it(
     client: TestClient, dataset_root: Path,
 ) -> None:
@@ -912,6 +906,22 @@ def _launch_setup(tmp_path, monkeypatch):
     return str(ckpt), str(dataset_root), date, inference_routes
 
 
+def _held_worker(monkeypatch, inference_routes):
+    """Replace the inference worker with one holding its job running until the returned event
+    is set (or five seconds pass), then completing it."""
+    import threading
+
+    event = threading.Event()
+
+    def held(job) -> None:
+        job.status = "running"
+        event.wait(timeout=5)
+        job.status = "completed"
+
+    monkeypatch.setattr(inference_routes, "_worker", held)
+    return event
+
+
 def _launch_bucket(dataset_root: str, date: str) -> str:
     """The bucket directory every launch here names for ``date``."""
     return str(Path(dataset_root) / "predictions" / "baseline" / date)
@@ -936,7 +946,7 @@ def test_a_launch_into_a_directory_that_exists_fails_its_job_and_writes_nothing(
     before_bytes = doc_path.read_bytes()
 
     resp = client.post("/api/inference/launch", json={
-        "checkpoint_path": ckpt, "dataset_root": dataset_root,
+        "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root,
         "date": date, "output_dir": _launch_bucket(dataset_root, date),
         "stated": {"tile": False},
     })
@@ -948,7 +958,7 @@ def test_a_launch_into_a_directory_that_exists_fails_its_job_and_writes_nothing(
     assert "a bucket is published once" in job.error
     assert sorted(p.name for p in bucket.iterdir() if not _is_bookkeeping(p.name)) == ["img.json"]
     assert doc_path.read_bytes() == before_bytes
-    assert _audit_entries(Path(dataset_root)) == []
+    assert audit_rows(Path(dataset_root)) == []
 
 
 def test_inference_launch_leaves_the_bucket_for_its_publication_to_create(
@@ -957,7 +967,7 @@ def test_inference_launch_leaves_the_bucket_for_its_publication_to_create(
     ckpt, dataset_root, date, _inference_routes = _launch_setup(tmp_path, monkeypatch)
 
     resp = client.post("/api/inference/launch", json={
-        "checkpoint_path": ckpt, "dataset_root": dataset_root,
+        "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root,
         "date": date, "output_dir": _launch_bucket(dataset_root, date),
     })
 
@@ -972,28 +982,20 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
     """A second launch of the same model and date while the first job still writes is refused
     naming that job; once the first job is terminal the launch is admitted again, the
     publication being what refuses a bucket that exists."""
-    import threading
     import time
 
     ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
-    event = threading.Event()
-
-    def _wait_worker(job) -> None:
-        job.status = "running"
-        event.wait(timeout=5)
-        job.status = "completed"
-
-    monkeypatch.setattr(inference_routes, "_worker", _wait_worker)
+    event = _held_worker(monkeypatch, inference_routes)
 
     first = client.post("/api/inference/launch", json={
-        "checkpoint_path": ckpt, "dataset_root": dataset_root,
+        "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root,
         "date": date, "output_dir": _launch_bucket(dataset_root, date),
     })
     assert first.status_code == 200, first.text
     job_id = first.json()["job_id"]
 
     second = client.post("/api/inference/launch", json={
-        "checkpoint_path": ckpt, "dataset_root": dataset_root,
+        "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root,
         "date": date, "output_dir": _launch_bucket(dataset_root, date),
     })
     assert second.status_code == 409, second.text
@@ -1015,7 +1017,7 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
     assert job.status == "completed"
 
     third = client.post("/api/inference/launch", json={
-        "checkpoint_path": ckpt, "dataset_root": dataset_root,
+        "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root,
         "date": date, "output_dir": _launch_bucket(dataset_root, date),
     })
     assert third.status_code == 200, third.text
@@ -1027,28 +1029,20 @@ def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset
     """The live job a refusal names is found by resolved directory identity, so a
     trailing-separator spelling of the same dataset root still names the first job."""
     import os
-    import threading
     import time
 
     ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
-    event = threading.Event()
-
-    def _wait_worker(job) -> None:
-        job.status = "running"
-        event.wait(timeout=5)
-        job.status = "completed"
-
-    monkeypatch.setattr(inference_routes, "_worker", _wait_worker)
+    event = _held_worker(monkeypatch, inference_routes)
 
     first = client.post("/api/inference/launch", json={
-        "checkpoint_path": ckpt, "dataset_root": dataset_root,
+        "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root,
         "date": date, "output_dir": _launch_bucket(dataset_root, date),
     })
     assert first.status_code == 200, first.text
     job_id = first.json()["job_id"]
 
     second = client.post("/api/inference/launch", json={
-        "checkpoint_path": ckpt, "dataset_root": dataset_root,
+        "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root,
         "date": date, "output_dir": _launch_bucket(dataset_root, date) + os.sep,
     })
     assert second.status_code == 409, second.text
@@ -1075,7 +1069,7 @@ def test_inference_launch_resolves_explicit_conf_and_max_dets_source_from_the_pa
     ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
 
     resp = client.post("/api/inference/launch", json={
-        "checkpoint_path": ckpt, "dataset_root": dataset_root, "date": date,
+        "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root, "date": date,
         "output_dir": _launch_bucket(dataset_root, date),
         "stated": {"conf": DEFAULT_CONF, "max_dets": DEFAULT_MAX_DETS},
     })
@@ -1093,7 +1087,7 @@ def test_inference_launch_defaults_conf_and_max_dets_source_when_omitted(
     ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
 
     resp = client.post("/api/inference/launch", json={
-        "checkpoint_path": ckpt, "dataset_root": dataset_root, "date": date,
+        "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root, "date": date,
         "output_dir": _launch_bucket(dataset_root, date),
     })
     assert resp.status_code == 200, resp.text

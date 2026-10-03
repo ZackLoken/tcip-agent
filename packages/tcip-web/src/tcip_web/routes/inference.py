@@ -19,11 +19,12 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from tcip_mcp.identity import actor
 from tcip_mcp.pipelines.data.splits import same_directory
 from tcip_mcp.pipelines.execution import Stated
 from tcip_web import jobstore
 from tcip_web.paths import allowed_path
-from tcip_web.routes._body_common import EmptyBodyPayload
+from tcip_web.routes._body_common import PersonPayload
 from tcip_web.state import store
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,8 @@ class InferenceJob:
     checkpoint_path: str
     images_dir: str
     output_dir: str
+    # The person who launched the job, who publishes its bucket.
+    actor: str
     # What the launch stated of the execution record, resolved as run_inference resolves it.
     stated: Stated = field(default_factory=Stated)
     # The assessment whose execution record the pass runs and the bucket names.
@@ -110,7 +113,7 @@ def _worker(job: InferenceJob) -> None:
                 raster_path=None, output_dir=job.output_dir, assessment_id=job.assessment_id,
                 stated=job.stated, device=None, tile_batch_size=DEFAULT_TILE_BATCH_SIZE,
                 dry_run=False, require_masks=True, resume=False, progress=progress,
-                canceled=job.cancel_event.is_set)
+                canceled=job.cancel_event.is_set, actor=job.actor)
         except AuditEntryNotWritten as exc:
             job.audit_warning = str(exc)
             result = exc.arguments
@@ -142,10 +145,14 @@ class LaunchInferencePayload(BaseModel):
     stated: Stated = Stated()
     # The assessment whose execution record the pass runs, so the bucket is published under it.
     assessment_id: str | None = None
+    user: str
 
 
 @router.post("/launch")
 def launch_inference(payload: LaunchInferencePayload) -> dict:
+    """Launch a pass over the dataset's images on a background thread, by the person ``user``
+    names, who publishes its bucket."""
+    person = actor(payload.user)
     project = store.open_root()
     # A caller must not name a file outside the allowed roots, registered checkpoint or not.
     checkpoint_path = allowed_path(payload.checkpoint_path)
@@ -176,7 +183,8 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
     job = InferenceJob(
         job_id=f"inf-{uuid.uuid4().hex[:8]}", project=str(project),
         checkpoint_path=str(checkpoint_path), images_dir=str(images_dir),
-        output_dir=str(output_dir), stated=payload.stated, assessment_id=payload.assessment_id)
+        output_dir=str(output_dir), actor=person, stated=payload.stated,
+        assessment_id=payload.assessment_id)
     _register(job)
 
     t = threading.Thread(target=_worker, args=(job,), daemon=True)
@@ -193,13 +201,25 @@ def list_jobs() -> dict:
 
 
 @router.post("/jobs/{job_id}/cancel")
-def cancel_job(job_id: str, payload: EmptyBodyPayload) -> dict:
-    """Request graceful cancellation; the worker stops at the next image boundary."""
+def cancel_job(job_id: str, payload: PersonPayload) -> dict:
+    """Request graceful cancellation by the person ``user`` names; the worker stops at the next
+    image boundary and the request leaves one ``inference_canceled`` line in the job's project.
+    Refuses (404) an unknown job, and answers 409 when the line cannot follow the request."""
+    from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
+    from tcip_web.routes.audit_gap import audit_gap_409
+
+    person = actor(payload.user)
     j = _get(job_id)
     if j is None:
         raise HTTPException(404, f"job not found: {job_id}")
     j.cancel_event.set()
-    return {"job_id": job_id, "status": j.status, "cancel_requested": True}
+    answer = {"job_id": job_id, "status": j.status, "cancel_requested": True}
+    try:
+        record_event_or_raise("inference_canceled", {"job_id": job_id, "output_dir": j.output_dir},
+                              actor=person, scope=j.project)
+    except AuditEntryNotWritten as exc:
+        raise audit_gap_409(exc, answer) from exc
+    return answer
 
 
 @router.websocket("/jobs/{job_id}/stream")

@@ -49,6 +49,7 @@ function config(
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
+  useStore.setState({ user: "jordan" });
 });
 
 afterEach(() => {
@@ -71,7 +72,7 @@ describe("TrainingTab run list", () => {
     expect(await screen.findByText("train-agent-1")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel train-agent-1" }));
-    await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith("train-agent-1"));
+    await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith("train-agent-1", "jordan"));
   });
 
   it("shows a running row's own heartbeat age, the one liveness signal a record with no process id can offer", async () => {
@@ -908,7 +909,7 @@ describe("TrainingTab config picker", () => {
     ).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled());
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    await waitFor(() => expect(relaunchSpy).toHaveBeenCalledWith("exp-pristine-1", null));
+    await waitFor(() => expect(relaunchSpy).toHaveBeenCalledWith("exp-pristine-1", "jordan", null));
   });
 
   it("shows a refused start's issues under the picked config's row", async () => {
@@ -995,7 +996,9 @@ describe("TrainingTab config picker", () => {
 
     fireEvent.click(await screen.findByRole("radio", { name: /\/data\/splits/ }));
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    await waitFor(() => expect(relaunchSpy).toHaveBeenCalledWith("exp-1", "/data/splits"));
+    await waitFor(() =>
+      expect(relaunchSpy).toHaveBeenCalledWith("exp-1", "jordan", "/data/splits"),
+    );
   });
 
   it("disables Start while a selected config's data choices are still loading", async () => {

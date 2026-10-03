@@ -126,7 +126,7 @@ def test_a_delivery_event_names_its_producer_and_write_time_and_its_rows_repeat_
 
     acknowledged(tmp_path, lambda ack: deliver_per_image_counts_csv(
         tmp_path, bucket, str(out), trait=fx.COUNT_TRAIT, acknowledgment_id=ack,
-        door="test_provenance"))
+        door="test_provenance", actor=None))
 
     (event,) = read_delivery_events(tmp_path)
     assert event.producer.model_dump() == read_bucket(bucket).producer
