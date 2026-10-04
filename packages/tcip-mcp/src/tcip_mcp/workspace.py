@@ -15,8 +15,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import tcip_store
-from tcip_store import Key, StoreDescriptor, register_store, text_codec
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import Key
 
 logger = logging.getLogger(__name__)
 
@@ -52,28 +51,13 @@ def is_valid_name(name: str) -> bool:
 
 # ── the last-opened pointer ──────────────────────────────────────────────────
 
-_POINTER_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".txt")
-"""The pointer, one document under the workspace root, beside the backend's port record."""
-
 LAST_OPENED_STORE = "workspace_last_opened"
 _POINTER_PARTS = ("last_opened",)
-register_store(
-    StoreDescriptor(
-        name=LAST_OPENED_STORE,
-        kind="record",
-        key_fields=("document",),
-        frozen=True,
-        cannot_carry_field="a single project id string",
-        codec=text_codec(trailing_newline=True),
-        concurrency="last_writer_wins",
-        locator=_POINTER_DOC,
-    )
-)
 
 
 def last_opened_key(workspace: Path) -> Key:
-    """The workspace's last-opened pointer: the id of the project the backend opened last,
-    replaced whole on every open."""
+    """The workspace's last-opened pointer: the id of the project the backend opened last, a JSON
+    string replaced whole on every open."""
     return Key(LAST_OPENED_STORE, str(workspace), _POINTER_PARTS)
 
 

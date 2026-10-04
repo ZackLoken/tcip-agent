@@ -112,12 +112,10 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as scratch:
         workspace = (Path(scratch) / "workspace").resolve()
         workspace.mkdir()
-        from tcip_store.binding import bind_default
-
-        bind_default()
-        served = listings(workspace)
         import tcip_store
 
+        tcip_store.bind()
+        served = listings(workspace)
         tcip_store.release_root(workspace)
     GENERATED_PATH.write_text(json.dumps(served, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {GENERATED_PATH}")

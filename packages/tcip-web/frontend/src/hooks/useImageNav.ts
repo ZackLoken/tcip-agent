@@ -8,7 +8,7 @@ import { useCallback } from "react";
 import { api } from "@/api/client";
 import { useStore } from "@/store";
 
-// Debounced: only the settled position persists; a dropped sync leaves gui.json one image stale.
+// Debounced: only the settled position persists; a dropped sync leaves the snapshot one image stale.
 let navSyncTimer: ReturnType<typeof setTimeout> | null = null;
 function syncNavIndex(index: number): void {
   if (navSyncTimer !== null) clearTimeout(navSyncTimer);

@@ -650,12 +650,10 @@ def test_a_receipt_that_cannot_be_written_fails_persist_mapping_and_the_record_s
     contend for the same lock this test holds for the whole body). This calls
     ``plant_mapping.build_mapping`` directly rather than through ``build_plant_mapping`` so the
     tool's wrapper does not contend for that lock."""
-    from tcip_mcp.audit import AuditEntryNotWritten
-    from tcip_store.file_backend import FileBackend, path_lock
+    from tcip_mcp.audit import AuditEntryNotWritten, audit_log_key
+    from tcip_store.sqlite_backend import SqliteBackend
 
-    # Bound before anything is written, so this root's state is file-backed throughout: the
-    # lock below has to guard the exact file the receipt append writes to.
-    ts.bind(FileBackend(lock_timeout_s=0.2))
+    ts.bind(SqliteBackend(lock_timeout_s=0.2))
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root)
@@ -664,13 +662,10 @@ def test_a_receipt_that_cannot_be_written_fails_persist_mapping_and_the_record_s
         dataset_id="whatever-id", project=tmp_path,
         plant_registry={"name": "unregistered", "digest": "0" * 64})
 
-    audit_path = tmp_path / ".tcip" / "audit.jsonl"
-    audit_path.parent.mkdir(parents=True, exist_ok=True)
-
     holding, release = threading.Event(), threading.Event()
 
     def hold() -> None:
-        with path_lock(audit_path, timeout_s=30):
+        with ts.transaction(audit_log_key(tmp_path), timeout_s=30):
             holding.set()
             release.wait(30)
 
@@ -692,11 +687,11 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fastapi.testclient import TestClient
-    from tcip_store.file_backend import FileBackend, path_lock
+    from tcip_mcp.audit import audit_log_key
+    from tcip_store.sqlite_backend import SqliteBackend
     from tcip_web.app import app
     from tcip_web.state import store
 
-    ts.bind(FileBackend(lock_timeout_s=0.2))
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root)
@@ -704,13 +699,12 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
     asyncio.run(store.open_project(tmp_path.resolve()))
 
     client = TestClient(app, base_url="http://127.0.0.1")
-    audit_path = tmp_path / ".tcip" / "audit.jsonl"
-    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    ts.bind(SqliteBackend(lock_timeout_s=0.2))
 
     holding, release = threading.Event(), threading.Event()
 
     def hold() -> None:
-        with path_lock(audit_path, timeout_s=30):
+        with ts.transaction(audit_log_key(tmp_path), timeout_s=30):
             holding.set()
             release.wait(30)
 

@@ -111,10 +111,7 @@ def _detection_smoke_cfg(builder: str, tmp_path: Path) -> dict:
 def test_preflight_config_overfit_restores_rng_state(tmp_path, monkeypatch):
     """The overfit branch's own reseed-run-restore leaves no net trace on the streams: a plain
     smoke build (overfit=False) and the same build with overfit=True, run from the same seed,
-    must consume the streams identically once the overfit call returns. Comparing against a
-    fresh reseed with nothing run in between would be wrong: build_model + check_model_contract
-    draw real entropy too, on both paths alike, so the only valid baseline is the sibling call
-    that skips just the overfit branch."""
+    must consume the streams identically once the overfit call returns."""
     pytest.importorskip("torch")
     import functools
     import random
@@ -1027,11 +1024,8 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_data_cfg_handed_to_auto_trai
 
 def _fake_auto_train_val_reading_seed_like_split_construction(
         project, task, data_cfg, transforms, **_):
-    """The exact reads split_construction.py's own auto_train_val performs on its multi-stem
-    drawn path: setdefault the split block, then get its seed off that block. The single-source
-    spatial-strip path (spatial_single_source_split) reads no seed at all; see
-    test_run_hpo_trial_producer_fed_data_split_seed_is_unconsumed_over_the_single_source_spatial_path
-    for that path's own, different, consumption fact."""
+    """The reads ``auto_train_val`` performs on its multi-stem drawn path: setdefault the split
+    block, then get its seed off that block."""
     split_cfg = data_cfg.setdefault("split", {})
     split_cfg.get("seed", 42)
     ds = _TiledFakeDataset()
@@ -1331,27 +1325,6 @@ def test_run_hyperparameter_search_admits_a_categorical_evaluation_axis_naming_t
 
     assert "error" not in result, result
     assert seen == [param_space]
-
-
-# dataset_identity: a version-refused identity propagates rather than reading as unregistered.
-
-def test_dataset_identity_propagates_a_version_refused_identity(tmp_path):
-    """A version-refused identity propagates; it is not read as an unregistered dataset."""
-    import tcip_store as ts
-    from tcip_store import SchemaVersionRefused
-
-    from tcip_mcp.dataset_layout import dataset_identity_key
-    from tcip_mcp.pipelines.data.split_construction import dataset_identity
-
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
-    key = dataset_identity_key(tmp_path)
-    document = {"crop": "chestnut", "id": "abc123", "fingerprint": "v1:deadbeef",
-                "schema_version": 2}
-    ts.put_blob(key, ts.RECORD_JSON.encode(document))
-
-    with pytest.raises(SchemaVersionRefused):
-        dataset_identity({"images_dir": str(images_dir)})
 
 
 def test_dataset_identity_tolerates_a_genuinely_unregistered_dataset(tmp_path):

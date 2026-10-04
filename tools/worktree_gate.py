@@ -4,7 +4,7 @@ Each gate runs with PYTHONPATH set to the worktree's four `packages/*/src` direc
 `tcip_mcp` is proven to resolve under the worktree, in the foreground, stopping at the first
 failure with its exit code.
 
-    python tools/worktree_gate.py <worktree> --ruff --mypy --pytest tests/test_foo.py --backend file
+    python tools/worktree_gate.py <worktree> --ruff --mypy --pytest tests/test_foo.py
 """
 
 from __future__ import annotations
@@ -20,19 +20,14 @@ from pathlib import Path
 PACKAGE_SRC_DIRS = ("tcip-store", "tcip-annotation", "tcip-mcp", "tcip-web")
 
 
-def build_environ(worktree: Path, backend: str) -> dict[str, str]:
+def build_environ(worktree: Path) -> dict[str, str]:
     """The environment every gate runs under: PYTHONPATH set to the worktree's own four package
-    `src` directories (never appended to whatever the caller's own PYTHONPATH already names),
-    and TCIP_STORE_BACKEND set for the file backend, unset for sqlite so the ambient default binds.
+    `src` directories, never appended to whatever the caller's own PYTHONPATH already names.
     """
     env = dict(os.environ)
     src_dirs = [str((worktree / "packages" / name / "src").resolve()) for name in PACKAGE_SRC_DIRS]
     sep = ";" if sys.platform == "win32" else ":"
     env["PYTHONPATH"] = sep.join(src_dirs)
-    if backend == "file":
-        env["TCIP_STORE_BACKEND"] = "file"
-    else:
-        env.pop("TCIP_STORE_BACKEND", None)
     return env
 
 
@@ -85,7 +80,6 @@ def run_pytest(worktree: Path, env: dict[str, str], files: list[str]) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("worktree", type=Path)
-    parser.add_argument("--backend", choices=("sqlite", "file"), default="sqlite")
     parser.add_argument("--ruff", action="store_true")
     parser.add_argument("--mypy", action="store_true")
     parser.add_argument("--pytest", nargs="+", default=None, metavar="FILE")
@@ -95,7 +89,7 @@ def main() -> int:
     if not worktree.is_dir():
         raise SystemExit(f"{worktree} is not a directory")
 
-    env = build_environ(worktree, args.backend)
+    env = build_environ(worktree)
     resolved = prove_resolution(worktree, env)
     print(f"tcip_mcp resolves under the worktree: {resolved}")
 

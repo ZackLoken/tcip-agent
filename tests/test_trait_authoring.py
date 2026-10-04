@@ -170,16 +170,11 @@ def test_bud_opening_reads_back_as_the_reference_fixture(tmp_path: Path):
     assert set(t.delivers) == {"leaf_out_05per_date", "leaf_out_50per_date"}
 
 
-def test_the_file_backend_places_a_trait_record_at_the_state_traits_path(tmp_path: Path):
-    from tcip_store.file_backend import FileBackend
-
-    import tcip_store as ts
-
-    ts.bind(FileBackend())
+def test_a_trait_record_lands_in_the_project_state_database(tmp_path: Path):
     project_root = tmp_path / "fresh"
     propose(project_root, entry("leaf", ("leaf_length",)))
 
-    assert (project_root / ".tcip" / "state" / "traits" / "leaf.json").is_file()
+    assert (project_root / ".tcip" / "state" / ".tcip" / "store.db").is_file()
     assert traits.trait_names(project_root) == ["leaf"]
 
 

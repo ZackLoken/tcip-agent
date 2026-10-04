@@ -88,6 +88,59 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
     assert verified.experiment_id == run_dir.name
 
 
+def test_a_run_whose_closing_audit_line_is_refused_ends_failed_naming_it(tmp_path, monkeypatch):
+    """The body completes and saves its deliverable; the closing ``training_run`` append is
+    refused, so the final status reads ``failed`` naming the unwritten line, names no checkpoint,
+    and the log holds the opening line alone."""
+    import tcip_mcp.audit as audit
+
+    real_append = audit.append
+
+    def refuse_the_closing_line(key, entry):
+        if entry["status"] != "running":
+            raise OSError("the log's disk is full")
+        real_append(key, entry)
+
+    monkeypatch.setattr(audit, "append", refuse_the_closing_line)
+    ctx, run_dir = _context(tmp_path, _bespoke(tmp_path, "_agent_train"))
+    run_training_envelope(ctx)
+
+    final = observe(run_dir).final
+    assert final["state"] == "failed"
+    assert "audit entry could not be written" in final["error"]
+    assert completed_checkpoint(run_dir) is None
+    assert [e["status"] for e in _audit_events(tmp_path)] == ["running"]
+
+
+def _agent_train_raises(ctx):
+    """A body that fails on its own."""
+    raise RuntimeError("the body exploded")
+
+
+def test_a_failed_run_whose_closing_audit_line_is_refused_names_both_causes(
+    tmp_path, monkeypatch,
+):
+    """The body fails and the closing append is refused: the final status names the body's
+    error and the unwritten line, neither hiding the other."""
+    import tcip_mcp.audit as audit
+
+    real_append = audit.append
+
+    def refuse_the_closing_line(key, entry):
+        if entry["status"] != "running":
+            raise OSError("the log's disk is full")
+        real_append(key, entry)
+
+    monkeypatch.setattr(audit, "append", refuse_the_closing_line)
+    ctx, run_dir = _context(tmp_path, _bespoke(tmp_path, "_agent_train_raises"))
+    run_training_envelope(ctx)
+
+    final = observe(run_dir).final
+    assert final["state"] == "failed"
+    assert "the body exploded" in final["error"]
+    assert "audit entry could not be written" in final["error"]
+
+
 def _agent_train_default_tag_no_override(ctx):
     """Saves under the default tag ("checkpoint"), not model_best/model_final, and never
     calls set_final_weights. A loop like this produces no discoverable deliverable."""

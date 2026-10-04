@@ -126,8 +126,7 @@ def test_an_imports_staging_tree_is_never_admitted_even_under_the_workspace(
 ) -> None:
     """The import door stages a half-extracted project under ``<workspace>/.imports/<uuid>/``,
     which sits under the workspace, an allowed root; a route resolving into it while the import
-    is in flight must still refuse, or a guarded route could read a project's confirmed
-    negatives before the accounting and adoption steps have judged them."""
+    is in flight still refuses."""
     workspace = tmp_path.parent
     staged = workspace / ".imports" / "run-1" / "images" / "a.jpg"
     staged.parent.mkdir(parents=True)

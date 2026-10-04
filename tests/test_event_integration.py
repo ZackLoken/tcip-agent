@@ -236,14 +236,11 @@ class TestPortDiscovery:
             resolve_web_port(tmp_path.parent)
 
     def test_the_port_handoff_is_one_declaration_that_both_packages_reach(self) -> None:
-        """The port store is declared in ``web_client`` and the backend addresses it there."""
-        import tcip_store as ts
+        """The port's key builder lives in ``web_client`` and the backend addresses it there."""
         from tcip_mcp import web_client
         from tcip_web import __main__ as web_main
 
         assert web_main.backend_port_key is web_client.backend_port_key
-        descriptor = ts.get_descriptor(web_client.BACKEND_PORT_STORE)
-        assert descriptor.declared_in == web_client.__name__
 
     def test_the_backend_binds_and_the_tools_reach_one_loopback_host(self) -> None:
         from tcip_mcp import web_client
@@ -254,38 +251,28 @@ class TestPortDiscovery:
 
 
 class TestSharedWebStateDeclarations:
-    """Every document both packages touch is declared once, in ``web_client``."""
+    """Every record both packages touch has its one key builder in ``web_client``."""
 
     def test_the_gui_snapshot_is_one_declaration_that_both_packages_reach(self) -> None:
-        import tcip_store as ts
         from tcip_mcp import web_client
         from tcip_web import state as web_state
 
         assert web_state.read_gui_snapshot is web_client.read_gui_snapshot
         assert web_state.write_gui_snapshot is web_client.write_gui_snapshot
-        descriptor = ts.get_descriptor(web_client.GUI_SNAPSHOT_STORE)
-        assert descriptor.declared_in == web_client.__name__
 
     def test_the_canvas_documents_are_one_declaration_that_both_packages_reach(self) -> None:
-        import tcip_store as ts
         from tcip_mcp import web_client
         from tcip_web.routes import canvas
 
         assert canvas.canvas_meta_key is web_client.canvas_meta_key
         assert canvas.canvas_geometry_key is web_client.canvas_geometry_key
-        for store in (web_client.CANVAS_META_STORE, web_client.CANVAS_GEOMETRY_STORE):
-            assert ts.get_descriptor(store).declared_in == web_client.__name__
 
-    def test_the_web_only_stores_are_declared_where_the_catalog_reaches_them(self) -> None:
-        """The web-only stores are declared in ``web_client`` and the web routes address them
-        there."""
-        import tcip_store as ts
+    def test_the_web_only_stores_are_addressed_through_web_client(self) -> None:
+        """The web routes address the web-only records through ``web_client``'s key builder."""
         from tcip_mcp import web_client
         from tcip_web.routes import sessions
 
         assert sessions.annotation_stats_key is web_client.annotation_stats_key
-        assert ts.get_descriptor(web_client.ANNOTATION_STATS_STORE).declared_in == (
-            web_client.__name__)
 
 
 # ── Tool output schemas ─────────────────────────────────────────────────

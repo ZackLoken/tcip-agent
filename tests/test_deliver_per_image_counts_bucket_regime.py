@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from tcip_store.file_backend import _is_bookkeeping
+from tcip_store.file_backend import is_bookkeeping
 
 from tests import _trait_fixtures as fx
 
@@ -22,8 +22,8 @@ SCOPE = {"subject": fx.COUNT_SUBJECT}
 
 
 def _images(images_dir: Path) -> list[Path]:
-    """The capture's image files, without the file backend's lock sidecars beside them."""
-    return sorted(p for p in images_dir.iterdir() if not _is_bookkeeping(p.name))
+    """The capture's image files, without the lock sidecars beside them."""
+    return sorted(p for p in images_dir.iterdir() if not is_bookkeeping(p.name))
 
 
 @pytest.fixture(autouse=True)
@@ -144,8 +144,8 @@ class _BlockTorch:
         return None
 
 sys.meta_path.insert(0, _BlockTorch())
-from tcip_store.binding import bind_default
-bind_default()
+import tcip_store
+tcip_store.bind()
 import tcip_mcp.tools.inference_tools as itools
 from pathlib import Path
 r = itools.deliver_per_image_counts(Path({str(tmp_path)!r}), predictions_dir={str(chain.bucket)!r},

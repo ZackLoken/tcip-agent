@@ -31,9 +31,20 @@ def _project(ws: Path, directory: str, display_name: str) -> tuple[Path, str]:
 
 
 def _files(root: Path) -> dict[str, bytes]:
-    """Every file under ``root`` but the database, by its path relative to ``root``."""
+    """Every file under ``root`` but the databases, by its path relative to ``root``."""
     return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*"))
             if p.is_file() and not p.name.startswith("store.db")}
+
+
+def _held(root: Path, *, but: set[str]) -> dict[tuple, object]:
+    """Every record and log the databases under ``root`` hold, read through the seam, but the
+    stores ``but`` names, by root relative to ``root``, store and parts."""
+    from tcip_store.file_backend import database_roots
+
+    return {(base.relative_to(root).as_posix(), store, key.parts):
+            (ts.read(key, default=None), ts.read_log(key).records)
+            for base in database_roots(root) for store in ts.stores(str(base)) if store not in but
+            for key in ts.keys(store, str(base))}
 
 
 def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_as_they_were(
@@ -49,8 +60,12 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
     finished_run(project, experiment_id="exp-before")
     (project / "ds").mkdir()
     assert "error" not in register_dataset(project, str(project / "ds"), "currant")
+    from tcip_mcp.audit import AUDIT_LOG_STORE
+    from tcip_mcp.project_record import PROJECT_RECORD_STORE
+
+    renamed = {AUDIT_LOG_STORE, PROJECT_RECORD_STORE}
     files, runs, datasets = _files(project), list_experiments(project), read_datasets(project)
-    audit_lines = audit_rows(project)
+    held, audit_lines = _held(project, but=renamed), audit_rows(project)
 
     resp = client.post("/api/projects/rename", json={
         "id": project_id, "display_name": "Valley block, north half", "user": "tester"})
@@ -60,10 +75,8 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
                            "previous_display_name": "Valley block"}
     assert read_record(project)["display_name"] == "Valley block, north half"
     assert sorted(p.name for p in ws.iterdir() if (p / ".tcip").is_dir()) == ["valley_block"]
-    after = _files(project)
-    rename_writes = {".tcip/project.json", ".tcip/audit.jsonl"}
-    assert {k: v for k, v in after.items() if k not in rename_writes} == {
-        k: v for k, v in files.items() if k not in rename_writes}
+    assert _files(project) == files
+    assert _held(project, but=renamed) == held
     assert list_experiments(project) == runs
     assert read_datasets(project) == datasets
     assert audit_rows(project)[:-1] == audit_lines

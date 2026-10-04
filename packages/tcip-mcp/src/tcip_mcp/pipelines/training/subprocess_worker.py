@@ -72,11 +72,10 @@ def run_directory(
     that has ended before anything is written (``experiments.require_open``), observe it once,
     keep its heartbeat, build its context from that observation (:func:`prepare_run_context`,
     which takes the other arguments), and run its body inside the envelope. A failure before the
-    envelope opens writes the final status ``failed`` naming it, leaves a ``training_run`` audit
-    line, and propagates.
+    envelope opens closes the run ``failed`` naming it (``envelope.close_run``) and propagates.
     """
-    from tcip_mcp.experiments import keep_heartbeat, observe, require_open, write_final_status
-    from tcip_mcp.pipelines.training.envelope import run_training_envelope
+    from tcip_mcp.experiments import keep_heartbeat, observe, require_open
+    from tcip_mcp.pipelines.training.envelope import close_run, run_training_envelope
 
     require_open(run_dir)
     observation = observe(run_dir)
@@ -86,12 +85,10 @@ def run_directory(
             ctx = prepare_run_context(observation, origin=origin, epoch_hook=epoch_hook)
         except Exception as exc:
             logger.exception("Pre-training setup failed for run %s: %s", run_dir.name, exc)
-            from tcip_mcp.audit import record_event
             from tcip_mcp.experiments import project_of_run
 
-            write_final_status(run_dir, "failed", str(exc), checkpoint=None)
-            record_event("training_run", {"experiment_id": run_dir.name}, actor=None,
-                         status="failed", scope=project_of_run(run_dir))
+            close_run(run_dir, project_of_run(run_dir), "failed", str(exc), checkpoint=None,
+                      arguments={"experiment_id": run_dir.name})
             raise
         run_training_envelope(ctx)
         return ctx.run
@@ -104,9 +101,9 @@ def main() -> None:
 
     # Its own process entry point: the platform's GDAL cache budget, and its own backend binding.
     configure_gdal_cache()
-    from tcip_store.binding import bind_default
+    from tcip_store import bind
 
-    bind_default()
+    bind()
     run_directory(Path(_parse_args().run_dir))
 
 

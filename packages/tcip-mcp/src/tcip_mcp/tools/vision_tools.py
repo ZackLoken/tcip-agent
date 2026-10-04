@@ -719,9 +719,9 @@ def capture_live_canvas(
 ) -> dict:
     """Render exactly what the human's GUI canvas showed for this project: image, shapes, viewport.
 
-    Reads the canvas state the GUI pushes under the project's ``.tcip/state/``:
-    ``canvas_live.json`` (image, viewport, classes, counts, tab, mode, active_subject,
-    cut_armed, dirty and user) and ``canvas_shapes.json`` (the full display-resolved geometry,
+    Reads the canvas state the GUI pushes into the project's store: the meta record (image,
+    viewport, classes, counts, tab, mode, active_subject, cut_armed, dirty and user) and the
+    geometry record (the full display-resolved geometry,
     including unsaved edits and an in-progress drawing). The backend writes a push only under the
     project it has open, so these documents are always this project's own. Renders the region
     being shown at up to ``max_edge`` and returns the artifact path for the agent's own

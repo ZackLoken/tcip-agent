@@ -224,19 +224,6 @@ def test_every_draw_refuses_a_tree_short_of_its_floor_the_same_way(tmp_path: Pat
         auto_train_val(tmp_path, "detection", data_cfg, None)
 
 
-def test_draw_splits_refuses_a_version_refused_subject_registry_as_an_error(data_dir: Path, tmp_path: Path):
-    from tcip_mcp.dataset_layout import subject_registry_key
-
-    _add_extra_bud_groups(data_dir, 1)
-    ts.put_blob(
-        subject_registry_key(data_dir), ts.RECORD_JSON.encode({"schema_version": 99})
-    )
-    result = draw_splits(data_dir, str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
-    assert "error" in result, result
-    assert "schema_version" in result["error"]
-
-
 def test_draw_splits_stats_only_admits_a_nonzero_calibration_ratio(data_dir: Path):
     """A stats-only call (no output_path) may pass any calibration_ratio, a zero holdout_ratio
     included; only writing a selection requires every ratio non-zero."""
@@ -370,32 +357,6 @@ def test_draw_splits_stats_only_answers_an_ambiguous_image_stem_as_an_error(tmp_
 
     assert "error" in result
     assert "plotA" in result["error"]
-
-
-def test_scan_dataset_answers_a_newer_written_bandgroup_manifest_as_an_error(tmp_path: Path):
-    """A ``.bandgroup`` manifest above this reader's ceiling propagates as
-    ``tcip_store.SchemaVersionRefused`` out of ``list_logical_images``, uncaught by design;
-    ``scan_dataset`` must answer that as a named error rather than letting it raise through the
-    tool boundary, the same contract it already holds for an ambiguous stem."""
-    from tcip_store.file_backend import FileBackend
-    import tcip_store as ts
-
-    from tcip_mcp.pipelines.data.band_groups import band_group_manifest_key
-
-    root = tmp_path / "ds"
-    images_dir = root / "images" / "2-11-26"
-    images_dir.mkdir(parents=True)
-
-    key = band_group_manifest_key(images_dir, "plotA")
-    path = FileBackend().path_for(key)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(ts.RECORD_JSON.encode(
-        {"schema_version": 2, "bands": {"B1": "plotA_B1.npy", "B2": "plotA_B2.npy"}}))
-
-    result = scan_dataset(str(root))
-
-    assert "error" in result
-    assert "schema_version 2, above the 1 this reader knows" in result["error"]
 
 
 def test_scan_dataset_answers_an_ambiguous_image_stem_as_an_error(tmp_path: Path):

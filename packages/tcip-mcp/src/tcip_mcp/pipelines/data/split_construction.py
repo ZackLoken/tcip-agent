@@ -260,7 +260,7 @@ def dataset_identity(data_cfg: dict) -> tuple[str | None, str | None]:
     """``(dataset_id, dataset_fingerprint)`` for the run's dataset: the fingerprint recomputed, the
     id from the dataset's identity record, ``None`` for a dataset never registered. ``(None,
     None)`` for a run whose images sit under no dataset root. A fingerprint that cannot be read and
-    an identity record that does not decode raise, as does ``tcip_store.SchemaVersionRefused``.
+    an identity record that does not decode raise.
     """
     images_dir = data_cfg.get("images_dir")
     if not images_dir:
@@ -297,7 +297,7 @@ def spatial_single_source_split(
     """Derive the run's requested train/val ``shares`` (:func:`run_shares`) over one detection
     source's own tile lattice, by disjoint pixel strips
     (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`), and record it as
-    ``split_cfg["spatial_manifest"]``, which :func:`recorded_datasets` builds the run's views from.
+    ``split_cfg["spatial_manifest"]``.
 
     ``sample`` is the run's own single admitted sample, which every view here is built over
     (:func:`_spatial_views`). ``sizes`` is what this run resolved (:func:`run_sizes`). A test

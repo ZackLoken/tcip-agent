@@ -6,8 +6,6 @@ from __future__ import annotations
 from dataclasses import asdict
 from pathlib import Path
 
-import tcip_store
-
 from tcip_mcp.server import tool
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.data.splits import DEFAULT_GROUP_BY, DEFAULT_SEED, DEFAULT_VAL_RATIO
@@ -92,14 +90,9 @@ def freeze_selection(project: Path, experiment_id: str, output_path: str | None 
                          f"{existing_error or 'freeze_selection never overwrites one.'}"}
 
     try:
-        fingerprint = dataset_fingerprint(dataset_root)
-    except tcip_store.SchemaVersionRefused as exc:
-        return {"error": f"cannot fingerprint the dataset for the frozen selection: {exc}"}
-
-    try:
         write_selection(out_dir, Selection(
             samples=tuple(samples), scope=scope, seed=partition["seed"],
-            group_by=partition["group_by"], dataset_fingerprint=fingerprint,
+            group_by=partition["group_by"], dataset_fingerprint=dataset_fingerprint(dataset_root),
         ), project=project)
     except ValueError as exc:
         return {"error": f"{experiment_id!r}'s resolved record: {exc}"}
@@ -195,14 +188,11 @@ def scan_dataset(folder_path: str) -> dict:
         return {"error": f"Directory not found: {folder_path}"}
 
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
-    from tcip_store import SchemaVersionRefused
 
     try:
         scan = _scan_dataset(folder_path)
     except AmbiguousImageStem as exc:
         return {"error": str(exc)}
-    except SchemaVersionRefused as exc:
-        return {"error": f"a .bandgroup manifest under {folder_path} could not be read: {exc}"}
 
     image_stems = {Path(p).stem: p for p in scan["images"]}
     label_stems = {Path(p).stem for p in scan["labels"]}
@@ -352,8 +342,6 @@ def draw_splits(
         drawn, counted = draw_sides(
             membership.samples, membership.scope, seed=seed, stratify=stratify_foreground,
             ratios={side: share for side, share in ratios.items() if share != 0})
-    except tcip_store.SchemaVersionRefused as exc:
-        return {"error": f"a .bandgroup manifest under {folder_path} could not be read: {exc}"}
     except (UnreadableLabelDocument, AmbiguousImageStem, BandGroupIncomplete,
             FileNotFoundError, ValueError, OSError) as exc:
         return {"error": str(exc)}
@@ -384,8 +372,6 @@ def draw_splits(
             samples=tuple(drawn[key] for key in sorted(drawn)), scope=membership.scope, seed=seed,
             group_by=membership.group_by, dataset_fingerprint=dataset_fingerprint(folder_path),
         ), project=project)
-    except tcip_store.SchemaVersionRefused as exc:
-        return {"error": f"cannot fingerprint the dataset for the selection: {exc}"}
     except ValueError as exc:
         return {"error": str(exc)}
     return response

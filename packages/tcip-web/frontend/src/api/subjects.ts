@@ -25,8 +25,6 @@ export interface AttributeDef {
  *  is simply detected (e.g. bush). */
 export interface SubjectDef {
   description?: string;
-  defined_by?: string;
-  defined_at?: string;
   attributes?: Record<string, AttributeDef>;
 }
 

@@ -212,16 +212,17 @@ def test_a_registry_payload_that_json_cannot_hold_is_refused_at_register_model(t
     number to every later reader."""
     from pathlib import Path
 
+    import tcip_store as ts
     from tcip_mcp.model_registry import ModelRegistry
 
     reg = ModelRegistry(str(tmp_path))
     ckpt = _checkpoint(tmp_path, "m")
 
-    with pytest.raises(TypeError) as config_refused:
+    with pytest.raises(ts.StoreError) as config_refused:
         reg.register_model("a", str(ckpt), {"weights": Path("model_best.pt")})
     assert "config.weights" in str(config_refused.value)
 
-    with pytest.raises(ValueError) as metrics_refused:
+    with pytest.raises(ts.StoreError) as metrics_refused:
         reg.register_model("a", str(ckpt), {}, metrics={"val_map50": float("inf")})
     assert "metrics.val_map50" in str(metrics_refused.value)
 

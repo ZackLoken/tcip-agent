@@ -1,15 +1,39 @@
-"""What a value must be before a store will carry it, and how a producer says it is not.
+"""What a value must be before a store will carry it, its two stored spellings, and how a
+producer says a number is not finite.
 
-:func:`check_json_value` refuses, naming the field, an object JSON has no type for or a non-finite
-number, before the canonical codec's own encode-time refusal. :func:`stored_number` keeps a
-non-finite number as a JSON null beside a sibling field naming the state.
+A record is spelled by :func:`encode_record` and a log line by :func:`encode_log_line`; both are
+read back by :func:`decode_value`. :func:`check_json_value` refuses, naming the field, an object
+JSON has no type for or a non-finite number. :func:`stored_number` keeps a non-finite number as a
+JSON null beside a sibling field naming the state.
 """
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Mapping, Sequence
 from typing import Any
+
+
+def encode_record(value: Any) -> bytes:
+    """A record's bytes: UTF-8 JSON indented by two, keys in their authored order, a trailing
+    newline. Refuses what :func:`check_json_value` refuses, before anything is spelled."""
+    check_json_value(value)
+    text = json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False, sort_keys=False)
+    return f"{text}\n".encode("utf-8")
+
+
+def encode_log_line(value: Any) -> bytes:
+    """A log entry's bytes: UTF-8 JSON on one line, keys in their authored order. Refuses as
+    :func:`encode_record` does."""
+    check_json_value(value)
+    return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=False).encode("utf-8")
+
+
+def decode_value(data: bytes) -> Any:
+    """The value a record's or a log entry's bytes spell; ``ValueError`` when they do not decode."""
+    return json.loads(data.decode("utf-8"))
+
 
 _SCALARS = (str, bool, int, float, type(None))
 
@@ -76,10 +100,6 @@ def check_json_value(value: Any, *, path: str = "value") -> None:
                     "are strings, so convert the key before storing it"
                 )
             check_json_value(item, path=f"{path}.{key}")
-        return
-    if isinstance(value, (list, tuple)):
-        for index, item in enumerate(value):
-            check_json_value(item, path=f"{path}[{index}]")
         return
     if isinstance(value, float):
         state = non_finite_state(value)

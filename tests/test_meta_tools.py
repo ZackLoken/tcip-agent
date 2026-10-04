@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 from pathlib import Path
 
 import tcip_store as ts
 
-from tcip_mcp.project_status import read_project_status
+from tcip_mcp.tools.project_tools import _recent_activity
 from tcip_mcp.tools.meta_tools import (
     report_friction,
     load_project_memory,
@@ -31,11 +30,6 @@ def test_report_friction_writes_one_json_document(tmp_path: Path):
     )
 
     assert result["category"] == "missing_tool"
-    if result["report_path"] is not None:
-        report_path = Path(result["report_path"])
-        assert report_path.suffix == ".json"
-        assert report_path.parent == tmp_path / ".tcip" / "reports"
-        assert report_path.stem == result["report_id"]
 
     entry = read_report(str(tmp_path), result["report_id"])
     assert entry["category"] == "missing_tool"
@@ -43,28 +37,13 @@ def test_report_friction_writes_one_json_document(tmp_path: Path):
     assert "timestamp" in entry
 
 
-def test_a_report_under_the_database_backend_names_its_id_and_no_file(tmp_path: Path):
-    """Under the database backend the record lives in the store and no file exists, so the tool
-    answers the record id and no path rather than a path a caller cannot open."""
-    from tcip_store.sqlite_backend import SqliteBackend
-
-    ts.bind(SqliteBackend())
+def test_a_report_names_the_record_id_it_was_stored_under(tmp_path: Path):
+    """The record lives in the store, so the tool answers its id, the one a listing names."""
     stored = report_friction(tmp_path, category="missing_tool", detail="x")
-    assert stored["report_path"] is None
+    assert "report_path" not in stored
     assert read_report(str(tmp_path), stored["report_id"])["detail"] == "x"
     listed = load_project_memory(tmp_path, "reports")["reports"][0]
-    assert listed["report_id"] == stored["report_id"] and listed["path"] is None
-
-
-def test_a_report_under_the_file_backend_names_the_file_it_wrote(tmp_path: Path):
-    from tcip_store.file_backend import FileBackend
-
-    ts.bind(FileBackend())
-    written = report_friction(tmp_path, category="missing_tool", detail="y")
-    assert Path(written["report_path"]).is_file()
-    assert Path(written["report_path"]).stem == written["report_id"]
-    listed = load_project_memory(tmp_path, "reports")["reports"][0]
-    assert listed["path"] == written["report_path"]
+    assert listed["report_id"] == stored["report_id"] and "path" not in listed
 
 
 def test_report_friction_rejects_invalid_category(tmp_path: Path):
@@ -103,8 +82,6 @@ def test_write_retrospective_creates_new_file(tmp_path: Path):
     )
 
     assert result["project_id"] == "chestnut-bur-phase0"
-    if result["retrospective_path"] is not None:
-        assert Path(result["retrospective_path"]).name == "chestnut-bur-phase0.md"
     assert result["appended_to_existing"] is False
 
     content = read_retrospective(str(tmp_path), "chestnut-bur-phase0")
@@ -267,6 +244,33 @@ def test_load_reports_roundtrips_a_written_report(tmp_path: Path):
     assert rep["timestamp"]
 
 
+def test_a_report_missing_a_field_its_writer_records_refuses_rather_than_reading_as_blank(
+    tmp_path: Path,
+):
+    """A stored report holding its time alone is not answered with an empty category, detail
+    and context and a false disagreement; the listing refuses naming the missing field."""
+    import pytest
+
+    from tcip_mcp.tools.meta_tools import friction_report_key
+
+    ts.replace(friction_report_key(str(tmp_path), "20260304T120000Z_missing_tool_a1b2"),
+               {"timestamp": "2026-03-04T12:00:00+00:00"})
+
+    with pytest.raises(KeyError, match="category"):
+        load_project_memory(tmp_path, "reports")
+
+
+def test_a_report_that_is_not_a_json_object_will_not_decode(tmp_path: Path):
+    import pytest
+
+    from tcip_mcp.tools.meta_tools import friction_report_key
+
+    ts.replace(friction_report_key(str(tmp_path), "20260304T120000Z_missing_tool_a1b2"), "text")
+
+    with pytest.raises(ts.DecodeError, match="not a JSON object"):
+        read_report(str(tmp_path), "20260304T120000Z_missing_tool_a1b2")
+
+
 def test_load_reports_recent_first_and_respects_limit(tmp_path: Path):
     # Each report is stamped from the clock, whose tick is coarser than these calls, so the writes
     # are spaced far enough apart to state four different times rather than one.
@@ -280,55 +284,6 @@ def test_load_reports_recent_first_and_respects_limit(tmp_path: Path):
     # Most recent first
     assert result["reports"][0]["detail"] == "r3"
     assert result["reports"][1]["detail"] == "r2"
-
-
-def test_reports_come_back_in_the_order_they_state_not_the_order_their_bytes_landed(
-    tmp_path: Path,
-):
-    """A report whose bytes are touched after a later one still reads as the earlier of the two.
-
-    Bound to the file backend because the divergence can only be built in a file layout, which is
-    the point: a copy, a restore or an export rewrites when bytes landed, so a corpus ordered by
-    that would reshuffle a project's own account of what happened to it.
-    """
-    from tcip_store.file_backend import FileBackend
-
-    ts.bind(FileBackend())
-    earlier = report_friction(tmp_path, category="missing_tool", detail="stated earlier")
-    time.sleep(0.05)
-    report_friction(tmp_path, category="missing_tool", detail="stated later")
-
-    landed_last = time.time() + 60
-    os.utime(Path(earlier["report_path"]), (landed_last, landed_last))
-
-    result = load_project_memory(tmp_path, "reports", limit=10)
-
-    assert [r["detail"] for r in result["reports"]] == ["stated later", "stated earlier"]
-
-
-def test_retrospectives_come_back_by_their_stated_sections_not_by_when_bytes_landed(
-    tmp_path: Path,
-):
-    """A retrospective whose bytes are touched after a later one still reads as the earlier one.
-
-    The section headers a retrospective carries are its only record of when the work happened, so
-    they are what orders the corpus. File backend for the reason the report case names.
-    """
-    from tcip_store.file_backend import FileBackend
-
-    ts.bind(FileBackend())
-    earlier = write_retrospective(
-        tmp_path, project_id="earlier", task="t", worked="w", did_not_work="d")
-    time.sleep(0.05)
-    write_retrospective(
-        tmp_path, project_id="later", task="t", worked="w", did_not_work="d")
-
-    landed_last = time.time() + 60
-    os.utime(Path(earlier["retrospective_path"]), (landed_last, landed_last))
-
-    result = load_project_memory(tmp_path, "retrospectives", limit=10)
-
-    assert [r["project_id"] for r in result["retrospectives"]] == ["later", "earlier"]
 
 
 def test_a_retrospective_stating_no_section_sorts_after_every_dated_one_by_name(tmp_path: Path):
@@ -397,22 +352,21 @@ def test_load_reports_roundtrips_user_disagreement(tmp_path: Path):
     assert flags["b"] is True
 
 
-def test_report_friction_updates_project_status(tmp_path: Path):
+def test_a_friction_report_counts_toward_the_recent_activity_its_audit_line_records(tmp_path: Path):
     report_friction(tmp_path, category="missing_tool", detail="a")
-    status = read_project_status(tmp_path)
+    status = _recent_activity(tmp_path)
     assert status["reports_since_last_retrospective"] == 1
     assert status["reports_since_last_distillation"] == 1
 
 
-def test_write_retrospective_updates_project_status(tmp_path: Path):
+def test_a_retrospective_resets_the_report_count_and_is_pointed_at_by_id(tmp_path: Path):
     report_friction(tmp_path, category="missing_tool", detail="a")
     write_retrospective(tmp_path, project_id="p", task="t", worked="w", did_not_work="d")
 
-    status = read_project_status(tmp_path)
+    status = _recent_activity(tmp_path)
     assert status["reports_since_last_retrospective"] == 0
     assert status["last_retrospective"]["project_id"] == "p"
-    assert "path" not in status["last_retrospective"]  # backend-dependent, never persisted
-    assert "worked" not in json.dumps(status)  # no retrospective text cached, pointer only
+    assert "worked" not in json.dumps(status)  # no retrospective text, pointer only
 
 
 def test_record_distillation_pass_resets_distillation_counters(tmp_path: Path):
@@ -422,7 +376,7 @@ def test_record_distillation_pass_resets_distillation_counters(tmp_path: Path):
     result = record_distillation_pass(str(tmp_path))
     assert result["status"] == "recorded"
 
-    status = read_project_status(tmp_path)
+    status = _recent_activity(tmp_path)
     assert status["reports_since_last_distillation"] == 0
     assert status["last_distillation_at"]
 

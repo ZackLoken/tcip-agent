@@ -35,8 +35,8 @@ def test_gui_route_rows_and_platform_rows_agree_on_their_core_fields(
               "user": "tester"},
     )
     assert resp.status_code == 200, resp.text
-    audit_module.record_event("scan_dataset", {"dataset_root": str(dataset_root)},
-                              actor=None, scope=dataset_root)
+    audit_module.record_event_or_raise("scan_dataset", {"dataset_root": str(dataset_root)},
+                                       actor=None, scope=dataset_root)
 
     rows = ts.read_log(audit_module.audit_log_key(dataset_root)).records
     assert len(rows) == 2

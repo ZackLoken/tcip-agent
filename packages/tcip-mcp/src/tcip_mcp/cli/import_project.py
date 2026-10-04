@@ -1,11 +1,10 @@
 """Import an annotation project from a bundle ``tcip archive-project`` wrote: a ZIP archive, or a
 directory tree written by its ``--output-dir`` mode.
 
-The operator/agent entry point for restoring a project ``tcip archive-project`` bundled: stages
-the bundle into a private directory, refuses on any bookkeeping, collided, undecodable or
-unaccounted member, adopts what is left into a database when this process is bound to the
-database backend, then moves the staged tree onto ``destination``. Wraps
-``tcip_mcp.tools.project_tools.import_project`` with no MCP tool registration.
+The operator/agent entry point for restoring a project ``tcip archive-project`` bundled: extracts
+the bundle onto ``destination``, refusing a member that is the store's own bookkeeping or that
+escapes the destination. Wraps ``tcip_mcp.tools.project_tools.import_project`` with no MCP tool
+registration.
 
     tcip import-project <bundle_path> <destination>
 
@@ -30,12 +29,11 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                                              "run's audit line is recorded.")
     args = parser.parse_args(argv)
 
-    # Its own process entry point, so it binds the storage backend the seam has no default for.
-    from tcip_store.binding import bind_default
+    from tcip_store import bind
 
     from tcip_mcp.tools.project_tools import import_project
 
-    bind_default()
+    bind()
 
     result = import_project(args.bundle_path, args.destination)
     if "error" in result:

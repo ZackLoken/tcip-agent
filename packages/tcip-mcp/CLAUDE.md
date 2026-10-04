@@ -48,7 +48,7 @@ src/tcip_mcp/
   identity.py             # the user:<name> identity convention, spelled once
   agent_identity.py       # the client the MCP handshake declared and this run's minted session,
                             # stamped on every audit line and HTTP push; declarations, never verified
-  audit.py, project_status.py, web_client.py
+  audit.py, web_client.py
 ```
 
 Every MCP tool in `tools/` is decorated `@tool()` (`server.tool`); a tool that acts on a project
@@ -81,10 +81,9 @@ doc or comment.
   agent lacks that a console command can't carry.
 - State mutations route through audited doors only, each leaving one line: an `@audited` tool or
   console-command door, or a library function recording its own event through
-  `record_event_or_raise`; the record is `audit_log`, one store addressed by `audit.audit_log_key` under
-  two kinds of root (a dataset's own, a project's own), held by whichever
-  backend the process bound, that other code (including scripts) must not write around. `audit.py`
-  decides where an entry goes and what a failed append means: the decorator raises
-  `MutationCommittedWithoutAuditLine`; a caller that is neither an MCP tool nor a demoted door
-  emits through `record_event` (best-effort) or `record_event_or_raise` (raises
-  `AuditEntryNotWritten` on a failed append) rather than composing an entry of its own.
+  `record_event_or_raise`; the record is `audit_log`, one log addressed by `audit.audit_log_key`
+  under two kinds of root (a dataset's own, a project's own), held in that root's store database,
+  that other code (including scripts) must not write around. `audit.py` decides where an entry
+  goes and what a failed append means: the decorator raises `MutationCommittedWithoutAuditLine`;
+  a caller that is neither an MCP tool nor a demoted door emits through `record_event_or_raise`
+  (raises `AuditEntryNotWritten` on a failed append) rather than composing an entry of its own.

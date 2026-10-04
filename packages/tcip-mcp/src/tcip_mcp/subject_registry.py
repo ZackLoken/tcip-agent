@@ -4,8 +4,8 @@ The on-disk registry (``<dataset_root>/subjects.json``) is self-describing and n
 example, with ``tree`` and ``fruit`` as the subjects::
 
     {
-      "tree": {"description": "one tree crown", "defined_by": "...", "defined_at": "..."},
-      "fruit": {"description": "one fruit", "defined_by": "...", "defined_at": "...",
+      "tree": {"description": "one tree crown"},
+      "fruit": {"description": "one fruit",
                 "attributes": {
                   "condition": {"type": "categorical", "values": ["healthy", "diseased"]}
                 }}
@@ -70,8 +70,6 @@ class Subject:
 
     name: str
     description: str = ""
-    defined_by: str = ""
-    defined_at: str = ""
     attributes: tuple[Attribute, ...] = ()
 
     def attribute(self, name: str) -> Attribute | None:
@@ -129,22 +127,28 @@ def registry_from_dict(data: object) -> SubjectRegistry:
                     Attribute(name=aname, type=cast(str, abody.get("type")), values=tuple(values)))
             except ValueError as exc:
                 raise RegistryError(f"attribute {sname}.{aname}: {exc}") from exc
-        subjects.append(Subject(
-            name=sname,
-            description=str(sbody.get("description", "")),
-            defined_by=str(sbody.get("defined_by", "")),
-            defined_at=str(sbody.get("defined_at", "")),
-            attributes=tuple(attrs),
-        ))
+        description = sbody.get("description")
+        if not isinstance(description, str):
+            raise RegistryError(f"subject {sname!r} states no description string")
+        subjects.append(Subject(name=sname, description=description, attributes=tuple(attrs)))
     return SubjectRegistry(subjects=tuple(subjects))
+
+
+def registry_from_request(subjects: object) -> SubjectRegistry:
+    """:func:`registry_from_dict` over an authoring request, in which a subject stating no
+    ``description`` is one described by nothing yet."""
+    if isinstance(subjects, dict):
+        subjects = {name: {"description": "", **body} if isinstance(body, dict) else body
+                    for name, body in subjects.items()}
+    return registry_from_dict(subjects)
 
 
 def registry_to_dict(registry: SubjectRegistry) -> dict:
     """Serialize a :class:`SubjectRegistry` back to the nested mapping (inverse of
-    :func:`registry_from_dict`; empty description/provenance fields are still written for legibility)."""
+    :func:`registry_from_dict`; an empty description is still written)."""
     out: dict[str, dict] = {}
     for s in registry.subjects:
-        body: dict = {"description": s.description, "defined_by": s.defined_by, "defined_at": s.defined_at}
+        body: dict = {"description": s.description}
         if s.attributes:
             body["attributes"] = {
                 a.name: {"type": a.type, "values": list(a.values)} for a in s.attributes
@@ -154,21 +158,14 @@ def registry_to_dict(registry: SubjectRegistry) -> dict:
 
 
 def _checked_registry_document(data: bytes, *, path: str | Path) -> dict:
-    """The stored registry's decoded document, version-checked.
-
-    Raises :class:`RegistryError` for bytes that do not decode as JSON. Propagates
-    :class:`tcip_store.SchemaVersionRefused`, uncaught.
-    """
+    """The stored registry's decoded document. Raises :class:`RegistryError` for bytes that do
+    not decode as JSON."""
     import tcip_store
 
     try:
-        document = tcip_store.RECORD_JSON.decode(data)
+        return tcip_store.decode_value(data)
     except ValueError as exc:
         raise RegistryError(f"{path} does not decode as JSON: {exc}") from exc
-    from tcip_mcp.dataset_layout import SUBJECT_REGISTRY_STORE
-
-    tcip_store.check_schema_version(tcip_store.get_descriptor(SUBJECT_REGISTRY_STORE), document)
-    return document
 
 
 def read_versioned_registry(dataset_root: str | Path) -> tuple[SubjectRegistry, "Version"]:
@@ -177,16 +174,14 @@ def read_versioned_registry(dataset_root: str | Path) -> tuple[SubjectRegistry, 
 
     No registry raises ``FileNotFoundError``, and a registry whose bytes are present but will not
     decode raises :class:`RegistryError`, the same refusal a structurally invalid registry raises.
-    A ``schema_version`` this reader does not accept propagates as
-    :class:`tcip_store.SchemaVersionRefused`, uncaught.
     """
     import tcip_store
 
-    from tcip_mcp.dataset_layout import subject_registry_key, subjects_path
+    from tcip_mcp.dataset_layout import subjects_path
 
     path = subjects_path(dataset_root)
     try:
-        versioned = tcip_store.read_blob_versioned(subject_registry_key(dataset_root))
+        versioned = tcip_store.read_blob_versioned(path)
     except tcip_store.NotFound as exc:
         raise FileNotFoundError(f"no subject registry at {path}") from exc
     document = _checked_registry_document(versioned.value, path=path)
@@ -228,10 +223,7 @@ def replace_registry(
     stored registry (absent reads as no prior registry, not a refusal) and refuses a write that
     drops a subject, an attribute, or an attribute value the stored one declares, unless
     ``allow_removals`` is true. Stored bytes present but undecodable are likewise refused unless
-    ``allow_removals`` is true. A stored registry whose ``schema_version`` this reader does not
-    accept refuses the whole write regardless of ``allow_removals``:
-    :class:`tcip_store.SchemaVersionRefused` propagates uncaught from
-    :func:`_checked_registry_document`.
+    ``allow_removals`` is true.
 
     Refuses, independently of ``allow_removals``, a write that keeps an attribute's name and values
     but changes its ``type`` (categorical to ordinal or back), unless ``allow_type_changes`` is
@@ -249,14 +241,13 @@ def replace_registry(
     import tcip_store
 
     from tcip_mcp.audit import record_event_or_raise
-    from tcip_mcp.dataset_layout import subject_registry_key, subjects_path
+    from tcip_mcp.dataset_layout import subjects_path
 
     if not registry.subjects:
         raise RegistryError("a subject registry write must declare at least one subject")
 
     path = subjects_path(dataset_root)
-    key = subject_registry_key(dataset_root)
-    versioned = tcip_store.read_blob_versioned(key, default=None)
+    versioned = tcip_store.read_blob_versioned(path, default=None)
     outgoing: SubjectRegistry | None = None
     if versioned.value is not None:
         try:
@@ -293,7 +284,7 @@ def replace_registry(
                     )
 
     new_version = tcip_store.put_blob(
-        key, tcip_store.RECORD_JSON.encode(registry_to_dict(registry)),
+        path, tcip_store.encode_record(registry_to_dict(registry)),
         expect=versioned.version if expect is None else expect,
     )
 
@@ -310,12 +301,12 @@ def copy_registry(source: str | Path, destination: str | Path) -> None:
     """
     import tcip_store
 
-    from tcip_mcp.dataset_layout import subject_registry_key
+    from tcip_mcp.dataset_layout import subjects_path
 
     try:
         tcip_store.put_blob(
-            subject_registry_key(destination),
-            tcip_store.read_blob_versioned(subject_registry_key(source)).value,
+            subjects_path(destination),
+            tcip_store.read_blob_versioned(subjects_path(source)).value,
             expect=tcip_store.Version.ABSENT,
         )
     except tcip_store.VersionConflict as exc:

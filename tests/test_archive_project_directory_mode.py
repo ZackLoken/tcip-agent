@@ -44,8 +44,30 @@ def test_archive_project_refuses_a_non_empty_destination(tmp_path):
     result = archive_project(root, output_dir=str(dest))
 
     assert "error" in result
-    assert "not empty" in result["error"]
+    assert "already exists" in result["error"]
     assert [p.name for p in dest.iterdir()] == ["already_here.txt"]
+
+
+def test_archive_project_refuses_a_zip_destination_inside_the_project_or_already_written(
+    tmp_path,
+):
+    """The ZIP form takes the directory form's refusals: a destination inside the project would
+    bundle its own truncated self, and a written archive is never written over; a relative path
+    refuses rather than resolving against wherever the process runs."""
+    root = _project(tmp_path)
+    outside = tmp_path / "bundle.zip"
+
+    inside = archive_project(root, output_path=str(root / "archive.zip"))
+    assert "inside the project" in inside["error"]
+    assert not (root / "archive.zip").exists()
+
+    assert "error" not in archive_project(root, output_path=str(outside))
+    written = outside.read_bytes()
+    again = archive_project(root, output_path=str(outside))
+    assert "already exists" in again["error"]
+    assert outside.read_bytes() == written
+
+    assert "relative" in archive_project(root, output_path="archive.zip")["error"]
 
 
 def test_archive_project_refuses_both_output_path_and_output_dir(tmp_path):
@@ -83,9 +105,8 @@ def test_archive_project_directory_mode_admits_valid_work(tmp_path):
 
 
 def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_trip(tmp_path):
-    """archive_project(output_dir=...) -> import_project recovers a project the way the ZIP
-    round trip does (tests/test_project_tools.py::test_export_import_roundtrip), including its
-    band-group manifest and its multi-band-file capture, not only the single-band image."""
+    """archive_project(output_dir=...) -> import_project recovers a project, its band-group
+    manifest and its multi-band-file capture included."""
     from tcip_mcp.tools.project_tools import initialize_project, inspect_project, register_dataset
 
     src = tmp_path / "src_project"
@@ -103,14 +124,6 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
     imported = import_project(str(bundle_dir), str(dest))
     assert "error" not in imported, imported
     assert imported["files_extracted"] == exported["files_added"]
-
-    from tcip_store.adoption import adopt_root
-    from tcip_store.file_backend import database_file
-    from tcip_store.layout_claims import ROOT
-
-    dest_abs = str(Path(dest).absolute())
-    if not database_file(dest_abs).is_file():
-        adopt_root(dest_abs, ROOT, report=lambda line: None)
 
     status = inspect_project(dest)
     assert status["display_name"] == "Source project"
@@ -143,8 +156,7 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
 def _populate_project(src: Path) -> tuple[Path, Path]:
     """Populate an already-initialized project with a minimal image/label/registry, a
     multispectral capture's band-group manifest, and a sensor's own multi-band file, without
-    re-creating ``.tcip``. Returns the manifest path and the multi-band file path, the two
-    ``test_export_import_roundtrip`` also asserts a bundle carries whole.
+    re-creating ``.tcip``. Returns the manifest path and the multi-band file path.
     """
     from PIL import Image
 

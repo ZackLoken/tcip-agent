@@ -1,8 +1,8 @@
 """Data-state doctor: scan a live project for state inconsistencies code audits can't see.
 
 Checks empty label documents nobody marked complete, registry entries pointing at
-missing/test-fixture checkpoints, provenance smells, orphaned labels, verdict shards that will not
-read, and a stray file under ``.tcip/state`` no store claims. Read-only. Run at session start:
+missing/test-fixture checkpoints, provenance smells, orphaned labels, and verdict shards that will
+not read. Read-only. Run at session start:
 
     tcip doctor <project_root>
 
@@ -32,15 +32,11 @@ def _census(root: Path, findings: list, seen: "set[str]") -> dict | None:
     from tcip_annotation.json_io import UnreadableLabelDocument, read_label_document
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
     from tcip_mcp.tools.data_tools import _scan_dataset
-    from tcip_store import SchemaVersionRefused
 
     try:
         scan = _scan_dataset(str(root))
     except AmbiguousImageStem as exc:
         _report_stem_collision(findings, exc, seen)
-        return None
-    except SchemaVersionRefused as exc:
-        _report_band_group_version_refusal(findings, root, exc)
         return None
     label_reads: dict[Path, object] = {}
     for label in scan["labels"]:
@@ -61,15 +57,6 @@ def _report_stem_collision(findings: list, exc: Exception, seen: "set[str] | Non
             return
         seen.add(message)
     findings.append(("error", message))
-
-
-def _report_band_group_version_refusal(findings: list, root: Path, exc: Exception) -> None:
-    """Report a ``.bandgroup`` manifest whose ``schema_version`` this reader does not accept as a
-    finding naming the images tree it sits under.
-    """
-    from tcip_mcp.dataset_layout import image_root
-
-    findings.append(("warn", f"{image_root(root)}: a .bandgroup manifest could not be read: {exc}"))
 
 
 def _image_stems(root: Path) -> dict[str, str]:
@@ -164,14 +151,14 @@ def check_registry(root: Path, findings: list) -> None:
     from tcip_store import StoreError
 
     from tcip_mcp.buckets import bucket_dirs, read_bucket
-    from tcip_mcp.model_registry import RegistryVersionRefused, registered_entries
+    from tcip_mcp.model_registry import registered_entries
     from tcip_mcp.registry_paths import (
         RegistryPathEmpty, RegistryPathTraversal, resolved_registry_path,
     )
 
     try:
         entries = registered_entries(root)
-    except (StoreError, RegistryVersionRefused) as exc:
+    except StoreError as exc:
         findings.append(("error", "the model registry index will not decode or read, so this "
                         f"project's registered models could not be checked at all: {exc}"))
         return
@@ -242,15 +229,12 @@ def check_state(root: Path, findings: list, *, seen: "set[str] | None" = None) -
     import tcip_store
     from tcip_annotation.verdicts import REVIEW_VERDICTS_STORE, read_verdicts
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
-    from tcip_store import SchemaVersionRefused, StoreError
+    from tcip_store import StoreError
 
     try:
         stems = _image_stems(root)
     except AmbiguousImageStem as exc:
         _report_stem_collision(findings, exc, seen)
-        return
-    except SchemaVersionRefused as exc:
-        _report_band_group_version_refusal(findings, root, exc)
         return
     for key in tcip_store.keys(REVIEW_VERDICTS_STORE, str(project_state_dir(root))):
         bucket, image = key.parts
@@ -264,11 +248,10 @@ def check_state(root: Path, findings: list, *, seen: "set[str] | None" = None) -
 
 
 def check_traits(root: Path, findings: list) -> None:
-    """An error for every trait record the store or its schema refuses to read (a warning when
-    the refusal is the record's ``schema_version``), and a warning for every trait whose latest
-    revision the breeder has not confirmed."""
+    """An error for every trait record the store or its schema refuses to read, and a warning for
+    every trait whose latest revision the breeder has not confirmed."""
     from pydantic import ValidationError
-    from tcip_store import SchemaVersionRefused, StoreError
+    from tcip_store import StoreError
 
     from tcip_mcp.traits import read_trait, trait_names
 
@@ -276,8 +259,7 @@ def check_traits(root: Path, findings: list) -> None:
         try:
             record = read_trait(name, root)
         except (StoreError, ValidationError) as exc:
-            level = "warn" if isinstance(exc, SchemaVersionRefused) else "error"
-            findings.append((level, f"trait {name!r} will not read: {exc}"))
+            findings.append(("error", f"trait {name!r} will not read: {exc}"))
             continue
         if not record.latest.confirmed:
             findings.append(("warn", f"the latest revision ({record.latest.number}) of trait "
@@ -295,30 +277,6 @@ def check_project_record(root: Path, findings: list) -> None:
         findings.append(("error", problem))
 
 
-def check_stray_state_files(root: Path, findings: list) -> None:
-    """A file under ``.tcip/state`` no store claims (``tcip_mcp.stray_state.stray_state_files``) is
-    an info finding naming ``delete_stray_state_file`` as the remedy, never a warn or error. The
-    predicate matches path templates and never consults a database, so on a behind-database root
-    it can only under-report.
-    """
-    from tcip_mcp.stray_state import stray_state_files
-    from tcip_mcp.tools.bundle import AnchorMisplaced
-    from tcip_store.errors import StoreError
-
-    try:
-        strays = stray_state_files(root)
-    except (AnchorMisplaced, StoreError) as exc:
-        findings.append(("warn", f"the state root's accounting refused: {exc}"))
-        return
-    state_root = project_state_dir(Path(root).resolve())
-    for path in strays:
-        findings.append((
-            "info",
-            f".tcip/state/{path.relative_to(state_root).as_posix()}: a stray file under "
-            ".tcip/state that no store claims; delete it with delete_stray_state_file if it is "
-            "not needed"))
-
-
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], prog=prog)
     ap.add_argument("project_root", help="project directory holding images/ annotations/ .tcip/")
@@ -328,19 +286,18 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         print(f"error: not a directory: {root}")
         return 2
 
-    # Its own process entry point, so it binds the storage backend the seam has no default for.
-    from tcip_store.binding import bind_default
+    from tcip_store import bind
 
-    bind_default()
+    bind()
 
     findings: list[tuple[str, str]] = []
     # Shared across the checks that independently enumerate images/, so an images/ tree
-    # collision or an unreadable .bandgroup manifest is reported once, not once per check.
+    # collision is reported once, not once per check.
     ambiguous_seen: set[str] = set()
     census = _census(root, findings, ambiguous_seen)
     checks_taking_census = (check_data_quality, check_reserved_names, check_provenance)
     for check in (check_data_quality, check_reserved_names, check_registry, check_provenance,
-                  check_state, check_traits, check_project_record, check_stray_state_files):
+                  check_state, check_traits, check_project_record):
         run: Callable[..., None] = check
         if check is check_state:
             run(root, findings, seen=ambiguous_seen)

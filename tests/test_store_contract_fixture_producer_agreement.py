@@ -1,22 +1,74 @@
-"""Several of ``test_store_contract.py``'s ``REGISTERED`` goldens, checked against their producers.
-
-A golden there proves placement and encoding, never shape. Each case here derives the shape from
-the same producer the platform ships and checks the registered golden agrees with it, so a
-golden carrying a shape no producer writes is caught here.
-"""
+"""Records the platform's producers write, checked against a golden of their shape or against
+the shape their readers require."""
 
 from __future__ import annotations
 
-from tcip_mcp.pipelines.data import selection
+from typing import Any
 
-from tests.test_store_contract import REGISTERED
+TRAIT_UNDER_TEST = "trait_under_test"
+DELIVERY_KIND_UNDER_TEST = "state_crossing_dates"
+
+TRAIT_GOLDEN: dict[str, Any] = {"revisions": [{
+    "number": 1,
+    "entry": {
+        "name": TRAIT_UNDER_TEST, "delivers": ["measure_one"],
+        "positive_state": {"attribute": "stage", "value": "büsch"},
+        "milestone_fractions": [0.5], "milestone_on": "positive_fraction",
+        "majority_milestone": "",
+        "phenology_prefix": "", "majority_label": "", "count_objective": "",
+        "localization": "", "localization_tolerance": "half_class_avg_size",
+        "localization_tolerance_frac": 0.5, "count_bias_tolerance_frac": None,
+        "count_error_tolerance": None, "classifier_agreement_floor": None,
+        "ordinal_agreement_floor": None, "regression_skill_floor": None,
+        "regression_criterion": "",
+        "scale_tolerance_frac": None, "holdout_match_quality_floor": None, "notes": "ü",
+        "operationalizations": {DELIVERY_KIND_UNDER_TEST: {
+            "statement": "the date each büsch reached the measured state",
+            "mechanism": "the calibrated state classifier over isolated buds",
+            "measured_subject": "bud", "delivered_phenotypes": ["measure_one"],
+            "delivered_value_keys": []}}},
+    "entry_sha256": "7f3a1b9c2d4e5f60",
+    "rationale": "the breeder described the state directly", "relayed_note": "",
+    "proposed_at": "2026-03-04T12:00:00+00:00",
+    "confirmed_by": "user:ü", "confirmed_at": "2026-03-04T12:30:00+00:00",
+    "withdrawn_by": None, "withdrawn_at": None}]}
+"""One trait's record as the proposing and confirming producers leave it."""
+
+DELIVERY_EVENT_GOLDEN: dict[str, Any] = {
+    "event_id": "a1b2c3d4e5f60718", "trait": TRAIT_UNDER_TEST, "trait_revision": 1,
+    "trait_revision_sha256": "7f3a1b9c2d4e5f60",
+    "delivery_kind": DELIVERY_KIND_UNDER_TEST, "door": "deliver_phenology_milestones",
+    "output_path": "büsch_phenology.csv", "output_sha256": "0" * 64,
+    "producer": {"checkpoint_sha256": "0" * 64, "experiment_id": "exp_042"},
+    "buckets": [{"path": "predictions/live/2026-03-04", "date": "2026-03-04",
+                 "assessment_id": "assessment-ü", "validated": True, "reason": None}],
+    "scale_assessment_id": None, "validated": True, "acknowledgment": None,
+    "population": ["plot_ü"], "require_all_dates_complete": True,
+    "plant_mapping": {
+        "name": "valley", "dataset_id": "ds-1",
+        "dataset_root": "dü", "built_at": "2026-03-04T12:00:00+00:00",
+        "record_sha256": "0" * 64, "nn_tolerance_m": {"value": 3.0, "source": "stated"},
+        "capture_identity": {"2026-03-04": "0" * 16}, "captures_unverified": [],
+        "plant_csvs_unverified": [], "dates_delivered": ["2026-03-04"],
+        "images_unattributed": 0, "images_unattributed_scope": "delivered_dates",
+        "plant_attribution": "image"},
+    "produced_at": "2026-03-04T12:00:00+00:00"}
+"""One completed delivery, with the gate's finding for the bucket it shipped."""
 
 
-def test_the_selection_golden_carries_each_sample_s_own_source_label_group_and_side(tmp_path):
+def test_the_delivery_events_golden_validates_against_its_declared_shape():
+    """The delivery-event golden validates as a ``DeliveryEventRecord``."""
+    from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord
+
+    DeliveryEventRecord.model_validate(DELIVERY_EVENT_GOLDEN)
+
+
+def test_a_selection_record_carries_each_sample_s_own_source_label_group_and_side(tmp_path):
     """A selection's record is its sample list: each entry names its own source and label rather
-    than a shared root, so the golden cannot carry a per-date members block or a bare id list."""
+    than a shared root, with no per-date members block or bare id list."""
     import tcip_store as ts
 
+    from tcip_mcp.pipelines.data import selection
     from tcip_mcp.pipelines.data.label_queries import registry_scope
 
     selection.write_selection(
@@ -34,13 +86,9 @@ def test_the_selection_golden_carries_each_sample_s_own_source_label_group_and_s
         project=tmp_path,
     )
     fresh = ts.read(selection.selection_key(tmp_path / "splits"))
-    golden = REGISTERED["selection"].golden
-    assert isinstance(golden, dict)
 
-    assert "members" not in golden and "splits" not in golden and "date" not in golden
-    assert set(golden["samples"][0]) == set(fresh["samples"][0]) >= {
-        "member", "source", "ground_truth", "group", "side"}
-    assert set(golden) == set(fresh)
+    assert "members" not in fresh and "splits" not in fresh and "date" not in fresh
+    assert set(fresh["samples"][0]) >= {"member", "source", "ground_truth", "group", "side"}
 
 
 def test_the_delivery_events_golden_carries_every_key_a_delivery_records(tmp_path):
@@ -62,8 +110,7 @@ def test_the_delivery_events_golden_carries_every_key_a_delivery_records(tmp_pat
     assert "error" not in delivered, delivered
     (event,) = read_delivery_events(tmp_path)
     fresh = event.model_dump(mode="json")
-    golden = REGISTERED["delivery_events"].golden
-    assert isinstance(golden, dict)
+    golden = DELIVERY_EVENT_GOLDEN
     assert set(golden) == set(fresh)
     assert set(golden["buckets"][0]) == set(fresh["buckets"][0])
     assert set(golden["producer"]) == set(fresh["producer"])
@@ -82,11 +129,9 @@ def test_the_traits_golden_carries_every_field_the_proposing_and_confirming_prod
 
     fx.seed_confirmed_count(tmp_path)
     fresh = ts.read(traits.trait_key(tmp_path, fx.COUNT_TRAIT))
-    golden = REGISTERED["traits"].golden
-    assert isinstance(golden, dict)
 
-    (golden_revision,), fresh_revision = golden["revisions"], fresh["revisions"][-1]
-    assert set(golden) == set(fresh)
+    (golden_revision,), fresh_revision = TRAIT_GOLDEN["revisions"], fresh["revisions"][-1]
+    assert set(TRAIT_GOLDEN) == set(fresh)
     assert set(golden_revision) == set(fresh_revision)
     assert set(golden_revision["entry"]) == set(fresh_revision["entry"])
     (golden_op,), (fresh_op,) = (golden_revision["entry"]["operationalizations"].values(),

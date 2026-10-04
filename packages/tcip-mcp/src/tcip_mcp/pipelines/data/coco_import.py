@@ -44,7 +44,7 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
     transaction over every document, each checked absent under the locks: a label placed after
     validation refuses the whole import with nothing written, and a failure while publishing is
     rolled back, leaving no document of the import behind while the rollback itself succeeds
-    (``tcip_store.transaction``).
+    (``tcip_store.blob_transaction``).
     """
     import tcip_store
     from tcip_annotation.format_io import is_coco_id, parse_coco_annotations
@@ -84,7 +84,7 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
     capture = date if dates else None
     images_dir = dataset_layout.image_dir(root, capture)
     logical = list_logical_images(images_dir)
-    writes: list[tuple[tcip_store.Key, bytes]] = []
+    writes: list[tuple[Path, bytes]] = []
     ids: set[int] = set()
     stems: set[str] = set()
     for i, record in enumerate(images):
@@ -121,26 +121,25 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
         if not identified:
             continue
         try:
-            key, data = encode_annotations(str(target), by_image.get(image_id, []), width, height)
+            path, data = encode_annotations(target, by_image.get(image_id, []), width, height)
         except ValueError as exc:
             problems.append(f"image {name!r}: {exc}")
             continue
         if data is not None:
-            writes.append((key, data))
+            writes.append((path, data))
     problems += [f"annotations name image id {image_id!r}, which the document does not list"
                  for image_id in sorted(set(by_image) - ids)]
     if problems:
         raise ValueError(f"{source} was not imported, nothing written: " + "; ".join(problems))
 
-    written = [str(tcip_store.blob_path(key)) for key, _ in writes]
-    arguments = {"document": source, "date": date, "written": written}
+    arguments = {"document": source, "date": date, "written": [str(path) for path, _ in writes]}
     if writes:
-        with tcip_store.transaction(*(key for key, _ in writes)) as txn:
-            for (key, data), path in zip(writes, written):
-                if txn.read(key, default=None) is not None:
+        with tcip_store.blob_transaction(*(path for path, _ in writes)) as txn:
+            for path, data in writes:
+                if txn.read(path, default=None) is not None:
                     raise ValueError(f"{source} was not imported, nothing written: {path} "
                                      "already exists")
-                txn.write(key, data)
+                txn.write(path, data)
         record_event_or_raise("coco_document_imported", arguments, actor=None, scope=root,
                               document_digest=digest_bytes(raw))
     return arguments

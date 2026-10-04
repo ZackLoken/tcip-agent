@@ -1,7 +1,7 @@
 """The audit log: one append-only store under a dataset root or a project root
 (:func:`audit_log_key`). :func:`audited` records a decorated door's calls (timestamp, tool name,
-arguments, status and duration); :func:`record_event` and :func:`record_event_or_raise` record for
-code that is not a door."""
+arguments, status and duration); :func:`record_event_or_raise` records for code that is not a
+door."""
 
 from __future__ import annotations
 
@@ -13,28 +13,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, TypeVar, overload
 
-from tcip_store import LOG_JSON, Key, StoreDescriptor, append, register_store
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import Key, append
 
 from tcip_mcp import agent_identity
 
 logger = logging.getLogger(__name__)
 
-_AUDIT_LOG = RootedFileLocator(prefix=(".tcip",), suffix=".jsonl")
-"""The append-only log under a root's own ``.tcip/``."""
-
 AUDIT_LOG_STORE = "audit_log"
 _AUDIT_PARTS = ("audit",)
-register_store(
-    StoreDescriptor(
-        name=AUDIT_LOG_STORE,
-        kind="log",
-        key_fields=("document",),
-        frozen=True,
-        codec=LOG_JSON,
-        locator=_AUDIT_LOG,
-    )
-)
 
 # Fields to redact from logged arguments
 _REDACTED_FIELDS = {"api_key", "token", "password", "secret"}
@@ -124,26 +110,6 @@ def _entry(
     return entry
 
 
-def record_event(
-    tool: str,
-    arguments: dict[str, Any] | None = None,
-    *,
-    actor: str | None,
-    status: str = "ok",
-    scope: str | Path,
-    **extra: Any,
-) -> None:
-    """Emit one best-effort audit line for a caller that is not an ``@audited`` door, performed by
-    ``actor``. ``scope`` names the root whose log the entry belongs in (see
-    :func:`audit_log_key`). Never raises.
-    """
-    try:
-        append(audit_log_key(scope), _entry(tool, arguments, actor, status, extra))
-    except Exception:
-        # A dropped audit line is a real provenance gap, surface it, don't bury it at debug.
-        logger.warning("Failed to write audit entry", exc_info=True)
-
-
 def record_event_or_raise(
     tool: str,
     arguments: dict[str, Any] | None = None,
@@ -153,15 +119,15 @@ def record_event_or_raise(
     scope: str | Path,
     **extra: Any,
 ) -> None:
-    """Emit one audit line, performed by ``actor``, for a mutation already made, in
-    :func:`record_event`'s shape. A failed append is raised as :class:`AuditEntryNotWritten`,
-    naming the mutation that committed unrecorded.
+    """Emit one audit line, performed by ``actor``, for a mutation already made by a caller that
+    is not an ``@audited`` door, in the log of the root ``scope`` names (:func:`audit_log_key`). A
+    failed append is raised as :class:`AuditEntryNotWritten`, naming the mutation that committed
+    unrecorded.
     """
     entry = _entry(tool, arguments, actor, status, extra)
     try:
         append(audit_log_key(scope), entry)
     except Exception as exc:
-        logger.warning("Failed to write the audit entry for %s", tool, exc_info=True)
         raise AuditEntryNotWritten(tool, exc, arguments=arguments) from exc
 
 

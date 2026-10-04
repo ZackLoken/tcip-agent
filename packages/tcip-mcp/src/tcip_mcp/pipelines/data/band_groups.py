@@ -26,46 +26,15 @@ from datetime import datetime
 from pathlib import Path
 
 import tcip_store
-from tcip_store import (
-    RECORD_JSON,
-    Key,
-    StoreDescriptor,
-    Version,
-    VersionConflict,
-    check_schema_version,
-    get_descriptor,
-    register_store,
-)
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import Version, VersionConflict, encode_record
 
 MANIFEST_EXT = ".bandgroup"
 
-BAND_GROUP_MANIFEST_STORE = "band_group_manifest"
-_MANIFEST_FILE = RootedFileLocator(suffix=MANIFEST_EXT)
-"""A manifest sits beside the sibling files it names, so its scope is that image directory."""
-
-register_store(
-    StoreDescriptor(
-        name=BAND_GROUP_MANIFEST_STORE,
-        kind="blob",
-        key_fields=("stem",),
-        frozen=True,
-        locator=_MANIFEST_FILE,
-    )
-)
-
-
-def band_group_manifest_key(images_dir: str | Path, stem: str) -> Key:
-    """The manifest naming ``stem``'s sibling files, keyed under the image directory (it is itself
-    an enumerated logical image there), encoded through ``RECORD_JSON``.
-    """
-    return Key(BAND_GROUP_MANIFEST_STORE, str(images_dir), (stem,))
-
 
 def band_group_manifest_path(images_dir: str | Path, stem: str) -> Path:
-    """Where ``stem``'s manifest lives, for a reader holding the directory and the stem."""
-    relative = _MANIFEST_FILE.relative_path(str(images_dir), (stem,))
-    return Path(images_dir, *relative.parts)
+    """Where ``stem``'s manifest lives: beside the sibling files it names, itself an enumerated
+    logical image of that directory."""
+    return Path(images_dir, f"{stem}{MANIFEST_EXT}")
 
 
 # Extensions an embedded-metadata scan bothers reading, the DJI-shaped rigs this generalizes to
@@ -340,11 +309,9 @@ def groups_from_explicit_mapping(
 
 def read_band_group_manifest(manifest_path: Path) -> BandGroupRef:
     """Parse a ``.bandgroup`` file into a :class:`BandGroupRef`. Raises ``ValueError`` on a
-    malformed manifest (missing/empty ``bands``); :class:`tcip_store.SchemaVersionRefused`
-    propagates uncaught.
+    malformed manifest (missing/empty ``bands``).
     """
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    check_schema_version(get_descriptor(BAND_GROUP_MANIFEST_STORE), data)
     bands_field = data.get("bands")
     if not isinstance(bands_field, dict) or not bands_field:
         raise ValueError(f"{manifest_path}: 'bands' must be a non-empty {{name: filename}} mapping")
@@ -375,10 +342,9 @@ def write_band_group_manifest(
     payload: dict = {"bands": {name: p.name for name, p in bands.items()}, "source": source}
     if central_wavelength_nm:
         payload["central_wavelength_nm"] = central_wavelength_nm
-    tcip_store.put_blob(
-        band_group_manifest_key(images_dir, stem), RECORD_JSON.encode(payload), expect=expect,
-    )
-    return band_group_manifest_path(images_dir, stem)
+    path = band_group_manifest_path(images_dir, stem)
+    tcip_store.put_blob(path, encode_record(payload), expect=expect)
+    return path
 
 
 def detect_and_write_band_groups(
@@ -419,7 +385,7 @@ def detect_and_write_band_groups(
         try:
             ref = read_band_group_manifest(mp)
         except (OSError, ValueError):
-            continue  # SchemaVersionRefused is neither: it propagates rather than dissolving the group
+            continue
         already_claimed.update(p.name for p in ref.bands.values())
 
     candidates = [p for p in _candidate_single_band_files(d) if p.name not in already_claimed]

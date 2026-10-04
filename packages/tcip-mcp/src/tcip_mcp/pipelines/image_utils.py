@@ -56,11 +56,9 @@ def _scan_identities(d: Path) -> dict[str, list[tuple[Path, "BandGroupRef | None
 
     A readable manifest is one identity under its own exact stem, paired with the parsed
     :class:`BandGroupRef`; its claimed band files are that identity's members and no identity of
-    their own. An unreadable or corrupt manifest claims nothing and is no identity. A manifest
-    whose ``schema_version`` this reader does not accept raises
-    :class:`tcip_store.SchemaVersionRefused`, uncaught, before anything else. Every other file with
-    a suffix in :data:`IMAGE_EXTS` that no readable manifest claims is one raw identity under its
-    own exact stem, paired with ``None``.
+    their own. An unreadable or corrupt manifest claims nothing and is no identity. Every other
+    file with a suffix in :data:`IMAGE_EXTS` that no readable manifest claims is one raw identity
+    under its own exact stem, paired with ``None``.
     """
     identities: dict[str, list[tuple[Path, BandGroupRef | None]]] = {}
     claimed: set[str] = set()
@@ -101,8 +99,7 @@ def list_logical_images(images_dir: str | Path) -> dict[str, "Path | BandGroupRe
 
     Built from :func:`_scan_identities`: a :class:`BandGroupRef` for a manifest identity, that
     file's own path for a raw one. Raises :class:`AmbiguousImageStem` naming every ambiguous key's
-    own paths; the returned mapping is keyed by the exact stem. A manifest whose ``schema_version``
-    this reader does not accept propagates as :class:`tcip_store.SchemaVersionRefused`.
+    own paths; the returned mapping is keyed by the exact stem.
     """
     d = Path(images_dir)
     if not d.is_dir():
@@ -343,12 +340,10 @@ def load_multiband(path: "str | Path | BandGroupRef", num_channels: int) -> np.n
     """Load a multi-band image as ``[H, W, C]`` (NPY/NPZ natively; GeoTIFF via tifffile).
 
     A :class:`BandGroupRef` decodes each sibling file (each already a supported single-band
-    source) and stacks them into one ``[H, W, C]`` array in the manifest's declared band order:
-    the one place virtual (in-memory) stacking happens; never written back to disk.
+    source) and stacks them into one ``[H, W, C]`` array in the manifest's declared band order.
 
     A photographic container (anything outside ``.npy`` / ``.npz`` / ``.tif`` / ``.tiff``) raises
-    ``ValueError`` at any channel count: band data is what this returns, and a PIL frame is
-    :func:`load_image`'s business.
+    ``ValueError`` at any channel count.
     """
     with raster_source.open_array_source(path, num_channels) as src:
         return src.read_region(Rect(0, 0, src.width, src.height))[0]

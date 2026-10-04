@@ -12,7 +12,7 @@ import logging
 from glob import glob
 from pathlib import Path
 
-from tcip_store import store
+import tcip_store
 
 from tcip_annotation.json_io import is_reserved_stem
 from tcip_mcp import dataset_layout
@@ -299,10 +299,7 @@ def ingest_images(
         # A bad file (locked, vanished, unreadable) must not abort the batch; the blob becomes
         # the image only once whole, so a crash mid-copy can't leave a torn image.
         try:
-            data = src_path.read_bytes()
-            store.put_blob(
-                dataset_layout.image_key(project, bucket, src_path.stem, src_path.suffix), data
-            )
+            tcip_store.put_blob(dest, src_path.read_bytes())
         except OSError as exc:
             errors.append({"source": str(src_path), "error": str(exc)})
             continue

@@ -23,7 +23,7 @@ src/tcip_annotation/
 - No dependency on `tcip-mcp` or `tcip-web`. The one TCIP dependency it does carry is
   `tcip-store`, the storage seam below all three packages. A private copy of the
   temp-file-plus-replace primitive is not an acceptable substitute. A caller outside TCIP
-  addresses a file through `RootedFileLocator` and needs nothing from `tcip-mcp`'s layout.
+  addresses a document by its path and needs nothing from `tcip-mcp`'s layout.
 - One label shape: the per-image JSON document. An external dataset-level COCO is read once by
   `format_io.parse_coco_annotations`, on its way into per-image documents through tcip-mcp's
   import door, and never written or trained on. VOC, LabelMe, and YOLO are not read. A record

@@ -21,19 +21,10 @@ def get_reports(limit: int = 50) -> dict[str, Any]:
     """Return the open project's recent friction reports, newest stated timestamp first."""
     root = str(store.open_root())
 
-    from tcip_mcp.tools.meta_tools import report_document_name, report_documents
+    from tcip_mcp.tools.meta_tools import report_documents, report_row
 
     documents = report_documents(root)
-    reports: list[dict[str, Any]] = [
-        {
-            "file": report_document_name(document.name),
-            "timestamp": document.timestamp,
-            "category": document.value.get("category", ""),
-            "detail": document.value.get("detail", ""),
-            "context": document.value.get("context", {}),
-        }
-        for document in documents[:limit]
-    ]
+    reports = [report_row(document) for document in documents[:limit]]
 
     return {"reports": reports, "count": len(reports), "total_available": len(documents)}
 

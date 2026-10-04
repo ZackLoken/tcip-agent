@@ -250,12 +250,12 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/routes/meta.py | Meta-loop routes: read-only, on-demand views over the friction reports and retrospectives, enumerated, ordered and decoded by the module that owns their stores. | 2 | 1 |
 | packages/tcip-web/src/tcip_web/routes/projects.py | The workspace's projects: listing them, opening one, removing one and renaming one. | 11 | 3 |
 | packages/tcip-web/src/tcip_web/routes/results.py | Results routes: plant-mapping, per-plant phenology curves, CSV export, and the traits with the breeder's confirmation of a trait revision. | 18 | 2 |
-| packages/tcip-web/src/tcip_web/routes/sessions.py | Annotation session telemetry at the open project's ``.tcip/state/annotation_stats.json``: each session's person, start and end, and one entry per contribution to an image naming its activity. | 7 | 2 |
+| packages/tcip-web/src/tcip_web/routes/sessions.py | Annotation session telemetry in the open project's annotation-stats record: each session's person, start and end, and one entry per contribution to an image naming its activity. | 7 | 2 |
 | packages/tcip-web/src/tcip_web/routes/subjects.py | Subject registry routes. | 8 | 1 |
 | packages/tcip-web/src/tcip_web/routes/terminal.py | Agent terminal routes: provider status, session launch, restart and submitted requests over HTTP, and per session a WebSocket carrying raw PTY output as text frames out and ``TerminalInputFrame``/``TerminalResizeFrame`` JSON messages in. | 4 | 4 |
 | packages/tcip-web/src/tcip_web/routes/training.py | Training routes: launchable configs, launch/relaunch, list runs, live metrics stream. | 12 | 2 |
 | packages/tcip-web/src/tcip_web/routes/tuning.py | HPO / Tuning routes: relaunch, cancel, list and per-trial visibility, each read off the sweep's own directory under ``.tcip/hpo`` (``training_tools.sweep_record`` and ``read_sweep``). | 13 | 1 |
-| packages/tcip-web/src/tcip_web/state.py | The web backend's own state: the workspace it serves, the project it has open, that project's live :class:`~tcip_mcp.web_client.GuiState` (persisted to the project's ``.tcip/state/gui.json`` on every change) and the panel events it retains for a browser that connects late. | 2 | 17 |
+| packages/tcip-web/src/tcip_web/state.py | The web backend's own state: the workspace it serves, the project it has open, that project's live :class:`~tcip_mcp.web_client.GuiState` (persisted to the project's GUI snapshot record on every change) and the panel events it retains for a browser that connects late. | 2 | 17 |
 | packages/tcip-web/src/tcip_web/terminal.py | Embedded agent terminal: an agent harness from :data:`PROVIDERS` spawned directly in a pseudo-terminal (ConPTY via ``pywinpty`` on Windows, the stdlib ``pty`` on POSIX), its raw bytes streamed out and keystrokes streamed in. | 4 | 3 |
 | packages/tcip-web/src/tcip_web/trust_boundary.py | The network trust boundary: the backend serves connections that arrived through this machine, and answers only to loopback names. | 0 | 1 |
 
@@ -775,17 +775,12 @@ Docstring is the function's docstring first line, verbatim.
 | `view_gui_state` | `project_tools.py:205` | yes | The live GUI session the human is looking at in this project: dataset, date, trait, tab, |
 | `inspect_project` | `project_tools.py:220` | yes | Get an overview of the project. |
 
-`tools/bundle.py` (not a tool module: no `@tool()` sites) is the one membership accounting
-`archive_project` and `import_project` both compose from, `account_for(tree)`. It derives every
-root a project tree is or holds (the fixed `.tcip` structure, plus every `selection.json`
-anchor under placement constraints that raise `AnchorMisplaced` when one
-sits at the tree root, under `.tcip`, under a blob home, or under/above another derived root),
-then classifies every file by precedence: bookkeeping, a record or log claimed by exactly one
-derived root's own layout (`tcip_store.adoption.plan_root`; two roots claiming one file is a
-`collisions` entry on the result, never a specificity tie), a recognized blob home, or
-unaccounted. `archive_project` bundles the record/log and blob classes; `import_project` refuses
-on any bookkeeping, collided, undecodable or unaccounted member before adopting or moving
-anything.
+`archive_project` bundles every file under the project except the store's bookkeeping
+(`tcip_store.file_backend.is_bookkeeping`: locks, temp files, the database's WAL sidecars), each
+`.tcip/store.db` as the consistent copy `tcip_store.sqlite_backend.copy_database` takes, and
+without the checkpoints `model_registry.checkpoint_files` names unless `include_models`.
+`import_project` stages the bundle, refuses any bookkeeping member or one escaping the staging
+directory, and moves the staged tree onto an empty destination.
 
 ### proposal_tools.py (2 tools)
 
@@ -1215,17 +1210,13 @@ alone).
 
 ## 9. `audit_log`, one append-only store under two kinds of root
 
-Path: `.tcip/audit.jsonl` under the root an entry's scope names (`audit_log_key`,
-`packages/tcip-mcp/src/tcip_mcp/audit.py:74`): a dataset root for an event that changed a record
-traveling with the data; the project root otherwise. Every writer names its scope; there is no
-process-wide default log. That path is what the file backend places the log at and what
-`tcip export-store` writes back out; on the default database backend the rows live in that
-root's `.tcip/store.db` until they are exported.
+Key: `audit_log_key`, `packages/tcip-mcp/src/tcip_mcp/audit.py:60`, a log in the database of the
+root an entry's scope names: a dataset root for an event that changed a record traveling with
+the data; the project root otherwise. Every writer names its scope; there is no process-wide
+default log. `tcip dump-store` writes the log out as a file for reading.
 
-Writers: three write paths, `audit.py:197` (`audited`), `audit.py:127` (`record_event`) and
-`audit.py:147` (`record_event_or_raise`), each appending at `audit_log_key(scope)`; a line records
-no `scope` field, since the log it sits in is its scope. No line carries a `schema_version` field:
-absence is the frozen version 1, `frozen-formats.json`'s ceiling for this store.
+Writers: two write paths, `audited` and `record_event_or_raise` (`audit.py`), each appending at
+`audit_log_key(scope)`; a line records no `scope` field, since the log it sits in is its scope.
 
 Every mutating door leaves exactly one line per act, the decorator's or the library's. The
 decorator writes none for a call that returns its error dict and an `exception` line for a call
@@ -1247,7 +1238,7 @@ dataset-scoped (`register_dataset`, `tools/project_tools.py:97`; `propose_annota
 the entry in the project's own log; a resolver that raises refuses the call rather than filing it
 there.
 
-`record_event`/`record_event_or_raise` cover code that is neither an MCP tool nor a demoted door.
+`record_event_or_raise` covers code that is neither an MCP tool nor a demoted door.
 Project-scoped: the training envelope's open/close events
 (`pipelines/training/envelope.py`), the model registry's write event (`model_registered`,
 `model_registry.py`), an assessment's one line once its record is written
@@ -1276,31 +1267,25 @@ its server was started for and the web build route passes the backend's open pro
 sweep's opening (`open_sweep`, `tools/training_tools.py`), which both the tool and the GUI's
 relaunch reach.
 
-What a failed append means is where the three write paths part: `record_event` warns and
-returns, because its callers bracket work rather than follow a
-mutation; `record_event_or_raise` raises `AuditEntryNotWritten`; the decorator raises
-`MutationCommittedWithoutAuditLine`, because its append runs after the tool body and a warning
-there invites a blind retry of a mutation already on disk.
+A failed append is raised on both paths: `record_event_or_raise` raises `AuditEntryNotWritten`;
+the decorator raises `MutationCommittedWithoutAuditLine`, because its append runs after the tool
+body and a warning there invites a blind retry of a mutation already on disk.
 
 A log's own root is its scope, so a line names no root and a moved or imported project's log
 carries no machine path of its own; arguments a caller passed as absolute paths travel in an
 archive unredacted, since a project archive is provenance-preserving, not path-sanitized.
 
-Readers: one production parser, reading through the storage seam's `read_log` rather than
-decoding lines by hand, and refusing (never scanning past) a page reporting corruption or an
-unknown `schema_version`. `plant_mapping._scan_receipts`
-(`pipelines/postprocessing/plant_mapping.py:1453`) and `_require_receipt`
-(`pipelines/postprocessing/plant_mapping.py:1480`), the hard receipt gate `load_mapping` runs
+Readers: every reader goes through the storage seam's `read_log` rather than decoding lines by
+hand. The receipt gate refuses (never scans past) a page reporting corruption:
+`plant_mapping._scan_receipts`
+(`pipelines/postprocessing/plant_mapping.py:1423`) and `_require_receipt`
+(`pipelines/postprocessing/plant_mapping.py:1444`), the hard receipt gate `load_mapping` runs
 before trusting a persisted mapping record:
 every `plant_mapping_built` entry in the record's own project log is scanned for a receipt naming
-the record's digest, and a page reporting `page.corrupt` or `page.version_refused` raises rather
-than reading past it, since an entry could be hiding behind either kind of unreadable line unread.
-
-Beyond these two, `archive_project` (`tools/project_tools.py`) bundles the log file as a claimed
-ROOT-layout record through the shared membership accounting (`tcip_mcp.tools.bundle.account_for`)
-without opening it, and every other reader goes through the storage seam's own `read_log` or a
-test asserting named keys, so a new per-entry field (such as `schema_version` here) is additive
-for every consumer beside the two parsers above.
+the record's digest, and a page reporting `page.corrupt` raises rather than reading past it,
+since an entry could be hiding behind an unreadable line unread. `read_audit_log`
+(`tools/meta_tools.py`) answers an error naming the corrupt count, and `inspect_project`'s recent
+activity (`tools/project_tools.py`) answers `status_unavailable` naming it.
 
 ## 10-15. `.tcip/experiments/<experiment_id>/`, a run directory
 
@@ -1366,9 +1351,10 @@ check and its reserved-regions assessment) are driven against the same
 resolved record by `tests/test_spatial_region_containment.py`,
 `tests/test_run_partition_membership_fidelity.py` and `tests/test_selection_binding.py`.
 
-## 16. `.tcip/models/registry.json`, trained-model registry
+## 16. The trained-model registry index
 
-Path: `<project_path>/.tcip/models/registry.json`.
+Key: `registry_index_key`, `packages/tcip-mcp/src/tcip_mcp/model_registry.py:42`, store
+`model_registry`, in the project's database.
 
 The registry is one relation from sha256 to its one owner, `registered_entries`,
 `packages/tcip-mcp/src/tcip_mcp/model_registry.py:121`: the completed run whose final status names
@@ -1385,14 +1371,8 @@ the checkpoint's payload through that reader (`entry_facts`, `model_registry.py:
 metrics are the ones its payload carries, sourced `"trainer"` or `"training_source"`, a foreign
 entry's the ones its registration stated, sourced `"caller"`.
 
-The index document is `{entries: [...]}`, no `schema_version` field until this store's first bump
-(absence is the frozen version 1), read and written through one pair,
-`_read_registry_document`/`_write_registry_document`, that is the only code touching the raw
-value: an absent key answers the empty document, a present bare array is the shape this store
-carried before the family that wrapped it and refuses by name (`RegistryVersionRefused`,
-deliberately not a `StoreError`) stating that no operator door rewraps a live project's registry
-in place: the registry predates the entries-mapping shape the platform writes, and nothing
-repairs it in place. `ModelRegistry.register_model` spells `checkpoint_path` through
+The index record is `{entries: [...]}` at `registry_index_key`; an absent record answers no
+entries. `ModelRegistry.register_model` spells `checkpoint_path` through
 `registry_paths.checkpoint_registry_path_for` against the registry's own scope root: relative
 POSIX when the checkpoint resolves under it, absolute when it does not (the dataset registry's
 own `entry_is_external`/`registry_path_for` share the same containment core and grammar-aware
@@ -1411,13 +1391,14 @@ states none, the single declared-direction mapping `resolve_selection_metric`
 (`pipelines/training/generic_trainer.py`) also reads for the trainer's own checkpoint selection.
 Every one of these accessors, plus `register_model`'s own return, answers `checkpoint_path`
 resolved to an absolute path (`registry_paths.resolved_registry_path`) on a copy, never the
-registry's own internal relative-or-absolute storage spelling; bundle's checkpoint resolution and
-`doctor.py`'s registry check resolve through the same function. `unresolved_registered_checkpoints`
+registry's own internal relative-or-absolute storage spelling; `checkpoint_files` (the
+checkpoints an archive leaves out) and `doctor.py`'s registry check resolve through the same
+function. `unresolved_registered_checkpoints`
 and `import_project`'s own disclosure split on `is_external_form`: a designed-external entry is
 `external_checkpoints` (its own existence stated per entry), never counted toward
 `checkpoint_paths_unresolved` (an entry expected to resolve under the tree that does not).
 
-Seam S27 ("Trained-model registry .tcip/models/registry.json"), verdict `one-side-only`,
+Seam S27 ("Trained-model registry index"), verdict `one-side-only`,
 `phase0_implementation: once, shared`: `tests/test_lifecycle_wiring.py:7`,
 `tests/test_model_registry_metrics.py:8,40,54,70`, `tests/test_provenance_spine.py:70,84,94,111`,
 `tests/test_tcip_web_results_routes.py:593,605`. Gap: no test registers a real model and then
@@ -1472,15 +1453,14 @@ one that does not decode (`ValueError`). `tools/orthomosaic_tools.py`'s
 supplied raster does not match it; `delivery.gate` reads `assessment_id`, the producer and the
 date for its checks (format 27).
 
-## 19. `.tcip/state/gui.json`, live GUI state snapshot
+## 19. The live GUI state snapshot
 
-Path: `<project_root>/.tcip/state/gui.json`, addressed by `gui_snapshot_key`,
-`packages/tcip-mcp/src/tcip_mcp/web_client.py:65`.
+Key: `gui_snapshot_key`, `packages/tcip-mcp/src/tcip_mcp/web_client.py:35`, store
+`gui_snapshot`, in the project's database.
 
 Writer: `write_gui_snapshot`, `tcip_mcp/web_client.py:265`, called by `StateStore.mutate`
 (`tcip_web/state.py:170`) for the project open when the change is made, before the change is
-held; a write that fails raises and the change is not held. The store is declared
-`durable=False`: losing the last snapshot costs a re-selection, not history.
+held; a write that fails raises and the change is not held.
 
 Reader: `read_gui_snapshot`, `tcip_mcp/web_client.py:279`, run by `StateStore.open_project`
 (`tcip_web/state.py:101`) each time a project is opened and by the MCP `view_gui_state` tool; a
@@ -1492,50 +1472,41 @@ snapshot that does not decode as its whole shape raises.
 raises it with 400 and the validation message rather than the 500 an unhandled `ValueError` would
 produce.
 
-Seam S10 ("Live GUI state .tcip/state/gui.json"): one writer and one reader, both in
+Seam S10 ("Live GUI state snapshot"): one writer and one reader, both in
 `tcip_mcp/web_client.py`; `tests/test_active_context.py` persists through the backend's own
 `StateStore` and reads the snapshot back through `view_gui_state` and a reopened store.
 
-## 20. `.tcip/state/project_status.json`, per-project activity pointer
+## 20. Recent project activity, derived from the project's audit log
 
-Path: `<project_path>/.tcip/state/project_status.json`, addressed by `project_status_key`,
-`packages/tcip-mcp/src/tcip_mcp/project_status.py:48`, on the store `PROJECT_STATUS_STORE`,
-`project_status.py:33`; `project_status_path`, `project_status.py:53`, is the same address as a
-path for a caller that needs one.
+No record holds it. `inspect_project`'s `recent_activity` is derived when it is read
+(`_recent_activity`, `tools/project_tools.py`) from the project log's `report_friction`,
+`write_retrospective` and `record_distillation_pass` lines, in the order they landed.
 
-Writers: `record_report`, `project_status.py:110`; `record_retrospective`,
-`project_status.py:126`; `record_distillation`, `project_status.py:145`; all via the shared
-locked read-modify-write `_update`, `project_status.py:79`.
+## 21. The verdict shard log
 
-Reader: `read_project_status`, `project_status.py:59`.
-
-No seam id in `seam-coverage.json`'s 67-entry inventory names `project_status.json`.
-
-## 21. `.tcip/state/review/*.jsonl`, verdict shard log
-
-Path: `<state_dir>/review/<bucket>/<img_name>.jsonl`, the directory and suffix spelled once in
-`tcip_store.layout_claims` (`REVIEW_SHARD_DIRNAME`, `REVIEW_SHARD_SUFFIX`). The store is keyed
-`("bucket", "image")`, the bucket being the prediction bucket's path relative to its dataset root
-as `bucket_key_of` spells it, each part folded by `verdicts.verdict_key` so the shard's own path
-spells its key back. Real-world `state_dir` is `<dataset_root>/.tcip/state`, derived once by
+A log keyed by `verdicts.verdict_key` on the store `review_verdicts` under the dataset's state
+directory, parts `(bucket, image)`, the bucket being the prediction bucket's path relative to its
+dataset root as `bucket_key_of` spells it. Real-world `state_dir` is
+`<dataset_root>/.tcip/state`, derived once by
 `project_state_dir`, `packages/tcip-mcp/src/tcip_mcp/project_paths.py:9`.
 
 Each entry is one decision, `{proposal, action, by, at}`: the proposal's index in the bucket's
 document for the image, `accepted` or `rejected`, the person in the label record's own spelling,
 and the time. Writer: `verdicts.record_verdicts`, called only by
 `dataset_layout.save_label_document` when a save accepts or rejects a proposal, each entry
-through `verdicts.encode_verdict`. Reader: `verdicts.read_verdicts`, every entry through
+through `verdicts.encode_verdict`, all of one save's entries in one commit. Reader: `verdicts.read_verdicts`, every entry through
 `verdicts.decode_verdict`, which refuses a malformed entry by name; the editor's proposals route
 reads each proposal's last decision through it, and `tcip doctor`'s `check_state` reports a
 shard that will not read.
 
 Guard: `tests/test_label_document_gestures.py` (each decision recorded once, a malformed entry
-refused); `tests/test_store_contract.py` (the shard's key reads back on both backends, a cleared
-log enumerates as absent).
+refused); `tests/test_store_contract.py` (a save whose verdict will not encode lands none of its
+verdicts).
 
-## 22. `.tcip/datasets.json`, project-level dataset identity registry
+## 22. The project-level dataset identity registry
 
-Path: `<project_root>/.tcip/datasets.json`.
+Key: `dataset_registry_key`, `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:32`, store
+`dataset_registry`, in the project's database.
 
 Writer: `upsert_dataset`, `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:80`.
 
@@ -1545,18 +1516,15 @@ Shape: each entry's `path` is relative to `<project_root>` whenever the dataset 
 filesystem identity (`registry_path_for`, `project_tools.py`), the project's own tree becoming
 `"."`; absolute for a dataset outside it. Resolved on read through the one accessor,
 `dataset_entry_path`, `project_tools.py`, which every consumer of an entry's path calls rather
-than reading `path` off the entry directly. A project registered before this row was corrected
-by a one-off operator script, since applied to every real project and retired; there is no
-runtime migration.
+than reading `path` off the entry directly.
 
-No seam id in `seam-coverage.json`'s 67-entry inventory names `.tcip/datasets.json` (distinct from
+No seam id in `seam-coverage.json`'s 67-entry inventory names the dataset registry (distinct from
 `dataset.json`, format 4, which S26 covers).
 
-## 23. Workspace last-opened pointer (`last_opened.txt`)
+## 23. Workspace last-opened pointer
 
-Path: `<workspace_root>/.tcip/state/last_opened.txt`, addressed by `last_opened_key`,
-`packages/tcip-mcp/src/tcip_mcp/workspace.py:74`, on the store `workspace_last_opened`
-(`workspace.py:58`): one project id and a newline.
+Key: `last_opened_key`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:58`, store
+`workspace_last_opened`, in the workspace root's database: one project id as a JSON string.
 
 Writer: `write_last_opened`, `workspace.py:86`, called by the web backend's `open_project_by_id`
 (`packages/tcip-web/src/tcip_web/routes/projects.py:110`) on every open.
@@ -1576,12 +1544,10 @@ for this section); any format defined inside `pipelines/postprocessing/` (`selec
 covered in format 26). No seam id covers this placeholder entry since
 it names no single format.
 
-## 25. `.tcip/project.json`, per-project record (id, display name, site)
+## 25. The per-project record (id, display name, site)
 
-Path: `<project_path>/.tcip/project.json`, addressed by `project_record_key`,
-`packages/tcip-mcp/src/tcip_mcp/project_record.py:66`, on the store `PROJECT_RECORD_STORE`,
-`project_record.py:29`; `project_record_path`, `project_record.py:71`, is the same address as a
-path for a caller that needs one. It holds `id` (minted once at creation by `mint_id`,
+Key: `project_record_key`, `packages/tcip-mcp/src/tcip_mcp/project_record.py:43`, on the store
+`PROJECT_RECORD_STORE`, `project_record.py:17`, in the project's database. It holds `id` (minted once at creation by `mint_id`,
 `project_record.py:61`), `display_name` and `site`; the id is the project's identity, never its
 directory name.
 
@@ -1653,11 +1619,10 @@ pixels trained on and selected on, and one group key on two sides splits the cro
 across sides. `tcip plant-aware-group-splits` reads no selection back, it only writes one through
 `draw_splits`.
 
-`selection.read_selection_checked` (`selection.py:454`) is the checked variant a listing calls in
+`selection.read_selection_checked` (`selection.py:434`) is the checked variant a listing calls in
 place of the raising reader: absence answers `(None, None)`, a record that exists but will not
-decode, fails a shape check, or is version-refused answers `(None, text)`, catching
-`tcip_store.SchemaVersionRefused` beside the plain-shape `ValueError` for that purpose only,
-since a version refusal must never read as an ordinary absence.
+decode or fails a shape check answers `(None, text)`, so a refused record never reads as an
+ordinary absence.
 `training_tools.selection_compatibility` is every objection a launch binding one config to one
 selection would raise, checked ahead of that launch: composed from the config-only conflict and
 task checks (computed before any read, so an unreadable selection never suppresses them) and the
@@ -1731,7 +1696,7 @@ the primary implementation. Both fields are
 reported as-is below; the Phase 3 verdict is the one used for the seam count at the
 end.
 
-## S03. Backend port discovery file .tcip/state/web_port.txt
+## S03. Backend port discovery record
 
 Must agree: the MCP process finds the port the web backend actually bound.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:26` (`BACKEND_PORT_STORE`, declared beside the reader because the reader cannot import `tcip_web`; `backend_port_key`, `web_client.py:41`, is the one address, read at `web_client.py:342`).
@@ -1760,11 +1725,11 @@ and the project's own receipt gate (`plant_mapping.load_mapping`) trusts only wh
 own log actually recorded.
 Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:197` (`def audited(`, taking a declared
 `scope_arg` naming which tool argument carries the dataset a scoped tool mutates a record of) and
-`record_event` (`audit.py:127`)/`record_event_or_raise` (`audit.py:147`), the two emitters for code
-that is neither an MCP tool nor a script-invoked door demoted from one; all three append at the
-one `audit_log_key`, `audit.py:74`, and differ only in what a failed append means: `record_event`
-warns; `record_event_or_raise` raises `AuditEntryNotWritten`; the decorator refuses
-(`MutationCommittedWithoutAuditLine`), since its append runs after the tool body.
+`record_event_or_raise` (`audit.py`), the emitter for code that is neither an MCP tool nor a
+script-invoked door demoted from one; both append at the one `audit_log_key`, `audit.py:74`, and
+differ only in what a failed append raises: `record_event_or_raise` raises
+`AuditEntryNotWritten`; the decorator refuses (`MutationCommittedWithoutAuditLine`), since its
+append runs after the tool body.
 Side B: the label save and the registry write record through their library
 (`save_label_document`, `replace_registry`) whichever door calls them, a failed append raising
 `AuditEntryNotWritten`, which the GUI route answers as `routes/audit_gap.py`'s 409; the GUI
@@ -1772,11 +1737,11 @@ inference worker writes no line of its own and publishes through the one publish
 `routes/inference.py:142` (`bucket = publish(`),
 whose receipts are the library's, catching `AuditEntryNotWritten` into the job's
 `audit_warning`. Reader:
-`pipelines/postprocessing/plant_mapping.py:1480` (`_require_receipt`)
+`pipelines/postprocessing/plant_mapping.py:1444` (`_require_receipt`)
 trusts only a `plant_mapping_built` entry it finds in the log under the project its caller names
 (the MCP server's started project; the web backend's open project), scanned by `_scan_receipts`
-(`pipelines/postprocessing/plant_mapping.py:1453`), which refuses (never scans past) a page
-reporting corruption or an unknown `schema_version`.
+(`pipelines/postprocessing/plant_mapping.py:1423`), which refuses (never scans past) a page
+reporting corruption.
 Phase 3 verdict: single. Each writer is exercised through a real append and checked for its own
 tool name landing in the log its own scope names: `tests/test_tcip_web_routes.py`'s
 `test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote` (a dataset-scoped GUI write,
@@ -1787,8 +1752,7 @@ project-scoped export audit line, from the one route); `tests/test_tcip_web_subj
 write, checked against the project log for the same request); and
 `tests/test_audit_row_core_field_agreement.py:26`, which runs a real GUI route and a real
 platform write against one log and holds the two rows to the same core fields. The receipt
-gate's own agreement is held by `tests/test_plant_mapping.py:293,326` (a version-refused line
-still blocks the scan; a real receipt still admits) and
+gate's own agreement is held by `tests/test_plant_mapping.py:294` (a real receipt admits) and
 `tests/test_plant_mapping_binding.py:661,709` (a receipt that cannot be written fails the build
 and the web route alike).
 
@@ -1806,16 +1770,16 @@ Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:223` (`de
 Side B: `packages/tcip-web/src/tcip_web/routes/training.py:260` (`rows, cursor = await asyncio.to_thread(read_rows, observation.metrics_log, after=cursor)`, the training stream's incremental tail read off the event loop, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:181` (`def get_trial_metrics(`, reading a trial's log through `read_rows`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial is a run directory, so its log is the same file shape written by the same sink.
 
-## S10. Live GUI state .tcip/state/gui.json  <!-- queued: P5-284 unify -->
+## S10. Live GUI state snapshot  <!-- queued: P5-284 unify -->
 
 Must agree: the MCP agent reading GUI context parses the snapshot the web backend wrote.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:265` (`def write_gui_snapshot(`, the one writer, through the one address `gui_snapshot_key`, which `StateStore.mutate` in `tcip_web/state.py` calls).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:213` (`state = read_gui_snapshot(project)`, the one reader, which the backend's own `open_project` also calls).
 Phase 3 verdict: single.
 
-## S11. Live canvas state files canvas_live.json / canvas_shapes.json, under the backend's open project
+## S11. Live canvas state records, under the backend's open project
 
-Must agree: the push route writes canvas_live.json/canvas_shapes.json under the project the backend has open, and capture_live_canvas reads them from the project its MCP server was started for, so a capture reads the GUI's live canvas only while the two are the same project. Both sides address the documents through one locator pair (`canvas_meta_key`, `packages/tcip-mcp/src/tcip_mcp/web_client.py:95`; `canvas_geometry_key`, `web_client.py:100`). The push carries the project id the browser drew for (`packages/tcip-web/src/tcip_web/routes/canvas.py:57`, `def push_canvas_state(`), compared with the open project's own id (`StateStore.project_id`, `packages/tcip-web/src/tcip_web/state.py:108`) before anything is written, and a panel event from the MCP side carries its project's id the same way (`web_client.py:286`), delivered only when that project is open.
+Must agree: the push route writes the canvas meta and geometry records under the project the backend has open, and capture_live_canvas reads them from the project its MCP server was started for, so a capture reads the GUI's live canvas only while the two are the same project. Both sides address the records through one key pair (`canvas_meta_key`, `packages/tcip-mcp/src/tcip_mcp/web_client.py:46`; `canvas_geometry_key`, `web_client.py:51`). The push carries the project id the browser drew for (`packages/tcip-web/src/tcip_web/routes/canvas.py:57`, `def push_canvas_state(`), compared with the open project's own id (`StateStore.project_id`, `packages/tcip-web/src/tcip_web/state.py:108`) before anything is written, and a panel event from the MCP side carries its project's id the same way (`web_client.py:286`), delivered only when that project is open.
 Phase 3 verdict: single.
 
 ## S12. Friction reports and retrospectives under .tcip/
@@ -1911,7 +1875,7 @@ Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:307` (`def dataset_ide
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/dataset_fingerprint.py:109` (`def dataset_fingerprint(dataset_root: str | Path) -> str | None:`).
 Phase 3 verdict: single.
 
-## S27. Trained-model registry .tcip/models/registry.json
+## S27. Trained-model registry index
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:121` (`def registered_entries(`, the one read every consumer goes through: one owner per sha256, the completed run whose final status names the bytes, else the index's foreign entry; `_write_registry_entry`, `model_registry.py:295`, replaces one foreign entry by sha256 inside one `tcip_store.transaction` on the key `registry_index_key`, `model_registry.py:85`, mints).
@@ -1982,7 +1946,7 @@ Side A: `packages/tcip-mcp/src/tcip_mcp/knowledge/__init__.py:124` (`def crops_y
 Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:291` (`def check_proposed_entry(`, a proposal's one check of `delivers` against that read; a stored record decodes without it) and `tools/verify_skill_traits.py:26` (`load_vocab` checks a skill's trait tokens through that same read).
 Phase 3 verdict: single.
 
-## S38. Per-project trait records .tcip/state/traits/*.json
+## S38. Per-project trait records
 
 Must agree: the proposing tool, the confirmation door, the delivery doors and the GUI trait list read one record per trait and agree on which revision a delivery ships under.
 Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:403` (`def trait_key(`, the one placement, with `TRAITS_STORE`, `traits.py:388`, the store every reader and writer addresses).

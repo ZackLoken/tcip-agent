@@ -94,37 +94,6 @@ def test_preflight_refuses_a_stem_collision(tmp_path):
     assert any("shoot_001.jpg" in i and "Shoot_001.png" in i for i in r["issues"]), r["issues"]
 
 
-def test_preflight_reports_a_newer_written_bandgroup_manifest(tmp_path):
-    """A ``.bandgroup`` manifest above this reader's ceiling propagates as
-    ``tcip_store.SchemaVersionRefused`` out of ``list_logical_images``, uncaught by design;
-    preflight must report that as an issue naming the version rather than raising through the
-    tool boundary."""
-    pytest.importorskip("torch")
-    import tcip_store as ts
-    from tcip_store.file_backend import FileBackend
-
-    from tcip_mcp.pipelines.data.band_groups import band_group_manifest_key
-    from tcip_mcp.tools.training_tools import preflight_config
-
-    bucket = _ingested_bucket(tmp_path)
-    labels_dir = _labels_for(tmp_path, "shoot_001")
-    key = band_group_manifest_key(bucket, "plotA")
-    path = FileBackend().path_for(key)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(ts.RECORD_JSON.encode(
-        {"schema_version": 2, "bands": {"B1": "plotA_B1.npy", "B2": "plotA_B2.npy"}}))
-
-    cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "task": "detection"},
-        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir),
-                 "scope": {"subject": SUBJECT}},
-    }
-    r = preflight_config(tmp_path, cfg)
-    assert r["valid"] is False
-    assert any("schema_version 2" in i for i in r["issues"]), r["issues"]
-
-
 def test_doctor_image_stems_refuses_a_stem_collision(tmp_path):
     from tcip_mcp.cli.doctor import _image_stems
 

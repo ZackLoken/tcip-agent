@@ -11,8 +11,7 @@ import os
 import socket
 
 import uvicorn
-from tcip_store import replace
-from tcip_store.binding import bind_default
+from tcip_store import bind, replace
 
 from tcip_mcp.web_client import BACKEND_HOST, backend_port_key
 
@@ -41,7 +40,7 @@ def main() -> None:
     from tcip_mcp.workspace import workspace_from_environment
 
     workspace = workspace_from_environment()
-    instance = bind_default()
+    instance = bind()
     requested = int(os.environ.get("TCIP_WEB_PORT", str(DEFAULT_PORT)))
     port = _pick_port(BACKEND_HOST, requested)
     replace(backend_port_key(workspace), str(port))

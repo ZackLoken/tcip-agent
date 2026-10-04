@@ -114,11 +114,11 @@ def main(argv: list[str] | None = None) -> None:
                              "that need no project run")
     args = parser.parse_args(argv)
 
-    from tcip_store.binding import bind_default
+    from tcip_store import bind
 
     from tcip_mcp.workspace import workspace_from_environment
 
-    bind_default()
+    bind()
     binding = None
     if args.project is not None:
         from tcip_mcp.project_record import existing_project

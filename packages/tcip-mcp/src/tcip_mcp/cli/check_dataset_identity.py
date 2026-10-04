@@ -13,8 +13,6 @@ import argparse
 import sys
 from pathlib import Path
 
-from tcip_store import SchemaVersionRefused
-
 from tcip_mcp.cli import bound_project
 from tcip_mcp.dataset_layout import require_dataset_identity
 from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
@@ -30,20 +28,13 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     project = bound_project(args.project)
 
     root: Path = args.dataset_root
-    try:
-        current = dataset_fingerprint(root)
-    except SchemaVersionRefused as exc:
-        print(f"VERSION-REFUSED: {exc}")
-        return 5
+    current = dataset_fingerprint(root)
     if current is None:
         print(f"no fingerprint for {root} (no images/labels, bespoke or empty)")
         return 0
 
     try:
         identity = require_dataset_identity(root)
-    except SchemaVersionRefused as exc:
-        print(f"VERSION-REFUSED: {exc}")
-        return 5
     except ValueError as exc:
         print(f"UNREGISTERED: {exc}")
         return 1
@@ -68,7 +59,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         entry_path = dataset_entry_path(project, r)
         try:
             registered = require_dataset_identity(entry_path)
-        except (ValueError, OSError, SchemaVersionRefused) as exc:
+        except (ValueError, OSError) as exc:
             print(f"  GONE: id {ds_id} is registered at {entry_path}, which holds no readable "
                   f"identity ({exc}); it is now at {root}")
             continue

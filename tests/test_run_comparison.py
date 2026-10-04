@@ -218,13 +218,13 @@ def test_compare_best_route_422s_with_no_registered_checkpoint(client: TestClien
 
 
 def test_compare_best_route_409s_when_the_index_will_not_decode(client: TestClient, monkeypatch):
-    """A corrupt or version-refused index is not a project with no models: the route answers
-    409, not the 404 an absent index answers."""
+    """A corrupt index is not a project with no models: the route answers 409, not the 404 an
+    absent index answers."""
     import tcip_mcp.model_registry as model_registry
-    from tcip_mcp.model_registry import RegistryVersionRefused
+    from tcip_store import DecodeError
 
     def _boom(project_path):
-        raise RegistryVersionRefused("simulated unreadable registry index")
+        raise DecodeError("simulated unreadable registry index")
 
     monkeypatch.setattr(model_registry, "read_registry_index", _boom)
 

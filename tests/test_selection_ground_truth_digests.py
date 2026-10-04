@@ -17,7 +17,7 @@ torch = pytest.importorskip("torch")
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
-from tcip_store import RECORD_JSON  # noqa: E402
+from tcip_store import encode_record  # noqa: E402
 
 IMG = 32
 SUBJECT = "leaf"
@@ -65,7 +65,7 @@ def _manifest_sha256(out: Path) -> str:
 
     from tcip_mcp.pipelines.data.selection import selection_key
 
-    return hashlib.sha256(RECORD_JSON.encode(tcip_store.read(selection_key(out)))).hexdigest()
+    return hashlib.sha256(encode_record(tcip_store.read(selection_key(out)))).hexdigest()
 
 
 def test_every_drawn_sample_carries_its_own_ground_truth_digest(tmp_path: Path) -> None:
@@ -90,7 +90,7 @@ def test_a_withdrawn_ground_truth_refuses_its_digest_by_name(tmp_path: Path) -> 
 def test_the_run_binding_records_the_selection_digest_once_never_on_a_sample(
     tmp_path: Path,
 ) -> None:
-    """``selection_digest`` is the sha256 over ``RECORD_JSON.encode`` of the selection's own
+    """``selection_digest`` is the sha256 over ``encode_record`` of the selection's own
     document as the store holds it, and the run's resolved partition carries that value once in
     its binding block, never on a sample."""
     from tcip_mcp.experiments import run_resolution

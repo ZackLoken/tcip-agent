@@ -102,12 +102,12 @@ def save_subjects(payload: SaveSubjectsPayload) -> dict:
 
     from tcip_mcp.audit import AuditEntryNotWritten
     from tcip_mcp.identity import actor
-    from tcip_mcp.subject_registry import RegistryError, registry_from_dict, replace_registry
+    from tcip_mcp.subject_registry import RegistryError, registry_from_request, replace_registry
     from tcip_web.routes.audit_gap import audit_gap_409
 
     person = actor(payload.user)
     try:
-        registry = registry_from_dict(payload.subjects)
+        registry = registry_from_request(payload.subjects)
     except RegistryError as exc:
         raise HTTPException(400, f"invalid subject registry: {exc}") from exc
     dataset_root = allowed_path(payload.dataset_root)

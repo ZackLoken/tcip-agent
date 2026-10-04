@@ -39,7 +39,7 @@ def register_plant_registry(project: Path, name: str, csv_paths: list[str], *, c
     does not.
 
     Args:
-        name: The registry's name within this project (``tcip_store.layout_claims.NAME_SEGMENT``:
+        name: The registry's name within this project (``plant_mapping.NAME_SEGMENT``:
             lowercase letters, digits, single hyphens).
         csv_paths: One or more plant-locations CSVs (columns ``plot_name``, ``accession_name``,
             ``WGS84_centroid_x/y``, …).

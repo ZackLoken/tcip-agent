@@ -1,5 +1,5 @@
-"""Tests for tcip check-dataset-identity's outcomes: OK, CHANGED, VERSION-REFUSED,
-NEVER-RECORDED, and the identity read at the path the project's registry holds: MOVED and GONE."""
+"""Tests for tcip check-dataset-identity's outcomes: OK, CHANGED, NEVER-RECORDED, and the identity
+read at the path the project's registry holds: MOVED and GONE."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from pathlib import Path
 from PIL import Image
 
 import tcip_store as ts
-from tcip_mcp.dataset_layout import dataset_identity_key, require_dataset_identity
 from tcip_mcp.tools.project_tools import register_dataset
 from tests._web_fixtures import new_project
 
@@ -68,18 +67,6 @@ def test_a_real_content_change_still_reports_changed(tmp_path):
 
     assert completed.returncode == 2, completed.stdout + completed.stderr
     assert "CHANGED" in completed.stdout
-
-
-def test_a_version_refused_identity_reports_its_own_outcome_not_a_crash(tmp_path):
-    project, root, _ = _registered(tmp_path)
-    identity = require_dataset_identity(root)
-    ts.put_blob(dataset_identity_key(root), ts.RECORD_JSON.encode({**identity, "schema_version": 2}))
-
-    completed = _run_script(root, project)
-
-    assert completed.returncode == 5, completed.stdout + completed.stderr
-    assert "VERSION-REFUSED" in completed.stdout
-    assert "Traceback" not in completed.stderr
 
 
 def test_a_never_recorded_fingerprint_is_its_own_outcome(tmp_path):

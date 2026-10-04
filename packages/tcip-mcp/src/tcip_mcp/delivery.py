@@ -21,8 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 import tcip_store
 from pydantic import TypeAdapter
-from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import Key, encode_record
 
 from tcip_mcp.audit import now_iso, record_event_or_raise
 from tcip_mcp.pipelines.delivery_events_schema import (
@@ -197,7 +196,7 @@ def result_digest(result: Result, *, delivery_kind: str, revision: TraitRevision
     writes them (without the delivery's own cells, which are receipt), its population,
     missingness rule and plant-mapping disclosure, beside the kind, the trait revision, the
     producer, each bucket's finding and the scale assessment's."""
-    return hashlib.sha256(RECORD_JSON.encode({
+    return hashlib.sha256(encode_record({
         "rows": result.encoded({}).decode("utf-8"), "population": list(result.population),
         "require_all_dates_complete": result.require_all_dates_complete,
         "plant_mapping": _DISCLOSURE.dump_python(_DISCLOSURE.validate_python(
@@ -306,18 +305,6 @@ def gate(
 # ── the breeder's acknowledgment ────────────────────────────────────────────
 
 ACKNOWLEDGMENTS_STORE = "delivery_acknowledgments"
-register_store(
-    StoreDescriptor(
-        name=ACKNOWLEDGMENTS_STORE,
-        kind="record",
-        key_fields=("acknowledgment_id",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        enumerable=True,
-        locator=RootedFileLocator(prefix=("delivery_acknowledgments",), suffix=".json"),
-    )
-)
 """One record per breeder acknowledgment of an unvalidated result, each written exactly once."""
 
 
@@ -356,18 +343,6 @@ def read_acknowledgment(project: Path, acknowledgment_id: str) -> Acknowledgment
 # ── the delivery event ──────────────────────────────────────────────────────
 
 DELIVERY_EVENTS_STORE = "delivery_events"
-register_store(
-    StoreDescriptor(
-        name=DELIVERY_EVENTS_STORE,
-        kind="record",
-        key_fields=("event_id",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
-        enumerable=True,
-        locator=RootedFileLocator(prefix=("delivery_events",), suffix=".json"),
-    )
-)
 """One record per completed delivery, keyed by its own id, each written exactly once."""
 
 DELIVERY_EVENT_PATHS: PathFields = (

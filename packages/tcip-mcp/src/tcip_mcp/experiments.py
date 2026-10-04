@@ -30,7 +30,9 @@ from pathlib import Path, PureWindowsPath
 from typing import Any, BinaryIO
 
 import tcip_store
-from tcip_store import LOG_JSON, RECORD_JSON, BadKey, DecodeError, check_json_value
+from tcip_store import (
+    BadKey, DecodeError, decode_value, encode_log_line, encode_record,
+)
 
 from tcip_mcp.audit import now_iso
 from tcip_mcp.pipelines.data.selection import SAMPLE_PATHS
@@ -206,8 +208,7 @@ def write_once(path: Path, value: Any) -> None:
     """Publish ``value`` as the JSON record at ``path`` (:func:`publish_once`). Refuses a value
     JSON cannot hold before anything is created, and a path already written with
     ``FileExistsError``."""
-    check_json_value(value, path=path.name)
-    data = RECORD_JSON.encode(value)
+    data = encode_record(value)
     publish_once(path, lambda handle: handle.write(data))
 
 
@@ -226,10 +227,10 @@ def write_final_status(directory: Path, state: str, error: str | None, **outcome
 def append_row(path: Path, row: dict) -> None:
     """Append ``row`` as one line of the JSON log at ``path``, refusing a row JSON cannot hold
     and (``FileNotFoundError``) a log its directory was not opened with."""
-    check_json_value(row, path=path.name)
+    line = encode_log_line(row) + b"\n"
     with open(path, "r+b") as handle:
         handle.seek(0, os.SEEK_END)
-        handle.write(LOG_JSON.encode(row) + b"\n")
+        handle.write(line)
 
 
 def read_record(path: Path) -> Any:
@@ -237,7 +238,7 @@ def read_record(path: Path) -> Any:
     decode raise ``DecodeError`` naming the file."""
     data = path.read_bytes()
     try:
-        return RECORD_JSON.decode(data)
+        return decode_value(data)
     except ValueError as exc:
         raise DecodeError(f"{path} does not decode as JSON: {exc}") from exc
 
@@ -254,7 +255,7 @@ def read_rows(path: Path, *, after: int = 0) -> tuple[list[dict], int]:
     rows: list[dict] = []
     for line in data[:end].splitlines():
         try:
-            rows.append(LOG_JSON.decode(line))
+            rows.append(decode_value(line))
         except ValueError as exc:
             raise DecodeError(f"{path} holds a row that does not decode: {exc}") from exc
     return rows, after + end

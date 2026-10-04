@@ -103,11 +103,10 @@ def test_ingest_exif_buckets_and_undated(project, tmp_path):
     assert (project / "images" / "undated" / "no_exif.png").is_file()
 
 
-def test_ingested_bytes_read_back_through_the_image_key(project, tmp_path):
-    """The writer is the real ingest_images tool. The reader is tcip_store's blob read through
-    dataset_layout.image_key(root, date, stem, ext), which refuses a falsy date, so this uses a
-    dated capture: the bytes the store hands back through the key are byte-identical to the
-    source file ingest copied from, not merely present."""
+def test_ingested_bytes_read_back_through_the_image_path(project, tmp_path):
+    """The writer is the real ingest_images tool. The reader is tcip_store's blob read at
+    dataset_layout.image_path(root, date, stem, ext): the bytes it hands back are byte-identical
+    to the source file ingest copied from, not merely present."""
     import tcip_store as ts
 
     src = tmp_path / "raw"
@@ -116,8 +115,8 @@ def test_ingested_bytes_read_back_through_the_image_key(project, tmp_path):
     manifest = ingest_images(project, source=str(src))
     assert "error" not in manifest
 
-    key = dataset_layout.image_key(project, "2026-02-11", "a", ".jpg")
-    stored = ts.read_blob_versioned(key).value
+    path = dataset_layout.image_path(project, "2026-02-11", "a", ".jpg")
+    stored = ts.read_blob_versioned(path).value
     assert stored == (src / "a.jpg").read_bytes()
 
 
@@ -423,16 +422,16 @@ def test_ingest_survives_a_bad_file_mid_batch(project, tmp_path, monkeypatch):
     _make_image(src / "bad.png")
     _make_image(src / "good2.png")
 
-    import tcip_mcp.tools.ingest_tools as it
+    import tcip_store
 
-    real_put = it.store.put_blob
+    real_put = tcip_store.put_blob
 
-    def flaky_put(key, data, **kwargs):
-        if Path(key.parts[-1]).stem == "bad":
+    def flaky_put(path, data, **kwargs):
+        if Path(path).stem == "bad":
             raise OSError("simulated locked file")
-        return real_put(key, data, **kwargs)
+        return real_put(path, data, **kwargs)
 
-    monkeypatch.setattr(it.store, "put_blob", flaky_put)
+    monkeypatch.setattr(tcip_store, "put_blob", flaky_put)
 
     manifest = ingest_images(project, source=str(src))
 
@@ -527,45 +526,30 @@ def test_inspect_project_counts_canonical_images(project, tmp_path):
 
 
 def test_ingest_after_import_admits_a_second_date(tmp_path):
-    """The import door adopts a fresh root itself when the process is bound to the database
-    backend, so a project it lands is usable at once: no operator ``tcip adopt-store``
-    run sits between ``import_project`` and ``ingest_images``. Import, ingest is the admit case.
-    Bound to the database backend explicitly, since that is what the door's own adoption step
-    is conditional on."""
-    import tcip_store
-    from tcip_store.sqlite_backend import SqliteBackend
-    from tcip_store.store import _backend
-
+    """A project the import door lands is usable at once: import, then ingest, is the admit
+    case."""
     from tcip_mcp.project_record import read_record
     from tcip_mcp.tools.project_tools import archive_project, import_project
     from tests._web_fixtures import new_project
 
-    previous = _backend()
-    backend = SqliteBackend()
-    tcip_store.bind(backend)
     dest = tmp_path.parent / "reopened"
-    try:
-        project = new_project(tmp_path)
-        src1 = tmp_path / "raw1"
-        _make_image(src1 / "a.jpg", exif_date="2026:02:11 10:30:00")
-        first = ingest_images(project, source=str(src1))
-        assert "error" not in first
+    project = new_project(tmp_path)
+    src1 = tmp_path / "raw1"
+    _make_image(src1 / "a.jpg", exif_date="2026:02:11 10:30:00")
+    first = ingest_images(project, source=str(src1))
+    assert "error" not in first
 
-        zip_path = tmp_path.parent / "export.zip"
-        exported = archive_project(project, str(zip_path))
-        assert "error" not in exported
+    zip_path = tmp_path.parent / "export.zip"
+    exported = archive_project(project, str(zip_path))
+    assert "error" not in exported
 
-        imported = import_project(str(zip_path), str(dest))
-        assert "error" not in imported
-        assert imported["database_built"] is True
+    imported = import_project(str(zip_path), str(dest))
+    assert "error" not in imported
 
-        src2 = tmp_path / "raw2"
-        _make_image(src2 / "b.jpg", exif_date="2026:03:01 10:30:00")
-        second = ingest_images(dest, source=str(src2))
-        assert "error" not in second
-        assert read_record(dest)["id"] == read_record(project)["id"]
-    finally:
-        tcip_store.bind(previous)
-        backend.close()
+    src2 = tmp_path / "raw2"
+    _make_image(src2 / "b.jpg", exif_date="2026:03:01 10:30:00")
+    second = ingest_images(dest, source=str(src2))
+    assert "error" not in second
+    assert read_record(dest)["id"] == read_record(project)["id"]
 
     assert (dest / "images" / "2026-03-01" / "b.jpg").is_file()

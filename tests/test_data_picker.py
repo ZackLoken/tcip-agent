@@ -6,7 +6,6 @@ Covers the shared ``selection_compatibility`` check, the checked selection reade
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 from pathlib import Path
@@ -345,34 +344,6 @@ def test_list_split_choices_as_recorded_reports_moved_directories_like_preflight
 
     assert result["as_recorded"]["compatible"] is False
     assert "Not found: data.images_dir" in result["as_recorded"]["reason"]
-
-
-def test_list_split_choices_as_recorded_reports_a_version_refused_own_binding(
-    tmp_path: Path, monkeypatch,
-):
-    """A version-refused own binding reads as a disabled "As recorded" with the refusal text,
-    never propagates as an uncaught StoreError: the plain reader's ValueError-only except would
-    have let SchemaVersionRefused (a StoreError, not a ValueError) escape past it."""
-    monkeypatch.setenv("TCIP_STORE_BACKEND", "file")
-    monkeypatch.chdir(tmp_path)
-    from tcip_store.binding import bind_default as _rebind
-
-    _rebind()  # the autouse fixture already bound before this env var was set
-    from tcip_mcp.tools.training_tools import list_split_choices
-
-    from tcip_mcp.pipelines.data.selection import selection_document
-
-    root = _two_subject_two_date_dataset(tmp_path / "ds")
-    selection_dir = tmp_path / "m"
-    drawn = _draw(tmp_path, root, selection_dir)
-    opened_run(tmp_path, _bound_config(root, selection_dir), experiment_id="exp-version-refused")
-    (selection_dir / "selection.json").write_text(
-        json.dumps({**selection_document(drawn), "schema_version": 99}), encoding="utf-8")
-
-    result = list_split_choices(tmp_path, "exp-version-refused")
-
-    assert result["as_recorded"]["compatible"] is False
-    assert "schema_version" in result["as_recorded"]["reason"]
 
 
 def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces(

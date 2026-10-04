@@ -91,37 +91,6 @@ def test_a_launch_inside_an_mcp_handshake_shows_the_agents_declaration_from_its_
     assert "launched_by" not in _launch_record(tmp_path, "exp-agent-launch")
 
 
-def test_launch_refuses_a_dataset_identity_above_the_readers_ceiling(tmp_path, monkeypatch):
-    """A version-refused dataset identity document refuses the launch by name, before the run's
-    directory exists and before Popen is ever reached. The document is written through the
-    store's own put_blob, the platform's own producer for a schema_version this reader does not
-    accept. The admitting half is
-    test_a_launch_no_agent_declared_itself_to_shows_an_empty_declaration above."""
-    import tcip_store as ts
-
-    from tcip_mcp.dataset_layout import dataset_identity_key
-    from tcip_mcp.experiments import find_run
-    from tcip_mcp.tools import training_tools
-
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    seed_two_bud_images(images_dir, labels_dir)
-    captured: list[list[str]] = []
-    _fake_popen(monkeypatch, captured)
-
-    key = dataset_identity_key(tmp_path)
-    document = {"crop": "test-crop", "id": "abc123", "fingerprint": "v1:deadbeef",
-                "schema_version": 2}
-    ts.put_blob(key, ts.RECORD_JSON.encode(document))
-
-    result = training_tools.launch_training(
-        tmp_path, small_detection_config(images_dir, labels_dir, "exp-identity-refused"), actor=None)
-
-    assert result["error"].startswith("launch_training:")
-    assert "schema_version" in result["error"]
-    assert captured == []
-    assert find_run("exp-identity-refused", project=tmp_path) is None
-
-
 def test_launch_refuses_an_experiment_id_that_is_not_a_legal_directory_name(tmp_path, monkeypatch):
     """The id becomes the run's own directory: a path separator refuses by name, before any
     directory or process exists."""

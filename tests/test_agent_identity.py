@@ -1,8 +1,5 @@
 """The identity holder on its own: what a run establishes, what each projection says, and that a
 run's end forgets it.
-
-The records these values land on are proven in ``test_agent_identity_records.py`` through the real
-server; these cases pin the module's own contract, which that proof relies on.
 """
 
 from __future__ import annotations
@@ -127,7 +124,7 @@ def test_a_server_run_forgets_the_identity_on_its_way_out() -> None:
 def test_a_caller_cannot_hand_an_audit_line_another_identity(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The identity is applied after a caller's extra facts, so ``record_event(...,
+    """The identity is applied after a caller's extra facts, so ``record_event_or_raise(...,
     agent_session=...)`` records the handshake's session, not the caller's."""
     import tcip_mcp.audit as audit_module
     import tcip_store as ts
@@ -135,8 +132,8 @@ def test_a_caller_cannot_hand_an_audit_line_another_identity(
     monkeypatch.delenv("TCIP_TERMINAL_SESSION", raising=False)
     identity = agent_identity.begin("claude-code", "2.1.238")
 
-    audit_module.record_event("identity_probe", {}, actor=None, scope=tmp_path, agent_session="forged",
-                              agent_client_name="x")
+    audit_module.record_event_or_raise("identity_probe", {}, actor=None, scope=tmp_path,
+                                       agent_session="forged", agent_client_name="x")
 
     key = audit_module.audit_log_key(tmp_path)
     (row,) = [r for r in ts.read_log(key).records if r["tool"] == "identity_probe"]
@@ -169,15 +166,15 @@ def test_a_caller_cannot_supply_an_identity_key_the_handshake_left_absent(
     import tcip_mcp.audit as audit_module
     from tests._audit_fixtures import audit_rows
 
-    audit_module.record_event("no_handshake", {}, actor=None, scope=tmp_path,
-                              agent_session="forged")
+    audit_module.record_event_or_raise("no_handshake", {}, actor=None, scope=tmp_path,
+                                       agent_session="forged")
     (row,) = audit_rows(tmp_path, "no_handshake")
     assert "agent_session" not in row
 
     monkeypatch.delenv("TCIP_TERMINAL_SESSION", raising=False)
     agent_identity.begin("codex-mcp-client", "0.147.0")
-    audit_module.record_event("codex_session", {}, actor=None, scope=tmp_path,
-                              terminal_session="forged")
+    audit_module.record_event_or_raise("codex_session", {}, actor=None, scope=tmp_path,
+                                       terminal_session="forged")
     (row,) = audit_rows(tmp_path, "codex_session")
     assert row["agent_client_name"] == "codex-mcp-client"
     assert "terminal_session" not in row

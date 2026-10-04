@@ -21,7 +21,7 @@ pytest.importorskip("pycocotools")
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
-from tcip_store.file_backend import _is_bookkeeping  # noqa: E402
+from tcip_store.file_backend import is_bookkeeping  # noqa: E402
 
 from tests._chain_fixtures import (  # noqa: E402
     IMG, STEMS, SUBJECT, draw_reference_selection, object_at, run_the_chain, synthetic_capture,
@@ -198,7 +198,7 @@ def test_publishing_the_same_bucket_twice_refuses_the_second_publish(tmp_path: P
     def files() -> dict[str, bytes]:
         return {p.relative_to(chain.bucket).as_posix(): p.read_bytes()
                 for p in sorted(chain.bucket.rglob("*"))
-                if p.is_file() and not _is_bookkeeping(p.name)}
+                if p.is_file() and not is_bookkeeping(p.name)}
 
     before = files()
     assert "bucket.json" in before and len(before) == len(STEMS) + 1

@@ -3,12 +3,15 @@
 import { getJson } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 
+/** A report that will not decode carries its id and `malformed`, the reason, alone. */
 export interface FrictionReport {
-  file: string;
-  timestamp: string | null;
-  category: string;
-  detail: string;
-  context: Record<string, unknown>;
+  report_id: string;
+  timestamp?: string;
+  category?: string;
+  detail?: string;
+  context?: Record<string, unknown>;
+  user_disagreement?: boolean;
+  malformed?: string;
 }
 
 /** `timestamp` is the latest section header the document itself states, empty when it states none. */

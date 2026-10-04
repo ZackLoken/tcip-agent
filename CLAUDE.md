@@ -156,10 +156,7 @@ for general techniques only, never for a per-trait pipeline; the endpoint is a t
   guards, so a suite of them stays green over exactly this defect, which is how it survives to be
   found by a reader instead of by the suite.
 - Gates before reporting a change done: `ruff check packages tests tools`, `mypy`, and the change's
-  own test files. The full suite runs locally on the database backend only; the file backend is
-  covered by `tests/test_store_contract.py`, which runs both inside one session, and by CI's
-  two-leg matrix until the batch that deletes that backend removes it. Never report a gate
-  before its slowest part finishes; green means no detected
+  own test files. Never report a gate before its slowest part finishes; green means no detected
   breakage, never correctness. A test touching the filesystem outside `tmp_path` is the first
   reread on a break that only shows in CI.
 - A green suite is evidence only about the defects its fixtures can distinguish. Before trusting it
@@ -194,16 +191,11 @@ mypy                               # roots from mypy.ini, run from the repo root
 python tools/list_tools.py         # the MCP tool list (never hardcode counts in docs)
 npm --prefix packages/tcip-web/frontend run build   # lint, typecheck and test take the same prefix
 python -m tcip_web                 # backend plus built UI at http://127.0.0.1:8765
-tcip export-store <root>           # a root's database-held records back out as files
-tcip adopt-store <root>            # a root's loose record files into its database
+tcip dump-store <project> <out_dir>   # a project's records and logs written out as files
 ```
 
-Every process binds one storage backend at its entry point; an unset environment or
-`TCIP_STORE_BACKEND=sqlite` binds the database (`<root>/.tcip/store.db`), `TCIP_STORE_BACKEND=file`
-the loose-file layout, any other value refuses. `tests/test_store_contract.py` runs on both in one
-run; the rest runs on whichever is bound, and CI runs both, so a local `pytest tests/` binds the
-database backend only.
-A root with loose records is refused by the database backend until `tcip adopt-store` conforms it.
+Every process binds the store once at its entry point (`tcip_store.bind()`); a root's records
+and logs live in `<root>/.tcip/store.db`.
 The MCP server auto-launches from `.mcp.json`; a stale tool index means restart the client. A
 project is the only root: the web backend holds the project it has open, the MCP server takes
 `--project <path>` at start, and every other entry point obtains its project once and passes it.

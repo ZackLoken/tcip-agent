@@ -875,11 +875,9 @@ def test_read_annotations_raises_on_invalid_utf8_bytes(tmp_path: Path) -> None:
 
 def test_read_document_versioned_raises_on_invalid_utf8_bytes(tmp_path: Path) -> None:
     import tcip_store
-    from tcip_annotation.json_io import (
-        UnreadableLabelDocument, annotation_record_key, read_document_versioned,
-    )
+    from tcip_annotation.json_io import UnreadableLabelDocument, read_document_versioned
 
-    key = annotation_record_key(tmp_path, "a")
+    key = tmp_path / "a.json"
     tcip_store.put_blob(key, b'{"annotations": [{"subject": "cat\xffkin"}]}')
     with pytest.raises(UnreadableLabelDocument):
         read_document_versioned(key)
@@ -897,9 +895,9 @@ def test_load_label_document_reads_a_document_carrying_a_utf8_bom(tmp_path: Path
 
 def test_read_document_versioned_reads_a_document_carrying_a_utf8_bom(tmp_path: Path) -> None:
     import tcip_store
-    from tcip_annotation.json_io import annotation_record_key, read_document_versioned
+    from tcip_annotation.json_io import read_document_versioned
 
-    key = annotation_record_key(tmp_path, "a")
+    key = tmp_path / "a.json"
     tcip_store.put_blob(key, b"\xef\xbb\xbf" + b'{"annotations": []}')
     doc, _ = read_document_versioned(key)
     assert doc.annotations == []
@@ -907,9 +905,9 @@ def test_read_document_versioned_reads_a_document_carrying_a_utf8_bom(tmp_path: 
 
 def test_read_document_versioned_reads_an_absent_document_as_empty(tmp_path: Path) -> None:
     from tcip_store import Version
-    from tcip_annotation.json_io import annotation_record_key, read_document_versioned
+    from tcip_annotation.json_io import read_document_versioned
 
-    key = annotation_record_key(tmp_path, "never_written")
+    key = tmp_path / "never_written.json"
     doc, version = read_document_versioned(key)
     assert doc.annotations == [] and doc.marks == {}
     assert version == Version.ABSENT
@@ -921,23 +919,20 @@ def test_read_document_versioned_and_read_annotations_agree_on_the_same_bytes(
     """One decode policy: whatever the file reader accepts or refuses, the store-backed reader
     over the identical bytes must agree."""
     from tcip_annotation.json_io import (
-        UnreadableLabelDocument, annotation_record_key, read_document_versioned,
-        write_annotations,
+        UnreadableLabelDocument, read_document_versioned, write_annotations,
     )
 
     path = tmp_path / "a.json"
     write_annotations(path, [Annotation(subject="bud", geometry=BBox(1, 1, 2, 2))], 10, 10)
-    key = annotation_record_key(tmp_path, "a")
-    doc, _ = read_document_versioned(key)
+    doc, _ = read_document_versioned(path)
     assert [a.subject for a in doc.annotations] == [a.subject for a in read_annotations(path)]
 
     corrupt = tmp_path / "b.json"
     corrupt.write_bytes(b"{not json")
-    corrupt_key = annotation_record_key(tmp_path, "b")
     with pytest.raises(UnreadableLabelDocument):
         read_annotations(corrupt)
     with pytest.raises(UnreadableLabelDocument):
-        read_document_versioned(corrupt_key)
+        read_document_versioned(corrupt)
 
 
 def test_a_box_that_would_round_to_zero_extent_is_refused_at_write(tmp_path: Path) -> None:

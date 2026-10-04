@@ -192,10 +192,9 @@ def publish(
     then propagates.
     """
     import tcip_store
-    from tcip_annotation.json_io import annotation_record_key
 
     from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
-    from tcip_mcp.dataset_layout import capture_of, dataset_root_of
+    from tcip_mcp.dataset_layout import capture_of, dataset_root_of, label_filename
     from tcip_mcp.experiments import RunDirectoryExists, create_run_directory, write_once
     from tcip_mcp.registry_paths import recorded_paths
 
@@ -216,7 +215,7 @@ def publish(
             if raster_path is None and not written:
                 capture = capture_of(image)
             try:
-                tcip_store.put_blob(annotation_record_key(out, image.stem), document.data,
+                tcip_store.put_blob(out / label_filename(image.stem), document.data,
                                     expect=tcip_store.Version.ABSENT)
             except tcip_store.VersionConflict:
                 raise ValueError(f"two documents of one publication name the stem "

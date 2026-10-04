@@ -9,7 +9,7 @@ operators and the agent drive through the same state store.
 packages/tcip-web/
   src/tcip_web/
     app.py              # FastAPI app
-    state.py            # the open project, its GuiState (written to .tcip/state/gui.json on change)
+    state.py            # the open project, its GuiState (written to the project's GUI snapshot record on change)
     paths.py            # safe_join + the always-on path guard (derived allow-set, identity containment)
     jobstore.py         # background job tracking (training/inference/tuning)
     terminal.py         # in-app agent terminal (spawns a provider table row's harness)
@@ -47,12 +47,12 @@ On startup, the backend:
 
 - Resolves the workspace `TCIP_WORKSPACE` names, once, and refuses to start when it is unset.
 - Binds the loopback address `127.0.0.1` at `TCIP_WEB_PORT` (default `8765`).
-- Writes the workspace root's `.tcip/state/web_port.txt` so MCP tools can discover it, the
+- Records the port it bound in the workspace root's store so MCP tools can discover it, the
   one location every process on the machine resolves the same way regardless of which
   project each has open.
-- Opens the project the workspace's last-opened pointer names (by the id in its
-  `.tcip/project.json`), if that project is still in the workspace, and replays that project's
-  `.tcip/state/gui.json` snapshot if present.
+- Opens the project the workspace's last-opened pointer names (by the id in its project
+  record), if that project is still in the workspace, and replays that project's GUI snapshot
+  if present.
 
 Open `http://127.0.0.1:8765/` once the backend is up.
 
@@ -82,8 +82,7 @@ npm run build      # emits into ../static/
 MCP tools HTTP POST to `POST /api/events/{panel}` on the backend, which broadcasts those
 events to any browser subscribed to `/ws/panel/{panel}`.
 
-Port discovery inside MCP tools: the workspace root's `.tcip/state/web_port.txt`, the port the
-backend bound, always at `127.0.0.1`; with no record, no backend serves the workspace and an
+Port discovery inside MCP tools: the workspace root's port record, the port the backend bound, always at `127.0.0.1`; with no record, no backend serves the workspace and an
 event is not delivered.
 
 ## Keyboard map

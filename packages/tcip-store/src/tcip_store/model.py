@@ -1,45 +1,75 @@
-"""Identity and value types the storage seam speaks, identical on every backend.
+"""Identity and value types the storage seam speaks.
 
-No identity here carries a storage location: mapping an identity onto storage is a backend's
-private job. A key's root is the one string that holds a directory path, and ``canonical_path``
-decides when two spellings of it name one directory.
+A key's root is the one string that holds a directory path, and ``canonical_path`` decides when
+two spellings of it name one directory.
 """
 
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+import threading
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
+from tcip_store.errors import BadKey, TransactionMisuse
+
+_open_transaction = threading.local()
+
+
+def refuse_inside_transaction(operation: str) -> None:
+    """Refuse (``TransactionMisuse``) ``operation`` while this thread holds a transaction, over
+    records and logs or over files, since it would commit apart from it."""
+    if getattr(_open_transaction, "held", False):
+        raise TransactionMisuse(
+            f"{operation} is not allowed inside an open transaction: use the transaction's own "
+            "operations on the keys or files it names, name every key in one transaction(a, b) "
+            "rather than nesting, and keep record and file writes in separate transactions"
+        )
+
+
+@contextmanager
+def held_transaction() -> Generator[None]:
+    """Mark this thread as holding a transaction for the body. Refuses (``TransactionMisuse``) a
+    second one on the same thread, whether over records and logs or over files."""
+    refuse_inside_transaction("a second transaction")
+    _open_transaction.held = True
+    try:
+        yield
+    finally:
+        _open_transaction.held = False
+
 
 @dataclass(frozen=True)
 class Key:
-    """The identity of one record, log, or blob: which store, which root, which entry.
+    """The identity of one record or log: which store, which root, which entry.
 
-    ``store`` names a registered store. ``root`` is the directory that store's descriptor says the
-    entry hangs off, as an opaque string: a dataset root for stores that travel with the data, a
-    platform or project root for platform state, a sweep root for HPO trial state. ``parts`` is the
-    identity inside the store, ordered coarse to fine, so a prefix of it is a meaningful scan.
-
-    The store layer validates a key's shape, not provenance.
+    ``root`` is the directory whose database holds the entry. ``parts`` is the identity inside the
+    store, ordered coarse to fine, so a prefix of it is a meaningful scan. Refuses (``BadKey``) a
+    key with no root, or with a store or a part that is not a non-empty string.
     """
 
     store: str
     root: str
     parts: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.store, str) or not self.store:
+            raise BadKey(f"a key's store must be a non-empty string; got {self.store!r}")
+        if not self.root:
+            raise BadKey(f"{self.store!r} key carries no root: name the root the entry hangs off")
+        for part in self.parts:
+            if not isinstance(part, str) or not part:
+                raise BadKey(f"{self.store!r} key part must be a non-empty string; got {part!r}")
+
 
 @dataclass(frozen=True)
 class Version:
-    """What the caller believes is currently stored, as an opaque token.
-
-    Obtained from a read and only ever echoed back into ``replace(expect=...)`` or
-    ``delete(expect=...)``. ``Version.ABSENT`` asserts that no entry exists yet, which is
-    how a create-only write is expressed. Tokens are derived from the stored content on
-    every backend, so a byte-identical rewrite leaves a held token valid.
-    """
+    """What the caller believes is currently stored, as an opaque token derived from the stored
+    bytes. ``Version.ABSENT`` asserts that no entry exists yet, which is how a create-only write is
+    expressed."""
 
     token: str
 
@@ -59,41 +89,12 @@ class Versioned:
 
 @dataclass(frozen=True)
 class LogPage:
-    """Entries read from a log, the cursor to resume from, and what was not returned.
-
-    ``torn_tail`` is true when the last bytes in the log are a partial entry left by an in-flight
-    appender: those bytes are excluded and ``cursor`` does not advance past them. ``corrupt`` holds
-    the positions of undecodable entries that are not the tail, counted over every entry
-    encountered in this page including the undecodable ones, so entry 1 of (good, bad, good) is
-    reported while ``records`` holds the two that decoded. ``version_refused`` holds the positions
-    of entries that decoded fine but carry a ``schema_version`` this reader does not know.
-    """
+    """Entries read from a log, the cursor to resume from, and the positions of the entries in
+    this page that would not decode, which ``records`` leaves out."""
 
     records: list[Mapping[str, Any]]
     cursor: str
-    torn_tail: bool = False
     corrupt: tuple[int, ...] = ()
-    version_refused: tuple[int, ...] = ()
-
-
-@dataclass(frozen=True)
-class Capabilities:
-    """What the bound backend actually guarantees, so a caller refuses rather than degrades.
-
-    ``multi_key_atomic_commit``: a record transaction's staged writes land all-or-nothing, a
-    crash included. No backend promises it of a blob transaction, whose files a failure puts back
-    while the put-back succeeds, and a crash or a failed put-back can leave a prefix of.
-    ``cross_machine_exclusion``: the lock excludes writers on another machine.
-    ``durable_replace``: a returned durable write survives a power loss, rename included.
-    ``durable_append``: an append that returned survives a power loss.
-    ``local_blob_paths``: ``blob_path`` is answerable without a download.
-    """
-
-    multi_key_atomic_commit: bool
-    cross_machine_exclusion: bool
-    durable_replace: bool
-    durable_append: bool
-    local_blob_paths: bool
 
 
 class _Required:
@@ -115,13 +116,3 @@ def canonical_path(path: str | Path) -> str:
     one refuses before canonicalizing.
     """
     return os.path.normcase(str(Path(path).resolve()))
-
-
-def canonical_order(keys: tuple[Key, ...]) -> tuple[Key, ...]:
-    """Order keys deterministically, so two callers naming the same set cannot deadlock.
-
-    The order is derived from the keys themselves, not from the order they were named, and
-    it is the order locks are acquired in. It is not the order a transaction applies its
-    writes in: that is the declared order, which callers depend on.
-    """
-    return tuple(sorted(keys, key=lambda k: (k.store, k.root, k.parts)))

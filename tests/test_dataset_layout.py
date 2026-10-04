@@ -159,8 +159,8 @@ def test_bucket_dirs_finds_every_published_bucket_at_any_depth_and_nothing_else(
     tmp_path: Path,
 ) -> None:
     """A published bucket is a directory holding ``bucket.json``, dated or not: the one walk the
-    doctor command and ``tcip_mcp.store_catalog.project_roots`` both read through. A directory
-    under ``predictions/`` holding no record is none."""
+    doctor command reads through. A directory under ``predictions/`` holding no record is
+    none."""
     pytest.importorskip("torch")
     from tcip_mcp.buckets import bucket_dirs
     from tests._chain_fixtures import predicted, published

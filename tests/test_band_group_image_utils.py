@@ -185,23 +185,6 @@ def test_list_logical_images_with_a_corrupt_manifest_beside_a_same_stem_raw_file
     assert logical["broken"] == d / "broken.jpg"
 
 
-def test_list_logical_images_propagates_schema_version_refused(tmp_path):
-    import json
-
-    import tcip_store as ts
-
-    from tcip_mcp.pipelines.image_utils import list_logical_images
-
-    d = tmp_path / "images"
-    d.mkdir()
-    (d / "cap.bandgroup").write_text(
-        json.dumps({"bands": {"Red": "a.tif"}, "schema_version": 2}), encoding="utf-8"
-    )
-
-    with pytest.raises(ts.SchemaVersionRefused):
-        list_logical_images(d)
-
-
 def test_list_logical_images_does_not_raise_when_stems_are_all_distinct(grouped_dir):
     """A rail must admit valid work: the ordinary (non-colliding) grouped_dir fixture used
     throughout this file must keep resolving cleanly; the new refusal is scoped to a genuine

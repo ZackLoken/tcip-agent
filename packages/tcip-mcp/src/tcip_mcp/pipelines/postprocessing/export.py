@@ -33,7 +33,7 @@ def stored_geometries(image_result: dict) -> dict[int, BBox | Polygon]:
     masks = image_result.get("masks")
     size = (image_result["width"], image_result["height"])
     kept: dict[int, BBox | Polygon] = {}
-    for i, box in enumerate(image_result.get("boxes", [])):
+    for i, box in enumerate(image_result["boxes"]):
         geometry: BBox | Polygon = BBox(*box)
         if masks is not None and i < len(masks):
             geometry = _mask_geometry_for_export(masks[i], tuple(box), f"detection {i}",
@@ -101,7 +101,7 @@ def encode_predictions(
                                 attributes=json_io.attribute_values(ids, attributes),
                                 created_by=created_by, created_at=created_at))
         kept_indices.append(i)
-    _key, data = json_io.encode_annotations(p, preds, int(w), int(h), keep_empty=True)
+    _path, data = json_io.encode_annotations(p, preds, int(w), int(h), keep_empty=True)
     assert data is not None, "keep_empty encodes every document"
     if dropped:
         kept = set(kept_indices)
@@ -118,7 +118,7 @@ def encode_head_output(result: dict, *, task: str) -> tuple[bytes, int]:
     output the head returned under ``outputs``, as returned; no detection is ever dropped. A
     result carrying no output, and an image of a reserved stem, refuse (``ValueError``)."""
     from tcip_annotation.json_io import is_reserved_stem
-    from tcip_store import RECORD_JSON
+    from tcip_store import encode_record
 
     stem = Path(result["image"]).stem
     outputs = {k: v for k, v in result.items() if k not in ("image", "width", "height")}
@@ -128,9 +128,9 @@ def encode_head_output(result: dict, *, task: str) -> tuple[bytes, int]:
     if is_reserved_stem(stem):
         raise ValueError(f"{stem} would name its document after a prediction bucket's own "
                          "record, so it can never have a per-image document.")
-    return RECORD_JSON.encode({"image": stem, "width": int(result["width"]),
-                               "height": int(result["height"]), "task": task,
-                               "outputs": outputs}), 0
+    return encode_record({"image": stem, "width": int(result["width"]),
+                          "height": int(result["height"]), "task": task,
+                          "outputs": outputs}), 0
 
 
 def _mask_geometry_for_export(

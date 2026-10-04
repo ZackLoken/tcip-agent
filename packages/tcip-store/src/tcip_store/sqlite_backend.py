@@ -1,20 +1,10 @@
-"""The SQLite backend: one WAL database per root, with blobs left as files.
-
-Records and log entries live in ``<root>/.tcip/store.db``; blob bytes never enter a database and
-are served by a composed :class:`~tcip_store.file_backend.FileBackend`, so ``blob_path`` keeps
-answering with a real path.
+"""The store: a root's records and log entries in one WAL database, ``<root>/.tcip/store.db``.
 
 Creation builds the database under a unique temp name in rollback-journal mode, commits, closes,
-fsyncs, and installs it with a no-clobber primitive, all under a per-root transition lock, so the
-file's existence marks a complete database. Every open verifies the journal mode, the synchronous
-level, the schema version and the schema itself before a single row is read.
-
-Exclusion is the database rather than the key: one writer at a time per root, readers never
-blocked; ``capabilities()`` states the guarantees.
-
-A root whose records are still files is refused (``tcip adopt-store`` moves them in;
-:mod:`tcip_store.export` writes them back out). Every operation says which stores it is serving,
-and each layout they hang off is checked on its first use by each connection.
+fsyncs and installs it with a no-clobber primitive, all under the root's transition lock, so the
+file's existence marks a complete database. Every open verifies the schema, WAL and full
+synchronous before a single row is read. One writer at a time per root;
+readers are never blocked.
 """
 
 from __future__ import annotations
@@ -26,106 +16,53 @@ import threading
 import time
 import uuid
 from collections import Counter
-from collections.abc import Generator, Mapping, Sequence
-from contextlib import AbstractContextManager, ExitStack, contextmanager
-from datetime import datetime, timezone
+from collections.abc import Callable, Generator, Mapping, Sequence
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any
 
 from tcip_store.errors import (
     BackendUnavailable,
     DecodeError,
-    SchemaVersionRefused,
     StoreBusy,
     StoreError,
-    VersionConflict,
+    TransactionMisuse,
 )
 from tcip_store.file_backend import (
-    DATABASE_FILENAME,
     DEFAULT_LOCK_TIMEOUT_S,
-    FileBackend,
-    _decode,
-    _deleted_in_transaction,
-    _encode,
+    _ensure_parent,
     _filelock_classes,
-    _missing_record,
-    _refuse_embedded_newline,
     _remove_quietly,
-    _unheld_key,
     _version_of,
     creation_temp_name,
     database_file,
+    fsync_directory,
+    require_version,
     transition_lock,
+    versioned,
 )
-from tcip_store.layout_claims import (
-    claim_of,
-    claimed_files,
-    contested_claimants,
-    layouts_in_play,
-    layouts_of,
-    unconformed_files,
-)
-from tcip_store.model import (
-    REQUIRED,
-    Capabilities,
-    Key,
-    LogPage,
-    Version,
-    Versioned,
-    canonical_path,
-)
-from tcip_store.registry import claim_generation, get_descriptor
-from tcip_store.store import Txn
-
-SCHEMA_VERSION = 1
-"""What ``pragma user_version`` carries. This is the backend's own table shape, not the
-platform's record schemas, which stay domain work."""
+from tcip_store.model import REQUIRED, Key, LogPage, Version, Versioned, canonical_path
+from tcip_store.values import decode_value, encode_log_line, encode_record
 
 SCHEMA_DDL = """
-create table if not exists meta (
-    key   text primary key,
-    value text not null
-) without rowid;
-
 create table if not exists records (
-    store      text not null,
-    parts      text not null,
-    value      blob not null,
-    updated_at text not null,
+    store text not null,
+    parts text not null,
+    value blob not null,
     primary key (store, parts)
 );
 
-create table if not exists store_counters (
-    store            text primary key,
-    change_counter   integer not null,
-    exported_counter integer
-) without rowid;
-
-create table if not exists tombstones (
-    store      text not null,
-    parts      text not null,
-    deleted_at text not null,
-    primary key (store, parts)
-) without rowid;
-
 create table if not exists log_entries (
-    id          integer primary key autoincrement,
-    store       text not null,
-    parts       text not null,
-    entry       blob not null,
-    appended_at text not null
+    id    integer primary key autoincrement,
+    store text not null,
+    parts text not null,
+    entry blob not null
 );
 create index if not exists log_entries_by_key on log_entries (store, parts, id);
 """
 
-_SYNCHRONOUS_LEVELS = {"NORMAL": 1, "FULL": 2}
-
-_HELD_STORES = """
-select store from records
-union select store from log_entries
-union select store from tombstones
-union select store from store_counters where exported_counter is not null
-"""
+_FULL = 2
+"""What ``pragma synchronous`` reports at FULL."""
 
 
 def encode_parts(parts: tuple[str, ...]) -> str:
@@ -136,15 +73,6 @@ def encode_parts(parts: tuple[str, ...]) -> str:
 def decode_parts(text: str) -> tuple[str, ...]:
     """The parts a stored spelling names."""
     return tuple(json.loads(text))
-
-
-def database_path(root: str) -> Path:
-    """Where this root's database lives, or ``BadKey`` when the root is not absolute."""
-    return database_file(root)
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _schema_of(conn: sqlite3.Connection) -> tuple[tuple[str, str, str], ...]:
@@ -160,7 +88,7 @@ _reference: tuple[tuple[str, str, str], ...] | None = None
 
 
 def reference_schema() -> tuple[tuple[str, str, str], ...]:
-    """The schema the canonical DDL produces, read back out of a database that ran it."""
+    """The schema the DDL produces, read back out of a database that ran it."""
     global _reference
     with _reference_lock:
         if _reference is None:
@@ -196,26 +124,15 @@ def _install_without_clobbering(temp: Path, destination: Path) -> None:
 
 
 def verify_identity(conn: sqlite3.Connection, db_path: Path) -> None:
-    """Refuse a database that is not this backend's, before a single row is read.
-
-    Runs before anything is set on the connection. A file at this path that is not a SQLite
-    database at all refuses as a typed store error.
-    """
+    """Refuse (``StoreError``) a database that is not this module's, before a single row is read:
+    a file that is not a SQLite database, or one whose schema is not this module's DDL."""
     try:
-        version = conn.execute("pragma user_version").fetchone()[0]
+        found = _schema_of(conn)
     except sqlite3.DatabaseError as exc:
         raise StoreError(
             f"{db_path} is not a SQLite database: {exc}. Something else holds the name this "
-            "backend's database has, so whether this root's state is in a database cannot be "
-            "answered at all."
+            "store's database has."
         ) from exc
-    if version != SCHEMA_VERSION:
-        raise StoreError(
-            f"{db_path} carries user_version {version}, not {SCHEMA_VERSION}: it was written "
-            "by another tool or another version of this backend, and reading it here would be "
-            "a guess about what its rows mean"
-        )
-    found = _schema_of(conn)
     expected = reference_schema()
     if found == expected:
         return
@@ -230,66 +147,45 @@ def verify_identity(conn: sqlite3.Connection, db_path: Path) -> None:
         and sql != next(s for k, n, s in expected if (k, n) == (kind, name))
     )
     raise StoreError(
-        f"{db_path} does not carry this backend's schema: missing {missing}, "
-        f"unexpected {extra}, differently defined {changed}. A database this backend did "
-        "not build is never half-read"
+        f"{db_path} does not carry this store's schema: missing {missing}, "
+        f"unexpected {extra}, differently defined {changed}. A database this store did not "
+        "build is never half-read"
     )
 
 
-def set_wal(conn: sqlite3.Connection) -> str:
-    """Put one connection's database into WAL, returning the mode it reports afterwards.
-
-    SQLite takes an exclusive lock to change journal mode and does not consult the busy handler
-    while doing it, so this returns SQLITE_BUSY at once whenever another connection has the
-    database open; it is only safe under the transition lock.
+def _set_wal(conn: sqlite3.Connection) -> str:
+    """Put one connection's database into WAL, returning the mode it reports afterwards. Only safe
+    under the transition lock: changing the journal mode does not wait on a busy database.
     """
     return str(conn.execute("pragma journal_mode = wal").fetchone()[0]).lower()
 
 
-def convert_to_wal(db_path: Path) -> None:
-    """Put a freshly installed database into WAL, before anything else can open it: under the
-    transition lock with no other connection against it. Every path that installs a database calls
-    this.
-    """
-    conn = sqlite3.connect(str(db_path), isolation_level=None)
-    try:
-        mode = set_wal(conn)
-        if mode != "wal":
-            raise BackendUnavailable(
-                f"{db_path} would not take WAL journal mode at publication and reported "
-                f"{mode!r}: a rollback-journal database blocks every reader behind the "
-                "writer, which is not the exclusion this backend declares"
-            )
-    finally:
-        conn.close()
+def _refuse_rollback_journal(db_path: Path, mode: str) -> None:
+    if mode != "wal":
+        raise BackendUnavailable(
+            f"{db_path} would not take WAL journal mode and reported {mode!r}: a "
+            "rollback-journal database blocks every reader behind the writer"
+        )
 
 
-def open_verified(db_path: Path, root: str | None = None,
+def open_verified(db_path: Path, root: str,
                   timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> sqlite3.Connection:
-    """Open a published database, verify it, and leave it in WAL at full synchronous.
-
-    Identity is checked first. A database not already in WAL is converted under ``root``'s
-    transition lock; with no ``root`` it is refused.
-    """
+    """Open a published database, verify it, and leave it in WAL at full synchronous; a database
+    not already in WAL is converted under ``root``'s transition lock."""
     conn = sqlite3.connect(str(db_path), isolation_level=None, check_same_thread=False)
     try:
         verify_identity(conn, db_path)
         mode = str(conn.execute("pragma journal_mode").fetchone()[0]).lower()
-        if mode != "wal" and root is not None:
-            with transition_lock(root, timeout_s=timeout_s):
-                mode = set_wal(conn)
         if mode != "wal":
-            raise BackendUnavailable(
-                f"{db_path} would not take WAL journal mode and reported {mode!r}: a "
-                "rollback-journal database blocks every reader behind the writer, which is "
-                "not the exclusion this backend declares"
-            )
+            with transition_lock(root, timeout_s=timeout_s):
+                mode = _set_wal(conn)
+        _refuse_rollback_journal(db_path, mode)
         conn.execute("pragma synchronous = FULL")
         level = conn.execute("pragma synchronous").fetchone()[0]
-        if level != _SYNCHRONOUS_LEVELS["FULL"]:
+        if level != _FULL:
             raise BackendUnavailable(
                 f"{db_path} reports synchronous={level} after it was set to FULL, so a "
-                "committed write's durability is not what this backend would declare"
+                "committed write's durability is not what this store declares"
             )
     except BaseException:
         conn.close()
@@ -297,68 +193,69 @@ def open_verified(db_path: Path, root: str | None = None,
     return conn
 
 
-def open_read_only(db_path: Path) -> sqlite3.Connection:
-    """Open a published database for reading only, verified, without changing a byte of it; the
-    journal mode is never set.
-    """
-    if not db_path.is_file():
-        raise StoreError(f"{db_path} does not exist, so there are no store counters to read")
-    conn = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True, isolation_level=None)
+def copy_database(source: Path, destination: Path) -> None:
+    """Write a consistent copy of the database at ``source`` to ``destination`` through SQLite's
+    own backup, whatever another connection is committing meanwhile."""
+    src = sqlite3.connect(str(source))
     try:
-        verify_identity(conn, db_path)
-    except BaseException:
-        conn.close()
-        raise
-    return conn
+        dst = sqlite3.connect(str(destination))
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+
+
+def _encoded(key: Key, encode: Callable[[Any], bytes], value: Any) -> bytes:
+    """``value`` through ``encode``, or a ``StoreError`` naming the entry and what would not
+    encode."""
+    try:
+        return encode(value)
+    except (TypeError, ValueError) as exc:
+        raise StoreError(
+            f"{key.store}{list(key.parts)} under {key.root} does not encode: {exc}. "
+            f"The value is a {type(value).__name__}; convert what it holds to a JSON type "
+            "at the writer."
+        ) from exc
+
+
+def _decoded(key: Key, data: bytes) -> Any:
+    """A stored entry's value, or ``DecodeError`` naming the entry."""
+    try:
+        return decode_value(data)
+    except ValueError as exc:
+        raise DecodeError(
+            f"{key.store}{list(key.parts)} under {key.root} exists but does not decode: {exc}"
+        ) from exc
+
+
+def _versioned(key: Key, data: bytes | None, default: Any) -> Versioned:
+    """A stored record as :func:`~tcip_store.file_backend.versioned` answers it, its bytes
+    decoded through :func:`_decoded`."""
+    return versioned(data, default, lambda stored: _decoded(key, stored),
+                     f"{key.store}{list(key.parts)} has no record under {key.root}")
 
 
 class SqliteBackend:
-    """A storage backend holding records and logs in one SQLite database per root.
-
-    Blob operations are forwarded to a composed file backend, whose construction refuses without
-    cross-process locking.
-    """
+    """The store over one SQLite database per root, one connection per process, thread and root."""
 
     def __init__(self, *, lock_timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> None:
         _, timeout_error = _filelock_classes()
         self.lock_timeout_s = lock_timeout_s
         self._timeout_error = timeout_error
-        self._files = FileBackend(lock_timeout_s=lock_timeout_s)
         self._connections: dict[tuple[int, int, str], sqlite3.Connection] = {}
-        self._checked: dict[tuple[int, int, str], tuple[set[str], int]] = {}
-        self._marked: dict[str, set[str]] = {}
         self._guard = threading.Lock()
         # How many operations are using each connection right now; a release waits on it.
         self._busy: Counter[tuple[int, int, str]] = Counter()
         self._idle = threading.Condition(self._guard)
 
-    def capabilities(self) -> Capabilities:
-        """What this backend guarantees on the platform it is running on.
-
-        ``multi_key_atomic_commit`` is true: a record transaction's staged writes are one SQL
-        commit. A blob transaction publishes files through the composed file backend's apply.
-        ``cross_machine_exclusion`` is false: SQLite locking is unreliable on network filesystems
-        and WAL needs shared memory it cannot get there. ``durable_replace`` answers for records
-        and blobs at once, and is false on Windows, where a blob's rename directory entry cannot be
-        flushed.
-        """
-        return Capabilities(
-            multi_key_atomic_commit=True,
-            cross_machine_exclusion=False,
-            durable_replace=os.name != "nt",
-            durable_append=True,
-            local_blob_paths=True,
-        )
-
     def close(self) -> None:
-        """Close every connection this backend opened and its composed file backend."""
+        """Close every connection this backend opened."""
         with self._guard:
             for conn in self._connections.values():
                 conn.close()
             self._connections.clear()
-            self._checked.clear()
-            self._marked.clear()
-        self._files.close()
 
     def release(self, root: str) -> None:
         """Close every connection this backend holds on the canonical ``root`` or on a root under
@@ -373,30 +270,22 @@ class SqliteBackend:
             self._idle.wait_for(lambda: not any(under(slot) for slot in self._busy))
             for slot in [s for s in self._connections if under(s)]:
                 self._connections.pop(slot).close()
-                self._checked.pop(slot, None)
-            for marked in [m for m in self._marked if m == root or m.startswith(prefix)]:
-                del self._marked[marked]
 
     # ── database lifecycle ──────────────────────────────────────────────────────
 
     @contextmanager
     def _connection(
-        self,
-        root: str,
-        stores: Sequence[str],
-        keys: tuple[Key, ...] = (),
-        timeout_s: float | None = None,
-    ) -> Generator[sqlite3.Connection]:
-        """This process, thread and root's connection, creating the database if it is absent,
-        held in use (so :meth:`release` waits for it) until the block returns.
+        self, root: str, keys: tuple[Key, ...] = (), timeout_s: float | None = None,
+        *, create: bool,
+    ) -> Generator[sqlite3.Connection | None]:
+        """This process, thread and root's connection, held in use (so :meth:`release` waits for
+        it) until the block returns. With no database at ``root``, a write (``create``) builds one
+        and a read is answered with None.
 
         One connection per (pid, thread, root): a forked worker never reuses the parent's handles,
-        and a write on one thread never joins another thread's read. ``stores`` is what the
-        operation is serving; the root is checked against each layout they hang off on its first
-        use by this connection.
+        and a write on one thread never joins another thread's read.
         """
-        layouts = layouts_of(stores)
-        db_path = database_path(root)
+        db_path = database_file(root)
         slot = (os.getpid(), threading.get_ident(), canonical_path(root))
         with self._guard:
             conn = self._connections.get(slot)
@@ -404,15 +293,15 @@ class SqliteBackend:
                 self._busy[slot] += 1
         if conn is None:
             if not db_path.is_file():
-                for layout in layouts:
-                    self._refuse_unconformed(root, layout)
-                self._publish(db_path, root, layouts, keys, timeout_s)
+                if not create:
+                    yield None
+                    return
+                self._publish(db_path, root, keys, timeout_s)
             conn = open_verified(db_path, root, self.lock_timeout_s)
             with self._guard:
                 self._connections[slot] = conn
                 self._busy[slot] += 1
         try:
-            self._verify_layouts(conn, root, layouts, slot)
             yield conn
         finally:
             with self._idle:
@@ -421,212 +310,44 @@ class SqliteBackend:
                     del self._busy[slot]
                 self._idle.notify_all()
 
-    def require_conformed(self, root: str, stores: Sequence[str]) -> None:
-        """The database backend's half of the conform rail: refuse an unconformed root, whose
-        records are still files, before this backend answers about it.
-
-        A root holding files that a claim of this operation's layout matches, and no database, is
-        refused; a root holding no such files is fresh and proceeds. With a database present, a
-        claimed file refuses only when the database has never held the store that claims it.
-
-        The walk runs again under the transition lock when a database is created, once per layout
-        on each connection that serves that layout, and again for every layout once a declared
-        claim has joined the catalog.
-        """
-        layouts = layouts_of(stores)
-        if not database_path(root).is_file():
-            for layout in layouts:
-                self._refuse_unconformed(root, layout)
-            return
-        with self._connection(root, stores):
-            pass
-
-    @contextmanager
-    def _serving(
-        self, root: str, stores: Sequence[str], keys: tuple[Key, ...] = ()
-    ) -> Generator[sqlite3.Connection | None]:
-        """The checked connection for these stores, held in use for the block, or None when this
-        root holds no database; a read never creates a database.
-        """
-        layouts = layouts_of(stores)
-        if not database_path(root).is_file():
-            for layout in layouts:
-                self._refuse_unconformed(root, layout)
-            yield None
-            return
-        with self._connection(root, stores, keys) as conn:
-            yield conn
-
-    def _verify_layouts(
-        self,
-        conn: sqlite3.Connection,
-        root: str,
-        layouts: tuple[str, ...],
-        slot: tuple[int, int, str],
-    ) -> None:
-        """Check this root against every layout this connection has not checked it against yet:
-        first use per layout. A claim set that has grown empties the connection's verified set.
-        """
-        with self._guard:
-            verified, generation = self._checked.get(slot, (set(), claim_generation()))
-        current = claim_generation()
-        if current != generation:
-            verified = set()
-        for layout in layouts:
-            if layout in verified:
-                continue
-            self._refuse_never_held_files(conn, root, layout)
-            verified = verified | {layout}
-        with self._guard:
-            self._checked[slot] = (verified, current)
-
-    def _refuse_unconformed(self, root: str, layout: str) -> None:
-        """Refuse a root with no database that still holds files of this layout's stores."""
-        unconformed = unconformed_files(root, layout, limit=5)
-        if unconformed:
-            listed = ", ".join(str(path) for path in unconformed)
-            raise StoreError(
-                f"{root} holds record or log files but no {DATABASE_FILENAME}, so its state "
-                f"is still in the file layout: {listed}. Move it in with "
-                "tcip adopt-store before this backend touches the root; an empty "
-                "database beside those files would read every one of them as absent."
-            )
-
-    def _refuse_never_held_files(
-        self, conn: sqlite3.Connection, root: str, layout: str
-    ) -> None:
-        """Refuse a claimed file beside a database that has never held the store claiming it.
-
-        Held means rows, tombstones or an export stamp. The contenders are gathered across the
-        layouts this root serves; contenders that disagree, one holding markers and another never
-        held, are refused naming all of them.
-        """
-        claimed = claimed_files(root, layout)
-        if not claimed:
-            return
-        held = {store for (store,) in conn.execute(_HELD_STORES)}
-        in_play = layouts_in_play(sorted(held), (layout,))
-        stranded: list[tuple[Path, tuple[str, ...]]] = []
-        ambiguous: list[tuple[Path, tuple[str, ...]]] = []
-        for item in claimed:
-            across = contested_claimants(root, item.path, in_play)
-            dispositions = {store in held for store in across}
-            if dispositions == {False}:
-                stranded.append((item.path, across))
-            elif len(dispositions) > 1:
-                ambiguous.append((item.path, across))
-        if ambiguous:
-            raise self._ambiguous_claim(root, ambiguous)
-        if stranded:
-            listed = ", ".join(f"{path} ({'/'.join(stores)})" for path, stores in stranded[:5])
-            raise StoreError(
-                f"{root} holds a database that has never held the stores claiming these files, "
-                f"so their state is still in the file layout beside it: {listed}. Take them in "
-                "with tcip adopt-store, which loads exactly the stores this "
-                "database has no record of; reading past them would answer every one of them "
-                "with absence."
-            )
-
-    def _ambiguous_claim(
-        self, root: str, ambiguous: list[tuple[Path, tuple[str, ...]]]
-    ) -> StoreError:
-        """The refusal for a file whose claimants this database cannot be read to agree about."""
-        listed = ", ".join(f"{path} ({', '.join(stores)})" for path, stores in ambiguous[:5])
-        return StoreError(
-            f"{root} holds files more than one store could own, and this database holds state "
-            f"for some of those stores and none for the others: {listed}. Which store each "
-            "file belongs to cannot be told from the database, and taking it in under the wrong "
-            "one would count another store's document as this one's. Move the file to a root "
-            "only one of the stores hangs off, or export and conform the root deliberately."
-        )
-
-    def _guard_first_marker(self, conn: sqlite3.Connection, keys: tuple[Key, ...]) -> None:
-        """Refuse a store's first write here while a file that store claims already exists, walking
-        the store's own claim, only while the store is unmarked.
-        """
-        marked = self._marked.setdefault(canonical_path(keys[0].root), set())
-        unknown = sorted({key.store for key in keys} - marked)
-        if not unknown:
-            return
-        placeholders = ", ".join("?" for _ in unknown)
-        held = {
-            store
-            for (store,) in conn.execute(
-                f"select store from ({_HELD_STORES}) where store in ({placeholders})", unknown
-            )
-        }
-        marked |= held
-        for store in unknown:
-            if store in held:
-                continue
-            claim = claim_of(store)
-            first = claimed_files(
-                keys[0].root, claim.layout, claims={store: claim}, limit=1
-            )
-            if first:
-                raise StoreError(
-                    f"{first[0].path} is a file {store} owns, and this database has never held "
-                    f"{store}, so this would be its first write here and the file would then "
-                    "read as its own export rather than as state nothing took in. Take the file "
-                    "in with tcip adopt-store, or remove it if it is not this "
-                    "store's."
-                )
-
-    def _publish(
-        self,
-        db_path: Path,
-        root: str,
-        layouts: tuple[str, ...],
-        keys: tuple[Key, ...] = (),
-        timeout_s: float | None = None,
-    ) -> None:
+    def _publish(self, db_path: Path, root: str, keys: tuple[Key, ...],
+                 timeout_s: float | None) -> None:
         """Build a database beside its destination and install it atomically and exclusively.
 
         The transition lock is held across the existence re-check, the build and the install, so
-        two creators serialize and the loser opens the winner's database. A wait that runs out is
-        this layer's own refusal. Every layout the operation serves is checked again under the
-        lock.
+        two creators serialize and the loser opens the winner's database.
         """
         timeout = self.lock_timeout_s if timeout_s is None else timeout_s
-        self._files._ensure_parent(db_path, durable=True)
+        _ensure_parent(db_path)
         started = time.monotonic()
         try:
             held = transition_lock(root, timeout_s=timeout)
             held.__enter__()
         except self._timeout_error:
-            raise self._contended(root, keys, time.monotonic() - started) from None
+            raise StoreBusy(keys[0], time.monotonic() - started) from None
         try:
             if db_path.is_file():
                 return
-            for layout in layouts:
-                self._refuse_unconformed(root, layout)
             temp = db_path.parent / creation_temp_name(db_path.name, uuid.uuid4().hex)
             try:
                 self._build(temp)
                 _fsync_path(temp)
                 _install_without_clobbering(temp, db_path)
-                convert_to_wal(db_path)
+                conn = sqlite3.connect(str(db_path), isolation_level=None)
+                try:
+                    _refuse_rollback_journal(db_path, _set_wal(conn))
+                finally:
+                    conn.close()
             except BaseException:
                 _remove_quietly(str(temp))
                 raise
             _fsync_path(db_path)
-            self._files._fsync_dir(db_path.parent)
+            fsync_directory(db_path.parent)
         finally:
             held.__exit__(None, None, None)
 
-    def _contended(self, root: str, keys: tuple[Key, ...], waited_s: float) -> StoreError:
-        """The refusal for a wait this backend gave up on, naming a key when the call named one,
-        else the root.
-        """
-        if keys:
-            return StoreBusy(keys, keys[0], waited_s)
-        return StoreError(
-            f"waited {waited_s:.1f}s for the store database under {root} to be created by "
-            "another process and gave up; nothing was written"
-        )
-
     def _build(self, temp: Path) -> None:
-        """Apply the canonical DDL to a fresh rollback-journal (not WAL) database and close it."""
+        """Apply the DDL to a fresh rollback-journal (not WAL) database and close it."""
         conn = sqlite3.connect(str(temp), isolation_level=None)
         try:
             mode = conn.execute("pragma journal_mode = delete").fetchone()[0]
@@ -636,75 +357,47 @@ class SqliteBackend:
                     f"reported {mode!r}, so the file installed could not hold its own commits"
                 )
             conn.executescript(SCHEMA_DDL)
-            conn.execute(f"pragma user_version = {SCHEMA_VERSION}")
         finally:
             conn.close()
 
-    def _apply_synchronous(self, conn: sqlite3.Connection, level: str) -> None:
-        """Set how hard a commit on this connection flushes, from a store's declared durability."""
-        conn.execute(f"pragma synchronous = {level}")
-
     # ── error mapping ───────────────────────────────────────────────────────────
 
-    def _translate(
-        self, exc: sqlite3.Error, keys: tuple[Key, ...], waited_s: float
-    ) -> StoreError:
-        """Every sqlite3 failure as a typed refusal. Contention names the first key the call itself
-        named.
-        """
-        text = str(exc).lower()
-        contended = isinstance(exc, sqlite3.OperationalError) and (
-            "locked" in text or "busy" in text
-        )
-        if contended and keys:
-            return StoreBusy(keys, keys[0], waited_s)
-        root = keys[0].root if keys else "?"
-        return StoreError(f"the store database under {root} refused the operation: {exc}")
-
     @contextmanager
-    def _mapped(self, keys: tuple[Key, ...], waited_s: float | None = None) -> Generator[None]:
-        """Turn a driver error raised inside into this layer's own refusal. The reported wait is
-        measured here; a caller that already knows the true elapsed time passes it.
-        """
+    def _mapped(self, keys: tuple[Key, ...]) -> Generator[None]:
+        """Turn a driver error raised inside into this layer's own refusal: contention names the
+        first key the call named."""
         started = time.monotonic()
         try:
             yield
         except sqlite3.Error as exc:
-            elapsed = time.monotonic() - started if waited_s is None else waited_s
-            raise self._translate(exc, keys, elapsed) from exc
+            text = str(exc).lower()
+            contended = isinstance(exc, sqlite3.OperationalError) and (
+                "locked" in text or "busy" in text
+            )
+            if contended and keys:
+                raise StoreBusy(keys[0], time.monotonic() - started) from exc
+            root = keys[0].root if keys else "?"
+            raise StoreError(f"the store database under {root} refused the operation: {exc}") from exc
 
-    def _set_busy_timeout(self, conn: sqlite3.Connection, timeout_s: float) -> None:
-        conn.execute(f"pragma busy_timeout = {int(max(0.0, timeout_s) * 1000)}")
-
-    # ── write transactions ──────────────────────────────────────────────────────
+    # ── writes ──────────────────────────────────────────────────────────────────
 
     @contextmanager
     def _write(
         self, keys: tuple[Key, ...], *, timeout_s: float | None = None
     ) -> Generator[sqlite3.Connection]:
-        """One ``begin immediate`` transaction over the single root a call names.
-
-        The write lock is taken up front rather than upgraded from a read. A store that relaxed
-        durability commits at NORMAL; a transaction spanning both takes the stricter of the two.
-
-        A store's first marker in this database is guarded inside the transaction
-        (:meth:`_guard_first_marker`).
-        """
+        """One ``begin immediate`` transaction over the single root a call names, the write lock
+        taken up front rather than upgraded from a read."""
         timeout = self.lock_timeout_s if timeout_s is None else timeout_s
         with ExitStack() as held:
             with self._mapped(keys):
-                conn = held.enter_context(self._connection(
-                    keys[0].root, tuple(key.store for key in keys), keys, timeout))
-                self._set_busy_timeout(conn, timeout)
-                self._apply_synchronous(conn, self._synchronous_for(keys))
-            started = time.monotonic()
-            try:
+                conn = held.enter_context(
+                    self._connection(keys[0].root, keys, timeout, create=True))
+                assert conn is not None
+                conn.execute(f"pragma busy_timeout = {int(max(0.0, timeout) * 1000)}")
+            with self._mapped(keys):
                 conn.execute("begin immediate")
-            except sqlite3.Error as exc:
-                raise self._translate(exc, keys, time.monotonic() - started) from exc
             try:
                 with self._mapped(keys):
-                    self._guard_first_marker(conn, keys)
                     yield conn
                     conn.execute("commit")
             except BaseException:
@@ -712,45 +405,20 @@ class SqliteBackend:
                     conn.execute("rollback")
                 raise
 
-    def _synchronous_for(self, keys: tuple[Key, ...]) -> str:
-        durable = any(get_descriptor(key.store).durable for key in keys)
-        return "FULL" if durable else "NORMAL"
-
-    def _bump(self, conn: sqlite3.Connection, store: str) -> None:
-        """Count one change against a store, in the transaction that makes it.
-
-        Counter, tombstone and export-stamp writes are bookkeeping and bump nothing, so an
-        export cannot invalidate itself, and a store with no row here was never written.
-        """
-        conn.execute(
-            "insert into store_counters (store, change_counter, exported_counter) "
-            "values (?, 1, null) "
-            "on conflict(store) do update set change_counter = change_counter + 1",
-            (store,),
-        )
-
     def _put(self, conn: sqlite3.Connection, key: Key, data: bytes) -> None:
-        parts = encode_parts(key.parts)
         conn.execute(
-            "insert into records (store, parts, value, updated_at) values (?, ?, ?, ?) "
-            "on conflict(store, parts) do update set "
-            "value = excluded.value, updated_at = excluded.updated_at",
-            (key.store, parts, data, _now()),
+            "insert into records (store, parts, value) values (?, ?, ?) "
+            "on conflict(store, parts) do update set value = excluded.value",
+            (key.store, encode_parts(key.parts), data),
         )
-        conn.execute(
-            "delete from tombstones where store = ? and parts = ?", (key.store, parts)
-        )
-        self._bump(conn, key.store)
 
     def _drop(self, conn: sqlite3.Connection, key: Key) -> None:
-        parts = encode_parts(key.parts)
-        conn.execute("delete from records where store = ? and parts = ?", (key.store, parts))
-        conn.execute(
-            "insert into tombstones (store, parts, deleted_at) values (?, ?, ?) "
-            "on conflict(store, parts) do update set deleted_at = excluded.deleted_at",
-            (key.store, parts, _now()),
-        )
-        self._bump(conn, key.store)
+        conn.execute("delete from records where store = ? and parts = ?",
+                     (key.store, encode_parts(key.parts)))
+
+    def _append(self, conn: sqlite3.Connection, key: Key, data: bytes) -> None:
+        conn.execute("insert into log_entries (store, parts, entry) values (?, ?, ?)",
+                     (key.store, encode_parts(key.parts), data))
 
     def _stored(self, conn: sqlite3.Connection, key: Key) -> bytes | None:
         row = conn.execute(
@@ -759,76 +427,47 @@ class SqliteBackend:
         ).fetchone()
         return None if row is None else row[0]
 
-    def _require_version(
-        self, conn: sqlite3.Connection, key: Key, expect: Version
-    ) -> None:
-        data = self._stored(conn, key)
-        current = Version.ABSENT if data is None else _version_of(data)
-        if current != expect:
-            raise VersionConflict(key, expect, current)
-
     # ── records ─────────────────────────────────────────────────────────────────
 
     def read_versioned(self, key: Key, *, default: Any = REQUIRED) -> Versioned:
-        descriptor = get_descriptor(key.store)
         data = None
-        with self._mapped((key,)), self._serving(key.root, (key.store,), (key,)) as conn:
+        with self._mapped((key,)), self._connection(key.root, create=False) as conn:
             if conn is not None:
                 data = self._stored(conn, key)
-        if data is None:
-            if default is REQUIRED:
-                raise _missing_record(key)
-            return Versioned(default, Version.ABSENT)
-        return Versioned(_decode(descriptor, key, data), _version_of(data))
+        return _versioned(key, data, default)
 
     def exists(self, key: Key) -> bool:
-        if get_descriptor(key.store).kind == "blob":
-            return self._files.exists(key)
-        with self._mapped((key,)), self._serving(key.root, (key.store,), (key,)) as conn:
+        with self._mapped((key,)), self._connection(key.root, create=False) as conn:
             return conn is not None and self._stored(conn, key) is not None
 
     def replace(self, key: Key, value: Any, *, expect: Version | None = None) -> Version:
-        descriptor = get_descriptor(key.store)
-        data = _encode(descriptor, key, value)
+        data = _encoded(key, encode_record, value)
         with self._write((key,)) as conn:
             if expect is not None:
-                self._require_version(conn, key, expect)
+                require_version(key, self._stored(conn, key), expect)
             self._put(conn, key, data)
         return _version_of(data)
 
     def delete(self, key: Key, *, expect: Version | None = None) -> None:
-        if get_descriptor(key.store).kind == "blob":
-            self._files.delete(key, expect=expect)
-            return
         with self._write((key,)) as conn:
             if expect is not None:
-                self._require_version(conn, key, expect)
+                require_version(key, self._stored(conn, key), expect)
             self._drop(conn, key)
 
     @contextmanager
     def transaction(
         self, keys: Sequence[Key], *, timeout_s: float | None = None
     ) -> Generator[Txn]:
-        named = tuple(keys)
-        if get_descriptor(named[0].store).kind == "blob":
-            with self._files.transaction(named, timeout_s=timeout_s) as files_txn:
-                yield files_txn
-            return
-        with self._write(named, timeout_s=timeout_s) as conn:
-            txn = _SqliteTxn(self, conn, named)
-            yield txn
-            txn.apply()
+        with self._write(tuple(keys), timeout_s=timeout_s) as conn:
+            yield Txn(self, conn, tuple(keys))
 
     def keys(self, store: str, root: str, prefix: tuple[str, ...] = ()) -> list[Key]:
-        descriptor = get_descriptor(store)
-        if descriptor.kind == "blob":
-            return self._files.keys(store, root, prefix)
-        table = "log_entries" if descriptor.kind == "log" else "records"
-        with self._mapped(()), self._serving(root, (store,)) as conn:
+        with self._mapped(()), self._connection(root, create=False) as conn:
             if conn is None:
                 return []
             rows = conn.execute(
-                f"select distinct parts from {table} where store = ?", (store,)
+                "select parts from records where store = ? "
+                "union select parts from log_entries where store = ?", (store, store)
             ).fetchall()
         found = [
             Key(store, root, parts)
@@ -837,35 +476,29 @@ class SqliteBackend:
         ]
         return sorted(found, key=lambda k: k.parts)
 
+    def stores(self, root: str) -> list[str]:
+        """Every store name ``root``'s database holds a record or a log entry under, sorted."""
+        with self._mapped(()), self._connection(root, create=False) as conn:
+            if conn is None:
+                return []
+            rows = conn.execute(
+                "select store from records union select store from log_entries order by 1"
+            ).fetchall()
+        return [store for (store,) in rows]
+
     # ── logs ────────────────────────────────────────────────────────────────────
 
     def append(self, key: Key, record: Mapping[str, Any]) -> None:
-        """Add one entry, clearing any tombstone a prior ``clear_log`` on this key left."""
-        descriptor = get_descriptor(key.store)
-        data = _encode(descriptor, key, record)
-        _refuse_embedded_newline(key, data)
+        data = _encoded(key, encode_log_line, record)
         with self._write((key,)) as conn:
-            parts = encode_parts(key.parts)
-            conn.execute(
-                "insert into log_entries (store, parts, entry, appended_at) values (?, ?, ?, ?)",
-                (key.store, parts, data, _now()),
-            )
-            conn.execute(
-                "delete from tombstones where store = ? and parts = ?", (key.store, parts)
-            )
-            self._bump(conn, key.store)
+            self._append(conn, key, data)
 
     def read_log(self, key: Key, *, after: str | None = None) -> LogPage:
-        """Entries committed after the cursor, in commit order.
-
-        The cursor is the last returned row's id, which autoincrement never reuses. ``torn_tail``
-        is always False. An entry that will not decode is reported through ``corrupt``, and one
-        that decodes but carries a schema_version this reader does not know through
-        ``version_refused``.
-        """
-        descriptor = get_descriptor(key.store)
+        """Entries committed after the cursor, in commit order. The cursor is the last returned
+        row's id, which autoincrement never reuses; an entry that will not decode is reported
+        through ``corrupt``."""
         start = int(after) if after else 0
-        with self._mapped((key,)), self._serving(key.root, (key.store,), (key,)) as conn:
+        with self._mapped((key,)), self._connection(key.root, create=False) as conn:
             if conn is None:
                 return LogPage(records=[], cursor=str(start))
             rows = conn.execute(
@@ -875,120 +508,57 @@ class SqliteBackend:
             ).fetchall()
         records: list[Mapping[str, Any]] = []
         corrupt: list[int] = []
-        version_refused: list[int] = []
         cursor = start
         for position, (row_id, entry) in enumerate(rows):
             try:
-                records.append(_decode(descriptor, key, entry))
-            except SchemaVersionRefused:
-                version_refused.append(position)
+                records.append(_decoded(key, entry))
             except DecodeError:
                 corrupt.append(position)
             cursor = row_id
-        return LogPage(
-            records=records,
-            cursor=str(cursor),
-            corrupt=tuple(corrupt),
-            version_refused=tuple(version_refused),
-        )
+        return LogPage(records=records, cursor=str(cursor), corrupt=tuple(corrupt))
 
     def clear_log(self, key: Key) -> int:
-        """Delete every committed row for this log, returning how many there were.
-
-        Tombstones the key when it held any rows, so the next export deletes the log's exported
-        file. Bumps the change counter only when a row was removed.
-        """
+        """Delete every committed entry of this log, returning how many there were."""
         with self._write((key,)) as conn:
-            parts = encode_parts(key.parts)
-            count = conn.execute(
-                "select count(*) from log_entries where store = ? and parts = ?",
-                (key.store, parts),
-            ).fetchone()[0]
-            conn.execute(
-                "delete from log_entries where store = ? and parts = ?", (key.store, parts)
-            )
-            if count:
-                conn.execute(
-                    "insert into tombstones (store, parts, deleted_at) values (?, ?, ?) "
-                    "on conflict(store, parts) do update set deleted_at = excluded.deleted_at",
-                    (key.store, parts, _now()),
-                )
-                self._bump(conn, key.store)
-        return int(count)
-
-    # ── blobs, which stay files ─────────────────────────────────────────────────
-
-    def read_blob_versioned(self, key: Key, *, default: Any = REQUIRED) -> Versioned:
-        return self._files.read_blob_versioned(key, default=default)
-
-    def put_blob(self, key: Key, data: bytes, *, expect: Version | None = None) -> Version:
-        return self._files.put_blob(key, data, expect=expect)
-
-    def write_blob(
-        self, key: Key, *, expect: Version | None = None
-    ) -> AbstractContextManager[BinaryIO]:
-        return self._files.write_blob(key, expect=expect)
-
-    def open_blob(self, key: Key) -> AbstractContextManager[BinaryIO]:
-        return self._files.open_blob(key)
-
-    def blob_path(self, key: Key) -> Path:
-        return self._files.blob_path(key)
+            return conn.execute(
+                "delete from log_entries where store = ? and parts = ?",
+                (key.store, encode_parts(key.parts)),
+            ).rowcount
 
 
+class Txn:
+    """A transaction's handle over the keys it names: reads and writes inside one commit, a read
+    seeing this transaction's own writes. A key the transaction does not name is refused."""
 
-class _SqliteTxn:
-    """The database transaction's handle: reads inside the commit, writes staged until exit. A read
-    sees the transaction's own staged write, an unheld key is refused, and the declared key order
-    is the order writes land in.
-    """
-
-    def __init__(
-        self, backend: SqliteBackend, conn: sqlite3.Connection, keys: tuple[Key, ...]
-    ) -> None:
+    def __init__(self, backend: SqliteBackend, conn: sqlite3.Connection,
+                 keys: tuple[Key, ...]) -> None:
         self._backend = backend
         self._conn = conn
         self._keys = keys
-        self._staged: dict[Key, tuple[bool, Any]] = {}
 
     def _held(self, key: Key) -> None:
         if key not in self._keys:
-            raise _unheld_key(key)
+            raise TransactionMisuse(
+                f"{key.store}{list(key.parts)} is not held by this transaction: name every key "
+                "the body touches in transaction(...)"
+            )
 
     def read(self, key: Key, *, default: Any = REQUIRED) -> Any:
+        """One of the transaction's records; absence answers ``default`` or raises ``NotFound``."""
         self._held(key)
-        staged = self._staged.get(key)
-        if staged is not None:
-            removed, value = staged
-            if removed:
-                if default is REQUIRED:
-                    raise _deleted_in_transaction(key)
-                return default
-            return value
-        data = self._backend._stored(self._conn, key)
-        if data is None:
-            if default is REQUIRED:
-                raise _missing_record(key)
-            return default
-        return _decode(get_descriptor(key.store), key, data)
+        return _versioned(key, self._backend._stored(self._conn, key), default).value
 
     def write(self, key: Key, value: Any) -> None:
+        """Replace one of the transaction's records whole."""
         self._held(key)
-        self._staged[key] = (False, value)
+        self._backend._put(self._conn, key, _encoded(key, encode_record, value))
 
     def delete(self, key: Key) -> None:
+        """Remove one of the transaction's records."""
         self._held(key)
-        self._staged[key] = (True, None)
+        self._backend._drop(self._conn, key)
 
-    def apply(self) -> None:
-        """Encode and write every staged change, in the order the keys were declared."""
-        for key in self._keys:
-            staged = self._staged.get(key)
-            if staged is None:
-                continue
-            removed, value = staged
-            if removed:
-                self._backend._drop(self._conn, key)
-            else:
-                data = _encode(get_descriptor(key.store), key, value)
-                self._backend._put(self._conn, key, data)
+    def append(self, key: Key, record: Mapping[str, Any]) -> None:
+        """Append one entry to one of the transaction's logs."""
+        self._held(key)
+        self._backend._append(self._conn, key, _encoded(key, encode_log_line, record))

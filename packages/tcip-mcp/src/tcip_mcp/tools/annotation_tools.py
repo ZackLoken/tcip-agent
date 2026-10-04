@@ -294,9 +294,9 @@ def write_subject_registry(
     """Author the dataset's nested subject registry, a thin wrapper over ``subject_registry``.
 
     ``subjects`` is the nested registry mapping the expert defines, subjects to their
-    ``description`` / provenance and zero or more ``attributes`` (each ``categorical`` |
+    ``description`` and zero or more ``attributes`` (each ``categorical`` |
     ``ordinal`` with ordered ``values``). It is validated through
-    :func:`subject_registry.registry_from_dict` (a malformed shape refuses) and written to
+    :func:`subject_registry.registry_from_request` (a malformed shape refuses) and written to
     ``<dataset_root>/subjects.json`` via :func:`subject_registry.replace_registry`, which guards
     only the store's own window between its read and its put and refuses an empty registry. No
     numeric class ids, no colors, no id enumeration.
@@ -309,7 +309,7 @@ def write_subject_registry(
 
     Args:
         dataset_root: Dataset root; the registry is written to ``<dataset_root>/subjects.json``.
-        subjects: Nested ``{subject: {description?, defined_by?, defined_at?, attributes?}}`` dict.
+        subjects: Nested ``{subject: {description?, attributes?}}`` dict.
         allow_removals: State a dropped name, or a stored registry that will not decode, as a
             deliberate removal/repair.
         allow_type_changes: State a same-values attribute type flip (categorical to ordinal or
@@ -321,7 +321,7 @@ def write_subject_registry(
     from tcip_mcp.audit import AuditEntryNotWritten
 
     try:
-        registry = subject_registry.registry_from_dict(subjects)
+        registry = subject_registry.registry_from_request(subjects)
     except subject_registry.RegistryError as exc:
         return {"error": f"invalid registry: {exc}"}
 

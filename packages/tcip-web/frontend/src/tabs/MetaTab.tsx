@@ -120,16 +120,18 @@ export function MetaTab() {
           <div className="flex flex-col gap-2">
             {reports.map((r) => (
               <div
-                key={r.file}
+                key={r.report_id}
                 className="border-t border-tcip-border pt-2 first:border-t-0 first:pt-0"
               >
                 <div className="flex items-center gap-2 text-[11px] text-tcip-muted">
                   <span className="tcip-badge bg-tcip-border/60 text-tcip-fg">
                     {r.category || UNSET_GLYPH}
                   </span>
-                  <span className="font-mono">{r.timestamp ?? r.file}</span>
+                  <span className="font-mono">{r.timestamp ?? r.report_id}</span>
                 </div>
-                <div className="text-[12px] mt-1 whitespace-pre-wrap">{r.detail}</div>
+                <div className="text-[12px] mt-1 whitespace-pre-wrap">
+                  {r.detail ?? r.malformed}
+                </div>
                 {r.context && Object.keys(r.context).length > 0 && (
                   <pre className="text-[10px] text-tcip-muted mt-1 overflow-auto">
                     {JSON.stringify(r.context, null, 2)}

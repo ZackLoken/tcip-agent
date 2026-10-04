@@ -1,9 +1,6 @@
 """The dataset registry's ``path``: relative to the project root when the dataset is the
 project's own tree, absolute for a genuinely external dataset, resolved on read through one
-accessor (``dataset_entry_path``). Every consumer of a registry entry's ``path`` resolves it
-through that accessor; this file exercises the accessor itself and the consumers that have no
-test file of their own (``tcip_web.paths.allowed_roots`` is covered by
-test_web_path_guard_permanent_on.py).
+accessor (``dataset_entry_path``).
 """
 
 from __future__ import annotations
@@ -135,28 +132,6 @@ def test_stored_path_recognizes_containment_through_a_symlinked_project_root(tmp
         pytest.skip(f"symlinks not available on this machine: {exc}")
 
     assert stored_path(dataset, alias) == "datasets/main"
-
-
-# ── project_roots (tcip_mcp.store_catalog): reaches a relatively-registered dataset ───
-
-
-def test_project_roots_reaches_a_relatively_registered_datasets_state(tmp_path: Path):
-    """The dataset is registered under a subdirectory of the project, not the project's own
-    tree, so a resolved entry can only come from the registry-driven root project_roots adds,
-    never from the project root project_roots always adds regardless of the registry."""
-    from tcip_mcp.store_catalog import project_roots
-    from tcip_store.layout_claims import ROOT
-
-    project = tmp_path / "proj"
-    dataset = project / "datasets" / "main"
-    _make_dataset(dataset)
-    register_dataset(project, str(dataset), crop="currant")
-
-    roots = project_roots(project)
-
-    root_entries = [Path(r) for r, layout in roots if layout == ROOT]
-    assert any(p.resolve() == dataset.resolve() for p in root_entries)
-    assert len(root_entries) == len(set(root_entries))
 
 
 # ── check_dataset_identity.py: identity-based MOVED, not a stored-string comparison ────────

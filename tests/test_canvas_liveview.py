@@ -166,39 +166,6 @@ def test_heartbeat_updates_meta_without_touching_geometry(client, opened_project
     assert after == before                                                 # geometry untouched
 
 
-def test_push_state_does_not_fsync(client, tmp_path, monkeypatch):
-    """canvas_live/canvas_shapes are ephemeral: a push must not depend on fsync.
-
-    Bound to the file backend on purpose: canvas records declare durable=False, and this
-    backend's own write path calls os.fsync only when a record's descriptor declares itself
-    durable, so the patch proves the push's per-record durability choice. A fresh sqlite root
-    also fsyncs once, unconditionally, to create its database file before any record is
-    written; that is bootstrap infrastructure a root incurs regardless of what it stores, not
-    something this push depends on, and it would trip the same patch for an unrelated reason.
-    """
-    import asyncio
-    import os as _os
-
-    from tcip_store.file_backend import FileBackend
-
-    from tcip_mcp.tools.project_tools import initialize_project
-    from tcip_web.state import store
-
-    tcip_store.bind(FileBackend())
-    project = tmp_path
-    assert "error" not in initialize_project(str(project), "Test project", "north orchard")
-    asyncio.run(store.open_project(project))
-
-    def _boom(*_a, **_kw):
-        raise AssertionError("fsync should not be called for canvas state")
-
-    monkeypatch.setattr(_os, "fsync", _boom)
-    r = client.post("/api/canvas/state",
-                    json=_payload(project, A_IMG, shapes=SHAPES))
-    assert r.status_code == 200
-    assert _meta(project)["image_path"] == A_STORED
-
-
 def test_a_push_waits_for_a_holder_of_the_records_lock_and_then_lands(opened_project):
     """A push takes the meta record's lock, so it cannot overwrite what a holder is editing.
 

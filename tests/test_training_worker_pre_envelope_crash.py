@@ -1,8 +1,7 @@
 """A crash in the training worker's own pre-envelope setup (run record read, dataset build from
 what the launch resolved) never leaves the run reading ``running`` and never ends the process
-without a ``training_run`` audit event. ``run_training_envelope``, the one place that opens that
-event, is not reached from there, so the worker itself writes the run's final status ``failed``
-and opens the event before letting the crash propagate.
+without a ``training_run`` audit event: the run is closed ``failed`` before the crash
+propagates.
 """
 
 from __future__ import annotations
@@ -48,3 +47,29 @@ def test_a_pre_envelope_crash_marks_the_run_failed_and_opens_a_training_run_even
     assert len(events) == 1
     assert events[0]["status"] == "failed"
     assert events[0]["arguments"]["experiment_id"] == "exp-worker-crash"
+
+
+def test_a_pre_envelope_crash_whose_audit_line_is_refused_names_both_causes(
+        tmp_path, monkeypatch):
+    """Setup fails and the run's audit line is refused: the setup error propagates, and the
+    final status names it and the unwritten line."""
+    import tcip_mcp.audit as audit
+
+    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data", batch_size=1),
+                         experiment_id="exp-worker-crash-unaudited")
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("dataset build exploded")
+
+    def _refuse(key, entry):
+        raise OSError("the log's disk is full")
+
+    monkeypatch.setattr(sc, "recorded_datasets", _boom)
+    monkeypatch.setattr(audit, "append", _refuse)
+    with pytest.raises(RuntimeError, match="dataset build exploded"):
+        worker.run_directory(run_dir)
+
+    final = exp.observe(run_dir).final
+    assert final["state"] == "failed"
+    assert "dataset build exploded" in final["error"]
+    assert "audit entry could not be written" in final["error"]
