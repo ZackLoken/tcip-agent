@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from tcip_store.model import Key, Version
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tcip_store.model import Key, Version
 
 
 class StoreError(Exception):
@@ -13,16 +16,8 @@ class StoreNotBound(StoreError):
     """No backend is bound in this process."""
 
 
-class UnknownStore(StoreError):
-    """The key names a store nothing has registered."""
-
-
-class WrongKind(StoreError):
-    """The operation does not apply to the store's declared kind."""
-
-
 class BadKey(StoreError):
-    """The key does not match the store's declared shape."""
+    """The key names no root or carries an empty part."""
 
 
 class NotFound(StoreError):
@@ -30,30 +25,7 @@ class NotFound(StoreError):
 
 
 class DecodeError(StoreError):
-    """The entry exists but its bytes do not decode, or a backend's own bookkeeping file holds
-    bytes it cannot make sense of.
-
-    Distinct from ``NotFound``. The file backend also raises it out of ``append`` and ``clear_log``
-    when a clear-base watermark file it needs to settle does not hold a decimal integer.
-    """
-
-
-class SchemaVersionRefused(StoreError):
-    """A document's ``schema_version`` is outside what this reader's descriptor accepts; not a
-    ``DecodeError`` subclass.
-    """
-
-
-class PolicyViolation(StoreError):
-    """The write form is not one the store's concurrency policy allows."""
-
-
-class ListingUnsupported(StoreError):
-    """The store's descriptor declares no enumeration, so ``keys`` has no answer."""
-
-
-class CapabilityUnavailable(StoreError):
-    """The call requires a guarantee the bound backend does not declare."""
+    """The entry exists but its bytes do not decode. Distinct from ``NotFound``."""
 
 
 class BackendUnavailable(StoreError):
@@ -61,39 +33,32 @@ class BackendUnavailable(StoreError):
 
 
 class TransactionMisuse(StoreError):
-    """A transaction was used in a way that means different things on different backends."""
+    """A transaction was nested, named no key, spanned two roots, or was bypassed by a write
+    inside it."""
 
 
 class VersionConflict(StoreError):
     """The stored version is not the one the caller expected, so nothing was written."""
 
-    def __init__(self, key: Key, expected: Version, actual: Version) -> None:
+    def __init__(self, entry: Key | str, expected: Version, actual: Version) -> None:
+        named = entry if isinstance(entry, str) else f"{entry.store}{list(entry.parts)}"
         super().__init__(
-            f"{key.store}{list(key.parts)} changed since it was read: expected version "
+            f"{named} changed since it was read: expected version "
             f"{expected.token or '(absent)'}, found {actual.token or '(absent)'}. "
-            "Re-read the record and reapply the change; nothing was written."
+            "Re-read it and reapply the change; nothing was written."
         )
-        self.key = key
+        self.entry = entry
         self.expected = expected
         self.actual = actual
 
 
 class StoreBusy(StoreError):
-    """A lock was not acquired within the timeout, so nothing was written.
+    """A lock was not acquired within the timeout, so nothing was written. ``blocked_on`` names
+    the first key or file the refused call named."""
 
-    The file backend cannot name the process holding the lock: its lock carries no owner
-    identity. It names how long it waited and, in ``blocked_on``, a key the refused call
-    itself named, never the holder's. The file backend names the key whose lock it was
-    waiting on; a backend excluding writers more coarsely than one key at a time names the
-    first key the call named, since it cannot know which of them the contender holds.
-    """
-
-    def __init__(self, keys: tuple[Key, ...], blocked_on: Key, waited_s: float) -> None:
-        requested = ", ".join(f"{k.store}{list(k.parts)}" for k in keys)
-        super().__init__(
-            f"waited {waited_s:.1f}s for {blocked_on.store}{list(blocked_on.parts)} and gave up; "
-            f"nothing was written. Keys requested: {requested}."
-        )
-        self.keys = keys
+    def __init__(self, blocked_on: Key | str, waited_s: float) -> None:
+        named = (blocked_on if isinstance(blocked_on, str)
+                 else f"{blocked_on.store}{list(blocked_on.parts)}")
+        super().__init__(f"waited {waited_s:.1f}s for {named} and gave up; nothing was written.")
         self.blocked_on = blocked_on
         self.waited_s = waited_s

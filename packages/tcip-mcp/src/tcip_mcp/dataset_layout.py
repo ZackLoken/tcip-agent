@@ -14,8 +14,8 @@ file, resolved through the dataset's single subject registry::
         values
 
 The subject registry lives in the dataset and travels with the labels. This module never parses
-``subjects.json`` (its contents belong to :mod:`tcip_mcp.subject_registry`). It owns the
-dataset-root stores it registers below and the one label save.
+``subjects.json`` (its contents belong to :mod:`tcip_mcp.subject_registry`). It owns the paths
+below and the one label save.
 
 ``<date>`` of ``None`` (non-dated datasets) simply omits that segment.
 """
@@ -28,15 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 import tcip_store
-from tcip_store import (
-    RECORD_JSON,
-    Key,
-    StoreDescriptor,
-    check_schema_version,
-    get_descriptor,
-    register_store,
-)
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import Key, decode_value
 
 from tcip_annotation.json_io import LABEL_SUFFIX
 
@@ -61,36 +53,6 @@ def is_bucket_name(name: str) -> bool:
     from tcip_mcp.workspace import is_valid_name
 
     return is_valid_name(name) and not name.startswith(".")
-
-
-# ── the dataset-root stores ──────────────────────────────────────────────────
-
-_STATE_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
-"""A dataset's own private state documents, one of each per dataset."""
-
-_DATASET_DOC = RootedFileLocator(suffix=".json")
-"""The documents that travel with the image set, at the dataset root itself."""
-
-_IMAGE_TREE = RootedFileLocator(prefix=("images",))
-"""The ingested imagery, one file per capture under its date bucket. No suffix on the locator:
-the extension is part of the file's own name, because a dataset holds whatever formats its
-captures came in."""
-
-_LABEL_TREE = RootedFileLocator(prefix=("annotations",), suffix=LABEL_SUFFIX)
-"""Ground truth, one file per image under its capture date."""
-
-_PREDICTION_TREE = RootedFileLocator(prefix=("predictions",), suffix=LABEL_SUFFIX)
-"""Model outputs, one file per image under a model bucket and capture date."""
-
-
-def _entry_path(locator: RootedFileLocator, scope: str | Path, parts: tuple[str, ...]) -> Path:
-    """The absolute path a locator places an entry at under ``scope``."""
-    return Path(scope, *locator.relative_path(str(scope), parts).parts)
-
-
-def _document_of(filename: str) -> tuple[str, ...]:
-    """The key parts addressing a store that holds exactly one document per scope."""
-    return (Path(filename).stem,)
 
 
 def parse_image_path(image_path: str | Path) -> tuple[Path, Optional[str], str]:
@@ -139,7 +101,7 @@ def _date_seg(date: Optional[str]) -> tuple[str, ...]:
 
 def image_root(dataset_root: str | Path) -> Path:
     """``<dataset_root>/images/``: the whole image tree, every capture date under it."""
-    return Path(dataset_root, *_IMAGE_TREE.prefix)
+    return Path(dataset_root, "images")
 
 
 def image_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
@@ -154,7 +116,7 @@ def image_filename(stem: str, ext: str) -> str:
 
 def image_path(dataset_root: str | Path, date: Optional[str], stem: str, ext: str) -> Path:
     """Canonical write path for an image (``ext`` includes the leading dot)."""
-    return _entry_path(_IMAGE_TREE, dataset_root, (*_date_seg(date), image_filename(stem, ext)))
+    return image_dir(dataset_root, date) / image_filename(stem, ext)
 
 
 def resolve_images_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
@@ -187,35 +149,6 @@ def resolve_image_name(dataset_root: str | Path, date: Optional[str], stem: str)
     return logical_image_name(source)
 
 
-IMAGERY_STORE = "imagery"
-register_store(
-    StoreDescriptor(
-        name=IMAGERY_STORE,
-        kind="blob",
-        key_fields=("date", "filename"),
-        frozen=True,
-        cannot_carry_field="raw capture bytes (JPEG/PNG/TIFF/GeoTIFF/NPZ), nothing to version",
-        path_readable=True,
-        locator=_IMAGE_TREE,
-    )
-)
-
-
-def image_key(dataset_root: str | Path, date: str, stem: str, ext: str) -> Key:
-    """One ingested capture's bytes, a path-readable blob.
-
-    ``date`` is required: the ingest key is dated by design, with no undated form of its own. The
-    flat ``images/`` root (:func:`image_dir` with ``date=None``) is the undated imagery form,
-    addressed by path rather than through this key.
-    """
-    if not date:
-        raise ValueError(
-            f"image_key needs a capture date for {stem!r}: the undated dataset layout "
-            f"({image_dir(dataset_root, None)}) has no key shape yet"
-        )
-    return Key(IMAGERY_STORE, str(dataset_root), (date, image_filename(stem, ext)))
-
-
 def list_dates(dataset_root: str | Path,
                tree: Callable[[str | Path], Path] | None = None) -> list[str]:
     """Sorted bucket names under ``images/``, or under the tree ``tree`` names
@@ -231,7 +164,7 @@ def list_dates(dataset_root: str | Path,
 
 def annotation_root(dataset_root: str | Path) -> Path:
     """``<dataset_root>/annotations/``: the whole ground-truth tree, every capture date under it."""
-    return Path(dataset_root, *_LABEL_TREE.prefix)
+    return Path(dataset_root, "annotations")
 
 
 def annotation_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
@@ -282,64 +215,29 @@ def dataset_root_of(path: str | Path) -> Optional[Path]:
 
 
 def subjects_path(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/subjects.json``: the one nested registry that decodes the dataset's labels."""
-    return _entry_path(_DATASET_DOC, dataset_root, _SUBJECT_REGISTRY_PARTS)
-
-
-SUBJECT_REGISTRY_STORE = "subject_registry"
-_SUBJECT_REGISTRY_PARTS = _document_of(SUBJECTS_FILENAME)
-register_store(
-    StoreDescriptor(
-        name=SUBJECT_REGISTRY_STORE,
-        kind="blob",
-        key_fields=("document",),
-        frozen=True,
-        locator=_DATASET_DOC,
-    )
-)
-
-
-def subject_registry_key(dataset_root: str | Path) -> Key:
-    """The dataset's subject registry blob, encoded through ``RECORD_JSON`` in declared order."""
-    return Key(SUBJECT_REGISTRY_STORE, str(dataset_root), _SUBJECT_REGISTRY_PARTS)
+    """``<dataset_root>/subjects.json``: the one nested registry that decodes the dataset's
+    labels, written through ``tcip_store.encode_record`` in declared order."""
+    return Path(dataset_root, SUBJECTS_FILENAME)
 
 
 def dataset_identity_path(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/dataset.json``: the dataset's identity ({crop, id, fingerprint}).
+    """``<dataset_root>/dataset.json``: the dataset's identity ({crop, id, fingerprint}), written
+    compare-and-set through ``tcip_store.encode_record``.
 
     The stored fingerprint is a cache; recompute-on-read
     (``dataset_fingerprint.dataset_fingerprint``) is authority.
     """
-    return _entry_path(_DATASET_DOC, dataset_root, _DATASET_IDENTITY_PARTS)
-
-
-DATASET_IDENTITY_STORE = "dataset_identity"
-_DATASET_IDENTITY_PARTS = _document_of("dataset.json")
-register_store(
-    StoreDescriptor(
-        name=DATASET_IDENTITY_STORE,
-        kind="blob",
-        key_fields=("document",),
-        frozen=True,
-        locator=_DATASET_DOC,
-    )
-)
-
-
-def dataset_identity_key(dataset_root: str | Path) -> Key:
-    """The dataset's identity document, written compare-and-set through ``RECORD_JSON``."""
-    return Key(DATASET_IDENTITY_STORE, str(dataset_root), _DATASET_IDENTITY_PARTS)
+    return Path(dataset_root, "dataset.json")
 
 
 def decode_dataset_identity_document(data: bytes, *, dataset_root: str | Path) -> dict:
-    """A dataset identity document's bytes, decoded and shape/version-checked.
+    """A dataset identity document's bytes, decoded and shape-checked.
 
     Raises ``ValueError`` for bytes that do not decode, or that decode to something other than a
-    dict; a dict lacking ``id``, ``crop`` or ``fingerprint`` raises ``KeyError``. Propagates :class:`tcip_store.SchemaVersionRefused`, uncaught, for a
-    ``schema_version`` this reader does not accept.
+    dict; a dict lacking ``id``, ``crop`` or ``fingerprint`` raises ``KeyError``.
     """
     try:
-        identity = RECORD_JSON.decode(data)
+        identity = decode_value(data)
     except ValueError as exc:
         raise ValueError(
             f"{dataset_identity_path(dataset_root)} exists but does not decode as a dataset "
@@ -348,7 +246,6 @@ def decode_dataset_identity_document(data: bytes, *, dataset_root: str | Path) -
         raise ValueError(
             f"{dataset_identity_path(dataset_root)} exists but does not decode as a dataset "
             "identity; re-register with register_dataset")
-    check_schema_version(get_descriptor(DATASET_IDENTITY_STORE), identity)
     _id, _crop, _fingerprint = identity["id"], identity["crop"], identity["fingerprint"]
     return identity
 
@@ -356,11 +253,8 @@ def decode_dataset_identity_document(data: bytes, *, dataset_root: str | Path) -
 def read_dataset_identity(dataset_root: str | Path) -> dict | None:
     """The dataset's identity record (``{crop, id, fingerprint}``) decoded through
     :func:`decode_dataset_identity_document`, or ``None`` for a dataset never registered. A record
-    that does not decode raises ``ValueError``; :class:`tcip_store.SchemaVersionRefused`
-    propagates."""
-    import tcip_store
-
-    stored = tcip_store.read_blob_versioned(dataset_identity_key(dataset_root), default=None)
+    that does not decode raises ``ValueError``."""
+    stored = tcip_store.read_blob_versioned(dataset_identity_path(dataset_root), default=None)
     if stored.value is None:
         return None
     return decode_dataset_identity_document(stored.value, dataset_root=dataset_root)
@@ -380,7 +274,7 @@ def require_dataset_identity(dataset_root: str | Path) -> dict:
 
 def prediction_root(dataset_root: str | Path) -> Path:
     """``<dataset_root>/predictions/``: the whole prediction tree, every model bucket under it."""
-    return Path(dataset_root, *_PREDICTION_TREE.prefix)
+    return Path(dataset_root, "predictions")
 
 
 def label_filename(stem: str) -> str:
@@ -498,8 +392,8 @@ def save_label_document(
     landed write whose line cannot follow raises ``AuditEntryNotWritten``.
     """
     from tcip_annotation.json_io import (
-        CompletionMark, annotation_from_payload, annotation_record_key, read_document_versioned,
-        stamped, subject_digest, write_annotations,
+        CompletionMark, annotation_from_payload, read_document_versioned, stamped, subject_digest,
+        write_annotations,
     )
     from tcip_annotation.verdicts import Verdict, VerdictAction, record_verdicts
 
@@ -518,8 +412,7 @@ def save_label_document(
             raise ValueError(f"annotation {i} {exc}") from exc
     stored, read = read_document_versioned(str(label_path))
     if expect is not None and expect != read:
-        raise tcip_store.VersionConflict(
-            annotation_record_key(Path(label_path).parent, Path(label_path).stem), expect, read)
+        raise tcip_store.VersionConflict(str(label_path), expect, read)
     annotations = stamped(contents, stored.annotations, actor=author, now=now)
     verdicts: list[Verdict] = []
     if gestures.accept or gestures.reject:

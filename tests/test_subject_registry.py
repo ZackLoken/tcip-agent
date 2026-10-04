@@ -32,14 +32,25 @@ def _version(dataset_root):
 
 def _bud_bush() -> SubjectRegistry:
     return SubjectRegistry(subjects=(
-        Subject(name="bush", description="one currant bush crown", defined_by="user:breeder"),
+        Subject(name="bush", description="one currant bush crown"),
         Subject(
             name="bud",
             description="a currant bud",
-            defined_by="user:breeder",
             attributes=(Attribute(name="opening", type="categorical", values=("closed", "open")),),
         ),
     ))
+
+
+def test_a_stored_subject_stating_no_description_refuses_and_a_request_s_states_an_empty_one():
+    """A stored subject carries the description its writer wrote, so one without it refuses
+    rather than reading as described by nothing; an authoring request may leave it out."""
+    from tcip_mcp.subject_registry import registry_from_request
+
+    with pytest.raises(RegistryError, match="description"):
+        registry_from_dict({"bud": {}})
+
+    assert registry_from_request({"bud": {}}) == SubjectRegistry(
+        subjects=(Subject(name="bud", description=""),))
 
 
 def test_dict_and_file_roundtrip_preserve_the_registry(tmp_path):
@@ -132,7 +143,8 @@ def test_attribute_refuses_bad_values_at_construction():
 
 
 def test_absent_or_null_attributes_valid_but_falsy_malformed_refused():
-    for ok in ({"bush": {}}, {"bush": {"attributes": None}}):  # absent / null -> detection-only subject
+    for ok in ({"bush": {"description": ""}},
+               {"bush": {"description": "", "attributes": None}}):  # detection-only subject
         bush = registry_from_dict(ok).subject("bush")
         assert bush is not None and bush.attributes == ()
     for bad in (False, 0, "", []):  # a falsy but wrong-typed attributes is malformed, not "none"
@@ -160,10 +172,6 @@ def test_a_present_but_undecodable_registry_refuses_and_an_absent_one_says_so(tm
 def test_a_copied_registry_declares_the_same_document_in_the_same_order(tmp_path):
     """A registry placed beside another dataset's data declares exactly what its source declares,
     so a digest or an id assignment taken against either one reads the same declared order.
-
-    Every record now shares one spelling, so equal bytes no longer distinguish a copy from a
-    re-serialization; what this pins is that the document and its subject order survive, and
-    that the copy carries the canonical bytes rather than a spelling of its own.
     """
     from tcip_mcp.subject_registry import copy_registry
 
@@ -204,11 +212,10 @@ def _leaf_bush() -> SubjectRegistry:
     """A generic two-subject registry (a subject declaring no attribute, one declaring one), for the
     registry-write tests below."""
     return SubjectRegistry(subjects=(
-        Subject(name="bush", description="one plant crown", defined_by="user:breeder"),
+        Subject(name="bush", description="one plant crown"),
         Subject(
             name="leaf",
             description="one leaf",
-            defined_by="user:breeder",
             attributes=(Attribute(name="stage", type="categorical", values=("early", "late")),),
         ),
     ))

@@ -52,7 +52,7 @@ def test_removal_archives_moves_and_records_one_line(client, tmp_path):
     assert moved_to.parent == ws / workspace.REMOVED_DIRNAME and moved_to.is_dir()
     assert not project.exists()
     with zipfile.ZipFile(archive) as zf:
-        assert ".tcip/project.json" in zf.namelist()
+        assert ".tcip/store.db" in zf.namelist()
         assert "images/2026-03-04/img.jpg" in zf.namelist()
     (line,) = audit_rows(moved_to)[before:]
     assert line["tool"] == "project_removed"

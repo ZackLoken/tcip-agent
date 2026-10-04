@@ -1,5 +1,5 @@
 """The web backend's own state: the workspace it serves, the project it has open, that project's
-live :class:`~tcip_mcp.web_client.GuiState` (persisted to the project's ``.tcip/state/gui.json`` on
+live :class:`~tcip_mcp.web_client.GuiState` (persisted to the project's GUI snapshot record on
 every change) and the panel events it retains for a browser that connects late.
 """
 

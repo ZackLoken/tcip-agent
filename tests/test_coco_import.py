@@ -209,13 +209,13 @@ def test_the_digest_names_the_bytes_the_labels_came_from(tmp_path: Path, monkeyp
     root = _dataset(tmp_path)
     document = _document(tmp_path / "external.json")
     read_bytes = document.read_bytes()
-    real_transaction = ts.transaction
+    real_transaction = ts.blob_transaction
 
-    def replacing(*keys, **kwargs):
+    def replacing(*paths, **kwargs):
         document.write_text(json.dumps({"images": [], "categories": []}), encoding="utf-8")
-        return real_transaction(*keys, **kwargs)
+        return real_transaction(*paths, **kwargs)
 
-    monkeypatch.setattr(ts, "transaction", replacing)
+    monkeypatch.setattr(ts, "blob_transaction", replacing)
     assert "error" not in _import(document, root)
 
     (event,) = [row for row in audit_rows(root) if row["tool"] == "coco_document_imported"]
@@ -377,14 +377,14 @@ def test_a_record_the_writer_refuses_writes_nothing(tmp_path: Path):
 def _label_placed_before_the_writes(monkeypatch, label: Path, annotations) -> None:
     """A person's label landing on ``label`` after the validation pass read the directory and
     before the import's writes open."""
-    real_transaction = ts.transaction
+    real_transaction = ts.blob_transaction
 
-    def interleaved(*keys, **kwargs):
+    def interleaved(*paths, **kwargs):
         ts.put_blob(*json_io.encode_annotations(label, annotations, IMG, IMG, keep_empty=True))
-        monkeypatch.setattr(ts, "transaction", real_transaction)
-        return real_transaction(*keys, **kwargs)
+        monkeypatch.setattr(ts, "blob_transaction", real_transaction)
+        return real_transaction(*paths, **kwargs)
 
-    monkeypatch.setattr(ts, "transaction", interleaved)
+    monkeypatch.setattr(ts, "blob_transaction", interleaved)
 
 
 def test_an_import_whose_second_document_conflicts_leaves_no_document_written(
@@ -415,21 +415,21 @@ def test_an_import_failing_while_it_publishes_leaves_no_document(tmp_path: Path,
     """A failure publishing the second document, after the first was published, puts the first
     back: the import raises, no document of it remains, and no event is left."""
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
-    from tcip_store.file_backend import FileBackend
+    from tcip_store import file_backend
 
     root = _dataset(tmp_path)
     document = _document(tmp_path / "external.json")
-    real_apply = FileBackend._apply_staged
+    real_apply = file_backend._apply_staged
     published: list[Path] = []
 
-    def failing_second(self, temp, path, *, durable):
+    def failing_second(temp, path):
         if path.suffix == ".json" and path.parent == _labels(root):
             published.append(path)
             if len(published) == 2:
                 raise OSError("disk full")
-        return real_apply(self, temp, path, durable=durable)
+        return real_apply(temp, path)
 
-    monkeypatch.setattr(FileBackend, "_apply_staged", failing_second)
+    monkeypatch.setattr(file_backend, "_apply_staged", failing_second)
 
     with pytest.raises(OSError, match="disk full"):
         import_coco_document(document, root, date=DATE)

@@ -2,8 +2,7 @@
 
 ## Checklist
 
-- [ ] `pytest tests/` passes (both storage backends, if this touches the storage seam or a
-      change's own new/changed test files)
+- [ ] `pytest tests/` passes (or the change's own new/changed test files)
 - [ ] `ruff check .` passes
 - [ ] `mypy` passes
 - [ ] `python tools/list_tools.py` was not hardcoded anywhere as a count in a doc, comment,
@@ -17,8 +16,6 @@
       (`python tools/prove_test_fails_before.py <testfile> -k <expr>`, verdict `GUARDS`)
 - [ ] If this touches a persisted format, a refusal, an operating-point stamp, or a delivery
       gate: a design issue was opened and discussed before this pull request
-- [ ] If this touches a store's on-disk shape: `frozen-formats.json` was regenerated
-      (`python tools/generate_frozen_manifest.py`) and `tests/test_frozen_manifest.py` passes
 - [ ] Commits are one concern each, in dependency order, with LF line endings, and each message
       states the standing constraint the change installs
 - [ ] No new or renamed crop trait vocabulary outside `crops.yml` and

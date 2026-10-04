@@ -34,20 +34,11 @@ def _sep() -> str:
 def test_build_environ_sets_pythonpath_to_the_four_package_src_dirs_under_the_worktree(tool, tmp_path):
     worktree = tmp_path / "worktree"
 
-    env = tool.build_environ(worktree, "sqlite")
+    env = tool.build_environ(worktree)
 
     parts = env["PYTHONPATH"].split(_sep())
     expected = [str((worktree / "packages" / name / "src").resolve()) for name in tool.PACKAGE_SRC_DIRS]
     assert parts == expected
-    assert "TCIP_STORE_BACKEND" not in env
-
-
-def test_build_environ_sets_the_file_backend_when_requested(tool, tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_STORE_BACKEND", "sqlite")
-
-    env = tool.build_environ(tmp_path / "worktree", "file")
-
-    assert env["TCIP_STORE_BACKEND"] == "file"
 
 
 def test_the_proof_succeeds_when_tcip_mcp_resolves_under_the_worktree(tool, tmp_path, monkeypatch):
@@ -59,7 +50,7 @@ def test_the_proof_succeeds_when_tcip_mcp_resolves_under_the_worktree(tool, tmp_
         return subprocess.CompletedProcess(cmd, 0, stdout=str(inside) + "\n", stderr="")
 
     monkeypatch.setattr(tool.subprocess, "run", _fake_run)
-    env = tool.build_environ(worktree, "sqlite")
+    env = tool.build_environ(worktree)
 
     resolved = tool.prove_resolution(worktree, env)
 
@@ -77,7 +68,7 @@ def test_the_proof_refuses_when_tcip_mcp_resolves_outside_the_worktree(tool, tmp
         return subprocess.CompletedProcess(cmd, 0, stdout=str(elsewhere) + "\n", stderr="")
 
     monkeypatch.setattr(tool.subprocess, "run", _fake_run)
-    env = tool.build_environ(worktree, "sqlite")
+    env = tool.build_environ(worktree)
 
     with pytest.raises(SystemExit, match="outside the worktree"):
         tool.prove_resolution(worktree, env)

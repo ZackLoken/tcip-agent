@@ -83,12 +83,6 @@ jobs:
 
   python:
     runs-on: ubuntu-latest
-    strategy:
-      # Both storage backends stay gated: sqlite is the default, file is the
-      # zero-service fallback an operator can still select.
-      fail-fast: false
-      matrix:
-        store-backend: ["sqlite", "file"]
     steps:
       # Full history: tests/test_prove_test_fails_before.py runs the fail-before tool against a
       # real baseline commit, which a depth-1 checkout does not carry.
@@ -144,11 +138,10 @@ jobs:
         env:
           TCIP_MIN_TESTS: "400"
           OMP_NUM_THREADS: "1"
-          TCIP_STORE_BACKEND: ${{ matrix.store-backend }}
         run: pytest tests/ -n auto --timeout=300 -q
 
   # test_hpo_ray_detached_exit.py's console-signal exit path is Windows-only (skipif everywhere
-  # else), so it never rides the ubuntu python job's matrix; this job is its only CI coverage.
+  # else), so it never runs in the ubuntu python job; this job is its only CI coverage.
   ray-exit-windows:
     runs-on: windows-latest
     defaults:
@@ -192,11 +185,11 @@ jobs:
           activate-environment: tcip-agent
           auto-activate-base: false
 
-      - name: The removal's move of a project whose database was open, on the database backend
+      - name: The removal's move of a project whose database was open
         run: |
           set -o pipefail
           pytest tests/test_project_removal.py::test_removal_archives_moves_and_records_one_line \
-                 "tests/test_store_contract.py::test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other[sqlite]" \
+                 tests/test_store_contract.py::test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other \
                  -v --timeout=300 | tee project-removal-windows-output.txt
 
       - name: Prove both selected tests passed by node id, not a bare count
@@ -205,8 +198,8 @@ jobs:
             echo "the removal test did not pass (skipped or none selected)"
             exit 1
           }
-          grep -qE "^tests/test_store_contract\.py::test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other\[sqlite\] PASSED" project-removal-windows-output.txt || {
-            echo "the seam contract test's sqlite case did not pass (skipped or none selected)"
+          grep -qE "^tests/test_store_contract\.py::test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other PASSED" project-removal-windows-output.txt || {
+            echo "the seam contract test did not pass (skipped or none selected)"
             exit 1
           }
 

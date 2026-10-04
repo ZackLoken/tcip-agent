@@ -1,4 +1,4 @@
-/** Session-tracking API helpers (annotation_stats.json on disk). */
+/** Session-tracking API helpers (the open project's annotation-stats record). */
 
 import { getJson, postJson } from "@/api/http";
 import { ROUTES } from "@/api/routes";

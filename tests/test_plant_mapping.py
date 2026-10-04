@@ -291,40 +291,7 @@ def test_load_mapping_refuses_a_date_capture_identity_names_but_capture_digests_
         load_mapping(tmp_path, "mapping")
 
 
-def test_scan_receipts_refuses_a_version_refused_log_line_not_as_corruption(
-    tmp_path: Path,
-) -> None:
-    """A version-refused audit line is a policy fact, not corruption: it must still block the
-    receipt scan (an entry could be hiding behind it unread), naming schema_version rather than
-    the corrupt-log wording. Planted as bytes on the file backend's own log, since the seam's
-    writer refuses to append the line itself."""
-    from tcip_mcp.audit import audit_log_key
-    from tcip_store.file_backend import FileBackend
-
-    tcip_store.bind(FileBackend())
-    try:
-        build = _build({
-            "2-11-26": [
-                Assignment(
-                    image="IMG.JPG", stem="IMG", date_folder="2-11-26",
-                    plot_name="PLOT1", accession_name="A", source="sequence", distance_m=1.2,
-                )
-            ]
-        })
-        persist_mapping(build, tmp_path, actor=None)
-        key = audit_log_key(tmp_path)
-        poisoned = tcip_store.get_descriptor(key.store).codec.encode(
-            {"tool": "a_future_tool", "schema_version": 99})
-        with open(FileBackend().path_for(key), "ab") as handle:
-            handle.write(poisoned + b"\n")
-
-        with pytest.raises(ValueError, match="schema_version"):
-            load_mapping(tmp_path, "mapping")
-    finally:
-        tcip_store.unbind()
-
-
-def test_scan_receipts_still_admits_a_real_receipt_with_no_version_refused_lines(
+def test_scan_receipts_admits_a_real_receipt(
     tmp_path: Path,
 ) -> None:
     build = _build({
@@ -391,28 +358,20 @@ def test_persisting_a_mapping_into_a_directory_that_does_not_exist_yet_still_lan
 def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
     tmp_path: Path
 ) -> None:
-    """The write takes the mapping record's own lock, and reports the contention rather than
-    writing past it.
-
-    Two processes can be handed the same mapping path, and an unguarded write would interleave
-    with the other's bytes and leave a document that parses as a mapping while holding neither
-    build's assignments.
-
-    Bound to the file backend on purpose: a per-path lock held from outside the write is the
-    file backend's own exclusion, and the contention a database backend reports is its own.
-    """
+    """The write takes the database's write lock, and reports the contention rather than
+    writing past a holder of it."""
     import threading
 
     from tcip_store import StoreBusy
-    from tcip_store.file_backend import FileBackend, path_lock
+    from tcip_store.sqlite_backend import SqliteBackend
 
-    out = tmp_path / ".tcip" / "state" / "plant_mappings" / "mapping.json"
-    tcip_store.bind(FileBackend(lock_timeout_s=0.2))
+    key = plant_mapping_key(tmp_path, "mapping")
+    backend = tcip_store.bind(SqliteBackend(lock_timeout_s=0.2))
 
     holding, release = threading.Event(), threading.Event()
 
     def hold() -> None:
-        with path_lock(out, timeout_s=30):
+        with tcip_store.transaction(key, timeout_s=30):
             holding.set()
             release.wait(30)
 
@@ -422,7 +381,8 @@ def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
         assert holding.wait(30)
         with pytest.raises(StoreBusy):
             persist_mapping(_one_build(), tmp_path, actor=None)
-        assert not out.exists()
     finally:
         release.set()
         holder.join(30)
+    assert not tcip_store.exists(key)
+    backend.close()

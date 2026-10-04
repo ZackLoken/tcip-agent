@@ -1,10 +1,6 @@
 """HPO, hyperparameter optimization on Ray Tune.
 
-Search *algorithms* and trial *schedulers* are agent-selectable per task/data; no single
-method is welded in. The agent picks from whatever backends are installed (Ray degrades to
-what imports on this machine) and overrides the derivable defaults when the data warrants.
-
-Facts (not a recipe, the agent chooses):
+The search algorithms and trial schedulers a sweep can name:
   - search algorithms: ``random``/``grid`` are native; ``optuna``, ``bayesopt``, ``hyperopt``
     need their pip backend and are installed by default. Each is constructed with the sweep's
     own seed.
@@ -27,8 +23,7 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Callable
 
-from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import Key
 
 
 logger = logging.getLogger(__name__)
@@ -158,8 +153,7 @@ def build_search_alg(
     ``random_state=seed``; ``constant_grid_search`` pairs every sampled point with each value of
     the space's grid axes. A backend name constructs its own Ray wrapper class
     (:data:`_SEARCH_BACKENDS`) with the seed in that class's own keyword. ``metric``/``mode`` are
-    set once on the Tuner (Ray forbids setting them in both places), so they are not passed here.
-    Raises ``ValueError`` naming the choice for a searcher not offered here, for an offered backend
+    not passed. Raises ``ValueError`` naming the choice for a searcher not offered here, for an offered backend
     that is not installed, and for ``constant_grid_search`` asked of a backend; the choice is
     honored, never swapped for another algorithm.
     """
@@ -197,8 +191,8 @@ def build_scheduler(
 ):
     """Build a Ray Tune trial scheduler, or ``None`` to run every trial to completion.
 
-    ``metric``/``mode`` are set once on the Tuner, not here (Ray forbids both). PBT mutates
-    hyperparameters mid-training, so it needs ``hyperparam_mutations`` (the search space).
+    ``metric``/``mode`` are not passed. ``pbt`` takes ``hyperparam_mutations`` (the search
+    space).
     """
     key = (str(name).lower() if name is not None else None)
     if key is None or key in _NO_SCHEDULER:
@@ -230,26 +224,11 @@ def _default_trial_resources(max_concurrent: int) -> dict[str, float]:
 
 
 RAY_DASHBOARD_STORE = "ray_dashboard"
-register_store(
-    StoreDescriptor(
-        name=RAY_DASHBOARD_STORE,
-        kind="record",
-        key_fields=("document",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
-        locator=RootedFileLocator(prefix=(".tcip", "state"), suffix=".json"),
-    )
-)
 
 
 def ray_dashboard_key(project: Path) -> Key:
     """Where a running cluster's dashboard URL is written down, under the project whose sweep
-    started the cluster.
-
-    ``last_writer_wins``: the whole document is composed from what ``ray.init()`` just
-    returned and written in one shot, never merged into.
-    """
+    started the cluster, whole in one shot."""
     return Key(RAY_DASHBOARD_STORE, str(project.resolve()), ("ray_dashboard",))
 
 
@@ -526,8 +505,8 @@ def _search_space_and_points(
     param_space: dict | None, search_alg: str | None, split_draws: int, warm_start: bool,
     baseline_params: dict | None,
 ) -> tuple[dict, list[dict] | None, str]:
-    """The Ray Tune space, warm-start preset points, and the normalized search-algorithm name
-    ``tune_search`` builds its own search from: the platform's own ``param_space`` (or
+    """The Ray Tune space, warm-start preset points, and the normalized search-algorithm name: the
+    platform's own ``param_space`` (or
     ``get_default_space()`` for an empty or ``None`` one) turned into Ray's own space, gridded over
     every discrete axis under ``grid`` and over :data:`SPLIT_DRAW_SEED_KEY` above one draw, plus
     the warm-start baseline filtered to the space's own keys.
@@ -664,9 +643,9 @@ def tune_search(
 
     def trainable(config: dict) -> None:
         # A trial body runs in a Ray worker process, which is its own storage entry point.
-        from tcip_store.binding import bind_default
+        from tcip_store import bind
 
-        bind_default()
+        bind()
         objective_fn(config, lambda value: tune.report({metric: float(value)}))
 
     trainable = tune.with_resources(trainable, resources=resources)

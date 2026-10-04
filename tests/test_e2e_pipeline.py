@@ -182,14 +182,6 @@ class TestE2EPipeline:
             assert Path(sample.ground_truth).is_file()
 
         # ── Step 11: Export project as ZIP ───────────────────────────
-        from tcip_store.file_backend import database_file
-
-        if database_file(root).is_file():
-            # A database-backed project's state is not in the files a bundle carries: the
-            # platform's own export step lands it there first, same as an operator would run.
-            from tcip_store.export import export_root
-
-            export_root(root, report=lambda line: None)
         zip_path = str(tmp_path / "export.zip")
         export_result = archive_project(project_dir, zip_path)
         assert "error" not in export_result

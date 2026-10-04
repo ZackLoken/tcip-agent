@@ -1,9 +1,9 @@
-"""The project record: the one document every project carries, holding its identity and its site.
+"""The project record: the one record every project carries, holding its identity and its site.
 
-``<project>/.tcip/project.json`` holds ``id`` (minted once at creation, never derived from a path),
-``display_name`` (the name the picker shows, changed only by :func:`rename_project`) and ``site``
-(the breeder's own name for the orchard or station the project's plants stand in, never guessed
-from a directory name or a filename).
+It holds ``id`` (minted once at creation, never derived from a path), ``display_name`` (the name
+the picker shows, changed only by :func:`rename_project`) and ``site`` (the breeder's own name for
+the orchard or station the project's plants stand in, never guessed from a directory name or a
+filename).
 """
 
 from __future__ import annotations
@@ -12,33 +12,10 @@ import uuid
 from pathlib import Path
 
 import tcip_store
-from tcip_store import (
-    RECORD_JSON,
-    Key,
-    StoreDescriptor,
-    StoreError,
-    Version,
-    VersionConflict,
-    register_store,
-)
-from tcip_store.file_backend import RootedFileLocator
-
-_PROJECT_RECORD_DOC = RootedFileLocator(prefix=(".tcip",), suffix=".json")
-"""The project record, one document per project: ``<project>/.tcip/project.json``."""
+from tcip_store import Key, StoreError, Version, VersionConflict
 
 PROJECT_RECORD_STORE = "project_record"
 _PROJECT_RECORD_PARTS = ("project",)
-register_store(
-    StoreDescriptor(
-        name=PROJECT_RECORD_STORE,
-        kind="record",
-        key_fields=("document",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        locator=_PROJECT_RECORD_DOC,
-    )
-)
 
 _RECORD_FIELDS = ("id", "display_name", "site")
 
@@ -47,7 +24,7 @@ _MAX_TEXT_LENGTH = 200
 
 
 class ProjectRecordMissing(Exception):
-    """A project has no ``.tcip/project.json`` yet."""
+    """A project has no record yet."""
 
 
 class ProjectRecordInvalid(ValueError):
@@ -66,12 +43,6 @@ def mint_id() -> str:
 def project_record_key(project_path: str | Path) -> Key:
     """The project's own record, written compare-and-swap."""
     return Key(PROJECT_RECORD_STORE, str(project_path), _PROJECT_RECORD_PARTS)
-
-
-def project_record_path(project_path: str | Path) -> Path:
-    """``<project_path>/.tcip/project.json``."""
-    root = Path(project_path)
-    return root.joinpath(*_PROJECT_RECORD_DOC.relative_path(str(root), _PROJECT_RECORD_PARTS).parts)
 
 
 def validate_text(label: str, value: object) -> str:
@@ -125,8 +96,9 @@ def existing_project(value: str | Path) -> Path:
 
 def _checked(project_path: str | Path, raw: object) -> dict:
     """``raw``, a record read from ``project_path``, when it holds a non-empty id and a display
-    name and a site each as :func:`validate_text` would store it; otherwise the refusal
-    :func:`read_record` names."""
+    name and a site each as :func:`validate_text` would store it. Raises
+    ``ProjectRecordMissing`` for an absent record and ``ProjectRecordInvalid`` naming what the
+    record lacks otherwise."""
     if raw is None:
         raise ProjectRecordMissing(
             f"{project_path} is not a project yet: create it with initialize_project"
@@ -146,8 +118,7 @@ def _checked(project_path: str | Path, raw: object) -> dict:
 
 
 def create_record(project_path: str | Path, display_name: str, site: str) -> dict:
-    """Write a new project's record with a freshly minted id, the one creator of
-    ``.tcip/project.json``, and return it.
+    """Write a new project's record with a freshly minted id, its one creator, and return it.
 
     A project already recording the same display name and site is returned as it stands, its id
     kept. A present record with a different site raises :class:`SiteConflict`, and one with a

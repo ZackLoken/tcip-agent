@@ -1,6 +1,4 @@
-"""Subprocess isolation tests for launch_training and resource visibility/caps. Each test pins a
-specific concurrency/isolation gap rather than re-testing the whole subprocess path end to end
-(that's test_detection_measurement_integrity.py::test_launch_training_persists_effective_tile_geometry)."""
+"""Subprocess isolation tests for launch_training and resource visibility and caps."""
 
 from __future__ import annotations
 
@@ -250,14 +248,14 @@ def test_the_live_summary_folds_its_rows_in_the_recorded_objectives_direction(
     one the summary looks up from the metric's name: the same rows give the highest under a
     higher-is-better objective and the lowest under a lower-is-better one."""
     from tcip_mcp.experiments import RUN_FILE, observe, read_rows, run_summary
-    from tcip_store import RECORD_JSON
+    from tcip_store import decode_value, encode_record
     from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
 
     run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
-    record = RECORD_JSON.decode((run_dir / RUN_FILE).read_bytes())
+    record = decode_value((run_dir / RUN_FILE).read_bytes())
     record["resolved"]["objective"] = {"selection_metric": "map50",
                                        "higher_is_better": higher_is_better}
-    (run_dir / RUN_FILE).write_bytes(RECORD_JSON.encode(record))
+    (run_dir / RUN_FILE).write_bytes(encode_record(record))
     log_epoch(run_dir, 1, {"selection": 0.5, "selection_metric": "map50"})
     log_epoch(run_dir, 2, {"selection": 0.7, "selection_metric": "map50"})
     log_epoch(run_dir, 3, {"selection": float("nan"), "selection_metric": "map50"})
@@ -521,10 +519,8 @@ def test_default_trial_resources_no_gpu(monkeypatch):
 
 @pytest.mark.ray_cluster
 def test_tune_search_accepts_explicit_resources_per_trial(tmp_path):
-    """A real, lightweight Ray sweep (matching test_imbalance_aug_hpo.py's own established
-    pattern for this function: a pure-math objective, no training) runs to its end with an
-    explicit resources_per_trial, its log directory under the caller's storage_path, proving it's
-    accepted end to end rather than only unit-testing the derivation helper in isolation."""
+    """A real, lightweight Ray sweep (a pure-math objective, no training) runs to its end with an
+    explicit resources_per_trial, its log directory under the caller's storage_path."""
     from pathlib import Path
 
     pytest.importorskip("ray")

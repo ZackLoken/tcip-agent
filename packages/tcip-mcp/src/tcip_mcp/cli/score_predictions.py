@@ -54,9 +54,9 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
 
         trait = latest_confirmed(args.trait, bound_project(args.project)).entry
     else:
-        from tcip_store.binding import bind_default
+        from tcip_store import bind
 
-        bind_default()
+        bind()
 
     from tcip_mcp.tools.annotation_tools import score_predictions
 

@@ -19,14 +19,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import tcip_store
-from tcip_store import RECORD_JSON, Key, StoreDescriptor, check_json_value, register_store
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import Key
 
 from tcip_mcp.audit import now_iso
 from tcip_mcp.registry_paths import (
     RegistryPathEmpty,
     RegistryPathTraversal,
     checkpoint_registry_path_for,
+    is_external_form,
     resolved_registry_path,
 )
 
@@ -35,72 +35,63 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# ── the registry store ───────────────────────────────────────────────────────
-
-_INDEX_DOC = RootedFileLocator(prefix=(".tcip", "models"), suffix=".json")
-"""The registry index, one per project."""
-
 MODEL_REGISTRY_STORE = "model_registry"
 _INDEX_PARTS = ("registry",)
-REGISTRY_SCHEMA_VERSION = 1
-"""The store's registered version, per ``frozen-formats.json``; never written into a document."""
-register_store(
-    StoreDescriptor(
-        name=MODEL_REGISTRY_STORE,
-        kind="record",
-        key_fields=("document",),
-        frozen=True,
-        schema_version=REGISTRY_SCHEMA_VERSION,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        locator=_INDEX_DOC,
-    )
-)
-
-
-class RegistryVersionRefused(ValueError):
-    """The registry index document is not the ``{entries: [...]}`` mapping the writer writes."""
-
-
-def _read_registry_document(raw: object) -> dict:
-    """The registry's entries-mapping document from what the store handed back.
-
-    ``None`` (first use) answers the empty document. Anything but the mapping
-    :func:`_write_registry_document` writes raises :class:`RegistryVersionRefused`.
-    """
-    if raw is None:
-        return {"entries": []}
-    if not isinstance(raw, dict) or set(raw) != {"entries"} or not isinstance(raw["entries"], list):
-        raise RegistryVersionRefused(
-            f"the model registry index is not a recognized entries-mapping document: {raw!r}"
-        )
-    return raw
-
-
-def _write_registry_document(entries: list[dict]) -> dict:
-    """The document a write puts on disk for ``entries``."""
-    return {"entries": entries}
 
 
 def registry_index_key(project_path: str | Path) -> Key:
-    """The project's registered-model index, written compare-and-set."""
+    """The project's registered-model index, ``{entries: [...]}``, written in one transaction."""
     return Key(MODEL_REGISTRY_STORE, str(project_path), _INDEX_PARTS)
 
 
-def registry_index_path(project_path: str | Path) -> Path:
-    """Where the project's registry index lives on disk."""
-    return Path(project_path, *_INDEX_DOC.relative_path(str(project_path), _INDEX_PARTS).parts)
-
-
 def read_registry_index(project_path: str | Path) -> list[dict]:
-    """Every foreign checkpoint the project has registered, in registration order.
+    """Every foreign checkpoint the project has registered, in registration order. A project that
+    has registered nothing reads as an empty list; an index that does not decode raises
+    ``DecodeError``."""
+    return tcip_store.read(registry_index_key(project_path), default={"entries": []})["entries"]
 
-    A project that has registered nothing reads as an empty list; an index that does not decode
-    raises ``DecodeError``, and one that is not the entries mapping raises
-    :class:`RegistryVersionRefused`.
-    """
-    raw = tcip_store.read(registry_index_key(project_path), default=None)
-    return _read_registry_document(raw)["entries"]
+
+def _checkpoint_entry_file(project_path: Path, raw: str) -> Path | None:
+    """The existing file under ``project_path`` a registry ``checkpoint_path`` (``raw``, as stored)
+    resolves to, or ``None``: an entry naming another tree, a relative one with nothing at it, or
+    one that does not resolve at all."""
+    try:
+        resolved = resolved_registry_path(project_path, raw).resolve()
+    except (RegistryPathEmpty, RegistryPathTraversal):
+        return None
+    return resolved if resolved.is_file() and resolved.is_relative_to(project_path) else None
+
+
+def checkpoint_files(project_path: str | Path) -> frozenset[Path]:
+    """Every checkpoint file under the project, resolved: each file in ``.tcip/models``, each file
+    a registry entry names under the project, and each ``.pt`` file a run or sweep directory holds
+    beside its run record."""
+    from tcip_mcp.experiments import RUN_FILE, experiments_dir, sweeps_dir
+
+    root = Path(project_path).resolve()
+    found = {p for p in (root / ".tcip" / "models").glob("*") if p.is_file()}
+    found |= {path for path in (_checkpoint_entry_file(root, e["checkpoint_path"])
+                                for e in read_registry_index(root)) if path is not None}
+    for runs in (experiments_dir(root), sweeps_dir(root)):
+        found |= {p for p in runs.rglob("*.pt") if (p.parent / RUN_FILE).is_file()}
+    return frozenset(found)
+
+
+def registry_checkpoint_disclosures(project_path: str | Path) -> dict[str, list]:
+    """What the project's registry index says of checkpoints outside its tree:
+    ``checkpoint_paths_unresolved``, every stored path that is not a designed-external claim
+    (:func:`~tcip_mcp.registry_paths.is_external_form`) and names no file under the project, as
+    stored; ``external_checkpoints``, every designed-external path with whether it exists."""
+    root = Path(project_path).resolve()
+    stored = sorted(e["checkpoint_path"] for e in read_registry_index(root))
+    return {
+        "checkpoint_paths_unresolved": [
+            raw for raw in stored
+            if not is_external_form(raw) and _checkpoint_entry_file(root, raw) is None],
+        "external_checkpoints": [
+            {"checkpoint_path": raw, "exists": Path(raw).is_file()}
+            for raw in stored if is_external_form(raw)],
+    }
 
 
 def run_entry(observation: "RunObservation") -> dict | None:
@@ -302,7 +293,7 @@ def _write_registry_entry(txn: tcip_store.Txn, key: Key,
     written and the superseded entry when that already holds every field but ``registered_at``,
     which is no change and so no write.
     """
-    index = _read_registry_document(txn.read(key, default=None))["entries"]
+    index = txn.read(key, default={"entries": []})["entries"]
     superseded = next((e for e in index if e["sha256"] == entry["sha256"]), None)
     if superseded is not None:
         if ({k: v for k, v in superseded.items() if k != "registered_at"}
@@ -310,7 +301,7 @@ def _write_registry_entry(txn: tcip_store.Txn, key: Key,
             return superseded, superseded
     index = [e for e in index if e["sha256"] != entry["sha256"]]
     index.append(entry)
-    txn.write(key, _write_registry_document(index))
+    txn.write(key, {"entries": index})
     return superseded, entry
 
 
@@ -348,8 +339,6 @@ class ModelRegistry:
 
     def __init__(self, project_path: str) -> None:
         self._project_path = project_path
-        self.root = registry_index_path(project_path).parent
-        self.root.mkdir(parents=True, exist_ok=True)
 
     def register_model(
         self,
@@ -375,13 +364,11 @@ class ModelRegistry:
 
         Raises:
             FileNotFoundError: ``checkpoint_path`` does not exist.
-            TypeError / ValueError: ``config`` or ``metrics`` holds something JSON cannot carry,
-                or the checkpoint's payload is one the verified reader refuses, named before
-                anything is stored.
+            StoreError: ``config`` or ``metrics`` holds something JSON cannot carry, named
+                before anything is stored.
+            ValueError: the checkpoint's payload is one the verified reader refuses.
             AuditEntryNotWritten: the write committed but its own audit line could not be appended.
         """
-        check_json_value(config, path="config")
-        check_json_value(metrics or {}, path="metrics")
         ckpt = Path(checkpoint_path)
         if not ckpt.is_file():
             raise FileNotFoundError(

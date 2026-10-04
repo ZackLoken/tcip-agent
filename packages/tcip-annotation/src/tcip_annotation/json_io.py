@@ -37,16 +37,7 @@ from pathlib import Path
 from typing import Literal, Protocol, cast
 
 import tcip_store
-from tcip_store import (
-    Key,
-    SchemaVersionRefused,
-    StoreDescriptor,
-    Version,
-    check_schema_version,
-    get_descriptor,
-    register_store,
-)
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import Version
 
 from tcip_annotation.state import (
     Annotation, BBox, Point, Polygon, bbox_of, is_detection, polygonal,
@@ -57,38 +48,6 @@ ANNOTATIONS_KEY = "annotations"  # the one top-level list key
 LABEL_SUFFIX = ".json"
 """The suffix of every per-image label and prediction document, stated once for every package."""
 _PROV_KEYS = ("created_by", "created_at", "accepted_by", "accepted_at")
-
-
-# ── the store ─────────────────────────────────────────────────────────────────
-
-ANNOTATION_RECORDS_STORE = "annotation_records"
-_ANNOTATION_RECORD_LOCATOR = RootedFileLocator(suffix=LABEL_SUFFIX)
-register_store(
-    StoreDescriptor(
-        name=ANNOTATION_RECORDS_STORE,
-        kind="blob",
-        key_fields=("stem",),
-        frozen=True,
-        path_readable=True,
-        locator=_ANNOTATION_RECORD_LOCATOR,
-    )
-)
-
-
-def annotation_record_key(directory: str | Path, stem: str) -> Key:
-    """One image's per-image JSON document, addressed by the directory that holds it: the generic
-    form, for a tree no layout resolver describes. A layout-aware key for the same file addresses
-    the same file and lock.
-    """
-    return Key(ANNOTATION_RECORDS_STORE, str(Path(directory)), (str(stem),))
-
-
-def _record_key(target: Key | str | Path) -> Key:
-    """The key ``target`` names: a key passed straight through, or a path placed generically."""
-    if isinstance(target, Key):
-        return target
-    path = Path(target)
-    return annotation_record_key(path.parent, path.stem)
 
 
 def _document_bytes(payload: dict) -> bytes:
@@ -106,8 +65,8 @@ def parse_json_document(text: str, *, source: str) -> dict:
     """A JSON document's parsed dict, from its raw text: decode and dict-shape only.
 
     Raises :class:`UnreadableLabelDocument`, naming ``source``, for text that does not decode as
-    JSON or that decodes to something other than a dict. Checks neither the document's shape nor
-    its ``schema_version`` (:func:`parse_label_document` does).
+    JSON or that decodes to something other than a dict. Does not check the document's shape
+    (:func:`parse_label_document` does).
     """
     try:
         data = json.loads(text)
@@ -120,17 +79,6 @@ def parse_json_document(text: str, *, source: str) -> dict:
     return data
 
 
-def check_annotation_record_version(data: dict, *, source: str) -> None:
-    """Refuse ``data`` when it carries a ``schema_version`` this platform's own per-image reader
-    (:data:`ANNOTATION_RECORDS_STORE`) does not accept. Applies only to a document confirmed to be
-    this platform's own annotation-records document.
-    """
-    try:
-        check_schema_version(get_descriptor(ANNOTATION_RECORDS_STORE), data)
-    except SchemaVersionRefused as exc:
-        raise UnreadableLabelDocument(f"{source}: {exc}") from exc
-
-
 def is_dataset_level_document(data: dict) -> bool:
     """Whether a parsed document carries a dataset-level COCO's keys (``images`` or
     ``categories``) rather than being one image's label document."""
@@ -141,9 +89,8 @@ def parse_label_document(text: str, *, source: str) -> dict:
     """A per-image label document's parsed dict, from its raw text.
 
     Raises :class:`UnreadableLabelDocument`, naming ``source``, for text that does not decode as
-    JSON, that decodes to something other than a dict (:func:`parse_json_document`), that carries a
-    dataset-level COCO's keys, or that carries a ``schema_version`` this reader does not accept
-    (:func:`check_annotation_record_version`).
+    JSON, that decodes to something other than a dict (:func:`parse_json_document`), or that
+    carries a dataset-level COCO's keys.
     """
     data = parse_json_document(text, source=source)
     if is_dataset_level_document(data):
@@ -151,7 +98,6 @@ def parse_label_document(text: str, *, source: str) -> dict:
             f"{source} is a dataset-level COCO document (an 'images' or 'categories' key), not a "
             "per-image label document: convert it with import_coco"
         )
-    check_annotation_record_version(data, source=source)
     return data
 
 
@@ -634,7 +580,7 @@ def detection_annotations(path: str | Path) -> list[Annotation]:
     return [a for a in read_annotations(str(path)) if is_detection(a)]
 
 
-def read_document_versioned(target: Key | str | Path) -> tuple[LabelDocument, Version]:
+def read_document_versioned(target: str | Path) -> tuple[LabelDocument, Version]:
     """An image's label document (:func:`label_document`) and the version it was read at.
 
     The token names exactly the bytes the client was shown. An absent document reads as an empty
@@ -643,7 +589,7 @@ def read_document_versioned(target: Key | str | Path) -> tuple[LabelDocument, Ve
     decode or will not parse raises :class:`UnreadableLabelDocument`, decoded through the same
     strict policy as :func:`read_annotations`.
     """
-    stored = tcip_store.read_blob_versioned(_record_key(target), default=b"")
+    stored = tcip_store.read_blob_versioned(Path(target), default=b"")
     if stored.version == Version.ABSENT:
         return label_document(None), stored.version
     source = str(target)
@@ -872,11 +818,11 @@ def client_annotation(a: Annotation) -> dict:
     return {**out, **_held_provenance(a)}
 
 
-def encode_annotations(target, annotations, img_w: int, img_h: int, *,
+def encode_annotations(target: str | Path, annotations, img_w: int, img_h: int, *,
                        keep_empty: bool = False,
                        marks: Mapping[str, list[CompletionMark]] | None = None,
-                       ) -> tuple[Key, bytes | None]:
-    """The key ``target`` names and the exact bytes its per-image document holds.
+                       ) -> tuple[Path, bytes | None]:
+    """The document path ``target`` names and the exact bytes its per-image document holds.
 
     The writer's one encoder, apart from the write so a caller placing several documents can
     encode every one of them, and refuse on the first geometry the stored grid collapses
@@ -886,34 +832,31 @@ def encode_annotations(target, annotations, img_w: int, img_h: int, *,
     in the same write. ``None`` for the bytes when neither a record nor a mark survives and
     ``keep_empty`` is not set: such a document is removed rather than written.
     """
-    key = _record_key(target)
-    if is_reserved_stem(key.parts[-1]):
-        raise ValueError(f"{key.parts[-1]} would name its document after a prediction bucket's "
+    path = Path(target)
+    if is_reserved_stem(path.stem):
+        raise ValueError(f"{path.stem} would name its document after a prediction bucket's "
                          "own record, so it can never have a per-image document.")
     annotations = list(annotations)
     records = [{**stored_content(a), **_held_provenance(a)} for a in annotations]
     live = _live(marks or {}, annotations)
     if not records and not live and not keep_empty:
-        return key, None
-    payload: dict = {"image": key.parts[-1], "width": int(img_w), "height": int(img_h),
+        return path, None
+    payload: dict = {"image": path.stem, "width": int(img_w), "height": int(img_h),
                      ANNOTATIONS_KEY: records}
     if live:
         payload[COMPLETION_KEY] = {
             subject: [{"rect": list(m.rect), "by": m.by, "at": m.at, "digest": m.digest,
                        "proposals_hidden": m.proposals_hidden} for m in held]
             for subject, held in sorted(live.items())}
-    return key, _document_bytes(payload)
+    return path, _document_bytes(payload)
 
 
-def write_annotations(target, annotations, img_w: int, img_h: int, *,
+def write_annotations(target: str | Path, annotations, img_w: int, img_h: int, *,
                       keep_empty: bool = False, expect: Version | None = None,
                       marks: Mapping[str, list[CompletionMark]] | None = None,
                       ) -> Version | None:
     """Write all of an image's annotations, and the completion ``marks`` still live over them
-    (:func:`encode_annotations`), to its per-image JSON document.
-
-    ``target`` is either the document's storage key, minted by whichever resolver owns the tree it
-    lives in, or its path, which is placed generically by :func:`annotation_record_key`.
+    (:func:`encode_annotations`), to its per-image JSON document at ``target``.
 
     Empty list: ``keep_empty`` writes ``{"annotations": []}`` (unannotated until a human confirms
     it), else removes the document.
@@ -922,12 +865,12 @@ def write_annotations(target, annotations, img_w: int, img_h: int, *,
     write into a compare-and-set: anything that changed underneath raises ``VersionConflict`` and
     nothing is written. Returns the new version, or ``None`` when the document was removed.
     """
-    key, data = encode_annotations(target, annotations, img_w, img_h, keep_empty=keep_empty,
-                                   marks=marks)
+    path, data = encode_annotations(target, annotations, img_w, img_h, keep_empty=keep_empty,
+                                    marks=marks)
     if data is None:
-        tcip_store.delete(key, expect=expect)
+        tcip_store.delete_blob(path, expect=expect)
         return None
-    return tcip_store.put_blob(key, data, expect=expect)
+    return tcip_store.put_blob(path, data, expect=expect)
 
 
 # ── attribute values as ids ──────────────────────────────────────────────────

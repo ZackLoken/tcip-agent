@@ -20,8 +20,8 @@ The loop is three live tools, no separate journal file; the two that write are a
 
 | When | Tool | Lands |
 |---|---|---|
-| The moment friction happens | `report_friction` | `.tcip/reports/` |
-| End of substantial work, even if incomplete | `write_retrospective` | `.tcip/retrospectives/` |
+| The moment friction happens | `report_friction` | the project's friction reports |
+| End of substantial work, even if incomplete | `write_retrospective` | the project's retrospectives |
 | Start of the next session | `load_project_memory` (`kind='reports'`, then `'retrospectives'`) | read back into context |
 
 ## Capture: the moment friction happens
@@ -72,8 +72,9 @@ reports and retrospectives into a worksheet of recurring themes; it only reads, 
 written, applied, or promoted. After reviewing a worksheet, call `record_distillation_pass()`:
 the one audited write in this loop, kept out of the script. It acts on the project this server was
 started for (a worksheet covering other projects is recorded by a server started for each) and
-only resets that project's distillation-backlog counters; turning a recurring theme into a skill line, a
-`CLAUDE.md` rule, or a tool change stays your own separate edit, per the scoping above.
+only records the pass in that project's audit log, from which `inspect_project` counts the
+backlog since it; turning a recurring theme into a skill line, a `CLAUDE.md` rule, or a tool
+change stays your own separate edit, per the scoping above.
 
 ## Reading the record back
 
@@ -81,7 +82,7 @@ only resets that project's distillation-backlog counters; turning a recurring th
 a different question than the two memory tools above: not what a session learned, but which
 door touched a dataset or this project, when, and with what status (`scope=None` reads the
 project's own log, a dataset path that dataset's). It reads the
-same log every `@audited` tool and `record_event` call already writes to, filtered in memory,
+same log every `@audited` tool and `record_event_or_raise` call already writes to, filtered in memory,
 newest entries first; a corrupt or unreadable page is refused rather than answered partially.
 
 ## Honesty

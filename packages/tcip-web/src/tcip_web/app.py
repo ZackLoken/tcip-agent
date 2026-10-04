@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
-from tcip_store.binding import bind_default
+from tcip_store import bind
 
 from tcip_mcp.audit import now_iso
 from tcip_mcp.buckets import NotABucket
@@ -61,7 +61,7 @@ async def _lifespan(_app: FastAPI):
 
 # At import, not in the lifespan: a route may be exercised against this app without one running,
 # and a route that reaches a store with no backend bound would refuse rather than write.
-bind_default()
+bind()
 
 
 app = FastAPI(title="TCIP Pipeline", version="0.1.0", lifespan=_lifespan)
@@ -158,8 +158,8 @@ class ActiveTabPayload(BaseModel):
 
 @app.post("/api/state/tab")
 async def set_active_tab(payload: ActiveTabPayload) -> dict:
-    """Record which tab the browser is actually showing, so ``gui.json`` tracks what the human
-    sees.
+    """Record which tab the browser is actually showing, so the GUI snapshot tracks what the
+    human sees.
     """
     await _gui_store.mutate({"active_tab": payload.active_tab})
     return {"status": "ok", "active_tab": payload.active_tab}
@@ -310,7 +310,7 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
         **agent_identity.fields_from_headers(request.headers),
     }
     _gui_store.retain_event(panel, payload)
-    # Agent focus events also update the advisory GuiState slice, so gui.json reflects where the
+    # Agent focus events also update the advisory GuiState slice, so the snapshot shows where the
     # agent pointed the human: the browser applies the event locally and never syncs these back.
     if event.event_type == PANEL_EVENT_ANNOTATE_FOCUS:
         mutation: dict[str, Any] = {"active_tab": "annotate"}

@@ -12,54 +12,24 @@ from typing import Any, Literal, Optional, get_args
 
 import tcip_store
 from pydantic import BaseModel, ConfigDict, Field
-from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, text_codec
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import Key
 
 logger = logging.getLogger(__name__)
 
 BACKEND_HOST = "127.0.0.1"
 """The loopback address the backend binds, the only arrival its trust boundary serves."""
 
-_PORT_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".txt")
-"""The backend's port handoff, one document under the workspace root."""
-
 BACKEND_PORT_STORE = "backend_port"
 _PORT_PARTS = ("web_port",)
-register_store(
-    StoreDescriptor(
-        name=BACKEND_PORT_STORE,
-        kind="record",
-        key_fields=("document",),
-        frozen=False,
-        codec=text_codec(),
-        concurrency="last_writer_wins",
-        locator=_PORT_DOC,
-    )
-)
 
 
 def backend_port_key(workspace: Path) -> Key:
-    """The port the backend serving ``workspace`` bound."""
+    """The port the backend serving ``workspace`` bound, as a JSON string."""
     return Key(BACKEND_PORT_STORE, str(Path(workspace).resolve()), _PORT_PARTS)
 
 
-_SNAPSHOT_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
-"""The GUI snapshot, one document per project."""
-
 GUI_SNAPSHOT_STORE = "gui_snapshot"
 _SNAPSHOT_PARTS = ("gui",)
-register_store(
-    StoreDescriptor(
-        name=GUI_SNAPSHOT_STORE,
-        kind="record",
-        key_fields=("document",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
-        durable=False,
-        locator=_SNAPSHOT_DOC,
-    )
-)
 
 
 def gui_snapshot_key(project: str | Path) -> Key:
@@ -67,29 +37,10 @@ def gui_snapshot_key(project: str | Path) -> Key:
     return Key(GUI_SNAPSHOT_STORE, str(project), _SNAPSHOT_PARTS)
 
 
-_CANVAS_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
-"""The live-canvas documents, one pair per project."""
-
 CANVAS_META_STORE = "canvas_meta"
 CANVAS_GEOMETRY_STORE = "canvas_geometry"
 _META_PARTS = ("canvas_live",)
 _GEOMETRY_PARTS = ("canvas_shapes",)
-
-
-for _canvas_store in (CANVAS_META_STORE, CANVAS_GEOMETRY_STORE):
-    # declared here rather than through a helper: a call in a function body is not an import
-    register_store(
-        StoreDescriptor(
-            name=_canvas_store,
-            kind="record",
-            key_fields=("document",),
-            frozen=False,
-            codec=RECORD_JSON,
-            concurrency="last_writer_wins",
-            durable=False,
-            locator=_CANVAS_DOC,
-        )
-    )
 
 
 def canvas_meta_key(project: str) -> Key:
@@ -103,24 +54,12 @@ def canvas_geometry_key(project: str) -> Key:
 
 
 ANNOTATION_STATS_STORE = "annotation_stats"
-_ANNOTATION_STATS_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
 _ANNOTATION_STATS_PARTS = ("annotation_stats",)
-
-register_store(
-    StoreDescriptor(
-        name=ANNOTATION_STATS_STORE,
-        kind="record",
-        key_fields=("document",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        locator=_ANNOTATION_STATS_DOC,
-    )
-)
 
 
 def annotation_stats_key(project: str) -> Key:
-    """The project's per-image annotation timings and session rollups, written compare-and-swap."""
+    """The project's per-image annotation timings and session rollups, written in one
+    transaction."""
     return Key(ANNOTATION_STATS_STORE, project, _ANNOTATION_STATS_PARTS)
 
 
@@ -189,7 +128,7 @@ class GuiState(_GuiFields):
 
 
 class _DatasetChoice(BaseModel):
-    """The chosen part of a selection, the only part ``gui.json`` holds; ``dataset_root`` and
+    """The chosen part of a selection, the only part the GUI snapshot holds; ``dataset_root`` and
     ``predictions_dir`` spelled by :func:`tcip_mcp.registry_paths.stored_path` against the
     project."""
 
@@ -203,7 +142,7 @@ class _DatasetChoice(BaseModel):
 
 
 class _PersistedGuiState(_GuiFields):
-    """``gui.json``'s whole shape: :class:`GuiState` with its dataset held as the choice."""
+    """The GUI snapshot's whole shape: :class:`GuiState` with its dataset held as the choice."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -263,7 +202,7 @@ def current_image(selection: DatasetSelection) -> Optional[str]:
 
 
 def write_gui_snapshot(project: Path, state: GuiState) -> None:
-    """Persist ``state`` as ``project``'s ``gui.json``, its dataset held as the choice."""
+    """Persist ``state`` as ``project``'s GUI snapshot, its dataset held as the choice."""
     from tcip_mcp.registry_paths import stored_path
 
     dataset = state.dataset
@@ -287,7 +226,7 @@ def read_gui_snapshot(project: Path) -> Optional[GuiState]:
     if raw is None:
         return None
     persisted = _PersistedGuiState.model_validate(raw)
-    require_whole(persisted, "gui.json")
+    require_whole(persisted, "the GUI snapshot")
     choice = persisted.dataset
     dataset = DatasetSelection() if choice is None else selection_for(
         resolved_registry_path(project, choice.dataset_root), choice.subject, choice.date,

@@ -1,44 +1,19 @@
-"""The exact bytes of the stores whose entries are documents a human or a tool reads as files.
-
-These stores hold their value as opaque bytes at the seam and encode it in the module that owns
-them, so the encoding is no longer something the seam can be asked about: it is something this
-suite has to pin. Every case compares the landed file byte for byte against the spelling recorded
-here, so a codec swapped for a re-spelled serializer, a dropped trailing newline, or an
-``ensure_ascii`` flip shows up as a failing byte comparison rather than as a dataset that reads
-differently a season later.
-
-Two cases drive the owning module's own writer end to end: ``replace_registry`` and
-``write_band_group_manifest``. ``propose_trait`` has no case here: a trait record writes
-through the same ``RECORD_JSON`` codec every other record store uses, so its byte spelling is the
-one ``test_the_canonical_record_codec_writes_the_bytes_this_test_spells_out`` pins centrally in
-``test_store_contract.py``, its placement and codec application are covered there by the
-``traits`` case of
-``test_a_registered_store_lands_where_its_locator_says_with_the_bytes_its_codec_produces``,
-and ``test_trait_revisions.py`` asserts its own field-level content.
-
-The other three (dataset identity, friction report, retrospective) pin the codec and the path
-only, through the seam expression their writer makes, because those writers mint an id, stamp a
-timestamp or draw a random suffix, none of which a fixed byte comparison can hold still. That
-those writers reach the store through this very expression is covered where each writer's own
-content is asserted: ``test_project_tools`` for the identity document and ``test_meta_tools`` for
-reports and retrospectives.
-
-The bytes are the ones these documents carry on disk today; the placement of each file is pinned
-separately, for every registered store at once, by ``test_store_contract``. The cases whose store
-is a record bind the file backend, since only there is the file the bytes land in the store's own
-answer rather than an export's.
+"""The exact bytes of the documents a human or a tool reads as files: a file's on the file its
+producer writes, a record's on the file the read-only dump writes for it.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import tcip_store as ts
+
+from tcip_mcp.cli.dump_store import dump_store
 
 SUBJECT = "subject_under_test"
 REGISTRY_VALUE = {
     SUBJECT: {
         "description": "a description with an ümlaut",
-        "defined_by": "breeder",
-        "defined_at": "2026-03-04T12:00:00+00:00",
         "attributes": {"state": {"type": "categorical", "values": ["closed", "open"]}},
     }
 }
@@ -46,8 +21,6 @@ REGISTRY_BYTES = (
     '{\n'
     '  "subject_under_test": {\n'
     '    "description": "a description with an ümlaut",\n'
-    '    "defined_by": "breeder",\n'
-    '    "defined_at": "2026-03-04T12:00:00+00:00",\n'
     '    "attributes": {\n'
     '      "state": {\n'
     '        "type": "categorical",\n'
@@ -61,8 +34,6 @@ REGISTRY_BYTES = (
     '}\n'
 ).encode("utf-8")
 
-IDENTITY_VALUE = {"crop": "crop_under_test", "id": "a1b2c3d4e5f6",
-                  "fingerprint": "9f2c1b0a4d6e8f31"}
 IDENTITY_BYTES = (
     '{\n'
     '  "crop": "crop_under_test",\n'
@@ -87,14 +58,7 @@ BAND_GROUP_BYTES = (
     '}\n'
 ).encode("utf-8")
 
-REPORT_ID = "20260304T120000Z_missing_tool_a1b2"
-REPORT_VALUE = {
-    "timestamp": "2026-03-04T12:00:00+00:00",
-    "category": "missing_tool",
-    "detail": "ein Werkzeug für ü",
-    "context": {"trait": "trait_under_test"},
-    "user_disagreement": False,
-}
+NOW = "2026-03-04T12:00:00+00:00"
 REPORT_BYTES = (
     '{\n'
     '  "timestamp": "2026-03-04T12:00:00+00:00",\n'
@@ -107,17 +71,23 @@ REPORT_BYTES = (
     '}\n'
 ).encode("utf-8")
 
-RETROSPECTIVE_ID = "project_under_test"
-RETROSPECTIVE_BODY = "## Retrospective: 2026-03-04T12:00:00+00:00\n\nwas gut lief für ü\n\n---\n"
 RETROSPECTIVE_BYTES = (
-    "# project_under_test\n"
-    "\n"
-    "## Retrospective: 2026-03-04T12:00:00+00:00\n"
-    "\n"
-    "was gut lief für ü\n"
-    "\n"
-    "---\n"
+    '"# project_under_test\\n\\n## Retrospective: 2026-03-04T12:00:00+00:00\\n\\n'
+    '### Task\\n\\nt\\n\\n### What worked\\n\\nwas gut lief für ü\\n\\n'
+    '### What did not work\\n\\nd\\n\\n'
+    '### Assumptions that turned out to be wrong\\n\\n_(none noted)_\\n\\n'
+    '### Knowledge for future sessions\\n\\n_(none noted)_\\n\\n'
+    '### Missing or hard-to-use tools\\n\\n_(none noted)_\\n\\n'
+    '### What I would do differently\\n\\n_(none noted)_\\n\\n---\\n"\n'
 ).encode("utf-8")
+
+
+def _dumped(project: Path, store: str) -> bytes:
+    """The bytes of the one file the dump writes for ``project``'s one record in ``store``."""
+    (written,) = (path for path in dump_store(project, project.parent / "dump")
+                  if path.parent.name == store)
+    return written.read_bytes()
+
 
 def test_the_subject_registry_lands_as_the_ordered_json_document_labels_are_decoded_by(tmp_path):
     """Written through ``replace_registry``, which encodes with the canonical record codec: the
@@ -132,18 +102,23 @@ def test_the_subject_registry_lands_as_the_ordered_json_document_labels_are_deco
     assert path.read_bytes() == REGISTRY_BYTES
 
 
-def test_the_dataset_identity_document_lands_as_the_json_every_citing_record_reads(tmp_path):
-    """The identity write ``register_dataset`` makes: the canonical record codec's bytes, put
-    under the version the caller read."""
-    from tcip_mcp.dataset_layout import dataset_identity_key, dataset_identity_path
+def test_the_dataset_identity_document_lands_as_the_json_every_citing_record_reads(
+    tmp_path, monkeypatch,
+):
+    """Written through ``register_dataset``, its minted id and computed fingerprint held still."""
+    from tcip_mcp import project_record
+    from tcip_mcp.dataset_layout import dataset_identity_path
+    from tcip_mcp.pipelines.data import dataset_fingerprint
+    from tcip_mcp.tools.project_tools import register_dataset
 
-    ts.put_blob(
-        dataset_identity_key(tmp_path),
-        ts.RECORD_JSON.encode(IDENTITY_VALUE),
-        expect=ts.Version.ABSENT,
-    )
+    monkeypatch.setattr(project_record, "mint_id", lambda: "a1b2c3d4e5f6")
+    monkeypatch.setattr(dataset_fingerprint, "dataset_fingerprint", lambda root: "9f2c1b0a4d6e8f31")
+    dataset = tmp_path / "ds"
+    dataset.mkdir()
 
-    assert dataset_identity_path(tmp_path).read_bytes() == IDENTITY_BYTES
+    assert "error" not in register_dataset(tmp_path, str(dataset), crop="crop_under_test")
+
+    assert dataset_identity_path(dataset).read_bytes() == IDENTITY_BYTES
 
 
 def test_a_band_group_manifest_lands_as_the_json_the_image_enumerators_parse(tmp_path):
@@ -164,34 +139,31 @@ def test_a_band_group_manifest_lands_as_the_json_the_image_enumerators_parse(tmp
     assert path.read_bytes() == BAND_GROUP_BYTES
 
 
-def test_a_friction_report_lands_as_the_json_document_every_reader_of_the_corpus_parses(tmp_path):
-    """The write ``report_friction`` makes: the canonical record codec's bytes, create-only."""
-    from tcip_store.file_backend import FileBackend
-
+def test_a_friction_report_dumps_as_the_json_document_every_reader_of_the_corpus_parses(
+    tmp_path, monkeypatch,
+):
+    """Written through ``report_friction``, its clock and id suffix held still."""
     from tcip_mcp.tools import meta_tools
 
-    ts.bind(FileBackend())
-    ts.replace(
-        meta_tools.friction_report_key(str(tmp_path), REPORT_ID),
-        REPORT_VALUE,
-        expect=ts.Version.ABSENT,
-    )
+    monkeypatch.setattr(meta_tools, "now_iso", lambda: NOW)
+    monkeypatch.setattr(meta_tools.secrets, "token_hex", lambda n: "a1b2")
 
-    path = meta_tools._document_path(meta_tools._REPORT_DOC, str(tmp_path), REPORT_ID)
-    assert path.read_bytes() == REPORT_BYTES
+    assert "error" not in meta_tools.report_friction(
+        tmp_path, "missing_tool", "ein Werkzeug für ü", context={"trait": "trait_under_test"})
+
+    assert _dumped(tmp_path, meta_tools.FRICTION_REPORT_STORE) == REPORT_BYTES
 
 
-def test_a_retrospective_lands_as_the_markdown_text_and_nothing_around_it(tmp_path):
-    """The first section ``write_retrospective`` writes: the text itself, no envelope."""
-    from tcip_store.file_backend import FileBackend
-
+def test_a_retrospective_dumps_as_its_markdown_text_spelled_as_one_json_string(
+    tmp_path, monkeypatch,
+):
+    """Written through ``write_retrospective``, its clock held still: the text itself, as one
+    JSON string."""
     from tcip_mcp.tools import meta_tools
 
-    ts.bind(FileBackend())
-    key = meta_tools.retrospective_key(str(tmp_path), RETROSPECTIVE_ID)
-    stored = ts.read_versioned(key, default=None)
-    ts.replace(key, f"# {RETROSPECTIVE_ID}\n\n{RETROSPECTIVE_BODY}", expect=stored.version)
+    monkeypatch.setattr(meta_tools, "now_iso", lambda: NOW)
 
-    path = meta_tools._document_path(meta_tools._RETROSPECTIVE_DOC, str(tmp_path),
-                                     RETROSPECTIVE_ID)
-    assert path.read_bytes() == RETROSPECTIVE_BYTES
+    assert "error" not in meta_tools.write_retrospective(
+        tmp_path, "project_under_test", task="t", worked="was gut lief für ü", did_not_work="d")
+
+    assert _dumped(tmp_path, meta_tools.RETROSPECTIVE_STORE) == RETROSPECTIVE_BYTES

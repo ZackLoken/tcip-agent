@@ -35,7 +35,7 @@ All three processes share `.tcip/` on disk (experiment state, model registry, au
 
 Supporting libraries: `packages/tcip-annotation` (headless annotation engine: label I/O, IoU matching, SAM wrapper) and `packages/tcip-store` (the storage seam: one locked, atomic interface for the platform's records, append-only logs and blobs). `tcip-store` is the bottom of the stack, depending on nothing else here; `tcip-annotation` depends on it and on neither of the other two.
 
-Records and append-only logs go into one SQLite database per root, `<root>/.tcip/store.db`; blob bytes stay files under every backend, so imagery, labels and predictions travel with the dataset. Set `TCIP_STORE_BACKEND=file` to bind the file backend instead, which reads and writes the same records as loose files. A root whose records are still loose files is refused rather than read as empty: `tcip adopt-store <root>` moves them into a database, and `tcip export-store <root>` writes them back out.
+Records and append-only logs go into one SQLite database per root, `<root>/.tcip/store.db`; imagery, labels and predictions stay files, so they travel with the dataset. `tcip dump-store <project> <out_dir>` writes a project's records and logs out as files a person can read.
 
 ## Repository layout
 
@@ -53,7 +53,7 @@ packages/
                                #   georeferencing)
   tcip-annotation/             # headless annotation library
   tcip-store/                  # storage seam: keyed records, append-only logs, blobs
-    src/tcip_store/            # the contract (model, errors, registry, store) + file backend
+    src/tcip_store/            # the contract (model, errors, values, store) over one SQLite database
   tcip-web/                    # FastAPI backend + React frontend
     src/tcip_web/
       cli/                     # the tcip console command's own dispatcher (declared in pyproject.toml)
@@ -166,7 +166,7 @@ through the breeder's own acknowledged act.
 
 - Annotations: per-image COCO-shaped JSON (with `created_by`/`accepted_by` provenance), the one label document shape the platform writes and reads (mask rasters and tables are the other ground truth a run can read); an external dataset-level COCO is converted into it by `import_coco`.
 - Experiments: one directory per run, `.tcip/experiments/<id>/`, holding its launch record (`run.json`, with the data, partition and objective the launcher resolved), its metrics log, its final status, and its own files (weights, TensorBoard events, the source snapshot); nothing in it is rewritten once written, and a relaunch is a new directory.
-- Audit log: every mutating MCP tool leaves exactly one line per act, either the `@audited` decorator's entry for the call or the event its library records with facts the decorator cannot carry, and a call returning its error leaves none, while a call that raises leaves its exception line. Lines go into the append-only log under the root each call's scope names, written out at `.tcip/audit.jsonl` by the file backend and by `tcip export-store`. An entry that cannot be appended after its mutation raises.
+- Audit log: every mutating MCP tool leaves exactly one line per act, either the `@audited` decorator's entry for the call or the event its library records with facts the decorator cannot carry, and a call returning its error leaves none, while a call that raises leaves its exception line. Lines go into the append-only log in the database of the root each call's scope names. An entry that cannot be appended after its mutation raises.
 - Lazy imports: within the MCP server's import closure, heavy deps (torch, torchvision) are imported inside function bodies; other modules under `packages/*/src` (the training and inference pipelines, model components) import them at module level.
 - Crop traits: controlled vocabulary defined in `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`.
 - Measurement-integrity gates: every parameter a delivered phenotype depends on (confidence

@@ -1,15 +1,15 @@
 """Export an annotation project as a portable bundle: a ZIP archive, or, with --output-dir, the
 identical bundle written as a directory tree.
 
-The operator/agent entry point for packaging a project (images, ground truth, subject registry,
-``.tcip`` state, experiments and their claimed manifests, plus every recognized blob home) into
-one bundle an ``import-project`` run can restore from elsewhere. Wraps
+The operator/agent entry point for packaging a project's tree, its store databases copied
+consistently, into one bundle an ``import-project`` run can restore from elsewhere. Wraps
 ``tcip_mcp.tools.project_tools.archive_project`` with no MCP tool registration.
 
     tcip archive-project <project_path> --output-path PATH [--include-models]
     tcip archive-project <project_path> --output-dir DIR [--include-models]
 
-Exactly one of --output-path/--output-dir is required. This run's audit line is recorded under
+Exactly one of --output-path/--output-dir is required; a relative one resolves against the
+working directory. This run's audit line is recorded under
 ``<project_path>/.tcip``, the project being archived.
 """
 
@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from tcip_mcp.cli import bound_project
 
@@ -39,13 +40,11 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
 
     project = bound_project(args.project_path)
 
-    # archive_project exports every database under the tree before it composes the bundle, so
-    # every store must already be registered, not just the ones project_tools.py itself defines.
-    import tcip_mcp.store_catalog  # noqa: F401
     from tcip_mcp.tools.project_tools import archive_project
 
     result = archive_project(
-        project, output_path=args.output_path, output_dir=args.output_dir,
+        project, output_path=args.output_path and str(Path(args.output_path).resolve()),
+        output_dir=args.output_dir and str(Path(args.output_dir).resolve()),
         include_models=args.include_models,
     )
     if "error" in result:

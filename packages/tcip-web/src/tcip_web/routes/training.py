@@ -169,14 +169,12 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
     """Rank the marked comparison's own registered checkpoints by one metric
     (:func:`~tcip_mcp.tools.model_tools.ranked_registered_model`).
 
-    A registry index that will not decode or is not the entries mapping answers 409 naming why;
-    the ranking's own error dicts map to 422 with the whole dict as ``detail``. The answer is
-    projected to name, experiment id, stamped metrics, source, the direction used and its source,
-    and the exclusions.
+    A registry index that will not decode answers 409 naming why; the ranking's own error dicts
+    map to 422 with the whole dict as ``detail``. The answer is projected to name, experiment id,
+    stamped metrics, source, the direction used and its source, and the exclusions.
     """
-    from tcip_store.errors import DecodeError, SchemaVersionRefused
+    from tcip_store import DecodeError
 
-    from tcip_mcp.model_registry import RegistryVersionRefused
     from tcip_mcp.tools.model_tools import ranked_registered_model
 
     try:
@@ -184,7 +182,7 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
             store.open_root(), payload.metric, higher_is_better=payload.higher_is_better,
             include_unverified=payload.include_unverified, experiment_ids=payload.experiment_ids,
             tag=None)
-    except (DecodeError, RegistryVersionRefused, SchemaVersionRefused) as exc:
+    except DecodeError as exc:
         raise HTTPException(409, f"registry unreadable: {exc}") from exc
     if "error" in result:
         raise HTTPException(422, detail=result)

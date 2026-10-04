@@ -1,35 +1,14 @@
 """Tests for the project record: its minted id, display name and site, its create-only write, and
 its readers.
-
-Every symbol from ``tcip_mcp.project_record`` is imported inside the test function that uses it
-rather than at module level, so a tree without the module fails one test's own assertions rather
-than collection for the whole file.
 """
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
 import tcip_store as ts
-from tcip_store.file_backend import FileBackend
-from tcip_store.sqlite_backend import SqliteBackend
-
-
-@contextmanager
-def bound(backend):
-    """Bind one backend for a block, putting the suite's own back on the way out."""
-    from tcip_store.store import _backend
-
-    previous = _backend()
-    ts.bind(backend)
-    try:
-        yield backend
-    finally:
-        ts.bind(previous)
-        backend.close()
 
 
 # ── text validation ─────────────────────────────────────────────────────────────
@@ -136,19 +115,6 @@ def test_create_record_lets_a_decode_error_through_for_an_undecodable_record(tmp
         create_record(tmp_path, "Valley block", "north orchard")
 
 
-def test_create_record_refuses_writing_over_an_unadopted_root(tmp_path: Path):
-    """A root whose project record is still a loose file (no database) refuses, naming the
-    conform command, the same rule every other record store obeys under this root."""
-    from tcip_mcp.project_record import create_record
-
-    with bound(FileBackend()):
-        create_record(tmp_path, "Valley block", "north orchard")
-
-    with bound(SqliteBackend()):
-        with pytest.raises(ts.StoreError, match="tcip adopt-store"):
-            create_record(tmp_path, "Valley block", "north orchard")
-
-
 # ── replace_site: the one deliberate correction ─────────────────────────────────
 
 
@@ -186,12 +152,6 @@ def test_read_record_raises_missing_and_publishes_no_database_for_a_root_with_no
     assert not database_file(str(tmp_path.absolute())).is_file()
 
 
-def test_project_record_path_is_the_dotted_tcip_document(tmp_path: Path):
-    from tcip_mcp.project_record import project_record_path
-
-    assert project_record_path(tmp_path) == tmp_path / ".tcip" / "project.json"
-
-
 def test_record_fields_reports_the_record(tmp_path: Path):
     from tcip_mcp.project_record import create_record, record_fields
 
@@ -220,23 +180,6 @@ def test_record_fields_names_an_undecodable_record(tmp_path: Path):
 
     assert fields["display_name"] is None
     assert "does not decode" in fields["record_problem"]
-
-
-def test_record_fields_on_an_unadopted_root_names_tcip_adopt_store(tmp_path: Path):
-    """A root whose records are still loose files, built by writing through the file backend's
-    own creation door rather than by hand-writing ``project.json``."""
-    from tcip_mcp.project_record import record_fields
-    from tcip_mcp.tools.project_tools import initialize_project
-
-    dest = tmp_path / "unadopted"
-    with bound(FileBackend()):
-        initialize_project(str(dest), "Valley block", "north orchard")
-
-    with bound(SqliteBackend()):
-        fields = record_fields(dest)
-
-    assert fields["site"] is None
-    assert "tcip adopt-store" in fields["record_problem"]
 
 
 def test_existing_project_resolves_a_project_and_refuses_a_directory_with_no_record(

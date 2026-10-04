@@ -13,8 +13,7 @@ import importlib
 import sys
 
 COMMANDS: dict[str, str] = {
-    "adopt-store": "tcip_mcp.cli.adopt_store",
-    "export-store": "tcip_mcp.cli.export_store",
+    "dump-store": "tcip_mcp.cli.dump_store",
     "doctor": "tcip_mcp.cli.doctor",
     "archive-project": "tcip_mcp.cli.archive_project",
     "import-project": "tcip_mcp.cli.import_project",

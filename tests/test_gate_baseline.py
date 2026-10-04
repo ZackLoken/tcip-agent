@@ -50,27 +50,20 @@ def test_every_declared_step_runs_or_is_skipped_by_the_stated_rule():
     skipped_by_uses = [
         "mypy:actions/checkout@v4", "mypy:actions/setup-python@v5",
         "mypy:actions/cache@v4", "mypy:actions/cache@v4",
-        "python:actions/checkout@v4 [sqlite]", "python:actions/setup-python@v5 [sqlite]",
-        "python:actions/cache@v4 [sqlite]",
-        "python:actions/checkout@v4 [file]", "python:actions/setup-python@v5 [file]",
-        "python:actions/cache@v4 [file]",
+        "python:actions/checkout@v4", "python:actions/setup-python@v5",
+        "python:actions/cache@v4",
         "typescript:actions/checkout@v4", "typescript:actions/setup-node@v4",
     ]
     skipped_by_run_prefix = [
         "mypy:Install CPU-only torch", "mypy:Install packages",
-        "python:Install CPU-only torch [sqlite]", "python:Install packages [sqlite]",
-        "python:Install the system libraries the opencv-python wheel links (libGL, GLib) [sqlite]",
-        "python:Install CPU-only torch [file]", "python:Install packages [file]",
-        "python:Install the system libraries the opencv-python wheel links (libGL, GLib) [file]",
+        "python:Install CPU-only torch", "python:Install packages",
+        "python:Install the system libraries the opencv-python wheel links (libGL, GLib)",
         "typescript:Install frontend dependencies",
     ]
     run_steps = [
         "mypy:Type check (mypy; see mypy.ini)",
-        "python:Lint (ruff) [sqlite]", "python:ARCHITECTURE.md matches the tree [sqlite]",
-        "python:ARCHITECTURE.md citations match what they quote [sqlite]",
-        "python:Run tests [sqlite]",
-        "python:Lint (ruff) [file]", "python:ARCHITECTURE.md matches the tree [file]",
-        "python:ARCHITECTURE.md citations match what they quote [file]", "python:Run tests [file]",
+        "python:Lint (ruff)", "python:ARCHITECTURE.md matches the tree",
+        "python:ARCHITECTURE.md citations match what they quote", "python:Run tests",
         "typescript:Format check", "typescript:Lint", "typescript:Type check",
         "typescript:Test", "typescript:Build",
     ]
@@ -142,13 +135,6 @@ def test_resolve_git_bash_on_a_posix_host_refuses_with_no_bash_on_path(monkeypat
         gate_baseline._resolve_git_bash()
 
 
-def test_python_jobs_matrix_leg_env_carries_the_resolved_store_backend():
-    gate_baseline = _load()
-    by_key = {stage.key: stage for stage in gate_baseline.build_plan()}
-    assert by_key["python:Run tests [sqlite]"].env["TCIP_STORE_BACKEND"] == "sqlite"
-    assert by_key["python:Run tests [file]"].env["TCIP_STORE_BACKEND"] == "file"
-
-
 def test_unresolved_expression_refuses_by_name(tmp_path, monkeypatch):
     # ci.yml itself carries no ${{ }} expression build_plan cannot resolve, so this drives the
     # refusal with a fixture workflow instead: a stray expression in a job's own env.
@@ -195,11 +181,11 @@ def test_main_runs_a_selected_stage_to_a_fresh_out_directory(tmp_path, monkeypat
     gate_baseline = _load()
     out = tmp_path / "gate-out"
     monkeypatch.setattr(sys, "argv", [
-        "gate_baseline.py", "--out", str(out), "--only", "python:Lint (ruff) [sqlite]",
+        "gate_baseline.py", "--out", str(out), "--only", "python:Lint (ruff)",
     ])
     assert gate_baseline.main() == 0
     summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
-    assert summary["stages"][0]["stage"] == "python:Lint (ruff) [sqlite]"
+    assert summary["stages"][0]["stage"] == "python:Lint (ruff)"
     assert summary["stages"][0]["exit_code"] == 0
 
 

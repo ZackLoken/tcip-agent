@@ -21,7 +21,6 @@ What CLAUDE.md, a skill, a docstring, or the code itself led you to expect inste
 
 ## Environment
 
-- Storage backend: database (default) or `TCIP_STORE_BACKEND=file`
 - OS:
 - Commit or tag:
 

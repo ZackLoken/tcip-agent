@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 import tcip_store as ts
 from pydantic import BaseModel, ConfigDict
-from tcip_store.file_backend import RootedFileLocator
 
 from tcip_annotation import Annotation, BBox, Polygon, bbox_of
 from tcip_annotation.grid import grid_to_rect
@@ -35,21 +34,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.raster_source import Rect
 
 
-_PROPOSAL_DOC = RootedFileLocator(prefix=(".tcip", "state", "proposals"), suffix=".json")
-"""The proposal envelope one dataset image's run stages, under the dataset's own state tree."""
-
 PROPOSAL_STAGING_STORE = "proposal_staging"
-ts.register_store(
-    ts.StoreDescriptor(
-        name=PROPOSAL_STAGING_STORE,
-        kind="record",
-        key_fields=("date", "stem"),
-        frozen=True,
-        codec=ts.RECORD_JSON,
-        concurrency="last_writer_wins",
-        locator=_PROPOSAL_DOC,
-    )
-)
 
 
 class _StatedSubject(BaseModel):
@@ -190,10 +175,8 @@ def propose_annotations(
     same way, but nothing is staged (the response's ``staged`` is ``false``, naming why), so such a
     call cannot later be accepted.
 
-    The engine is a capability, not a fixed method: name one registered
-    (``register_proposal_engine``) or a dotted 'module:factory' the agent wrote, then trial and
-    compare engines by how well each one's high-conf proposals survive breeder review, and pick the
-    most useful for the task. An empty or unknown name refuses, naming the registered ones.
+    ``engine`` names one registered (``register_proposal_engine``) or a dotted 'module:factory'.
+    An empty or unknown name refuses, naming the registered ones.
 
     ``grid_cells`` restricts the pass to a region instead of the whole frame: name the
     reference-grid cells the region spans (e.g. ``['B3', 'C3', 'B4', 'C4']``), and the engine
@@ -463,7 +446,7 @@ def _stage_document(project: Path, address: StagingAddress, producer: str, image
 
     if not annotations:
         return None
-    _key, data = json_io.encode_annotations(image, annotations, img_w, img_h)
+    _path, data = json_io.encode_annotations(image, annotations, img_w, img_h)
     assert data is not None, "a non-empty proposal encodes a document"
     out = prediction_root(address.root).joinpath(
         producer, *([address.date] if address.date else []), image.stem)

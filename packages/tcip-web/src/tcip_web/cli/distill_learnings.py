@@ -108,22 +108,24 @@ def build_workspace_worksheet(workspace: Path) -> str:
 
 
 def _gather(project: Path) -> tuple[list[dict], list, str]:
-    """``project``'s decoded friction reports (an unreadable one skipped), its retrospectives
-    (latest stated section first), and the free text of both joined."""
-    from tcip_mcp.tools.meta_tools import report_documents, retrospective_documents
+    """``project``'s friction reports as :func:`~tcip_mcp.tools.meta_tools.report_row` lists
+    them, its retrospectives (latest stated section first), and the free text of the decoded
+    reports and the retrospectives joined."""
+    from tcip_mcp.tools.meta_tools import report_documents, report_row, retrospective_documents
 
-    reports = [document.value for document in report_documents(str(project))
-               if not document.value.get("malformed")]
+    reports = [report_row(document) for document in report_documents(str(project))]
     retros = retrospective_documents(str(project))
-    text = " ".join([*(str(r.get("detail", "")) for r in reports),
+    text = " ".join([*(r["detail"] for r in reports if "malformed" not in r),
                      *(document.value for document in retros)])
     return reports, retros, text
 
 
 def _report_line(report: dict, width: int) -> str:
-    """One report as a bullet: its category and its detail on one line, cut to ``width``."""
-    detail = str(report.get("detail", "")).replace("\n", " ")[:width]
-    return f"- [{report.get('category', '?')}] {detail}"
+    """One report as a bullet: its category and its detail, or ``malformed`` and the reason it
+    will not decode, on one line cut to ``width``."""
+    if "malformed" in report:
+        return f"- [malformed] {report['malformed'].replace(chr(10), ' ')[:width]}"
+    return f"- [{report['category']}] {report['detail'].replace(chr(10), ' ')[:width]}"
 
 
 def build_worksheet(project: Path) -> str:
@@ -138,7 +140,7 @@ def build_worksheet(project: Path) -> str:
         for word, n in themes:
             lines.append(f"- {word} ×{n}")
 
-    disagreements = [r for r in reports if r.get("user_disagreement")]
+    disagreements = [r for r in reports if "malformed" not in r and r["user_disagreement"]]
     if disagreements:
         lines.append(f"\n## Disagreements ({len(disagreements)}): the owner pushed back or disagreed")
         lines.extend(_report_line(r, 200) for r in disagreements[:15])
@@ -173,11 +175,11 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     args = ap.parse_args(argv)
 
     if args.workspace:
-        from tcip_store.binding import bind_default
+        from tcip_store import bind
 
         from tcip_mcp.workspace import workspace_from_environment
 
-        bind_default()
+        bind()
         print(build_workspace_worksheet(workspace_from_environment()))
         return 0
 

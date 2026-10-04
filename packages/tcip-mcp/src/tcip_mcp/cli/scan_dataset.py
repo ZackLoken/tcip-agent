@@ -19,12 +19,11 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser.add_argument("folder_path", help="Dataset root directory to scan.")
     args = parser.parse_args(argv)
 
-    # Its own process entry point, so it binds the storage backend the seam has no default for.
-    from tcip_store.binding import bind_default
+    from tcip_store import bind
 
     from tcip_mcp.tools.data_tools import scan_dataset
 
-    bind_default()
+    bind()
 
     result = scan_dataset(args.folder_path)
     if "error" in result:

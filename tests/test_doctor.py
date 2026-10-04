@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -43,10 +42,6 @@ def _project(tmp_path: Path) -> Path:
     ann.mkdir(parents=True)
     state = root / ".tcip" / "state"
     state.mkdir(parents=True)
-    import tcip_store as ts
-    from tcip_store.file_backend import FileBackend
-
-    ts.bind(FileBackend())
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     for name in ("IMG_A", "IMG_B", "IMG_C"):
         Image.new("RGB", (32, 32)).save(root / "images" / "2026-02-11" / f"{name}.JPG")
@@ -61,16 +56,10 @@ def _project(tmp_path: Path) -> Path:
     return root
 
 
-def _run(root: Path, *, file_layout: bool = False):
-    """Run the doctor against ``root``.
-
-    ``file_layout=True`` bound to the file backend on purpose: that caller's fixture wrote its
-    records through the storage seam bound to the file backend, so the subprocess is pinned to
-    file regardless of whatever backend the outer test run selects.
-    """
-    env = {**os.environ, "TCIP_STORE_BACKEND": "file"} if file_layout else None
+def _run(root: Path):
+    """Run the doctor against ``root`` in its own process."""
     return subprocess.run(
-        [PY_EXE, "-m", "tcip_web.cli", "doctor", str(root)], capture_output=True, text=True, env=env)
+        [PY_EXE, "-m", "tcip_web.cli", "doctor", str(root)], capture_output=True, text=True)
 
 
 def test_doctor_help_prints_the_dispatchers_prog_argument(capsys):
@@ -104,7 +93,7 @@ def test_doctor_flags_registry_checkpoint_path_under_a_temp_directory(tmp_path):
     root = _project(tmp_path)
     _register_absent_checkpoint(root, "junk", tmp_path / "elsewhere" / "model.pt")
 
-    res = _run(root, file_layout=True)
+    res = _run(root)
     assert res.returncode == 2  # errors present
     out = res.stdout
     assert "IMG_B" in out and "not marked complete" in out   # unconfirmed empty -> error
@@ -116,20 +105,16 @@ def test_doctor_flags_registry_checkpoint_path_under_a_temp_directory(tmp_path):
 def test_doctor_admits_a_confirmed_negative_under_dated_labels_flat_images(tmp_path):
     """A confirmed negative is the document's own mark, so dated labels over images never split
     into date buckets read the same as any other, never as an unconfirmed empty."""
-    import tcip_store as ts
-    from tcip_store.file_backend import FileBackend
-
     root = tmp_path / "proj"
     (root / "images").mkdir(parents=True)
     ann = root / "annotations" / "2026-02-11"
     ann.mkdir(parents=True)
-    ts.bind(FileBackend())
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     Image.new("RGB", (32, 32)).save(root / "images" / "IMG_A.JPG")
     json_io.write_annotations(ann / "IMG_A.json", [], 32, 32, keep_empty=True)
     mark_complete(root / "images" / "IMG_A.JPG", ann / "IMG_A.json", "bud", project=root)
 
-    res = _run(root, file_layout=True)
+    res = _run(root)
 
     assert "not marked complete" not in res.stdout
 
@@ -137,9 +122,6 @@ def test_doctor_admits_a_confirmed_negative_under_dated_labels_flat_images(tmp_p
 def test_doctor_reports_a_stem_collision_and_completes(tmp_path):
     """A bucket already holding two identities for one stem key refuses at every reader; the
     doctor names it as a finding instead of crashing on the exception."""
-    import tcip_store as ts
-    from tcip_store.file_backend import FileBackend
-
     root = tmp_path / "proj"
     images = root / "images" / "2026-02-11"
     images.mkdir(parents=True)
@@ -150,9 +132,7 @@ def test_doctor_reports_a_stem_collision_and_completes(tmp_path):
     Image.new("RGB", (32, 32)).save(images / "foo.png")
     json_io.write_annotations(ann / "foo.json", [], 32, 32, keep_empty=True)
 
-    ts.bind(FileBackend())
-
-    res = _run(root, file_layout=True)
+    res = _run(root)
 
     assert res.returncode == 2
     assert "foo.jpg" in res.stdout and "foo.png" in res.stdout
@@ -163,16 +143,12 @@ def test_doctor_flags_a_trait_record_that_will_not_read(tmp_path):
     """A trait record the schema refuses reads identically to no trait at all from a listing
     alone; ``tcip doctor`` is where the agent catches the difference at session start."""
     import tcip_store as ts
-    from tcip_store.file_backend import FileBackend
 
     root = _project(tmp_path)
     record = _record_localizing(tmp_path, "unicorn", "unicorn_match")
-    # This test's doctor subprocess runs with file_layout=True, so the fixture's own record has
-    # to land as the same loose file the file backend reads, not the process-default backend.
-    ts.bind(FileBackend())
     ts.replace(traits.trait_key(root, "unicorn"), record, expect=ts.Version.ABSENT)
 
-    res = _run(root, file_layout=True)
+    res = _run(root)
     assert res.returncode == 2  # errors present
     assert "'unicorn' will not read" in res.stdout
     assert "unicorn_match" in res.stdout
@@ -224,16 +200,9 @@ def test_doctor_clean_project_exits_zero(tmp_path):
     assert res.returncode == 0, res.stdout
 
 
-def _layout_project(tmp_path: Path, date: str | None, name: str = "resolved", *,
-                    file_layout: bool = False) -> Path:
+def _layout_project(tmp_path: Path, date: str | None, name: str = "resolved") -> Path:
     """A project whose image and label trees are placed by the layout resolver, so a scan root
-    that drifts from the canonical layout shows up as findings the doctor never makes; with
-    ``file_layout`` every record of it is written on the file backend, bound first."""
-    if file_layout:
-        import tcip_store as ts
-        from tcip_store.file_backend import FileBackend
-
-        ts.bind(FileBackend())
+    that drifts from the canonical layout shows up as findings the doctor never makes."""
     root = tmp_path / name
     image_dir(root, date).mkdir(parents=True)
     annotation_dir(root, date).mkdir(parents=True)
@@ -251,12 +220,12 @@ def test_labels_are_scanned_where_the_layout_resolver_places_them(tmp_path):
     """An unmarked empty label is named by the path the resolver builds, so the checker's scan
     root and the canonical annotations tree cannot drift apart unnoticed."""
     date = "2026-03-04"
-    root = _layout_project(tmp_path, date, file_layout=True)
+    root = _layout_project(tmp_path, date)
     Image.new("RGB", (48, 32)).save(image_dir(root, date) / "IMG_R.JPG")
     label = annotation_path(root, date, "IMG_R")
     json_io.write_annotations(label, [], 48, 32, keep_empty=True)
 
-    res = _run(root, file_layout=True)
+    res = _run(root)
     assert res.returncode == 2, res.stdout
     unmarked = _lines(res.stdout, "not marked complete")
     assert len(unmarked) == 1, res.stdout
@@ -270,10 +239,6 @@ def test_a_mark_for_any_subject_finishes_an_empty_label_on_a_dateless_dataset(tm
     image_dir(root, None).mkdir(parents=True)
     annotation_dir(root, None).mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
-    import tcip_store as ts
-    from tcip_store.file_backend import FileBackend
-
-    ts.bind(FileBackend())
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     image = image_dir(root, None) / "IMG_F.JPG"
     Image.new("RGB", (40, 24)).save(image)
@@ -281,7 +246,7 @@ def test_a_mark_for_any_subject_finishes_an_empty_label_on_a_dateless_dataset(tm
     json_io.write_annotations(label, [], 40, 24, keep_empty=True)
     mark_complete(image, label, "bud", project=root)
 
-    res = _run(root, file_layout=True)
+    res = _run(root)
     assert "not marked complete" not in res.stdout, res.stdout
 
 
@@ -426,26 +391,6 @@ def test_doctor_reports_an_undecodable_trait_record_without_aborting(tmp_path: P
     assert len(lines) == 1 and "will not read" in lines[0]
 
 
-def test_doctor_reports_a_version_refused_trait_record_without_aborting(tmp_path: Path):
-    import json
-
-    from tests._record_damage_fixtures import damage_record
-
-    root = _leaf_project(tmp_path)
-    fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
-    record = traits.read_trait("leaf", root).model_dump(mode="json")
-    # A version this store's own writer refuses to produce, so the record's own bytes are
-    # damaged in place rather than written through the seam.
-    damage_record(traits.trait_key(root, "leaf"),
-                  json.dumps({**record, "schema_version": 99}).encode("utf-8"))
-
-    res = _run(root)
-
-    assert res.returncode == 1, res.stdout
-    lines = _lines(res.stdout, "trait '")
-    assert len(lines) == 1 and "schema_version 99, above the" in lines[0]
-
-
 def test_doctor_errors_on_a_project_whose_record_does_not_decode(tmp_path):
     """A damaged record is a check that could not run, not a clean project: an error, and exit 2."""
     from tcip_mcp.project_record import project_record_key
@@ -467,11 +412,11 @@ def test_doctor_flags_an_unreadable_label(tmp_path):
     """A corrupt label file is an error-level finding, never a pass: the reader raises on it, and
     the doctor reports it rather than letting the corruption pass as an empty document."""
     date = "2026-03-04"
-    root = _layout_project(tmp_path, date, file_layout=True)
+    root = _layout_project(tmp_path, date)
     Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_S.JPG")
     annotation_path(root, date, "IMG_S").write_text("not json {][", encoding="utf-8")
 
-    res = _run(root, file_layout=True)
+    res = _run(root)
     assert res.returncode == 2, res.stdout
     unreadable = _lines(res.stdout, "will not read")
     assert len(unreadable) >= 1, res.stdout
@@ -490,7 +435,7 @@ def test_doctor_flags_an_image_and_a_label_with_a_reserved_stem(tmp_path):
     reserved.parent.mkdir(parents=True, exist_ok=True)
     reserved.write_text('{"annotations": []}', encoding="utf-8")
 
-    res = _run(root, file_layout=True)
+    res = _run(root)
     assert res.returncode == 2, res.stdout
     findings = _lines(res.stdout, "reserved for a prediction bucket")
     assert any("bucket.jpg" in ln for ln in findings), res.stdout

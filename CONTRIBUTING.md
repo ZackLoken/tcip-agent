@@ -3,7 +3,7 @@
 ## Setup
 
 Follow README.md's Setup section for the conda environment and the frontend install; this
-document does not restate it. The `tcip` console script (`tcip doctor`, `tcip adopt-store`, and
+document does not restate it. The `tcip` console script (`tcip doctor`, `tcip dump-store`, and
 every other operator command) is declared in `packages/tcip-web/pyproject.toml`; an existing
 editable checkout gains it only on the next `pip install -e packages/tcip-web`. Every test spawns
 a command as `python -m tcip_web.cli <command>` instead, so the test suite holds without that
@@ -22,22 +22,19 @@ mypy                               # roots from mypy.ini, run from the repo root
 python tools/list_tools.py         # the MCP tool list (never hardcode counts in docs)
 npm --prefix packages/tcip-web/frontend run build   # lint, typecheck and test take the same prefix
 python -m tcip_web                 # backend plus built UI at http://127.0.0.1:8765
-tcip export-store <root>           # a root's database-held records back out as files
-tcip adopt-store <root>            # a root's loose record files into its database
+tcip dump-store <project> <out_dir>   # a project's records and logs written out as files
 ```
 
 `conda activate tcip-agent` is the environment every other line below runs inside, not a gate of
-its own. `pytest tests/` is the suite; it binds one storage backend per run (an unset environment
-binds the database, `TCIP_STORE_BACKEND=file` the loose-file layout), so a change touching the
-storage seam runs it both ways. `ruff check packages tests tools` and `mypy` are the lint and
+its own. `pytest tests/` is the suite. `ruff check packages tests tools` and `mypy` are the lint and
 type gates. `python tools/list_tools.py` is how you find the current MCP tool count and names;
 never hardcode a count in a doc, comment, or commit message.
 `python tools/gate_baseline.py --out <dir>` runs the same stages `.github/workflows/ci.yml`
 declares, so a local pass predicts CI. The frontend line is the frontend's own gate, run only
 when a frontend file changed; `lint`, `typecheck` and `test` run under the same prefix. `python -m tcip_web` is how you confirm a change against the
-served app rather than tests alone. `tcip export-store` and `tcip adopt-store` move a root's records
-between the database and loose-file layouts; run them, not a hand-written script, whenever a
-change needs to inspect or convert a root's on-disk state.
+served app rather than tests alone. `tcip dump-store <project> <out_dir>` writes a project's
+records and logs out as files; run it, not a hand-written script, whenever a change needs to
+inspect a project's stored state.
 
 ## Rules a contributor meets
 
@@ -49,14 +46,9 @@ change needs to inspect or convert a root's on-disk state.
   `VACUOUS` (the test passed even without the fix), `INDETERMINATE` (the baseline is not shown
   to precede the change), and `REFUSED` (nothing was selected, or collection failed). Only
   `GUARDS` is reported as a guard; state a `VACUOUS` result as vacuous, not as passing coverage.
-- Persisted formats are frozen. `frozen-formats.json`, generated from the store registry by
-  `tools/generate_frozen_manifest.py` and held to it by `tests/test_frozen_manifest.py`, is
-  the shipped freeze commitment: every store's classification and version ceiling. A format
-  bump is a deliberate, reviewed change that states its own obligations (how the new shape
-  coexists with what a reader already wrote), never a silent shape change inside a frozen
-  version. There are no runtime migration shims: existing state is conformed by a `cli/` command
-  shipped with the bump and deleted once every root that needed it is conformed, not by a
-  fallback the running platform carries forward.
+- A record is the shape its one producer writes and its one reader reads. A re-shaped record
+  changes both together, and the records already written are regenerated or discarded with the
+  change; there are no runtime migration shims and no defaults for a field a record lacks.
 - A change touching a persisted field, a refusal, an operating-point stamp, or a delivery gate
   takes design review before code. Open an issue describing the change first; do not send a
   pull request for one of these without a design discussion already open.

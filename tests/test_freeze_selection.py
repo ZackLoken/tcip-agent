@@ -1,8 +1,5 @@
 """freeze_selection: a finished run's own drawn train/val partition, frozen into a selection a
 later run can bind to.
-
-Reuses test_selection_binding.py's dataset fixture and builds a real drawn split through the
-launcher's own resolution, rather than restating it.
 """
 
 from __future__ import annotations
@@ -50,12 +47,12 @@ def _real_drawn_experiment(
 def _damage_resolved(project: Path, experiment_id: str, change) -> None:
     """Rewrite what a run's launch record under ``project`` says it resolved, on disk past its
     one writer, ``change`` applied to it."""
-    from tcip_store import RECORD_JSON
+    from tcip_store import encode_record
 
     path = experiment_dir(experiment_id, project=project) / RUN_FILE
     record = read_record(path)
     change(record["resolved"])
-    path.write_bytes(RECORD_JSON.encode(record))
+    path.write_bytes(encode_record(record))
 
 
 # -- admits valid work: freeze, read back, bind a second run -------------------
@@ -99,7 +96,7 @@ def test_freeze_selection_names_the_sources_the_run_read_not_the_launch_input(tm
     changes nothing: freezing a partition against pixels the run never saw would bind a later run
     to a different dataset."""
     from PIL import Image
-    from tcip_store import RECORD_JSON
+    from tcip_store import encode_record
 
     from tcip_mcp.tools.data_tools import freeze_selection
 
@@ -114,7 +111,7 @@ def test_freeze_selection_names_the_sources_the_run_read_not_the_launch_input(tm
     run_dir = experiment_dir("exp-elsewhere", project=tmp_path)
     launch = read_record(run_dir / RUN_FILE)
     launch["config"]["data"]["images_dir"] = str(other)
-    (run_dir / RUN_FILE).write_bytes(RECORD_JSON.encode(launch))
+    (run_dir / RUN_FILE).write_bytes(encode_record(launch))
 
     result = freeze_selection(tmp_path, "exp-elsewhere", output_path=str(tmp_path / "frozen"))
 

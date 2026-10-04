@@ -3,10 +3,8 @@
 Coverage, not a guard: this tool has no prior behavior to prove absent.
 
 Every entry read here comes from a real ``@audited`` call, never a hand-built dict, except the
-corrupt-page, version-refused-page and torn-tail cases, each of which appends malformed bytes by
-hand directly to the log file at the seam's own path (bypassing the store's append entirely,
-never something a writer through the seam could produce), the same technique
-``tests/test_experiment_log_version_refused.py`` uses for its own log reader.
+corrupt-page case, which damages a committed entry's bytes in the database by hand, never
+something a writer through the seam could produce.
 """
 
 from __future__ import annotations
@@ -90,74 +88,23 @@ def test_read_audit_log_project_default_scope_excludes_dataset_scoped_entries(
 def test_read_audit_log_refuses_on_a_page_carrying_an_undecodable_entry(
     project: Path, dataset_root: Path,
 ) -> None:
-    from tcip_store.file_backend import FileBackend
+    import sqlite3
+
     from tcip_mcp.tools.annotation_tools import write_subject_registry
+    from tcip_store.file_backend import database_file
 
-    ts.bind(FileBackend())
+    assert "error" not in write_subject_registry(project, str(dataset_root), subjects=_subjects())
+    conn = sqlite3.connect(str(database_file(str(dataset_root.resolve()))), isolation_level=None)
     try:
-        assert "error" not in write_subject_registry(project, str(dataset_root), subjects=_subjects())
-        key = audit_module.audit_log_key(dataset_root)
-        with open(FileBackend().path_for(key), "ab") as handle:
-            handle.write(b'{"tool": "write_subject_registry", bro\n')
-
-        result = read_audit_log(project, scope=str(dataset_root))
+        conn.execute("update log_entries set entry = ? where id = (select max(id) from "
+                     "log_entries)", (b'{"tool": "write_subject_registry", bro',))
     finally:
-        ts.unbind()
+        conn.close()
+
+    result = read_audit_log(project, scope=str(dataset_root))
 
     assert "error" in result
     assert "undecodable" in result["error"]
-    assert "entries" not in result
-
-
-def test_read_audit_log_refuses_on_a_page_carrying_a_version_refused_entry(
-    project: Path, dataset_root: Path,
-) -> None:
-    """Same shape as ``tests/test_experiment_log_version_refused.py``: the poisoned line is
-    appended by hand, directly to the log file at the seam's own path, never through the store's
-    own append (no writer through the seam could produce a schema_version this reader refuses)."""
-    from tcip_store.file_backend import FileBackend
-    from tcip_mcp.tools.annotation_tools import write_subject_registry
-
-    ts.bind(FileBackend())
-    try:
-        assert "error" not in write_subject_registry(project, str(dataset_root), subjects=_subjects())
-        key = audit_module.audit_log_key(dataset_root)
-        descriptor = ts.get_descriptor(key.store)
-        poisoned = descriptor.codec.encode({"tool": "write_subject_registry", "schema_version": 99})
-        with open(FileBackend().path_for(key), "ab") as handle:
-            handle.write(poisoned + b"\n")
-
-        result = read_audit_log(project, scope=str(dataset_root))
-    finally:
-        ts.unbind()
-
-    assert "error" in result
-    assert "version-refused" in result["error"]
-    assert "entries" not in result
-
-
-def test_read_audit_log_refuses_on_a_page_with_a_torn_tail(
-    project: Path, dataset_root: Path,
-) -> None:
-    """The tail bytes are appended by hand, directly to the log file, with no trailing newline:
-    the shape an appender dying mid-write leaves behind, never one this store's own append could
-    produce (append always durably terminates its own line)."""
-    from tcip_store.file_backend import FileBackend
-    from tcip_mcp.tools.annotation_tools import write_subject_registry
-
-    ts.bind(FileBackend())
-    try:
-        assert "error" not in write_subject_registry(project, str(dataset_root), subjects=_subjects())
-        key = audit_module.audit_log_key(dataset_root)
-        with open(FileBackend().path_for(key), "ab") as handle:
-            handle.write(b'{"tool": "write_subject_registry", "status": "ok"')
-
-        result = read_audit_log(project, scope=str(dataset_root))
-    finally:
-        ts.unbind()
-
-    assert "error" in result
-    assert "torn tail" in result["error"]
     assert "entries" not in result
 
 

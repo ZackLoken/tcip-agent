@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import tcip_store as ts
 from PIL import Image
 
 from tcip_annotation import json_io
@@ -69,15 +68,13 @@ def test_draw_splits_stats_golden(tmp_path: Path):
 
 
 def test_draw_splits_selection_document_golden(tmp_path: Path):
-    """Bound to the file backend on purpose: the selection's own document sits beside the draw
-    as ``selection.json``, a fact about the file layout a database backend does not reproduce.
-    Every sample names its own source and label; the draw copies nothing."""
-    from tcip_store.file_backend import FileBackend
+    """The selection is the draw's one record, in the database under its directory. Every
+    sample names its own source and label; the draw copies nothing."""
+    from tcip_store.file_backend import is_bookkeeping
 
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.data_tools import draw_splits
 
-    ts.bind(FileBackend())
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "s"
     result = draw_splits(tmp_path, str(root), output_path=str(out), seed=1, subject="bud",
@@ -88,8 +85,8 @@ def test_draw_splits_selection_document_golden(tmp_path: Path):
     assert result["selection_dir"] == str(out)
 
     written = sorted(str(p.relative_to(out)).replace("\\", "/") for p in out.rglob("*")
-                     if p.is_file() and p.suffix != ".lock")
-    assert written == ["selection.json"]
+                     if p.is_file() and not is_bookkeeping(p.name))
+    assert written == [".tcip/store.db"]
 
     drawn = read_selection(out, project=tmp_path)
     assert drawn.counts() == GOLDEN_DRAW_SPLITS["splits"]

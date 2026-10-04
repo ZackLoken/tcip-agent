@@ -183,8 +183,7 @@ def mypy_pin() -> "str | None":
 
 
 def _host_is_windows() -> bool:
-    """Whether this host resolves bash the Windows way; a test pins this rather than ``os.name``,
-    which ``pathlib`` reads to pick its path class."""
+    """Whether this host resolves bash the Windows way."""
     return os.name == "nt"
 
 
@@ -246,7 +245,7 @@ def main() -> int:
     if args.out.resolve() == RECORDED_BASELINE.resolve():
         parser.error(
             f"{RECORDED_BASELINE} is the recorded baseline (a one-leg pytest run, not "
-            "comparable to this gate's two-leg run) and stays as history; pass a different --out."
+            "comparable to this gate's run) and stays as history; pass a different --out."
         )
     args.out.mkdir(parents=True, exist_ok=True)
 

@@ -1,10 +1,7 @@
 """The registry entry shape as its readers actually consume it.
 
-``ModelRegistry`` writes ``.tcip/models/registry.json``; other readers consume those entries by
-key: the data-state doctor's registry-pollution check, the provenance identity resolver, and the
-browser's own ``RegisteredModel``. Both sides of each agreement here run the real implementations
-against a registry the real ``register_model`` wrote, so a key the writer stops emitting shows up
-as a reader going quiet rather than as a check still passing against a hand-written entry.
+Each agreement here runs a reader of the registry index's entries against a registry the real
+``register_model`` wrote.
 """
 
 from __future__ import annotations
@@ -94,12 +91,10 @@ def test_doctor_flags_every_registry_entry_the_registry_wrote(polluted_project) 
 
 
 def test_doctor_reports_nothing_for_a_project_with_no_registered_models(tmp_path: Path) -> None:
-    """A models directory with an empty index is a clean state, not a finding: constructing the
-    registry creates the directory before anything is registered."""
+    """A project that has registered nothing is a clean state, not a finding."""
     root = tmp_path / "proj"
     root.mkdir()
     reg = ModelRegistry(str(root))
-    assert (root / ".tcip" / "models").is_dir()
     assert reg.list_models() == []
 
     findings: list[tuple[str, str]] = []
@@ -140,22 +135,17 @@ def test_doctor_reports_an_index_that_will_not_decode_rather_than_reading_it_as_
     Absence and corruption are different states: a project that registered nothing has no models,
     while a project whose index will not parse has models nobody can see. Folding the second into
     the first hands a breeder a clean bill of health for a registry that is unreadable.
-
-    Bound to the file backend on purpose: corruption is injected by truncating the index's own
-    raw bytes on disk, which only means something for a document a file actually holds.
     """
-    from tcip_store import bind
-    from tcip_store.file_backend import FileBackend
+    from tcip_mcp.model_registry import registry_index_key
+    from tests._record_damage_fixtures import damage_record
 
-    bind(FileBackend())
     root = tmp_path / "proj"
     root.mkdir()
     reg = ModelRegistry(str(root))
     ckpt = _checkpoint(tmp_path / "model_best.pt", "weights-a")
     reg.register_model("currant_bud_detector_v1", str(ckpt), {})
 
-    index = root / ".tcip" / "models" / "registry.json"
-    index.write_text(index.read_text(encoding="utf-8")[:-8], encoding="utf-8")
+    damage_record(registry_index_key(root), b'{"entries": [{"name": "currant')
 
     findings: list[tuple[str, str]] = []
     _doctor().check_registry(root, findings)

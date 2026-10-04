@@ -224,12 +224,12 @@ def published(project: Path, out: Path, results: list[dict], *, scope: dict,
     from tcip_mcp.pipelines.execution import Stated, prepare_pass
     from tests._verified_checkpoint_fixtures import project_checkpoint
 
-    from tcip_store import RECORD_JSON
+    from tcip_store import decode_value, encode_record
 
     checkpoint = load_registered_checkpoint(
         project_checkpoint(project, data={"num_channels": 3, "scope": scope}, registry=registry),
         project=project)
-    identity = (RECORD_JSON.decode(RECORD_JSON.encode(raster_identity(raster_path)))
+    identity = (decode_value(encode_record(raster_identity(raster_path)))
                 if raster_path is not None else None)
     p = prepare_pass(checkpoint, Stated(tile=False))
     return publish(project, out, pass_documents(p, results), producer=checkpoint.producer,

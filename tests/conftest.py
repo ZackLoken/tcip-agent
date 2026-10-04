@@ -49,9 +49,9 @@ def _drain_background_store_writers() -> None:
 def _bind_storage_backend():
     """Bind the storage backend before every test, the way a process entry point does, and close
     it after the test once background writers are drained."""
-    from tcip_store.binding import bind_default
+    import tcip_store
 
-    backend = bind_default()
+    backend = tcip_store.bind()
     yield
     _drain_background_store_writers()
     backend.close()

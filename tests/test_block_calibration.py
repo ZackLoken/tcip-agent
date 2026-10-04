@@ -287,7 +287,7 @@ def test_a_recorded_mosaic_size_other_than_the_file_refuses_by_name(tmp_path: Pa
     """The run's recorded mosaic dimensions are checked against the raster read now: a manifest
     recorded against a replaced or truncated file refuses rather than scoring a sub-area or
     addressing pixels past the edge."""
-    from tcip_store import RECORD_JSON
+    from tcip_store import encode_record
 
     from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
     from tcip_mcp.assessment import AssessmentRefused
@@ -296,7 +296,7 @@ def test_a_recorded_mosaic_size_other_than_the_file_refuses_by_name(tmp_path: Pa
     run_dir = experiment_dir(exp["experiment_id"], project=tmp_path)
     run = read_record(run_dir / RUN_FILE)
     run["resolved"]["data"]["split"]["spatial_manifest"]["width"] = width
-    (run_dir / RUN_FILE).write_bytes(RECORD_JSON.encode(run))
+    (run_dir / RUN_FILE).write_bytes(encode_record(run))
 
     with pytest.raises(AssessmentRefused, match="now reads"):
         _assess(exp)

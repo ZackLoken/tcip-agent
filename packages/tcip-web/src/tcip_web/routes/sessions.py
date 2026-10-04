@@ -1,4 +1,4 @@
-"""Annotation session telemetry at the open project's ``.tcip/state/annotation_stats.json``: each
+"""Annotation session telemetry in the open project's annotation-stats record: each
 session's person, start and end, and one entry per contribution to an image naming its activity.
 Every throughput figure is derived from those entries when they are read."""
 

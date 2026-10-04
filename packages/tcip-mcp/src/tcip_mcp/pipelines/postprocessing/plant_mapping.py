@@ -41,8 +41,7 @@ from typing import (
 import tcip_store
 from PIL import ExifTags, Image
 from pydantic import ConfigDict, TypeAdapter
-from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import Key, encode_record
 
 from tcip_mcp.audit import now_iso
 from tcip_mcp.project_paths import project_state_dir
@@ -200,7 +199,7 @@ class MappingBuild:
 
         problem = f"plant mapping {name!r} under {project} is not a record this reader decodes"
         try:
-            build = _MAPPING_RECORD.validate_json(RECORD_JSON.encode(raw))
+            build = _MAPPING_RECORD.validate_json(encode_record(raw))
         except ValidationError as exc:
             raise ValueError(f"{problem}: {exc}") from exc
         undigested = sorted(set(build.capture_identity) - set(build.capture_digests))
@@ -686,19 +685,15 @@ class PlantRegistryNameConflict(Exception):
 
 
 PLANT_REGISTRY_STORE = "plant_registries"
-_REGISTRY_DOC = RootedFileLocator(prefix=("plant_registries",), suffix=".json")
-register_store(
-    StoreDescriptor(
-        name=PLANT_REGISTRY_STORE,
-        kind="record",
-        key_fields=("name",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        enumerable=True,
-        locator=_REGISTRY_DOC,
-    )
-)
+
+NAME_SEGMENT = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+"""A caller-chosen registry or mapping name's one legal shape: lowercase letters, digits, single
+hyphens between groups."""
+
+ARCHIVED_NAME_SEGMENT = re.compile(NAME_SEGMENT.pattern.removesuffix("$") + r"@[0-9a-f]{12}$")
+"""An archived plant-mapping name's own shape: a legal :data:`NAME_SEGMENT` plus ``@`` and the
+twelve-hex-digit prefix of the record digest it archived; it never matches plain
+:data:`NAME_SEGMENT`."""
 
 
 def _named(name: str, *patterns: re.Pattern[str]) -> tuple[str]:
@@ -714,8 +709,6 @@ def plant_registry_key(project: Path | str, name: str) -> Key:
     ``.tcip/state`` like :func:`plant_mapping_key`. A name outside ``NAME_SEGMENT`` raises
     ``ValueError``.
     """
-    from tcip_store.layout_claims import NAME_SEGMENT
-
     return Key(PLANT_REGISTRY_STORE, str(project_state_dir(project)), _named(name, NAME_SEGMENT))
 
 
@@ -1264,36 +1257,15 @@ def build_mapping(
 
 
 PLANT_MAPPING_STORE = "plant_mapping"
-_MAPPING_DOC = RootedFileLocator(prefix=("plant_mappings",), suffix=".json")
-register_store(
-    StoreDescriptor(
-        name=PLANT_MAPPING_STORE,
-        kind="record",
-        key_fields=("name",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
-        enumerable=True,
-        locator=_MAPPING_DOC,
-    )
-)
 
 
 def plant_mapping_key(project: Path | str, name: str) -> Key:
-    """One project's named plant-mapping build, addressed by the project that owns it.
-
-    A mapping is project state: a dataset can be read by more than one project, and each project's
-    mapping is its own. The key root is ``<project>/.tcip/state``; the document lives at
-    ``plant_mappings/<name>.json`` under it.
-
-    ``last_writer_wins``: a mapping is written whole in one call, and a later build under the
-    same name replaces it, unconditioned on the record its citation check read.
-
-    A name outside ``NAME_SEGMENT`` and the archived ``ARCHIVED_NAME_SEGMENT`` raises
+    """One project's named plant-mapping build, addressed by the project that owns it, under its
+    ``.tcip/state``: a dataset can be read by more than one project, and each project's mapping is
+    its own. A mapping is written whole in one call, and a later build under the same name
+    replaces it. A name outside ``NAME_SEGMENT`` and the archived ``ARCHIVED_NAME_SEGMENT`` raises
     ``ValueError``.
     """
-    from tcip_store.layout_claims import ARCHIVED_NAME_SEGMENT, NAME_SEGMENT
-
     return Key(PLANT_MAPPING_STORE, str(project_state_dir(project)),
                _named(name, NAME_SEGMENT, ARCHIVED_NAME_SEGMENT))
 
@@ -1301,8 +1273,6 @@ def plant_mapping_key(project: Path | str, name: str) -> Key:
 def plant_mapping_names(project: Path | str) -> list[str]:
     """Every mapping name persisted under this project that ``NAME_SEGMENT`` admits, sorted, from
     the store's own key listing."""
-    from tcip_store.layout_claims import NAME_SEGMENT
-
     root = str(project_state_dir(project))
     names = (key.parts[-1] for key in tcip_store.keys(PLANT_MAPPING_STORE, root))
     return sorted(name for name in names if NAME_SEGMENT.fullmatch(name))
@@ -1316,8 +1286,8 @@ def archived_mapping_name(name: str, record_sha256: str) -> str:
 
 def record_digest(record: object) -> str:
     """The digest a stored mapping record earns, whatever its shape: sha256 over
-    ``RECORD_JSON.encode(record)``, what its receipt names."""
-    return hashlib.sha256(RECORD_JSON.encode(record)).hexdigest()
+    ``encode_record(record)``, what its receipt names."""
+    return hashlib.sha256(encode_record(record)).hexdigest()
 
 
 class MappingRebuildRefusal(Exception):
@@ -1460,12 +1430,6 @@ def _scan_receipts(project: Path | str, root_key: str, *, after: Optional[str]) 
             f"the audit log at {key} carries {len(page.corrupt)} undecodable "
             f"entr{'y' if len(page.corrupt) == 1 else 'ies'}; repair the log before a "
             "plant-mapping receipt can be trusted")
-    if page.version_refused:
-        raise ValueError(
-            f"the audit log at {key} carries {len(page.version_refused)} entr"
-            f"{'y' if len(page.version_refused) == 1 else 'ies'} at a schema_version this reader "
-            "does not know, not corruption; a plant-mapping receipt cannot be trusted while an "
-            "entry could be hiding behind it unread")
     seen = _receipt_seen.setdefault(root_key, {})
     for entry in page.records:
         if entry.get("tool") != "plant_mapping_built":

@@ -10,10 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from tcip_store import (
-    RECORD_JSON, Key, StoreDescriptor, Version, VersionConflict, register_store, store,
-)
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import Key, Version, VersionConflict, decode_value, encode_record, store
 
 from tcip_mcp.pipelines.execution import DEFAULT_TILE_BATCH_SIZE, Stated
 from tcip_mcp.server import tool
@@ -21,21 +18,9 @@ from tcip_mcp.server import tool
 logger = logging.getLogger(__name__)
 
 RASTER_PASS_PROGRESS_STORE = "raster_pass_progress"
-register_store(
-    StoreDescriptor(
-        name=RASTER_PASS_PROGRESS_STORE,
-        kind="record",
-        key_fields=("bucket", "segment"),
-        frozen=False,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        enumerable=True,
-        locator=RootedFileLocator(prefix=(".tcip", "raster_pass_progress"), suffix=".json"),
-    )
-)
 """One tiled raster pass's resume state, kept under the project rather than in the bucket it will
 publish: an ``identity`` record naming the pass, plus one ``batch-<index>`` record per tile batch
-already predicted, under ``<project>/.tcip/raster_pass_progress/<bucket digest>/``."""
+already predicted, both keyed under the bucket's digest."""
 
 
 def infer(
@@ -91,7 +76,7 @@ def infer(
         from tcip_mcp.pipelines.data.split_construction import raster_identity as identity_of
 
         try:
-            raster_identity = RECORD_JSON.decode(RECORD_JSON.encode(identity_of(raster_path)))
+            raster_identity = decode_value(encode_record(identity_of(raster_path)))
         except ValueError as exc:
             return {"error": f"raster content identity could not be computed for "
                              f"{raster_path}: {exc}"}

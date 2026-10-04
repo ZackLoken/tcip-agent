@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import threading
 from pathlib import Path
 
@@ -118,7 +117,9 @@ def test_inspect_project_folds_in_recent_activity(tmp_path: Path):
 
     _initialized(tmp_path)
     status = inspect_project(tmp_path)
-    assert status["recent_activity"] == {}  # no history yet: genuinely empty, not corrupt
+    assert status["recent_activity"] == {  # no history yet: counted from the log, not corrupt
+        "reports_since_last_retrospective": 0, "reports_since_last_distillation": 0,
+        "retrospectives_since_last_distillation": 0}
 
     report_friction(tmp_path, category="missing_tool", detail="a")
     status = inspect_project(tmp_path)
@@ -139,32 +140,24 @@ def test_inspect_project_folds_in_last_retrospective_by_id_not_path(tmp_path: Pa
     assert "path" not in last
 
 
-def test_inspect_project_surfaces_corrupt_status_honestly(tmp_path: Path):
-    from tcip_mcp.project_status import project_status_key, record_report
+def test_inspect_project_surfaces_an_undecodable_audit_log_honestly(tmp_path: Path):
+    import sqlite3
+
+    from tcip_mcp.tools.meta_tools import report_friction
+    from tcip_store.file_backend import database_file
 
     _initialized(tmp_path)
-    record_report(tmp_path)  # seed a real record so a damaged one has somewhere to overwrite
-    damage_record(project_status_key(tmp_path), b"{not valid json")
+    report_friction(tmp_path, category="missing_tool", detail="a")
+    conn = sqlite3.connect(str(database_file(str(tmp_path))), isolation_level=None)
+    try:
+        conn.execute("update log_entries set entry = ? where id = "
+                     "(select max(id) from log_entries)", (b"{not valid json",))
+    finally:
+        conn.close()
 
     status = inspect_project(tmp_path)
-    assert "status_unavailable" in status["recent_activity"]
-    # The record reads unaffected by a corrupt status file: different store, different rail.
-    assert status["record_problem"] is None
-
-
-def test_inspect_project_surfaces_version_refused_status_distinctly_from_corrupt(tmp_path: Path):
-    from tcip_mcp.project_status import (
-        PROJECT_STATUS_STORE, project_status_key, record_report,
-    )
-
-    _initialized(tmp_path)
-    record_report(tmp_path)  # seed a real record so a poisoned one has somewhere to overwrite
-    poisoned = tcip_store.get_descriptor(PROJECT_STATUS_STORE).codec.encode(
-        {"reports_since_last_retrospective": 1, "schema_version": 99})
-    damage_record(project_status_key(tmp_path), poisoned)
-
-    status = inspect_project(tmp_path)
-    assert "schema_version" in status["recent_activity"]["status_unavailable"]
+    assert "undecodable" in status["recent_activity"]["status_unavailable"]
+    # The record reads unaffected by a damaged log: different store, different rail.
     assert status["record_problem"] is None
 
 
@@ -238,16 +231,6 @@ def test_export_import_roundtrip(tmp_path: Path):
     assert "error" not in imported
     assert imported["files_extracted"] == exported["files_added"]
 
-    # A restored bundle is files, not a database: a database backend refuses to touch it until
-    # its own record/log files are moved in, the same conform step real usage runs.
-    from tcip_store.adoption import adopt_root
-    from tcip_store.file_backend import database_file
-    from tcip_store.layout_claims import ROOT
-
-    dest_abs = str(Path(dest).absolute())
-    if not database_file(dest_abs).is_file():
-        adopt_root(dest_abs, ROOT, report=lambda line: None)
-
     status = inspect_project(dest)
     assert status["id"] == record["id"]
     # inspect_project counts raw image files, so the two sibling bands count separately here;
@@ -276,99 +259,8 @@ def test_export_import_roundtrip(tmp_path: Path):
     assert restored_id == {"crop": "currant", "id": reg["id"], "fingerprint": reg["fingerprint"]}
 
 
-def test_project_roots_names_a_run_output_dir_a_selection_and_a_prediction_bucket(
-    tmp_path: Path,
-):
-    """project_roots reaches every layout a project's own records name it under, not only the
-    registered dataset roots: each run directory and the selection a run bound to (its resolved
-    partition's selection.selection_dir)."""
-    from tcip_store.layout_claims import RUN, SPLITS
-
-    from tcip_mcp.store_catalog import project_roots
-
-    project = tmp_path / "project"
-    dataset = tmp_path / "dataset"
-    project.mkdir()
-    dataset.mkdir()
-    _make_dataset(dataset)
-    register_dataset(project, str(dataset), crop="currant")
-
-    split_dir = tmp_path / "splits" / "frozen-exp-1"
-    split_dir.mkdir(parents=True)
-    run_dir = _run_bound_to(project, split_dir)
-
-    roots = project_roots(project)
-
-    assert (str(run_dir.absolute()), RUN) in roots
-    assert (str(split_dir.absolute()), SPLITS) in roots
-
-
-def _run_bound_to(project: Path, selection_dir: Path) -> Path:
-    """A run directory under ``project`` whose launch record's partition is bound to a selection
-    ``draw_splits`` drew into ``selection_dir`` (over a dataset beside it), resolved and opened
-    by the launcher's own producer and writer."""
-    from tests._verified_checkpoint_fixtures import opened_run
-    from tests.test_selection_binding import _draw, _two_subject_two_date_dataset
-
-    _draw(project, _two_subject_two_date_dataset(
-        selection_dir.parent / f"{selection_dir.name}-ds"), selection_dir)
-    return opened_run(project, {"model_source": {"task": "detection"},
-                                "data": {"split": {"selection_dir": str(selection_dir)}}})
-
-
-def test_project_roots_keeps_both_layouts_when_one_directory_is_two_kinds_of_root(
-    tmp_path: Path,
-):
-    """A directory a run bound to as its selection that is also registered as a project dataset
-    keeps both layouts: _add is keyed on the (path, layout) pair, not the path alone, so the
-    dataset-registry add is not silently dropped because the selection add already claimed that
-    path."""
-    from tcip_store.layout_claims import ROOT, SPLITS
-
-    from tcip_mcp.store_catalog import project_roots
-
-    project = tmp_path / "project"
-    project.mkdir()
-
-    shared = tmp_path / "shared"
-    shared.mkdir()
-    _make_dataset(shared)
-    _run_bound_to(project, shared)
-    register_dataset(project, str(shared), crop="currant")
-
-    roots = project_roots(project)
-
-    assert (str(shared.absolute()), SPLITS) in roots
-    assert (str(shared.absolute()), ROOT) in roots
-
-
-def test_project_roots_skips_a_bound_selection_that_no_longer_exists(tmp_path: Path):
-    """A run's resolved record can still name a selection directory that has since been moved or
-    deleted; project_roots skips it rather than handing ``tcip adopt-store`` a path to recreate
-    from nothing."""
-    import shutil
-
-    from tcip_store.layout_claims import SPLITS
-
-    from tcip_mcp.store_catalog import project_roots
-
-    project = tmp_path / "project"
-    project.mkdir()
-
-    split_dir = tmp_path / "splits" / "gone"
-    split_dir.mkdir(parents=True)
-    _run_bound_to(project, split_dir)
-    tcip_store.release_root(split_dir)  # the selection's own store lets go of its file
-    shutil.rmtree(split_dir)
-
-    roots = project_roots(project)
-
-    assert not any(layout == SPLITS for _, layout in roots)
-
-
 def test_external_dataset_paths_names_an_external_registry_entry(tmp_path: Path):
-    """import_project calls this after extraction to disclose which registered datasets stayed
-    external."""
+    """A registered dataset outside the project is named as external."""
     project = tmp_path / "project"
     dataset = tmp_path / "dataset"  # a sibling of project, never nested under it: external
     project.mkdir()
@@ -408,8 +300,7 @@ def test_archive_project_includes_bespoke_model_source(tmp_path: Path):
 
 
 def test_archive_project_reports_checkpoints_excluded_by_default(tmp_path: Path):
-    """A checkpoint under .tcip/models/*.pt is dropped by include_models=False; left_behind
-    names that count separately from unaccounted and bookkeeping, rather than folding it in."""
+    """A checkpoint under .tcip/models is dropped by include_models=False, and counted."""
     src = tmp_path / "src_project"
     _initialized(src)
     (src / ".tcip" / "models" / "m.pt").write_bytes(b"weights")
@@ -417,11 +308,10 @@ def test_archive_project_reports_checkpoints_excluded_by_default(tmp_path: Path)
     result = archive_project(src, str(tmp_path / "export.zip"))
 
     assert "error" not in result
-    assert result["left_behind"]["checkpoints_excluded"] == 1
-    assert result["left_behind"]["unaccounted"] == 0
+    assert result["checkpoints_excluded"] == 1
 
     result_included = archive_project(src, str(tmp_path / "export2.zip"), include_models=True)
-    assert result_included["left_behind"]["checkpoints_excluded"] == 0
+    assert result_included["checkpoints_excluded"] == 0
 
 
 def test_archive_project_includes_a_registered_run_checkpoint_outside_tcip_models(tmp_path: Path):
@@ -593,10 +483,8 @@ def test_import_project_discloses_a_designed_external_checkpoint_separately_from
 
 def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(tmp_path: Path):
     """A checkpoint sitting under .tcip/models/ that is also a registry entry is one file to
-    _blob_files' two homes (the models glob and the registered-checkpoint reader); it must land
-    in the bundle once, not as a duplicate zip member neither door's own accounting predicts."""
-    from tcip_mcp.model_registry import ModelRegistry
-    from tcip_mcp.tools.bundle import account_for
+    the two checkpoint arms that recognize it; it lands in the bundle once."""
+    from tcip_mcp.model_registry import ModelRegistry, checkpoint_files
     from tests._verified_checkpoint_fixtures import checkpoint_file
 
     src = tmp_path / "src_project"
@@ -604,9 +492,7 @@ def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(tmp_pa
     ckpt = checkpoint_file(src / ".tcip" / "models" / "m.pt", "weights")
     ModelRegistry(str(src)).register_model("m", str(ckpt), {})
 
-    accounting = account_for(src)
-    blob_names = [os.path.normcase(str(p)) for p in accounting.blobs]
-    assert blob_names.count(os.path.normcase(str(ckpt))) == 1
+    assert Path(ckpt).resolve() in checkpoint_files(src)
 
     result = archive_project(src, str(tmp_path / "export.zip"), include_models=True)
     assert "error" not in result, result
@@ -619,29 +505,32 @@ def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(tmp_pa
     assert len(matching) == 1, f"m.pt bundled more than once: {names}"
 
 
-def test_archive_project_carries_a_registered_checkpoint_inside_model_src_when_models_excluded(
+def test_a_checkpoint_registered_from_anywhere_in_the_project_travels_only_with_models(
     tmp_path: Path,
 ):
-    """A bespoke run's model_src/ snapshot travels regardless of include_models. A weights file
-    that happens to sit inside that snapshot is a run file, not a checkpoint blob
-    include_models=False is entitled to drop."""
-    src = tmp_path / "src_project"
-    _initialized(src)
-    model_src = src / ".tcip" / "experiments" / "exp_001" / "model_src" / "abcd1234"
-    model_src.mkdir(parents=True)
-    ckpt = model_src / "weights.pt"
-    ckpt.write_bytes(b"snapshot-bundled weights")
-
-    result = archive_project(src, str(tmp_path / "export.zip"), include_models=False)
-    assert "error" not in result, result
-
+    """A checkpoint registered from a directory of the project's own, neither ``.tcip/models``
+    nor a run's, is a checkpoint: ``include_models=False`` leaves it out and counts it, and
+    ``include_models=True`` carries it."""
     import zipfile
 
-    with zipfile.ZipFile(str(tmp_path / "export.zip")) as zf:
-        names = zf.namelist()
-    assert any(n.endswith("weights.pt") for n in names), (
-        f"a checkpoint inside a model_src snapshot must travel regardless of include_models: {names}"
-    )
+    from tcip_mcp.model_registry import ModelRegistry
+    from tests._verified_checkpoint_fixtures import checkpoint_file
+
+    src = tmp_path / "src_project"
+    _initialized(src)
+    (src / "weights").mkdir()
+    ckpt = checkpoint_file(src / "weights" / "foreign.pt", "weights registered in the project")
+    ModelRegistry(str(src)).register_model("foreign", str(ckpt), {})
+
+    without = archive_project(src, str(tmp_path / "without.zip"), include_models=False)
+    with_models = archive_project(src, str(tmp_path / "with.zip"), include_models=True)
+
+    assert without["checkpoints_excluded"] == 1
+    with zipfile.ZipFile(str(tmp_path / "without.zip")) as zf:
+        assert "weights/foreign.pt" not in zf.namelist()
+    with zipfile.ZipFile(str(tmp_path / "with.zip")) as zf:
+        assert "weights/foreign.pt" in zf.namelist()
+    assert with_models["checkpoints_excluded"] == 0
 
 
 def test_archive_project_admits_a_symlink_spelled_project(tmp_path: Path):
@@ -892,38 +781,6 @@ def test_initialize_project_refuses_an_undecodable_record(tmp_path: Path):
     assert "does not decode" in result["error"]
 
 
-def test_initialize_project_refuses_an_unadopted_root(tmp_path: Path):
-    """A root whose records are still loose files: the store's conform rail refuses
-    initialize_project's record write there until tcip adopt-store has run, the same rule every
-    other record store under that root already obeys. The file backend legitimately produces
-    that state, so the unadopted root here is built by writing through the file backend directly
-    and then judged under the database backend."""
-    from tcip_store.file_backend import FileBackend
-    from tcip_store.sqlite_backend import SqliteBackend
-    from tcip_store.store import _backend
-
-    dest = tmp_path / "unadopted"
-    previous = _backend()
-    file_backend = FileBackend()
-    tcip_store.bind(file_backend)
-    try:
-        _initialized(dest)
-    finally:
-        tcip_store.bind(previous)
-        file_backend.close()
-
-    backend = SqliteBackend()
-    tcip_store.bind(backend)
-    try:
-        result = initialize_project(str(dest), "Test project", "north orchard")
-    finally:
-        tcip_store.bind(previous)
-        backend.close()
-
-    assert "error" in result
-    assert "tcip adopt-store" in result["error"]
-
-
 def test_initialize_project_records_on_a_directory_that_gained_tcip_with_no_creating_door(
     tmp_path: Path,
 ):
@@ -981,10 +838,9 @@ def test_inspect_project_reports_an_invalid_record(tmp_path: Path):
 
 
 def test_archive_and_import_carry_the_project_record(tmp_path: Path):
-    """initialize_project -> archive_project -> import_project round-trips a project whose record
-    is on disk in the archive: the record, its id included, travels with the project like every
-    other ``.tcip`` document, and archive_project exports it itself, so no operator step sits
-    between the two doors."""
+    """initialize_project -> archive_project -> import_project round-trips a project's record,
+    its id included, inside the database the archive copies, with no operator step between the
+    two doors."""
     src = tmp_path / "src_project"
     record = _initialized(src)
 
@@ -995,21 +851,44 @@ def test_archive_and_import_carry_the_project_record(tmp_path: Path):
     import zipfile
 
     with zipfile.ZipFile(str(zip_path)) as zf:
-        assert ".tcip/project.json" in zf.namelist()
+        assert ".tcip/store.db" in zf.namelist()
 
     dest = tmp_path / "restored"
     imported = import_project(str(zip_path), str(dest))
     assert "error" not in imported
 
-    from tcip_store.adoption import adopt_root
-    from tcip_store.file_backend import database_file
-    from tcip_store.layout_claims import ROOT
-
-    dest_abs = str(Path(dest).absolute())
-    if not database_file(dest_abs).is_file():
-        adopt_root(dest_abs, ROOT, report=lambda line: None)
-
     from tcip_mcp.project_record import read_record
 
     restored = read_record(dest)
     assert (restored["id"], restored["site"]) == (record["id"], "north orchard")
+
+
+def test_an_archive_of_an_open_database_carries_every_record_and_entry_it_holds(tmp_path: Path):
+    """The project's database is open, its latest commits still in its write-ahead log, when the
+    archive runs; the imported project's dump holds every record the source's did, byte for
+    byte, and every log entry, the import's own line after them."""
+    from tcip_mcp.cli.dump_store import dump_store
+    from tcip_mcp.tools.meta_tools import report_friction, write_retrospective
+
+    src = tmp_path / "src_project"
+    _initialized(src)
+    for i in range(3):
+        report_friction(src, category="missing_tool", detail=f"report {i}")
+    write_retrospective(src, project_id="p", task="t", worked="w", did_not_work="d")
+    before_dir = tmp_path / "before"
+    before = dump_store(src, before_dir)
+    assert (src / ".tcip" / "store.db-wal").stat().st_size > 0
+
+    assert "error" not in archive_project(src, str(tmp_path / "export.zip"))
+    dest = tmp_path / "restored"
+    assert "error" not in import_project(str(tmp_path / "export.zip"), str(dest))
+    after_dir = tmp_path / "after"
+    dump_store(dest, after_dir)
+
+    assert len(before) == 6
+    for written in before:
+        restored = after_dir / written.relative_to(before_dir)
+        if written.suffix == ".jsonl":
+            assert restored.read_bytes().startswith(written.read_bytes()), written
+        else:
+            assert restored.read_bytes() == written.read_bytes(), written

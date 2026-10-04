@@ -13,8 +13,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 import tcip_store as ts
-from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import Key
 
 from tcip_mcp.audit import now_iso
 
@@ -386,18 +385,6 @@ class TraitRecord(BaseModel):
 # ── the store ────────────────────────────────────────────────────────────────
 
 TRAITS_STORE = "traits"
-register_store(
-    StoreDescriptor(
-        name=TRAITS_STORE,
-        kind="record",
-        key_fields=("trait",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        enumerable=True,
-        locator=RootedFileLocator(prefix=("traits",), suffix=".json"),
-    )
-)
 
 
 def trait_key(project: str | Path, trait: str) -> Key:

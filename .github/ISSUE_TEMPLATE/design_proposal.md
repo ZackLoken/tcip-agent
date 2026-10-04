@@ -18,11 +18,9 @@ What is broken, missing, or wrong today that this fixes or adds.
 
 ## Persisted-format impact
 
-If this touches a store's on-disk shape: is it inside the store's frozen version 1, or does it
-need a version bump (`frozen-formats.json`, `tools/generate_frozen_manifest.py`)? A bump states
-its own obligations: how an existing reader still reads an old-version document, and how existing
-on-disk state is conformed (a `cli/` command shipped with the bump and deleted once every root
-that needed it is conformed, never a runtime migration shim).
+If this re-shapes a record: its one producer and its one reader change together, and the records
+already written are regenerated or discarded with the change, never read through a default or a
+migration shim.
 
 ## Refusal or gate impact
 

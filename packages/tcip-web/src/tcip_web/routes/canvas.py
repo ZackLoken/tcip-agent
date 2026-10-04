@@ -1,15 +1,15 @@
 """Live canvas-state bridge: the GUI pushes what it is rendering; the agent reads it back.
 
 A heartbeat (image, viewport, classes, counts; ``shapes`` omitted) arrives on view/meta changes,
-and the full display-resolved geometry only when shapes change. State is split across two files
-under the open project's ``.tcip/state/``:
+and the full display-resolved geometry only when shapes change. State is split across two records
+of the open project:
 
-  - ``canvas_live.json``: the small meta document; overwritten atomically by every push.
-  - ``canvas_shapes.json``: the geometry blob; written only by full pushes.
+  - the meta record (``canvas_meta_key``): replaced by every push.
+  - the geometry record (``canvas_geometry_key``): written only by full pushes.
 
-Each document is replaced whole; the geometry is valid only when its ``(image_path, tab)`` identity
-matches the meta document. Both records declare ``durable=False``. A push names the project it was
-built for by id; one naming any project but the backend's open one answers 409 and writes nothing.
+Each record is replaced whole; the geometry is valid only when its ``(image_path, tab)`` identity
+matches the meta record. A push names the project it was built for by id; one naming any project
+but the backend's open one answers 409 and writes nothing.
 """
 
 from __future__ import annotations

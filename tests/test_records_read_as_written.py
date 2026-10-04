@@ -91,7 +91,7 @@ def test_a_sweep_final_status_lacking_its_state_fails_at_the_read(
 
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.experiments import FINAL_STATUS_FILE, read_record
-    from tcip_store import RECORD_JSON
+    from tcip_store import encode_record
 
     def fake_search(**kw):
         return str(Path(kw["storage_path"]) / kw["study_name"])
@@ -104,7 +104,7 @@ def test_a_sweep_final_status_lacking_its_state_fails_at_the_read(
     final = tt.sweep_dir(result["study_name"], project=tmp_path) / FINAL_STATUS_FILE
     damaged = read_record(final)
     del damaged["state"]
-    final.write_bytes(RECORD_JSON.encode(damaged))
+    final.write_bytes(encode_record(damaged))
     with pytest.raises(KeyError, match="state"):
         tt.monitor_training(tmp_path, sweep_id=result["study_name"])
 

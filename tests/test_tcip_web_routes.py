@@ -13,7 +13,7 @@ from PIL import Image
 from tcip_annotation.json_io import read_annotations, write_annotations
 from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.subject_registry import SubjectRegistry, Subject
-from tcip_store.file_backend import _is_bookkeeping
+from tcip_store.file_backend import is_bookkeeping
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import registry_over
 from tcip_web.app import app
@@ -956,7 +956,7 @@ def test_a_launch_into_a_directory_that_exists_fails_its_job_and_writes_nothing(
     job.thread.join(60)
     assert job.status == "failed"
     assert "a bucket is published once" in job.error
-    assert sorted(p.name for p in bucket.iterdir() if not _is_bookkeeping(p.name)) == ["img.json"]
+    assert sorted(p.name for p in bucket.iterdir() if not is_bookkeeping(p.name)) == ["img.json"]
     assert doc_path.read_bytes() == before_bytes
     assert audit_rows(Path(dataset_root)) == []
 

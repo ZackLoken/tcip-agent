@@ -1,7 +1,6 @@
 """What the registry holds, and where it holds it.
 
-The registered-model inventory of a project is the index at ``.tcip/models/registry.json``:
-registration records a checkpoint where it already lives instead of copying it under the registry
+The registered-model inventory of a project is its registry index record: registration records a checkpoint where it already lives instead of copying it under the registry
 directory, and a checkpoint registered again supersedes its earlier entry rather than adding a
 second one. Both facts decide what any reader counting a project's models can honestly report.
 """
@@ -65,9 +64,10 @@ def test_registering_a_checkpoint_again_supersedes_its_earlier_entry(tmp_path: P
     keeps one entry per checkpoint, so a reader counting registered models never counts one
     checkpoint twice."""
     root = tmp_path / "proj"
+    root.mkdir()
     reg = ModelRegistry(str(root))
 
-    ckpt_v1 = checkpoint_file(tmp_path / "model_epoch8.pt", "epoch-8-weights")
+    ckpt_v1 =checkpoint_file(tmp_path / "model_epoch8.pt", "epoch-8-weights")
     ckpt_v2 = checkpoint_file(tmp_path / "model_epoch19.pt", "epoch-19-weights-after-resume")
     companion = checkpoint_file(tmp_path / "leaf_model.pt", "a separate run")
 

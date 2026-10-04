@@ -356,17 +356,19 @@ def dispatch_train_body(ctx: TrainContext) -> None:
 
 def run_training_envelope(ctx: TrainContext) -> None:
     """Run a training body inside the audited envelope: open a ``training_run`` audit event,
-    dispatch the body (:func:`dispatch_train_body`), write the run's final status once
-    (:func:`_finalize_run`), and close the audit event, whatever the body did or omitted.
+    dispatch the body (:func:`dispatch_train_body`), settle how the run ended
+    (:func:`_settle_run`), and close the run (:func:`close_run`), whatever the body did or
+    omitted. An opening line that cannot be written fails the run naming why.
     """
-    from tcip_mcp.audit import record_event
+    from tcip_mcp.audit import record_event_or_raise
 
     run = ctx.run
     audit_args = {"experiment_id": run.id, "task": ctx.task}
 
-    record_event("training_run", audit_args, actor=None, status="running", scope=run.project)
     t0 = time.monotonic()
     try:
+        record_event_or_raise("training_run", audit_args, actor=None, status="running",
+                              scope=run.project)
         dispatch_train_body(ctx)
     except Exception as exc:  # noqa: BLE001
         if run.status not in ("failed", "canceled"):
@@ -374,23 +376,40 @@ def run_training_envelope(ctx: TrainContext) -> None:
         run.error = run.error or str(exc)
         logger.exception("Training body failed for %s: %s", run.id, exc)
 
-    try:
-        _finalize_run(ctx)
-    finally:
-        record_event("training_run", {**audit_args, **stored_number("best_metric", run.best_metric)},
-                     actor=None, status=run.status or "failed", scope=run.project,
-                     duration_ms=round((time.monotonic() - t0) * 1000, 1))
+    checkpoint = _settle_run(ctx)
+    run.status, run.error = close_run(
+        ctx.run_dir, run.project, run.status or "failed", run.error or None,
+        checkpoint=checkpoint,
+        arguments={**audit_args, **stored_number("best_metric", run.best_metric)},
+        duration_ms=round((time.monotonic() - t0) * 1000, 1))
 
 
-def _finalize_run(ctx: TrainContext) -> None:
-    """Write the run's final status once (``experiments.write_final_status``), which closes every
-    sink of its context: the state the body ended in, the error behind a failure, and for a
-    completed run its deliverable (``run.deliverable``), named inside the run's directory with the
-    sha256 the verified checkpoint reader admitted (``model_registry.admitted_digest``). A run the
-    wall clock stopped ends ``failed`` naming it; a completed run with no deliverable, or one that
-    cannot be read or that the verified reader refuses, ends ``failed`` naming why.
-    """
+def close_run(run_dir: Path, project: Path, state: str, error: str | None, *,
+              checkpoint: dict | None, arguments: dict[str, Any],
+              **extra: Any) -> tuple[str, str | None]:
+    """Append the run's closing ``training_run`` line under ``project``, then write its final
+    status once and return the state and error it names. A refused append ends the run
+    ``failed`` with no checkpoint, its reason named after ``error`` when there is one."""
+    from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
     from tcip_mcp.experiments import write_final_status
+
+    try:
+        record_event_or_raise("training_run", arguments, actor=None, status=state, scope=project,
+                              **extra)
+    except AuditEntryNotWritten as exc:
+        state, checkpoint = "failed", None
+        error = f"{error}; {exc}" if error else str(exc)
+    write_final_status(run_dir, state, error, checkpoint=checkpoint)
+    return state, error
+
+
+def _settle_run(ctx: TrainContext) -> dict | None:
+    """Settle how the run ended and return the checkpoint its final status names: for a completed
+    run its deliverable (``run.deliverable``), named inside the run's directory with the sha256
+    the verified checkpoint reader admitted (``model_registry.admitted_digest``), else ``None``. A
+    run the wall clock stopped ends ``failed`` naming it; a completed run with no deliverable, or
+    one that cannot be read or that the verified reader refuses, ends ``failed`` naming why.
+    """
     from tcip_mcp.model_registry import admitted_digest
 
     run = ctx.run
@@ -406,5 +425,4 @@ def _finalize_run(ctx: TrainContext) -> None:
                           "sha256": admitted_digest(run.deliverable)}
         except (OSError, ValueError) as exc:
             run.status, run.error = "failed", f"final weights could not be admitted: {exc}"
-    write_final_status(ctx.run_dir, run.status or "failed", run.error or None,
-                       checkpoint=checkpoint)
+    return checkpoint

@@ -1,12 +1,5 @@
-"""What an audited tool does when its own audit entry cannot be appended.
-
-The entry is written after the tool body, so a failed append is not one situation but two. A body
-that returned has already committed whatever it changed, and a caller that saw only a warning
-would read the missing entry as a failed call and retry a mutation that already happened. A body
-that raised owns the exception the caller gets, and a failed audit-of-failure must never displace
-it. Both are properties of the decorator rather than of any one tool, so they are checked against
-a tool defined here, and on whichever backend the suite is bound to.
-"""
+"""What an audited tool does when its own audit entry cannot be appended: a body that returned
+raises the unwritten line, and a body that raised keeps its own exception."""
 
 from __future__ import annotations
 
@@ -106,7 +99,7 @@ def test_a_door_with_no_project_parameter_is_refused_at_decoration() -> None:
             return {"count": count}
 
 
-# ── record_event_or_raise: record_event's sibling for a mutation that has already committed ──
+# ── record_event_or_raise: the line for a mutation that has already committed ──
 
 
 def test_record_event_or_raise_raises_audit_entry_not_written_when_the_append_fails(
@@ -127,7 +120,7 @@ def test_record_event_or_raise_raises_audit_entry_not_written_when_the_append_fa
 def test_record_event_or_raise_against_a_healthy_log_writes_one_entry_and_returns_silently(
     tmp_path: Path,
 ) -> None:
-    """The rail admits the work it exists beside: a healthy append behaves like record_event's."""
+    """The rail admits the work it exists beside: a healthy append lands one line."""
     audit_module.record_event_or_raise(
         "confirm_something", {"trait": "bloom"}, actor=None, status="ok", scope=tmp_path,
         note="confirmed",

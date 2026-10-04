@@ -13,8 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence, cast
 
 import tcip_store
-from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import Key, encode_record
 
 from tcip_mcp.registry_paths import PathFields, recorded_paths, runtime_paths, within
 from tcip_mcp.subject_registry import Attribute, named
@@ -286,31 +285,13 @@ def refuse_crossing_sides(samples: Sequence[Sample]) -> None:
 
 # -- the record -----------------------------------------------------------------
 
-_SELECTION_DOC = RootedFileLocator(suffix=".json")
-"""A selection directory's own document. The directory is wherever the caller asked the draw to
-be written, so no dataset resolver owns its layout."""
-
 SELECTION_STORE = "selection"
 _SELECTION_PARTS = ("selection",)
-register_store(
-    StoreDescriptor(
-        name=SELECTION_STORE,
-        kind="record",
-        key_fields=("document",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
-        locator=_SELECTION_DOC,
-    )
-)
 
 
 def selection_key(selection_dir: str | Path) -> Key:
-    """The selection recorded under ``selection_dir``.
-
-    ``last_writer_wins``: a selection is written once, whole, at the end of the draw that produced
-    it.
-    """
+    """The selection recorded under ``selection_dir``, wherever the caller asked the draw to be
+    written, once and whole at the end of the draw that produced it."""
     return Key(SELECTION_STORE, str(Path(selection_dir)), _SELECTION_PARTS)
 
 
@@ -441,8 +422,7 @@ def read_selection(selection_dir: str | Path, *, project: str | Path) -> Selecti
     """The selection of ``project`` recorded under ``selection_dir``.
 
     Refuses with ``ValueError`` naming ``selection_dir`` when nothing is recorded there, when the
-    record will not decode, or when it fails any of :func:`as_selection`'s shape checks. Lets
-    :class:`tcip_store.SchemaVersionRefused` propagate.
+    record will not decode, or when it fails any of :func:`as_selection`'s shape checks.
     """
     document = _read_selection_document(selection_dir, project)
     if document is None:
@@ -459,17 +439,13 @@ def read_selection_checked(
     wrong".
 
     Answers ``(selection, None)``, ``(None, None)`` for an absence, or ``(None, text)`` for a
-    record that exists and is refused, a schema-version refusal included.
+    record that exists and is refused.
     """
-    from tcip_store import SchemaVersionRefused
-
     try:
         document = _read_selection_document(selection_dir, project)
         if document is None:
             return None, None
         return as_selection(document, where=str(selection_dir)), None
-    except SchemaVersionRefused as exc:
-        return None, str(exc)
     except ValueError as exc:
         return None, str(exc)
 
@@ -521,7 +497,7 @@ def selection_digest(selection: Selection, project: str | Path) -> str:
     (:func:`stored_selection_document`)."""
     import hashlib
 
-    return hashlib.sha256(RECORD_JSON.encode(stored_selection_document(selection, project))).hexdigest()
+    return hashlib.sha256(encode_record(stored_selection_document(selection, project))).hexdigest()
 
 
 def with_sides(selection: Selection, assignment: dict[str, str]) -> Selection:

@@ -13,7 +13,6 @@
       "Edit(tsconfig.json)",
       "Edit(.gitignore)",
       "Edit(README.md)",
-      "Edit(.tcip/state/traits/**)",
       "Bash(rm:*)",
       "Bash(rmdir:*)",
       "Bash(git push:*)",

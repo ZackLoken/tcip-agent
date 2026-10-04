@@ -1,12 +1,11 @@
-"""The import door's own rails: staging, the shared accounting's refusals, the backend-
-conditional adoption, and the move. Each refusal here is paired with the legitimate call the
-same rail must still admit.
+"""The import door's own rails: staging, the refusal of the store's own bookkeeping and of an
+escaping member, and the move. Each refusal here is paired with the legitimate call the same rail
+must still admit.
 """
 
 from __future__ import annotations
 
 import zipfile
-from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -14,22 +13,7 @@ import pytest
 import tcip_store as ts
 from tcip_mcp.tools.project_tools import archive_project, import_project
 from tcip_mcp.web_client import gui_snapshot_key
-from tcip_store.file_backend import FileBackend, lock_file_for
-from tcip_store.sqlite_backend import SqliteBackend
-
-
-@contextmanager
-def bound(backend):
-    """Bind one backend for a block, putting the suite's own backend back on the way out."""
-    from tcip_store.store import _backend
-
-    previous = _backend()
-    ts.bind(backend)
-    try:
-        yield backend
-    finally:
-        ts.bind(previous)
-        backend.close()
+from tcip_store.file_backend import lock_file_for
 
 
 def _project(root: Path) -> Path:
@@ -66,15 +50,14 @@ def test_import_refuses_a_non_empty_destination_and_changes_nothing(tmp_path, mo
     dest = tmp_path / "dest"
     dest.mkdir()
     (dest / "subjects.json").write_bytes(b"already here")
-    with bound(SqliteBackend()):
-        ts.replace(gui_snapshot_key(dest), {"active_subject": "x"}, expect=ts.Version.ABSENT)
+    ts.replace(gui_snapshot_key(dest), {"active_subject": "x"}, expect=ts.Version.ABSENT)
 
-        result = import_project(str(zip_path), str(dest))
+    result = import_project(str(zip_path), str(dest))
 
-        assert "error" in result
-        assert str(dest) in result["error"]
-        assert (dest / "subjects.json").read_bytes() == b"already here"
-        assert ts.read(gui_snapshot_key(dest)) == {"active_subject": "x"}
+    assert "error" in result
+    assert str(dest) in result["error"]
+    assert (dest / "subjects.json").read_bytes() == b"already here"
+    assert ts.read(gui_snapshot_key(dest)) == {"active_subject": "x"}
 
 
 def test_import_admits_a_pre_existing_empty_destination(tmp_path):
@@ -91,56 +74,17 @@ def test_import_admits_a_pre_existing_empty_destination(tmp_path):
     assert (dest / "subjects.json").is_file()
 
 
-# ── rail 3: an unaccounted member refuses the whole import, naming it ──────────────────────
+# ── rail 5: a database's sidecar, or its lock, refuses ──────────────────────────────────────
 
 
-def test_import_refuses_an_unaccounted_member_naming_it(tmp_path):
-    root = _project(tmp_path / "source")
-    zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(root, str(zip_path))
-    with zipfile.ZipFile(str(zip_path), "a") as zf:
-        zf.writestr(".tcip/state/_write_probe.txt", "probe")
-
-    dest = tmp_path / "dest"
-    result = import_project(str(zip_path), str(dest))
-
-    assert "error" in result
-    assert "_write_probe.txt" in result["error"]
-    assert not dest.exists()
-
-
-# ── rail 4: an undecodable claimed member refuses naming the file and the store ─────────────
-
-
-def test_import_refuses_an_undecodable_claimed_member_on_both_backends(tmp_path, monkeypatch):
-    zip_path = _hand_zip(tmp_path / "bundle.zip", {".tcip/project.json": b"{not valid json"})
-
-    dest = tmp_path / "dest_sqlite"
-    with bound(SqliteBackend()):
-        result = import_project(str(zip_path), str(dest))
-    assert "error" in result
-    assert "project.json" in result["error"]
-    assert not dest.exists()
-
-    dest2 = tmp_path / "dest_file"
-    with bound(FileBackend()):
-        result2 = import_project(str(zip_path), str(dest2))
-    assert "error" in result2
-    assert "project.json" in result2["error"]
-    assert not dest2.exists()
-
-
-# ── rail 5: a member named store.db, or its lock, refuses ───────────────────────────────────
-
-
-def test_import_refuses_a_member_named_store_db(tmp_path):
-    zip_path = _hand_zip(tmp_path / "bundle.zip", {".tcip/store.db": b"not a database"})
+def test_import_refuses_a_member_named_as_a_database_sidecar(tmp_path):
+    zip_path = _hand_zip(tmp_path / "bundle.zip", {".tcip/store.db-wal": b"not a log"})
     dest = tmp_path / "dest"
 
     result = import_project(str(zip_path), str(dest))
 
     assert "error" in result
-    assert "store.db" in result["error"]
+    assert "store.db-wal" in result["error"]
     assert not dest.exists()
 
 
@@ -151,75 +95,6 @@ def test_import_refuses_a_member_named_store_db_lock(tmp_path):
     result = import_project(str(zip_path), str(dest))
 
     assert "error" in result
-    assert not dest.exists()
-
-
-# ── rail 12: cross-root collision ────────────────────────────────────────────────────────────
-
-_COLLISION_PROBE_STORE = "rail_collision_probe"
-_collision_probe_registered = False
-
-
-_COLLISION_PROBE_EVENT_ID = "rail_collision_probe_event"
-"""A literal delivery-event id no other test ever uses, so this probe's claim collides only with
-a zip built to trigger it, never with an ordinary delivery event written anywhere else in the
-same pytest session."""
-
-_COLLISION_PROBE_MEMBER = f".tcip/state/delivery_events/{_COLLISION_PROBE_EVENT_ID}.json"
-
-
-def _register_collision_probe() -> None:
-    """A test-only store whose declared claim collides with the shipped delivery_events claim: a
-    ROOT-layout template that spells out .tcip/state/delivery_events/<the probe event id>.json in
-    full, a path the shipped claim already owns under the root's state directory. Registered
-    once, process-wide, so the admitting test above this in file order must run first.
-    """
-    global _collision_probe_registered
-    if _collision_probe_registered:
-        return
-    _collision_probe_registered = True
-    from tcip_store.file_backend import RootedFileLocator
-    from tcip_store.layout_claims import ROOT, Claim, Constant, Patterned, literal
-
-    ts.register_store(
-        ts.StoreDescriptor(
-            name=_COLLISION_PROBE_STORE,
-            kind="record",
-            key_fields=("event_id",),
-            codec=ts.RECORD_JSON,
-            concurrency="last_writer_wins",
-            locator=RootedFileLocator(prefix=(".tcip", "state", "delivery_events"),
-                                      suffix=".json"),
-            claim=Claim(
-                ROOT,
-                ((Constant(".tcip"), Constant("state"), Constant("delivery_events"),
-                  Patterned(literal(_COLLISION_PROBE_EVENT_ID), tail=".json")),),
-            ),
-        )
-    )
-
-
-def test_import_admits_a_claimed_record_before_any_collision_is_registered(tmp_path):
-    """The admitting side: run before test_import_refuses_a_runtime_registered_claim_collision
-    registers the colliding claim, since register_store cannot be undone within a process."""
-    zip_path = _hand_zip(tmp_path / "bundle.zip", {_COLLISION_PROBE_MEMBER: b"{}"})
-    dest = tmp_path / "dest"
-
-    result = import_project(str(zip_path), str(dest))
-
-    assert "error" not in result
-    assert (dest / _COLLISION_PROBE_MEMBER).is_file()
-
-
-def test_import_refuses_a_runtime_registered_claim_collision_by_name(tmp_path):
-    _register_collision_probe()
-    zip_path = _hand_zip(tmp_path / "bundle.zip", {_COLLISION_PROBE_MEMBER: b"{}"})
-    dest = tmp_path / "dest"
-
-    result = import_project(str(zip_path), str(dest))
-
-    assert "error" in result
-    assert f"{_COLLISION_PROBE_EVENT_ID}.json" in result["error"]
     assert not dest.exists()
 
 
@@ -271,24 +146,21 @@ def test_import_refuses_a_corrupt_zip_without_stranding_a_staging_tree(tmp_path)
     assert not imports_root.is_dir() or not any(imports_root.iterdir())
 
 
-# ── rail 10: the file-backend leg ───────────────────────────────────────────────────────────
+# ── rail 10: a record the database holds travels in its database ────────────────────────────
 
 
-def test_import_under_file_backend_lands_files_and_builds_no_database(tmp_path):
+def test_a_record_travels_inside_the_database_the_archive_copies(tmp_path):
     record = {"active_subject": "x"}
-    with bound(FileBackend()):
-        root = _project(tmp_path / "source")
-        ts.replace(gui_snapshot_key(root), record, expect=ts.Version.ABSENT)
-        assert "error" not in archive_project(root, str(tmp_path / "bundle.zip"))
+    root = _project(tmp_path / "source")
+    ts.replace(gui_snapshot_key(root), record, expect=ts.Version.ABSENT)
+    assert "error" not in archive_project(root, str(tmp_path / "bundle.zip"))
 
     dest = tmp_path / "dest"
-    with bound(FileBackend()):
-        result = import_project(str(tmp_path / "bundle.zip"), str(dest))
+    result = import_project(str(tmp_path / "bundle.zip"), str(dest))
 
-        assert "error" not in result
-        assert result["database_built"] is False
-        assert not (dest / ".tcip" / "store.db").exists()
-        assert ts.read(gui_snapshot_key(dest)) == record
+    assert "error" not in result
+    assert (dest / ".tcip" / "store.db").is_file()
+    assert ts.read(gui_snapshot_key(dest)) == record
 
 
 # ── rail 13: concurrency ─────────────────────────────────────────────────────────────────────
@@ -345,25 +217,22 @@ def test_a_free_locked_leftover_staging_sibling_is_swept_with_its_lock_file(tmp_
 def test_dataset_registry_stores_the_relative_dot_after_import(tmp_path):
     """The project's own dataset registers to itself, and that entry's ``path`` survives the
     archive/import round trip as the project-relative ``"."`` rather than an absolute path baked
-    in before the move. Bound to the file backend throughout (rather than the ambient default),
-    so this reads what the door itself wrote, with no unrelated database-conform refusal in
-    between."""
+    in before the move."""
     from tcip_mcp.tools.project_tools import read_datasets, register_dataset
 
-    with bound(FileBackend()):
-        root = _project(tmp_path / "source")
-        registered = register_dataset(root, str(root), crop="currant")
-        assert "error" not in registered
+    root = _project(tmp_path / "source")
+    registered = register_dataset(root, str(root), crop="currant")
+    assert "error" not in registered
 
-        zip_path = tmp_path / "bundle.zip"
-        assert "error" not in archive_project(root, str(zip_path))
-        dest = tmp_path / "dest"
-        imported = import_project(str(zip_path), str(dest))
+    zip_path = tmp_path / "bundle.zip"
+    assert "error" not in archive_project(root, str(zip_path))
+    dest = tmp_path / "dest"
+    imported = import_project(str(zip_path), str(dest))
 
-        assert "error" not in imported
-        entries = read_datasets(dest)
-        assert entries[0]["path"] == "."
-        assert imported["dataset_paths_unresolved"] == []
+    assert "error" not in imported
+    entries = read_datasets(dest)
+    assert entries[0]["path"] == "."
+    assert imported["dataset_paths_unresolved"] == []
 
 
 def test_dataset_registry_travels_with_nothing_rewritten(tmp_path):
@@ -457,8 +326,8 @@ def test_a_splits_root_nested_under_a_nested_dataset_root_archives_and_round_tri
 def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, monkeypatch):
     """initialize_project, register_dataset, a confirmed trait revision, a completed run's
     directory, an HPO sweep's directory and a project-relative splits manifest, all through their
-    own real producers; archived, imported into a fresh destination, and read back under the
-    default backend with no ``tcip adopt-store`` run. The sweep's trial body is stood in for by
+    own real producers; archived, imported into a fresh destination, and read back at once. The
+    sweep's trial body is stood in for by
     one that only resolves and opens the trial's run directory through the launcher's own
     producer and writer."""
     import tcip_mcp.tools.training_tools as tt
@@ -515,32 +384,30 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     assert "error" not in archive_project(root, str(zip_path))
 
     dest = tmp_path / "restored"
-    with bound(SqliteBackend()):
-        imported = import_project(str(zip_path), str(dest))
-        assert "error" not in imported
-        assert imported["database_built"] is True
+    imported = import_project(str(zip_path), str(dest))
+    assert "error" not in imported
 
-        from tcip_mcp.project_record import read_record
+    from tcip_mcp.project_record import read_record
 
-        assert read_record(str(dest))["site"] == "north orchard"
+    assert read_record(str(dest))["site"] == "north orchard"
 
-        entries = read_datasets(dest)
-        assert entries[0]["path"] == "."
-        assert dataset_entry_path(dest, entries[0]).resolve() == dest.resolve()
+    entries = read_datasets(dest)
+    assert entries[0]["path"] == "."
+    assert dataset_entry_path(dest, entries[0]).resolve() == dest.resolve()
 
-        assert read_trait(COUNT_TRAIT, dest).latest_confirmed == confirmed
+    assert read_trait(COUNT_TRAIT, dest).latest_confirmed == confirmed
 
-        run_dir = experiments.find_run("exp1", project=dest)
-        assert run_dir is not None
-        observation = experiments.observe(run_dir)
-        assert observation.record["config"]["model_source"]["task"] == "detection"
-        rows = experiments.read_rows(run_dir / experiments.METRICS_FILE)[0]
-        assert rows[0]["loss"] == 0.5
-        assert observation.checkpoint is not None
+    run_dir = experiments.find_run("exp1", project=dest)
+    assert run_dir is not None
+    observation = experiments.observe(run_dir)
+    assert observation.record["config"]["model_source"]["task"] == "detection"
+    rows = experiments.read_rows(run_dir / experiments.METRICS_FILE)[0]
+    assert rows[0]["loss"] == 0.5
+    assert observation.checkpoint is not None
 
-        sweep = tt.read_sweep(tt.sweep_observation(study, project=dest))
-        assert sweep["status"] == "completed"
-        assert [t["params"] for t in sweep["trials"]] == [{"lr": 0.1}]
+    sweep = tt.read_sweep(tt.sweep_observation(study, project=dest))
+    assert sweep["status"] == "completed"
+    assert [t["params"] for t in sweep["trials"]] == [{"lr": 0.1}]
 
-        selection = ts.read(selection_key(dest / "splits_out"))
-        assert selection["scope"]["subject"] == "bud"
+    selection = ts.read(selection_key(dest / "splits_out"))
+    assert selection["scope"]["subject"] == "bud"

@@ -18,17 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import tcip_store
-from tcip_store import (
-    RECORD_JSON,
-    DecodeError,
-    Key,
-    StoreDescriptor,
-    Version,
-    VersionConflict,
-    register_store,
-    text_codec,
-)
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import DecodeError, Key, Version, VersionConflict
 
 from tcip_mcp.server import tool
 from tcip_mcp.audit import audited, now_iso
@@ -45,44 +35,8 @@ REPORT_CATEGORIES = {
 }
 
 
-_REPORT_DOC = RootedFileLocator(prefix=(".tcip", "reports"), suffix=".json")
-"""One friction report per JSON document, under the project."""
-
-_RETROSPECTIVE_DOC = RootedFileLocator(prefix=(".tcip", "retrospectives"), suffix=".md")
-"""One retrospective per project identifier, under the project."""
-
 FRICTION_REPORT_STORE = "friction_reports"
 RETROSPECTIVE_STORE = "retrospectives"
-
-_RETROSPECTIVE_TEXT = text_codec()
-"""The retrospective's bytes: the markdown itself, with nothing added around it."""
-
-register_store(
-    StoreDescriptor(
-        name=FRICTION_REPORT_STORE,
-        kind="record",
-        key_fields=("report",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
-        enumerable=True,
-        locator=_REPORT_DOC,
-    )
-)
-
-register_store(
-    StoreDescriptor(
-        name=RETROSPECTIVE_STORE,
-        kind="record",
-        key_fields=("project",),
-        frozen=True,
-        cannot_carry_field="retrospective markdown text, parsed by heading and section markers only",
-        codec=_RETROSPECTIVE_TEXT,
-        concurrency="cas",
-        enumerable=True,
-        locator=_RETROSPECTIVE_DOC,
-    )
-)
 
 
 def friction_report_key(project_path: str, report_id: str) -> Key:
@@ -91,35 +45,19 @@ def friction_report_key(project_path: str, report_id: str) -> Key:
 
 
 def retrospective_key(project_path: str, project_id: str) -> Key:
-    """One project's retrospective document."""
+    """One project's retrospective document, its markdown text."""
     return Key(RETROSPECTIVE_STORE, str(project_path), (project_id,))
 
 
-def _document_path(locator: RootedFileLocator, project_path: str, name: str) -> Path:
-    """Where ``locator`` places the document ``name`` under ``project_path``."""
-    root = Path(project_path)
-    return root.joinpath(*locator.relative_path(str(root), (name,)).parts)
-
-
-def _path_if_written(path: Path) -> str | None:
-    """The document's file path when the bound backend wrote one (the file backend), else None."""
-    return str(path) if path.is_file() else None
-
-
-def report_document_name(report_id: str) -> str:
-    """The file name one report's document carries, taken from the store's own locator."""
-    return f"{report_id}{_REPORT_DOC.suffix}"
-
-
 def read_report(project_path: str, report_id: str) -> dict:
-    """One friction report's decoded document, or ``{}`` when nothing is recorded under that id.
-    Raises ``DecodeError`` for a report whose bytes are present but will not read as JSON.
+    """One friction report's decoded document. Raises ``NotFound`` when nothing is recorded under
+    that id and ``DecodeError`` for a report that will not read as a JSON object.
     """
-    entry = tcip_store.read(friction_report_key(project_path, report_id), default=None)
-    if entry is None:
-        return {}
-    return entry if isinstance(entry, dict) else {"detail": str(entry), "category": "",
-                                                  "malformed": True}
+    key = friction_report_key(project_path, report_id)
+    entry = tcip_store.read(key)
+    if not isinstance(entry, dict):
+        raise DecodeError(f"{key.store}{list(key.parts)} under {key.root} is not a JSON object")
+    return entry
 
 
 def read_retrospective(project_path: str, project_id: str) -> str:
@@ -150,7 +88,7 @@ def _newest_first(documents: list[MemoryDocument]) -> list[MemoryDocument]:
 
 def report_documents(project_path: str) -> list[MemoryDocument]:
     """Every friction report under a project, newest stated timestamp first. A report that will not
-    decode is carried as a malformed row.
+    decode is carried with the ``DecodeError`` its reader raised as its value, stating no time.
     """
     documents: list[MemoryDocument] = []
     for key in tcip_store.keys(FRICTION_REPORT_STORE, str(project_path)):
@@ -158,11 +96,22 @@ def report_documents(project_path: str) -> list[MemoryDocument]:
         try:
             entry = read_report(project_path, name)
         except DecodeError as exc:
-            entry = {"detail": str(exc), "category": "", "malformed": True}
-        documents.append(
-            MemoryDocument(name, entry, "" if entry.get("malformed") else entry["timestamp"])
-        )
+            documents.append(MemoryDocument(name, exc, ""))
+        else:
+            documents.append(MemoryDocument(name, entry, entry["timestamp"]))
     return _newest_first(documents)
+
+
+def report_row(document: MemoryDocument) -> dict:
+    """One friction report as a listing shows it: its id, its time and every field its writer
+    records, or its id and the reason it will not decode (``malformed``) for a report that will
+    not. A decoded report lacking a field its writer records raises ``KeyError``."""
+    entry = document.value
+    if isinstance(entry, DecodeError):
+        return {"report_id": document.name, "malformed": str(entry)}
+    return {"report_id": document.name, "timestamp": entry["timestamp"],
+            "category": entry["category"], "detail": entry["detail"],
+            "context": entry["context"], "user_disagreement": entry["user_disagreement"]}
 
 
 _RETROSPECTIVE_SECTION = re.compile(r"^## Retrospective: (.+)$", re.MULTILINE)
@@ -232,13 +181,9 @@ def report_friction(
     tcip_store.replace(
         friction_report_key(str(project), report_id), entry, expect=Version.ABSENT,
     )
-    from tcip_mcp.project_status import record_report
-
-    record_report(str(project))
 
     return {
         "report_id": report_id,
-        "report_path": _path_if_written(_document_path(_REPORT_DOC, str(project), report_id)),
         "category": category,
         "timestamp": entry["timestamp"],
         "user_disagreement": user_disagreement,
@@ -331,7 +276,7 @@ def read_audit_log(
     that will not parse refuses by name. A date-only ``until`` means the end of that whole day, so
     ``until="2026-03-02"`` includes every entry from that date.
 
-    A page carrying undecodable entries, unknown-schema-version entries, or a torn tail is refused.
+    A page carrying undecodable entries is refused.
 
     Args:
         scope: Dataset root, project root, a path under either, or ``None`` for the project's own
@@ -361,19 +306,13 @@ def read_audit_log(
         key = audit_log_key(resolved_scope)
 
     page = tcip_store.read_log(key)
-    if page.corrupt or page.version_refused or page.torn_tail:
+    if page.corrupt:
         undecodable = len(page.corrupt)
-        refused = len(page.version_refused)
-        parts = [
-            f"{undecodable} undecodable entr{'y' if undecodable == 1 else 'ies'}",
-            f"{refused} version-refused entr{'y' if refused == 1 else 'ies'}",
-        ]
-        if page.torn_tail:
-            parts.append("a torn tail from an appender still mid-write")
         return {
             "error": (
-                f"the audit log at {key.root} carries {', '.join(parts)}; repair the log "
-                "before trusting a read of it"
+                f"the audit log at {key.root} carries {undecodable} undecodable "
+                f"entr{'y' if undecodable == 1 else 'ies'}; repair the log before trusting a "
+                "read of it"
             ),
             "scope_resolved": key.root,
         }
@@ -433,22 +372,12 @@ def _load_reports(
     needle = filter_substring.lower().strip()
 
     def row(document: MemoryDocument) -> dict | None:
-        entry = document.value
-        filename = report_document_name(document.name)
-        if cat and entry.get("category") != cat:
+        made = report_row(document)
+        if cat and ("malformed" in made or made["category"] != cat):
             return None
-        if needle and needle not in (filename + " " + json.dumps(entry)).lower():
+        if needle and needle not in json.dumps(made).lower():
             return None
-        return {
-            "file": filename,
-            "report_id": document.name,
-            "path": _path_if_written(_document_path(_REPORT_DOC, project_path, document.name)),
-            "timestamp": document.timestamp,
-            "category": entry.get("category", ""),
-            "detail": entry.get("detail", ""),
-            "context": entry.get("context", {}),
-            "user_disagreement": entry.get("user_disagreement", False),
-        }
+        return made
 
     return _memory_page("reports", "friction reports", report_documents(project_path), limit, row)
 
@@ -466,12 +395,12 @@ def write_retrospective(
     missing_or_hard_tools: str = "",
     would_do_differently: str = "",
 ) -> dict:
-    """Write a retrospective to ``.tcip/retrospectives/<project_id>.md``; when one exists under
-    that name, a new dated section is appended rather than overwriting it.
+    """Write a retrospective under ``project_id``; when one exists under that name, a new dated
+    section is appended rather than overwriting it.
 
     Args:
         project_id: Short identifier for this retrospective (e.g. '<crop>-<trait>-trial'), not
-            the project record's own id. Becomes the filename.
+            the project record's own id.
         task: What you were trying to accomplish.
         worked: What went well. Approaches, tools, decisions that paid off.
         did_not_work: What went badly. Dead ends, failures, confusion.
@@ -485,7 +414,6 @@ def write_retrospective(
     """
     now = now_iso()
     project_path = str(project)
-    retro_path = _document_path(_RETROSPECTIVE_DOC, project_path, project_id)
 
     section_header = f"## Retrospective: {now}"
     body = f"""{section_header}
@@ -538,12 +466,7 @@ def write_retrospective(
             continue
         break
 
-    from tcip_mcp.project_status import record_retrospective
-
-    record_retrospective(project_path, project_id)
-
     return {
-        "retrospective_path": _path_if_written(retro_path),
         "project_id": project_id,
         "timestamp": now,
         "appended_to_existing": appended,
@@ -553,11 +476,8 @@ def write_retrospective(
 @tool()
 @audited
 def record_distillation_pass(project: Path) -> dict:
-    """Record that this project's friction reports and retrospectives were reviewed, resetting
-    its distillation-backlog counters; records nothing else."""
-    from tcip_mcp.project_status import record_distillation
-
-    record_distillation(str(project))
+    """Record, as this door's audit line, that this project's friction reports and retrospectives
+    were reviewed; records nothing else."""
     return {"status": "recorded"}
 
 
@@ -572,8 +492,6 @@ def _load_retrospectives(
             return None
         return {
             "project_id": document.name,
-            "path": _path_if_written(
-                _document_path(_RETROSPECTIVE_DOC, project_path, document.name)),
             "timestamp": document.timestamp,
             "content": content,
         }

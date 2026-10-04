@@ -159,8 +159,8 @@ def test_triage_predictions_admits_a_checkpoint_registered_under_the_project_it_
 
 
 def test_review_priority_route_worker_fails_the_job_on_an_unregistered_checkpoint(tmp_path):
-    """Drives the review-priority route's own worker directly, the way
-    tests/test_inference_route_write_order.py drives the inference worker."""
+    """The review-priority route's own worker, driven directly, fails its job on a checkpoint
+    nothing registered."""
     pytest.importorskip("fastapi")
     from tcip_web.routes.annotate import PriorityQueueJob, _pq_worker
 
@@ -447,7 +447,7 @@ def test_ctx_save_checkpoint_admits_a_state_naming_no_reserved_key(tmp_path):
 def test_doctor_lists_a_bucket_naming_an_unregistered_digest_and_stays_silent_on_a_registered_one(
     tmp_path,
 ):
-    from tcip_store import RECORD_JSON
+    from tcip_store import decode_value, encode_record
 
     from tcip_mcp.cli import doctor as doctor_module
     from tcip_mcp.dataset_layout import prediction_root
@@ -462,8 +462,8 @@ def test_doctor_lists_a_bucket_naming_an_unregistered_digest_and_stays_silent_on
     assert "error" not in good and "error" not in stale and "error" not in undated
     assert good["checkpoint_sha256"] == reg["sha256"]
     for bucket, digest in ((Path(stale["output_dir"]), "a" * 64), (undated_dir, "b" * 64)):
-        record = RECORD_JSON.decode((bucket / "bucket.json").read_bytes())
-        (bucket / "bucket.json").write_bytes(RECORD_JSON.encode(
+        record = decode_value((bucket / "bucket.json").read_bytes())
+        (bucket / "bucket.json").write_bytes(encode_record(
             {**record, "producer": {**record["producer"], "checkpoint_sha256": digest}}))
 
     findings: list = []

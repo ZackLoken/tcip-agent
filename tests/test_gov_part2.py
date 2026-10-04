@@ -55,6 +55,23 @@ def test_distill_worksheet_surfaces_disagreements(tmp_path):
     assert "kept the old default" not in disagreements_section
 
 
+def test_the_worksheet_lists_a_report_that_will_not_decode_as_malformed(tmp_path):
+    """A stored report that is not a JSON object is listed as malformed beside the decoded one,
+    and the worksheet still builds."""
+    import tcip_store as ts
+    from tcip_mcp.tools.meta_tools import friction_report_key
+
+    distill = _load_distill()
+    _seed_report(tmp_path, "needs_human_judgment", "a decoded report")
+    ts.replace(friction_report_key(str(tmp_path), "20260304T120000Z_missing_tool_a1b2"),
+               ["not", "a", "report"])
+
+    ws = distill.build_worksheet(tmp_path)
+    assert "Friction reports (2)" in ws
+    assert "[malformed]" in ws
+    assert "a decoded report" in ws
+
+
 def test_themes_generic_frequency_and_recurrence_floor():
     distill = _load_distill()
     text = ("the wobblesync module keeps desyncing. wobblesync desyncing again. "
@@ -124,17 +141,20 @@ def test_build_workspace_worksheet_ignores_non_project_dirs(tmp_path):
 
 
 def test_workspace_mode_never_writes_anything(tmp_path):
-    """A workspace worksheet leaves every file under a project's ``.tcip`` unchanged."""
-    import tcip_store as ts
-    from tcip_store.file_backend import FileBackend
+    """A workspace worksheet leaves every file under a project's ``.tcip`` but the store's own
+    bookkeeping unchanged."""
+    from tcip_store.file_backend import is_bookkeeping
 
-    ts.bind(FileBackend())
     distill = _load_distill()
     proj_a = tmp_path.parent / "proj_a"
     proj_a.mkdir()
     _seed_report(proj_a, "missing_tool", "x")
 
-    before = {p: p.read_bytes() for p in (proj_a / ".tcip").rglob("*") if p.is_file()}
+    def files() -> dict:
+        return {p: p.read_bytes() for p in (proj_a / ".tcip").rglob("*")
+                if p.is_file() and not is_bookkeeping(p.name)}
+
+    before = files()
     distill.build_workspace_worksheet(tmp_path.parent)
-    after = {p: p.read_bytes() for p in (proj_a / ".tcip").rglob("*") if p.is_file()}
+    after = files()
     assert before == after

@@ -1,8 +1,8 @@
 """A model registry entry's path is stored relative to the project root and resolved on read.
 
-Covers the entries-mapping document boundary's refusal and its partners, the grammar-aware
-external test, the shared containment core between the checkpoint and dataset registries, and
-every response surface answering a resolved absolute path for a relative stored entry.
+Covers the grammar-aware external test, the shared containment core between the checkpoint and
+dataset registries, and every response surface answering a resolved absolute path for a relative
+stored entry.
 """
 
 from __future__ import annotations
@@ -13,12 +13,7 @@ from pathlib import Path
 import pytest
 import tcip_store as ts
 
-from tcip_mcp.model_registry import (
-    ModelRegistry,
-    RegistryVersionRefused,
-    read_registry_index,
-    registry_index_key,
-)
+from tcip_mcp.model_registry import ModelRegistry, read_registry_index, registry_index_key
 from tcip_mcp.registry_paths import is_external_form
 
 
@@ -31,56 +26,11 @@ def _checkpoint(path: Path, marker: str) -> None:
     checkpoint_file(path, marker)
 
 
-def _plant_malformed_registry(root: Path) -> None:
-    ts.replace(registry_index_key(root), {"entries": "not-a-list"}, expect=ts.Version.ABSENT)
-
-
-# ── the document-boundary refusal and its partners ─────────────────────────────────────────
-
-
 def test_absent_registry_answers_empty_for_a_fresh_project(tmp_path: Path):
     assert read_registry_index(tmp_path) == []
 
 
-def test_the_refusal_is_not_a_store_error(tmp_path: Path):
-    """A StoreError catch must never swallow this into an empty answer, so it is checked as its
-    own type, not merely as raising something."""
-    _plant_malformed_registry(tmp_path)
-
-    with pytest.raises(RegistryVersionRefused):
-        try:
-            read_registry_index(tmp_path)
-        except ts.StoreError:
-            pytest.fail("RegistryVersionRefused must not be a StoreError")
-
-
-def test_bundle_propagates_the_refusal_rather_than_reading_a_malformed_registry_as_empty(
-    tmp_path: Path,
-):
-    from tcip_mcp.tools.bundle import account_for
-
-    from tcip_mcp.tools.project_tools import initialize_project
-
-    initialize_project(str(tmp_path), "Test project", "north orchard")
-    _plant_malformed_registry(tmp_path)
-
-    with pytest.raises(RegistryVersionRefused):
-        account_for(tmp_path)
-
-
-def test_archive_project_refuses_loudly_on_a_malformed_registry(tmp_path: Path):
-    from tcip_mcp.tools.project_tools import archive_project, initialize_project
-
-    initialize_project(str(tmp_path), "Test project", "north orchard")
-    _plant_malformed_registry(tmp_path)
-
-    result = archive_project(tmp_path, str(tmp_path.parent / "out.zip"))
-
-    assert "error" in result
-    assert "not a recognized entries-mapping document" in result["error"]
-
-
-def test_archive_project_accounts_for_a_registered_checkpoint_outside_models(tmp_path: Path):
+def test_archive_project_carries_a_registered_checkpoint_outside_models(tmp_path: Path):
     from tcip_mcp.tools.project_tools import archive_project, initialize_project
 
     project = tmp_path / "proj"
@@ -95,31 +45,13 @@ def test_archive_project_accounts_for_a_registered_checkpoint_outside_models(tmp
     result = archive_project(project, str(out), include_models=True)
 
     assert "error" not in result, result
-    assert result["left_behind"]["unaccounted"] == 0
     with zipfile.ZipFile(out) as zf:
         assert "weights/m.pt" in zf.namelist()
 
-
-def test_doctor_reports_the_refusal_as_its_own_finding(tmp_path: Path):
-    from tcip_mcp.cli import doctor
-    from tcip_mcp.tools.project_tools import initialize_project
-
-    initialize_project(str(tmp_path), "Test project", "north orchard")
-    _plant_malformed_registry(tmp_path)
-
-    findings: list[tuple[str, str]] = []
-    doctor.check_registry(tmp_path, findings)
-
-    assert findings and findings[0][0] == "error"
-    assert "could not be checked" in findings[0][1]
-
-
-def test_a_document_other_than_the_written_mapping_refuses():
-    from tcip_mcp.model_registry import _read_registry_document
-
-    for raw in ([], {"entries": "not-a-list"}, {"schema_version": 1, "entries": []}):
-        with pytest.raises(RegistryVersionRefused):
-            _read_registry_document(raw)
+    without = archive_project(project, str(tmp_path / "without.zip"))
+    assert "error" not in without and without["checkpoints_excluded"] == 1
+    with zipfile.ZipFile(tmp_path / "without.zip") as zf:
+        assert "weights/m.pt" not in zf.namelist()
 
 
 # ── the grammar-aware external test, both spellings, both directions ───────────────────────
@@ -337,15 +269,13 @@ def test_checkpoint_registry_path_for_admits_an_existing_directory_root(tmp_path
 
 
 def test_list_models_carries_a_malformed_entrys_error_rather_than_dropping_it(tmp_path: Path):
-    from tcip_mcp.model_registry import _write_registry_document
-
     project = tmp_path / "proj"
-    ModelRegistry(str(project))  # creates the project's own .tcip/models directory
-    ts.replace(registry_index_key(project), _write_registry_document([
+    project.mkdir()
+    ts.replace(registry_index_key(project), {"entries": [
         {"name": "malformed", "checkpoint_path": "../outside/evil.pt", "sha256": "a" * 64,
          "file_size_bytes": None, "registered_at": "2026-01-01T00:00:00+00:00", "config": {},
          "metrics": {}, "metrics_source": None, "tags": [], "experiment_id": None},
-    ]), expect=ts.Version.ABSENT)
+    ]}, expect=ts.Version.ABSENT)
 
     listed = ModelRegistry(str(project)).list_models()
 

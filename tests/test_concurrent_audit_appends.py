@@ -12,7 +12,8 @@ from collections import Counter
 import pytest
 
 import tcip_store as ts
-from tcip_mcp.audit import audit_log_key, record_event
+from tcip_mcp.audit import audit_log_key, record_event_or_raise
+from tcip_store.sqlite_backend import SqliteBackend
 
 
 def _generous_lock_timeout_s() -> float:
@@ -25,9 +26,7 @@ def _generous_lock_timeout_s() -> float:
 @pytest.fixture
 def unstarved_backend():
     """Bind this test's backend with the generous lock wait, and close it on the way out."""
-    from tcip_store.binding import bind_default
-
-    backend = bind_default(lock_timeout_s=_generous_lock_timeout_s())
+    backend = ts.bind(SqliteBackend(lock_timeout_s=_generous_lock_timeout_s()))
     yield backend
     backend.close()
 
@@ -59,18 +58,18 @@ def test_concurrent_threads_no_torn_or_lost_lines(tmp_path, unstarved_backend):
     assert len(appended) == n_threads * per_thread
 
     page = ts.read_log(audit_log_key(tmp_path))
-    assert page.corrupt == () and page.torn_tail is False
+    assert page.corrupt == ()
     assert Counter((r["tag"], r["i"]) for r in page.records) == Counter(appended)
 
 
 _PROCESS_APPENDER = """\
 import json, sys
 import tcip_store as ts
-from tcip_store.binding import bind_default
+from tcip_store.sqlite_backend import SqliteBackend
 from tcip_mcp.audit import audit_log_key
 
 root, tag, timeout_s, n = sys.argv[1], sys.argv[2], float(sys.argv[3]), int(sys.argv[4])
-bind_default(lock_timeout_s=timeout_s)
+ts.bind(SqliteBackend(lock_timeout_s=timeout_s))
 returned = []
 try:
     for i in range(n):
@@ -103,14 +102,14 @@ def test_concurrent_processes_no_torn_or_lost_lines(tmp_path, unstarved_backend)
     assert sum(appended.values()) == 2 * per_process
 
     page = ts.read_log(audit_log_key(tmp_path))
-    assert page.corrupt == () and page.torn_tail is False
+    assert page.corrupt == ()
     assert Counter((r["tag"], r["i"]) for r in page.records) == appended
 
 
 def test_an_ordinary_event_lands_in_the_log_its_scope_names(tmp_path):
     """The rail admits the plain call: one event, recorded whole, in the named root's log."""
-    record_event("save_label_document", {"n_annotations": 3}, actor="user:breeder",
-                 scope=str(tmp_path))
+    record_event_or_raise("save_label_document", {"n_annotations": 3}, actor="user:breeder",
+                          scope=str(tmp_path))
 
     page = ts.read_log(audit_log_key(tmp_path))
     assert [r["tool"] for r in page.records] == ["save_label_document"]

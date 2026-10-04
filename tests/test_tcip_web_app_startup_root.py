@@ -37,8 +37,8 @@ def test_main_publishes_the_port_and_configures_the_backend_on_one_workspace(
 ):
     """The port the backend binds is the port a tool process resolves under the same workspace."""
     import tcip_web.__main__ as entry
+    import tcip_store
     from tcip_mcp.web_client import resolve_web_port
-    from tcip_store.binding import bind_default
 
     elsewhere = tmp_path_factory.mktemp("elsewhere")
     extra = tmp_path_factory.mktemp("extra")
@@ -50,7 +50,7 @@ def test_main_publishes_the_port_and_configures_the_backend_on_one_workspace(
 
     entry.main()
 
-    bind_default()
+    tcip_store.bind()
     assert store.workspace == elsewhere.resolve()
     assert store.image_roots == (extra.resolve(),)
     assert served[0] != 0

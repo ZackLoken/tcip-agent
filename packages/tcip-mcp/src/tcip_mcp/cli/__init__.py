@@ -10,11 +10,11 @@ from pathlib import Path
 def bound_project(value: str) -> Path:
     """Bind this process's store and return the project at ``value``, resolved; exits naming the
     path when it holds no readable project record."""
-    from tcip_store.binding import bind_default
+    from tcip_store import bind
 
     from tcip_mcp.project_record import existing_project
 
-    bind_default()
+    bind()
     try:
         return existing_project(value)
     except ValueError as exc:

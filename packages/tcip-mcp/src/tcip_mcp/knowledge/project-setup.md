@@ -19,9 +19,7 @@ follow this arc. Each step links out to the domain skill that owns its detail.
 
 Start the session with `load_project_memory` (kind='reports' and kind='retrospectives'), then `inspect_project`
 on any project you're handed. Surface friction with `report_friction` the moment you hit
-it (ambiguous goal, unconfirmed format). `tcip doctor <project>` names a stray file
-under `.tcip/state` no store claims; delete one through `delete_stray_state_file` with the
-person's confirmation as `reason`.
+it (ambiguous goal, unconfirmed format).
 
 ## 1. Create the project
 
@@ -78,7 +76,7 @@ next steps do. After it, `inspect_project` reports the capture dates and image c
 
 After ingest, `register_dataset(dataset_root, crop)` records the dataset's identity (a minted
 `id` plus a whole-dataset content fingerprint) in `<dataset_root>/dataset.json` and the project's
-`.tcip/datasets.json`, so a later delivered number can be traced back to the exact data behind
+dataset registry, so a later delivered number can be traced back to the exact data behind
 it. `crop` is required and is never inferred from the path or a slug.
 
 ## 3. Translate the goal into a trait, task, and `subjects.json`
@@ -165,8 +163,8 @@ predictions, then deliver per `packages/tcip-mcp/src/tcip_mcp/knowledge/delivery
 
 ## Reading the live session: `view_gui_state`
 
-The GUI (a separate process) and you share the project's files, not memory. `view_gui_state`
-is the bridge: it reads this project's `.tcip/state/gui.json` and returns what the human is
+The GUI (a separate process) and you share the project's store, not memory. `view_gui_state`
+is the bridge: it reads this project's GUI snapshot and returns what the human is
 looking at right now: `dataset_root`, `subject`, `date`, `active_tab`, and
 `current_image_index` / `current_image`. Call it when the human says "this image" or "the
 one I'm on" without a path. The nav index is persisted debounced as they page through
