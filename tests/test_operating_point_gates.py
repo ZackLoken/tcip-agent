@@ -193,17 +193,6 @@ def test_an_f1_objective_picks_f1_max_and_labels_it_accordingly(objective):
 
 # ── Cap-saturation evidence (never a failure) ─────────────────────────────────
 
-def test_cap_hit_stamped_by_records_from_detector():
-    from tcip_mcp.pipelines.training.evaluation import records_from_detector
-
-    target = {"boxes": torch.zeros((3, 4)), "labels": torch.zeros(3, dtype=torch.long),
-              "iscrowd": torch.zeros(3, dtype=torch.long), "image_id": "x"}
-    output = {"boxes": torch.zeros((3, 4)), "labels": torch.zeros(3, dtype=torch.long),
-              "scores": torch.tensor([0.9, 0.8, 0.7])}
-    assert records_from_detector(target, output, width=10, height=10, detections_cap=3)["cap_hit"] is True
-    assert records_from_detector(target, output, width=10, height=10, detections_cap=10)["cap_hit"] is False
-    assert "cap_hit" not in records_from_detector(target, output, width=10, height=10)
-
 
 def test_cap_saturated_frac_is_the_share_of_records_that_hit_the_cap():
     assert cap_saturated_frac([{"cap_hit": True}, {"cap_hit": False}]) == pytest.approx(0.5)

@@ -39,8 +39,6 @@ def _build_lamb(params, *, lr: float, weight_decay: float, **kw):
     return Lamb(params, lr=lr, weight_decay=weight_decay)
 
 
-# The four builders don't share one signature (sgd alone takes momentum), so the dict's value
-# type is stated explicitly rather than left to a join across mismatched signatures.
 _OPTIMIZER_BUILDERS: dict[str, Callable[..., torch.optim.Optimizer]] = {
     "sgd": _build_sgd,
     "adam": _build_adam,
@@ -72,10 +70,9 @@ def build_optimizer(
     else:
         param_groups = [{"params": model.parameters(), "lr": head_lr}]
 
-    try:
-        factory = _OPTIMIZER_BUILDERS[name]
-    except KeyError:
-        raise KeyError(f"Unknown optimizer '{name}'. Available: {sorted(_OPTIMIZER_BUILDERS)}") from None
+    from tcip_mcp.pipelines.model_build import resolve_named
+
+    factory = resolve_named(name, _OPTIMIZER_BUILDERS, kind="optimizer")
     return factory(param_groups, lr=head_lr, weight_decay=weight_decay)
 
 
@@ -95,13 +92,8 @@ def compute_lr_scale(effective_batch: int, reference_batch: int, power: float) -
 
 
 def _flatten_param_ids(optimizer: torch.optim.Optimizer) -> dict[int, torch.nn.Parameter]:
-    """Map the integer state-dict ``pid`` to its live Parameter.
-
-    ``optimizer.state_dict()['state']`` is keyed by an integer assigned in the
-    flattened ``param_groups`` iteration order; this reproduces that order so a
-    snapshot can be re-keyed by parameter *name* (stable across stages) rather
-    than by ``pid`` (which shifts as the trainable set grows).
-    """
+    """Map each integer ``pid`` of ``optimizer.state_dict()['state']`` to its live Parameter, in
+    the flattened ``param_groups`` order that assigns them."""
     pid_to_param: dict[int, torch.nn.Parameter] = {}
     pid = 0
     for group in optimizer.param_groups:

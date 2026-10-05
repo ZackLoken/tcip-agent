@@ -26,7 +26,7 @@ from torch.utils.data import DataLoader
 from tcip_store import stored_numbers
 
 from tcip_mcp.pipelines.data.datasets import indexed_sample_keys, instance_targets
-from tcip_mcp.pipelines.model_contract import TCIPModel
+from tcip_mcp.pipelines.model_contract import DETECTION_TASKS, TCIPModel
 from tcip_mcp.pipelines.model_build import (
     STATE_DICT_KEY,
     build_model,
@@ -99,15 +99,9 @@ def restore_rng_state(state: dict[str, Any]) -> None:
 
 def loader_worker_init(worker_id: int, seed: int | None = None,
                        num_workers: int | None = None) -> None:
-    """DataLoader worker-process initializer, module-level so it pickles under Windows spawn
-    (a closure cannot, and spawn pickles ``worker_init_fn`` to every worker).
-
-    Always configures the platform GDAL cache budget: a spawned worker starts a fresh process
-    on GDAL's stock default, not the budget the parent configured. Scaled by ``num_workers``
-    (each worker gets ``1 / num_workers`` of the budget) so the fleet of workers together
-    commits what the platform intended, not that amount each; ``None`` gives every worker the
-    whole budget, unscaled. Per-worker numpy/random seeding applies only when the run is seeded.
-    """
+    """DataLoader worker-process initializer: configures the platform GDAL cache budget at
+    ``1 / num_workers`` of it per worker (the whole budget for ``None``), and seeds numpy and
+    random per worker when ``seed`` is given."""
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
 
     share = 1.0 / num_workers if num_workers else 1.0
@@ -215,7 +209,7 @@ def _uniform_native_size(train_ds: Any) -> tuple[int, int] | None:
     """The one ``(width, height)`` every training source shares, or ``None`` when sizes differ,
     a source cannot be probed, or the dataset exposes no source list to probe."""
     stems = sorted(indexed_sample_keys(train_ds))
-    resolve = getattr(train_ds, "_resolve_path", None)
+    resolve = getattr(train_ds, "image_of", None)
     if not stems or resolve is None:
         return None
     from tcip_mcp.pipelines.image_utils import image_dimensions
@@ -321,8 +315,7 @@ def _build_scheduler(optimizer, config: dict, epochs: int):
 def _validate(
     model: TCIPModel, val_loader: DataLoader, device: torch.device, task: str, *,
     dims: Mapping[str, int], conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,
-    iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
-    trait: TraitEntry | None = None,
+    score_weights: dict | None = None, trait: TraitEntry | None = None,
 ) -> dict:
     """Task-aware validation, delegates to ``evaluation.evaluate`` and ``val_``-prefixes.
 
@@ -340,8 +333,7 @@ def _validate(
     metrics = evaluate(
         model, val_loader, device, task, dims=dims,
         conf_threshold=conf_threshold, iou_threshold=iou_threshold,
-        iou_type=iou_type, max_dets=max_dets, score_weights=score_weights,
-        trait=trait,
+        score_weights=score_weights, trait=trait,
     )
     return {f"{VAL_METRIC_PREFIX}{k}": v for k, v in metrics.items()}
 
@@ -378,7 +370,7 @@ def resolve_selection_metric(
         including the ``"objective"`` default, is rejected. Defaults to ``True`` for a caller that
         has not built a loader yet.
     """
-    default = "objective" if task in ("detection", "instance_seg") else "loss"
+    default = "objective" if task in DETECTION_TASKS else "loss"
     resolved = requested or default
     if resolved not in HIGHER_IS_BETTER_BY_METRIC:
         raise ValueError(
@@ -551,8 +543,8 @@ def train(
     - ``checkpoint_every_n_epochs`` (int, default 5), periodic resumable checkpoints.
     - ``early_stopping`` (``{enabled, patience, min_delta}``, default enabled-if-val_loader,
       patience 7, min_delta 1e-4).
-    - ``evaluation`` (``{trait, conf_threshold, iou_threshold, iou_type, max_dets,
-      score_weights}``, all optional), passed through to ``_validate``/``evaluate``.
+    - ``evaluation`` (``{trait, conf_threshold, iou_threshold, score_weights}``, all optional),
+      passed through to ``_validate``/``evaluate``.
 
     Every key sits at the top level of the config. Best-model selection and early stopping read
     ``run.objective``, the metric and direction the run's launch resolved. The best epoch's
@@ -760,7 +752,7 @@ def train(
                 for batch_idx, batch in enumerate(train_loader):
                     if run.should_cancel():
                         break
-                    if task in ("detection", "instance_seg"):
+                    if task in DETECTION_TASKS:
                         images, targets = batch
                         images = [img.to(device) for img in images]
                         targets = instance_targets([{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets])
@@ -823,8 +815,6 @@ def train(
                         # ship-point conf, which an assessment derives later.
                         conf_threshold=eval_cfg.get("conf_threshold", DEFAULT_CONF),
                         iou_threshold=eval_cfg.get("iou_threshold", 0.5),
-                        iou_type=eval_cfg.get("iou_type"),
-                        max_dets=eval_cfg.get("max_dets", 100),
                         score_weights=eval_cfg.get("score_weights"),
                         trait=trait,
                     )

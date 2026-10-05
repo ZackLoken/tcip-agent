@@ -84,7 +84,7 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
         tmp_path / "ds", TRAIN_INTENSITIES, [2.0 * c for c in TRAIN_INTENSITIES])
     config = _config(tmp_path, epochs=1, early_stopping={"enabled": False})
     config["data"] = {**config["data"], "images_dir": str(images_dir),
-                      "labels_dir": str(csv_path)}
+                      "labels_dir": str(csv_path), "split": {"seed": 1, "val_ratio": 0.15}}
     out_dir = opened_run(tmp_path, config)
     record = read_record(out_dir / RUN_FILE)
     run = TrainRun(id=out_dir.name, config=trained_config(record),

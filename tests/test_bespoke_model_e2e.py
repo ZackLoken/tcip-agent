@@ -85,7 +85,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
             "task": "detection", "source_files": [src_file],
         },
         "data": {"images_dir": str(images_dir), "num_channels": 3,
-                 "scope": asdict(dataset.scope)},
+                 "scope": asdict(dataset.scope), "split": {"seed": 0, "val_ratio": 0.15}},
         "training_source": "tests.bespoke_models:train_bespoke",
         "device": "cpu", "epochs": 2, "seed": 0,
     }

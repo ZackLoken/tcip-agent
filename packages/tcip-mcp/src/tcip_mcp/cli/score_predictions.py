@@ -1,9 +1,9 @@
-r"""Score a published bucket's predictions against the images' own label documents (COCOeval),
-from the command line.
+r"""Score a published bucket's predictions against the images' own label documents through the
+platform's one matcher, from the command line.
 
 Wraps ``annotation_tools.score_predictions``: a single image file returns per-box matches (plus an
 optional per-detection breakdown with ``detail``); an images directory returns aggregate metrics
-plus per-image TP/FP/FN. Both regimes share ``coco_detection_metrics``.
+plus per-image TP/FP/FN.
 
 Usage:
     tcip score-predictions --path <image_or_images_dir> --bucket <name> \

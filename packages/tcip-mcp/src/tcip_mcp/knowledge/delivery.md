@@ -24,9 +24,9 @@ acknowledgment, the population) is recorded once on the delivery event the last 
 | value_key | string | Which aggregated field `value` came from (e.g. `count`, `area_mm2`), so a reader can detect a px/mm mismatch independently |
 | n_images | int | Number of source images |
 | pipeline_version | string | Pipeline that produced this result |
-| plant_id_source | string | How the plant identity was resolved for this plant's images (`"mixed"` when they disagree); blank when the records carried no identity provenance |
+| plant_id_source | string | How the plant identity was resolved for this plant's images, the assignment rows' own `source` (`"mixed"` when they disagree); blank when the records carried no `source` |
 | plant_attribution | string | The granularity objects were attributed to plants at: `"image"` for `build_plant_mapping`'s walked-capture mapping, `"detection"` for an orthomosaic's nearest-neighbor per-detection mapping, `"segment"` for an orthomosaic's canopy-segment mapping (a detection's box centroid fell inside a canopy boundary a person accepted, never a mask-level or area measurement). Distinct from `plant_id_source`, which names the matching method, not the granularity |
-| plant_id_distance_m_max | float | Worst per-image plant-assignment distance, in meters, across this plant's images; the identity-confidence signal `build_plant_mapping` produces |
+| plant_id_distance_m_max | float | Worst per-image plant-assignment distance, in meters, across this plant's images, the assignment rows' own `distance_m`; blank when none carried one |
 | validated | bool | Whether every delivered bucket's assessment cleared the one delivery gate; false only on a delivery a breeder acknowledged shipping unvalidated |
 | trait | string | The trait the delivery ships under |
 | trait_revision | int | The confirmed trait revision the delivery ships under |

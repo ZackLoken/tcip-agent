@@ -16,9 +16,9 @@ from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from tcip_mcp.model_registry import VerifiedCheckpoint
-    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.data.selection import ClassScope
-    from tcip_mcp.pipelines.inference.predictor import TileGeometry
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.pipelines.slicing import TileGeometry
 
 logger = logging.getLogger(__name__)
 
@@ -44,17 +44,6 @@ CROSS_TILE_MERGES: dict[str, tuple[str, str]] = {
 metric that type compares over (intersection over union, or over the smaller box)."""
 
 
-def cross_tile_merge_rule(postprocess: str) -> tuple[str, str]:
-    """The ``(SAHI postprocess type, match metric)`` ``postprocess`` names; any other name refuses
-    with the vocabulary."""
-    try:
-        return CROSS_TILE_MERGES[postprocess]
-    except KeyError:
-        raise ValueError(
-            f"postprocess {postprocess!r} names no cross-tile merge; choose one of "
-            f"{sorted(CROSS_TILE_MERGES)}") from None
-
-
 class ExecutionRefused(ValueError):
     """A pass that cannot run as stated: a tile edge the checkpoint contradicts, a tiled pass with
     no basis for its scale, or a stated value that differs from the record being restored."""
@@ -66,7 +55,7 @@ class Execution:
 
     ``conf`` and ``max_dets`` are ``None`` for a checkpoint whose head is not a detector. The tiled
     fields are ``None`` for an untiled pass. ``sources`` names, per field that holds a value, where
-    the value came from, in :class:`~tcip_mcp.pipelines.inference.predictor.TileGeometry`'s words
+    the value came from, in :class:`~tcip_mcp.pipelines.slicing.TileGeometry`'s words
     (``explicit`` for a value the caller stated, ``derived``, ``native_ratio``, ``default``), or the
     derivation or fit that produced it, by name.
     """
@@ -142,13 +131,13 @@ class Pass:
     images it runs over and the class scope its labels decode under."""
 
     checkpoint: VerifiedCheckpoint
-    predictor: Any
+    predictor: GenericPredictor
     scope: ClassScope
     execution: Execution
     tile_batch_size: int
     paths: list[Any] = field(default_factory=list)
 
-    def predict(self, sources: list[str | BandGroupRef | Any],
+    def predict(self, sources: list[Any],
                 execution: Execution | None = None) -> list[dict]:
         """One result per source under the pass's own execution record, or under ``execution``
         where one is given."""
@@ -191,7 +180,7 @@ def prepare_pass(
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.image_utils import list_logical_images
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
-    from tcip_mcp.pipelines.inference.predictor import TileEdgeContradiction, resolve_tile_geometry
+    from tcip_mcp.pipelines.slicing import TileEdgeContradiction, resolve_tile_geometry
 
     logical = list_logical_images(images_dir) if images_dir is not None else {}
     paths = [logical[stem] for stem in sorted(logical)]
@@ -210,7 +199,7 @@ def prepare_pass(
         execution = untiled_execution(checkpoint, conf=stated.conf, max_dets=stated.max_dets)
 
     predictor = GenericPredictor(checkpoint, device=device)
-    if restored is None and (getattr(predictor, "train_tile_size", None) is not None
+    if restored is None and (predictor.train_tile_size is not None
                              if stated.tile is None else stated.tile):
         try:
             geometry = resolve_tile_geometry(predictor, tiled=True, tile_size=stated.tile_size,
@@ -237,8 +226,10 @@ def tiled_execution(base: Execution, geometry: TileGeometry, *, postprocess: str
     under the installed SAHI version."""
     import sahi
 
-    merge = postprocess or DEFAULT_POSTPROCESS
-    merge_type, match_metric = cross_tile_merge_rule(merge)
+    from tcip_mcp.pipelines.model_build import resolve_named
+
+    merge = DEFAULT_POSTPROCESS if postprocess is None else postprocess
+    merge_type, match_metric = resolve_named(merge, CROSS_TILE_MERGES, kind="cross-tile merge")
     return replace(
         base, tile_size=geometry.tile_size, overlap=geometry.overlap,
         tile_resize=geometry.tile_resize, postprocess=merge, merge_type=merge_type,
@@ -256,8 +247,10 @@ def untiled_execution(checkpoint: VerifiedCheckpoint, *, conf: float | None,
     """The untiled record a fresh pass of ``checkpoint`` starts from: for a detector the stated
     conf and cap, else the documented defaults, each with its source; for any other head neither,
     and a stated conf or cap refuses (:class:`ExecutionRefused`)."""
+    from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+
     sources: dict[str, str] = {}
-    if checkpoint.task in ("detection", "instance_seg"):
+    if checkpoint.task in DETECTION_TASKS:
         sources = {"conf": "explicit" if conf is not None else "default",
                    "max_dets": "explicit" if max_dets is not None else "default"}
         conf = float(conf) if conf is not None else DEFAULT_CONF

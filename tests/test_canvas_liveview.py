@@ -313,14 +313,22 @@ def test_render_draws_a_point_shape_and_never_widens_it_to_a_box(tmp_path):
     assert r_at((140, 50)) < 10          # nothing 40px away: no box, no fill, no outline
 
 
-def test_render_tolerates_malformed_shapes(tmp_path):
+@pytest.mark.parametrize("bad", [
+    {"kind": "box", "color": "#FF0000"}, {"kind": "polygon", "points": [[1, 1]], "color": "#FF0000"},
+    "junk", {"kind": "box", "xyxy": [10, 10, 40, 40], "color": "not-a-color"},
+    {"kind": "box", "xyxy": [10, 10, 40, 40]}],
+    ids=["box_without_corners", "one_point_polygon", "not_a_shape", "unparsable_color", "no_color"])
+def test_render_refuses_a_malformed_shape_naming_it(tmp_path, bad):
+    """A shape the canvas push could not have drawn refuses naming its index, never renders a
+    canvas the human is not seeing; the well-formed shapes beside it admit."""
     from tcip_annotation.viz import render_canvas_state
     img = _make_image(tmp_path)
-    bad = [{"kind": "box"}, {"kind": "polygon", "points": [[1, 1]]}, "junk",
-           {"kind": "box", "xyxy": [10, 10, 40, 40], "color": "not-a-color"}]
-    out = render_canvas_state(_pixels(img), bad, origin=(0, 0), scale=1.0,
-                              output_path=str(tmp_path / "bad.jpg"))
-    assert Path(out).is_file()                  # renders what it can, never raises
+    good = {"kind": "box", "xyxy": [10, 10, 40, 40], "color": "#0f0"}
+    assert Path(render_canvas_state(_pixels(img), [good], origin=(0, 0), scale=1.0,
+                                    output_path=str(tmp_path / "good.jpg"))).is_file()
+    with pytest.raises(ValueError, match="canvas shape 1 "):
+        render_canvas_state(_pixels(img), [good, bad], origin=(0, 0), scale=1.0,
+                            output_path=str(tmp_path / "bad.jpg"))
 
 
 # ── MCP tool ────────────────────────────────────────────────────────────────

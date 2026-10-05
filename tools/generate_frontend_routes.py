@@ -173,10 +173,14 @@ PROXY_FOOTER = "];\n"
 
 
 def render_proxy(app) -> str:
-    """The full text of the generated dev-proxy module."""
+    """The full text of the generated dev-proxy module, with the one loopback host the backend
+    binds and answers to (``tcip_mcp.web_client.LOOPBACK_HOST``) for the dev server to serve on."""
+    from tcip_mcp.web_client import LOOPBACK_HOST
+
     body = "".join(f'  {{ path: "{path}", ws: {str(ws).lower()} }},\n'
                    for path, ws in collect_proxy_entries(app))
-    return PROXY_HEADER + body + PROXY_FOOTER
+    return (PROXY_HEADER + body + PROXY_FOOTER
+            + f'\nexport const LOOPBACK_HOST = "{LOOPBACK_HOST}";\n')
 
 
 def main() -> int:

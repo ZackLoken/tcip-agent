@@ -146,20 +146,12 @@ def _neighbor_max_overlaps(boxes: Sequence[Sequence[float]], metric: str) -> lis
     """Each box's max overlap with any other box in the same image (xywh px), as intersection over
     union (``"IOU"``) or over the smaller box (``"IOS"``); fewer than 2 boxes -> []."""
     import numpy as np
+    from tcip_annotation.matching import iou_matrix, xywh_corners
+
     if len(boxes) < 2:
         return []
-    b = np.asarray(boxes, dtype=float)
-    x1, y1, w, h = b[:, 0], b[:, 1], b[:, 2], b[:, 3]
-    x2, y2 = x1 + w, y1 + h
-    area = w * h
-    ix1 = np.maximum(x1[:, None], x1[None, :])
-    iy1 = np.maximum(y1[:, None], y1[None, :])
-    ix2 = np.minimum(x2[:, None], x2[None, :])
-    iy2 = np.minimum(y2[:, None], y2[None, :])
-    inter = np.clip(ix2 - ix1, 0.0, None) * np.clip(iy2 - iy1, 0.0, None)
-    denominator = {"IOU": area[:, None] + area[None, :] - inter,
-                   "IOS": np.minimum(area[:, None], area[None, :])}[metric]
-    overlap = np.where(denominator > 0, inter / np.where(denominator > 0, denominator, 1.0), 0.0)
+    corners = xywh_corners(boxes)
+    overlap = iou_matrix(corners, corners, over={"IOU": "union", "IOS": "smaller"}[metric])
     np.fill_diagonal(overlap, 0.0)  # exclude a box's overlap with itself (1.0)
     return overlap.max(axis=1).tolist()
 
@@ -167,13 +159,12 @@ def _neighbor_max_overlaps(boxes: Sequence[Sequence[float]], metric: str) -> lis
 def _neighbor_min_center_distances(boxes: Sequence[Sequence[float]]) -> list[float]:
     """Each box's distance to its nearest same-image neighbor's center (xywh px); fewer than 2 boxes -> []."""
     import numpy as np
+    from tcip_annotation.matching import box_centers, xywh_corners
+
     if len(boxes) < 2:
         return []
-    b = np.asarray(boxes, dtype=float)
-    cx, cy = b[:, 0] + b[:, 2] / 2.0, b[:, 1] + b[:, 3] / 2.0
-    dx = cx[:, None] - cx[None, :]
-    dy = cy[:, None] - cy[None, :]
-    dist = np.sqrt(dx ** 2 + dy ** 2)
+    centers = box_centers(xywh_corners(boxes))
+    dist = np.linalg.norm(centers[:, None, :] - centers[None, :, :], axis=-1)
     np.fill_diagonal(dist, np.inf)
     return dist.min(axis=1).tolist()
 
@@ -194,13 +185,15 @@ def derive_localization_tolerance_frac(
     filtered to the trait's own class.
     """
     import numpy as np
+    from tcip_annotation.matching import box_sizes, xywh_corners
+
     gt_boxes_per_image = _validate_gt_boxes_per_image(
         gt_boxes_per_image, fn_name="derive_localization_tolerance_frac")
     dists: list[float] = []
     sizes: list[float] = []
     for boxes in gt_boxes_per_image:
         dists.extend(_neighbor_min_center_distances(boxes))
-        sizes.extend((max(w, 0.0) * max(h, 0.0)) ** 0.5 for _, _, w, h in boxes)
+        sizes.extend(box_sizes(xywh_corners(boxes)).tolist())
     if not dists or not sizes:
         return None
     avg_size = float(np.mean(sizes))
@@ -212,12 +205,12 @@ def derive_localization_tolerance_frac(
 
 
 def char_sizes_from_boxes(gt_boxes_per_image: Sequence[Sequence[Sequence[float]]]) -> list[float]:
-    """``sqrt(w*h)`` per positive GT box across every image; boxes are ``(x, y, w, h)``."""
-    sizes = [
-        (max(w, 0.0) * max(h, 0.0)) ** 0.5
-        for boxes in gt_boxes_per_image for _, _, w, h in boxes
-    ]
-    return [s for s in sizes if s > 0]
+    """The positive characteristic sizes (:func:`~tcip_annotation.matching.box_sizes`) of every
+    GT box across every image; boxes are ``(x, y, w, h)``."""
+    from tcip_annotation.matching import box_sizes, xywh_corners
+
+    return [s for boxes in gt_boxes_per_image
+            for s in box_sizes(xywh_corners(boxes)).tolist() if s > 0]
 
 
 def _achievable_iou(avg_size: float, jitter_px: float) -> float:

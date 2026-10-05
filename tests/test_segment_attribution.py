@@ -372,11 +372,11 @@ def test_assign_detections_to_segments_attributes_a_containment_and_names_the_re
     plants = [_plant(georef, "plot0", 10, 10)]  # segment 1 (30..50) stays untied
     tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT)
 
-    detections = {"boxes": [
+    detections = [
         [8.0, 8.0, 12.0, 12.0],       # centroid (10, 10): inside the tied segment
         [58.0, 58.0, 62.0, 62.0],     # centroid (60, 60): inside no segment
         [38.0, 38.0, 42.0, 42.0],     # centroid (40, 40): inside the untied segment
-    ]}
+    ]
 
     assignments = assign_detections_to_segments(detections, tie)
 
@@ -408,7 +408,7 @@ def test_assign_detections_to_segments_attributes_an_overlap_to_neither(tmp_path
     tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT)
 
     # centroid (25, 15) lies in both segments' overlap (20..30 on x).
-    detections = {"boxes": [[23.0, 13.0, 27.0, 17.0]]}
+    detections = [[23.0, 13.0, 27.0, 17.0]]
 
     assignments = assign_detections_to_segments(detections, tie)
 
@@ -429,4 +429,4 @@ def test_assign_detections_to_segments_no_boxes_returns_empty(tmp_path: Path) ->
     plants = [_plant(georef, "plot0", 10, 10)]
     tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT)
 
-    assert assign_detections_to_segments({"boxes": []}, tie) == []
+    assert assign_detections_to_segments([], tie) == []

@@ -1,6 +1,6 @@
 """Evaluation metrics + composite selection objective.
 
-Unit tests for the pycocotools metrics engine, the ported composite objective,
+Unit tests for the one matcher's detection metrics, the composite objective,
 the in-house scalar metrics, and ``_selection_value``; plus light integration
 tests that exercise the detection/classification ``_validate`` path end-to-end.
 """
@@ -14,7 +14,6 @@ from functools import partial
 import pytest
 
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
-pytest.importorskip("pycocotools")
 
 from tcip_annotation.matching import match_pairs  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
@@ -23,13 +22,12 @@ from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     DEFAULT_SCORE_WEIGHTS,
-    build_coco_image_record,
     classification_metrics,
-    coco_detection_metrics,
     compute_composite_objective,
     concordance_correlation_coefficient,
-    effective_iou_type,
+    detection_metrics,
     gt_class_avg_size,
+    image_record,
     ordinal_metrics,
     pick_count_unbiased,
     pick_f1_max,
@@ -77,31 +75,33 @@ def test_composite_objective_has_no_score_for_a_degenerate_epoch():
 
 
 # --------------------------------------------------------------------------
-# pycocotools detection metrics
+# detection metrics under the IoU convention
 # --------------------------------------------------------------------------
 
 def _rec(gt, dt, w=100, h=100):
-    return build_coco_image_record(w, h, gt, dt)
+    return image_record(w, h, gt, dt)
 
 
-def test_coco_map50_perfect():
-    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "area": 400, "iscrowd": 0}]
+def test_detection_map50_perfect():
+    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "iscrowd": 0}]
     dt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9}]
-    m = coco_detection_metrics([_rec(gt, dt)])
+    m = detection_metrics([_rec(gt, dt)], trait=None, conf_threshold=0.25, iou_threshold=0.5,
+                          by_mask=False)
     assert m["map50"] == pytest.approx(1.0)
     assert m["map"] == pytest.approx(1.0)
 
 
-def test_coco_operating_point_tp_fp_fn():
+def test_detection_operating_point_tp_fp_fn():
     gt = [
-        {"category_id": 1, "bbox": [10, 10, 20, 20], "area": 400, "iscrowd": 0},
-        {"category_id": 1, "bbox": [50, 50, 10, 10], "area": 100, "iscrowd": 0},
+        {"category_id": 1, "bbox": [10, 10, 20, 20], "iscrowd": 0},
+        {"category_id": 1, "bbox": [50, 50, 10, 10], "iscrowd": 0},
     ]
     dt = [
         {"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9},   # TP
         {"category_id": 1, "bbox": [80, 80, 10, 10], "score": 0.7},   # FP
     ]
-    m = coco_detection_metrics([_rec(gt, dt)])
+    m = detection_metrics([_rec(gt, dt)], trait=None, conf_threshold=0.25, iou_threshold=0.5,
+                          by_mask=False)
     assert (m["tp"], m["fp"], m["fn"]) == (1, 1, 1)
     assert m["precision"] == pytest.approx(0.5)
     assert m["recall"] == pytest.approx(0.5)
@@ -109,45 +109,66 @@ def test_coco_operating_point_tp_fp_fn():
     assert m["map50"] > 0.0
 
 
-def test_coco_conf_threshold_filters():
-    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "area": 400, "iscrowd": 0}]
+def test_detection_conf_threshold_filters():
+    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "iscrowd": 0}]
     dt = [
         {"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9},   # TP
         {"category_id": 1, "bbox": [80, 80, 10, 10], "score": 0.7},   # FP, below 0.8
     ]
-    m = coco_detection_metrics([_rec(gt, dt)], conf_threshold=0.8)
+    m = detection_metrics([_rec(gt, dt)], trait=None, conf_threshold=0.8, iou_threshold=0.5,
+                          by_mask=False)
     assert m["tp"] == 1
     assert m["fp"] == 0
 
 
-def test_coco_no_stdout(capsys):
-    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "area": 400, "iscrowd": 0}]
+def test_detection_metrics_write_nothing_to_stdout(capsys):
+    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "iscrowd": 0}]
     dt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9}]
-    coco_detection_metrics([_rec(gt, dt)])
+    detection_metrics([_rec(gt, dt)], trait=None, conf_threshold=0.25, iou_threshold=0.5,
+                      by_mask=False)
     captured = capsys.readouterr()
-    assert captured.out == ""  # pycocotools prints must be redirected (MCP stdio safety)
+    assert captured.out == ""  # nothing reaches stdout (MCP stdio safety)
 
 
-def test_coco_segm_path():
-    poly = [10.0, 10.0, 30.0, 10.0, 30.0, 30.0, 10.0, 30.0]
-    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "area": 400, "iscrowd": 0, "segmentation": [poly]}]
-    dt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9, "segmentation": [poly]}]
-    m = coco_detection_metrics([_rec(gt, dt)], iou_type="segm")
-    assert 0.0 <= m["map50"] <= 1.0
+def test_detection_mask_path():
+    ring = [(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]
+    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "iscrowd": 0, "rings": [ring]}]
+    dt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9, "rings": [ring]}]
+    m = detection_metrics([_rec(gt, dt)], trait=None, conf_threshold=0.25, iou_threshold=0.5,
+                          by_mask=True)
     assert m["map50"] == pytest.approx(1.0)
+    assert m["governing_criterion"]["kind"] == "mask_iou_match"
 
 
-def test_coco_empty():
-    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "area": 400, "iscrowd": 0}]
+def test_a_mask_match_counts_by_region_where_the_box_match_would_not():
+    """An L-shaped object whose box a detection's box covers exactly, but whose region the
+    detection's region overlaps under half: matched by box, missed by mask."""
+    l_shape = [(0.0, 0.0), (40.0, 0.0), (40.0, 10.0), (10.0, 10.0), (10.0, 40.0), (0.0, 40.0)]
+    corner = [(10.0, 10.0), (40.0, 10.0), (40.0, 40.0), (10.0, 40.0)]
+    gt = [{"category_id": 1, "bbox": [0, 0, 40, 40], "iscrowd": 0, "rings": [l_shape]}]
+    dt = [{"category_id": 1, "bbox": [0, 0, 40, 40], "score": 0.9, "rings": [corner]}]
+    by_box, by_mask = (detection_metrics([_rec(gt, dt)], trait=None, conf_threshold=0.25,
+                                         iou_threshold=0.5, by_mask=mask) for mask in (False, True))
+    assert (by_box["tp"], by_box["fp"], by_box["fn"]) == (1, 0, 0)
+    assert (by_mask["tp"], by_mask["fp"], by_mask["fn"]) == (0, 1, 1)
+
+
+def test_detection_metrics_over_an_empty_side():
+    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "iscrowd": 0}]
     dt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9}]
-    # (a) empty preds + non-empty GT -> guard the real loadRes([]) IndexError.
-    m = coco_detection_metrics([_rec(gt, [])])
+
+    def metrics(gt, dt):
+        return detection_metrics([_rec(gt, dt)], trait=None, conf_threshold=0.25,
+                                 iou_threshold=0.5, by_mask=False)
+
+    # (a) no predictions over ground truth: every object missed.
+    m = metrics(gt, [])
     assert m["fn"] == 1 and m["recall"] == 0.0 and m["map50"] == 0.0
-    # (b) non-empty preds + empty GT -> guard the COCOeval stats == -1 sentinel.
-    m = coco_detection_metrics([_rec([], dt)])
-    assert m["map50"] == 0.0 and m["map50"] >= 0.0
+    # (b) predictions over no ground truth: no object to find, so no precision to average.
+    m = metrics([], dt)
+    assert m["map50"] == 0.0
     # (c) both empty.
-    m = coco_detection_metrics([_rec([], [])])
+    m = metrics([], [])
     assert m["tp"] == 0 and m["fp"] == 0 and m["map50"] == 0.0
 
 
@@ -187,9 +208,10 @@ CENTER_10 = {"kind": "center_match", "tolerance": 10.0}
 """A center match at a 10 px tolerance."""
 
 
-def _points(centers: list[tuple[float, float]]) -> list[list[float]]:
-    """Each center as a zero-extent xywh box, so a center match reads its distance exactly."""
-    return [[x, y, 0.0, 0.0] for x, y in centers]
+def _points(centers: list[tuple[float, float]]) -> list[dict]:
+    """Each center as the matcher's record of a zero-extent xywh box, so a center match reads its
+    distance exactly."""
+    return [{"bbox": [x, y, 0.0, 0.0]} for x, y in centers]
 
 
 def test_golden_derive_operating_point_curve():
@@ -249,8 +271,8 @@ def test_match_pairs_distance_first_tie_breaks_by_gt_then_detection_index():
 def test_match_pairs_under_an_iou_criterion_matches_by_overlap():
     """The same matcher under an IoU criterion: a detection overlapping its ground truth past the
     threshold pairs, one beside it does not, however near its center sits."""
-    gt = [[0.0, 0.0, 10.0, 10.0], [100.0, 0.0, 10.0, 10.0]]
-    dt = [[1.0, 0.0, 10.0, 10.0], [106.0, 0.0, 10.0, 10.0]]
+    gt = [{"bbox": [0.0, 0.0, 10.0, 10.0]}, {"bbox": [100.0, 0.0, 10.0, 10.0]}]
+    dt = [{"bbox": [1.0, 0.0, 10.0, 10.0]}, {"bbox": [106.0, 0.0, 10.0, 10.0]}]
     pairs = match_pairs(gt, dt, {"kind": "iou_match", "iou_threshold": 0.5},
                         policy="score_first")
     assert pairs == [(0, 0)]
@@ -336,36 +358,39 @@ def test_resolve_match_criterion_iou_match_refuses_a_reference_with_no_box_to_de
 
 
 # --------------------------------------------------------------------------
-# COCO box and mask mAP exact values on fixed synthetic records.
+# Box and mask mAP exact values on fixed synthetic records.
 # --------------------------------------------------------------------------
 
-def test_golden_coco_box_and_mask_map():
-    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "area": 400, "iscrowd": 0}]
+def test_golden_box_and_mask_map():
+    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "iscrowd": 0}]
     dt_perfect = [{"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9}]
-    m = coco_detection_metrics([_rec(gt, dt_perfect)])
-    assert (m["map"], m["map50"], m["map75"]) == pytest.approx((1.0, 1.0, 1.0))
+    m = detection_metrics([_rec(gt, dt_perfect)], trait=None, conf_threshold=0.25,
+                          iou_threshold=0.5, by_mask=False)
+    assert (m["map"], m["map50"]) == pytest.approx((1.0, 1.0))
     assert (m["precision"], m["recall"], m["f1"]) == pytest.approx((1.0, 1.0, 1.0))
     assert (m["tp"], m["fp"], m["fn"]) == (1, 0, 0)
 
     # 1 TP + 1 FP against 2 GT → P=R=F1=0.5, counts 1/1/1.
     gt2 = [
-        {"category_id": 1, "bbox": [10, 10, 20, 20], "area": 400, "iscrowd": 0},
-        {"category_id": 1, "bbox": [50, 50, 10, 10], "area": 100, "iscrowd": 0},
+        {"category_id": 1, "bbox": [10, 10, 20, 20], "iscrowd": 0},
+        {"category_id": 1, "bbox": [50, 50, 10, 10], "iscrowd": 0},
     ]
     dt2 = [
         {"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9},
         {"category_id": 1, "bbox": [80, 80, 10, 10], "score": 0.7},
     ]
-    m2 = coco_detection_metrics([_rec(gt2, dt2)])
+    m2 = detection_metrics([_rec(gt2, dt2)], trait=None, conf_threshold=0.25, iou_threshold=0.5,
+                           by_mask=False)
     assert (m2["precision"], m2["recall"], m2["f1"]) == pytest.approx((0.5, 0.5, 0.5))
     assert (m2["tp"], m2["fp"], m2["fn"]) == (1, 1, 1)
 
     # segm: a perfect mask match scores map50 = 1.0.
-    poly = [10.0, 10.0, 30.0, 10.0, 30.0, 30.0, 10.0, 30.0]
-    gt_s = [{"category_id": 1, "bbox": [10, 10, 20, 20], "area": 400, "iscrowd": 0, "segmentation": [poly]}]
-    dt_s = [{"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9, "segmentation": [poly]}]
-    ms = coco_detection_metrics([_rec(gt_s, dt_s)], iou_type="segm")
-    assert ms["iou_type"] == "segm"
+    ring = [(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]
+    gt_s = [{"category_id": 1, "bbox": [10, 10, 20, 20], "iscrowd": 0, "rings": [ring]}]
+    dt_s = [{"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9, "rings": [ring]}]
+    ms = detection_metrics([_rec(gt_s, dt_s)], trait=None, conf_threshold=0.25,
+                           iou_threshold=0.5, by_mask=True)
+    assert ms["governing_criterion"]["kind"] == "mask_iou_match"
     assert ms["map50"] == pytest.approx(1.0)
 
 
@@ -631,44 +656,6 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(tmp_pa
     assert ranking_returned - declared == not_a_ranking
 
 
-# --------------------------------------------------------------------------
-# Effective iou_type: evaluate() scoring and run_test_evaluation metadata
-# --------------------------------------------------------------------------
-
-def test_effective_iou_type_resolution():
-    assert effective_iou_type("detection", None) == "bbox"
-    assert effective_iou_type("instance_seg", None) == "segm"   # segm AP by default
-    assert effective_iou_type("instance_seg", "bbox") == "bbox"  # explicit override wins
-    assert effective_iou_type("detection", "segm") == "segm"
-    assert effective_iou_type("classification", None) == ""
-
-
-def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
-    """The result must record the iou_type evaluate() actually scored with (instance_seg
-    defaults to segm AP; recording 'bbox' would misreport mask AP)."""
-    import tcip_mcp.pipelines.training.evaluation as evaluation
-    from tcip_mcp.pipelines.execution import prepare_pass
-
-    monkeypatch.setattr(evaluation, "evaluate", lambda *a, **k: {"loss": 0.1, "map50": 0.5})
-
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, verified_checkpoint
-
-    segmenter = prepare_pass(verified_checkpoint(tmp_path, model_source={
-        "builder": "tests.bespoke_models:build_fixed_mask_instance_seg", "task": "instance_seg"}),
-        Stated(tile=False))
-    detector = prepare_pass(verified_checkpoint(tmp_path, model_source=dict(BUILT_DETECTOR)),
-                            Stated(tile=False))
-
-    r = run_test_evaluation(segmenter, None, "cpu")
-    assert r["iou_type"] == "segm"
-
-    r = run_test_evaluation(detector, None, "cpu")
-    assert r["iou_type"] == "bbox"
-
-    r = run_test_evaluation(segmenter, None, "cpu", iou_type="bbox")
-    assert r["iou_type"] == "bbox"  # explicit override still recorded as-is
-
-
 def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, monkeypatch):
     """run_test_evaluation and run_full_frame_evaluation compose through one shared
     evaluation_result: both regimes' results carry the same common identity keys by name and
@@ -684,7 +671,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     common_fields = {
-        "model_path", "task", "checkpoint_sha256", "experiment_id", "iou_type",
+        "model_path", "task", "checkpoint_sha256", "experiment_id",
         "iou_threshold", "execution", "eval_regime",
     }
     full_frame_only_fields = {
@@ -708,6 +695,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     class _StubPredictor:
         task = "detection"
         in_chans = 3
+        train_tile_size = train_overlap = train_native_size = train_augmentation = None
 
         def predict_sliced(self, path, **kw):
             return {"width": 32, "height": 32, "boxes": [], "scores": [], "labels": [],
@@ -732,7 +720,7 @@ def test_evaluation_result_refuses_a_key_extra_shares_with_common():
     common = {
         "model_path": "m.pt", "task": "detection", "checkpoint_sha256": "abc",
         "experiment_id": "e1",
-        "iou_type": "bbox", "iou_threshold": 0.5, "execution": {"conf": 0.3, "max_dets": 100},
+        "iou_threshold": 0.5, "execution": {"conf": 0.3, "max_dets": 100},
         "eval_regime": "full-frame-single-pass",
     }
     extra = {"precision": 0.9, "task": "classification"}
@@ -868,7 +856,7 @@ def test_validate_classification_metrics(tmp_path):
     assert run.best_metric == pytest.approx(last["val_loss"])  # selection falls back to val_loss
 
 
-def test_score_predictions_folder_uses_pycocotools(data_dir):
+def test_score_predictions_folder_counts_every_image_through_the_matcher(data_dir):
     from tcip_mcp.tools.annotation_tools import score_predictions
     from tests.conftest import DATA_DIR_BUCKET
 
@@ -880,7 +868,7 @@ def test_score_predictions_folder_uses_pycocotools(data_dir):
     assert all(p["tp"] == 1 and p["fp"] == 1 and p["fn"] == 1 for p in r["per_image"])
 
 
-# -- a crowd region: COCO's ignore region, never one object ------------------------------------
+# -- a crowd region: an ignore region, never one object ------------------------------------
 
 _OBJECT = [10.0, 10.0, 20.0, 20.0]
 _CROWD = [50.0, 50.0, 40.0, 40.0]
@@ -892,20 +880,20 @@ def _crowd_records() -> list[dict]:
     from tcip_mcp.pipelines.training.evaluation import gt_record
 
     return [
-        build_coco_image_record(100, 100, [gt_record(_OBJECT, 1, 0), gt_record(_CROWD, 1, 1)],
+        image_record(100, 100, [gt_record(_OBJECT, 1, 0), gt_record(_CROWD, 1, 1)],
                                 [{"category_id": 1, "bbox": _OBJECT, "score": 0.9},
                                  {"category_id": 1, "bbox": [55.0, 55.0, 30.0, 30.0], "score": 0.9}]),
-        build_coco_image_record(100, 100, [gt_record(_CROWD, 1, 1)], []),
+        image_record(100, 100, [gt_record(_CROWD, 1, 1)], []),
     ]
 
 
 def test_a_detection_in_a_crowd_region_is_neither_true_nor_false_and_the_region_no_miss():
-    m = coco_detection_metrics(_crowd_records(), iou_threshold=0.5, conf_threshold=0.25)
-    assert (m["tp"], m["fp"], m["fn"], m["n_gt"]) == (1, 0, 0, 1)
-    assert [c["fn"] for c in m["per_image_counts"]] == [0, 0]
+    m = detection_metrics(_crowd_records(), trait=None, iou_threshold=0.5, conf_threshold=0.25,
+                          by_mask=False)
+    assert (m["tp"], m["fp"], m["fn"]) == (1, 0, 0)
 
 
-def test_the_center_match_count_treats_a_crowd_region_as_cocoeval_does():
+def test_the_center_match_count_treats_a_crowd_region_as_the_iou_count_does():
     from tcip_mcp.pipelines.training.evaluation import governing_counts
 
     counts = governing_counts(_crowd_records(), {"kind": "center_match", "tolerance": 3.0},
@@ -930,18 +918,35 @@ def test_a_targets_records_are_one_shape_on_the_stored_grid_whatever_the_target_
     arrays = {k: np.asarray(v) for k, v in listed.items()}
     off_grid = {**listed, "boxes": [[1.2504, 2.5, 30.7496, 40.5], [50.0, 50.0, 90.0, 90.0]]}
 
-    expected = [{"category_id": 1, "bbox": [1.25, 2.5, 29.5, 38.0], "area": 1121.0, "iscrowd": 0},
-                {"category_id": 1, "bbox": [50.0, 50.0, 40.0, 40.0], "area": 1600.0, "iscrowd": 1}]
+    expected = [{"category_id": 1, "bbox": [1.25, 2.5, 29.5, 38.0], "iscrowd": 0},
+                {"category_id": 1, "bbox": [50.0, 50.0, 40.0, 40.0], "iscrowd": 1}]
+    regions = [{"rings": [[(1.25, 2.5), (30.75, 2.5), (30.75, 40.5), (1.25, 40.5)]]},
+               {"rings": [[(50.0, 50.0), (90.0, 50.0), (90.0, 90.0), (50.0, 90.0)]]}]
     for target in (listed, arrays, target_tensors(listed), off_grid):
-        assert gt_records(target) == expected
+        # A target carrying its rows' geometry states each row's region beside its box.
+        assert gt_records(target) == ([{**e, **r} for e, r in zip(expected, regions)]
+                                      if "geometry" in target else expected)
     flagless = {"boxes": [[0, 0, 10, 10]], "labels": [1]}
     with pytest.raises(ValueError, match="iscrowd"):
         gt_records(flagless)
 
 
+def test_a_detector_output_stating_no_boxes_refuses_rather_than_reading_as_no_detections():
+    from tcip_mcp.pipelines.training.evaluation import records_from_detector
+
+    target = {"boxes": torch.zeros((0, 4)), "labels": torch.zeros((0,), dtype=torch.int64),
+              "iscrowd": torch.zeros((0,), dtype=torch.int64)}
+    with pytest.raises(KeyError, match="boxes"):
+        records_from_detector(target, {}, width=10, height=10)
+    empty = {"boxes": torch.zeros((0, 4)), "labels": torch.zeros((0,), dtype=torch.int64),
+             "scores": torch.zeros((0,))}
+    assert records_from_detector(target, empty, width=10, height=10)["dt"] == []
+
+
 def test_a_ground_truth_record_is_one_shape_from_a_target_and_from_its_annotation(tmp_path):
     """The loader's target route and the annotation route build a document's ground truth as
-    the same records, its box, area and crowd flag stated alike, so the scorer fills nothing in."""
+    the same records, its box, crowd flag and region stated alike, so the scorer fills nothing
+    in."""
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.label_queries import json_det_targets
     from tcip_mcp.pipelines.training.evaluation import gt_records, records_from_annotation
@@ -950,10 +955,11 @@ def test_a_ground_truth_record_is_one_shape_from_a_target_and_from_its_annotatio
         Annotation(subject="bur", geometry=BBox(10.1, 10.1, 40.3, 30.3)),
         Annotation(subject="bur", geometry=BBox(50.0, 50.0, 90.0, 90.0), iscrowd=True)])
     listed = json_det_targets(document.annotations, registry_scope(tmp_path, "bur"))
-    _, record = records_from_annotation(document.annotations, [], width=100,
-                                        height=100, name_id={"bur": 1})
-    assert record["gt"] == gt_records(listed)
-    assert all(g["area"] == g["bbox"][2] * g["bbox"][3] for g in record["gt"])
+    record = records_from_annotation(document.annotations, [], width=100,
+                                     height=100, name_id={"bur": 1})
+    # The annotation route also names each record's annotation, by its index in the document.
+    assert [{k: v for k, v in g.items() if k != "index"} for g in record["gt"]] == gt_records(listed)
+    assert [g["index"] for g in record["gt"]] == [0, 1]
 
 
 def test_a_detectors_record_reads_both_sides_on_the_stored_grid(tmp_path):
@@ -980,14 +986,14 @@ def _reference_records(tmp_path, reference: list, detections: list) -> list[dict
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
 
     return [records_from_annotation(_stored(tmp_path, reference).annotations, detections,
-                                    width=100, height=100)[1]]
+                                    width=100, height=100)]
 
 
 @pytest.mark.parametrize("crowd_only", [True, False], ids=["crowd_only", "empty"])
 def test_a_detection_outside_a_reference_with_no_object_is_a_false_positive(tmp_path, crowd_only):
     """A reference holding no object, crowd regions alone or nothing, is still evaluated: a
-    detection outside every crowd region is one false positive, by COCOeval and by the center
-    match alike, never hidden by a zero-object shortcut."""
+    detection outside every crowd region is one false positive, by the IoU convention and by the
+    center match alike, never hidden by a zero-object shortcut."""
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.training.evaluation import governing_counts
 
@@ -996,8 +1002,9 @@ def test_a_detection_outside_a_reference_with_no_object_is_a_false_positive(tmp_
     detection = Annotation(subject="bur", geometry=BBox(5, 5, 20, 20), score=0.9)
     records = _reference_records(tmp_path, reference, [detection])
 
-    m = coco_detection_metrics(records, iou_threshold=0.5, conf_threshold=0.25)
-    assert (m["tp"], m["fp"], m["fn"], m["n_gt"]) == (0, 1, 0, 0)
+    m = detection_metrics(records, trait=None, iou_threshold=0.5, conf_threshold=0.25,
+                          by_mask=False)
+    assert (m["tp"], m["fp"], m["fn"]) == (0, 1, 0)
     counts = governing_counts(records, {"kind": "center_match", "tolerance": 3.0},
                               conf_threshold=0.25)
     assert (counts["tp"], counts["fp"], counts["fn"]) == (0, 1, 0)
@@ -1010,8 +1017,9 @@ def test_a_reference_with_objects_and_no_detection_scores_every_object_a_miss(tm
         Annotation(subject="bur", geometry=BBox(5, 5, 20, 20), created_by="user:breeder"),
         Annotation(subject="bur", geometry=BBox(40, 40, 60, 60), created_by="user:breeder")], [])
 
-    m = coco_detection_metrics(records, iou_threshold=0.5, conf_threshold=0.25)
-    assert (m["tp"], m["fp"], m["fn"], m["n_pred"]) == (0, 0, 2, 0)
+    m = detection_metrics(records, trait=None, iou_threshold=0.5, conf_threshold=0.25,
+                          by_mask=False)
+    assert (m["tp"], m["fp"], m["fn"]) == (0, 0, 2)
 
 
 def test_a_crowd_region_is_no_object_in_a_ground_truth_count(tmp_path):

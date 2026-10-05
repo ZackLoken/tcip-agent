@@ -61,7 +61,7 @@ def test_an_annotation_prediction_off_the_stored_grid_is_put_on_it_before_scorin
     gt = [Annotation(subject="target", geometry=BBox(*ON_GRID_BOX))]
     preds = [Annotation(subject="target", geometry=BBox(*SUB_QUANTUM_BOX), score=0.9)]
 
-    _iou_type, record = records_from_annotation(gt, preds, width=200, height=200)
+    record = records_from_annotation(gt, preds, width=200, height=200)
 
     x1, y1, x2, y2 = ON_GRID_BOX
     assert record["gt"][0]["bbox"] == [x1, y1, x2 - x1, y2 - y1]
@@ -82,9 +82,7 @@ def test_scoring_labels_read_back_from_disk_is_unaffected_by_the_shared_grid(tmp
     match exactly, with no metric moved by putting both sides through the same derivation."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.pipelines.training.evaluation import (
-        coco_detection_metrics, records_from_annotation,
-    )
+    from tcip_mcp.pipelines.training.evaluation import detection_metrics, records_from_annotation
 
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
 
@@ -97,9 +95,10 @@ def test_scoring_labels_read_back_from_disk_is_unaffected_by_the_shared_grid(tmp
 
     stored = json_io.read_label_document(label).annotations
     preds = [Annotation(subject=a.subject, geometry=a.geometry, score=0.9) for a in stored]
-    _iou_type, record = records_from_annotation(stored, preds, width=200, height=200)
+    record = records_from_annotation(stored, preds, width=200, height=200)
 
-    metrics = coco_detection_metrics([record], iou_threshold=0.5, conf_threshold=0.25)
+    metrics = detection_metrics([record], trait=None, iou_threshold=0.5, conf_threshold=0.25,
+                                by_mask=False)
 
     assert metrics["map50"] == 1.0
     assert metrics["precision"] == 1.0

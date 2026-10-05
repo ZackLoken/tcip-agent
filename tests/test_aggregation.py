@@ -2,8 +2,8 @@
 
 Covers the plant_id hard requirement (plant identity is never guessed from a
 filename; a record must carry an explicit plant_id_key value or one plant_id_fn resolves),
-identity-provenance pass-through (plant_id_source/plant_id_distance_m, mirroring
-build_plant_mapping's own real Assignment fields), the crops.yml-derived units column, and the
+identity-provenance pass-through (the assignment rows' own source/distance_m), the
+crops.yml-derived units column, and the
 aggregation strategies (count / mean / mode / sum). Phenology milestones are not here; they
 are the positive-fraction crossing, tested in test_phenology.py.
 """
@@ -132,30 +132,43 @@ def test_plant_id_fn_override_keeps_series_together():
 # ── identity provenance pass-through (build_plant_mapping's honest signals) ──
 
 
+def _mapped_rows(*assigned: tuple[str, str, float]) -> list[dict]:
+    """Per-image count rows carrying the assignment rows ``MappingBuild.rows`` produces, one per
+    ``(image, source, distance_m)``, each assigned to plant ``P1``."""
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        Assignment, ImageStamp, MappingBuild, PlantRecord,
+    )
+
+    plant = PlantRecord(plot_name="P1", accession_name="A", plot_number=None, row_number=None,
+                        col_number=None, lat=0.0, lon=0.0)
+    build = MappingBuild(
+        name="m", dataset_root="r", dataset_id="d", built_at="t", dates_requested=None,
+        dates=["2024-05-01"], nn_tolerance_m={"value": 1.0, "source": "stated"},
+        plant_registry={}, capture_identity={}, capture_digests={}, unreadable={},
+        assignments={"2024-05-01": [Assignment.of(
+            ImageStamp(path=image, stem=image, date_folder="2024-05-01", kind="image",
+                       name=image, timestamp=None, lat=None, lon=None, h_pos_err=None,
+                       readable=True), plant, source, distance)  # type: ignore[arg-type]
+            for image, source, distance in assigned]})
+    return [{**row, "plant_id": row["plot_name"], "count": 1}
+            for row in build.rows()["2024-05-01"]]
+
+
 def test_plant_id_source_passes_through_when_uniform():
-    results = [
-        {"image": "a", "plant_id": "P1", "count": 1, "plant_id_source": "sequence"},
-        {"image": "b", "plant_id": "P1", "count": 2, "plant_id_source": "sequence"},
-    ]
-    out = aggregate_per_plant(results, strategy="count", value_key="count")
+    out = aggregate_per_plant(_mapped_rows(("a", "sequence", 1.0), ("b", "sequence", 2.0)),
+                              strategy="count", value_key="count")
     assert out[0]["plant_id_source"] == "sequence"
 
 
 def test_plant_id_source_reports_mixed_when_not_uniform():
-    results = [
-        {"image": "a", "plant_id": "P1", "count": 1, "plant_id_source": "sequence"},
-        {"image": "b", "plant_id": "P1", "count": 2, "plant_id_source": "nearest_neighbor"},
-    ]
-    out = aggregate_per_plant(results, strategy="count", value_key="count")
+    out = aggregate_per_plant(_mapped_rows(("a", "sequence", 1.0), ("b", "nearest_neighbor", 2.0)),
+                              strategy="count", value_key="count")
     assert out[0]["plant_id_source"] == "mixed"
 
 
 def test_plant_id_distance_m_max_tracked():
-    results = [
-        {"image": "a", "plant_id": "P1", "count": 1, "plant_id_distance_m": 1.5},
-        {"image": "b", "plant_id": "P1", "count": 2, "plant_id_distance_m": 4.2},
-    ]
-    out = aggregate_per_plant(results, strategy="count", value_key="count")
+    out = aggregate_per_plant(_mapped_rows(("a", "sequence", 1.5), ("b", "sequence", 4.2)),
+                              strategy="count", value_key="count")
     assert out[0]["plant_id_distance_m_max"] == pytest.approx(4.2)
 
 

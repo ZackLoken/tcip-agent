@@ -318,31 +318,34 @@ def test_run_inference_instance_seg_explicit_tile_true_writes_tiled(instance_seg
     assert _document(r, images_dir) is not None
 
 
-def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_ckpt, tmp_path):
-    """The delivery-gating eval never consumed masks: it reads boxes/scores/labels only, so a
-    tile-trained Mask R-CNN must still evaluate here instead of crashing on the mask refusal."""
-    from tcip_annotation.state import Annotation, BBox
+def test_run_full_frame_evaluation_tiled_instance_seg_scores_masks(instance_seg_ckpt, tmp_path):
+    """A tile-trained Mask R-CNN is gated full frame by its masks over the objects its own task
+    selects: a box beside a polygon is no instance reference on either route."""
+    from tcip_annotation.state import Annotation, BBox, Polygon
     from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
     from tests._producer_fixtures import label_image
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     _image(images_dir, "a.png")
-    label_image(images_dir / "a.png", [Annotation(subject="stem", geometry=BBox(54, 54, 74, 74))],
-                128, 128)
+    label_image(images_dir / "a.png", [
+        Annotation(subject="stem", geometry=BBox(10, 10, 30, 30)),
+        Annotation(subject="stem", geometry=Polygon(rings=[[(54, 54), (74, 54), (74, 74)]]))],
+        128, 128)
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     checkpoint = load_registered_checkpoint(instance_seg_ckpt, project=tmp_path)
-    r = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
-                                  stated=Stated(tile_size=TILE, overlap=0.2))
+    admitted = checkpoint_admission(checkpoint, images_dir)
+    r = run_full_frame_evaluation(checkpoint, admitted, stated=Stated(tile_size=TILE, overlap=0.2))
+    samples = admitted.every_sample()
+    trained = build_dataset("instance_seg", scope=admitted.scope, samples=samples,
+                            sizes=resolve_sizes("instance_seg", {"num_channels": 3}, samples))
     assert r["eval_regime"] == "full-frame-tiled-inference"
     assert r["scored_images"] == 1
-    assert r["n_gt"] == 1
-    # task records the checkpoint's actual producer task, not a hardcoded "detection". iou_type
-    # stays "bbox" regardless of task: this gate always scores boxes only, by design (see the
-    # docstring).
+    assert r["n_gt"] == len(trained[0][1]["boxes"]) == 1
     assert r["task"] == "instance_seg"
-    assert r["iou_type"] == "bbox"
+    assert r["governing_criterion"]["kind"] == "mask_iou_match"
 
 
 # export.py encode_predictions: masks become a real (possibly multi-ring) Polygon.

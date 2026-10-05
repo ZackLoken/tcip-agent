@@ -302,7 +302,7 @@ def test_a_splits_root_nested_under_a_nested_dataset_root_archives_and_round_tri
     _annotated_dataset(curated, 4)
 
     splits_result = draw_splits(project, str(curated), subject="bud", output_path=str(curated / "splits"),
-                                 train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                                 seed=1, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in splits_result, splits_result
 
     zip_path = tmp_path / "bundle.zip"
@@ -362,13 +362,13 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
         root, base_config={"model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                                       "task": "detection"},
                      "data": {"images_dir": str(root / "images" / "2026-03-04"),
-                              "scope": {"subject": "bud"}}},
+                              "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}}},
         n_trials=1, search_seed=0
     )
     study = hpo_result["study_name"]
 
     splits_result = draw_splits(root, str(root), output_path=str(root / "splits_out"), subject="bud",
-                                train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                                seed=1, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in splits_result, splits_result
 
     zip_path = tmp_path / "bundle.zip"

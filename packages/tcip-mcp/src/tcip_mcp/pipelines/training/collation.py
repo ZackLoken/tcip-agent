@@ -34,6 +34,8 @@ def _stack_collate(batch):
 
 def task_collate(task: str):
     """Return the right collate_fn for a task type."""
-    if task in ("detection", "instance_seg"):
+    from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+
+    if task in DETECTION_TASKS:
         return _detection_collate
     return _stack_collate

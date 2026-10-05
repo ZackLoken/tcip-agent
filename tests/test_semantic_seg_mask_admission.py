@@ -84,9 +84,9 @@ def test_the_class_count_and_a_served_sample_read_one_mask_the_same_way(tmp_path
     read_mask = BaseImageDataset.read_mask
     read: list[str] = []
 
-    def _spy(path):
-        read.append(Path(path).name)
-        return read_mask(path)
+    def _spy(sample):
+        read.append(Path(sample.ground_truth).name)
+        return read_mask(sample)
 
     monkeypatch.setattr(BaseImageDataset, "read_mask", staticmethod(_spy))
 

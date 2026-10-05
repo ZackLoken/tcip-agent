@@ -40,7 +40,8 @@ def _make_dataset(root: Path, *, shade: int = 0) -> Path:
 def _config(images_dir: Path) -> dict:
     """A :data:`BUILT_DETECTOR` run's config over ``images_dir``."""
     return {"model_source": dict(BUILT_DETECTOR),
-            "data": {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}}}
+            "data": {"images_dir": str(images_dir), "scope": {"subject": SUBJECT},
+                     "split": {"seed": 0, "val_ratio": 0.15}}}
 
 
 def test_compare_experiments_surfaces_shared_fingerprint(tmp_path):
@@ -63,7 +64,7 @@ def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(tmp_path
     opened_run(tmp_path, {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_classifier",
                          "task": "classification"},
-        "data": table_images(tmp_path / "loose")}, experiment_id="b")
+        "data": {**table_images(tmp_path / "loose"), "split": {"seed": 0, "val_ratio": 0.15}}}, experiment_id="b")
     assert compare_experiments(["a", "b"], project=tmp_path)["same_dataset_fingerprint"] is None
 
 
@@ -89,7 +90,7 @@ def test_dataset_identity_raises_a_fingerprint_read_failure(tmp_path, monkeypatc
     _make_dataset(tmp_path)
     register_dataset(tmp_path, str(tmp_path), crop="currant")
 
-    def _raise(_root):
+    def _raise(_root, _admitted):
         raise OSError("simulated I/O error mid-scan")
 
     # dataset_identity reads the fingerprint through its own module at call time, so it is
@@ -155,7 +156,8 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(tmp_path, mon
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 64},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": SUBJECT},
+                 "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}], "device": "cpu",
         "experiment_id": "exp-identity",
     }, actor=None)

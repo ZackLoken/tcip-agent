@@ -1,28 +1,23 @@
 """Task-aware evaluation metrics + composite selection objective:
-  * the pycocotools-backed detection / instance_seg metrics (mAP + operating-point TP/FP/FN), the
-  canonical COCO mAP definition;
+  * detection / instance_seg counts and average precision from the platform's one matcher
+  (:mod:`tcip_annotation.matching`), by box or, for instance segmentation, by mask;
   * in-house scalar metrics for classification / ordinal / regression;
   * the composite selection objective (lower = better);
   * a task-agnostic two-pass ``evaluate()``.
-
-Every pycocotools call runs with stdout redirected, since it prints to stdout.
 """
 
 from __future__ import annotations
 
-import contextlib
-import io
 import logging
 import math
 from collections.abc import Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import numpy as np
 import torch
 
 from tcip_store import stored_number, stored_numbers
 
-# Every box handed to pycocotools goes through this, both sides of a match on the one stored grid.
 from tcip_annotation.json_io import xywh
 
 if TYPE_CHECKING:
@@ -30,30 +25,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Composite-objective weights. Note: in compute_composite_objective the F1 and
-# mAP50 terms are multiplied by 10 to lift them onto the same scale as val_loss,
-# so a weight here acts on that *scaled* term (a 0.35 f1 weight ~ 3.5 loss-units
-# of pull at f1=0). See compute_composite_objective for the exact formula.
-# These weights silently decide which checkpoint wins, so they are a caller-owned selection policy
-# (validated=false, not a data derivation): overridable via the ``score_weights`` kwarg on every
-# eval surface. Documented default, not a frozen truth, no derivation label is claimed for it.
 DEFAULT_SCORE_WEIGHTS: dict[str, float] = {"loss": 0.45, "f1": 0.35, "map50": 0.20}
+"""Composite-objective weights, each acting on its term as :func:`compute_composite_objective`
+scales it: a caller-owned selection policy, overridable through ``score_weights`` on every eval
+surface; a documented default, no derivation."""
 
-# The metric keys that ``evaluate()`` labels comparability-only (``map50_role``) once a center-match
-# trait's own governing criterion takes over ``precision``/``recall``/``f1`` (see the center_match
-# branch below), the AP@0.5-family keys plus the IoU@0.5-convention precision/recall/F1 that get
-# relabeled ``iou_*`` at that point. The single source of truth for "is this metric governing or
-# comparability-only for a center-match trait", ``resolve_selection_metric`` (generic_trainer.py)
-# and ``rank_registered_models`` (model_tools.py) both import this rather than re-encoding the names.
 CENTER_MATCH_COMPARABILITY_KEYS: frozenset[str] = frozenset({
-    "map50", "map", "map_at_maxdets", "map50_at_maxdets",
-    "iou_precision", "iou_recall", "iou_f1",
+    "map50", "map", "iou_precision", "iou_recall", "iou_f1",
 })
+"""The metric keys reported comparability-only (``map50_role``) under a trait's own governing
+criterion: the IoU-convention average precision and counts."""
 
 VAL_METRIC_PREFIX = "val_"
-"""What ``_validate`` (generic_trainer.py) prefixes every metric key with before it reaches a
-run's metrics log or a registry entry. Declared once here so a ranking reader strips it without
-importing the training stack."""
+"""The prefix every validation metric key carries in a run's metrics log and registry entry."""
 
 HIGHER_IS_BETTER_BY_METRIC: dict[str, bool] = {
     "loss": False,
@@ -65,8 +49,6 @@ HIGHER_IS_BETTER_BY_METRIC: dict[str, bool] = {
     "f1": True,
     "map": True,
     "map50": True,
-    "map_at_maxdets": True,
-    "map50_at_maxdets": True,
     "iou_precision": True,
     "iou_recall": True,
     "iou_f1": True,
@@ -78,19 +60,13 @@ HIGHER_IS_BETTER_BY_METRIC: dict[str, bool] = {
     "dice": True,
     "pixel_acc": True,
 }
-"""Direction of a better value, keyed by the bare (un-``val_``-prefixed) metric name, for every
-scalar ``evaluate()`` (or ``governing_counts``) returns across the tasks it scores. A raw count
-(``tp``/``fp``/``fn``), a signed bias (``count_bias_mean``) and a non-finite value's state
-companion (``tcip_store.values.NOT_FINITE_SUFFIX``) have no direction and are not listed."""
+"""Direction of a better value for each directed scalar metric, keyed by its bare
+(un-``val_``-prefixed) name; a raw count, a signed bias and a non-finite state companion have no
+direction."""
 
 
 def _rounded(value):
-    """One metric at the reported precision, leaving a non-finite or non-numeric value alone.
-
-    Rounding a value that is not a number raises, and rounding a non-finite one changes
-    nothing, so both are handed on for the caller to represent rather than forced through
-    here.
-    """
+    """One metric at the reported precision, a non-finite or non-numeric value unchanged."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return value
     return round(value, 6) if math.isfinite(value) else value
@@ -133,10 +109,6 @@ def compute_composite_objective(
     return w["loss"] * vl + w["f1"] * (1.0 - f1v) * 10 + w["map50"] * (1.0 - m50) * 10
 
 
-# ====================================================================
-# pycocotools detection / instance_seg metrics
-# ====================================================================
-
 def precision_recall_f1(tp: int, fp: int, fn: int) -> dict[str, float]:
     """Precision, recall and F1 from counts: each ``0.0`` when its denominator is empty."""
     precision = tp / (tp + fp) if tp + fp else 0.0
@@ -145,239 +117,99 @@ def precision_recall_f1(tp: int, fp: int, fn: int) -> dict[str, float]:
     return {"precision": precision, "recall": recall, "f1": f1}
 
 
-def build_coco_image_record(width: float, height: float, gt: list[dict], dt: list[dict],
-                            image_id=None) -> dict:
-    """One per-image entry: ``{'width','height','gt':[ann...],'dt':[res...]}`` (+ optional image_id)."""
-    rec = {"width": int(width), "height": int(height), "gt": list(gt), "dt": list(dt)}
-    if image_id is not None:
-        rec["image_id"] = image_id
-    return rec
+AP_IOU_THRESHOLDS = tuple(round(0.5 + 0.05 * i, 2) for i in range(10))
+"""The IoU thresholds ``map`` averages average precision over, 0.50 to 0.95 by 0.05: the COCO
+convention's own, so ``map`` stays comparable to a COCO-reported figure."""
+
+_AP_RECALL_POINTS = 101
+"""The recall points average precision is interpolated at, the COCO convention's own."""
 
 
-def _counts_at_operating_point(coco_eval, iou_threshold: float, conf_threshold: float) -> dict:
-    """Walk ``COCOeval.evalImgs`` to extract TP/FP/FN at a (conf, iou) point."""
-    p = coco_eval.params
-    iou_thrs = list(p.iouThrs)
-    t = min(range(len(iou_thrs)), key=lambda i: abs(iou_thrs[i] - iou_threshold))
-    area_all = p.areaRng[0]
+def iou_criterion(iou_threshold: float, *, by_mask: bool) -> dict:
+    """The matcher's IoU criterion at ``iou_threshold``: over each record's ``rings`` for a mask
+    match (``by_mask``), else over its box."""
+    return {"kind": "mask_iou_match" if by_mask else "iou_match",
+            "iou_threshold": float(iou_threshold)}
 
-    tp = fp = total_gt = 0
-    per_image: dict[int, dict] = {}
-    for e in coco_eval.evalImgs:
-        if e is None or e["aRng"] != area_all:
-            continue
-        img_id = e["image_id"]
-        gt_ignore = np.asarray(e["gtIgnore"])
-        n_gt = int((gt_ignore == 0).sum())
-        total_gt += n_gt
-        dt_scores = np.asarray(e["dtScores"])
-        dt_matches = np.asarray(e["dtMatches"])
-        dt_ignore = np.asarray(e["dtIgnore"])
-        e_tp = e_fp = 0
-        for d in range(dt_scores.shape[0] if dt_scores.size else 0):
-            # strict > matches deployed torchvision's in-model score_thresh (keeps score > thresh)
-            if dt_scores[d] <= conf_threshold or dt_ignore[t, d]:
+
+def matched(per_image: list[dict], criterion: dict, *, conf: float = -math.inf,
+            policy: str = "score_first", held: dict | None = None) -> list[dict[int, Any]]:
+    """Each per-image record's class-by-class matching under ``criterion`` at ``conf``
+    (:func:`~tcip_annotation.matching.class_matchings`, indices into the record's ``gt`` and
+    ``dt``), each taken from ``held`` where the same inputs were already matched."""
+    from tcip_annotation.matching import class_matchings
+
+    return [class_matchings(rec["gt"], rec["dt"], criterion, conf=conf, policy=policy, held=held)
+            for rec in per_image]
+
+
+def average_precision(per_image: list[dict], criterion: dict, *,
+                      held: dict | None = None) -> float:
+    """The area under the precision-recall curve of every detection in ``per_image`` matched
+    under ``criterion`` (:func:`matched`, every detection), averaged over the classes the ground
+    truth's objects carry: per class, detections ranked by score across images, one a crowd
+    region ignores counting neither way, precision made monotone from the right and read at
+    :data:`_AP_RECALL_POINTS` recall points. ``0.0`` for a reference holding no object."""
+    images = list(zip(per_image, matched(per_image, criterion, held=held)))
+    per_class = []
+    for cid in sorted({a["category_id"] for rec in per_image for a in gt_objects(rec)}):
+        ranked: list[tuple[float, bool]] = []
+        n_objects = 0
+        for rec, by_class in images:
+            if cid not in by_class:
                 continue
-            if dt_matches[t, d] > 0:
-                e_tp += 1
-            else:
-                e_fp += 1
-        tp += e_tp
-        fp += e_fp
-        rec = per_image.setdefault(img_id, {"image_id": img_id, "tp": 0, "fp": 0, "gt": 0})
-        rec["tp"] += e_tp
-        rec["fp"] += e_fp
-        rec["gt"] += n_gt
-
-    per_image_counts = [
-        {"image_id": r["image_id"], "tp": r["tp"], "fp": r["fp"], "fn": max(r["gt"] - r["tp"], 0)}
-        for r in per_image.values()
-    ]
-    return {"tp": tp, "fp": fp, "fn": max(total_gt - tp, 0), "per_image_counts": per_image_counts}
+            m = by_class[cid]
+            n_objects += len(m.pairs) + len(m.missed)
+            paired = {d for _, d in m.pairs}
+            ranked += [(_dt_score(rec["dt"][d]), d in paired) for d in sorted(
+                paired | set(m.unpaired), key=lambda d: (-_dt_score(rec["dt"][d]), d))]
+        ranked.sort(key=lambda r: -r[0])
+        hits = np.asarray([hit for _, hit in ranked], dtype=bool)
+        tp, fp = np.cumsum(hits), np.cumsum(~hits)
+        recall = tp / n_objects
+        precision = np.maximum.accumulate((tp / np.maximum(tp + fp, 1))[::-1])[::-1]
+        at = np.searchsorted(recall, np.linspace(0.0, 1.0, _AP_RECALL_POINTS), side="left")
+        per_class.append(float(np.mean([precision[i] if i < len(precision) else 0.0
+                                        for i in at])))
+    return float(np.mean(per_class)) if per_class else 0.0
 
 
-def _ap_from_precision(coco_eval, *, iou: float | None, maxdet: int) -> float:
-    """Mean AP from ``coco_eval.eval['precision']`` at a given IoU / maxDet, mirroring
-    pycocotools' ``_summarize(ap=1)`` (area='all'), but indexed explicitly so we can read AP at
-    both the standard 100 cap and a non-100 operating cap without summarize()'s hardcoded 100."""
-    p = coco_eval.params
-    s = coco_eval.eval["precision"]  # [T(iou), R(rec), K(cat), A(area), M(maxDet)]
-    if iou is not None:
-        t = np.where(np.isclose(p.iouThrs, iou))[0]
-        s = s[t]
-    mind = list(p.maxDets).index(maxdet)
-    s = s[:, :, :, 0, mind]  # area 'all' is index 0
-    valid = s[s > -1]
-    return float(valid.mean()) if valid.size else 0.0
-
-
-def coco_detection_metrics(
-    per_image: list[dict],
-    *,
-    iou_type: str = "bbox",
-    iou_threshold: float = 0.5,
-    conf_threshold: float = 0.25,
-    max_dets: int = 100,
-) -> dict:
-    """Run ``COCOeval`` once over ``per_image`` records and return COCO metrics.
-
-    Returns mAP at the standard 100-detection cap (``map``/``map50``/``map75``, comparable across
-    runs and caps) plus the same at the operating cap (``map_at_maxdets``/``map50_at_maxdets``),
-    and operating-point ``precision``/``recall``/``f1``/``tp``/``fp``/``fn`` with per-image counts.
-    Short-circuits to all-zero metrics, every object a miss, when there is no prediction at all
-    (``loadRes([])`` raises ``IndexError``). A reference with no object, empty or crowd regions
-    alone, is still evaluated: each detection outside a crowd region is a false positive.
+def gt_objects(rec: dict, *, crowd: bool = False, class_id: int | None = None) -> list[dict]:
+    """A per-image record's ground-truth objects of ``class_id`` (every class for ``None``): every
+    ``gt`` entry but a crowd region (:func:`~tcip_annotation.matching.objects_of`), which is never
+    one object in a count, a size or a spacing; with ``crowd``, the crowd regions instead.
     """
-    images, annotations, results = [], [], []
-    cat_ids: set[int] = set()
-    ann_id = 1
-    n_pred = 0
-    # Objects each image's ground truth holds: a crowd region is none, it is COCOeval's ignore.
-    n_objects = [len(gt_objects(rec)) for rec in per_image]
-    for img_id, rec in enumerate(per_image, start=1):
-        images.append({"id": img_id, "width": int(rec["width"]), "height": int(rec["height"])})
-        for ann in rec["gt"]:
-            a = dict(ann)
-            a["id"] = ann_id
-            a["image_id"] = img_id
-            annotations.append(a)
-            cat_ids.add(int(a["category_id"]))
-            ann_id += 1
-        for res in rec["dt"]:
-            r = dict(res)
-            r["image_id"] = img_id
-            results.append(r)
-            cat_ids.add(int(r["category_id"]))
-            n_pred += 1
-    n_gt = sum(n_objects)
+    from tcip_annotation.matching import objects_of
 
-    base = {
-        "map": 0.0, "map50": 0.0, "map75": 0.0,
-        "map_at_maxdets": 0.0, "map50_at_maxdets": 0.0,
-        "precision": 0.0, "recall": 0.0, "f1": 0.0,
-        "tp": 0, "fp": 0, "fn": n_gt,
-        "n_images": len(per_image), "n_gt": n_gt, "n_pred": n_pred,
-        "per_image_counts": [
-            {"image_id": i + 1, "tp": 0, "fp": 0, "fn": n} for i, n in enumerate(n_objects)
-        ],
-        "iou_type": iou_type, "iou_threshold": iou_threshold,
-        "conf_threshold": conf_threshold, "max_dets": max_dets,
-    }
-    if n_pred == 0:
-        return base
-
-    from pycocotools.coco import COCO
-    from pycocotools.cocoeval import COCOeval
-
-    categories = [{"id": c, "name": str(c)} for c in sorted(cat_ids)]
-    sink = io.StringIO()
-    with contextlib.redirect_stdout(sink):
-        coco_gt = COCO()
-        coco_gt.dataset = {"images": images, "annotations": annotations, "categories": categories}
-        coco_gt.createIndex()
-        coco_dt = coco_gt.loadRes(results)
-        coco_eval = COCOeval(coco_gt, coco_dt, iouType=iou_type)
-        # Include 100 so map/map50/map75 stay the standard, cap-comparable AP; max_dets adds the operating-cap figures.
-        coco_eval.params.maxDets = sorted({1, 100, int(max_dets)})
-        coco_eval.params.imgIds = [im["id"] for im in images]
-        coco_eval.evaluate()
-        coco_eval.accumulate()
-        m_ap = _ap_from_precision(coco_eval, iou=None, maxdet=100)
-        m_ap50 = _ap_from_precision(coco_eval, iou=0.5, maxdet=100)
-        m_ap75 = _ap_from_precision(coco_eval, iou=0.75, maxdet=100)
-        m_ap_md = _ap_from_precision(coco_eval, iou=None, maxdet=int(max_dets))
-        m_ap50_md = _ap_from_precision(coco_eval, iou=0.5, maxdet=int(max_dets))
-        counts = _counts_at_operating_point(coco_eval, iou_threshold, conf_threshold)
-
-    tp, fp, fn = counts["tp"], counts["fp"], counts["fn"]
-    return {
-        "map": max(m_ap, 0.0), "map50": max(m_ap50, 0.0), "map75": max(m_ap75, 0.0),
-        "map_at_maxdets": max(m_ap_md, 0.0), "map50_at_maxdets": max(m_ap50_md, 0.0),
-        **precision_recall_f1(tp, fp, fn),
-        "tp": tp, "fp": fp, "fn": fn,
-        "n_images": len(per_image), "n_gt": n_gt, "n_pred": n_pred,
-        "per_image_counts": counts["per_image_counts"],
-        "iou_type": iou_type, "iou_threshold": iou_threshold,
-        "conf_threshold": conf_threshold, "max_dets": max_dets,
-    }
+    gt = rec["gt"]
+    return [gt[i] for i in objects_of(gt, crowd=crowd) if _in_class(gt[i], class_id)]
 
 
-# ====================================================================
-# Center-match counting sweep (for count-unbiased operating-point calibration)
-# ====================================================================
-# For small objects IoU is noisy relative to annotation jitter; a detection counts as finding an
-# object when its center lands within a derived tolerance of a GT center (the object's actual
-# scale for a given trait/dataset is gt_class_avg_size's job to measure, not a pinned constant
-# here). The operating point (conf) is then
-# derived to minimize the signed per-image count bias E[FP-FN], not F1, because the phenotype is a
-# count (Sigma pred ~= Sigma gt) for a trait whose recorded count_objective/localization say so
-# (traits.py, neither is authored, both are derived/decided once and recorded).
-
-def gt_objects(rec: dict, *, crowd: bool = False) -> list[dict]:
-    """A per-image record's ground-truth objects: every ``gt`` entry but a crowd region, which is
-    COCO's ignore region and never one object in a count, a size or a spacing; with ``crowd``, the
-    crowd regions instead.
-    """
-    return [a for a in rec["gt"] if bool(a["iscrowd"]) is crowd]
-
-
-def gt_facts(rec: dict) -> list:
-    """A per-image record's ground truth as content: each record's class, box and crowd flag, in
-    a fixed order. The one projection every content identity of ground truth hashes."""
-    return sorted([g["category_id"], g["bbox"], g["iscrowd"]] for g in rec["gt"])
-
-
-def _char_size_xywh(a: dict) -> float:
-    """Characteristic size of a box = sqrt(w*h), scale-robust for a tolerance basis."""
-    w, h = float(a["bbox"][2]), float(a["bbox"][3])
-    return (max(w, 0.0) * max(h, 0.0)) ** 0.5
+def _in_class(record: dict, class_id: int | None) -> bool:
+    """Whether an evaluation record is of ``class_id``; every record is, for ``None``."""
+    return class_id is None or record["category_id"] == class_id
 
 
 def gt_class_avg_size(per_image: list[dict], class_id: int | None = None) -> float:
-    """Average characteristic GT box size, the derived basis for the center-match tolerance.
+    """Average characteristic size (:func:`~tcip_annotation.matching.box_sizes`) of the ground
+    truth's objects of ``class_id``, every class for ``None``; ``0.0`` for none."""
+    from tcip_annotation.matching import box_sizes, xywh_corners
 
-    Derived from the data in hand (not pinned): the tolerance is ``half_class_avg_size`` (traits.py).
-    """
-    sizes = [
-        _char_size_xywh(a)
-        for rec in per_image for a in gt_objects(rec)
-        if class_id is None or a["category_id"] == class_id
-    ]
-    return float(np.mean(sizes)) if sizes else 0.0
+    boxes = [a["bbox"] for rec in per_image for a in gt_objects(rec, class_id=class_id)]
+    return float(np.mean(box_sizes(xywh_corners(boxes)))) if boxes else 0.0
 
 
 def mean_of_present_counts(counts: Iterable[int]) -> float:
-    """Mean of the entries in ``counts`` that are actually positive (> 0): the "typical, when
-    present" statistic behind a relative count-bias tolerance's derived denominator.
-    """
+    """Mean of the positive entries in ``counts``; ``0.0`` when none is positive."""
     present = [c for c in counts if c > 0]
     return float(np.mean(present)) if present else 0.0
 
 
 def gt_class_typical_count(per_image: list[dict], class_id: int | None = None) -> float:
-    """Mean per-image GT count for ``class_id`` (all classes pooled when ``None``), the derived
-    denominator a relative count-bias tolerance scales against
-    (:func:`operating_point._bias_equivalence_ok`).
-
-    GT-only and conf-independent, a distinct notion of "present" from ``_count_stats_at_conf``'s
-    ``n_present`` (a counted object or detection, at one conf): a class with detections but no real
-    GT anywhere derives 0.
-    """
-    counts = [
-        sum(1 for a in gt_objects(rec) if class_id is None or a["category_id"] == class_id)
-        for rec in per_image
-    ]
+    """Mean ground-truth count of ``class_id`` (all classes pooled when ``None``) over the images
+    holding any, independent of detections and confidence; ``0.0`` when no image holds one."""
+    counts = [len(gt_objects(rec, class_id=class_id)) for rec in per_image]
     return mean_of_present_counts(counts)
-
-
-def _match_image(gt: list[dict], dt: list[dict], criterion: dict) -> tuple[int, int, int]:
-    """tp/fp/fn on one image from the one matcher
-    (:func:`~tcip_annotation.matching.pair_detections`): a crowd region is no object to miss, and
-    an ignored detection is neither a true nor a false positive."""
-    from tcip_annotation.matching import pair_detections
-
-    m = pair_detections(gt, dt, criterion)
-    return len(m.pairs), len(m.unpaired), len(m.missed)
 
 
 def localization_frac(trait: TraitEntry, boxes_per_image: list[list[list[float]]]
@@ -397,27 +229,28 @@ def localization_frac(trait: TraitEntry, boxes_per_image: list[list[list[float]]
 
 
 def resolve_match_criterion(trait: TraitEntry | None, per_image: list[dict], *,
-                            class_id: int | None = None, iou_threshold: float = 0.5) -> dict:
+                            class_id: int | None = None, iou_threshold: float = 0.5,
+                            by_mask: bool = False) -> dict:
     """The localization criterion that governs a trait's phenotype count and model selection, as
     ``{kind, tolerance_frac and tolerance | iou_threshold, derived_from, trait}``, resolved once
     over the reference ``per_image`` and carried whole to every count and match over it.
 
-    With no trait it is IoU matching at ``iou_threshold``, the labeled comparability convention
-    (AP@0.5), which governs nothing on its own. With one, its stated ``localization`` governs, an
-    unauthored one refusing (:class:`~tcip_mcp.traits.UnauthoredField`): a center match's tolerance
-    is a fraction of the average object size (:func:`localization_frac`), scaled to ``per_image``
-    here and to another reference by :func:`scaled_to`; an IoU match's threshold is the one the
-    ground truth's own box sizes derive, and a reference with no box to derive it from refuses.
+    With no trait it is IoU matching at ``iou_threshold``, the comparability convention. With one,
+    its stated ``localization`` governs, an unauthored one refusing
+    (:class:`~tcip_mcp.traits.UnauthoredField`): a center match's tolerance is a
+    fraction of the average object size (:func:`localization_frac`), scaled to ``per_image`` here
+    and to another reference by :func:`scaled_to`; an IoU match's threshold is the one the ground
+    truth's own box sizes derive, and a reference with no box to derive it from refuses. An IoU
+    match is over masks when ``by_mask`` (:func:`iou_criterion`).
     """
     if trait is None:
-        return {"kind": "iou_match", "iou_threshold": float(iou_threshold),
-                "derived_from": "comparability convention (AP@0.5)", "trait": None}
+        return {**iou_criterion(iou_threshold, by_mask=by_mask),
+                "derived_from": "comparability convention", "trait": None}
     from tcip_mcp.pipelines.derivations import IOU_MATCH_DERIVATION, derive_iou_match_threshold
     from tcip_mcp.traits import CENTER_MATCH, authored
 
     authored(trait, ("localization",))
-    boxes_per_image = [[a["bbox"] for a in gt_objects(rec)
-                        if class_id is None or a["category_id"] == class_id]
+    boxes_per_image = [[a["bbox"] for a in gt_objects(rec, class_id=class_id)]
                        for rec in per_image]
     if trait.localization == CENTER_MATCH:
         frac, frac_source = localization_frac(trait, boxes_per_image)
@@ -428,7 +261,7 @@ def resolve_match_criterion(trait: TraitEntry | None, per_image: list[dict], *,
         raise ValueError(
             f"trait {trait.name!r} matches by IoU, and this reference holds no ground-truth box "
             "to derive the IoU a match must reach from; evaluate against a labeled reference.")
-    return {"kind": "iou_match", "iou_threshold": float(threshold),
+    return {**iou_criterion(threshold, by_mask=by_mask),
             "derived_from": IOU_MATCH_DERIVATION, "trait": trait.name}
 
 
@@ -454,13 +287,15 @@ def _dt_score(d: dict) -> float:
 
 def governing_counts(per_image: list[dict], criterion: dict, *, conf_threshold: float,
                      class_id: int | None = None) -> dict:
-    """tp/fp/fn/precision/recall/f1 at the criterion that governs the phenotype count, every
-    conf-surviving detection matched under ``criterion`` (:func:`match_pairs`). This count is what a
-    count-trait phenotype and model selection rest on, distinct from AP@0.5, which stays a labeled
-    comparability metric that governs nothing.
-    """
-    m = _count_stats_at_conf(per_image, criterion=criterion, conf=conf_threshold,
-                             class_id=class_id)
+    """tp/fp/fn/precision/recall/f1 of ``per_image`` matched under ``criterion`` at
+    ``conf_threshold`` (:func:`counted`), for ``class_id`` or every class."""
+    return counted(matched(per_image, criterion, conf=conf_threshold), criterion, class_id)
+
+
+def counted(by_image: list[dict[int, Any]], criterion: dict, class_id: int | None = None) -> dict:
+    """:func:`governing_counts`'s answer from the per-image matchings ``by_image`` under
+    ``criterion``."""
+    m = _count_stats(by_image, class_id)
     return {"tp": int(m["tp"]), "fp": int(m["fp"]), "fn": int(m["fn"]),
             **{k: round(m[k], 6) for k in ("precision", "recall", "f1")}, "criterion": criterion}
 
@@ -468,29 +303,30 @@ def governing_counts(per_image: list[dict], criterion: dict, *, conf_threshold: 
 def attribute_pairs(per_image: list[dict], criterion: dict, *, conf: float,
                     column: int) -> list[tuple[Any, int, int]]:
     """``(image_id, reference id, predicted id)`` under attribute ``column`` for each reference
-    object matched, on geometry alone, to one detection scoring at least ``conf``, under
-    ``criterion`` scaled to ``per_image`` (:func:`~tcip_annotation.matching.match_pairs`, distance
-    first). A reference object unassessed for that attribute contributes no pair."""
+    object matched to one detection of its class scoring at least ``conf``, distance first, under
+    ``criterion`` scaled to ``per_image`` (:func:`matched`). A reference object unassessed for
+    that attribute contributes no pair."""
     from tcip_annotation.json_io import UNASSESSED
-    from tcip_annotation.matching import match_pairs
 
-    scaled = scaled_to(criterion, per_image)
     pairs = []
-    for rec in per_image:
-        gt = gt_objects(rec)
-        dt = [d for d in rec["dt"] if d["score"] >= conf]
-        for gi, di in match_pairs([g["bbox"] for g in gt], [d["bbox"] for d in dt], scaled,
-                                  policy="distance_first"):
-            truth = gt[gi]["attributes"][column]
+    for rec, by_class in zip(per_image, matched(per_image, scaled_to(criterion, per_image),
+                                                conf=conf, policy="distance_first")):
+        for g, d in (pair for m in by_class.values() for pair in m.pairs):
+            truth = rec["gt"][g]["attributes"][column]
             if truth != UNASSESSED:
-                pairs.append((rec["image_id"], truth, dt[di]["attributes"][column]))
+                pairs.append((rec["image_id"], truth, rec["dt"][d]["attributes"][column]))
     return pairs
 
 
 def _count_stats_at_conf(per_image: list[dict], *, criterion: dict, conf: float,
                          class_id: int | None) -> dict:
-    """Counting statistics under ``criterion`` over ``per_image`` at one conf, optionally for one
-    class: the class-pooled curve entry and every per-class entry beside it.
+    """:func:`_count_stats` of ``per_image`` matched once at ``conf`` (:func:`matched`)."""
+    return _count_stats(matched(per_image, criterion, conf=conf), class_id)
+
+
+def _count_stats(matched: list[dict[int, Any]], class_id: int | None) -> dict:
+    """Counting statistics over each image's per-class matchings ``matched``, for one class or,
+    for ``None``, each image's counts summed over its classes: a curve entry.
 
     Two scopes of the same per-image bias travel side by side. The whole-reference statistics
     (``count_bias_mean``/``count_bias_std`` over ``n_images``) are what a conf picker compares
@@ -504,14 +340,9 @@ def _count_stats_at_conf(per_image: list[dict], *, criterion: dict, conf: float,
     tp = fp = fn = 0
     biases: list[int] = []
     present_biases: list[int] = []
-    for rec in per_image:
-        gt = [a for a in rec["gt"] if class_id is None or a["category_id"] == class_id]
-        dt = sorted(
-            (d for d in rec["dt"]
-             if _dt_score(d) >= conf and (class_id is None or d["category_id"] == class_id)),
-            key=lambda d: -_dt_score(d),
-        )
-        t, f, n = _match_image(gt, dt, criterion)
+    for by_class in matched:
+        ms = [m for cid, m in by_class.items() if class_id is None or cid == class_id]
+        t, f, n = (sum(m.counts[i] for m in ms) for i in range(3))
         tp += t
         fp += f
         fn += n
@@ -540,17 +371,6 @@ def _count_stats_at_conf(per_image: list[dict], *, criterion: dict, conf: float,
     }
 
 
-def _class_ids_present(per_image: list[dict], class_id: int | None = None) -> list[int]:
-    """The class ids to break the sweep down by: ``[class_id]`` when given, whether or not the
-    records carry it, else every ``category_id`` the records' gt and dt carry, sorted. An
-    annotation or detection with no ``category_id`` raises ``KeyError``."""
-    if class_id is not None:
-        return [class_id]
-    ids = {a["category_id"] for rec in per_image for a in rec["gt"]}
-    ids |= {d["category_id"] for rec in per_image for d in rec["dt"]}
-    return sorted(ids)
-
-
 def derive_operating_point_curve(per_image: list[dict], *, criterion: dict,
                                  class_id: int | None = None,
                                  conf_grid: list[float] | None = None,
@@ -565,11 +385,10 @@ def derive_operating_point_curve(per_image: list[dict], *, criterion: dict,
     count_bias_mean_present, count_bias_std_present, per_class}]}``. See
     :func:`_count_stats_at_conf` for the two bias scopes.
 
-    ``per_class`` carries the same statistics measured within each class the records carry, keyed
-    by ``str(category_id)`` (string keys so an in-memory sweep and one round-tripped through a
-    stored JSON record have the same shape): matching is class-blind in the pooled entry, so a
-    detector that calls every class-A object class B reports zero pooled bias while both per-class counts
-    are wrong. Class ids come from the records themselves.
+    ``per_class`` carries the same statistics within each class the records carry, keyed by
+    ``str(category_id)`` (string keys so an in-memory sweep and one round-tripped through a stored
+    JSON record have the same shape), from the one matching per conf the pooled entry sums. Class
+    ids come from the records themselves.
     """
     scores = sorted({_dt_score(d) for rec in per_image for d in rec["dt"]})
     if conf_grid is None:
@@ -578,37 +397,24 @@ def derive_operating_point_curve(per_image: list[dict], *, criterion: dict,
         else:
             conf_grid = list(scores)
         conf_grid = sorted(set([0.0, *conf_grid]))
-    class_ids = _class_ids_present(per_image, class_id)
     curve: list[dict] = []
     for conf in conf_grid:
-        pooled = _count_stats_at_conf(per_image, criterion=criterion, conf=conf, class_id=class_id)
-        if len(class_ids) == 1:
-            # Filtering to the only class present is a no-op on both gt and dt, so the pooled entry
-            # is that class's entry, reused rather than recomputed, which keeps the single-class
-            # sweep (every reference the platform builds) at one pass's cost.
-            per_class = {str(class_ids[0]): pooled}
-        else:
-            per_class = {str(cid): _count_stats_at_conf(per_image, criterion=criterion, conf=conf,
-                                                        class_id=cid)
-                         for cid in class_ids}
-        curve.append({"conf": float(conf), **pooled, "per_class": per_class})
+        by_image = matched(per_image, criterion, conf=conf)
+        class_ids = ([class_id] if class_id is not None
+                     else sorted({cid for by_class in by_image for cid in by_class}))
+        curve.append({"conf": float(conf), **_count_stats(by_image, class_id),
+                      "per_class": {str(cid): _count_stats(by_image, cid) for cid in class_ids}})
     return {"criterion": criterion, "class_id": class_id, "curve": curve}
 
 
 def worst_class_count_bias(entry: dict) -> float:
     """The largest |mean per-image count bias| over the classes in one curve entry, the class this
-    conf serves worst, and the one the gate's per-class equivalence test refuses on.
-
-    Falls back to the pooled bias for an entry with no per-class breakdown; a single-class sweep
-    reuses the pooled entry as its one class, so the two agree there by construction.
-    """
-    per_class = entry.get("per_class") or {}
-    if not per_class:
-        return abs(entry["count_bias_mean"])
-    return max(abs(s["count_bias_mean"]) for s in per_class.values())
+    conf serves worst; the pooled bias for an entry over no class."""
+    return max((abs(s["count_bias_mean"]) for s in entry["per_class"].values()),
+               default=abs(entry["count_bias_mean"]))
 
 
-def pick_count_unbiased(sweep: dict) -> float | None:
+def pick_count_unbiased(sweep: dict) -> float:
     """The conf that minimizes the worst per-class |mean per-image count bias| (tie-break: lower
     pooled |bias|, higher F1, lower |error|, higher conf).
 
@@ -621,10 +427,7 @@ def pick_count_unbiased(sweep: dict) -> float | None:
     The final ``-c["conf"]`` tie-break prefers the highest of exactly tied confs (a reference
     filtered to a floor ties everything below it), the most conservative candidate among equals.
     """
-    curve = sweep.get("curve") or []
-    if not curve:
-        return None
-    best = min(curve, key=lambda c: (worst_class_count_bias(c), abs(c["count_bias_mean"]), -c["f1"],
+    best = min(sweep["curve"], key=lambda c: (worst_class_count_bias(c), abs(c["count_bias_mean"]), -c["f1"],
                                      c["abs_count_error_mean"], -c["conf"]))
     return best["conf"]
 
@@ -634,34 +437,37 @@ def classes_with_evidence(entry: dict) -> set[str]:
     surviving detection at that conf (``tp + fp + fn > 0``). A class whose entry is all zeros
     carries no evidence of an unbiased count.
     """
-    return {cid for cid, s in (entry.get("per_class") or {}).items()
-            if s["tp"] + s["fp"] + s["fn"] > 0}
+    return {cid for cid, s in entry["per_class"].items() if s["tp"] + s["fp"] + s["fn"] > 0}
 
 
-def pick_f1_max(sweep: dict) -> float | None:
+def pick_f1_max(sweep: dict) -> float:
     """The F1-max conf, reported alongside the count-unbiased point to show the trade-off."""
-    curve = sweep.get("curve") or []
-    return max(curve, key=lambda c: c["f1"])["conf"] if curve else None
+    return max(sweep["curve"], key=lambda c: c["f1"])["conf"]
 
 
-# ---- converters -----------------------------------------------------
+def image_record(width: float, height: float, gt: list[dict], dt: list[dict],
+                 image_id=None) -> dict:
+    """One per-image evaluation record: ``{"width", "height", "gt", "dt"}`` and ``image_id`` when
+    given. The one shape every per-image record is built in."""
+    rec = {"width": int(width), "height": int(height), "gt": list(gt), "dt": list(dt)}
+    if image_id is not None:
+        rec["image_id"] = image_id
+    return rec
 
-def _mask_to_rle(mask) -> dict:
-    """Encode a binary/soft mask (``[H,W]`` or ``[1,H,W]``) as COCO RLE for segm metrics."""
-    from pycocotools import mask as mask_utils
+
+def _mask_rings(mask: Any, threshold: float | None) -> list:
+    """A binary (``threshold`` ``None``) or soft mask's regions as rings
+    (:func:`~tcip_annotation.mask_contours.mask_to_polygon_rings`), for a mask match."""
+    from tcip_annotation.mask_contours import mask_to_polygon_rings
 
     m = mask.detach().cpu().numpy() if hasattr(mask, "detach") else np.asarray(mask)
-    if m.ndim == 3:  # predicted masks arrive as [1, H, W] soft probabilities
-        m = m[0]
-    binary = np.asfortranarray((m >= 0.5).astype(np.uint8))
-    return mask_utils.encode(binary)
+    return mask_to_polygon_rings(m, threshold=threshold)
 
 
 def gt_record(bbox: list[float], category_id: int, crowd: Any) -> dict:
-    """One ground-truth evaluation record: its ``[x, y, w, h]`` box, the ``area`` that box
-    states and its crowd flag. The one shape every ground-truth record is built in."""
-    return {"category_id": int(category_id), "bbox": bbox, "area": float(bbox[2] * bbox[3]),
-            "iscrowd": int(crowd)}
+    """One ground-truth evaluation record: its class, its ``[x, y, w, h]`` box and its crowd flag.
+    The one shape every ground-truth record is built in."""
+    return {"category_id": int(category_id), "bbox": bbox, "iscrowd": int(crowd)}
 
 
 def dt_record(bbox: list[float], category_id: Any, score: Any) -> dict:
@@ -693,68 +499,63 @@ def _with_attributes(records: list[dict], values: Any) -> list[dict]:
 
 def prediction_record(result: Mapping[str, Any], gt: list[dict], *, image_id: str) -> dict:
     """One per-image evaluation record from a detection result (its ``width``, ``height``,
-    corner ``boxes``, ``scores``, ``labels``, ``attributes`` where it carries them, and
-    ``cap_hit``) and the image's ground-truth records ``gt``, named ``image_id``. Boxes, scores
-    and labels differing in length refuse (``ValueError``)."""
+    corner ``boxes``, ``scores``, ``labels``, ``attributes`` and ``masks`` where it carries them,
+    each mask's polygons as its record's ``rings``, and ``cap_hit``) and the image's ground-truth
+    records ``gt``, named ``image_id``. Boxes, scores, labels and masks differing in length refuse
+    (``ValueError``)."""
     dt = _with_attributes([detection_record(box, label, score) for box, score, label
                            in zip(result["boxes"], result["scores"], result["labels"],
                                   strict=True)], result.get("attributes"))
-    return {**build_coco_image_record(int(result["width"]), int(result["height"]), gt, dt,
-                                      image_id=image_id),
+    for record, mask in zip(dt, result.get("masks", ()), strict="masks" in result):
+        record["rings"] = [list(zip(p[0::2], p[1::2])) for p in mask["segmentation"]]
+    return {**image_record(int(result["width"]), int(result["height"]), gt, dt,
+                           image_id=image_id),
             "cap_hit": result["cap_hit"]}
 
 
 def gt_records(target: Mapping[str, Any]) -> list[dict]:
-    """A target's rows, corner ``boxes`` beside ``labels``, the crowd flag and the ``attributes``
-    row where the target carries them, as evaluation ground-truth records on the stored grid
+    """A target's rows, corner ``boxes`` beside ``labels``, the crowd flag, the ``attributes`` row
+    and each row's ``geometry`` as its ``rings`` (:func:`~tcip_annotation.matching.geometry_rings`)
+    where the target carries them, as evaluation ground-truth records on the stored grid
     (:func:`~tcip_annotation.json_io.xywh`), from a tensor, array or list target alike, its crowd
     flags read through :func:`~tcip_mcp.pipelines.data.datasets.crowd_of`.
     """
+    from tcip_annotation.matching import geometry_rings
+
     from tcip_mcp.pipelines.data.datasets import crowd_of
 
     if not len(target["boxes"]):
         return []
-    return _with_attributes(
+    records = _with_attributes(
         [gt_record(xywh(*box), lab, crowd)
          for box, lab, crowd in zip(_rows(target["boxes"]), _rows(target["labels"]),
                                     _rows(crowd_of(target)))], target.get("attributes"))
+    for record, geometry in zip(records, target.get("geometry", ()),
+                                strict="geometry" in target):
+        record["rings"] = geometry_rings(geometry)
+    return records
 
 
 def records_from_detector(target: dict, output: dict, *, width: int, height: int,
-                          include_masks: bool = False, detections_cap: int | None = None) -> dict:
-    """torchvision GT target + detector output -> one COCO per-image record.
-
-    With ``include_masks`` (instance_seg / Mask R-CNN) each GT and prediction also carries an RLE
-    ``segmentation``, so the record can be scored with ``iou_type='segm'``.
-
-    ``detections_cap`` (non-gating provenance): when the caller knows the in-model
-        ``detections_per_img`` this output was generated under, stamp ``cap_hit``, whether this
-        image's raw detection count reached that cap.
-    """
+                          include_masks: bool = False) -> dict:
+    """A torchvision target and a detector's output as one per-image record. With
+    ``include_masks`` (instance segmentation) every ground-truth and detection record also
+    carries its mask's ``rings``, the predicted masks cut at the platform's binarize threshold
+    (:func:`~tcip_mcp.pipelines.measurement.mask_geometry.resolve_binarize_threshold`), for a mask
+    match."""
     gt = gt_records(target)
-    if include_masks and target.get("masks") is not None:
-        for ann, mask in zip(gt, target["masks"]):
-            ann["segmentation"] = _mask_to_rle(mask)
-    dt = []
-    pboxes = output.get("boxes")
-    pmasks = output.get("masks") if include_masks else None
-    if pboxes is not None and len(pboxes):
-        plabels = output["labels"].detach().cpu().tolist()
-        pscores = output["scores"].detach().cpu().tolist()
-        for i, (box, c, s) in enumerate(zip(pboxes.detach().cpu().tolist(), plabels, pscores)):
-            res = detection_record(box, c, s)
-            if pmasks is not None and i < len(pmasks):
-                res["segmentation"] = _mask_to_rle(pmasks[i])
-            dt.append(res)
-        _with_attributes(dt, output.get("attributes"))
-    rec = build_coco_image_record(width, height, gt, dt, image_id=target.get("image_id"))
-    if detections_cap is not None:
-        rec["cap_hit"] = len(dt) >= detections_cap
-    return rec
+    dt = _with_attributes([detection_record(box, c, s) for box, c, s in zip(
+        output["boxes"].detach().cpu().tolist(), output["labels"].detach().cpu().tolist(),
+        output["scores"].detach().cpu().tolist(), strict=True)], output.get("attributes"))
+    if include_masks:
+        from tcip_mcp.pipelines.measurement.mask_geometry import resolve_binarize_threshold
 
-
-def _poly_flat(points) -> list[float]:
-    return [float(c) for pt in points for c in (pt[0], pt[1])]
+        cut = resolve_binarize_threshold()["value"]
+        for ann, mask in zip(gt, target["masks"], strict=True):
+            ann["rings"] = _mask_rings(mask, None)
+        for res, mask in zip(dt, output["masks"], strict=True):
+            res["rings"] = _mask_rings(mask, cut)
+    return image_record(width, height, gt, dt, image_id=target.get("image_id"))
 
 
 def subject_category_ids(annotations) -> dict[str, int]:
@@ -770,60 +571,106 @@ def subject_category_ids(annotations) -> dict[str, int]:
     return {n: i + 1 for i, n in enumerate(names)}
 
 
-def records_from_annotation(gt, preds, *, width: int, height: int, force_segm: bool = False,
-                             name_id: dict[str, int] | None = None):
-    """Name-based :class:`Annotation` GT + predictions -> (iou_type, COCO per-image record).
+def records_from_annotation(gt, preds, *, width: int, height: int,
+                            name_id: dict[str, int] | None = None) -> dict:
+    """Ground-truth and predicted :class:`Annotation` lists (a prediction carrying a ``score``)
+    as one per-image record, every record carrying its ``rings``
+    (:func:`~tcip_annotation.matching.match_record`) beside its box and the ``index`` of the
+    annotation it was built from in its list. ``name_id`` maps each subject
+    to the one category id it has in every image scored together
+    (:func:`subject_category_ids`), this image's own map when ``None``. A geometry-less annotation
+    and a :class:`~tcip_annotation.state.Point` contribute no record: neither has a region to
+    score."""
+    from tcip_annotation.matching import match_record
+    from tcip_annotation.state import box_derivable, is_detection, prediction_score
 
-    ``gt`` / ``preds`` are ``Annotation`` lists (a prediction carries a ``score``). The COCO
-    ``category_id`` is a 1-indexed id per distinct ``subject`` name, shared by GT and predictions.
-    Pass ``name_id`` when scoring more than one image: pycocotools accumulates every per-image
-    record into one eval, so a subject must map to the same id in every image; the per-image-local
-    default (``name_id`` ``None``) is for a single image. ``force_segm`` makes every box carry a
-    rectangular ``segmentation`` so a whole dataset can be scored with ``iou_type='segm'``.
-
-    A geometry-less annotation and a :class:`~tcip_annotation.state.Point` contribute no record and
-    no ``name_id`` entry: neither has a box to score.
-    """
-    from tcip_annotation.state import (
-        bbox_of, box_derivable, is_detection, polygonal, prediction_score,
-    )
-
-    def _scorable(a) -> bool:
-        return box_derivable(a.geometry)
-
-    def _has_poly(anns):
-        return any(polygonal(a.geometry) for a in anns)
-
-    use_segm = force_segm or _has_poly(gt) or _has_poly(preds)
-    iou_type = "segm" if use_segm else "bbox"
-
-    if name_id is None:  # single-image scoring: a local map cannot disagree with itself
+    if name_id is None:
         name_id = subject_category_ids((*gt, *preds))
 
-    def _box_seg(x1, y1, x2, y2):
-        return [[float(x1), float(y1), float(x2), float(y1), float(x2), float(y2), float(x1), float(y2)]]
-
-    def _record(a, *, is_pred):
-        if not _scorable(a):
-            return None
-        box = bbox_of(a.geometry)
-        corners = (box.x1, box.y1, box.x2, box.y2)
-        rec = (detection_record(corners, name_id[a.subject], prediction_score(a)) if is_pred else gt_record(xywh(*corners), name_id[a.subject], a.iscrowd))
-        if polygonal(a.geometry):
-            rec["segmentation"] = [_poly_flat(ring) for ring in a.geometry.rings]
-        elif use_segm:
-            rec["segmentation"] = _box_seg(box.x1, box.y1, box.x2, box.y2)
-        return rec
-
-    gt_recs = [r for r in (_record(a, is_pred=False) for a in gt) if r is not None]
-    dt_recs = [_record(a, is_pred=True) for a in preds if is_detection(a)]
-    return iou_type, build_coco_image_record(width, height, gt_recs, dt_recs)
+    gt_recs = [{**gt_record(m["bbox"], name_id[a.subject], a.iscrowd), "rings": m["rings"],
+                "index": i}
+               for i, a in enumerate(gt) if box_derivable(a.geometry) for m in [match_record(a)]]
+    dt_recs = [{**dt_record(m["bbox"], name_id[a.subject], prediction_score(a)),
+                "rings": m["rings"], "index": i}
+               for i, a in enumerate(preds) if is_detection(a) for m in [match_record(a)]]
+    return image_record(width, height, gt_recs, dt_recs)
 
 
-# ====================================================================
-# In-house scalar metrics (expansion seam, segm AP already covers
-# true instance segmentation once a mask head exists)
-# ====================================================================
+def bucket_reads(images: Sequence[Any], bucket: Any) -> list[tuple[Any, list, list | None]]:
+    """The one read a scoring of ``bucket``'s documents for the logical ``images`` makes
+    (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_paths`' answers): each image's
+    ``(source, ground truth, predictions)``, its label document's annotations and, where the
+    bucket's record names a document for it, that document's (``None`` where it names none), each
+    read once. An image with no label document refuses
+    (:class:`~tcip_annotation.json_io.UnreadableLabelDocument`)."""
+    from pathlib import Path
+
+    from tcip_annotation.json_io import read_label_document, read_predictions
+
+    from tcip_mcp.dataset_layout import label_key_of
+    from tcip_mcp.pipelines.image_utils import source_path_of
+
+    out = []
+    for source in images:
+        named = Path(source_path_of(source))
+        document = bucket.document_key(named.stem)
+        out.append((source, read_label_document(label_key_of(named)).annotations,
+                    read_predictions(document) if document is not None else None))
+    return out
+
+
+class ScoredImage(NamedTuple):
+    """One image of a bucket's scoring (:func:`score_bucket`): the logical image it names, its
+    ground truth, the bucket's predictions for it (``None`` where the bucket names no document for
+    it, which leaves it out of every aggregate), its frame, and its governing matching, indices
+    into ``gt`` and ``preds`` (every object missed where unpredicted)."""
+
+    image: Any
+    gt: list
+    preds: list | None
+    width: int
+    height: int
+    matching: Any
+
+
+def score_bucket(images: Sequence[Any], bucket: Any, *, iou_threshold: float,
+                 conf_threshold: float, trait: TraitEntry | None) -> tuple[list[ScoredImage], dict]:
+    """``bucket``'s documents for the logical ``images`` scored against their ground truth from
+    their one read (:func:`bucket_reads`): :func:`detection_metrics` at ``conf_threshold`` over the
+    predicted images' records, one subject-to-id map across every image, by mask when any
+    annotation is a polygon, under the criterion that governs (``trait``'s own when given, the IoU
+    convention at ``iou_threshold`` otherwise), and each image as a :class:`ScoredImage` carrying
+    the matching that scoring made of it."""
+    from tcip_annotation.matching import Matching, merged
+    from tcip_annotation.state import polygonal
+
+    from tcip_mcp.pipelines.image_utils import image_dimensions
+
+    read = [(src, gt, preds, *image_dimensions(src)) for src, gt, preds in bucket_reads(images, bucket)]
+    name_id = subject_category_ids([a for _s, gt, preds, _w, _h in read for a in (*gt, *(preds or ()))])
+    records = [records_from_annotation(gt, preds or [], width=w, height=h, name_id=name_id)
+               for _s, gt, preds, w, h in read]
+    predicted = [k for k, (_s, _gt, preds, _w, _h) in enumerate(read) if preds is not None]
+    metrics = detection_metrics(
+        [records[k] for k in predicted], trait=trait, conf_threshold=conf_threshold,
+        iou_threshold=iou_threshold,
+        by_mask=any(polygonal(a.geometry) for k in predicted
+                    for a in (*read[k][1], *cast(list, read[k][2]))))
+    by_image = dict(zip(predicted, metrics["matchings"]))
+    unpredicted = [k for k in range(len(read)) if k not in by_image]
+    by_image.update(zip(unpredicted, matched([records[k] for k in unpredicted],
+                                             metrics["governing_criterion"])))
+
+    def annotated(rec: dict, by_class: dict) -> Matching:
+        m = merged(by_class)
+        gi, di = [r["index"] for r in rec["gt"]], [r["index"] for r in rec["dt"]]
+        return Matching(pairs=[(gi[g], di[d]) for g, d in m.pairs],
+                        unpaired=[di[d] for d in m.unpaired], ignored={di[d] for d in m.ignored},
+                        missed=[gi[g] for g in m.missed])
+
+    return [ScoredImage(src, gt, preds, w, h, annotated(records[k], by_image[k]))
+            for k, (src, gt, preds, w, h) in enumerate(read)], metrics
+
 
 def classification_metrics(pred_labels: torch.Tensor, targets: torch.Tensor, num_classes: int) -> dict:
     """Accuracy + macro-F1 + per-class precision/recall/f1/support/count_bias, each per-class
@@ -1009,41 +856,57 @@ def semantic_seg_metrics(preds: torch.Tensor, targets: torch.Tensor, num_classes
 # Task-agnostic evaluate(), loss pass + prediction pass
 # ====================================================================
 
-def effective_iou_type(task: str, iou_type: str | None) -> str:
-    """Resolve the COCOeval ``iouType`` actually used to score ``task``: an explicit ``iou_type``
-    wins; otherwise ``segm`` for instance_seg, ``bbox`` for detection, ``""`` for non-COCO tasks.
-    """
-    if iou_type:
-        return iou_type
-    if task == "instance_seg":
-        return "segm"
-    return "bbox" if task == "detection" else ""
+def detection_metrics(per_image: list[dict], *, trait: TraitEntry | None, conf_threshold: float,
+                      iou_threshold: float, by_mask: bool) -> dict:
+    """A detector's metrics over ``per_image``, every number from the one matcher: ``tp``/``fp``/
+    ``fn``/``precision``/``recall``/``f1`` at ``conf_threshold`` (:func:`governing_counts`) under
+    the criterion that governs (:func:`resolve_match_criterion`, ``trait``'s own when given, by
+    mask when ``by_mask``), recorded under ``governing_criterion``; ``map50`` and ``map``, the
+    average precision (:func:`average_precision`) at the IoU 0.5 convention and over
+    :data:`AP_IOU_THRESHOLDS`. Under a trait's criterion the IoU convention's own counts ride
+    beside them as ``iou_precision``/``iou_recall``/``iou_f1`` and ``map50_role`` labels the
+    convention's numbers comparability only. ``matchings`` holds each image's governing
+    matching (:func:`matched`), the one the counts sum; every matching is made once per distinct
+    criterion and detection set."""
+    criterion = resolve_match_criterion(trait, per_image, iou_threshold=iou_threshold,
+                                        by_mask=by_mask)
+    held: dict = {}
+    governing = matched(per_image, criterion, conf=conf_threshold, held=held)
+    counts = counted(governing, criterion)
+    ap = {t: average_precision(per_image, iou_criterion(t, by_mask=by_mask), held=held)
+          for t in AP_IOU_THRESHOLDS}
+    out: dict = {**{k: counts[k] for k in ("tp", "fp", "fn", "precision", "recall", "f1")},
+                 "governing_criterion": criterion, "map50": round(ap[0.5], 6),
+                 "map": round(float(np.mean(list(ap.values()))), 6), "matchings": governing}
+    if trait is not None:
+        convention = counted(matched(per_image, iou_criterion(iou_threshold, by_mask=by_mask),
+                                     conf=conf_threshold, held=held), criterion)
+        out.update({"iou_precision": convention["precision"], "iou_recall": convention["recall"],
+                    "iou_f1": convention["f1"], "map50_role": "comparability_only"})
+    return out
 
 
 @torch.no_grad()
 def evaluate(
     model, loader, device, task: str, *, dims: Mapping[str, Any],
     conf_threshold: float = 0.25, iou_threshold: float = 0.5,
-    iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
-    trait: TraitEntry | None = None,
+    score_weights: dict | None = None, trait: TraitEntry | None = None,
 ) -> dict:
     """Compute per-task validation/test metrics. Returns bare metric keys.
 
     ``dims`` is what the model was built at (:func:`~tcip_mcp.pipelines.model_build.model_dims`);
-    a class or rank count is read from it, never off the half being scored. A detector whose dims
-    carry ``attributes`` also reports ``attribute_agreement``: per attribute name, the matched
-    pairs' count and :func:`classification_metrics` over them (:func:`attribute_pairs`, under the
-    governing criterion at ``conf_threshold``).
-
-    ``trait``: the trait's confirmed entry; when set, a count trait's derived localization
-        criterion (traits.py, e.g. a
-        center-match at half the class-average size) governs the reported detection count and the
-        f1 the selection composite optimizes; map50 stays a labeled comparability metric. Absent ->
-        the IoU@``iou_threshold`` convention governs.
+    a class or rank count is read from it, never off the half being scored. A detector's metrics
+    are :func:`detection_metrics` (by mask for instance segmentation) beside the composite
+    ``objective``; one whose dims carry ``attributes`` also reports ``attribute_agreement``: per
+    attribute name, the matched pairs' count and :func:`classification_metrics` over them
+    (:func:`attribute_pairs`, under the governing criterion at ``conf_threshold``). ``trait`` is
+    the trait's confirmed entry whose criterion governs the count; absent, the IoU convention at
+    ``iou_threshold`` governs.
     """
-    is_detection = task in ("detection", "instance_seg")
+    from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+
+    is_detection = task in DETECTION_TASKS
     is_instance_seg = task == "instance_seg"
-    eff_iou_type = effective_iou_type(task, iou_type)
 
     model.eval()
     total_loss = 0.0
@@ -1134,29 +997,13 @@ def evaluate(
     result: dict = stored_number("loss", _rounded(loss))
 
     if is_detection:
-        m = coco_detection_metrics(per_image, iou_type=eff_iou_type, iou_threshold=iou_threshold,
-                                   conf_threshold=conf_threshold, max_dets=max_dets)
-        result.update({
-            "precision": round(m["precision"], 6), "recall": round(m["recall"], 6),
-            "f1": round(m["f1"], 6), "map50": round(m["map50"], 6), "map": round(m["map"], 6),
-            "map_at_maxdets": round(m["map_at_maxdets"], 6),
-            "map50_at_maxdets": round(m["map50_at_maxdets"], 6),
-        })
-        # A count trait's derived criterion governs the reported count + the selection f1;
-        # map50 stays a labeled comparability metric. Without a trait the IoU convention governs.
-        criterion = resolve_match_criterion(trait, per_image, iou_threshold=iou_threshold)
-        if trait is not None:
-            gc = governing_counts(per_image, criterion, conf_threshold=conf_threshold)
-            result.update({
-                "precision": gc["precision"], "recall": gc["recall"], "f1": gc["f1"],
-                "governing_criterion": criterion, "map50_role": "comparability_only",
-                "iou_precision": round(m["precision"], 6), "iou_recall": round(m["recall"], 6),
-                "iou_f1": round(m["f1"], 6),
-            })
-        governing_f1 = result["f1"]
+        m = detection_metrics(per_image, trait=trait, conf_threshold=conf_threshold,
+                              iou_threshold=iou_threshold, by_mask=is_instance_seg)
+        result.update({k: v for k, v in m.items() if k not in ("tp", "fp", "fn", "matchings")})
+        criterion = m["governing_criterion"]
         result.update(stored_number(
             "objective",
-            _rounded(compute_composite_objective(loss, governing_f1, m["map50"], score_weights)),
+            _rounded(compute_composite_objective(loss, m["f1"], m["map50"], score_weights)),
         ))
         if dims.get("attributes"):
             agreement = {}

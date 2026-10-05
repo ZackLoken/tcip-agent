@@ -28,7 +28,7 @@ from pydantic import BaseModel
 
 from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE, DISPLAY_MAX_PIXELS
 from tcip_web import jobstore
-from tcip_web.paths import allowed_path
+from tcip_web.paths import allowed_file, allowed_image, resolved_image
 
 router = APIRouter(prefix="/api/images", tags=["images"])
 
@@ -52,32 +52,19 @@ class ServingGrid(BaseModel):
 
 
 RENDER_CACHE_VERSION = 3
-"""Bumped whenever the render cache key's inputs or the served headers' shape changes, so a
-warm entry written under the old shape is served by neither the disk cache nor conditional
-revalidation. Read by ``tools/generate_frontend_types.py`` and carried on every image URL the
-browser builds (``api.images.url``), so a browser cache entry from before the bump is never the
-response to a request built after it either.
-"""
+"""The render cache's shape version, part of every cache key and every image URL: bumped whenever
+the cache key's inputs or the served headers' shape changes."""
 
 IMAGE_ERROR_HEADER = "X-TCIP-Image-Error"
-"""The response header a refusal here names its condition through, since a DOM ``Image`` sees
-only that a load failed. Read by ``tools/generate_frontend_types.py``."""
+"""The response header a refusal here names its condition through."""
 
 OVERVIEWS_REQUIRED = "overviews_required"
 """The one condition this header carries: a read that needs a raster's overview pyramid and
-has none. Read by ``tools/generate_frontend_types.py``."""
+has none."""
 
 _CACHE_BUDGET_DIVISOR = 20
-"""The rendered-variant cache's byte budget is the cache volume's free space divided by this.
-
-The decode, orient, resize and encode pipeline costs seconds of CPU per large frame and the
-browser cache only covers one session, so a cold request (fresh session, refresh, prefetch) is a
-sendfile instead of a re-render. Cell-aligned region serving stores one entry per cell view
-rather than a handful per raster, so a fixed file count no longer tracks what the cache costs;
-bytes do. A twentieth of free space keeps the cache an order of magnitude away from ever filling
-the volume while still holding thousands of cell-sized JPEGs on any workstation disk; the
-divisor is that headroom rationale, not a measured optimum.
-"""
+"""The rendered-variant cache's byte budget is the cache volume's free space divided by this: a
+documented headroom choice, not a measured optimum."""
 
 _cache_budget_bytes: "int | None" = None
 
@@ -116,21 +103,11 @@ measured precision."""
 
 _STATS_SAMPLE_BUDGET = _STATS_MAX_WINDOWS * _STATS_WINDOW_SIZE**2
 """Full-resolution pixels a raster may hold before its display stats are read from an overview
-level instead of from native windows.
-
-The window sample is cheap in pixels and expensive in reads: its square windows scatter across a
-raster stored as full-width strips, so each one decodes whole strips to keep a 256-pixel square.
-Past this many pixels that cost stops tracking the sample's size, and a single reduced read of the
-whole frame describes the raster for far less work.
-"""
+level instead of from native windows."""
 
 _STATS_OVERVIEW_MAX_EDGE = 1024
-"""Longest output edge the display stats of an oversized raster are read at.
-
-Below the deepest overview level any pyramid built here carries (levels stop at the first whose
-longest edge fits ``DISPLAY_MAX_EDGE``, so the deepest level's longest edge is over half of it),
-which is what makes the read come off that level rather than off native pixels.
-"""
+"""Longest output edge the display stats of an oversized raster are read at, below the deepest
+overview level any pyramid built here carries so the read comes off that level."""
 
 _STATS_CACHE_MAX = 64
 """Rasters the per-raster stats cache describes at once. An entry is a few hundred bytes, so this
@@ -228,38 +205,15 @@ def _evict_lru(cache_dir: Path) -> None:
         pass
 
 
-def _checked(path: str) -> Path:
-    """Resolve + allow-list check an absolute client-supplied image path."""
-    src = allowed_path(path)
-    if not src.is_file():
-        raise HTTPException(404, f"not a file: {path}")
-    return src
-
-
-def _resolved_source(src: Path):
-    """The logical image ``src`` names (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`):
-    a band group missing a member answers 409, and an ambiguous stem 400."""
-    from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, resolve_image_path
-
-    try:
-        return resolve_image_path(src)
-    except BandGroupIncomplete as exc:
-        raise HTTPException(409, str(exc)) from exc
-    except AmbiguousImageStem as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
 @router.get("/serving_grid")
 def get_serving_grid(path: str = Query(..., description="Absolute path to the image file")
                      ) -> ServingGrid:
     """The region-serving grid over the raster at ``path``: cells sized to one display-bounded
     serve (:func:`~tcip_mcp.pipelines.reference_grid.derive_serving_tile_size`), measured off the
     raster's header, never a decode."""
-    from tcip_mcp.pipelines.image_utils import image_dimensions
     from tcip_mcp.pipelines.reference_grid import derive_serving_tile_size, reference_cells
 
-    width, height = image_dimensions(_resolved_source(_checked(path)))
+    _path, width, height = allowed_image(path)
     edge = derive_serving_tile_size(width, height)
     return ServingGrid(tile_size=edge, cells=[
         ServingCell(name=c.name, x0=c.x0, y0=c.y0, x1=c.x1, y1=c.y1)
@@ -541,10 +495,9 @@ def serve_image(
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.derivations import probe_channels
 
-    src = _checked(path)
     if stretch not in STRETCH_MODES:
         raise HTTPException(400, f"stretch must be one of {sorted(STRETCH_MODES)}, got {stretch!r}")
-    source = _resolved_source(src)
+    src, source = resolved_image(path)
 
     corners = (x0, y0, x1, y1)
     if any(c is None for c in corners) and any(c is not None for c in corners):
@@ -708,7 +661,7 @@ def get_bands(path: str = Query(...)) -> dict:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.derivations import probe_channels
 
-    source = _resolved_source(_checked(path))
+    source = resolved_image(path)[1]
     n = probe_channels(source)
     if n <= 3 and not isinstance(source, BandGroupRef):
         return {"band_count": n, "bands": []}
@@ -808,7 +761,7 @@ def build_image_overviews(payload: OverviewBuildPayload) -> dict:
     One build per raster: a request naming a path a build is already running for joins that job
     rather than starting a second one over the same sidecar. Poll ``/overviews/status``.
     """
-    src = _checked(payload.path)
+    src = allowed_file(payload.path)
     job, created = _overview_registry.find_or_register(
         lambda existing: existing.path == str(src) and existing.status in ("pending", "running"),
         lambda: OverviewJob(job_id=f"ovr-{uuid.uuid4().hex[:8]}", path=str(src)),

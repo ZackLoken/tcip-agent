@@ -1,11 +1,10 @@
 """Functional instance_seg via Mask R-CNN: masks reach the loss, predictions
-carry masks, and metrics use segmentation IoU (segm AP)."""
+carry masks, and metrics match by mask."""
 
 import pytest
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
-pytest.importorskip("pycocotools")
 
 
 def test_mask_rcnn_uses_masks_in_loss_and_predicts_masks():
@@ -32,10 +31,7 @@ def test_mask_rcnn_uses_masks_in_loss_and_predicts_masks():
 
 
 def test_segm_metrics_score_mask_overlap():
-    from tcip_mcp.pipelines.training.evaluation import (
-        coco_detection_metrics,
-        records_from_detector,
-    )
+    from tcip_mcp.pipelines.training.evaluation import detection_metrics, records_from_detector
 
     mask = torch.zeros((1, 32, 32), dtype=torch.uint8)
     mask[0, 8:24, 8:24] = 1
@@ -46,6 +42,8 @@ def test_segm_metrics_score_mask_overlap():
               "masks": mask.unsqueeze(0).float()}  # [N, 1, H, W] soft masks
 
     rec = records_from_detector(target, output, width=32, height=32, include_masks=True)
-    m = coco_detection_metrics([rec], iou_type="segm")
-    assert m["iou_type"] == "segm"
+    m = detection_metrics([rec], trait=None, conf_threshold=0.25, iou_threshold=0.5,
+                          by_mask=True)
+    assert m["governing_criterion"]["kind"] == "mask_iou_match"
     assert m["map50"] > 0.5                       # a perfect mask match scores high
+    assert (m["tp"], m["fp"], m["fn"]) == (1, 0, 0)

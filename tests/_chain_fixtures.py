@@ -65,7 +65,7 @@ def draw_reference_selection(project: Path, root: Path, out: Path):
     from tcip_mcp.tools.data_tools import draw_splits
 
     result = draw_splits(project, str(root), output_path=str(out), subject=SUBJECT, seed=2,
-                         train_ratio=0.4, val_ratio=0.2, calibration_ratio=0.2, holdout_ratio=0.2)
+                         val_ratio=0.2, calibration_ratio=0.2, holdout_ratio=0.2)
     assert "error" not in result, result
     return read_selection(out, project=project)
 
@@ -223,6 +223,7 @@ def published(project: Path, name: str, results: list[dict], *, scope: dict,
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.data.split_construction import raster_identity
     from tcip_mcp.pipelines.execution import Stated, prepare_pass
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tests._verified_checkpoint_fixtures import project_checkpoint
 
     from tcip_store import decode_value, encode_record
@@ -230,7 +231,7 @@ def published(project: Path, name: str, results: list[dict], *, scope: dict,
     checkpoint = load_registered_checkpoint(
         project_checkpoint(project, data={"num_channels": 3, "scope": scope}, registry=registry),
         project=project)
-    identity = (decode_value(encode_record(raster_identity(raster_path)))
+    identity = (decode_value(encode_record(raster_identity(resolve_image_path(raster_path))))
                 if raster_path is not None else None)
     p = prepare_pass(checkpoint, Stated(tile=False))
     root = source_root([raster_path] if raster_path is not None else [r["image"] for r in results])
@@ -408,7 +409,7 @@ def attributed_series(
 
     selection_dir = project / "selection"
     drawn = draw_splits(project, str(root), output_path=str(selection_dir), subject=SUBJECT,
-                        seed=2, train_ratio=0.4, val_ratio=0.2, calibration_ratio=0.2,
+                        seed=2, val_ratio=0.2, calibration_ratio=0.2,
                         holdout_ratio=0.2)
     assert "error" not in drawn, drawn
     config = {**run_config(selection_dir), "model_source": dict(model_source or BLOB_BUILDER),

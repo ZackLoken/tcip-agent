@@ -62,12 +62,16 @@ def _import_dotted(target: object) -> Any:
         raise ValueError(f"Builder {attr!r} not found in module {mod_name!r}.") from exc
 
 
-def resolve_named(name: str, registry: "Mapping[str, Any]", *, kind: str, register: str) -> Any:
-    """The entry ``registry`` holds under ``name``, else the target a dotted ``module:factory``
-    ``name`` imports. Refuses (``ValueError``) a name that is neither, the registered names and
-    ``register`` (the call that adds one) named, and a dotted name that will not import."""
+def resolve_named(name: str, registry: "Mapping[str, Any]", *, kind: str,
+                  register: str | None = None) -> Any:
+    """The entry ``registry`` holds under ``name``. Where ``register`` names the call that adds
+    an entry to ``registry``, a dotted ``module:factory`` ``name`` imports its target instead.
+    Refuses (``ValueError``) a name that is neither, naming the ``kind``, the registered names
+    and ``register``, and a dotted name that will not import."""
     if name in registry:
         return registry[name]
+    if register is None:
+        raise ValueError(f"Unknown {kind} {name!r}. Name one of {sorted(registry)}.")
     if ":" in name or "." in name:
         try:
             return _import_dotted(name)
@@ -77,6 +81,17 @@ def resolve_named(name: str, registry: "Mapping[str, Any]", *, kind: str, regist
         f"Unknown {kind} {name!r}. Name a registered one ({sorted(registry)}), register one with "
         f"{register}, or pass a dotted 'module:factory' you wrote."
     )
+
+
+def keyword_parameters(fn: Any) -> tuple[set[str], bool]:
+    """The keyword names ``fn``'s signature names (``self`` and variadics excluded), and whether
+    it also takes any keyword (``**kwargs``)."""
+    import inspect
+
+    params = inspect.signature(fn).parameters.values()
+    named = {p.name for p in params
+             if p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD) and p.name != "self"}
+    return named, any(p.kind is p.VAR_KEYWORD for p in params)
 
 
 def _import_root(file: Path, module: str) -> Path | None:
@@ -189,12 +204,12 @@ def recorded_model_dims(config: "Mapping[str, Any]") -> dict[str, Any]:
     """:func:`model_dims` over what a run's config records on its data section: its ``scope`` and
     its sizes. Refuses by name a run of a built-in loader's task that records no count its ground
     truth derives (``num_ranks`` for an ordinal run)."""
-    from tcip_mcp.pipelines.data.datasets import _DATASET_MAP, stated_sizes
+    from tcip_mcp.pipelines.data.datasets import builtin_loader, stated_sizes
     from tcip_mcp.pipelines.data.selection import ClassScope
 
     data_cfg = config.get("data") or {}
     dims = model_dims(ClassScope.of(data_cfg), stated_sizes(data_cfg))
-    loader = None if data_cfg.get(DATASET_SOURCE_KEY) else _DATASET_MAP.get(run_task(config))
+    loader = builtin_loader(run_task(config), data_cfg.get(DATASET_SOURCE_KEY))
     count = loader.ground_truth_count if loader is not None else None
     if count is not None and count not in dims:
         raise ValueError(
@@ -258,11 +273,12 @@ def resolve_contract_dims(config: dict, task: str, dims: "Mapping[str, Any]") ->
     safe non-tiny fallback that clears typical stride-32 backbones. The count is the one ``dims``
     states.
     """
+    from tcip_mcp.pipelines.data.datasets import run_tiling
+
     count = dims.get("num_classes", dims.get("num_ranks"))
-    img_size = 224  # safe non-tiny default (7x7 at stride 32); overridden by the real tile edge below
-    tiling = (config.get("data") or {}).get("tiling")
-    if task == "detection" and isinstance(tiling, dict) and tiling.get("enabled", True) and tiling.get("tile_size"):
-        img_size = int(tiling["tile_size"])
+    tiling = run_tiling(task, (config.get("data") or {}).get("tiling")) or {}
+    # 224 clears typical stride-32 backbones at 7x7; a tiled run's real tile edge replaces it.
+    img_size = int(tiling.get("tile_size") or 224)
     return {"in_chans": dims["in_chans"], "img_size": img_size,
             **({} if count is None else {"num_classes": count}),
             **({"attributes": dims["attributes"]} if "attributes" in dims else {})}

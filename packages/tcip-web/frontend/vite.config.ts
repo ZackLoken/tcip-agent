@@ -4,9 +4,9 @@ import { fileURLToPath, URL } from "node:url";
 
 // Relative, not the "@" alias: that alias is declared inside this very config and is not
 // available to the config file's own imports at load time.
-import { DEV_PROXY } from "./src/api/devProxy.generated";
+import { DEV_PROXY, LOOPBACK_HOST } from "./src/api/devProxy.generated";
 
-const BACKEND = process.env.TCIP_WEB_BACKEND ?? "http://127.0.0.1:8765";
+const BACKEND = process.env.TCIP_WEB_BACKEND ?? `http://${LOOPBACK_HOST}:8765`;
 
 export default defineConfig({
   plugins: [react()],
@@ -16,6 +16,7 @@ export default defineConfig({
     },
   },
   server: {
+    host: LOOPBACK_HOST,
     port: 5173,
     proxy: Object.fromEntries(
       DEV_PROXY.map(({ path, ws }) => [path, { target: BACKEND, changeOrigin: true, ws }]),

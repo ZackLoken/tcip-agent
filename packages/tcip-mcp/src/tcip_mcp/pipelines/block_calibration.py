@@ -1,8 +1,7 @@
 """The reserved-region reference of a within-image split: the band geometry, completeness and
-feasibility an assessment reads a mosaic's own reserved calibration and test regions through (see
-``split_construction.spatial_single_source_split``'s four-way split,
-``reserve_calibration_fraction``), for a raster training source too large or too singular to hold
-whole images out from.
+feasibility an assessment reads a mosaic's own reserved calibration and holdout regions through
+(see ``split_construction.spatial_single_source_split``'s four-way split, ``calibration_ratio``),
+for a raster training source too large or too singular to hold whole images out from.
 """
 
 from __future__ import annotations
@@ -25,10 +24,10 @@ DEFAULT_K_TEST = 3
 
 def reserved_spatial_regions(resolved: dict) -> dict | None:
     """The spatial manifest of a run's resolution (``data.split.spatial_manifest``) when it
-    reserved a calibration and a test region, else ``None``: a run that drew no within-image
-    spatial split, or one that reserved no calibration or no test region."""
+    reserved a calibration and a holdout region, else ``None``: a run that drew no within-image
+    spatial split, or one that reserved no calibration or no holdout region."""
     spatial = resolved["data"]["split"].get("spatial_manifest")
-    if not spatial or not spatial["calibration_region"] or not spatial["test_region"]:
+    if not spatial or not spatial["calibration_region"] or not spatial["holdout_region"]:
         return None
     return spatial
 
@@ -66,9 +65,10 @@ def band_rects(
 
 def centered_in(boxes: np.ndarray, rect: tuple[int, int, int, int]) -> np.ndarray:
     """Which of the xyxy ``boxes`` have their center inside the half-open ``rect``."""
+    from tcip_annotation.matching import box_centers
+
     x0, y0, x1, y1 = rect
-    cx = (boxes[:, 0] + boxes[:, 2]) / 2.0
-    cy = (boxes[:, 1] + boxes[:, 3]) / 2.0
+    cx, cy = box_centers(boxes).T
     return (cx >= x0) & (cx < x1) & (cy >= y0) & (cy < y1)
 
 

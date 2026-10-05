@@ -1,7 +1,5 @@
 """The resolver from a raster's georeferencing tags to a real-world pixel size in meters
-(:func:`resolve_pixel_size` and its two wrappers, :func:`raster_pixel_size` and
-:func:`raster_pixel_size_reason`).
-"""
+(:func:`resolve_pixel_size`)."""
 
 from __future__ import annotations
 
@@ -14,9 +12,9 @@ from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 
 @dataclass(frozen=True)
 class PixelSize:
-    """One raster's own real-world pixel size, resolved from its georeferencing tags alone
-    (:func:`raster_pixel_size`): ``meters_per_px`` is the isotropic pixel edge in meters,
-    ``source_clause`` the one-clause description of the geotransform it came from."""
+    """One raster's own real-world pixel size, resolved from its georeferencing tags alone:
+    ``meters_per_px`` is the isotropic pixel edge in meters, ``source_clause`` the one-clause
+    description of the geotransform it came from."""
 
     meters_per_px: float
     source_clause: str
@@ -24,33 +22,26 @@ class PixelSize:
 
 _UNIT_CODES_TO_METERS = frozenset({"9001", "9002", "9003"})
 """``pyproj`` axis ``unit_code`` values this module converts to meters (meter, foot, US survey
-foot); judged by code, never by the numeric factor, which ``pyproj`` reports for a degree axis
-too."""
+foot)."""
 
 _ANISOTROPY_REL_TOL = 1e-6
 """Relative tolerance for treating ``pixel_scale_x``/``pixel_scale_y`` as equal: one part in a
 million, so a tag written as ``0.030000001`` beside ``0.03`` reads as equal while any real
-anisotropy still refuses. An anisotropic raster has no single pixel size, and
-:func:`~tcip_mcp.pipelines.derivations.derive_block_scale_px` converts one isotropic distance (a
-planting-grid pitch) through this figure, so an anisotropic raster is refused by name rather than
-averaged into a scalar that would not hold in both axes."""
+anisotropy still refuses."""
 
 
 def resolve_pixel_size(source: Path | BandGroupRef) -> tuple[PixelSize | None, str]:
-    """The implementation behind :func:`raster_pixel_size` and :func:`raster_pixel_size_reason`:
-    returns ``(pixel_size, reason)``, ``reason`` the empty string on success and the first failing
+    """``source``'s own real-world pixel size from its georeferencing tags alone, as
+    ``(pixel_size, reason)``: ``reason`` the empty string on success and the first failing
     condition's clause otherwise, checked in this order:
 
     1. ``source`` is a raster at all (:func:`~tcip_mcp.pipelines.image_utils.capture_kind`); a
       photographic capture or a band group is never opened here.
     2. :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.read_geotransform` returns.
-      Its own exceptions are mapped to a short clause never carrying the server's absolute path
-      (the geographic case is refused there by the model-type check, which reads as
-      :class:`GeoreferencingError` here): :class:`RotatedRasterError` -> "it is rotated or
-      sheared", :class:`GeoreferencingError` -> "its georeferencing tags are incomplete"; a
-      :class:`ValueError` from ``tifffile`` on a container that is not a TIFF (``.npy``/``.npz``,
-      which ``capture_kind`` also calls rasters) -> "it is not a TIFF"; ``OSError`` -> "it could
-      not be read".
+      Its own exceptions are mapped to a short clause never carrying the server's absolute path:
+      :class:`RotatedRasterError` -> "it is rotated or sheared", :class:`GeoreferencingError` ->
+      "its georeferencing tags are incomplete"; a :class:`ValueError` from ``tifffile`` on a
+      container that is not a TIFF -> "it is not a TIFF"; ``OSError`` -> "it could not be read".
     3. ``pyproj.CRS.from_epsg(epsg)`` resolves (a :class:`pyproj.exceptions.CRSError`, raised for a
       user-defined or unknown code, is the reason).
     4. The CRS is not compound, checked before any unit code: a compound CRS reports an empty
@@ -106,21 +97,3 @@ def resolve_pixel_size(source: Path | BandGroupRef) -> tuple[PixelSize | None, s
     meters_per_px = gt.pixel_scale_x * factor
     clause = f"a projected geotransform (EPSG:{gt.epsg}, {meters_per_px:.6g} m/px)"
     return PixelSize(meters_per_px=meters_per_px, source_clause=clause), ""
-
-
-def raster_pixel_size(source: Path | BandGroupRef) -> PixelSize | None:
-    """``source``'s own real-world pixel size, from its georeferencing tags alone, or ``None`` when
-    ``source`` is not a raster this module can resolve one for (see :func:`resolve_pixel_size` for
-    the checks, in order); call :func:`raster_pixel_size_reason` for why.
-
-    A photographic capture is never opened, and a ``band_group`` manifest is excluded.
-    """
-    pixel_size, _reason = resolve_pixel_size(source)
-    return pixel_size
-
-
-def raster_pixel_size_reason(source: Path | BandGroupRef) -> str | None:
-    """The one-clause reason :func:`raster_pixel_size` returned ``None`` for ``source``, or
-    ``None`` when it did not (a pixel size was resolved)."""
-    pixel_size, reason = resolve_pixel_size(source)
-    return None if pixel_size is not None else reason

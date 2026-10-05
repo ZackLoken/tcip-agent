@@ -66,7 +66,7 @@ class _PointDataset(Dataset):
     def __getitem__(self, idx):
         from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 
-        image = pil_to_tensor(load_image(Path(self.samples[idx].source), 3))
+        image = pil_to_tensor(load_image(self.samples[idx].image, 3))
         return image, torch.tensor(self.points[idx], dtype=torch.float32)
 
 
@@ -231,7 +231,8 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(tmp_pa
     # actually admits, passes with no issue.
     root = tmp_path / "ds"
     _admitted_samples(root)
-    located_data = {**data, "images_dir": str(root / "images" / UNDATED_BUCKET), "scope": {"subject": "leaf"}}
+    located_data = {**data, "images_dir": str(root / "images" / UNDATED_BUCKET),
+                    "scope": {"subject": "leaf"}, "split": {"seed": 0, "val_ratio": 0.15}}
     admitted = preflight_config(tmp_path, {**config, "data": located_data}, smoke=False)
     assert admitted["issues"] == [], admitted["issues"]
 

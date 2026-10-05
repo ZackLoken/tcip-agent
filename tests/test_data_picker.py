@@ -34,7 +34,8 @@ def _bespoke_config(images_dir: Path, *, subject: str = SUBJECT) -> dict:
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 64},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "scope": {"subject": subject}},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": subject},
+                 "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
                      "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
@@ -173,14 +174,14 @@ def test_list_split_choices_offers_a_table_selection_for_a_table_configuration(
     root = tmp_path / "ds"
     images_dir, csv_path = _table_dataset(root)
     drawn = draw_splits(tmp_path, str(root), output_path=str(root / "splits" / "rows"),
-                        ground_truth=str(csv_path), seed=4, train_ratio=0.5, val_ratio=0.25,
+                        ground_truth=str(csv_path), seed=4, val_ratio=0.25,
                         calibration_ratio=0.125, holdout_ratio=0.125, group_by="stem")
     assert "error" not in drawn, drawn
 
     opened_run(tmp_path, {
         "model_source": {"builder": "m:f", "task": "classification"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path),
-                 "task": "classification"},
+                 "task": "classification", "split": {"seed": 0, "val_ratio": 0.15}},
     }, experiment_id="exp-table-picker")
 
     result = list_split_choices(tmp_path, "exp-table-picker")
@@ -357,7 +358,7 @@ def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces
     _draw(tmp_path, root, dataset_default)
 
     cfg = _bespoke_config(root / "images" / DATES[0])
-    cfg["data"]["split"] = {"seed": 7, "group_by": "tile_prefix"}
+    cfg["data"]["split"] = {"seed": 7, "val_ratio": 0.15, "group_by": "tile_prefix"}
     opened_run(tmp_path, cfg, experiment_id="exp-drawn-policy")
 
     result = list_split_choices(tmp_path, "exp-drawn-policy")
@@ -409,13 +410,13 @@ def test_list_split_choices_never_names_a_null_valued_split_key_as_replaced(
     _draw(tmp_path, root, dataset_default)
 
     cfg = _bespoke_config(root / "images" / DATES[0])
-    cfg["data"]["split"] = {"seed": 7, "redraw_within_selection": None}
+    cfg["data"]["split"] = {"seed": 7, "val_ratio": 0.15, "redraw_within_selection": None}
     opened_run(tmp_path, cfg, experiment_id="exp-null-policy-key")
 
     result = list_split_choices(tmp_path, "exp-null-policy-key")
     entry = next(m for m in result["selections"] if m["selection_dir"] == str(dataset_default))
 
-    assert entry["replaced_split_keys"] == ["seed"]
+    assert entry["replaced_split_keys"] == ["seed", "val_ratio"]
 
 
 def test_list_split_choices_reads_the_picked_runs_own_launch_record_only_once(

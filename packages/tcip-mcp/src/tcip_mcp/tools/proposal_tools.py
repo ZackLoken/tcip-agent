@@ -21,7 +21,7 @@ from tcip_annotation.grid import grid_to_rect
 from tcip_annotation.json_io import stored_box_extent_ok
 from tcip_annotation.viz import render_candidates, render_detections
 
-from tcip_mcp.audit import audited, now_iso
+from tcip_mcp.audit import now_iso, record_event_or_raise
 from tcip_mcp.pipelines.image_utils import (
     BandGroupIncomplete, image_dimensions, resolve_image_path,
 )
@@ -57,27 +57,6 @@ def _staging_key_for(image_path: str) -> ts.Key:
     from tcip_mcp.dataset_layout import parse_image_path
 
     return proposal_staging_key(*parse_image_path(image_path))
-
-
-def _unresolvable_staging_source(img: Path, exc: Exception) -> str:
-    """A reason to decline staging ``img``, when
-    :func:`~tcip_mcp.pipelines.image_utils.resolve_image_path` raised ``exc`` for it.
-
-    A band-group member's own path (``capture_Red.tif`` when ``capture.bandgroup`` claims it)
-    resolves to nothing; this names the manifest that claims it instead. ``BandGroupIncomplete`` (a
-    manifest that resolves but is missing a sibling) already carries its own manifest-naming
-    message and is returned unchanged.
-    """
-    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.image_utils import BandGroupIncomplete, list_logical_images
-
-    if isinstance(exc, BandGroupIncomplete):
-        return str(exc)
-    for source in list_logical_images(img.parent).values():
-        if isinstance(source, BandGroupRef) and img in source.bands.values():
-            return (f"{img} is one band of the group {source.manifest_path.name!r}; propose "
-                    f"on {source.manifest_path} instead.")
-    return str(exc)
 
 
 def _region_rect_from_cells(cells: list, names: list[str]) -> "Rect":
@@ -127,7 +106,6 @@ def _offset_candidates(candidates: list[dict], origin: tuple[float, float]) -> l
 
 
 @tool()
-@audited(scope_arg="image_path")
 def propose_annotations(
     project: Path,
     image_path: str,
@@ -151,11 +129,13 @@ def propose_annotations(
     On an image under a dataset's ``images/`` tree, the candidates are staged keyed by the dataset,
     capture date and stem, alongside the content identity of the pixels the engine ran on:
     ``stage_proposals``'s assignments regime reads the record back by that same address and refuses
-    if the image's content no longer matches it. On a path outside any dataset's ``images/`` tree,
-    or a dataset path that regime would itself fail to resolve (a band-group member's own path when
-    its manifest claims it), the engine still runs and the render and candidates are returned the
-    same way, but nothing is staged (the response's ``staged`` is ``false``, naming why), so such a
-    call cannot later be accepted.
+    if the image's content no longer matches it. On a path outside any dataset's ``images/`` tree
+    the engine still runs and the render and candidates are returned the same way, but nothing is
+    staged (the response's ``staged`` is ``false``, naming why), so such a call cannot later be
+    accepted. A path naming no logical image (a band of a grouped capture, which names its
+    manifest) refuses (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`). Writing or
+    clearing the staged record leaves one audit line in the dataset's log; a call that writes
+    neither leaves none.
 
     ``engine`` names one registered (``register_proposal_engine``) or a dotted 'module:factory'.
     An empty or unknown name refuses, naming the registered ones.
@@ -188,8 +168,9 @@ def propose_annotations(
         return {"error": f"Image not found: {image_path}"}
 
     try:
+        source = resolve_image_path(img)
         proposer = resolve_proposer(engine)
-    except (ValueError, ImportError) as e:
+    except (FileNotFoundError, BandGroupIncomplete, ValueError, ImportError) as e:
         return {"error": str(e)}
 
     # A region is cropped and offset entirely here, before the engine ever sees an image path.
@@ -206,14 +187,9 @@ def propose_annotations(
                              "cells were read off (overlay_reference_grid echoes it back, with "
                              "overlap). Without it a cell name resolves against a grid nobody "
                              "rendered."}
-        from tcip_mcp.pipelines.image_utils import image_dimensions
         from tcip_mcp.pipelines.raster_source import open_raster
         from tcip_mcp.pipelines.reference_grid import reference_cells
-        from tcip_mcp.tools.vision_tools import _source_for_path
 
-        # One resolution of the source for both halves: the frame the cells are laid over is the
-        # frame the crop is read from, so they can never come from two decisions.
-        source = _source_for_path(image_path)
         try:
             w, h = image_dimensions(source)
             cells = reference_cells(w, h, tile_size, overlap, clamp=True)
@@ -254,7 +230,10 @@ def propose_annotations(
         except ValueError:
             pass
         else:
-            ts.delete(stale)
+            if ts.delete(stale):
+                record_event_or_raise("propose_annotations",
+                                      {"image_path": image_path, "staged": 0},
+                                      actor=None, scope=stale.root)
         return {
             "image_path": None,
             "engine": engine,
@@ -273,9 +252,9 @@ def propose_annotations(
     except (KeyError, TypeError, ValueError) as exc:
         return {"error": f"Engine {engine!r} proposed a candidate this platform cannot hold: {exc}"}
 
-    from tcip_mcp.tools.vision_tools import _display_for_path
+    from tcip_mcp.tools.vision_tools import _read_for_display
 
-    read = _display_for_path(image_path)
+    read = _read_for_display(source)
     out = render_candidates(read.pixels, candidates, native_size=read.native_size,
                             output_path=viz_output_path(project, "candidates"))
 
@@ -291,25 +270,17 @@ def propose_annotations(
         staged = False
         stage_note = f" Not staged: {exc}"
     else:
-        from tcip_mcp.pipelines import image_utils
+        import dataclasses
 
-        try:
-            # The same resolution the assignments regime will make: staging over an unrereadable
-            # source would leave a record it can never confirm.
-            source = image_utils.resolve_image_path(img)
-        except (FileNotFoundError, image_utils.BandGroupIncomplete) as exc:
-            staged = False
-            stage_note = f" Not staged: {_unresolvable_staging_source(img, exc)}"
-        else:
-            import dataclasses
+        from tcip_mcp.pipelines.raster_source import content_identity
 
-            from tcip_mcp.pipelines.raster_source import content_identity
-
-            identity = content_identity(source)
-            envelope["image_identity"] = dataclasses.asdict(identity)
-            ts.replace(address, envelope)
-            staged = True
-            stage_note = ""
+        envelope["image_identity"] = dataclasses.asdict(content_identity(source))
+        ts.replace(address, envelope)
+        record_event_or_raise("propose_annotations", {
+            "image_path": image_path, "staged": len(candidates)}, actor=None,
+            scope=address.root)
+        staged = True
+        stage_note = ""
 
     region_note = f" (region {grid_cells})" if region_info is not None else ""
     return {
@@ -339,7 +310,7 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
     longer matches the content identity it recorded."""
     try:
         source = resolve_image_path(img)
-    except (FileNotFoundError, BandGroupIncomplete) as exc:
+    except (FileNotFoundError, BandGroupIncomplete, ValueError) as exc:
         return {"error": str(exc)}
 
     # Load cached proposals from the same record propose_annotations staged them in.
@@ -392,10 +363,10 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
         return {"error": str(exc)}
 
     # Render final result for QA
-    from tcip_mcp.tools.vision_tools import _box_dict, _display_for_path, _name_map, _subject_indexer
+    from tcip_mcp.tools.vision_tools import _box_dict, _name_map, _read_for_display, _subject_indexer
 
     idx, index = _subject_indexer()
-    read = _display_for_path(image_path)
+    read = _read_for_display(source)
     out = render_detections(read.pixels, [_box_dict(a, index) for a in proposals],
                             native_size=read.native_size, class_names=_name_map(idx),
                             output_path=viz_output_path(project, "staged"))
@@ -464,7 +435,7 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: t
 
     try:
         img_source = resolve_image_path(img)
-    except (FileNotFoundError, BandGroupIncomplete) as exc:
+    except (FileNotFoundError, BandGroupIncomplete, ValueError) as exc:
         return {"error": str(exc)}
     img_w, img_h = image_dimensions(img_source)
 

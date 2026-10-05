@@ -496,13 +496,15 @@ class PhotographicSource(_ClosableSource):
     ``get_image_dimensions`` measures: labels are authored in the upright frame.
     """
 
-    def __init__(self, path: str | Path, num_channels: int):
+    def __init__(self, path: str | Path | bytes, num_channels: int):
+        """``path`` names the file, or is the file's bytes as one read already answered them."""
+        import io
+
         from PIL import Image
 
         from tcip_annotation.utils import auto_orient_image
 
-        self.path = Path(path)
-        opened = Image.open(self.path)
+        opened = Image.open(io.BytesIO(path) if isinstance(path, bytes) else Path(path))
         self.image = auto_orient_image(opened).convert(_PIL_MODES[num_channels])
         opened.close()
         self.width, self.height = self.image.size

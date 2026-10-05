@@ -60,7 +60,7 @@ def _prepare_queue_sources(checkpoint_path: str, images_dir: str, subject: str |
     images_path = Path(images_dir)
     if not images_path.is_dir():
         return None, 0, {"error": f"Images dir not found: {images_dir}"}
-    from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
+    from tcip_mcp.pipelines.image_utils import list_logical_images, source_path_of
 
     logical = list_logical_images(images_path)
     if not logical:
@@ -75,8 +75,8 @@ def _prepare_queue_sources(checkpoint_path: str, images_dir: str, subject: str |
     from tcip_mcp.dataset_layout import label_key_of
 
     try:
-        kept = [s for s in sources if not read_document_versioned(label_key_of(
-            s.manifest_path if isinstance(s, BandGroupRef) else s))[0].finished(subject)]
+        kept = [s for s in sources if not read_document_versioned(
+            label_key_of(source_path_of(s)))[0].finished(subject)]
     except (ValueError, UnreadableLabelDocument) as exc:
         return None, 0, {"error": str(exc)}
     return kept, len(sources) - len(kept), None

@@ -608,16 +608,12 @@ def test_assign_detections_to_plants_maps_near_and_leaves_far_unmapped(tmp_path:
     plants = read_plant_csvs([_plant_grid_csv(tmp_path, georef, _PLANT_PIXELS)])
     assert len(plants) == 4
 
-    detections = {
-        "boxes": [
-            [8.0, 8.0, 12.0, 12.0],              # centroid (10, 10): sits on plant 0
-            [3990.0, 3990.0, 4010.0, 4010.0],    # ~2 km away: no plant anywhere near
-        ],
-        "scores": [0.9, 0.8],
-        "labels": [1, 1],
-    }
+    boxes = [
+        [8.0, 8.0, 12.0, 12.0],              # centroid (10, 10): sits on plant 0
+        [3990.0, 3990.0, 4010.0, 4010.0],    # ~2 km away: no plant anywhere near
+    ]
     assignments = assign_detections_to_plants(
-        detections, georef, plants, nn_tolerance_m=resolve_nn_tolerance_m(plants)["value"])
+        boxes, georef, plants, nn_tolerance_m=resolve_nn_tolerance_m(plants)["value"])
     assert len(assignments) == 2
 
     near, far = assignments
@@ -649,7 +645,7 @@ def test_assign_detections_to_plants_matches_within_the_tolerance_it_is_given(
     lat, lon = georef.pixel_to_wgs84(*det_px)
     plant0_lat, plant0_lon = georef.pixel_to_wgs84(*_PLANT_PIXELS[0])
     dist = haversine_m(lat, lon, plant0_lat, plant0_lon)
-    detections = {"boxes": [[det_px[0] - 1, det_px[1] - 1, det_px[0] + 1, det_px[1] + 1]]}
+    detections = [[det_px[0] - 1, det_px[1] - 1, det_px[0] + 1, det_px[1] + 1]]
 
     tight = assign_detections_to_plants(detections, georef, plants, nn_tolerance_m=dist / 2)
     assert tight[0].source == "unmapped"
@@ -667,4 +663,4 @@ def test_assign_detections_to_plants_no_boxes_returns_empty(tmp_path: Path) -> N
     georef = OrthomosaicGeoreference.from_file(path)
     plants = read_plant_csvs([_plant_grid_csv(tmp_path, georef, _PLANT_PIXELS)])
 
-    assert assign_detections_to_plants({"boxes": []}, georef, plants, nn_tolerance_m=1.0) == []
+    assert assign_detections_to_plants([], georef, plants, nn_tolerance_m=1.0) == []

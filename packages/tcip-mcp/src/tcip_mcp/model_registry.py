@@ -181,10 +181,16 @@ class VerifiedCheckpoint:
         return {"checkpoint_sha256": self.sha256, "experiment_id": self.experiment_id}
 
     @property
+    def config(self) -> dict:
+        """The run config the checkpoint carries, ``{}`` for one carrying none (a foreign
+        checkpoint's documented answer)."""
+        return self.payload.get("config") or {}
+
+    @property
     def data_config(self) -> dict:
         """The checkpoint's own stamped ``config["data"]``, ``{}`` for a checkpoint carrying
-        none (a foreign checkpoint's documented answer)."""
-        data_cfg = (self.payload.get("config") or {}).get("data")
+        none."""
+        data_cfg = self.config.get("data")
         return data_cfg if isinstance(data_cfg, dict) else {}
 
     @property
@@ -193,7 +199,7 @@ class VerifiedCheckpoint:
         ``ValueError`` when that states none."""
         from tcip_mcp.pipelines.model_build import run_task
 
-        return run_task(self.payload.get("config") or {})
+        return run_task(self.config)
 
 
 class UnregisteredCheckpoint(ValueError):
@@ -256,19 +262,11 @@ def checkpoint_payload(checkpoint_path: str | Path, sha256: str) -> dict:
 
 
 def load_registered_checkpoint(checkpoint_path: str | Path, *, project: Path) -> VerifiedCheckpoint:
-    """Read a checkpoint's bytes once, hash them, and refuse unless ``project``'s registry names
-    that hash.
+    """The checkpoint at ``checkpoint_path``, read once and unpickled from the same bytes its
+    digest is taken over, when ``project``'s :func:`registered_entries` name that digest.
 
-    Refuses two forgeries: a checkpoint dropped at any path that nothing registered, and a
-    checkpoint whose file is replaced (in place or by rename) between a caller checking its
-    identity and a caller loading its weights. In order: the file is read into one ``bytes``
-    object; the digest is taken over that exact object through :func:`_sha256_of_bytes` and
-    looked up among ``project``'s :func:`registered_entries`, none raising
-    :class:`UnregisteredCheckpoint` naming the path, the digest, the root searched and the remedy.
-    Only then is the payload unpickled (:func:`_load_verified_payload`). A missing file raises
-    ``FileNotFoundError`` before any read.
-
-    The digest and the load are over one immutable byte string.
+    Raises :class:`UnregisteredCheckpoint` naming the path, the digest and the root searched when
+    none does, and ``FileNotFoundError`` for a missing file.
     """
     ckpt = Path(checkpoint_path)
     root = str(project)

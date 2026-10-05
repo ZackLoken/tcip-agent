@@ -152,7 +152,7 @@ def test_preflight_admits_a_clean_multi_image_bucket(tmp_path):
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(bucket), "scope": {"subject": SUBJECT}},
+        "data": {"images_dir": str(bucket), "scope": {"subject": SUBJECT}, "split": {"seed": 0, "val_ratio": 0.15}},
     }
     r = preflight_config(tmp_path, cfg)
     assert r["issues"] == [], r["issues"]
@@ -171,13 +171,13 @@ def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(tmp_path
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
         "data": {"images_dir": str(bucket), "scope": {"subject": SUBJECT},
-                 "split": {"group_by": "stem"}},
+                 "split": {"group_by": "stem", "seed": 0, "val_ratio": 0.15}},
     }
     r = preflight_config(tmp_path, cfg)
     assert not any(i.startswith("data.split:") for i in r["issues"]), r["issues"]
 
 
-def test_reserve_calibration_feasibility_admits_a_clean_multi_image_bucket(tmp_path):
+def test_calibration_ratio_feasibility_admits_a_clean_multi_image_bucket(tmp_path):
     """Both uncollided images are counted: the feasibility issue names the real count (2), the
     direct evidence the admission reached every member rather than one raw-walked file."""
     pytest.importorskip("torch")
@@ -191,7 +191,7 @@ def test_reserve_calibration_feasibility_admits_a_clean_multi_image_bucket(tmp_p
                          "task": "detection"},
         "data": {"images_dir": str(bucket), "scope": {"subject": SUBJECT},
                  "tiling": {"enabled": True, "sliver_frac": 0.5},  # stated: two boxes, no spread
-                 "split": {"reserve_calibration_fraction": 0.2}},
+                 "split": {"calibration_ratio": 0.2, "val_ratio": 0.15, "seed": 1}},
     }
     r = preflight_config(tmp_path, cfg)
     assert any("2 admitted sources" in i for i in r["issues"]), r["issues"]

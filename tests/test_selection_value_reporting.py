@@ -44,7 +44,7 @@ def _config(evaluation: dict | None = None) -> dict:
     config = {
         "model_source": {"builder": BUILDER, "builder_kwargs": {"init_weight": 0.0},
                          "task": "regression"},
-        "data": {"num_channels": 1, "scope": {}},
+        "data": {"num_channels": 1, "scope": {}, "split": {"seed": 1, "val_ratio": 0.15}},
         "device": "cpu",
         "mixed_precision": False,
         "stages": [{"freeze_to": 0, "epochs": 3}],

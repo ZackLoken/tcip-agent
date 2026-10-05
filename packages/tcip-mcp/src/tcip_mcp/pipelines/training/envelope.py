@@ -265,7 +265,7 @@ class TrainContext:
             self.tb.flush()
 
     def save_checkpoint(self, state: dict, tag: str = "checkpoint") -> str:
-        """Write ``state`` once under ``tag``, stamped with ``kind`` and this run's ``config``
+        """Write ``state`` once under ``tag``, stamped with this run's ``config``
         without its data locations (``experiments.DATA_PATHS``; the run's own record keeps them),
         record it in ``run.saved``, and return the path written. A tag already written refuses
         with ``FileExistsError``. A ``metrics`` key in ``state`` is the deliverable's metrics,

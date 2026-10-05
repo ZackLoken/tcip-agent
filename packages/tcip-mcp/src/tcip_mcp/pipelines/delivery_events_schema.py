@@ -11,6 +11,9 @@ from typing import Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict
 
+from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+    ToleranceSource, UnattributedSegmentSource,
+)
 from tcip_mcp.traits import Text
 
 
@@ -21,7 +24,7 @@ class MatchTolerance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     value: float
-    source: str
+    source: ToleranceSource
 
 
 class PlantRegistryReference(BaseModel):
@@ -102,25 +105,6 @@ class SegmentTieDisclosure(BaseModel):
     clearance_m: float
 
 
-class UnattributedDetectionsBySource(BaseModel):
-    """A canopy-segment delivery's own unattributed-detection count, broken out by the
-    :class:`~tcip_mcp.pipelines.postprocessing.segment_attribution.SegmentAssignment.source`
-    that left each one unattributed; ``detections_unattributed`` on the enclosing disclosure is
-    the sum of these three, stated there as derived, never independent evidence.
-
-    This sum excludes one further case the door's own response counts as unmapped: a detection
-    whose containment resolved to exactly one tied segment (``source="segment_containment"``, so
-    it never appears in any of these three counts) but whose only containing segment's plant was
-    then dropped from delivery for an ambiguous detection elsewhere in that same segment. The two
-    numbers can differ for that reason alone."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    outside_segments: int
-    overlapping_segments: int
-    segment_without_plant: int
-
-
 class CanopySegmentDisclosure(BaseModel):
     """The ``plant_mapping`` an orthomosaic delivery's canopy-segment regime attributed detections
     through.
@@ -144,7 +128,9 @@ class CanopySegmentDisclosure(BaseModel):
     plants_without_segment: list[str]
     plants_with_ambiguous_detections: list[str]
     detections_unattributed: int
-    detections_unattributed_by_source: UnattributedDetectionsBySource
+    detections_unattributed_by_source: dict[UnattributedSegmentSource, int]
+    """The unattributed detections by the segment source that left each one unattributed; their
+    sum is ``detections_unattributed``."""
     detections_unattributed_scope: Literal["delivered_raster"]
     plant_attribution: str
 

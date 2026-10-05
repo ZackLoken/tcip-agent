@@ -48,40 +48,19 @@ def _records(img) -> list[dict]:
     return tcip_store.read(image_label_key(img))["annotations"]
 
 
-def test_save_annotations_stamps_created_by_when_given(tmp_path):
-    from tcip_mcp.tools.annotation_tools import save_annotations
-    img = _img(tmp_path)
-    save_annotations(tmp_path, tmp_path.parent, str(img),
-                     annotations=[{"subject": "bud", "bbox": [10, 10, 30, 30]}],
-                     created_by="claude")
-    obj = _records(img)[0]
-    assert obj["created_by"] == "claude"        # producer named by the agent
-    assert obj["created_at"]
+def test_save_annotations_takes_no_producer_and_names_itself(tmp_path):
+    """Every saved record carries a producer and its time: the tool's own, which no caller
+    states."""
+    import inspect
 
-
-def test_save_annotations_names_itself_when_the_caller_names_no_producer(tmp_path):
-    """Every saved record carries a producer and its time: with none named, the tool's own."""
     from tcip_mcp.tools.annotation_tools import save_annotations
+    assert "created_by" not in inspect.signature(save_annotations).parameters
     img = _img(tmp_path)
     save_annotations(tmp_path, tmp_path.parent, str(img),
                      annotations=[{"subject": "bud", "bbox": [10, 10, 30, 30]}])
     obj = _records(img)[0]
     assert obj["created_by"] == "save_annotations"
     assert obj["created_at"]
-
-
-def test_save_annotations_refuses_a_blank_producer_and_writes_nothing(tmp_path):
-    import tcip_store
-
-    from tcip_mcp.tools.annotation_tools import save_annotations
-    from tests._producer_fixtures import image_label_key
-
-    img = _img(tmp_path)
-    result = save_annotations(tmp_path, tmp_path.parent, str(img),
-                              annotations=[{"subject": "bud", "bbox": [10, 10, 30, 30]}],
-                              created_by="  ")
-    assert "records its producer" in result["error"]
-    assert not tcip_store.exists(image_label_key(img))
 
 
 def test_save_annotations_never_reads_provenance_off_a_shape(tmp_path):
@@ -94,9 +73,8 @@ def test_save_annotations_never_reads_provenance_off_a_shape(tmp_path):
             {"subject": "bud", "bbox": [10, 10, 30, 30], "created_by": "someone-else"},
             {"subject": "bud", "bbox": [40, 40, 60, 60]},
         ],
-        created_by="claude",
     )
-    assert [o["created_by"] for o in _records(img)] == ["claude", "claude"]
+    assert [o["created_by"] for o in _records(img)] == ["save_annotations", "save_annotations"]
 
 
 # ── MCP read_annotations: authorship travels back out of the read path ───────

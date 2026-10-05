@@ -91,7 +91,7 @@ def test_ws_state_rejects_cross_site_origin(client: TestClient) -> None:
 def test_ws_state_rejects_duplicate_origin(client: TestClient) -> None:
     # Two individually permitted origins, so duplication alone is what closes this connect.
     duplicated = _RawHeaderList([
-        ("origin", "http://127.0.0.1"), ("origin", "http://localhost:5173"),
+        ("origin", "http://127.0.0.1"), ("origin", "http://127.0.0.1:5173"),
     ])
     with pytest.raises(WebSocketDisconnect) as closed:
         with client.websocket_connect("ws://127.0.0.1/ws/state", headers=duplicated):
@@ -117,24 +117,23 @@ def test_ws_panel_rejects_cross_site_origin(client: TestClient) -> None:
             pass
 
 
-def test_is_loopback_host() -> None:
+def test_the_boundary_answers_to_the_one_loopback_host_the_servers_bind() -> None:
+    from tcip_mcp.web_client import LOOPBACK_HOST
     from tcip_web.trust_boundary import is_loopback_host
 
-    assert is_loopback_host("127.0.0.1")
-    assert is_loopback_host("localhost")
-    assert is_loopback_host("::1")
-    assert is_loopback_host("[::ffff:127.0.0.1]")
-    assert not is_loopback_host("0.0.0.0")
-    assert not is_loopback_host("192.168.1.5")
+    assert is_loopback_host(LOOPBACK_HOST)
+    assert is_loopback_host(f"[::ffff:{LOOPBACK_HOST}]")
+    for other in ("localhost", "::1", "127.1.2.3", "0.0.0.0", "192.168.1.5"):
+        assert not is_loopback_host(other), other
 
 
-def test_pick_port_finds_free_when_taken() -> None:
-    import tcip_web.__main__ as m
+def test_free_port_finds_free_when_taken() -> None:
+    from tcip_mcp.web_client import LOOPBACK_HOST, free_port
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
+        s.bind((LOOPBACK_HOST, 0))
         taken = s.getsockname()[1]
-        got = m._pick_port("127.0.0.1", taken)  # requested port is occupied
+        got = free_port(taken)  # requested port is occupied
         assert got != taken and got > 0
 
 

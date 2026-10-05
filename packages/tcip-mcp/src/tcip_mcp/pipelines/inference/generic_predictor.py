@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Callable, Protocol, cast
 
 import numpy as np
 import torch
-from PIL import Image
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -28,19 +27,11 @@ from tcip_mcp.pipelines.model_build import (
     recorded_model_dims,
 )
 from tcip_mcp.pipelines.image_utils import (
-    BandGroupRef, display_source_path, load_image, pil_to_tensor, pixel_array,
+    BandGroupRef, frame_size, load_image, pil_to_tensor, pixel_array, source_path_of,
 )
+from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
 
 logger = logging.getLogger(__name__)
-
-# Detection task names that format outputs as boxes/scores/labels. A bespoke model_source declares
-# the task type ``detection`` / ``instance_seg``, both route through the detection formatter.
-_DETECTION_TASKS = frozenset({"detection", "instance_seg"})
-
-DETECTION_ROWS = ("boxes", "scores", "labels", "attributes", "masks")
-"""The keys of a detection record (:meth:`GenericPredictor._detection_record`) holding one entry
-per detection, which every row filter over a record keeps in step."""
-
 
 class WindowedRasterReader(Protocol):
     """A source read window by window: full-raster pixel dimensions, band count, and a windowed
@@ -64,55 +55,51 @@ class GenericPredictor:
     exposed as-recorded: ``train_tile_size``/``train_overlap`` (a tiled run's tile lattice),
     ``train_native_size`` (the one frame size an untiled run's frames all shared, ``[width,
     height]``), and ``train_augmentation`` (the augmentation config that run declared, a dict or a
-    preset name). :func:`~tcip_mcp.pipelines.inference.predictor.resolve_tile_geometry` turns
-    those into an inference geometry.
+    preset name). :func:`~tcip_mcp.pipelines.slicing.resolve_tile_geometry` turns those into an
+    inference geometry. ``dims`` are the dimensions the model was built at
+    (:func:`~tcip_mcp.pipelines.model_build.recorded_model_dims`).
     """
 
     def __init__(self, checkpoint: "VerifiedCheckpoint", device: str | None = None) -> None:
-        self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+        from tcip_mcp.pipelines.data.datasets import stated_tiling
 
-        # Already read and unpickled by load_registered_checkpoint; no re-read here.
+        self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.checkpoint_path = checkpoint.path
         self.checkpoint_sha256 = checkpoint.sha256
-        ckpt = checkpoint.payload
-        self.config = ckpt.get("config", {})
+        self.config = checkpoint.config
         self.model_source = self.config.get(MODEL_SOURCE_KEY)
+        self.task = checkpoint.task
 
-        # Training tile geometry, so inference can derive the tile scale from the checkpoint instead
-        # of a mismatched default. None when this checkpoint carried no tiling geometry.
-        _tiling = (self.config.get("data") or {}).get("tiling") or {}
-        self.train_tile_size = _tiling.get("tile_size")
-        self.train_overlap = _tiling.get("overlap")
-        # The untiled counterpart, both as recorded; resolve_tile_geometry reads them.
-        self.train_native_size = (self.config.get("data") or {}).get("train_native_size")
+        data = checkpoint.data_config
+        tiling = stated_tiling(data.get("tiling")) or {}
+        self.train_tile_size = tiling.get("tile_size")
+        self.train_overlap = tiling.get("overlap")
+        self.train_native_size = data.get("train_native_size")
         self.train_augmentation = self.config.get("augmentation")
 
-        # The width and count the run that produced this checkpoint recorded on its own config.
-        dims = recorded_model_dims(self.config)
-        self.in_chans = dims["in_chans"]
-        self.attribute_sizes = [len(a.values) for a in dims.get("attributes", ())]
-        self.model = build_model(self.config, dims)  # re-imported bespoke builder (no exec)
-        self.model.load_state_dict(ckpt[STATE_DICT_KEY])
+        self.dims = recorded_model_dims(self.config)
+        self.in_chans = self.dims["in_chans"]
+        self.attribute_sizes = [len(a.values) for a in self.dims.get("attributes", ())]
+        self.model = build_model(self.config, self.dims)
+        self.model.load_state_dict(checkpoint.payload[STATE_DICT_KEY])
         self.model.to(self.device)
         self.model.eval()
-        self.task = checkpoint.task
 
     def model_input(self, image_path: str | Path | BandGroupRef) -> tuple[torch.Tensor, int, int]:
         """One source as this model reads it: EXIF-oriented at the model's own width, as a
         tensor on its device, with the source's ``(width, height)``."""
         img = load_image(image_path, self.in_chans)
-        w, h = img.size if isinstance(img, Image.Image) else (img.shape[1], img.shape[0])
-        return pil_to_tensor(img).to(self.device), int(w), int(h)
+        return pil_to_tensor(img).to(self.device), *frame_size(img)
 
     @torch.no_grad()
     def predict(self, image_path: str | Path | BandGroupRef, execution: Execution) -> dict:
         """Run inference on a single image, a plain path/string or a :class:`BandGroupRef`, under
         the untiled ``execution`` record."""
-        if self.task in _DETECTION_TASKS:
+        if self.task in DETECTION_TASKS:
             return self._predict_whole([image_path], execution)[0]
         tensor, w, h = self.model_input(image_path)
         outputs = self.model(tensor.unsqueeze(0))
-        return self._format_other(outputs, display_source_path(image_path), w, h)
+        return self._format_other(outputs, source_path_of(image_path), w, h)
 
     @torch.no_grad()
     def predict_batch(
@@ -132,7 +119,7 @@ class GenericPredictor:
             return [self.predict_sliced(p, execution=execution, tile_batch_size=tile_batch_size,
                                         require_masks=require_masks)
                     for p in image_paths]
-        if self.task not in _DETECTION_TASKS:
+        if self.task not in DETECTION_TASKS:
             return [self.predict(p, execution) for p in image_paths]
         step = max(1, batch_size)
         return [r for start in range(0, len(image_paths), step)
@@ -172,7 +159,7 @@ class GenericPredictor:
         model.perform_batch_inference(arrays)
         model.convert_original_predictions(
             shift_amount=[[0, 0]] * len(arrays), full_shape=[list(a.shape[:2]) for a in arrays])
-        return [self._detection_record(preds, display_source_path(s), a.shape[1], a.shape[0],
+        return [self._detection_record(preds, source_path_of(s), *frame_size(a),
                                        model=model, max_dets=execution.max_dets)
                 for preds, s, a in zip(model.object_prediction_list_per_image, sources, arrays)]
 
@@ -189,7 +176,6 @@ class GenericPredictor:
         from tcip_mcp.pipelines.slicing import prediction_rows
 
         ranked = sorted(predictions, key=lambda p: -p.score.value)
-        # cap_hit uses >=, matching records_from_detector.
         cap_hit = bool(max_dets is not None and len(ranked) >= max_dets)
         kept = prediction_rows(ranked[:max_dets] if max_dets is not None else ranked,
                                self.attribute_sizes)
@@ -245,7 +231,7 @@ class GenericPredictor:
             raise ValueError(
                 "prior/progress apply only to a windowed-reader source: a whole-decode pass writes "
                 "its files all at once and has no resume seam to feed them into.")
-        if self.task not in _DETECTION_TASKS:
+        if self.task not in DETECTION_TASKS:
             if windowed:
                 raise ValueError(
                     f"sliced prediction over a windowed reader needs a detection or instance_seg "
@@ -273,7 +259,7 @@ class GenericPredictor:
                 return reader.read_window(y0, y1, x0, x1)
         else:
             arr, interpretations = pixel_array(load_image(decoded, self.in_chans))
-            height, width, label = arr.shape[0], arr.shape[1], display_source_path(decoded)
+            (width, height), label = frame_size(arr), source_path_of(decoded)
 
             def read(x0: int, y0: int, x1: int, y1: int) -> np.ndarray:
                 return arr[y0:y1, x0:x1]

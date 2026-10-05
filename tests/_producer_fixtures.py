@@ -50,12 +50,13 @@ def seed_two_bud_images(images_dir) -> None:
 
 def small_detection_config(images_dir, experiment_id: str) -> dict:
     """A one-epoch CPU detection run of the bespoke detector over ``images_dir`` under
-    ``experiment_id``."""
+    ``experiment_id``, drawing its split at seed 0."""
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"}},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
+                 "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
         "mixed_precision": False, "device": "cpu",
         "experiment_id": experiment_id,

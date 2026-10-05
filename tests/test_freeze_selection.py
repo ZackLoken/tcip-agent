@@ -39,7 +39,7 @@ def _real_drawn_experiment(
     opened_run(project, {
         "model_source": {"task": "detection"},
         "data": {"images_dir": str(images_dir), "scope": {"subject": subject},
-                 "auto_val": auto_val},
+                 "auto_val": auto_val, "split": {"seed": 0, "val_ratio": 0.15}},
         **({} if auto_val else {"evaluation": {"selection_metric": "loss"}}),
     }, experiment_id=experiment_id)
     return run_resolution(experiment_id, project=project)["data"]
@@ -176,7 +176,7 @@ def test_freeze_selection_carries_an_explicit_group_key_map_onto_its_samples(tmp
     images_dir = root / "images" / DATES[0]
     resolved_run(tmp_path, {
         "images_dir": str(images_dir), "scope": {"subject": SUBJECT},
-        "split": {"group_key_map":
+        "split": {"seed": 0, "val_ratio": 0.15, "group_key_map":
                   {member_identity(DATES[0], s): "g1" for s in ("a", "b", "c")}
                   | {member_identity(DATES[0], s): "g2" for s in ("d", "e", "f")}}},
         experiment_id="exp-explicit-map")
@@ -206,7 +206,7 @@ def _bound_run(root: Path, tmp_path: Path, experiment_id: str, **split_extra) ->
 
     selection_dir = tmp_path / f"src-{experiment_id}"
     drawn = draw_splits(tmp_path, str(root), output_path=str(selection_dir), subject=SUBJECT,
-                        seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                        seed=2, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in drawn, drawn
 
     resolved_run(tmp_path, {"split": {"selection_dir": str(selection_dir), **split_extra}},

@@ -13,13 +13,17 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 
 from tcip_mcp.pipelines.active_learning import DEFAULT_SCORER
+from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +38,8 @@ class BaseScorer(ABC):
     """Rank images by how valuable they'd be to label next."""
 
     @abstractmethod
-    def score(self, image_paths: list[str], predictor: Any) -> list[tuple[str, float]]:
+    def score(self, image_paths: list[str],
+              predictor: GenericPredictor) -> list[tuple[str, float]]:
         """Return (path, score) pairs sorted descending (highest = most valuable), reading each
         candidate through the loaded checkpoint ``predictor``: its model, its device and its
         ``in_chans`` travel together."""
@@ -52,7 +57,8 @@ class UncertaintyScorer(BaseScorer):
         self.task = task
 
     @torch.no_grad()
-    def score(self, image_paths: list[str], predictor: Any) -> list[tuple[str, float]]:
+    def score(self, image_paths: list[str],
+              predictor: GenericPredictor) -> list[tuple[str, float]]:
         model = predictor.model
         model.eval()
         scored: list[tuple[str, float]] = []
@@ -60,33 +66,23 @@ class UncertaintyScorer(BaseScorer):
         for path in image_paths:
             tensor = predictor.model_input(path)[0].unsqueeze(0)
 
-            if self.task in ("detection", "instance_seg"):
+            if self.task in DETECTION_TASKS:
                 outputs = model([tensor[0]])
                 if isinstance(outputs, list):
                     outputs = outputs[0]
-                scores = outputs.get("scores", torch.tensor([]))
-                if len(scores) == 0:
-                    # No detections = no ambiguous decision for uncertainty sampling to act on.
-                    # Scoring these 1.0 floods the queue with empty frames; a missed object is a
-                    # recall gap uncertainty sampling can't see from the model's own outputs (use
-                    # diversity/coverage sampling for that), so an empty frame ranks low, not top.
-                    uncertainty = 0.0
-                else:
-                    # Low confidence spread → uncertain
-                    uncertainty = 1.0 - scores.mean().item()
+                scores = outputs["scores"]
+                # A frame with no detections holds no ambiguous decision, so it ranks lowest.
+                uncertainty = 1.0 - scores.mean().item() if len(scores) else 0.0
             else:
                 outputs = model(tensor)
-                if isinstance(outputs, dict):
-                    # Multi-head: average classification-style entropy across all heads.
-                    entropies = [
-                        _entropy(v) for v in outputs.values()
-                        if isinstance(v, torch.Tensor) and v.dim() >= 2
-                    ]
-                    uncertainty = sum(entropies) / len(entropies) if entropies else 0.5
-                elif isinstance(outputs, torch.Tensor) and outputs.dim() >= 2:
-                    uncertainty = _entropy(outputs)
-                else:
-                    uncertainty = 0.5
+                heads = outputs.values() if isinstance(outputs, dict) else [outputs]
+                # Multi-head: average classification-style entropy across all heads.
+                entropies = [_entropy(v) for v in heads
+                             if isinstance(v, torch.Tensor) and v.dim() >= 2]
+                if not entropies:
+                    raise ValueError(f"the uncertainty scorer cannot score a {self.task} model: "
+                                     "its output carries no class logits to take an entropy of.")
+                uncertainty = sum(entropies) / len(entropies)
 
             scored.append((path, uncertainty))
 
@@ -108,7 +104,8 @@ class DiversityScorer(BaseScorer):
         self._labeled = embeddings
 
     @torch.no_grad()
-    def score(self, image_paths: list[str], predictor: Any) -> list[tuple[str, float]]:
+    def score(self, image_paths: list[str],
+              predictor: GenericPredictor) -> list[tuple[str, float]]:
         model = predictor.model
         if not hasattr(model, "backbone"):
             # No silent random-noise embeddings: diversity needs real backbone features.
@@ -123,7 +120,6 @@ class DiversityScorer(BaseScorer):
         embeddings = []
         for path in image_paths:
             tensor = predictor.model_input(path)[0].unsqueeze(0)
-            # A bespoke model's own opt-in attribute, not part of nn.Module's stub (checked above).
             feats = cast(Any, model).backbone(tensor)
             feat = list(feats.values())[-1] if isinstance(feats, dict) else feats
             emb = F.adaptive_avg_pool2d(feat, 1).flatten(1).cpu().numpy()
@@ -169,7 +165,8 @@ class CombinedScorer(BaseScorer):
         self.uw = uncertainty_weight
         self.dw = diversity_weight
 
-    def score(self, image_paths: list[str], predictor: Any) -> list[tuple[str, float]]:
+    def score(self, image_paths: list[str],
+              predictor: GenericPredictor) -> list[tuple[str, float]]:
         unc_scores = dict(self.unc.score(image_paths, predictor))
         div_scores = dict(self.div.score(image_paths, predictor))
 
@@ -192,9 +189,6 @@ class CombinedScorer(BaseScorer):
         return combined
 
 
-# The acquisition-function seam: one Protocol (BaseScorer) + one dict registry. Built-in reference
-# scorers are pre-registered; the agent registers its own with register_scorer(name, factory) instead
-# of editing a closed menu. A factory takes the task string and returns a BaseScorer.
 SCORER_REGISTRY: dict[str, Callable[[str], BaseScorer]] = {
     "uncertainty": lambda task: UncertaintyScorer(task=task),
     "diversity": lambda task: DiversityScorer(),

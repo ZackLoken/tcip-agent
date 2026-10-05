@@ -16,8 +16,23 @@ from tcip_store import Key
 
 logger = logging.getLogger(__name__)
 
-BACKEND_HOST = "127.0.0.1"
-"""The loopback address the backend binds, the only arrival its trust boundary serves."""
+LOOPBACK_HOST = "127.0.0.1"
+"""The loopback address every server the platform starts binds and is reached at: the backend,
+TensorBoard and Ray's dashboard."""
+
+
+def free_port(requested: int) -> int:
+    """``requested`` if it is free on :data:`LOOPBACK_HOST`, else a free port the OS assigns."""
+    import socket
+
+    for candidate in (requested, 0):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind((LOOPBACK_HOST, candidate))
+                return s.getsockname()[1]
+        except OSError:
+            continue
+    raise OSError(f"no port could be bound on {LOOPBACK_HOST}")
 
 BACKEND_PORT_STORE = "backend_port"
 _PORT_PARTS = ("web_port",)
@@ -260,7 +275,7 @@ def backend_url(workspace: Path, path: str) -> str:
     port = resolve_web_port(workspace)
     if not path.startswith("/"):
         path = "/" + path
-    return f"http://{BACKEND_HOST}:{port}{path}"
+    return f"http://{LOOPBACK_HOST}:{port}{path}"
 
 
 def post_panel_event(

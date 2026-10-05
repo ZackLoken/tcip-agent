@@ -15,7 +15,6 @@ from pathlib import Path
 import pytest
 
 torch = pytest.importorskip("torch")
-pytest.importorskip("pycocotools")
 
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
@@ -23,11 +22,7 @@ from tests._producer_fixtures import label_image  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     SCOPED_DATA, project_checkpoint, verified_checkpoint,
 )
-from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
-    build_coco_image_record,
-    coco_detection_metrics,
-    evaluate,
-)
+from tcip_mcp.pipelines.training.evaluation import evaluate  # noqa: E402
 
 _DIMS = {"in_chans": 3, "num_classes": 1}
 """What a one-subject detector over three-band sources is built at."""
@@ -99,44 +94,6 @@ def test_all_negative_only_loader_is_not_skipped():
     result = evaluate(model, loader, torch.device("cpu"), "detection", dims=_DIMS)
     assert stub.calls == [(2, 0)]  # forwarded, not skipped
     assert result["loss"] == pytest.approx(2.5)  # finite, non-zero: negatives contribute loss
-
-
-# ── standard map@100 beside map@max_dets ─────────────────────────────────
-
-def _rec(gt, dt, w=100, h=100):
-    return build_coco_image_record(w, h, gt, dt)
-
-
-def _perfect_records(n=1):
-    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "area": 400, "iscrowd": 0}]
-    dt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9}]
-    return [_rec(gt, dt) for _ in range(n)]
-
-
-def test_map_nonzero_at_high_maxdets():
-    m = coco_detection_metrics(_perfect_records(), max_dets=1000)
-    assert m["map"] == pytest.approx(1.0)      # standard map@100 no longer collapses to 0.0
-    assert m["map50"] == pytest.approx(1.0)
-    assert m["map_at_maxdets"] == pytest.approx(1.0)
-    assert m["map50_at_maxdets"] == pytest.approx(1.0)
-
-
-def test_map_invariant_across_maxdets():
-    recs = _perfect_records(3)
-    maps = {md: coco_detection_metrics(recs, max_dets=md) for md in (100, 300, 1000)}
-    base = maps[100]
-    for md in (300, 1000):
-        assert maps[md]["map"] == pytest.approx(base["map"])
-        assert maps[md]["map50"] == pytest.approx(base["map50"])
-        assert maps[md]["map75"] == pytest.approx(base["map75"])
-
-
-def test_standard_keys_unchanged_at_100():
-    m = coco_detection_metrics(_perfect_records(), max_dets=100)
-    assert m["map"] == pytest.approx(1.0)
-    assert m["map50"] == pytest.approx(1.0)
-    # at the standard cap the operating-cap figures equal the standard ones
-    assert m["map_at_maxdets"] == pytest.approx(m["map"])
 
 
 # ── tiled evaluation regimes ──────────────────────────────────────────────
@@ -364,8 +321,7 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
         return evaluate(
             independent_model, recorded["loader"], recorded["device"], recorded["task"],
             dims=dims, conf_threshold=measured["execution"]["conf"],
-            iou_threshold=kw["iou_threshold"], iou_type=kw["iou_type"],
-            max_dets=measured["execution"]["max_dets"], trait=kw["trait"])
+            iou_threshold=kw["iou_threshold"], trait=kw["trait"])
 
     set_detector_operating_point(independent_model, score_thresh=measured["execution"]["conf"],
                                  detections_per_img=measured["execution"]["max_dets"])
@@ -373,7 +329,8 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     assert independent
     for key, value in independent.items():
         # Two forward passes over the same weights are equal to float noise, not bit for bit.
-        assert measured[key] == pytest.approx(value, rel=1e-4), key
+        assert measured[key] == (pytest.approx(value, rel=1e-4)
+                                 if isinstance(value, (int, float)) else value), key
 
     # What the builder's own floor reports instead, so the equality above is evidence about this
     # fixture rather than a comparison nothing could separate.
@@ -402,6 +359,8 @@ class _SlicedStub:
 
     task = "detection"
     in_chans = 3
+    train_native_size = None
+    train_augmentation = None
 
     def __init__(self, boxes, *, train_tile_size=None, train_overlap=None):
         self.boxes = boxes
@@ -468,13 +427,13 @@ def test_full_frame_reads_each_ground_truth_box_on_the_stored_grid(tmp_path, mon
     from tcip_annotation.state import Annotation, BBox
 
     scored: list = []
-    real_record = evaluation.build_coco_image_record
+    real_record = evaluation.image_record
 
     def recording(w, h, gt, dt, **kw):
         scored.append((gt, dt))
         return real_record(w, h, gt, dt, **kw)
 
-    monkeypatch.setattr(evaluation, "build_coco_image_record", recording)
+    monkeypatch.setattr(evaluation, "image_record", recording)
     bur = {"num_channels": 3, "scope": {"subject": "bur"}}
     _full_frame(tmp_path, monkeypatch, _SlicedStub([[10.1, 10.1, 40.3, 30.3]]),
                 [Annotation(subject="bur", geometry=BBox(10.1, 10.1, 40.3, 30.3))],
@@ -609,7 +568,7 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15},
                  # no tile_size: the effective default must be persisted
                  "tiling": {"enabled": True, "sliver_frac": 0.5}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],

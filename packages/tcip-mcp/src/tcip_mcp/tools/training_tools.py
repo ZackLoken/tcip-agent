@@ -161,14 +161,16 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
         resolved_data = resolution.record["data"]
         known = {str(Path(s.source).resolve())
                  for s in partition_samples(resolution.record["partition"])}
-        if (split_cfg_dict.get("reserve_calibration_fraction")
-                and "spatial_manifest" not in resolved_data["split"]):
+        from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
+
+        reserved = sorted(f"{side}_ratio" for side in REFERENCE_SIDES
+                          if split_cfg_dict.get(f"{side}_ratio"))
+        if reserved and "spatial_manifest" not in resolved_data["split"]:
             issues.append(
-                f"data.split.reserve_calibration_fraction="
-                f"{split_cfg_dict['reserve_calibration_fraction']} has no effect: this run over "
-                f"{len(known)} admitted sources did not resolve to the single-source "
-                "spatial-strip split a calibration region reserves from (a detection task with "
-                "tiling enabled over one admitted source).")
+                f"data.split {reserved} have no effect: this run over {len(known)} admitted "
+                "sources did not resolve to the single-source spatial-strip split a reserved "
+                "region is cut from (a detection task with tiling enabled over one admitted "
+                "source); draw a selection with draw_splits for a reference.")
         if sampling_record is not None:
             bad = sorted({label for label, _ in sampling_record.windows
                           if str(Path(label).resolve()) not in known})
@@ -315,12 +317,13 @@ def open_run(
     resumes from, its wall clock, the model contract preflight proved, and an HPO
     trial's sampled point. A seed is drawn onto ``config`` when it states none. Refuses an
     existing directory (``experiments.RunDirectoryExists``)."""
-    from tcip_mcp.pipelines.data.split_construction import dataset_identity
+    from tcip_mcp.pipelines.data.split_construction import dataset_identity, partition_samples
     from tcip_mcp.pipelines.model_build import capture_env, snapshot_model_source
     from tcip_mcp.pipelines.training.run_registry import draw_seed_if_unset
 
     draw_seed_if_unset(config)
-    dataset_id, fingerprint = dataset_identity(config.get("data") or {})
+    dataset_id, fingerprint = dataset_identity(
+        config.get("data") or {}, partition_samples(resolved["partition"]) if resolved else ())
     experiments.open_run_directory(run_dir, lambda directory: {
         "created": now_iso(), "config": config, "resolved": resolved,
         "environment": capture_env(),
@@ -525,18 +528,11 @@ def monitor_training(project: Path, experiment_id: str | None = None,
         "output_dir": disk["output_dir"], "error": disk["error"],
     }
 
-    # A run's own TensorBoard is keyed by its log directory, never by experiment_id.
-    tb_url = None
-    try:
-        from tcip_mcp.pipelines.training.tensorboard_manager import _TB_PROCESSES
-        output_dir = result.get("output_dir")
-        tb_key = str((Path(output_dir) / "tensorboard").resolve()) if output_dir else None
-        entry = _TB_PROCESSES.get(tb_key) if tb_key is not None else None
-        if entry is not None and entry.proc.poll() is None:
-            tb_url = f"http://localhost:{entry.port}"
-    except Exception:
-        pass
-    result["tensorboard_url"] = tb_url
+    from tcip_mcp.pipelines.training.tensorboard_manager import running_url
+
+    output_dir = result.get("output_dir")
+    result["tensorboard_url"] = (running_url(logdir=str(Path(output_dir) / "tensorboard"))
+                                 if output_dir else None)
     return result
 
 
@@ -641,7 +637,7 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
                 as_recorded["compatible"] = False
                 as_recorded["reason"] = "; ".join(own_issues)
     else:
-        seed = split_seed(split_cfg)
+        seed = own.record["resolved"]["partition"]["seed"]
         as_recorded = {
             "case": "drawn",
             "line": f"draws its split again with seed {seed} over the labels as they are now",
@@ -1008,12 +1004,12 @@ def run_hyperparameter_search(
             draw. Recorded in the sweep's input beside ``split_draws``, ``None`` when the caller
             stated none.
         split_draws: Above 1, adds ``data.split.seed`` to the search space as a grid over
-            ``split_draw_seeds`` (default: the base config's own ``data.split.seed``, else
-            ``DEFAULT_SEED``, plus the draw index), paired with every sampled point through Ray's
+            ``split_draw_seeds`` (default: the base config's own ``data.split.seed`` plus the draw
+            index), paired with every sampled point through Ray's
             own ``BasicVariantGenerator(constant_grid_search=True)`` so each point trains once per
             seed. A ``base_config`` bound to a selection gains
             ``data.split.redraw_within_selection: true`` on its own copy (``data.split.seed``
-            defaulting to ``DEFAULT_SEED``), so every trial redraws train and val inside the
+            stated), so every trial redraws train and val inside the
             selection's own train-plus-val samples, calibration untouched; refused when those
             samples resolve to fewer than two foreground groups. Otherwise refused when
             ``data.auto_val`` is off, ``search_alg`` is not a native one
@@ -1341,8 +1337,8 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
 def _base_config_for_split_draws(base_config: dict, split_draws: int) -> dict:
     """``base_config`` as a sweep over ``split_draws`` draws is minted from: unchanged unless
     ``split_draws`` is above 1 and the config is bound to a selection, in which case a copy carries
-    ``data.split.redraw_within_selection: true`` (defaulting ``data.split.seed`` to
-    ``DEFAULT_SEED`` when absent). An already-true flag or an already-set seed is left as it is.
+    ``data.split.redraw_within_selection: true``; a config stating no ``data.split.seed`` refuses
+    (``ValueError``).
     """
     if split_draws <= 1:
         return base_config
@@ -1451,7 +1447,9 @@ def _split_draws_refusal(
     """
     if split_draws <= 1:
         return None
-    from tcip_mcp.pipelines.training.hpo import SPLIT_DRAW_SEED_KEY, _NATIVE_SEARCH, _NO_SCHEDULER
+    from tcip_mcp.pipelines.training.hpo import (
+        SPLIT_DRAW_SEED_KEY, _NATIVE_SEARCH, _NO_SCHEDULER, search_alg_key,
+    )
 
     data_cfg = base_config.get("data") or {}
     split_cfg = data_cfg.get("split") or {}
@@ -1459,8 +1457,8 @@ def _split_draws_refusal(
     if not bound and not data_cfg.get("auto_val", True):
         return ("split_draws needs a drawn validation split, and base_config sets "
                 "data.auto_val=False.")
-    if (search_alg or "").lower() not in _NATIVE_SEARCH:
-        native = sorted(x for x in _NATIVE_SEARCH if isinstance(x, str) and x)
+    if search_alg_key(search_alg) not in _NATIVE_SEARCH:
+        native = sorted(_NATIVE_SEARCH)
         return (f"split_draws pairs a grid axis through Ray's own BasicVariantGenerator, which "
                 f"only a native search_alg ({native}) builds; search_alg={search_alg!r} does not.")
     if (scheduler or "none").lower() not in _NO_SCHEDULER:
@@ -1523,17 +1521,12 @@ def _unbound_single_source_spatial_issue(task: str, data_cfg: dict, split_draws:
     a mapping, or disabled, a bespoke ``dataset_source`` is named, the admitted count could not be
     resolved, or the admitted count is not exactly one.
     """
-    if task != "detection":
-        return None
+    from tcip_mcp.pipelines.data.datasets import run_tiling
+    from tcip_mcp.pipelines.data.split_construction import run_membership
     from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY
 
-    if data_cfg.get(DATASET_SOURCE_KEY):
+    if data_cfg.get(DATASET_SOURCE_KEY) or run_tiling(task, data_cfg.get("tiling")) is None:
         return None
-    tiling = data_cfg.get("tiling")
-    if not isinstance(tiling, dict) or not tiling or not tiling.get("enabled", True):
-        return None
-
-    from tcip_mcp.pipelines.data.split_construction import run_membership
 
     try:
         membership = run_membership(data_cfg)
@@ -1721,15 +1714,15 @@ def evaluate_model(
     labels_dir: str | None = None,
     stated: Stated | None = None,
     iou_threshold: float = 0.5,
-    iou_type: str | None = None,
     tiling: dict | None = None,
     use_tiled_inference: bool = False,
     trait: str | None = None,
 ) -> dict:
     """Evaluate a trained checkpoint on a (held-out) dataset and return the result.
 
-    Computes the same per-task metrics as validation, detection/instance_seg get pycocotools mAP +
-    precision/recall/F1; classification/ordinal/regression get the in-house scalar metrics. Writes
+    Computes the same per-task metrics as validation: detection/instance_seg get the one
+    matcher's precision/recall/F1 and average precision (by mask for instance_seg);
+    classification/ordinal/regression get the in-house scalar metrics. Writes
     nothing: the training run's directory is never touched. The reference is read under the class
     space the checkpoint records, its map included.
 
@@ -1761,9 +1754,7 @@ def evaluate_model(
             delivery-grade path the ``tile_size``, ``overlap``, ``postprocess`` and
             ``cross_tile_nms``. The resolved record, each value's source with it, is returned under
             ``execution``.
-        iou_threshold: Operating IoU (on COCOeval's grid; 0.5 -> index 0).
-        iou_type: 'bbox' or 'segm'. Default (None) auto-resolves from the task, 'segm' for
-            instance_seg, 'bbox' otherwise.
+        iou_threshold: The IoU a match must reach under the IoU convention.
         tiling: Optional detection tiling dict ({enabled, tile_size, overlap, ...}) for a
             tile-level eval. None + a run id reuses the run's training tiling; None + a checkpoint
             path stays untiled.
@@ -1862,6 +1853,6 @@ def evaluate_model(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     try:
         return run_test_evaluation(
-            pass_, loader, device, iou_threshold=iou_threshold, iou_type=iou_type, tiling=tiling, trait=trait_entry)
+            pass_, loader, device, iou_threshold=iou_threshold, tiling=tiling, trait=trait_entry)
     except ValueError as exc:
         return {"error": str(exc)}

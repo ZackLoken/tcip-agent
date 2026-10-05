@@ -81,8 +81,8 @@ def test_draw_splits_counts_json_objects_not_lines(tmp_path):
         label_image(negative, [], 100, 80, keep_empty=True)
         mark_complete(negative, "bud", project=tmp_path)
 
-    res = draw_splits(tmp_path, str(tmp_path), train_ratio=0.5, val_ratio=0.5, calibration_ratio=0.0,
-                      group_by="stem", subject="bud")
+    res = draw_splits(tmp_path, str(tmp_path), seed=1, val_ratio=0.5, calibration_ratio=0.0,
+                      holdout_ratio=0.0, group_by="stem", subject="bud")
     assert "error" not in res
     # foreground_annotations sums per split: true total is 3+1+0+0. Counting raw JSON text
     # lines instead reports dozens, since negatives alone read as several each.

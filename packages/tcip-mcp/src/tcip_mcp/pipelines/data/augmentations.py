@@ -312,6 +312,8 @@ def get_augmentation_preset(name: str, image_size: tuple[int, int] = (640, 640))
 
     ``nadir_rotation``: free rotation, h/v flips, mild jitter; no mosaic/copy-paste/mixup.
     """
+    from tcip_mcp.pipelines.model_build import resolve_named
+
     presets: dict[str, dict] = {
         "nadir_rotation": {
             "rotation": {"degrees": 180, "p": 1.0},
@@ -327,9 +329,7 @@ def get_augmentation_preset(name: str, image_size: tuple[int, int] = (640, 640))
         },
         "none": {"resize": list(image_size)},
     }
-    if name not in presets:
-        raise ValueError(f"Unknown augmentation preset '{name}'. Available: {sorted(presets)}")
-    return presets[name]
+    return resolve_named(name, presets, kind="augmentation preset")
 
 
 def recorded_resize(config: dict | str | None) -> tuple[int, int] | None:
@@ -374,17 +374,15 @@ def build_augmentation(config: dict | str) -> Compose:
 
     Returns a Compose([..., ToTensor()]) pipeline.
     """
+    from tcip_mcp.pipelines.model_build import resolve_named
+
     if isinstance(config, str):
         config = get_augmentation_preset(config)
 
     transforms = []
 
     for name, params in config.items():
-        cls = _AUGMENTATION_REGISTRY.get(name)
-        if cls is None:
-            raise ValueError(
-                f"Unknown augmentation '{name}'. Available: {sorted(_AUGMENTATION_REGISTRY)}"
-            )
+        cls = resolve_named(name, _AUGMENTATION_REGISTRY, kind="augmentation")
 
         if isinstance(params, bool) and params:
             transforms.append(cls())

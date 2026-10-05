@@ -372,7 +372,7 @@ def _draw_flat(project: Path, root: Path, out: Path, *, seed: int = 2):
     from tcip_mcp.tools.data_tools import draw_splits
 
     result = draw_splits(project, str(root), output_path=str(out), subject=_FLAT_SUBJECT, seed=seed,
-                         train_ratio=0.4, val_ratio=0.3, calibration_ratio=0.15, holdout_ratio=0.15)
+                         val_ratio=0.3, calibration_ratio=0.15, holdout_ratio=0.15)
     assert "error" not in result, result
     return read_selection(out, project=project)
 

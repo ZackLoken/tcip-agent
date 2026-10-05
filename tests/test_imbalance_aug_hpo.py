@@ -156,7 +156,6 @@ def test_semantic_seg_head_advertises_no_loss_choice():
     from tcip_mcp.pipelines.components.heads import SemanticSegHead
     with _pytest.raises(TypeError, match="'loss'"):
         SemanticSegHead(in_channels=64, num_classes=3, loss="weighted_ce")  # type: ignore[call-arg]  # the refused kwarg is the subject; the raises pins it to loss
-    assert SemanticSegHead.default_loss == ""
 
 
 # --------------------------------------------------------------------------
@@ -426,8 +425,16 @@ def test_a_searcher_this_platform_cannot_seed_or_run_is_refused_by_name(name):
     pytest.importorskip("ray")
     from tcip_mcp.pipelines.training.hpo import build_search_alg
 
-    with pytest.raises(ValueError, match=f"'{name}' is not offered"):
+    with pytest.raises(ValueError, match=f"Unknown search_alg '{name}'"):
         build_search_alg(name, seed=0)
+
+
+def test_a_blank_search_alg_refuses_naming_the_vocabulary():
+    pytest.importorskip("ray")
+    from tcip_mcp.pipelines.training.hpo import build_search_alg
+
+    with pytest.raises(ValueError, match="Unknown search_alg ''.*random"):
+        build_search_alg("", seed=0)
 
 
 def test_build_search_alg_native_and_backend():

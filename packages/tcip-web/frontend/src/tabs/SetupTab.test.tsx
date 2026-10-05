@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { StructuredRefusalError } from "@/api/http";
-import { resultsApi } from "@/api/inference";
+import { resultsApi, type ServedPlantMapping } from "@/api/inference";
+import type { MatchTolerance } from "@/api/types.generated";
 import { useStore } from "@/store";
 import { SetupTab } from "@/tabs/SetupTab";
 import { TRAIT_LISTINGS } from "@/test/traitRecords";
@@ -160,7 +161,7 @@ describe("SetupTab plant-mapping build: match-tolerance phrase", () => {
     fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
   }
 
-  async function buildWithTolerance(nn_tolerance_m: { value: number; source: string }) {
+  async function buildWithTolerance(nn_tolerance_m: MatchTolerance) {
     vi.spyOn(resultsApi, "buildPlantMapping").mockResolvedValue({
       name: "valley-2026",
       unreadable: {},
@@ -198,11 +199,6 @@ describe("SetupTab plant-mapping build: match-tolerance phrase", () => {
   it("names the capped stated value for source stated_capped", async () => {
     await buildWithTolerance({ value: 2, source: "stated_capped" });
     expect(await screen.findByText(/capped to the grid pitch/)).toBeInTheDocument();
-  });
-
-  it("renders a source this map does not know as its own raw string", async () => {
-    await buildWithTolerance({ value: 5, source: "future_branch" });
-    expect(await screen.findByText(/future_branch/)).toBeInTheDocument();
   });
 
   it("sends supersede only once the checkbox is checked", async () => {
@@ -327,7 +323,7 @@ describe("SetupTab plant-mapping build: match-tolerance phrase", () => {
     expect(await screen.findByText(/avg no distances/)).toBeInTheDocument();
   });
 
-  const LOADED = {
+  const LOADED: ServedPlantMapping = {
     name: "valley-2026",
     unreadable: {},
     summary: {

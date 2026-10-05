@@ -129,9 +129,7 @@ class BandGroupRef:
 
 
 class BandGroupIncomplete(FileNotFoundError):
-    """A ``.bandgroup`` manifest references a sibling file that no longer exists on disk. Raised at
-    ``resolve_image_source``.
-    """
+    """A ``.bandgroup`` manifest references a sibling file that no longer exists on disk."""
 
 
 def _read_xmp_tags(path: Path) -> dict[str, str] | None:

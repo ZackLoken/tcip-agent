@@ -84,6 +84,8 @@ config = {
         "images_dir": "data/images",  # each image's own label document is its ground truth
         # the subject it is admitted for; admission adds every attribute the registry declares
         "scope": {"subject": "fruit"},
+        # the run's own train/val draw: its seed and its val share are both stated
+        "split": {"seed": 7, "val_ratio": 0.2},  # 0.2 an example value
     },
     "batch_size": 4,
     "stages": [...],
@@ -189,9 +191,13 @@ run_hyperparameter_search(base_config=config, n_trials=20, search_alg="optuna", 
 
 ## Dataset Selections
 
-Use `draw_splits` to draw a train/val/calibration selection: `draw_splits` has no `test_ratio`
-parameter at all, no launch path honors a held-out test list (a separate, within-image
-mechanism, `reserve_calibration_fraction` on the spatial_strip route, not this one). The samples
+Use `draw_splits` to draw a selection's train, val, calibration and holdout sides. Each side but
+`train` is stated as a share and `train` takes the remainder; an unstated share takes
+`splits.DEFAULT_SHARES` (provisional, the owner's documented targets, which the group draw rounds
+to whole groups), and the `seed` has no default. A side the draw would leave empty refuses naming
+it. A run drawing its own split takes no default share: it states `val_ratio`, and a run drawing
+a within-image split (the spatial_strip route) reserves a holdout or calibration region only
+where `holdout_ratio` or `calibration_ratio` states one. The samples
 are drawn through the same admission a training run uses, and which admission that is depends on
 what the dataset's ground truth is. A draw over the dataset's label documents (no
 `ground_truth`) requires `subject`, since that admission is subject-scoped; the selection's scope
@@ -213,10 +219,10 @@ measure (a count needs detections to compare, a scalar needs table rows).
   Every capture date the dataset holds enters one selection, so a trait needing examples from two
   dates trains in place: no derived folder, no copied imagery, and two dates holding a same-named
   image are two samples rather than one
-- A stats-only call (no `output_path`) is the same draw, written nowhere; it defaults to
-  `train_ratio=0.8`, `val_ratio=0.2`, `calibration_ratio=0.0`, `holdout_ratio=0.0`; leakage-free
-  (sibling tiles of one source image stay in the same split). A side whose ratio is zero is not
-  drawn, written or not; a negative ratio refuses
+- A stats-only call (no `output_path`) is the same draw, written nowhere and leaving no audit
+  line; leakage-free (sibling tiles of one source image stay in the same split). A side whose
+  share is zero is not drawn, written or not; a share outside `[0, 1)`, or shares leaving `train`
+  nothing, refuse
 - The draw refuses, before any write, when the tree holds fewer foreground groups of `subject`
   than one per requested side, counted for the draw's own subject regardless of
   `stratify_foreground`; a run's own train/val draw and a redraw inside a selection refuse by the
@@ -224,7 +230,7 @@ measure (a count needs detections to compare, a scalar needs table rows).
 - `stratify_foreground=True` (default) balances splits by each source's foreground annotation
   count, not per-class distribution; the minimum-foreground floor above sees real foreground
   either way
-- Reproducible with random seed
+- Reproducible from the stated seed
 
 A run names the selection it should train against with `data.split.selection_dir` (the
 `selection_dir` `draw_splits` returned). Any task can bind one whose samples carry the ground
@@ -241,7 +247,7 @@ directory pair: a selection carries validation membership, and a directory besid
 second membership source.
 `selection_dir` conflicts with a
 drawn split's own parameters (`group_by`, `group_key_map`, `val_ratio`, `seed`,
-`stratify_foreground`, `test_ratio`, `reserve_calibration_fraction`). The loaders read the
+`stratify_foreground`, `holdout_ratio`, `calibration_ratio`). The loaders read the
 selection's `train` and `val` samples as recorded, admitting nothing afresh; its `calibration`
 samples build neither loader. The run's `run.json` then records the bound membership in its
 partition, with the selection it bound (the selection's directory, its digest and whether the run

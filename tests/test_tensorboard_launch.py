@@ -42,7 +42,7 @@ def test_launch_reports_the_failure_when_the_process_exits_immediately(monkeypat
     assert "url" not in info
     assert "exited during startup" in info["error"]
     assert "tensorboard is not installed" in info["output"]
-    assert all(entry["key"] != "dead-run" for entry in tb.list_tensorboard())
+    assert tb.running_url(key="dead-run") is None
 
 
 def _never_confirms_kill_popen_class(spawned: list):
@@ -113,7 +113,7 @@ def test_stop_logs_a_kill_that_never_confirms(monkeypatch, tmp_path, caplog):
     monkeypatch.setattr(tb.subprocess, "Popen", _never_confirms_kill_popen_class(spawned))
     # the stand-in carries none of the platform tie's own machinery (no _handle on Windows); the
     # tie itself is not what this test is about.
-    monkeypatch.setattr(tb, "_DISABLE_LIFETIME_TIE", True)
+    monkeypatch.setattr(tb, "_assign_to_win_job", lambda proc: None, raising=False)
 
     try:
         info = tb.launch_tensorboard(str(tmp_path), key="unconfirmed-run")
@@ -138,7 +138,7 @@ def test_exit_sweep_logs_a_kill_that_never_confirms(monkeypatch, tmp_path, caplo
 
     spawned: list[subprocess.Popen] = []
     monkeypatch.setattr(tb.subprocess, "Popen", _never_confirms_kill_popen_class(spawned))
-    monkeypatch.setattr(tb, "_DISABLE_LIFETIME_TIE", True)
+    monkeypatch.setattr(tb, "_assign_to_win_job", lambda proc: None, raising=False)
 
     try:
         info = tb.launch_tensorboard(str(tmp_path), key="sweep-unconfirmed-run")
@@ -167,13 +167,15 @@ def test_launch_returns_a_url_for_a_process_that_stays_up(monkeypatch, tmp_path)
 
     monkeypatch.setattr(tb.subprocess, "Popen", living_popen)
 
+    from tcip_mcp.web_client import LOOPBACK_HOST
+
     info = tb.launch_tensorboard(str(tmp_path), key="live-run")
     try:
-        assert info["url"] == f"http://localhost:{info['port']}"
-        assert any(entry["key"] == "live-run" for entry in tb.list_tensorboard())
+        assert info["url"] == f"http://{LOOPBACK_HOST}:{info['port']}"
+        assert tb.running_url(key="live-run") == info["url"]
     finally:
         tb.stop_tensorboard(key="live-run")
-    assert all(entry["key"] != "live-run" for entry in tb.list_tensorboard())
+    assert tb.running_url(key="live-run") is None
 
 
 def test_launch_reports_the_platform_lifetime_tie(monkeypatch, tmp_path):
@@ -191,22 +193,6 @@ def test_launch_reports_the_platform_lifetime_tie(monkeypatch, tmp_path):
         assert info["lifetime_tie"] == ("job" if sys.platform == "win32" else "guardian")
     finally:
         tb.stop_tensorboard(key="tie-run")
-
-
-def test_launch_reports_the_tie_disabled_under_the_test_seam(monkeypatch, tmp_path):
-    from tcip_mcp.pipelines.training import tensorboard_manager as tb
-
-    monkeypatch.setattr(
-        tb, "_tensorboard_argv",
-        lambda logdir, port: [sys.executable, "-c", "import time; time.sleep(30)"],
-    )
-    monkeypatch.setattr(tb, "_DISABLE_LIFETIME_TIE", True)
-
-    info = tb.launch_tensorboard(str(tmp_path), key="tie-disabled-run")
-    try:
-        assert info["lifetime_tie"] == "none: disabled for test"
-    finally:
-        tb.stop_tensorboard(key="tie-disabled-run")
 
 
 def test_a_record_id_spelled_like_a_sweeps_key_runs_its_own_board_beside_it(monkeypatch, tmp_path):
@@ -231,8 +217,9 @@ def test_a_record_id_spelled_like_a_sweeps_key_runs_its_own_board_beside_it(monk
     try:
         assert "url" in sweep_info and "url" in run_info
         assert run_info["logdir"] != sweep_key
-        keys = {entry["key"] for entry in tb.list_tensorboard()}
-        assert keys == {sweep_key, str(run_logdir.resolve())}
+        assert tb.running_url(key=sweep_key) == sweep_info["url"]
+        assert tb.running_url(logdir=str(run_logdir)) == run_info["url"]
+        assert sweep_info["pid"] != run_info["pid"]
     finally:
         tb.stop_tensorboard(key=sweep_key)
         tb.stop_tensorboard(key=str(run_logdir.resolve()))

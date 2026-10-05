@@ -23,8 +23,10 @@ localization criterion with a tolerance derived from the data in hand, e.g. a ce
 criterion per trait/data; keep mAP@50 alongside only as the comparability label (see `operating_point`
 / the derive-don't-pin rail). There is no single mandated "primary" metric per task.
 
-Detection/instance-seg metrics (`coco_detection_metrics`) are aggregate only; no per-class AP
-today. Per-class precision/recall/F1 is real for classification (`evaluate_model`); ordinal and
+Detection/instance-seg metrics (`detection_metrics`) come from the platform's one matcher: the
+counts at the operating conf under the governing criterion, and average precision (`map50`, `map`
+over IoU 0.50 to 0.95) from the same matcher over the confidence sweep, matched by mask for
+instance segmentation. They are aggregate only; no per-class AP is reported. Per-class precision/recall/F1 is real for classification (`evaluate_model`); ordinal and
 regression get only the scalar metrics in the table above, no per-class breakdown. Change
 detection is not a built task type; see README's Roadmap.
 

@@ -170,7 +170,7 @@ def test_the_shard_records_each_decision_once_and_refuses_an_entry_it_cannot_rea
 
 def test_a_save_from_a_stale_read_conflicts_and_writes_nothing(tmp_path: Path) -> None:
     image = _image(tmp_path)
-    first = _save(tmp_path, image, [{"subject": "bud", "bbox": BOX}])
+    first, _document = _save(tmp_path, image, [{"subject": "bud", "bbox": BOX}])
     _save(tmp_path, image, [], author="user:second", expect=first)
 
     with pytest.raises(ts.VersionConflict):
@@ -373,14 +373,14 @@ def _counted(annotations: list, proposals: list, criterion: dict) -> dict:
     """The assessment's governing count over one image's annotations and proposals."""
     from tcip_annotation.json_io import xywh
     from tcip_mcp.pipelines.training.evaluation import (
-        build_coco_image_record, dt_record, governing_counts, gt_record,
+        dt_record, governing_counts, gt_record, image_record,
     )
 
     def box(a) -> list[float]:
         g = a.geometry
         return xywh(g.x1, g.y1, g.x2, g.y2)
 
-    record = build_coco_image_record(
+    record = image_record(
         WIDTH, HEIGHT, [gt_record(box(a), 1, a.iscrowd) for a in annotations],
         [dt_record(box(p), 1, p.score) for p in proposals])
     return governing_counts([record], criterion, conf_threshold=0.0)

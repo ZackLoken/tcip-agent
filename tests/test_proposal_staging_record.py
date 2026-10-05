@@ -237,12 +237,11 @@ def test_propose_then_accept_through_a_band_groups_manifest_path(
     assert len(_staged_annotations(tmp_path, accepted["bucket"], "capture")) == 1
 
 
-def test_propose_on_a_band_groups_member_path_stages_nothing_and_names_the_manifest(
+def test_propose_on_a_band_groups_member_path_refuses_naming_the_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Proposing directly on a band-group member's own path (rather than its manifest) is a
-    path ``stage_proposals`` could never resolve back to the same source, so it must not be
-    staged: staging it anyway would leave a record accept can never confirm."""
+    """A band of a grouped capture is no logical image of its own: proposing on its path refuses
+    naming the manifest, stages nothing, and the manifest's own path admits the proposal."""
     import tifffile
     import tcip_store as ts
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
@@ -260,12 +259,11 @@ def test_propose_on_a_band_groups_member_path_stages_nothing_and_names_the_manif
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
     member_path = bands["Red"]
     proposed = propose_annotations(tmp_path, image_path=str(member_path), engine="stub")
-    assert "error" not in proposed, proposed
-    assert proposed["staged"] is False
-    assert manifest.name in proposed["summary"]
-    assert Path(proposed["image_path"]).is_file()
-
+    assert manifest.name in proposed["error"]
     assert ts.read(_staging_key_for(str(member_path)), default=None) is None
+
+    admitted = propose_annotations(tmp_path, image_path=str(manifest), engine="stub")
+    assert admitted["staged"] is True, admitted
 
 
 def test_a_second_accept_of_the_same_staged_run_refuses_and_keeps_the_first(
@@ -346,6 +344,31 @@ def test_a_re_run_finding_nothing_clears_the_previous_runs_record(
         tmp_path, image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" in accepted
     assert "propose_annotations" in accepted["error"]
+
+
+def test_a_first_run_finding_nothing_leaves_no_audit_line_and_a_clearing_run_leaves_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only a removal is an act: an image with no staged record that the engine finds nothing on
+    records nothing, and a run that clears a prior run's record records that clearing."""
+    from tcip_mcp.audit import acts_of
+    from tcip_mcp.tools.proposal_tools import propose_annotations
+
+    img_path = tmp_path / "images" / UNDATED_BUCKET / "fresh.jpg"
+    _make_image(img_path)
+
+    _install_stub(monkeypatch, [])
+    result = propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
+    assert "error" not in result, result
+    assert acts_of(tmp_path, ("propose_annotations",))[0] == []
+
+    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
+    _install_stub(monkeypatch, [])
+    propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
+    acts, _cursor = acts_of(tmp_path, ("propose_annotations",))
+    assert [act["arguments"]["staged"] for act in acts][-1] == 0
+    assert len(acts) == 2, acts
 
 
 def test_accept_reports_an_unsampleable_image_as_an_error_dict(

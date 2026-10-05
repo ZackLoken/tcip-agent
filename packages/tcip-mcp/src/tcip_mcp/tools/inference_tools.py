@@ -30,16 +30,17 @@ def infer(
     progress: Callable[[int, int], None] | None = None,
     canceled: Callable[[], bool] | None = None, actor: str | None,
 ) -> dict:
-    """Run a registered checkpoint's pass over ``images_dir`` or ``raster_path`` and publish its
-    predictions as the bucket named ``bucket`` under their dataset root
-    (:func:`~tcip_mcp.buckets.source_root`) by ``actor``, answering the publication's result or
+    """Run a registered checkpoint's pass over the capture ``images_dir``
+    (:func:`~tcip_mcp.dataset_layout.parse_capture_dir`, which refuses any other directory) or
+    ``raster_path`` and publish its predictions as the bucket named ``bucket`` under their dataset
+    root (:func:`~tcip_mcp.buckets.source_root`) by ``actor``, answering the publication's result or
     the error dict naming a refusal. ``progress`` is called with ``(done, total)`` images once the
     pass is prepared and after each image, and ``canceled`` asked before each image: once it
     answers true the pass stops at that image boundary and publishes the documents predicted, or
     publishes nothing when it predicted none."""
     from tcip_mcp.assessment import read_assessment
     from tcip_mcp.buckets import pass_documents, publish, source_root
-    from tcip_mcp.dataset_layout import bucket_key
+    from tcip_mcp.dataset_layout import bucket_key, parse_capture_dir
     from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Execution, ExecutionRefused, prepare_pass
 
@@ -53,7 +54,8 @@ def infer(
     if raster_path is not None and not Path(raster_path).is_file():
         return {"error": f"raster_path not found: {raster_path}"}
     try:
-        root = source_root([cast(str, raster_path or images_dir)])
+        root = (source_root([raster_path]) if raster_path is not None
+                else parse_capture_dir(cast(str, images_dir))[0])
         checkpoint = load_registered_checkpoint(checkpoint_path, project=project)
     except (UnregisteredCheckpoint, FileNotFoundError, ValueError) as exc:
         return {"error": str(exc)}
@@ -78,9 +80,11 @@ def infer(
     raster_identity = None
     if raster_path is not None:
         from tcip_mcp.pipelines.data.split_construction import raster_identity as identity_of
+        from tcip_mcp.pipelines.image_utils import resolve_image_path
 
         try:
-            raster_identity = decode_value(encode_record(identity_of(raster_path)))
+            raster_identity = decode_value(encode_record(identity_of(
+                resolve_image_path(raster_path))))
         except ValueError as exc:
             return {"error": f"raster content identity could not be computed for "
                              f"{raster_path}: {exc}"}
@@ -183,7 +187,8 @@ def run_inference(
 
     Args:
         checkpoint_path: A checkpoint registered in this project.
-        images_dir: Directory of input images (exclusive with ``raster_path``).
+        images_dir: A capture directory, ``<root>/images/<capture>`` (exclusive with
+            ``raster_path``); any other directory refuses naming it.
         raster_path: A single raster (exclusive with ``images_dir``).
         bucket: The name to publish the predictions under, e.g. ``<model>/<date>``.
         assessment_id: The assessment whose execution record the pass runs and whose id the

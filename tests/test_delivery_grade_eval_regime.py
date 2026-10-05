@@ -255,7 +255,8 @@ def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
         task = "detection"
         train_tile_size = 100
         train_overlap = 0.2
-        in_chans = 3
+        train_native_size = train_augmentation = None
+        in_chans =3
 
         def predict_sliced(self, path, **kw):
             # 5 detections returned; max_dets below will cap the caller intentionally at 2.
@@ -302,7 +303,8 @@ def test_the_gate_reads_its_references_at_the_predictors_own_width(tmp_path):
         task = "detection"
         train_tile_size = 100
         train_overlap = 0.2
-        in_chans = 1
+        train_native_size = train_augmentation = None
+        in_chans =1
 
         def predict_sliced(self, path, **kw):
             return {"image": path, "width": 128, "height": 128, "boxes": [[10, 10, 40, 40]],
@@ -333,7 +335,8 @@ def test_run_full_frame_evaluation_records_merge_and_execution(tmp_path):
         task = "detection"
         train_tile_size = 100
         train_overlap = 0.2
-        in_chans = 3
+        train_native_size = train_augmentation = None
+        in_chans =3
 
         def predict_sliced(self, path, **kw):
             merges.append(kw["execution"].cross_tile_nms)
@@ -391,7 +394,8 @@ def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(tmp_pa
         task = "detection"
         train_tile_size = 100
         train_overlap = 0.2
-        in_chans = 3
+        train_native_size = train_augmentation = None
+        in_chans =3
 
         def predict_sliced(self, path, **kw):
             return {"image": path, "width": 128, "height": 128, "boxes": [], "scores": [],
@@ -413,7 +417,7 @@ def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(tmp_pa
         scored = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir), stated=Stated())
     finally:
         predictor_mod.GenericPredictor = build_predictor_orig
-    assert scored["n_images"] == 8
+    assert scored["scored_images"] == 8
 
 
 def test_the_gate_refuses_an_images_tree_with_no_ground_truth(tmp_path):
@@ -433,7 +437,8 @@ def test_the_gate_refuses_an_images_tree_with_no_ground_truth(tmp_path):
         task = "detection"
         train_tile_size = 100
         train_overlap = 0.2
-        in_chans = 3
+        train_native_size = train_augmentation = None
+        in_chans =3
 
         def predict_sliced(self, path, **kw):
             return {"image": path, "width": 128, "height": 128, "boxes": [], "scores": [],

@@ -18,15 +18,14 @@ from __future__ import annotations
 import pytest
 
 pytest.importorskip("torch")  # evaluation.py imports torch at module load
-pytest.importorskip("pycocotools")
 
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
-    build_coco_image_record,
-    coco_detection_metrics,
+    detection_metrics,
     governing_counts,
     derive_operating_point_curve,
     gt_record,
 )
+from tcip_mcp.pipelines.training.evaluation import image_record  # noqa: E402
 
 CENTER_MATCH_TOLERANCE = 10.0
 
@@ -44,7 +43,7 @@ def _asymmetric_iou_records() -> list[dict]:
     wide_gt = gt_record([50, 60, 40, 20], 1, 0)
     tall_gt = gt_record([200, 100, 30, 60], 1, 0)
     flat_gt = gt_record([400, 250, 80, 25], 1, 0)
-    frame_one = build_coco_image_record(
+    frame_one = image_record(
         640, 400,
         [wide_gt, tall_gt, flat_gt],
         [
@@ -55,7 +54,7 @@ def _asymmetric_iou_records() -> list[dict]:
             {"category_id": 1, "bbox": [600, 350, 20, 40], "score": 0.55},
         ],
     )
-    frame_two = build_coco_image_record(
+    frame_two = image_record(
         300, 500,
         [gt_record([40, 40, 60, 15], 1, 0), gt_record([150, 300, 25, 90], 1, 0)],
         [{"category_id": 1, "bbox": [40, 40, 60, 15], "score": 0.95}],
@@ -67,7 +66,8 @@ def test_precision_and_recall_are_not_interchangeable():
     """On a reference with three false positives and two misses the two ratios differ, and each
     must be reported against its own denominator: precision over everything reported, recall over
     everything real."""
-    m = coco_detection_metrics(_asymmetric_iou_records())
+    m = detection_metrics(_asymmetric_iou_records(), trait=None, conf_threshold=0.25,
+                          iou_threshold=0.5, by_mask=False)
     assert (m["tp"], m["fp"], m["fn"]) == (3, 3, 2)
     assert m["precision"] == pytest.approx(0.5)      # 3 of 6 reported detections are real
     assert m["recall"] == pytest.approx(0.6)         # 3 of 5 real objects were reported
@@ -83,8 +83,9 @@ def test_extra_false_positives_move_precision_and_leave_recall_alone():
                         {"category_id": 1, "bbox": [10, 400, 30, 40], "score": 0.65},
                         {"category_id": 1, "bbox": [220, 60, 40, 20], "score": 0.45}]
 
-    before = coco_detection_metrics(base)
-    after = coco_detection_metrics(noisier)
+    before, after = (detection_metrics(records, trait=None, conf_threshold=0.25,
+                                       iou_threshold=0.5, by_mask=False)
+                     for records in (base, noisier))
     assert (after["tp"], after["fn"]) == (before["tp"], before["fn"])
     assert after["fp"] == before["fp"] + 2
     assert after["recall"] == pytest.approx(before["recall"])
@@ -101,7 +102,7 @@ def _clustered_center_match_records() -> list[dict]:
     objects, only one of them detected, so the reference also carries plain misses. Class id 7,
     a sparse id, so nothing rests on ids being dense or zero-based.
     """
-    frame_one = build_coco_image_record(
+    frame_one = image_record(
         500, 300,
         [{"category_id": 7, "bbox": [88, 92, 24, 16], "iscrowd": 0},
          {"category_id": 7, "bbox": [285, 185, 30, 30], "iscrowd": 0}],
@@ -109,7 +110,7 @@ def _clustered_center_match_records() -> list[dict]:
          {"category_id": 7, "bbox": [97, 97, 16, 12], "score": 0.85},
          {"category_id": 7, "bbox": [290, 190, 20, 20], "score": 0.50}],
     )
-    frame_two = build_coco_image_record(
+    frame_two = image_record(
         800, 600,
         [{"category_id": 7, "bbox": [370, 290, 60, 20], "iscrowd": 0},
          {"category_id": 7, "bbox": [590, 80, 20, 40], "iscrowd": 0},
@@ -158,7 +159,7 @@ def test_uncontested_detections_all_match():
     """The tolerance still admits every detection that has its own object: one detection per object,
     each within tolerance, is all true positives with nothing left over."""
     records = [
-        build_coco_image_record(
+        image_record(
             500, 300,
             [{"category_id": 7, "bbox": [88, 92, 24, 16], "iscrowd": 0},
              {"category_id": 7, "bbox": [285, 185, 30, 30], "iscrowd": 0}],

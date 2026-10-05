@@ -188,12 +188,11 @@ def test_the_pairing_still_pairs_the_boxes_around_a_point() -> None:
 def test_records_from_annotation_omits_a_point_and_its_category() -> None:
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
 
-    iou_type, rec = records_from_annotation(
+    rec = records_from_annotation(
         [Annotation(subject="prompt", geometry=Point(5.0, 5.0)),
          Annotation(subject="bud", geometry=BOX)],
         [Annotation(subject="bud", geometry=BOX, score=0.8)],
         width=100, height=80)
-    assert iou_type == "bbox"
     assert len(rec["gt"]) == 1 and len(rec["dt"]) == 1
     # 'prompt' minted no category, so the box keeps id 1 rather than being pushed to 2 by a subject
     # that contributes no record at all.

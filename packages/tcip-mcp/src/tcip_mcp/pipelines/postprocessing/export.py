@@ -70,7 +70,7 @@ def encode_predictions(
     from tcip_annotation.state import Annotation
     from tcip_mcp.audit import now_iso
     from tcip_mcp.pipelines.data.selection import DOCUMENT
-    from tcip_mcp.pipelines.inference.generic_predictor import DETECTION_ROWS
+    from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS
 
     attributes = cast(tuple, scope.admitted_for(DOCUMENT, "this bucket's scope").attributes)
     missing = [k for k in ("image", "width", "height", "boxes", "scores", "labels")
@@ -105,7 +105,7 @@ def encode_predictions(
     assert data is not None, "keep_empty encodes every document"
     if dropped:
         kept = set(kept_indices)
-        for key in DETECTION_ROWS:
+        for key in PER_BOX_KEYS:
             if result.get(key) is not None:
                 result[key] = [v for i, v in enumerate(result[key]) if i in kept]
         result["count"] = len(kept_indices)

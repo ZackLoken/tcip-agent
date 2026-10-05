@@ -412,9 +412,9 @@ class SqliteBackend:
             (key.store, encode_parts(key.parts), data),
         )
 
-    def _drop(self, conn: sqlite3.Connection, key: Key) -> None:
-        conn.execute("delete from records where store = ? and parts = ?",
-                     (key.store, encode_parts(key.parts)))
+    def _drop(self, conn: sqlite3.Connection, key: Key) -> bool:
+        return conn.execute("delete from records where store = ? and parts = ?",
+                            (key.store, encode_parts(key.parts))).rowcount > 0
 
     def _append(self, conn: sqlite3.Connection, key: Key, data: bytes) -> None:
         conn.execute("insert into log_entries (store, parts, entry) values (?, ?, ?)",
@@ -448,11 +448,11 @@ class SqliteBackend:
             self._put(conn, key, data)
         return _version_of(data)
 
-    def delete(self, key: Key, *, expect: Version | None = None) -> None:
+    def delete(self, key: Key, *, expect: Version | None = None) -> bool:
         with self._write((key,)) as conn:
             if expect is not None:
                 require_version(key, self._stored(conn, key), expect)
-            self._drop(conn, key)
+            return self._drop(conn, key)
 
     @contextmanager
     def transaction(

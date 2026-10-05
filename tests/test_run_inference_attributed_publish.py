@@ -64,7 +64,7 @@ def _published(tmp_path: Path, checkpoint: str, images_dir: Path):
 def test_an_attributed_run_writes_every_attribute_value_and_stamps_its_scope(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / "2026-01-01"
     _one_image(images_dir)
     checkpoint = _checkpoint(tmp_path, COLOR, GRADE)
     install(monkeypatch, _attributed_predictor())
@@ -81,7 +81,7 @@ def test_an_attributed_run_writes_every_attribute_value_and_stamps_its_scope(
 def test_a_detector_run_declaring_no_attribute_writes_the_ordinary_shape_and_stamps_its_scope(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / "2026-01-01"
     _one_image(images_dir)
     checkpoint = _checkpoint(tmp_path)
     install(monkeypatch, StubPredictor())

@@ -1,26 +1,7 @@
-"""Plant-ID mapping across capture dates, by capture sequence plus GPS:
-
-  1. Order images on each date by EXIF DateTime (walker's capture sequence).
-  2. Detect "row breaks" as GPS jumps between consecutive images that stand out from the rest of
-    that date's own walking gaps (derived per date, not a fixed distance, since a walker produces
-    small, roughly uniform steps within a row and one or more much larger jumps at a row
-    transition, whether the row itself is straight or curved).
-  3. Within each row run, assign plants by matching the row end-points to the plant CSV and filling
-    in plants sequentially along the row.
-
-Fallback: when sequence anchoring fails (missing timestamps, unordered capture), fall back to
-    nearest-neighbor GPS with a configurable tolerance. Each assignment records its match
-    ``source`` and the GPS ``distance_m`` to the matched plant, never a 0-1 confidence.
-
-A mapping is project state with a name, bound to the dataset it was built over and to its own build
-receipt: ``build_mapping`` produces a :class:`MappingBuild` (provenance plus assignments),
-``persist_mapping`` writes the record and then the receipt that binds it, and ``load_mapping``
-refuses a record no receipt names. ``verify_mapping_inputs`` is the delivery-time check: for each
-mapped date a delivered bucket records, it re-reads only the captures the delivery reads (:func:`stems_delivery_reads`) plus the plant CSVs the record names, and refuses
-(never raises) when what is on disk now no longer matches what the build was made from; a date the
-delivery omits, or a capture of a delivered date the delivery does not read, is disclosed rather
-than checked.
-"""
+"""Plant-ID mapping across capture dates: each image assigned a plant by its capture sequence
+along a row and its GPS, or by nearest-neighbor GPS where no sequence anchors it, every assignment
+recording its match ``source`` and its GPS ``distance_m``. A mapping is named project state, bound
+to the dataset it was built over and to the build receipt that names it."""
 
 from __future__ import annotations
 
@@ -35,7 +16,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import (
-    TYPE_CHECKING, Any, ClassVar, Iterable, Literal, NamedTuple, Optional, Sequence,
+    TYPE_CHECKING, Any, ClassVar, Iterable, Literal, NamedTuple, Optional, Sequence, get_args,
 )
 
 import tcip_store
@@ -57,22 +38,19 @@ logger = logging.getLogger(__name__)
 EARTH_RADIUS_M = 6_378_137.0
 
 SEQUENCE_MATCH_FACTOR = 2
-"""assign_plants' sequence-anchored gate: a run's nearest unclaimed plant is accepted out to this
-many times nn_tolerance_m before falling through to plain nearest-neighbor."""
+"""The sequence-anchored gate: a run's nearest unclaimed plant is accepted out to this many times
+nn_tolerance_m before falling through to plain nearest-neighbor."""
 
 NEAREST_MATCH_FACTOR = 3
-"""assign_plants' plain nearest-neighbor gate, the loosest a match is ever accepted at: this
-many times nn_tolerance_m."""
+"""The plain nearest-neighbor gate, the loosest a match is ever accepted at: this many times
+nn_tolerance_m."""
 
 
 @dataclass
 class ImageStamp:
     """Per-capture metadata: EXIF for an ``image``, structural facts for a ``band_group`` or
-    ``raster`` (``image_utils.capture_kind``). ``name`` is the file name (with extension)
-    ``list_logical_images`` enumerated this stem under, ``readable`` is only meaningful for an
-    ``image`` (``null`` for the other two kinds, which carry no EXIF to fail reading), and
-    ``manifest_sha256``/``members`` only carry a value for a ``band_group``.
-    """
+    ``raster``. ``name`` is the capture's file name, ``readable`` whether an ``image``'s EXIF read
+    (``None`` for the other kinds), and ``manifest_sha256``/``members`` a ``band_group``'s own."""
 
     path: str
     stem: str
@@ -86,6 +64,11 @@ class ImageStamp:
     readable: Optional[bool]
     manifest_sha256: Optional[str] = None
     members: tuple[str, ...] = ()
+
+    @property
+    def position(self) -> tuple[float, float] | None:
+        """``(lat, lon)``, or ``None`` when the stamp lacks either."""
+        return None if self.lat is None or self.lon is None else (self.lat, self.lon)
 
 
 @dataclass
@@ -103,10 +86,32 @@ class PlantRecord:
 
 _DECODED = ConfigDict(strict=True, extra="forbid", allow_inf_nan=False)
 
+GpsSource = Literal["sequence", "nearest_neighbor", "unmapped"]
+"""Where a GPS assignment's plant came from: the capture sequence, the plain nearest plant, or
+none within the gate."""
+
+UnattributedSegmentSource = Literal["outside_segments", "overlapping_segments",
+                                    "segment_without_plant"]
+"""Why a canopy-segment assignment names no plant: no segment holds the detection, several do, or
+the one that does is tied to no plant."""
+
+SegmentSource = Literal["segment_containment", UnattributedSegmentSource]
+"""Where a canopy-segment assignment's plant came from: one tied segment containing the detection,
+or why none did."""
+
+UNATTRIBUTED_SEGMENT_SOURCES: tuple[UnattributedSegmentSource, ...] = get_args(
+    UnattributedSegmentSource)
+
+ToleranceSource = Literal["grid_pitch", "stated", "stated_capped"]
+"""Where a match tolerance came from (:func:`resolve_nn_tolerance_m`): the plant grid's pitch,
+the stated value, or the stated value capped to the grid pitch."""
+
 
 @dataclass
 class Assignment:
-    """The mapping we produce for a single image, named by its file name in its date folder."""
+    """The mapping we produce for a single image, named by its file name in its date folder;
+    ``distance_m`` is the GPS distance (m) to the nearest plant, ``None`` for a stamp with no
+    position."""
 
     __pydantic_config__ = _DECODED
 
@@ -115,16 +120,25 @@ class Assignment:
     date_folder: str
     plot_name: Optional[str]
     accession_name: Optional[str]
-    source: Literal["sequence", "nearest_neighbor", "unmapped"]
-    distance_m: Optional[float]  # GPS distance to the matched plant (m); None if unmapped
+    source: GpsSource
+    distance_m: Optional[float]
+
+    @classmethod
+    def of(cls, stamp: "ImageStamp", plant: "PlantRecord | None", source: GpsSource,
+           distance_m: float | None) -> "Assignment":
+        """``stamp`` assigned to ``plant`` (``None`` for no plant) from ``source``."""
+        return cls(image=stamp.name, stem=stamp.stem, date_folder=stamp.date_folder,
+                   plot_name=plant.plot_name if plant else None,
+                   accession_name=plant.accession_name if plant else None,
+                   source=source, distance_m=distance_m)
 
 
-def assignment_is_attributed(assignment: "Assignment | dict") -> bool:
-    """Whether ``assignment`` (an :class:`Assignment`, or the plain dict row ``MappingBuild.rows``
+def assignment_is_attributed(assignment: object) -> bool:
+    """Whether ``assignment`` (any assignment record, or the plain dict row ``MappingBuild.rows``
     produces) names a real plant: a non-empty ``plot_name``, the rule a plant CSV's own blank name
     column and an unmapped capture (``plot_name=None``) both fail by.
     """
-    plot_name = assignment.get("plot_name") if isinstance(assignment, dict) else assignment.plot_name
+    plot_name = attr(assignment, "plot_name")
     return isinstance(plot_name, str) and plot_name != ""
 
 
@@ -300,10 +314,6 @@ _MAPPING_RECORD = TypeAdapter(MappingBuild)
 
 # ── EXIF extraction ──────────────────────────────────────────────────────
 
-_DT_ORIGINAL_TAG = 0x9003
-# DateTimeOriginal: checked at the top level and in the Exif sub-IFD (0x8769) below, since a
-# fresh PIL.Image.Exif writes it at the top level while a camera's own JPEG nests it under 0x8769.
-_EXIF_IFD_TAG = 0x8769
 _GPS_IFD_TAG = 0x8825
 
 
@@ -331,8 +341,11 @@ def read_image_stamp(path: Path, date_folder: str) -> ImageStamp:
     The ``try`` covers ``Image.open`` alone: a capture PIL cannot open (a HEIC with no decoder
     installed, a locked file) becomes a stamp with ``readable=False``; an image that opens and
     carries no EXIF stays ``readable=True`` with ``None`` fields. A capture time, GPS coordinate or
-    positioning error present in malformed form raises ``ValueError`` naming the image.
+    positioning error present in malformed form, and a GPS coordinate whose hemisphere reference is
+    missing, raise ``ValueError`` naming the image.
     """
+    from tcip_mcp.pipelines.image_utils import exif_capture_time, parse_capture_time
+
     stamp = ImageStamp(
         path=str(path), stem=path.stem, date_folder=date_folder, kind="image", name=path.name,
         timestamp=None, lat=None, lon=None, h_pos_err=None, readable=True,
@@ -344,14 +357,11 @@ def read_image_stamp(path: Path, date_folder: str) -> ImageStamp:
         return stamp
     with im:
         exif = im.getexif()
-        dt_raw = exif.get_ifd(_EXIF_IFD_TAG).get(_DT_ORIGINAL_TAG)
-        if dt_raw is None:
-            dt_raw = exif.get(_DT_ORIGINAL_TAG)
+        dt_raw = exif_capture_time(exif)
         if dt_raw is not None:
-            try:
-                stamp.timestamp = datetime.strptime(str(dt_raw), "%Y:%m:%d %H:%M:%S")
-            except ValueError as exc:
-                raise ValueError(f"{path}'s capture time {dt_raw!r} does not read") from exc
+            stamp.timestamp = parse_capture_time(dt_raw)
+            if stamp.timestamp is None:
+                raise ValueError(f"{path}'s capture time {dt_raw!r} does not read")
 
         gps_raw = exif.get_ifd(_GPS_IFD_TAG)
         if gps_raw:
@@ -902,19 +912,19 @@ def stems_delivery_reads(rows: "Iterable[Assignment | dict]", bucket: "Bucket") 
             if assignment_is_attributed(row) and attr(row, "stem") in pred_stems}
 
 
-def _nearest_plant(
-    lat: float,
-    lon: float,
-    plants: list[PlantRecord],
-) -> tuple[Optional[PlantRecord], Optional[float]]:
-    best: Optional[PlantRecord] = None
-    best_d: Optional[float] = None
-    for p in plants:
-        d = haversine_m(lat, lon, p.lat, p.lon)
-        if best_d is None or d < best_d:
-            best = p
-            best_d = d
-    return best, best_d
+def nearest_plant(
+    position: tuple[float, float], plants: list[PlantRecord], *, within_m: float,
+    skip: "set[int] | frozenset[int]" = frozenset(),
+) -> tuple[Optional[int], Optional[float]]:
+    """The index in ``plants`` (those in ``skip`` passed over) of the plant nearest the ``(lat,
+    lon)`` ``position``, and its distance in meters; the index is ``None`` when that plant lies
+    farther than ``within_m`` and both are ``None`` when no plant is left to measure."""
+    distances = [(haversine_m(*position, p.lat, p.lon), i)
+                 for i, p in enumerate(plants) if i not in skip]
+    if not distances:
+        return None, None
+    distance, index = min(distances)
+    return (index if distance <= within_m else None), distance
 
 
 # ── Sequence anchoring ─────────────────────────────────────────────────
@@ -975,8 +985,8 @@ def _segment_runs(stamps: list[ImageStamp]) -> list[list[ImageStamp]]:
     pairs: list[tuple[ImageStamp, Optional[float]]] = []
     for prev, cur in zip(stamps, stamps[1:]):
         d = None
-        if prev.lat is not None and cur.lat is not None:
-            d = haversine_m(prev.lat, prev.lon or 0.0, cur.lat, cur.lon or 0.0)
+        if prev.position is not None and cur.position is not None:
+            d = haversine_m(*prev.position, *cur.position)
         pairs.append((cur, d))
 
     threshold = _derive_row_break_threshold([d for _, d in pairs if d is not None])
@@ -1003,104 +1013,29 @@ def assign_plants(
     *,
     nn_tolerance_m: float,
 ) -> list[Assignment]:
-    """Assign each image to a plant by sequence-anchored NN matching.
-
-    A ``band_group``/``raster`` stamp carries no GPS fix (``lat``/``lon`` are always ``None``),
-    so it always falls through to the ``unmapped`` branch below, the same way an ``image`` with
-    no usable EXIF position does.
-    """
+    """Assign each image to a plant by sequence-anchored NN matching: its nearest unclaimed plant
+    within the sequence gate, else its nearest plant within the loosest gate
+    (:func:`match_gates`), else none. A stamp with no position (a ``band_group`` or ``raster``, or
+    an ``image`` with no usable EXIF position) is unmapped."""
     out: list[Assignment] = []
-    if not stamps or not plants:
-        for s in stamps:
-            out.append(
-                Assignment(
-                    image=s.name,
-                    stem=s.stem,
-                    date_folder=s.date_folder,
-                    plot_name=None,
-                    accession_name=None,
-                    source="unmapped",
-                    distance_m=None,
-                )
-            )
-        return out
-
-    ordered = _order_by_time(stamps)
-    runs = _segment_runs(ordered)
-
-    # Each image picks its nearest unclaimed plant; degrades to NN when sequence signal is weak.
+    gates = match_gates(nn_tolerance_m)
     claimed: set[int] = set()
-
-    for run in runs:
+    for run in _segment_runs(_order_by_time(stamps)):
         for s in run:
-            if s.lat is None or s.lon is None:
-                out.append(
-                    Assignment(
-                        image=s.name,
-                        stem=s.stem,
-                        date_folder=s.date_folder,
-                        plot_name=None,
-                        accession_name=None,
-                        source="unmapped",
-                        distance_m=None,
-                    )
-                )
+            if s.position is None or not plants:
+                out.append(Assignment.of(s, None, "unmapped", None))
                 continue
-
-            best_idx = -1
-            best_d: Optional[float] = None
-            for i, p in enumerate(plants):
-                if i in claimed:
-                    continue
-                d = haversine_m(s.lat, s.lon, p.lat, p.lon)
-                if best_d is None or d < best_d:
-                    best_idx = i
-                    best_d = d
-
-            if best_idx < 0 or best_d is None or best_d > nn_tolerance_m * SEQUENCE_MATCH_FACTOR:
-                # Fall through to plain NN, even if claimed: duplicates can happen
-                plant, nn_d = _nearest_plant(s.lat, s.lon, plants)
-                if plant is None or nn_d is None or nn_d > nn_tolerance_m * NEAREST_MATCH_FACTOR:
-                    out.append(
-                        Assignment(
-                            image=s.name,
-                            stem=s.stem,
-                            date_folder=s.date_folder,
-                            plot_name=None,
-                            accession_name=None,
-                            source="unmapped",
-                            distance_m=nn_d,
-                        )
-                    )
-                else:
-                    out.append(
-                        Assignment(
-                            image=s.name,
-                            stem=s.stem,
-                            date_folder=s.date_folder,
-                            plot_name=plant.plot_name,
-                            accession_name=plant.accession_name,
-                            source="nearest_neighbor",
-                            distance_m=nn_d,
-                        )
-                    )
+            index, distance = nearest_plant(
+                s.position, plants, within_m=gates["sequence_match_distance_m"], skip=claimed)
+            if index is not None:
+                claimed.add(index)
+                out.append(Assignment.of(s, plants[index], "sequence", distance))
                 continue
+            index, distance = nearest_plant(
+                s.position, plants, within_m=gates["max_match_distance_m"])
+            out.append(Assignment.of(s, None, "unmapped", distance) if index is None
+                       else Assignment.of(s, plants[index], "nearest_neighbor", distance))
 
-            p = plants[best_idx]
-            claimed.add(best_idx)
-            out.append(
-                Assignment(
-                    image=s.name,
-                    stem=s.stem,
-                    date_folder=s.date_folder,
-                    plot_name=p.plot_name,
-                    accession_name=p.accession_name,
-                    source="sequence",
-                    distance_m=best_d,
-                )
-            )
-
-    # Return in the original stamp order so callers can merge with their image lists
     by_image = {(a.date_folder, a.image): a for a in out}
     return [by_image[(s.date_folder, s.name)] for s in stamps]
 
@@ -1109,13 +1044,9 @@ def assign_plants(
 
 
 def grid_pitch_m(plants: list[PlantRecord]) -> float:
-    """Median nearest-neighbor spacing of the plant centroids = the planting grid pitch (m).
-
-    Derived from the layout in hand (not pinned): used to cap the GPS match tolerance so a
-    detection can't be attributed to a plant more than half a grid cell away; beyond that, the
-    nearest plant is as likely to be the wrong (adjacent) plot as the right one.
-    """
-    pts = [(p.lat, p.lon) for p in plants if p.lat is not None and p.lon is not None]
+    """Median nearest-neighbor spacing of the plant centroids, the planting grid pitch (m); 0.0
+    for fewer than two plants."""
+    pts = [(p.lat, p.lon) for p in plants]
     if len(pts) < 2:
         return 0.0
     nn = []
@@ -1133,29 +1064,27 @@ def resolve_nn_tolerance_m(plants: list[PlantRecord], stated: float | None = Non
     """The tolerance (meters) a capture or detection is matched to a plant within, and where it
     came from: ``{"value": float, "source": str}``.
 
-    Derived as ``grid_pitch_m(plants) / 6`` (``"grid_pitch"``), so ``assign_plants``' loosest
-    ``NEAREST_MATCH_FACTOR``-times gate keeps the match radius within half a grid cell. A stated
-    value is honored (``"stated"``) up to that ceiling and capped at it (``"stated_capped"``).
-    Raises :class:`NoMatchTolerance` naming ``nn_tolerance_m`` when nothing is stated and the layout carries too
-    few georeferenced plants to derive a pitch from.
+    Derived as the tolerance whose loosest gate (:func:`match_gates`) reaches half a grid cell
+    (:func:`grid_pitch_m`), ``"grid_pitch"``. A stated value is honored (``"stated"``) up to that
+    ceiling and capped at it (``"stated_capped"``). Raises :class:`NoMatchTolerance` naming
+    ``nn_tolerance_m`` when nothing is stated and the layout carries too few plants to derive a
+    pitch from.
     """
-    pitch = grid_pitch_m(plants)
+    ceiling = grid_pitch_m(plants) / (2 * NEAREST_MATCH_FACTOR)
     if stated is None:
-        if pitch <= 0:
+        if ceiling <= 0:
             raise NoMatchTolerance(
                 "the plant layout carries fewer than two georeferenced plants, so no grid pitch "
                 "derives a match tolerance: state nn_tolerance_m (meters)")
-        return {"value": pitch / 6, "source": "grid_pitch"}
-    if pitch > 0 and stated > pitch / 6:
-        return {"value": pitch / 6, "source": "stated_capped"}
+        return {"value": ceiling, "source": "grid_pitch"}
+    if 0 < ceiling < stated:
+        return {"value": ceiling, "source": "stated_capped"}
     return {"value": stated, "source": "stated"}
 
 
 def match_gates(nn_tolerance_m: float) -> dict:
-    """The distances a match is accepted out to, given ``nn_tolerance_m``: the stated tolerance
-    itself, the sequence-anchored gate's own ceiling, and ``max_match_distance_m``,
-    ``assign_plants``' loosest gate (the plain nearest-neighbor fallback).
-    """
+    """The distances a match is accepted out to, given ``nn_tolerance_m``: the tolerance itself,
+    a sequence-anchored match's ceiling, and ``max_match_distance_m``, the loosest any match is."""
     return {
         "nn_tolerance_m": nn_tolerance_m,
         "sequence_match_distance_m": nn_tolerance_m * SEQUENCE_MATCH_FACTOR,
@@ -1222,7 +1151,7 @@ def build_mapping(
             logical = list_logical_images(date_dir)
             stamps = _read_date_stamps(logical, date)
             n_stamps += len(stamps)
-            n_positioned += sum(1 for s in stamps if s.lat is not None and s.lon is not None)
+            n_positioned += sum(1 for s in stamps if s.position is not None)
             capture_ids[date] = capture_identity(stamps)
             capture_digests_by_date[date] = capture_digests(stamps)
             unreadable[date] = sorted(
@@ -1421,24 +1350,13 @@ _receipt_seen: dict[str, dict[str, set[str]]] = {}
 
 
 def _scan_receipts(project: Path | str, root_key: str, *, after: Optional[str]) -> None:
-    from tcip_mcp.audit import audit_log_key
+    from tcip_mcp.audit import acts_of
 
-    key = audit_log_key(project)
-    page = tcip_store.read_log(key, after=after)
-    if page.corrupt:
-        raise ValueError(
-            f"the audit log at {key} carries {len(page.corrupt)} undecodable "
-            f"entr{'y' if len(page.corrupt) == 1 else 'ies'}; repair the log before a "
-            "plant-mapping receipt can be trusted")
+    entries, cursor = acts_of(project, ("plant_mapping_built",), after=after)
     seen = _receipt_seen.setdefault(root_key, {})
-    for entry in page.records:
-        if entry.get("tool") != "plant_mapping_built":
-            continue
-        args = entry.get("arguments") or {}
-        entry_name, sha = args.get("name"), args.get("record_sha256")
-        if isinstance(entry_name, str) and isinstance(sha, str):
-            seen.setdefault(entry_name, set()).add(sha)
-    _receipt_cursor[root_key] = page.cursor
+    for entry in entries:
+        seen.setdefault(entry["arguments"]["name"], set()).add(entry["arguments"]["record_sha256"])
+    _receipt_cursor[root_key] = cursor
 
 
 def _require_receipt(project: Path | str, name: str, record_sha256: str) -> None:
@@ -1635,13 +1553,13 @@ def verify_mapping_inputs(
                         f"{s.name} (date {date}) was readable when this mapping was built and "
                         "could not be read now: retry, or rebuild if it is gone")}
             if assignment_is_attributed(row) and row.distance_m is not None:
-                if s.lat is None or s.lon is None:
+                if s.position is None:
                     return {"refusal": (
                         f"{s.name} (date {date}) recorded a plant position when this mapping was "
                         "built and now carries no GPS position: rebuild, since its assignment "
                         "would differ")}
                 distances = [
-                    haversine_m(s.lat, s.lon, p.lat, p.lon)
+                    haversine_m(*s.position, p.lat, p.lon)
                     for p in verified_plants if p.plot_name == row.plot_name
                 ]
                 if not distances:

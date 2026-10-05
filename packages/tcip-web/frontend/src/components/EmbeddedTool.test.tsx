@@ -28,11 +28,11 @@ describe("EmbeddedTool", () => {
   });
 
   it("frames the tool and links out to it full-screen", () => {
-    render(<EmbeddedTool title="TensorBoard" url="http://localhost:6006" />);
+    render(<EmbeddedTool title="TensorBoard" url="http://127.0.0.1:6006" />);
     const frame = screen.getByTitle("TensorBoard");
-    expect(frame).toHaveAttribute("src", "http://localhost:6006");
+    expect(frame).toHaveAttribute("src", "http://127.0.0.1:6006");
     const link = screen.getByRole("link", { name: /open in a new tab/i });
-    expect(link).toHaveAttribute("href", "http://localhost:6006");
+    expect(link).toHaveAttribute("href", "http://127.0.0.1:6006");
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
@@ -52,14 +52,14 @@ describe("EmbeddedTool", () => {
     ).toBeInTheDocument();
     unmount();
 
-    render(<EmbeddedTool title="Ray dashboard" url="http://localhost:8265" />);
+    render(<EmbeddedTool title="Ray dashboard" url="http://127.0.0.1:8265" />);
     expect(
       screen.getByRole("link", { name: "Open in a new tab: Ray dashboard" }),
     ).toBeInTheDocument();
   });
 
   it("carries its own title as a heading, not a plain span", () => {
-    render(<EmbeddedTool title="TensorBoard" url="http://localhost:6006" />);
+    render(<EmbeddedTool title="TensorBoard" url="http://127.0.0.1:6006" />);
     expect(screen.getByRole("heading", { level: 2, name: "TensorBoard" })).toBeInTheDocument();
   });
 

@@ -1,34 +1,28 @@
 """Per-plant attribution by canopy segment: a detection attributed to a plant by containment in a
 canopy boundary a person accepted, the segment itself tied to a registry plant by containment of
-the plant's own projected position.
-
-A canopy boundary here is whatever the breeder accepted into a per-image label document: a hand
-trace, a SAM proposal a reviewer accepted, or an instance-segmentation model's own output once a
-reviewer has accepted it; a person must positively stand behind it (:func:`load_canopy_segments`).
-The tie from a segment to a plant identity rests on the registry position's own accuracy: a
-position displaced by more than its disclosed clearance places the plant in a neighbor's canopy
-with every check here passing, since no breeder-confirmed tie or validated position-error bound
-exists yet.
+the plant's own projected position. A canopy boundary is one a person accepted
+(:func:`load_canopy_segments`). Provisional: no validated position-error bound exists, so a
+registry position displaced past its disclosed clearance ties the plant to a neighbor's canopy.
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import ClassVar, NamedTuple, cast
+from typing import ClassVar, cast
 
 from shapely.geometry import Point as ShapelyPoint
 from shapely.ops import nearest_points
-from shapely.validation import make_valid
 
 from tcip_annotation.json_io import (
     LabelDocument,
     is_unadjudicated_prediction,
     provenance_facts,
 )
-from tcip_annotation.matching import _rings_to_shapely, box_ring, point_in_polygon
+from tcip_annotation.matching import box_ring, point_in_polygon, shapely_geometry
 from tcip_annotation.state import (
-    Annotation, BBox, Polygon, box_derivable, polygonal,
+    BBox, Polygon, box_derivable, polygonal,
 )
 
 from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
@@ -37,25 +31,15 @@ from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
     detection_location,
     plants_in_frame,
 )
-from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord, require_named_plants
+from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+    PlantRecord, SegmentSource, require_named_plants,
+)
 
 
 class CanopySegmentRefusal(ValueError):
     """A canopy-segment document, or one of its own annotations, cannot stand behind a segment
     tie: a document/raster identity mismatch, an absent subject, a ``Point`` naming no region, or
     a record not positively a person's."""
-
-
-class _SegmentAssignmentSources(NamedTuple):
-    """The four values :class:`SegmentAssignment`'s own ``source`` field takes."""
-
-    containment: str = "segment_containment"
-    outside: str = "outside_segments"
-    overlapping: str = "overlapping_segments"
-    without_plant: str = "segment_without_plant"
-
-
-SEGMENT_ASSIGNMENT_SOURCES = _SegmentAssignmentSources()
 
 
 @dataclass
@@ -134,8 +118,7 @@ def load_canopy_segments(
         i = facts.no_created_by[0]
         raise CanopySegmentRefusal(
             f"canopy segment {i} of subject {subject!r} carries no created_by at all; a canopy "
-            "boundary must positively carry a person's authorship or acceptance, unlike the "
-            "reference rule's own pre-provenance hand labels"
+            "boundary must positively carry a person's authorship or acceptance"
         )
     if facts.not_positively_a_persons:
         i = facts.not_positively_a_persons[0]
@@ -146,16 +129,8 @@ def load_canopy_segments(
             "boundary must be positively a person's, a reviewer's acceptance included"
         )
 
-    def _checked_polygon(a: Annotation) -> Polygon:
-        # Every refusal above already ran over the same annotations; reaching here means none
-        # of them had a None or Point geometry.
-        assert box_derivable(a.geometry)
-        return _polygon_of(a.geometry)
-
-    return [
-        CanopySegment(segment_index=i, polygon=_checked_polygon(a))
-        for i, a in enumerate(annotations)
-    ]
+    return [CanopySegment(segment_index=i, polygon=_polygon_of(cast("BBox | Polygon", a.geometry)))
+            for i, a in enumerate(annotations)]
 
 
 @dataclass
@@ -199,18 +174,10 @@ class SegmentTie:
 
 
 def _clearance_m(px: float, py: float, polygon: Polygon, transform: GeoTransform) -> float:
-    """The distance from pixel ``(px, py)`` to ``polygon``'s own boundary, in the raster's native
-    CRS units, through ``transform``'s own pixel scale.
-
-    Computed from each axis's own pixel delta to the nearest boundary point, converted through
-    ``pixel_scale_x``/``pixel_scale_y`` independently and combined by Pythagoras, so an
-    anisotropic pixel scale (``pixel_scale_x != pixel_scale_y``) still converts exactly, never a
-    single scalar multiply that assumes square pixels.
-    """
-    geom = _rings_to_shapely(polygon.rings)
-    if not geom.is_valid:
-        geom = make_valid(geom)
-    boundary_point = nearest_points(ShapelyPoint(px, py), geom.boundary)[1]
+    """The distance from pixel ``(px, py)`` to ``polygon``'s boundary in the raster's native CRS
+    units, each axis's pixel delta scaled by that axis's own pixel scale."""
+    boundary_point = nearest_points(ShapelyPoint(px, py),
+                                    shapely_geometry(polygon.rings).boundary)[1]
     delta_native_x = (px - boundary_point.x) * transform.pixel_scale_x
     delta_native_y = (py - boundary_point.y) * transform.pixel_scale_y
     return math.hypot(delta_native_x, delta_native_y)
@@ -299,12 +266,9 @@ class SegmentAssignment:
     :class:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.DetectionAssignment`'s own
     fields. ``segment_index`` is ``None`` when the centroid lies inside no segment
     (``source="outside_segments"``) or inside more than one (``source="overlapping_segments"``,
-    attributed to neither, never the nearer); ``overlapping_segment_indices`` carries every
-    segment index the overlap touched in that case, empty otherwise, so a caller can still name
-    which tied segments' plants an ambiguous detection implicated. ``distance_m`` is always
-    ``None``: containment carries no positional distance, so the CSV's own
-    ``plant_id_distance_m_max`` stays blank and means no positional bound was measured, never zero
-    uncertainty.
+    attributed to neither); ``overlapping_segment_indices`` carries every segment index the
+    overlap touched in that case, empty otherwise. ``distance_m`` is always ``None``: containment
+    measures no positional distance.
     """
 
     detection_index: int
@@ -313,7 +277,7 @@ class SegmentAssignment:
     segment_index: int | None
     plot_name: str | None
     accession_name: str | None
-    source: str  # one of SEGMENT_ASSIGNMENT_SOURCES
+    source: SegmentSource
     distance_m: None
     overlapping_segment_indices: tuple[int, ...] = ()
 
@@ -322,14 +286,10 @@ class SegmentAssignment:
     a canopy boundary a person accepted, never a mask-level or area measurement."""
 
 
-def assign_detections_to_segments(detections: dict, tie: SegmentTie) -> list[SegmentAssignment]:
-    """One :class:`SegmentAssignment` per box in a ``predict_sliced``-shaped ``detections`` result
-    (the same ``{"boxes": [[x1, y1, x2, y2], ...]}`` shape
-    :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.assign_detections_to_plants`
-    reads), taking only ``tie`` (never the plant registry or the raster directly): every candidate
-    segment, tied and untied both, already lives on it.
-    """
-    boxes = detections.get("boxes") or []
+def assign_detections_to_segments(boxes: Sequence[Sequence[float]],
+                                  tie: SegmentTie) -> list[SegmentAssignment]:
+    """One :class:`SegmentAssignment` per xyxy box of ``boxes`` (full-mosaic pixel space), its
+    centroid tested against every candidate segment ``tie`` holds, tied and untied both."""
     candidates: list[tuple[int, Polygon, TiedSegment | None]] = [
         (s.segment_index, s.polygon, s) for s in tie.tied
     ] + [
@@ -340,29 +300,15 @@ def assign_detections_to_segments(detections: dict, tie: SegmentTie) -> list[Seg
     for i, box in enumerate(boxes):
         cx, cy = detection_location(box)
         hits = [(idx, tied) for idx, polygon, tied in candidates if point_in_polygon(cx, cy, polygon)]
-        if not hits:
-            out.append(SegmentAssignment(
-                detection_index=i, pixel_x=cx, pixel_y=cy, segment_index=None, plot_name=None,
-                accession_name=None, source=SEGMENT_ASSIGNMENT_SOURCES.outside, distance_m=None,
-            ))
-        elif len(hits) > 1:
-            out.append(SegmentAssignment(
-                detection_index=i, pixel_x=cx, pixel_y=cy, segment_index=None, plot_name=None,
-                accession_name=None, source=SEGMENT_ASSIGNMENT_SOURCES.overlapping,
-                distance_m=None, overlapping_segment_indices=tuple(idx for idx, _ in hits),
-            ))
-        else:
-            idx, tied = hits[0]
-            if tied is not None:
-                out.append(SegmentAssignment(
-                    detection_index=i, pixel_x=cx, pixel_y=cy, segment_index=idx,
-                    plot_name=tied.plot_name, accession_name=tied.accession_name,
-                    source=SEGMENT_ASSIGNMENT_SOURCES.containment, distance_m=None,
-                ))
-            else:
-                out.append(SegmentAssignment(
-                    detection_index=i, pixel_x=cx, pixel_y=cy, segment_index=idx, plot_name=None,
-                    accession_name=None, source=SEGMENT_ASSIGNMENT_SOURCES.without_plant,
-                    distance_m=None,
-                ))
+        tied = hits[0][1] if len(hits) == 1 else None
+        source: SegmentSource = ("outside_segments" if not hits
+                                 else "overlapping_segments" if len(hits) > 1
+                                 else "segment_containment" if tied is not None
+                                 else "segment_without_plant")
+        out.append(SegmentAssignment(
+            detection_index=i, pixel_x=cx, pixel_y=cy,
+            segment_index=hits[0][0] if len(hits) == 1 else None,
+            plot_name=tied.plot_name if tied else None,
+            accession_name=tied.accession_name if tied else None, source=source, distance_m=None,
+            overlapping_segment_indices=tuple(idx for idx, _ in hits) if len(hits) > 1 else ()))
     return out

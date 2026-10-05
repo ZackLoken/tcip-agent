@@ -68,12 +68,12 @@ def test_identity_provenance_is_summarized_per_plant_not_across_the_cohort():
     another plant's worst assignment distance."""
     results = [
         {"image": "a1", "plant_id": "PLANT_A", "count": 2,
-         "plant_id_source": "gnss_sequence", "plant_id_distance_m": 0.4},
+         "source": "gnss_sequence", "distance_m":0.4},
         {"image": "a2", "plant_id": "PLANT_A", "count": 4,
-         "plant_id_source": "gnss_sequence", "plant_id_distance_m": 1.9},
+         "source": "gnss_sequence", "distance_m":1.9},
         {"image": "b1", "plant_id": "PLANT_B", "count": 10,
-         "plant_id_source": "gnss_sequence", "plant_id_distance_m": 6.5},
-        {"image": "b2", "plant_id": "PLANT_B", "count": 20, "plant_id_source": "qr_code"},
+         "source": "gnss_sequence", "distance_m":6.5},
+        {"image": "b2", "plant_id": "PLANT_B", "count": 20, "source": "qr_code"},
         {"image": "c1", "plant_id": "PLANT_C", "count": 7},
     ]
     out = _by_plant(aggregate_per_plant(results, strategy="count", value_key="count"))
@@ -95,15 +95,15 @@ def test_delivery_csv_carries_each_plants_own_value_and_image_count(tmp_path):
 
     results = [
         {"image": "a1", "plant_id": "PLANT_A", "count": 2, "plant_attribution": "image",
-         "plant_id_source": "gnss_sequence", "plant_id_distance_m": 0.4},
+         "source": "gnss_sequence", "distance_m":0.4},
         {"image": "a2", "plant_id": "PLANT_A", "count": 4, "plant_attribution": "image",
-         "plant_id_source": "gnss_sequence", "plant_id_distance_m": 1.9},
+         "source": "gnss_sequence", "distance_m":1.9},
         {"image": "a3", "plant_id": "PLANT_A", "count": 9, "plant_attribution": "image",
-         "plant_id_source": "gnss_sequence"},
+         "source": "gnss_sequence"},
         {"image": "b1", "plant_id": "PLANT_B", "count": 10, "plant_attribution": "image",
-         "plant_id_source": "qr_code"},
+         "source": "qr_code"},
         {"image": "b2", "plant_id": "PLANT_B", "count": 20, "plant_attribution": "image",
-         "plant_id_source": "qr_code"},
+         "source": "qr_code"},
         {"image": "c1", "plant_id": "PLANT_C", "count": 7, "plant_attribution": "image"},
     ]
     summaries = aggregate_per_plant(results, strategy="count", value_key="count")

@@ -123,14 +123,32 @@ class TestRenderDetections:
         )
         assert Path(result).is_file()
 
-    def test_with_confidence(self, viz_dataset: Path):
+    def test_with_score(self, viz_dataset: Path):
         from tcip_annotation.viz import render_detections
 
         pixels, native = _display(str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"))
-        boxes = [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0, "confidence": 0.95}]
+        boxes = [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0, "score": 0.95}]
         out = str(viz_dataset / "test_conf.png")
         result = render_detections(pixels, boxes, native_size=native, output_path=out)
         assert Path(result).is_file()
+
+    def test_a_shape_without_its_class_and_a_candidate_without_its_score_refuse_by_name(
+            self, tmp_path: Path):
+        """A renderer's inputs are required: a box stating no ``class_id`` and a candidate
+        stating no ``score`` refuse naming the key rather than drawing as class 0 or score 0."""
+        from tcip_annotation.viz import render_candidates, render_detections
+
+        frame = Image.new("RGB", (40, 40))
+        with pytest.raises(KeyError, match="class_id"):
+            render_detections(frame, [{"x1": 1, "y1": 1, "x2": 9, "y2": 9}], native_size=(40, 40),
+                              output_path=str(tmp_path / "box.png"))
+        candidate = {"candidate_id": 0, "rings": [[(1, 1), (9, 1), (9, 9)]], "bbox": [1, 1, 8, 8],
+                     "area": 32}
+        with pytest.raises(KeyError, match="score"):
+            render_candidates(frame, [candidate], native_size=(40, 40),
+                              output_path=str(tmp_path / "candidate.png"))
+        assert Path(render_candidates(frame, [{**candidate, "score": 0.5}], native_size=(40, 40),
+                                      output_path=str(tmp_path / "admitted.png"))).is_file()
 
     def test_a_pil_frame_renders_the_same_as_its_own_pixels(self, viz_dataset: Path):
         """Both input forms are drawn on, and the caller's own frame is never mutated."""
@@ -163,7 +181,7 @@ class TestRenderDetections:
         served = Image.new("RGB", (200, 100), (80, 80, 80))
         out = str(tmp_path / "scaled.png")
         render_detections(served, [{"x1": 100, "y1": 50, "x2": 300, "y2": 150, "class_id": 0}],
-                          native_size=native, output_path=out, conf_key=None)
+                          native_size=native, output_path=out)
         px = Image.open(out).convert("RGB")
 
         def red_at(xy):
@@ -204,14 +222,17 @@ class TestRenderSegmentations:
         # The second ring really is painted: the two renders differ.
         assert Path(both).read_bytes() != Path(first_only).read_bytes()
 
-    def test_polygon_without_rings_key_is_skipped_not_crashed(self, viz_dataset: Path):
-        """The renderer's rail admits an entry with no drawable ring rather than raising."""
+    def test_a_polygon_stating_no_rings_refuses_and_one_with_none_drawn_admits(
+            self, viz_dataset: Path):
+        """An entry naming no ``rings`` refuses by name; one whose ring list is empty renders."""
         from tcip_annotation.viz import render_segmentations
 
         pixels, native = _display(str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"))
         out = str(viz_dataset / "seg_empty.png")
-        assert Path(render_segmentations(pixels, [{"class_id": 0}], native_size=native,
-                                         output_path=out)).is_file()
+        with pytest.raises(KeyError, match="rings"):
+            render_segmentations(pixels, [{"class_id": 0}], native_size=native, output_path=out)
+        assert Path(render_segmentations(pixels, [{"class_id": 0, "rings": []}],
+                                         native_size=native, output_path=out)).is_file()
 
 
 class TestRenderComparison:
@@ -220,7 +241,7 @@ class TestRenderComparison:
 
         pixels, native = _display(str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"))
         gt = [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}]
-        pred = [{"x1": 110, "y1": 110, "x2": 210, "y2": 210, "class_id": 0, "confidence": 0.9}]
+        pred = [{"x1": 110, "y1": 110, "x2": 210, "y2": 210, "class_id": 0, "score": 0.9}]
         out = str(viz_dataset / "test_comp.png")
         result = render_comparison(pixels, gt, pred, native_size=native, output_path=out)
         assert Path(result).is_file()
@@ -233,7 +254,7 @@ class TestRenderComparison:
 
         pixels, native = _display(str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"))
         gt = [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}]
-        pred = [{"x1": 110, "y1": 110, "x2": 210, "y2": 210, "class_id": 0, "confidence": 0.9}]
+        pred = [{"x1": 110, "y1": 110, "x2": 210, "y2": 210, "class_id": 0, "score": 0.9}]
         tp = [(0, 0)]
 
         with_line = str(viz_dataset / "test_comp_with_line.png")
@@ -372,7 +393,7 @@ class TestVisualizePredictions:
 def test_scoring_and_the_comparison_render_state_one_count_for_one_image(tmp_path: Path):
     """With no trait, the single-image scoring's TP/FP/FN, its per-detection tags and the
     comparison render's counts are one matching's: a detection centered in a thin crowd strip,
-    which COCOeval's area-based crowd test would count a false positive, is ignored by all three."""
+    which it overlaps by little of its own area, is ignored by all three."""
     pytest.importorskip("torch")
     from tcip_annotation.state import Annotation, BBox
 
@@ -412,6 +433,24 @@ class TestVisualizeComparison:
         assert Path(result["image_path"]).is_file()
         assert result["gt_count"] == 2
         assert result["pred_count"] == 2
+
+    def test_an_image_the_bucket_did_not_predict_draws_its_ground_truth_all_missed(
+            self, viz_bucket: Path):
+        from tcip_annotation.state import Annotation, BBox
+
+        from tcip_mcp.tools.vision_tools import visualize
+        from tests._producer_fixtures import label_image
+
+        img = viz_bucket / "images" / UNDATED_BUCKET / "img_005.jpg"
+        Image.new("RGB", (640, 480), color=(100, 120, 80)).save(img)
+        label_image(img, [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264)),
+                          Annotation(subject="leaf", geometry=BBox(176, 132, 208, 156))], 640, 480)
+
+        result = visualize(viz_bucket, "comparison", str(img), bucket=PUBLISHED)
+
+        assert "error" not in result, result
+        assert (result["gt_count"], result["pred_count"]) == (2, 0)
+        assert (result["tp"], result["fp"], result["fn"]) == (0, 0, 2)
 
     def test_an_unreadable_gt_returns_an_error_naming_the_document(self, viz_bucket: Path):
         """Same as the annotations source: the shared reader's own message, naming the
@@ -515,6 +554,18 @@ class TestVisualizeDatasetSample:
         assert result["count"] == 4
         assert result["total_images"] == 4
 
+    def test_only_the_images_of_a_capture_are_sampled(self, viz_dataset: Path):
+        from tcip_mcp.tools.vision_tools import visualize
+
+        Image.new("RGB", (64, 48)).save(viz_dataset / "images" / "loose.jpg")
+        (viz_dataset / "images" / UNDATED_BUCKET / "nested").mkdir()
+        Image.new("RGB", (64, 48)).save(viz_dataset / "images" / UNDATED_BUCKET / "nested" / "deep.jpg")
+
+        result = visualize(viz_dataset, "dataset", str(viz_dataset), n=16)
+
+        assert "error" not in result, result
+        assert result["total_images"] == 4
+
     def test_no_images(self, tmp_path: Path):
         from tcip_mcp.tools.vision_tools import visualize
 
@@ -596,16 +647,14 @@ class TestRenderCandidates:
                 "candidate_id": 0,
                 "bbox": [100.0, 100.0, 200.0, 200.0],
                 "area": 10000,
-                "stability_score": 0.95,
-                "predicted_iou": 0.90,
+                "score": 0.95,
                 "rings": [[(100, 100), (200, 100), (200, 200), (100, 200)]],
             },
             {
                 "candidate_id": 1,
                 "bbox": [300.0, 300.0, 400.0, 400.0],
                 "area": 5000,
-                "stability_score": 0.88,
-                "predicted_iou": 0.85,
+                "score": 0.88,
                 "rings": [[(300, 300), (400, 300), (400, 400), (300, 400)]],
             },
         ]

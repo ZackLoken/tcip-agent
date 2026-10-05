@@ -181,7 +181,7 @@ def test_one_tiled_source_still_splits_spatially_over_its_own_samples(tmp_path: 
     data_cfg = {
         "images_dir": str(images_dir), "scope": {"subject": SUBJECT},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
+        "split": {"val_ratio": 0.25, "holdout_ratio": 0.1, "calibration_ratio": 0, "seed": 1},
     }
 
     train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", data_cfg, None)

@@ -24,7 +24,6 @@ class FPN(nn.Module):
         super().__init__()
         self.out_channels = out_channels
         self.add_p2 = add_p2
-        self.num_levels = len(in_channels_list) + int(add_p2)
 
         self.lateral_convs = nn.ModuleList()
         self.output_convs = nn.ModuleList()
@@ -93,7 +92,6 @@ class IdentityNeck(nn.Module):
     def __init__(self, in_channels_list: list[int], **_: Any) -> None:
         super().__init__()
         self.out_channels = in_channels_list[-1] if in_channels_list else 0
-        self._in_channels_list = in_channels_list
 
     def forward(self, features: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         return features
@@ -115,23 +113,3 @@ class GlobalAvgPoolNeck(nn.Module):
         keys = sorted(features.keys())
         x = features[keys[-1]]
         return F.adaptive_avg_pool2d(x, 1).flatten(1)
-
-
-# ---------------------------------------------------------------------------
-# Build helpers
-# ---------------------------------------------------------------------------
-
-def _build_fpn(in_channels_list: list[int], out_channels: int = 256, add_p2: bool = False, **_: Any) -> FPN:
-    return FPN(in_channels_list, out_channels, add_p2=add_p2)
-
-
-def _build_pan(in_channels_list: list[int], out_channels: int = 256, add_p2: bool = False, **_: Any) -> PAN:
-    return PAN(in_channels_list, out_channels, add_p2=add_p2)
-
-
-def _build_identity(in_channels_list: list[int], **kw: Any) -> IdentityNeck:
-    return IdentityNeck(in_channels_list, **kw)
-
-
-def _build_gap(in_channels_list: list[int], **kw: Any) -> GlobalAvgPoolNeck:
-    return GlobalAvgPoolNeck(in_channels_list, **kw)

@@ -19,7 +19,7 @@ from tcip_mcp.pipelines.operating_point import (  # noqa: E402
     count_criterion,
 )
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
-    build_coco_image_record,
+    image_record,
     derive_operating_point_curve,
     gt_class_avg_size,
     pick_count_unbiased,
@@ -51,13 +51,13 @@ def _gt_records(prefix, n, *, swap_classes, classes=(1, 2), offset=0.0):
             gt.append({"bbox": box, "category_id": cat, "iscrowd": 0})
             dt.append({"bbox": box, "category_id": classes[1] if swap_classes else cat,
                        "score": 0.9})
-        recs.append({**build_coco_image_record(FRAME, FRAME, gt, dt, image_id=f"{prefix}{i}"),
+        recs.append({**image_record(FRAME, FRAME, gt, dt, image_id=f"{prefix}{i}"),
                      "cap_hit": False})
     return recs
 
 
 def _record(prefix, i, gt, dt):
-    return {**build_coco_image_record(FRAME, FRAME, gt, dt, image_id=f"{prefix}{i}"),
+    return {**image_record(FRAME, FRAME, gt, dt, image_id=f"{prefix}{i}"),
             "cap_hit": False}
 
 

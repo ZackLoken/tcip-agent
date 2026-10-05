@@ -79,7 +79,7 @@ def _table_dataset(root: Path) -> tuple[Path, Path]:
 
 def _drawn(root: Path, ground_truth: Path, out: Path, *, seed: int = 4):
     result = draw_splits(out.parent, str(root), output_path=str(out), ground_truth=str(ground_truth),
-                         seed=seed, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125,
+                         seed=seed, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125,
                          group_by="stem")
     assert "error" not in result, result
     return read_selection(out, project=out.parent)

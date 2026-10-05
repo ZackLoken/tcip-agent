@@ -109,8 +109,9 @@ Three seams support bespoke work; the platform guarantees integrity around it:
   `dataset_source`: an *importable* builder you wrote (`{"builder": "my_module:build_ds",
   "builder_kwargs": {...}, "source_files": [...]}`, mirroring `model_source`). It receives the
   samples the platform's own producer named for the side being built and the class space they
-  were admitted under (`samples` / `scope` / `transforms` / `task`), sizing the dataset it builds
-  itself, plus your own
+  were admitted under (`samples` / `scope` / `transforms` / `task`), each sample carrying the
+  logical image its pixels are read from as `image` (a `BandGroupRef` for a grouped capture),
+  sizing the dataset it builds itself, plus your own
   `builder_kwargs`, and must return a torch `Dataset`. Never a directory, a document path or a
   format flag, on any route including your own `ctx.build_dataset` call, which is this same
   factory: the platform names the samples and your builder builds over them, so a strip split
@@ -225,12 +226,11 @@ def plant_id_fn(image_path: str) -> str | None:
     row = by_stem.get(Path(image_path).stem)
     return row["plot_name"] if row else None
 
+# Each row carries its assignment's own source, distance_m and plant_attribution, read by those names.
 image_results = [
-    {**r, "image": r["image"],
-     "plant_id_source": (row := by_stem.get(Path(r["image"]).stem)) and row["source"],
-     "plant_id_distance_m": row and row["distance_m"],
-     "plant_attribution": row and row["plant_attribution"]}
+    {**r, **{k: row[k] for k in ("source", "distance_m", "plant_attribution")}}
     for r in read_stage_b_preds_as_image_results("stage-b/<date>")  # your own per-image count reader
+    if (row := by_stem.get(Path(r["image"]).stem))
 ]
 
 # The final CSV is a phenotype delivery door: it clears the one gate over the published buckets

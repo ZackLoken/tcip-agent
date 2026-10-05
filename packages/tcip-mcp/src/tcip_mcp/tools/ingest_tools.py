@@ -23,17 +23,10 @@ from tcip_mcp.server import tool
 logger = logging.getLogger(__name__)
 
 
-_DT_ORIGINAL = 0x9003  # EXIF DateTimeOriginal tag id
-_EXIF_IFD = 0x8769  # Exif sub-IFD offset tag
-
 # The container families a capture date can be asked of, by extension: EXIF in a photographic file,
 # raster metadata in a GDAL-readable one. Every other ingestible extension is neither.
 _PHOTOGRAPHIC_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".heic"}
 _GDAL_EXTS = {".tif", ".tiff"}
-
-# The spellings a capture-date value arrives in: the colon form EXIF's DateTimeOriginal and TIFF's
-# DateTime tag are specified to use, and the ISO forms a stitching engine's own item is written in.
-_DATE_FORMATS = ("%Y:%m:%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")
 
 # Default-domain raster metadata items observed to name a capture date, matched case-insensitively
 # in this order: a Sentera-stitched orthomosaic writes ``capture_date``.
@@ -41,36 +34,32 @@ _GDAL_DATE_ITEMS = ("capture_date",)
 
 
 def _iso_date(raw: object) -> str | None:
-    """A capture-date value in any spelling this reads → ISO ``YYYY-MM-DD``; ``None`` if none fit."""
-    from datetime import datetime
+    """A capture-date value in any spelling
+    :func:`~tcip_mcp.pipelines.image_utils.parse_capture_time` reads, as ISO ``YYYY-MM-DD``;
+    ``None`` if none fits."""
+    from tcip_mcp.pipelines.image_utils import parse_capture_time
 
-    text = str(raw).strip()
-    for fmt in _DATE_FORMATS:
-        try:
-            return datetime.strptime(text, fmt).strftime("%Y-%m-%d")
-        except ValueError:
-            continue
-    return None
+    parsed = parse_capture_time(raw)
+    return parsed.strftime("%Y-%m-%d") if parsed is not None else None
 
 
 def _photographic_capture_date(path: Path) -> tuple[str | None, str | None]:
-    """EXIF ``DateTimeOriginal`` from a photographic container, and why it could not be read.
-
-    Reads via the public ``Image.getexif()`` + Exif sub-IFD so it works across formats (JPEG, PNG,
-    HEIC). ``Image.open`` decodes the header only and never the pixels.
-    """
+    """EXIF ``DateTimeOriginal`` from a photographic container
+    (:func:`~tcip_mcp.pipelines.image_utils.exif_capture_time`), and why it could not be read.
+    ``Image.open`` decodes the header only and never the pixels."""
     from PIL import Image
+
+    from tcip_mcp.pipelines.image_utils import exif_capture_time
 
     try:
         with Image.open(path) as im:
             exif = im.getexif()
             try:
-                sub = exif.get_ifd(_EXIF_IFD)
+                raw = exif_capture_time(exif)
             except Exception as exc:
                 return None, f"EXIF block could not be read: {exc}"
     except Exception as exc:
         return None, f"image header could not be read: {exc}"
-    raw = sub.get(_DT_ORIGINAL)
     if raw is None:
         return None, None
     iso = _iso_date(raw)

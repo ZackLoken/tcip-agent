@@ -46,13 +46,13 @@ def test_a_routable_arrival_is_refused_whatever_the_environment_holds(
 
 
 def test_a_connection_from_this_machine_is_served() -> None:
-    for base in ("http://127.0.0.1", "http://localhost:8765"):
+    for base in ("http://127.0.0.1", "http://127.0.0.1:8765"):
         assert TestClient(app, base_url=base).get("/health").status_code == 200, base
     # The test client cannot form an IPv6 base URL; the mapped spelling is exercised through the
     # Host header instead, which the same canonical parser reads.
     local = TestClient(app, base_url="http://127.0.0.1")
     assert local.get("/health", headers={"host": "[::ffff:127.0.0.1]:80"}).status_code == 200
-    assert local.get("/health", headers={"host": "LOCALHOST."}).status_code == 200
+    assert local.get("/health", headers={"host": "127.0.0.1."}).status_code == 200
 
 
 def test_an_arrival_the_backend_cannot_classify_is_refused() -> None:
@@ -70,11 +70,12 @@ def test_a_refused_arrival_is_named_once_to_the_operator(
     assert len(named) == 1
 
 
-def test_the_host_must_be_a_loopback_name_at_the_arrival_port() -> None:
+def test_the_host_must_be_the_loopback_host_at_the_arrival_port() -> None:
     local = TestClient(app, base_url="http://127.0.0.1:8765")
-    assert local.get("/health", headers={"host": "localhost:8765"}).status_code == 200
+    assert local.get("/health", headers={"host": "127.0.0.1:8765"}).status_code == 200
     assert local.get("/health", headers={"host": "evil.example.com"}).status_code == 400
-    assert local.get("/health", headers={"host": "localhost:9999"}).status_code == 400
+    assert local.get("/health", headers={"host": "127.0.0.1:9999"}).status_code == 400
+    assert local.get("/health", headers={"host": "localhost:8765"}).status_code == 400
     assert local.get("/health", headers={"host": "gui.example:443"}).status_code == 400
 
 

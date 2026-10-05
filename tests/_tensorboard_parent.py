@@ -65,7 +65,8 @@ def main() -> None:
 
     tb._tensorboard_argv = _sleep_argv
     if "--no-tie" in flags:
-        tb._DISABLE_LIFETIME_TIE = True
+        tb._guardian_argv = lambda argv: argv
+        tb._assign_to_win_job = lambda proc: "disabled for test"
 
     launched: dict = {}
 

@@ -14,18 +14,21 @@ def _deg_to_dms(value: float) -> tuple[float, float, float]:
     return (float(d), float(m), round((m_full - m) * 60, 4))
 
 
-def write_geo_image(path: Path, lat: float, lon: float, when: Any, image: Any = None) -> None:
-    """A JPEG at ``path`` carrying EXIF DateTimeOriginal ``when`` and GPS ``lat``/``lon``: the
-    PIL ``image`` given, else a tiny black frame."""
+def write_geo_image(path: Path, lat: float, lon: float, when: Any, image: Any = None, *,
+                    omit: tuple[int, ...] = ()) -> None:
+    """A JPEG at ``path`` carrying EXIF DateTimeOriginal ``when`` and GPS ``lat``/``lon``, less
+    the GPS tags ``omit`` names (``0x0001`` the latitude's hemisphere, ``0x0003``/``0x0004`` the
+    longitude's): the PIL ``image`` given, else a tiny black frame."""
     from PIL import Image
 
     path.parent.mkdir(parents=True, exist_ok=True)
     exif = Image.Exif()
     exif[0x8769] = {0x9003: when.strftime("%Y:%m:%d %H:%M:%S")}
-    exif[0x8825] = {
+    gps = {
         0x0001: "N" if lat >= 0 else "S", 0x0002: _deg_to_dms(lat),
         0x0003: "E" if lon >= 0 else "W", 0x0004: _deg_to_dms(lon),
     }
+    exif[0x8825] = {tag: value for tag, value in gps.items() if tag not in omit}
     frame = image if image is not None else Image.new("RGB", (8, 8))
     frame.save(path, exif=exif, quality=100, subsampling=0)
 

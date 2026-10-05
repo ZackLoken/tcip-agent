@@ -246,7 +246,8 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
     ckpt = tmp_path / "out" / "checkpoint_epoch_1.pt"
     assert ckpt.is_file()
 
-    launched = {**cfg, "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)}}
+    launched = {**cfg, "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path),
+                                "split": {"seed": 3, "val_ratio": 0.15}}}
     ctx, run_dir = _context(tmp_path, launched, train_loader=build_loader(), val_loader=None,
                             resume_from=str(ckpt))
     run_training_envelope(ctx)

@@ -87,11 +87,18 @@ class Annotation:
             raise ValueError(f"an annotation needs a non-empty string subject; got {self.subject!r}")
 
 
+def object_rows(iscrowd) -> list[bool]:
+    """For each of the crowd flags ``iscrowd`` (a list, an array or a tensor, one per row),
+    whether its row is one object rather than a crowd region."""
+    return [not bool(flag) for flag in iscrowd]
+
+
 def instances(annotations: list[Annotation], *, crowd: bool = False) -> list[Annotation]:
-    """The annotations that are each one object: every one but a crowd region; with ``crowd``, the
-    crowd regions instead.
+    """The annotations that are each one object (:func:`object_rows`): every one but a crowd
+    region; with ``crowd``, the crowd regions instead.
     """
-    return [a for a in annotations if a.iscrowd == crowd]
+    return [a for a, one in zip(annotations, object_rows([a.iscrowd for a in annotations]))
+            if one is not crowd]
 
 
 def box_derivable(geometry: "BBox | Polygon | Point | None") -> TypeGuard[BBox | Polygon]:

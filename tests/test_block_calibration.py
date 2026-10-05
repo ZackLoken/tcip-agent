@@ -91,7 +91,7 @@ def _completed_over(project: Path, data_cfg: dict, experiment_id: str) -> dict:
                 observation.record["resolved"]["data"]["split"]["spatial_manifest"]}
 
 
-def _build_experiment(tmp_path: Path, *, reserve_frac: float = 0.15,
+def _build_experiment(tmp_path: Path, *, calibration_ratio: float = 0.15,
                       experiment_id: str = "exp_block",
                       plant_csv_paths: list[str] | None = None) -> dict:
     """A real 4-way spatial-strip split over a real raster, resolved and recorded by a real run
@@ -116,8 +116,8 @@ def _build_experiment(tmp_path: Path, *, reserve_frac: float = 0.15,
     data_cfg = {
         "images_dir": str(images_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": TILE, "overlap": 0.2},
-        "split": {"val_ratio": 0.2, "test_ratio": 0.15, "seed": 1,
-                  "reserve_calibration_fraction": reserve_frac},
+        "split": {"val_ratio": 0.2, "holdout_ratio": 0.15, "seed": 1,
+                  "calibration_ratio": calibration_ratio},
     }
     if plant_csv_paths:
         data_cfg["plant_csv_paths"] = plant_csv_paths
@@ -144,7 +144,7 @@ def _attested(tmp_path: Path, **kwargs) -> dict:
     exp = _build_experiment(tmp_path, **kwargs)
     manifest = exp["spatial_manifest"]
     _attest_regions_complete(
-        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["holdout_region"]])
     return exp
 
 
@@ -183,14 +183,14 @@ def test_an_assessment_refuses_while_the_reserved_regions_are_unattested(tmp_pat
 
 def test_a_mark_over_one_region_leaves_the_other_unattested(tmp_path: Path):
     """The check reads each mark's rect: a mark over the calibration region attests that region
-    alone, so the assessment refuses naming the test region and only it."""
+    alone, so the assessment refuses naming the holdout region and only it."""
     from tcip_mcp.assessment import AssessmentRefused
 
     exp = _build_experiment(tmp_path)
     _attest_regions_complete(exp["root"], exp["stem"],
                              [exp["spatial_manifest"]["calibration_region"]])
 
-    with pytest.raises(AssessmentRefused, match=r"\['test_region'\] are not marked complete"):
+    with pytest.raises(AssessmentRefused, match=r"\['holdout_region'\] are not marked complete"):
         _assess(exp)
 
 
@@ -299,9 +299,9 @@ def test_an_attested_mosaic_is_assessed_and_recorded(tmp_path: Path):
 def test_a_run_with_no_reserved_region_refuses_naming_the_remedy(tmp_path: Path):
     from tcip_mcp.assessment import AssessmentRefused
 
-    exp = _build_experiment(tmp_path, reserve_frac=0.0, experiment_id="exp_no_reserve")
+    exp = _build_experiment(tmp_path, calibration_ratio=0.0, experiment_id="exp_no_reserve")
 
-    with pytest.raises(AssessmentRefused, match="reserve_calibration_fraction"):
+    with pytest.raises(AssessmentRefused, match="calibration_ratio"):
         _assess(exp)
 
 
@@ -346,7 +346,7 @@ def test_band_counts_and_spacing_count_objects_not_crowd_regions(tmp_path: Path)
             WIDTH, HEIGHT, keep_empty=True)
         manifest = exp["spatial_manifest"]
         _attest_regions_complete(
-            exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+            exp["root"], exp["stem"], [manifest["calibration_region"], manifest["holdout_region"]])
         records.append(_assess(exp))
 
     plain, crowd = records
@@ -395,12 +395,12 @@ def test_the_recorded_cap_is_derived_from_the_calibration_bands_alone(tmp_path: 
     exp = _build_experiment(tmp_path)
     manifest = exp["spatial_manifest"]
     existing = json_io.read_label_document(exp["label"]).annotations
-    tx0, _ty0, tx1, _ty1 = manifest["test_region"][0]
+    tx0, _ty0, tx1, _ty1 = manifest["holdout_region"][0]
     dense = [Annotation(subject="bud", geometry=BBox(x, y, x + 15, y + 30))
              for x in range(int(tx0) + 5, int(tx1) - 20, 2) for y in (40, 80, 120)]
     json_io.write_label_document(exp["label"], existing + dense, WIDTH, HEIGHT, keep_empty=True)
     _attest_regions_complete(
-        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["holdout_region"]])
 
     record = _assess(exp)
 
@@ -422,7 +422,7 @@ def test_an_unstated_merge_threshold_derives_from_the_calibration_bands(tmp_path
         for x in range(10, WIDTH - 20, BOX_STEP) for dx in (0, 5)], WIDTH, HEIGHT,
         keep_empty=True)
     _attest_regions_complete(
-        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["holdout_region"]])
 
     record = _assess(exp)
 
@@ -441,7 +441,7 @@ def test_a_raster_pass_stamps_an_explicit_conf_as_explicit_and_an_omitted_one_as
     from tcip_mcp.pipelines.execution import DEFAULT_CONF, Stated
     from tcip_mcp.tools.inference_tools import run_inference
 
-    exp = _build_experiment(tmp_path, reserve_frac=0.0, experiment_id="exp_conf")
+    exp = _build_experiment(tmp_path, calibration_ratio=0.0, experiment_id="exp_conf")
     for name, stated in (("stated", {"conf": DEFAULT_CONF}), ("omitted", {})):
         result = run_inference(tmp_path, exp["checkpoint_path"], bucket=name,
                                raster_path=str(exp["raster_path"]),
@@ -596,8 +596,8 @@ def _build_attribute_scoped_experiment(
     data_cfg = {
         "images_dir": str(images_dir), "scope": {"subject": "bud"}, "auto_val": True,
         "tiling": {"enabled": True, "tile_size": TILE, "overlap": 0.2},
-        "split": {"val_ratio": 0.2, "test_ratio": 0.15, "seed": 1,
-                  "reserve_calibration_fraction": 0.15},
+        "split": {"val_ratio": 0.2, "holdout_ratio": 0.15, "seed": 1,
+                  "calibration_ratio": 0.15},
     }
     completed = _completed_over(tmp_path, data_cfg, experiment_id)
     recorded_scope = ClassScope.of(run_resolution(experiment_id, project=tmp_path)["data"])
@@ -606,7 +606,7 @@ def _build_attribute_scoped_experiment(
     _write_registry(reordered_values)
     manifest = completed["spatial_manifest"]
     _attest_regions_complete(root, stem, [manifest["calibration_region"],
-                                          manifest["test_region"]])
+                                          manifest["holdout_region"]])
     return {"project": tmp_path, "root": root, "stem": stem,
             "experiment_id": experiment_id, **completed, "recorded_scope": recorded_scope}
 
@@ -649,7 +649,7 @@ def test_regions_marked_through_the_editors_save_admit_the_assessment(tmp_path: 
     open_new_project(tmp_path)
     manifest = exp["spatial_manifest"]
     client = TestClient(app, base_url="http://127.0.0.1")
-    for region in (manifest["calibration_region"], manifest["test_region"]):
+    for region in (manifest["calibration_region"], manifest["holdout_region"]):
         x0, y0, x1, y1 = region[0]
         current = client.get("/api/annotate/labels", params={
             "image_path": str(exp["raster_path"])}).json()

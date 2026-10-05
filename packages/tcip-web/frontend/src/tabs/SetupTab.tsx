@@ -7,17 +7,12 @@ import { TabHeading } from "@/components/TabHeading";
 import { TraitRevisionPanel } from "@/components/TraitRevisionPanel";
 import { useStore } from "@/store";
 
-// resolve_nn_tolerance_m's own three sources, in the breeder's words; a source string this
-// map does not know renders as its own raw string.
-const TOLERANCE_SOURCE_PHRASES: Record<string, string> = {
+// resolve_nn_tolerance_m's own sources, in the breeder's words.
+const TOLERANCE_SOURCE_PHRASES: Record<MatchTolerance["source"], string> = {
   grid_pitch: "derived from the plot's grid pitch",
   stated: "the stated value",
   stated_capped: "the stated value, capped to the grid pitch",
 };
-
-function toleranceSourceText(source: string): string {
-  return TOLERANCE_SOURCE_PHRASES[source] ?? source;
-}
 
 function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
   const [mappingName, setMappingName] = useState("");
@@ -179,7 +174,7 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
         <div className="mt-2 text-[11px] text-tcip-muted tabular-nums">
           {buildTolerance && buildMaxMatchDistance !== null && (
             <div className="mb-1">
-              {`Match tolerance ${buildTolerance.value.toFixed(2)} m (${toleranceSourceText(buildTolerance.source)}); matches accepted out to ${buildMaxMatchDistance.toFixed(2)} m`}
+              {`Match tolerance ${buildTolerance.value.toFixed(2)} m (${TOLERANCE_SOURCE_PHRASES[buildTolerance.source]}); matches accepted out to ${buildMaxMatchDistance.toFixed(2)} m`}
             </div>
           )}
           {Object.entries(buildSummary.per_date).map(([d, s]) => (

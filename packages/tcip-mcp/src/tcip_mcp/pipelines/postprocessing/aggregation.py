@@ -45,8 +45,9 @@ def aggregate_per_plant(
     ``plant_id_fn(image)``; a record for which neither resolves raises, naming
     ``build_plant_mapping`` (``tcip_mcp.pipelines.postprocessing.plant_mapping``).
 
-    When a record carries ``plant_id_source``/``plant_id_distance_m`` (as ``build_plant_mapping``'s
-    ``Assignment`` records do), it is summarized per plant. A record's ``plant_attribution`` (the
+    When a record carries an assignment's ``source``/``distance_m`` (as ``build_plant_mapping``'s
+    ``Assignment`` rows do), they are summarized per plant as ``plant_id_source`` (``"mixed"``
+    where the plant's images disagree) and ``plant_id_distance_m_max``. A record's ``plant_attribution`` (the
     granularity objects were attributed to plants at, e.g. ``plant_mapping.MappingBuild``'s
     ``"image"`` or ``orthomosaic_mapping.DetectionAssignment``'s ``"detection"``) is carried onto
     the summary; a plant whose own images disagree on it refuses (see :func:`_agreed`).
@@ -80,23 +81,23 @@ def aggregate_per_plant(
             )
         groups[pid].append(r)
 
-    aggregator = _STRATEGIES.get(strategy)
-    if aggregator is None:
-        raise ValueError(f"Unknown aggregation strategy: {strategy}. Available: {list(_STRATEGIES.keys())}")
+    from tcip_mcp.pipelines.model_build import resolve_named
+
+    aggregator = resolve_named(strategy, _STRATEGIES, kind="aggregation strategy")
 
     results = []
     for plant_id, items in sorted(groups.items()):
-        summary = aggregator(items, value_key)
+        values = [r[value_key] for r in items if value_key in r]
+        summary = aggregator(values, len(items) - len(values))
         summary["plant_id"] = plant_id
         summary["observations"] = len(items)
         summary["value_key"] = value_key
         summary["plant_attribution"] = _agreed(
             items, "plant_attribution", f"aggregate_per_plant, plant {plant_id!r}")
-        sources = {r["plant_id_source"] for r in items if r.get("plant_id_source") is not None}
+        sources = {r["source"] for r in items if r.get("source") is not None}
         if sources:
             summary["plant_id_source"] = sources.pop() if len(sources) == 1 else "mixed"
-        distances = [r["plant_id_distance_m"] for r in items
-                    if isinstance(r.get("plant_id_distance_m"), (int, float))]
+        distances = [r["distance_m"] for r in items if r.get("distance_m") is not None]
         if distances:
             summary["plant_id_distance_m_max"] = max(distances)
         results.append(summary)
@@ -120,10 +121,8 @@ def _agreed(items: list[dict], key: str, where: str, *, required: bool = False) 
 # ── Strategy implementations ────────────────────────────────────────────────
 
 
-def _agg_count(items: list[dict], value_key: str) -> dict:
+def _agg_count(values: list, n_missing: int) -> dict:
     """Median count across images. A missing value_key is a missing observation, not a measured 0."""
-    values = [r[value_key] for r in items if value_key in r]
-    n_missing = len(items) - len(values)
     return {
         "value": statistics.median(values) if values else None,
         "min_count": min(values) if values else None,
@@ -132,22 +131,19 @@ def _agg_count(items: list[dict], value_key: str) -> dict:
     }
 
 
-def _agg_mean(items: list[dict], value_key: str) -> dict:
+def _agg_mean(values: list, n_missing: int) -> dict:
     """Arithmetic mean of continuous values; ``None`` when every item omits ``value_key``."""
-    values = [r.get(value_key, 0.0) for r in items if value_key in r]
-    n_observations_with_value = len(values)
     if not values:
         return {"value": None, "n_observations_with_value": 0}
     return {
         "value": round(statistics.mean(values), 4),
         "std": round(statistics.stdev(values), 4) if len(values) > 1 else 0.0,
-        "n_observations_with_value": n_observations_with_value,
+        "n_observations_with_value": len(values),
     }
 
 
-def _agg_mode(items: list[dict], value_key: str) -> dict:
+def _agg_mode(values: list, n_missing: int) -> dict:
     """Most frequent value (for ordinal traits)."""
-    values = [r.get(value_key) for r in items if value_key in r]
     if not values:
         return {"value": None}
     counter = Counter(values)
@@ -159,9 +155,8 @@ def _agg_mode(items: list[dict], value_key: str) -> dict:
     }
 
 
-def _agg_sum(items: list[dict], value_key: str) -> dict:
+def _agg_sum(values: list, n_missing: int) -> dict:
     """Sum of values (for area traits); ``None`` when every item omits ``value_key``."""
-    values = [r.get(value_key, 0.0) for r in items if value_key in r]
     if not values:
         return {"value": None, "n_observations_with_value": 0}
     return {"value": sum(values), "n_observations_with_value": len(values)}

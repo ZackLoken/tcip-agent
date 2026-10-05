@@ -90,8 +90,8 @@ def _fake_predictor(monkeypatch) -> None:
 def _one_image(tmp_path):
     from PIL import Image
 
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
+    images_dir = tmp_path / "images" / "2026-01-01"
+    images_dir.mkdir(parents=True)
     Image.new("RGB", (16, 16)).save(images_dir / "img.jpg")
     return images_dir
 

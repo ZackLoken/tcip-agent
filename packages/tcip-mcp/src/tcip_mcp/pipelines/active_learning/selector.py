@@ -1,9 +1,5 @@
-"""Active learning selector: partition a checkpoint's own predictions.
-
-Review-queue (medium-confidence) and unscoreable partitioning over prediction dicts. Ranking
-unlabeled images by informativeness is the scorers' own seam (``active_learning.scorer``), which
-reads the predictor rather than these dicts.
-"""
+"""Active learning selector: review-queue (medium-confidence) and unscoreable partitioning over a
+checkpoint's own prediction dicts."""
 
 from __future__ import annotations
 

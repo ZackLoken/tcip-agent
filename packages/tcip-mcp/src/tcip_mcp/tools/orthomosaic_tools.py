@@ -72,8 +72,8 @@ def orthomosaic_plant_counts(
     )
     from tcip_mcp.pipelines.postprocessing.phenology import population
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        read_plant_csv_bytes, registry_csv_entries, require_named_plants,
-        resolve_nn_tolerance_m, verify_registry_csv_bytes,
+        assignment_is_attributed, read_plant_csv_bytes, registry_csv_entries,
+        require_named_plants, resolve_nn_tolerance_m, verify_registry_csv_bytes,
     )
     from tcip_mcp.pipelines.raster_source import georeferenced_raster_identity_mismatch
 
@@ -114,17 +114,17 @@ def orthomosaic_plant_counts(
         in_frame, outside = plants_in_frame(registered, georef, width=width, height=height)
         uncountable = {p.plot_name: "outside the raster's frame" for p in outside}
         tolerance = resolve_nn_tolerance_m(in_frame, nn_tolerance_m)
-        assignments = assign_detections_to_plants({"boxes": boxes}, georef, in_frame,
+        assignments = assign_detections_to_plants(boxes, georef, in_frame,
                                                   nn_tolerance_m=tolerance["value"])
+        attributed = [a for a in assignments if assignment_is_attributed(a)]
         counts = {p.plot_name: 0 for p in in_frame}
-        for a in assignments:
-            if a.plot_name is not None:
-                counts[a.plot_name] += 1
+        for a in attributed:
+            counts[cast(str, a.plot_name)] += 1
         attribution = DetectionAssignment.plant_attribution
         disclosure = {
             "plant_registry": registry_ref, "raster_identity": recorded_identity,
             "nn_tolerance_m": tolerance,
-            "detections_unattributed": sum(1 for a in assignments if a.plot_name is None),
+            "detections_unattributed": len(assignments) - len(attributed),
             "detections_unattributed_scope": "delivered_raster", "plant_attribution": attribution,
             "plants_outside_raster": sorted(p.plot_name for p in outside),
         }
@@ -158,9 +158,10 @@ def _segment_counts(
     from tcip_annotation.json_io import UnreadableLabelDocument, document_at, read_stored
 
     from tcip_mcp.dataset_layout import label_key_of
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import UNATTRIBUTED_SEGMENT_SOURCES
     from tcip_mcp.pipelines.postprocessing.segment_attribution import (
-        SEGMENT_ASSIGNMENT_SOURCES, SegmentAssignment, assign_detections_to_segments,
-        load_canopy_segments, tie_segments_to_plants,
+        SegmentAssignment, assign_detections_to_segments, load_canopy_segments,
+        tie_segments_to_plants,
     )
 
     stem = Path(raster_path).stem
@@ -175,23 +176,17 @@ def _segment_counts(
     segments = load_canopy_segments(document, subject=canopy_subject, raster_stem=stem,
                                     raster_identity=recorded_identity)
     tie = tie_segments_to_plants(segments, registered, georef, width=width, height=height)
-    assignments = assign_detections_to_segments({"boxes": boxes}, tie)
-    sources = SEGMENT_ASSIGNMENT_SOURCES
-    ambiguous_segments = {i for a in assignments if a.source == sources.overlapping
+    assignments = assign_detections_to_segments(boxes, tie)
+    ambiguous_segments = {i for a in assignments if a.source == "overlapping_segments"
                           for i in a.overlapping_segment_indices}
     tied = {t.segment_index: t for t in tie.tied}
     ambiguous = sorted(tied[i].plot_name for i in ambiguous_segments & set(tied))
     counts = {t.plot_name: 0 for t in tie.tied if t.plot_name not in ambiguous}
     for a in assignments:
-        if a.source != sources.containment:
-            continue
-        assert a.segment_index is not None, "a containment names its segment"
-        if tied[a.segment_index].plot_name in counts:
-            counts[tied[a.segment_index].plot_name] += 1
-    by_source = {"outside_segments": sum(a.source == sources.outside for a in assignments),
-                 "overlapping_segments": sum(a.source == sources.overlapping for a in assignments),
-                 "segment_without_plant": sum(a.source == sources.without_plant
-                                              for a in assignments)}
+        if a.source == "segment_containment" and a.plot_name in counts:
+            counts[a.plot_name] += 1
+    by_source = {source: sum(a.source == source for a in assignments)
+                 for source in UNATTRIBUTED_SEGMENT_SOURCES}
     disclosure = {
         "plant_registry": registry_ref, "raster_identity": recorded_identity,
         "canopy_segments": {"capture": key.parts[0], "stem": stem, "sha256": version.token,

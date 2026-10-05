@@ -67,6 +67,31 @@ def test_focus_annotate_lands_on_first_annotated_polygon_frame(tmp_path: Path) -
     assert isinstance(res["delivered"], bool)
 
 
+def test_a_named_bucket_sets_the_mode_from_its_own_document_not_the_label(tmp_path: Path) -> None:
+    """The frame's ground truth is a box and the bucket's proposal for it a polygon: the canvas
+    shows the proposals, so the mode is the proposal document's own geometry."""
+    import pytest
+    from PIL import Image
+
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
+
+    root, date = tmp_path, "2026-03-02"
+    frame = Path(image_dir(root, date)) / "IMG_0000.jpg"
+    frame.parent.mkdir(parents=True)
+    Image.new("RGB", (100, 100), (90, 110, 70)).save(frame)
+    _label(root, "bud", date, "detect", "IMG_0000", 1)
+    published(root, "preds", [{
+        "image": str(frame), "width": 100, "height": 100, "boxes": [[10.0, 10.0, 20.0, 20.0]],
+        "scores": [0.9], "labels": [1],
+        "masks": [{"segmentation": [[10.0, 10.0, 20.0, 10.0, 20.0, 20.0]]}]}],
+        scope={"subject": "bud"})
+
+    assert focus_human_attention(root, root.parent, str(root), "bud", date)["mode"] == "box"
+    assert focus_human_attention(root, root.parent, str(root), "bud", date,
+                                 bucket="preds")["mode"] == "polygon"
+
+
 def test_focus_annotate_scopes_annotated_to_the_requested_subject(tmp_path: Path) -> None:
     # Name-based schema: one file per image holds every subject. IMG_0001 is labeled only for 'leaf',
     # IMG_0002 only for 'bud'. Focusing on 'leaf' must land on IMG_0001 (its subject's frame) in
