@@ -39,9 +39,9 @@ function RefusedLaunchEntry({
   return (
     <li className="border border-tcip-border rounded p-2 flex flex-col gap-1 text-[11px]">
       <p>
-        {date}: job {refusal.job_id} is still writing the bucket at{" "}
-        <span className="font-mono">{refusal.requested_output_dir}</span>. A bucket is published
-        once, so nothing was launched; name another bucket directory to publish this run.
+        {date}: job {refusal.job_id} is still writing the bucket{" "}
+        <span className="font-mono">{refusal.requested_bucket}</span>. A bucket is published once,
+        so nothing was launched; name another bucket to publish this run.
       </p>
       <button
         className="tcip-btn text-[11px] self-start"
@@ -78,8 +78,8 @@ export function InferenceTab() {
   const [dates, setDates] = useState<string[]>([]);
   const [datesError, setDatesError] = useState<string | null>(null);
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
-  // The directory the run's buckets publish under, one child per date; the breeder names it.
-  const [bucketRoot, setBucketRoot] = useState("");
+  // The name the run's buckets publish under, one ``<name>/<date>`` per date; the breeder names it.
+  const [bucketName, setBucketName] = useState("");
   // The assessment whose execution record the run takes and publishes under; empty for none.
   const [assessmentId, setAssessmentId] = useState("");
   const [jobs, setJobs] = useState<InferenceJob[]>([]);
@@ -205,8 +205,6 @@ export function InferenceTab() {
                 done: asNum(msg.done, prev.done),
                 total: asNum(msg.total, prev.total),
                 status: (msg.status as InferenceJob["status"]) ?? prev.status,
-                audit_warning:
-                  (msg.audit_warning as string | null | undefined) ?? prev.audit_warning,
                 // A frame's presence of the key decides, including error: null.
                 error: "error" in msg ? (msg.error as string | null) : prev.error,
               } as InferenceJob)
@@ -231,7 +229,7 @@ export function InferenceTab() {
     });
   }
 
-  // One date's launch body: its bucket is the named directory's child for that date.
+  // One date's launch body: its bucket is the named bucket's ``<name>/<date>``.
   async function launchOne(checkpointPath: string, date: string) {
     if (!datasetRoot) return;
     try {
@@ -239,7 +237,7 @@ export function InferenceTab() {
         checkpoint_path: checkpointPath,
         dataset_root: datasetRoot,
         date,
-        output_dir: `${bucketRoot.replace(/[/\\]+$/, "")}/${date}`,
+        bucket: `${bucketName.replace(/\/+$/, "")}/${date}`,
         stated: {},
         assessment_id: assessmentId.trim() || null,
         user: useStore.getState().user,
@@ -251,9 +249,9 @@ export function InferenceTab() {
           done: 0,
           total: 0,
           images_dir: res.images_dir,
-          output_dir: res.output_dir,
+          dataset_root: res.dataset_root,
+          bucket: res.bucket,
           error: null,
-          audit_warning: null,
         };
         setJobs((prev) => [stub, ...prev]);
         setActiveJob(stub);
@@ -277,7 +275,7 @@ export function InferenceTab() {
 
   async function onLaunch() {
     const model = models.find((m) => m.checkpoint_path === modelPath);
-    if (!model || !datasetRoot || !bucketRoot || selectedDates.length === 0) return;
+    if (!model || !datasetRoot || !bucketName || selectedDates.length === 0) return;
     setRefusedLaunches((prev) => {
       const next = { ...prev };
       for (const date of selectedDates) delete next[date];
@@ -305,7 +303,8 @@ export function InferenceTab() {
           total: 0,
           // Nothing the refusal carries names the images dir; left empty rather than fabricated.
           images_dir: "",
-          output_dir: refusal.requested_output_dir ?? "",
+          dataset_root: datasetRoot ?? "",
+          bucket: refusal.requested_bucket ?? "",
           error: null,
         } as InferenceJob),
     );
@@ -403,14 +402,14 @@ export function InferenceTab() {
         )}
 
         <label className="tcip-label mb-1" htmlFor="inference-bucket-root">
-          Bucket directory
+          Bucket name
         </label>
         <input
           id="inference-bucket-root"
           className="tcip-input w-full mb-3 font-mono"
-          value={bucketRoot}
-          onChange={(e) => setBucketRoot(e.target.value)}
-          placeholder="a new directory under this project's predictions tree"
+          value={bucketName}
+          onChange={(e) => setBucketName(e.target.value)}
+          placeholder="a name no bucket of this dataset is published under"
         />
 
         <label className="tcip-label mb-1" htmlFor="inference-assessment">
@@ -428,15 +427,15 @@ export function InferenceTab() {
           Every execution value (conf, cap, tiling, cross-tile merge) is the named assessment's own,
           or without one is resolved from this checkpoint as the agent-facing door resolves it, so a
           run here and a run there cannot diverge. Only predictions published under an assessment
-          can deliver validated numbers. Each date publishes once, into its own directory under the
-          one named above.
+          can deliver validated numbers. Each date publishes once, as its own bucket under the name
+          above.
         </p>
 
         <button
           ref={launchButtonRef}
           className="tcip-btn-primary w-full"
           onClick={onLaunch}
-          disabled={launching || !modelPath || !bucketRoot || selectedDates.length === 0}
+          disabled={launching || !modelPath || !bucketName || selectedDates.length === 0}
         >
           ▶&nbsp;&nbsp;Launch inference
         </button>
@@ -532,7 +531,7 @@ export function InferenceTab() {
               <span className="font-mono text-[12px]">{activeJob.job_id}</span>
             </div>
             <div className="text-[11px] text-tcip-muted">
-              Output: <span className="font-mono">{activeJob.output_dir}</span>
+              Bucket: <span className="font-mono">{activeJob.bucket}</span>
             </div>
             {activeJobListed && (
               <div className="text-[11px] mt-1 tabular-nums">
@@ -541,11 +540,6 @@ export function InferenceTab() {
             )}
             {activeJob.error && (
               <div className="text-[11px] text-tcip-fp mt-1">Error: {activeJob.error}</div>
-            )}
-            {activeJob.audit_warning && (
-              <div className="text-[11px] text-tcip-warn mt-1">
-                Audit: {activeJob.audit_warning}
-              </div>
             )}
           </div>
         )}

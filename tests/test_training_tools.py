@@ -4,6 +4,8 @@ immutability on relaunch, and canonical-format confidence parsing in get_worst_p
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 import json
 from pathlib import Path
 
@@ -21,6 +23,28 @@ def _labeled(tmp_path: Path) -> dict:
 
     scope = {"subject": "bud"}
     return {**detection_images(tmp_path / "labeled", scope), "scope": scope}
+
+
+def _bud_image(image: Path, *, labeled: bool = True) -> None:
+    """A 20x20 frame at ``image`` and, unless ``labeled`` is false, its label document holding
+    one ``bud`` box."""
+    from PIL import Image
+    from tcip_annotation.state import Annotation, BBox
+
+    from tests._producer_fixtures import label_image
+
+    image.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (20, 20)).save(image)
+    if labeled:
+        label_image(image, [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], 20, 20)
+
+
+def _damaged(image: Path, stored: bytes) -> None:
+    """``image``'s label document replaced in the store by ``stored``."""
+    from tests._producer_fixtures import image_label_key
+    from tests._record_damage_fixtures import damage_record
+
+    damage_record(image_label_key(image), stored)
 
 
 # --------------------------------------------------------------------------
@@ -188,26 +212,18 @@ def test_preflight_config_warns_when_most_candidates_wont_train(tmp_path):
     only a fraction of its candidate images must not report "valid, no warnings" with no
     visibility into what would silently train on far fewer images than the operator expects."""
     pytest.importorskip("torch")
-    from PIL import Image
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images"
-    lbls = tmp_path / "annotations"
-    imgs.mkdir()
-    lbls.mkdir()
-    # 1 annotated, 3 unannotated (no label file at all) -> 75% of candidates won't train.
-    Image.new("RGB", (20, 20)).save(imgs / "ann.jpg")
-    json_io.write_annotations(lbls / "ann.json",
-                              [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], 20, 20)
+    imgs = tmp_path / "images" / UNDATED_BUCKET
+    # 1 annotated, 3 unannotated (no label document at all) -> 75% of candidates won't train.
+    _bud_image(imgs / "ann.jpg")
     for stem in ("a", "b", "c"):
-        Image.new("RGB", (20, 20)).save(imgs / f"{stem}.jpg")
+        _bud_image(imgs / f"{stem}.jpg", labeled=False)
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "bud"},
                  "auto_val": False},
         "batch_size": 2,
         # One admitted image holds nothing out, so the run selects on its training loss.
@@ -221,23 +237,15 @@ def test_preflight_config_warns_when_most_candidates_wont_train(tmp_path):
 
 def test_preflight_config_no_coverage_warning_when_everything_trains(tmp_path):
     pytest.importorskip("torch")
-    from PIL import Image
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images"
-    lbls = tmp_path / "annotations"
-    imgs.mkdir()
-    lbls.mkdir()
-    Image.new("RGB", (20, 20)).save(imgs / "ann.jpg")
-    json_io.write_annotations(lbls / "ann.json",
-                              [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], 20, 20)
+    imgs = tmp_path / "images" / UNDATED_BUCKET
+    _bud_image(imgs / "ann.jpg")
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "bud"}},
         "batch_size": 2,
     }
     assert preflight_config(tmp_path, cfg)["warnings"] == []
@@ -249,71 +257,31 @@ def test_preflight_config_no_coverage_warning_when_everything_trains(tmp_path):
 
 def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(tmp_path):
     """The coverage check's own admission must not fold an unreadable label into a generic build
-    failure it silently drops: a run over this labels_dir would fail on the same file, so
-    preflight reports it as a blocking issue, naming the file, not a warning."""
+    failure it silently drops: a run over these images would fail on the same document, so
+    preflight reports it as a blocking issue, naming the document, not a warning; the launch's
+    own admission refuses it in the same words."""
     pytest.importorskip("torch")
-    from PIL import Image
     from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.tools.training_tools import preflight_config
-
-    imgs = tmp_path / "images"
-    lbls = tmp_path / "annotations"
-    imgs.mkdir()
-    lbls.mkdir()
-    Image.new("RGB", (20, 20)).save(imgs / "ann.jpg")
-    Image.new("RGB", (20, 20)).save(imgs / "bad.jpg")
-    json_io.write_annotations(lbls / "ann.json",
-                              [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], 20, 20)
-    (lbls / "bad.json").write_bytes(b"{not json")
-
-    cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
-        "batch_size": 2,
-    }
-    r = preflight_config(tmp_path, cfg)
-    assert r["valid"] is False
-    assert any("bad.json" in i for i in r["issues"]), r["issues"]
-
-
-def test_preflight_reports_the_admission_refusal_the_launch_would_raise(tmp_path):
-    """A dataset-level export at an image's label path refuses the run's own admission, through
-    the one per-image reader, so preflight names it in those words: a preflight that swallowed
-    the refusal would read valid over data the launch then refuses."""
-    pytest.importorskip("torch")
-    from PIL import Image
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs, lbls = tmp_path / "images", tmp_path / "annotations"
-    imgs.mkdir()
-    lbls.mkdir()
-    for stem in ("a", "b", "zzz-export"):
-        Image.new("RGB", (20, 20)).save(imgs / f"{stem}.jpg")
-    for stem in ("a", "b"):
-        json_io.write_annotations(lbls / f"{stem}.json",
-                                  [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], 20, 20)
-    (lbls / "zzz-export.json").write_text(json.dumps(
-        {"images": [{"id": 1, "file_name": "a.jpg"}], "annotations": [], "categories": []}))
+    imgs = tmp_path / "images" / UNDATED_BUCKET
+    _bud_image(imgs / "ann.jpg")
+    _bud_image(imgs / "bad.jpg")
+    _damaged(imgs / "bad.jpg", b"{not json")
 
-    data_cfg = {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}}
+    data_cfg = {"images_dir": str(imgs), "scope": {"subject": "bud"}}
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": dict(data_cfg), "batch_size": 2,
+        "data": dict(data_cfg),
+        "batch_size": 2,
     }
     r = preflight_config(tmp_path, cfg)
-
-    with pytest.raises(json_io.UnreadableLabelDocument, match="dataset-level COCO") as raised:
+    with pytest.raises(json_io.UnreadableLabelDocument, match="bad") as raised:
         auto_train_val(tmp_path, "detection", dict(data_cfg), None)
     assert r["valid"] is False
-    assert any("dataset-level COCO" in i for i in r["issues"]), r["issues"]
-    assert any("zzz-export.json" in i for i in r["issues"])
-    assert "zzz-export.json" in str(raised.value)
+    assert any(str(raised.value) in i for i in r["issues"]), r["issues"]
 
 
 def test_preflight_admits_the_run_once(tmp_path):
@@ -322,18 +290,17 @@ def test_preflight_admits_the_run_once(tmp_path):
     question of what this run trains on."""
     pytest.importorskip("torch")
     from PIL import Image
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
     import tcip_mcp.pipelines.data.label_queries as label_queries
     from tcip_mcp.tools.training_tools import preflight_config
+    from tests._producer_fixtures import label_image
 
-    imgs, lbls = tmp_path / "images", tmp_path / "annotations"
-    imgs.mkdir()
-    lbls.mkdir()
+    imgs = tmp_path / "images" / UNDATED_BUCKET
+    imgs.mkdir(parents=True)
     Image.new("RGB", (256, 256)).save(imgs / "mosaic.jpg")
-    json_io.write_annotations(lbls / "mosaic.json",
-                              [Annotation(subject="bud", geometry=BBox(20, 20, 60, 60))], 256, 256)
+    label_image(imgs / "mosaic.jpg",
+                [Annotation(subject="bud", geometry=BBox(20, 20, 60, 60))], 256, 256)
 
     calls = []
     real_admit = label_queries.admit
@@ -345,7 +312,7 @@ def test_preflight_admits_the_run_once(tmp_path):
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "bud"},
                  "tiling": {"enabled": True, "tile_size": 64, "overlap": 0.2},
                  "split": {"reserve_calibration_fraction": 0.15, "val_ratio": 0.2,
                            "test_ratio": 0.1, "seed": 1}},
@@ -367,29 +334,23 @@ def test_preflight_admits_the_run_once(tmp_path):
 def test_preflight_config_blocks_a_document_only_the_admission_reader_refuses(
         tmp_path, bad_document, refusal):
     """A document that decodes to a dict but whose annotations field is not a list, or whose
-    record cannot be coerced, is exactly what the run's own admission (read_annotations) refuses
-    at launch: preflight reads through the same call so it blocks here too, rather than passing a
-    document the launch then aborts on."""
+    record cannot be coerced, is exactly what the run's own admission refuses at launch:
+    preflight reads through the same call so it blocks here too, rather than passing a document
+    the launch then aborts on."""
     pytest.importorskip("torch")
-    from PIL import Image
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
+    from tcip_store import encode_record
+
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images"
-    lbls = tmp_path / "annotations"
-    for d in (imgs, lbls):
-        d.mkdir()
-    Image.new("RGB", (20, 20)).save(imgs / "ann.jpg")
-    Image.new("RGB", (20, 20)).save(imgs / "bad.jpg")
-    json_io.write_annotations(lbls / "ann.json",
-                              [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], 20, 20)
-    (lbls / "bad.json").write_text(bad_document, encoding="utf-8")
+    imgs = tmp_path / "images" / UNDATED_BUCKET
+    _bud_image(imgs / "ann.jpg")
+    _bud_image(imgs / "bad.jpg")
+    _damaged(imgs / "bad.jpg", encode_record(json.loads(bad_document)))
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "bud"}},
         "batch_size": 2,
     }
     r = preflight_config(tmp_path, cfg)
@@ -470,14 +431,12 @@ def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(tmp_p
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images"
-    lbls = tmp_path / "labels"
-    imgs.mkdir()
-    lbls.mkdir()
+    imgs = tmp_path / "images" / UNDATED_BUCKET
+    imgs.mkdir(parents=True)
     cfg: dict[str, object] = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "bud"}},
         "batch_size": 2,
         "evaluation": "not_a_mapping",
     }
@@ -490,22 +449,21 @@ def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(tmp_p
 
 def _reserve_cal_big_single_source(root, width=4000, height=3000, tile_size=128):
     """One large single-image detection source with real width/height, real GT scattered evenly
-    across it: enough for a feasible 4-way spatial-strip split."""
+    across it: enough for a feasible 4-way spatial-strip split; its images directory."""
     import torch
     from torchvision.utils import save_image
 
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
+    from tests._producer_fixtures import label_image
 
-    images_dir, labels_dir = root / "images", root / "labels"
+    images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
-    stem = "mosaic"
-    save_image(torch.rand(3, height, width) * 0.3, str(images_dir / f"{stem}.png"))
+    image = images_dir / "mosaic.png"
+    save_image(torch.rand(3, height, width) * 0.3, str(image))
     boxes = [Annotation(subject="bud", geometry=BBox(x, y, x + 20, y + 20))
             for x in range(20, width - 20, 200) for y in range(20, height - 20, 200)]
-    json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, width, height, keep_empty=True)
-    return images_dir, labels_dir
+    label_image(image, boxes, width, height, keep_empty=True)
+    return images_dir
 
 
 def test_preflight_reserve_calibration_fraction_wrong_task_flags_issue(tmp_path):
@@ -515,8 +473,8 @@ def test_preflight_reserve_calibration_fraction_wrong_task_flags_issue(tmp_path)
 
     from tcip_mcp.tools.training_tools import preflight_config
 
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     rows = ["stem,label"]
     for i in range(4):
         Image.new("RGB", (32, 32), (20 * i, 30, 40)).save(images_dir / f"img{i}.png")
@@ -536,24 +494,15 @@ def test_preflight_reserve_calibration_fraction_wrong_task_flags_issue(tmp_path)
 def test_preflight_reserve_calibration_fraction_multi_member_flags_issue(tmp_path):
     """Two admitted members resolve to the group-balanced split, which reserves no calibration
     region, so the fraction is named as having no effect."""
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.training_tools import preflight_config
 
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
-    from PIL import Image
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     for stem in ("a", "b"):
-        Image.new("RGB", (32, 32)).save(images_dir / f"{stem}.png")
-        json_io.write_annotations(
-            labels_dir / f"{stem}.json",
-            [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], 32, 32, keep_empty=True)
+        _bud_image(images_dir / f"{stem}.png")
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
                  # sliver_frac stated: two boxes derive no size spread.
                  "tiling": {"enabled": True, "tile_size": 32, "sliver_frac": 0.5},
                  "split": {"reserve_calibration_fraction": 0.15}},
@@ -567,11 +516,11 @@ def test_preflight_reserve_calibration_fraction_infeasible_layout_refuses_under_
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    images_dir, labels_dir = _reserve_cal_big_single_source(tmp_path / "ds")
+    images_dir = _reserve_cal_big_single_source(tmp_path / "ds")
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
                  "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
                  # Nothing left for a real train fraction at this mosaic size.
                  "split": {"val_ratio": 0.45, "test_ratio": 0.45, "seed": 1,
@@ -589,24 +538,23 @@ def test_preflight_reserve_calibration_fraction_infeasible_layout_refuses_under_
 
 def test_preflight_reserve_calibration_fraction_reports_an_unreadable_label_by_name(tmp_path):
     """This probe's own generic except Exception must not swallow an unreadable label into a
-    silently-logged build failure: the breeder needs to see which file is broken."""
+    silently-logged build failure: the breeder needs to see which document is broken."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    images_dir, labels_dir = _reserve_cal_big_single_source(tmp_path / "ds")
-    bad = labels_dir / "mosaic.json"
-    bad.write_bytes(b"{not json")
+    images_dir = _reserve_cal_big_single_source(tmp_path / "ds")
+    _damaged(images_dir / "mosaic.png", b"{not json")
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
                  "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
                  "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                           "reserve_calibration_fraction": 0.15}},
         "batch_size": 2,
     }
     r = preflight_config(tmp_path, cfg, smoke=True)
-    assert any(str(bad) in i for i in r["issues"]), r["issues"]
+    assert any("mosaic" in i and "decode" in i for i in r["issues"]), r["issues"]
 
 
 def test_preflight_reserve_calibration_fraction_admits_a_feasible_layout(tmp_path):
@@ -615,12 +563,12 @@ def test_preflight_reserve_calibration_fraction_admits_a_feasible_layout(tmp_pat
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    images_dir, labels_dir = _reserve_cal_big_single_source(tmp_path / "ds")
+    images_dir = _reserve_cal_big_single_source(tmp_path / "ds")
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 128, "max_size": 256},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
                  "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
                  "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                           "reserve_calibration_fraction": 0.15}},
@@ -778,7 +726,7 @@ def _detection_base() -> dict:
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": "imgs", "labels_dir": "lbls"},
+        "data": {"images_dir": "imgs"},
         "batch_size": 2,
     }
 
@@ -1083,11 +1031,11 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
     from tcip_mcp.experiments import RUN_FILE, read_record
     from tests.test_training_autoval import _big_single_source
 
-    images_dir, labels_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     base = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
                  "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
                  "split": {"val_ratio": 0.25, "test_ratio": 0.1}},
         "batch_size": 2,
@@ -1171,34 +1119,31 @@ def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(tmp_
 # get_worst_predictions: confidence comes from the canonical prediction format
 # --------------------------------------------------------------------------
 
-def test_get_worst_predictions_reads_canonical_confidence(tmp_path, monkeypatch):
-    """Prediction files are per-image JSON with a native ``score`` (json_io); confidence
-    reads from that field, not from box geometry. Reading a normalized box height as confidence
-    instead would make the (1 - avg_conf) ranking term ~1.0 for every image with small boxes
-    (e.g. buds)."""
+def test_get_worst_predictions_reads_canonical_confidence(tmp_path):
+    """Prediction documents carry a native ``score``; confidence reads from that field, not from
+    box geometry. Reading a normalized box height as confidence instead would make the
+    (1 - avg_conf) ranking term ~1.0 for every image with small boxes (e.g. buds)."""
     pytest.importorskip("torch")
-    monkeypatch.chdir(tmp_path)
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.vision_tools import get_worst_predictions
     from tests._chain_fixtures import published
+    from tests._producer_fixtures import label_image
 
-    gts = tmp_path / "labels"
-    gts.mkdir()
+    images = tmp_path / "images" / UNDATED_BUCKET
     scored = {"confident": [0.9, 0.9], "shaky": [0.1, 0.1]}
     for stem, scores in scored.items():
         # Matching GT count → missed = extra = 0, error is exactly (1 - avg_conf).
         gt_anns = [Annotation(subject="bud", geometry=BBox(20.0, 11.0, 40.0, 31.0)) for _ in scores]
-        json_io.write_annotations(str(gts / f"{stem}.json"), gt_anns, 100, 100)
-    # Confidence lives in the JSON `score`; box geometry is irrelevant to this count + confidence
-    # heuristic (no IoU matching), so the boxes can be anything.
-    bucket = published(tmp_path, tmp_path / "preds", [
-        {"image": f"{stem}.png", "width": 100, "height": 100,
+        label_image(images / f"{stem}.png", gt_anns, 100, 100)
+    # Confidence lives in the document's `score`; box geometry is irrelevant to this count +
+    # confidence heuristic (no IoU matching), so the boxes can be anything.
+    bucket = published(tmp_path, "preds", [
+        {"image": str(images / f"{stem}.png"), "width": 100, "height": 100,
          "boxes": [[10.0, 10.0, 40.0, 22.0]] * len(scores), "scores": scores,
          "labels": [1] * len(scores)} for stem, scores in scored.items()],
         scope={"subject": "bud"})
 
-    out = get_worst_predictions(bucket, str(gts), top_k=2)
+    out = get_worst_predictions(bucket, top_k=2)
     by_stem = {w["stem"]: w["error_score"] for w in out["worst_images"]}
     assert by_stem["confident"] == pytest.approx(0.1, abs=1e-3)
     assert by_stem["shaky"] == pytest.approx(0.9, abs=1e-3)
@@ -1331,8 +1276,8 @@ def test_dataset_identity_tolerates_a_genuinely_unregistered_dataset(tmp_path):
     """The admitting half: no identity document at all still reads as (None, fp), not a refusal."""
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
 
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
 
     ds_id, fp = dataset_identity({"images_dir": str(images_dir)})
     assert ds_id is None

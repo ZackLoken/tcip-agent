@@ -6,6 +6,8 @@ through ``build_dataset``).
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 import numpy as np
@@ -49,21 +51,21 @@ def test_dedup_boxes_class_aware():
 # TiledDetectionDataset wrapper (needs torch)
 # --------------------------------------------------------------------------
 
-def _det_dataset(tmp_path: Path, n: int = 1, size: int = 128):
+def _det_dataset(tmp_path: Path, n: int = 1, size: int = 128) -> Path:
     from PIL import Image
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
+
+    from tests._producer_fixtures import label_image
+
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
     for i in range(n):
         Image.new("RGB", (size, size), (120, 120, 120)).save(images_dir / f"img{i}.jpg")
         # YOLO "0 0.5 0.5 0.1 0.1" (normalized) -> pixel xyxy in a size×size image
         box = BBox(0.45 * size, 0.45 * size, 0.55 * size, 0.55 * size)
-        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="bud", geometry=box)], size, size, keep_empty=True)
-    return images_dir, labels_dir
+        label_image(images_dir / f"img{i}.jpg", [Annotation(subject="bud", geometry=box)],
+                    size, size, keep_empty=True)
+    return images_dir
 
 
 def test_a_dataset_too_sparse_to_derive_its_sliver_cutoff_refuses_naming_the_field(tmp_path):
@@ -72,11 +74,11 @@ def test_a_dataset_too_sparse_to_derive_its_sliver_cutoff_refuses_naming_the_fie
     the same dataset with the field stated tiles."""
     pytest.importorskip("torch")
 
-    images_dir, labels_dir = _det_dataset(tmp_path, n=2)
+    images_dir = _det_dataset(tmp_path, n=2)
     with pytest.raises(ValueError, match="tiling.sliver_frac"):
-        dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
+        dataset_over("detection", str(images_dir), subject="bud",
                      tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
-    stated = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
+    stated = dataset_over("detection", str(images_dir), subject="bud",
                           tiling={"enabled": True, "tile_size": 64, "overlap": 0.2,
                                   "sliver_frac": SLIVER})
     assert len(stated) > 0
@@ -85,8 +87,8 @@ def test_a_dataset_too_sparse_to_derive_its_sliver_cutoff_refuses_naming_the_fie
 def test_tiled_detection_dataset_wrapper(tmp_path):
     torch = pytest.importorskip("torch")
 
-    images_dir, labels_dir = _det_dataset(tmp_path)
-    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2, "sliver_frac": SLIVER})
+    images_dir = _det_dataset(tmp_path)
+    ds = dataset_over("detection", str(images_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2, "sliver_frac": SLIVER})
     assert len(ds) >= 1  # 128px image -> multiple tiles
     img, target = ds[0]
     assert tuple(img.shape) == (3, 64, 64)
@@ -98,19 +100,18 @@ def test_tiled_detection_dataset_wrapper(tmp_path):
 def test_tiled_dataset_keeps_empty_tiles(tmp_path):
     pytest.importorskip("torch")
     from PIL import Image
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
+    from tests._producer_fixtures import label_image
+
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     Image.new("RGB", (256, 256), (120, 120, 120)).save(images_dir / "a.jpg")
     # YOLO "0 0.1 0.1 0.1 0.1" in a 256×256 image -> a 25.6px box in the top-left corner
-    json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="bud", geometry=BBox(12.8, 12.8, 38.4, 38.4))],
-                              256, 256, keep_empty=True)
-    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2, "sliver_frac": SLIVER})
+    label_image(images_dir / "a.jpg",
+                [Annotation(subject="bud", geometry=BBox(12.8, 12.8, 38.4, 38.4))],
+                256, 256, keep_empty=True)
+    ds = dataset_over("detection", str(images_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2, "sliver_frac": SLIVER})
     # Tiles far from the object are kept as valid negatives.
     empties = sum(1 for i in range(len(ds)) if ds[i][1]["boxes"].shape[0] == 0)
     assert empties > 0
@@ -122,8 +123,8 @@ def test_tiled_dataset_collate_roundtrip(tmp_path):
     from torch.utils.data import DataLoader
     from tcip_mcp.pipelines.training.collation import task_collate
 
-    images_dir, labels_dir = _det_dataset(tmp_path)
-    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2, "sliver_frac": SLIVER})
+    images_dir = _det_dataset(tmp_path)
+    ds = dataset_over("detection", str(images_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2, "sliver_frac": SLIVER})
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
     imgs, targets = next(iter(loader))
     assert isinstance(imgs, list) and isinstance(targets, list)
@@ -138,13 +139,13 @@ def test_build_dataset_no_tiling_unchanged(tmp_path):
     from PIL import Image
     from tcip_mcp.pipelines.data.datasets import DetectionDataset
 
-    images_dir, labels_dir = _det_dataset(tmp_path, n=3, size=64)
-    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
+    images_dir = _det_dataset(tmp_path, n=3, size=64)
+    ds = dataset_over("detection", str(images_dir), subject="bud")
     assert isinstance(ds, DetectionDataset)
     assert len(ds) == 3  # no tiling -> one sample per image
 
     # tiling passed to a non-detection task is ignored (no raise).
-    cls_dir = tmp_path / "cls"
+    cls_dir = tmp_path / "cls" / "images" / UNDATED_BUCKET
     cls_dir.mkdir(parents=True, exist_ok=True)
     rows = []
     for i in range(2):
@@ -167,8 +168,8 @@ def test_keep_regions_none_indexes_every_slice(tmp_path):
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
-    images_dir, labels_dir = _det_dataset(tmp_path, n=1, size=256)
-    base = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
+    images_dir = _det_dataset(tmp_path, n=1, size=256)
+    base = dataset_over('detection', str(images_dir), subject="bud")
     plain = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=SLIVER)
     explicit_none = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, keep_regions=None)
     from tcip_mcp.pipelines.slicing import slice_lattice
@@ -183,8 +184,8 @@ def test_keep_regions_restricts_to_fully_inside_tiles(tmp_path):
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
-    images_dir, labels_dir = _det_dataset(tmp_path, n=1, size=256)
-    base = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
+    images_dir = _det_dataset(tmp_path, n=1, size=256)
+    base = dataset_over('detection', str(images_dir), subject="bud")
     full = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=SLIVER)
     left_half = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, keep_regions=[(0, 0, 128, 256)])
 
@@ -201,8 +202,8 @@ def test_keep_regions_two_views_share_one_base_and_partition_disjointly(tmp_path
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
-    images_dir, labels_dir = _det_dataset(tmp_path, n=1, size=256)
-    base = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
+    images_dir = _det_dataset(tmp_path, n=1, size=256)
+    base = dataset_over('detection', str(images_dir), subject="bud")
     left = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, keep_regions=[(0, 0, 128, 256)])
     right = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, keep_regions=[(128, 0, 256, 256)])
 

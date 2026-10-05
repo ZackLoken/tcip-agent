@@ -123,8 +123,8 @@ Three seams support bespoke work; the platform guarantees integrity around it:
   where the ground truth carries its own classes (a mask raster, a table row): derive the class
   space from the ground truth you were handed. A task with no
   built-in loader is not a task with no producer: the platform admits by the shape of the ground
-  truth `data.labels_dir` points at, whatever the task, so your builder receives the same samples
-  a built-in loader would. Registry-free, imported like any module, never `exec`'d.
+  truth (the images' own label documents, or the masks or table `data.labels_dir` names), whatever
+  the task, so your builder receives the same samples a built-in loader would. Registry-free, imported like any module, never `exec`'d.
 - `pipelines.model_build.build_model(config, dims)` builds from a `model_source`: an *importable*
   builder you wrote (`{"builder": "my_module:build_net", "builder_kwargs": {...},
   "source_files": [...], "task": "detection"}`). It is imported, never `exec`'d. The platform
@@ -211,7 +211,7 @@ tiling persistence) against a `model_source` builder; run each stage's model wit
 # through the audited envelope, so provenance and immutability hold across the whole run.
 stage_a = launch_training(config={"model_source": {...}, "data": {...}})
 stage_b = launch_training(config={"model_source": {...}, "data": {...}})
-run_inference(checkpoint_path=stage_b_best, images_dir=images_dir, output_dir="stage_b_preds")
+run_inference(checkpoint_path=stage_b_best, images_dir=images_dir, bucket="stage-b/<date>")
 
 # aggregate_per_plant never guesses plant identity from a filename; supply a real plant_id_fn.
 # build_plant_mapping (a GNSS + capture-sequence resolver) is the real mechanism.
@@ -230,7 +230,7 @@ image_results = [
      "plant_id_source": (row := by_stem.get(Path(r["image"]).stem)) and row["source"],
      "plant_id_distance_m": row and row["distance_m"],
      "plant_attribution": row and row["plant_attribution"]}
-    for r in read_stage_b_preds_as_image_results("stage_b_preds")  # your own per-image count reader
+    for r in read_stage_b_preds_as_image_results("stage-b/<date>")  # your own per-image count reader
 ]
 
 # The final CSV is a phenotype delivery door: it clears the one gate over the published buckets
@@ -238,7 +238,7 @@ image_results = [
 summaries = aggregate_per_plant(image_results, plant_id_fn=plant_id_fn)
 deliver_per_plant_csv(summaries, "phenotype.csv", delivered_phenotype="<phenotype>",
                       delivery_kind="per_plant_count_aggregate", plants=[...],
-                      buckets=["predictions/stage-b/<date>"])
+                      dataset_root=dataset_root, buckets=["stage-b/<date>"])
 ```
 
 How many stages there are, and what each one does, is your decomposition to derive; the chaining

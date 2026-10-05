@@ -16,6 +16,8 @@ per-test timeout.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 import csv
 import math
 from functools import partial
@@ -30,10 +32,9 @@ from torch.utils.data import DataLoader
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
 from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
-from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tests._image_fixtures import write_noise_image  # noqa: E402
-from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
+from tests._producer_fixtures import dataset_over, label_image, run_over  # noqa: E402
 
 IMG = 64
 
@@ -94,21 +95,14 @@ def _assert_trained(run, output_dir: Path) -> None:
 # --------------------------------------------------------------------------
 
 def test_detection_e2e(tmp_path: Path):
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    labels_dir.mkdir(parents=True, exist_ok=True)
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     for i in range(4):
         _save_png(images_dir / f"img{i}.png")
         # one centered box covering the middle of the image
-        json_io.write_annotations(
-            str(labels_dir / f"img{i}.json"),
-            [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
-            IMG,
-            IMG,
-            keep_empty=True,
-        )
+        label_image(images_dir / f"img{i}.png",
+                    [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))], IMG, IMG)
 
-    dataset, data = run_over("detection", str(images_dir), str(labels_dir), subject="bud")
+    dataset, data = run_over("detection", str(images_dir), subject="bud")
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("detection"))
 
     model_source = _model_source("build_bespoke_detection", min_size=IMG, max_size=IMG * 2)
@@ -118,22 +112,15 @@ def test_detection_e2e(tmp_path: Path):
 
 
 def test_instance_seg_e2e(tmp_path: Path):
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    labels_dir.mkdir(parents=True, exist_ok=True)
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    square = Polygon([[(19.2, 19.2), (44.8, 19.2), (44.8, 44.8), (19.2, 44.8)]])
     for i in range(4):
         _save_png(images_dir / f"img{i}.png")
         # a square polygon (>= 3 vertices)
-        json_io.write_annotations(
-            str(labels_dir / f"img{i}.json"),
-            [Annotation(subject="bud",
-                        geometry=Polygon([[(19.2, 19.2), (44.8, 19.2), (44.8, 44.8), (19.2, 44.8)]]))],
-            IMG,
-            IMG,
-            keep_empty=True,
-        )
+        label_image(images_dir / f"img{i}.png", [Annotation(subject="bud", geometry=square)],
+                    IMG, IMG)
 
-    dataset, data = run_over("instance_seg", str(images_dir), str(labels_dir), subject="bud")
+    dataset, data = run_over("instance_seg", str(images_dir), subject="bud")
     # Guard the polygon -> mask rasterization path (datasets.py). With the mask_rcnn
     # detector these masks now reach the Mask R-CNN mask loss during training.
     assert dataset[0][1]["masks"].shape[0] > 0
@@ -150,7 +137,7 @@ def test_instance_seg_e2e(tmp_path: Path):
 # --------------------------------------------------------------------------
 
 def test_semantic_seg_e2e(tmp_path: Path):
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     masks_dir = tmp_path / "masks"
     masks_dir.mkdir(parents=True, exist_ok=True)
     from PIL import Image
@@ -179,7 +166,7 @@ def _write_csv(path: Path, rows: list[tuple[str, object]], header: tuple[str, st
 
 
 def test_ordinal_e2e(tmp_path: Path):
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     rows = []
     for i in range(6):
         _save_png(images_dir / f"img{i}.png", bright=(i % 3 == 0))
@@ -200,7 +187,7 @@ def test_ordinal_derives_num_ranks_from_data(tmp_path: Path):
     """A rank scale of 7 ranks must derive its count from the CSV, never truncate to a narrower
     bound. crops.yml's kernel_pellicle trait is a real 1-7 scale (ranks 0-6, 7 ranks) once
     0-indexed."""
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     rows = []
     for rank in range(7):
         _save_png(images_dir / f"img{rank}.png", bright=(rank >= 4))
@@ -222,7 +209,7 @@ def test_ordinal_num_ranks_stated_raises(tmp_path: Path):
     """A caller-configured num_ranks raises: the rank count is the CSV's own, so a stated one
     (here too small, which would train the excess ranks as silent duplicates of the top rank)
     is refused rather than compared."""
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     rows = []
     for rank in range(7):
         _save_png(images_dir / f"img{rank}.png", bright=(rank >= 4))
@@ -237,7 +224,7 @@ def test_ordinal_num_ranks_stated_raises(tmp_path: Path):
 def test_classification_derives_num_classes_from_data(tmp_path: Path):
     """A label range of 4 classes must derive its count from the CSV, never truncate to a
     narrower bound."""
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     rows = []
     for label in range(4):
         _save_png(images_dir / f"img{label}.png", bright=(label >= 2))
@@ -251,7 +238,7 @@ def test_classification_derives_num_classes_from_data(tmp_path: Path):
 
 def test_classification_num_classes_stated_raises(tmp_path: Path):
     """A caller-configured num_classes raises: the class count is the CSV's own."""
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     rows = []
     for label in range(4):
         _save_png(images_dir / f"img{label}.png", bright=(label >= 2))
@@ -264,7 +251,7 @@ def test_classification_num_classes_stated_raises(tmp_path: Path):
 
 
 def test_regression_e2e(tmp_path: Path):
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     rows = []
     for i in range(6):
         _save_png(images_dir / f"img{i}.png", bright=(i % 2 == 0))
@@ -288,7 +275,7 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.tools.training_tools import evaluate_model
 
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     rows = []
     for i in range(6):
         _save_png(images_dir / f"img{i}.png", bright=(i % 3 == 0))
@@ -319,7 +306,7 @@ def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.tools.training_tools import evaluate_model
 
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     rows = []
     for i in range(6):
         _save_png(images_dir / f"img{i}.png", bright=(i % 2 == 0))

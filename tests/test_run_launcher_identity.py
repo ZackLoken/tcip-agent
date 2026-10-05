@@ -5,6 +5,8 @@ and after its directory exists.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 import pytest
 
 from tests._producer_fixtures import seed_two_bud_images, small_detection_config
@@ -55,12 +57,12 @@ def test_a_launch_no_agent_declared_itself_to_shows_an_empty_declaration(tmp_pat
     is what the run's row shows: the fact available, never a guess about who."""
     from tcip_mcp.tools import training_tools
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    seed_two_bud_images(images_dir, labels_dir)
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    seed_two_bud_images(images_dir)
     _fake_popen(monkeypatch, [])
 
     result = training_tools.launch_training(
-        tmp_path, small_detection_config(images_dir, labels_dir, "exp-bare-launch"), actor=None)
+        tmp_path, small_detection_config(images_dir,"exp-bare-launch"), actor=None)
     assert "error" not in result, result
     assert _row(tmp_path, "exp-bare-launch")["launch"] == {}
     assert "launched_by" not in _launch_record(tmp_path, "exp-bare-launch")
@@ -75,13 +77,13 @@ def test_a_launch_inside_an_mcp_handshake_shows_the_agents_declaration_from_its_
     from tcip_mcp import agent_identity
     from tcip_mcp.tools import training_tools
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    seed_two_bud_images(images_dir, labels_dir)
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    seed_two_bud_images(images_dir)
     _fake_popen(monkeypatch, [])
 
     identity = agent_identity.begin("claude-code", "2.1.238")
     result = training_tools.launch_training(
-        tmp_path, small_detection_config(images_dir, labels_dir, "exp-agent-launch"), actor=None)
+        tmp_path, small_detection_config(images_dir,"exp-agent-launch"), actor=None)
     agent_identity.end()
     assert "error" not in result, result
     assert _row(tmp_path, "exp-agent-launch")["launch"] == {
@@ -97,13 +99,13 @@ def test_launch_refuses_an_experiment_id_that_is_not_a_legal_directory_name(tmp_
     from tcip_mcp.experiments import run_dirs
     from tcip_mcp.tools import training_tools
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    seed_two_bud_images(images_dir, labels_dir)
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    seed_two_bud_images(images_dir)
     captured: list[list[str]] = []
     _fake_popen(monkeypatch, captured)
 
     result = training_tools.launch_training(
-        tmp_path, small_detection_config(images_dir, labels_dir, "not/legal"), actor=None)
+        tmp_path, small_detection_config(images_dir,"not/legal"), actor=None)
 
     assert result["error"].startswith("launch_training:")
     assert "not/legal" in result["error"]
@@ -120,8 +122,8 @@ def test_launch_refuses_when_the_launch_record_cannot_be_written(tmp_path, monke
     from tcip_mcp.experiments import find_run
     from tcip_mcp.tools import training_tools
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    seed_two_bud_images(images_dir, labels_dir)
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    seed_two_bud_images(images_dir)
     captured: list[list[str]] = []
     _fake_popen(monkeypatch, captured)
 
@@ -131,7 +133,7 @@ def test_launch_refuses_when_the_launch_record_cannot_be_written(tmp_path, monke
     monkeypatch.setattr(experiments_mod, "write_once", _raise)
 
     result = training_tools.launch_training(
-        tmp_path, small_detection_config(images_dir, labels_dir, "exp-write-raises"), actor=None)
+        tmp_path, small_detection_config(images_dir,"exp-write-raises"), actor=None)
 
     assert result["error"] == "launch_training: disk full"
     assert not any("tcip_mcp.pipelines.training.subprocess_worker" in argv for argv in captured)
@@ -143,11 +145,11 @@ def test_a_launch_records_the_seed_it_draws(tmp_path, monkeypatch):
     records, the one record the child trains from."""
     from tcip_mcp.tools import training_tools
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    seed_two_bud_images(images_dir, labels_dir)
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    seed_two_bud_images(images_dir)
     _fake_popen(monkeypatch, [])
 
-    cfg = small_detection_config(images_dir, labels_dir, "exp-fresh-seed")
+    cfg = small_detection_config(images_dir,"exp-fresh-seed")
     result = training_tools.launch_training(tmp_path, cfg, actor=None)
     assert "error" not in result, result
     assert "seed" not in cfg
@@ -164,8 +166,8 @@ def test_a_spawn_failure_leaves_a_directory_that_reads_interrupted(tmp_path, mon
     from tcip_mcp.experiments import experiment_dir, observe
     from tcip_mcp.tools import training_tools
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    seed_two_bud_images(images_dir, labels_dir)
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    seed_two_bud_images(images_dir)
 
     def _raise_popen(*args, **kwargs):
         raise OSError("no such executable")
@@ -174,12 +176,12 @@ def test_a_spawn_failure_leaves_a_directory_that_reads_interrupted(tmp_path, mon
 
     with pytest.raises(OSError):
         training_tools.launch_training(
-            tmp_path, small_detection_config(images_dir, labels_dir, "exp-spawn-fails"), actor=None)
+            tmp_path, small_detection_config(images_dir,"exp-spawn-fails"), actor=None)
 
     monkeypatch.setattr(experiments_mod, "HEARTBEAT_STALE_SECONDS", -1.0)
     assert observe(experiment_dir("exp-spawn-fails", project=tmp_path)).state == "interrupted"
 
     _fake_popen(monkeypatch, [])
     relaunch = training_tools.launch_training(
-        tmp_path, small_detection_config(images_dir, labels_dir, "exp-spawn-fails"), actor=None)
+        tmp_path, small_detection_config(images_dir,"exp-spawn-fails"), actor=None)
     assert "already exists" in relaunch["error"]

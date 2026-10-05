@@ -16,7 +16,7 @@ const UI_PREFIX = "tcip.dsui.";
  *  distinct views don't share. */
 export function datasetKey(project: OpenProject | null, d: DatasetSelection): string | null {
   if (!project || !d.dataset_root || !d.date) return null;
-  return JSON.stringify([project.id, d.dataset_root, d.date, d.subject, d.predictions_dir]);
+  return JSON.stringify([project.id, d.dataset_root, d.date, d.subject, d.bucket]);
 }
 
 export function saveDatasetUi(key: string, state: DatasetUiState): void {

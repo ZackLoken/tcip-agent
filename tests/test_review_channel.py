@@ -2,21 +2,21 @@
 
 focus_human_attention with a bucket resolves a model's proposals on a frame and posts an
 ``annotate_focus`` event naming that bucket (a soft miss with no GUI, but the resolution must be
-right). stage_proposals writes agent-proposed detections to the predictions tree (never GT) for
+right). stage_proposals publishes agent-proposed detections as a prediction bucket (never GT) for
 canvas sign-off.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 from PIL import Image
 
+import tcip_store
 from tcip_annotation import json_io
 from tcip_annotation.state import BBox, Polygon
-from tcip_mcp.dataset_layout import image_dir, prediction_root
+from tcip_mcp.dataset_layout import LABEL_DOCUMENTS, bucket_key, image_dir, prediction_key
 from tcip_mcp.tools.gui_tools import focus_human_attention
 from tcip_mcp.tools.proposal_tools import stage_proposals
 
@@ -48,32 +48,32 @@ def _images(root: Path, date: str, names: list[str]) -> None:
         (idir / name).write_bytes(b"x")
 
 
-def _bucket(root: Path, producer: str, date: str) -> Path:
-    """The directory ``producer``'s documents for ``date`` sit in under ``root``'s predictions."""
-    return prediction_root(root) / producer / date
+def _staged_name(producer: str, date: str, stem: str) -> str:
+    """The bucket ``stage_proposals`` publishes for ``stem`` under ``producer``: its own bucket,
+    one per staged image."""
+    return f"{producer}/{date}/{stem}"
 
 
-def _staged(root: Path, producer: str, date: str, stem: str) -> Path:
-    """The document ``stage_proposals`` publishes for ``stem`` under ``producer``: its own
-    bucket, one per staged image."""
-    return _bucket(root, producer, date) / stem / f"{stem}.json"
+def _staged(root: Path, producer: str, date: str, stem: str):
+    """The key of the document ``stage_proposals`` publishes for ``stem`` under ``producer``."""
+    return prediction_key(root, _staged_name(producer, date, stem), stem)
 
 
-def _publish(root: Path, date: str, preds: dict[str, list[float]]) -> Path:
-    """The model bucket ``baseline`` for ``date`` under ``root``: one document per image name of
-    ``preds``, a scored ``bud`` box per score (none for an empty list); its directory."""
+def _publish(root: Path, date: str, preds: dict[str, list[float]]) -> str:
+    """The model bucket ``baseline/<date>`` under ``root``: one document per image name of
+    ``preds``, a scored ``bud`` box per score (none for an empty list); its name."""
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
-    return published(root.parent, _bucket(root, "baseline", date), [
+    return published(root.parent, f"baseline/{date}", [
         {"image": str(Path(image_dir(root, date)) / name), "width": 100, "height": 100,
          "boxes": [[10.0, 10.0, 20.0, 20.0]] * len(scores), "scores": scores,
          "labels": [1] * len(scores)} for name, scores in preds.items()],
-        scope={"subject": "bud"}).path
+        scope={"subject": "bud"}).name
 
 
 def _image(root: Path, date: str, stem: str, size: tuple[int, int] = (640, 480)) -> None:
-    # stage_proposals now denormalizes to pixel space, so it needs a real, readable image.
+    # stage_proposals denormalizes to pixel space, so it needs a real, readable image.
     idir = Path(image_dir(root, date))
     idir.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", size, color=(90, 110, 70)).save(idir / f"{stem}.jpg")
@@ -85,6 +85,18 @@ def _img_path(root: Path, date: str, stem: str) -> str:
     return str(Path(image_dir(root, date)) / f"{stem}.jpg")
 
 
+def _no_ground_truth(root: Path) -> bool:
+    """Whether no label document was written under ``root``."""
+    return tcip_store.keys(LABEL_DOCUMENTS, str(root)) == []
+
+
+def _damage(root: Path, bucket: str, stem: str) -> None:
+    """``stem``'s published document in ``bucket``, its stored bytes no longer decoding."""
+    from tests._record_damage_fixtures import damage_record
+
+    damage_record(prediction_key(root, bucket, stem), b"{not json")
+
+
 def test_focus_over_a_bucket_lands_on_first_frame_with_proposals(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
@@ -93,12 +105,12 @@ def test_focus_over_a_bucket_lands_on_first_frame_with_proposals(tmp_path: Path)
     bucket = _publish(root, date, {"IMG_0002.JPG": [0.9], "IMG_0003.JPG": [0.8]})
 
     res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud", date,
-                                predictions_dir=str(bucket))
+                                bucket=bucket)
     assert "error" not in res
     assert res["image_index"] == 2  # first frame with proposals from this model
     assert res["image"] == "IMG_0002.JPG"
     assert res["n_holding_subject"] == 2
-    assert res["predictions_dir"] == str(bucket)
+    assert res["bucket"] == bucket
     assert isinstance(res["delivered"], bool)
 
 
@@ -110,7 +122,7 @@ def test_focus_over_a_bucket_skips_an_empty_prediction_document(tmp_path: Path) 
     bucket = _publish(root, date, {"IMG_0000.JPG": [], "IMG_0002.JPG": [0.9]})
 
     res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud", date,
-                                predictions_dir=str(bucket))
+                                bucket=bucket)
     assert res["image_index"] == 2
     assert res["n_holding_subject"] == 1
 
@@ -123,11 +135,10 @@ def test_focus_over_a_bucket_navigates_past_an_unreadable_prediction_on_another_
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
     bucket = _publish(root, date, {"IMG_0000.JPG": [0.7], "IMG_0002.JPG": [0.9]})
-    bad = bucket / "IMG_0000.json"
-    bad.write_bytes(b"{not json")
+    _damage(root, bucket, "IMG_0000")
 
     res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud", date,
-                                predictions_dir=str(bucket))
+                                bucket=bucket)
 
     assert "error" not in res
     assert res["image"] == "IMG_0002.JPG"
@@ -138,14 +149,14 @@ def test_focus_over_a_bucket_refuses_an_explicitly_named_unreadable_frame(tmp_pa
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
-    bad = _publish(root, date, {"IMG_0000.JPG": [0.7]}) / "IMG_0000.json"
-    bad.write_bytes(b"{not json")
+    bucket = _publish(root, date, {"IMG_0000.JPG": [0.7]})
+    _damage(root, bucket, "IMG_0000")
 
     res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud", date,
-                                predictions_dir=str(bad.parent), image_index=0)
+                                bucket=bucket, image_index=0)
 
     assert "error" in res
-    assert str(bad) in res["error"]
+    assert "IMG_0000" in res["error"]
 
 
 def test_focus_over_a_bucket_carries_the_explicit_index_and_proposal(tmp_path: Path) -> None:
@@ -155,16 +166,16 @@ def test_focus_over_a_bucket_carries_the_explicit_index_and_proposal(tmp_path: P
     bucket = _publish(root, date, {"IMG_0000.JPG": [0.9]})
 
     res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud", date,
-                                predictions_dir=str(bucket), image_index=3, proposal=2)
+                                bucket=bucket, image_index=3, proposal=2)
     assert res["image_index"] == 3
     assert res["proposal"] == 2
 
 
-def test_focus_refuses_a_directory_that_is_no_bucket(tmp_path: Path) -> None:
+def test_focus_refuses_a_name_that_is_no_bucket(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     _images(root, "2026-02-11", ["IMG_0000.JPG"])
     res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud",
-                                "2026-02-11", predictions_dir=str(_bucket(root, "baseline", "2026-02-11")))
+                                "2026-02-11", bucket="baseline/2026-02-11")
     assert "error" in res
 
 
@@ -181,9 +192,8 @@ def test_stage_proposals_writes_prediction_format_not_gt(tmp_path: Path) -> None
     assert res["staged"] == 2
 
     out = _staged(root, "claude", date, "IMG_0001")
-    assert out.is_file()
-    assert res["path"] == str(out)
-    preds = json_io.read_annotations(out)
+    assert res["bucket"] == _staged_name("claude", date, "IMG_0001")
+    preds = json_io.read_label_document(out).annotations
     # Normalized cx/cy/w/h denormalized against a 640x480 image, carrying per-object confidence.
     assert len(preds) == 2
     b0 = preds[0]
@@ -194,13 +204,13 @@ def test_stage_proposals_writes_prediction_format_not_gt(tmp_path: Path) -> None
         (288.0, 216.0, 352.0, 264.0)
     )
     # Every staged object stamps the producer (model_name) as created_by + a created_at.
-    data = json.loads(out.read_text())
+    data = tcip_store.read(out)
     assert len(data["annotations"]) == 2
     for obj in data["annotations"]:
         assert obj["created_by"] == "claude"
         assert obj["created_at"]
-    # It must not have written into annotations/ (GT).
-    assert not (root / "annotations").exists()
+    # It must not have written any ground truth.
+    assert _no_ground_truth(root)
 
 
 def test_stage_proposals_rejects_unnormalized_coords(tmp_path: Path) -> None:
@@ -213,21 +223,21 @@ def test_stage_proposals_rejects_unnormalized_coords(tmp_path: Path) -> None:
     assert "error" in res and "normal" in res["error"].lower()
 
 
-def test_stage_proposals_rejects_path_traversal_into_gt(tmp_path: Path) -> None:
-    """A malformed model_name must never escape predictions/ into the GT tree; date and stem are
-    no longer caller-supplied strings to traverse with (image_path resolves them structurally
+def test_stage_proposals_rejects_a_model_name_that_is_no_single_segment(tmp_path: Path) -> None:
+    """A malformed model_name must never name more than the producer segment of the staged
+    bucket; date and stem are no caller-supplied strings (image_path resolves them structurally
     through the same parser propose_annotations uses)."""
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0001")
     image_path = _img_path(root, date, "IMG_0001")
     good = [{"subject": "bud", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
-    # Include a backslash segment (a Windows separator: "predictions\..\annotations" would
-    # escape) and a whitespace/empty segment, both of which is_valid_name rejects.
+    # Include a backslash segment and a whitespace/empty segment, both of which is_valid_name
+    # rejects.
     for bad_model in ("../annotations/bud", "..", "a/b", "D:/evil", "a\\b", " ", ""):
         res = stage_proposals(tmp_path, image_path, model_name=bad_model, boxes=good)
         assert "error" in res
-    assert not (root / "annotations").exists()  # nothing leaked into ground truth
+    assert _no_ground_truth(root)  # nothing leaked into ground truth
 
 
 def test_focus_rejects_path_traversal(tmp_path: Path) -> None:
@@ -237,7 +247,7 @@ def test_focus_rejects_path_traversal(tmp_path: Path) -> None:
     # The focus is read-only, but a traversal date still refuses: it becomes a path segment under
     # images/, the guard stage_proposals applies.
     res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud", "../evil")
-    assert "date must be a single safe path segment" in res["error"]
+    assert "a capture must be a single safe path segment" in res["error"]
 
 
 def test_stage_proposals_rejects_box_missing_subject(tmp_path: Path) -> None:
@@ -268,7 +278,7 @@ def test_stage_proposals_refuses_a_shape_naming_no_subject_by_index(
                           **{shape: [good, bad]})
     assert res["error"].startswith(f"{'box' if shape == 'boxes' else 'polygon'} 1: ")
     assert "subject" in res["error"]
-    assert not _staged(root, "agent_proposals", date, "IMG_0001").exists()
+    assert not tcip_store.exists(_staged(root, "agent_proposals", date, "IMG_0001"))
 
 
 def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
@@ -283,9 +293,8 @@ def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
     assert res["staged"] == 1 and res["n_segment"] == 1 and res["n_detect"] == 0
 
     out = _staged(root, "sam", date, "IMG_0132")
-    assert out.is_file()
-    assert res["path"] == str(out)
-    polys = json_io.read_annotations(out)
+    assert res["bucket"] == _staged_name("sam", date, "IMG_0132")
+    polys = json_io.read_label_document(out).annotations
     # Polygon denormalized to pixel space, mask-quality score carried as confidence.
     assert len(polys) == 1
     p0 = polys[0]
@@ -297,12 +306,12 @@ def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
     assert len(p0.geometry.rings[0]) == 4
     assert p0.geometry.rings[0][0] == pytest.approx((64.0, 48.0))
     # Each staged polygon stamps the producer (model_name) as created_by + a created_at.
-    data = json.loads(out.read_text())
+    data = tcip_store.read(out)
     assert len(data["annotations"]) == 1
     assert data["annotations"][0]["created_by"] == "sam"
     assert data["annotations"][0]["created_at"]
     # It must not touch GT; the polygon is stored as its rings alone, its box derived by readers.
-    assert not (root / "annotations").exists()
+    assert _no_ground_truth(root)
     assert "segmentation" in data["annotations"][0] and "bbox" not in data["annotations"][0]
 
 
@@ -315,20 +324,18 @@ def test_stage_proposals_stages_boxes_and_polygons_together(tmp_path: Path) -> N
     res = stage_proposals(tmp_path, _img_path(root, date, "IMG_0001"), model_name="claude",
                           boxes=boxes, polygons=polygons)
     assert res["n_detect"] == 1 and res["n_segment"] == 1 and res["staged"] == 2
-    # Boxes and polygons alike land in the one per-image prediction file now.
-    out = _staged(root, "claude", date, "IMG_0001")
-    assert out.is_file()
-    assert res["path"] == str(out)
-    objs = json.loads(out.read_text())["annotations"]
+    # Boxes and polygons alike land in the one per-image prediction document.
+    assert res["bucket"] == _staged_name("claude", date, "IMG_0001")
+    objs = tcip_store.read(_staged(root, "claude", date, "IMG_0001"))["annotations"]
     assert len(objs) == 2
     # Both the box and the polygon stamp the producer (model_name) as created_by + a created_at.
     for obj in objs:
         assert obj["created_by"] == "claude"
         assert obj["created_at"]
-    # One box and one polygon in the single file: no detect/segment split.
+    # One box and one polygon in the single document: no detect/segment split.
     kinds = sorted("segmentation" if "segmentation" in o else "bbox" for o in objs)
     assert kinds == ["bbox", "segmentation"]
-    assert not (root / "annotations").exists()
+    assert _no_ground_truth(root)
 
 
 def test_stage_proposals_rejects_bad_polygon(tmp_path: Path) -> None:
@@ -349,7 +356,7 @@ def test_stage_proposals_rejects_bad_polygon(tmp_path: Path) -> None:
     )
     assert "error" in res and "normal" in res["error"].lower()
     # A rejected shape must leave no partial stage.
-    assert not (root / "predictions").exists()
+    assert not tcip_store.exists(bucket_key(root, _staged_name("sam", date, "IMG_0001")))
 
 
 def test_stage_proposals_requires_a_shape(tmp_path: Path) -> None:
@@ -478,8 +485,7 @@ def test_stage_proposals_admits_a_two_ring_pixel_proposal_with_pair_vertices(tmp
                           polygons=[{"subject": "leaf", "conf": 0.9, "rings": rings}])
 
     assert res["staged"] == 1 and "error" not in res
-    out = _staged(root, "sam", date, "IMG_0200")
-    polys = json_io.read_annotations(out)
+    polys = json_io.read_label_document(_staged(root, "sam", date, "IMG_0200")).annotations
     assert len(polys) == 1
     assert isinstance(polys[0].geometry, Polygon)
     assert [len(r) for r in polys[0].geometry.rings] == [4, 3]
@@ -507,7 +513,7 @@ def test_a_two_ring_proposal_round_trips_through_propose_and_accept(
     accepted = stage_proposals(tmp_path, accept_image_path, assignments=[{"candidate_id": 1, "subject": "leaf"}])
     assert "error" not in accepted
 
-    read_back = read_annotations(accept_image_path, str(Path(accepted["path"]).parent))
+    read_back = read_annotations(accept_image_path, accepted["bucket"])
     accepted_preds = read_back["predictions"]["annotations"]
     assert sorted(len(ring) for pred in accepted_preds for ring in pred["rings"]) == [3, 4]
 
@@ -524,7 +530,7 @@ def test_stage_proposals_refuses_both_points_and_rings(tmp_path: Path) -> None:
     }])
 
     assert "error" in res and "exactly one of 'points' or 'rings'" in res["error"]
-    assert not (root / "predictions").exists()
+    assert not tcip_store.exists(bucket_key(root, _staged_name("sam", date, "IMG_0202")))
 
 
 def test_stage_proposals_refuses_neither_points_nor_rings(tmp_path: Path) -> None:
@@ -549,7 +555,7 @@ def test_stage_proposals_refuses_a_short_ring_under_rings(tmp_path: Path) -> Non
     }])
 
     assert "error" in res and "three or more points" in res["error"]
-    assert not (root / "predictions").exists()
+    assert not tcip_store.exists(bucket_key(root, _staged_name("sam", date, "IMG_0204")))
 
 
 def test_stage_proposals_refuses_a_pixel_vertex_outside_the_image_bounds(tmp_path: Path) -> None:
@@ -563,7 +569,7 @@ def test_stage_proposals_refuses_a_pixel_vertex_outside_the_image_bounds(tmp_pat
     }])
 
     assert "error" in res and "pixel bounds" in res["error"]
-    assert not (root / "predictions").exists()
+    assert not tcip_store.exists(bucket_key(root, _staged_name("sam", date, "IMG_0205")))
 
 
 def test_stage_proposals_refuses_an_out_of_range_coordinate_under_rings(tmp_path: Path) -> None:
@@ -579,7 +585,7 @@ def test_stage_proposals_refuses_an_out_of_range_coordinate_under_rings(tmp_path
     }])
 
     assert "error" in res and "pixel bounds" in res["error"]
-    assert not (root / "predictions").exists()
+    assert not tcip_store.exists(bucket_key(root, _staged_name("sam", date, "IMG_0206")))
 
 
 def test_stage_proposals_refuses_a_normalized_ring_handed_under_rings(tmp_path: Path) -> None:
@@ -595,7 +601,7 @@ def test_stage_proposals_refuses_a_normalized_ring_handed_under_rings(tmp_path: 
     }])
 
     assert "error" in res and "span under a pixel" in res["error"]
-    assert not (root / "predictions").exists()
+    assert not tcip_store.exists(bucket_key(root, _staged_name("sam", date, "IMG_0207")))
 
 
 # ── Staged documents are written once ──────────────────────────────────────
@@ -605,20 +611,21 @@ _BOX = [{"subject": "bud", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1
 
 def test_stage_proposals_refuses_a_second_stage_of_the_same_stem(tmp_path: Path) -> None:
     """A staged document a reviewer may already have judged is never rewritten: the second stage
-    answers an error naming the document, and the first document's bytes are unchanged."""
+    answers an error naming the bucket, and the first document is unchanged."""
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0001", size=(640, 480))
     image_path = _img_path(root, date, "IMG_0001")
     first = stage_proposals(tmp_path, image_path, model_name="claude", boxes=_BOX)
-    written = Path(first["path"]).read_bytes()
+    document = _staged(root, "claude", date, "IMG_0001")
+    written = tcip_store.read_versioned(document).version
 
     res = stage_proposals(tmp_path, image_path, model_name="claude",
                           boxes=[{**_BOX[0], "conf": 0.3}])
 
-    assert "already exists" in res["error"]
-    assert str(Path(first["path"]).parent) in res["error"]
-    assert Path(first["path"]).read_bytes() == written
+    assert "already" in res["error"]
+    assert first["bucket"] in res["error"]
+    assert tcip_store.read_versioned(document).version == written
 
 
 def test_stage_proposals_admits_two_stems_staged_in_turn(tmp_path: Path) -> None:
@@ -633,18 +640,5 @@ def test_stage_proposals_admits_two_stems_staged_in_turn(tmp_path: Path) -> None
     second = stage_proposals(tmp_path, _img_path(root, date, "IMG_0002"), model_name="claude", boxes=_BOX)
 
     assert "error" not in first and "error" not in second
-    assert first["path"] == str(_staged(root, "claude", date, "IMG_0001"))
-    assert second["path"] == str(_staged(root, "claude", date, "IMG_0002"))
-
-
-def test_stage_proposals_refuses_a_reserved_stem_with_an_error_dict(tmp_path: Path) -> None:
-    """An image whose stem names a bucket's own record can never become a per-image prediction
-    document, and the audited door says so in its answer rather than raising."""
-    root = tmp_path / "proj"
-    date = "2026-02-11"
-    _image(root, date, "bucket", size=(640, 480))
-    res = stage_proposals(tmp_path, _img_path(root, date, "bucket"), model_name="claude", boxes=_BOX)
-    assert "a prediction bucket's own record" in res["error"]
-    assert not any((_bucket(root, "claude", date) / "bucket").glob("*.json"))
-
-
+    assert first["bucket"] == _staged_name("claude", date, "IMG_0001")
+    assert second["bucket"] == _staged_name("claude", date, "IMG_0002")

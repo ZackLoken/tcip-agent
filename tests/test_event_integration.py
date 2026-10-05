@@ -3,7 +3,8 @@ and the output shapes of the tools that push."""
 
 from __future__ import annotations
 
-import json
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 import pytest
@@ -288,25 +289,18 @@ class TestTrainingToolOutputSchema:
         monkeypatch.chdir(tmp_path)
 
         from PIL import Image
-        from tcip_annotation import json_io
         from tcip_annotation.state import Annotation, BBox
         from tcip_mcp.experiments import experiment_dir, find_run
         from tcip_mcp.pipelines.training import tensorboard_manager
         from tcip_mcp.tools import training_tools
+        from tests._producer_fixtures import label_image
 
-        images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-        val_images, val_labels = tmp_path / "val_images", tmp_path / "val_labels"
-        for d in (images_dir, labels_dir, val_images, val_labels):
-            d.mkdir()
+        images_dir = tmp_path / "images" / UNDATED_BUCKET
+        images_dir.mkdir(parents=True)
         for i in range(2):
             Image.new("RGB", (128, 128)).save(images_dir / f"t{i}.png")
-            json_io.write_annotations(
-                str(labels_dir / f"t{i}.json"),
-                [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
-        Image.new("RGB", (128, 128)).save(val_images / "v0.png")
-        json_io.write_annotations(
-            str(val_labels / "v0.json"),
-            [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
+            label_image(images_dir / f"t{i}.png",
+                        [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
 
         class _NoChild:
             """Stands in for the training subprocess; no child is spawned."""
@@ -323,8 +317,7 @@ class TestTrainingToolOutputSchema:
             "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                              "builder_kwargs": {"min_size": 64, "max_size": 128},
                              "task": "detection"},
-            "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                     "scope": {"subject": "bud"}},
+            "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"}},
             "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                          "mixed_precision": False, "device": "cpu",
         }
@@ -372,7 +365,9 @@ class TestInferenceToolOutputSchema:
         ckpt = registered_checkpoint(
             tmp_path, model_source={"builder": "tests.bespoke_models:build_bright_blob_detector",
                           "task": "detection"})
-        res = run_inference(tmp_path, ckpt, images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
+        (tmp_path / "images" / UNDATED_BUCKET).mkdir(parents=True)
+        res = run_inference(tmp_path, ckpt, images_dir=str(tmp_path / "images" / UNDATED_BUCKET),
+                            bucket="out/2026-01-01",
                             dry_run=True, stated=Stated(
                                 tile=True, tile_size=512, overlap=0.35, conf=0.17, max_dets=37,
                                 cross_tile_nms=0.55, postprocess="nmm"))
@@ -388,27 +383,29 @@ class TestInferenceToolOutputSchema:
         assert execution["postprocess"] == "nmm"
         assert execution["sources"]["cross_tile_nms"] == "explicit"
 
-    def test_a_published_bucket_holds_one_file_per_image_carrying_that_images_detections(
+    def test_a_published_bucket_holds_one_document_per_image_carrying_that_images_detections(
         self, tmp_path: Path,
     ) -> None:
-        """A prediction bucket holds one file per image the pass saw, named for its stem and
+        """A prediction bucket holds one document per image the pass saw, keyed by its stem and
         holding its own detections, an image with none included, and its record names each."""
         pytest.importorskip("torch")
+        from tcip_annotation import json_io
+
         from tests._chain_fixtures import published
 
         def _boxes(n: int) -> list[list[float]]:
             return [[10.0 * i, 12.0 * i, 10.0 * i + 24.0, 12.0 * i + 18.0] for i in range(1, n + 1)]
 
         counts = {"row3_plant07": 1, "row3_plant11": 0, "row9_plant02": 4}
-        out = tmp_path / "dataset" / "predictions" / "baseline" / "2026-01-01"
-        bucket = published(tmp_path, out, [
-            {"image": f"{stem}.jpg", "width": 800, "height": 600, "boxes": _boxes(n),
-             "scores": [0.9] * n, "labels": [1] * n}
+        images = tmp_path / "dataset" / "images" / "2026-01-01"
+        bucket = published(tmp_path, "baseline/2026-01-01", [
+            {"image": str(images / f"{stem}.jpg"), "width": 800, "height": 600,
+             "boxes": _boxes(n), "scores": [0.9] * n, "labels": [1] * n}
             for stem, n in counts.items()], scope={"subject": "bud"})
 
         assert sorted(bucket.documents) == sorted(counts)
-        written = {p.stem: len(json.loads(p.read_text())["annotations"])
-                   for p in out.glob("*.json") if p.name != "bucket.json"}
+        written = {stem: len(json_io.read_predictions(bucket.document_key(Path(source).stem)))
+                   for stem, source in bucket.documents.items()}
         assert written == counts
 
 

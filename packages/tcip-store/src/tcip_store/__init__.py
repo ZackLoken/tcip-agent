@@ -11,7 +11,7 @@ from tcip_store.errors import (
     TransactionMisuse,
     VersionConflict,
 )
-from tcip_store.file_backend import blob_transaction, delete_blob, put_blob, read_blob_versioned
+from tcip_store.file_backend import delete_blob, put_blob, read_blob_versioned
 from tcip_store.model import REQUIRED, Key, LogPage, Version, Versioned, canonical_path
 from tcip_store.sqlite_backend import Txn
 from tcip_store.store import (
@@ -59,7 +59,6 @@ __all__ = [
     "Versioned",
     "append",
     "bind",
-    "blob_transaction",
     "canonical_path",
     "check_json_value",
     "clear_log",

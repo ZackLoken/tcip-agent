@@ -15,16 +15,18 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
 from PIL import Image
+from tcip_store import Key
 from torch.utils.data import Dataset
 
 
 from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+from tcip_annotation.json_io import LabelDocument, read_label_document
 from tcip_annotation.state import box_derivable, polygonal
 
 from tcip_mcp.pipelines.data.label_queries import ground_truth_table, json_det_targets
@@ -145,12 +147,11 @@ class BaseImageDataset(BaseDataset):
         """
         if self.reads_geometry is None:
             return
-        from tcip_annotation import json_io
-
         reads = self.reads_geometry
         wrong = []
         for sample in samples:
-            mine = [a for a in json_io.read_annotations(sample.ground_truth)
+            mine = [a for a in read_label_document(cast(Key, sample.ground_truth),
+                                                   sample.ground_truth_digest).annotations
                     if a.subject == self.scope.subject]
             if mine and not any(reads(a.geometry) for a in mine):
                 wrong.append(sample.location)
@@ -167,10 +168,6 @@ class BaseImageDataset(BaseDataset):
         """The logical image one sample key names: the sample's own recorded source (a
         ``BandGroupRef`` when a ``.bandgroup`` manifest groups it)."""
         return resolve_source_path(self._samples[stem].source)
-
-    def _label_path(self, stem: str) -> Path:
-        """The ground truth one sample key names: the path the sample itself recorded."""
-        return Path(self._samples[stem].ground_truth)
 
     def _open_image(self, stem: str):
         """Open an image honoring ``expected_channels``: PIL where the pixels have a faithful
@@ -254,13 +251,9 @@ def object_rows(iscrowd: Any) -> Any:
 
 
 def instance_targets(targets: list[dict]) -> list[dict]:
-    """Loader targets as the built-in torchvision heads are handed them: every crowd row removed.
-
-    Those heads read only ``boxes``, ``labels`` and ``masks``, so a crowd region handed to them
-    trains as one positive instance; withheld, its region trains as background, which penalizes a
-    detection inside it but never teaches one box for many objects. The loaders' own targets keep
-    every row and its ``iscrowd`` flag, for evaluation and for a bespoke loop that acts on it.
-    """
+    """``targets`` as the built-in torchvision heads take them: every crowd row
+    (:func:`object_rows`) dropped from each per-box key, every other key as it was; the input
+    targets are unchanged."""
     out = []
     for t in targets:
         keep = object_rows(crowd_of(t))
@@ -282,6 +275,12 @@ class DocumentDataset(BaseImageDataset):
         self.scope = scope
         self._init_from_samples(samples)
 
+    def document(self, stem: str) -> LabelDocument:
+        """The label document one sample key names, read by the key the sample recorded and at
+        its ``ground_truth_digest`` when it records one."""
+        sample = self._samples[stem]
+        return read_label_document(cast(Key, sample.ground_truth), sample.ground_truth_digest)
+
 
 class DetectionDataset(DocumentDataset):
     """Object detection over a recorded sample list: each sample reads its own source and the label
@@ -292,16 +291,16 @@ class DetectionDataset(DocumentDataset):
     reads_geometry = staticmethod(box_derivable)
     reads_description = "a box or a polygon of its subject"
 
-    def det_targets(self, stem: str) -> dict[str, Any]:
-        """One sample's own label document as the target :func:`json_det_targets` reads under this
-        run's own class space."""
-        return json_det_targets(str(self._label_path(stem)), self.scope, reads=self.reads_geometry)
+    def det_targets(self, document: LabelDocument) -> dict[str, Any]:
+        """One sample's label ``document`` (:meth:`document`) as the target
+        :func:`json_det_targets` reads under this run's own class space."""
+        return json_det_targets(document.annotations, self.scope, reads=self.reads_geometry)
 
     @property
     def class_distribution(self) -> dict[int, int]:
         counts: Counter[int] = Counter()
         for stem in self.stems:
-            target = self.det_targets(stem)
+            target = self.det_targets(self.document(stem))
             for lab in np.asarray(target["labels"])[object_rows(target["iscrowd"])].tolist():
                 counts[lab - 1] += 1  # back to 0-indexed cid
         return dict(counts)
@@ -309,7 +308,8 @@ class DetectionDataset(DocumentDataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self.stems[idx]
         img = self._open_image(stem)
-        return self._finalize(img, {**target_tensors(self.det_targets(stem)), "image_id": idx})
+        return self._finalize(
+            img, {**target_tensors(self.det_targets(self.document(stem))), "image_id": idx})
 
 
 # ====================================================================
@@ -543,14 +543,15 @@ class TiledDetectionDataset(BaseImageDataset):
                 "width": int(w), "height": int(h), "channels": channels,
                 "dtype_itemsize": itemsize, "windowed": windowed,
             }
-            # The frame the boxes were actually drawn in, recorded in the label file itself. The
+            # The frame the boxes were actually drawn in, recorded in the label document. The
             # annotation stack measures with PIL, which reports a 40x24x5 GeoTIFF as 5x40, so on a
             # multi-band raster the authored frame and the decoded frame genuinely disagree, and
             # every box would be cropped from somewhere it was never drawn. Comparing the two
             # decoders instead would prove nothing: they share a branch and agree by construction.
             from tcip_mcp.pipelines.data.splits import label_document_extent
 
-            authored = label_document_extent(base._label_path(stem))
+            document = base.document(stem)
+            authored = label_document_extent(document, f"{stem}'s label document")
             if authored != (w, h):
                 raise ValueError(
                     f"tiled dataset frame mismatch for stem {stem!r}: the labels record a "
@@ -561,7 +562,7 @@ class TiledDetectionDataset(BaseImageDataset):
                     f"{authored[1]}."
                 )
             # Through the base dataset's own targeting, over this sample's own document.
-            full = base.det_targets(stem)
+            full = base.det_targets(document)
             fb = np.asarray(full["boxes"], dtype=np.float32).reshape(-1, 4)
             # Every per-box value beside the boxes, each indexed by row with them below.
             rows_of: dict[str, np.ndarray] = {k: np.asarray(full[k], dtype=np.int64)
@@ -705,7 +706,7 @@ class InstanceSegDataset(DocumentDataset):
         img = self._open_image(stem)
         w, h = self._image_size(img)
 
-        target = json_det_targets(str(self._label_path(stem)), self.scope,
+        target = json_det_targets(self.document(stem).annotations, self.scope,
                                   reads=self.reads_geometry)
         from PIL import ImageDraw
 
@@ -747,7 +748,7 @@ class SemanticSegDataset(BaseImageDataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self.stems[idx]
         img = self._open_image(stem)
-        mask = self.read_mask(self._label_path(stem))
+        mask = self.read_mask(cast(str, self._samples[stem].ground_truth))
         # Key matches the SemanticSegHead loss contract.
         target = {"masks": torch.tensor(mask, dtype=torch.int64)}
         return self._finalize(img, target)
@@ -765,9 +766,10 @@ def table_values(samples: Sequence[Sample]) -> list[str]:
     values: list[str] = []
     for sample in samples:
         assert sample.row_key is not None, "refuse_unreadable_samples requires a row key here"
-        if sample.ground_truth not in tables:
-            tables[sample.ground_truth] = ground_truth_table(sample.ground_truth)
-        values.append(tables[sample.ground_truth][sample.row_key])
+        table = cast(str, sample.ground_truth)
+        if table not in tables:
+            tables[table] = ground_truth_table(table)
+        values.append(tables[table][sample.row_key])
     return values
 
 
@@ -961,7 +963,7 @@ def resolve_sizes(
     if name is None:
         return resolved
     ids = (Counter(int(v) for s in samples
-                   for v in np.unique(cls.read_mask(Path(s.ground_truth))))
+                   for v in np.unique(cls.read_mask(cast(str, s.ground_truth))))
            if cls.ground_truth_shape == MASK
            else Counter(int(value) for value in table_values(samples)))
     resolved[name] = num_classes_from_distribution(ids)

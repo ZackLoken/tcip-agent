@@ -34,21 +34,19 @@ export interface InferenceJob {
   done: number;
   total: number;
   images_dir: string;
-  output_dir: string;
+  dataset_root: string;
+  bucket: string;
   error: string | null;
-  // Set when a line the publishing library writes for this run could not be written; the
-  // predictions are on disk regardless.
-  audit_warning: string | null;
 }
 
-/** A run over one capture date's images into a bucket directory that does not exist yet; every
- *  execution value ``stated`` leaves unset the platform derives from the checkpoint, and an
- *  ``assessment_id`` runs that assessment's execution record and publishes under it. */
+/** A run over one capture date's images into a bucket name not yet published under the dataset
+ *  root; every execution value ``stated`` leaves unset the platform derives from the checkpoint,
+ *  and an ``assessment_id`` runs that assessment's execution record and publishes under it. */
 export interface LaunchInferenceBody {
   checkpoint_path: string;
   dataset_root: string;
   date: string;
-  output_dir: string;
+  bucket: string;
   stated: Stated;
   assessment_id: string | null;
   user: string;
@@ -60,7 +58,8 @@ export const inferenceApi = {
       status: string;
       job_id: string;
       images_dir: string;
-      output_dir: string;
+      dataset_root: string;
+      bucket: string;
     }>(ROUTES.postInferenceLaunch, body),
 
   listJobs: () => getJson<{ jobs: InferenceJob[] }>(ROUTES.getInferenceJobs),
@@ -245,13 +244,13 @@ export function deliveryRefusalOf(e: unknown): DeliveryRefusal | null {
   };
 }
 
-/** The Inference tab's launch refusing the bucket directory a live job is still writing: the
- *  requested path and that job. */
+/** The Inference tab's launch refusing the bucket a live job is still writing: the requested
+ *  bucket name and that job. */
 export interface BucketExistsRefusal {
   kind: "bucket_exists";
   message: string;
-  date: string | null;
-  requested_output_dir: string | null;
+  date: string;
+  requested_bucket: string | null;
   job_id: string;
 }
 
@@ -260,13 +259,17 @@ export interface BucketExistsRefusal {
 export function bucketRefusalOf(e: unknown): BucketExistsRefusal | null {
   if (!(e instanceof StructuredRefusalError)) return null;
   const detail = e.detail;
-  if (detail.kind !== "bucket_exists" || typeof detail.job_id !== "string") return null;
+  if (
+    detail.kind !== "bucket_exists" ||
+    typeof detail.job_id !== "string" ||
+    typeof detail.date !== "string"
+  )
+    return null;
   return {
     kind: "bucket_exists",
     message: typeof detail.message === "string" ? detail.message : e.message,
-    date: typeof detail.date === "string" ? detail.date : null,
-    requested_output_dir:
-      typeof detail.requested_output_dir === "string" ? detail.requested_output_dir : null,
+    date: detail.date,
+    requested_bucket: typeof detail.requested_bucket === "string" ? detail.requested_bucket : null,
     job_id: detail.job_id,
   };
 }

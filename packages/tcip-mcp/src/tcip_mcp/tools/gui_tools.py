@@ -11,8 +11,9 @@ from pathlib import Path
 
 from tcip_annotation import Annotation, BBox
 from tcip_annotation.state import polygonal
-from tcip_annotation.json_io import UnreadableLabelDocument
-from tcip_annotation.json_io import read_annotations as read_labels
+from tcip_annotation.json_io import (
+    UnreadableLabelDocument, read_document_versioned, read_label_document,
+)
 
 from tcip_mcp.server import tool
 
@@ -66,66 +67,66 @@ def focus_human_attention(
     date: str,
     image_index: int | None = None,
     mode: str | None = None,
-    predictions_dir: str | None = None,
+    bucket: str | None = None,
     proposal: int | None = None,
 ) -> dict:
     """Drive the live Annotate tab to a (subject, date) frame in the right mode, showing the
-    proposals of the bucket at ``predictions_dir`` when one is named (emits ``annotate_focus``).
+    proposals of the bucket named ``bucket`` under ``dataset_root`` when one is named (emits
+    ``annotate_focus``).
 
     It lands on ``image_index``, else on the first frame holding ``subject``: in the bucket's
     document for it when a bucket is named, in its label document otherwise. A backend with
     another project open, or none running, answers ``delivered: false`` rather than raising. An
     image elsewhere on the date whose document will not read is named by file name in the result's
     ``unreadable``; only the landed-on frame's own unreadable document refuses, naming that
-    document's path, and an ``image_index`` outside the date's images or a ``date`` that is not
-    one path segment refuses.
+    document, and an ``image_index`` outside the date's images or a ``date`` that is not one path
+    segment refuses.
 
     Args:
-        dataset_root: Dataset root holding ``images/`` and ``annotations/`` (plus
-            ``predictions/``).
+        dataset_root: Dataset root holding ``images/``.
         subject: Annotation subject (e.g. "fruit").
         date: Capture-date bucket (e.g. "2026-03-02").
         image_index: Index into the date's sorted image list.
         mode: "box", "polygon" or "point" (default: inferred from the geometry the labels on
             that frame actually carry).
-        predictions_dir: The published bucket or staged proposals whose proposals the canvas
+        bucket: The name of the published bucket or staged proposals whose proposals the canvas
             shows.
         proposal: The index of the proposal, in the bucket's document for the frame, to focus.
     """
     from tcip_annotation.json_io import annotations_hold_subject
 
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.dataset_layout import annotation_dir, image_dir, label_filename
+    from tcip_mcp.dataset_layout import image_dir, label_key
     from tcip_mcp.web_client import ANNOTATE_MODES, PANEL_EVENT_ANNOTATE_FOCUS, post_panel_event
-    from tcip_mcp.workspace import is_valid_name
 
-    if not is_valid_name(date):
-        return {"error": f"date must be a single safe path segment (no separators/'..'), got {date!r}"}
-    idir = Path(image_dir(dataset_root, date))
+    try:
+        idir = image_dir(dataset_root, date)
+    except ValueError as exc:
+        return {"error": str(exc)}
     if not idir.is_dir():
         return {"error": f"no images for date {date} under {dataset_root}"}
     images = sorted(_logical_image_names(idir))
     if not images:
         return {"error": f"no images on {date}"}
     try:
-        bucket = read_bucket(predictions_dir) if predictions_dir else None
+        found = read_bucket(dataset_root, bucket) if bucket else None
     except ValueError as exc:
         return {"error": str(exc)}
-    adir = Path(annotation_dir(dataset_root, date))
 
-    def _document(name: str) -> Path | None:
-        if bucket is not None:
-            return bucket.document(name)
-        label = adir / label_filename(Path(name).stem)
-        return label if label.is_file() else None
+    def _labels(name: str) -> list[Annotation]:
+        return read_document_versioned(
+            label_key(dataset_root, date, Path(name).stem))[0].annotations
 
     holding: list[int] = []
     unreadable: dict[str, str] = {}
     for i, name in enumerate(images):
-        document = _document(name)
         try:
-            if document is not None and annotations_hold_subject(read_labels(str(document)),
-                                                                 subject):
+            if found is None:
+                held = _labels(name)
+            else:
+                document = found.document_key(Path(name).stem)
+                held = read_label_document(document).annotations if document else []
+            if annotations_hold_subject(held, subject):
                 holding.append(i)
         except UnreadableLabelDocument as exc:
             unreadable[name] = str(exc)
@@ -139,9 +140,8 @@ def focus_human_attention(
     if target_name in unreadable:
         return {"error": unreadable[target_name]}
     if mode is None:
-        label = adir / label_filename(Path(target_name).stem)
         try:
-            task = _subject_task(read_labels(str(label)), subject) if label.is_file() else None
+            task = _subject_task(_labels(target_name), subject)
         except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
         mode = _TASK_MODE.get(task or "", "box")
@@ -152,14 +152,14 @@ def focus_human_attention(
     payload = {
         "dataset_root": dataset_root, "subject": subject, "date": date,
         "image_index": image_index, "mode": mode, "active_subject": subject,
-        "predictions_dir": predictions_dir, "proposal": proposal,
+        "bucket": bucket, "proposal": proposal,
     }
     result = post_panel_event(project, workspace, "app", PANEL_EVENT_ANNOTATE_FOCUS, payload)
     return {
         "delivered": result.get("delivered", False),
         "status": result.get("status"),
         "subject": subject, "date": date, "image_index": image_index, "mode": mode,
-        "predictions_dir": predictions_dir, "proposal": proposal,
+        "bucket": bucket, "proposal": proposal,
         "n_images": len(images), "n_holding_subject": len(holding), "image": target_name,
         "unreadable": sorted(unreadable),
     }

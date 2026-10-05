@@ -69,7 +69,6 @@ RECORD_PATHS: dict[str, PathFields] = {
     RUN_FILE: (
         *within(("config", "data"), DATA_PATHS), *within(("resolved", "data"), DATA_PATHS),
         *within(("resolved", "partition", "samples", "[]"), SAMPLE_PATHS),
-        ("resolved", "partition", "ground_truth_digests", "{}"),
         ("resolved", "partition", "selection", "selection_dir"),
         ("resume_from",), *within(("trial_params",), _PARAMETER_PATHS)),
     SWEEP_FILE: (

@@ -56,7 +56,7 @@ def test_same_dataset_fingerprint_is_none_not_true_when_one_id_is_an_error(tmp_p
     from tests._verified_checkpoint_fixtures import opened_run
     from tests.test_dataset_identity_recording import _config, _make_dataset
 
-    shared = _config(*_make_dataset(tmp_path / "shared"))
+    shared = _config(_make_dataset(tmp_path / "shared"))
     opened_run(tmp_path, shared, experiment_id="e1")
     opened_run(tmp_path, shared, experiment_id="e2")
     assert compare_experiments(["e1", "e2"], project=tmp_path)["same_dataset_fingerprint"] is True
@@ -67,8 +67,8 @@ def test_same_dataset_fingerprint_is_none_not_true_when_one_id_is_an_error(tmp_p
 
 
 def test_compare_experiments_reports_task_and_subject_from_the_runs_records(tmp_path):
-    """A rail must admit valid work: the task read off the launch record, the subject off the
-    data section the run resolved."""
+    """The task is read off the launch record, the subject off the data section the run
+    resolved."""
     _opened(tmp_path, "exp-task-subject")
 
     (c,) = _compared(tmp_path, "exp-task-subject")

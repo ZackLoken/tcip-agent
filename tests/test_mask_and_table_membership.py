@@ -18,6 +18,7 @@ pytest.importorskip("torch")
 
 from PIL import Image  # noqa: E402
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tcip_mcp.pipelines.data.selection import ClassScope, read_selection  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
     auto_train_val, partition_samples,
@@ -50,7 +51,7 @@ def _resolved(project: Path, experiment_id: str, task: str, data_cfg: dict):
 def _mask_dataset(root: Path) -> tuple[Path, Path]:
     """A dataset whose ground truth is one ``<stem>.png`` mask per image, each carrying a distinct
     foreground block so a mask read back can be told from its neighbor's."""
-    images_dir, masks_dir = root / "images", root / "masks"
+    images_dir, masks_dir = root / "images" / UNDATED_BUCKET, root / "masks"
     images_dir.mkdir(parents=True, exist_ok=True)
     masks_dir.mkdir(parents=True, exist_ok=True)
     for index, stem in enumerate(STEMS):
@@ -63,7 +64,7 @@ def _mask_dataset(root: Path) -> tuple[Path, Path]:
 
 def _table_dataset(root: Path) -> tuple[Path, Path]:
     """A dataset whose ground truth is one table row per image, each row a distinct label."""
-    images_dir, csv_path = root / "images", root / "labels.csv"
+    images_dir, csv_path = root / "images" / UNDATED_BUCKET, root / "labels.csv"
     images_dir.mkdir(parents=True, exist_ok=True)
     rows = []
     for index, stem in enumerate(STEMS):
@@ -122,24 +123,32 @@ def test_a_bound_classification_run_trains_over_exactly_its_selections_samples(t
     assert {s.ground_truth for s in partition_samples(partition)} == {str(csv_path)}
 
 
-def _document_dataset(root: Path) -> tuple[Path, Path]:
-    """A dataset whose ground truth is one label document per image, each holding one ``bud``."""
-    from tcip_annotation import json_io
+def _document_dataset(root: Path) -> tuple[Path, None]:
+    """A dataset whose ground truth is one label document per image, each holding one ``bud``;
+    its images directory, and no ground-truth place, since the images' own keys address it."""
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir, labels_dir = root / "images", root / "annotations"
+    from tests._producer_fixtures import label_image
+
+    images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
     for stem in STEMS:
         Image.new("RGB", (16, 16), (10, 20, 30)).save(images_dir / f"{stem}.png")
-        json_io.write_annotations(str(labels_dir / f"{stem}.json"),
-                                  [Annotation(subject="bud", geometry=BBox(1, 1, 8, 8))], 16, 16)
-    return images_dir, labels_dir
+        label_image(images_dir / f"{stem}.png",
+                    [Annotation(subject="bud", geometry=BBox(1, 1, 8, 8))], 16, 16)
+    return images_dir, None
 
 
-def _drop_ground_truth_of_a(ground_truth: Path) -> None:
-    """Remove member ``a``'s ground truth: its row from a table, its file from a directory."""
-    if ground_truth.suffix == ".csv":
+def _drop_ground_truth_of_a(images_dir: Path, ground_truth: Path | None) -> None:
+    """Remove member ``a``'s ground truth: its label document, its row from a table, its mask
+    from a directory."""
+    import tcip_store
+
+    from tests._producer_fixtures import image_label_key
+
+    if ground_truth is None:
+        tcip_store.delete(image_label_key(images_dir / "a.png"))
+    elif ground_truth.suffix == ".csv":
         rows = [r for r in csv.reader(ground_truth.open(newline="")) if r[0] != "a"]
         with open(ground_truth, "w", newline="") as handle:
             csv.writer(handle).writerows(rows)
@@ -147,14 +156,14 @@ def _drop_ground_truth_of_a(ground_truth: Path) -> None:
         next(p for p in ground_truth.iterdir() if p.stem == "a").unlink()
 
 
-def _drop_image_of_a(images_dir: Path, ground_truth: Path) -> None:
+def _drop_image_of_a(images_dir: Path, ground_truth: Path | None) -> None:
     """Remove member ``a``'s image, and empty its label document when it has one, so the truth
     left behind reads ``unannotated`` rather than admitted."""
-    from tcip_annotation import json_io
+    from tests._producer_fixtures import label_image
 
     (images_dir / "a.png").unlink()
-    if ground_truth.is_dir() and (ground_truth / "a.json").is_file():
-        json_io.write_annotations(str(ground_truth / "a.json"), [], 16, 16, keep_empty=True)
+    if ground_truth is None:
+        label_image(images_dir / "a.png", [], 16, 16, keep_empty=True)
 
 
 @pytest.mark.parametrize("dataset", [_document_dataset, _mask_dataset, _table_dataset],
@@ -166,7 +175,7 @@ def test_a_recorded_sample_is_tallied_as_a_fresh_admission_tallies_it(
     """One admission evaluates a directory's candidates and a selection's recorded samples alike:
     with one member's ground truth or image gone, the refusal of the recorded samples names the
     tallies a fresh admission over the same members answers."""
-    from tcip_mcp.pipelines.data.label_queries import admit, admits, refuse_inadmissible_samples
+    from tcip_mcp.pipelines.data.label_queries import admit, admits, readmitted_samples
 
     images_dir, ground_truth = dataset(tmp_path / "ds")
     scope = ClassScope(subject="bud", attributes=()) if dataset is _document_dataset else None
@@ -175,7 +184,7 @@ def test_a_recorded_sample_is_tallied_as_a_fresh_admission_tallies_it(
     if drop == "image":
         _drop_image_of_a(images_dir, ground_truth)
     else:
-        _drop_ground_truth_of_a(ground_truth)
+        _drop_ground_truth_of_a(images_dir, ground_truth)
 
     fresh = admit(images_dir, ground_truth, scope=admission.scope,
                   members=[s.member for s in samples])
@@ -183,17 +192,17 @@ def test_a_recorded_sample_is_tallied_as_a_fresh_admission_tallies_it(
                         if not admits(name))
     assert refused == "absent=1"
     with pytest.raises(ValueError, match=f"a\\.png'\\]\\): {refused}\\."):
-        refuse_inadmissible_samples(samples, admission.scope)
+        readmitted_samples(samples, admission.scope)
 
 
 def test_a_directory_named_like_a_mask_is_admitted_by_neither_read_of_it(tmp_path: Path):
     """What a mask is is one predicate, so the admission that enumerates a directory and the
     re-admission that checks a recorded sample's own path cannot disagree: a directory named
     ``a.1.png`` is a mask to neither."""
-    from tcip_mcp.pipelines.data.label_queries import admit, refuse_inadmissible_samples
+    from tcip_mcp.pipelines.data.label_queries import admit, readmitted_samples
 
-    images_dir, masks_dir = tmp_path / "images", tmp_path / "masks"
-    images_dir.mkdir()
+    images_dir, masks_dir = tmp_path / "images" / UNDATED_BUCKET, tmp_path / "masks"
+    images_dir.mkdir(parents=True)
     masks_dir.mkdir()
     for stem in ("a.1", "b"):
         Image.new("RGB", (16, 16), (10, 20, 30)).save(images_dir / f"{stem}.png")
@@ -203,7 +212,7 @@ def test_a_directory_named_like_a_mask_is_admitted_by_neither_read_of_it(tmp_pat
     admitted = admit(images_dir, masks_dir)
     assert [record.member for record in admitted.records] == ["b"]
     # Admits valid work: what it did admit still admits when it is checked again.
-    refuse_inadmissible_samples(
+    readmitted_samples(
         admitted.samples({record.member: "train" for record in admitted.records}, lambda m: m),
         admitted.scope)
 
@@ -315,7 +324,7 @@ def test_a_dotted_row_key_names_one_member_end_to_end(tmp_path: Path):
     resolved partition the assessment's disjointness joins against by that name.
     """
     root = tmp_path / "ds"
-    images_dir, csv_path = root / "images", root / "labels.csv"
+    images_dir, csv_path = root / "images" / UNDATED_BUCKET, root / "labels.csv"
     images_dir.mkdir(parents=True, exist_ok=True)
     dotted = [f"a.{index}" for index in range(8)]
     rows = []
@@ -426,7 +435,7 @@ def test_a_mask_edited_after_the_run_refuses_the_freeze_by_name(tmp_path: Path):
 def _three_class_masks(root: Path) -> tuple[Path, Path]:
     """Four images and their masks, one of which alone reaches class 2: a run sizing each loader
     by the classes its own half happens to hold would size the two halves differently."""
-    images_dir, masks_dir = root / "images", root / "masks"
+    images_dir, masks_dir = root / "images" / UNDATED_BUCKET, root / "masks"
     images_dir.mkdir(parents=True, exist_ok=True)
     masks_dir.mkdir(parents=True, exist_ok=True)
     for index, stem in enumerate(STEMS[:4]):
@@ -523,22 +532,20 @@ def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(tmp_path:
 def test_the_place_and_the_record_read_one_ground_truth_shape(tmp_path: Path):
     """The sniff over a place a config names and the read over a sample's own recorded ground
     truth answer with one shape, because the place asks the record's own rule of what it finds
-    there: a table, a directory of masks and a directory of documents each read the same way from
-    either side."""
+    there: a table, a directory of masks, and no place at all for the label documents an image's
+    own key addresses, each read the same way from either side."""
     from tcip_mcp.pipelines.data.label_queries import ground_truth_shape
     from tcip_mcp.pipelines.data.selection import shape_of
+    from tests._producer_fixtures import image_label_key
 
     root = tmp_path / "ds"
-    _images_dir, masks_dir = _mask_dataset(root)
+    images_dir, masks_dir = _mask_dataset(root)
     _table_images, csv_path = _table_dataset(tmp_path / "table")
-    documents = root / "annotations"
-    documents.mkdir(parents=True)
-    (documents / "a.json").write_text("{}", encoding="utf-8")
 
-    for place, member in ((csv_path, csv_path),
-                          (masks_dir, masks_dir / f"{STEMS[0]}.png"),
-                          (documents, documents / "a.json")):
-        assert ground_truth_shape(str(place)) == shape_of(str(member), None), place
+    for place, member in ((str(csv_path), str(csv_path)),
+                          (str(masks_dir), str(masks_dir / f"{STEMS[0]}.png")),
+                          (None, image_label_key(images_dir / f"{STEMS[0]}.png"))):
+        assert ground_truth_shape(place) == shape_of(member, None), place
 
 
 def test_a_mask_run_refuses_a_stated_class_space_and_admits_the_empty_one(tmp_path: Path):
@@ -577,8 +584,7 @@ def test_the_bound_and_drawn_mask_routes_record_one_directory_the_same_way(tmp_p
         """Every member the run trains or validates on, with the ground truth, its digest at the
         run and the source the record names for it."""
         partition = _resolved(tmp_path, experiment_id, "semantic_seg", data_cfg)[0]["partition"]
-        at_run = partition["ground_truth_digests"]
-        return {s.member: (s.ground_truth, at_run[s.ground_truth], s.source)
+        return {s.member: (s.ground_truth, s.ground_truth_digest, s.source)
                 for s in partition_samples(partition) if s.side in ("train", "val")}
 
     bound = trained("exp-mask-bound", {"split": {"selection_dir": str(out)}})
@@ -597,24 +603,20 @@ def test_the_bound_and_drawn_mask_routes_record_one_directory_the_same_way(tmp_p
 def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(tmp_path: Path):
     """The same images are trained twice, once over a per-image label document each and once over a
     ``<stem>.png`` mask each, at the same seed and grouping policy. The two ground truths are
-    genuinely different files, so the digests and the scopes differ; what the one producer may not
-    do is name a different membership, a different partition, a differently shaped record or a
+    genuinely different records, so the digests and the scopes differ; what the one producer may
+    not do is name a different membership, a different partition, a differently shaped record or a
     different image for one shape than for the other.
     """
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import image_label_key, label_image, registry_over
 
     root = tmp_path / "ds"
     images_dir, masks_dir = _mask_dataset(root)
-    labels_dir = root / "annotations"
-    labels_dir.mkdir(parents=True, exist_ok=True)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="leaf"),)))
     for stem in STEMS:
-        json_io.write_annotations(labels_dir / f"{stem}.json",
-                                  [Annotation(subject="leaf", geometry=BBox(2, 2, 8, 8))],
-                                  16, 16, keep_empty=True)
+        label_image(images_dir / f"{stem}.png",
+                    [Annotation(subject="leaf", geometry=BBox(2, 2, 8, 8))], 16, 16)
 
     split = {"group_by": "stem", "val_ratio": 0.25, "seed": 11}
 
@@ -629,8 +631,7 @@ def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(tmp_p
 
     document_run, document_served, document_sources = resolved(
         "exp-shape-document", "detection", {
-            "images_dir": str(images_dir), "labels_dir": str(labels_dir),
-            "scope": {"subject": "leaf"}, "split": dict(split)})
+            "images_dir": str(images_dir), "scope": {"subject": "leaf"}, "split": dict(split)})
     mask_run, mask_served, mask_sources = resolved(
         "exp-shape-mask", "semantic_seg", {
             "images_dir": str(images_dir), "labels_dir": str(masks_dir),
@@ -643,7 +644,8 @@ def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(tmp_p
         return {s.member: s for s in partition_samples(partition)}
 
     document_samples, mask_samples = by_member(document_run), by_member(mask_run)
-    assert {Path(s.ground_truth).parent for s in document_samples.values()} == {labels_dir}
+    assert {m: s.ground_truth for m, s in document_samples.items()} == {
+        m: image_label_key(images_dir / f"{m}.png") for m in STEMS}
     assert {Path(s.ground_truth).parent for s in mask_samples.values()} == {masks_dir}
     assert {m: (s.side, s.group) for m, s in document_samples.items()} == {
         m: (s.side, s.group) for m, s in mask_samples.items()}

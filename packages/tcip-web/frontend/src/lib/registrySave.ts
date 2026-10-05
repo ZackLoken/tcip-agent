@@ -8,9 +8,9 @@ import { selectProjectRoot } from "@/store/slices/gui";
  *  whether the save landed; a refusal toasts `failure` with the server's reason. */
 export async function saveRegistry(next: Registry, failure: string): Promise<boolean> {
   const { registry, setRegistry, pushToast, gui, user } = useStore.getState();
-  const root = gui.dataset.dataset_root;
+  const { dataset_root: root, date } = gui.dataset;
   setRegistry(next, registry.version, registry.discovered);
-  if (!selectProjectRoot(useStore.getState()) || !root) return false;
+  if (!selectProjectRoot(useStore.getState()) || !root || !date) return false;
   try {
     const saved = await subjectsApi.save(next, root, registry.version, user);
     setRegistry(next, saved.version, registry.discovered);
@@ -25,7 +25,7 @@ export async function saveRegistry(next: Registry, failure: string): Promise<boo
     }
     pushToast(`${failure}: ${message}`);
     try {
-      const fresh = await subjectsApi.load(root, gui.dataset.annotations_dir);
+      const fresh = await subjectsApi.load(root, date);
       setRegistry(fresh.subjects ?? {}, fresh.version, fresh.discovered);
     } catch {
       /* the reload itself failing leaves the optimistic registry in place */

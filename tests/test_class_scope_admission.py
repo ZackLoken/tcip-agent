@@ -49,8 +49,8 @@ REVERSED = Attribute(name="condition", type="categorical", values=("damaged", "h
 """The reverse of the order the fixture's registry declares ``condition`` in."""
 
 
-def _dirs(root: Path) -> tuple[str, str]:
-    return str(root / "images" / DATES[0]), str(root / "annotations" / DATES[0])
+def _images_dir(root: Path) -> str:
+    return str(root / "images" / DATES[0])
 
 
 def test_a_run_recording_its_attributes_is_admitted_under_them_not_the_registrys(
@@ -58,8 +58,8 @@ def test_a_run_recording_its_attributes_is_admitted_under_them_not_the_registrys
 ) -> None:
     from tcip_mcp.pipelines.data.split_construction import run_membership
 
-    images_dir, labels_dir = _dirs(_attribute_scoped_dataset(tmp_path / "ds"))
-    membership = run_membership({"images_dir": images_dir, "labels_dir": labels_dir,
+    images_dir = _images_dir(_attribute_scoped_dataset(tmp_path / "ds"))
+    membership = run_membership({"images_dir": images_dir,
                                  "scope": asdict(ClassScope(SUBJECT, (REVERSED,)))})
 
     assert membership.scope.attributes == (REVERSED,)
@@ -71,10 +71,9 @@ def test_a_document_scope_with_no_attributes_read_refuses_and_a_fresh_statement_
     from tcip_mcp.pipelines.data.label_queries import admit
     from tcip_mcp.pipelines.data.split_construction import run_membership
 
-    images_dir, labels_dir = _dirs(_attribute_scoped_dataset(tmp_path / "ds"))
+    images_dir = _images_dir(_attribute_scoped_dataset(tmp_path / "ds"))
     with pytest.raises(ValueError, match="records no attributes"):
-        admit(images_dir, labels_dir, scope=ClassScope(SUBJECT))
+        admit(images_dir, scope=ClassScope(SUBJECT))
 
-    fresh = run_membership({"images_dir": images_dir, "labels_dir": labels_dir,
-                            "scope": {"subject": SUBJECT}})
+    fresh = run_membership({"images_dir": images_dir, "scope": {"subject": SUBJECT}})
     assert fresh.scope.attributes == (CONDITION,)

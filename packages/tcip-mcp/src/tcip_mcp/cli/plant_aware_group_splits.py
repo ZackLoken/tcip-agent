@@ -116,7 +116,7 @@ def derive_plant_group_key_map(
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
-    parser.add_argument("dataset_root", help="Dataset root (canonical images/, annotations/ layout).")
+    parser.add_argument("dataset_root", help="Dataset root (canonical images/ layout).")
     parser.add_argument("--project", required=True,
                         help="The project the draw acts on and records its audit line under.")
     parser.add_argument("--plant-csv", action="append", required=True, dest="plant_csv_paths",

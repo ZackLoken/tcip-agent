@@ -19,35 +19,37 @@ pytest.importorskip("torchvision")
 
 from tests.test_orthomosaic_tools import (  # noqa: E402, F401
     _GRID, _PLANT_PIXELS, SCOPE, TIEPOINT_NATIVE_X, TILE, _bespoke_detection_checkpoint,
-    _plant_grid_csv, _plant_registry, _recorded_meaning, _write_geo_raster,
+    _plant_grid_csv, _plant_registry, _raster, _recorded_meaning, _write_geo_raster,
 )
 
+BUCKET = "preds/2026-01-01"
 
-def _produced_bucket(tmp_path: Path, raster_path: Path) -> Path:
-    """A bucket from the real producer: run_inference's whole-raster regime."""
+
+def _produced_bucket(tmp_path: Path, raster_path: Path) -> str:
+    """A bucket from the real producer: run_inference's whole-raster regime; its name."""
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
 
-    out_dir = tmp_path / "preds"
     result = run_inference(
-        tmp_path, _bespoke_detection_checkpoint(tmp_path), output_dir=str(out_dir),
+        tmp_path, _bespoke_detection_checkpoint(tmp_path), bucket=BUCKET,
         raster_path=str(raster_path), stated=Stated(conf=0.0, tile_size=TILE))
     assert "error" not in result, result
-    return out_dir
+    return result["bucket"]
 
 
-def _delivered(tmp_path: Path, bucket: Path, raster_path: Path) -> dict:
+def _delivered(tmp_path: Path, bucket: str, raster_path: Path) -> dict:
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     registry = _plant_registry(tmp_path, _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS))
     return deliver_orthomosaic_plant_counts(
-        tmp_path, str(bucket), registry, str(tmp_path / "counts.csv"), "stem_count", _GRID)
+        tmp_path, str(tmp_path / "ds"), bucket, registry, str(tmp_path / "counts.csv"),
+        "stem_count", _GRID)
 
 
 def test_a_raster_whose_tiepoint_moved_since_publication_refuses(tmp_path):
     """Identical pixels at a moved tiepoint resolve every detection onto a different plant, so the
     raster is refused rather than silently believed: the content half alone cannot see this."""
-    raster_path = tmp_path / "mosaic.tif"
+    raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
     bucket = _produced_bucket(tmp_path, raster_path)
     _write_geo_raster(raster_path, tiepoint_x=TIEPOINT_NATIVE_X + 20.0)
@@ -60,7 +62,7 @@ def test_a_raster_whose_tiepoint_moved_since_publication_refuses(tmp_path):
 
 
 def test_a_raster_whose_content_changed_since_publication_refuses(tmp_path):
-    raster_path = tmp_path / "mosaic.tif"
+    raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
     bucket = _produced_bucket(tmp_path, raster_path)
     _write_geo_raster(raster_path, seed=7)
@@ -74,11 +76,12 @@ def test_a_raster_whose_content_changed_since_publication_refuses(tmp_path):
 def test_a_bucket_of_per_image_predictions_refuses_naming_what_it_is(tmp_path):
     from tests._chain_fixtures import published
 
-    raster_path = tmp_path / "mosaic.tif"
+    raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
-    bucket = published(tmp_path, tmp_path / "ds" / "predictions" / "frames",
-                       [{"image": "img1.jpg", "width": 64, "height": 64, "boxes": [],
-                         "scores": [], "labels": []}], scope=SCOPE).path
+    bucket = published(tmp_path, "frames/2026-01-01",
+                       [{"image": str(raster_path.parent / "img1.jpg"), "width": 64,
+                         "height": 64, "boxes": [], "scores": [], "labels": []}],
+                       scope=SCOPE).name
 
     refused = _delivered(tmp_path, bucket, raster_path)
 
@@ -91,10 +94,10 @@ def test_the_raster_it_was_produced_on_passes_the_identity_check_and_meets_the_g
     assessed and this door takes no acknowledgment, so the refusal named is the gate's."""
     from tcip_mcp.buckets import read_bucket
 
-    raster_path = tmp_path / "mosaic.tif"
+    raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
     bucket = _produced_bucket(tmp_path, raster_path)
-    recorded = read_bucket(bucket).raster_identity
+    recorded = read_bucket(tmp_path / "ds", bucket).raster_identity
     assert recorded is not None and recorded["pixel_checksum"]
     assert recorded["geotransform"]["tiepoint_native_x"] == TIEPOINT_NATIVE_X
 

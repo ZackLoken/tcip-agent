@@ -6,6 +6,8 @@ Uses synthetic data for classification and real sample data for detection.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 import os
 from pathlib import Path
 
@@ -26,7 +28,7 @@ from tests._producer_fixtures import run_over  # noqa: E402
 @pytest.fixture()
 def tiny_classification_data(tmp_path):
     """A minimal 2-class image classification dataset: images plus their ground-truth table."""
-    images_dir = tmp_path / "cls_images"
+    images_dir = tmp_path / "cls" / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
     rows = ["stem,label"]
     for cls_name, cls_idx in [("healthy", 0), ("diseased", 1)]:
@@ -160,11 +162,11 @@ class TestFullClassificationPipeline:
 # Test: detection pipeline with real bud data
 # ---------------------------------------------------------------------------
 
-# A real nested-schema dataset to run the detection pipeline against: set TCIP_SAMPLE_PROJECT to a
-# converted project root (holds subjects.json + annotations/<date>/ + images/<date>/); defaults to an
-# in-repo <repo>/data sample. Skips when neither is present.
 SAMPLE_PROJECT = Path(os.environ.get(
     "TCIP_SAMPLE_PROJECT", str(Path(__file__).resolve().parent.parent / "data")))
+"""A real dataset to run the detection pipeline against: TCIP_SAMPLE_PROJECT names a project
+root holding subjects.json, images/<date>/ and their label documents; defaults to an in-repo
+<repo>/data sample. The tests below skip when neither is present."""
 
 
 def _sample_date() -> str | None:
@@ -172,16 +174,13 @@ def _sample_date() -> str | None:
     if not (SAMPLE_PROJECT / "subjects.json").is_file():
         return None
     from tcip_annotation import json_io
-    ann_root = SAMPLE_PROJECT / "annotations"
-    if not ann_root.is_dir():
-        return None
-    for date_dir in sorted(p for p in ann_root.iterdir() if p.is_dir()):
-        if not (SAMPLE_PROJECT / "images" / date_dir.name).is_dir():
-            continue
-        for jf in date_dir.glob("*.json"):
+    from tcip_mcp.dataset_layout import capture_label_keys, list_dates
+
+    for date in list_dates(SAMPLE_PROJECT):
+        for key in capture_label_keys(SAMPLE_PROJECT, date):
             if any(a.subject == "bud" and a.geometry is not None
-                   for a in json_io.read_annotations(str(jf))):
-                return date_dir.name
+                   for a in json_io.read_label_document(key).annotations):
+                return date
     return None
 
 
@@ -215,8 +214,7 @@ class TestDetectionPipelineRealData:
         date = _sample_date()
         assert date is not None
         images_dir = SAMPLE_PROJECT / "images" / date
-        labels_dir = SAMPLE_PROJECT / "annotations" / date
-        dataset, data = run_over("detection", str(images_dir), str(labels_dir), subject="bud")
+        dataset, data = run_over("detection", str(images_dir), subject="bud")
         # num_classes is the one subject the scope isolates (bud here), and num_samples comes
         # from the bud-annotated images on this date.
         assert dataset.num_classes == 1

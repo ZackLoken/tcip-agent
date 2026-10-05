@@ -17,6 +17,7 @@ torch = pytest.importorskip("torch")  # evaluation.py imports torch at module lo
 pytest.importorskip("pycocotools")
 
 from tcip_annotation.matching import match_pairs  # noqa: E402
+from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tcip_mcp.pipelines.data.label_queries import registry_scope  # noqa: E402
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
@@ -47,6 +48,7 @@ from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
     resolve_selection_metric,
 )
 from tests._image_fixtures import write_noise_image  # noqa: E402
+from tests._producer_fixtures import checkpoint_admission  # noqa: E402
 from tests._dense_op_fixtures import gt_only  # noqa: E402
 from tests import _trait_fixtures as fx  # noqa: E402
 
@@ -676,9 +678,9 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
+    from tests._producer_fixtures import label_image
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     common_fields = {
@@ -697,12 +699,11 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     checkpoint = load_registered_checkpoint(ckpt_path, project=tmp_path)
     test_result = run_test_evaluation(prepare_pass(checkpoint, Stated(tile=False)), None, "cpu")
 
-    images_dir, ff_labels = tmp_path / "ff_images", tmp_path / "ff_labels"
-    images_dir.mkdir()
-    ff_labels.mkdir()
+    images_dir = tmp_path / "ff" / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     Image.new("RGB", (32, 32)).save(images_dir / "a.png")
-    json_io.write_annotations(str(ff_labels / "a.json"),
-                              [Annotation(subject="bud", geometry=BBox(4, 4, 12, 12))], 32, 32)
+    label_image(images_dir / "a.png", [Annotation(subject="bud", geometry=BBox(4, 4, 12, 12))],
+                32, 32)
 
     class _StubPredictor:
         task = "detection"
@@ -714,7 +715,8 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
 
     monkeypatch.setattr(predictor_mod, "GenericPredictor", lambda *a, **kw: _StubPredictor())
     ff_result = run_full_frame_evaluation(
-        checkpoint, str(images_dir), str(ff_labels), stated=Stated(tile_size=32, overlap=0.0))
+        checkpoint, checkpoint_admission(checkpoint, images_dir),
+        stated=Stated(tile_size=32, overlap=0.0))
 
     for field in common_fields:
         assert field in test_result, f"{field} missing from the test-regime record"
@@ -756,6 +758,33 @@ IMG = 64
 _save_png = partial(write_noise_image, size=IMG)
 
 
+def _four_bud_images(tmp_path):
+    """Four noise images in ``tmp_path``'s undated capture, each labeled with one centered
+    ``bud`` box."""
+    from tcip_annotation.state import Annotation, BBox
+
+    from tests._producer_fixtures import label_image
+
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    for i in range(4):
+        _save_png(images_dir / f"img{i}.png")
+        label_image(images_dir / f"img{i}.png",
+                    [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))], IMG, IMG)
+    return images_dir
+
+
+def _stored(tmp_path, annotations, size: int = 100):
+    """``annotations`` written as the label document of a ``size``-pixel image ``a`` under
+    ``tmp_path`` and read back."""
+    from tcip_annotation import json_io
+
+    from tcip_mcp.dataset_layout import label_key
+
+    key = label_key(tmp_path, UNDATED_BUCKET, "a")
+    json_io.write_label_document(key, annotations, size, size, keep_empty=True)
+    return json_io.read_label_document(key)
+
+
 def _cfg(model_source, data: dict) -> dict:
     return {
         "model_source": model_source, "data": data, "device": "cpu",
@@ -766,17 +795,7 @@ def _cfg(model_source, data: dict) -> dict:
 
 
 def test_validate_detection_returns_metrics_and_objective(tmp_path):
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    labels_dir.mkdir(parents=True, exist_ok=True)
-    for i in range(4):
-        _save_png(images_dir / f"img{i}.png")
-        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
-                                  IMG, IMG, keep_empty=True)
-    ds, data = run_over("detection", str(images_dir), str(labels_dir), subject="bud")
+    ds, data = run_over("detection", str(_four_bud_images(tmp_path)), subject="bud")
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
@@ -804,17 +823,7 @@ def test_train_center_match_trait_records_governing_criterion(tmp_path):
     """Threading `trait` into _validate surfaces val_governing_criterion (a dict) and
     val_map50_role (a str) in val_metrics; the TensorBoard scalar loop must skip these
     non-numeric values rather than crash `add_scalar` on them."""
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    labels_dir.mkdir(parents=True, exist_ok=True)
-    for i in range(4):
-        _save_png(images_dir / f"img{i}.png")
-        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
-                                  IMG, IMG, keep_empty=True)
-    ds, data = run_over("detection", str(images_dir), str(labels_dir), subject="bud")
+    ds, data = run_over("detection", str(_four_bud_images(tmp_path)), subject="bud")
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
@@ -834,7 +843,7 @@ def test_train_center_match_trait_records_governing_criterion(tmp_path):
 
 
 def test_validate_classification_metrics(tmp_path):
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     rows = []
     for i in range(6):
         _save_png(images_dir / f"img{i}.png")
@@ -861,8 +870,9 @@ def test_validate_classification_metrics(tmp_path):
 
 def test_score_predictions_folder_uses_pycocotools(data_dir):
     from tcip_mcp.tools.annotation_tools import score_predictions
-    r = score_predictions(str(data_dir / "images" / "2-11-26"),
-                          str(data_dir / "predictions" / "live" / "2-11-26"))
+    from tests.conftest import DATA_DIR_BUCKET
+
+    r = score_predictions(str(data_dir / "images" / "2-11-26"), DATA_DIR_BUCKET)
     assert "map50" in r
     # fixture: each image has 2 GT, predictions = 1 TP + 1 FP -> tp=1,fp=1,fn=1 per image (x3 images).
     assert r["total_tp"] == 3 and r["total_fp"] == 3 and r["total_fn"] == 3
@@ -908,17 +918,15 @@ def test_a_targets_records_are_one_shape_on_the_stored_grid_whatever_the_target_
     records, each box on the stored two-decimal grid: every reader of a target reads it here."""
     import numpy as np
 
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.datasets import target_tensors
     from tcip_mcp.pipelines.data.label_queries import json_det_targets
     from tcip_mcp.pipelines.training.evaluation import gt_records
 
-    label = tmp_path / "a.json"
-    json_io.write_annotations(label, [
+    document = _stored(tmp_path, [
         Annotation(subject="bur", geometry=BBox(1.25, 2.5, 30.75, 40.5)),
-        Annotation(subject="bur", geometry=BBox(50.0, 50.0, 90.0, 90.0), iscrowd=True)], 100, 100)
-    listed = json_det_targets(str(label), registry_scope(tmp_path, "bur"))
+        Annotation(subject="bur", geometry=BBox(50.0, 50.0, 90.0, 90.0), iscrowd=True)])
+    listed = json_det_targets(document.annotations, registry_scope(tmp_path, "bur"))
     arrays = {k: np.asarray(v) for k, v in listed.items()}
     off_grid = {**listed, "boxes": [[1.2504, 2.5, 30.7496, 40.5], [50.0, 50.0, 90.0, 90.0]]}
 
@@ -934,17 +942,15 @@ def test_a_targets_records_are_one_shape_on_the_stored_grid_whatever_the_target_
 def test_a_ground_truth_record_is_one_shape_from_a_target_and_from_its_annotation(tmp_path):
     """The loader's target route and the annotation route build a document's ground truth as
     the same records, its box, area and crowd flag stated alike, so the scorer fills nothing in."""
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.label_queries import json_det_targets
     from tcip_mcp.pipelines.training.evaluation import gt_records, records_from_annotation
 
-    label = tmp_path / "a.json"
-    json_io.write_annotations(label, [
+    document = _stored(tmp_path, [
         Annotation(subject="bur", geometry=BBox(10.1, 10.1, 40.3, 30.3)),
-        Annotation(subject="bur", geometry=BBox(50.0, 50.0, 90.0, 90.0), iscrowd=True)], 100, 100)
-    listed = json_det_targets(str(label), registry_scope(tmp_path, "bur"))
-    _, record = records_from_annotation(json_io.read_annotations(label), [], width=100,
+        Annotation(subject="bur", geometry=BBox(50.0, 50.0, 90.0, 90.0), iscrowd=True)])
+    listed = json_det_targets(document.annotations, registry_scope(tmp_path, "bur"))
+    _, record = records_from_annotation(document.annotations, [], width=100,
                                         height=100, name_id={"bur": 1})
     assert record["gt"] == gt_records(listed)
     assert all(g["area"] == g["bbox"][2] * g["bbox"][3] for g in record["gt"])
@@ -955,16 +961,13 @@ def test_a_detectors_record_reads_both_sides_on_the_stored_grid(tmp_path):
     float32 corners, and each detection on the grid its ground truth is stored on."""
     torch = pytest.importorskip("torch")
 
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.datasets import target_tensors
     from tcip_mcp.pipelines.data.label_queries import json_det_targets
     from tcip_mcp.pipelines.training.evaluation import records_from_detector
 
-    label = tmp_path / "a.json"
-    json_io.write_annotations(label, [Annotation(subject="bur", geometry=BBox(10.3, 20.7, 40.1, 60.9))],
-                              100, 100)
-    listed = json_det_targets(str(label), registry_scope(tmp_path, "bur"))
+    document = _stored(tmp_path, [Annotation(subject="bur", geometry=BBox(10.3, 20.7, 40.1, 60.9))])
+    listed = json_det_targets(document.annotations, registry_scope(tmp_path, "bur"))
     output = {"boxes": torch.tensor([[10.1, 10.1, 40.3, 30.3]]),
               "labels": torch.tensor([1]), "scores": torch.tensor([0.9])}
     record = records_from_detector(target_tensors(listed), output, width=100, height=100)
@@ -974,12 +977,9 @@ def test_a_detectors_record_reads_both_sides_on_the_stored_grid(tmp_path):
 
 def _reference_records(tmp_path, reference: list, detections: list) -> list[dict]:
     """One image's records, its reference written and read back through the label document."""
-    from tcip_annotation import json_io
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
 
-    label = tmp_path / "reference.json"
-    json_io.write_annotations(label, reference, 100, 100, keep_empty=True)
-    return [records_from_annotation(json_io.read_annotations(label), detections,
+    return [records_from_annotation(_stored(tmp_path, reference).annotations, detections,
                                     width=100, height=100)[1]]
 
 
@@ -1015,15 +1015,13 @@ def test_a_reference_with_objects_and_no_detection_scores_every_object_a_miss(tm
 
 
 def test_a_crowd_region_is_no_object_in_a_ground_truth_count(tmp_path):
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.splits import count_label_lines
     from tcip_mcp.pipelines.training.evaluation import gt_class_typical_count
 
     assert gt_class_typical_count(_crowd_records()) == 1.0
-    label = tmp_path / "a.json"
-    json_io.write_annotations(label, [
+    document = _stored(tmp_path, [
         Annotation(subject="bur", geometry=BBox(1, 1, 9, 9)),
-        Annotation(subject="bur", geometry=BBox(20, 20, 60, 60), iscrowd=True)], 100, 100)
-    assert count_label_lines(label, ClassScope(subject="bur")) == 1
-    assert count_label_lines(label, ClassScope()) == 1
+        Annotation(subject="bur", geometry=BBox(20, 20, 60, 60), iscrowd=True)])
+    assert count_label_lines(document, ClassScope(subject="bur")) == 1
+    assert count_label_lines(document, ClassScope()) == 1

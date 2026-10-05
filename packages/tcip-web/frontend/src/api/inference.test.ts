@@ -39,6 +39,7 @@ describe("results api error handling (asJson)", () => {
 describe("downloadCsv refusal decoding", () => {
   const REQUEST = {
     mapping_name: "valley",
+    dataset_root: "C:/data",
     buckets: [],
     trait: "stage_50per_date",
     plants: ["PLOT-01"],

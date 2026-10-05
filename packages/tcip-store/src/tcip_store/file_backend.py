@@ -15,7 +15,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable, Generator
-from contextlib import ExitStack, contextmanager
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -24,11 +24,10 @@ from tcip_store.errors import (
     BadKey,
     NotFound,
     StoreBusy,
-    TransactionMisuse,
     VersionConflict,
 )
 from tcip_store.model import (
-    REQUIRED, Key, Version, Versioned, canonical_path, held_transaction, refuse_inside_transaction,
+    REQUIRED, Key, Version, Versioned, canonical_path, refuse_inside_transaction,
 )
 
 _TEMP_SUFFIX = ".tmp"
@@ -221,20 +220,15 @@ def _read_bytes(path: Path) -> bytes | None:
 
 
 @contextmanager
-def _locked(paths: tuple[Path, ...], timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> Generator[None]:
-    """Hold every path's lock, acquired in canonical order so two callers naming one set cannot
-    deadlock; ``StoreBusy`` naming the first path when the wait runs out."""
+def _locked(path: Path) -> Generator[None]:
+    """Hold ``path``'s lock (:func:`path_lock`); ``StoreBusy`` naming it when the wait runs out."""
     _, timeout_error = _filelock_classes()
-    ordered = sorted({canonical_path(path): path for path in paths}.items())
-    deadline = time.monotonic() + timeout_s
-    with ExitStack() as held:
-        for _, path in ordered:
-            _ensure_parent(path)
-            try:
-                held.enter_context(path_lock(path, timeout_s=deadline - time.monotonic()))
-            except timeout_error:
-                raise StoreBusy(str(paths[0]), timeout_s) from None
-        yield
+    _ensure_parent(path)
+    try:
+        with path_lock(path):
+            yield
+    except timeout_error:
+        raise StoreBusy(str(path), DEFAULT_LOCK_TIMEOUT_S) from None
 
 
 def require_version(entry: Key | str, data: bytes | None, expect: Version) -> None:
@@ -271,7 +265,7 @@ def put_blob(path: Path, data: bytes, *, expect: Version | None = None) -> Versi
     inside an open transaction.
     """
     refuse_inside_transaction("put_blob")
-    with _locked((path,)):
+    with _locked(path):
         if expect is not None:
             require_version(str(path), _read_bytes(path), expect)
         _apply_staged(_stage_bytes(path, data), path)
@@ -282,80 +276,10 @@ def delete_blob(path: Path, *, expect: Version | None = None) -> None:
     """Remove a file under its lock, comparing ``expect`` and refusing inside an open transaction
     as :func:`put_blob` does; absence is not an error."""
     refuse_inside_transaction("delete_blob")
-    with _locked((path,)):
+    with _locked(path):
         if expect is not None:
             require_version(str(path), _read_bytes(path), expect)
         _remove_entry(path)
-
-
-class BlobTxn:
-    """A file transaction's handle: reads under the locks, writes staged until a clean exit."""
-
-    def __init__(self, paths: tuple[Path, ...]) -> None:
-        self._paths = paths
-        self._staged: dict[Path, bytes] = {}
-
-    def _held(self, path: Path) -> None:
-        if path not in self._paths:
-            raise TransactionMisuse(f"{path} is not held by this transaction: name it in "
-                                    "blob_transaction(...)")
-
-    def read(self, path: Path, *, default: Any = REQUIRED) -> Any:
-        """One of the transaction's files, this transaction's own staged write included."""
-        self._held(path)
-        if path in self._staged:
-            return self._staged[path]
-        return read_blob_versioned(path, default=default).value
-
-    def write(self, path: Path, data: bytes) -> None:
-        """Stage one of the transaction's files' whole bytes."""
-        self._held(path)
-        self._staged[path] = data
-
-    def apply(self) -> None:
-        """Stage every write's bytes, then rename each into place in the declared order. A failure
-        while renaming puts every file this apply already touched back as it was, while that
-        put-back itself succeeds; a crash can leave a prefix of the declared order.
-        """
-        pending = [(path, self._staged[path]) for path in self._paths if path in self._staged]
-        temps: list[str] = []
-        try:
-            for path, data in pending:
-                temps.append(_stage_bytes(path, data))
-        except BaseException:
-            for temp in temps:
-                _remove_quietly(temp)
-            raise
-        restores: list[tuple[Path, str | None]] = []
-        try:
-            for (path, _), temp in zip(pending, temps, strict=True):
-                previous = _read_bytes(path)
-                restores.append((path, None if previous is None else _stage_bytes(path, previous)))
-                _apply_staged(temp, path)
-        except BaseException:
-            for temp in temps:
-                _remove_quietly(temp)
-            for path, restore in reversed(restores):
-                if restore is None:
-                    _remove_entry(path)
-                else:
-                    _apply_staged(restore, path)
-            raise
-        for _, restore in restores:
-            if restore is not None:
-                _remove_quietly(restore)
-
-
-@contextmanager
-def blob_transaction(*paths: Path) -> Generator[BlobTxn]:
-    """Hold every named file's lock, yield a :class:`BlobTxn` over them and apply its staged
-    writes on a clean exit; an exception inside applies nothing. Refuses
-    (``TransactionMisuse``) a second transaction of either kind on the same thread
-    (:func:`~tcip_store.model.held_transaction`)."""
-    with held_transaction(), _locked(paths):
-        txn = BlobTxn(paths)
-        yield txn
-        txn.apply()
 
 
 def is_bookkeeping(name: str) -> bool:

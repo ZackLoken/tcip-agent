@@ -30,13 +30,13 @@ src/tcip_mcp/
     operating_point.py          # the criteria an assessment judges against: count, classifier,
                                  # scalar, and the spatial held-out check
     schemas.py, image_utils.py
-  dataset_layout.py      # the single path resolver on the backend: where an image's
-                          # labels/predictions live on disk, and the one label save. The frontend cannot import it: the label suffix and the completion-state vocabulary reach it through the generated types
+  dataset_layout.py      # the one resolver: an image's place, its label document's key, a bucket's
+                          # keys, and the one label save; the frontend names images only
   subject_registry.py    # subjects.json: subjects and the attributes each declares, in declared order
   traits.py               # one record per trait: its entry (spec fields and what each delivered
                             # number means) as appended revisions the breeder confirms
   operationalization.py    # the check every delivery door runs on the latest confirmed revision
-  buckets.py               # a published bucket and its bucket.json, written once
+  buckets.py               # a published bucket: its record and its documents, one commit, once
   assessment.py            # the assessment a delivered number rests on, written once
   delivery.py              # the one delivery gate and the delivery event
   project_record.py       # a project's own record: its id, display name and site
@@ -84,6 +84,8 @@ doc or comment.
   `record_event_or_raise`; the record is `audit_log`, one log addressed by `audit.audit_log_key`
   under two kinds of root (a dataset's own, a project's own), held in that root's store database,
   that other code (including scripts) must not write around. `audit.py` decides where an entry
-  goes and what a failed append means: the decorator raises `MutationCommittedWithoutAuditLine`;
-  a caller that is neither an MCP tool nor a demoted door emits through `record_event_or_raise`
-  (raises `AuditEntryNotWritten` on a failed append) rather than composing an entry of its own.
+  goes and what a failed append means: the decorator raises `MutationCommittedWithoutAuditLine`.
+  A library write holding its records and its line in one transaction appends the line inside it
+  through `audit_entry`, so neither lands without the other; a door whose line follows a
+  committed write emits through `record_event_or_raise`, which raises `AuditEntryNotWritten` on
+  a failed append.

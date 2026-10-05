@@ -35,11 +35,10 @@ export const subjectsApi = {
   // The registry lives in the dataset (not the project); pass dataset_root so a shared image
   // set carries its own subject names.
 
-  // `subjects` is null when no registry is stored; `discovered` names the subjects the labels
-  // under the annotations dir hold either way.
-  load: (dataset_root: string, annotations_dir: string | null) => {
-    const params = new URLSearchParams({ dataset_root });
-    if (annotations_dir) params.set("annotations_dir", annotations_dir);
+  // `subjects` is null when no registry is stored; `discovered` names the subjects the label
+  // documents of capture `date` hold either way, and `unreadable` the stems that would not read.
+  load: (dataset_root: string, date: string) => {
+    const params = new URLSearchParams({ dataset_root, date });
     return getJson<{
       subjects: Registry | null;
       discovered: string[];

@@ -206,7 +206,8 @@ def _delivery_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Pa
 
 
 def _assert_all_doors_refuse(
-    tmp_path: Path, preds_by_date: dict[str, str], mapping_name: str, expected_fragment: str,
+    tmp_path: Path, dataset_root: Path, preds_by_date: dict[str, str], mapping_name: str,
+    expected_fragment: str,
 ) -> None:
     from fastapi.testclient import TestClient
     from tcip_web.app import app
@@ -215,7 +216,8 @@ def _assert_all_doors_refuse(
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
         tmp_path, trait="currant_bloom", mapping_name=mapping_name, plants=["P1"],
-        buckets=list(preds_by_date.values()), output_csv_path=str(out_csv))
+        dataset_root=str(dataset_root), buckets=list(preds_by_date.values()),
+        output_csv_path=str(out_csv))
     assert "error" in res
     assert expected_fragment in res["error"]
     assert not out_csv.exists()
@@ -223,7 +225,7 @@ def _assert_all_doors_refuse(
     asyncio.run(store.open_project(tmp_path.resolve()))
     client = TestClient(app, base_url="http://127.0.0.1")
     payload = {
-        "mapping_name": mapping_name,
+        "mapping_name": mapping_name, "dataset_root": str(dataset_root),
         "buckets": list(preds_by_date.values()), "trait": "currant_bloom",
         "plants": ["P1"],
     }
@@ -248,7 +250,8 @@ def test_delivery_refuses_naming_a_date_recorded_with_no_capture_at_all(
     _persist_synthetic_mapping(
         tmp_path, dataset_root, "valley", plant_csvs=plant_csvs, assignments={DATE: []})
 
-    _assert_all_doors_refuse(tmp_path, preds_by_date, "valley", "recorded no capture at all")
+    _assert_all_doors_refuse(tmp_path, dataset_root, preds_by_date, "valley",
+                             "recorded no capture at all")
 
 
 def test_delivery_refuses_naming_the_plant_csvs_when_none_parsed_a_plant(
@@ -259,7 +262,7 @@ def test_delivery_refuses_naming_the_plant_csvs_when_none_parsed_a_plant(
         tmp_path, dataset_root, "valley", plant_csvs=[],
         assignments={DATE: [_unmapped_row("P1_20260211", None)]})
 
-    _assert_all_doors_refuse(tmp_path, preds_by_date, "valley", "parsed no plant")
+    _assert_all_doors_refuse(tmp_path, dataset_root, preds_by_date, "valley", "parsed no plant")
 
 
 def test_delivery_refuses_with_the_ungeoreferenced_sentence_when_every_distance_is_none(
@@ -273,7 +276,8 @@ def test_delivery_refuses_with_the_ungeoreferenced_sentence_when_every_distance_
         tmp_path, dataset_root, "valley", plant_csvs=plant_csvs,
         assignments={DATE: [_unmapped_row("P1_20260211", None)]})
 
-    _assert_all_doors_refuse(tmp_path, preds_by_date, "valley", "plant-tag mechanism")
+    _assert_all_doors_refuse(tmp_path, dataset_root, preds_by_date, "valley",
+                             "plant-tag mechanism")
 
 
 def test_delivery_refuses_naming_the_match_distance_when_every_position_is_too_far(
@@ -287,7 +291,8 @@ def test_delivery_refuses_naming_the_match_distance_when_every_position_is_too_f
         tmp_path, dataset_root, "valley", plant_csvs=plant_csvs,
         assignments={DATE: [_unmapped_row("P1_20260211", 5_000.0)]})
 
-    _assert_all_doors_refuse(tmp_path, preds_by_date, "valley", "beyond the accepted match")
+    _assert_all_doors_refuse(tmp_path, dataset_root, preds_by_date, "valley",
+                             "beyond the accepted match")
 
 
 # ── the predicate: a blank plant name is unattributed, everywhere it is decided ─────────
@@ -325,15 +330,16 @@ def _republished(dataset_root: Path, date: str) -> dict[str, str]:
     """Every image now under ``date`` published as a fresh bucket of that date, for a scene whose
     capture set grew after :func:`_write_scene` published it."""
     images = sorted((dataset_root / "images" / date).glob("*.jpg"))
-    bucket = dataset_root / "predictions" / "all" / date
-    return {date: _publish(dataset_root.parent, bucket, images)}
+    return {date: _publish(dataset_root.parent, f"all/{date}", images)}
 
 
-def _delivered_disclosure(project: Path, preds_by_date: dict[str, str]) -> dict:
+def _delivered_disclosure(project: Path, dataset_root: Path,
+                          preds_by_date: dict[str, str]) -> dict:
     """Deliver ``preds_by_date`` through ``valley`` for both plants; the event's plant-mapping
     disclosure."""
     res = _deliver(project, trait="currant_bloom", mapping_name="valley", plants=PLANT_IDS,
-                   buckets=preds_by_date.values(), output_csv_path=str(project / "out.csv"))
+                   dataset_root=dataset_root, buckets=preds_by_date.values(),
+                   output_csv_path=str(project / "out.csv"))
     assert "error" not in res, res
     return _events(project)[-1]["plant_mapping"]
 
@@ -372,7 +378,7 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
     assert loaded_summary["totals"]["n_unattributed"] == 1
 
     _seed_currant_bloom_trait(tmp_path)
-    pm = _delivered_disclosure(tmp_path, preds_by_date)
+    pm = _delivered_disclosure(tmp_path, dataset_root, preds_by_date)
     assert pm["images_unattributed"] == 1
     assert pm["dates_delivered"] == [DATE]
     assert pm["images_unattributed_scope"] == "delivered_dates"
@@ -396,7 +402,7 @@ def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
     assert build_res["summary"]["totals"]["n_unattributed"] == 1
 
     _seed_currant_bloom_trait(tmp_path)
-    pm = _delivered_disclosure(tmp_path, {dates[0]: preds_by_date[dates[0]]})
+    pm = _delivered_disclosure(tmp_path, dataset_root, {dates[0]: preds_by_date[dates[0]]})
     assert pm["images_unattributed"] == 0
     assert pm["dates_delivered"] == [dates[0]]
 
@@ -422,7 +428,7 @@ def test_a_date_recorded_with_no_capture_still_delivers_beside_an_attributed_one
     assert build_res["summary"]["per_date"][empty_date]["n_images"] == 0
 
     _seed_currant_bloom_trait(tmp_path)
-    pm = _delivered_disclosure(tmp_path, preds_by_date)
+    pm = _delivered_disclosure(tmp_path, dataset_root, preds_by_date)
     assert pm["dates_delivered"] == [DATE]
 
 
@@ -439,7 +445,8 @@ def test_a_fully_positioned_scene_keeps_delivering_with_zero_unattributed(
     assert build_res["summary"]["totals"]["n_unattributed"] == 0
 
     _seed_currant_bloom_trait(tmp_path)
-    assert _delivered_disclosure(tmp_path, preds_by_date)["images_unattributed"] == 0
+    assert _delivered_disclosure(tmp_path, dataset_root,
+                                 preds_by_date)["images_unattributed"] == 0
 
 
 def test_a_raster_beside_positioned_photographs_still_delivers(
@@ -456,7 +463,7 @@ def test_a_raster_beside_positioned_photographs_still_delivers(
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
-    _delivered_disclosure(tmp_path, preds_by_date)
+    _delivered_disclosure(tmp_path, dataset_root, preds_by_date)
     assert (tmp_path / "out.csv").exists()
 
 

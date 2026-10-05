@@ -18,6 +18,8 @@ Rails pinned here (one section each):
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 import inspect
 from pathlib import Path
 
@@ -25,7 +27,6 @@ import pytest
 
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
 
-from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology as PH  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
@@ -146,9 +147,9 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
     registry = cr.SubjectRegistry(subjects=(cr.Subject(name="bud", attributes=(opening,)),))
 
     def bucket(date: str, stem: str, values: list[str]):
-        return published(tmp_path, tmp_path / "ds" / "predictions" / "run" / date,
-                         [predicted(stem, values, (opening,))], scope={"subject": "bud"},
-                         registry=registry)
+        image = tmp_path / "ds" / "images" / date / f"{stem}.png"
+        return published(tmp_path, f"run/{date}", [predicted(image, values, (opening,))],
+                         scope={"subject": "bud"}, registry=registry)
 
     buckets = {"2026-02-11": bucket("2026-02-11", "P1_a", ["closed", "closed", "closed", "open"]),
                "2026-03-09": bucket("2026-03-09", "P1_b", ["open", "open", "open", "closed"])}
@@ -263,20 +264,19 @@ def test_golden_evaluate_model_resolves_diagnostic_max_dets_when_unset(tmp_path,
         runners.run_test_evaluation = _fake_diagnostic
 
         from PIL import Image
-        from tcip_annotation import json_io
         from tcip_annotation.state import Annotation, BBox
 
+        from tests._producer_fixtures import label_image
+
         tmp = tmp_path
-        images_dir, labels_dir = tmp / "images", tmp / "labels"
-        images_dir.mkdir()
-        labels_dir.mkdir()
+        images_dir = tmp / "images" / UNDATED_BUCKET
+        images_dir.mkdir(parents=True)
         Image.new("RGB", (64, 64)).save(images_dir / "a.png")
-        json_io.write_annotations(str(labels_dir / "a.json"),
-                                  [Annotation(subject="bud", geometry=BBox(5, 5, 20, 20))],
-                                  64, 64)
+        label_image(images_dir / "a.png", [Annotation(subject="bud", geometry=BBox(5, 5, 20, 20))],
+                    64, 64)
         ckpt = foreign_checkpoint(tmp)
 
-        TT.evaluate_model(tmp, str(ckpt), str(images_dir), str(labels_dir))
+        TT.evaluate_model(tmp, str(ckpt), str(images_dir))
     finally:
         runners.run_test_evaluation = orig_diag
 
@@ -295,14 +295,15 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
     from tcip_mcp.tools import training_tools as TT
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
+    from tests._producer_fixtures import label_image
+
     def _dataset(root):
-        images_dir, labels_dir = root / "images", root / "labels"
+        images_dir = root / "images" / UNDATED_BUCKET
         images_dir.mkdir(parents=True)
-        labels_dir.mkdir(parents=True)
         Image.new("RGB", (64, 64), color=(120, 120, 120)).save(images_dir / "a.png")
-        json_io.write_annotations(str(labels_dir / "a.json"),
-                                  [Annotation(subject="bud", geometry=BBox(5, 5, 20, 20))], 64, 64)
-        return images_dir, labels_dir
+        label_image(images_dir / "a.png", [Annotation(subject="bud", geometry=BBox(5, 5, 20, 20))],
+                    64, 64)
+        return images_dir
 
     from PIL import Image
 
@@ -328,8 +329,7 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
     # model/predictor stubs below go in, so the fixture's own checkpoint save is never stubbed.
     def _prepare(root_name, name):
         root = tmp_path / root_name
-        images_dir, labels_dir = _dataset(root)
-        return images_dir, labels_dir, foreign_checkpoint(tmp_path, name=name)
+        return _dataset(root), foreign_checkpoint(tmp_path, name=name)
 
     tile_ds = _prepare("tile", "conf-tile-level")
     single_ds = _prepare("single", "conf-single-pass")
@@ -341,8 +341,8 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
     monkeypatch.setattr(predictor_mod, "GenericPredictor", lambda *a, **kw: _StubPredictor())
 
     def _run(dataset, **kw):
-        images_dir, labels_dir, ckpt = dataset
-        r = TT.evaluate_model(tmp_path, str(ckpt), str(images_dir), str(labels_dir), **kw)
+        images_dir, ckpt = dataset
+        r = TT.evaluate_model(tmp_path, str(ckpt), str(images_dir), **kw)
         assert "error" not in r, r
         return r
 

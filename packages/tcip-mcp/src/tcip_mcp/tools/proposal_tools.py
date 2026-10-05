@@ -3,15 +3,15 @@ canvas review.
 
 propose_annotations asks a named engine (one registered, or a 'module:factory' the agent brings)
 to look at pixels and offer candidates. stage_proposals publishes either an engine's reviewed
-candidates or explicit boxes/polygons once as a proposal bucket in the predictions tree, refusing
-one already published, for a human to accept, reject or correct on the Annotate canvas. It never
-writes ground truth.
+candidates or explicit boxes/polygons once as a proposal bucket under the image's dataset root,
+refusing one already published, for a human to accept, reject or correct on the Annotate canvas.
+It never writes ground truth.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any
 
 import tcip_store as ts
 from pydantic import BaseModel, ConfigDict
@@ -45,36 +45,18 @@ class _StatedSubject(BaseModel):
     subject: str
 
 
-def proposal_staging_key(dataset_root: str | Path, date: str | None, stem: str) -> ts.Key:
+def proposal_staging_key(dataset_root: str | Path, capture: str, stem: str) -> ts.Key:
     """The candidates the latest proposal run produced for one dataset image, whole, under the
-    dataset root: ``date`` is the image's capture-date bucket, or ``None`` for a flat dataset's
-    undated layout, addressed under ``dataset_layout.UNDATED_BUCKET`` (so a flat-layout image and
-    an image in that literal bucket share one key for a given stem)."""
-    from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
-    return ts.Key(PROPOSAL_STAGING_STORE, str(dataset_root), (date or UNDATED_BUCKET, stem))
+    dataset root, by the image's capture and stem."""
+    return ts.Key(PROPOSAL_STAGING_STORE, str(dataset_root), (capture, stem))
 
 
-class StagingAddress(NamedTuple):
-    """The :func:`proposal_staging_key` for a dataset image, plus the dataset root and date
-    :func:`~tcip_mcp.dataset_layout.parse_image_path` derived to reach it.
-    """
-
-    key: ts.Key
-    root: Path
-    date: str | None
-
-
-def _staging_key_for(image_path: str) -> StagingAddress:
-    """The :class:`StagingAddress` for the dataset image at ``image_path``.
-
-    Raises ``ValueError``, the resolver's own message, for a path outside any dataset's ``images/``
-    tree.
-    """
+def _staging_key_for(image_path: str) -> ts.Key:
+    """The :func:`proposal_staging_key` of the dataset image at ``image_path``; ``ValueError``,
+    :func:`~tcip_mcp.dataset_layout.parse_image_path`'s own, for an image of no capture."""
     from tcip_mcp.dataset_layout import parse_image_path
 
-    root, date, stem = parse_image_path(image_path)
-    return StagingAddress(proposal_staging_key(root, date, stem), root, date)
+    return proposal_staging_key(*parse_image_path(image_path))
 
 
 def _unresolvable_staging_source(img: Path, exc: Exception) -> str:
@@ -272,7 +254,7 @@ def propose_annotations(
         except ValueError:
             pass
         else:
-            ts.delete(stale.key)
+            ts.delete(stale)
         return {
             "image_path": None,
             "engine": engine,
@@ -325,7 +307,7 @@ def propose_annotations(
 
             identity = content_identity(source)
             envelope["image_identity"] = dataclasses.asdict(identity)
-            ts.replace(address.key, envelope)
+            ts.replace(address, envelope)
             staged = True
             stage_note = ""
 
@@ -350,7 +332,7 @@ def propose_annotations(
     }
 
 
-def _stage_assignments_regime(project: Path, image_path: str, img: Path, address: StagingAddress,
+def _stage_assignments_regime(project: Path, image_path: str, img: Path, address: ts.Key,
                                assignments: list[dict]) -> dict:
     """Stage the candidates ``assignments`` names, each with its subject, from the record staged
     at ``address`` for ``img``; refuses when that record is absent or the image's content no
@@ -361,7 +343,7 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
         return {"error": str(exc)}
 
     # Load cached proposals from the same record propose_annotations staged them in.
-    envelope = ts.read(address.key, default=None)
+    envelope = ts.read(address, default=None)
     if envelope is None:
         return {"error": f"No proposals found for {img.stem}. Run propose_annotations first."}
 
@@ -404,9 +386,9 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
 
     # Model output for a human to accept on the Annotate canvas, never written straight to ground truth.
     try:
-        path = _stage_document(project, address, engine, img, annotations=proposals,
-                               img_w=w, img_h=h)
-    except (FileExistsError, ValueError) as exc:
+        bucket = _stage_document(project, address, engine, img, annotations=proposals,
+                                 img_w=w, img_h=h)
+    except ValueError as exc:
         return {"error": str(exc)}
 
     # Render final result for QA
@@ -424,40 +406,37 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
     return {
         "image_path": out,
         "engine": engine,
-        "path": path,
+        "bucket": bucket,
         "summary": note,
         "proposal_count": n_poly,
     }
 
 
-def _stage_document(project: Path, address: StagingAddress, producer: str, image: Path, *,
+def _stage_document(project: Path, address: ts.Key, producer: str, image: Path, *,
                     annotations: list[Annotation], img_w: int, img_h: int) -> str | None:
-    """Publish ``annotations`` as the bucket of one staged proposal for ``image``, at
-    ``predictions/<producer>/[<date>/]<stem>/`` (:func:`~tcip_mcp.buckets.publish`), its record
-    naming ``producer`` as what proposed them, and return its document's path; no annotations
-    publishes nothing and returns ``None``. The document is encoded before anything is created,
-    so a reserved stem refuses (``ValueError``) leaving nothing; a bucket already there refuses
-    (:class:`~tcip_mcp.buckets.BucketExists`)."""
+    """Publish ``annotations`` as the bucket of one staged proposal for ``image``, named
+    ``<producer>/<capture>/<stem>`` under the image's dataset root (both read off the image's
+    staging key ``address``)
+    (:func:`~tcip_mcp.buckets.publish`), its record naming ``producer`` as what proposed them, and
+    return the bucket's name; no annotations publishes nothing and returns ``None``. A bucket of
+    that name already published refuses (:class:`~tcip_mcp.buckets.BucketExists`)."""
     from tcip_annotation import json_io
 
     from tcip_mcp.buckets import Document, publish
-    from tcip_mcp.dataset_layout import prediction_root
     from tcip_mcp.pipelines.data.selection import ClassScope
 
     if not annotations:
         return None
-    _path, data = json_io.encode_annotations(image, annotations, img_w, img_h)
+    data = json_io.document_payload(annotations, img_w, img_h)
     assert data is not None, "a non-empty proposal encodes a document"
-    out = prediction_root(address.root).joinpath(
-        producer, *([address.date] if address.date else []), image.stem)
-    bucket = publish(project, out, [Document(str(image), data)],
-                     producer={"proposed_by": producer},
-                     scope=ClassScope(), execution=None, raster_path=None, raster_identity=None,
-                     assessment_id=None, actor=None)
-    return str(bucket.document(image))
+    name = "/".join([producer, *address.parts])
+    return publish(project, Path(address.root), name, [Document(str(image), data)],
+                   producer={"proposed_by": producer},
+                   scope=ClassScope(), execution=None, raster_path=None, raster_identity=None,
+                   assessment_id=None, actor=None).name
 
 
-def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: StagingAddress,
+def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: ts.Key,
                            model_name: str, boxes: list[dict], polygons: list[dict]) -> dict:
     """Stage explicit boxes and polygons, each carrying a ``subject``, as one staged proposal of
     ``model_name`` for the image (:func:`_stage_document`)."""
@@ -569,13 +548,13 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: S
     proposals: list[Annotation] = box_proposals + polygon_proposals
 
     try:
-        path = _stage_document(project, address, model_name, img, annotations=proposals,
-                               img_w=img_w, img_h=img_h)
-    except (FileExistsError, ValueError) as exc:
+        bucket = _stage_document(project, address, model_name, img, annotations=proposals,
+                                 img_w=img_w, img_h=img_h)
+    except ValueError as exc:
         return {"error": str(exc)}
 
-    note = ("staged to predictions/ for canvas review, not committed as ground truth; the human "
-            "accepts each proposal on the Annotate tab before it becomes GT "
+    note = ("staged as a prediction bucket for canvas review, not committed as ground truth; the "
+            "human accepts each proposal on the Annotate tab before it becomes GT "
             "(focus_human_attention tab='annotate' to send them). It is never promoted to a "
             "reference.")
 
@@ -583,7 +562,7 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: S
         "staged": len(proposals),
         "n_detect": len(box_proposals), "n_segment": len(polygon_proposals),
         "dropped_boxes": dropped_boxes,
-        "path": path, "model_name": model_name, "date": address.date, "stem": img.stem,
+        "bucket": bucket, "model_name": model_name, "date": address.parts[0], "stem": img.stem,
         "note": note,
     }
 
@@ -619,8 +598,8 @@ def stage_proposals(
       same ``Polygon`` through the ground-truth door's own vertex parser.
 
     Either regime resolves the dataset root, capture date and stem from ``image_path`` itself, and
-    publishes the image's proposal once as its own bucket at
-    ``predictions/<producer>/<date>/<stem>/``, its record naming the engine or ``model_name`` as
+    publishes the image's proposal once as its own bucket named ``<producer>/<date>/<stem>`` under
+    that root, returned as ``bucket``, its record naming the engine or ``model_name`` as
     what proposed it and no checkpoint, execution record or class scope: a proposal already staged
     for the image under the same producer refuses, so a re-run never overwrites reviewed
     predictions or orphans their verdicts, and no delivery ships one. Pair with

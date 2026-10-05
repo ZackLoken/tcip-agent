@@ -17,6 +17,8 @@ coverage.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 import pytest
@@ -24,11 +26,11 @@ import pytest
 pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
     auto_train_val, partition_samples,
 )
+from tests._producer_fixtures import label_image  # noqa: E402
 from tests._verified_checkpoint_fixtures import partition_side as recorded_side  # noqa: E402
 
 IMG = 64
@@ -53,19 +55,15 @@ def _target_geometry(task: str):
     return BBox(10.0, 10.0, 30.0, 30.0)
 
 
-def _labeled(root: Path, stems, *, task: str = "detection") -> tuple[Path, Path]:
+def _labeled(root: Path, stems, *, task: str = "detection") -> Path:
     """One labeled directory: an image and a per-image label document per stem, each carrying the
-    geometry ``task``'s own loader reads."""
-    images_dir, labels_dir = root / "images", root / "labels"
-    labels_dir.mkdir(parents=True, exist_ok=True)
+    geometry ``task``'s own loader reads; the image directory."""
+    images_dir = root / "images" / UNDATED_BUCKET
     for stem in stems:
         _image(images_dir / f"{stem}.png")
-        json_io.write_annotations(
-            str(labels_dir / f"{stem}.json"),
-            [Annotation(subject=SUBJECT, geometry=_target_geometry(task))],
-            IMG, IMG, keep_empty=True,
-        )
-    return images_dir, labels_dir
+        label_image(images_dir / f"{stem}.png",
+                    [Annotation(subject=SUBJECT, geometry=_target_geometry(task))], IMG, IMG)
+    return images_dir
 
 
 def _one_target(ds, task: str) -> None:
@@ -81,19 +79,18 @@ def _one_target(ds, task: str) -> None:
         assert int(target["masks"].sum()) > 0
 
 
-def _big_source(root: Path, stem: str, width: int, height: int) -> tuple[Path, Path]:
-    """One source large enough to hold a within-image spatial split, with GT across its extent."""
+def _big_source(root: Path, stem: str, width: int, height: int) -> Path:
+    """One source large enough to hold a within-image spatial split, with GT across its extent;
+    the image directory."""
     from PIL import Image
 
-    images_dir, labels_dir = root / "images", root / "labels"
+    images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (width, height), color=(70, 90, 60)).save(images_dir / f"{stem}.png")
     boxes = [Annotation(subject=SUBJECT, geometry=BBox(x, y, x + 20, y + 20))
              for x in range(20, width - 20, 200) for y in range(20, height - 20, 200)]
-    json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, width, height,
-                              keep_empty=True)
-    return images_dir, labels_dir
+    label_image(images_dir / f"{stem}.png", boxes, width, height)
+    return images_dir
 
 
 def _membership(ds) -> set[str]:
@@ -127,9 +124,9 @@ def _recorded(project: Path, task: str, data_cfg: dict) -> dict:
 @pytest.mark.parametrize("task", GEOMETRY_TASKS)
 def test_the_drawn_route_loaders_name_their_own_samples(tmp_path: Path, task: str):
     stems = [f"src{i}_0_0" for i in range(4)]
-    images_dir, labels_dir = _labeled(tmp_path / "ds", stems, task=task)
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "scope": {"subject": SUBJECT}, "auto_val": True, "split": {"val_ratio": 0.5, "seed": 1}}
+    images_dir = _labeled(tmp_path / "ds", stems, task=task)
+    data_cfg = {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}, "auto_val": True,
+                "split": {"val_ratio": 0.5, "seed": 1}}
 
     train_ds, val_ds, partition = auto_train_val(tmp_path, task, data_cfg, None)
 
@@ -143,9 +140,8 @@ def test_the_drawn_route_loaders_name_their_own_samples(tmp_path: Path, task: st
 @pytest.mark.parametrize("task", GEOMETRY_TASKS)
 def test_auto_val_off_trains_on_every_admitted_sample_and_records_them(tmp_path: Path, task: str):
     stems = ["a_0_0", "b_0_0", "c_0_0"]
-    images_dir, labels_dir = _labeled(tmp_path / "ds", stems, task=task)
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "scope": {"subject": SUBJECT}, "auto_val": False}
+    images_dir = _labeled(tmp_path / "ds", stems, task=task)
+    data_cfg = {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}, "auto_val": False}
     record = _recorded(tmp_path, task, data_cfg)
 
     train_ds, val_ds, partition = auto_train_val(tmp_path, task, data_cfg, None)
@@ -163,11 +159,11 @@ def test_a_starved_draw_refuses_by_the_draws_own_floor(tmp_path: Path, task: str
     """A group policy that collapses every sample into one group leaves no side to hold out, so
     the run refuses naming the floor rather than training without validation."""
     stems = ["a_0_0", "b_0_0"]
-    images_dir, labels_dir = _labeled(tmp_path / "ds", stems, task=task)
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "scope": {"subject": SUBJECT}, "auto_val": True,
+    images_dir = _labeled(tmp_path / "ds", stems, task=task)
+    data_cfg = {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}, "auto_val": True,
                 "split": {"val_ratio": 0.5, "seed": 1,
-                          "group_key_map": {s: "one_group" for s in stems}}}
+                          "group_key_map": {f"{UNDATED_BUCKET}/{s}": "one_group"
+                                            for s in stems}}}
 
     with pytest.raises(ValueError, match="fewer than the 2 the requested sides need"):
         auto_train_val(tmp_path, task, data_cfg, None)
@@ -181,10 +177,9 @@ def test_one_tiled_source_still_splits_spatially_over_its_own_samples(tmp_path: 
     Detection alone: tiling wraps the detection loader, and no other task reaches this route.
     """
     stem = "mosaic"
-    images_dir, labels_dir = _big_source(tmp_path / "ds", stem, 4000, 3000)
+    images_dir = _big_source(tmp_path / "ds", stem, 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir),
-        "scope": {"subject": SUBJECT},
+        "images_dir": str(images_dir), "scope": {"subject": SUBJECT},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
@@ -208,20 +203,20 @@ def test_the_train_only_and_drawn_routes_record_one_directory_the_same_way(tmp_p
     directory holds, where it is, or what each member's ground truth digests to now.
     """
     stems = ["a_0_0", "b_0_0", "c_0_0", "d_0_0"]
-    images_dir, labels_dir = _labeled(tmp_path / "train_ds", stems)
+    images_dir = _labeled(tmp_path / "train_ds", stems)
 
-    whole_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "scope": {"subject": SUBJECT}, "auto_val": False}
+    whole_cfg = {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}, "auto_val": False}
     whole = _recorded(tmp_path, "detection", whole_cfg)
 
-    drawn_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "scope": {"subject": SUBJECT}, "auto_val": True, "split": {"val_ratio": 0.5, "seed": 1}}
+    drawn_cfg = {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}, "auto_val": True,
+                 "split": {"val_ratio": 0.5, "seed": 1}}
     drawn = _recorded(tmp_path, "detection", drawn_cfg)
 
     def _held(record: dict) -> list[tuple]:
-        return sorted((s.member, s.source, s.ground_truth) for s in partition_samples(record))
+        return sorted((s.member, s.source, s.ground_truth, s.ground_truth_digest)
+                      for s in partition_samples(record))
 
     assert _held(whole) == _held(drawn)
     assert len(_held(whole)) == len(stems)
-    assert whole["ground_truth_digests"] == drawn["ground_truth_digests"]
+    assert all(digest for *_, digest in _held(whole))
     assert recorded_side(whole, "val") == [] and recorded_side(drawn, "val") != []

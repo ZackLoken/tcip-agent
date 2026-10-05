@@ -7,11 +7,11 @@ returned. --project is required, since the artifact and the audit line land unde
 Usage:
     tcip visualize --source annotations --path <image.jpg> \
         --project <project> [--task detect] [--class-names fruit,shoot] \
-        [--conf-threshold <default>] [--iou-threshold 0.5] [--n 16]
+        [--conf-threshold <default>] [--iou-threshold 0.5] [--n 16] [--bucket <name>]
 
 --source is one of 'annotations' (path = image file), 'predictions' (path = image file),
-'comparison' (path = image file), or 'dataset' (path = dataset folder containing images/ and
-labels/, tiles --n random annotated samples into a grid).
+'comparison' (path = image file), or 'dataset' (path = dataset root folder containing images/,
+tiles --n random annotated samples into a grid).
 """
 
 from __future__ import annotations
@@ -43,9 +43,10 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                         help="IoU threshold for a positive match (source=comparison only).")
     parser.add_argument("--n", type=int, default=16,
                         help="Number of samples in the grid (source=dataset only).")
-    parser.add_argument("--predictions-dir", default="",
-                        help="The published bucket whose predictions to render (required for "
-                             "source=predictions and comparison).")
+    parser.add_argument("--bucket", default="",
+                        help="The name of the bucket, published under the image's dataset root, "
+                             "whose predictions to render (required for source=predictions and "
+                             "comparison).")
     args = parser.parse_args(argv)
 
     project = bound_project(args.project)
@@ -55,7 +56,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     stated = {} if args.conf_threshold is None else {"conf_threshold": args.conf_threshold}
     result = visualize(
         project, args.source, args.path, task=args.task, class_names=args.class_names,
-        iou_threshold=args.iou_threshold, n=args.n, predictions_dir=args.predictions_dir,
+        iou_threshold=args.iou_threshold, n=args.n, bucket=args.bucket,
         **stated)
     print(json.dumps(result, indent=2))
     return 1 if "error" in result else 0

@@ -8,6 +8,8 @@ read the result back, including through the geometric disjointness check that co
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 import pytest
@@ -15,31 +17,29 @@ import pytest
 pytest.importorskip("torchvision")
 
 
-def _single_source_mosaic(root: Path, width: int = 4000, height: int = 3000) -> tuple[Path, Path, str]:
+def _single_source_mosaic(root: Path, width: int = 4000, height: int = 3000) -> tuple[Path, str]:
     """One large detection source with GT spread across its full extent, the shape that resolves
-    to the single-source spatial-strip split."""
+    to the single-source spatial-strip split; its image directory and stem."""
     from PIL import Image
 
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir, labels_dir = root / "images", root / "labels"
+    from tests._producer_fixtures import label_image
+
+    images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
     stem = "mosaic"
     Image.new("RGB", (width, height), color=(70, 90, 60)).save(images_dir / f"{stem}.png")
     boxes = [Annotation(subject="bud", geometry=BBox(x, y, x + 20, y + 20))
              for x in range(20, width - 20, 200) for y in range(20, height - 20, 200)]
-    json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, width, height,
-                              keep_empty=True)
-    return images_dir, labels_dir, stem
+    label_image(images_dir / f"{stem}.png", boxes, width, height)
+    return images_dir, stem
 
 
-def _data_cfg(images_dir: Path, labels_dir: Path, **split) -> dict:
+def _data_cfg(images_dir: Path, **split) -> dict:
     cfg = {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1}
     cfg.update(split)
-    return {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-            "scope": {"subject": "bud"},
+    return {"images_dir": str(images_dir), "scope": {"subject": "bud"},
             "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
             "split": cfg}
 
@@ -60,8 +60,8 @@ def test_spatial_split_records_val_membership_from_the_val_side(tmp_path: Path) 
     """The recorded val membership is the validation side's own strip identities. Train and val
     held different regions, so the record must show different, non-overlapping members: a metric
     reconstructed from a manifest claiming both sides held the same units is unreproducible."""
-    images_dir, labels_dir, _ = _single_source_mosaic(tmp_path / "ds")
-    data_cfg = _data_cfg(images_dir, labels_dir)
+    images_dir, _ = _single_source_mosaic(tmp_path / "ds")
+    data_cfg = _data_cfg(images_dir)
 
     split = _persisted_split(tmp_path, "exp_membership", data_cfg)
 
@@ -85,8 +85,8 @@ def test_persisted_calibration_region_is_reserved_away_from_train(tmp_path: Path
     from tcip_mcp.pipelines.raster_source import rects_overlap
     from tcip_mcp.pipelines.operating_point import spatial_disjointness
 
-    images_dir, labels_dir, _stem = _single_source_mosaic(tmp_path / "ds")
-    data_cfg = _data_cfg(images_dir, labels_dir, val_ratio=0.2, test_ratio=0.1,
+    images_dir, _stem = _single_source_mosaic(tmp_path / "ds")
+    data_cfg = _data_cfg(images_dir, val_ratio=0.2, test_ratio=0.1,
                          reserve_calibration_fraction=0.15)
 
     split = _persisted_split(tmp_path, "exp_reserved_cal", data_cfg)

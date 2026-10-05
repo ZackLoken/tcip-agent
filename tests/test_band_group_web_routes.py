@@ -211,21 +211,21 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     _write_group(images_dir, "cap_001")
-    out_dir = tmp_path / "out"
     ckpt = foreign_checkpoint(tmp_path)
 
-    from tcip_mcp.pipelines.image_utils import logical_image_name
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.pipelines.image_utils import display_source_path
     from tests._predictor_fixtures import StubPredictor, install
 
     seen = []
 
     class ObservingPredictor(StubPredictor):
-        """The stub's empty prediction, named by each source's logical image name, recording
-        every source it is handed."""
+        """The stub's empty prediction, named by each source's display path as the real predictor
+        names it, recording every source it is handed."""
 
         def predict_batch(self, paths, execution=None, **kw):
             seen.extend(paths)
-            return [{**result, "image": logical_image_name(p)}
+            return [{**result, "image": display_source_path(p)}
                     for p, result in zip(paths, super().predict_batch(paths, execution, **kw))]
 
     install(monkeypatch, ObservingPredictor(width=20, height=24, boxes=(), scores=(),
@@ -233,12 +233,12 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
 
     job = InferenceJob(
         job_id="t2", actor="user:tester", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), project=str(tmp_path), stated=Stated(
+        dataset_root=str(tmp_path), bucket="out", project=str(tmp_path), stated=Stated(
             tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nms"),
     )
     _worker(job)
 
-    assert job.status == "completed"
+    assert job.status == "completed", job.error
     assert job.done == 1 and job.total == 1
     assert len(seen) == 1 and isinstance(seen[0], BandGroupRef) and seen[0].stem == "cap_001"
-    assert (out_dir / "cap_001.json").is_file()
+    assert read_bucket(tmp_path, "out").documents == {"cap_001": "cap_001.bandgroup"}

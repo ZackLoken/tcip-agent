@@ -54,26 +54,21 @@ def _evidence_roots(root: Path) -> list[Path]:
     return [root, *(dataset_entry_path(root, e) for e in entries)]
 
 
-def _belonging(root: Path, *paths: Optional[str]) -> list[Optional[Path]]:
-    """Confine evidence paths to the open project: its tree or a dataset registered to it.
+def _is_root(resolved: Path, root: Path) -> bool:
+    """Whether ``resolved`` is ``root`` itself."""
+    return resolved == root.resolve()
 
-    Resolved paths come back in the order given (``None`` for an omitted one), and every later read
-    uses them. A path inside the managed allow-set but outside this project's own set refuses,
-    naming the project and the roots it checked.
-    """
+
+def _belonging(root: Path, path: str, admits=within) -> Path:
+    """``path`` resolved, when ``admits`` it against the open project or a dataset registered to
+    it (by default, at or under one); any other path refuses (403), naming the roots checked."""
     roots = _evidence_roots(root)
-    out: list[Optional[Path]] = []
-    for p in paths:
-        if not p:
-            out.append(None)
-            continue
-        resolved = resolved_path(p)
-        if not any(within(resolved, r) for r in roots):
-            raise HTTPException(
-                403, f"{p} does not belong to project {root}: it is under neither the project "
-                     f"nor a dataset registered to it ({', '.join(str(r) for r in roots)})")
-        out.append(resolved)
-    return out
+    resolved = resolved_path(path)
+    if not any(admits(resolved, r) for r in roots):
+        raise HTTPException(
+            403, f"{path} does not belong to project {root}, whose own roots are the project and "
+                 f"the datasets registered to it ({', '.join(str(r) for r in roots)})")
+    return resolved
 
 
 # ── Plant mapping ──────────────────────────────────────────────────────
@@ -81,7 +76,7 @@ def _belonging(root: Path, *paths: Optional[str]) -> list[Optional[Path]]:
 
 class BuildMappingPayload(BaseModel):
     name: str
-    images_root: str
+    images_root: str = Field(min_length=1)
     plant_registry: str
     dates: Optional[list[str]] = None
     nn_tolerance_m: Optional[float] = None
@@ -105,10 +100,10 @@ def build_plant_mapping(payload: BuildMappingPayload) -> dict:
 
     person = actor(payload.user)
     root = store.open_root()
-    [images_root] = _belonging(root, payload.images_root)
+    images_root = _belonging(root, payload.images_root)
     try:
         return plant_mapping.build_plant_mapping(
-            root, payload.name, images_root or "", payload.plant_registry, dates=payload.dates,
+            root, payload.name, images_root, payload.plant_registry, dates=payload.dates,
             nn_tolerance_m=payload.nn_tolerance_m, supersede=payload.supersede,
             actor=person).served()
     except plant_mapping.PlantRegistryNotFound as exc:
@@ -162,7 +157,8 @@ class PhenologyInputs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mapping_name: str  # a name persisted under the open project's own plant-mapping store
-    # The published bucket of each delivered date; each stands for the date its record states.
+    dataset_root: str  # the project or a dataset registered to it, the buckets' root
+    # The name of the published bucket of each delivered date; each stands for its record's date.
     buckets: list[str]
     trait: str
     # The population: the plant ids this measurement is for, one row each, never every mapped plot.
@@ -186,11 +182,11 @@ def _measure(payload: PhenologyInputs) -> "PhenologyMeasurement":
     from tcip_mcp.traits import TraitUnknownError
 
     root = store.open_root()
-    resolved = _belonging(root, *payload.buckets)
+    dataset_root = _belonging(root, payload.dataset_root, _is_root)
     try:
         return phenology.measure_phenology(
             root, trait=payload.trait, mapping_name=payload.mapping_name,
-            buckets=[p for p in resolved if p is not None], plants=payload.plants,
+            dataset_root=dataset_root, buckets=payload.buckets, plants=payload.plants,
             require_all_dates_complete=payload.require_all_dates_complete)
     except OperationalizationRefused as exc:
         raise HTTPException(400, exc.as_detail()) from exc
@@ -344,7 +340,8 @@ class PerImageCountDelivery(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["per_image_count"]
-    predictions_dir: str = Field(min_length=1)
+    dataset_root: str = Field(min_length=1)
+    bucket: str = Field(min_length=1)
     trait: str = Field(min_length=1)
 
 
@@ -358,7 +355,8 @@ class OrthomosaicPlantCountsDelivery(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["orthomosaic_plant_counts"]
-    predictions_dir: str = Field(min_length=1)
+    dataset_root: str = Field(min_length=1)
+    bucket: str = Field(min_length=1)
     plant_registry: str
     delivered_phenotype: str
     plants: list[str]
@@ -408,15 +406,14 @@ def export_count_csv(payload: ExportCountCsvPayload, request: Request) -> Respon
     root = store.open_root()
     saved_path = root / "results_export" / Path(payload.filename).name
     delivery = payload.delivery
-    (predictions_dir,) = _belonging(root, delivery.predictions_dir)
-    assert predictions_dir is not None, "the payload requires a non-empty predictions_dir"
+    dataset_root = _belonging(root, delivery.dataset_root, _is_root)
     acknowledgment_id = _recorded_acknowledgment(payload, person, request)
     try:
         if delivery.kind == "per_image_count":
             from tcip_mcp.pipelines.postprocessing.export import deliver_per_image_counts_csv
 
             result = deliver_per_image_counts_csv(
-                root, predictions_dir, str(saved_path), trait=delivery.trait,
+                root, dataset_root, delivery.bucket, str(saved_path), trait=delivery.trait,
                 acknowledgment_id=acknowledgment_id, door="results.export_count_csv",
                 actor=person)
         else:
@@ -427,7 +424,7 @@ def export_count_csv(payload: ExportCountCsvPayload, request: Request) -> Respon
             from tcip_mcp.tools.orthomosaic_tools import orthomosaic_plant_counts
 
             result = orthomosaic_plant_counts(
-                root, str(predictions_dir), registry_record, str(saved_path),
+                root, str(dataset_root), delivery.bucket, registry_record, str(saved_path),
                 delivery.delivered_phenotype, delivery.plants, crop=delivery.crop,
                 pipeline_version=delivery.pipeline_version,
                 canopy_subject=delivery.canopy_subject, acknowledgment_id=acknowledgment_id,

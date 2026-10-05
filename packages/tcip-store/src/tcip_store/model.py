@@ -20,20 +20,20 @@ _open_transaction = threading.local()
 
 
 def refuse_inside_transaction(operation: str) -> None:
-    """Refuse (``TransactionMisuse``) ``operation`` while this thread holds a transaction, over
-    records and logs or over files, since it would commit apart from it."""
+    """Refuse (``TransactionMisuse``) ``operation`` while this thread holds a transaction, since
+    it would commit apart from it: a record or log write, or a file write."""
     if getattr(_open_transaction, "held", False):
         raise TransactionMisuse(
             f"{operation} is not allowed inside an open transaction: use the transaction's own "
-            "operations on the keys or files it names, name every key in one transaction(a, b) "
-            "rather than nesting, and keep record and file writes in separate transactions"
+            "operations on the keys it names, name every key in one transaction(a, b) rather "
+            "than nesting, and write a file only once the transaction has committed"
         )
 
 
 @contextmanager
 def held_transaction() -> Generator[None]:
     """Mark this thread as holding a transaction for the body. Refuses (``TransactionMisuse``) a
-    second one on the same thread, whether over records and logs or over files."""
+    second one on the same thread."""
     refuse_inside_transaction("a second transaction")
     _open_transaction.held = True
     try:

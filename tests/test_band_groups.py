@@ -273,8 +273,7 @@ def test_a_colliding_group_id_with_no_identity_signal_at_all_is_refused(tmp_path
 
 
 def test_a_genuine_capture_with_identity_tags_still_forms_normally(tmp_path):
-    """A rail must admit valid work: 4 files sharing a group id and agreeing timestamp/GPS (a
-    real single capture) must still form, not be caught by the new guard."""
+    """4 files sharing a group id and agreeing timestamp/GPS (one capture) form a group."""
     from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
 
     d = tmp_path / "images"
@@ -295,34 +294,6 @@ def test_a_genuine_capture_with_identity_tags_still_forms_normally(tmp_path):
     assert sorted(result["formed"][0]["bands"]) == ["Green", "NIR", "Red", "RedEdge"]
 
 
-def test_a_group_whose_canonical_stem_is_reserved_is_not_written(tmp_path):
-    """A group whose siblings' common prefix names a bucket's own provenance stamp is not written
-    as a manifest: minting a logical image under that stem would make its label indistinguishable
-    from the stamp everywhere a prediction bucket is walked. The members stay standalone files."""
-    from tcip_annotation.json_io import BUCKET_RECORD, is_reserved_stem
-    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
-
-    reserved = Path(BUCKET_RECORD).stem
-    assert is_reserved_stem(reserved)
-    d = tmp_path / "images"
-    d.mkdir()
-    gid = "reserved-stem-capture"
-    for band_name, wl, filename in (
-        ("Green", 560, f"{reserved}_G.tif"), ("NIR", 860, f"{reserved}_NIR.tif"),
-    ):
-        _write_band_file_with_identity(
-            d / filename, gid, band_name, wl,
-            utc="2023-05-23T17:06:28.931664", lat=43.196946355, lon=-90.058003633,
-        )
-
-    result = detect_and_write_band_groups(d)
-    assert result["formed"] == []
-    assert not list(d.glob("*.bandgroup"))
-    assert len(result["reserved_name_skips"]) == 1
-    assert result["reserved_name_skips"][0]["stem"] == reserved
-    assert sorted(d.iterdir()) == sorted([d / f"{reserved}_G.tif", d / f"{reserved}_NIR.tif"])
-
-
 def test_no_metadata_and_no_manifest_leaves_files_independent(tmp_path):
     """Refuse, don't guess: a file with no embedded correlation metadata and no explicit
     manifest stays exactly as independent as it is today; no filename-pattern fallback."""
@@ -335,7 +306,7 @@ def test_no_metadata_and_no_manifest_leaves_files_independent(tmp_path):
     tifffile.imwrite(str(d / "plain_b.tif"), arr)
 
     result = detect_and_write_band_groups(d)
-    assert result == {"formed": [], "refused": [], "manifests": [], "reserved_name_skips": []}
+    assert result == {"formed": [], "refused": [], "manifests": []}
 
 
 def test_a_lone_file_with_a_group_id_forms_no_group(tmp_path):
@@ -395,9 +366,8 @@ def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(tm
 
 
 def test_explicit_group_id_equal_to_one_of_its_own_members_stem_forms(tmp_path):
-    """A rail must admit valid work: the ownership-aware inventory excludes a group's own
-    about-to-be-claimed members from the collision check, so a group_id matching one of them
-    forms cleanly rather than refusing against its own file."""
+    """A group_id equal to one of the group's own members' stems forms: the collision check
+    excludes the members the group claims."""
     from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
@@ -439,10 +409,8 @@ def test_two_explicit_group_ids_folding_to_one_key_form_one_and_refuse_the_other
 
 
 def test_a_group_that_claims_a_members_stem_lets_a_later_group_form_under_it(tmp_path):
-    """A rail must admit valid work: the first group's own claimed member (``y.tif``) leaves its
-    raw identity behind once the manifest is written, so a second group in the same pass whose
-    own stem equals that member's stem forms cleanly rather than refusing against a member the
-    first group already claims."""
+    """A second group in one pass whose stem equals a member the first group claims (``y.tif``)
+    forms: that member's raw identity is gone once the first manifest is written."""
     from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
@@ -560,8 +528,7 @@ def test_ingest_images_groups_real_dji_bucket(tmp_path, monkeypatch):
 
 
 def test_ingest_images_default_skips_band_group_detection(tmp_path, monkeypatch):
-    """A rail must admit valid work: a project with no multi-band capture pays nothing, and
-    detect_band_groups defaults False so an ordinary ingest is entirely unaffected."""
+    """``detect_band_groups`` defaults False: an ordinary ingest runs no band-group detection."""
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "workspace"))
     from PIL import Image
 
@@ -572,9 +539,7 @@ def test_ingest_images_default_skips_band_group_detection(tmp_path, monkeypatch)
     Image.new("RGB", (16, 16)).save(src / "a.jpg")
 
     manifest = ingest_images(tmp_path / "plain_proj_default", source=str(src))
-    assert manifest["band_groups"] == {
-        "formed": [], "refused": [], "manifests": [], "reserved_name_skips": [],
-    }
+    assert manifest["band_groups"] == {"formed": [], "refused": [], "manifests": []}
 
 
 def test_a_manifest_recorded_mid_detection_is_kept_rather_than_overwritten(tmp_path, monkeypatch):

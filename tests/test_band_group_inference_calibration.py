@@ -10,6 +10,8 @@ checkpoint's channel count is one property of the whole dataset, so a 2-band mod
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 import numpy as np
@@ -55,25 +57,24 @@ def _detection_checkpoint(tmp_path: Path) -> str:
     return str(ckpt)
 
 
-def _grouped_dataset(root: Path) -> tuple[Path, Path]:
-    """Two 2-band grouped captures, each with a ground-truth label."""
-    from tcip_annotation import json_io
+def _grouped_dataset(root: Path) -> Path:
+    """Two 2-band grouped captures, each with a ground-truth label document; their images
+    directory."""
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir = root / "images"
-    labels_dir = root / "labels"
+    from tests._producer_fixtures import label_image
+
+    images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
-    labels_dir.mkdir(parents=True)
 
     _write_group(images_dir, "capture_001", fill=(111, 222))
     _write_group(images_dir, "capture_002", fill=(50, 90))
 
     for stem in ("capture_001", "capture_002"):
-        json_io.write_annotations(
-            str(labels_dir / f"{stem}.json"),
-            [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], TILE, TILE, keep_empty=True,
-        )
-    return images_dir, labels_dir
+        label_image(images_dir / f"{stem}.bandgroup",
+                    [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], TILE, TILE,
+                    keep_empty=True)
+    return images_dir
 
 
 def test_the_assessments_records_over_grouped_samples_decode_each_capture(tmp_path, monkeypatch):
@@ -87,11 +88,11 @@ def test_the_assessments_records_over_grouped_samples_decode_each_capture(tmp_pa
     from tcip_mcp.pipelines.execution import Stated, prepare_pass
     from tests._producer_fixtures import samples_over
 
-    images_dir, labels_dir = _grouped_dataset(tmp_path)
+    images_dir = _grouped_dataset(tmp_path)
     checkpoint = load_registered_checkpoint(_detection_checkpoint(tmp_path), project=tmp_path)
     p = prepare_pass(checkpoint, Stated(tile=False, conf=0.0, max_dets=100, postprocess="nms"),
                      device="cpu", tile_batch_size=8)
-    samples = samples_over(images_dir, labels_dir, subject="bud")
+    samples = samples_over(images_dir, subject="bud")
 
     seen_sources = []
     real_open_raster = raster_source.open_raster
@@ -114,8 +115,8 @@ def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path):
     enumerating as its own."""
     from tests._verified_checkpoint_fixtures import predicted_over
 
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     _write_group(images_dir, "capture_001")
     ckpt = _detection_checkpoint(tmp_path)
 
@@ -132,7 +133,7 @@ def test_predict_batch_rejects_stringified_band_group_refs(tmp_path):
     from tcip_mcp.pipelines.execution import Stated, prepare_pass
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
-    images_dir, _labels_dir = _grouped_dataset(tmp_path)
+    images_dir = _grouped_dataset(tmp_path)
     checkpoint = load_registered_checkpoint(_detection_checkpoint(tmp_path), project=tmp_path)
     p = prepare_pass(checkpoint, Stated(tile=False, conf=0.0), device="cpu")
 

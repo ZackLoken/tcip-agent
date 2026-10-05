@@ -7,95 +7,51 @@ No torch, safe to import anywhere.
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 
 
-def _labels_term(annotations_root: Path) -> str | None:
-    """Whole-dataset label identity, composed from each label document's own
-    :func:`~tcip_mcp.pipelines.data.selection.ground_truth_digest` under its dir.
+def _labels_term(dataset_root: Path) -> str | None:
+    """Whole-dataset label identity, composed from each label document's capture, stem and
+    :func:`~tcip_mcp.pipelines.data.selection.ground_truth_digest`. ``None`` when the dataset
+    holds no label document."""
+    import tcip_store
 
-    Labels live at ``annotations/<date>/*.json`` (date-nested) or flat ``annotations/*.json``; the
-    per-dir digests are combined keyed by dir name. ``None`` when no labels exist anywhere.
-    """
-    if not annotations_root.is_dir():
-        return None
-    subdirs = sorted(d for d in annotations_root.iterdir() if d.is_dir())
-    flat = not subdirs
-    label_dirs = subdirs if subdirs else [annotations_root]
-    h = hashlib.sha256()
-    any_labels = False
-    from tcip_annotation.json_io import prediction_documents
+    from tcip_mcp.dataset_layout import LABEL_DOCUMENTS
     from tcip_mcp.pipelines.data.selection import ground_truth_digest
 
-    for d in label_dirs:
-        documents = prediction_documents(d)
-        if not documents:
-            continue
-        any_labels = True
-        # The flat root keys with "", which no real subdir name can be, so it never collides.
-        key = "" if flat else d.name
-        h.update(key.encode("utf-8"))
-        h.update(b"\0")
-        for document in documents:
-            h.update(f"{document.stem}\0{ground_truth_digest(document)}\0".encode("utf-8"))
-        h.update(b"\0")
-    return h.hexdigest()[:16] if any_labels else None
+    keys = tcip_store.keys(LABEL_DOCUMENTS, str(dataset_root.resolve()))
+    h = hashlib.sha256()
+    for key in keys:
+        h.update("\0".join((*key.parts, ground_truth_digest(key), "")).encode("utf-8"))
+    return h.hexdigest()[:16] if keys else None
 
 
-def _images_term(images_root: Path, cache_path: Path | None) -> str | None:
-    """Whole-dataset image identity from each image's raw file bytes (content, not name/size), so a
-    re-encode under the same filename changes identity; a ``.bandgroup`` manifest is hashed as its
-    own raw JSON bytes the same way, never decoded pixels. Each file's sha is cached by ``(relpath,
-    size, mtime_ns)`` so only changed files re-hash; a cache miss always hashes the bytes. ``None``
-    when there are no images (bespoke/imageless).
-    """
+def _images_term(images_root: Path) -> str | None:
+    """Whole-dataset image identity from each image file's byte digest
+    (:func:`~tcip_store.read_blob_versioned`), read from the bytes on every call; a
+    ``.bandgroup`` manifest digests as its own bytes. ``None`` when there are no images."""
     if not images_root.is_dir():
         return None
+    from tcip_store import read_blob_versioned
+
     from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
 
     files = sorted(p for p in images_root.rglob("*")
                    if p.is_file() and p.suffix.lower() in IMAGE_EXTS)
     if not files:
         return None
-    old: dict[str, str] = {}
-    if cache_path and cache_path.is_file():
-        try:
-            loaded = json.loads(cache_path.read_text(encoding="utf-8"))
-            old = loaded if isinstance(loaded, dict) else {}
-        except (OSError, ValueError):
-            old = {}
-    new: dict[str, str] = {}  # only current files -> the cache never grows unbounded
-    manifest: dict[str, str] = {}
-    for f in files:
-        rel = f.relative_to(images_root).as_posix()
-        st = f.stat()
-        key = f"{rel}\0{st.st_size}\0{st.st_mtime_ns}"
-        sha = old.get(key) or hashlib.sha256(f.read_bytes()).hexdigest()
-        new[key] = sha
-        manifest[rel] = sha
-    if cache_path and new != old:
-        try:
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(json.dumps(new), encoding="utf-8")
-        except OSError:
-            pass
     h = hashlib.sha256()
-    for rel in sorted(manifest):
-        h.update(rel.encode("utf-8"))
+    for f in files:
+        h.update(f.relative_to(images_root).as_posix().encode("utf-8"))
         h.update(b"\0")
-        h.update(manifest[rel].encode("utf-8"))
+        h.update(read_blob_versioned(f).version.token.encode("utf-8"))
         h.update(b"\0")
     return h.hexdigest()[:16]
 
 
 def _registry_term(dataset_root: Path) -> str:
-    """Digest over the canonical registry serialization in declared order (a value's id is its
-    position there). Serialized via ``registry_to_dict`` rather than raw bytes, so a
-    whitespace-only reformat of ``subjects.json`` does not change identity but a value
-    reorder/addition does. Empty string when the dataset has no registry; a registry
-    ``read_registry`` refuses raises as it does.
-    """
+    """Digest over the canonical registry serialization (``registry_to_dict``) in declared order;
+    empty when the dataset has no registry, and a registry ``read_registry`` refuses raises."""
     from tcip_annotation.json_io import canonical_digest
 
     from tcip_mcp.subject_registry import read_registry, registry_to_dict
@@ -107,23 +63,14 @@ def _registry_term(dataset_root: Path) -> str:
 
 
 def dataset_fingerprint(dataset_root: str | Path) -> str | None:
-    """Whole-dataset content identity: labels with their completion marks + image files +
-    registry.
-
-    The label term digests each label document's bytes, its completion marks included; the image
-    term hashes each file's raw bytes (walking ``image_utils.IMAGE_EXTS``, a ``.bandgroup``
-    manifest hashed as its own bytes); the registry term digests the canonical subject registry.
-    Content-addressed, so a moved dataset keeps its fingerprint and a change to any of the three
-    changes it. ``None`` for a dataset with no images or no labels (e.g. a bespoke
-    ``dataset_source``). Authority is recompute-on-read; a stored fingerprint (``dataset.json``)
-    is a cache.
-    """
-    from tcip_mcp.dataset_layout import annotation_root, image_root
-    from tcip_mcp.project_paths import project_state_dir
+    """Whole-dataset content identity over :func:`_labels_term`, :func:`_images_term` and
+    :func:`_registry_term`, so a moved dataset keeps its fingerprint and a change to any of the
+    three changes it. ``None`` for a dataset with no images or no labels."""
+    from tcip_mcp.dataset_layout import image_root
 
     root = Path(dataset_root)
-    labels = _labels_term(annotation_root(root))
-    images = _images_term(image_root(root), project_state_dir(root) / "image_hash_cache.json")
+    labels = _labels_term(root)
+    images = _images_term(image_root(root))
     if labels is None or images is None:
         return None
     h = hashlib.sha256()

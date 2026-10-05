@@ -69,11 +69,11 @@ def test_a_state_that_cannot_be_persisted_raises_and_is_not_held(tmp_path: Path,
 
 def test_a_reopened_project_holds_the_state_it_persisted(tmp_path: Path) -> None:
     project = new_project(tmp_path / "A")
-    (project / "ds").mkdir()
+    (project / "ds" / "images" / "undated").mkdir(parents=True)
     store = StateStore()
     asyncio.run(store.open_project(project))
-    asyncio.run(store.mutate({"active_tab": "results",
-                              "dataset": DatasetSelection(dataset_root=str(project / "ds"))}))
+    asyncio.run(store.mutate({"active_tab": "results", "dataset": DatasetSelection(
+        dataset_root=str(project / "ds"), date="undated")}))
 
     # A fresh store simulates a backend restart.
     restarted = StateStore()

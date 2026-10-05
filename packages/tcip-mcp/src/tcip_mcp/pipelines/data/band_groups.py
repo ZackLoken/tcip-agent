@@ -358,10 +358,6 @@ def detect_and_write_band_groups(
         tried first when given; the embedded-metadata table (strategy 1) runs over whatever
         candidates it leaves unclaimed. Files no strategy matches are left independent.
 
-    A group whose own stem (the siblings' common prefix) is reserved for a prediction bucket's
-    record (``tcip_annotation.json_io.is_reserved_stem``) is not written; its members stay
-    standalone files and the group is reported in ``"reserved_name_skips"``.
-
     A group whose ``image_utils.stem_collision_key`` (of the common-prefix stem, or the caller's
     ``group_id`` for an explicit group) is held by any identity in the bucket
     (``image_utils.bucket_logical_identities``) other than a manifest already recorded under this
@@ -369,16 +365,13 @@ def detect_and_write_band_groups(
     file, and writes no manifest. The identities are updated after each manifest this call writes,
     so a later group is checked against the bucket as it now stands.
 
-    Returns ``{"formed": [...], "refused": [...], "manifests": [...], "reserved_name_skips":
-    [...]}``.
+    Returns ``{"formed": [...], "refused": [...], "manifests": [...]}``.
     """
-    from tcip_annotation.json_io import is_reserved_stem
-
     from tcip_mcp.pipelines.image_utils import bucket_logical_identities, stem_collision_key
 
     d = Path(images_dir)
     if not d.is_dir():
-        return {"formed": [], "refused": [], "manifests": [], "reserved_name_skips": []}
+        return {"formed": [], "refused": [], "manifests": []}
 
     already_claimed: set[str] = set()
     for mp in sorted(d.glob(f"*{MANIFEST_EXT}")):
@@ -401,14 +394,8 @@ def detect_and_write_band_groups(
 
     formed: list[dict] = []
     manifests: list[str] = []
-    reserved_name_skips: list[dict] = []
     for group in (*explicit_found, *embedded_found):
         stem = group["stem"]
-        if is_reserved_stem(stem):
-            reserved_name_skips.append(
-                {"stem": stem, "bands": sorted(group["bands"]), "source": group["source"]}
-            )
-            continue
         key = stem_collision_key(stem)
         own_members = {p.name for p in group["bands"].values()}
         collision = next(
@@ -447,7 +434,4 @@ def detect_and_write_band_groups(
             else:
                 identities.pop(member_key, None)
 
-    return {
-        "formed": formed, "refused": refused, "manifests": manifests,
-        "reserved_name_skips": reserved_name_skips,
-    }
+    return {"formed": formed, "refused": refused, "manifests": manifests}

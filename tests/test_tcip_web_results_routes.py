@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv
 from io import StringIO
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote
 
 import pytest
@@ -61,6 +62,15 @@ def test_plant_mapping_build_requires_a_registered_dataset(
     )
     assert resp.status_code == 400
     assert "is not a dataset" in resp.json()["detail"]
+
+
+def test_plant_mapping_build_refuses_an_empty_images_root_as_malformed(
+    client: TestClient, opened_project: Path,
+) -> None:
+    """An empty ``images_root`` would resolve to the working directory; it is no root at all."""
+    resp = client.post("/api/results/plant_mapping/build", json={
+        "name": "valley", "images_root": "", "plant_registry": "unregistered", "user": "tester"})
+    assert resp.status_code == 422, resp.text[:300]
 
 
 def test_plant_mapping_load_of_an_unstored_name_answers_404_naming_it(
@@ -167,7 +177,7 @@ def test_an_acknowledged_export_ships_unvalidated_and_its_event_names_the_act(
     assert (event["acknowledgment"]["acknowledged_by"], event["acknowledgment"]["reason"]) == (
         "user:breeder", "a look before assessment")
     assert event["validated"] is False
-    lines = [e for root in (tmp_path, Path(event["buckets"][0]["path"]).parents[2])
+    lines = [e for root in {tmp_path, Path(event["buckets"][0]["dataset_root"])}
              for e in tcip_store.read_log(audit_log_key(root)).records
              if e["tool"] in ("delivery_acknowledged", "delivery_event")]
     assert sorted(e["tool"] for e in lines) == ["delivery_acknowledged", "delivery_event"]
@@ -315,17 +325,18 @@ def test_phenology_measurement_refuses_when_the_delivered_dataset_carries_no_reg
     from tests._chain_fixtures import predicted, published
 
     open_new_project(tmp_path)
-    bucket = published(tmp_path, tmp_path / "ds" / "predictions" / "live" / "2026-02-11",
-                       [predicted("PLANT_A", ["bud"])], scope={"subject": "bud"}).path
+    bucket = published(tmp_path, "live/2026-02-11",
+                       [predicted(tmp_path / "images" / "2026-02-11" / "PLANT_A.png", ["bud"])],
+                       scope={"subject": "bud"})
 
     resp = client.post("/api/results/phenology_measurement", json={
-        "mapping_name": "valley",
-        "buckets": [str(bucket)], "trait": "bud_opening",
+        "mapping_name": "valley", "dataset_root": str(bucket.root),
+        "buckets": [bucket.name], "trait": "bud_opening",
         "plants": ["PLANT_A"],
     })
 
     assert resp.status_code == 400
-    assert "no subject registry is reachable" in resp.json()["detail"]
+    assert "holds no subject registry" in resp.json()["detail"]
 
 
 # ── Count CSV export: per-image kind ──────────────────────────────────────
@@ -333,25 +344,28 @@ def test_phenology_measurement_refuses_when_the_delivered_dataset_carries_no_reg
 COUNT_SCOPE = {"subject": fx.COUNT_SUBJECT}
 
 
-def _unassessed_count_bucket(project: Path, *, scope: dict = COUNT_SCOPE) -> Path:
-    """Two frames of three detections each, published under no assessment, in a project whose
-    count trait is confirmed."""
+def _unassessed_count_bucket(project: Path, *, scope: dict = COUNT_SCOPE):
+    """Two frames of three detections each, published under no assessment as the bucket
+    ``live/counts`` of the project's own images, in a project whose count trait is confirmed; the
+    bucket."""
     pytest.importorskip("torch")
     from tests._chain_fixtures import predicted, published
 
     fx.seed_delivery_traits(project)
     fx.seed_confirmed_count(project, measured_subject=fx.COUNT_SUBJECT)
     subject = scope["subject"]
-    bucket = published(project, project / "ds" / "predictions" / "live" / "counts",
-                       [predicted(f"img{i}", [subject] * 3) for i in range(2)],
-                       scope=scope).path
+    bucket = published(project, "live/counts",
+                       [predicted(project / "images" / f"img{i}.png", [subject] * 3)
+                        for i in range(2)], scope=scope)
     open_new_project(project)
     return bucket
 
 
-def _per_image(bucket: Path, trait: str = fx.COUNT_TRAIT, **extra) -> dict:
-    return {"delivery": {"kind": "per_image_count", "predictions_dir": str(bucket),
-                         "trait": trait}, "filename": "counts.csv", "user": "breeder", **extra}
+def _per_image(bucket, trait: str = fx.COUNT_TRAIT, **extra) -> dict:
+    """The export body delivering ``bucket``'s per-image counts under ``trait``."""
+    return {"delivery": {"kind": "per_image_count", "dataset_root": str(bucket.root),
+                         "bucket": bucket.name, "trait": trait},
+            "filename": "counts.csv", "user": "breeder", **extra}
 
 
 COUNT_ROUTE = "/api/results/export_count_csv"
@@ -400,19 +414,28 @@ def test_an_assessed_count_bucket_delivers_validated_and_discards_an_acknowledgm
     client: TestClient, tmp_path: Path,
 ) -> None:
     """A validated delivery's event carries no acknowledgment, even when one was posted beside
-    it: it cleared nothing."""
+    it: it cleared nothing. Its buckets' root is a dataset registered to the project, never one
+    that merely sits under it."""
     pytest.importorskip("torch")
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.tools.project_tools import register_dataset
+    from tcip_mcp.traits import registered_crops
     from tests._chain_fixtures import run_the_chain
 
     chain = run_the_chain(tmp_path, experiment_id="exp-web-count")
     open_new_project(tmp_path)
+    bucket = read_bucket(chain.root, chain.bucket)
+    unregistered = _export_count(client, _per_image(bucket))
+    registered = register_dataset(tmp_path, str(chain.root), crop=sorted(registered_crops())[0])
+    assert "error" not in registered, registered
 
-    bare = _export_count(client, _per_image(chain.bucket))
+    bare = _export_count(client, _per_image(bucket))
     posted = _export_count(client, _per_image(
-        chain.bucket, acknowledgment={"reason": "just in case",
+        bucket, acknowledgment={"reason": "just in case",
                                       "result_sha256": "0" * 64}),
         headers=BROWSER)
 
+    assert unregistered.status_code == 403, unregistered.text[:300]
     assert bare.status_code == 200, bare.text[:300]
     assert bare.headers["X-TCIP-Validated"] == "true"
     assert bare.headers["X-TCIP-Acknowledged-By"] == ""
@@ -421,7 +444,7 @@ def test_an_assessed_count_bucket_delivers_validated_and_discards_an_acknowledgm
     assert posted.headers["X-TCIP-Acknowledged-By"] == ""
     events = client.get("/api/results/delivery-events").json()["records"]
     assert [e["acknowledgment"] for e in events] == [None, None]
-    lines = [e for root in {tmp_path, Path(chain.bucket).parents[2]}
+    lines = [e for root in {tmp_path, Path(chain.root)}
              for e in tcip_store.read_log(audit_log_key(root)).records
              if e["tool"] == "delivery_event"]
     assert [e["actor"] for e in lines] == ["user:breeder"] * 2
@@ -511,10 +534,10 @@ def test_export_count_csv_refuses_a_bucket_outside_the_project(
 
 @pytest.mark.parametrize("delivery", [
     {"kind": "not_a_real_kind"},
-    {"kind": "per_image_count", "predictions_dir": "", "trait": "stem"},
-    {"kind": "per_image_count", "predictions_dir": "preds", "trait": ""},
-    {"kind": "orthomosaic_plant_counts", "predictions_dir": "", "plant_registry": "reg",
-     "delivered_phenotype": "stem_count", "plants": ["plot0"]},
+    {"kind": "per_image_count", "dataset_root": "ds", "bucket": "", "trait": "stem"},
+    {"kind": "per_image_count", "dataset_root": "ds", "bucket": "preds", "trait": ""},
+    {"kind": "orthomosaic_plant_counts", "dataset_root": "ds", "bucket": "",
+     "plant_registry": "reg", "delivered_phenotype": "stem_count", "plants": ["plot0"]},
 ], ids=["unknown-kind", "blank-bucket", "blank-trait", "blank-raster-bucket"])
 def test_export_count_csv_refuses_a_malformed_payload_with_422_not_500(
     client: TestClient, opened_project: Path, delivery: dict,
@@ -526,9 +549,10 @@ def test_export_count_csv_refuses_a_malformed_payload_with_422_not_500(
 # ── Count CSV export: orthomosaic kind ───────────────────────────────────
 
 
-def _orthomosaic(project: Path) -> tuple[Path, str]:
-    """An unassessed whole-raster bucket and a registered plant registry over its 2x2 grid, in a
-    project whose per-plant count is confirmed; ``(bucket, registry name)``."""
+def _orthomosaic(project: Path) -> tuple[Any, str]:
+    """An unassessed whole-raster bucket over the project's own image tree and a registered plant
+    registry over its 2x2 grid, in a project whose per-plant count is confirmed;
+    ``(bucket, registry name)``."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     from tests.test_orthomosaic_tools import (
@@ -537,7 +561,8 @@ def _orthomosaic(project: Path) -> tuple[Path, str]:
 
     fx.seed_delivery_traits(project)
     fx.seed_confirmed_aggregate(project, "stem_count", value_keys=["count"])
-    raster_path = project / "mosaic.tif"
+    raster_path = project / "images" / "undated" / "mosaic.tif"
+    raster_path.parent.mkdir(parents=True, exist_ok=True)
     _write_geo_raster(raster_path)
     bucket = _raster_bucket(project, raster_path, [(8.0, 8.0, 12.0, 12.0)])
     registry = _plant_registry(project, _plant_grid_csv(project, raster_path, _PLANT_PIXELS))
@@ -545,9 +570,10 @@ def _orthomosaic(project: Path) -> tuple[Path, str]:
     return bucket, registry
 
 
-def _per_plant(bucket: Path, registry: str, *, filename: str = "plant_counts.csv",
+def _per_plant(bucket, registry: str, *, filename: str = "plant_counts.csv",
                **extra) -> dict:
-    return {"delivery": {"kind": "orthomosaic_plant_counts", "predictions_dir": str(bucket),
+    return {"delivery": {"kind": "orthomosaic_plant_counts", "dataset_root": str(bucket.root),
+                         "bucket": bucket.name,
                          "plant_registry": registry, "delivered_phenotype": "stem_count",
                          "plants": ["plot0", "plot1", "plot2", "plot3"]},
             "filename": filename, "user": "breeder", **extra}
@@ -638,8 +664,7 @@ def test_registered_models_answers_a_resolved_absolute_checkpoint_path(
 def test_inference_launch_missing_checkpoint(client: TestClient, opened_project: Path) -> None:
     resp = client.post("/api/inference/launch", json={
         "checkpoint_path": str(opened_project / "no.pt"), "dataset_root": str(opened_project),
-        "date": "2026-02-11", "user": "tester",
-        "output_dir": str(opened_project / "predictions" / "baseline" / "2026-02-11")})
+        "date": "2026-02-11", "user": "tester", "bucket": "baseline/2026-02-11"})
     assert resp.status_code == 404
 
 
@@ -652,13 +677,13 @@ def test_inference_list_jobs_endpoint(client: TestClient, opened_project: Path) 
 def test_inference_list_row_and_stream_frame_are_one_projection(
     client: TestClient, opened_project: Path,
 ) -> None:
-    """The list route's row and the stream's final frame are ``_summary``'s, so a job's audit
-    warning and dropped-box count reach the poll as they reach the stream, under one name."""
+    """The list route's row and the stream's final frame are ``_summary``'s, so a job's
+    dropped-box count reaches the poll as it reaches the stream, under one name."""
     from tcip_web.routes import inference as inference_routes
 
     job = inference_routes.InferenceJob(
-        job_id="inf-warn-test", actor="user:tester", project=str(opened_project), checkpoint_path="", images_dir="",
-        output_dir="", status="completed", audit_warning="the line did not land",
+        job_id="inf-warn-test", actor="user:tester", project=str(opened_project),
+        checkpoint_path="", dataset_root="", images_dir="", bucket="", status="completed",
         dropped_boxes=3,
     )
     inference_routes._register(job)
@@ -670,9 +695,7 @@ def test_inference_list_row_and_stream_frame_are_one_projection(
             frames = [ws.receive_json(), ws.receive_json()]
         assert [f.pop("type") for f in frames] == ["progress", "final"]
         assert frames[1] == row
-        assert (row["audit_warning"], row["dropped_boxes"]) == (
-            "the line did not land", 3)
-        assert "warning" not in row
+        assert row["dropped_boxes"] == 3
     finally:
         with inference_routes._registry.lock:
             inference_routes._registry.jobs.pop("inf-warn-test", None)
@@ -694,7 +717,8 @@ def test_inference_by_id_job_route_is_retired(client: TestClient) -> None:
     from tcip_web.routes import inference as inference_routes
 
     job = inference_routes.InferenceJob(
-        job_id="inf-retired-test", actor="user:tester", project="", checkpoint_path="", images_dir="", output_dir="",
+        job_id="inf-retired-test", actor="user:tester", project="", checkpoint_path="",
+        dataset_root="", images_dir="", bucket="",
     )
     inference_routes._register(job)
     try:

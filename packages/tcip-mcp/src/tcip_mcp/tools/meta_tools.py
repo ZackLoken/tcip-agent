@@ -1,10 +1,4 @@
-"""Meta-loop tools for self-improvement.
-
-Tools that let an agent session leave the system smarter than it started:
-- report_friction: structured friction logging when the agent hits a problem
-- write_retrospective: end-of-project reflection written to markdown
-- load_project_memory: read recent reports or retrospectives at session start (closes the loop)
-"""
+"""Meta-loop tools: ``report_friction``, ``write_retrospective`` and ``load_project_memory``."""
 
 from __future__ import annotations
 
@@ -262,8 +256,7 @@ def read_audit_log(
     status.
 
     ``scope`` resolves through ``tcip_mcp.audit.dataset_scope_of``: a path under a dataset's
-    canonical segment (``annotations``, ``predictions``, ``images``, ``labels``) resolves up to its
-    dataset root, and a bare directory counts as a root only when it carries its own ``.tcip``
+    ``images/`` tree resolves up to its dataset root, and a bare directory counts as a root only when it carries its own ``.tcip``
     directory or a ``subjects.json``, which a project root does too. ``scope=None`` reads the
     project's own log. A ``scope`` that resolves to none of these refuses by name. The whole log is read
     through ``tcip_store.read_log``, filtered in memory on each entry's own ``tool`` name,

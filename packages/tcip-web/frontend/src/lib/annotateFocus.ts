@@ -14,11 +14,11 @@ import type { Mode } from "@/store/types";
 export interface AnnotateFocusData {
   dataset_root?: string;
   subject?: string | null;
-  date?: string | null;
+  date: string;
   image_index?: number;
   mode?: Mode;
   active_subject?: string | null;
-  predictions_dir?: string | null;
+  bucket?: string | null;
   proposal?: number | null;
 }
 
@@ -28,15 +28,15 @@ export async function applyAnnotateFocus(d: AnnotateFocusData): Promise<void> {
     !!d.dataset_root &&
     (d.dataset_root !== cur.dataset_root ||
       (d.subject ?? null) !== cur.subject ||
-      (d.date ?? null) !== cur.date ||
-      (d.predictions_dir ?? null) !== cur.predictions_dir);
+      d.date !== cur.date ||
+      (d.bucket ?? null) !== cur.bucket);
   const project = useStore.getState().openProject;
   if (needsSwitch && project) {
     const res = await api.dataset.select({
       dataset_root: d.dataset_root!,
       subject: d.subject ?? null,
-      date: d.date ?? null,
-      predictions_dir: d.predictions_dir ?? null,
+      date: d.date,
+      bucket: d.bucket ?? null,
     });
     useStore.getState().applyRestoredDataset(res.selection, project);
     toastLabelProblem(res.label_problem);

@@ -4,6 +4,7 @@
  */
 
 import { api, type ProjectSummary } from "@/api/client";
+import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
 import { toastLabelProblem } from "@/lib/labelProblemToast";
 import { recordRecentProject } from "@/lib/recentProjects";
 import { useStore } from "@/store";
@@ -18,25 +19,28 @@ export function defaultDate(dates: string[]): string {
   return dates[dates.length - 1] ?? "";
 }
 
-/** Open ``p`` (a listed project whose record reads, so it carries an id) on a date, subject and
- *  bucket directory (one ``bucketsForDate`` serves); the backend points the workspace's
- *  last-opened pointer at it. */
+/** Open ``p`` (a listed project whose record reads, so it carries an id) on a capture, subject
+ *  and bucket name (one ``bucketsForDate`` serves); the backend points the workspace's
+ *  last-opened pointer at it. A project holding no capture (``date`` empty) opens with no
+ *  dataset selected. */
 export async function openWorkspaceProject(
   p: ProjectSummary & { id: string },
   date: string,
   subject: string | null,
-  predictionsDir: string | null,
+  bucket: string | null,
 ): Promise<DatasetSelection> {
   // Snapshot the outgoing dataset's UI state before the open's broadcast can move it; the
   // restore for the new selection is defined once, below.
   useStore.getState().saveCurrentDatasetUi();
   const opened = await api.projects.open(p.id);
-  const res = await api.dataset.select({
-    dataset_root: opened.path,
-    subject: subject || null,
-    date: date || null,
-    predictions_dir: predictionsDir || null,
-  });
+  const res = date
+    ? await api.dataset.select({
+        dataset_root: opened.path,
+        subject: subject || null,
+        date,
+        bucket: bucket || null,
+      })
+    : { selection: GUI_STATE_DEFAULTS.dataset, label_problem: null };
   try {
     recordRecentProject(opened.id);
   } catch (e) {
@@ -56,10 +60,9 @@ export async function openWorkspaceProject(
 export const subjectsForDate = (p: ProjectSummary, d: string): string[] =>
   p.subjects_by_date[d] ?? [];
 
-/** The buckets published over date ``d``: each one's directory, keyed by its path under
- *  predictions/; empty when none is. */
-export const bucketsForDate = (p: ProjectSummary, d: string): Record<string, string> =>
-  p.prediction_dirs[d] ?? {};
+/** The names of the buckets published over date ``d``; empty when none is. */
+export const bucketsForDate = (p: ProjectSummary, d: string): string[] =>
+  p.buckets_by_date[d] ?? [];
 
 /** The most-recent date that actually has a labeled subject, or null if none do. */
 function newestLabeledDate(p: ProjectSummary): string | null {
@@ -77,6 +80,6 @@ export async function openProjectById(id: string): Promise<DatasetSelection | nu
   // otherwise land the human on a blank canvas with no date selector to recover.
   const date = newestLabeledDate(p) ?? defaultDate(p.dates);
   const subject = subjectsForDate(p, date)[0] ?? null;
-  const bucket = Object.values(bucketsForDate(p, date))[0] ?? null;
+  const bucket = bucketsForDate(p, date)[0] ?? null;
   return openWorkspaceProject({ ...p, id: p.id }, date, subject, bucket);
 }

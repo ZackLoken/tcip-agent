@@ -213,8 +213,8 @@ def test_the_happy_path_through_the_platforms_own_producers_refuses_at_the_class
     out_csv = tmp_path / "out.csv"
 
     res = deliver_phenology_milestones(
-        tmp_path, trait="currant_bloom", mapping_name="valley",
-        plants=POPULATION, buckets=list(preds_by_date.values()),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=str(tmp_path / "ds"), buckets=list(preds_by_date.values()),
         output_csv_path=str(out_csv))
 
     assert "error" in res, res
@@ -235,8 +235,8 @@ def test_a_deleted_registry_refuses_at_delivery_naming_the_registry_and_the_mapp
     out_csv = tmp_path / "out.csv"
 
     res = deliver_phenology_milestones(
-        tmp_path, trait="currant_bloom", mapping_name="valley",
-        plants=POPULATION, buckets=list(preds_by_date.values()),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=str(tmp_path / "ds"), buckets=list(preds_by_date.values()),
         output_csv_path=str(out_csv))
 
     assert "error" in res
@@ -260,8 +260,8 @@ def test_a_registry_digest_mismatch_refuses_at_delivery(
     out_csv = tmp_path / "out.csv"
 
     res = deliver_phenology_milestones(
-        tmp_path, trait="currant_bloom", mapping_name="valley",
-        plants=POPULATION, buckets=list(preds_by_date.values()),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=str(tmp_path / "ds"), buckets=list(preds_by_date.values()),
         output_csv_path=str(out_csv))
 
     assert "error" in res

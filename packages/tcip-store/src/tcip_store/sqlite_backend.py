@@ -543,15 +543,22 @@ class Txn:
                 "the body touches in transaction(...)"
             )
 
-    def read(self, key: Key, *, default: Any = REQUIRED) -> Any:
-        """One of the transaction's records; absence answers ``default`` or raises ``NotFound``."""
+    def read_versioned(self, key: Key, *, default: Any = REQUIRED) -> Versioned:
+        """One of the transaction's records and its version; absence answers ``default`` at
+        ``Version.ABSENT`` or raises ``NotFound``."""
         self._held(key)
-        return _versioned(key, self._backend._stored(self._conn, key), default).value
+        return _versioned(key, self._backend._stored(self._conn, key), default)
 
-    def write(self, key: Key, value: Any) -> None:
-        """Replace one of the transaction's records whole."""
+    def read(self, key: Key, *, default: Any = REQUIRED) -> Any:
+        """One of the transaction's records (:meth:`read_versioned`'s value)."""
+        return self.read_versioned(key, default=default).value
+
+    def write(self, key: Key, value: Any) -> Version:
+        """Replace one of the transaction's records whole, returning its new version."""
         self._held(key)
-        self._backend._put(self._conn, key, _encoded(key, encode_record, value))
+        data = _encoded(key, encode_record, value)
+        self._backend._put(self._conn, key, data)
+        return _version_of(data)
 
     def delete(self, key: Key) -> None:
         """Remove one of the transaction's records."""

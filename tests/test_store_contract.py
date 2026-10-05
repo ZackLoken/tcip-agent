@@ -18,7 +18,6 @@ import pytest
 import tcip_store as ts
 from tcip_annotation import verdicts
 from tcip_mcp import delivery, traits
-from tcip_mcp.project_paths import project_state_dir
 from tcip_store.file_backend import DATABASE_FILENAME, database_file
 from tcip_store.sqlite_backend import SqliteBackend, encode_parts, open_verified
 from tests._store_worker import (
@@ -455,22 +454,28 @@ def test_a_transaction_over_a_record_and_a_log_commits_both_or_neither(store):
 
 
 def test_a_verdict_that_will_not_encode_lands_none_of_the_save_s_verdicts(store):
-    """``record_verdicts`` appends a save's verdicts in one commit: one that will not encode,
-    after another already appended, leaves the shard holding neither."""
+    """``record_verdicts`` appends a save's verdicts inside the save's one transaction: one that
+    will not encode, after another already appended, leaves the shard holding neither."""
     from datetime import datetime, timezone
 
-    key = verdicts.verdict_key(project_state_dir(store.root), "predictions/live", "a_1.jpg")
+    key = verdicts.verdict_key(store.root, "live", "a_1")
     good = verdicts.Verdict(proposal=0, action="accepted", by="user:ü",
                             at="2026-03-04T12:00:00+00:00")
     unencodable = verdicts.Verdict(proposal=1, action="rejected", by="user:ü",
                                    at=datetime(2026, 3, 4, tzinfo=timezone.utc))  # type: ignore[arg-type]
 
     with pytest.raises(ts.StoreError):
-        verdicts.record_verdicts(key, [good, unencodable])
+        _record_verdicts(key, [good, unencodable])
     assert verdicts.read_verdicts(key) == []
 
-    verdicts.record_verdicts(key, [good])
+    _record_verdicts(key, [good])
     assert verdicts.read_verdicts(key) == [good]
+
+
+def _record_verdicts(key, decided) -> None:
+    """``decided`` appended to the shard ``key`` names in a transaction of its own."""
+    with ts.transaction(key) as txn:
+        verdicts.record_verdicts(txn, key, decided)
 
 
 def test_a_module_level_write_inside_a_transaction_is_refused_and_lands_outside_it(store):
@@ -960,8 +965,8 @@ def test_a_value_with_a_non_string_key_is_refused_rather_than_merged_with_its_sp
 
 
 def test_a_file_write_inside_a_record_transaction_refuses_and_lands_outside_it(store):
-    """A file write or file transaction inside a record transaction would commit apart from it,
-    so each refuses and the record transaction rolls back whole; the same write outside lands."""
+    """A file write inside a record transaction would commit apart from it, so it refuses and the
+    record transaction rolls back whole; the same write outside lands."""
     record = store.key(LWW, "beside-a-file")
     path = blob_path(store.root, "beside-a-record")
     ts.replace(record, {"n": 0})
@@ -970,36 +975,11 @@ def test_a_file_write_inside_a_record_transaction_refuses_and_lands_outside_it(s
         with ts.transaction(record) as txn:
             txn.write(record, {"n": 1})
             ts.put_blob(path, b"new")
-    with pytest.raises(ts.TransactionMisuse):
-        with ts.transaction(record):
-            with ts.blob_transaction(path):
-                pass
     assert ts.read(record) == {"n": 0}
     assert not path.exists()
 
     ts.put_blob(path, b"new")
     assert path.read_bytes() == b"new"
-
-
-def test_a_record_write_inside_a_file_transaction_refuses_and_lands_outside_it(store):
-    """A record write or record transaction inside a file transaction refuses, and the file
-    transaction applies nothing; the same write outside lands."""
-    record = store.key(LWW, "beside-a-file-transaction")
-    path = blob_path(store.root, "under-a-file-transaction")
-
-    with pytest.raises(ts.TransactionMisuse):
-        with ts.blob_transaction(path) as txn:
-            txn.write(path, b"new")
-            ts.replace(record, {"n": 1})
-    with pytest.raises(ts.TransactionMisuse):
-        with ts.blob_transaction(path):
-            with ts.transaction(record):
-                pass
-    assert not path.exists()
-    assert ts.read(record, default=None) is None
-
-    ts.replace(record, {"n": 1})
-    assert ts.read(record) == {"n": 1}
 
 
 def test_a_file_that_is_not_a_database_at_the_database_s_path_refuses_naming_it(store):
@@ -1017,30 +997,28 @@ def test_a_file_that_is_not_a_database_at_the_database_s_path_refuses_naming_it(
 def test_enumerating_review_verdicts_answers_identities_that_read_back(store):
     """``keys`` answers the shard's own key, which reads the shard back, though its names carry
     separators."""
-    state_dir = project_state_dir(store.root)
-    key = verdicts.verdict_key(state_dir, "predictions/live/2026-03-04", "a/b.jpg")
+    key = verdicts.verdict_key(store.root, "live/2026-03-04", "a/b")
     decided = verdicts.Verdict(proposal=0, action="accepted", by="user:ü",
                                at="2026-03-04T12:00:00+00:00")
-    verdicts.record_verdicts(key, [decided])
+    _record_verdicts(key, [decided])
 
-    assert ts.keys(verdicts.REVIEW_VERDICTS_STORE, str(state_dir)) == [key]
+    assert ts.keys(verdicts.REVIEW_VERDICTS_STORE, str(store.root)) == [key]
     assert verdicts.read_verdicts(key) == [decided]
 
 
 def test_a_cleared_log_enumerates_as_absent(store):
     """A log that holds entries is enumerated once, however many it holds, and one cleared of
     them is not enumerated at all."""
-    state_dir = project_state_dir(store.root)
-    kept = verdicts.verdict_key(state_dir, "predictions/live/2026-03-04", "a.jpg")
-    cleared = verdicts.verdict_key(state_dir, "predictions/live/2026-03-04", "b.jpg")
+    kept = verdicts.verdict_key(store.root, "live/2026-03-04", "a")
+    cleared = verdicts.verdict_key(store.root, "live/2026-03-04", "b")
     decided = verdicts.Verdict(proposal=0, action="rejected", by="user:ü",
                                at="2026-03-04T12:00:00+00:00")
-    verdicts.record_verdicts(kept, [decided, decided])
-    verdicts.record_verdicts(cleared, [decided])
+    _record_verdicts(kept, [decided, decided])
+    _record_verdicts(cleared, [decided])
 
     ts.clear_log(cleared)
 
-    assert ts.keys(verdicts.REVIEW_VERDICTS_STORE, str(state_dir)) == [kept]
+    assert ts.keys(verdicts.REVIEW_VERDICTS_STORE, str(store.root)) == [kept]
 
 
 # ── files written by path ───────────────────────────────────────────────────────
@@ -1097,30 +1075,6 @@ def test_a_blob_delete_from_a_current_token_lands_and_a_stale_one_is_refused(sto
 
     ts.delete_blob(path, expect=moved)
     assert not path.exists()
-
-
-def test_a_blob_transaction_writes_every_file_or_none(store):
-    """A blob transaction reads each file as bytes, stages each write, and lands every one or,
-    on a raise inside it, none."""
-    first, second = blob_path(store.root, "first"), blob_path(store.root, "second")
-    ts.put_blob(second, b"kept")
-
-    with pytest.raises(RuntimeError):
-        with ts.blob_transaction(first, second) as txn:
-            txn.write(first, b"staged")
-            raise RuntimeError("the caller found a conflict")
-    assert not first.exists()
-    assert second.read_bytes() == b"kept"
-
-    with ts.blob_transaction(first, second) as txn:
-        assert txn.read(first, default=None) is None
-        assert txn.read(second) == b"kept"
-        with pytest.raises(ts.TransactionMisuse):
-            txn.read(blob_path(store.root, "unheld"))
-        txn.write(first, b"one")
-        txn.write(second, b"two")
-    assert first.read_bytes() == b"one"
-    assert second.read_bytes() == b"two"
 
 
 def test_two_processes_writing_a_blob_from_one_token_produce_one_winner_and_one_conflict(store):

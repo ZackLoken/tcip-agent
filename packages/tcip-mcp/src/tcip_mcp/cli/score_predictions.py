@@ -1,12 +1,12 @@
-r"""Score a published bucket's predictions against on-disk ground truth (COCOeval), from the
-command line.
+r"""Score a published bucket's predictions against the images' own label documents (COCOeval),
+from the command line.
 
 Wraps ``annotation_tools.score_predictions``: a single image file returns per-box matches (plus an
 optional per-detection breakdown with ``detail``); an images directory returns aggregate metrics
 plus per-image TP/FP/FN. Both regimes share ``coco_detection_metrics``.
 
 Usage:
-    tcip score-predictions --path <image_or_images_dir> --predictions-dir <bucket> \
+    tcip score-predictions --path <image_or_images_dir> --bucket <name> \
         [--iou-threshold 0.5] [--conf-threshold <default>] [--detail] \
         [--trait <trait_name> --project <project>]
 
@@ -27,8 +27,9 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser.add_argument("--path", required=True,
                         help="Absolute path to an image file (single-image match) or an images "
                              "directory (aggregate).")
-    parser.add_argument("--predictions-dir", required=True,
-                        help="The published bucket whose documents are scored.")
+    parser.add_argument("--bucket", required=True,
+                        help="The name of the bucket, published under --path's dataset root, "
+                             "whose documents are scored.")
     parser.add_argument("--project", default=None,
                         help="The project the trait's confirmed revision is read from. Required "
                              "with --trait.")
@@ -62,7 +63,8 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
 
     stated = {} if args.conf_threshold is None else {"conf_threshold": args.conf_threshold}
     result = score_predictions(
-        args.path, args.predictions_dir, iou_threshold=args.iou_threshold, detail=args.detail, trait=trait, **stated)
+        args.path, args.bucket, iou_threshold=args.iou_threshold, detail=args.detail,
+        trait=trait, **stated)
     print(json.dumps(result, indent=2))
     return 1 if "error" in result else 0
 

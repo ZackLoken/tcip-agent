@@ -17,10 +17,7 @@ function dataset(over: Partial<DatasetSelection> = {}): DatasetSelection {
     image_list: ["a.jpg", "b.jpg", "c.jpg"],
     current_image_index: 0,
     images_dir: "/proj/ds/images/2-11-26",
-    annotations_dir: "/proj/ds/annotations/2-11-26",
-    predictions_dir: null,
-    label_paths: {},
-    prediction_paths: {},
+    bucket: null,
     ...over,
   };
 }
@@ -137,7 +134,7 @@ describe("mergeSnapshot ownership model", () => {
     // survive, not just its contents.
     const localList = s().gui.dataset.image_list;
     const incoming = snapshot({
-      dataset: dataset({ predictions_dir: "/proj/ds/predictions/m2/2-11-26" }),
+      dataset: dataset({ bucket: "m2/2-11-26" }),
     });
     expect(incoming.dataset.image_list).not.toBe(localList);
     expect(incoming.dataset.image_list).toEqual(localList);
@@ -145,7 +142,7 @@ describe("mergeSnapshot ownership model", () => {
     s().mergeSnapshot(incoming, 6, PROJECT, null);
 
     expect(s().gui.dataset.image_list).toBe(localList);
-    expect(s().gui.dataset.predictions_dir).toBe("/proj/ds/predictions/m2/2-11-26");
+    expect(s().gui.dataset.bucket).toBe("m2/2-11-26");
   });
 
   it("adopts the persisted state on boot, with the tab from the project's own record", () => {

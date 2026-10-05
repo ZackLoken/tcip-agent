@@ -5,6 +5,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 from PIL import Image  # noqa: E402
+from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
 
 
@@ -29,8 +30,8 @@ def test_load_image_grayscale_pil_and_npy_multiband(tmp_path):
 
 
 def test_build_dataset_grayscale_yields_one_channel(tmp_path):
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     Image.new("RGB", (16, 16)).save(images_dir / "a.png")
     (tmp_path / "labels.csv").write_text("stem,label\na,0\n")
     ds = dataset_over("classification", str(images_dir), str(tmp_path / "labels.csv"),
@@ -47,8 +48,8 @@ def test_grayscale_classification_end_to_end(tmp_path):
     from tcip_mcp.pipelines.training.collation import task_collate
     from tests.tiny_trainer_fixtures import trainer_run
 
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     rows = ["stem,label"]
     for i in range(4):
         Image.new("RGB", (32, 32), (30 * i, 40, 50)).save(images_dir / f"img{i}.png")

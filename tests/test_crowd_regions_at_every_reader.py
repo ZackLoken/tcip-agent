@@ -20,6 +20,8 @@ from PIL import Image  # noqa: E402
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key  # noqa: E402
+from tests._producer_fixtures import label_image  # noqa: E402
 from tests.bespoke_models import BrightRegionDetector  # noqa: E402
 
 SUBJECT = "bur"
@@ -44,39 +46,45 @@ def build_recording_detector(*, in_chans: int = 3, num_classes: int = 1) -> Reco
     return RecordingDetector(in_chans=in_chans)
 
 
-def _labeled(root: Path, stems=("c0", "c1"), crowd=True) -> tuple[Path, Path]:
-    """Frames each holding one bur and, when ``crowd``, one region of unseparated burs."""
-    images, labels = root / "images", root / "annotations"
+def _read_back(root: Path, stem: str, anns: list) -> list:
+    """``anns`` written as the label document of the image ``stem`` under ``root`` and read back
+    through the platform's own reader."""
+    key = label_key(root, UNDATED_BUCKET, stem)
+    json_io.write_label_document(key, anns, IMG, IMG)
+    return json_io.read_label_document(key).annotations
+
+
+def _labeled(root: Path, stems=("c0", "c1"), crowd=True) -> Path:
+    """Frames each holding one bur and, when ``crowd``, one region of unseparated burs; their
+    images directory."""
+    images = root / "images" / UNDATED_BUCKET
     images.mkdir(parents=True, exist_ok=True)
-    labels.mkdir(parents=True, exist_ok=True)
     for stem in stems:
         Image.new("RGB", (IMG, IMG), (40, 40, 40)).save(images / f"{stem}.png")
         anns = [Annotation(subject=SUBJECT, geometry=OBJECT)]
         if crowd:
             anns.append(Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True))
-        json_io.write_annotations(labels / f"{stem}.json", anns, IMG, IMG)
-    return images, labels
+        label_image(images / f"{stem}.png", anns, IMG, IMG)
+    return images
 
 
 def _detection_loader(root: Path, task: str = "detection"):
     from tests._producer_fixtures import dataset_over
 
-    images, labels = _labeled(root)
-    return dataset_over(task, images, labels, subject=SUBJECT)
+    return dataset_over(task, _labeled(root), subject=SUBJECT)
 
 
 def test_the_instance_loader_carries_each_polygons_crowd_flag(tmp_path: Path):
-    images, labels = tmp_path / "images", tmp_path / "annotations"
-    images.mkdir()
-    labels.mkdir()
+    images = tmp_path / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
     Image.new("RGB", (IMG, IMG), (40, 40, 40)).save(images / "p0.png")
-    json_io.write_annotations(labels / "p0.json", [
+    label_image(images / "p0.png", [
         Annotation(subject=SUBJECT, geometry=Polygon([[(5.0, 5.0), (25.0, 5.0), (25.0, 25.0)]])),
         Annotation(subject=SUBJECT, geometry=Polygon([[(55.0, 55.0), (95.0, 55.0), (95.0, 95.0)]]),
                    iscrowd=True)], IMG, IMG)
     from tests._producer_fixtures import dataset_over
 
-    _image, target = dataset_over("instance_seg", images, labels, subject=SUBJECT)[0]
+    _image, target = dataset_over("instance_seg", images, subject=SUBJECT)[0]
 
     assert target["iscrowd"].tolist() == [0, 1]
     assert len(target["masks"]) == len(target["boxes"]) == 2
@@ -88,16 +96,15 @@ def test_the_instance_loader_takes_each_polygons_class_from_the_one_target_decis
     subject decision is ``attribute_ids``', the one every target reader makes."""
     from tests._producer_fixtures import dataset_over
 
-    images, labels = tmp_path / "images", tmp_path / "annotations"
-    images.mkdir()
-    labels.mkdir()
+    images = tmp_path / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
     Image.new("RGB", (IMG, IMG), (40, 40, 40)).save(images / "p0.png")
-    json_io.write_annotations(labels / "p0.json", [
+    label_image(images / "p0.png", [
         Annotation(subject=SUBJECT, geometry=Polygon([[(5.0, 5.0), (25.0, 5.0), (25.0, 25.0)]])),
         Annotation(subject="leaf", geometry=Polygon([[(55.0, 55.0), (95.0, 55.0), (95.0, 95.0)]])),
     ], IMG, IMG)
 
-    _image, target = dataset_over("instance_seg", images, labels, subject=SUBJECT)[0]
+    _image, target = dataset_over("instance_seg", images, subject=SUBJECT)[0]
 
     assert target["labels"].tolist() == [1]
     assert target["boxes"].tolist() == [[5.0, 5.0, 25.0, 25.0]]
@@ -118,7 +125,7 @@ def test_a_crop_keeps_each_rows_crowd_flag_with_its_box(tmp_path: Path):
 
     # A window past the object (it ends at 25) and inside the crowd region (it starts at 55).
     seed = next(s for s in range(1000) if min(origin(s)) >= 30)
-    target = target_tensors(loader.det_targets(loader.stems[0]))
+    target = target_tensors(loader.det_targets(loader.document(loader.stems[0])))
     assert target["iscrowd"].tolist() == [0, 1]
     random.seed(seed)
     _img, cropped = crop(Image.new("RGB", (IMG, IMG)), target)
@@ -178,12 +185,11 @@ def test_the_overfit_probe_drives_the_model_with_objects_only(tmp_path: Path):
 
 
 def test_the_completion_digest_changes_with_the_crowd_flag(tmp_path: Path):
-    path = tmp_path / "a.json"
     digests = []
     for crowd in (False, True):
-        json_io.write_annotations(path, [Annotation(subject=SUBJECT, geometry=CROWD,
-                                                    iscrowd=crowd)], IMG, IMG)
-        digests.append(json_io.subject_digest(json_io.read_annotations(path), SUBJECT))
+        read = _read_back(tmp_path, "a", [Annotation(subject=SUBJECT, geometry=CROWD,
+                                                     iscrowd=crowd)])
+        digests.append(json_io.subject_digest(read, SUBJECT))
     assert digests[0] != digests[1]
 
 
@@ -194,13 +200,11 @@ def _records(tmp_path: Path, crowd: bool, n_crowd: int = 120) -> list[dict]:
 
     records = []
     for i, offset in enumerate((0.0, 30.0)):
-        path = tmp_path / f"r{i}_{crowd}.json"
         anns = [Annotation(subject=SUBJECT, geometry=BBox(5 + offset, 5, 15 + offset, 15))]
         if crowd:
             anns += [Annotation(subject=SUBJECT, geometry=BBox(40, 40, 99, 99), iscrowd=True)
                      for _ in range(n_crowd)]
-        json_io.write_annotations(path, anns, IMG, IMG)
-        records.append(records_from_annotation(json_io.read_annotations(path), [],
+        records.append(records_from_annotation(_read_back(tmp_path, f"r{i}_{crowd}", anns), [],
                                                width=IMG, height=IMG)[1])
     return records
 
@@ -214,11 +218,12 @@ def test_the_density_cap_counts_objects_not_crowd_regions(tmp_path: Path):
 
     counts = {}
     for crowd in (True, False):
-        path = tmp_path / f"cap_{crowd}.json"
+        key = label_key(tmp_path, UNDATED_BUCKET, f"cap_{crowd}")
         anns = [Annotation(subject=SUBJECT, geometry=OBJECT)] + (
             [Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True)] * 3 if crowd else [])
-        json_io.write_annotations(path, anns, IMG, IMG)
-        counts[crowd] = count_label_lines(path, registry_scope(tmp_path, SUBJECT))
+        json_io.write_label_document(key, anns, IMG, IMG)
+        counts[crowd] = count_label_lines(json_io.read_label_document(key),
+                                          registry_scope(tmp_path / "images", SUBJECT))
     assert counts[True] == counts[False] == 1
     assert derive_max_dets_from_counts([counts[True]]) == 100
 
@@ -236,15 +241,10 @@ def test_the_object_size_and_spacing_ignore_crowd_regions(tmp_path: Path):
             == resolve_match_criterion(trait, without)["tolerance"])
 
 
-def _read_back(path: Path, anns: list) -> list:
-    json_io.write_annotations(path, anns, IMG, IMG)
-    return json_io.read_annotations(path)
-
-
 def test_a_crowd_prediction_is_no_detection_at_the_scoring_side(tmp_path: Path):
     from tcip_mcp.pipelines.training.evaluation import coco_detection_metrics, records_from_annotation
 
-    preds = _read_back(tmp_path / "p.json", [
+    preds = _read_back(tmp_path, "p", [
         Annotation(subject=SUBJECT, geometry=CROWD, score=0.9, iscrowd=True)])
     _, record = records_from_annotation([], preds, width=IMG, height=IMG)
     assert record["dt"] == []
@@ -256,7 +256,7 @@ def test_one_selector_answers_both_halves_of_the_crowd_split(tmp_path: Path):
     """The matcher's crowd regions are the selector's crowd half, the objects its other half."""
     from tcip_annotation.state import instances
 
-    gt = _read_back(tmp_path / "g.json", [
+    gt = _read_back(tmp_path, "g", [
         Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True),
         Annotation(subject=SUBJECT, geometry=OBJECT)])
     assert [a.geometry for a in instances(gt, crowd=True)] == [CROWD]
@@ -270,10 +270,10 @@ def test_the_editors_pairing_never_pairs_with_or_as_a_crowd_region(tmp_path: Pat
     from tcip_annotation.matching import pair_proposals
 
     inside = BBox(60.0, 60.0, 80.0, 80.0)
-    gt = _read_back(tmp_path / "g.json", [
+    gt = _read_back(tmp_path, "g", [
         Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True),
         Annotation(subject=SUBJECT, geometry=OBJECT)])
-    preds = _read_back(tmp_path / "p.json", [
+    preds = _read_back(tmp_path, "p", [
         Annotation(subject=SUBJECT, geometry=CROWD, score=0.9, iscrowd=True),
         Annotation(subject=SUBJECT, geometry=inside, score=0.9),
         Annotation(subject=SUBJECT, geometry=OBJECT, score=0.9)])
@@ -294,14 +294,14 @@ def _center_records(tmp_path: Path) -> list[dict]:
     name_id = {SUBJECT: 1}
     records = []
     for i in range(9):
-        gt = _read_back(tmp_path / f"g{i}.json",
+        gt = _read_back(tmp_path, f"g{i}",
                         [Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True)])
-        preds = _read_back(tmp_path / f"p{i}.json",
+        preds = _read_back(tmp_path, f"p{i}",
                            [Annotation(subject=SUBJECT, geometry=BBox(60.0, 60.0, 80.0, 80.0),
                                        score=0.9)])
         records.append(records_from_annotation(gt, preds, width=IMG, height=IMG,
                                                name_id=name_id)[1])
-    missed = _read_back(tmp_path / "missed.json", [Annotation(subject=SUBJECT, geometry=OBJECT)])
+    missed = _read_back(tmp_path, "missed", [Annotation(subject=SUBJECT, geometry=OBJECT)])
     records.append(records_from_annotation(missed, [], width=IMG, height=IMG, name_id=name_id)[1])
     return records
 
@@ -333,26 +333,28 @@ def test_the_worst_predictions_triage_counts_objects_not_crowd_regions(tmp_path:
     """Both sides of the triage's count are objects: a crowd region beside the one matching
     detection is no surplus, and a reference holding crowd regions alone is no missed image."""
     pytest.importorskip("torch")
-    from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.vision_tools import get_worst_predictions
     from tests._chain_fixtures import published
 
-    preds, labels = tmp_path / "preds", tmp_path / "labels"
-    published(tmp_path, preds, [{"image": "a.png", "width": IMG, "height": IMG,
-                                 "boxes": [[OBJECT.x1, OBJECT.y1, OBJECT.x2, OBJECT.y2]],
-                                 "scores": [0.9], "labels": [1]}],
-              scope={"subject": SUBJECT})
+    images = tmp_path / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
+    for stem in ("a", "b"):
+        Image.new("RGB", (IMG, IMG), (40, 40, 40)).save(images / f"{stem}.png")
+    bucket = published(tmp_path, "preds", [
+        {"image": str(images / "a.png"), "width": IMG, "height": IMG,
+         "boxes": [[OBJECT.x1, OBJECT.y1, OBJECT.x2, OBJECT.y2]], "scores": [0.9],
+         "labels": [1]}], scope={"subject": SUBJECT})
     # Crowd regions beside the detection, as an edit in place would leave them.
-    json_io.write_annotations(preds / "a.json", [
+    json_io.write_label_document(bucket.document_key("a"), [
         Annotation(subject=SUBJECT, geometry=OBJECT, score=0.9),
         *[Annotation(subject=SUBJECT, geometry=CROWD, score=0.9, iscrowd=True)] * 5], IMG, IMG)
-    json_io.write_annotations(labels / "a.json", [Annotation(subject=SUBJECT, geometry=OBJECT)],
-                              IMG, IMG)
-    json_io.write_annotations(labels / "b.json",
-                              [Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True)], IMG, IMG)
+    label_image(images / "a.png", [Annotation(subject=SUBJECT, geometry=OBJECT)], IMG, IMG)
+    label_image(images / "b.png", [Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True)],
+                IMG, IMG)
 
-    result = get_worst_predictions(read_bucket(preds), str(labels))
+    result = get_worst_predictions(bucket)
     assert result["worst_images"] == [{"stem": "a", "error_score": 0.1}]
+    assert result["not_predicted"] == ["b"]
 
 
 def test_the_derived_spacing_and_cross_tile_nms_ignore_crowd_regions(tmp_path: Path):
@@ -368,13 +370,11 @@ def test_the_derived_spacing_and_cross_tile_nms_ignore_crowd_regions(tmp_path: P
     def records(crowd: bool) -> list[dict]:
         out = []
         for i in range(6):
-            path = tmp_path / f"s{i}_{crowd}.json"
             anns = [Annotation(subject=SUBJECT, geometry=BBox(5 + i, 5, 25 + i, 25)),
                     Annotation(subject=SUBJECT, geometry=BBox(20 + i, 5, 40 + i, 25))]
             if crowd:
                 anns += [Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True)] * 3
-            json_io.write_annotations(path, anns, IMG, IMG)
-            out.append(records_from_annotation(json_io.read_annotations(path), [],
+            out.append(records_from_annotation(_read_back(tmp_path, f"s{i}_{crowd}", anns), [],
                                                width=IMG, height=IMG)[1])
         return out
 

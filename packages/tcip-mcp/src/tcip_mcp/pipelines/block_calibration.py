@@ -8,8 +8,12 @@ whole images out from.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from tcip_annotation.json_io import LabelDocument
 
 logger = logging.getLogger(__name__)
 
@@ -86,23 +90,24 @@ def select_gt_for_band(
 
 
 def check_completeness(
-    label_path: str, subject: str, rects: dict[str, tuple[int, int, int, int]],
+    document: "LabelDocument", where: str, subject: str,
+    rects: dict[str, tuple[int, int, int, int]],
 ) -> None:
-    """Refuse by name (:class:`~tcip_mcp.assessment.AssessmentRefused`, naming the regions and
-    the subject) unless the live completion marks the label document at ``label_path`` holds for
+    """Refuse by name (:class:`~tcip_mcp.assessment.AssessmentRefused`, naming the regions, the
+    subject and ``where``) unless the live completion marks the label ``document`` holds for
     ``subject`` cover every half-open rect in ``rects``.
     """
-    from tcip_annotation.json_io import covers, read_label_document
+    from tcip_annotation.json_io import covers
 
     from tcip_mcp.assessment import AssessmentRefused
 
-    marks = read_label_document(label_path).marks.get(subject, [])
+    marks = document.marks.get(subject, [])
     uncovered = sorted(name for name, rect in rects.items() if not covers(marks, rect))
     if uncovered:
         raise AssessmentRefused(
             f"the reserved region(s) {uncovered} are not marked complete for subject {subject!r} "
-            f"in {label_path}: mark each region complete in the Annotate tab before its ground "
-            "truth can be assessed against."
+            f"in {where}: mark each region complete in the Annotate tab before its ground truth "
+            "can be assessed against."
         )
 
 

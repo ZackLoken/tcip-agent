@@ -10,6 +10,8 @@ pixels it is handed, so the crop the tool writes is what decides the answer.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 import numpy as np
@@ -241,8 +243,8 @@ class TestRegionFrameIsTheResolvedImageSources:
         from tcip_mcp.pipelines import proposal
         from tcip_mcp.tools.proposal_tools import propose_annotations
 
-        images_dir = tmp_path / "images"
-        images_dir.mkdir()
+        images_dir = tmp_path / "images" / UNDATED_BUCKET
+        images_dir.mkdir(parents=True)
         frame = np.full((UPRIGHT_H, UPRIGHT_W, 3), 20, dtype=np.uint8)
         x1, y1, x2, y2 = PATCH_BOX
         frame[y1:y2, x1:x2] = (255, 0, 0)
@@ -266,8 +268,8 @@ class TestRegionFrameIsTheResolvedImageSources:
         from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
         from tcip_mcp.tools.proposal_tools import propose_annotations
 
-        images_dir = tmp_path / "images"
-        images_dir.mkdir()
+        images_dir = tmp_path / "images" / UNDATED_BUCKET
+        images_dir.mkdir(parents=True)
         bands = {}
         for name, fill in (("Green", 111), ("Red", 222)):
             band_path = images_dir / f"cap_{name}.tif"
@@ -338,15 +340,15 @@ class TestWholeFrameDefaultIsUnaffected:
 
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: OneBoxProposer())
 
-        images_dir = tmp_path / "images"
-        images_dir.mkdir()
+        images_dir = tmp_path / "images" / UNDATED_BUCKET
+        images_dir.mkdir(parents=True)
         img_path = images_dir / "no_region.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
         result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
         assert "error" not in result, result
 
-        envelope = ts.read(proposal_tools._staging_key_for(str(img_path)).key)
+        envelope = ts.read(proposal_tools._staging_key_for(str(img_path)))
         assert set(envelope) == {"engine", "candidates", "image_identity"}
 
     def test_a_candidate_the_store_cannot_hold_is_reported_rather_than_staged(
@@ -372,15 +374,15 @@ class TestWholeFrameDefaultIsUnaffected:
 
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: ArrayBoxProposer())
 
-        images_dir = tmp_path / "images"
-        images_dir.mkdir()
+        images_dir = tmp_path / "images" / UNDATED_BUCKET
+        images_dir.mkdir(parents=True)
         img_path = images_dir / "unstorable.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
         result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
 
         assert "candidates[0].bbox" in result["error"]
-        assert ts.read(proposal_tools._staging_key_for(str(img_path)).key, default=None) is None
+        assert ts.read(proposal_tools._staging_key_for(str(img_path)), default=None) is None
 
     def test_a_candidate_whose_rings_are_no_polygon_is_refused_where_it_arrives(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -398,15 +400,15 @@ class TestWholeFrameDefaultIsUnaffected:
                          "rings": [[(1, 1), (2, 2)]]}]
 
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: TwoPointProposer())
-        images_dir = tmp_path / "images"
-        images_dir.mkdir()
+        images_dir = tmp_path / "images" / UNDATED_BUCKET
+        images_dir.mkdir(parents=True)
         img_path = images_dir / "short_ring.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
         result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
 
         assert "three or more points" in result.get("error", ""), result
-        assert ts.read(proposal_tools._staging_key_for(str(img_path)).key, default=None) is None
+        assert ts.read(proposal_tools._staging_key_for(str(img_path)), default=None) is None
 
     def test_an_ordinary_candidate_is_still_staged(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -426,15 +428,15 @@ class TestWholeFrameDefaultIsUnaffected:
 
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: OneBoxProposer())
 
-        images_dir = tmp_path / "images"
-        images_dir.mkdir()
+        images_dir = tmp_path / "images" / UNDATED_BUCKET
+        images_dir.mkdir(parents=True)
         img_path = images_dir / "storable.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
         result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
 
         assert "error" not in result, result
-        envelope = ts.read(proposal_tools._staging_key_for(str(img_path)).key)
+        envelope = ts.read(proposal_tools._staging_key_for(str(img_path)))
         assert envelope["candidates"][0]["bbox"] == [1.0, 1.0, 2.0, 2.0]
 
     def test_a_candidate_stating_no_confidence_is_refused_where_it_arrives(
@@ -453,12 +455,12 @@ class TestWholeFrameDefaultIsUnaffected:
                          "rings": [[(1, 1), (2, 1), (2, 2)]]}]
 
         register_proposal_engine("unscored", UnscoredProposer())  # type: ignore[arg-type]
-        images_dir = tmp_path / "images"
-        images_dir.mkdir()
+        images_dir = tmp_path / "images" / UNDATED_BUCKET
+        images_dir.mkdir(parents=True)
         img_path = images_dir / "unscored.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
         result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path), engine="unscored")
 
         assert "'score'" in result.get("error", ""), result
-        assert ts.read(proposal_tools._staging_key_for(str(img_path)).key, default=None) is None
+        assert ts.read(proposal_tools._staging_key_for(str(img_path)), default=None) is None

@@ -12,9 +12,8 @@ from PIL import Image
 import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.verdicts import Verdict, read_verdicts
-from tcip_mcp.dataset_layout import (
-    Gestures, annotation_path, image_dir, save_label_document, verdict_key_of,
-)
+from tcip_mcp.dataset_layout import Gestures, image_dir, save_label_document, verdict_key_of
+from tests._producer_fixtures import image_label_key
 
 DATE = "2026-02-11"
 WIDTH, HEIGHT = 100, 80
@@ -29,19 +28,15 @@ def _image(root: Path, stem: str = "a") -> Path:
     return path
 
 
-def _label(root: Path, image: Path) -> Path:
-    return annotation_path(root, DATE, image.stem)
-
-
 def _save(root: Path, image: Path, payloads: list[dict], *, author: str = "user:breeder",
           expect: ts.Version | None = None, gestures: Gestures = Gestures()):
-    return save_label_document(root, image, _label(root, image), payloads, width=WIDTH,
+    return save_label_document(root, image_label_key(image), payloads, width=WIDTH,
                                height=HEIGHT, author=author, actor=author, expect=expect,
                                gestures=gestures)
 
 
 def _stored(root: Path, image: Path) -> json_io.LabelDocument:
-    return json_io.read_label_document(_label(root, image))
+    return json_io.read_label_document(image_label_key(image))
 
 
 def _as_loaded(root: Path, image: Path) -> list[dict]:
@@ -51,7 +46,7 @@ def _as_loaded(root: Path, image: Path) -> list[dict]:
 
 def _bucket(root: Path, image: Path) -> str:
     """A proposal bucket for ``image`` holding one ``bud`` box over :data:`BOX`, staged through
-    the platform's own door; its directory."""
+    the platform's own door; its name."""
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     x1, y1, x2, y2 = BOX
@@ -59,7 +54,7 @@ def _bucket(root: Path, image: Path) -> str:
         "subject": "bud", "conf": 0.9, "cx": (x1 + x2) / 2 / WIDTH, "cy": (y1 + y2) / 2 / HEIGHT,
         "w": (x2 - x1) / WIDTH, "h": (y2 - y1) / HEIGHT}])
     assert "error" not in staged, staged
-    return str(Path(staged["path"]).parent)
+    return staged["bucket"]
 
 
 # ── corrections keep what they do not correct ──────────────────────────────
@@ -141,14 +136,13 @@ def test_accepting_a_model_proposal_carries_no_attribute_value_into_the_document
     image = _image(tmp_path)
     color = cr.Attribute("color", "categorical", ("red", "blue"))
     registry = cr.SubjectRegistry(subjects=(cr.Subject(name="bud", attributes=(color,)),))
-    result = {**predicted(image.stem, ["blue"], (color,)), "image": str(image),
-              "width": WIDTH, "height": HEIGHT}
-    bucket = published(tmp_path, tmp_path / "predictions" / "model" / DATE, [result],
-                       scope={"subject": "bud"}, registry=registry)
-    (proposal,) = json_io.read_annotations(bucket.path / f"{image.stem}.json")
+    result = {**predicted(image, ["blue"], (color,)), "width": WIDTH, "height": HEIGHT}
+    bucket = published(tmp_path, f"model/{DATE}", [result], scope={"subject": "bud"},
+                       registry=registry)
+    (proposal,) = json_io.read_predictions(bucket.document_key(image.stem))
     assert proposal.attributes == {"color": "blue"}
 
-    _save(tmp_path, image, [], gestures=Gestures(bucket=str(bucket.path), accept=frozenset({0})))
+    _save(tmp_path, image, [], gestures=Gestures(bucket=bucket.name, accept=frozenset({0})))
 
     (accepted,) = _stored(tmp_path, image).annotations
     assert (accepted.subject, accepted.attributes) == ("bud", {})
@@ -157,14 +151,12 @@ def test_accepting_a_model_proposal_carries_no_attribute_value_into_the_document
 
 def test_the_shard_records_each_decision_once_and_refuses_an_entry_it_cannot_read(
         tmp_path: Path) -> None:
-    from tcip_mcp.buckets import read_bucket
-
     image = _image(tmp_path)
     bucket = _bucket(tmp_path, image)
 
     _save(tmp_path, image, [], gestures=Gestures(bucket=bucket, accept=frozenset({0})))
 
-    key = verdict_key_of(tmp_path, image, read_bucket(bucket).path)
+    key = verdict_key_of(image_label_key(image), bucket)
     (decided,) = read_verdicts(key)
     assert decided == Verdict(proposal=0, action="accepted", by="user:breeder", at=decided.at)
 
@@ -188,11 +180,10 @@ def test_a_save_from_a_stale_read_conflicts_and_writes_nothing(tmp_path: Path) -
     assert _stored(tmp_path, image).annotations == []
 
 
-def _nothing_written(root: Path, image: Path, bucket: str) -> bool:
-    from tcip_mcp.buckets import read_bucket
-
-    key = verdict_key_of(root, image, read_bucket(bucket).path)
-    return not _label(root, image).exists() and not list(ts.keys(key.store, key.root))
+def _nothing_written(image: Path, bucket: str) -> bool:
+    key = verdict_key_of(image_label_key(image), bucket)
+    return (ts.read(image_label_key(image), default=None) is None
+            and not ts.keys(key.store, key.root))
 
 
 def test_a_proposal_both_accepted_and_rejected_refuses_before_any_write(tmp_path: Path) -> None:
@@ -203,7 +194,7 @@ def test_a_proposal_both_accepted_and_rejected_refuses_before_any_write(tmp_path
         _save(tmp_path, image, [], gestures=Gestures(
             bucket=bucket, accept=frozenset({0}), reject=frozenset({0})))
 
-    assert _nothing_written(tmp_path, image, bucket)
+    assert _nothing_written(image, bucket)
 
 
 def test_a_proposal_named_twice_refuses_at_the_save_route_before_any_write(
@@ -217,13 +208,12 @@ def test_a_proposal_named_twice_refuses_at_the_save_route_before_any_write(
     image = _image(root)
     bucket = _bucket(root, image)
     client = TestClient(app, base_url="http://127.0.0.1")
-    body = {"image_path": str(image), "label_path": str(_label(root, image)), "user": "breeder",
-            "annotations": [], "bucket": bucket}
+    body = {"image_path": str(image), "user": "breeder", "annotations": [], "bucket": bucket}
 
     resp = client.post("/api/annotate/labels", json={**body, "accept": [0, 0]})
     assert resp.status_code == 400, resp.text
     assert "more than once" in resp.text
-    assert _nothing_written(root, image, bucket)
+    assert _nothing_written(image, bucket)
 
     assert client.post("/api/annotate/labels", json={**body, "accept": [0]}).status_code == 200
     assert len(_stored(root, image).annotations) == 1
@@ -244,9 +234,10 @@ def test_a_bucket_document_that_will_not_read_answers_400_at_the_proposals_route
     params = {"image_path": str(image), "bucket": bucket}
     assert client.get("/api/annotate/proposals", params=params).status_code == 200
 
-    document = read_bucket(bucket).document(image)
-    document.write_text('{"annotations": [{"subject": "bud", "bbox": [5, 5, 0, 5], '
-                        '"score": 0.9}]}', encoding="utf-8")
+    document = read_bucket(root, bucket).document_key(image.stem)
+    assert document is not None
+    ts.replace(document, {"annotations": [{"subject": "bud", "bbox": [5, 5, 0, 5],
+                                           "score": 0.9}]})
 
     resp = client.get("/api/annotate/proposals", params=params)
     assert resp.status_code == 400, resp.text
@@ -263,7 +254,7 @@ def test_the_queue_refuses_a_label_document_that_will_not_read_by_name(tmp_path:
     _sources, skipped, error = _prepare_queue_sources(str(checkpoint), str(image.parent), "bud")
     assert (skipped, error) == (1, None)
 
-    _label(tmp_path, image).write_text('{"annotations": {}}', encoding="utf-8")
+    ts.replace(image_label_key(image), {"annotations": {}})
 
     _sources, _skipped, error = _prepare_queue_sources(str(checkpoint), str(image.parent), "bud")
     assert error is not None and "annotations" in error["error"]
@@ -283,8 +274,7 @@ def test_the_proposals_payload_carries_what_the_editor_reads_and_no_more(tmp_pat
 
     proposals = client.get("/api/annotate/proposals", params={
         "image_path": str(image), "bucket": bucket}).json()
-    loaded = client.get("/api/annotate/labels", params={
-        "image_path": str(image), "label_path": str(_label(root, image))}).json()
+    loaded = client.get("/api/annotate/labels", params={"image_path": str(image)}).json()
 
     assert set(proposals) == {"bucket", "proposals"}
     assert loaded["completion"] == {"bud": "negative"}
@@ -339,12 +329,11 @@ def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(tmp_path: Pat
     client = TestClient(app, base_url="http://127.0.0.1")
 
     def readers() -> tuple[int, int, str]:
-        counts = admit(image.parent, _label(root, image).parent, members=[image.stem],
-                       scope=registry_scope(_label(root, image).parent, "bud")).tallies
+        counts = admit(image.parent, members=[image.stem],
+                       scope=registry_scope(image.parent, "bud")).tallies
         _sources, skipped, _error = _prepare_queue_sources(str(checkpoint), str(image.parent),
                                                            "bud")
-        listed = client.get("/api/annotate/labels", params={
-            "image_path": str(image), "label_path": str(_label(root, image))}).json()
+        listed = client.get("/api/annotate/labels", params={"image_path": str(image)}).json()
         return counts.get("negative", 0), skipped, listed["completion"].get("bud", "unannotated")
 
     assert readers() == (0, 0, "unannotated")
@@ -366,8 +355,7 @@ def test_saved_provenance_is_the_requests_actor_whatever_the_browser_sends(
     client = TestClient(app, base_url="http://127.0.0.1")
 
     resp = client.post("/api/annotate/labels", json={
-        "image_path": str(image), "label_path": str(_label(root, image)), "user": "breeder",
-        "annotations": [{"subject": "bud", "bbox": BOX, "created_by": "user:mallory",
+        "image_path": str(image), "user": "breeder", "annotations": [{"subject": "bud", "bbox": BOX, "created_by": "user:mallory",
                          "created_at": "2020-01-01T00:00:00+00:00",
                          "accepted_by": "user:mallory"}]})
     assert resp.status_code == 200, resp.text
@@ -418,7 +406,7 @@ def test_the_assessment_count_and_the_editor_pairing_agree_under_a_crowd_region(
     staged = stage_proposals(tmp_path, str(image), model_name="detector", boxes=[
         norm(11, 11, 31, 31, 0.9), norm(60, 20, 70, 30, 0.8), norm(5, 60, 15, 75, 0.7)])
     assert "error" not in staged, staged
-    bucket, proposals = image_proposals(Path(staged["path"]).parent, image)
+    bucket, proposals = image_proposals(staged["bucket"], image_label_key(image))
     annotations = _stored(tmp_path, image).annotations
 
     counted = _counted(annotations, proposals, resolve_match_criterion(None, []))
@@ -436,24 +424,23 @@ def test_the_editor_pairs_a_bucket_under_its_assessments_center_match(tmp_path: 
     tolerance, but by more than the comparability IoU admits, pairs and counts alike."""
     pytest.importorskip("torch")
     from tcip_mcp.assessment import read_assessment
-    from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import image_proposals, proposal_pairs
     from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
     from tests._chain_fixtures import IMG, run_the_chain
 
     chain = run_the_chain(tmp_path, experiment_id="exp-editor-pairing")
-    bucket = read_bucket(chain.bucket)
-    image = next(p for p in sorted(chain.images_dir.iterdir()) if bucket.document(p) is not None)
-    _bucket_record, proposals = image_proposals(bucket.path, image)
+    bucket = chain.read()
+    image = next(p for p in sorted(chain.images_dir.iterdir())
+                 if bucket.document_key(p.stem) is not None)
+    _bucket_record, proposals = image_proposals(bucket.name, image_label_key(image))
     top = max((p for p in proposals if p.score is not None), key=lambda p: p.score)
     g = top.geometry
     size = g.x2 - g.x1
     shifted = {"subject": top.subject, "bbox": [g.x1 + 0.2 * size, g.y1 + 0.2 * size,
                                                 g.x2 + 0.2 * size, g.y2 + 0.2 * size]}
-    label = tmp_path / "editor" / f"{image.stem}.json"
-    save_label_document(tmp_path, image, label, [shifted], width=IMG, height=IMG,
+    save_label_document(tmp_path, image_label_key(image), [shifted], width=IMG, height=IMG,
                         author="user:breeder", actor="user:breeder")
-    annotations = json_io.read_label_document(label).annotations
+    annotations = json_io.read_label_document(image_label_key(image)).annotations
     criterion = read_assessment(tmp_path, bucket.assessment_id).criterion["count"]["localization"]
 
     paired = proposal_pairs(tmp_path, bucket, annotations, proposals)

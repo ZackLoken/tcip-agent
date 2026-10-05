@@ -43,16 +43,21 @@ def _count_entry(**fields) -> traits.TraitEntry:
         fx.COUNT_SPEC, traits.PER_IMAGE_COUNT, measured_subject=fx.COUNT_SUBJECT, **fields)
 
 
-def _bucket(root: Path) -> Path:
-    """``root``'s one unassessed bucket of three detections on one frame, published on first use
-    (``_chain_fixtures.published``)."""
+def _bucket(root: Path):
+    """``root``'s one unassessed bucket ``counts/2026-02-11`` of three detections on one frame of
+    the dataset ``ds``, published on first use (``_chain_fixtures.published``); the bucket."""
     pytest.importorskip("torch")
+    import tcip_store
+
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.dataset_layout import bucket_key
     from tests._chain_fixtures import predicted, published
 
-    bucket = root / "ds" / "predictions" / "counts" / "2026-02-11"
-    if not (bucket / "bucket.json").exists():
-        published(root, bucket, [predicted("a", [fx.COUNT_SUBJECT] * 3)], scope=_SCOPE)
-    return bucket
+    dataset, name = root / "ds", "counts/2026-02-11"
+    if not tcip_store.exists(bucket_key(dataset, name)):
+        published(root, name, [predicted(dataset / "images" / "2026-02-11" / "a.png",
+                                         [fx.COUNT_SUBJECT] * 3)], scope=_SCOPE)
+    return read_bucket(dataset, name)
 
 
 def _deliver_counts(root: Path, name: str) -> dict:
@@ -64,7 +69,7 @@ def _deliver_counts(root: Path, name: str) -> dict:
     out = root / f"{name}.csv"
     bucket = _bucket(root)
     acknowledged(root, lambda ack: deliver_per_image_counts_csv(
-        root, bucket, str(out), trait=fx.COUNT_TRAIT, acknowledgment_id=ack,
+        root, bucket.root, bucket.name, str(out), trait=fx.COUNT_TRAIT, acknowledgment_id=ack,
         door="test_trait_revisions", actor=None), by="user:tester", reason="no assessment backs these counts")
     (event,) = [e for e in read_delivery_events(root) if e.output_path == str(out)]
     return event.model_dump(mode="json")
@@ -130,7 +135,6 @@ def test_a_later_proposal_leaves_deliveries_under_the_confirmed_one_until_it_is_
 def test_one_confirmation_covers_every_delivery_kind_the_revision_states(tmp_path: Path) -> None:
     """Spec fields and the operationalization text of every kind are one entry and one
     confirmation: confirming revision 1 makes each kind it states deliverable."""
-    from tcip_mcp.buckets import read_bucket
     from tests._chain_fixtures import deliver_acknowledged
 
     both = fx.with_operationalization(
@@ -143,7 +147,7 @@ def test_one_confirmation_covers_every_delivery_kind_the_revision_states(tmp_pat
         tmp_path, [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
                     "plant_attribution": "image"}],
         tmp_path / "per_plant.csv", "stem_count", delivery_kind=traits.PER_PLANT_COUNT_AGGREGATE,
-        buckets=[read_bucket(_bucket(tmp_path))])
+        buckets=[_bucket(tmp_path)])
 
     kinds = {e.delivery_kind: e.trait_revision for e in read_delivery_events(tmp_path)}
     assert kinds == {traits.PER_IMAGE_COUNT: 1, traits.PER_PLANT_COUNT_AGGREGATE: 1}

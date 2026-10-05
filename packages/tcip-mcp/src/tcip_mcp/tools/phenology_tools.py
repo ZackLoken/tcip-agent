@@ -139,6 +139,7 @@ def deliver_phenology_milestones(
     project: Path,
     trait: str,
     mapping_name: str,
+    dataset_root: str,
     buckets: list[str],
     output_csv_path: str,
     plants: list[str],
@@ -160,8 +161,9 @@ def deliver_phenology_milestones(
     Args:
         trait: A trait in this project.
         mapping_name: A plant mapping persisted under this project.
-        buckets: The published bucket of each delivered date, one per date; each stands for the
-            capture date its own record states.
+        dataset_root: The dataset root the buckets are published under.
+        buckets: The name of the published bucket of each delivered date, one per date; each
+            stands for the capture date its own record states.
         output_csv_path: Where to write the CSV; a relative path is under the project.
         plants: The delivery's population, the plant ids (the mapping's ``plot_name`` values) it
             is for; an empty list refuses.
@@ -179,8 +181,8 @@ def deliver_phenology_milestones(
 
     try:
         measurement = phenology.measure_phenology(
-            project, trait=trait, mapping_name=mapping_name,
-            buckets=[Path(project, b) for b in buckets], plants=plants,
+            project, trait=trait, mapping_name=mapping_name, dataset_root=dataset_root,
+            buckets=buckets, plants=plants,
             require_all_dates_complete=require_all_dates_complete)
         delivered = phenology.deliver_phenology(
             project, measurement, curves=False, output_path=Path(project, output_csv_path),

@@ -9,7 +9,7 @@ import { useStore } from "@/store";
 
 /** Per-instance attribute editing + a geometry-less (image/plant-level) rating entry, plus
  *  authoring new attributes and values onto the active subject: the selected shape's
- *  attributes, the image-level ratings that ride in the same label file with no box, and the
+ *  attributes, the image-level ratings that ride in the same label document with no box, and the
  *  registry-growing controls a breeder otherwise has no way to reach without a shell. */
 export function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | null }) {
   const activeSubject = useStore((s) => s.gui.active_subject);

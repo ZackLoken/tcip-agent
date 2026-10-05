@@ -11,6 +11,9 @@ a doubled one.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tests._producer_fixtures import checkpoint_admission
+
 from pathlib import Path
 
 import pytest
@@ -432,19 +435,20 @@ def test_an_unreadable_recorded_augmentation_config_does_not_sink_an_untiled_run
     assert p.execution.tile_size is None and len(results) == 1
 
 
-def _native_frame_gt(images_dir: Path, labels_dir: Path) -> None:
+def _native_frame_gt(images_dir: Path) -> None:
     """A single 128x128 image, ground truth at exactly the middle half of every tile on a gapless
     2x2 TILE-edge lattice: what ``_MiddleHalfDetector`` reports whatever intermediate resize a
     tile is run through, so a perfect-match reference isolates the geometry reproduction this
     admits-valid-work proof is about from any unrelated matching noise.
     """
     from PIL import Image
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
+    from tests._producer_fixtures import label_image
+
     Image.new("RGB", (IMAGE, IMAGE), (120, 120, 120)).save(images_dir / "a.png")
-    json_io.write_annotations(
-        str(labels_dir / "a.json"),
+    label_image(
+        images_dir / "a.png",
         [Annotation(subject="bud", geometry=BBox(*b)) for b in sorted(_expected_middle_half_boxes())],
         IMAGE, IMAGE)
 
@@ -480,20 +484,17 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
-    _native_frame_gt(images_dir, labels_dir)
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
+    _native_frame_gt(images_dir)
     checkpoint = verified_checkpoint(tmp_path)
 
     monkeypatch.setattr(predictor_mod, "GenericPredictor",
                         lambda *a, **kw: _persisted_regime_predictor())
-    persisted = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
-                                          stated=Stated())
+    persisted = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir), stated=Stated())
     monkeypatch.setattr(predictor_mod, "GenericPredictor",
                         lambda *a, **kw: _native_frame_regime_predictor())
-    native = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
-                                       stated=Stated())
+    native = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir), stated=Stated())
     monkeypatch.undo()
 
     persisted_execution, native_execution = persisted["execution"], native["execution"]
@@ -530,10 +531,9 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
-    _native_frame_gt(images_dir, labels_dir)
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
+    _native_frame_gt(images_dir)
 
     captured: dict = {}
 
@@ -550,7 +550,7 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
 
     checkpoint = verified_checkpoint(tmp_path)
     monkeypatch.setattr(predictor_mod, "GenericPredictor", _spy_predictor)
-    r = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir), stated=Stated())
+    r = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir), stated=Stated())
 
     assert "error" not in r
     assert captured["execution"].tile_resize == (TILE * 2, TILE * 2)

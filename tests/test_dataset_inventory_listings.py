@@ -13,40 +13,32 @@ from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.subject_registry import SubjectRegistry, RegistryError, Subject
 from tests._producer_fixtures import registry_over
 from tcip_mcp.dataset_layout import (
-    annotation_dir,
-    subjects_path,
+    capture_subjects,
+    label_key,
     list_dates,
     list_subjects,
-    prediction_root,
-    subjects_with_labels,
+    prediction_key,
+    subjects_path,
 )
-
-
-def _write(path: Path, text: str = "") -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
 
 
 def test_only_published_buckets_are_listed_under_the_date_their_record_states(
     tmp_path: Path,
 ) -> None:
-    """A directory under ``predictions/`` holding artifacts that are not a publication (a
-    rendered overlay, a half-written temp file, a staged document) is no bucket: listing it would
-    offer the breeder a model with nothing published behind it."""
+    """A prediction document no bucket record names (a half-written or staged one) is no bucket:
+    listing it would offer the breeder a model with nothing published behind it."""
     pytest.importorskip("torch")
     from tcip_mcp.buckets import buckets_by_date
     from tests._chain_fixtures import predicted, published
 
     root = tmp_path
     scope = {"subject": "bud"}
-    _write(prediction_root(root) / "baseline" / "2026-02-11" / "overlay.png", "not a label")
-    _write(prediction_root(root) / "baseline" / "2026-02-11" / "IMG_1.json",
-           '{"annotations": []}')
+    json_io.write_label_document(prediction_key(root, "baseline/2026-02-11", "IMG_1"), [],
+                                 120, 90, keep_empty=True)
     for model, date, stem in (("candidate", "2026-02-11", "IMG_1"),
                               ("baseline", "2026-03-02", "IMG_2")):
-        published(root, prediction_root(root) / model / date,
-                  [{**predicted(stem, ["bud"]),
-                    "image": str(root / "images" / date / f"{stem}.png")}], scope=scope)
+        published(root, f"{model}/{date}",
+                  [predicted(root / "images" / date / f"{stem}.png", ["bud"])], scope=scope)
 
     listed = buckets_by_date(root, ["2026-02-11", "2026-03-02"])
 
@@ -111,14 +103,13 @@ def test_declared_subjects_and_subjects_labeled_on_a_date_are_not_interchangeabl
     """
     root = tmp_path
     _registry(root)
-    json_io.write_annotations(
-        str(annotation_dir(root, "2026-02-11") / "IMG_1.json"),
-        [Annotation(subject="bud", geometry=BBox(1, 2, 7, 19))], 120, 90)
-    json_io.write_annotations(
-        str(annotation_dir(root, "2026-03-02") / "IMG_2.json"),
-        [Annotation(subject="bush", geometry=BBox(3, 4, 40, 11))], 120, 90)
+    json_io.write_label_document(label_key(root, "2026-02-11", "IMG_1"),
+                                 [Annotation(subject="bud", geometry=BBox(1, 2, 7, 19))], 120, 90)
+    json_io.write_label_document(label_key(root, "2026-03-02", "IMG_2"),
+                                 [Annotation(subject="bush", geometry=BBox(3, 4, 40, 11))],
+                                 120, 90)
 
     assert list_subjects(root) == ["leaf", "bush", "bud"]
-    assert subjects_with_labels(root, "2026-02-11") == ["bud"]
-    assert subjects_with_labels(root, "2026-03-02") == ["bush"]
-    assert subjects_with_labels(root, "2026-04-01") == []
+    assert capture_subjects(root, "2026-02-11")[0] == ["bud"]
+    assert capture_subjects(root, "2026-03-02")[0] == ["bush"]
+    assert capture_subjects(root, "2026-04-01")[0] == []

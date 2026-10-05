@@ -10,8 +10,8 @@ from pathlib import Path
 
 from PIL import Image
 
-from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
+from tests._producer_fixtures import image_label_key, label_image
 
 
 # 4 source prefixes (srcA..srcD) x 3 tiles x 1 GT box each: 4 leakage groups, uniform density,
@@ -41,14 +41,11 @@ def _multi_source_dataset(root: Path) -> Path:
     date = "2-11-26"
     images_dir = root / "images" / date
     images_dir.mkdir(parents=True)
-    labels_dir = root / "annotations" / date
-    labels_dir.mkdir(parents=True)
     for pref in ("srcA", "srcB", "srcC", "srcD"):
         for t in range(3):
-            stem = f"{pref}_{t}_0"
-            Image.new("RGB", (64, 64), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
-            json_io.write_annotations(str(labels_dir / f"{stem}.json"),
-                                      [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))], 64, 64)
+            image = images_dir / f"{pref}_{t}_0.jpg"
+            Image.new("RGB", (64, 64), (128, 128, 128)).save(image)
+            label_image(image, [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))], 64, 64)
     return root
 
 
@@ -93,4 +90,4 @@ def test_draw_splits_selection_document_golden(tmp_path: Path):
     assert {s.group: s.side for s in drawn.samples} == GOLDEN_SIDE_BY_GROUP
     for sample in drawn.samples:
         assert Path(sample.source).parent == root / "images" / "2-11-26"
-        assert Path(sample.ground_truth).parent == root / "annotations" / "2-11-26"
+        assert sample.ground_truth == image_label_key(sample.source)

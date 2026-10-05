@@ -3,6 +3,8 @@ mark finished."""
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
@@ -16,20 +18,17 @@ def _dataset(tmp_path: Path, *, marked: tuple[str, ...]) -> Path:
     through the editor's own save door; its images directory."""
     from PIL import Image
 
-    from tcip_annotation import json_io
-    from tcip_mcp.dataset_layout import annotation_path, image_dir
-    from tests._producer_fixtures import mark_complete
+    from tcip_mcp.dataset_layout import image_dir
+    from tests._producer_fixtures import label_image, mark_complete
 
     root = tmp_path / "dataset"
     images = image_dir(root, DATE)
     images.mkdir(parents=True)
     for stem in ("imgA", "imgB"):
         Image.new("RGB", (64, 64), (120, 120, 120)).save(images / f"{stem}.png")
-        label = annotation_path(root, DATE, stem)
-        label.parent.mkdir(parents=True, exist_ok=True)
-        json_io.write_annotations(label, [], 64, 64, keep_empty=True)
+        label_image(images / f"{stem}.png", [], 64, 64, keep_empty=True)
         if stem in marked:
-            mark_complete(images / f"{stem}.png", label, "bud", project=tmp_path)
+            mark_complete(images / f"{stem}.png", "bud", project=tmp_path)
     return images
 
 
@@ -91,8 +90,8 @@ def test_triage_predictions_surfaces_unscoreable(tmp_path, monkeypatch):
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
-    images = tmp_path / "images"
-    images.mkdir()
+    images = tmp_path / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
     (images / "a.jpg").write_bytes(b"x")
 
     predictions = [{"image": "a.jpg", "width": 4, "height": 4, "head0_values": [0.42]}]
@@ -118,8 +117,8 @@ def _stubbed_triage_predictions(tmp_path, monkeypatch, predictions: list[dict], 
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
-    images = tmp_path / "images"
-    images.mkdir()
+    images = tmp_path / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
     for pred in predictions:
         (images / pred["image"]).write_bytes(b"x")
     monkeypatch.setattr(
@@ -301,8 +300,8 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(tm
                                          "image_std": [0.2]},
                       "task": "detection"},
         data={"num_channels": 1, "scope": {"subject": "bud"}})
-    images = tmp_path / "images"
-    images.mkdir()
+    images = tmp_path / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
     for stem in ("a", "b"):
         Image.new("RGB", (64, 64), (90, 110, 70)).save(images / f"{stem}.png")
 
@@ -319,8 +318,8 @@ def test_prioritize_review_queue_unbound_run_carries_no_marks(tmp_path, monkeypa
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     ckpt = foreign_checkpoint(tmp_path)
-    images = tmp_path / "images"
-    images.mkdir()
+    images = tmp_path / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
     (images / "a.jpg").write_bytes(b"x")
     _stub_scorer(monkeypatch)
 
@@ -338,44 +337,33 @@ _FLAT_IMG = 32
 _FLAT_STEMS = ("a", "b", "c", "d", "e", "f")
 
 
-def _save_flat_png(path: Path) -> None:
+def _labeled_flat_image(path: Path) -> None:
+    """A gray image at ``path`` whose label document holds one ``leaf`` box."""
     from PIL import Image
-    path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (_FLAT_IMG, _FLAT_IMG), color=(128, 128, 128)).save(path)
-
-
-def _write_flat_label(root: Path, date: str, stem: str) -> None:
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    json_io.write_annotations(
-        str(root / "annotations" / date / f"{stem}.json"),
-        [Annotation(subject=_FLAT_SUBJECT, geometry=BBox(2, 2, 10, 10))], _FLAT_IMG, _FLAT_IMG,
-    )
+    from tests._producer_fixtures import label_image
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (_FLAT_IMG, _FLAT_IMG), color=(128, 128, 128)).save(path)
+    label_image(path, [Annotation(subject=_FLAT_SUBJECT, geometry=BBox(2, 2, 10, 10))],
+                _FLAT_IMG, _FLAT_IMG)
 
 
-def _bucketed_labels_flat_images_dataset(root: Path, date: str, stems=_FLAT_STEMS) -> Path:
-    """Labels bucketed under one date; images in the flat ``images/`` root (no ``images/<date>/``
-    bucket), the layout whose selection records each sample's source under that flat root."""
+def _flat_images_dataset(root: Path, stems=_FLAT_STEMS) -> Path:
+    """Labeled images in the undated capture alone, so the selection records each sample's
+    source under it."""
     for stem in stems:
-        _save_flat_png(root / "images" / f"{stem}.jpg")
-        _write_flat_label(root, date, stem)
+        _labeled_flat_image(root / "images" / UNDATED_BUCKET / f"{stem}.jpg")
     return root
 
 
-def _mixed_two_date_dataset(
-    root: Path, canonical_date: str, flat_date: str, stems=_FLAT_STEMS,
-) -> Path:
-    """One date's images bucketed under ``images/<date>/`` (canonical); the other's labels are
-    bucketed the same way but its images sit in the flat ``images/`` root, no bucket of its own
-    (the same mismatch :func:`_bucketed_labels_flat_images_dataset` builds for one date, beside a
-    date that has no such mismatch)."""
+def _mixed_dated_and_flat_dataset(root: Path, date: str, stems=_FLAT_STEMS) -> Path:
+    """One capture's labeled images under ``images/<date>/`` and the same stems' labeled images
+    in the undated capture beside it."""
     for stem in stems:
-        _save_flat_png(root / "images" / canonical_date / f"{stem}.jpg")
-        _write_flat_label(root, canonical_date, stem)
-    for stem in stems:
-        _save_flat_png(root / "images" / f"{stem}.jpg")
-        _write_flat_label(root, flat_date, stem)
+        _labeled_flat_image(root / "images" / date / f"{stem}.jpg")
+    _flat_images_dataset(root, stems)
     return root
 
 
@@ -389,26 +377,20 @@ def _draw_flat(project: Path, root: Path, out: Path, *, seed: int = 2):
     return read_selection(out, project=project)
 
 
-def test_prioritize_review_queue_marks_a_flat_images_tree_dataset_correctly(tmp_path, monkeypatch):
-    """A dataset whose labels are bucketed by date but whose images live in the flat images/ root
-    (no images/<date>/ bucket) still marks its calibration side correctly: each sample's own
-    recorded source names the flat root, never a date guessed from images_dir's path shape (which
-    cannot tell a flat root apart from a dateless one)."""
-    date = "2026-03-01"
-    root = _bucketed_labels_flat_images_dataset(tmp_path / "data", date)
+def test_prioritize_review_queue_marks_an_undated_capture_correctly(tmp_path, monkeypatch):
+    """A dataset whose images are its undated capture alone marks its calibration side
+    correctly: each sample's own recorded source names that capture."""
+    root = _flat_images_dataset(tmp_path / "data")
     manifest_dir = tmp_path / "manifest"
     drawn = _draw_flat(tmp_path, root, manifest_dir)
-    reference_stems = {
-        Path(s.source).stem for s in _reference_samples(drawn)
-        if Path(s.ground_truth).parent.name == date
-    }
-    assert reference_stems  # the fixture's own three-way ratio gives this date some
+    reference_stems = {Path(s.source).stem for s in _reference_samples(drawn)}
+    assert reference_stems  # the fixture's own three-way ratio gives it some
 
     _run_dir, ckpt_path = _bound_checkpoint(tmp_path, manifest_dir, "exp-pq-flat")
     _stub_scorer(monkeypatch)
 
     r = prioritize_review_queue(
-        tmp_path, checkpoint_path=ckpt_path, images_dir=str(root / "images"))
+        tmp_path, checkpoint_path=ckpt_path, images_dir=str(root / "images" / UNDATED_BUCKET))
     assert "error" not in r, r
     assert r["queue"], r
     marked_true = {Path(e["image"]).stem for e in r["queue"] if e["reference_member"]}
@@ -418,16 +400,15 @@ def test_prioritize_review_queue_marks_a_flat_images_tree_dataset_correctly(tmp_
 def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibration_side(
     tmp_path, monkeypatch,
 ):
-    """A selection spanning two dates (one canonical, the other bucketed-labels-flat-images like
-    the single-date rail above) marks only the calibration samples whose own source sits in the
-    queue's images directory: a sample the selection holds under the other date's own images
-    bucket must never read as a member here, even though the same stem name recurs under both."""
-    canonical_date, flat_date = "2026-03-01", "2026-03-15"
-    root = _mixed_two_date_dataset(tmp_path / "data", canonical_date, flat_date)
+    """A selection spanning a dated and the undated capture marks only the calibration
+    samples whose own source sits in the queue's images directory: a sample the selection holds
+    under the dated capture's tree must never read as a member here, even though the same stem
+    name recurs under both."""
+    root = _mixed_dated_and_flat_dataset(tmp_path / "data", "2026-03-01")
     manifest_dir = tmp_path / "manifest"
     # A seed whose draw puts calibration samples under both dates, a stem among them under one only.
     drawn = _draw_flat(tmp_path, root, manifest_dir, seed=3)
-    here = (root / "images").resolve()
+    here = (root / "images" / UNDATED_BUCKET).resolve()
     bound_stems = {Path(s.source).stem for s in _reference_samples(drawn)
                    if Path(s.source).parent.resolve() == here}
     other_stems = {Path(s.source).stem for s in _reference_samples(drawn)
@@ -440,7 +421,7 @@ def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibrati
     _stub_scorer(monkeypatch)
 
     r = prioritize_review_queue(
-        tmp_path, checkpoint_path=ckpt_path, images_dir=str(root / "images"))
+        tmp_path, checkpoint_path=ckpt_path, images_dir=str(root / "images" / UNDATED_BUCKET))
     assert "error" not in r, r
     assert r["queue"], r
     marked_true = {Path(e["image"]).stem for e in r["queue"] if e["reference_member"]}

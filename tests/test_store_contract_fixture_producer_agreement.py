@@ -40,7 +40,7 @@ DELIVERY_EVENT_GOLDEN: dict[str, Any] = {
     "delivery_kind": DELIVERY_KIND_UNDER_TEST, "door": "deliver_phenology_milestones",
     "output_path": "büsch_phenology.csv", "output_sha256": "0" * 64,
     "producer": {"checkpoint_sha256": "0" * 64, "experiment_id": "exp_042"},
-    "buckets": [{"path": "predictions/live/2026-03-04", "date": "2026-03-04",
+    "buckets": [{"dataset_root": "dü", "bucket": "live/2026-03-04", "date": "2026-03-04",
                  "assessment_id": "assessment-ü", "validated": True, "reason": None}],
     "scale_assessment_id": None, "validated": True, "acknowledgment": None,
     "population": ["plot_ü"], "require_all_dates_complete": True,
@@ -68,6 +68,7 @@ def test_a_selection_record_carries_each_sample_s_own_source_label_group_and_sid
     than a shared root, with no per-date members block or bare id list."""
     import tcip_store as ts
 
+    from tcip_mcp.dataset_layout import label_key
     from tcip_mcp.pipelines.data import selection
     from tcip_mcp.pipelines.data.label_queries import registry_scope
 
@@ -76,7 +77,7 @@ def test_a_selection_record_carries_each_sample_s_own_source_label_group_and_sid
         selection.Selection(
             samples=(
                 selection.Sample(member="a_1", source=str(tmp_path / "images/2026-03-04/a_1.jpg"),
-                                 ground_truth=str(tmp_path / "annotations/2026-03-04/a_1.json"),
+                                 ground_truth=label_key(tmp_path, "2026-03-04", "a_1"),
                                  group="a", side="train",
                                  ground_truth_digest="7f3a1b9c2d4e5f60"),
             ),
@@ -104,7 +105,7 @@ def test_the_delivery_events_golden_carries_every_key_a_delivery_records(tmp_pat
     from tests._chain_fixtures import run_the_chain
 
     chain = run_the_chain(tmp_path, experiment_id="exp-golden-event")
-    delivered = deliver_per_image_counts(tmp_path, predictions_dir=str(chain.bucket),
+    delivered = deliver_per_image_counts(tmp_path, str(chain.root), chain.bucket,
                                          output_path=str(tmp_path / "out.csv"),
                                          trait=fx.COUNT_TRAIT)
     assert "error" not in delivered, delivered

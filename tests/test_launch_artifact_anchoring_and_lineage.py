@@ -39,35 +39,31 @@ def recorded_children(monkeypatch):
     return children
 
 
-def _canonical_dataset(root: Path, date: str = "2-11-26") -> tuple[Path, Path]:
-    """A small dataset in the canonical layout, the shape ``dataset_root_of`` resolves."""
+def _canonical_dataset(root: Path, date: str = "2-11-26") -> Path:
+    """A small dataset in the canonical layout, the shape ``dataset_root_of`` resolves; its
+    image directory."""
     from PIL import Image
 
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import label_image, registry_over
 
     images_dir = root / "images" / date
-    labels_dir = root / "annotations" / date
     images_dir.mkdir(parents=True)
-    labels_dir.mkdir(parents=True)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     for i in range(2):
         Image.new("RGB", (96, 64), color=(110, 120, 130)).save(images_dir / f"img_{i}.png")
-        json_io.write_annotations(
-            str(labels_dir / f"img_{i}.json"),
-            [Annotation(subject="bud", geometry=BBox(8, 6, 40, 22))], 96, 64)
-    return images_dir, labels_dir
+        label_image(images_dir / f"img_{i}.png",
+                    [Annotation(subject="bud", geometry=BBox(8, 6, 40, 22))], 96, 64)
+    return images_dir
 
 
-def _detection_config(images_dir: Path, labels_dir: Path) -> dict:
+def _detection_config(images_dir: Path) -> dict:
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 96},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "scope": {"subject": "bud"}, "auto_val": False},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"}, "auto_val": False},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
         "evaluation": {"selection_metric": "loss"},
@@ -94,8 +90,8 @@ def test_the_run_directory_lies_under_its_project_not_the_process_cwd(
     server_cwd.mkdir()
     monkeypatch.chdir(server_cwd)
 
-    images_dir, labels_dir = _canonical_dataset(project / "ds")
-    res = training_tools_launch(project, _detection_config(images_dir, labels_dir))
+    images_dir = _canonical_dataset(project / "ds")
+    res = training_tools_launch(project, _detection_config(images_dir))
 
     run_dir = Path(res["output_dir"])
     assert run_dir == experiments_dir(project) / res["experiment_id"]
@@ -115,11 +111,11 @@ def test_launched_run_records_the_datasets_identity_in_its_run_record(
     from tcip_mcp.tools.project_tools import register_dataset
 
     ds_root = tmp_path / "ds"
-    images_dir, labels_dir = _canonical_dataset(ds_root)
+    images_dir = _canonical_dataset(ds_root)
     registered = register_dataset(tmp_path, str(ds_root), crop="currant")
     assert registered["id"] and registered["fingerprint"]
 
-    res = training_tools_launch(tmp_path, _detection_config(images_dir, labels_dir))
+    res = training_tools_launch(tmp_path, _detection_config(images_dir))
 
     dataset = _launch_record(res)["dataset"]
     assert dataset == {"id": registered["id"], "fingerprint": registered["fingerprint"]}
@@ -134,8 +130,8 @@ def test_launch_records_what_the_smoke_contract_checked(
     project = tmp_path / "project"
     project.mkdir()
 
-    images_dir, labels_dir = _canonical_dataset(project / "ds")
-    launched_config = _detection_config(images_dir, labels_dir)
+    images_dir = _canonical_dataset(project / "ds")
+    launched_config = _detection_config(images_dir)
     res = training_tools_launch(project, launched_config)
     assert "model_contract" not in launched_config
 
@@ -153,8 +149,8 @@ def test_launch_omitting_overfit_check_records_null(
     project = tmp_path / "project"
     project.mkdir()
 
-    images_dir, labels_dir = _canonical_dataset(project / "ds")
-    res = training_tools_launch(project, _detection_config(images_dir, labels_dir))
+    images_dir = _canonical_dataset(project / "ds")
+    res = training_tools_launch(project, _detection_config(images_dir))
     assert res["overfit_check"] is None
 
     assert _launch_record(res)["model_contract"]["overfit_check"] is None
@@ -170,9 +166,9 @@ def test_launch_with_overfit_check_records_the_rendered_report(
     project = tmp_path / "project"
     project.mkdir()
 
-    images_dir, labels_dir = _canonical_dataset(project / "ds")
+    images_dir = _canonical_dataset(project / "ds")
     res = training_tools.launch_training(
-        project, _detection_config(images_dir, labels_dir), overfit_check=True, actor=None)
+        project, _detection_config(images_dir), overfit_check=True, actor=None)
     assert "error" not in res, res
     assert res["overfit_check"] is not None
     assert "passed" in res["overfit_check"]
@@ -195,13 +191,12 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
     project = tmp_path / "project"
     project.mkdir()
 
-    images_dir, labels_dir = _canonical_dataset(project / "ds")
+    images_dir = _canonical_dataset(project / "ds")
     config = {
         "model_source": {"builder": "tests.bespoke_models:build_diverging_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 96},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "scope": {"subject": "bud"}, "auto_val": False},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"}, "auto_val": False},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
         "evaluation": {"selection_metric": "loss"},
@@ -228,8 +223,8 @@ def test_the_run_record_the_worker_reads_carries_the_seed_and_the_training_keys(
     project = tmp_path / "project"
     project.mkdir()
 
-    images_dir, labels_dir = _canonical_dataset(project / "ds")
-    res = training_tools_launch(project, _detection_config(images_dir, labels_dir))
+    images_dir = _canonical_dataset(project / "ds")
+    res = training_tools_launch(project, _detection_config(images_dir))
 
     record = _launch_record(res)
     config = record["config"]

@@ -27,7 +27,6 @@ describe("annotate.save lost-update handling", () => {
     stubFetch(200, { base_mtime: "1783702599549301100" });
     const res = await api.annotate.save({
       image_path: "x",
-      label_path: "x.json",
       annotations: [],
       user: "breeder",
     });
@@ -36,10 +35,9 @@ describe("annotate.save lost-update handling", () => {
   });
 
   it("returns a conflict (not a thrown error) on a 409", async () => {
-    stubFetch(409, { detail: { error: "label file changed since it was loaded" } });
+    stubFetch(409, { detail: { error: "label document changed since it was loaded" } });
     const res = await api.annotate.save({
       image_path: "x",
-      label_path: "x.json",
       annotations: [],
       base_mtime: "1",
       user: "breeder",
@@ -48,45 +46,14 @@ describe("annotate.save lost-update handling", () => {
   });
 
   it("throws on a 409 whose body carries no detail, as every JSON call does", async () => {
-    stubFetch(409, { error: "label file changed since it was loaded" });
+    stubFetch(409, { error: "label document changed since it was loaded" });
     const save = api.annotate.save({
       image_path: "x",
-      label_path: "x.json",
       annotations: [],
       base_mtime: "1",
       user: "breeder",
     });
     await expect(save).rejects.toThrow("409");
-  });
-
-  it("returns unrecorded with the committed token and message on the audit-gap 409", async () => {
-    stubFetch(409, {
-      detail: {
-        error: "audit_entry_not_written",
-        message: "save_label_document completed and its audit entry could not be written",
-        committed: {
-          status: "ok",
-          image_path: "x",
-          n_annotations: 0,
-          base_mtime: "2",
-          completion: {},
-        },
-      },
-    });
-    const res = await api.annotate.save({
-      image_path: "x",
-      label_path: "x.json",
-      annotations: [],
-      base_mtime: "1",
-      user: "breeder",
-    });
-    expect(res.status).toBe("unrecorded");
-    if (res.status === "unrecorded") {
-      expect(res.base_mtime).toBe("2");
-      expect(res.message).toBe(
-        "save_label_document completed and its audit entry could not be written",
-      );
-    }
   });
 });
 
@@ -174,11 +141,11 @@ describe("query string assembly", () => {
     vi.unstubAllGlobals();
   });
 
-  it("drops a null parameter instead of sending the text null", async () => {
-    stubFetch(200, { bucket: "b", proposals: [] });
-    await api.annotate.proposals("img.jpg", "b", null);
+  it("carries each named parameter, a bucket name with its separator encoded", async () => {
+    stubFetch(200, { bucket: "m/2026-01-01", proposals: [] });
+    await api.annotate.proposals("img.jpg", "m/2026-01-01");
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe(
-      "/api/annotate/proposals?image_path=img.jpg&bucket=b",
+      "/api/annotate/proposals?image_path=img.jpg&bucket=m%2F2026-01-01",
     );
   });
 

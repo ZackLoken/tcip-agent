@@ -4,6 +4,8 @@ name (``KeyError``) rather than being tolerated with a default."""
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 import numpy as np
@@ -110,27 +112,22 @@ def test_a_sweep_final_status_lacking_its_state_fails_at_the_read(
 
 
 def test_a_completion_mark_lacking_its_time_fails_at_the_read(tmp_path: Path) -> None:
-    import json
-
     import pytest
 
-    from tcip_annotation.json_io import (
-        UnreadableLabelDocument, read_label_document, write_annotations,
-    )
-    from tests._producer_fixtures import mark_complete
+    import tcip_store
+    from tcip_annotation.json_io import UnreadableLabelDocument, read_label_document
+    from tests._producer_fixtures import image_label_key, mark_complete
 
-    image = tmp_path / "images" / "IMG_1.png"
-    image.parent.mkdir()
+    image = tmp_path / "images" / UNDATED_BUCKET / "IMG_1.png"
+    image.parent.mkdir(parents=True)
     Image.fromarray(np.zeros((80, 100, 3), dtype=np.uint8)).save(image)
-    label = tmp_path / "labels" / "IMG_1.json"
-    label.parent.mkdir()
-    write_annotations(label, [], 100, 80)
-    mark_complete(image, label, "bud", project=tmp_path, by="user:breeder")
+    mark_complete(image, "bud", project=tmp_path, by="user:breeder")
+    label = image_label_key(image)
     assert read_label_document(label).state("bud") == "negative"
 
-    stored = json.loads(label.read_text(encoding="utf-8"))
+    stored = tcip_store.read(label)
     del stored["complete"]["bud"][0]["at"]
-    label.write_text(json.dumps(stored), encoding="utf-8")
+    tcip_store.replace(label, stored)
 
     with pytest.raises(UnreadableLabelDocument, match=r"KeyError\('at'\)"):
         read_label_document(label)

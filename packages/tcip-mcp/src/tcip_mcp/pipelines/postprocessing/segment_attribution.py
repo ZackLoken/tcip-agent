@@ -22,9 +22,8 @@ from shapely.ops import nearest_points
 from shapely.validation import make_valid
 
 from tcip_annotation.json_io import (
-    annotations_of_document,
+    LabelDocument,
     is_unadjudicated_prediction,
-    parse_label_document,
     provenance_facts,
 )
 from tcip_annotation.matching import _rings_to_shapely, box_ring, point_in_polygon
@@ -82,46 +81,31 @@ def _polygon_of(geometry: BBox | Polygon) -> Polygon:
 
 
 def load_canopy_segments(
-    document_bytes: bytes, *, subject: str, raster_stem: str, raster_identity: dict,
+    document: LabelDocument, *, subject: str, raster_stem: str, raster_identity: dict,
 ) -> list[CanopySegment]:
-    """The canopy segments of ``subject`` in one label document's own bytes, checked against the
-    raster they claim to describe and against the canopy rule's own provenance admissibility.
+    """The canopy segments of ``subject`` in the raster's own label ``document`` (the caller read
+    it by the raster's key), checked against the raster's frame and against the canopy rule's own
+    provenance admissibility.
 
-    Parses ``document_bytes`` (a byte snapshot the caller already read and hashed once) and keeps
-    the annotations whose ``subject`` is the stated one. Refuses by name: when the document's own
-    ``image`` is not ``raster_stem`` or its ``width``/``height`` differ from ``raster_identity``'s;
-    when no annotation of ``subject`` exists; when an annotation of ``subject`` carries no geometry
-    at all (an image-level label) or is a :class:`~tcip_annotation.state.Point`, naming the record;
-    and when any annotation of ``subject`` is not positively a person's: a scored record (the
-    model's own unreviewed output), a record with no ``created_by`` at all, or a record whose
-    ``created_by`` is not a person's unless its ``accepted_by`` is a person's, each refused naming
-    the record. A person's own hand trace, and a machine-authored proposal a reviewer has accepted,
-    both admit.
+    Keeps the annotations whose ``subject`` is the stated one. Refuses by name: when the
+    document's ``width``/``height`` differ from ``raster_identity``'s; when no annotation of
+    ``subject`` exists; when an annotation of ``subject`` carries no geometry at all (an
+    image-level label) or is a :class:`~tcip_annotation.state.Point`, naming the record; and when
+    any annotation of ``subject`` is not positively a person's: a scored record (the model's own
+    unreviewed output), a record with no ``created_by`` at all, or a record whose ``created_by``
+    is not a person's unless its ``accepted_by`` is a person's, each refused naming the record. A
+    person's own hand trace, and a machine-authored proposal a reviewer has accepted, both admit.
     """
-    try:
-        text = document_bytes.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
+    if (int(document.width or -1), int(document.height or -1)) != (
+            int(raster_identity["width"]), int(raster_identity["height"])):
         raise CanopySegmentRefusal(
-            f"the canopy segment document for raster stem {raster_stem!r} is not valid UTF-8: {exc}"
-        ) from exc
-    document = parse_label_document(
-        text, source=f"canopy segment document for raster stem {raster_stem!r}")
-
-    if document.get("image") != raster_stem:
-        raise CanopySegmentRefusal(
-            f"the canopy segment document names image {document.get('image')!r}, not the raster's "
-            f"own stem {raster_stem!r}; the document at this position does not describe this raster"
-        )
-    doc_width, doc_height = document.get("width"), document.get("height")
-    if int(doc_width or -1) != int(raster_identity["width"]) or \
-            int(doc_height or -1) != int(raster_identity["height"]):
-        raise CanopySegmentRefusal(
-            f"the canopy segment document is {doc_width}x{doc_height}, the raster is "
-            f"{raster_identity['width']}x{raster_identity['height']}; the document at this "
-            "position does not describe this raster"
+            f"the canopy segment document of raster stem {raster_stem!r} is "
+            f"{document.width}x{document.height}, the raster is "
+            f"{raster_identity['width']}x{raster_identity['height']}; the document does not "
+            "describe this raster"
         )
 
-    annotations = [a for a in annotations_of_document(document) if a.subject == subject]
+    annotations = [a for a in document.annotations if a.subject == subject]
     if not annotations:
         raise CanopySegmentRefusal(
             f"no annotation of subject {subject!r} exists in the canopy segment document for "

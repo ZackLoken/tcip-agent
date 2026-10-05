@@ -80,9 +80,9 @@ implementation is replaceable and the guarantee is not.
 - No pilot vocabulary as framing: a trait's own name, state or column prefix never names a general
   mechanism in identifiers, comments or docs; thread the real trait through as data from the
   project's registry. A concrete trait is fine as one marked example.
-- A negative is an empty label file plus a human marking the image done with nothing on it.
-  An empty label file alone is never a negative, and empty label files are never deleted without
-  asking.
+- A negative is an empty label document plus a human marking the image done with nothing on it.
+  An empty label document alone is never a negative, and empty label documents are never deleted
+  without asking.
 - Never train or evaluate on a format the data does not positively confirm; refuse rather than
   guess.
 - Confirm before destructive or outward actions (deleting labels, overwriting weights, exporting

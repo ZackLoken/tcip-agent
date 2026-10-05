@@ -9,6 +9,8 @@ head consumes.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 import pytest
 
 pytest.importorskip("torch")
@@ -65,18 +67,17 @@ def _real_detection_item(tmp_path):
     """One ``(image, target)`` from a real ``DetectionDataset``: a non-square frame, a non-square
     box, and a subject that is not the first one in the registry."""
     from PIL import Image
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tests._producer_fixtures import label_image
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     registry_over(tmp_path, SubjectRegistry((Subject("bush"), Subject("bud"))))
     Image.new("RGB", (96, 48)).save(images_dir / "a.png")
-    json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="bud", geometry=BBox(4, 6, 40, 19))], 96, 48)
-    return dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")[0]
+    label_image(images_dir / "a.png", [Annotation(subject="bud", geometry=BBox(4, 6, 40, 19))],
+                96, 48)
+    return dataset_over('detection', str(images_dir), subject="bud")[0]
 
 
 def _real_detection_target(tmp_path):
@@ -88,8 +89,8 @@ def _real_ordinal_items(tmp_path):
     populated rank column."""
     from PIL import Image
 
-    images_dir = tmp_path / "ordinal_images"
-    images_dir.mkdir()
+    images_dir = tmp_path / "ordinal" / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     for name in ("a", "b"):
         Image.new("RGB", (96, 48)).save(images_dir / f"{name}.png")
     csv_path = tmp_path / "ranks.csv"

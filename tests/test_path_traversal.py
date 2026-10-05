@@ -51,7 +51,8 @@ def test_annotate_labels_route_blocks_outside_allowed_root(
 
     from tcip_web.routes.annotate import load_labels
 
-    img = tmp_path / "ok.jpg"
+    img = tmp_path / "images" / "undated" / "ok.jpg"
+    img.parent.mkdir(parents=True)
     Image.new("RGB", (8, 8)).save(img)
     outside = tmp_path_factory.mktemp("outside") / "secret.jpg"
     Image.new("RGB", (8, 8)).save(outside)

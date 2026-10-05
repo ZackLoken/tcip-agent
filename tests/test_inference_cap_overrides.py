@@ -126,20 +126,26 @@ def test_the_dry_run_report_shows_the_values_the_pass_will_run_at(tmp_path):
     from tests._verified_checkpoint_fixtures import project_checkpoint
 
     checkpoint = project_checkpoint(tmp_path)
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
+    images_dir = tmp_path / "images" / "undated"
+    images_dir.mkdir(parents=True)
     Image.new("RGB", (64, 64)).save(images_dir / "a.png")
-    raster = tmp_path / "mosaic.tif"
+    raster = tmp_path / "ortho" / "images" / "undated" / "mosaic.tif"
+    raster.parent.mkdir(parents=True)
     Image.new("RGB", (64, 64)).save(raster)
 
     over_images = run_inference(tmp_path, checkpoint_path=checkpoint, images_dir=str(images_dir),
-                                output_dir=str(tmp_path / "out"), dry_run=True)
+                                bucket="out/2026-01-01", dry_run=True)
     over_raster = run_inference(tmp_path, checkpoint_path=checkpoint, raster_path=str(raster),
-                                output_dir=str(tmp_path / "out"), stated=Stated(tile_size=32),
+                                bucket="out/2026-01-01", stated=Stated(tile_size=32),
                                 dry_run=True)
+
+    import tcip_store
+
+    from tcip_mcp.dataset_layout import bucket_key
 
     for result in (over_images, over_raster):
         assert "error" not in result, result
         assert result["execution"]["conf"] == DEFAULT_CONF
         assert result["execution"]["max_dets"] == DEFAULT_MAX_DETS
-    assert not (tmp_path / "out").exists()
+    for root in (tmp_path, tmp_path / "ortho"):
+        assert not tcip_store.exists(bucket_key(root, "out/2026-01-01"))

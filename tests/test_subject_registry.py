@@ -72,8 +72,7 @@ def _scope(tmp_path, registry, subject):
     from tcip_mcp.pipelines.data.label_queries import registry_scope
 
     registry_over(tmp_path, registry)
-    (tmp_path / "annotations").mkdir(exist_ok=True)
-    return registry_scope(tmp_path / "annotations", subject)
+    return registry_scope(tmp_path / "images", subject)
 
 
 def test_a_value_id_is_its_declared_position_never_a_sorted_one(tmp_path):

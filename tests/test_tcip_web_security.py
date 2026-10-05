@@ -50,7 +50,7 @@ def test_inference_launch_confines_checkpoint_to_image_roots(
     outside.write_bytes(b"x")
     resp = client.post("/api/inference/launch", json={
         "checkpoint_path": str(outside), "dataset_root": str(tmp_path), "date": "2026-02-11",
-        "output_dir": str(tmp_path / "predictions" / "baseline" / "2026-02-11"), "user": "breeder",
+        "bucket": "baseline/2026-02-11", "user": "breeder",
     })
     assert resp.status_code == 403
 
@@ -63,7 +63,7 @@ def test_inference_launch_unconfined_for_a_checkpoint_inside_the_workspace(
     resp = client.post("/api/inference/launch", json={
         "checkpoint_path": str(tmp_path / "nope.pt"),
         "dataset_root": str(tmp_path), "date": "2026-02-11",
-        "output_dir": str(tmp_path / "predictions" / "baseline" / "2026-02-11"), "user": "breeder",
+        "bucket": "baseline/2026-02-11", "user": "breeder",
     })
     assert resp.status_code == 404
 

@@ -1,5 +1,6 @@
 """Launch asks each task for the data locations its own loader reads: a classification config
-names its images and its CSV and nothing else, while detection still needs its labels directory.
+names its images and its CSV and nothing else, and a detection config names its images alone,
+their own label documents answering for them.
 """
 
 from __future__ import annotations
@@ -71,22 +72,21 @@ def test_a_classification_config_naming_a_missing_csv_is_refused_by_name(tmp_pat
     result = preflight_config(tmp_path, cfg)
 
     assert result["valid"] is False
-    assert any("Not found: data.labels_dir" in issue for issue in result["issues"]), \
+    assert any("data.labels_dir" in issue and "gone.csv" in issue for issue in result["issues"]), \
         result["issues"]
 
 
-def test_a_detection_config_still_needs_its_labels_directory(tmp_path: Path) -> None:
+def test_a_detection_config_names_its_images_alone(tmp_path: Path) -> None:
     from tcip_mcp.tools.training_tools import preflight_config
+    from tests._verified_checkpoint_fixtures import detection_images
 
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
+    scope = {"subject": "bud"}
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {}, "task": "detection"},
-        "data": {"images_dir": str(images_dir)},
+        "data": {**detection_images(tmp_path / "ds", scope), "scope": scope},
     }
 
     result = preflight_config(tmp_path, cfg)
 
-    assert result["valid"] is False
-    assert any("Missing 'data.labels_dir'" in issue for issue in result["issues"])
+    assert result["issues"] == [], result["issues"]

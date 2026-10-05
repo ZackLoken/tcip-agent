@@ -11,6 +11,8 @@ rather than guess.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 import numpy as np
@@ -163,23 +165,22 @@ def _flip_transform():
 
 
 def _detection_project(tmp_path: Path, arr: np.ndarray, *, extrasamples: list[str] | None = None):
+    """One TIFF holding ``arr`` and its label document; its images directory."""
     import tifffile
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
+    from tests._producer_fixtures import label_image
+
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     kwargs = {"photometric": "rgb", "rowsperstrip": 8}
     if extrasamples:
         kwargs["extrasamples"] = extrasamples
     tifffile.imwrite(str(images_dir / "img0.tif"), arr, **kwargs)
     h, w = arr.shape[:2]
-    json_io.write_annotations(str(labels_dir / "img0.json"),
-                              [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))],
-                              w, h, keep_empty=True)
-    return images_dir, labels_dir
+    label_image(images_dir / "img0.tif", [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))],
+                w, h, keep_empty=True)
+    return images_dir
 
 
 def test_a_uint8_tiff_trains_augmented_through_detection(tmp_path: Path):
@@ -187,8 +188,8 @@ def test_a_uint8_tiff_trains_augmented_through_detection(tmp_path: Path):
     import torch
 
     arr = _grid(40, 32, 3)
-    images_dir, labels_dir = _detection_project(tmp_path, arr)
-    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", transforms=_flip_transform())
+    images_dir = _detection_project(tmp_path, arr)
+    ds = dataset_over("detection", str(images_dir), subject="bud", transforms=_flip_transform())
     got, _target = ds[0]
     flipped = torch.from_numpy(arr[:, ::-1].astype(np.float32) / 255.0).permute(2, 0, 1)
     assert torch.equal(got, flipped)
@@ -202,8 +203,8 @@ def test_a_uint8_windowed_tile_trains_augmented_through_tiling(tmp_path: Path):
     raster_source.close_source_pool()
     try:
         arr = _grid(96, 96, 3)
-        images_dir, labels_dir = _detection_project(tmp_path, arr)
-        ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", transforms=_flip_transform(), tiling=TILING)
+        images_dir = _detection_project(tmp_path, arr)
+        ds = dataset_over("detection", str(images_dir), subject="bud", transforms=_flip_transform(), tiling=TILING)
         got, _target = ds[0]  # tile at (0, 0)
         tile = arr[0:64, 0:64]
         flipped = torch.from_numpy(tile[:, ::-1].astype(np.float32) / 255.0).permute(2, 0, 1)
@@ -224,8 +225,8 @@ def test_a_declared_alpha_windowed_tile_trains_augmented(tmp_path: Path):
     raster_source.close_source_pool()
     try:
         arr = _grid(96, 96, 4)
-        images_dir, labels_dir = _detection_project(tmp_path, arr, extrasamples=["unassalpha"])
-        ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
+        images_dir = _detection_project(tmp_path, arr, extrasamples=["unassalpha"])
+        ds = dataset_over("detection", str(images_dir), subject="bud",
                           stated={"num_channels": 4}, transforms=_flip_transform(),
                           tiling=TILING)
         got, _target = ds[0]  # tile at (0, 0)
@@ -248,8 +249,8 @@ def test_a_declared_spectral_fourth_band_windowed_tile_trains_unaugmented(tmp_pa
     raster_source.close_source_pool()
     try:
         arr = _grid(96, 96, 4)
-        images_dir, labels_dir = _detection_project(tmp_path, arr, extrasamples=["unspecified"])
-        ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
+        images_dir = _detection_project(tmp_path, arr, extrasamples=["unspecified"])
+        ds = dataset_over("detection", str(images_dir), subject="bud",
                           stated={"num_channels": 4}, transforms=_flip_transform(),
                           tiling=TILING)
         got, _target = ds[0]  # tile at (0, 0)

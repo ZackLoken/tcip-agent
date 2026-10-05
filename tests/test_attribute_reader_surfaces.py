@@ -29,8 +29,14 @@ def _scope(tmp_path: Path, *attributes: cr.Attribute) -> ClassScope:
 
     registry_over(tmp_path, cr.SubjectRegistry(subjects=(
         cr.Subject(name=SUBJECT, attributes=attributes),)))
-    (tmp_path / "annotations").mkdir(exist_ok=True)
-    return registry_scope(tmp_path / "annotations", SUBJECT)
+    return registry_scope(tmp_path / "images", SUBJECT)
+
+
+def _document(tmp_path: Path):
+    """The key of a prediction document of the bucket ``m`` under ``tmp_path``."""
+    from tcip_mcp.dataset_layout import prediction_key
+
+    return prediction_key(tmp_path, "m", "img")
 
 
 def test_count_by_class_under_a_scope_declaring_no_attribute_of_the_state_counts_none_positive(
@@ -39,8 +45,8 @@ def test_count_by_class_under_a_scope_declaring_no_attribute_of_the_state_counts
     """A bucket whose scope declares no attribute the positive state names never counts a
     positive, even where a record happens to carry that attribute's name and value: only a bucket
     whose model classified that attribute assessed the state at all."""
-    p = tmp_path / "img.json"
-    json_io.write_annotations(
+    p = _document(tmp_path)
+    json_io.write_label_document(
         p, [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 3, 3), score=0.9,
                        attributes={"grade": "high"})], 8, 8)
 
@@ -53,8 +59,8 @@ def test_count_by_class_under_a_scope_declaring_no_attribute_of_the_state_counts
 def test_count_by_class_reads_the_states_own_attribute_among_several(tmp_path: Path) -> None:
     """Under a scope declaring two attributes, the positive state's own attribute decides, never
     the other one; a record carrying no value under it refuses by name."""
-    p = tmp_path / "img.json"
-    json_io.write_annotations(p, [
+    p = _document(tmp_path)
+    json_io.write_label_document(p, [
         Annotation(subject=SUBJECT, geometry=BBox(1, 1, 3, 3), score=0.9,
                    attributes={"color": "red", "grade": "high"}),
         Annotation(subject=SUBJECT, geometry=BBox(4, 4, 6, 6), score=0.9,
@@ -64,8 +70,8 @@ def test_count_by_class_reads_the_states_own_attribute_among_several(tmp_path: P
 
     assert phenology.count_by_class(p, PositiveState(attribute="grade", value="high"),
                                     scope=scope) == (2, 1, 0)
-    json_io.write_annotations(p, [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 3, 3),
-                                             score=0.9, attributes={"color": "red"})], 8, 8)
+    json_io.write_label_document(p, [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 3, 3),
+                                                score=0.9, attributes={"color": "red"})], 8, 8)
     with pytest.raises(json_io.UndeclaredValue, match="'grade'"):
         phenology.count_by_class(p, PositiveState(attribute="grade", value="high"), scope=scope)
 
@@ -74,19 +80,26 @@ def test_an_undecodable_bucket_record_refuses_by_name_rather_than_reading_as_unc
     tmp_path: Path,
 ) -> None:
     """A published bucket whose record no longer decodes has no scope to read its documents
-    under: reading it refuses naming the file."""
+    under: reading it refuses naming the record."""
     pytest.importorskip("torch")
-    from tcip_annotation.json_io import BUCKET_RECORD
+    import sqlite3
 
-    from tcip_mcp.buckets import read_bucket
+    from tcip_store.file_backend import database_file
+
+    from tcip_mcp.buckets import NotABucket, read_bucket
     from tests._chain_fixtures import predicted, published
 
-    bucket = published(tmp_path, tmp_path / "ds" / "predictions" / "classifier" / "2026-05-02",
-                       [predicted("s1", ["one"])], scope={"subject": SUBJECT})
-    (bucket.path / BUCKET_RECORD).write_bytes(b"{not json")
+    image = tmp_path / "ds" / "images" / "2026-05-02" / "s1.png"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"")
+    bucket = published(tmp_path, "classifier/2026-05-02", [predicted(image, ["one"])],
+                       scope={"subject": SUBJECT})
+    with sqlite3.connect(database_file(str(bucket.root))) as db:
+        db.execute("update records set value = ? where store = 'prediction_buckets'",
+                   (b"{not json",))
 
-    with pytest.raises(ValueError, match=BUCKET_RECORD):
-        read_bucket(bucket.path)
+    with pytest.raises(NotABucket, match=r"prediction_buckets\['classifier/2026-05-02'\]"):
+        read_bucket(bucket.root, bucket.name)
 
 
 def test_the_coco_reader_keeps_a_records_attribute_values() -> None:

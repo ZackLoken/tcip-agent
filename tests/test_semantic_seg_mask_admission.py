@@ -5,6 +5,8 @@ with a fabricated all-background mask.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 import numpy as np
@@ -17,9 +19,9 @@ from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
 
 
 def _dataset(tmp_path: Path):
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     masks_dir = tmp_path / "masks"
-    images_dir.mkdir()
+    images_dir.mkdir(parents=True)
     masks_dir.mkdir()
     for i in range(2):
         Image.new("RGB", (8, 8), (i * 40, 0, 0)).save(images_dir / f"img{i}.png")

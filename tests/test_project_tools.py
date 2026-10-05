@@ -26,17 +26,14 @@ def _make_dataset(root: Path) -> None:
     """A minimal nested-schema dataset (image + label + registry) for identity tests."""
     from PIL import Image
 
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import label_image, registry_over
 
-    (root / "images" / "2-11-26").mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (32, 32)).save(root / "images" / "2-11-26" / "img_000.jpg")
-    (root / "annotations" / "2-11-26").mkdir(parents=True, exist_ok=True)
-    json_io.write_annotations(
-        str(root / "annotations" / "2-11-26" / "img_000.json"),
-        [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
+    image = root / "images" / "2-11-26" / "img_000.jpg"
+    image.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (32, 32)).save(image)
+    label_image(image, [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
 
 
@@ -84,6 +81,7 @@ def test_register_dataset_reconciles_a_move_by_id(tmp_path: Path):
     reg = register_dataset(tmp_path, str(src), crop="currant")
 
     moved = tmp_path / "moved"
+    tcip_store.release_root(src)
     shutil.copytree(src, moved)  # same content, new path
     register_dataset(tmp_path, str(moved), crop="currant")
 
@@ -181,22 +179,19 @@ def test_export_import_roundtrip(tmp_path: Path):
     src = tmp_path / "src_project"
     date = "2-11-26"
     images = src / "images" / date
-    labels = src / "annotations" / date
-    for d in (images, labels):
-        d.mkdir(parents=True)
+    images.mkdir(parents=True)
     record = _initialized(src)
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp import subject_registry
+    from tcip_mcp.dataset_layout import label_key
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import label_image, registry_over
 
     Image.new("RGB", (64, 64)).save(images / "img_000.jpg")
-    json_io.write_annotations(
-        str(labels / "img_000.json"),
-        [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))], 64, 64,
-    )
+    label_image(images / "img_000.jpg", [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))],
+                64, 64)
     # A multispectral capture the sensor wrote one file per band for: the manifest beside the
     # bands is what makes those files one logical image, so the bundle has to carry all of them.
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
@@ -236,7 +231,8 @@ def test_export_import_roundtrip(tmp_path: Path):
     # inspect_project counts raw image files, so the two sibling bands count separately here;
     # the logical-image count the band group folds them into is asserted below.
     assert status["image_count"] == 3
-    assert (dest / "annotations" / date / "img_000.json").is_file()
+    (restored_label,) = json_io.read_label_document(label_key(dest, date, "img_000")).annotations
+    assert restored_label.subject == "bud"
     # Comparing the enumeration rather than a file list pins the archive to the same notion of
     # "image" the platform reads the restored directory back with.
     from tcip_mcp.pipelines.image_utils import list_logical_images

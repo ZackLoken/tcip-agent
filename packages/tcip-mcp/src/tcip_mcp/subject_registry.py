@@ -17,7 +17,7 @@ An attribute is an axis a subject's instances carry, ``categorical`` (unordered)
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast
@@ -343,49 +343,3 @@ def registry_for_dataset_root(dataset_root: str | Path) -> SubjectRegistry | Non
         return None
 
 
-def distinct_dataset_root(pred_dirs: Sequence[str | Path]) -> Path | None:
-    """The single dataset root every one of ``pred_dirs`` resolves under, or ``None`` when none
-    do. Refuses (``RegistryError``) when the directories span more than one.
-    """
-    from tcip_mcp.dataset_layout import dataset_root_of
-
-    roots: set[Path] = {r for d in pred_dirs
-                        if d and (r := dataset_root_of(Path(d).resolve())) is not None}
-    if len(roots) > 1:
-        raise RegistryError(
-            "a delivery's prediction directories resolve to more than one dataset root "
-            f"({sorted(str(r) for r in roots)}); no delivery this platform ships spans more than "
-            "one dataset, so this cannot be reconciled to a single registry"
-        )
-    return next(iter(roots), None)
-
-
-def dataset_root_for_pred_dirs(pred_dirs: Sequence[str | Path]) -> Path:
-    """The single dataset root every one of ``pred_dirs`` resolves under.
-
-    Refuses (``RegistryError``) when the directories span more than one dataset root, and refuses
-    by name when none resolves to a dataset root at all.
-    """
-    root = distinct_dataset_root(pred_dirs)
-    if root is None:
-        raise RegistryError(
-            f"none of the prediction directories {[str(d) for d in pred_dirs]} resolves to a "
-            "dataset root, so there is no dataset for a plant-mapping delivery to attribute "
-            "these predictions to; re-export under the dataset's own predictions tree "
-            "(images/<date>/ sibling), or register this bucket's root as a dataset through "
-            "register_dataset"
-        )
-    return root
-
-
-def registry_for_pred_dirs(pred_dirs: Sequence[str | Path]) -> SubjectRegistry | None:
-    """The registry for the single dataset every one of ``pred_dirs`` resolves under.
-
-    ``None`` when none of the directories resolves to a dataset root, or the one they do resolve to
-    carries no registry yet. Refuses (``RegistryError``) when the directories span more than one
-    dataset root.
-    """
-    root = distinct_dataset_root(pred_dirs)
-    if root is None:
-        return None
-    return registry_for_dataset_root(root)

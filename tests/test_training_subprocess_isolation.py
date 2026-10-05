@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -23,27 +25,26 @@ def _write_classes_json(dataset_root, subject="bud", attribute=None, values=None
 
 
 def _document_dataset(root, subject="bud", attribute=None, values=None):
-    """Two images and their own label documents, under a registry naming ``subject``."""
+    """Two images and their own label documents, under a registry naming ``subject``; the images
+    directory."""
     from pathlib import Path
 
     from PIL import Image
 
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
+    from tests._producer_fixtures import label_image
 
     root = Path(root)
-    images_dir, labels_dir = root / "images", root / "annotations"
+    images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
-    labels_dir.mkdir(parents=True)
     _write_classes_json(root, subject=subject, attribute=attribute, values=values)
     attrs = {attribute: values[0]} if attribute else {}
     for stem in ("a", "b"):
         Image.new("RGB", (32, 32), (10, 20, 30)).save(images_dir / f"{stem}.png")
-        json_io.write_annotations(
-            labels_dir / f"{stem}.json",
-            [Annotation(subject=subject, geometry=BBox(4, 4, 20, 20), attributes=attrs)],
-            32, 32, keep_empty=True)
-    return images_dir, labels_dir
+        label_image(images_dir / f"{stem}.png",
+                    [Annotation(subject=subject, geometry=BBox(4, 4, 20, 20), attributes=attrs)],
+                    32, 32, keep_empty=True)
+    return images_dir
 
 
 def test_the_class_space_recorded_is_the_one_the_run_admitted(tmp_path):
@@ -54,8 +55,8 @@ def test_the_class_space_recorded_is_the_one_the_run_admitted(tmp_path):
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = tmp_path / "plain"
-    images_dir, labels_dir = _document_dataset(root, subject="bud")
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+    images_dir = _document_dataset(root, subject="bud")
+    data_cfg = {"images_dir": str(images_dir),
                 "scope": {"subject": "bud"}, "split": {"val_ratio": 0.5, "seed": 1}}
     auto_train_val(tmp_path, "detection", data_cfg, None)
 
@@ -71,9 +72,9 @@ def test_a_run_over_an_attributed_subject_records_its_attributes_in_declared_ord
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.subject_registry import Attribute
 
-    images_dir, labels_dir = _document_dataset(
+    images_dir = _document_dataset(
         tmp_path / "scoped", subject="bud", attribute="opening", values=["closed", "open"])
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+    data_cfg = {"images_dir": str(images_dir),
                 "scope": {"subject": "bud"}, "split": {"val_ratio": 0.5, "seed": 1}}
     auto_train_val(tmp_path, "detection", data_cfg, None)
 
@@ -90,7 +91,7 @@ def test_a_run_whose_ground_truth_carries_its_own_classes_records_the_empty_scop
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = tmp_path / "masks"
-    images_dir, masks_dir = root / "images", root / "masks"
+    images_dir, masks_dir = root / "images" / UNDATED_BUCKET, root / "masks"
     images_dir.mkdir(parents=True)
     masks_dir.mkdir(parents=True)
     for stem in ("a", "b"):
@@ -164,12 +165,11 @@ def test_launch_training_child_receives_its_own_run_directory(tmp_path, monkeypa
 
     from tests._producer_fixtures import seed_two_bud_images, small_detection_config
 
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    seed_two_bud_images(images_dir, labels_dir)
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    seed_two_bud_images(images_dir)
 
     def _cfg(experiment_id: str) -> dict:
-        return small_detection_config(images_dir, labels_dir, experiment_id)
+        return small_detection_config(images_dir, experiment_id)
 
     def children() -> list[list[str]]:
         return [argv for argv in captured_argv if "--run-dir" in argv]

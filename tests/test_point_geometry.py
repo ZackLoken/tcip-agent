@@ -15,23 +15,30 @@ every consumer:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
+import tcip_store
 from tcip_annotation import json_io
 from tcip_annotation.matching import pair_proposals
 from tcip_annotation.state import Annotation, BBox, Point, Polygon, bbox_of
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
+from tests._producer_fixtures import image_label_key, label_image
 
 BOX = BBox(10.0, 10.0, 30.0, 30.0)
 RING = [(50.0, 50.0), (70.0, 50.0), (70.0, 70.0)]
 
 
+def _saved(image: Path) -> list[Annotation]:
+    """The annotations of ``image``'s label document."""
+    return json_io.read_label_document(image_label_key(image)).annotations
+
+
 def _img(tmp_path: Path, name: str = "IMG_0001.JPG", size: tuple[int, int] = (100, 80)) -> Path:
-    p = tmp_path / "images" / name
+    p = tmp_path / "images" / UNDATED_BUCKET / name
     p.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", size).save(p)
     return p
@@ -54,33 +61,32 @@ def test_bbox_of_still_reads_a_box_and_a_polygon() -> None:
     assert (b.x1, b.y1, b.x2, b.y2) == (50.0, 50.0, 70.0, 70.0)
 
 
-# ── on-disk round trip (json_io) ─────────────────────────────────────────────
+# ── the record's round trip (json_io) ────────────────────────────────────────
 
 
-def test_point_round_trips_through_the_per_image_json(tmp_path: Path) -> None:
-    path = tmp_path / "IMG_0001.json"
-    json_io.write_annotations(
-        path, [Annotation(subject="bud", geometry=Point(12.5, 34.25))], 100, 80)
+def test_point_round_trips_through_the_per_image_document(tmp_path: Path) -> None:
+    key = label_key(tmp_path, UNDATED_BUCKET, "IMG_0001")
+    json_io.write_label_document(
+        key, [Annotation(subject="bud", geometry=Point(12.5, 34.25))], 100, 80)
 
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    (rec,) = raw["annotations"]
+    (rec,) = tcip_store.read(key)["annotations"]
     assert rec["point"] == [12.5, 34.25]
     assert "bbox" not in rec  # no fabricated box travels with a point
 
-    (back,) = json_io.read_annotations(path)
+    (back,) = json_io.read_label_document(key).annotations
     assert isinstance(back.geometry, Point)
     assert (back.geometry.x, back.geometry.y) == (12.5, 34.25)
 
 
-def test_a_point_alongside_a_box_and_a_polygon_all_survive_one_file(tmp_path: Path) -> None:
-    path = tmp_path / "IMG_0002.json"
-    json_io.write_annotations(path, [
+def test_a_point_alongside_a_box_and_a_polygon_all_survive_one_document(tmp_path: Path) -> None:
+    key = label_key(tmp_path, UNDATED_BUCKET, "IMG_0002")
+    json_io.write_label_document(key, [
         Annotation(subject="bud", geometry=BOX),
         Annotation(subject="bud", geometry=Polygon([RING])),
         Annotation(subject="bud", geometry=Point(1.0, 2.0)),
         Annotation(subject="bud"),  # image-level label, no geometry
     ], 100, 80)
-    kinds = [type(a.geometry) for a in json_io.read_annotations(path)]
+    kinds = [type(a.geometry) for a in json_io.read_label_document(key).annotations]
     assert kinds == [BBox, Polygon, Point, type(None)]
 
 
@@ -97,8 +103,7 @@ def _scope(root: Path, *values: str):
     attributes = (cr.Attribute("opening", "categorical", values),) if values else ()
     registry_over(root, cr.SubjectRegistry(subjects=(cr.Subject(name="bud",
                                                                  attributes=attributes),)))
-    (root / "annotations").mkdir(exist_ok=True)
-    return registry_scope(root / "annotations", "bud")
+    return registry_scope(root / "images", "bud")
 
 
 def test_attribute_ids_still_give_a_box_its_row() -> None:
@@ -112,17 +117,17 @@ def test_attribute_ids_still_give_a_box_its_row() -> None:
 def test_json_det_targets_yields_no_box_for_a_point(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.data.label_queries import json_det_targets
 
-    label = tmp_path / "IMG_0001.json"
-    json_io.write_annotations(label, [
-        Annotation(subject="bud", geometry=Point(20.0, 20.0)),
-        Annotation(subject="bud", geometry=BOX),
-    ], 100, 80)
-    target = json_det_targets(str(label), _scope(tmp_path / "plain"))
+    annotations = [Annotation(subject="bud", geometry=Point(20.0, 20.0)),
+                   Annotation(subject="bud", geometry=BOX)]
+    key = label_key(tmp_path, UNDATED_BUCKET, "IMG_0001")
+    json_io.write_label_document(key, annotations, 100, 80)
+    stored = json_io.read_label_document(key).annotations
+    target = json_det_targets(stored, _scope(tmp_path / "plain"))
     assert target["boxes"] == [[10.0, 10.0, 30.0, 30.0]]
     assert target["labels"] == [1]
     # An attribute scope must not turn the point into a decode failure either: it is simply not a
     # target, and the box, never assessed, is one row marked unassessed.
-    target = json_det_targets(str(label), _scope(tmp_path / "attributed", "open"))
+    target = json_det_targets(stored, _scope(tmp_path / "attributed", "open"))
     assert target["boxes"] == [[10.0, 10.0, 30.0, 30.0]]
     assert target["attributes"].tolist() == [[json_io.UNASSESSED]]
 
@@ -136,24 +141,23 @@ def test_a_point_only_document_carries_the_subject_and_the_detection_loader_refu
     than training it as a zero-object negative no human confirmed."""
     from tests._producer_fixtures import dataset_over
 
-    images, labels = tmp_path / "images", tmp_path / "annotations"
-    images.mkdir()
-    labels.mkdir()
+    images = tmp_path / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
     for stem in ("IMG_0001", "IMG_0002"):
         Image.new("RGB", (100, 80)).save(images / f"{stem}.png")
-    json_io.write_annotations(labels / "IMG_0001.json",
-                              [Annotation(subject="bud", geometry=Point(20.0, 20.0))], 100, 80)
-    json_io.write_annotations(labels / "IMG_0002.json",
-                              [Annotation(subject="bud", geometry=BOX)], 100, 80)
+    label_image(images / "IMG_0001.png", [Annotation(subject="bud", geometry=Point(20.0, 20.0))],
+                100, 80)
+    label_image(images / "IMG_0002.png", [Annotation(subject="bud", geometry=BOX)], 100, 80)
 
     for stem in ("IMG_0001", "IMG_0002"):
-        assert json_io.read_label_document(labels / f"{stem}.json").state("bud") == "partial"
+        doc = json_io.read_label_document(image_label_key(images / f"{stem}.png"))
+        assert doc.state("bud") == "partial"
 
     with pytest.raises(ValueError, match="only in geometries a detection loader does not read"):
-        dataset_over("detection", images, labels, subject="bud")
+        dataset_over("detection", images, subject="bud")
 
     # Admits valid work: the document carrying a box still trains.
-    ds = dataset_over("detection", images, labels, subject="bud", members=["IMG_0002"])
+    ds = dataset_over("detection", images, subject="bud", members=["IMG_0002"])
     assert [Path(s).stem for s in ds.stems] == ["IMG_0002"]
 
 
@@ -205,21 +209,19 @@ def test_worst_predictions_does_not_count_a_point_as_a_detection(tmp_path: Path)
     from tcip_mcp.tools.vision_tools import get_worst_predictions
     from tests._chain_fixtures import published
 
-    gt_dir, pred_dir = tmp_path / "gt", tmp_path / "pred"
-    gt_dir.mkdir()
-    json_io.write_annotations(gt_dir / "IMG_0001.json",
-                              [Annotation(subject="bud", geometry=BOX)], 100, 80)
-    published(tmp_path, pred_dir, [
-        {"image": "IMG_0001.jpg", "width": 100, "height": 80,
+    image = _img(tmp_path, "IMG_0001.jpg")
+    label_image(image, [Annotation(subject="bud", geometry=BOX)], 100, 80)
+    bucket = published(tmp_path, "pred/2026-01-01", [
+        {"image": str(image), "width": 100, "height": 80,
          "boxes": [[BOX.x1, BOX.y1, BOX.x2, BOX.y2]], "scores": [1.0], "labels": [1]}],
         scope={"subject": "bud"})
     # A point beside the published box, as an edit in place would leave it: no head emits one.
-    json_io.write_annotations(pred_dir / "IMG_0001.json", [
+    json_io.write_label_document(bucket.document_key(image.stem), [
         Annotation(subject="bud", geometry=BOX, score=1.0),
         Annotation(subject="bud", geometry=Point(60.0, 60.0), score=1.0),
     ], 100, 80)
 
-    res = get_worst_predictions(read_bucket(pred_dir), str(gt_dir))
+    res = get_worst_predictions(read_bucket(bucket.root, bucket.name))
     # 1 GT box vs 1 predicted box: no shortfall, no surplus, full confidence -> a zero error score.
     # Counting the point as a surplus prediction would score this perfect frame as wrong.
     assert res["worst_images"][0]["error_score"] == 0.0
@@ -229,8 +231,10 @@ def test_phenology_detection_counts_exclude_a_point(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.postprocessing.phenology import count_by_class
     from tcip_mcp.traits import PositiveState
 
-    path = tmp_path / "IMG_0001.json"
-    json_io.write_annotations(path, [
+    from tcip_mcp.dataset_layout import prediction_key
+
+    path = prediction_key(tmp_path, "m/2026-01-01", "IMG_0001")
+    json_io.write_label_document(path, [
         Annotation(subject="bud", geometry=BOX, score=0.9,
                   attributes={"opening": "open"}),
         Annotation(subject="bud", geometry=Point(60.0, 60.0), score=0.9,
@@ -261,8 +265,7 @@ def test_visualize_annotations_renders_the_box_and_reports_the_point(tmp_path: P
     from tcip_mcp.tools.vision_tools import _viz_annotations
 
     img = _img(tmp_path / "ds", "IMG_0001.JPG")
-    label = tmp_path / "ds" / "annotations" / "IMG_0001.json"
-    json_io.write_annotations(label, [
+    label_image(img, [
         Annotation(subject="bud", geometry=BOX),
         Annotation(subject="bud", geometry=Point(60.0, 60.0)),
     ], 100, 80)
@@ -288,9 +291,7 @@ def test_mcp_read_annotations_tool_returns_a_point(tmp_path: Path) -> None:
     from tcip_mcp.tools.annotation_tools import read_annotations as read_annotations_tool
 
     img = _img(tmp_path / "ds", "IMG_0001.JPG")
-    label = tmp_path / "ds" / "annotations" / "IMG_0001.json"
-    json_io.write_annotations(label, [Annotation(subject="bud", geometry=Point(12.0, 34.0))],
-                              100, 80)
+    label_image(img, [Annotation(subject="bud", geometry=Point(12.0, 34.0))], 100, 80)
     res = read_annotations_tool(str(img))
     (ann,) = res["labels"]["annotations"]
     assert ann["point"] == [12.0, 34.0]
@@ -313,11 +314,10 @@ def test_save_annotations_tool_writes_an_incoming_point(tmp_path: Path) -> None:
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     img = _img(tmp_path)
-    out = tmp_path / "IMG_0001.json"
-    res = save_annotations(tmp_path, tmp_path.parent, str(img), annotations=[{"subject": "bud", "point": [12.0, 34.0]}],
-                           path=str(out))
+    res = save_annotations(tmp_path, tmp_path.parent, str(img),
+                           annotations=[{"subject": "bud", "point": [12.0, 34.0]}])
     assert "error" not in res
-    (stored,) = json_io.read_annotations(out)
+    (stored,) = _saved(img)
     assert isinstance(stored.geometry, Point)
     assert (stored.geometry.x, stored.geometry.y) == (12.0, 34.0)
 
@@ -328,12 +328,11 @@ def test_save_annotations_tool_keeps_points_and_point_distinct(tmp_path: Path) -
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     img = _img(tmp_path)
-    out = tmp_path / "IMG_0001.json"
     save_annotations(tmp_path, tmp_path.parent, str(img), annotations=[
         {"subject": "bud", "points": [[50, 50], [70, 50], [70, 70]]},
         {"subject": "bud", "point": [12.0, 34.0]},
-    ], path=str(out))
-    kinds = [type(a.geometry) for a in json_io.read_annotations(out)]
+    ])
+    kinds = [type(a.geometry) for a in _saved(img)]
     assert kinds == [Polygon, Point]
 
 
@@ -349,18 +348,16 @@ def client() -> TestClient:
 
 def test_annotate_route_round_trips_a_point(client: TestClient, tmp_path: Path) -> None:
     img = _img(tmp_path)
-    label = tmp_path / "labels" / "IMG_0001.json"
 
     resp = client.post("/api/annotate/labels", json={
-        "image_path": str(img), "label_path": str(label),
+        "image_path": str(img),
         "annotations": [{"subject": "bud", "point": [12.0, 34.0]}], "user": "breeder",
     })
     assert resp.status_code == 200
-    (stored,) = json_io.read_annotations(str(label))
+    (stored,) = _saved(img)
     assert isinstance(stored.geometry, Point)
 
-    body = client.get("/api/annotate/labels",
-                      params={"image_path": str(img), "label_path": str(label)}).json()
+    body = client.get("/api/annotate/labels", params={"image_path": str(img)}).json()
     (ann,) = body["annotations"]
     assert ann["point"] == [12.0, 34.0]  # read back as itself, not as a geometry-less label
 
@@ -369,15 +366,14 @@ def test_annotate_route_round_trips_mixed_point_and_box_geometry(
     client: TestClient, tmp_path: Path
 ) -> None:
     img = _img(tmp_path)
-    label = tmp_path / "labels" / "IMG_0001.json"
     resp = client.post("/api/annotate/labels", json={
-        "image_path": str(img), "label_path": str(label),
+        "image_path": str(img),
         "annotations": [{"subject": "bud", "point": [12.0, 34.0]},
                         {"subject": "bud", "bbox": [10.0, 10.0, 30.0, 30.0]}],
         "user": "breeder",
     })
     assert resp.status_code == 200
-    kinds = [type(a.geometry) for a in json_io.read_annotations(str(label))]
+    kinds = [type(a.geometry) for a in _saved(img)]
     assert kinds == [Point, BBox]
 
 
@@ -390,15 +386,14 @@ def test_the_proposals_route_pairs_no_proposal_with_a_point(
 
     tmp_path = open_new_project(tmp_path / "proj")
     img = _img(tmp_path)
-    gt = tmp_path / "gt.json"
-    json_io.write_annotations(gt, [Annotation(subject="bud", geometry=Point(20.0, 20.0))], 100, 80)
-    bucket = published(tmp_path, tmp_path / "predictions" / "baseline", [
+    label_image(img, [Annotation(subject="bud", geometry=Point(20.0, 20.0))], 100, 80)
+    bucket = published(tmp_path, "baseline/2026-01-01", [
         {"image": str(img), "width": 100, "height": 80,
          "boxes": [[BOX.x1, BOX.y1, BOX.x2, BOX.y2]], "scores": [0.9], "labels": [1]}],
         scope={"subject": "bud"})
 
     resp = client.get("/api/annotate/proposals", params={
-        "image_path": str(img), "bucket": str(bucket.path), "label_path": str(gt)})
+        "image_path": str(img), "bucket": bucket.name})
     assert resp.status_code == 200, resp.text
 
     # The point makes no spatial claim: the box proposal pairs with nothing.

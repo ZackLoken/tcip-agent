@@ -110,9 +110,8 @@ def test_inference_cancel_endpoint_and_worker(tmp_path, opened_project, monkeypa
     _fake_predictor(monkeypatch)
 
     job = InferenceJob(job_id="j1", actor="user:tester", project=str(tmp_path),
-                       checkpoint_path=project_checkpoint(tmp_path),
-                       images_dir=str(images_dir), output_dir=str(tmp_path / "out"),
-                       stated=STATED)
+                       checkpoint_path=project_checkpoint(tmp_path), dataset_root=str(tmp_path),
+                       images_dir=str(images_dir), bucket="out", stated=STATED)
     _register(job)
 
     res = cancel_job("j1", PersonPayload(user="Alice"))
@@ -131,131 +130,6 @@ def test_inference_cancel_endpoint_and_worker(tmp_path, opened_project, monkeypa
     assert job.done == 0
 
 
-def test_inference_worker_sets_audit_warning_on_a_lost_audit_line(
-    tmp_path, opened_project, monkeypatch,
-):
-    """The run's own predictions land regardless; a failed append must not vanish as a silent
-    warning, and it must not change the run's own terminal status either."""
-    pytest.importorskip("fastapi")
-    monkeypatch.chdir(tmp_path)
-    import tcip_mcp.audit as audit_module
-    from tcip_web.routes import inference
-    from tcip_web.routes.inference import InferenceJob, _register, _worker
-    from tests._verified_checkpoint_fixtures import project_checkpoint
-
-    images_dir = _one_image(tmp_path)
-    ckpt = project_checkpoint(tmp_path)
-    _fake_predictor(monkeypatch)
-
-    def _refuse_append(*args: object, **kwargs: object) -> None:
-        raise RuntimeError("audit log unwritable")
-
-    monkeypatch.setattr(audit_module, "append", _refuse_append)
-
-    output_dir = tmp_path / "ds" / "predictions" / "model" / "2026-01-01"
-    job = InferenceJob(job_id="j-audit", actor="user:tester", project=str(tmp_path), checkpoint_path=ckpt, images_dir=str(images_dir),
-                       output_dir=str(output_dir), stated=STATED)
-    _register(job)
-
-    _worker(job)
-    served = {j["job_id"]: j for j in inference.list_jobs()["jobs"]}.get("j-audit", {})
-    assert served.get("status") == "completed"
-    warning = served.get("audit_warning")
-    assert warning is not None
-    assert "prediction_bucket_published" in warning
-    assert (output_dir / "img.json").exists()
-
-
-def test_inference_worker_healthy_run_serves_audit_warning_none(
-    tmp_path, opened_project, monkeypatch,
-):
-    """Coverage: a run whose own audit line lands carries no gap on the served body."""
-    pytest.importorskip("fastapi")
-    monkeypatch.chdir(tmp_path)
-    from tcip_web.routes import inference
-    from tcip_web.routes.inference import InferenceJob, _register, _worker
-    from tests._verified_checkpoint_fixtures import project_checkpoint
-
-    images_dir = _one_image(tmp_path)
-    _fake_predictor(monkeypatch)
-
-    output_dir = tmp_path / "ds" / "predictions" / "model" / "2026-01-01"
-    job = InferenceJob(job_id="j-healthy", actor="user:tester", project=str(tmp_path),
-                       checkpoint_path=project_checkpoint(tmp_path),
-                       images_dir=str(images_dir), output_dir=str(output_dir), stated=STATED)
-    _register(job)
-
-    _worker(job)
-    served = {j["job_id"]: j for j in inference.list_jobs()["jobs"]}.get("j-healthy", {})
-    assert served.get("status") == "completed"
-    assert served.get("audit_warning") is None
-
-
-def test_inference_stream_final_frame_never_precedes_the_audit_attempt(
-    tmp_path, opened_project, monkeypatch,
-):
-    """The worker's terminal status must not become visible to the stream before the audit
-    attempt for this run resolves: a frame that read the status while the append was still in
-    flight would carry a terminal status with no ``audit_warning`` yet, and the stream closes on
-    any terminal status, so that frame would be the last one the client ever sees."""
-    pytest.importorskip("fastapi")
-    monkeypatch.chdir(tmp_path)
-    import threading
-
-    from fastapi.testclient import TestClient
-
-    import tcip_mcp.audit as audit_module
-    from tcip_web.app import app
-    from tcip_web.routes.inference import InferenceJob, _register, _worker
-    from tests._verified_checkpoint_fixtures import project_checkpoint
-
-    images_dir = _one_image(tmp_path)
-    ckpt = project_checkpoint(tmp_path)
-    _fake_predictor(monkeypatch)
-
-    about_to_append = threading.Event()
-    release_append = threading.Event()
-
-    def _blocking_refusal(*args: object, **kwargs: object) -> None:
-        about_to_append.set()
-        release_append.wait(10)
-        raise RuntimeError("audit log unwritable")
-
-    monkeypatch.setattr(audit_module, "append", _blocking_refusal)
-
-    output_dir = tmp_path / "ds" / "predictions" / "model" / "2026-01-01"
-    job = InferenceJob(job_id="j-stream-order", actor="user:tester", project=str(tmp_path), checkpoint_path=ckpt,
-                       images_dir=str(images_dir), output_dir=str(output_dir), stated=STATED)
-    _register(job)
-
-    worker_thread = threading.Thread(target=_worker, args=(job,))
-    worker_thread.start()
-    try:
-        assert about_to_append.wait(10)
-        assert job.status == "running"
-
-        client = TestClient(app, base_url="http://127.0.0.1")
-        with client.websocket_connect(
-            f"ws://127.0.0.1/api/inference/jobs/{job.job_id}/stream"
-        ) as ws:
-            first = ws.receive_json()
-            assert first["type"] == "progress"
-            assert first["status"] == "running"
-            release_append.set()
-            frame = None
-            for _ in range(50):
-                frame = ws.receive_json()
-                if frame["type"] == "final":
-                    break
-                assert frame["status"] == "running"
-            assert frame is not None and frame["type"] == "final"
-            assert frame["audit_warning"] is not None
-            assert "prediction_bucket_published" in frame["audit_warning"]
-    finally:
-        release_append.set()
-        worker_thread.join(10)
-
-
 def test_inference_cancel_reaches_a_job_launched_for_a_previously_open_project(
     tmp_path, opened_project,
 ):
@@ -270,8 +144,8 @@ def test_inference_cancel_reaches_a_job_launched_for_a_previously_open_project(
     from tests._web_fixtures import open_new_project
 
     job = InferenceJob(
-        job_id="launched-under-a", actor="user:tester", project=str(opened_project), checkpoint_path="c",
-        images_dir="i", output_dir="o", stated=STATED,
+        job_id="launched-under-a", actor="user:tester", project=str(opened_project),
+        checkpoint_path="c", dataset_root="d", images_dir="i", bucket="b", stated=STATED,
     )
     _register(job)
 

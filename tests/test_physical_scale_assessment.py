@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Polygon
 from tests import _trait_fixtures as fx
+from tests._producer_fixtures import label_image
 
 DATE = "2026-01-01"
 PX_PER_MM = 10.0  # a fixed 0.1 mm/px reference scale, chosen for round test numbers
@@ -53,16 +53,15 @@ def _reference(project: Path, *, n: int = 8, extents_mm: list[float] | None = No
     from tcip_mcp.traits import registered_crops
 
     root = project / "ds"
-    images, labels = root / "images" / DATE, root / "annotations" / DATE
+    images = root / "images" / DATE
     images.mkdir(parents=True)
-    labels.mkdir(parents=True)
     registry_over(root, cr.SubjectRegistry(subjects=(cr.Subject(name=SUBJECT),)))
     assert "error" not in register_dataset(project, str(root), crop=sorted(registered_crops())[0])
     rows = []
     for i in range(n):
         stem = f"r{i}"
         Image.new("RGB", (120, 120), color=(20 + i, 20, 20)).save(images / f"{stem}.png")
-        json_io.write_annotations(str(labels / f"{stem}.json"), [Annotation(
+        label_image(images / f"{stem}.png", [Annotation(
             subject=SUBJECT, geometry=Polygon(rings=[_rect(100.0, angle_deg=(angles or {}).get(i, 0.0))]))],
             120, 120)
         extent = extents_mm[i] if extents_mm else 100.0 / PX_PER_MM
@@ -115,9 +114,9 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(tmp_pa
     assert scale["scale"]["value"] == pytest.approx(0.1)  # 10 mm over a 100 px reference length
 
     image = tmp_path / "ds" / "images" / DATE / "r0.png"
-    bucket = read_bucket(published(
-        tmp_path, tmp_path / "ds" / "predictions" / "m" / DATE,
-        [{**predicted("r0", [SUBJECT]), "image": str(image)}], scope={"subject": SUBJECT}).path)
+    published_bucket = published(tmp_path, f"m/{DATE}", [predicted(image, [SUBJECT])],
+                                 scope={"subject": SUBJECT})
+    bucket = read_bucket(published_bucket.root, published_bucket.name)
     rows = [{"plant_id": "p1", "value": 12.5, "observations": 1, "value_key": "area_mm2",
              "plant_attribution": "image"}]
     def deliver(out: Path, **kw):
@@ -152,9 +151,9 @@ def test_a_box_reference_refuses_rather_than_reading_a_projected_extent(tmp_path
     assessment refuses it outright."""
     _author_tolerance(tmp_path)
     selection, csv_path = _reference(tmp_path)
-    for label in (tmp_path / "ds" / "annotations" / DATE).glob("*.json"):
-        json_io.write_annotations(str(label), [Annotation(
-            subject=SUBJECT, geometry=BBox(10, 55, 110, 65))], 120, 120)
+    for image in (tmp_path / "ds" / "images" / DATE).glob("*.png"):
+        label_image(image, [Annotation(subject=SUBJECT, geometry=BBox(10, 55, 110, 65))],
+                    120, 120)
 
     result = _calibrate(tmp_path, selection, csv_path)
 
@@ -164,8 +163,8 @@ def test_a_box_reference_refuses_rather_than_reading_a_projected_extent(tmp_path
 def test_an_image_with_two_reference_annotations_refuses_rather_than_picking_one(tmp_path):
     _author_tolerance(tmp_path)
     selection, csv_path = _reference(tmp_path)
-    for label in (tmp_path / "ds" / "annotations" / DATE).glob("*.json"):
-        json_io.write_annotations(str(label), [
+    for image in (tmp_path / "ds" / "images" / DATE).glob("*.png"):
+        label_image(image, [
             Annotation(subject=SUBJECT, geometry=Polygon(rings=[_rect(100.0)])),
             Annotation(subject=SUBJECT, geometry=Polygon(rings=[_rect(40.0, center=(30, 30))]))],
             120, 120)
@@ -273,28 +272,28 @@ def test_a_malformed_reference_csv_refuses_naming_its_line(tmp_path, rows, match
 
 
 def test_the_scale_is_measured_from_the_retained_table(tmp_path, monkeypatch):
-    """The breeder's table is retained before it is read and measured from its copy: a table that
-    changes as the assessment opens is measured as retained, and a change after the assessment is
-    a moved reference."""
+    """The breeder's table is read once, that read is retained, and the scale is measured from
+    the retained copy: a table that changes as the assessment opens is measured as it was read
+    and retained, and a change after the assessment is a moved reference."""
     from tcip_mcp import assessment as module
     from tcip_mcp.assessment import assessment_dir, read_assessment
 
     _author_tolerance(tmp_path)
     selection, csv_path = _reference(tmp_path)
-    retain = module._retained
+    read = module._read_reference
 
-    def changed_as_it_is_retained(run_dir, samples, extra=()):
+    def changed_as_it_is_read(samples, extra=()):
         _write_csv(csv_path, [(f"r{i}", 20.0, "mm") for i in range(8)])
-        return retain(run_dir, samples, extra)
+        return read(samples, extra)
 
-    monkeypatch.setattr(module, "_retained", changed_as_it_is_retained)
+    monkeypatch.setattr(module, "_read_reference", changed_as_it_is_read)
     scale = _calibrate(tmp_path, selection, csv_path)
     monkeypatch.undo()
 
     assert scale["scale"]["value"] == pytest.approx(0.2), scale
     recorded = read_assessment(tmp_path, scale["assessment_id"])
     run_dir = assessment_dir(tmp_path, scale["assessment_id"])
-    (table,) = [f for f in recorded.reference.ground_truth if f.path == str(csv_path)]
+    (table,) = [f for f in recorded.reference.ground_truth if f.ground_truth == str(csv_path)]
     assert "20.0" in (run_dir / table.copy).read_text()
     assert recorded.reference.moved(run_dir) == []
     _write_csv(csv_path, [(f"r{i}", 30.0, "mm") for i in range(8)])

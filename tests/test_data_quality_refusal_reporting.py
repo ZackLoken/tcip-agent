@@ -1,27 +1,22 @@
 """tcip doctor's check_data_quality: what it reports, and what it must never quietly claim.
 
 Two standing facts the caller relies on. First, a label document the one per-image reader refuses
-is a named finding for that file, never a reason to stop looking at the others. Second, the
+is a named finding for that document, never a reason to stop looking at the others. Second, the
 finding's own vocabulary is load bearing: a warning and an error are not interchangeable.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
+import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 
 from tcip_mcp.cli import doctor
+from tcip_mcp.dataset_layout import label_key
 
 DATE = "2-11-26"
-
-COCO = {
-    "images": [{"id": 1, "file_name": "plotA_0_0.jpg", "width": 96, "height": 64}],
-    "annotations": [{"id": 1, "image_id": 1, "category_id": 1, "bbox": [11, 7, 28, 44]}],
-    "categories": [{"id": 1, "name": "bud"}],
-}
 
 
 def _write_image(path: Path, width: int, height: int) -> None:
@@ -33,7 +28,7 @@ def _write_image(path: Path, width: int, height: int) -> None:
 
 def _check(root: Path) -> list[tuple[str, str]]:
     findings: list[tuple[str, str]] = []
-    doctor.check_data_quality(root, findings, census=doctor._census(root, findings, set()))
+    doctor.check_data_quality(root, findings, census=doctor._census(root, findings))
     return findings
 
 
@@ -41,22 +36,24 @@ def _errors(findings: list[tuple[str, str]]) -> list[str]:
     return [msg for level, msg in findings if level == "error"]
 
 
-def test_an_unreadable_label_store_is_an_error_per_file(tmp_path: Path):
-    """Labels present but of a shape the reader refuses are an error per file, naming the refusal;
-    a dataset with no annotations dir at all yields no error, only the count of unlabeled images."""
+def _label(root: Path, stem: str, annotations, width: int = 96, height: int = 64,
+           **kwargs) -> None:
+    json_io.write_label_document(label_key(root, DATE, stem), annotations, width, height, **kwargs)
+
+
+def test_an_unreadable_label_record_is_an_error_per_document(tmp_path: Path):
+    """Label records of a shape the reader refuses are an error per document, naming the refusal;
+    a dataset with no label documents at all yields no error, only the count of unlabeled
+    images."""
     root = tmp_path / "unreadable"
-    labels_dir = root / "annotations" / DATE
-    labels_dir.mkdir(parents=True)
     for stem in ("plotA_0_0", "plotA_0_1"):
         _write_image(root / "images" / DATE / f"{stem}.jpg", 96, 64)
-        (labels_dir / f"{stem}.json").write_text(
-            json.dumps({"shapes": [{"label": "bud", "points": [[3, 5], [40, 52]]}]}),
-            encoding="utf-8",
-        )
+        ts.replace(label_key(root, DATE, stem),
+                   {"shapes": [{"label": "bud", "points": [[3, 5], [40, 52]]}]})
 
     findings = _check(root)
     assert len(findings) == 2
-    assert all(level == "error" and "label file will not read" in msg
+    assert all(level == "error" and "label document will not read" in msg
                for level, msg in findings)
 
     bare = tmp_path / "unlabeled"
@@ -71,16 +68,10 @@ def test_an_unreadable_label_store_is_an_error_per_file(tmp_path: Path):
 def test_a_label_with_no_matching_image_is_an_error(tmp_path: Path):
     """An orphan label is an error-level finding."""
     root = tmp_path / "ds"
-    labels_dir = root / "annotations" / DATE
-    labels_dir.mkdir(parents=True)
     for stem in ("plotA_0_0", "plotB_0_0"):
         _write_image(root / "images" / DATE / f"{stem}.jpg", 96, 64)
     for stem in ("plotA_0_0", "plotB_0_0", "plotZ_9_9"):
-        json_io.write_annotations(
-            labels_dir / f"{stem}.json",
-            [Annotation(subject="bud", geometry=BBox(11, 7, 39, 51))],
-            96, 64,
-        )
+        _label(root, stem, [Annotation(subject="bud", geometry=BBox(11, 7, 39, 51))])
 
     errors = _errors(_check(root))
 
@@ -88,54 +79,13 @@ def test_a_label_with_no_matching_image_is_an_error(tmp_path: Path):
     assert "plotZ_9_9" in errors[0] and "no matching image" in errors[0]
 
 
-def test_a_coco_document_at_a_label_path_is_an_error_naming_the_import(tmp_path: Path):
-    """A dataset-level COCO sitting where an image's label document belongs is refused by the one
-    reader, and the finding carries the reader's own remedy."""
+def test_an_unreadable_first_label_hides_no_later_finding(tmp_path: Path):
+    """The census reads each document on its own, so an unreadable label sorting first is one
+    finding and the orphan after it is still reported."""
     root = tmp_path / "ds"
-    labels_dir = root / "annotations" / DATE
-    labels_dir.mkdir(parents=True)
-    _write_image(root / "images" / DATE / "plotA_0_0.jpg", 96, 64)
-    (labels_dir / "plotA_0_0.json").write_text(json.dumps(COCO), encoding="utf-8")
-
-    findings = _check(root)
-
-    assert [level for level, _ in findings] == ["error"]
-    assert "plotA_0_0" in findings[0][1] and "import_coco" in findings[0][1]
-
-
-def test_each_file_is_read_on_its_own_not_once_for_the_whole_directory(tmp_path: Path):
-    """A COCO-shaped file sorting first must not decide how every other file in the same
-    directory is read, which would hide a real defect (here, an orphan per-image label) behind
-    the finding the COCO file earns."""
-    root = tmp_path / "ds"
-    labels_dir = root / "annotations" / DATE
-    labels_dir.mkdir(parents=True)
-    _write_image(root / "images" / DATE / "plotA_0_0.jpg", 96, 64)
-
-    (labels_dir / "0_coco.json").write_text(json.dumps(COCO), encoding="utf-8")
-    json_io.write_annotations(
-        labels_dir / "1_orphan.json",
-        [Annotation(subject="bud", geometry=BBox(1, 1, 8, 8))], 100, 100,
-    )
-
-    errors = _errors(_check(root))
-
-    assert any("0_coco" in e and "import_coco" in e for e in errors)
-    assert any("1_orphan" in e and "no matching image" in e for e in errors)
-
-
-def test_an_undecodable_first_label_hides_no_later_finding(tmp_path: Path):
-    """The census reads no document, so an undecodable label sorting first is one finding and
-    the orphan after it is still reported."""
-    root = tmp_path / "ds"
-    labels_dir = root / "annotations" / DATE
-    labels_dir.mkdir(parents=True)
     _write_image(root / "images" / DATE / "0_bad.jpg", 96, 64)
-    (labels_dir / "0_bad.json").write_bytes(b"{not json")
-    json_io.write_annotations(
-        labels_dir / "zzz_orphan.json",
-        [Annotation(subject="bud", geometry=BBox(1, 1, 8, 8))], 96, 64,
-    )
+    ts.replace(label_key(root, DATE, "0_bad"), ["not", "a", "document"])
+    _label(root, "zzz_orphan", [Annotation(subject="bud", geometry=BBox(1, 1, 8, 8))])
 
     errors = _errors(_check(root))
 
@@ -144,13 +94,11 @@ def test_an_undecodable_first_label_hides_no_later_finding(tmp_path: Path):
 
 
 def test_an_empty_label_not_marked_complete_is_an_error(tmp_path: Path):
-    """A platform-written empty document is not a zero-byte file, so a size check never catches
+    """A platform-written empty document is not an absent one, so a presence check never catches
     it; an empty label no person marked complete is unannotated, not a negative."""
     root = tmp_path / "ds"
-    labels_dir = root / "annotations" / DATE
-    labels_dir.mkdir(parents=True)
     _write_image(root / "images" / DATE / "plotA_0_0.jpg", 96, 64)
-    json_io.write_annotations(labels_dir / "plotA_0_0.json", [], 96, 64, keep_empty=True)
+    _label(root, "plotA_0_0", [], keep_empty=True)
 
     errors = _errors(_check(root))
 
@@ -164,48 +112,23 @@ def test_a_confirmed_negative_empty_label_stays_clean(tmp_path: Path):
     from tests._producer_fixtures import mark_complete
 
     root = tmp_path / "ds"
-    labels_dir = root / "annotations" / DATE
-    labels_dir.mkdir(parents=True)
     image = root / "images" / DATE / "plotA_0_0.jpg"
     _write_image(image, 96, 64)
-    json_io.write_annotations(labels_dir / "plotA_0_0.json", [], 96, 64, keep_empty=True)
-    mark_complete(image, labels_dir / "plotA_0_0.json", "bud", project=root)
+    _label(root, "plotA_0_0", [], keep_empty=True)
+    mark_complete(image, "bud", project=root)
 
     assert _check(root) == []
 
 
-def test_a_coco_at_the_dataset_root_is_not_one_of_the_datasets_labels(tmp_path: Path):
-    """An external COCO document left at the dataset root is not a label store: the per-image
-    tree's own findings are reported and nothing is reported about the root document."""
+def test_an_unreadable_label_is_a_finding_beside_a_readable_one(tmp_path: Path):
+    """Coverage, not a guard: the refusal surfaces as a per-document finding beside a readable
+    document of the same capture, never propagating out of the walk."""
     root = tmp_path / "ds"
-    labels_dir = root / "annotations" / DATE
-    labels_dir.mkdir(parents=True)
-    for stem in ("plotA_0_0", "plotB_0_0"):
-        _write_image(root / "images" / DATE / f"{stem}.jpg", 96, 64)
-        json_io.write_annotations(labels_dir / f"{stem}.json", [], 96, 64, keep_empty=True)
-    (root / "annotations.json").write_text(json.dumps(COCO), encoding="utf-8")
-
-    errors = _errors(_check(root))
-
-    assert len(errors) == 2
-    assert sum("plotA_0_0" in e for e in errors) == 1
-    assert sum("plotB_0_0" in e for e in errors) == 1
-
-
-def test_an_undecodable_label_is_a_finding_beside_a_readable_json_file(tmp_path: Path):
-    """Coverage, not a guard: the refusal surfaces as a per-file finding beside a readable
-    document in the same directory, never propagating out of the walk."""
-    root = tmp_path / "ds"
-    labels_dir = root / "annotations" / DATE
-    labels_dir.mkdir(parents=True)
     _write_image(root / "images" / DATE / "plotA_0_0.jpg", 96, 64)
     _write_image(root / "images" / DATE / "plotB_0_0.jpg", 96, 64)
 
-    json_io.write_annotations(
-        labels_dir / "plotA_0_0.json",
-        [Annotation(subject="bud", geometry=BBox(11, 7, 39, 51))], 96, 64,
-    )
-    (labels_dir / "plotB_0_0.json").write_bytes(b"{not json")
+    _label(root, "plotA_0_0", [Annotation(subject="bud", geometry=BBox(11, 7, 39, 51))])
+    ts.replace(label_key(root, DATE, "plotB_0_0"), ["not", "a", "document"])
 
     findings = _check(root)
 

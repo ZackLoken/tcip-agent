@@ -58,19 +58,16 @@ def _ingested_bucket_of(tmp_path: Path, stems: list[str]) -> Path:
 SUBJECT = "leaf"
 
 
-def _labels_for(tmp_path: Path, *stems: str) -> Path:
-    """A labels directory holding one document per stem, so the producer admits this bucket: a
+def _label(bucket: Path, *stems: str) -> None:
+    """One label document per stem's image in ``bucket``, so the producer admits this bucket: a
     preflight reads the run's own admitted membership, never a directory listing of its own."""
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    labels_dir = tmp_path / "labels"
-    labels_dir.mkdir(exist_ok=True)
+    from tests._producer_fixtures import label_image
+
     for stem in stems:
-        json_io.write_annotations(
-            labels_dir / f"{stem}.json",
-            [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 5, 5))], 16, 16, keep_empty=True)
-    return labels_dir
+        label_image(bucket / f"{stem}.jpg",
+                    [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 5, 5))], 16, 16)
 
 
 def test_preflight_refuses_a_stem_collision(tmp_path):
@@ -81,28 +78,16 @@ def test_preflight_refuses_a_stem_collision(tmp_path):
 
     bucket = _ingested_bucket(tmp_path)
     _collide(bucket)
-    labels_dir = _labels_for(tmp_path, "shoot_001")
+    _label(bucket, "shoot_001")
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir),
-                 "scope": {"subject": SUBJECT}},
+        "data": {"images_dir": str(bucket), "scope": {"subject": SUBJECT}},
     }
     r = preflight_config(tmp_path, cfg)
     assert r["valid"] is False
     assert any("shoot_001.jpg" in i and "Shoot_001.png" in i for i in r["issues"]), r["issues"]
-
-
-def test_doctor_image_stems_refuses_a_stem_collision(tmp_path):
-    from tcip_mcp.cli.doctor import _image_stems
-
-    bucket = _ingested_bucket(tmp_path)
-    _collide(bucket)
-    project_root = bucket.parent.parent
-
-    with pytest.raises(AmbiguousImageStem):
-        _image_stems(project_root)
 
 
 def test_scan_dataset_image_census_refuses_a_stem_collision(tmp_path):
@@ -117,10 +102,8 @@ def test_scan_dataset_image_census_refuses_a_stem_collision(tmp_path):
 
 
 def test_doctor_script_reports_a_stem_collision_with_no_label_file_instead_of_crashing(tmp_path):
-    """``check_state`` calls ``_image_stems`` directly, ahead of any per-label read that could
-    catch the same ambiguity another way: a collision with no label file for its stem at all
-    reaches only that direct call, and must still surface as a finding, not a crashed
-    subprocess."""
+    """A collision with no label record for its stem surfaces as a finding of the doctor's one
+    census, not a crashed subprocess."""
     import subprocess
     import sys
 
@@ -138,9 +121,7 @@ def test_doctor_script_reports_a_stem_collision_with_no_label_file_instead_of_cr
 
 
 def test_doctor_script_reports_a_stem_collision_once_not_once_per_check(tmp_path):
-    """``check_data_quality`` and ``check_state`` each independently enumerate the same
-    ``images/`` tree and reach the identical collision; a breeder reads about it once, not once
-    per check that happens to hit it."""
+    """The doctor enumerates ``images/`` once, so a breeder reads about a collision once."""
     import subprocess
     import sys
 
@@ -166,13 +147,12 @@ def test_preflight_admits_a_clean_multi_image_bucket(tmp_path):
     from tcip_mcp.tools.training_tools import preflight_config
 
     bucket = _ingested_bucket_of(tmp_path, ["shoot_001", "shoot_002"])
-    labels_dir = _labels_for(tmp_path, "shoot_001", "shoot_002")
+    _label(bucket, "shoot_001", "shoot_002")
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir),
-                 "scope": {"subject": SUBJECT}},
+        "data": {"images_dir": str(bucket), "scope": {"subject": SUBJECT}},
     }
     r = preflight_config(tmp_path, cfg)
     assert r["issues"] == [], r["issues"]
@@ -185,13 +165,12 @@ def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(tmp_path
     from tcip_mcp.tools.training_tools import preflight_config
 
     bucket = _ingested_bucket_of(tmp_path, ["shoot_001", "shoot_002"])
-    labels_dir = _labels_for(tmp_path, "shoot_001", "shoot_002")
+    _label(bucket, "shoot_001", "shoot_002")
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir),
-                 "scope": {"subject": SUBJECT},
+        "data": {"images_dir": str(bucket), "scope": {"subject": SUBJECT},
                  "split": {"group_by": "stem"}},
     }
     r = preflight_config(tmp_path, cfg)
@@ -205,28 +184,17 @@ def test_reserve_calibration_feasibility_admits_a_clean_multi_image_bucket(tmp_p
     from tcip_mcp.tools.training_tools import preflight_config
 
     bucket = _ingested_bucket_of(tmp_path, ["shoot_001", "shoot_002"])
-    labels_dir = _labels_for(tmp_path, "shoot_001", "shoot_002")
+    _label(bucket, "shoot_001", "shoot_002")
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir),
-                 "scope": {"subject": SUBJECT},
+        "data": {"images_dir": str(bucket), "scope": {"subject": SUBJECT},
                  "tiling": {"enabled": True, "sliver_frac": 0.5},  # stated: two boxes, no spread
                  "split": {"reserve_calibration_fraction": 0.2}},
     }
     r = preflight_config(tmp_path, cfg)
     assert any("2 admitted sources" in i for i in r["issues"]), r["issues"]
-
-
-def test_doctor_image_stems_admits_a_clean_multi_image_bucket(tmp_path):
-    from tcip_mcp.cli.doctor import _image_stems
-
-    bucket = _ingested_bucket_of(tmp_path, ["shoot_001", "shoot_002"])
-    project_root = bucket.parent.parent
-
-    stems = _image_stems(project_root)
-    assert stems == {"shoot_001": "shoot_001.jpg", "shoot_002": "shoot_002.jpg"}
 
 
 def test_scan_dataset_image_census_admits_a_clean_multi_image_bucket(tmp_path):

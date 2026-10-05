@@ -6,7 +6,6 @@ no attribute writes its subject alone the same way.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -45,49 +44,52 @@ def _one_image(images_dir: Path) -> None:
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
 
 
+def _published(tmp_path: Path, checkpoint: str, images_dir: Path):
+    """``run_inference`` over ``images_dir`` into the bucket ``out/2026-01-01``; the bucket and
+    the records of its one document."""
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    import tcip_store
+
+    result = run_inference(tmp_path, checkpoint, str(images_dir), bucket="out/2026-01-01",
+                           stated=Stated(tile=False))
+    assert "error" not in result, result
+    bucket = read_bucket(result["dataset_root"], result["bucket"])
+    key = bucket.document_key("img")
+    assert key is not None
+    return bucket, tcip_store.read(key)["annotations"]
+
+
 def test_an_attributed_run_writes_every_attribute_value_and_stamps_its_scope(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    from tcip_mcp.buckets import read_bucket
-
     images_dir = tmp_path / "images"
     _one_image(images_dir)
     checkpoint = _checkpoint(tmp_path, COLOR, GRADE)
     install(monkeypatch, _attributed_predictor())
-    from tcip_mcp.tools.inference_tools import run_inference
 
-    out = tmp_path / "out"
-    result = run_inference(tmp_path, checkpoint, str(images_dir), output_dir=str(out),
-                           stated=Stated(tile=False))
+    bucket, anns = _published(tmp_path, checkpoint, images_dir)
 
-    assert "error" not in result, result
-    anns = json.loads((out / "img.json").read_text())["annotations"]
     assert [a["attributes"] for a in anns] == [{"color": "red", "grade": "high"},
                                                {"color": "blue", "grade": "low"}]
     assert all(a["subject"] == SUBJECT for a in anns)
 
-    assert read_bucket(out).scope.attributes == (COLOR, GRADE)
+    assert bucket.scope.attributes == (COLOR, GRADE)
 
 
 def test_a_detector_run_declaring_no_attribute_writes_the_ordinary_shape_and_stamps_its_scope(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    from tcip_mcp.buckets import read_bucket
-
     images_dir = tmp_path / "images"
     _one_image(images_dir)
     checkpoint = _checkpoint(tmp_path)
     install(monkeypatch, StubPredictor())
-    from tcip_mcp.tools.inference_tools import run_inference
 
-    out = tmp_path / "out"
-    result = run_inference(tmp_path, checkpoint, str(images_dir), output_dir=str(out),
-                           stated=Stated(tile=False))
+    bucket, anns = _published(tmp_path, checkpoint, images_dir)
 
-    assert "error" not in result, result
-    anns = json.loads((out / "img.json").read_text())["annotations"]
     assert len(anns) == 1
     assert anns[0]["subject"] == SUBJECT
     assert not anns[0].get("attributes")
 
-    assert read_bucket(out).scope.attributes == ()
+    assert bucket.scope.attributes == ()

@@ -13,9 +13,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
 from tcip_web.app import app
+from tests._producer_fixtures import image_label_key, label_image
+
+DATE = "2026-03-02"
 
 
 @pytest.fixture
@@ -50,7 +52,7 @@ def test_subject_names_differing_only_by_case_stay_distinct(
 
     subjects = client.get(
         "/api/subjects/load",
-        params={"dataset_root": str(tmp_path)},
+        params={"dataset_root": str(tmp_path), "date": DATE},
     ).json()["subjects"]
     assert set(subjects) == {"bud", "Bud", "bush"}
     assert subjects["bud"]["description"] == "the first spelling a human typed"
@@ -64,10 +66,8 @@ def test_registry_derived_from_labels_keeps_each_name_exactly_as_labeled(
 ) -> None:
     """With no saved registry, the discovered names are the ones a readable label document
     actually carries, each unchanged."""
-    labels = tmp_path / "annotations" / "2026-03-02"
-    labels.mkdir(parents=True)
-    write_annotations(
-        str(labels / "IMG_A.json"),
+    label_image(
+        tmp_path / "images" / DATE / "IMG_A.jpg",
         [
             _box("bud", 12, 30, 48, 140),
             _box("Bud", 300, 44, 372, 70),
@@ -78,7 +78,7 @@ def test_registry_derived_from_labels_keeps_each_name_exactly_as_labeled(
 
     body = client.get(
         "/api/subjects/load",
-        params={"dataset_root": str(tmp_path), "annotations_dir": str(labels)},
+        params={"dataset_root": str(tmp_path), "date": DATE},
     ).json()
     assert body["subjects"] is None
     assert set(body["discovered"]) == {"bud", "Bud", "bush"}
@@ -89,22 +89,26 @@ def test_registry_derivation_reports_a_document_it_cannot_read(
     client: TestClient, tmp_path: Path
 ) -> None:
     """A record whose subject name is empty makes its own document unreadable: the draft
-    registry still derives from the readable documents, and names the unreadable one by path
+    registry still derives from the readable documents, and names the unreadable one by stem
     rather than silently deriving nothing from it."""
-    labels = tmp_path / "annotations" / "2026-03-02"
-    labels.mkdir(parents=True)
-    write_annotations(str(labels / "IMG_A.json"), [_box("bud", 12, 30, 48, 140)], 900, 500)
-    # No platform producer can make a record without a subject; a foreign or hand-edited file can.
-    (labels / "IMG_B.json").write_text(json.dumps({
+    from tcip_store import encode_record
+
+    from tests._record_damage_fixtures import damage_record
+
+    images = tmp_path / "images" / DATE
+    label_image(images / "IMG_A.jpg", [_box("bud", 12, 30, 48, 140)], 900, 500)
+    label_image(images / "IMG_B.jpg", [_box("bud", 700, 100, 760, 220)], 900, 500)
+    # No platform producer can make a record without a subject; a damaged record can carry one.
+    damage_record(image_label_key(images / "IMG_B.jpg"), encode_record({
         "image": "IMG_B", "width": 900, "height": 500,
-        "annotations": [{"subject": "", "bbox": [700, 100, 60, 120]}]}), encoding="utf-8")
+        "annotations": [{"subject": "", "bbox": [700, 100, 60, 120]}]}))
 
     body = client.get(
         "/api/subjects/load",
-        params={"dataset_root": str(tmp_path), "annotations_dir": str(labels)},
+        params={"dataset_root": str(tmp_path), "date": DATE},
     ).json()
     assert body["discovered"] == ["bud"]
-    assert body["unreadable"] == [str(labels / "IMG_B.json")]
+    assert body["unreadable"] == ["IMG_B"]
 
 
 def test_a_new_subject_is_addable_alongside_the_saved_ones(
@@ -132,7 +136,7 @@ def test_a_new_subject_is_addable_alongside_the_saved_ones(
 
     subjects = client.get(
         "/api/subjects/load",
-        params={"dataset_root": str(tmp_path)},
+        params={"dataset_root": str(tmp_path), "date": DATE},
     ).json()["subjects"]
     assert set(subjects) == {"bud", "hazel_leaf"}
     assert subjects["bud"]["description"] == "corrected"

@@ -206,14 +206,11 @@ def test_parse_coco_multi_ring_segmentation_keeps_every_ring():
 
 def test_the_coco_reader_admits_a_byte_order_marked_document(tmp_path):
     """A UTF-8 byte-order mark encodes the same document as one without it."""
-    from tcip_annotation.json_io import (
-        decode_document_bytes, parse_json_document, read_document_bytes,
-    )
+    from tcip_mcp.pipelines.data.coco_import import _read_coco
 
     coco = _sample_coco_detect()
     path = tmp_path / "annotations.json"
     path.write_bytes(b"\xef\xbb\xbf" + json.dumps(coco).encode("utf-8"))
 
-    document = parse_json_document(
-        decode_document_bytes(read_document_bytes(path), source=str(path)), source=str(path))
+    document, _digest = _read_coco(path)
     assert len(_parse(document)[1][1]) == 2

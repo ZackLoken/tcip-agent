@@ -35,7 +35,7 @@ All three processes share `.tcip/` on disk (experiment state, model registry, au
 
 Supporting libraries: `packages/tcip-annotation` (headless annotation engine: label I/O, IoU matching, SAM wrapper) and `packages/tcip-store` (the storage seam: one locked, atomic interface for the platform's records, append-only logs and blobs). `tcip-store` is the bottom of the stack, depending on nothing else here; `tcip-annotation` depends on it and on neither of the other two.
 
-Records and append-only logs go into one SQLite database per root, `<root>/.tcip/store.db`; imagery, labels and predictions stay files, so they travel with the dataset. `tcip dump-store <project> <out_dir>` writes a project's records and logs out as files a person can read.
+Records and append-only logs go into one SQLite database per root, `<root>/.tcip/store.db`, label and prediction documents among them; imagery stays files. `tcip dump-store <project> <out_dir>` writes a project's records and logs out as files a person can read.
 
 ## Repository layout
 
@@ -129,7 +129,7 @@ platform's own tools, in the order a first run needs them.
 
 Annotation itself happens in the GUI's Annotate tab: a human labels a sample of images, and an
 image with nothing to label is marked done as a negative there, never inferred from an empty
-label file alone.
+label document alone.
 
 For a first training run, `draw_splits(folder_path, subject=subject, train_ratio=0.7,
 val_ratio=0.15, calibration_ratio=0.15, output_path=<path>)` draws a fresh leakage-free
@@ -164,7 +164,7 @@ through the breeder's own acknowledged act.
 
 ## Conventions
 
-- Annotations: per-image COCO-shaped JSON (with `created_by`/`accepted_by` provenance), the one label document shape the platform writes and reads (mask rasters and tables are the other ground truth a run can read); an external dataset-level COCO is converted into it by `import_coco`.
+- Annotations: one COCO-shaped label document per image (with `created_by`/`accepted_by` provenance), a record in the dataset root's database, the one label document shape the platform writes and reads (mask rasters and tables are the other ground truth a run can read, as files); an external dataset-level COCO is converted into it by `import_coco`. Prediction documents and each bucket's record are records beside them, and `tcip dump-store` writes them out as files a person can read.
 - Experiments: one directory per run, `.tcip/experiments/<id>/`, holding its launch record (`run.json`, with the data, partition and objective the launcher resolved), its metrics log, its final status, and its own files (weights, TensorBoard events, the source snapshot); nothing in it is rewritten once written, and a relaunch is a new directory.
 - Audit log: every mutating MCP tool leaves exactly one line per act, either the `@audited` decorator's entry for the call or the event its library records with facts the decorator cannot carry, and a call returning its error leaves none, while a call that raises leaves its exception line. Lines go into the append-only log in the database of the root each call's scope names. An entry that cannot be appended after its mutation raises.
 - Lazy imports: within the MCP server's import closure, heavy deps (torch, torchvision) are imported inside function bodies; other modules under `packages/*/src` (the training and inference pipelines, model components) import them at module level.
@@ -189,7 +189,7 @@ Working now:
   `instance_seg`), on RGB and N-channel imagery (multi-band GeoTIFF/NPZ/grayscale; `num_channels`
   threads to the backbone's `in_chans`, and an `in_chans != 3` detector takes per-band
   `image_mean`/`image_std` from `derivations.band_normalization_stats`).
-- Training that loads the native per-image JSON labels directly, experiment tracking,
+- Training that loads the native per-image label documents directly, experiment tracking,
   annotation/review, SAM-assisted labeling, assessment of a trait's positive-state classifier
   (`assess_checkpoint` for a state-crossing delivery), and per-plant CSV export, including a
   percentile-crossing phenology-milestone deliverable (per-plant `<trait>_05/50/95per_date` = the

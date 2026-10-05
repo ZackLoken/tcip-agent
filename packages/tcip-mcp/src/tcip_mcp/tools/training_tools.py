@@ -36,11 +36,13 @@ _OVERFIT_CHECK_LOCK = threading.Lock()
 def candidate_config_with_selection(config: dict, selection_dir: str) -> dict:
     """The launch config choosing ``selection_dir`` over ``config``'s own data section would
     build: ``data.split`` replaced wholesale by ``{"selection_dir": selection_dir}``, and the
-    stated ``scope`` dropped, since a bound run reads its scope off the selection.
+    stated ``scope`` and ``labels_dir`` dropped, since a bound run reads its scope and each
+    sample's ground truth off the selection.
     """
     data_cfg_raw = config.get("data")
     data_cfg: dict = {**data_cfg_raw} if isinstance(data_cfg_raw, dict) else {}
     data_cfg.pop("scope", None)
+    data_cfg.pop("labels_dir", None)
     data_cfg["split"] = {"selection_dir": selection_dir}
     return {**config, "data": data_cfg}
 
@@ -62,7 +64,7 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
     Config structure, one placement for everything::
 
         model_source: {builder, builder_kwargs, task}
-        data: {images_dir, labels_dir, scope}   # known loaders, or a bespoke
+        data: {images_dir, labels_dir?, scope}  # known loaders, or a bespoke
                                                 # {dataset_source: {builder, ...}}
         batch_size, stages, mixed_precision, device, seed, ...   # every key
                                                 # generic_trainer.train() reads, at the top
@@ -1541,7 +1543,7 @@ def _unbound_single_source_spatial_issue(task: str, data_cfg: dict, split_draws:
         return None
     return (
         f"split_draws={split_draws} redraws the split, and base_config admits one trainable "
-        "source under data.labels_dir: a detection sweep with tiling on takes the single-source "
+        "source under data.images_dir: a detection sweep with tiling on takes the single-source "
         "spatial strip path, whose partition is placed by declared order and does not vary with "
         "data.split.seed, or refuses the validation it cannot draw; in every case no draw holds a different partition out and the spread would be "
         "training-seed noise. Run at split_draws=1, or sweep a dataset with two or more admitted "
@@ -1578,7 +1580,7 @@ _SEED_AXIS_REMEDY = (
     "baseline_params names the seed under a warm start; no other data.* axis is in param_space; "
     "a trial_budget is stated on a launch that is not a relaunch, and Ray's variant count over "
     "the sweep fits under it; and, for a built-in detection config with tiling on, more than one "
-    "trainable source is admitted under data.labels_dir (a single admitted source's own "
+    "trainable source is admitted under data.images_dir (a single admitted source's own "
     "single-source spatial-strip path pairs no distinct partition with any draw). A single fixed "
     "seed belongs in "
     "base_config's own data.split.seed: the drawn path's partition depends on it, and the "
@@ -1716,7 +1718,7 @@ def evaluate_model(
     project: Path,
     experiment_id_or_ckpt: str,
     images_dir: str,
-    labels_dir: str = "",
+    labels_dir: str | None = None,
     stated: Stated | None = None,
     iou_threshold: float = 0.5,
     iou_type: str | None = None,
@@ -1748,10 +1750,12 @@ def evaluate_model(
             names) or a checkpoint path. Either way the resolved checkpoint must be registered in
             this project's registry (``register_model``, explicit mode for a foreign or bespoke
             checkpoint) or this door refuses before loading it.
-        images_dir: Images directory for the evaluation split.
-        labels_dir: Labels dir (detection/instance_seg), masks dir (semantic_seg), or the GT CSV
-            path (classification/ordinal/regression, one row per image stem); the task is the
-            checkpoint's own.
+        images_dir: The capture directory of the evaluation split.
+        labels_dir: The masks dir (semantic_seg) or the GT CSV path
+            (classification/ordinal/regression, one row per image stem); omitted for label
+            documents (detection/instance_seg), which the images' own keys address. Admitted once
+            with ``images_dir`` (``label_queries.admit``) before any regime runs, a refusal naming
+            both. The task is the checkpoint's own.
         stated: The execution values to state rather than derive (``execution.Stated``): the
             operating ``conf`` and detection cap ``max_dets`` P/R/F1 are reported at, and on the
             delivery-grade path the ``tile_size``, ``overlap``, ``postprocess`` and
@@ -1812,12 +1816,20 @@ def evaluate_model(
     run_tiling = checkpoint.data_config.get("tiling")
     stated = stated or Stated()
 
-    if use_tiled_inference and task == "detection":
-        from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_mcp.pipelines.data.label_queries import admit, require_admitted
 
+    try:
+        admitted = admit(images_dir, labels_dir, scope=scope)
+        require_admitted(admitted)
+    except (ValueError, UnreadableLabelDocument) as exc:
+        return {"error": f"the ground truth of images_dir={images_dir!r} with "
+                         f"labels_dir={labels_dir!r} admits nothing to evaluate: {exc}"}
+
+    if use_tiled_inference and task == "detection":
         try:
             return run_full_frame_evaluation(
-                checkpoint, images_dir, labels_dir, stated=stated, iou_threshold=iou_threshold,
+                checkpoint, admitted, stated=stated, iou_threshold=iou_threshold,
                 trait=trait_entry)
         except (ValueError, UnreadableLabelDocument) as exc:
             return {"error": str(exc)}
@@ -1837,12 +1849,6 @@ def evaluate_model(
     predictor = pass_.predictor
 
     try:
-        # Through the producer, over the ground truth this door was pointed at, so the door and a
-        # run over the same data admit one membership.
-        from tcip_mcp.pipelines.data.label_queries import admit, require_admitted
-
-        admitted = admit(images_dir, labels_dir, scope=scope)
-        require_admitted(admitted)
         measured_samples = admitted.every_sample()
         # Read at the width the predictor reads at: the model scores these tensors, so a loader
         # sized off the references instead would hand it images of another shape.

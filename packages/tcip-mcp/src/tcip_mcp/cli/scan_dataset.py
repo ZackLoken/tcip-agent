@@ -1,8 +1,7 @@
-"""Scan a folder for images, labels, and predictions.
+"""Count a dataset's images, label documents and prediction documents.
 
-The read-only census of what a dataset folder holds: image/label/prediction counts, and which files
-are excluded from every bucket walk because their own stem or filename collides with a prediction
-bucket's provenance stamp. Wraps ``tcip_mcp.tools.data_tools.scan_dataset``.
+The read-only census of what a dataset root holds. Wraps
+``tcip_mcp.tools.data_tools.scan_dataset``.
 
     tcip scan-dataset <folder_path>
 """

@@ -7,6 +7,8 @@ stamped, and completion writes the final status whose checkpoint the registry re
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 import pytest
@@ -211,7 +213,7 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
     from tcip_mcp.registry_paths import stored_path
     from tests.tiny_trainer_fixtures import trainer_run
 
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
     rows = []
     for i in range(6):

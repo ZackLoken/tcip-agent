@@ -1,4 +1,4 @@
-"""One bucket grammar, owned by the layout, for every reader of ``images/`` and ``predictions/``.
+"""One bucket grammar, owned by the layout, for every reader of ``images/``.
 
 A directory name is a bucket (a date, ``UNDATED_BUCKET``, or a literal like a plot name) unless it
 starts with a dot; a dot-prefixed directory is platform or editor cruft, never a capture.
@@ -108,20 +108,17 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
 def test_the_tree_and_the_project_summary_list_only_published_buckets_alike(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """Both read a bucket off its own record: a published bucket lists under the date its record
-    states, and a directory of documents with no record lists nowhere."""
+    """Both read a bucket off its own record: a published bucket lists by name under the date its
+    record states."""
     pytest.importorskip("torch")
     from tcip_web.routes.projects import _summarize
     from tests._chain_fixtures import DATE, unassessed_bucket
 
     bucket = unassessed_bucket(tmp_path, experiment_id="exp-grammar")
     root = tmp_path / "ds"
-    (root / "predictions" / "staged" / DATE).mkdir(parents=True)
-    (root / "predictions" / "staged" / DATE / "s00.json").write_text("{}", encoding="utf-8")
-    name = bucket.relative_to(root / "predictions").as_posix()
 
     tree = client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
     picker = _summarize(root)
 
-    assert tree["prediction_dirs"][DATE] == {name: str(bucket)}
-    assert picker.prediction_dirs == tree["prediction_dirs"]
+    assert tree["buckets_by_date"][DATE] == [bucket.name]
+    assert picker.buckets_by_date == tree["buckets_by_date"]

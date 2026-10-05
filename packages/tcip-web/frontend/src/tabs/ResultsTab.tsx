@@ -89,13 +89,12 @@ export function ResultsTab() {
   // Dataset tree (dates + the buckets published over each) drives the structured per-date picker
   // below, never a hand-edited JSON blob.
   const [dates, setDates] = useState<string[]>([]);
-  const [predictionDirs, setPredictionDirs] = useState<Record<string, Record<string, string>>>({});
-  // Each bucket published over ``date``, as [its name under predictions/, its directory].
-  const bucketsFor = (date: string): [string, string][] =>
-    Object.entries(predictionDirs[date] ?? {});
+  const [bucketsByDate, setBucketsByDate] = useState<Record<string, string[]>>({});
+  // The name of each bucket published over ``date`` under the dataset root.
+  const bucketsFor = (date: string): string[] => bucketsByDate[date] ?? [];
   const [datesError, setDatesError] = useState<string | null>(null);
   const [labelProblem, setLabelProblem] = useState<string | null>(null);
-  // The bucket directory the breeder picked per date; a date with none picked is not delivered.
+  // The bucket name the breeder picked per date; a date with none picked is not delivered.
   const [dateBucket, setDateBucket] = useState<Record<string, string>>({});
   // The population, typed by the breeder: one plant id per line or comma. The mapping names
   // every plot its plant CSVs carry, which is never the same list, so nothing fills this in.
@@ -151,7 +150,7 @@ export function ResultsTab() {
   const [countKind, setCountKind] = useState<"per_image_count" | "orthomosaic_plant_counts">(
     "per_image_count",
   );
-  const [countPredictionsDir, setCountPredictionsDir] = useState("");
+  const [countBucket, setCountBucket] = useState("");
   const [countTrait, setCountTrait] = useState("");
   const [countPlantRegistry, setCountPlantRegistry] = useState("");
   const [countDeliveredPhenotype, setCountDeliveredPhenotype] = useState("");
@@ -233,7 +232,7 @@ export function ResultsTab() {
       .tree(datasetRoot)
       .then((t) => {
         setDates(t.dates_with_images);
-        setPredictionDirs(t.prediction_dirs);
+        setBucketsByDate(t.buckets_by_date);
         setDateBucket({});
         setDatesError(null);
         setLabelProblem(t.label_problem);
@@ -250,7 +249,7 @@ export function ResultsTab() {
   }, [refreshDatasetTree]);
 
   async function compute(showUnvalidated = false, rule: boolean | null = requireAllComplete) {
-    if (!projectRoot) return;
+    if (!projectRoot || !datasetRoot) return;
     if (!trait) {
       setError(traitError ?? "Pick a trait before computing.");
       return;
@@ -267,7 +266,8 @@ export function ResultsTab() {
     try {
       const request: PhenologyPayload = {
         mapping_name: mappingName,
-        buckets: Object.values(dateBucket).filter((dir) => dir),
+        dataset_root: datasetRoot,
+        buckets: Object.values(dateBucket).filter((name) => name),
         trait,
         plants,
         show_unvalidated: showUnvalidated,
@@ -325,6 +325,7 @@ export function ResultsTab() {
     try {
       const body: ExportCsvPayload = {
         mapping_name: lastRequest.mapping_name,
+        dataset_root: lastRequest.dataset_root,
         buckets: lastRequest.buckets,
         trait: lastRequest.trait,
         plants: lastRequest.plants,
@@ -373,7 +374,7 @@ export function ResultsTab() {
       : plants.length === 0 || !countPlantRegistry.trim() || !countDeliveredPhenotype.trim();
 
   async function exportCountCsv() {
-    if (!projectRoot || !countPredictionsDir || !countFilename.trim()) return;
+    if (!projectRoot || !datasetRoot || !countBucket || !countFilename.trim()) return;
     if (countKindFieldsMissing) return;
     if (countShowAck && !countAckReason.trim()) return;
     setCountExporting(true);
@@ -383,10 +384,16 @@ export function ResultsTab() {
     try {
       const delivery: ExportCountCsvPayload["delivery"] =
         countKind === "per_image_count"
-          ? { kind: "per_image_count", predictions_dir: countPredictionsDir, trait: countTrait }
+          ? {
+              kind: "per_image_count",
+              dataset_root: datasetRoot,
+              bucket: countBucket,
+              trait: countTrait,
+            }
           : {
               kind: "orthomosaic_plant_counts",
-              predictions_dir: countPredictionsDir,
+              dataset_root: datasetRoot,
+              bucket: countBucket,
               plant_registry: countPlantRegistry,
               delivered_phenotype: countDeliveredPhenotype,
               plants,
@@ -564,13 +571,13 @@ export function ResultsTab() {
             <label className="tcip-label">Prediction bucket</label>
             <select
               className="tcip-select"
-              value={countPredictionsDir}
-              onChange={(e) => setCountPredictionsDir(e.target.value)}
+              value={countBucket}
+              onChange={(e) => setCountBucket(e.target.value)}
             >
               <option value="">Choose a bucket…</option>
               {dates.flatMap((d) =>
-                bucketsFor(d).map(([name, dir]) => (
-                  <option key={dir} value={dir}>
+                bucketsFor(d).map((name) => (
+                  <option key={name} value={name}>
                     {`${d} (${name})`}
                   </option>
                 )),
@@ -681,7 +688,7 @@ export function ResultsTab() {
               onClick={() => void exportCountCsv()}
               disabled={
                 countExporting ||
-                !countPredictionsDir ||
+                !countBucket ||
                 !countFilename.trim() ||
                 countKindFieldsMissing ||
                 (countShowAck && !countAckReason.trim())
@@ -757,8 +764,8 @@ export function ResultsTab() {
                                   <option value="">
                                     {opts.length === 0 ? "no predictions" : "(skip)"}
                                   </option>
-                                  {opts.map(([name, dir]) => (
-                                    <option key={dir} value={dir}>
+                                  {opts.map((name) => (
+                                    <option key={name} value={name}>
                                       {name}
                                     </option>
                                   ))}

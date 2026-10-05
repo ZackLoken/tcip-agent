@@ -1,59 +1,61 @@
-"""Building a loader over data on disk the way every door in the platform does.
-
-A loader is built from the samples the producer named, never from a place to look, so a test that
-needs one over a directory or a table admits through ``label_queries.admit`` first and builds from
-what it answers. These helpers are that one route, so a fixture and the production path cannot
-drift into admitting different membership.
-"""
+"""Label documents written and loaders built through the platform's own producers
+(``label_queries.admit``, ``write_label_document``, the one label save)."""
 
 from __future__ import annotations
 
 from typing import Any
 
+from tcip_mcp.dataset_layout import label_key_of as image_label_key
+
+
+def label_image(image_path, annotations, width: int, height: int, **kwargs: Any):
+    """``annotations`` written as the label document of the image at ``image_path``
+    (:func:`~tcip_annotation.json_io.write_label_document` at the image's own key); the new
+    version."""
+    from tcip_annotation.json_io import write_label_document
+
+    return write_label_document(image_label_key(image_path), annotations, width, height, **kwargs)
+
 
 def seed_leaf_detection_dataset(root) -> tuple:
-    """Two training and one validation 128px image under ``root``, each with a label document
-    holding one ``leaf`` box; ``(images, labels, val_images, val_labels)``."""
+    """Two training and one validation 128px image under ``root``'s image tree, captures
+    ``train`` and ``val``, each with a label document holding one ``leaf`` box;
+    ``(images, val_images)``."""
     from PIL import Image
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir, labels_dir = root / "images", root / "labels"
-    val_images, val_labels = root / "val_images", root / "val_labels"
-    for d in (images_dir, labels_dir, val_images, val_labels):
+    images_dir, val_images = root / "images" / "train", root / "images" / "val"
+    for d in (images_dir, val_images):
         d.mkdir(parents=True)
     leaf = [Annotation(subject="leaf", geometry=BBox(10, 10, 30, 30))]
-    for images, labels, stem in ((images_dir, labels_dir, "t0"), (images_dir, labels_dir, "t1"),
-                                 (val_images, val_labels, "v0")):
+    for images, stem in ((images_dir, "t0"), (images_dir, "t1"), (val_images, "v0")):
         Image.new("RGB", (128, 128)).save(images / f"{stem}.png")
-        json_io.write_annotations(str(labels / f"{stem}.json"), leaf, 128, 128)
-    return images_dir, labels_dir, val_images, val_labels
+        label_image(images / f"{stem}.png", leaf, 128, 128)
+    return images_dir, val_images
 
 
-def seed_two_bud_images(images_dir, labels_dir) -> None:
-    """Make ``images_dir`` and ``labels_dir`` and write two 32px images, each with a label
-    document holding one ``bud`` box, so a drawn split holds one out for validation."""
+def seed_two_bud_images(images_dir) -> None:
+    """Make ``images_dir``, a capture of a dataset image tree, and write two 32px images, each
+    with a label document holding one ``bud`` box, so a drawn split holds one out for
+    validation."""
     from PIL import Image
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir.mkdir()
-    labels_dir.mkdir()
+    images_dir.mkdir(parents=True)
     for i in range(2):
         Image.new("RGB", (32, 32), color=(10 * i, 0, 0)).save(images_dir / f"img{i}.png")
-        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
+        label_image(images_dir / f"img{i}.png",
+                    [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
 
 
-def small_detection_config(images_dir, labels_dir, experiment_id: str) -> dict:
-    """A one-epoch CPU detection run of the bespoke detector over ``images_dir`` and
-    ``labels_dir`` under ``experiment_id``."""
+def small_detection_config(images_dir, experiment_id: str) -> dict:
+    """A one-epoch CPU detection run of the bespoke detector over ``images_dir`` under
+    ``experiment_id``."""
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "scope": {"subject": "bud"}},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
         "mixed_precision": False, "device": "cpu",
         "experiment_id": experiment_id,
@@ -69,48 +71,61 @@ def registry_over(dataset_root, registry) -> None:
                      allow_type_changes=True, actor=None)
 
 
-def mark_complete(image_path, label_path, subject: str, *, project, rect=None,
+def mark_complete(image_path, subject: str, *, project, rect=None,
                   proposals_hidden: bool = False, by: str = "user:tester"):
     """``subject`` marked complete over ``rect`` (the whole image when ``None``) on the label
-    document at ``label_path`` through the platform's one save door, the document's annotations
-    kept as they are; an image with no annotation of ``subject`` reads as a confirmed negative.
-    Returns the new version."""
-    from tcip_annotation.json_io import client_annotation, read_label_document
+    document of the image at ``image_path`` through the platform's one save door, the document's
+    annotations kept as they are; an image with no annotation of ``subject`` reads as a confirmed
+    negative. Returns the new version."""
+    from tcip_annotation.json_io import client_annotation, read_document_versioned
 
     from tcip_mcp.dataset_layout import Gestures, save_label_document
     from tcip_mcp.pipelines.image_utils import image_path_dimensions
 
-    doc = read_label_document(label_path)
+    key = image_label_key(image_path)
+    doc, _version = read_document_versioned(key)
     width, height = image_path_dimensions(image_path)
     return save_label_document(
-        project, image_path, label_path, [client_annotation(a) for a in doc.annotations],
+        project, key, [client_annotation(a) for a in doc.annotations],
         width=width, height=height, author=by, actor=by,
         gestures=Gestures(complete={subject: True}, rect=rect, proposals_hidden=proposals_hidden))
 
 
 def admit_over(
-    images_dir, ground_truth, *, subject: str | None = None, members: list[str] | None = None,
+    images_dir, ground_truth=None, *, subject: str | None = None,
+    members: list[str] | None = None,
 ):
-    """The admission over one place holding ground truth under the class space its registry
-    answers for ``subject`` (:func:`~tcip_mcp.pipelines.data.label_queries.registry_scope`),
-    refusing an empty one by name."""
+    """The admission over the images of ``images_dir`` and their ground truth (their own label
+    documents when ``ground_truth`` is ``None``) under the class space their registry answers for
+    ``subject`` (:func:`~tcip_mcp.pipelines.data.label_queries.registry_scope`), refusing an empty
+    one by name."""
     from tcip_mcp.pipelines.data.label_queries import admit, registry_scope, require_admitted
 
-    admitted = admit(images_dir, ground_truth, scope=registry_scope(ground_truth, subject),
+    admitted = admit(images_dir, ground_truth, scope=registry_scope(images_dir, subject),
                      members=members)
     require_admitted(admitted)
     return admitted
 
 
+def checkpoint_admission(checkpoint, images_dir, ground_truth=None):
+    """The admission ``evaluate_model`` measures ``checkpoint`` over: the images of
+    ``images_dir`` and their ground truth under the class space the checkpoint records."""
+    from tcip_mcp.pipelines.data.label_queries import admit
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
+    return admit(images_dir, ground_truth, scope=ClassScope.of(checkpoint.data_config))
+
+
 def samples_over(
-    images_dir, ground_truth, *, subject: str | None = None, members: list[str] | None = None,
+    images_dir, ground_truth=None, *, subject: str | None = None,
+    members: list[str] | None = None,
 ):
     """Every admitted member of one place as samples, each on the training side."""
     return admit_over(images_dir, ground_truth, subject=subject, members=members).every_sample()
 
 
 def run_over(
-    task: str, images_dir, ground_truth, *, subject: str | None = None,
+    task: str, images_dir, ground_truth=None, *, subject: str | None = None,
     members: list[str] | None = None, stated: dict[str, Any] | None = None, **kwargs: Any,
 ):
     """A loader for ``task`` over one place holding ground truth and the data section a run over
@@ -130,6 +145,6 @@ def run_over(
     return build_dataset(task, samples=samples, scope=admitted.scope, sizes=sizes, **kwargs), data
 
 
-def dataset_over(task: str, images_dir, ground_truth, **kwargs: Any):
+def dataset_over(task: str, images_dir, ground_truth=None, **kwargs: Any):
     """The loader :func:`run_over` builds."""
     return run_over(task, images_dir, ground_truth, **kwargs)[0]

@@ -198,18 +198,15 @@ SUBJECT = "leaf"
 
 
 def _write_dataset_stem(dataset_root: Path, date: str, stem: str, tiepoint: tuple[float, float]) -> None:
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
+    from tests._producer_fixtures import label_image
+
     images_dir = dataset_root / "images" / date
-    labels_dir = dataset_root / "annotations" / date
     images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
     _write_geotiff(images_dir / f"{stem}.tif", *tiepoint)
-    json_io.write_annotations(
-        labels_dir / f"{stem}.json",
-        [Annotation(subject=SUBJECT, geometry=BBox(0, 0, 2, 2))], SHAPE[1], SHAPE[0],
-    )
+    label_image(images_dir / f"{stem}.tif",
+                [Annotation(subject=SUBJECT, geometry=BBox(0, 0, 2, 2))], SHAPE[1], SHAPE[0])
 
 
 def test_draw_splits_keeps_every_plants_stems_on_one_split_side(

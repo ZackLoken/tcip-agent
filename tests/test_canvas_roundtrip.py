@@ -3,7 +3,7 @@
 These tests simulate what the annotation canvas webview does:
 1. Load image → read existing labels
 2. Add/modify annotations (boxes + polygons)
-3. Save the single name-based per-image label file
+3. Save the single name-based per-image label document
 4. Read back and verify content matches
 
 Also tests prediction overlay data roundtrip for the proposals the editor shows.
@@ -15,14 +15,16 @@ from pathlib import Path
 
 import pytest
 
-from tcip_annotation import (
-    Annotation,
-    BBox,
-    Polygon,
-    read_annotations,
-    write_annotations,
-)
+from tcip_annotation import Annotation, BBox, Polygon
+from tcip_annotation.json_io import read_label_document, write_label_document
 from tcip_annotation.matching import pair_proposals
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key, prediction_key
+
+
+def _write(key, annotations) -> list[Annotation]:
+    """``annotations`` written as the 640x480 document ``key`` names, and read back."""
+    write_label_document(key, annotations, 640, 480)
+    return read_label_document(key).annotations
 
 
 # ── Setup ──
@@ -33,8 +35,6 @@ def img_dir(tmp_path: Path) -> Path:
     """Minimal image dataset directory structure."""
     images = tmp_path / "images"
     images.mkdir()
-    (tmp_path / "labels").mkdir()
-    (tmp_path / "predictions").mkdir()
 
     # Create a minimal test image
     from PIL import Image
@@ -42,6 +42,14 @@ def img_dir(tmp_path: Path) -> Path:
     img = Image.new("RGB", (640, 480), color=(100, 150, 200))
     img.save(images / "test_001.jpg")
     return tmp_path
+
+
+def _label(root: Path):
+    return label_key(root, UNDATED_BUCKET, "test_001")
+
+
+def _prediction(root: Path):
+    return prediction_key(root, "m", "test_001")
 
 
 # ── Box roundtrip ──
@@ -58,12 +66,7 @@ class TestBoxRoundtrip:
             Annotation(subject="nut", geometry=BBox(x1=400, y1=300, x2=550, y2=420)),
         ]
 
-        # Save
-        label_path = str(img_dir / "labels" / "test_001.json")
-        write_annotations(label_path, annotations, 640, 480)
-
-        # Read back
-        read_back = read_annotations(label_path)
+        read_back = _write(_label(img_dir), annotations)
         assert len(read_back) == 2
         assert {a.subject for a in read_back} == {"bud", "nut"}
 
@@ -77,7 +80,7 @@ class TestBoxRoundtrip:
 
     def test_five_distinct_subjects_survive_the_round_trip(self, img_dir: Path) -> None:
         """Coverage: five box annotations of five distinct subjects, written and read back
-        through the same per-image label file, all five subjects and the count surviving the
+        through the same per-image label document, all five subjects and the count surviving the
         round trip."""
         subjects = ["bud", "shoot", "leaf", "nut", "bush"]
         annotations = [
@@ -85,10 +88,7 @@ class TestBoxRoundtrip:
             for i, subj in enumerate(subjects)
         ]
 
-        label_path = str(img_dir / "labels" / "test_001.json")
-        write_annotations(label_path, annotations, 640, 480)
-
-        read_back = read_annotations(label_path)
+        read_back = _write(_label(img_dir), annotations)
         assert len(read_back) == 5
         assert {a.subject for a in read_back} == set(subjects)
 
@@ -104,12 +104,7 @@ class TestPolygonRoundtrip:
         # Draw a triangle polygon (simulating canvas vertex clicks)
         poly = Polygon(rings=[[(100.0, 50.0), (250.0, 200.0), (50.0, 200.0)]])
 
-        # Save
-        label_path = str(img_dir / "labels" / "test_001.json")
-        write_annotations(label_path, [Annotation(subject="bud", geometry=poly)], 640, 480)
-
-        # Read back
-        read_back = read_annotations(label_path)
+        read_back = _write(_label(img_dir), [Annotation(subject="bud", geometry=poly)])
         assert len(read_back) == 1
         assert read_back[0].subject == "bud"
         assert isinstance(read_back[0].geometry, Polygon)
@@ -129,10 +124,7 @@ class TestPolygonRoundtrip:
                        geometry=Polygon(rings=[[(200, 200), (300, 200), (300, 300), (200, 300)]])),
         ]
 
-        label_path = str(img_dir / "labels" / "test_001.json")
-        write_annotations(label_path, annotations, 640, 480)
-
-        read_back = read_annotations(label_path)
+        read_back = _write(_label(img_dir), annotations)
         assert len(read_back) == 2
         assert {a.subject for a in read_back} == {"bud", "leaf"}
 
@@ -143,36 +135,28 @@ class TestPolygonRoundtrip:
             [(100.0, 50.0), (150.0, 50.0), (150.0, 200.0), (100.0, 200.0)],
             [(300.0, 60.0), (350.0, 60.0), (350.0, 190.0), (300.0, 190.0)],
         ]
-        pred_path = str(img_dir / "predictions" / "test_001.json")
-        write_annotations(
-            pred_path,
-            [Annotation(subject="bud", geometry=Polygon(rings=rings), score=0.88)],
-            640, 480)
-
-        read_back = read_annotations(pred_path)
+        read_back = _write(_prediction(img_dir),
+                           [Annotation(subject="bud", geometry=Polygon(rings=rings), score=0.88)])
         assert len(read_back) == 1  # one instance, not one annotation per contour
         assert read_back[0].geometry.rings == rings
         assert read_back[0].score == 0.88
 
 
-# ── Single-file save (boxes + polygons in one per-image file) ──
+# ── Single-document save (boxes + polygons in one per-image document) ──
 
 
-class TestSingleFileSave:
-    """The canvas saves every subject, boxes and polygons alike, into one per-image file."""
+class TestSingleDocumentSave:
+    """The canvas saves every subject, boxes and polygons alike, into one per-image document."""
 
-    def test_box_and_polygon_single_file(self, img_dir: Path) -> None:
-        """Save a box and a polygon together, verify both survive in one file."""
+    def test_box_and_polygon_single_document(self, img_dir: Path) -> None:
+        """Save a box and a polygon together, verify both survive in one document."""
         annotations = [
             Annotation(subject="bud", geometry=BBox(x1=50, y1=50, x2=200, y2=150)),
             Annotation(subject="nut",
                        geometry=Polygon(rings=[[(300, 100), (400, 100), (400, 200), (300, 200)]])),
         ]
 
-        label_path = str(img_dir / "labels" / "test_001.json")
-        write_annotations(label_path, annotations, 640, 480)
-
-        read_back = read_annotations(label_path)
+        read_back = _write(_label(img_dir), annotations)
         assert len(read_back) == 2
         box_ann = next(a for a in read_back if isinstance(a.geometry, BBox))
         poly_ann = next(a for a in read_back if isinstance(a.geometry, Polygon))
@@ -188,25 +172,15 @@ class TestPredictionOverlay:
 
     def test_prediction_overlay_pairing(self, img_dir: Path) -> None:
         """Load annotations + proposals, pair them, verify overlay data."""
-        # Write GT
-        gt = [
+        loaded_gt = _write(_label(img_dir), [
             Annotation(subject="bud", geometry=BBox(x1=100, y1=50, x2=250, y2=200)),
             Annotation(subject="bud", geometry=BBox(x1=400, y1=300, x2=550, y2=420)),
-        ]
-        gt_path = str(img_dir / "labels" / "test_001.json")
-        write_annotations(gt_path, gt, 640, 480)
-
-        # Write predictions (one matching, one FP)
-        preds = [
+        ])
+        # Predictions: one matching, one FP.
+        loaded_preds = _write(_prediction(img_dir), [
             Annotation(subject="bud", geometry=BBox(x1=105, y1=55, x2=245, y2=195), score=0.92),
             Annotation(subject="bud", geometry=BBox(x1=10, y1=10, x2=50, y2=50), score=0.75),
-        ]
-        pred_path = str(img_dir / "predictions" / "test_001.json")
-        write_annotations(pred_path, preds, 640, 480)
-
-        # Now load and match
-        loaded_gt = read_annotations(gt_path)
-        loaded_preds = read_annotations(pred_path)
+        ])
 
         paired = pair_proposals(loaded_gt, loaded_preds, {"kind": "iou", "iou_threshold": 0.5})
 

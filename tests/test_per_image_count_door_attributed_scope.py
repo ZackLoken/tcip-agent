@@ -29,14 +29,15 @@ def test_an_attributed_bucket_delivers_its_object_count_not_its_value_count(
 
     posture = cr.Attribute("posture", "categorical", ("upright", "lodged"))
     registry = cr.SubjectRegistry(subjects=(cr.Subject(name=SUBJECT, attributes=(posture,)),))
-    bucket = published(tmp_path, tmp_path / "ds" / "predictions" / "classifier" / "2026-05-20",
-                       [predicted("img1", ["upright", "lodged"], (posture,))],
-                       scope={"subject": SUBJECT}, registry=registry).path
+    image = tmp_path / "ds" / "images" / "2026-05-20" / "img1.jpg"
+    bucket = published(tmp_path, "classifier/2026-05-20",
+                       [predicted(image, ["upright", "lodged"], (posture,))],
+                       scope={"subject": SUBJECT}, registry=registry)
     out = tmp_path / "counts.csv"
 
     acknowledged(tmp_path, lambda ack: deliver_per_image_counts_csv(
-        tmp_path, bucket, str(out), trait=fx.COUNT_TRAIT, acknowledgment_id=ack,
-        door="test_door", actor=None), reason="unassessed fixture")
+        tmp_path, bucket.root, bucket.name, str(out), trait=fx.COUNT_TRAIT,
+        acknowledgment_id=ack, door="test_door", actor=None), reason="unassessed fixture")
 
     rows = list(csv.DictReader(out.read_text(encoding="utf-8").splitlines()))
     assert len(rows) == 1

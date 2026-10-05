@@ -1,6 +1,7 @@
-"""The ground-truth digests a drawn selection records: each sample carries its own file's digest,
-the draw reads each file once, a bound run's partition alone carries them, and the selection's own
-digest is the one value both the run's binding and an assessment's reference record.
+"""The ground-truth digests a drawn selection records: each sample carries its own document's
+version, the draw reads each document once, a bound run's partition alone carries them, and the
+selection's own digest is the one value both the run's binding and an assessment's reference
+record.
 """
 
 from __future__ import annotations
@@ -11,11 +12,12 @@ from pathlib import Path
 
 import pytest
 
+import tcip_store
 from tests._image_fixtures import write_image
+from tests._producer_fixtures import label_image
 
 torch = pytest.importorskip("torch")
 
-from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_store import encode_record  # noqa: E402
 
@@ -31,13 +33,11 @@ def _dataset(root: Path, stems=_STEMS) -> Path:
     """Two capture dates, eight stems each, enough groups that a three-way draw leaves both
     train and val non-empty for either date."""
     for date in DATES:
-        images_dir, labels_dir = root / "images" / date, root / "annotations" / date
+        images_dir = root / "images" / date
         for stem in stems:
             _save_png(images_dir / f"{stem}.jpg")
-            json_io.write_annotations(
-                str(labels_dir / f"{stem}.json"),
-                [Annotation(subject=SUBJECT, geometry=BBox(2, 2, 10, 10))], IMG, IMG,
-            )
+            label_image(images_dir / f"{stem}.jpg",
+                        [Annotation(subject=SUBJECT, geometry=BBox(2, 2, 10, 10))], IMG, IMG)
     return root
 
 
@@ -68,23 +68,30 @@ def _manifest_sha256(out: Path) -> str:
     return hashlib.sha256(encode_record(tcip_store.read(selection_key(out)))).hexdigest()
 
 
-def test_every_drawn_sample_carries_its_own_ground_truth_digest(tmp_path: Path) -> None:
+def test_every_drawn_sample_carries_its_own_documents_version_as_its_digest(
+        tmp_path: Path) -> None:
+    from tcip_mcp.dataset_layout import label_key
+
     root = _dataset(tmp_path / "ds")
     drawn = _draw(tmp_path, root, tmp_path / "m")
 
-    assert drawn.samples
+    assert len(drawn.samples) == len(DATES) * len(_STEMS)
     for sample in drawn.samples:
-        assert sample.ground_truth_digest == hashlib.sha256(
-            Path(sample.ground_truth).read_bytes()).hexdigest()[:16]
+        assert sample.ground_truth in {label_key(root, date, sample.member) for date in DATES}
+        assert sample.ground_truth_digest == tcip_store.read_versioned(
+            sample.ground_truth).version.token
 
 
 def test_a_withdrawn_ground_truth_refuses_its_digest_by_name(tmp_path: Path) -> None:
-    """A file that is gone has no digest: the read refuses naming it rather than answering a
-    stand-in value a comparison could mistake for a recorded one."""
+    """A document that is gone has no digest: the read refuses naming it rather than answering
+    a stand-in value a comparison could mistake for a recorded one."""
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
     from tcip_mcp.pipelines.data.selection import ground_truth_digest
 
-    with pytest.raises(FileNotFoundError, match="absent.json"):
-        ground_truth_digest(tmp_path / "absent.json")
+    with pytest.raises(tcip_store.NotFound, match="absent"):
+        ground_truth_digest(label_key(tmp_path, UNDATED_BUCKET, "absent"))
+    with pytest.raises(tcip_store.NotFound, match="absent.csv"):
+        ground_truth_digest(str(tmp_path / "absent.csv"))
 
 
 def test_the_run_binding_records_the_selection_digest_once_never_on_a_sample(
@@ -108,27 +115,28 @@ def test_the_run_binding_records_the_selection_digest_once_never_on_a_sample(
     assert not any("selection_sha256" in sample for sample in resolved["partition"]["samples"])
 
 
-def test_draw_splits_digests_every_members_document_in_one_read(tmp_path: Path) -> None:
-    """The draw digests its members' ground truth in one batch, each document once however many
-    members it answers for, and every sample's digest is that batch's."""
-    import unittest.mock as mock
-
-    from tcip_mcp.pipelines.data import selection
+def test_a_document_emptied_after_its_admission_refuses_at_the_loader(
+        tmp_path: Path, monkeypatch) -> None:
+    """Each sample records the version the read that admitted it saw, so a document emptied
+    between that admission and the sample list refuses at the loader's versioned read rather
+    than training as an image with nothing on it."""
+    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_mcp.pipelines.data import label_queries
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _dataset(tmp_path / "ds")
-    real_digests = selection.ground_truth_digests
-    batches: list[dict[str, str]] = []
+    images_dir = root / "images" / DATES[0]
+    real_samples = label_queries.Admission.samples
 
-    def spy(paths):
-        batches.append(real_digests(paths))
-        return batches[-1]
+    def emptied_first(self, assignment, group_of):
+        label_image(images_dir / "a.jpg", [], IMG, IMG, keep_empty=True)
+        return real_samples(self, assignment, group_of)
 
-    with mock.patch.object(selection, "ground_truth_digests", spy):
-        drawn = _draw(tmp_path, root, tmp_path / "m")
+    monkeypatch.setattr(label_queries.Admission, "samples", emptied_first)
+    data_cfg = {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}}
 
-    (batch,) = batches
-    assert sorted(batch) == sorted({s.ground_truth for s in drawn.samples})
-    assert all(s.ground_truth_digest == batch[s.ground_truth] for s in drawn.samples)
+    with pytest.raises(UnreadableLabelDocument, match="'a'.* is at version"):
+        auto_train_val(tmp_path, "detection", data_cfg, None)
 
 
 def test_the_partition_alone_carries_the_per_sample_digests(tmp_path: Path) -> None:
@@ -147,4 +155,3 @@ def test_the_partition_alone_carries_the_per_sample_digests(tmp_path: Path) -> N
     assert all(sample["ground_truth_digest"] for sample in resolved["partition"]["samples"])
     for block in (resolved["data"]["split"], resolved["partition"]["selection"]):
         assert "samples" not in block
-        assert "ground_truth_digests" not in block

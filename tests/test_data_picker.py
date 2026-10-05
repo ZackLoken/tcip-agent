@@ -29,13 +29,12 @@ def client() -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
 
 
-def _bespoke_config(images_dir: Path, labels_dir: Path, *, subject: str = SUBJECT) -> dict:
+def _bespoke_config(images_dir: Path, *, subject: str = SUBJECT) -> dict:
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 64},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "scope": {"subject": subject}},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": subject}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
                      "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
@@ -44,7 +43,7 @@ def _bespoke_config(images_dir: Path, labels_dir: Path, *, subject: str = SUBJEC
 
 def _bound_config(root: Path, selection_dir: Path) -> dict:
     """A bespoke config bound to the selection at ``selection_dir``, stating no scope of its own."""
-    config = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    config = _bespoke_config(root / "images" / DATES[0])
     config["data"]["split"] = {"selection_dir": str(selection_dir)}
     del config["data"]["scope"]
     return config
@@ -131,7 +130,7 @@ def test_preflight_reports_the_conflict_issues_even_when_the_manifest_is_unreada
     from tcip_mcp.tools.training_tools import preflight_config
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    config = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    config = _bespoke_config(root / "images" / DATES[0])
     config["data"]["split"] = {"selection_dir": str(tmp_path / "nope"), "seed": 7,
                                "group_by": "stem"}
 
@@ -199,9 +198,7 @@ def test_list_split_choices_route_404s_for_an_unknown_experiment(
     monkeypatch.chdir(tmp_path)
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    opened_run(tmp_path, _bespoke_config(root / "images" / DATES[0],
-                                         root / "annotations" / DATES[0]),
-               experiment_id="exp-known")
+    opened_run(tmp_path, _bespoke_config(root / "images" / DATES[0]), experiment_id="exp-known")
 
     known = client.get("/api/training/configs/exp-known/splits")
     assert known.status_code == 200
@@ -245,7 +242,7 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
     broken_dir.mkdir()
     ts.replace(selection_key(broken_dir), {"seed": 1, "samples": []})
 
-    picked_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    picked_cfg = _bespoke_config(root / "images" / DATES[0])
     opened_run(tmp_path, picked_cfg, experiment_id="exp-picked")
 
     result = list_split_choices(tmp_path, "exp-picked")
@@ -287,7 +284,7 @@ def test_list_split_choices_offers_a_frozen_manifest(tmp_path: Path):
     frozen = freeze_selection(tmp_path, "exp-src")
     assert "error" not in frozen, frozen
 
-    picked_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    picked_cfg = _bespoke_config(root / "images" / DATES[0])
     opened_run(tmp_path, picked_cfg, experiment_id="exp-picked-frozen")
 
     result = list_split_choices(tmp_path, "exp-picked-frozen")
@@ -316,7 +313,7 @@ def test_list_split_choices_offers_two_frozen_manifests_under_one_splits_directo
     assert Path(second["selection_dir"]).parent == root / "splits"
     assert first["selection_dir"] != second["selection_dir"]
 
-    picked_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    picked_cfg = _bespoke_config(root / "images" / DATES[0])
     opened_run(tmp_path, picked_cfg, experiment_id="exp-picked-both-frozen")
 
     result = list_split_choices(tmp_path, "exp-picked-both-frozen")
@@ -336,7 +333,7 @@ def test_list_split_choices_as_recorded_reports_moved_directories_like_preflight
     from tcip_mcp.tools.training_tools import list_split_choices
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    cfg = _bespoke_config(root / "images" / DATES[0])
     opened_run(tmp_path, cfg, experiment_id="exp-moved-dirs")
     shutil.rmtree(root / "images" / DATES[0])
 
@@ -359,7 +356,7 @@ def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces
     dataset_default = root / "splits"
     _draw(tmp_path, root, dataset_default)
 
-    cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    cfg = _bespoke_config(root / "images" / DATES[0])
     cfg["data"]["split"] = {"seed": 7, "group_by": "tile_prefix"}
     opened_run(tmp_path, cfg, experiment_id="exp-drawn-policy")
 
@@ -411,7 +408,7 @@ def test_list_split_choices_never_names_a_null_valued_split_key_as_replaced(
     dataset_default = root / "splits"
     _draw(tmp_path, root, dataset_default)
 
-    cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    cfg = _bespoke_config(root / "images" / DATES[0])
     cfg["data"]["split"] = {"seed": 7, "redraw_within_selection": None}
     opened_run(tmp_path, cfg, experiment_id="exp-null-policy-key")
 
@@ -431,9 +428,9 @@ def test_list_split_choices_reads_the_picked_runs_own_launch_record_only_once(
     from tcip_mcp.tools.training_tools import list_split_choices
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    picked_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    picked_cfg = _bespoke_config(root / "images" / DATES[0])
     opened_run(tmp_path, picked_cfg, experiment_id="exp-picked-once")
-    other_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    other_cfg = _bespoke_config(root / "images" / DATES[0])
     opened_run(tmp_path, other_cfg, experiment_id="exp-other-once")
 
     reads: list[str] = []
@@ -501,7 +498,7 @@ def test_list_split_choices_offers_a_symlinked_manifest_directory_once(
     except OSError as exc:
         pytest.skip(f"this platform refuses directory symlink creation for this user: {exc}")
 
-    cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    cfg = _bespoke_config(root / "images" / DATES[0])
     opened_run(tmp_path, cfg, experiment_id="exp-symlinked-splits")
 
     result = list_split_choices(tmp_path, "exp-symlinked-splits")
@@ -525,7 +522,7 @@ def test_list_split_choices_offers_a_case_respelled_duplicate_manifest_once(
     shared_dir = tmp_path / "shared_manifest"
     _draw(tmp_path, root, shared_dir, seed=4)
 
-    own_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    own_cfg = _bespoke_config(root / "images" / DATES[0])
     opened_run(tmp_path, own_cfg, experiment_id="exp-picker")
 
     opened_run(tmp_path, _bound_config(root, shared_dir), experiment_id="exp-candidate-lower")
@@ -553,7 +550,7 @@ def test_relaunch_route_refuses_a_selection_dir_the_launch_cannot_bind(
     from tcip_mcp.pipelines.data.selection import selection_key
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    cfg = _bespoke_config(root / "images" / DATES[0])
     opened_run(tmp_path, cfg, experiment_id="exp-picker-guard")
 
     broken_dir = root / "splits" / "broken"
@@ -590,7 +587,7 @@ def test_relaunch_route_launches_the_stated_data_unchanged_when_no_partition_is_
     monkeypatch.setattr(training_tools_module, "launch_training", fake_launch_training)
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    drawn = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    drawn = _bespoke_config(root / "images" / DATES[0])
     opened_run(tmp_path, drawn, experiment_id="exp-drawn")
     resp = client.post("/api/training/runs", json={"experiment_id": "exp-drawn", "user": "tester"})
     assert resp.status_code == 200, resp.json()
@@ -625,7 +622,7 @@ def test_relaunch_route_launches_a_new_run_with_the_chosen_partition(
     chosen = root / "splits"
     _draw(tmp_path, root, chosen)
 
-    cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    cfg = _bespoke_config(root / "images" / DATES[0])
     opened_run(tmp_path, cfg, experiment_id="exp-choose-partition")
     source_path = experiment_dir("exp-choose-partition", project=tmp_path) / RUN_FILE
     source_before = read_record(source_path)
@@ -668,7 +665,7 @@ def test_relaunch_route_admits_a_symlinked_spelling_of_an_offered_split_director
     except OSError as exc:
         pytest.skip(f"this platform refuses directory symlink creation for this user: {exc}")
 
-    cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    cfg = _bespoke_config(root / "images" / DATES[0])
     opened_run(tmp_path, cfg, experiment_id="exp-symlink-relaunch")
 
     choices = list_split_choices(tmp_path, "exp-symlink-relaunch")
@@ -698,7 +695,7 @@ def test_a_chosen_selection_binds_and_the_runs_own_resolved_record_names_it(tmp_
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     chosen = tmp_path / "chosen"
     _draw(tmp_path, root, chosen, seed=5)
-    stated = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    stated = _bespoke_config(root / "images" / DATES[0])
 
     run_dir = opened_run(tmp_path, candidate_config_with_selection(stated, str(chosen)),
                          experiment_id="exp-bound-split-record")

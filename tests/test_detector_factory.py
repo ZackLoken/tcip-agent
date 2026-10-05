@@ -8,6 +8,7 @@ pytest.importorskip("torchvision")
 
 from torch import Tensor, nn  # noqa: E402
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tests import bespoke_models  # noqa: E402
 
 
@@ -89,25 +90,22 @@ def test_a_detector_over_that_backbone_builds_from_its_datasets_own_band_statist
     states the width builds on torchvision's own three-band default."""
     import numpy as np
     import tifffile
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
     from tcip_mcp.pipelines.components.detectors import build_detector
     from tcip_mcp.pipelines.derivations import band_normalization_stats
-    from tests._producer_fixtures import samples_over
+    from tests._producer_fixtures import label_image, samples_over
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     for index, stem in enumerate(("a", "b")):
         bands = np.full((32, 32, 5), 20 * (index + 1), dtype=np.uint8)
         bands[..., 4] = 200
         tifffile.imwrite(str(images_dir / f"{stem}.tif"), bands)
-        json_io.write_annotations(
-            str(labels_dir / f"{stem}.json"),
-            [Annotation(subject="leaf", geometry=BBox(4, 4, 20, 20))], 32, 32, keep_empty=True)
+        label_image(images_dir / f"{stem}.tif",
+                    [Annotation(subject="leaf", geometry=BBox(4, 4, 20, 20))], 32, 32)
 
-    samples = samples_over(str(images_dir), str(labels_dir), subject="leaf")
+    samples = samples_over(str(images_dir), subject="leaf")
     derived = band_normalization_stats([s.source for s in samples], 5)
     assert derived is not None
     mean, std, paths_read = derived

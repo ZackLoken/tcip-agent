@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Sequence
 from tcip_store import canonical_path
 
 if TYPE_CHECKING:
+    from tcip_annotation.json_io import LabelDocument
     from tcip_mcp.pipelines.data.selection import ClassScope
 
 # A tiled stem looks like ``<source>_<x>_<y>`` (two trailing integer fields).
@@ -45,35 +46,26 @@ GROUP_KEY_FNS: dict[str, Callable[[str], str]] = {
 }
 
 
-def count_label_lines(label_path: str | Path, scope: "ClassScope") -> int:
+def count_label_lines(document: "LabelDocument", scope: "ClassScope") -> int:
     """How many instances of ``scope``'s subject (of any subject when it names none) one per-image
-    label document carries. A missing document raises ``FileNotFoundError``, an unreadable one
-    :class:`~tcip_annotation.json_io.UnreadableLabelDocument`.
-    """
+    label ``document`` carries."""
     from tcip_annotation import json_io
     from tcip_annotation.state import instances
 
-    if not Path(label_path).is_file():
-        raise FileNotFoundError(f"no label document at {label_path} to count foreground in")
     # A crowd region is never one object, so it is never counted as one.
-    records = instances(json_io.read_annotations(str(label_path)))
-    return sum(1 for a in records if scope.subject is None
+    return sum(1 for a in instances(document.annotations) if scope.subject is None
                or json_io.attribute_ids(a, scope.subject, ()) is not None)
 
 
-def label_document_extent(label_path: str | Path) -> tuple[int, int]:
-    """``(width, height)`` one per-image label JSON records (the json_io schema's top-level
-    ``width``/``height``, the frame its boxes were authored against). A document that states no
-    positive width and height refuses (``ValueError``) naming it; an unreadable file raises
-    :class:`~tcip_annotation.json_io.UnreadableLabelDocument`.
+def label_document_extent(document: "LabelDocument", where: str) -> tuple[int, int]:
+    """``(width, height)`` one per-image label ``document`` records, the frame its geometry was
+    authored against. A document that states no positive width and height refuses
+    (``ValueError``) naming ``where``.
     """
-    from tcip_annotation.json_io import load_label_document
-
-    data = load_label_document(Path(label_path))
-    w, h = data.get("width"), data.get("height")
+    w, h = document.width, document.height
     if not (isinstance(w, int) and isinstance(h, int) and w > 0 and h > 0):
         raise ValueError(
-            f"{label_path} states no positive width and height ({w!r}, {h!r}): the frame its "
+            f"{where} states no positive width and height ({w!r}, {h!r}): the frame its "
             "geometry was drawn in is unknown, so nothing can place that geometry on the image. "
             "Write the label document through the annotation store, which records the frame.")
     return w, h
@@ -213,12 +205,10 @@ def refuse_insufficient_foreground_groups(
     )
 
 
-def member_identity(date: str | None, stem: str) -> str:
-    """A draw's member identity for one image: ``<date>/<stem>``, or the bare ``stem`` under a
-    flat, dateless tree. A stem is unique only within one capture date, so a draw spanning more
-    than one date keys members this way, and so must an agent-supplied ``group_key_map``.
-    """
-    return f"{date}/{stem}" if date else stem
+def member_identity(capture: str, stem: str) -> str:
+    """A draw's member identity for one image, ``<capture>/<stem>``, the key an agent-supplied
+    ``group_key_map`` names it by."""
+    return f"{capture}/{stem}"
 
 
 def recorded_group_by(group_by: str, group_key_map: Mapping[str, str] | None) -> str:
@@ -249,10 +239,10 @@ def resolve_group_key_fn(
 
 
 def recorded_group_key_fn(
-    group_by: str, *, date: str | None, stems: Sequence[str] = (),
+    group_by: str, *, date: str, stems: Sequence[str] = (),
     group_key_map: dict[str, str] | None = None,
 ) -> Callable[[str], str]:
-    """The group key a draw records for a bare stem admitted out of one capture date's directory:
+    """The group key a draw records for a bare stem admitted out of capture ``date``'s directory:
     the stem becomes its member identity (:func:`member_identity`) and the policy is resolved
     against those identities (:func:`resolve_group_key_fn`).
 

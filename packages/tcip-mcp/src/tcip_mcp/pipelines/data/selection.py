@@ -30,7 +30,7 @@ REFERENCE_SIDES = ("calibration", "holdout")
 """The two sides an assessment reads."""
 
 DOCUMENT = "document"
-"""Ground truth that is one label document per sample, ``<stem>.json``."""
+"""Ground truth that is one label document per sample, the record its image's key names."""
 
 MASK = "mask"
 """Ground truth that is one mask raster per sample, ``<stem>.png``."""
@@ -49,19 +49,15 @@ SHAPE_DESCRIPTIONS = {
 """How each shape reads in a refusal."""
 
 
-def shape_of(ground_truth: str, row_key: str | None) -> str:
-    """Which of :data:`GROUND_TRUTH_SHAPES` a ground-truth name is, read off the name itself: a row
-    key or a ``.csv`` means one row of a table, a ``.png`` means a mask raster of its own, and
-    anything else is a label document of its own. Reads no disk.
-    """
-    if row_key is not None:
+def shape_of(ground_truth: Key | str, row_key: str | None) -> str:
+    """Which of :data:`GROUND_TRUTH_SHAPES` a sample's ground truth is, read off the value itself:
+    a key is a label document, a row key or a ``.csv`` path one row of a table, and any other path
+    a mask raster of its own. Reads no disk."""
+    if isinstance(ground_truth, Key):
+        return DOCUMENT
+    if row_key is not None or Path(ground_truth).suffix.lower() == ".csv":
         return TABLE
-    suffix = Path(ground_truth).suffix.lower()
-    if suffix == ".csv":
-        return TABLE
-    if suffix == ".png":
-        return MASK
-    return DOCUMENT
+    return MASK
 
 
 @dataclass(frozen=True)
@@ -72,19 +68,19 @@ class Sample:
     ``member`` is the name a membership record names this sample by, as its admission resolved it
     (:class:`~tcip_mcp.pipelines.data.label_queries.Admitted`). ``source`` is the image path, or
     the ``.bandgroup`` manifest path standing in for a grouped capture, or the raster path when
-    ``rect`` names a region of it. ``ground_truth`` is the path to whatever answers for this
-    sample: a per-image label document, a mask raster, or a table; it is never derived from
-    ``source``. ``row_key`` names this sample's row inside a tabular ``ground_truth``, and is
-    ``None`` when the whole file answers for the sample.
+    ``rect`` names a region of it. ``ground_truth`` is what answers for this sample: a per-image
+    label document's key, or the path of a mask raster or a table. ``row_key`` names this
+    sample's row inside a tabular ``ground_truth``, and is ``None`` when the whole file answers
+    for the sample.
 
     ``rect`` is the half-open pixel rect ``(x0, y0, x1, y1)`` a within-image draw assigned, or
-    ``None`` when the sample is the whole source. ``ground_truth_digest`` is that file's digest at
-    draw time.
+    ``None`` when the sample is the whole source. ``ground_truth_digest`` is the ground truth's
+    :func:`ground_truth_digest` when it was read.
     """
 
     member: str
     source: str
-    ground_truth: str
+    ground_truth: Key | str
     group: str
     side: str
     rect: tuple[int, int, int, int] | None = None
@@ -295,17 +291,40 @@ def selection_key(selection_dir: str | Path) -> Key:
     return Key(SELECTION_STORE, str(Path(selection_dir)), _SELECTION_PARTS)
 
 
-SAMPLE_PATHS: PathFields = (("source",), ("ground_truth",))
+GROUND_TRUTH_PATHS: PathFields = ((), ("root",))
+"""The fields of a stored ground truth (:func:`ground_truth_record`) that name a path: a mask's or
+a table's path itself, or a document key's root."""
+
+SAMPLE_PATHS: PathFields = (("source",), *within(("ground_truth",), GROUND_TRUTH_PATHS))
 """The fields of a sample document that name a path."""
 
 SELECTION_PATHS: PathFields = within(("samples", "[]"), SAMPLE_PATHS)
 """The fields of a selection document that name a path."""
 
 
+def ground_truth_record(ground_truth: Key | str) -> str | dict[str, str]:
+    """How a record stores one sample's ground truth, the one :func:`ground_truth_of` reads back:
+    a label document's key as its ``root``, ``capture`` and ``stem``, a path as itself."""
+    if isinstance(ground_truth, Key):
+        capture, stem = ground_truth.parts
+        return {"root": ground_truth.root, "capture": capture, "stem": stem}
+    return ground_truth
+
+
+def ground_truth_of(stored: Any) -> Key | str:
+    """A ground truth :func:`ground_truth_record` stored, read back."""
+    from tcip_mcp.dataset_layout import label_key
+
+    if isinstance(stored, dict):
+        return label_key(stored["root"], stored["capture"], stored["stem"])
+    return str(stored)
+
+
 def sample_document(sample: Sample) -> dict[str, Any]:
     """The JSON shape one sample is held in, the one :func:`read_sample` reads back."""
     doc: dict[str, Any] = {
-        "member": sample.member, "source": sample.source, "ground_truth": sample.ground_truth,
+        "member": sample.member, "source": sample.source,
+        "ground_truth": ground_truth_record(sample.ground_truth),
         "group": sample.group, "side": sample.side,
     }
     if sample.rect is not None:
@@ -357,7 +376,8 @@ def read_sample(raw: Any, position: int, where: str) -> Sample:
         rect = (x0, y0, x1, y1)
     row_key = raw.get("row_key")
     return Sample(
-        member=str(raw["member"]), source=str(raw["source"]), ground_truth=str(raw["ground_truth"]),
+        member=str(raw["member"]), source=str(raw["source"]),
+        ground_truth=ground_truth_of(raw["ground_truth"]),
         group=str(raw["group"]), side=side, rect=rect,
         row_key=str(row_key) if row_key is not None else None,
         ground_truth_digest=raw.get("ground_truth_digest"),
@@ -434,13 +454,8 @@ def read_selection(selection_dir: str | Path, *, project: str | Path) -> Selecti
 def read_selection_checked(
     selection_dir: str | Path, *, project: str | Path,
 ) -> tuple[Selection | None, str | None]:
-    """:func:`read_selection` for a caller listing a candidate directory rather than binding to
-    it, which must tell "nothing recorded here" apart from "something is recorded here and it is
-    wrong".
-
-    Answers ``(selection, None)``, ``(None, None)`` for an absence, or ``(None, text)`` for a
-    record that exists and is refused.
-    """
+    """:func:`read_selection` answering ``(selection, None)``, ``(None, None)`` for an absence, or
+    ``(None, text)`` for a record that exists and is refused."""
     try:
         document = _read_selection_document(selection_dir, project)
         if document is None:
@@ -461,35 +476,26 @@ def _read_selection_document(selection_dir: str | Path, project: str | Path) -> 
     return None if document is None else runtime_paths(document, SELECTION_PATHS, project)
 
 
-def digest_bytes(b: bytes) -> str:
-    """One ground-truth record's digest from its bytes, ``sha256(bytes)[:16]``."""
-    import hashlib
-
-    return hashlib.sha256(b).hexdigest()[:16]
-
-
-def ground_truth_digest(path: str | Path) -> str:
-    """One ground-truth file's own digest (:func:`digest_bytes`), whatever shape the file is. A
-    file that is not there raises ``FileNotFoundError`` naming it."""
-    return digest_bytes(Path(path).read_bytes())
+def ground_truth_digest(ground_truth: Key | str) -> str:
+    """The sha256 of one ground truth's stored bytes, the store's version token: a label document
+    record's (:func:`tcip_store.read_versioned`) or a file's
+    (:func:`tcip_store.read_blob_versioned`). One that is absent raises ``tcip_store.NotFound``
+    naming it."""
+    if isinstance(ground_truth, Key):
+        return tcip_store.read_versioned(ground_truth).version.token
+    return tcip_store.read_blob_versioned(Path(ground_truth)).version.token
 
 
-def ground_truth_digests(paths: Iterable[str]) -> dict[str, str]:
-    """Each named file's own digest, keyed by its path and read once per file however many members
-    that file answers for."""
-    return {path: ground_truth_digest(path) for path in dict.fromkeys(paths)}
-
-
-def moved_ground_truth(recorded: Mapping[str, str]) -> list[str]:
-    """The files among ``recorded`` (each path to the digest recorded for it) that no longer
-    digest to it, a file gone since among them, sorted."""
-    def moved(path: str, digest: str) -> bool:
+def moved_ground_truth(recorded: Mapping[Key | str, str]) -> list[Key | str]:
+    """The ground truths among ``recorded`` (each to the digest recorded for it) that no longer
+    digest to it, one gone since among them, in ``recorded``'s order."""
+    def moved(ground_truth: Key | str, digest: str) -> bool:
         try:
-            return ground_truth_digest(path) != digest
-        except FileNotFoundError:
+            return ground_truth_digest(ground_truth) != digest
+        except tcip_store.NotFound:
             return True
 
-    return sorted(path for path, digest in recorded.items() if moved(path, digest))
+    return [gt for gt, digest in recorded.items() if moved(gt, digest)]
 
 
 def selection_digest(selection: Selection, project: str | Path) -> str:

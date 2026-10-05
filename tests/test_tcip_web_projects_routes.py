@@ -27,9 +27,9 @@ def workspace_dir(tmp_path: Path) -> Path:
     return ws
 
 
-def _make_project(ws: Path, name: str, *, dates=(), subjects=(), models=()) -> Path:
+def _make_project(ws: Path, name: str, *, dates=(), subjects=()) -> Path:
     """A workspace project created through ``initialize_project``, its display name ``name``,
-    holding one image per date, the named subjects and a prediction directory per model."""
+    holding one image per date and the named subjects."""
     from PIL import Image
 
     from tcip_mcp.tools.project_tools import initialize_project
@@ -46,8 +46,6 @@ def _make_project(ws: Path, name: str, *, dates=(), subjects=(), models=()) -> P
         from tests._producer_fixtures import registry_over
 
         registry_over(proj, SubjectRegistry(tuple(Subject(s) for s in sorted(subjects))))
-    for m in models:
-        (proj / "predictions" / m).mkdir(parents=True)
     return proj
 
 
@@ -56,7 +54,7 @@ def _listed(client: TestClient) -> dict[str, dict]:
 
 
 def test_list_projects_lists_workspace_projects(client, workspace_dir):
-    _make_project(workspace_dir, "currant_bud_valley-farm", dates=["2026-02-11"], subjects=["bud", "bush"], models=["baseline"])
+    _make_project(workspace_dir, "currant_bud_valley-farm", dates=["2026-02-11"], subjects=["bud", "bush"])
     _make_project(workspace_dir, "chestnut_burr_site-b", dates=["2026-03-01"])
 
     resp = client.get("/api/projects")
@@ -69,38 +67,32 @@ def test_list_projects_lists_workspace_projects(client, workspace_dir):
     hz = _listed(client)["currant_bud_valley-farm"]
     assert hz["dates"] == ["2026-02-11"]
     assert hz["subjects"] == ["bud", "bush"]  # sorted
-    assert hz["prediction_dirs"] == {"2026-02-11": {}}  # predictions/baseline publishes nothing
+    assert hz["buckets_by_date"] == {"2026-02-11": []}  # no bucket is published
     assert hz["image_count"] == 1
 
 
 def test_projects_report_per_date_subject_model_availability(client, workspace_dir):
     # bud labeled on 02-11 (+ a bucket published over it); bush labeled on 03-02;
-    # 03-24 has images but nothing labeled. One name-based label file per image.
+    # 03-24 has images but nothing labeled. One name-based label document per image.
     pytest.importorskip("torch")
-    from tcip_annotation.json_io import write_annotations
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.dataset_layout import annotation_dir, prediction_root
     from tests._chain_fixtures import published
+    from tests._producer_fixtures import label_image
 
     proj = _make_project(
         workspace_dir,
         "currant_bud_valley-farm",
         dates=["2026-02-11", "2026-03-02", "2026-03-24"],
         subjects=["bud", "bush"],
-        models=["baseline"],
     )
-    ad = annotation_dir(proj, "2026-02-11")
-    ad.mkdir(parents=True, exist_ok=True)
-    write_annotations(str(ad / "img.json"), [Annotation(subject="bud", geometry=BBox(1, 1, 7, 7))],
-                      8, 8)
-    ad2 = annotation_dir(proj, "2026-03-02")
-    ad2.mkdir(parents=True, exist_ok=True)
-    write_annotations(str(ad2 / "img.json"), [Annotation(subject="bush", geometry=BBox(2, 2, 6, 6))],
-                      8, 8)
-    pd = prediction_root(proj) / "baseline" / "2026-02-11"
-    published(proj, pd, [{"image": str(proj / "images" / "2026-02-11" / "img.png"), "width": 8,
-                          "height": 8, "boxes": [[1.0, 1.0, 7.0, 7.0]], "scores": [0.9],
-                          "labels": [1]}], scope={"subject": "bud"})
+    label_image(proj / "images" / "2026-02-11" / "img.png",
+                [Annotation(subject="bud", geometry=BBox(1, 1, 7, 7))], 8, 8)
+    label_image(proj / "images" / "2026-03-02" / "img.png",
+                [Annotation(subject="bush", geometry=BBox(2, 2, 6, 6))], 8, 8)
+    published(proj, "baseline/2026-02-11", [
+        {"image": str(proj / "images" / "2026-02-11" / "img.png"), "width": 8, "height": 8,
+         "boxes": [[1.0, 1.0, 7.0, 7.0]], "scores": [0.9], "labels": [1]}],
+        scope={"subject": "bud"})
 
     hz = _listed(client)["currant_bud_valley-farm"]
     # Flat lists still list everything present anywhere.
@@ -109,25 +101,26 @@ def test_projects_report_per_date_subject_model_availability(client, workspace_d
     assert hz["subjects_by_date"]["2026-02-11"] == ["bud"]
     assert hz["subjects_by_date"]["2026-03-02"] == ["bush"]
     assert hz["subjects_by_date"]["2026-03-24"] == []  # images but no labels
-    assert hz["prediction_dirs"]["2026-02-11"] == {"baseline/2026-02-11": str(pd)}
-    assert hz["prediction_dirs"]["2026-03-02"] == {}
-    assert hz["prediction_dirs"]["2026-03-24"] == {}
+    assert hz["buckets_by_date"] == {
+        "2026-02-11": ["baseline/2026-02-11"], "2026-03-02": [], "2026-03-24": []}
     assert hz["label_problem"] is None
 
 
 def test_projects_report_a_label_problem_and_still_list(client, workspace_dir):
     """A corrupt label under one project must not 500 the whole listing (mirrors
-    record_problem): the project still lists, its other dates are unaffected, and the file is
-    named."""
-    from tcip_mcp.dataset_layout import annotation_dir
+    record_problem): the project still lists, its other dates are unaffected, and the document
+    is named."""
+    from tcip_annotation.state import Annotation, BBox
+    from tests._producer_fixtures import image_label_key, label_image
+    from tests._record_damage_fixtures import damage_record
 
     proj = _make_project(
         workspace_dir, "currant_bud_valley-farm",
         dates=["2026-02-11", "2026-03-02"], subjects=["bud"],
     )
-    bad = annotation_dir(proj, "2026-02-11")
-    bad.mkdir(parents=True, exist_ok=True)
-    (bad / "img.json").write_text("not json {][", encoding="utf-8")
+    bad = proj / "images" / "2026-02-11" / "img.png"
+    label_image(bad, [Annotation(subject="bud", geometry=BBox(1, 1, 7, 7))], 8, 8)
+    damage_record(image_label_key(bad), b"not json {][")
 
     resp = client.get("/api/projects")
     assert resp.status_code == 200
@@ -135,7 +128,7 @@ def test_projects_report_a_label_problem_and_still_list(client, workspace_dir):
     assert hz["subjects_by_date"]["2026-02-11"] == []
     assert hz["subjects_by_date"]["2026-03-02"] == []
     assert hz["label_problem"] is not None
-    assert str(bad / "img.json") in hz["label_problem"]
+    assert "img" in hz["label_problem"]
 
 
 def test_list_ignores_dirs_without_tcip(client, workspace_dir):

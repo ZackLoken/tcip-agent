@@ -138,12 +138,7 @@ function setupDataset() {
         image_list: ["img1.jpg", "img2.jpg"],
         current_image_index: 0,
         images_dir: "C:/data/images/2026-01-01",
-        annotations_dir: "C:/data/annotations/2026-01-01",
-        predictions_dir: null,
-        label_paths: {
-          "img1.jpg": "C:/data/annotations/2026-01-01/img1.json",
-          "img2.jpg": "C:/data/annotations/2026-01-01/img2.json",
-        },
+        bucket: null,
       },
     },
     openProject: { id: "a1b2c3d4e5f6", path: "C:/proj" },
@@ -390,35 +385,6 @@ describe("AnnotateTab save/load race", () => {
     for (const a of body.annotations) {
       expect(Object.keys(a).filter((k) => /_(by|at)$/.test(k))).toEqual([]);
     }
-  });
-});
-
-describe("AnnotateTab audit-gap handling", () => {
-  it("treats an unrecorded save as ok (echoes the token, clears dirty) and toasts the message", async () => {
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-
-    saveSpy.mockResolvedValueOnce({
-      status: "unrecorded",
-      base_mtime: "101",
-      completion: {},
-      message: "save_label_document completed and its audit entry could not be written",
-    });
-    act(addBox);
-    pressSave();
-    await flush();
-
-    expect(useStore.getState().canvas.dirty).toBe(false);
-    expect(useStore.getState().toasts.at(-1)?.message).toBe(
-      "save_label_document completed and its audit entry could not be written",
-    );
-
-    // The echoed token from the unrecorded save is what the next save sends.
-    act(addBox);
-    pressSave();
-    await flush();
-    expect(saveSpy.mock.calls[1][0].base_mtime).toBe("101");
   });
 });
 
@@ -1060,7 +1026,7 @@ describe("AnnotateTab labels-written conflict sentence", () => {
         .pushAgentActivity(
           "annotate",
           "labels_written",
-          { written: ["C:/data/annotations/2026-01-01/img1.json"] },
+          { image_path: "C:/data/images/2026-01-01/img1.jpg" },
           "claude-code 2.1.238",
         );
     });
@@ -1084,7 +1050,7 @@ describe("AnnotateTab labels-written conflict sentence", () => {
         .pushAgentActivity(
           "annotate",
           "labels_written",
-          { written: ["C:/data/annotations/2026-01-01/img1.json"] },
+          { image_path: "C:/data/images/2026-01-01/img1.jpg" },
           null,
         );
     });
@@ -1568,7 +1534,7 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
     ]);
   });
 
-  it("addresses the save at the label file the annotations directory names for this image", async () => {
+  it("addresses the save by the image alone, naming no place its labels are kept", async () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -1578,22 +1544,8 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
     await flush();
 
     expect(saveSpy).toHaveBeenCalledTimes(1);
-    expect(saveSpy.mock.calls[0][0].label_path).toBe("C:/data/annotations/2026-01-01/img1.json");
-  });
-
-  it("refuses to save locally when the dataset has no annotations directory", async () => {
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, annotations_dir: null, label_paths: {} } },
-    }));
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-
-    act(addBox);
-    pressSave();
-    await flush();
-
-    expect(saveSpy).not.toHaveBeenCalled();
+    expect(saveSpy.mock.calls[0][0].image_path).toBe("C:/data/images/2026-01-01/img1.jpg");
+    expect(Object.keys(saveSpy.mock.calls[0][0])).not.toContain("label_path");
   });
 
   it("commits a drawn box under the subject the drag started on, not the one active at release", async () => {
@@ -1840,7 +1792,7 @@ describe("AnnotateTab canvas push names its project", () => {
   });
 });
 
-const BUCKET = "C:/data/predictions/m1/2026-01-01";
+const BUCKET = "m1/2026-01-01";
 const PROPOSALS = {
   bucket: BUCKET,
   proposals: [
@@ -1860,7 +1812,7 @@ const PROPOSALS = {
 
 function withBucket() {
   useStore.setState((s) => ({
-    gui: { ...s.gui, dataset: { ...s.gui.dataset, predictions_dir: BUCKET } },
+    gui: { ...s.gui, dataset: { ...s.gui.dataset, bucket: BUCKET } },
   }));
   return vi.spyOn(api.annotate, "proposals").mockResolvedValue(PROPOSALS);
 }
@@ -1915,11 +1867,7 @@ describe("AnnotateTab proposals", () => {
     const proposalsSpy = withBucket();
     await mountTab();
     await waitFor(() => expect(dottedRects()).toHaveLength(1));
-    expect(proposalsSpy).toHaveBeenCalledWith(
-      "C:/data/images/2026-01-01/img1.jpg",
-      BUCKET,
-      "C:/data/annotations/2026-01-01/img1.json",
-    );
+    expect(proposalsSpy).toHaveBeenCalledWith("C:/data/images/2026-01-01/img1.jpg", BUCKET);
 
     fireEvent.click(screen.getByText("toolbar-hide"));
     await flush();

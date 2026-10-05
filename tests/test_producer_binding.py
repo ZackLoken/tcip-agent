@@ -10,7 +10,6 @@ naming why; the untouched flow beside them delivers validated
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -21,33 +20,37 @@ pytest.importorskip("pycocotools")
 from tests._chain_fixtures import run_the_chain, synthetic_capture  # noqa: E402
 
 
-def _deliver(project: Path, bucket: Path, out: Path) -> dict:
+def _deliver(project: Path, root: Path, bucket: str, out: Path) -> dict:
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
     from tests import _trait_fixtures as fx
 
-    return deliver_per_image_counts(project, predictions_dir=str(bucket), output_path=str(out),
-                                    trait=fx.COUNT_TRAIT)
+    return deliver_per_image_counts(project, str(root), bucket, str(out), trait=fx.COUNT_TRAIT)
 
 
-def _edit_record(bucket: Path, edit) -> None:
-    """Rewrite ``bucket``'s record on disk through ``edit``, the way a hand edit after publication
-    reaches it."""
-    path = bucket / "bucket.json"
-    record = json.loads(path.read_text(encoding="utf-8"))
+def _edit_record(root: Path, bucket: str, edit) -> None:
+    """Rewrite ``bucket``'s record through ``edit`` past the publication, the way a hand edit
+    after publication reaches it."""
+    import tcip_store
+
+    from tcip_mcp.dataset_layout import bucket_key
+
+    key = bucket_key(root, bucket)
+    record = tcip_store.read(key)
     edit(record)
-    path.write_text(json.dumps(record), encoding="utf-8")
+    tcip_store.replace(key, record)
 
 
 def test_a_bucket_record_edited_to_another_execution_answers_for_nothing(tmp_path: Path):
     """The assessment measured one execution record; a bucket stating another, under the same
     assessment id, was not produced by what the assessment measured."""
     chain = run_the_chain(tmp_path, experiment_id="exp-binding-execution")
-    assert _deliver(tmp_path, chain.bucket, tmp_path / "before.csv")["validated"] is True
+    assert _deliver(tmp_path, chain.root, chain.bucket,
+                    tmp_path / "before.csv")["validated"] is True
 
-    _edit_record(chain.bucket, lambda record: record["execution"].update(conf=0.05))
+    _edit_record(chain.root, chain.bucket, lambda record: record["execution"].update(conf=0.05))
 
     out = tmp_path / "after.csv"
-    delivered = _deliver(tmp_path, chain.bucket, out)
+    delivered = _deliver(tmp_path, chain.root, chain.bucket, out)
     assert "was not produced by the checkpoint and execution record" in delivered["error"]
     assert chain.assessment["assessment_id"] in delivered["error"]
     assert not out.exists()
@@ -56,10 +59,11 @@ def test_a_bucket_record_edited_to_another_execution_answers_for_nothing(tmp_pat
 def test_a_bucket_record_naming_an_assessment_nobody_ran_answers_for_nothing(tmp_path: Path):
     chain = run_the_chain(tmp_path, experiment_id="exp-binding-forged-id")
 
-    _edit_record(chain.bucket, lambda record: record.update(assessment_id="assessment-never-run"))
+    _edit_record(chain.root, chain.bucket,
+                 lambda record: record.update(assessment_id="assessment-never-run"))
 
     out = tmp_path / "counts.csv"
-    delivered = _deliver(tmp_path, chain.bucket, out)
+    delivered = _deliver(tmp_path, chain.root, chain.bucket, out)
     assert "no assessment 'assessment-never-run' is recorded" in delivered["error"]
     assert not out.exists()
 
@@ -70,15 +74,15 @@ def test_a_capture_outside_the_assessments_reference_answers_for_nothing(tmp_pat
     from tcip_mcp.tools.inference_tools import run_inference
 
     chain = run_the_chain(tmp_path, experiment_id="exp-binding-coverage")
-    other_images, _labels = synthetic_capture(chain.root, date="2-25-26")
-    bucket = chain.root / "predictions" / "chain" / "2-25-26"
+    other_images = synthetic_capture(chain.root, date="2-25-26")
+    bucket = "chain/2-25-26"
     published = run_inference(tmp_path, checkpoint_path=chain.checkpoint_path,
-                              images_dir=str(other_images), output_dir=str(bucket),
+                              images_dir=str(other_images), bucket=bucket,
                               assessment_id=chain.assessment["assessment_id"])
     assert "error" not in published, published
 
     out = tmp_path / "counts.csv"
-    delivered = _deliver(tmp_path, bucket, out)
+    delivered = _deliver(tmp_path, chain.root, bucket, out)
     assert "reference does not cover" in delivered["error"]
     assert "2-25-26" in delivered["error"]
     assert not out.exists()

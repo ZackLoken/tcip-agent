@@ -7,6 +7,9 @@ tests here are pure-Python or monkeypatched (no GPU) so they stay xdist-safe.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tests._producer_fixtures import checkpoint_admission
+
 from pathlib import Path
 
 import pytest
@@ -16,6 +19,7 @@ pytest.importorskip("pycocotools")
 
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
+from tests._producer_fixtures import label_image  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     SCOPED_DATA, project_checkpoint, verified_checkpoint,
 )
@@ -138,21 +142,18 @@ def test_standard_keys_unchanged_at_100():
 # ── tiled evaluation regimes ──────────────────────────────────────────────
 
 def _det_dataset(tmp_path, n=3, size=128):
+    """``n`` images in ``tmp_path``'s undated capture, each labeled with one ``bud`` box."""
     from PIL import Image
 
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
     for i in range(n):
         Image.new("RGB", (size, size), color=(120, 120, 120)).save(images_dir / f"img{i}.png")
-        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))],
-                                  size, size)
-    return images_dir, labels_dir
+        label_image(images_dir / f"img{i}.png",
+                    [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], size, size)
+    return images_dir
 
 
 def _capture_run_test_evaluation(monkeypatch):
@@ -175,12 +176,12 @@ def test_run_id_reuses_training_tiling(tmp_path, monkeypatch):
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import finished_run
 
-    images_dir, labels_dir = _det_dataset(tmp_path)
+    images_dir = _det_dataset(tmp_path)
     data = {**SCOPED_DATA, "tiling": {"enabled": True, "tile_size": 64, "sliver_frac": 0.5}}
     run_dir = finished_run(tmp_path, experiment_id="det-measure-tiled", data=data)
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(tmp_path, run_dir.name, str(images_dir), str(labels_dir))
+    evaluate_model(tmp_path, run_dir.name, str(images_dir))
     assert isinstance(captured["ds"], TiledDetectionDataset)
     assert captured["ds"].num_samples > 3  # more tiles than the 3 source images
     from tcip_mcp.experiments import run_resolution
@@ -198,7 +199,7 @@ def test_evaluating_a_run_leaves_its_directory_byte_identical(tmp_path, monkeypa
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import finished_run
 
-    images_dir, labels_dir = _det_dataset(tmp_path)
+    images_dir = _det_dataset(tmp_path)
     run_dir = finished_run(tmp_path, experiment_id="det-evaluated")
 
     def snapshot() -> dict:
@@ -207,7 +208,7 @@ def test_evaluating_a_run_leaves_its_directory_byte_identical(tmp_path, monkeypa
 
     before = snapshot()
     audit_before = list(ts.read_log(audit_log_key(tmp_path)).records)
-    result = evaluate_model(tmp_path, run_dir.name, str(images_dir), str(labels_dir))
+    result = evaluate_model(tmp_path, run_dir.name, str(images_dir))
 
     assert "error" not in result, result
     assert snapshot() == before
@@ -219,11 +220,11 @@ def test_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    images_dir, labels_dir = _det_dataset(tmp_path)
+    images_dir = _det_dataset(tmp_path)
     ckpt = registered_checkpoint(tmp_path)
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(tmp_path, ckpt, str(images_dir), str(labels_dir))
+    evaluate_model(tmp_path, ckpt, str(images_dir))
     assert isinstance(captured["ds"], DetectionDataset)
     assert not isinstance(captured["ds"], TiledDetectionDataset)
     assert captured["tiling"] is None
@@ -235,7 +236,7 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, 
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    images_dir, labels_dir = _det_dataset(tmp_path)  # three-band sources
+    images_dir = _det_dataset(tmp_path)  # three-band sources
     scope = {"subject": "bud"}
     one_band = {"builder": "tests.bespoke_models:build_bespoke_detection",
                 "builder_kwargs": {"min_size": 64, "max_size": 128,
@@ -245,7 +246,7 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, 
                                  data={"num_channels": 1, "scope": scope})
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(tmp_path, ckpt, str(images_dir), str(labels_dir))
+    evaluate_model(tmp_path, ckpt, str(images_dir))
     assert captured["ds"].expected_channels == 1
 
     from tcip_mcp.tools.model_tools import register_model
@@ -258,17 +259,16 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, 
     assert "error" not in register_model(tmp_path, name="unstated-width",
                                          checkpoint_path=str(unstated), config={})
 
-    r = evaluate_model(tmp_path, str(unstated), str(images_dir), str(labels_dir))
+    r = evaluate_model(tmp_path, str(unstated), str(images_dir))
 
     assert "no band count" in r["error"], r
 
 
-def _detections_as_ground_truth(payload, images_dir, labels_dir, *, subject: str, limit: int = 20):
+def _detections_as_ground_truth(payload, images_dir, *, subject: str, limit: int = 20):
     """Write each image's own strongest detections back as its ground truth, so a metric over this
     fixture is sensitive to which detections the model is allowed to emit. The checkpoint's model
     is read with its score floor removed so that it returns detections to write back.
     """
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
     from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
@@ -279,14 +279,13 @@ def _detections_as_ground_truth(payload, images_dir, labels_dir, *, subject: str
     model.load_state_dict(payload[STATE_DICT_KEY])
     model.eval()
     set_detector_operating_point(model, score_thresh=0.0)
-    labels_dir.mkdir(parents=True, exist_ok=True)
     for image in sorted(Path(images_dir).glob("*.png")):
         tensor = pil_to_tensor(load_image(image, 3))
         with torch.no_grad():
             boxes = model([tensor])[0]["boxes"].tolist()
         w, h = int(tensor.shape[-1]), int(tensor.shape[-2])
-        json_io.write_annotations(
-            str(labels_dir / f"{image.stem}.json"),
+        label_image(
+            image,
             [Annotation(subject=subject, geometry=BBox(*(float(v) for v in box)))
              for box in boxes[:limit] if box[2] - box[0] > 1 and box[3] - box[1] > 1],
             w, h)
@@ -313,7 +312,7 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
     for i in range(2):
         Image.new("RGB", (128, 128), color=(120, 120, 120)).save(images_dir / f"img{i}.png")
@@ -326,7 +325,7 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     # detection and a substituted floor of 0.5 or 0.0 would not.
     ckpt = registered_checkpoint(tmp_path, model_source=declares_its_point, seed=0)
     verified = load_registered_checkpoint(ckpt, project=tmp_path)
-    _detections_as_ground_truth(verified.payload, images_dir, labels_dir, subject="bud")
+    _detections_as_ground_truth(verified.payload, images_dir, subject="bud")
 
     build_model = model_build.build_model
     builds = []
@@ -350,7 +349,7 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     # Both routes run from one seed: the loss pass samples proposals, so two unseeded passes over
     # the same weights differ in that one metric by more than float noise.
     torch.manual_seed(777)
-    measured = evaluate_model(tmp_path, ckpt, str(images_dir), str(labels_dir))
+    measured = evaluate_model(tmp_path, ckpt, str(images_dir))
     assert "error" not in measured, measured
     assert len(builds) == 1
 
@@ -388,11 +387,11 @@ def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    images_dir, labels_dir = _det_dataset(tmp_path)
+    images_dir = _det_dataset(tmp_path)
     ckpt = registered_checkpoint(tmp_path)
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(tmp_path, ckpt, str(images_dir), str(labels_dir),
+    evaluate_model(tmp_path, ckpt, str(images_dir),
                    tiling={"enabled": True, "tile_size": 64, "sliver_frac": 0.5})
     assert isinstance(captured["ds"], TiledDetectionDataset)
 
@@ -422,18 +421,16 @@ def _full_frame(tmp_path, monkeypatch, stub, annotations, *, checkpoint=None, **
     from PIL import Image
 
     import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
-    from tcip_annotation import json_io
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     Image.new("RGB", (128, 128)).save(images_dir / "a.png")
-    json_io.write_annotations(str(labels_dir / "a.json"), annotations, 128, 128,
-                              keep_empty=True)
+    label_image(images_dir / "a.png", annotations, 128, 128, keep_empty=True)
     monkeypatch.setattr(predictor_mod, "GenericPredictor", lambda *a, **kw: stub)
-    return run_full_frame_evaluation(checkpoint or verified_checkpoint(tmp_path),
-                                     str(images_dir), str(labels_dir), stated=Stated(**stated))
+    checkpoint = checkpoint or verified_checkpoint(tmp_path)
+    return run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
+                                     stated=Stated(**stated))
 
 
 def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
@@ -502,7 +499,7 @@ def _pass_over(tmp_path, monkeypatch, stub, **stated):
     from tests._verified_checkpoint_fixtures import predicted_over
 
     images_dir = tmp_path / "one"
-    images_dir.mkdir()
+    images_dir.mkdir(parents=True)
     Image.new("RGB", (100, 100)).save(images_dir / "a.png")
     install(monkeypatch, stub)
     return predicted_over(tmp_path, project_checkpoint(tmp_path), str(images_dir), device="cpu",
@@ -587,7 +584,6 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
     import time
 
     from PIL import Image
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.experiments import run_resolution
     import tcip_mcp.pipelines.training.generic_trainer as gt
@@ -599,20 +595,12 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
 
     monkeypatch.setattr(gt, "train", _poison_train)
 
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    val_images = tmp_path / "val_images"
-    val_labels = tmp_path / "val_labels"
-    for d in (images_dir, labels_dir, val_images, val_labels):
-        d.mkdir()
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     for i in range(2):
         Image.new("RGB", (128, 128)).save(images_dir / f"t{i}.png")
-        json_io.write_annotations(str(labels_dir / f"t{i}.json"),
-                                  [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))],
-                                  128, 128)
-    Image.new("RGB", (128, 128)).save(val_images / "v0.png")
-    json_io.write_annotations(str(val_labels / "v0.json"),
-                              [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
+        label_image(images_dir / f"t{i}.png",
+                    [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
@@ -621,8 +609,7 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "scope": {"subject": "bud"},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
                  # no tile_size: the effective default must be persisted
                  "tiling": {"enabled": True, "sliver_frac": 0.5}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],

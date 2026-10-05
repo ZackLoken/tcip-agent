@@ -1736,7 +1736,7 @@ def resolve_delivery_mapping(
     """
     from tcip_store import StoreError
 
-    from tcip_mcp.subject_registry import RegistryError, dataset_root_for_pred_dirs
+    from tcip_mcp.buckets import shared_root
     from tcip_mcp.dataset_layout import require_dataset_identity
 
     try:
@@ -1756,10 +1756,7 @@ def resolve_delivery_mapping(
             "cover; rebuild the mapping to cover them, or drop those buckets")
 
     try:
-        delivered_root = dataset_root_for_pred_dirs([str(b.path) for b in buckets.values()])
-    except RegistryError as exc:
-        raise MappingDeliveryRefusal(str(exc)) from exc
-    try:
+        delivered_root = shared_root(buckets.values())
         delivered_identity = require_dataset_identity(delivered_root)
     except ValueError as exc:
         raise MappingDeliveryRefusal(str(exc)) from exc

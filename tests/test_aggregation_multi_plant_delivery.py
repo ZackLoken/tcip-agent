@@ -184,17 +184,17 @@ def _assessed(project, kind: str, experiment_id: str):
         entry, PER_PLANT_COUNT_AGGREGATE, measured_subject=SUBJECT,
         delivered_phenotypes=("stem_count",), delivered_value_keys=("count",)))
     root = project / "ds"
-    images_dir, _labels = synthetic_capture(root)
+    images_dir = synthetic_capture(root)
     draw_reference_selection(project, root, project / "selection")
     checkpoint = train_on(project / "selection", project, experiment_id)
     assessment = assess_checkpoint(project, checkpoint_path=checkpoint, trait=fx.COUNT_TRAIT,
                                    delivery_kind=kind, selection_dir=str(project / "selection"))
     assert assessment.get("passed") is True, assessment
-    bucket = root / "predictions" / kind / DATE
+    bucket = f"{kind}/{DATE}"
     published = run_inference(project, checkpoint_path=checkpoint, images_dir=str(images_dir),
-                              output_dir=str(bucket), assessment_id=assessment["assessment_id"])
+                              bucket=bucket, assessment_id=assessment["assessment_id"])
     assert "error" not in published, published
-    return read_bucket(bucket)
+    return read_bucket(root, bucket)
 
 
 _ROWS = [{"plant_id": "PLANT_A", "value": 4, "observations": 3, "value_key": "count",

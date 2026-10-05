@@ -42,22 +42,32 @@ def _scope(root: Path, *attributes: cr.Attribute) -> ClassScope:
     from tests._producer_fixtures import registry_over
 
     registry_over(root, _registry(*attributes))
-    (root / "annotations").mkdir(parents=True, exist_ok=True)
-    return registry_scope(root / "annotations", "bud")
+    return registry_scope(root / "images", "bud")
+
+
+def _document(project: Path, annotations: list[Annotation]):
+    """``annotations`` written as one image's prediction document under ``project``; its key."""
+    from tcip_mcp.dataset_layout import prediction_key
+
+    key = prediction_key(project, "m/2024-05-01", "img")
+    json_io.write_label_document(key, annotations, 8, 8)
+    return key
 
 
 def _bucket(project: Path, date: str, documents: dict[str, list[str]], *,
             attributed: bool = True):
     """A bucket published for ``date`` holding one document per stem of ``documents``, each
     detection carrying its value under :data:`OPENING`, from a checkpoint whose scope declares it,
-    or none from one whose scope declares no attribute (``_chain_fixtures.published``)."""
+    or none from one whose scope declares no attribute (``_chain_fixtures.published``). With no
+    stem named it holds one image of no stem a test maps, since a publication holds a document."""
     pytest.importorskip("torch")
     from tests._chain_fixtures import predicted, published
 
     attributes = (OPENING,) if attributed else ()
-    out = project / "ds" / "predictions" / f"m-{'attributed' if attributed else 'bare'}" / date
-    return published(project, out, [predicted(stem, values, attributes)
-                                    for stem, values in documents.items()],
+    images = project / "ds" / "images" / date
+    name = f"m-{'attributed' if attributed else 'bare'}/{date}"
+    return published(project, name, [predicted(images / f"{stem}.jpg", values, attributes)
+                                     for stem, values in (documents or {"unmapped": []}).items()],
                      scope={"subject": "bud"}, registry=_registry(*attributes))
 
 
@@ -191,12 +201,8 @@ def test_every_milestone_bound_and_the_observed_date_count_are_delivered_columns
 def test_count_by_class_bare_detector_bucket_refuses_never_full_coverage(tmp_path):
     # A detector whose scope declares no attribute at all has no call of the positive state, so
     # none of its detections counts as assessed for it.
-    p = tmp_path / "img.json"
-    json_io.write_annotations(
-        p, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9),
-            Annotation(subject="bud", geometry=BBox(4, 4, 6, 6), score=0.8)],
-        8, 8,
-    )
+    p = _document(tmp_path, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9),
+                             Annotation(subject="bud", geometry=BBox(4, 4, 6, 6), score=0.8)])
     total, positive, unclassified = phenology.count_by_class(p, OPENED, scope=_scope(tmp_path))
     assert (total, positive, unclassified) == (2, 0, 2)  # whole bucket unclassified, not full coverage
 
@@ -204,27 +210,21 @@ def test_count_by_class_bare_detector_bucket_refuses_never_full_coverage(tmp_pat
 def test_count_by_class_wrong_axis_bucket_refuses(tmp_path):
     # A run whose scope declares a different attribute of the same subject (damage severity); it
     # never called the positive state's attribute, so it must refuse, not be miscounted.
-    p = tmp_path / "img.json"
-    json_io.write_annotations(
-        p, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9,
-                       attributes={"damage": "mild"})], 8, 8,
-    )
-    scope = _scope(tmp_path, cr.Attribute("damage", "ordinal", ("none", "mild", "severe")))
+    p = _document(tmp_path, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9,
+                                        attributes={"damage": "mild"})])
+    scope =_scope(tmp_path, cr.Attribute("damage", "ordinal", ("none", "mild", "severe")))
     total, positive, unclassified = phenology.count_by_class(p, OPENED, scope=scope)
     assert (total, positive, unclassified) == (1, 0, 1)
 
 
 def test_count_by_class_attributed_bucket_splits_positive_negative(tmp_path):
-    p = tmp_path / "img.json"
-    json_io.write_annotations(
-        p, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9,
-                       attributes={"opening": "open"}),
-            Annotation(subject="bud", geometry=BBox(4, 4, 6, 6), score=0.8,
-                       attributes={"opening": "closed"}),
-            Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.7,
-                       attributes={"opening": "open"})],
-        8, 8,
-    )
+    p = _document(tmp_path, [
+        Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9,
+                   attributes={"opening": "open"}),
+        Annotation(subject="bud", geometry=BBox(4, 4, 6, 6), score=0.8,
+                   attributes={"opening": "closed"}),
+        Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.7,
+                   attributes={"opening": "open"})])
     total, positive, unclassified = phenology.count_by_class(p, OPENED,
                                                              scope=_scope(tmp_path, OPENING))
     assert (total, positive, unclassified) == (3, 2, 0)
@@ -233,13 +233,9 @@ def test_count_by_class_attributed_bucket_splits_positive_negative(tmp_path):
 def test_count_by_class_foreign_record_within_attributed_bucket_refuses(tmp_path):
     # A record carrying no value under the state's attribute (a stale bare-detector document)
     # refuses by name rather than reading as a negative.
-    p = tmp_path / "img.json"
-    json_io.write_annotations(
-        p, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9,
-                       attributes={"opening": "open"}),
-            Annotation(subject="bud", geometry=BBox(4, 4, 6, 6), score=0.8)],
-        8, 8,
-    )
+    p = _document(tmp_path, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9,
+                                        attributes={"opening": "open"}),
+                             Annotation(subject="bud", geometry=BBox(4, 4, 6, 6), score=0.8)])
     with pytest.raises(json_io.UndeclaredValue, match="with a value under 'opening'"):
         phenology.count_by_class(p, OPENED, scope=_scope(tmp_path, OPENING))
 

@@ -81,7 +81,7 @@ def bind(
 ) -> None:
     """Refuse (:class:`OperationalizationRefused`) a delivery ``revision``'s ``delivery_kind``
     operationalization does not bind: a delivered phenotype it does not cover, a row value key
-    outside its set or missing, a bucket (``buckets``: path to the subject its detections are of)
+    outside its set or missing, a bucket (``buckets``: name to the subject its detections are of)
     not counting its measured subject, or, with ``registry`` given, a positive state the delivered
     dataset's registry no longer declares."""
     entry = revision.entry

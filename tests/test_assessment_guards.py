@@ -7,6 +7,8 @@ reference is re-sided only through the admission's own sample producer, never ha
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 import shutil
 from pathlib import Path
 
@@ -28,20 +30,20 @@ from tests._dense_op_fixtures import dense_records, good_cal_holdout  # noqa: E4
 
 def _trained(project: Path, experiment_id: str):
     """A capture, its drawn selection and a checkpoint trained on the selection's train side;
-    ``(images_dir, labels_dir, selection, selection_dir, checkpoint_path)``."""
+    ``(images_dir, selection, selection_dir, checkpoint_path)``."""
     root = project / "ds"
-    images_dir, labels_dir = synthetic_capture(root)
+    images_dir = synthetic_capture(root)
     selection_dir = project / "selection"
     selection = draw_reference_selection(project, root, selection_dir)
-    return images_dir, labels_dir, selection, selection_dir, train_on(
-        selection_dir, project, experiment_id)
+    return images_dir, selection, selection_dir, train_on(selection_dir, project, experiment_id)
 
 
-def _add_frame(images_dir: Path, labels_dir: Path, stem: str, *, like: str,
-               same_pixels: bool) -> None:
+def _add_frame(images_dir: Path, stem: str, *, like: str, same_pixels: bool) -> None:
     """Add frame ``stem`` labelled exactly as frame ``like``: its image a byte copy of ``like``'s
     when ``same_pixels``, else a frame of its own (another shade) holding the same box."""
     from PIL import Image, ImageDraw
+
+    from tests._producer_fixtures import image_label_key, label_image
 
     if same_pixels:
         shutil.copyfile(images_dir / f"{like}.png", images_dir / f"{stem}.png")
@@ -51,11 +53,11 @@ def _add_frame(images_dir: Path, labels_dir: Path, stem: str, *, like: str,
         ImageDraw.Draw(frame).rectangle([x0, y0, x0 + size - 1, y0 + size - 1],
                                         fill=(250, 240, 200))
         frame.save(images_dir / f"{stem}.png")
-    shutil.copyfile(labels_dir / f"{like}.json", labels_dir / f"{stem}.json")
+    label_image(images_dir / f"{stem}.png", json_io.read_label_document(
+        image_label_key(images_dir / f"{like}.png")).annotations, IMG, IMG)
 
 
-def _resided(project: Path, images_dir: Path, labels_dir: Path, drawn, extra: dict[str, str],
-             out: Path) -> Path:
+def _resided(project: Path, images_dir: Path, drawn, extra: dict[str, str], out: Path) -> Path:
     """A reference selection of its own: the drawn selection's calibration and holdout sides with
     the added frames ``extra`` (member to side) joined to them, sided and grouped by the admission's
     own sample producer under the draw's own policy; its dir."""
@@ -63,7 +65,7 @@ def _resided(project: Path, images_dir: Path, labels_dir: Path, drawn, extra: di
     from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES, Selection, write_selection
     from tcip_mcp.pipelines.data.splits import recorded_group_key_fn
 
-    admitted = admit(images_dir, labels_dir, scope=drawn.scope)
+    admitted = admit(images_dir, scope=drawn.scope)
     sides = {s.member: s.side for s in drawn.samples if s.side in REFERENCE_SIDES} | extra
     samples = admitted.samples(sides, recorded_group_key_fn(drawn.group_by, date=admitted.date))
     write_selection(out, Selection(samples=tuple(samples), scope=drawn.scope, seed=drawn.seed,
@@ -83,11 +85,11 @@ def _a_train_member(selection) -> str:
 def test_a_distinct_image_holding_a_training_frames_boxes_is_a_legitimate_reference(tmp_path):
     """Two different images can carry identical boxes: the second is not the first, so a reference
     holding it is held out. Identity is the image's content, never the geometry drawn on it."""
-    images_dir, labels_dir, drawn, _sel, checkpoint = _trained(tmp_path, "exp-twin")
+    images_dir, drawn, _sel, checkpoint = _trained(tmp_path, "exp-twin")
     confirm_count_trait(tmp_path)
     like = _a_train_member(drawn)
-    _add_frame(images_dir, labels_dir, "twin", like=like, same_pixels=False)
-    reference = _resided(tmp_path, images_dir, labels_dir, drawn, {"twin": "holdout"},
+    _add_frame(images_dir, "twin", like=like, same_pixels=False)
+    reference = _resided(tmp_path, images_dir, drawn, {"twin": "holdout"},
                          tmp_path / "reference")
 
     record = assess(tmp_path, checkpoint, reference)
@@ -101,11 +103,11 @@ def test_a_distinct_image_holding_a_training_frames_boxes_is_a_legitimate_refere
 def test_a_training_image_copied_under_a_new_name_into_the_reference_fails_disjointness(tmp_path):
     """A byte copy of a training frame under another name is the same image: the reference holding
     it shares its content with training, whatever it is called or grouped under."""
-    images_dir, labels_dir, drawn, _sel, checkpoint = _trained(tmp_path, "exp-dup")
+    images_dir, drawn, _sel, checkpoint = _trained(tmp_path, "exp-dup")
     confirm_count_trait(tmp_path)
     like = _a_train_member(drawn)
-    _add_frame(images_dir, labels_dir, "dup", like=like, same_pixels=True)
-    reference = _resided(tmp_path, images_dir, labels_dir, drawn, {"dup": "holdout"},
+    _add_frame(images_dir, "dup", like=like, same_pixels=True)
+    reference = _resided(tmp_path, images_dir, drawn, {"dup": "holdout"},
                          tmp_path / "reference")
 
     record = assess(tmp_path, checkpoint, reference)
@@ -120,12 +122,12 @@ def test_a_training_image_copied_under_a_new_name_into_the_reference_fails_disjo
 def test_a_reference_frame_in_a_training_group_fails_even_when_its_pixels_are_its_own(tmp_path):
     """A tile of a training source is not held out from it: a reference frame grouped with a
     training frame fails on the group alone, its own pixels notwithstanding."""
-    images_dir, labels_dir, drawn, _sel, checkpoint = _trained(tmp_path, "exp-group")
+    images_dir, drawn, _sel, checkpoint = _trained(tmp_path, "exp-group")
     confirm_count_trait(tmp_path)
     like = _a_train_member(drawn)
     sibling = f"{like}_5_5"
-    _add_frame(images_dir, labels_dir, sibling, like=like, same_pixels=False)
-    reference = _resided(tmp_path, images_dir, labels_dir, drawn, {sibling: "holdout"},
+    _add_frame(images_dir, sibling, like=like, same_pixels=False)
+    reference = _resided(tmp_path, images_dir, drawn, {sibling: "holdout"},
                          tmp_path / "reference")
 
     record = assess(tmp_path, checkpoint, reference)
@@ -234,8 +236,8 @@ def test_a_delivery_under_another_revision_than_the_assessments_refuses_naming_b
     confirm_count_trait(tmp_path, count_error_tolerance=3.0)
     out_csv = tmp_path / "counts.csv"
 
-    delivered = deliver_per_image_counts(tmp_path, predictions_dir=str(chain.bucket),
-                                         output_path=str(out_csv), trait=fx.COUNT_TRAIT)
+    delivered = deliver_per_image_counts(tmp_path, str(chain.root), chain.bucket, str(out_csv),
+                                         trait=fx.COUNT_TRAIT)
 
     assert "error" in delivered, delivered
     assert "revision 1" in delivered["error"] and "revision 2" in delivered["error"], delivered
@@ -256,26 +258,25 @@ def test_one_producer_clears_the_gate_and_a_series_of_two_refuses(tmp_path):
     nothing = Result((), (), population=())
     chain = run_the_chain(tmp_path, experiment_id="exp-series-a")
     other = train_on(chain.selection_dir, tmp_path, "exp-series-b")
-    second = chain.root / "predictions" / "other" / DATE
+    second = f"other/{DATE}"
     published = run_inference(tmp_path, checkpoint_path=other, images_dir=str(chain.images_dir),
-                              output_dir=str(second))
+                              bucket=second)
     assert "error" not in published, published
     revision = latest_confirmed(fx.COUNT_TRAIT, tmp_path)
-    first = read_bucket(chain.bucket)
+    first = chain.read()
 
     assert gate(tmp_path, [first], delivery_kind="per_image_count", revision=revision,
                 result=nothing).validated
     with pytest.raises(DeliveryRefused, match="more than one checkpoint") as refused:
-        gate(tmp_path, [first, read_bucket(second)],
+        gate(tmp_path, [first, read_bucket(chain.root, second)],
              delivery_kind="per_image_count", revision=revision, result=nothing)
-    assert str(chain.bucket) in str(refused.value) and str(second) in str(refused.value)
+    assert chain.bucket in str(refused.value) and second in str(refused.value)
 
 
 def test_an_assessment_whose_retained_reference_is_gone_answers_for_nothing(tmp_path):
     """An assessment whose retained reference copies are removed reads as a changed reference,
     so the gate refuses the bucket it validated."""
     from tcip_mcp.assessment import REFERENCE_DIR, assessment_dir
-    from tcip_mcp.buckets import read_bucket
     from tcip_mcp.delivery import DeliveryRefused, Result, gate
     from tcip_mcp.operationalization import latest_confirmed
 
@@ -283,7 +284,7 @@ def test_an_assessment_whose_retained_reference_is_gone_answers_for_nothing(tmp_
     shutil.rmtree(assessment_dir(tmp_path, chain.assessment["assessment_id"]) / REFERENCE_DIR)
 
     with pytest.raises(DeliveryRefused, match="changed since"):
-        gate(tmp_path, [read_bucket(chain.bucket)],
+        gate(tmp_path, [chain.read()],
              delivery_kind="per_image_count",
              revision=latest_confirmed(fx.COUNT_TRAIT, tmp_path),
              result=Result((), (), population=()))
@@ -295,14 +296,13 @@ def test_a_reference_source_edited_after_the_assessment_answers_for_nothing(tmp_
     from PIL import Image
 
     from tcip_mcp.assessment import read_assessment
-    from tcip_mcp.buckets import read_bucket
     from tcip_mcp.delivery import DeliveryRefused, Result, gate
     from tcip_mcp.operationalization import latest_confirmed
 
     chain = run_the_chain(tmp_path, experiment_id="exp-edited-source")
     nothing = Result((), (), population=())
     revision = latest_confirmed(fx.COUNT_TRAIT, tmp_path)
-    bucket = read_bucket(chain.bucket)
+    bucket = chain.read()
     assert gate(tmp_path, [bucket], delivery_kind="per_image_count", revision=revision,
                 result=nothing).validated
     source = read_assessment(tmp_path, chain.assessment["assessment_id"]).reference.samples[0].source
@@ -373,15 +373,14 @@ def test_a_polygon_that_fails_to_rasterize_refuses_rather_than_training_an_empty
     from tests._producer_fixtures import dataset_over
 
     from tests._image_fixtures import write_image
+    from tests._producer_fixtures import label_image
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    labels_dir.mkdir()
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     write_image(images_dir / "a.png", size=IMG)
-    json_io.write_annotations(
-        str(labels_dir / "a.json"),
-        [Annotation(subject=SUBJECT, geometry=Polygon(rings=[[(2, 2), (20, 2), (20, 20)]]))],
-        IMG, IMG)
-    dataset = dataset_over("instance_seg", images_dir, labels_dir, subject=SUBJECT)
+    label_image(images_dir / "a.png",
+                [Annotation(subject=SUBJECT, geometry=Polygon(rings=[[(2, 2), (20, 2), (20, 20)]]))],
+                IMG, IMG)
+    dataset = dataset_over("instance_seg", images_dir, subject=SUBJECT)
 
     def refuse(self, *args, **kwargs):
         raise ValueError("the ring would not draw")
@@ -399,7 +398,7 @@ def test_a_restored_record_runs_as_recorded_and_a_changed_overlap_or_merge_refus
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import ExecutionRefused, Stated, prepare_pass
 
-    _images, _labels, _drawn, _sel, checkpoint_path = _trained(tmp_path, "exp-restore")
+    _images, _drawn, _sel, checkpoint_path = _trained(tmp_path, "exp-restore")
     checkpoint = load_registered_checkpoint(checkpoint_path, project=tmp_path)
     recorded = prepare_pass(checkpoint, Stated(tile=True, overlap=0.2)).execution
     assert recorded.tiled, recorded

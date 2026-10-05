@@ -19,18 +19,6 @@ export function pathInDir(path: string | null, dir: string | null): boolean {
   return !!path && !!dir && path.startsWith(`${dir}/`);
 }
 
-/** One image's ground-truth record on the selected date, as the selection names it; null for no
- *  image or one the selection does not list. */
-export function labelPath(dataset: DatasetSelection, imageName: string | null): string | null {
-  return imageName ? (dataset.label_paths[imageName] ?? null) : null;
-}
-
-/** One image's prediction record in the selected model bucket, as the selection names it; null
- *  when no model is selected. */
-export function predictionPath(dataset: DatasetSelection, imageName: string | null): string | null {
-  return imageName ? (dataset.prediction_paths[imageName] ?? null) : null;
-}
-
 /** The image the selection currently points at: its name and where its bytes live. */
 export function currentImage(dataset: DatasetSelection): {
   name: string | null;

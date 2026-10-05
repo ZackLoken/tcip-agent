@@ -8,6 +8,8 @@ primitives so a hand-rolled ``train(ctx)`` self-proves.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -85,25 +87,23 @@ def _bespoke_classification_dataset(samples=None, scope=None, transforms=None, t
 
 
 def _admitted_tree(tmp_path):
-    """An images directory and a label tree the platform's own producer admits samples from, for a
-    bespoke run: a builder does not exempt its run from naming the data the producer reads."""
+    """An images directory whose label documents the platform's own producer admits samples from,
+    for a bespoke run: a builder does not exempt its run from naming the data the producer
+    reads."""
     from PIL import Image
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import label_image, registry_over
 
     root = tmp_path / "ds"
-    imgs, lbls = root / "images", root / "annotations"
+    imgs = root / "images" / UNDATED_BUCKET
     imgs.mkdir(parents=True)
-    lbls.mkdir(parents=True)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="leaf"),)))
     for stem in ("a", "b", "c", "d"):
         Image.new("RGB", (32, 32)).save(imgs / f"{stem}.png")
-        json_io.write_annotations(lbls / f"{stem}.json",
-                                  [Annotation(subject="leaf", geometry=BBox(2, 2, 10, 10))],
-                                  32, 32, keep_empty=True)
-    return imgs, lbls
+        label_image(imgs / f"{stem}.png", [Annotation(subject="leaf", geometry=BBox(2, 2, 10, 10))],
+                    32, 32, keep_empty=True)
+    return imgs
 
 
 def _bespoke_task_model(**_kwargs):
@@ -170,8 +170,7 @@ def test_model_dims_hands_the_admitted_subject_and_every_attribute(tmp_path):
                   Attribute("grade", "ordinal", ("low", "mid", "high")))
     registry_over(tmp_path, SubjectRegistry(subjects=(Subject(name="bud",
                                                                attributes=attributes),)))
-    (tmp_path / "annotations").mkdir()
-    scope = registry_scope(tmp_path / "annotations", "bud")
+    scope = registry_scope(tmp_path / "images", "bud")
 
     assert model_dims(scope, {"num_channels": 3}) == {"in_chans": 3, "num_classes": 1,
                                                       "attributes": attributes}
@@ -185,10 +184,10 @@ def test_preflight_smoke_blocks_broken_builder(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs, lbls = _admitted_tree(tmp_path)
+    imgs = _admitted_tree(tmp_path)
     cfg = {
         "model_source": {"builder": f"{__name__}:_broken_builder", "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "leaf"}},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"}},
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
     # Fast path (no smoke) is structurally valid: the builder imports fine.
@@ -204,12 +203,12 @@ def test_preflight_smoke_passes_valid_builder(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs, lbls = _admitted_tree(tmp_path)
+    imgs = _admitted_tree(tmp_path)
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "leaf"}},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"}},
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
     r = preflight_config(tmp_path, cfg, smoke=True, overfit=True)
@@ -255,7 +254,7 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(tmp_path, monk
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
 
-    images_dir, masks_dir = tmp_path / "ds" / "images", tmp_path / "ds" / "masks"
+    images_dir, masks_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET, tmp_path / "ds" / "masks"
     images_dir.mkdir(parents=True)
     masks_dir.mkdir(parents=True)
     for stem in ("a", "b", "c", "d"):
@@ -292,10 +291,10 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs, lbls = _admitted_tree(tmp_path)
+    imgs = _admitted_tree(tmp_path)
     cfg = {
         "model_source": {"builder": f"{__name__}:_bespoke_task_model", "task": "bunch_compactness"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "leaf"},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"},
                  "dataset_source": {"builder": f"{__name__}:_bespoke_task_dataset",
                                     "task": "bunch_compactness"}},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
@@ -320,8 +319,8 @@ def test_preflight_smoke_batch_matches_what_the_run_will_build(tmp_path, monkeyp
     from tcip_mcp.pipelines.data.split_construction import resolve_run
     from tcip_mcp.tools.training_tools import _one_real_batch
 
-    imgs, lbls = _admitted_tree(tmp_path)
-    data = {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "leaf"},
+    imgs = _admitted_tree(tmp_path)
+    data = {"images_dir": str(imgs), "scope": {"subject": "leaf"},
             "dataset_source": {"builder": f"{__name__}:_strict_bespoke_dataset",
                                "task": "bunch_compactness"}}
     resolution = resolve_run({"model_source": {"task": "bunch_compactness"}, "data": data}, project=tmp_path)
@@ -337,10 +336,10 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs, lbls = _admitted_tree(tmp_path)
+    imgs = _admitted_tree(tmp_path)
     cfg = {  # structurally valid, but the dataset cannot produce an item
         "model_source": {"builder": f"{__name__}:_bespoke_task_model", "task": "bunch_compactness"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "leaf"},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"},
                  "dataset_source": {"builder": f"{__name__}:_unbuildable_dataset",
                                     "task": "bunch_compactness"}},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
@@ -389,8 +388,8 @@ def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(tmp_path,
     from tcip_mcp.pipelines.training.collation import task_collate
 
     monkeypatch.chdir(tmp_path)
-    imgs, table = tmp_path / "images", tmp_path / "labels.csv"
-    imgs.mkdir()
+    imgs, table = tmp_path / "images" / UNDATED_BUCKET, tmp_path / "labels.csv"
+    imgs.mkdir(parents=True)
     rows = []
     for index in range(4):
         Image.new("RGB", (32, 32), (40 * index, 90, 120)).save(imgs / f"img{index}.png")
