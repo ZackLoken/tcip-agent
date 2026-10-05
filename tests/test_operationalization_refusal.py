@@ -24,7 +24,6 @@ from tcip_mcp.traits import (
     STATE_CROSSING_DATES,
     TraitUnknownError,
 )
-from tcip_web.app import app
 from tests import _trait_fixtures as fx
 from tests._chain_fixtures import deliver_milestones
 
@@ -172,11 +171,6 @@ def test_a_trait_the_named_project_does_not_hold_refuses(project: Path, tmp_path
 
 
 # ── the crossing delivery doors ──────────────────────────────────────────────
-
-
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _series(tmp_path: Path, *, assessed: bool = True) -> dict:

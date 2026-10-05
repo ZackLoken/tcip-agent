@@ -43,8 +43,7 @@ Buildable now:
 
 Not buildable now (no loader, no task type, no scaffolding carried):
 
-- 3D point clouds (LiDAR / SfM). No point-cloud dataset or loader, and no task type. See
-  CLAUDE.md's Scope section and README's Roadmap.
+- 3D point clouds (LiDAR / SfM). No point-cloud dataset or loader, and no task type.
 - Non-imagery spectral readings (a bare NIR / hyperspectral sample, not a raster). The dataset
   layer reads 2D imagery; there is no loader for a spectrum.
 - A *learned* contextual-ranking task: a model that scores a plant relative to its plot or
@@ -91,7 +90,7 @@ No architecture is imposed. The `toolkit-inventory` skill is the name-and-locati
 whole set: the `build_detector` / `build_loss` / task string names, the heads/necks/backbones,
 the derivations, the `ctx` craft library, and the proposal-engine and scorer registries.
 
-Tailor the architecture to the data in hand (CLAUDE.md: derive, don't pin):
+Tailor the architecture to the data in hand, derived rather than pinned:
 
 - Anchors from the GT box shapes, not a fixed `(0.5, 1, 2)`. Feed the dataset's GT `(w, h)`
   through `pipelines.derivations.gt_aspect_ratios` and set anchor *sizes* from the GT object-size
@@ -248,7 +247,7 @@ mechanics are identical for one stage or four, and there is no fixed phase vocab
 ## Design principles
 
 - Start with the simplest thing that could measure the trait, and add complexity only when the
-  data or the metrics justify it (CLAUDE.md's progressive-disclosure rail).
+  data or the metrics justify it.
 - Write a retrospective (`write_retrospective`) when you finish. Record what you measured
   about *this* dataset and what it implied: object scale, capture cadence, class imbalance, where
   the operating point resolved and why. Not a reusable pipeline shape: the next dataset re-derives

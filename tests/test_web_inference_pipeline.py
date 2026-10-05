@@ -18,16 +18,14 @@ def _checkpoint(project: Path, **kwargs) -> Path:
 
 
 def _one_image(project: Path, *stems: str) -> Path:
-    """A gray 100px image per stem (``img`` by default) in ``project``'s undated capture; the
-    capture's directory."""
-    from PIL import Image
-
+    """A 100px image per stem (``img`` by default) in ``project``'s undated capture; the capture's
+    directory."""
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+    from tests._producer_fixtures import write_image
 
     images_dir = image_dir(project, UNDATED_BUCKET)
-    images_dir.mkdir(parents=True)
     for stem in stems or ("img",):
-        Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / f"{stem}.jpg")
+        write_image(images_dir / f"{stem}.jpg", (100, 100))
     return images_dir
 
 

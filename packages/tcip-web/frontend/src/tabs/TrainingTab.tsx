@@ -1,24 +1,18 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { StructuredRefusalError } from "@/api/http";
 import { openTrainingStream, trainingApi } from "@/api/training";
-import type { LaunchableConfig, MetricRow, SplitChoices, TrainingRunSummary } from "@/api/training";
-import { DisclosureChevron } from "@/components/CollapsibleSection";
+import type { MetricRow, SplitChoices } from "@/api/training";
+import {
+  EPOCH_KEY,
+  type RunRow,
+  type SweepGroup,
+  type TrainingListing,
+} from "@/api/types.generated";
 import { EmbeddedTool } from "@/components/EmbeddedTool";
 import { LaunchPicker, type DataPicker, type LaunchPickerRow } from "@/components/LaunchPicker";
 import { MAX_MARKED_RUNS, RunComparison, type MarkedRun } from "@/components/RunComparison";
 import { TabHeading } from "@/components/TabHeading";
-import { useDisclosure } from "@/hooks/useDisclosure";
 import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
 import { useEmbeddedToolRetry, type EmbeddedToolStepResult } from "@/hooks/useEmbeddedToolRetry";
 import { UNSET_GLYPH } from "@/lib/glyphs";
@@ -27,28 +21,24 @@ import { useStore } from "@/store";
 import { declaredClient } from "@/store/slices/agentActivity";
 import { selectProjectRoot } from "@/store/slices/gui";
 import { defaultTrainingRequest } from "@/tabs/agentPrompts";
-import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 import { RunMonitorEmpty, RunMonitorLayout } from "@/tabs/RunMonitorLayout";
-import {
-  defaultChartSeries,
-  mergeMetric,
-  numericMetricKeys,
-  RUN_REFRESH_MS,
-} from "@/tabs/trainingMetrics";
+import { mergeMetric, RUN_REFRESH_MS, unionMetricKeys } from "@/tabs/trainingMetrics";
+
+const NO_LISTING: TrainingListing = { runs: [], sweeps: [] };
 
 function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
 /** What a run's launch event says about who started it: never a guess. */
-function launcherSentence(launch: TrainingRunSummary["launch"]): string {
+function launcherSentence(launch: RunRow["launch"]): string {
   if (!launch) return "no launch event recorded";
   return declaredClient(launch) ? "started by the agent" : "started with no agent declared";
 }
 
 /** The longer sentence behind a row's launcher mark, reachable by assistive technology through
  * aria-describedby: what the mark means, with the declared client named for an agent launch. */
-function launcherDescription(launch: TrainingRunSummary["launch"]): string {
+function launcherDescription(launch: RunRow["launch"]): string {
   if (!launch) {
     return "No launch event in this project's audit log names this run.";
   }
@@ -69,17 +59,27 @@ function heartbeatAge(heartbeat: string | null | undefined): string | null {
   return mins < 1 ? "last heartbeat under a minute ago" : `last heartbeat ${mins} min ago`;
 }
 
-/** The row's own select control name: id, status, a running row's own heartbeat age, and the
- * record's own launcher sentence, with the best value's metric appended exactly as the record
- * carries them when present; the same order the visible row itself reads in. */
-function runRowLabel(run: TrainingRunSummary): string {
-  const age = run.status === "running" ? heartbeatAge(run.heartbeat) : null;
-  const statusPart = age ? `${run.status}, ${age}` : run.status;
-  const base = `${run.experiment_id} ${statusPart}, ${launcherSentence(run.launch)}`;
-  if (run.best_metric === undefined || run.best_metric === null || !run.best_metric_name) {
-    return base;
-  }
+/** A row's state, with a running row's own heartbeat age. */
+function stateLine(state: string, heartbeat: string): string {
+  const age = state === "running" ? heartbeatAge(heartbeat) : null;
+  return age ? `${state}, ${age}` : state;
+}
+
+/** The row's own select control name: id, state, and the record's own launcher sentence, with
+ * the best value's metric appended exactly as the record carries them when present; the same
+ * order the visible row itself reads in. */
+function runRowLabel(run: RunRow): string {
+  const base = `${run.experiment_id} ${stateLine(run.state, run.heartbeat)}, ${launcherSentence(run.launch)}`;
+  if (run.best_metric === null || !run.best_metric_name) return base;
   return `${base}, best ${run.best_metric_name} ${run.best_metric}`;
+}
+
+/** What a sweep's trials amount to so far, under the objective its record states. */
+function sweepOutcomeLine(sweep: SweepGroup): string {
+  const metric = String(sweep.objective.selection_metric ?? "objective");
+  return sweep.outcome.best_params == null
+    ? "no completed trial yet"
+    : `best ${metric} ${String(sweep.outcome.best_value)}`;
 }
 
 const NO_OTHER_PARTITION =
@@ -110,28 +110,25 @@ export function dataPickerFor(choices: SplitChoices | undefined): DataPicker | u
   };
 }
 
-function configRow(
-  cfg: LaunchableConfig,
+function runLaunchRow(
+  run: RunRow,
   choices: SplitChoices | undefined,
   dataLoading: boolean,
   dataError: string | undefined,
   onStart: (selectionDir: string | null) => Promise<void>,
 ): LaunchPickerRow {
   return {
-    key: cfg.experiment_id,
+    key: run.experiment_id,
     content: (
       <>
-        <span className="block font-mono text-[11px]">{cfg.experiment_id}</span>
+        <span className="block font-mono text-[11px]">{run.experiment_id}</span>
         <span className="block text-[10px] text-tcip-muted">
-          {cfg.builder ?? "unknown builder"}
-          {cfg.task ? ` · ${cfg.task}` : ""}
-          {cfg.subject ? ` · ${cfg.subject}` : ""}
+          {run.builder} · {run.task}
+          {run.sweep ? ` · trial of ${run.sweep}` : ""}
         </span>
         <span className="block text-[10px] text-tcip-muted">
-          {cfg.created ? new Date(cfg.created).toLocaleString() : "no creation date recorded"}
-          {" · "}
-          {cfg.state}
-          {cfg.parent_experiment ? ` · parent ${cfg.parent_experiment}` : ""}
+          {new Date(run.created).toLocaleString()} · {run.state}
+          {run.relaunched_from ? ` · from ${run.relaunched_from}` : ""}
         </span>
       </>
     ),
@@ -146,8 +143,148 @@ function configRow(
   };
 }
 
-// Training is launched from a config already recorded in this project, or described fresh to
-// the agent; this tab tracks the runs those launches produce and their live metrics.
+function sweepLaunchRow(sweep: SweepGroup, onStart: () => Promise<void>): LaunchPickerRow {
+  return {
+    key: sweep.sweep_id,
+    content: (
+      <>
+        <span className="block font-mono text-[11px]">{sweep.sweep_id}</span>
+        <span className="block text-[10px] text-tcip-muted">
+          sweep of {String(sweep.input.n_trials)} trials · {String(sweep.input.search_alg)} ·{" "}
+          {sweep.state}
+        </span>
+      </>
+    ),
+    branchLine: "A new sweep over this sweep's recorded config, search and seed",
+    onStart,
+  };
+}
+
+function RunItem({
+  run,
+  selected,
+  marked,
+  canceling,
+  cancelError,
+  onSelect,
+  onToggleMarked,
+  onCancel,
+}: {
+  run: RunRow;
+  selected: boolean;
+  marked: boolean;
+  canceling: boolean;
+  cancelError: string | undefined;
+  onSelect: () => void;
+  onToggleMarked: () => void;
+  onCancel: () => void;
+}) {
+  const id = run.experiment_id;
+  return (
+    <div
+      className={`flex items-start gap-1 p-2 rounded border transition-colors ${
+        selected && !marked
+          ? "border-tcip-accent bg-tcip-accent/10"
+          : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
+      }`}
+    >
+      <button
+        type="button"
+        aria-pressed={selected}
+        aria-label={runRowLabel(run)}
+        aria-describedby={`origin-mark-${id}`}
+        className="flex-1 min-w-0 text-left"
+        onClick={onSelect}
+      >
+        <div className="font-mono text-[11px]">{id}</div>
+        <div className="text-[10px] text-tcip-muted flex justify-between">
+          <span>
+            {stateLine(run.state, run.heartbeat)}
+            <span title={launcherDescription(run.launch)}>
+              {` · ${launcherSentence(run.launch)}`}
+            </span>
+            <span id={`origin-mark-${id}`} className="sr-only">
+              {launcherDescription(run.launch)}
+            </span>
+          </span>
+          {run.best_metric !== null && run.best_metric_name && (
+            <span className="tabular-nums">
+              best {run.best_metric_name} {run.best_metric}
+            </span>
+          )}
+        </div>
+      </button>
+      <div className="flex flex-col items-end gap-1 shrink-0">
+        <div
+          role="group"
+          aria-label="Run actions"
+          className="inline-flex rounded border border-tcip-border overflow-hidden"
+        >
+          <button
+            type="button"
+            aria-pressed={marked}
+            aria-label={`Compare ${id}`}
+            className={`px-2 py-1 text-[10px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
+              marked ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
+            }`}
+            onClick={onToggleMarked}
+          >
+            Compare
+          </button>
+          <CancelButton
+            id={id}
+            state={run.state}
+            canceling={canceling}
+            cancelError={cancelError}
+            onCancel={onCancel}
+          />
+        </div>
+        <CancelError id={id} cancelError={cancelError} />
+      </div>
+    </div>
+  );
+}
+
+function CancelButton({
+  id,
+  state,
+  canceling,
+  cancelError,
+  onCancel,
+}: {
+  id: string;
+  state: string;
+  canceling: boolean;
+  cancelError: string | undefined;
+  onCancel: () => void;
+}) {
+  if (TERMINAL_STATES.has(state)) return null;
+  return (
+    <button
+      type="button"
+      title="Reaches a live process only; a stale running row keeps this control until its heartbeat window lapses."
+      aria-label={`Cancel ${id}`}
+      aria-describedby={cancelError ? `cancel-error-${id}` : undefined}
+      disabled={canceling}
+      className="px-2 py-1 text-[10px] border-l border-tcip-border first:border-l-0 hover:bg-tcip-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70"
+      onClick={onCancel}
+    >
+      {canceling ? "Canceling…" : "Cancel"}
+    </button>
+  );
+}
+
+function CancelError({ id, cancelError }: { id: string; cancelError: string | undefined }) {
+  if (!cancelError) return null;
+  return (
+    <span id={`cancel-error-${id}`} className="text-[10px] text-tcip-fp text-right max-w-[150px]">
+      {cancelError}
+    </span>
+  );
+}
+
+// Training is launched from a run or sweep already recorded in this project, or described fresh
+// to the agent; this tab tracks the runs and sweeps those launches produce and their metrics.
 export function TrainingTab() {
   const projectRoot = useStore(selectProjectRoot);
   const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
@@ -158,12 +295,10 @@ export function TrainingTab() {
   );
 
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [configs, setConfigs] = useState<LaunchableConfig[]>([]);
-  const [configsError, setConfigsError] = useState<string | null>(null);
   const [splitChoicesById, setSplitChoicesById] = useState<Record<string, SplitChoices>>({});
   const [splitChoicesLoadingId, setSplitChoicesLoadingId] = useState<string | null>(null);
   const [splitChoiceErrors, setSplitChoiceErrors] = useState<Record<string, string>>({});
-  const [runs, setRuns] = useState<TrainingRunSummary[]>([]);
+  const [listing, setListing] = useState<TrainingListing>(NO_LISTING);
   const [runsError, setRunsError] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<MetricRow[]>([]);
@@ -172,22 +307,24 @@ export function TrainingTab() {
   const [tbNoLogs, setTbNoLogs] = useState<{ error: string | null } | null>(null);
   const [tbAttempt, setTbAttempt] = useState(0);
   const [markedExperimentIds, setMarkedExperimentIds] = useState<Set<string>>(new Set());
-  // Cancel in flight, by run id: disables that row's own Cancel button with a pending label,
-  // and a failure lands in cancelErrors rather than only a toast.
+  // Cancel in flight, by run or sweep id: disables that row's own Cancel button with a pending
+  // label, and a failure lands in cancelErrors rather than only a toast.
   const [pendingCancel, setPendingCancel] = useState<ReadonlySet<string>>(new Set());
   const [cancelErrors, setCancelErrors] = useState<Record<string, string>>({});
   const streamRef = useRef<(() => void) | null>(null);
-  const { open: chartTableOpen, toggle: toggleChartTable } = useDisclosure();
-  const chartHeadingId = useId();
-  const chartNameId = useId();
-  const chartTableId = useId();
 
-  const marked: MarkedRun[] = runs
+  const rows = useMemo(
+    () => [...listing.runs, ...listing.sweeps.flatMap((s) => s.trials)],
+    [listing],
+  );
+  const selectedSweep = listing.sweeps.find((s) => s.sweep_id === selectedRun);
+
+  const marked: MarkedRun[] = rows
     .filter((r) => markedExperimentIds.has(r.experiment_id))
     .map((r) => ({ experimentId: r.experiment_id }));
   const comparing = marked.length >= 2;
 
-  function toggleMarked(run: TrainingRunSummary) {
+  function toggleMarked(run: RunRow) {
     setMarkedExperimentIds((prev) => {
       const next = new Set(prev);
       if (next.has(run.experiment_id)) {
@@ -214,13 +351,15 @@ export function TrainingTab() {
 
   const refreshRuns = useCallback(async () => {
     try {
-      const r = await trainingApi.listRuns();
-      const nextRuns = r.runs ?? [];
-      setRuns(nextRuns);
+      const next = await trainingApi.listRuns();
+      setListing(next);
       setRunsError(null);
       // A run that leaves the list must also leave the marked set, or the cap (which counts
       // markedExperimentIds itself) can read full while the header (runs still present) shows fewer.
-      const stillPresent = new Set(nextRuns.map((run) => run.experiment_id));
+      const stillPresent = new Set([
+        ...next.runs.map((run) => run.experiment_id),
+        ...next.sweeps.flatMap((s) => [s.sweep_id, ...s.trials.map((t) => t.experiment_id)]),
+      ]);
       setMarkedExperimentIds((prev) => {
         const pruned = new Set(Array.from(prev).filter((id) => stillPresent.has(id)));
         return pruned.size === prev.size ? prev : pruned;
@@ -229,43 +368,34 @@ export function TrainingTab() {
       // stream too, or a stale selection keeps reconnecting behind a run this list never shows.
       setSelectedRun((prev) => (prev !== null && !stillPresent.has(prev) ? null : prev));
     } catch (e) {
-      setRunsError(`Could not load training runs: ${e instanceof Error ? e.message : String(e)}`);
+      setRunsError(`Could not load training runs: ${messageOf(e)}`);
     }
-  }, []);
-
-  const refreshConfigs = useCallback(async () => {
-    try {
-      const r = await trainingApi.listConfigs();
-      setConfigs(r.configs ?? []);
-      setConfigsError(null);
-    } catch (e) {
-      setConfigs([]);
-      setConfigsError(`Could not load configs: ${e instanceof Error ? e.message : String(e)}`);
-    }
-    setSplitChoicesById({});
-    setSplitChoiceErrors({});
   }, []);
 
   // Fetched only for the row the breeder actually opens: list_split_choices re-enumerates
   // every experiment in the project, so fetching it for every row on open would cost O(n^2).
-  const loadSplitChoices = useCallback(async (experimentId: string) => {
-    setSplitChoicesLoadingId(experimentId);
-    try {
-      const choices = await trainingApi.listSplitChoices(experimentId);
-      setSplitChoicesById((prev) => ({ ...prev, [experimentId]: choices }));
-      setSplitChoiceErrors((prev) => {
-        const { [experimentId]: _drop, ...rest } = prev;
-        return rest;
-      });
-    } catch (e) {
-      setSplitChoiceErrors((prev) => ({
-        ...prev,
-        [experimentId]: `Could not load its data choices: ${e instanceof Error ? e.message : String(e)}`,
-      }));
-    } finally {
-      setSplitChoicesLoadingId((current) => (current === experimentId ? null : current));
-    }
-  }, []);
+  const loadSplitChoices = useCallback(
+    async (key: string) => {
+      if (listing.sweeps.some((s) => s.sweep_id === key)) return;
+      setSplitChoicesLoadingId(key);
+      try {
+        const choices = await trainingApi.listSplitChoices(key);
+        setSplitChoicesById((prev) => ({ ...prev, [key]: choices }));
+        setSplitChoiceErrors((prev) => {
+          const { [key]: _drop, ...rest } = prev;
+          return rest;
+        });
+      } catch (e) {
+        setSplitChoiceErrors((prev) => ({
+          ...prev,
+          [key]: `Could not load its data choices: ${messageOf(e)}`,
+        }));
+      } finally {
+        setSplitChoicesLoadingId((current) => (current === key ? null : current));
+      }
+    },
+    [listing],
+  );
 
   useEffect(() => {
     void refreshRuns();
@@ -274,14 +404,17 @@ export function TrainingTab() {
   }, [refreshRuns]);
 
   useEffect(() => {
-    if (pickerOpen) void refreshConfigs();
-  }, [pickerOpen, refreshConfigs]);
+    if (!pickerOpen) return;
+    setSplitChoicesById({});
+    setSplitChoiceErrors({});
+  }, [pickerOpen]);
 
-  async function startFromConfig(experimentId: string, selectionDir: string | null) {
-    const result = await trainingApi.relaunch(experimentId, useStore.getState().user, selectionDir);
+  async function startFrom(source: string, selectionDir: string | null) {
+    const result = await trainingApi.relaunch(source, useStore.getState().user, selectionDir);
     setPickerOpen(false);
     void refreshRuns();
-    if (typeof result.experiment_id === "string") setSelectedRun(result.experiment_id);
+    const started = result.experiment_id ?? result.sweep_id;
+    if (typeof started === "string") setSelectedRun(started);
   }
 
   function sendToAgent() {
@@ -289,23 +422,24 @@ export function TrainingTab() {
     setPickerOpen(false);
   }
 
-  // The run list's own poll keeps a status per run independent of the metrics stream; a ref
+  // The run list's own poll keeps a state per run independent of the metrics stream; a ref
   // (not a dependency) so reading it doesn't reopen the stream on every poll.
-  const runsRef = useRef<TrainingRunSummary[]>(runs);
+  const rowsRef = useRef<RunRow[]>(rows);
   useEffect(() => {
-    runsRef.current = runs;
-  }, [runs]);
+    rowsRef.current = rows;
+  }, [rows]);
 
+  const streaming = selectedRun !== null && !selectedSweep;
   useEffect(() => {
-    // Comparing owns its own per-run streams; suspend this one so the stream count stays the marked count.
-    if (!selectedRun || !projectRoot || comparing) return;
-    // Clear the previous run's curve; the stream replays this run from the start, so a
-    // seed GET would just double-load the same rows. The WS is the single source now.
+    // Comparing owns the detail region; a sweep has no metrics log of its own.
+    if (!selectedRun || !streaming || !projectRoot || comparing) return;
+    // The stream replays this run from the start, so a seed GET would just double-load the
+    // same rows. The WS is the single source.
     setMetrics([]);
     streamRef.current?.();
     // A run already terminal when this stream opened is a rediscovery, not a transition the
     // breeder is watching; only a run still live at open time toasts on its own terminal frame.
-    const knownAtOpen = runsRef.current.find((r) => r.experiment_id === selectedRun)?.status;
+    const knownAtOpen = rowsRef.current.find((r) => r.experiment_id === selectedRun)?.state;
     const alreadyTerminal = TERMINAL_STATES.has(knownAtOpen ?? "");
     // A run selected at its launch moment can be unknown to the backend for a few reconnects;
     // the toast names that once per selection, not once per silent retry.
@@ -314,8 +448,8 @@ export function TrainingTab() {
       if (msg.type === "metric" && msg.row) {
         setMetrics((prev) => mergeMetric(prev, msg.row as MetricRow));
       } else if (msg.type === "status") {
-        // A known run carries its status report and no error; an unknown run carries error and
-        // no status, is not terminal, and the socket keeps reconnecting behind it.
+        // A known run carries its row and no error; an unknown run carries error and no row,
+        // is not terminal, and the socket keeps reconnecting behind it.
         if (msg.error) {
           if (!errorToasted) {
             errorToasted = true;
@@ -323,14 +457,14 @@ export function TrainingTab() {
           }
           return;
         }
-        const st = msg.status?.status;
+        const st = msg.status?.state;
         if (typeof st === "string" && !alreadyTerminal)
           useStore.getState().pushToast(`Training ${selectedRun}: ${st}`, "info");
         void refreshRuns();
       }
     });
     return () => streamRef.current?.();
-  }, [selectedRun, projectRoot, refreshRuns, comparing]);
+  }, [selectedRun, streaming, projectRoot, refreshRuns, comparing]);
 
   // tbNoLogs is a step side effect below, not part of the hook's own outcome, since its text
   // overrides tbError's; reset it on the same triggers the hook itself resets url/error on.
@@ -338,8 +472,8 @@ export function TrainingTab() {
     setTbNoLogs(null);
   }, [selectedRun, tbAttempt]);
 
-  // Adopt the TensorBoard already serving this run, or start one, retrying on a timer while
-  // the run is live: useEmbeddedToolRetry, the loop the Tuning tab's own panel shares.
+  // Adopt the TensorBoard already serving this run, trial or sweep, or start one, retrying on a
+  // timer while it is live.
   const tbStep = useCallback(async (): Promise<EmbeddedToolStepResult> => {
     if (!selectedRun) return { url: null, error: null, done: true };
     const experimentId = selectedRun;
@@ -350,7 +484,7 @@ export function TrainingTab() {
       return { url: null, error: messageOf(e), done: true };
     }
 
-    let url = detail.tensorboard_url ?? null;
+    let url = detail.tensorboard_url;
     let failure: string | null = null;
     let noLogs = false;
     if (!url) {
@@ -373,10 +507,11 @@ export function TrainingTab() {
       setTbNoLogs(null);
       return { url, error: null, done: true };
     }
-    const terminal = TERMINAL_STATES.has(detail.status ?? "");
-    if (!terminal) return { url: null, error: null, done: false };
+    // The route answers a detail carrying the run or the sweep its id names, never neither.
+    const status = (detail.run ?? detail.sweep)!;
+    if (!TERMINAL_STATES.has(status.state)) return { url: null, error: null, done: false };
     if (noLogs) {
-      setTbNoLogs({ error: detail.error ?? null });
+      setTbNoLogs({ error: status.error });
       return { url: null, error: null, done: true };
     }
     return { url: null, error: failure ?? "No TensorBoard is serving this run.", done: true };
@@ -389,41 +524,30 @@ export function TrainingTab() {
     tbStep,
   );
 
-  async function onCancel(experimentId: string) {
-    setPendingCancel((prev) => new Set(prev).add(experimentId));
+  async function onCancel(id: string) {
+    setPendingCancel((prev) => new Set(prev).add(id));
     setCancelErrors((prev) => {
-      const { [experimentId]: _drop, ...rest } = prev;
+      const { [id]: _drop, ...rest } = prev;
       return rest;
     });
     try {
-      await trainingApi.cancel(experimentId, useStore.getState().user);
+      await trainingApi.cancel(id, useStore.getState().user);
       void refreshRuns();
     } catch (e) {
       const message = `Cancel failed: ${messageOf(e)}`;
       useStore.getState().pushToast(message);
-      setCancelErrors((prev) => ({ ...prev, [experimentId]: message }));
+      setCancelErrors((prev) => ({ ...prev, [id]: message }));
     } finally {
       setPendingCancel((prev) => {
         const next = new Set(prev);
-        next.delete(experimentId);
+        next.delete(id);
         return next;
       });
     }
   }
 
-  const chartData = useMemo((): (MetricRow & { step: number })[] => {
-    return metrics.map((m, i) => ({ ...m, step: m.epoch ?? m.step ?? i }));
-  }, [metrics]);
-
-  // Whether metrics[i] itself carried an ordinal, checked against the raw row since chartData's
-  // own step field has by then been overwritten with the derived value (real or index).
-  const hasOrdinal = useCallback(
-    (i: number) => typeof metrics[i]?.epoch === "number" || typeof metrics[i]?.step === "number",
-    [metrics],
-  );
-
-  const selectedRunSummary = runs.find((r) => r.experiment_id === selectedRun);
-  const selectedRunTerminal = TERMINAL_STATES.has(selectedRunSummary?.status ?? "");
+  const selectedRow = rows.find((r) => r.experiment_id === selectedRun);
+  const selectedTerminal = TERMINAL_STATES.has(selectedRow?.state ?? "");
 
   const noLogsMessage = tbNoLogs
     ? tbNoLogs.error
@@ -431,15 +555,39 @@ export function TrainingTab() {
       : "This run produced no logs."
     : null;
 
-  const metricKeys = useMemo(() => {
-    const keys = new Set<string>();
-    metrics.forEach((row) => {
-      numericMetricKeys(row).forEach((k) => keys.add(k));
-    });
-    return Array.from(keys);
-  }, [metrics]);
+  const metricKeys = useMemo(() => unionMetricKeys(metrics), [metrics]);
 
-  const chartSeries = useMemo(() => defaultChartSeries(metricKeys, metrics), [metricKeys, metrics]);
+  function runItem(run: RunRow) {
+    const id = run.experiment_id;
+    return (
+      <li key={id}>
+        <RunItem
+          run={run}
+          selected={selectedRun === id}
+          marked={markedExperimentIds.has(id)}
+          canceling={pendingCancel.has(id)}
+          cancelError={cancelErrors[id]}
+          onSelect={() => setSelectedRun(id)}
+          onToggleMarked={() => toggleMarked(run)}
+          onCancel={() => void onCancel(id)}
+        />
+      </li>
+    );
+  }
+
+  const launchRows: LaunchPickerRow[] = [
+    ...rows.map((run) =>
+      runLaunchRow(
+        run,
+        splitChoicesById[run.experiment_id],
+        splitChoicesLoadingId === run.experiment_id,
+        splitChoiceErrors[run.experiment_id],
+        (dir) => startFrom(run.experiment_id, dir),
+      ),
+    ),
+    ...listing.sweeps.map((sweep) => sweepLaunchRow(sweep, () => startFrom(sweep.sweep_id, null))),
+  ];
+  const empty = listing.runs.length === 0 && listing.sweeps.length === 0;
 
   return (
     <>
@@ -466,25 +614,8 @@ export function TrainingTab() {
             </>
           ) : selectedRun ? (
             <>
-              <h2 id={chartHeadingId} className="tcip-heading">
-                Live metrics
-              </h2>
+              <h2 className="tcip-heading">{selectedSweep ? "Sweep" : "Metrics"}</h2>
               <span className="font-mono text-[12px] text-tcip-fg">{selectedRun}</span>
-              {chartData.length > 0 && (
-                <>
-                  <span className="flex-1" />
-                  <button
-                    type="button"
-                    onClick={toggleChartTable}
-                    aria-expanded={chartTableOpen}
-                    aria-controls={chartTableOpen ? chartTableId : undefined}
-                    className="flex items-center gap-1 text-[11px] text-tcip-muted hover:text-tcip-fg"
-                  >
-                    <DisclosureChevron open={chartTableOpen} />
-                    as table
-                  </button>
-                </>
-              )}
             </>
           ) : (
             <span className="tcip-heading">Select a run to view metrics</span>
@@ -492,109 +623,48 @@ export function TrainingTab() {
         }
         detail={
           comparing ? (
-            <RunComparison marked={marked} projectRoot={projectRoot} />
+            <RunComparison marked={marked} />
           ) : (
             <div className="flex flex-col gap-4">
-              <div className="h-[38vh] min-h-[220px] shrink-0">
-                {selectedRun && chartData.length > 0 ? (
-                  <figure
-                    role="img"
-                    aria-labelledby={`${chartHeadingId} ${chartNameId}`}
-                    className="m-0 h-full"
-                  >
-                    <span id={chartNameId} className="sr-only">
-                      {chartSeries.allKeys
-                        ? `for ${selectedRun}: all logged metrics: ${chartSeries.keys.join(", ")}`
-                        : `for ${selectedRun}: ${chartSeries.keys
-                            .map((key) => chartSeries.labels[key] ?? key)
-                            .join(", ")}${
-                            chartSeries.keys.length < metricKeys.length
-                              ? '; every other logged metric is behind the "as table" toggle'
-                              : ""
-                          }`}
-                    </span>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={chartData}>
-                        <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
-                        <XAxis
-                          dataKey="step"
-                          stroke={CHART.axis}
-                          style={{ fontSize: 11 }}
-                          label={{
-                            value: "epoch/step",
-                            position: "insideBottom",
-                            offset: -5,
-                            fill: CHART.axis,
-                          }}
-                        />
-                        <YAxis stroke={CHART.axis} style={{ fontSize: 11 }} />
-                        <Tooltip
-                          contentStyle={{
-                            background: CHART.tooltipBg,
-                            border: `1px solid ${CHART.tooltipBorder}`,
-                            borderRadius: 4,
-                            fontSize: 11,
-                          }}
-                        />
-                        <Legend wrapperStyle={{ fontSize: 11, color: CHART.legendText }} />
-                        {chartSeries.keys.map((key, i) => (
-                          <Line
-                            key={key}
-                            type="monotone"
-                            dataKey={key}
-                            name={chartSeries.labels[key] ?? key}
-                            stroke={CHART_LINE_COLORS[i % CHART_LINE_COLORS.length]}
-                            dot={false}
-                            strokeWidth={1.5}
-                            isAnimationActive={false}
-                          />
-                        ))}
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </figure>
-                ) : (
-                  <div
-                    role="status"
-                    className="flex items-center justify-center h-full text-tcip-muted text-[12px]"
-                  >
-                    {!selectedRun
-                      ? "No run selected."
-                      : selectedRunTerminal
-                        ? "This run recorded no metrics."
-                        : "Waiting for metrics…"}
-                  </div>
-                )}
-              </div>
-
-              {selectedRun && chartData.length > 0 && chartTableOpen && (
-                <div id={chartTableId} className="overflow-auto max-h-64 shrink-0">
-                  <table className="w-full text-[11px]">
-                    <caption className="sr-only">{`${selectedRun} metrics as a table`}</caption>
-                    <thead>
-                      <tr className="border-b border-tcip-border">
-                        <th className="tcip-th">epoch/step</th>
-                        {metricKeys.map((key) => (
-                          <th key={key} className="tcip-th">
-                            {key}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {chartData.map((row, i) => (
-                        <tr key={i} className="border-t border-tcip-border first:border-t-0">
-                          <td className="py-1 pr-3 tabular-nums">
-                            {hasOrdinal(i) ? row.step : UNSET_GLYPH}
-                          </td>
+              {streaming &&
+                (metrics.length > 0 ? (
+                  <div className="overflow-auto max-h-64 shrink-0">
+                    <table className="w-full text-[11px]">
+                      <caption className="sr-only">{`${selectedRun} metrics by epoch`}</caption>
+                      <thead>
+                        <tr className="border-b border-tcip-border">
+                          <th className="tcip-th">epoch</th>
                           {metricKeys.map((key) => (
-                            <td key={key} className="pr-3 tabular-nums">
-                              {typeof row[key] === "number" ? row[key] : UNSET_GLYPH}
-                            </td>
+                            <th key={key} className="tcip-th">
+                              {key}
+                            </th>
                           ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {metrics.map((row, i) => (
+                          <tr key={i} className="border-t border-tcip-border first:border-t-0">
+                            <td className="py-1 pr-3 tabular-nums">
+                              {typeof row[EPOCH_KEY] === "number" ? row[EPOCH_KEY] : UNSET_GLYPH}
+                            </td>
+                            {metricKeys.map((key) => (
+                              <td key={key} className="pr-3 tabular-nums">
+                                {typeof row[key] === "number" ? row[key] : UNSET_GLYPH}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div role="status" className="text-tcip-muted text-[12px]">
+                    {selectedTerminal ? "This run recorded no metrics." : "Waiting for metrics…"}
+                  </div>
+                ))}
+              {!selectedRun && (
+                <div role="status" className="text-tcip-muted text-[12px]">
+                  No run selected.
                 </div>
               )}
 
@@ -617,19 +687,11 @@ export function TrainingTab() {
           <div className="mb-3 pb-3 border-b border-tcip-border">
             <LaunchPicker
               list={{
-                title: "Configs in this project",
-                emptyMessage: "No config exists in this project yet.",
-                error: configsError ?? undefined,
-                onRetry: () => void refreshConfigs(),
-                rows: configs.map((cfg) =>
-                  configRow(
-                    cfg,
-                    splitChoicesById[cfg.experiment_id],
-                    splitChoicesLoadingId === cfg.experiment_id,
-                    splitChoiceErrors[cfg.experiment_id],
-                    (dir) => startFromConfig(cfg.experiment_id, dir),
-                  ),
-                ),
+                title: "Runs and sweeps in this project",
+                emptyMessage: "No run or sweep exists in this project yet.",
+                error: runsError ?? undefined,
+                onRetry: () => void refreshRuns(),
+                rows: launchRows,
               }}
               composerLabel="Describe a new one to the agent"
               request={request}
@@ -648,104 +710,53 @@ export function TrainingTab() {
             </button>
           </div>
         )}
-        {runs.length === 0 && !runsError && (
+        {empty && !runsError && (
           <RunMonitorEmpty>No runs yet. Use "Start a run" above.</RunMonitorEmpty>
         )}
-        {runs.length > 0 && (
+        {!empty && (
           <div className="text-[10px] text-tcip-muted mb-1">
-            Every recorded run, sorted by experiment id.
+            Every recorded run, sorted by experiment id, then every sweep with its trials.
           </div>
         )}
         <ul className="space-y-1">
-          {runs.map((r) => {
-            const isMarked = markedExperimentIds.has(r.experiment_id);
-            const canceling = pendingCancel.has(r.experiment_id);
-            const cancelError = cancelErrors[r.experiment_id];
-            const heartbeatText = r.status === "running" ? heartbeatAge(r.heartbeat) : null;
-            return (
-              <li key={r.experiment_id}>
-                <div
-                  className={`flex items-start gap-1 p-2 rounded border transition-colors ${
-                    selectedRun === r.experiment_id && !isMarked
-                      ? "border-tcip-accent bg-tcip-accent/10"
-                      : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
-                  }`}
-                >
+          {listing.runs.map(runItem)}
+          {listing.sweeps.map((sweep) => (
+            <li key={sweep.sweep_id}>
+              <div
+                role="group"
+                aria-label={`Sweep ${sweep.sweep_id}`}
+                className="p-2 rounded border border-tcip-border"
+              >
+                <div className="flex items-start gap-1">
                   <button
                     type="button"
-                    aria-pressed={selectedRun === r.experiment_id}
-                    aria-label={runRowLabel(r)}
-                    aria-describedby={`origin-mark-${r.experiment_id}`}
+                    aria-pressed={selectedRun === sweep.sweep_id}
                     className="flex-1 min-w-0 text-left"
-                    onClick={() => setSelectedRun(r.experiment_id)}
+                    onClick={() => setSelectedRun(sweep.sweep_id)}
                   >
-                    <div className="font-mono text-[11px]">{r.experiment_id}</div>
-                    <div className="text-[10px] text-tcip-muted flex justify-between">
-                      <span>
-                        {r.status}
-                        {heartbeatText && `, ${heartbeatText}`}
-                        <span title={launcherDescription(r.launch)}>
-                          {` · ${launcherSentence(r.launch)}`}
-                        </span>
-                        <span id={`origin-mark-${r.experiment_id}`} className="sr-only">
-                          {launcherDescription(r.launch)}
-                        </span>
-                      </span>
-                      {r.best_metric !== undefined &&
-                        r.best_metric !== null &&
-                        r.best_metric_name && (
-                          <span className="tabular-nums">
-                            best {r.best_metric_name} {r.best_metric}
-                          </span>
-                        )}
+                    <div className="font-mono text-[11px]">{sweep.sweep_id}</div>
+                    <div className="text-[10px] text-tcip-muted">
+                      sweep · {stateLine(sweep.state, sweep.heartbeat)} · {sweepOutcomeLine(sweep)}
                     </div>
                   </button>
                   <div className="flex flex-col items-end gap-1 shrink-0">
-                    <div
-                      role="group"
-                      aria-label="Run actions"
-                      className="inline-flex rounded border border-tcip-border overflow-hidden"
-                    >
-                      <button
-                        type="button"
-                        aria-pressed={isMarked}
-                        aria-label={`Compare ${r.experiment_id}`}
-                        className={`px-2 py-1 text-[10px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
-                          isMarked ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
-                        }`}
-                        onClick={() => toggleMarked(r)}
-                      >
-                        Compare
-                      </button>
-                      {!TERMINAL_STATES.has(r.status) && (
-                        <button
-                          type="button"
-                          title="Reaches a live process only; a stale running row keeps this control until its heartbeat window lapses."
-                          aria-label={`Cancel ${r.experiment_id}`}
-                          aria-describedby={
-                            cancelError ? `cancel-error-${r.experiment_id}` : undefined
-                          }
-                          disabled={canceling}
-                          className="px-2 py-1 text-[10px] border-l border-tcip-border hover:bg-tcip-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70"
-                          onClick={() => void onCancel(r.experiment_id)}
-                        >
-                          {canceling ? "Canceling…" : "Cancel"}
-                        </button>
-                      )}
+                    <div className="inline-flex rounded border border-tcip-border overflow-hidden empty:hidden">
+                      <CancelButton
+                        id={sweep.sweep_id}
+                        state={sweep.state}
+                        canceling={pendingCancel.has(sweep.sweep_id)}
+                        cancelError={cancelErrors[sweep.sweep_id]}
+                        onCancel={() => void onCancel(sweep.sweep_id)}
+                      />
                     </div>
-                    {cancelError && (
-                      <span
-                        id={`cancel-error-${r.experiment_id}`}
-                        className="text-[10px] text-tcip-fp text-right max-w-[150px]"
-                      >
-                        {cancelError}
-                      </span>
-                    )}
+                    <CancelError id={sweep.sweep_id} cancelError={cancelErrors[sweep.sweep_id]} />
                   </div>
                 </div>
-              </li>
-            );
-          })}
+                {sweep.error && <div className="text-[10px] text-tcip-fp">{sweep.error}</div>}
+                <ul className="mt-1 pl-3 space-y-1">{sweep.trials.map(runItem)}</ul>
+              </div>
+            </li>
+          ))}
         </ul>
       </RunMonitorLayout>
     </>

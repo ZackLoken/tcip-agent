@@ -11,12 +11,11 @@ import subprocess
 import sys
 import threading
 import time
-from pathlib import Path
 from queue import Empty, Queue
 
 import pytest
 
-WORKSPACE = Path(__file__).resolve().parent.parent
+from tests import REPO_ROOT
 
 
 def _send_jsonrpc(proc, obj: dict) -> None:
@@ -73,7 +72,7 @@ class TestMcpBridge:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=env,
-            cwd=str(WORKSPACE),
+            cwd=str(REPO_ROOT),
         )
 
         self.queue: Queue = Queue()

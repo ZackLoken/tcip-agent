@@ -1,17 +1,10 @@
-"""Delivery-grade evaluation runs in a different regime than inference: it resolves tile geometry
-via the same shared ``resolve_tile_geometry`` ``run_inference`` uses (refusing rather than
-scoring at an ungrounded scale when nothing is resolvable), honors ``max_dets`` verbatim on both
-regimes with a per-image ``cap_hit``/``max_dets_cap_saturated_frac`` signal on the gating path, and
-runs under the execution record ``prepare_pass`` resolves, the one ``run_inference`` runs under.
-See ``test_detection_measurement_integrity.py`` for the geometry-resolution tests; this file covers
-the ``evaluate_model`` wrapper's passthrough + refusal handling and the runner's own recorded
-execution record.
-"""
+"""``evaluate_model`` and the full-frame runner: ``max_dets`` honored verbatim in both regimes, a
+saturated cap reported, the execution record each run records, and the gate's refusals."""
 
 from __future__ import annotations
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
-from tests._producer_fixtures import checkpoint_admission
+from tests._producer_fixtures import checkpoint_admission, seed_bud_images
 
 import pytest
 
@@ -19,6 +12,7 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
 
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
+from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
 
 # seed_bud_trait_spec (conftest.py) confirms bud_opening in this test's project, so the
 # trait/subject="bud" call sites resolve.
@@ -28,37 +22,6 @@ pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 # ══════════════════════════════════════════════════════════════════════════
 # max_dets honored verbatim (no rescuing sentinel)
 # ══════════════════════════════════════════════════════════════════════════
-
-def _det_dataset(tmp_path, n=3, size=128):
-    """``n`` images in ``tmp_path``'s undated capture, each labeled with one ``bud`` box."""
-    from PIL import Image
-    from tcip_annotation.state import Annotation, BBox
-
-    from tests._producer_fixtures import label_image
-
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True, exist_ok=True)
-    for i in range(n):
-        Image.new("RGB", (size, size), color=(120, 120, 120)).save(images_dir / f"img{i}.png")
-        label_image(images_dir / f"img{i}.png",
-                    [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], size, size)
-    return images_dir
-
-
-def _one_image(tmp_path, size: int, box) -> object:
-    """One ``size``-pixel image ``a.png`` in ``tmp_path``'s undated capture labeled with one
-    ``bud`` box at ``box``; the image directory."""
-    from PIL import Image
-    from tcip_annotation.state import Annotation, BBox
-
-    from tests._producer_fixtures import label_image
-
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
-    Image.new("RGB", (size, size)).save(images_dir / "a.png")
-    label_image(images_dir / "a.png", [Annotation(subject="bud", geometry=BBox(*box))], size, size)
-    return images_dir
-
 
 def test_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
     """training_tools.evaluate_model's use_tiled_inference branch must honor an explicit max_dets
@@ -75,7 +38,7 @@ def test_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
         return {"eval_regime": "full-frame-tiled-inference"}
 
     monkeypatch.setattr(runners, "run_full_frame_evaluation", _fake)
-    images_dir = _det_dataset(tmp_path)
+    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
@@ -93,7 +56,7 @@ def test_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypatch)
     from tcip_mcp.pipelines.execution import DEFAULT_MAX_DETS
     from tcip_mcp.tools.training_tools import evaluate_model
 
-    images_dir = _det_dataset(tmp_path)
+    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
@@ -105,12 +68,19 @@ def test_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypatch)
     assert r["execution"]["sources"]["max_dets"] == "default"
 
 
-def test_diagnostic_path_hands_an_unset_cap_on_unstated(tmp_path, monkeypatch):
-    """The diagnostic regime resolves no cap of its own: an unset one reaches the runner as the
-    pass the one execution resolver prepared, defaulted and recorded as a default."""
+def _detector(monkeypatch, *, in_chans: int = 3, **answer) -> StubPredictor:
+    """Make every predictor the evaluation builds one three-band (or ``in_chans``-band) detector
+    trained at 100px tiles answering ``answer`` (:class:`StubPredictor`'s), on a 128px frame
+    holding nothing unless ``answer`` says otherwise; the detector."""
+    return install(monkeypatch, StubPredictor(
+        task="detection", in_chans=in_chans, train_tile_size=100, train_overlap=0.2,
+        **{"width": 128, "height": 128, "boxes": (), "scores": (), **answer}))
+
+
+def _captured_execution(monkeypatch) -> dict:
+    """Stand in for the diagnostic runner, recording under ``"execution"`` the execution record
+    of the pass it is handed."""
     import tcip_mcp.pipelines.training.eval_runners as runners
-    from tcip_mcp.pipelines.execution import DEFAULT_MAX_DETS
-    from tcip_mcp.tools.training_tools import evaluate_model
 
     captured: dict = {}
 
@@ -119,7 +89,17 @@ def test_diagnostic_path_hands_an_unset_cap_on_unstated(tmp_path, monkeypatch):
         return {"eval_regime": "tile-level"}
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
-    images_dir = _det_dataset(tmp_path)
+    return captured
+
+
+def test_diagnostic_path_hands_an_unset_cap_on_unstated(tmp_path, monkeypatch):
+    """The diagnostic regime resolves no cap of its own: an unset one reaches the runner as the
+    pass the one execution resolver prepared, defaulted and recorded as a default."""
+    from tcip_mcp.pipelines.execution import DEFAULT_MAX_DETS
+    from tcip_mcp.tools.training_tools import evaluate_model
+
+    captured = _captured_execution(monkeypatch)
+    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
@@ -130,17 +110,10 @@ def test_diagnostic_path_hands_an_unset_cap_on_unstated(tmp_path, monkeypatch):
 
 
 def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
-    import tcip_mcp.pipelines.training.eval_runners as runners
     from tcip_mcp.tools.training_tools import evaluate_model
 
-    captured: dict = {}
-
-    def _fake(pass_, loader, device, **kw):
-        captured["execution"] = pass_.execution
-        return {"eval_regime": "tile-level"}
-
-    monkeypatch.setattr(runners, "run_test_evaluation", _fake)
-    images_dir = _det_dataset(tmp_path)
+    captured = _captured_execution(monkeypatch)
+    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
@@ -163,7 +136,7 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(tmp_path
         return {"eval_regime": "full-frame-tiled-inference"}
 
     monkeypatch.setattr(runners, "run_full_frame_evaluation", _fake)
-    images_dir = _det_dataset(tmp_path)
+    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
     from tests._verified_checkpoint_fixtures import SCOPED_DATA, registered_checkpoint
 
     ckpt = registered_checkpoint(
@@ -193,7 +166,7 @@ def test_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
         raise ValueError("Cannot resolve a trustworthy tile_size for ckpt.pt: ... tiling=")
 
     monkeypatch.setattr(runners, "run_full_frame_evaluation", _refuse)
-    images_dir = _det_dataset(tmp_path)
+    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
@@ -214,7 +187,7 @@ def test_gate_translates_unreadable_label_to_error_dict(tmp_path, monkeypatch):
         raise UnreadableLabelDocument("label document 2026-03-02/IMG_0001 does not decode")
 
     monkeypatch.setattr(runners, "run_full_frame_evaluation", _refuse)
-    images_dir = _det_dataset(tmp_path)
+    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
@@ -231,7 +204,7 @@ def test_both_regimes_refuse_a_stray_labels_dir_by_name(tmp_path, use_tiled_infe
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    images_dir = _det_dataset(tmp_path)
+    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
     stray = tmp_path / "stray_labels"
     stray.mkdir()
     ckpt = registered_checkpoint(tmp_path)
@@ -242,45 +215,29 @@ def test_both_regimes_refuse_a_stray_labels_dir_by_name(tmp_path, use_tiled_infe
     assert "stray_labels" in r["error"] and "admits nothing to evaluate" in r["error"], r
 
 
-def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
+def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path, monkeypatch):
     """Honoring an explicit low max_dets verbatim reopens a truncation hole unless it's at least
     detectable. A caller-explicit cap that actually binds on real detections must be visible in
     the result, not silently assumed safe."""
-    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
-
-    images_dir = _one_image(tmp_path, 200, (10, 10, 30, 30))
-
-    class _ManyDetectionsStub:
-        task = "detection"
-        train_tile_size = 100
-        train_overlap = 0.2
-        train_native_size = train_augmentation = None
-        in_chans =3
-
-        def predict_sliced(self, path, **kw):
-            # 5 detections returned; max_dets below will cap the caller intentionally at 2.
-            # cap_hit=True: what the real predict_sliced would stamp here, now read directly.
-            boxes = [[10, 10, 30, 30], [50, 50, 70, 70], [90, 90, 110, 110],
-                     [130, 130, 150, 150], [170, 170, 190, 190]]
-            return {"image": path, "width": 200, "height": 200, "boxes": boxes,
-                    "scores": [0.9, 0.8, 0.7, 0.6, 0.5], "labels": [1] * 5, "count": 5,
-                    "cap_hit": True}
-
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
+    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET, n=1, size=200,
+                                 box=(10, 10, 30, 30))
+
     checkpoint = verified_checkpoint(tmp_path)
-    build_predictor_orig = predictor_mod.GenericPredictor
-    try:
-        predictor_mod.GenericPredictor = lambda *a, **kw: _ManyDetectionsStub()
-        r = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir), stated=Stated(max_dets=2))
-    finally:
-        predictor_mod.GenericPredictor = build_predictor_orig
+    # Five detections against a stated cap of two; cap_hit is what predict_sliced stamps.
+    _detector(monkeypatch, width=200, height=200, cap_hit=True,
+              boxes=((10, 10, 30, 30), (50, 50, 70, 70), (90, 90, 110, 110),
+                     (130, 130, 150, 150), (170, 170, 190, 190)),
+              scores=(0.9, 0.8, 0.7, 0.6, 0.5))
+    r = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
+                                  stated=Stated(max_dets=2))
     assert r["execution"]["max_dets"] == 2  # honored verbatim
     assert r["max_dets_cap_saturated_frac"] == 1.0  # the one image hit the cap, now visible
 
 
-def test_the_gate_reads_its_references_at_the_predictors_own_width(tmp_path):
+def test_the_gate_reads_its_references_at_the_predictors_own_width(tmp_path, monkeypatch):
     """The delivery gate builds its loader at the width the predictor reads at, and never derives
     one: this gate scores source paths through the predictor and reads only targets off the
     loader, so references of differing band counts are a measurement it can take."""
@@ -288,78 +245,44 @@ def test_the_gate_reads_its_references_at_the_predictors_own_width(tmp_path):
     import tifffile
     from tcip_annotation.state import Annotation, BBox
 
-    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
     from tests._producer_fixtures import label_image
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
-    images_dir = _det_dataset(tmp_path)  # three-band sources
+    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)  # three-band sources
     array = np.zeros((128, 128, 5), dtype=np.uint8)
     tifffile.imwrite(str(images_dir / "five_band.tif"), array)  # and one of five bands
     label_image(images_dir / "five_band.tif",
                 [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
 
-    class _OneBandStub:
-        task = "detection"
-        train_tile_size = 100
-        train_overlap = 0.2
-        train_native_size = train_augmentation = None
-        in_chans =1
-
-        def predict_sliced(self, path, **kw):
-            return {"image": path, "width": 128, "height": 128, "boxes": [[10, 10, 40, 40]],
-                    "scores": [0.9], "labels": [1], "count": 1, "cap_hit": False}
-
-    build_predictor_orig = predictor_mod.GenericPredictor
-    try:
-        predictor_mod.GenericPredictor = lambda *a, **kw: _OneBandStub()
-        checkpoint = verified_checkpoint(tmp_path)
-        r = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
-                                      stated=Stated())
-    finally:
-        predictor_mod.GenericPredictor = build_predictor_orig
+    _detector(monkeypatch, in_chans=1, boxes=((10, 10, 40, 40),), scores=(0.9,))
+    checkpoint = verified_checkpoint(tmp_path)
+    r = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
+                                  stated=Stated())
 
     assert r["scored_images"] == 4
     assert r["tp"] == 4
 
 
-def test_run_full_frame_evaluation_records_merge_and_execution(tmp_path):
+def test_run_full_frame_evaluation_records_merge_and_execution(tmp_path, monkeypatch):
     """The runner's record carries the execution record whose conf/max_dets/cross_tile_nms read
     source "explicit" when stated (a stated value equal to the default included) and "default"
     when not, and cross_tile_nms the merge threshold the pass ran at; a direct call stating
     max_dets=2 records 2 as explicit."""
-    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
-
-    class _EmptyStub:
-        task = "detection"
-        train_tile_size = 100
-        train_overlap = 0.2
-        train_native_size = train_augmentation = None
-        in_chans =3
-
-        def predict_sliced(self, path, **kw):
-            merges.append(kw["execution"].cross_tile_nms)
-            return {"image": path, "width": 128, "height": 128, "boxes": [], "scores": [],
-                    "labels": [], "cap_hit": False}
-
-    merges: list[float] = []
-    images_dir = _one_image(tmp_path, 128, (10, 10, 30, 30))
-
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
+    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET, n=1, size=128,
+                                 box=(10, 10, 30, 30))
     checkpoint = verified_checkpoint(tmp_path)
-    build_predictor_orig = predictor_mod.GenericPredictor
-    try:
-        predictor_mod.GenericPredictor = lambda *a, **kw: _EmptyStub()
-        r_default = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir), stated=Stated())
-        r_stated = run_full_frame_evaluation(
-            checkpoint, checkpoint_admission(checkpoint, images_dir),
-            stated=Stated(conf=0.5, cross_tile_nms=0.3, max_dets=2))
-    finally:
-        predictor_mod.GenericPredictor = build_predictor_orig
+    detector = _detector(monkeypatch)
+    r_default = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
+                                          stated=Stated())
+    r_stated = run_full_frame_evaluation(
+        checkpoint, checkpoint_admission(checkpoint, images_dir),
+        stated=Stated(conf=0.5, cross_tile_nms=0.3, max_dets=2))
 
-    assert merges == [0.3, 0.3]
+    assert [execution.cross_tile_nms for execution in detector.executions] == [0.3, 0.3]
     for r in (r_default, r_stated):
         assert r["execution"]["postprocess"] == "nms"
         assert r["execution"]["cross_tile_nms"] == 0.3
@@ -371,86 +294,43 @@ def test_run_full_frame_evaluation_records_merge_and_execution(tmp_path):
     assert r_stated["execution"]["max_dets"] == 2
 
 
-def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(tmp_path):
+def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(tmp_path, monkeypatch):
     """The delivery gate measures over the loader a run would build, so ground truth carrying
     the subject only as points refuses in that loader's own words rather than scoring every
     image against an empty reference and reporting the number as a delivery metric."""
-    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
+    from tcip_annotation.state import Annotation, Point
+
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
-
-    from PIL import Image
-    from tcip_annotation.state import Annotation, BBox, Point
-
-    from tests._producer_fixtures import label_image
-
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
-    for index in range(8):
-        Image.new("RGB", (128, 128)).save(images_dir / f"p{index}.png")
-        label_image(images_dir / f"p{index}.png",
-                    [Annotation(subject="bud", geometry=Point(20.0, 30.0))], 128, 128)
-
-    class _EmptyStub:
-        task = "detection"
-        train_tile_size = 100
-        train_overlap = 0.2
-        train_native_size = train_augmentation = None
-        in_chans =3
-
-        def predict_sliced(self, path, **kw):
-            return {"image": path, "width": 128, "height": 128, "boxes": [], "scores": [],
-                    "labels": [], "cap_hit": False}
-
+    from tests._producer_fixtures import seed_labeled_images
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
+    images_dir = seed_labeled_images(
+        tmp_path / "images" / UNDATED_BUCKET,
+        [Annotation(subject="bud", geometry=Point(20.0, 30.0))], n=8, width=128, height=128)
     checkpoint = verified_checkpoint(tmp_path)
-    build_predictor_orig = predictor_mod.GenericPredictor
-    try:
-        predictor_mod.GenericPredictor = lambda *a, **kw: _EmptyStub()
-        with pytest.raises(ValueError, match="only in geometries a detection loader"):
-            run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir), stated=Stated())
+    _detector(monkeypatch)
+    with pytest.raises(ValueError, match="only in geometries a detection loader"):
+        run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
+                                  stated=Stated())
 
-        # Admits valid work: the same eight images, their documents carrying boxes, score.
-        for index in range(8):
-            label_image(images_dir / f"p{index}.png",
-                        [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))], 128, 128)
-        scored = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir), stated=Stated())
-    finally:
-        predictor_mod.GenericPredictor = build_predictor_orig
+    # Admits valid work: the same eight images, their documents carrying boxes, score.
+    seed_bud_images(images_dir, n=8, size=128, box=(10, 10, 30, 30))
+    scored = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
+                                       stated=Stated())
     assert scored["scored_images"] == 8
 
 
-def test_the_gate_refuses_an_images_tree_with_no_ground_truth(tmp_path):
+def test_the_gate_refuses_an_images_tree_with_no_ground_truth(tmp_path, monkeypatch):
     """A measurement is against a reference: with no label document there is nothing to score
     against, so the gate refuses by name rather than scoring every image against empty ground
     truth and reporting a perfect-looking miss rate."""
-    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
-
-    from PIL import Image
-
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
-    Image.new("RGB", (128, 128)).save(images_dir / "a.png")
-
-    class _EmptyStub:
-        task = "detection"
-        train_tile_size = 100
-        train_overlap = 0.2
-        train_native_size = train_augmentation = None
-        in_chans =3
-
-        def predict_sliced(self, path, **kw):
-            return {"image": path, "width": 128, "height": 128, "boxes": [], "scores": [],
-                    "labels": [], "cap_hit": False}
-
+    from tests._producer_fixtures import blank_image
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
+    images_dir = blank_image(tmp_path, "a.png", (128, 128)).parent
     checkpoint = verified_checkpoint(tmp_path)
-    build_predictor_orig = predictor_mod.GenericPredictor
-    try:
-        predictor_mod.GenericPredictor = lambda *a, **kw: _EmptyStub()
-        with pytest.raises(ValueError, match="no trainable samples"):
-            run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir), stated=Stated())
-    finally:
-        predictor_mod.GenericPredictor = build_predictor_orig
+    _detector(monkeypatch)
+    with pytest.raises(ValueError, match="no trainable samples"):
+        run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
+                                  stated=Stated())

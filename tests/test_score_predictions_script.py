@@ -10,19 +10,13 @@ from __future__ import annotations
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
-from PIL import Image
 
 from tcip_annotation.state import Annotation, BBox
-
-
-def _write_image(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (100, 80), color=(120, 120, 120)).save(path)
+from tests._cli_fixtures import run_tcip
+from tests._producer_fixtures import write_image
 
 
 def _fixture(tmp_path: Path) -> tuple[Path, str]:
@@ -33,7 +27,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, str]:
     from tests._producer_fixtures import label_image
 
     img = tmp_path / "images" / UNDATED_BUCKET / "IMG_0000.jpg"
-    _write_image(img)
+    write_image(img)
     label_image(img, [Annotation(subject="bud", geometry=BBox(1, 1, 40, 30))], 100, 80)
     published(tmp_path, "baseline", [
         {"image": str(img), "width": 100, "height": 80, "boxes": [[1.0, 1.0, 40.0, 30.0]],
@@ -42,20 +36,13 @@ def _fixture(tmp_path: Path) -> tuple[Path, str]:
     return img, "baseline"
 
 
-def _run(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, "-m", "tcip_web.cli", "score-predictions", *args],
-        cwd=str(cwd), capture_output=True, text=True, timeout=60,
-    )
-
-
 def test_refuses_a_trait_scoped_run_naming_no_project(tmp_path):
     img, bucket = _fixture(tmp_path)
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
-    result = _run(["--path", str(img), "--bucket", bucket, "--trait", "bud_count"],
-                  cwd=cwd)
+    result = run_tcip("score-predictions",
+                      ["--path", str(img), "--bucket", bucket, "--trait", "bud_count"], cwd=cwd)
 
     assert result.returncode != 0, result.stdout
     assert "--trait requires --project" in result.stderr
@@ -67,7 +54,7 @@ def test_scores_a_single_image_with_no_project_named(tmp_path):
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
-    result = _run(["--path", str(img), "--bucket", bucket], cwd=cwd)
+    result = run_tcip("score-predictions", ["--path", str(img), "--bucket", bucket], cwd=cwd)
 
     assert result.returncode == 0, result.stderr
     body = json.loads(result.stdout)

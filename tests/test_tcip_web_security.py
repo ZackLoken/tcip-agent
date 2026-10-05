@@ -1,5 +1,5 @@
 """The route-level face of the trust boundary: Host check, WS Origin check, path confinement
-on the launch and stream routes. The boundary's own policy is covered in test_trust_boundary.py."""
+on the launch and stream routes."""
 
 from __future__ import annotations
 
@@ -8,13 +8,6 @@ import socket
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
-
-from tcip_web.app import app
-
-
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
 
 
 class _RawHeaderList(list):

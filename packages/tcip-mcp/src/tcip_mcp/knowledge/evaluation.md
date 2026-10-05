@@ -47,7 +47,7 @@ measurement-agreement/method-comparison contexts specifically because of that de
 | `tcip render-failure-cases` (logged command) | Surface + render the N images with highest triage error |
 | `experiment_tools.compare_experiments` (library call) | Side-by-side metrics across experiments |
 | `get_experiment` (`view='lineage'`) | Trace data → model → predictions chain |
-| `list_experiments` | Enumerate every experiment on record, including one no other tool can rediscover (a pre-created one never launched) |
+| `list_experiments` | List every run of the project, and every sweep with its trial runs under it |
 | `rank_registered_models` | Rank registered models by a stated metric, direction and verification status |
 
 `evaluate_model` accepts an optional `trait=`: when set, the trait's own governing criterion

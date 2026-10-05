@@ -9,8 +9,8 @@ import {
   type BucketExistsRefusal,
   type InferenceJob,
   type InferenceStatus,
-  type RegisteredModel,
 } from "@/api/inference";
+import type { RegisteredModel } from "@/api/types.generated";
 import { TabHeading } from "@/components/TabHeading";
 import { useStore } from "@/store";
 import { selectProjectRoot } from "@/store/slices/gui";

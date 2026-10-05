@@ -1,30 +1,14 @@
-"""A state-changing route must declare a JSON body model.
-
-CORS is disabled on this backend; nothing here checks origin, which is covered separately
-(``test_state_changing_routes_require_same_origin.py``) by the check
-``TrustBoundaryMiddleware`` applies ahead of every route. What this guards is narrower: a route
-with no body parameter at all is reachable as a browser simple request (a cross-origin HTML
-form submission, for instance), which never triggers a CORS preflight. Requiring a JSON body,
-even an empty one, makes the server refuse every content type a simple request can send, on
-every POST/PUT/PATCH/DELETE route with no exemption; only application/json, which a browser
-sends only from a preflighted request, still reaches the handler.
-"""
+"""Every POST, PUT, PATCH and DELETE route declares a JSON body model, so it refuses every content
+type a browser simple request can send and only application/json reaches its handler."""
 
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
-
-import pytest
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from tcip_web.app import app
-from tcip_web.trust_boundary import STATE_CHANGING_METHODS
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-GENERATOR = REPO_ROOT / "tools" / "generate_frontend_routes.py"
+from tests._route_walk import state_changing_routes
 
 
 class _ProbePayload(BaseModel):
@@ -37,38 +21,14 @@ class _ProbePayload(BaseModel):
 
 EMPTY_BODY_ROUTES = (
     "/api/training/runs/does-not-exist/tensorboard",
-    "/api/tuning/sweeps/does-not-exist/tensorboard",
-    "/api/tuning/sweeps/does-not-exist/trials/does-not-exist/tensorboard",
-    "/api/tuning/sweeps/does-not-exist/trials/does-not-exist/tensorboard/stop",
+    "/api/sessions/end",
 )
-"""The state-changing routes whose only body is ``EmptyBodyPayload``, each hit with an id
-nothing resolves.
+"""The state-changing routes whose only body is ``EmptyBodyPayload``.
 
 Named here rather than derived, because deriving them from the app would only ever restate what
 the routes currently declare, and what has to be held is that these particular reachable state
 changes refuse the browser simple-request shape.
 """
-
-
-def _route_generator():
-    """The route-walking module, loaded the same way ``test_frontend_route_paths.py`` loads it,
-    so this test enumerates routes through the one real walk of the app's router tree rather
-    than a second copy of it."""
-    spec = importlib.util.spec_from_file_location("tcip_frontend_route_generator", GENERATOR)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def _state_changing_routes(target=app) -> list[APIRoute]:
-    gen = _route_generator()
-    return [
-        route
-        for route in gen.iter_api_routes(target)
-        if isinstance(route, APIRoute)
-        and (route.methods - {"HEAD", "OPTIONS"}) & STATE_CHANGING_METHODS
-    ]
 
 
 def declares_json_body(route: APIRoute) -> bool:
@@ -93,16 +53,11 @@ def declares_json_body(route: APIRoute) -> bool:
     )
 
 
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
-
-
 def test_every_state_changing_route_declares_a_json_body_model() -> None:
     """No exemption list: a route reaches this assertion whatever it is, and fails it unless the
     body it declares is JSON. A route taking only path parameters, and a form or multipart route,
     both fail it."""
-    routes = _state_changing_routes()
+    routes = state_changing_routes(app)
     assert routes, "no state-changing routes found; the route walk itself is broken"
     undeclared = sorted(
         f"{sorted(r.methods - {'HEAD', 'OPTIONS'})} {r.path}"
@@ -118,23 +73,15 @@ def test_a_declared_body_model_admits_an_empty_json_object(
     """The rail must admit valid work: each route that carries no fields of its own still
     accepts the ``{}`` its real caller sends, and reaches the handler's own outcome rather than
     a 422 from the body model rejecting the call. A project is open, so each handler reaches
-    its own lookup. An unknown id is a 404 everywhere the handler
-    resolves an id before acting; the trial-tensorboard stop route acts on a computed process
-    key with no id lookup of its own, so an unknown trial is a no-op 200, not a 404.
+    its own lookup: an unknown run is a 404, and ending a session when none is open is a no-op
+    200.
     """
-    unknown_id_routes = tuple(
-        url for url in EMPTY_BODY_ROUTES if not url.endswith("/tensorboard/stop")
-    )
-    for url in unknown_id_routes:
-        resp = client.post(url, json={})
-        assert resp.status_code != 422, (url, resp.text)
-        assert resp.status_code == 404, (url, resp.status_code, resp.text)
+    resp = client.post("/api/training/runs/does-not-exist/tensorboard", json={})
+    assert resp.status_code == 404, resp.text
 
-    resp = client.post(
-        "/api/tuning/sweeps/does-not-exist/trials/does-not-exist/tensorboard/stop", json={}
-    )
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "not_running"
+    resp = client.post("/api/sessions/end", json={})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "noop"
 
 
 def test_a_missing_body_is_refused(client: TestClient) -> None:
@@ -162,7 +109,7 @@ def test_a_headerless_json_shaped_body_is_refused(client: TestClient) -> None:
     the shape this rail exists to keep out. If the body were parsed as JSON here the way it is
     when the caller declares ``application/json``, ``b"{}"`` would decode to an empty dict, feed
     through the same body model a real ``json={}`` call satisfies, and reach the handler for its
-    own outcome (404, for an unknown id, on every route this test walks) instead of failing
+    own outcome instead of failing
     validation. The 422 asserted below is what distinguishes that reverted behavior from the
     one this rail depends on; a dependency upgrade or pin change that stopped enforcing it would
     fail this assertion rather than passing silently.
@@ -210,7 +157,7 @@ def test_the_guard_rejects_the_shapes_it_exists_to_catch() -> None:
     def no_body_route() -> dict:
         return {}
 
-    verdicts = {r.path: declares_json_body(r) for r in _state_changing_routes(probe)}
+    verdicts = {r.path: declares_json_body(r) for r in state_changing_routes(probe)}
     assert verdicts == {
         "/json": True,
         "/defaulted-json": False,

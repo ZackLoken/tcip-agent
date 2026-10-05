@@ -8,7 +8,7 @@ FastAPI backend + Vite/React/TS/Tailwind/Konva frontend: the human's UI. Loads o
 ```
 src/tcip_web/
   routes/          # annotate, audit_gap, canvas, dataset, fs, images, inference, meta,
-                    # projects, results, sessions, subjects, terminal, training, tuning
+                    # projects, results, sessions, subjects, terminal, training
   app.py, state.py, jobstore.py, paths.py, __main__.py
   terminal.py + agent_terminal.settings.json
                     # the breeder-facing in-app agent terminal, its provider table and the

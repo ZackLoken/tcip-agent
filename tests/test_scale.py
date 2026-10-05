@@ -64,10 +64,9 @@ def test_get_experiment_metrics_pagination(tmp_path):
     assert page["metrics_offset"] == 3
 
 
-def test_get_experiment_n_epochs_counts_distinct_values_not_rows(tmp_path):
-    """n_epochs is the count of distinct epoch values, not the row count: a bespoke loop logging
-    train and val as separate rows under the same epoch still counts as one epoch. n_rows is the
-    row count, and is what metrics_offset/metrics_limit actually page against."""
+def test_get_experiment_reads_the_rows_of_one_epoch_as_one(tmp_path):
+    """A bespoke loop logging train and val as separate rows under one epoch reads as one epoch
+    whose row carries both."""
     from tcip_mcp.experiments import get_experiment
     from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
 
@@ -77,4 +76,5 @@ def test_get_experiment_n_epochs_counts_distinct_values_not_rows(tmp_path):
 
     result = get_experiment("exp2", project=tmp_path)
     assert result["n_epochs"] == 1
-    assert result["n_rows"] == 2
+    (row,) = result["metrics"]
+    assert (row["epoch"], row["loss_train"], row["loss_val"]) == (3, 0.5, 0.4)

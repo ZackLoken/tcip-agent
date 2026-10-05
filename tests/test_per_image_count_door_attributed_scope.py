@@ -3,12 +3,11 @@ never a count per attribute value."""
 
 from __future__ import annotations
 
-import csv
 from pathlib import Path
 
 import pytest
 
-from tests import _trait_fixtures as fx
+from tests import _trait_fixtures as fx, csv_rows
 
 SUBJECT = fx.COUNT_SUBJECT  # what the confirmed per_image_count says the counts are of
 
@@ -39,6 +38,6 @@ def test_an_attributed_bucket_delivers_its_object_count_not_its_value_count(
         tmp_path, bucket.root, bucket.name, str(out), trait=fx.COUNT_TRAIT,
         acknowledgment_id=ack, door="test_door", actor=None), reason="unassessed fixture")
 
-    rows = list(csv.DictReader(out.read_text(encoding="utf-8").splitlines()))
+    rows = csv_rows(out)
     assert len(rows) == 1
     assert int(rows[0]["detection_count"]) == 2  # both records counted as the object class

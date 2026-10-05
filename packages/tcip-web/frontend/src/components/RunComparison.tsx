@@ -1,28 +1,11 @@
 /** The Training tab's side-by-side run comparison: RunComparison and its cell helpers. */
 import { useEffect, useMemo, useState } from "react";
-import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 
 import { StructuredRefusalError } from "@/api/http";
 import type { CompareExperiment, CompareResult, CompareSplit, MetricRow } from "@/api/training";
-import { openTrainingStream, trainingApi } from "@/api/training";
-import { joinRunSeries, metricKeysAcross, type RunSeries } from "@/lib/joinRunSeries";
-import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
-import {
-  mergeMetric,
-  METRIC_STATE_SUFFIX,
-  numericMetricKeys,
-  RUN_REFRESH_MS,
-  VAL_METRIC_PREFIX,
-} from "@/tabs/trainingMetrics";
+import { trainingApi } from "@/api/training";
+import { NOT_FINITE_SUFFIX } from "@/api/types.generated";
+import { bareMetricName, RUN_REFRESH_MS, unionMetricKeys } from "@/tabs/trainingMetrics";
 
 /** One marked run: the one id it is tracked by, compared, ranked and streamed under. */
 export interface MarkedRun {
@@ -40,9 +23,6 @@ const NO_REGISTERED_CHECKPOINT = "no registered checkpoint";
 /** The tool's own wording for a marked set with nothing at all to rank. */
 const NO_MARKED_CHECKPOINT = "none of the marked experiments registered a checkpoint";
 const NOT_RANKED_NO_CHECKPOINT = `not ranked: ${NO_REGISTERED_CHECKPOINT}`;
-/** Shown beside a disabled Rank when a marked column's own registry can't be read, in place of
- * a chooser built from the columns that could: ranking never silently drops the unreadable one. */
-const OPEN_PROJECT_FOR_METRICS = "open the project to stream metrics";
 const RANK_REASON_ID = "rank-disabled-reason";
 
 function cellText(value: unknown): string {
@@ -72,29 +52,19 @@ function fingerprintNote(experiments: CompareExperiment[]): string {
     : "not comparable";
 }
 
-// The rank chooser and the logged-metrics table share this one filter (numericMetricKeys) so a
-// bookkeeping or string-valued key, a selection label say, is never offered as something to rank.
 function registryMetricKeys(experiments: CompareExperiment[]): string[] {
-  const keys = new Set<string>();
-  for (const exp of experiments) {
-    for (const entry of exp.registry ?? []) {
-      for (const k of numericMetricKeys(entry.metrics)) keys.add(k);
-    }
-  }
-  return Array.from(keys).sort();
+  return unionMetricKeys(
+    experiments.flatMap((exp) => (exp.registry ?? []).map((entry) => entry.metrics)),
+  ).sort();
 }
 
 function loggedMetricKeys(experiments: CompareExperiment[]): string[] {
-  const keys = new Set<string>();
-  for (const exp of experiments) {
-    for (const k of numericMetricKeys(exp.last_logged_metrics)) keys.add(k);
-  }
-  return Array.from(keys).sort();
+  return unionMetricKeys(experiments.map((exp) => exp.last_logged_metrics)).sort();
 }
 
 function loggedMetricCell(row: MetricRow | undefined, key: string): string {
   if (!row) return UNRECORDED;
-  const state = row[`${key}${METRIC_STATE_SUFFIX}`];
+  const state = row[`${key}${NOT_FINITE_SUFFIX}`];
   if (typeof state === "string") return state;
   return cellText(row[key]);
 }
@@ -106,17 +76,10 @@ function notRankedNoMetricStamped(metric: string): string {
 }
 
 /** Side-by-side detail for two to four marked runs: one column per run labeled by the record it
- * came from, an overlay chart, and one rank control over the platform's best-model derivation. */
-export function RunComparison({
-  marked,
-  projectRoot,
-}: {
-  marked: MarkedRun[];
-  projectRoot: string | null;
-}) {
+ * came from, and one rank control over the platform's best-model derivation. */
+export function RunComparison({ marked }: { marked: MarkedRun[] }) {
   const [result, setResult] = useState<CompareResult | null>(null);
   const [compareError, setCompareError] = useState<string | null>(null);
-  const [seriesByRun, setSeriesByRun] = useState<Record<string, MetricRow[]>>({});
 
   const [rankMetric, setRankMetric] = useState("");
   const [rankDirection, setRankDirection] = useState<boolean | null>(null);
@@ -125,9 +88,7 @@ export function RunComparison({
   const [rankResult, setRankResult] = useState<Awaited<
     ReturnType<typeof trainingApi.compareBest>
   > | null>(null);
-  // The metric rankResult actually ranked by, kept separate from rankMetric so a chooser change
-  // after a successful rank never relabels the answer already on screen.
-  const [rankedMetric, setRankedMetric] = useState("");
+  const rankedMetric = rankResult?.ranking_basis ?? "";
   const [rankError, setRankError] = useState<string | null>(null);
   const [higherIsBetterByMetric, setHigherIsBetterByMetric] = useState<Record<string, boolean>>({});
 
@@ -156,7 +117,6 @@ export function RunComparison({
     setResult(null);
     setCompareError(null);
     setRankResult(null);
-    setRankedMetric("");
     setRankError(null);
     setNeedsUnverifiedOption(false);
     setRankMetric("");
@@ -179,23 +139,6 @@ export function RunComparison({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markedKey]);
-
-  useEffect(() => {
-    setSeriesByRun({});
-    if (!projectRoot) return;
-    const stops = marked.map(({ experimentId }) =>
-      openTrainingStream(experimentId, (msg) => {
-        if (msg.type !== "metric" || !msg.row) return;
-        setSeriesByRun((prev) => ({
-          ...prev,
-          [experimentId]: mergeMetric(prev[experimentId] ?? [], msg.row as MetricRow),
-        }));
-      }),
-    );
-    return () => stops.forEach((stop) => stop());
-    // marked's own identity is what a stream subscribes to; re-derive on every change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [markedKey, projectRoot]);
 
   const byExperimentId = useMemo(() => {
     const map = new Map<string, CompareExperiment>();
@@ -228,10 +171,7 @@ export function RunComparison({
   );
 
   function hasDeclaredDirection(metric: string): boolean {
-    const bare = metric.startsWith(VAL_METRIC_PREFIX)
-      ? metric.slice(VAL_METRIC_PREFIX.length)
-      : metric;
-    return higherIsBetterByMetric[bare] !== undefined;
+    return higherIsBetterByMetric[bareMetricName(metric)] !== undefined;
   }
   const declaredMetricOptions = rankMetricOptions.filter(hasDeclaredDirection);
   const undeclaredMetricOptions = rankMetricOptions.filter((k) => !hasDeclaredDirection(k));
@@ -246,29 +186,12 @@ export function RunComparison({
         ? "choose a ranking direction before ranking"
         : null;
 
-  const runSeries: RunSeries[] = marked.map((m) => ({
-    experimentId: m.experimentId,
-    rows: seriesByRun[m.experimentId] ?? [],
-  }));
-  const overlayMetricOptions = metricKeysAcross(runSeries);
-  const [overlayMetric, setOverlayMetric] = useState("");
-  useEffect(() => {
-    if (overlayMetric && overlayMetricOptions.includes(overlayMetric)) return;
-    setOverlayMetric(overlayMetricOptions[0] ?? "");
-    // Re-pick only when the option set itself changes, not on every streamed row.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overlayMetricOptions.join(",")]);
-  // droppedByRun counts a keyless row regardless of which metric is currently charted, so this
-  // is called even before a metric is picked (an empty metric key then just plots nothing).
-  const { points: chartData, droppedByRun } = joinRunSeries(runSeries, overlayMetric);
-
   function onRankMetricChange(metric: string) {
     setRankMetric(metric);
     setRankDirection(null);
     setIncludeUnverified(false);
     setNeedsUnverifiedOption(false);
     setRankResult(null);
-    setRankedMetric("");
     setRankError(null);
   }
 
@@ -289,10 +212,8 @@ export function RunComparison({
         include_unverified: includeUnverified,
       });
       setRankResult(res);
-      setRankedMetric(rankMetric);
     } catch (e) {
       setRankResult(null);
-      setRankedMetric("");
       // Branches on the tool's own refusal fields, never on matching the error text: the route
       // now carries rank_registered_models's whole error dict as the refusal's structured detail.
       if (e instanceof StructuredRefusalError) {
@@ -479,82 +400,6 @@ export function RunComparison({
             </tr>
           </tbody>
         </table>
-      </div>
-
-      <div className="h-[32vh] min-h-[220px] shrink-0 tcip-panel p-2">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="tcip-heading">Overlay</span>
-          {overlayMetricOptions.length > 0 && (
-            <select
-              aria-label="Overlay metric"
-              className="tcip-select text-[11px]"
-              value={overlayMetric}
-              onChange={(e) => setOverlayMetric(e.target.value)}
-            >
-              {overlayMetricOptions.map((k) => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-        {overlayMetric && chartData.length > 0 ? (
-          <ResponsiveContainer width="100%" height="88%">
-            <LineChart data={chartData}>
-              <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
-              <XAxis
-                dataKey="x"
-                stroke={CHART.axis}
-                style={{ fontSize: 11 }}
-                label={{
-                  value: "epoch/step",
-                  position: "insideBottom",
-                  offset: -5,
-                  fill: CHART.axis,
-                }}
-              />
-              <YAxis stroke={CHART.axis} style={{ fontSize: 11 }} />
-              <Tooltip
-                contentStyle={{
-                  background: CHART.tooltipBg,
-                  border: `1px solid ${CHART.tooltipBorder}`,
-                  borderRadius: 4,
-                  fontSize: 11,
-                }}
-              />
-              <Legend wrapperStyle={{ fontSize: 11, color: CHART.legendText }} />
-              {marked.map((m, i) => (
-                <Line
-                  key={m.experimentId}
-                  type="monotone"
-                  dataKey={m.experimentId}
-                  name={m.experimentId}
-                  stroke={CHART_LINE_COLORS[i % CHART_LINE_COLORS.length]}
-                  dot={false}
-                  strokeWidth={1.5}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="flex items-center justify-center h-full text-tcip-muted text-[12px]">
-            {projectRoot ? "Waiting for metrics..." : OPEN_PROJECT_FOR_METRICS}
-          </div>
-        )}
-        {Object.entries(droppedByRun).some(([, n]) => n > 0) && (
-          <div className="text-[10px] text-tcip-muted mt-1">
-            {Object.entries(droppedByRun)
-              .filter(([, n]) => n > 0)
-              .map(
-                ([experimentId, n]) =>
-                  `${experimentId}: ${n} row(s) with no epoch/step, dropped from the overlay`,
-              )
-              .join(" / ")}
-          </div>
-        )}
       </div>
 
       <div className="tcip-panel p-2">

@@ -8,7 +8,6 @@ asks for is one the dev server forwards.
 
 from __future__ import annotations
 
-import importlib.util
 import re
 from pathlib import Path
 
@@ -16,13 +15,13 @@ import pytest
 from fastapi import FastAPI
 
 from tcip_web.app import app
+from tests import REPO_ROOT
+from tests._route_walk import route_generator as _generator
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_SRC = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
 GENERATED = FRONTEND_SRC / "api" / "routes.ts"
 PROXY_GENERATED = FRONTEND_SRC / "api" / "devProxy.generated.ts"
 VITE_CONFIG = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "vite.config.ts"
-GENERATOR = REPO_ROOT / "tools" / "generate_frontend_routes.py"
 
 _LITERAL_RE = re.compile(r"""["'`](/(?:api|ws)/[^"'`]*)["'`]""")
 _ROUTES_USE_RE = re.compile(r"\bROUTES\.([A-Za-z0-9_]+)")
@@ -32,15 +31,6 @@ _PROXY_BUILD_RE = re.compile(
     r"\[\s*path\s*,\s*\{\s*target:\s*BACKEND\s*,\s*changeOrigin:\s*true\s*,\s*ws\s*\}\s*\]\s*\)\s*,?\s*\)",
     re.S,
 )
-
-
-def _generator():
-    """The path-module generator loaded as a module, so the test regenerates the same way CI does."""
-    spec = importlib.util.spec_from_file_location("tcip_frontend_route_generator", GENERATOR)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def _frontend_sources(include_tests: bool) -> list[Path]:

@@ -44,16 +44,16 @@ describe("TopBar tab strip accessibility", () => {
 
   it("moves aria-selected to the clicked tab", () => {
     render(<TopBar />);
-    const tuningTab = screen.getByRole("tab", { name: /tuning/i });
-    fireEvent.click(tuningTab);
-    expect(tuningTab).toHaveAttribute("aria-selected", "true");
+    const inferenceTab = screen.getByRole("tab", { name: /inference/i });
+    fireEvent.click(inferenceTab);
+    expect(inferenceTab).toHaveAttribute("aria-selected", "true");
   });
 
   it("points each tab's aria-controls at that tab's own panel id", () => {
     render(<TopBar />);
-    const tuningTab = screen.getByRole("tab", { name: /tuning/i });
-    expect(tuningTab).toHaveAttribute("id", "tab-tuning");
-    expect(tuningTab).toHaveAttribute("aria-controls", "tabpanel-tuning");
+    const inferenceTab = screen.getByRole("tab", { name: /inference/i });
+    expect(inferenceTab).toHaveAttribute("id", "tab-inference");
+    expect(inferenceTab).toHaveAttribute("aria-controls", "tabpanel-inference");
   });
 
   it("keeps only the active tab in the Tab order, a roving tabindex", () => {
@@ -65,8 +65,8 @@ describe("TopBar tab strip accessibility", () => {
     expect(active[0]).toHaveAttribute("tabindex", "0");
     inactive.forEach((t) => expect(t).toHaveAttribute("tabindex", "-1"));
 
-    fireEvent.click(screen.getByRole("tab", { name: /tuning/i }));
-    expect(screen.getByRole("tab", { name: /tuning/i })).toHaveAttribute("tabindex", "0");
+    fireEvent.click(screen.getByRole("tab", { name: /inference/i }));
+    expect(screen.getByRole("tab", { name: /inference/i })).toHaveAttribute("tabindex", "0");
     expect(screen.getByRole("tab", { name: /training/i })).toHaveAttribute("tabindex", "-1");
   });
 
@@ -77,11 +77,11 @@ describe("TopBar tab strip accessibility", () => {
     training.focus();
 
     fireEvent.keyDown(training, { key: "ArrowRight" });
-    const tuning = screen.getByRole("tab", { name: /tuning/i });
-    expect(tuning).toHaveAttribute("aria-selected", "true");
-    expect(tuning).toHaveFocus();
+    const inference = screen.getByRole("tab", { name: /inference/i });
+    expect(inference).toHaveAttribute("aria-selected", "true");
+    expect(inference).toHaveFocus();
 
-    fireEvent.keyDown(tuning, { key: "ArrowLeft" });
+    fireEvent.keyDown(inference, { key: "ArrowLeft" });
     expect(screen.getByRole("tab", { name: /training/i })).toHaveAttribute("aria-selected", "true");
 
     const first = screen.getAllByRole("tab")[0];

@@ -12,24 +12,9 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 import os
 from pathlib import Path
 
-import pytest
-from fastapi.testclient import TestClient
-
 import tcip_store as ts
-from tcip_mcp.tools.project_tools import initialize_project
-from tcip_web.app import app
 from tests._audit_fixtures import audit_rows
-
-
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
-
-
-def _project(ws: Path, directory: str, display_name: str) -> tuple[Path, str]:
-    result = initialize_project(str(ws / directory), display_name, "north orchard")
-    assert "error" not in result, result
-    return ws / directory, result["id"]
+from tests._web_fixtures import named_project
 
 
 def _files(root: Path) -> dict[str, bytes]:
@@ -52,13 +37,13 @@ def _held(root: Path, *, but: set[str]) -> dict[tuple, object]:
 def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_as_they_were(
     client, tmp_path,
 ):
-    from tcip_mcp.experiments import list_experiments
+    from tcip_mcp.experiments import run_rows
     from tcip_mcp.project_record import read_record
     from tcip_mcp.tools.project_tools import read_datasets, register_dataset
     from tests._verified_checkpoint_fixtures import finished_run
 
     ws = tmp_path.parent
-    project, project_id = _project(ws, "valley_block", "Valley block")
+    project, project_id = named_project(ws / "valley_block", "Valley block")
     finished_run(project, experiment_id="exp-before")
     (project / "ds").mkdir()
     assert "error" not in register_dataset(project, str(project / "ds"), "currant")
@@ -66,7 +51,7 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
     from tcip_mcp.project_record import PROJECT_RECORD_STORE
 
     renamed = {AUDIT_LOG_STORE, PROJECT_RECORD_STORE}
-    files, runs, datasets = _files(project), list_experiments(project), read_datasets(project)
+    files, runs, datasets = _files(project), run_rows(project), read_datasets(project)
     held, audit_lines = _held(project, but=renamed), audit_rows(project)
 
     resp = client.post("/api/projects/rename", json={
@@ -79,7 +64,7 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
     assert sorted(p.name for p in ws.iterdir() if (p / ".tcip").is_dir()) == ["valley_block"]
     assert _files(project) == files
     assert _held(project, but=renamed) == held
-    assert list_experiments(project) == runs
+    assert run_rows(project) == runs
     assert read_datasets(project) == datasets
     assert audit_rows(project)[:-1] == audit_lines
     (line,) = audit_rows(project, "project_renamed")
@@ -92,7 +77,7 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
 def test_a_display_name_the_record_refuses_answers_400_and_changes_nothing(client, tmp_path):
     from tcip_mcp.project_record import read_record
 
-    project, project_id = _project(tmp_path.parent, "valley_block", "Valley block")
+    project, project_id = named_project(tmp_path.parent / "valley_block", "Valley block")
 
     resp = client.post("/api/projects/rename", json={
         "id": project_id, "display_name": "   ", "user": "tester"})
@@ -106,7 +91,7 @@ def test_a_rename_naming_no_one_answers_400_and_changes_nothing(client, tmp_path
     from tcip_mcp.project_record import read_record
 
     monkeypatch.setenv("TCIP_USER", "osuser")
-    project, project_id = _project(tmp_path.parent, "valley_block", "Valley block")
+    project, project_id = named_project(tmp_path.parent / "valley_block", "Valley block")
 
     resp = client.post("/api/projects/rename", json={
         "id": project_id, "display_name": "Hill block", "user": "  "})
@@ -117,7 +102,7 @@ def test_a_rename_naming_no_one_answers_400_and_changes_nothing(client, tmp_path
 
 
 def test_an_id_no_project_holds_answers_404(client, tmp_path):
-    _project(tmp_path.parent, "valley_block", "Valley block")
+    named_project(tmp_path.parent / "valley_block", "Valley block")
 
     resp = client.post("/api/projects/rename", json={
         "id": "0" * 12, "display_name": "Hill block", "user": "tester"})
@@ -135,7 +120,8 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     import json
 
     from tcip_mcp.experiments import (
-        RUN_FILE, SWEEP_FILE, create_run_directory, find_run, observe, sweeps_dir, write_record,
+        RUN_FILE, SWEEP_FILE, create_run_directory, experiment_dir, find_run, find_sweep, observe,
+        write_record,
     )
     from tcip_mcp.model_registry import ModelRegistry
     from tcip_mcp.buckets import read_bucket
@@ -146,7 +132,7 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     from tests._verified_checkpoint_fixtures import detection_config, finished_run, opened_run
 
     ws = tmp_path.parent
-    project, _ = _project(ws, "valley_block", "Valley block")
+    project, _ = named_project(ws / "valley_block", "Valley block")
     first = finished_run(project, experiment_id="exp-first")
     checkpoint = Path(observe(first).checkpoint["path"])
     opened_run(project, detection_config(project / "data"),
@@ -158,7 +144,7 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
                               stated=Stated(tile=False))
     assert "error" not in published, published
     other_images = str(project / "data" / "other")
-    sweep = create_run_directory(sweeps_dir(project) / "study")
+    sweep = create_run_directory(experiment_dir("study", project=project))
     write_record(sweep / SWEEP_FILE, {"input": {
         "base_config": {"data": {"images_dir": str(project / "data" / "images")}},
         "baseline_params": {"data.images_dir": other_images},
@@ -194,7 +180,7 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     assert record.document_keys and all(ts.exists(key) for key in record.document_keys)
 
     moved_other = str(moved.resolve() / "data" / "other")
-    swept = observe(sweeps_dir(moved) / "study", SWEEP_FILE).record["input"]
+    swept = observe(find_sweep("study", project=moved)).record["input"]
     assert swept["base_config"]["data"]["images_dir"] == str(moved.resolve() / "data" / "images")
     assert swept["baseline_params"] == {"data.images_dir": moved_other}
     assert swept["param_space"]["data.labels_dir"]["choices"] == [moved_other]

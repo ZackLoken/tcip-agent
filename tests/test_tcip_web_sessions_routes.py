@@ -5,18 +5,11 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 import tcip_store
 from tcip_mcp.web_client import annotation_stats_key
-from tcip_web.app import app
 from tests._audit_fixtures import audit_rows
-
-
-@pytest.fixture
-def client(opened_project: Path) -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _event(client: TestClient, image: str, seconds: float, added: int, activity: str,
@@ -60,12 +53,12 @@ def test_throughput_is_derived_from_the_stored_entries(
 
 
 def test_a_session_is_its_persons_and_records_them_in_the_actor_spelling(
-    client: TestClient
+    opened_client: TestClient
 ) -> None:
-    _event(client, "IMG_A", 3.0, 1, "new_annotation")
-    _event(client, "IMG_A", 2.0, 0, "review", user="bob")
+    _event(opened_client, "IMG_A", 3.0, 1, "new_annotation")
+    _event(opened_client, "IMG_A", 2.0, 0, "review", user="bob")
 
-    sessions = _load(client)["sessions"]
+    sessions = _load(opened_client)["sessions"]
     assert [s["user"] for s in sessions] == ["user:bob", "user:alice"]
     assert sessions[1]["ended"] is None
 
@@ -125,11 +118,10 @@ def test_a_contribution_naming_another_project_is_refused_and_records_nothing(
     assert tcip_store.read(annotation_stats_key(str(opened_project)), default=None) is None
 
 
-def test_load_missing_returns_empty_shape(client: TestClient) -> None:
-    assert _load(client) == {"sessions": []}
+def test_load_missing_returns_empty_shape(opened_client: TestClient) -> None:
+    assert _load(opened_client) == {"sessions": []}
 
 
-def test_the_session_routes_refuse_while_no_project_is_open() -> None:
-    client = TestClient(app, base_url="http://127.0.0.1")
+def test_the_session_routes_refuse_while_no_project_is_open(client: TestClient) -> None:
     assert _event(client, "IMG_A", 1.0, 0, "review").status_code == 409
     assert client.get("/api/sessions/load").status_code == 409

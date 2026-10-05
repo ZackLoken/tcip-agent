@@ -372,11 +372,10 @@ def test_a_polygon_that_fails_to_rasterize_refuses_rather_than_training_an_empty
 
     from tests._producer_fixtures import dataset_over
 
-    from tests._image_fixtures import write_image
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import label_image, write_image
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
-    write_image(images_dir / "a.png", size=IMG)
+    write_image(images_dir / "a.png", (IMG, IMG))
     label_image(images_dir / "a.png",
                 [Annotation(subject=SUBJECT, geometry=Polygon(rings=[[(2, 2), (20, 2), (20, 20)]]))],
                 IMG, IMG)

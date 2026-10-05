@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+from tests import REPO_ROOT
+
 GENERATOR = REPO_ROOT / "tools" / "generate_harness_discovery.py"
 
 

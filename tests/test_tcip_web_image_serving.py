@@ -15,13 +15,7 @@ import tifffile
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from tcip_web.app import app
 from tcip_web.routes import images as images_route
-
-
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
 
 
 @pytest.fixture(autouse=True)
@@ -146,6 +140,34 @@ def test_a_partial_region_is_refused(client: TestClient, tmp_path: Path):
     resp = client.get("/api/images", params={"path": str(path), "x0": 0, "y0": 0, "x1": 100})
     assert resp.status_code == 400
     assert "all four" in resp.json()["detail"]
+
+
+def test_the_serving_grid_tiles_an_ingested_raster_and_refuses_a_missing_one(
+    client: TestClient, tmp_path: Path,
+):
+    """The grid over an image ``ingest_images`` brought in covers its whole extent in cells of
+    the derived serving edge; a path naming no image refuses by name."""
+    from tcip_mcp.pipelines.reference_grid import derive_serving_tile_size
+    from tcip_mcp.tools.ingest_tools import ingest_images
+
+    source = tmp_path / "source"
+    source.mkdir()
+    _wide_raster(source / "strip_01.tif")
+    ingested = ingest_images(tmp_path / "proj", str(source), date_from="none")
+    assert "error" not in ingested, ingested
+    (image,) = (p for p in (Path(ingested["image_root"]) / "undated").iterdir()
+                if p.stem == "strip_01")
+
+    grid = client.get("/api/images/serving_grid", params={"path": str(image)})
+    assert grid.status_code == 200, grid.text
+    body = grid.json()
+    assert body["tile_size"] == derive_serving_tile_size(5000, 64)
+    assert sum((c["x1"] - c["x0"]) * (c["y1"] - c["y0"]) for c in body["cells"]) == 5000 * 64
+
+    missing = client.get("/api/images/serving_grid",
+                         params={"path": str(image.with_name("absent_01.tif"))})
+    assert missing.status_code == 404
+    assert "absent_01" in missing.json()["detail"]
 
 
 # ── Display caps ─────────────────────────────────────────────────────────────────────────

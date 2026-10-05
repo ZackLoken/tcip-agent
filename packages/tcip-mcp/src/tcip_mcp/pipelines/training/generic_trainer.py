@@ -15,19 +15,23 @@ import logging
 import math
 import random
 import time
-from pathlib import Path
 from collections.abc import Mapping
+from dataclasses import dataclass, fields
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from tcip_store import stored_numbers
+from tcip_store import scalar_number, stored_numbers
 
+from tcip_mcp.experiments import TENSORBOARD_DIR
 from tcip_mcp.pipelines.data.datasets import indexed_sample_keys, instance_targets
 from tcip_mcp.pipelines.model_contract import DETECTION_TASKS, TCIPModel
 from tcip_mcp.pipelines.model_build import (
+    CONFIG_KEY,
+    METRICS_KEY,
     STATE_DICT_KEY,
     build_model,
     recorded_model_dims,
@@ -37,6 +41,7 @@ from tcip_mcp.pipelines.execution import DEFAULT_CONF
 from tcip_mcp.pipelines.schemas import DEFAULT_BATCH_SIZE
 from tcip_mcp.pipelines.training.evaluation import (
     HIGHER_IS_BETTER_BY_METRIC,
+    VAL_LOSS_KEY,
     VAL_METRIC_PREFIX,
     evaluate,
 )
@@ -254,12 +259,25 @@ def _checkpoint_metrics(metrics: dict) -> dict:
     return stored_numbers(metrics)
 
 
-_RESUME_KEYS = (
-    STATE_DICT_KEY, "optimizer_state_dict", "scheduler_state_dict", "scaler_state_dict",
-    "stage", "stage_epoch", "epoch", "best_metric", "es_best", "es_counter", "global_step",
-    "torch_rng_state", "numpy_rng_state", "python_rng_state", "cuda_rng_state",
-)
-"""The resume contract: every key :func:`_save_checkpoint` writes and a resume reads."""
+@dataclass(frozen=True)
+class _ResumeState:
+    """The resume contract beside the weights: each field a key :func:`_save_checkpoint` writes
+    and a resume reads back."""
+
+    optimizer_state_dict: dict
+    scheduler_state_dict: Any
+    scaler_state_dict: Any
+    stage: int
+    stage_epoch: int
+    epoch: int
+    best_metric: float
+    es_best: float
+    es_counter: int
+    global_step: int
+    torch_rng_state: Any
+    numpy_rng_state: Any
+    python_rng_state: Any
+    cuda_rng_state: Any
 
 
 def _save_checkpoint(
@@ -268,24 +286,18 @@ def _save_checkpoint(
     es_best: float, es_counter: int, global_step: int, seed, metrics: dict,
 ) -> None:
     """Write a resumable periodic checkpoint carrying the run's config, the weights and the resume
-    state."""
-    state = {
-        STATE_DICT_KEY: model.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict(),
-        "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
-        "scaler_state_dict": scaler.state_dict() if scaler is not None else None,
-        "stage": stage_idx,
-        "stage_epoch": stage_epoch,
-        "epoch": run.current_epoch,
-        "best_metric": run.best_metric,
-        "es_best": es_best,
-        "es_counter": es_counter,
-        "global_step": global_step,
-        **capture_rng_state(),
-    }
+    state (:class:`_ResumeState`)."""
+    state = _ResumeState(
+        optimizer_state_dict=optimizer.state_dict(),
+        scheduler_state_dict=scheduler.state_dict() if scheduler is not None else None,
+        scaler_state_dict=scaler.state_dict() if scaler is not None else None,
+        stage=stage_idx, stage_epoch=stage_epoch, epoch=run.current_epoch,
+        best_metric=run.best_metric, es_best=es_best, es_counter=es_counter,
+        global_step=global_step, **capture_rng_state(),
+    )
     write_checkpoint({
-        **{k: state[k] for k in _RESUME_KEYS}, "config": config, "seed": seed,
-        "metrics": _checkpoint_metrics(metrics),
+        STATE_DICT_KEY: model.state_dict(), **vars(state), CONFIG_KEY: config, "seed": seed,
+        METRICS_KEY: _checkpoint_metrics(metrics),
     }, path)
 
 
@@ -317,19 +329,9 @@ def _validate(
     dims: Mapping[str, int], conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,
     score_weights: dict | None = None, trait: TraitEntry | None = None,
 ) -> dict:
-    """Task-aware validation, delegates to ``evaluation.evaluate`` and ``val_``-prefixes.
-
-    detection/instance_seg → precision/recall/F1/mAP50/mAP + composite objective;
-    classification → accuracy/F1; ordinal → MAE/rank_acc; regression → MAE/RMSE;
-    semantic_seg → mIoU/dice/pixel_acc/per-class IoU (``evaluation.semantic_seg_metrics``). Always
-    returns ``val_loss``. Only detection/instance_seg's composite objective (or an explicit
-    ``evaluation.selection_metric``) drives ``model_best.pt``/early stopping, every other
-    task, including semantic_seg, selects by ``val_loss`` (see ``resolve_selection_metric``).
-
-    ``trait``: the trait's confirmed entry; when set, a count trait's derived localization
-    criterion governs the reported detection count/F1 instead of the IoU@0.5 comparability
-    convention (see ``evaluate``).
-    """
+    """``evaluation.evaluate`` of ``model`` over ``val_loader`` at the given thresholds and
+    ``trait`` (the confirmed entry whose criterion governs a count trait's detection metrics),
+    every key prefixed :data:`VAL_METRIC_PREFIX`."""
     metrics = evaluate(
         model, val_loader, device, task, dims=dims,
         conf_threshold=conf_threshold, iou_threshold=iou_threshold,
@@ -431,13 +433,6 @@ def _selection_value(task: str, val_metrics: dict, avg_loss: float, metric: str)
         f"selection metric {metric!r} (key {key!r}) is not among this epoch's validation "
         f"metrics for task {task!r}: {sorted(val_metrics)}."
     )
-
-
-def _is_scalar_metric(value: Any) -> bool:
-    """Whether ``value`` is a real number TensorBoard's ``add_scalar`` (and the console line's
-    own summary) can log. A center-match trait's ``val_metrics`` carries non-scalar entries
-    (``governing_criterion``: dict, ``map50_role``: str) that both must skip alike."""
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _improves(candidate: float, incumbent: float, *, higher_is_better: bool) -> bool:
@@ -575,7 +570,7 @@ def train(
         out_dir.mkdir(parents=True, exist_ok=True)
 
         if SummaryWriter is not None:
-            tb_writer = SummaryWriter(log_dir=str(out_dir / "tensorboard"))
+            tb_writer = SummaryWriter(log_dir=str(out_dir / TENSORBOARD_DIR))
 
         device = torch.device(config.get("device", "cuda" if torch.cuda.is_available() else "cpu"))
 
@@ -627,30 +622,29 @@ def train(
         # Resume from a periodic checkpoint (model + optimizer + scheduler + scaler).
         resume_stage = -1
         resume_stage_epoch = 0
-        ckpt = None
+        ckpt: _ResumeState | None = None
         if resume_from:
             # On CPU: the RNG byte tensors must stay there, and load_state_dict moves the rest.
             loaded = torch.load(resume_from, map_location="cpu", weights_only=False)
-            # The contract's one read: every restore below indexes this projection, never loaded.
-            try:
-                ckpt = {k: loaded[k] for k in _RESUME_KEYS}
-            except KeyError:
-                missing = [k for k in _RESUME_KEYS if k not in loaded]
+            names = [STATE_DICT_KEY, *(f.name for f in fields(_ResumeState))]
+            missing = [name for name in names if name not in loaded]
+            if missing:
                 raise ValueError(
                     f"Cannot resume from {resume_from}: checkpoint is missing {missing}. Resume "
-                    "from a periodic checkpoint_epoch_*.pt, or start a fresh run."
-                ) from None
-            model.load_state_dict(ckpt[STATE_DICT_KEY])
-            resume_stage = ckpt["stage"]
-            resume_stage_epoch = ckpt["stage_epoch"]
-            run.current_epoch = ckpt["epoch"]
-            run.best_metric = ckpt["best_metric"]
-            es_best = ckpt["es_best"]
-            es_counter = ckpt["es_counter"]
-            global_step = ckpt["global_step"]
+                    "from a periodic checkpoint_epoch_*.pt, or start a fresh run.")
+            # The contract's one read: every restore below reads this projection, never loaded.
+            ckpt = _ResumeState(**{name: loaded[name] for name in names[1:]})
+            model.load_state_dict(loaded[STATE_DICT_KEY])
+            resume_stage = ckpt.stage
+            resume_stage_epoch = ckpt.stage_epoch
+            run.current_epoch = ckpt.epoch
+            run.best_metric = ckpt.best_metric
+            es_best = ckpt.es_best
+            es_counter = ckpt.es_counter
+            global_step = ckpt.global_step
             # After the fresh set_seed() above, which also configures cudnn, so the resumed
             # streams overwrite the freshly-seeded ones.
-            restore_rng_state(ckpt)
+            restore_rng_state(vars(ckpt))
             logger.info("Resuming from %s at stage %d, stage_epoch %d (global epoch %d)",
                         resume_from, resume_stage, resume_stage_epoch, run.current_epoch)
 
@@ -724,11 +718,11 @@ def train(
             start_epoch = 0
             if stage_idx == resume_stage and ckpt is not None:
                 start_epoch = resume_stage_epoch
-                optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+                optimizer.load_state_dict(ckpt.optimizer_state_dict)
                 if scheduler is not None:
-                    scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+                    scheduler.load_state_dict(ckpt.scheduler_state_dict)
                 if scaler is not None:
-                    scaler.load_state_dict(ckpt["scaler_state_dict"])
+                    scaler.load_state_dict(ckpt.scaler_state_dict)
                 ckpt = None
 
             for epoch in range(start_epoch, stage_epochs):
@@ -823,12 +817,11 @@ def train(
                 # Suppress the scheduler during warmup epochs.
                 if not in_warmup:
                     if is_plateau:
-                        scheduler.step(val_metrics.get("val_loss", avg_loss))
+                        scheduler.step(val_metrics.get(VAL_LOSS_KEY, avg_loss))
                     else:
                         scheduler.step()
 
                 epoch_metrics = {
-                    "epoch": run.current_epoch,
                     "stage": stage_idx,
                     "train_loss": round(avg_loss, 6),
                     "lr": current_lr,
@@ -845,7 +838,7 @@ def train(
                     tb_writer.add_scalar("train/loss", avg_loss, run.current_epoch)
                     tb_writer.add_scalar("train/lr", current_lr, run.current_epoch)
                     for k, v in val_metrics.items():
-                        if _is_scalar_metric(v):
+                        if scalar_number(v):
                             tb_writer.add_scalar(f"val/{k}", v, run.current_epoch)
                     tb_writer.flush()
 
@@ -854,13 +847,13 @@ def train(
 
                 extra_val_metrics = " ".join(
                     f"{k}={v:.4f}" for k, v in val_metrics.items()
-                    if k != "val_loss" and _is_scalar_metric(v))
+                    if k != VAL_LOSS_KEY and scalar_number(v))
                 # A task whose evaluation reports no loss at all carries val_loss=None, which a
                 # float format raises on: say what it is rather than print a 0 nobody measured.
-                val_loss = val_metrics.get("val_loss")
+                val_loss = val_metrics.get(VAL_LOSS_KEY)
                 logger.info("Epoch %d stage %d loss=%.4f val_loss=%s lr=%.2e%s",
                     run.current_epoch, stage_idx, avg_loss,
-                    f"{val_loss:.4f}" if _is_scalar_metric(val_loss) else val_loss, current_lr,
+                    f"{val_loss:.4f}" if scalar_number(val_loss) else val_loss, current_lr,
                     f" {extra_val_metrics}" if extra_val_metrics else "")
 
                 if _improves(sel, run.best_metric, higher_is_better=higher_is_better):
@@ -868,7 +861,7 @@ def train(
                     best_payload = {
                         STATE_DICT_KEY: {k: v.detach().cpu().clone()
                                          for k, v in model.state_dict().items()},
-                        "metrics": _checkpoint_metrics(epoch_metrics),
+                        METRICS_KEY: _checkpoint_metrics(epoch_metrics),
                         "stage": stage_idx, "epoch": run.current_epoch,
                     }
 
@@ -911,12 +904,12 @@ def train(
         if not diverged:
             if best_payload is not None:
                 run.saved["model_best"] = write_checkpoint(
-                    {**best_payload, "config": config}, checkpoint_path(out_dir, "model_best"))
+                    {**best_payload, CONFIG_KEY: config}, checkpoint_path(out_dir, "model_best"))
             last_epoch_metrics = run.metrics_history[-1] if run.metrics_history else {}
             run.saved["model_final"] = write_checkpoint({
                 STATE_DICT_KEY: model.state_dict(),
-                "config": config,
-                "metrics": _checkpoint_metrics(last_epoch_metrics),
+                CONFIG_KEY: config,
+                METRICS_KEY: _checkpoint_metrics(last_epoch_metrics),
             }, checkpoint_path(out_dir, "model_final"))
 
         if diverged:

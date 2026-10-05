@@ -5,12 +5,13 @@ import { metaApi } from "@/api/meta";
 import { sessionsApi } from "@/api/sessions";
 import { useStore } from "@/store";
 import { MetaTab } from "@/tabs/MetaTab";
+import { openTestProject } from "@/test/store";
 
 const initialStoreState = useStore.getState();
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
-  useStore.setState({ openProject: { id: "a1b2c3d4e5f6", path: "/proj" } });
+  openTestProject();
   vi.spyOn(metaApi, "reports").mockResolvedValue({ reports: [], count: 0, total_available: 0 });
   vi.spyOn(metaApi, "retrospectives").mockResolvedValue({
     retrospectives: [],

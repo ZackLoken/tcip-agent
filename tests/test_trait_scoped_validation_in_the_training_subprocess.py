@@ -9,22 +9,9 @@ in-process calls.
 from __future__ import annotations
 
 import os
-import time
 from pathlib import Path
 
 import pytest
-
-
-def _wait_terminal(project: Path, run_id: str, seconds: float) -> str:
-    from tcip_mcp.tools import training_tools
-
-    deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        status = training_tools.monitor_training(project, run_id)
-        if status.get("status") in ("completed", "failed", "canceled"):
-            return str(status.get("status"))
-        time.sleep(0.5)
-    pytest.fail("timed out waiting for the training subprocess to reach a terminal state")
 
 
 def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_entry_alone(
@@ -41,9 +28,13 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
-    from tests._producer_fixtures import seed_leaf_detection_dataset
+    from tcip_annotation.state import Annotation, BBox
 
-    images_dir, _val_images = seed_leaf_detection_dataset(tmp_path / "ds")
+    from tests._producer_fixtures import seed_labeled_images
+
+    images_dir = seed_labeled_images(
+        tmp_path / "ds" / "images" / "train",
+        [Annotation(subject="leaf", geometry=BBox(10, 10, 30, 30))], n=2, width=128, height=128)
     proposed = propose_and_confirm(
         tmp_path, entry("leaf", ("leaf_length",), localization=CENTER_MATCH))
 
@@ -60,6 +51,8 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
     assert "error" not in res, res
     assert res["pid"] != os.getpid()
 
-    assert _wait_terminal(tmp_path, res["experiment_id"], 180) == "completed"
+    from tests._verified_checkpoint_fixtures import run_to_end
+
+    assert run_to_end(tmp_path, res["experiment_id"], seconds=180)["state"] == "completed"
 
     assert read_trait("leaf", tmp_path).revisions == (proposed,)

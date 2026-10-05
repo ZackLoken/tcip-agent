@@ -223,19 +223,27 @@ class TrainContext:
     def _epoch_sink(self, epoch: int, metrics: dict) -> None:
         """Append one epoch's metrics to the run's ``metrics.jsonl`` in their stored form, stamped
         with ``epoch`` and the instant, after firing ``epoch_hook`` if attached with the metrics
-        the body produced, so a diverged loss keeps comparing as the worst one. A row JSON cannot
-        hold raises, naming the field.
+        the body produced, so a diverged loss keeps comparing as the worst one. Refuses
+        (``ValueError``) metrics carrying either stamp's key; a row JSON cannot hold raises,
+        naming the field.
         """
         from tcip_mcp.audit import now_iso
-        from tcip_mcp.experiments import METRICS_FILE, append_row, require_open
+        from tcip_mcp.experiments import (
+            EPOCH_KEY, METRICS_FILE, TIMESTAMP_KEY, append_row, require_open,
+        )
         from tcip_mcp.pipelines.training.generic_trainer import _checkpoint_metrics
 
+        stamped = sorted({EPOCH_KEY, TIMESTAMP_KEY} & metrics.keys())
+        if stamped:
+            raise ValueError(
+                f"the metrics carry {stamped}, which the metrics log stamps on each row itself; "
+                "pass the epoch as the sink's own argument.")
         require_open(self.run_dir)
         self._epoch = epoch
         if self.epoch_hook is not None:
             self.epoch_hook(epoch, metrics)
         append_row(self.run_dir / METRICS_FILE,
-                   {"epoch": epoch, "timestamp": now_iso(), **_checkpoint_metrics(metrics)})
+                   {**_checkpoint_metrics(metrics), EPOCH_KEY: epoch, TIMESTAMP_KEY: now_iso()})
 
     def set_final_weights(self, tag: str) -> None:
         """Declare the checkpoint this body saved under ``tag`` (:meth:`save_checkpoint`) the
@@ -257,10 +265,12 @@ class TrainContext:
 
     def log_metrics(self, epoch: int, metrics: dict) -> None:
         """Custom-loop metric sink: the run's own metrics log plus TensorBoard."""
+        from tcip_store import scalar_number
+
         self._epoch_sink(epoch, metrics)
         if self.tb is not None:
             for k, v in metrics.items():
-                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                if scalar_number(v):
                     self.tb.add_scalar(k, v, epoch)
             self.tb.flush()
 
@@ -275,9 +285,10 @@ class TrainContext:
         ``config`` is always this run's own.
         """
         from tcip_mcp.experiments import require_open
+        from tcip_mcp.pipelines.model_build import CONFIG_KEY
 
         require_open(self.run_dir)
-        if "config" in state:
+        if CONFIG_KEY in state:
             raise ValueError(
                 "ctx.save_checkpoint: state carries a 'config' key, reserved for this run's own "
                 "launch config, the record every publishing door reads this run's scope from; "
@@ -295,7 +306,7 @@ class TrainContext:
             for parent in parents:
                 node = node.get(parent) or {}
             node.pop(leaf, None)
-        self.run.saved[tag] = write_checkpoint({**state, "config": config},
+        self.run.saved[tag] = write_checkpoint({**state, CONFIG_KEY: config},
                                                checkpoint_path(self.run_dir, tag))
         return str(self.run.saved[tag])
 
@@ -323,7 +334,9 @@ class TrainContext:
             try:
                 from torch.utils.tensorboard import SummaryWriter
 
-                self._tb = SummaryWriter(log_dir=str(self.run_dir / "tensorboard"))
+                from tcip_mcp.experiments import TENSORBOARD_DIR
+
+                self._tb = SummaryWriter(log_dir=str(self.run_dir / TENSORBOARD_DIR))
             except Exception:  # noqa: BLE001
                 self._tb = None
         return self._tb

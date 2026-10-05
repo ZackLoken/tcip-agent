@@ -19,6 +19,7 @@ torch = pytest.importorskip("torch")
 
 from tcip_mcp.audit import audit_log_key  # noqa: E402
 from tcip_mcp.experiments import observe  # noqa: E402
+from tcip_mcp.pipelines.model_build import CONFIG_KEY, METRICS_KEY, STATE_DICT_KEY  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope  # noqa: E402
 from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
@@ -35,16 +36,13 @@ def _audit_events(root, tool="training_run"):
 def _context(tmp_path, config: dict, **kwargs) -> tuple[TrainContext, Path]:
     """A context over a run directory the launcher's own writer opened over ``config``, its run
     training under the data section the launch resolved, as the child's own entry trains it."""
-    from tcip_mcp.experiments import RUN_FILE, read_record
-    from tcip_mcp.pipelines.training.run_registry import TrainRun, trained_config
+    from tcip_mcp.experiments import observe
+    from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._verified_checkpoint_fixtures import opened_run
 
     run_dir = opened_run(tmp_path, config, resume_from=kwargs.get("resume_from"))
-    record = read_record(run_dir / RUN_FILE)
-    run = TrainRun(id=run_dir.name, config=trained_config(record),
-                   objective=record["resolved"]["objective"], project=tmp_path,
-                   output_dir=str(run_dir))
-    return TrainContext(run=run, **{"train_loader": None, **kwargs}), run_dir
+    return TrainContext(run=observed_run(observe(run_dir)),
+                        **{"train_loader": None, **kwargs}), run_dir
 
 
 def _bespoke(tmp_path, body: str) -> dict:
@@ -59,7 +57,7 @@ def _agent_train(ctx):
     assert ctx.should_cancel() is False
     ctx.log_metrics(1, {"train_loss": 0.5, "val_loss": 0.4})
     ctx.save_checkpoint(
-        {"model_state_dict": {}, "metrics": {"val_loss": 0.4, "epoch": 1}}, "model_best")
+        {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.4, "epoch": 1}}, "model_best")
 
 
 def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path):
@@ -73,7 +71,7 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
     assert ctx.run.status == "completed"
     assert [row["epoch"] for row in read_rows(run_dir / METRICS_FILE)[0]] == [1]
     best = torch.load(run_dir / "model_best.pt", weights_only=False)
-    assert best["config"]["model_source"] == config["model_source"]
+    assert best[CONFIG_KEY]["model_source"] == config["model_source"]
     assert "model_source" not in best
 
     # Body is bracketed on the append-only audit log (open running + close completed).
@@ -90,10 +88,8 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
     assert verified.experiment_id == run_dir.name
 
 
-def test_a_run_whose_closing_audit_line_is_refused_ends_failed_naming_it(tmp_path, monkeypatch):
-    """The body completes and saves its deliverable; the closing ``training_run`` append is
-    refused, so the final status reads ``failed`` naming the unwritten line, names no checkpoint,
-    and the log holds the opening line alone."""
+def _refuse_the_closing_audit_line(monkeypatch) -> None:
+    """Every ``audit.append`` but a ``running`` line raises a full-disk ``OSError``."""
     import tcip_mcp.audit as audit
 
     real_append = audit.append
@@ -104,6 +100,13 @@ def test_a_run_whose_closing_audit_line_is_refused_ends_failed_naming_it(tmp_pat
         real_append(key, entry)
 
     monkeypatch.setattr(audit, "append", refuse_the_closing_line)
+
+
+def test_a_run_whose_closing_audit_line_is_refused_ends_failed_naming_it(tmp_path, monkeypatch):
+    """The body completes and saves its deliverable; the closing ``training_run`` append is
+    refused, so the final status reads ``failed`` naming the unwritten line, names no checkpoint,
+    and the log holds the opening line alone."""
+    _refuse_the_closing_audit_line(monkeypatch)
     ctx, run_dir = _context(tmp_path, _bespoke(tmp_path, "_agent_train"))
     run_training_envelope(ctx)
 
@@ -124,16 +127,7 @@ def test_a_failed_run_whose_closing_audit_line_is_refused_names_both_causes(
 ):
     """The body fails and the closing append is refused: the final status names the body's
     error and the unwritten line, neither hiding the other."""
-    import tcip_mcp.audit as audit
-
-    real_append = audit.append
-
-    def refuse_the_closing_line(key, entry):
-        if entry["status"] != "running":
-            raise OSError("the log's disk is full")
-        real_append(key, entry)
-
-    monkeypatch.setattr(audit, "append", refuse_the_closing_line)
+    _refuse_the_closing_audit_line(monkeypatch)
     ctx, run_dir = _context(tmp_path, _bespoke(tmp_path, "_agent_train_raises"))
     run_training_envelope(ctx)
 
@@ -146,7 +140,7 @@ def test_a_failed_run_whose_closing_audit_line_is_refused_names_both_causes(
 def _agent_train_default_tag_no_override(ctx):
     """Saves under the default tag ("checkpoint"), not model_best/model_final, and never
     calls set_final_weights. A loop like this produces no discoverable deliverable."""
-    ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.4}})
+    ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.4}})
 
 
 def test_envelope_default_tag_with_no_override_fails_run_and_completes_nothing(tmp_path):
@@ -185,7 +179,7 @@ def test_envelope_declared_deliverable_never_written_fails_run_and_completes_not
 
 def _agent_train_explicit_override(ctx):
     """Saves under a non-conventional tag, but explicitly declares it the deliverable."""
-    ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.4}}, "custom_tag")
+    ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.4}}, "custom_tag")
     ctx.set_final_weights("custom_tag")
 
 

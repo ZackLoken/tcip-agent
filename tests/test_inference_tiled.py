@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._producer_fixtures import gray_frame
+
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
@@ -22,13 +24,6 @@ def _detection_checkpoint(tmp_path: Path) -> str:
     return registered_checkpoint(tmp_path, model_source={
         "builder": "tests.bespoke_models:build_bespoke_detection",
         "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2}, "task": "detection"})
-
-
-def _image(tmp_path: Path, size: int = 128) -> str:
-    from PIL import Image
-    p = tmp_path / "img.png"
-    Image.new("RGB", (size, size), (120, 120, 120)).save(p)
-    return str(p)
 
 
 def _tiled_pass(tmp_path: Path, ckpt: str):
@@ -50,7 +45,7 @@ def _sliced(p, source, execution=None, **kwargs) -> dict:
 def test_predict_sliced_shape_and_bounds(tmp_path):
     p = _tiled_pass(tmp_path, _detection_checkpoint(tmp_path))
 
-    r = _sliced(p, _image(tmp_path))
+    r = _sliced(p, gray_frame(tmp_path))
 
     assert {"image", "width", "height", "boxes", "scores", "labels", "count", "cap_hit"} <= set(r)
     assert isinstance(r["count"], int) and r["count"] == len(r["boxes"])
@@ -64,7 +59,7 @@ def test_predict_sliced_stamps_cap_hit_when_the_full_frame_cap_truncates(tmp_pat
     """The post-merge full-frame cap truncates a dense result and stamps ``cap_hit`` from the
     pre-truncation count; sitting exactly at the cap still reads as hit."""
     p = _tiled_pass(tmp_path, _detection_checkpoint(tmp_path))
-    img = _image(tmp_path)
+    img = gray_frame(tmp_path)
     uncapped = _sliced(p, img, p.execution.with_value("max_dets", None, "explicit"))
     assert uncapped["count"] > 1, "the bespoke model must produce more than one raw detection " \
         "for this test to force a real truncation, not merely assert an untested edge"
@@ -83,7 +78,7 @@ def test_predict_sliced_whole_decode_refuses_prior_or_progress_by_name(tmp_path)
     has no resume seam to feed them into, and silently dropping them would let a caller believe a
     whole-decode pass resumed when it quietly started over."""
     p = _tiled_pass(tmp_path, _detection_checkpoint(tmp_path))
-    img = _image(tmp_path)
+    img = gray_frame(tmp_path)
     empty_prior = {"slices": [], "predictions": []}
 
     with pytest.raises(ValueError, match="resume seam"):
@@ -96,7 +91,7 @@ def test_the_prepared_pass_tiles_when_asked_and_not_otherwise(tmp_path):
     from tests._verified_checkpoint_fixtures import predicted_over
 
     ckpt = _detection_checkpoint(tmp_path)
-    images_dir = str(Path(_image(tmp_path)).parent)
+    images_dir = str(Path(gray_frame(tmp_path)).parent)
 
     tiled, tiled_results = predicted_over(tmp_path, ckpt, images_dir, tile=True,
                                           tile_size=TILE, conf=0.0)
@@ -150,7 +145,7 @@ def test_the_pass_decodes_through_the_checkpoints_own_recorded_attributes(tmp_pa
         data={"num_channels": 3, "scope": {"subject": "bud"}},
         registry=cr.SubjectRegistry(subjects=(cr.Subject(name="bud", attributes=attributes),)))
 
-    p, results = predicted_over(tmp_path, ckpt, str(Path(_image(tmp_path)).parent), conf=0.0)
+    p, results = predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path)).parent), conf=0.0)
 
     assert p.scope.attributes == attributes
     for result in results:

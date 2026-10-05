@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
+from tests._cli_fixtures import run_tcip
 
 
 def _ingested_bucket(tmp_path: Path) -> Path:
@@ -104,16 +105,11 @@ def test_scan_dataset_image_census_refuses_a_stem_collision(tmp_path):
 def test_doctor_script_reports_a_stem_collision_with_no_label_file_instead_of_crashing(tmp_path):
     """A collision with no label record for its stem surfaces as a finding of the doctor's one
     census, not a crashed subprocess."""
-    import subprocess
-    import sys
-
     bucket = _ingested_bucket(tmp_path)
     _collide(bucket)
     project_root = bucket.parent.parent
 
-    res = subprocess.run(
-        [sys.executable, "-m", "tcip_web.cli", "doctor", str(project_root)],
-        capture_output=True, text=True)
+    res = run_tcip("doctor", [str(project_root)])
 
     assert "Traceback" not in res.stderr, res.stderr
     assert res.returncode == 2
@@ -122,16 +118,11 @@ def test_doctor_script_reports_a_stem_collision_with_no_label_file_instead_of_cr
 
 def test_doctor_script_reports_a_stem_collision_once_not_once_per_check(tmp_path):
     """The doctor enumerates ``images/`` once, so a breeder reads about a collision once."""
-    import subprocess
-    import sys
-
     bucket = _ingested_bucket(tmp_path)
     _collide(bucket)
     project_root = bucket.parent.parent
 
-    res = subprocess.run(
-        [sys.executable, "-m", "tcip_web.cli", "doctor", str(project_root)],
-        capture_output=True, text=True)
+    res = run_tcip("doctor", [str(project_root)])
 
     assert "Traceback" not in res.stderr, res.stderr
     assert res.stdout.count("name more than one logical image") == 1, res.stdout

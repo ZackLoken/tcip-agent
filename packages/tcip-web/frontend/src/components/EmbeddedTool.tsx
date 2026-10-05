@@ -1,6 +1,6 @@
 /**
- * A titled chrome bar over an iframe, for the tools the platform runs beside the app
- * (TensorBoard, Ray's dashboard). Presentation only: launching, polling and stopping whatever
+ * A titled chrome bar over an iframe, for a tool the platform runs beside the app
+ * (TensorBoard). Presentation only: launching, polling and stopping whatever
  * is embedded belong to the caller, which mounts this once it has a url, a launch in flight,
  * or a failure to show.
  *

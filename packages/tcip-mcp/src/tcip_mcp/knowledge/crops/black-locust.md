@@ -61,7 +61,7 @@ living plant, and which cannot come from imagery at all. The imaging modality
 - Growth / habit: `plant_growth_habit` (nominal class), `thorns` (ordinal),
   `suckers` (ordinal), `seeds` (binary, inferred from pod presence).
 - Structural size, but requires metric-calibrated 3D that TCIP does not yet
-  build. CLAUDE.md scope today is 2D imagery, object detection first;
+  build. The platform's scope today is 2D imagery, object detection first;
   LiDAR/SfM point clouds are not built. So `plant_height` (m) and `dbh` (m, at
   1.37 m) are field-*sensible* in principle but are not deliverable from current
   2D pipelines: a raw pixel height or width is not meters (see Measurement
@@ -158,10 +158,7 @@ Mechanics live in the `annotation` skill; the crop-specific hard parts:
 
 ## Measurement integrity
 
-Per the CLAUDE.md measurement-integrity invariant (validate against a reference sized to the
-trait: GT annotations, or a breeder-confirmed sample of the model's own outputs (review-confirmation),
-not dense GT for every trait; geometry needs a validated mask + physical scale). Black-locust-specific
-traps:
+Black-locust-specific traps:
 
 - `dbh` / `plant_height`: an uncalibrated pixel width or bounding-box height is
   not a metric diameter or height. These need calibrated 3D (LiDAR/SfM with

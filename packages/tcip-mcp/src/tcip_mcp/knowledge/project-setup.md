@@ -1,6 +1,6 @@
 ---
 name: project-setup
-description: "The front-door arc: turn a breeder's raw pile of photos plus a stated goal into a structured, trainable TCIP project. Covers creating the project (its id, display name and site), ingest_images (capture-date bucketing), translating a goal into a trait/task/subjects.json, SAM-assisted bootstrap annotation, splitting, bespoke model design, training, inference, and review handoff. Load this when someone arrives with unstructured images and a phenotyping goal rather than a prepared dataset."
+description: "The front-door arc: turn a breeder's raw pile of photos plus a stated goal into a structured, trainable TCIP project. Covers creating the project (its id, display name and site), ingest_images (capture-date bucketing), translating a goal into a trait/task/subjects.json, model-proposed bootstrap annotation, splitting, bespoke model design, training, inference, and review handoff. Load this when someone arrives with unstructured images and a phenotyping goal rather than a prepared dataset."
 ---
 
 # Project setup: from raw photos to a trainable project
@@ -182,10 +182,5 @@ dir, keeping the project's id, round-tripping back to an `inspect_project`-visib
 training run started for a project keeps writing to that project whatever the GUI opens
 meanwhile.
 
-## Invariants (from CLAUDE.md)
-
-- State changes go through audited MCP tools, each leaving one audit line per act (the tool's own,
-  or its library's event); `ingest_images` is one.
-- Experiments are immutable: a new run each time; never overwrite history.
-- Confirm before destructive/outward actions (moving source images, overwriting weights,
-  exporting deliverables). Copy-by-default keeps ingestion non-destructive.
+`ingest_images` leaves one audit line per act and copies by default, so ingestion never moves a
+source image.

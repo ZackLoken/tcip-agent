@@ -14,6 +14,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from tests._producer_fixtures import write_image
+
 #: Neutral gray, so a drawn color's dominance is the same size in either channel.
 BACKGROUND = (100, 100, 100)
 #: The source frame; served at half resolution below, which is what places the shapes.
@@ -37,9 +39,7 @@ SHAPES = [
 
 
 def _canvas_image(tmp_path: Path) -> str:
-    path = tmp_path / "canvas.png"
-    Image.new("RGB", (FRAME_W, FRAME_H), BACKGROUND).save(path)
-    return str(path)
+    return str(write_image(tmp_path / "canvas.png", (FRAME_W, FRAME_H), BACKGROUND))
 
 
 def _ago(seconds: float) -> str:

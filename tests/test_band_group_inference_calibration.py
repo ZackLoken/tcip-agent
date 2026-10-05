@@ -19,6 +19,8 @@ import pytest
 import tifffile
 
 torch = pytest.importorskip("torch")
+
+from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
 pytest.importorskip("torchvision")
 
 TILE = 32
@@ -50,7 +52,7 @@ def _detection_checkpoint(tmp_path: Path) -> str:
               "data": {"num_channels": 2, "scope": {"subject": "bud", "attributes": []}}}
     model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "model_best.pt"
-    torch.save({"model_state_dict": model.state_dict(), "config": config}, str(ckpt))
+    torch.save({STATE_DICT_KEY: model.state_dict(), CONFIG_KEY: config}, str(ckpt))
     result = register_model(tmp_path, name="band-group-test-model", checkpoint_path=str(ckpt),
                             config={})
     assert "error" not in result, result

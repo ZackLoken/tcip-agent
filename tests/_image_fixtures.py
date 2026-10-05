@@ -33,14 +33,6 @@ def write_geo_image(path: Path, lat: float, lon: float, when: Any, image: Any = 
     frame.save(path, exif=exif, quality=100, subsampling=0)
 
 
-def write_image(path: Path, size: int = 100) -> None:
-    """A flat gray ``size`` by ``size`` RGB image at ``path``, its parent created."""
-    from PIL import Image
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (size, size), (120, 120, 120)).save(path)
-
-
 def write_noise_image(path: Path, size: int, bright: bool = False, span: float = 0.3) -> None:
     """A ``size`` by ``size`` RGB image of uniform noise at ``path``, its parent created: values
     in [0, ``span``), or offset by 0.7 when ``bright``."""

@@ -7,18 +7,11 @@ carries an audit line, both under that project.
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 from PIL import Image
 
-
-def _run(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, "-m", "tcip_web.cli", "overlay-reference-grid", *args],
-        cwd=str(cwd), capture_output=True, text=True, timeout=60,
-    )
+from tests._cli_fixtures import run_tcip
 
 
 def test_refuses_without_a_project_and_plants_no_store(tmp_path):
@@ -27,7 +20,7 @@ def test_refuses_without_a_project_and_plants_no_store(tmp_path):
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
-    result = _run(["--image", str(img)], cwd=cwd)
+    result = run_tcip("overlay-reference-grid", ["--image", str(img)], cwd=cwd)
 
     assert result.returncode != 0, result.stdout
     assert "--project" in result.stderr
@@ -41,7 +34,7 @@ def test_renders_the_overlay_and_echoes_grid_geometry_under_the_named_project(pr
     cwd = tmp_path.parent / "operator_cwd"
     cwd.mkdir()
 
-    result = _run(["--image", str(img), "--project", str(project), "--tile-size", "80"], cwd=cwd)
+    result = run_tcip("overlay-reference-grid", ["--image", str(img), "--project", str(project), "--tile-size", "80"], cwd=cwd)
 
     assert result.returncode == 0, result.stderr
     body = json.loads(result.stdout)

@@ -9,10 +9,8 @@ nothing here generalizes from one trait's own vocabulary.
 from __future__ import annotations
 
 import asyncio
-import csv
 import os
 import shutil
-import threading
 from datetime import datetime, timedelta
 from collections.abc import Iterable
 from pathlib import Path
@@ -25,8 +23,9 @@ from tcip_mcp.tools.phenology_tools import build_plant_mapping
 from tcip_mcp.tools.project_tools import initialize_project, register_dataset
 from tcip_mcp.traits import registered_crops
 
+from tests._audit_fixtures import held_by_another_writer
 from tests._image_fixtures import write_geo_image
-from tests._mapping_fixtures import register_plant_registry_for
+from tests._mapping_fixtures import register_plant_registry_for, write_plant_csv
 from tests.test_second_trait_acceptance import BLOOM_STATE, FLOWERS, _seed_currant_bloom_trait
 
 PLANTS = [
@@ -129,12 +128,7 @@ def _write_scene(
                 images.append(images_root / date / f"{stem}.jpg")
         preds_by_date[date] = _publish(dataset_root.parent, f"live/{date}", images)
 
-    plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
-    with plant_csv.open("w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(["plot_name", "accession_name", "WGS84_centroid_x", "WGS84_centroid_y"])
-        for p in plants:
-            w.writerow([p["plot"], p["accession"], p["lon"], p["lat"]])
+    plant_csv = write_plant_csv(dataset_root.parent / f"{dataset_root.name}_plants.csv", plants)
     return images_root, plant_csv, preds_by_date
 
 
@@ -298,9 +292,7 @@ def test_deliver_phenology_milestones_refuses_a_plant_csv_rewritten_in_place(
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
-    plant_csv.write_text(
-        "plot_name,accession_name,WGS84_centroid_x,WGS84_centroid_y\n"
-        "P1,acc-Z,-90.058000,43.19670\n", encoding="utf-8")
+    write_plant_csv(plant_csv, [{**PLANTS[0], "accession": "acc-Z"}])
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
@@ -633,34 +625,19 @@ def test_a_receipt_that_cannot_be_written_fails_persist_mapping_and_the_record_s
         dataset_id="whatever-id", project=tmp_path,
         plant_registry={"name": "unregistered", "digest": "0" * 64})
 
-    holding, release = threading.Event(), threading.Event()
-
-    def hold() -> None:
-        with ts.transaction(audit_log_key(tmp_path), timeout_s=30):
-            holding.set()
-            release.wait(30)
-
-    holder = threading.Thread(target=hold)
-    holder.start()
-    try:
-        assert holding.wait(30)
-        with pytest.raises(AuditEntryNotWritten, match="plant_mapping_built"):
-            plant_mapping.persist_mapping(build, tmp_path, actor=None)
-    finally:
-        release.set()
-        holder.join(30)
+    with held_by_another_writer(audit_log_key(tmp_path)), pytest.raises(
+            AuditEntryNotWritten, match="plant_mapping_built"):
+        plant_mapping.persist_mapping(build, tmp_path, actor=None)
 
     with pytest.raises(ValueError, match="receipt"):
         plant_mapping.load_mapping(tmp_path, "valley")
 
 
 def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, client, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fastapi.testclient import TestClient
     from tcip_mcp.audit import audit_log_key
     from tcip_store.sqlite_backend import SqliteBackend
-    from tcip_web.app import app
     from tcip_web.state import store
 
     _init(tmp_path)
@@ -669,35 +646,20 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     asyncio.run(store.open_project(tmp_path.resolve()))
 
-    client = TestClient(app, base_url="http://127.0.0.1")
     ts.bind(SqliteBackend(lock_timeout_s=0.2))
 
-    holding, release = threading.Event(), threading.Event()
-
-    def hold() -> None:
-        with ts.transaction(audit_log_key(tmp_path), timeout_s=30):
-            holding.set()
-            release.wait(30)
-
-    holder = threading.Thread(target=hold)
-    holder.start()
-    try:
-        assert holding.wait(30)
+    with held_by_another_writer(audit_log_key(tmp_path)):
         resp = client.post("/api/results/plant_mapping/build", json={
             "name": "valley", "images_root": str(images_root), "plant_registry": registry,
-        "user": "tester",
+            "user": "tester",
         })
-        assert resp.status_code == 409, resp.text
-        detail = resp.json()["detail"]
-        assert isinstance(detail, dict), detail
-        assert detail.get("error") == "audit_entry_not_written"
-        assert "plant_mapping_built" in (detail.get("message") or "")
-        # A record no receipt names is no mapping a reader loads, so nothing is offered as
-        # committed.
-        assert detail.get("committed") is None
-    finally:
-        release.set()
-        holder.join(30)
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert isinstance(detail, dict), detail
+    assert detail.get("error") == "audit_entry_not_written"
+    assert "plant_mapping_built" in (detail.get("message") or "")
+    # A record no receipt names is no mapping a reader loads, so nothing is offered as committed.
+    assert detail.get("committed") is None
     with pytest.raises(ValueError, match="no plant_mapping_built receipt"):
         plant_mapping.load_mapping(tmp_path, "valley")
 
@@ -714,13 +676,11 @@ def _cite_mapping(tmp_path: Path, name: str, dataset_root: Path,
 
 
 def test_a_supersede_whose_receipt_fails_answers_409_and_the_archive_still_loads(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, client, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A rebuild that supersedes a cited mapping moves the old record to its archive name, then
     writes the new record and its one receipt. When that receipt is refused the door answers 409
     with ``committed`` null, and the archived record still loads on its own build's receipt."""
-    from fastapi.testclient import TestClient
-    from tcip_web.app import app
     from tcip_web.state import store
 
     _init(tmp_path)
@@ -729,8 +689,7 @@ def test_a_supersede_whose_receipt_fails_answers_409_and_the_archive_still_loads
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     asyncio.run(store.open_project(tmp_path.resolve()))
 
-    client = TestClient(app, base_url="http://127.0.0.1")
-    first = client.post("/api/results/plant_mapping/build", json={
+    first =client.post("/api/results/plant_mapping/build", json={
         "name": "valley", "images_root": str(images_root), "plant_registry": registry,
         "user": "tester",
     })
@@ -890,14 +849,7 @@ def test_a_read_capture_whose_plants_own_csv_is_missing_discloses_rather_than_re
     dataset_root = _dataset(tmp_path)
     images_root, _plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
 
-    per_plant_csvs = []
-    for p in PLANTS:
-        path = tmp_path / f"plants_{p['plot']}.csv"
-        with path.open("w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow(["plot_name", "accession_name", "WGS84_centroid_x", "WGS84_centroid_y"])
-            w.writerow([p["plot"], p["accession"], p["lon"], p["lat"]])
-        per_plant_csvs.append(path)
+    per_plant_csvs = [write_plant_csv(tmp_path / f"plants_{p['plot']}.csv", [p]) for p in PLANTS]
     build_res = build_plant_mapping(
         tmp_path, name="valley", images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, per_plant_csvs))
@@ -934,14 +886,7 @@ def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_r
     images_root, _plant_csv, preds_by_date = _write_scene(
         dataset_root, dates=[DATES[0]], plants=plants3, unpredicted=frozenset({p3_stem}))
 
-    per_plant_csvs = []
-    for p in plants3:
-        path = tmp_path / f"plants_{p['plot']}.csv"
-        with path.open("w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow(["plot_name", "accession_name", "WGS84_centroid_x", "WGS84_centroid_y"])
-            w.writerow([p["plot"], p["accession"], p["lon"], p["lat"]])
-        per_plant_csvs.append(path)
+    per_plant_csvs = [write_plant_csv(tmp_path / f"plants_{p['plot']}.csv", [p]) for p in plants3]
     build_res = build_plant_mapping(
         tmp_path, name="valley", images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, per_plant_csvs))

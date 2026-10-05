@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp.delivery import DeliveryRefused, record_acknowledgment
-from tests import _trait_fixtures as fx
+from tests import _trait_fixtures as fx, csv_rows
 
 SCOPE = {"subject": fx.COUNT_SUBJECT}
 
@@ -52,11 +52,6 @@ def _acknowledged(project: Path, bucket: str) -> dict:
     return acknowledged(project, lambda ack: _deliver(project, bucket, ack))
 
 
-def _rows(result: dict) -> list[dict]:
-    with open(result["csv_path"], newline="") as f:
-        return list(csv.DictReader(f))
-
-
 @pytest.mark.parametrize("who, why", [("", "known limitation"), ("   ", "known limitation"),
                                       ("user:breeder", ""), ("user:breeder", "\t\n")])
 def test_an_acknowledgment_names_who_and_why_both_non_empty(tmp_path, who, why):
@@ -88,7 +83,7 @@ def test_an_acknowledged_delivery_ships_stamped_unvalidated_with_the_act_on_its_
 
     assert result["validated"] is False
     assert result["acknowledged_by"] == "user:breeder"
-    assert {r["validated"] for r in _rows(result)} == {"False"}
+    assert {r["validated"] for r in csv_rows(result["csv_path"])} == {"False"}
     (event,) = read_delivery_events(tmp_path)
     assert event.acknowledgment is not None
     assert (event.acknowledgment.acknowledged_by, event.acknowledgment.reason) == (
@@ -218,7 +213,7 @@ def test_a_zero_extent_box_is_counted_by_neither_the_document_nor_the_delivery(t
     from tcip_mcp.buckets import read_bucket
 
     assert read_bucket(tmp_path / "ds", bucket).dropped_boxes == 1
-    (row,) = _rows(_acknowledged(tmp_path, bucket))
+    (row,) = csv_rows(_acknowledged(tmp_path, bucket)["csv_path"])
 
     assert int(row["detection_count"]) == 1
     assert float(row["avg_confidence"]) == pytest.approx(0.9)

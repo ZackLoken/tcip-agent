@@ -1,4 +1,4 @@
-"""Training routes: launchable configs, launch/relaunch, list runs, live metrics stream."""
+"""Training routes: launch or relaunch a run or sweep, list runs and sweeps, live metrics stream."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from tcip_store.errors import BadKey
 
+from tcip_mcp.experiments import RunRow, TrainingDetail, TrainingListing, training_listing
 from tcip_mcp.identity import actor
 from tcip_web.routes._body_common import EmptyBodyPayload, PersonPayload
 from tcip_web.state import store
@@ -19,14 +20,6 @@ from tcip_web.state import store
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/training", tags=["training"])
-
-
-@router.get("/configs")
-def list_configs_route() -> dict:
-    """Every experiment in the open project a run can be started or relaunched from."""
-    from tcip_mcp.tools.training_tools import list_launchable_configs
-
-    return {"configs": list_launchable_configs(store.open_root())}
 
 
 @router.get("/configs/{experiment_id}/splits")
@@ -42,102 +35,101 @@ def list_split_choices_route(experiment_id: str) -> dict:
     return result
 
 
-class RelaunchConfigPayload(BaseModel):
-    experiment_id: str
+class RelaunchPayload(BaseModel):
+    relaunched_from: str
     selection_dir: str | None = None
     user: str
 
 
 @router.post("/runs")
-def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
-    """Start a new run from the config a run of this project was launched with, as a fresh run id
-    with the picked one as parent, by the person ``user`` names: no config, param space or path is
-    ever submitted by the browser.
+def relaunch_route(payload: RelaunchPayload) -> dict:
+    """Start a new run or sweep from what a run or sweep of this project recorded, the one
+    ``relaunched_from`` names, by the person ``user`` names: no config, param space or path is
+    ever submitted by the browser. A run relaunches through ``launch_training`` with its launch
+    config; a sweep through ``training_tools.launch_sweep``, off the request thread in its own
+    worker process, the way a run's body runs.
 
-    An optional ``selection_dir`` names a partition the browser picked instead of the launch's own
+    An optional ``selection_dir`` names a partition the browser picked instead of a run's own
     "As recorded" data section: the launch config then carries ``data.split`` replaced wholesale
-    by ``{"selection_dir": chosen}``, and the launch's own refusal of it answers 422. A launch
-    whose audit line could not be written answers 409.
+    by ``{"selection_dir": chosen}``. A source naming nothing answers 404, a sweep source with a
+    ``selection_dir`` 422, a refusal 422, and a launch whose audit line could not be written 409.
     """
     from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.experiments import SWEEP_FILE, named_directory, observe
     from tcip_mcp.tools.training_tools import (
-        candidate_config_with_selection, launch_training, stated_config,
+        candidate_config_with_selection, launch_sweep, launch_training,
     )
     from tcip_web.routes.audit_gap import audit_gap_409
 
     person = actor(payload.user)
     project = store.open_root()
-    config = stated_config(project, payload.experiment_id)
-    if config is None:
-        raise HTTPException(404, f"no launchable config named {payload.experiment_id}")
-    if payload.selection_dir:
-        config = candidate_config_with_selection(config, payload.selection_dir)
+    source = named_directory(payload.relaunched_from, project=project)
+    if source is None:
+        raise HTTPException(404, f"no run or sweep named {payload.relaunched_from}")
     try:
-        result = launch_training(project, config, parent_experiment=payload.experiment_id,
-                                 actor=person)
+        if (source / SWEEP_FILE).is_file():
+            if payload.selection_dir:
+                raise HTTPException(422, "a sweep relaunches from its own recorded input")
+            result = launch_sweep(project, source, actor=person)
+        else:
+            config = observe(source).record["config"]
+            if payload.selection_dir:
+                config = candidate_config_with_selection(config, payload.selection_dir)
+            result = launch_training(project, config, relaunched_from=source.name, actor=person)
     except AuditEntryNotWritten as exc:
         raise audit_gap_409(exc, exc.arguments) from exc
-    except Exception as exc:
-        raise HTTPException(500, str(exc)) from exc
     if result.get("error"):
         raise HTTPException(422, detail=result)
     return result
 
 
 @router.get("/runs")
-def list_runs_route() -> dict:
-    """Every training run directory of the project (``training_tools._all_training_runs``)."""
-    from tcip_mcp.tools.training_tools import _all_training_runs
-
-    return {"runs": _all_training_runs(store.open_root())}
+def list_runs_route() -> TrainingListing:
+    """Every run and sweep of the open project (``experiments.training_listing``)."""
+    return training_listing(store.open_root())
 
 
 @router.get("/runs/{experiment_id}")
-def get_run(experiment_id: str) -> dict:
-    from tcip_mcp.tools.training_tools import monitor_training
+def get_run(experiment_id: str) -> TrainingDetail:
+    """One run, trial or sweep of the open project (``training_tools.training_detail``), 404 for
+    an id naming none."""
+    from tcip_mcp.tools.training_tools import training_detail
 
-    return monitor_training(store.open_root(), experiment_id)
+    detail = training_detail(store.open_root(), experiment_id)
+    if detail is None:
+        raise HTTPException(404, f"Run not found: {experiment_id}")
+    return detail
 
 
 @router.post("/runs/{experiment_id}/tensorboard")
 def launch_run_tensorboard(experiment_id: str, payload: EmptyBodyPayload) -> dict:
-    """Start (or reuse) a TensorBoard serving this run's log directory, keyed by that directory.
+    """Start (or reuse) a TensorBoard over the board (``experiments.board_of``) of the run, trial
+    or sweep ``experiment_id`` names, keyed by that directory.
 
-    A run with no recorded output directory, or whose output directory's ``tensorboard``
-    subdirectory holds no event file, refuses with ``no_logs: True``. A run whose own status
-    already carries an error is checked for events first: with none it reads as no-logs (with that
-    reason attached); with real event files it keeps the plain refusal.
+    A board holding no event file refuses with ``no_logs: True``, carrying the final status's
+    error when one is written; a board with events whose run or sweep ended in error refuses
+    with that error alone.
     """
+    from tcip_mcp.experiments import board_of, named_directory, observe
     from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
-    from tcip_mcp.tools.training_tools import monitor_training
 
-    status = monitor_training(store.open_root(), experiment_id)
-    if "status" not in status:
-        raise HTTPException(404, status.get("error") or f"Run not found: {experiment_id}")
-    output_dir = status.get("output_dir")
-    tb_dir = Path(f"{output_dir}/tensorboard") if output_dir else None
-    has_events = bool(tb_dir is not None and tb_dir.is_dir()
-                       and any(tb_dir.glob("events.out.tfevents*")))
-    error = status.get("error")
-    if error and has_events:
-        raise HTTPException(404, error)
-    if not has_events:
+    directory = named_directory(experiment_id, project=store.open_root())
+    if directory is None:
+        raise HTTPException(404, f"Run not found: {experiment_id}")
+    board = board_of(directory)
+    error = observe(directory).error
+    if not any(board.rglob("events.out.tfevents*")):
         raise HTTPException(
-            404,
-            {"error": error or f"run produced no logs: {experiment_id}", "no_logs": True},
-        )
-    return launch_tensorboard(f"{output_dir}/tensorboard")
+            404, {"error": error or f"run produced no logs: {experiment_id}", "no_logs": True})
+    if error:
+        raise HTTPException(404, error)
+    return launch_tensorboard(str(board))
 
 
 @router.post("/runs/{experiment_id}/cancel")
 def cancel_run_route(experiment_id: str, payload: PersonPayload) -> dict:
-    """Request graceful cancellation of a running run (stops at the next batch boundary), by the
-    person ``user`` names.
-
-    Wraps the ``cancel_training`` MCP tool: the trainer still writes ``model_final.pt``
-    so partial progress is recoverable. Status flips to 'canceled' asynchronously, unless the
-    run's divergence verdict lands first, in which case it ends 'failed' instead.
-    """
+    """Request graceful cancellation of the run, trial or sweep ``experiment_id`` names
+    (``cancel_training``), by the person ``user`` names; its refusal answers 404."""
     from tcip_mcp.tools.training_tools import cancel_training
 
     result = cancel_training(store.open_root(), experiment_id, actor=actor(payload.user))
@@ -171,7 +163,8 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
 
     A registry index that will not decode answers 409 naming why; the ranking's own error dicts
     map to 422 with the whole dict as ``detail``. The answer is projected to name, experiment id,
-    stamped metrics, source, the direction used and its source, and the exclusions.
+    stamped metrics, source, the metric ranked by, the direction used and its source, and the
+    exclusions.
     """
     from tcip_store import DecodeError
 
@@ -192,6 +185,7 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
         "experiment_id": result["experiment_id"],
         "metrics": result["metrics"],
         "metrics_source": result["metrics_source"],
+        "ranking_basis": result["ranking_basis"],
         "higher_is_better": result["higher_is_better"],
         "direction_source": result["direction_source"],
         "excluded_unverified": result["excluded_unverified"],
@@ -210,7 +204,8 @@ def metric_directions_route() -> dict:
 
 
 class TrainingMetricFrame(BaseModel):
-    """One metrics-log row, pushed as it is appended."""
+    """One epoch's whole row (``experiments.epoch_rows``), pushed each time a row of that epoch
+    is appended."""
 
     type: Literal["metric"]
     experiment_id: str
@@ -218,19 +213,20 @@ class TrainingMetricFrame(BaseModel):
 
 
 class TrainingStatusFrame(BaseModel):
-    """The terminal frame: ``status`` carries the run's ``experiments.run_summary`` row for a run
-    this process can still identify, ``error`` is set instead when it cannot."""
+    """The terminal frame: ``status`` carries the run's row for a run this process can still
+    identify, ``error`` is set instead when it cannot."""
 
     type: Literal["status"]
     experiment_id: str
-    status: dict | None
+    status: RunRow | None
     error: str | None
 
 
 async def _stream_metrics(
     ws: WebSocket, project: Path, experiment_id: str, poll_seconds: float = 1.0
 ) -> None:
-    """Push every row of a run's ``metrics.jsonl`` to the browser as it is appended.
+    """Push a run's metrics, a sweep's trial included, to the browser as they are appended: each
+    epoch a new row touches is sent again whole (``experiments.epoch_rows`` over every row read).
 
     Each tick observes the run once (``experiments.observe``) and reads its log from a byte-offset
     cursor (``experiments.read_rows``), so it reads only what was appended since the last tick and
@@ -241,7 +237,8 @@ async def _stream_metrics(
     is not a single directory name raises ``BadKey``. Every read runs off the event loop.
     """
     from tcip_mcp.experiments import (
-        TERMINAL_STATES, find_observation, observe, read_rows, run_name, run_summary,
+        EPOCH_KEY, TERMINAL_STATES, epoch_rows, find_observation, launch_declarations, observe,
+        read_rows, run_name, run_summary,
     )
 
     observation = await asyncio.to_thread(find_observation, run_name(experiment_id),
@@ -256,12 +253,16 @@ async def _stream_metrics(
 
     while True:
         rows, cursor = await asyncio.to_thread(read_rows, observation.metrics_log, after=cursor)
-        for row in rows:
-            frame = TrainingMetricFrame(type="metric", experiment_id=experiment_id, row=row)
-            await ws.send_json(frame.model_dump())
         sent += rows
+        touched = [row.get(EPOCH_KEY) for row in rows]
+        for row in epoch_rows(sent):
+            if row.get(EPOCH_KEY) in touched:
+                frame = TrainingMetricFrame(type="metric", experiment_id=experiment_id, row=row)
+                await ws.send_json(frame.model_dump())
         if observation.state in TERMINAL_STATES:
-            status = await asyncio.to_thread(run_summary, observation, sent)
+            launches = await asyncio.to_thread(launch_declarations, project)
+            status = await asyncio.to_thread(run_summary, observation, sent,
+                                             launches.get(experiment_id))
             await ws.send_json(TrainingStatusFrame(
                 type="status", experiment_id=experiment_id, status=status,
                 error=None).model_dump())

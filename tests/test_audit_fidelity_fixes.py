@@ -4,23 +4,12 @@ carry model provenance, and stratified splits count JSON objects, not JSON lines
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import pytest
-from PIL import Image
 
 import tcip_store as ts
 from tcip_annotation import json_io
-from tcip_annotation.state import Annotation, BBox
 
-from tests._producer_fixtures import image_label_key, label_image
-
-
-def _img(tmp_path, name="IMG_0001.JPG", size=(100, 80)):
-    p = tmp_path / "images" / UNDATED_BUCKET / name
-    p.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", size).save(p)
-    return p
+from tests._producer_fixtures import box_annotation, blank_image, image_label_key, label_image
 
 
 def test_mcp_save_annotations_empty_writes_the_empty_document_the_route_writes(tmp_path):
@@ -28,8 +17,8 @@ def test_mcp_save_annotations_empty_writes_the_empty_document_the_route_writes(t
     the document stays, holding nothing, never deleted."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    img = _img(tmp_path)
-    label_image(img, [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 100, 80)
+    img = blank_image(tmp_path)
+    label_image(img, [box_annotation(1, 1, 9, 9)], 100, 80)
     res = save_annotations(tmp_path, tmp_path.parent, str(img), annotations=[])
     assert res == {"capture": "undated", "written": [img.stem], "count": 0}
     assert ts.read(image_label_key(img), default=None) is not None
@@ -43,7 +32,7 @@ def test_mcp_save_annotations_refuses_by_index_through_the_decoders_checks(tmp_p
     naming its index, and nothing is written; the valid one beside it is not written alone."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    img = _img(tmp_path)
+    img = blank_image(tmp_path)
     res = save_annotations(tmp_path, tmp_path.parent, str(img),
                            annotations=[{"subject": "bur", "bbox": [1, 1, 5, 5]}, bad])
     assert res["error"].startswith("annotation 1 ")
@@ -70,13 +59,11 @@ def test_draw_splits_counts_json_objects_not_lines(tmp_path):
 
     from tests._producer_fixtures import mark_complete
 
-    images = [_img(tmp_path, name=f"img_{i}.JPG") for i in range(4)]
+    images = [blank_image(tmp_path, name=f"img_{i}.JPG") for i in range(4)]
 
-    def _box() -> Annotation:
-        return Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))
-
-    label_image(images[0], [_box(), _box(), _box()], 100, 80)
-    label_image(images[1], [_box()], 100, 80)
+    box = box_annotation(1, 1, 9, 9)
+    label_image(images[0], [box, box, box], 100, 80)
+    label_image(images[1], [box], 100, 80)
     for negative in images[2:]:
         label_image(negative, [], 100, 80, keep_empty=True)
         mark_complete(negative, "bud", project=tmp_path)

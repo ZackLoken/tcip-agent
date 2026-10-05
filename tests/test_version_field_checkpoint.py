@@ -10,6 +10,9 @@ import pytest
 torch = pytest.importorskip("torch")
 torchvision = pytest.importorskip("torchvision")
 
+from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
+from tests._verified_checkpoint_fixtures import register_checkpoint  # noqa: E402
+
 
 def _bespoke_checkpoint(path: Path) -> str:
     """A real, unpicklable tcip checkpoint at path, the platform's own producer's shape."""
@@ -23,25 +26,18 @@ def _bespoke_checkpoint(path: Path) -> str:
     config = {"model_source": model_source,
               "data": {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}}}
     payload = {
-        "config": config,
-        "model_state_dict": build_model(config, recorded_model_dims(config)).state_dict(),
+        CONFIG_KEY: config,
+        STATE_DICT_KEY: build_model(config, recorded_model_dims(config)).state_dict(),
     }
     torch.save(payload, str(path))
     return str(path)
-
-
-def _register(tmp_path: Path, ckpt_path: str, name: str) -> None:
-    from tcip_mcp.tools.model_tools import register_model
-
-    result = register_model(name=name, checkpoint_path=ckpt_path, config={}, project=tmp_path)
-    assert "error" not in result, result
 
 
 def test_a_version_one_checkpoint_loads_through_the_platforms_own_registration(tmp_path):
     from tcip_mcp.model_registry import load_registered_checkpoint
 
     ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
-    _register(tmp_path, ckpt, "version-one-model")
+    register_checkpoint(tmp_path, ckpt, name="version-one-model")
 
     verified = load_registered_checkpoint(ckpt, project=tmp_path)
-    assert "model_state_dict" in verified.payload
+    assert STATE_DICT_KEY in verified.payload

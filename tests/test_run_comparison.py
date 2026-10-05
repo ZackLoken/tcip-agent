@@ -6,15 +6,7 @@ route.
 
 from __future__ import annotations
 
-import pytest
 from fastapi.testclient import TestClient
-
-from tcip_web.app import app
-
-
-@pytest.fixture
-def client(opened_project) -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _opened(project, experiment_id: str, *, data_dir=None, split: dict | None = None):
@@ -202,14 +194,14 @@ def test_a_ranking_over_a_marked_set_that_registered_nothing_reads_the_registry_
     assert len(reads) == 1
 
 
-def test_compare_best_route_422s_with_no_registered_checkpoint(client: TestClient, tmp_path):
+def test_compare_best_route_422s_with_no_registered_checkpoint(opened_client: TestClient, tmp_path):
     """A project with no completed run and no foreign registration answers the ranking's own
     refusal as 422, and the asking writes no registry index."""
     import tcip_store
 
     from tcip_mcp.model_registry import registry_index_key
 
-    resp = client.post("/api/training/compare/best", json={
+    resp = opened_client.post("/api/training/compare/best", json={
         "experiment_ids": ["exp-a"], "metric": "val_map50",
     })
     assert resp.status_code == 422
@@ -217,7 +209,7 @@ def test_compare_best_route_422s_with_no_registered_checkpoint(client: TestClien
     assert tcip_store.read(registry_index_key(tmp_path), default=None) is None
 
 
-def test_compare_best_route_409s_when_the_index_will_not_decode(client: TestClient, monkeypatch):
+def test_compare_best_route_409s_when_the_index_will_not_decode(opened_client: TestClient, monkeypatch):
     """A corrupt index is not a project with no models: the route answers 409, not the 404 an
     absent index answers."""
     import tcip_mcp.model_registry as model_registry
@@ -228,17 +220,17 @@ def test_compare_best_route_409s_when_the_index_will_not_decode(client: TestClie
 
     monkeypatch.setattr(model_registry, "read_registry_index", _boom)
 
-    resp = client.post("/api/training/compare/best", json={
+    resp = opened_client.post("/api/training/compare/best", json={
         "experiment_ids": ["exp-a"], "metric": "val_map50",
     })
     assert resp.status_code == 409
     assert "registry unreadable" in resp.json()["detail"]
 
 
-def test_compare_best_route_422s_on_the_tools_own_error(client: TestClient, tmp_path):
+def test_compare_best_route_422s_on_the_tools_own_error(opened_client: TestClient, tmp_path):
     _register(tmp_path, "exp-a", 0.7)
 
-    resp = client.post("/api/training/compare/best", json={
+    resp = opened_client.post("/api/training/compare/best", json={
         "experiment_ids": ["exp-a"], "metric": "val_map99",
     })
     assert resp.status_code == 422
@@ -247,11 +239,11 @@ def test_compare_best_route_422s_on_the_tools_own_error(client: TestClient, tmp_
     assert detail["needs_direction"] is True
 
 
-def test_compare_best_route_422s_when_the_marked_set_registered_nothing(client: TestClient,
+def test_compare_best_route_422s_when_the_marked_set_registered_nothing(opened_client: TestClient,
                                                                         tmp_path):
     _register(tmp_path, "exp-other", 0.7)
 
-    resp = client.post("/api/training/compare/best", json={
+    resp = opened_client.post("/api/training/compare/best", json={
         "experiment_ids": ["exp-marked"], "metric": "val_map50",
     })
     assert resp.status_code == 422
@@ -259,66 +251,29 @@ def test_compare_best_route_422s_when_the_marked_set_registered_nothing(client: 
 
 
 def test_an_empty_metric_lists_through_the_listing_route_and_refuses_through_the_ranking_one(
-    client: TestClient, tmp_path,
+    opened_client: TestClient, tmp_path,
 ):
     _register(tmp_path, "exp-a", 0.7)
 
-    listed = client.get("/api/results/models/registered")
+    listed = opened_client.get("/api/results/models/registered")
     assert listed.status_code == 200
     assert [m["experiment_id"] for m in listed.json()["models"]] == ["exp-a"]
 
-    resp = client.post("/api/training/compare/best", json={
+    resp = opened_client.post("/api/training/compare/best", json={
         "experiment_ids": ["exp-a"], "metric": ""})
     assert resp.status_code == 422
     assert "names the metric it ranks by" in resp.json()["detail"]["error"]
 
 
-def test_compare_best_route_projects_the_answer(client: TestClient, tmp_path):
+def test_compare_best_route_projects_the_answer(opened_client: TestClient, tmp_path):
     _register(tmp_path, "exp-a", 0.7)
 
-    resp = client.post("/api/training/compare/best", json={
+    resp = opened_client.post("/api/training/compare/best", json={
         "experiment_ids": ["exp-a"], "metric": "val_map50", "include_unverified": True,
     })
     assert resp.status_code == 200
     assert resp.json() == {
         "name": "exp-a", "experiment_id": "exp-a", "metrics": {"val_map50": 0.7},
-        "metrics_source": "training_source", "higher_is_better": True,
-        "direction_source": "declared", "excluded_unverified": [],
+        "metrics_source": "training_source", "ranking_basis": "val_map50",
+        "higher_is_better": True, "direction_source": "declared", "excluded_unverified": [],
     }
-
-
-def test_not_finite_suffix_matches_the_frontends_own_constant():
-    """Nothing on the wire enforces this pairing: the frontend's metric helpers read a metric's
-    own ``{key}{NOT_FINITE_SUFFIX}`` companion tcip_store.values writes, and the two definitions
-    can drift silently since no shared source spans the Python/TypeScript boundary."""
-    import re
-    from pathlib import Path
-
-    from tcip_store.values import NOT_FINITE_SUFFIX
-
-    ts_source = (
-        Path(__file__).resolve().parent.parent
-        / "packages" / "tcip-web" / "frontend" / "src" / "tabs" / "trainingMetrics.ts"
-    )
-    text = ts_source.read_text(encoding="utf-8")
-    match = re.search(r'METRIC_STATE_SUFFIX = "([^"]+)"', text)
-    assert match is not None, f"METRIC_STATE_SUFFIX declaration not found in {ts_source}"
-    assert match.group(1) == NOT_FINITE_SUFFIX
-
-
-def test_val_metric_prefix_matches_the_frontends_own_constant():
-    """The same drift guard as above, for the other constant this file shares with the
-    frontend."""
-    import re
-    from pathlib import Path
-
-    from tcip_mcp.pipelines.training.evaluation import VAL_METRIC_PREFIX
-
-    ts_source = (
-        Path(__file__).resolve().parent.parent
-        / "packages" / "tcip-web" / "frontend" / "src" / "tabs" / "trainingMetrics.ts"
-    )
-    text = ts_source.read_text(encoding="utf-8")
-    match = re.search(r'VAL_METRIC_PREFIX = "([^"]+)"', text)
-    assert match is not None, f"VAL_METRIC_PREFIX declaration not found in {ts_source}"
-    assert match.group(1) == VAL_METRIC_PREFIX

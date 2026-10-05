@@ -42,9 +42,8 @@ src/tcip_mcp/
   project_record.py       # a project's own record: its id, display name and site
   workspace.py            # the workspace root, its project directories and last-opened pointer
   project_paths.py        # paths under one project's .tcip/ (state, viz) and the repo root
-  experiments.py, model_registry.py   # run and sweep directories (.tcip/experiments/, .tcip/hpo/), each
-                                        # written once as it goes; the registry is completed runs plus
-                                        # the foreign checkpoints registered beside them
+  experiments.py, model_registry.py   # runs and sweeps with their trial runs, side by side in
+                                        # .tcip/experiments/; the registry: completed runs plus foreign ones
   identity.py             # the user:<name> identity convention, spelled once
   agent_identity.py       # the client the MCP handshake declared and this run's minted session,
                             # stamped on every audit line and HTTP push; declarations, never verified

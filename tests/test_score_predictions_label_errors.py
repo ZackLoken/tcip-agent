@@ -9,20 +9,14 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from pathlib import Path
 
 import pytest
-from PIL import Image
 
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.tools.annotation_tools import score_predictions
-from tests._producer_fixtures import image_label_key, label_image
+from tests._producer_fixtures import image_label_key, label_image, write_image
 
 pytest.importorskip("torch")
 
 ONE_BUD = [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))]
-
-
-def _write_image(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (100, 80), color=(120, 120, 120)).save(path)
 
 
 def _published(project: Path, name: str, image: Path, registry=None):
@@ -43,7 +37,7 @@ def test_score_predictions_single_image_reports_an_unreadable_gt(tmp_path: Path)
     from tests._record_damage_fixtures import damage_record
 
     img = tmp_path / "images" / UNDATED_BUCKET / "IMG_0000.jpg"
-    _write_image(img)
+    write_image(img)
     label_image(img, ONE_BUD, 100, 80)
     damage_record(image_label_key(img), b"{not json")
     _published(tmp_path, "baseline", img)
@@ -58,7 +52,7 @@ def test_score_predictions_folder_reports_an_unreadable_prediction(tmp_path: Pat
     from tests._record_damage_fixtures import damage_record
 
     images = tmp_path / "ds" / "images" / UNDATED_BUCKET
-    _write_image(images / "IMG_0000.jpg")
+    write_image(images / "IMG_0000.jpg")
     label_image(images / "IMG_0000.jpg", ONE_BUD, 100, 80)
     bucket = _published(tmp_path, "baseline", images / "IMG_0000.jpg")
     damage_record(bucket.document_key("IMG_0000"), b"{not json")
@@ -78,7 +72,7 @@ def test_score_predictions_over_attributed_documents_scores_the_object_class(
     from tcip_mcp import subject_registry as cr
 
     img = tmp_path / "images" / UNDATED_BUCKET / "IMG_0000.jpg"
-    _write_image(img)
+    write_image(img)
     label_image(img, ONE_BUD, 100, 80)
     _published(tmp_path, "classifier", img,
                cr.SubjectRegistry(subjects=(cr.Subject(name="bud", attributes=(
@@ -97,7 +91,7 @@ def test_a_predicted_image_with_no_label_document_is_refused_as_a_reference(tmp_
     from tcip_mcp.tools.vision_tools import get_worst_predictions
 
     img = tmp_path / "images" / UNDATED_BUCKET / "IMG_0000.jpg"
-    _write_image(img)
+    write_image(img)
     bucket = _published(tmp_path, "baseline", img)
 
     res = score_predictions(str(img), "baseline")
@@ -114,7 +108,7 @@ def test_an_image_the_bucket_names_no_document_for_is_unknown_never_a_miss(tmp_p
 
     images = tmp_path / "ds" / "images" / UNDATED_BUCKET
     for stem in ("IMG_0000", "IMG_0001"):
-        _write_image(images / f"{stem}.jpg")
+        write_image(images / f"{stem}.jpg")
         label_image(images / f"{stem}.jpg", ONE_BUD, 100, 80)
     bucket = _published(tmp_path, "baseline", images / "IMG_0000.jpg")
 

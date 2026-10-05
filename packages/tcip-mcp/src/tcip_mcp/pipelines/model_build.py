@@ -26,7 +26,10 @@ MODEL_SOURCE_KEY = "model_source"
 TRAINING_SOURCE_KEY = "training_source"
 DATASET_SOURCE_KEY = "dataset_source"
 STATE_DICT_KEY = "model_state_dict"
-"""The config keys naming a run's bespoke sources, and the checkpoint key holding its weights."""
+CONFIG_KEY = "config"
+METRICS_KEY = "metrics"
+"""The config keys naming a run's bespoke sources, and a checkpoint's keys holding its weights,
+the config its model builds from and the metrics it was selected on."""
 
 RESERVED_DIMS = ("in_chans", "num_classes", "num_ranks", "attributes")
 """The dimensions the platform hands a model builder (:func:`model_dims`), never its

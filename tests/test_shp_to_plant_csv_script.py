@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp.cli.shp_to_plant_csv import _validate_round_trip, convert_shp_to_plant_csv, main
+from tests import csv_rows
 
 UTM_15N_EPSG = 32615
 
@@ -75,11 +76,6 @@ def _polygon_shapefile(tmp_path: Path) -> Path:
     )
 
 
-def _read_csv_rows(path: Path) -> list[dict]:
-    with path.open(newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
-
-
 # ── axis order + point geometry ─────────────────────────────────────────
 
 
@@ -90,7 +86,7 @@ def test_point_geometry_reprojects_to_correct_unswapped_wgs84(tmp_path: Path) ->
     result = convert_shp_to_plant_csv(shp, csv_path)
 
     assert result["geometry_kinds"] == ["point"]
-    rows = _read_csv_rows(csv_path)
+    rows = csv_rows(csv_path)
     assert len(rows) == 1
     lon, lat = float(rows[0]["WGS84_centroid_x"]), float(rows[0]["WGS84_centroid_y"])
 
@@ -137,7 +133,7 @@ def test_polygon_geometry_uses_centroid(tmp_path: Path) -> None:
     result = convert_shp_to_plant_csv(shp, csv_path)
 
     assert result["geometry_kinds"] == ["polygon"]
-    rows = _read_csv_rows(csv_path)
+    rows = csv_rows(csv_path)
     lon, lat = float(rows[0]["WGS84_centroid_x"]), float(rows[0]["WGS84_centroid_y"])
     expected_lon, expected_lat = _reference_lonlat(*POINT_NATIVE)
     assert lon == pytest.approx(expected_lon, abs=1e-6)
@@ -172,11 +168,10 @@ def test_round_trip_validation_names_the_real_cause_on_a_broken_header(tmp_path:
 
 
 def test_round_trip_validation_passes_on_a_well_formed_csv(tmp_path: Path) -> None:
-    good = tmp_path / "good.csv"
-    with good.open("w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(["plot_name", "accession_name", "WGS84_centroid_x", "WGS84_centroid_y"])
-        w.writerow(["P1", "acc-A", "-93.0", "42.0"])
+    from tests._mapping_fixtures import write_plant_csv
+
+    good = write_plant_csv(tmp_path / "good.csv", [
+        {"plot": "P1", "accession": "acc-A", "lat": 42.0, "lon": -93.0}])
 
     assert _validate_round_trip(good, n_written=1) == 1
 
@@ -191,7 +186,7 @@ def test_missing_optional_field_is_reported_and_written_empty(tmp_path: Path) ->
     result = convert_shp_to_plant_csv(shp, csv_path, field_map={"accession_name": "no_such_field"})
 
     assert "accession_name" in result["missing_fields"]
-    rows = _read_csv_rows(csv_path)
+    rows = csv_rows(csv_path)
     assert rows[0]["accession_name"] == ""
 
 
@@ -211,7 +206,7 @@ def test_field_map_override_picks_up_a_renamed_source_field(tmp_path: Path) -> N
     result = convert_shp_to_plant_csv(path, csv_path, field_map={"accession_name": "ACC_NAME"})
 
     assert "accession_name" not in result["missing_fields"]
-    rows = _read_csv_rows(csv_path)
+    rows = csv_rows(csv_path)
     assert rows[0]["accession_name"] == "acc-Z"
 
 
@@ -242,7 +237,7 @@ def test_main_cli_end_to_end(tmp_path: Path) -> None:
 
     assert rc == 0
     assert csv_path.is_file()
-    rows = _read_csv_rows(csv_path)
+    rows = csv_rows(csv_path)
     assert len(rows) == 1
 
 
@@ -472,5 +467,5 @@ def test_converter_csv_carries_non_numeric_plot_number_verbatim(tmp_path: Path) 
     """coverage. The written CSV carries a non-numeric plot number through unchanged."""
     csv_path = tmp_path / "plants.csv"
     convert_shp_to_plant_csv(_alnum_point_shapefile(tmp_path), csv_path)
-    rows = _read_csv_rows(csv_path)
+    rows = csv_rows(csv_path)
     assert rows[0]["plot_number"] == "A1"

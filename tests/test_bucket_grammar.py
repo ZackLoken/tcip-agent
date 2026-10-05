@@ -14,13 +14,6 @@ from fastapi.testclient import TestClient
 from tcip_mcp.dataset_layout import list_dates
 
 
-@pytest.fixture
-def client() -> TestClient:
-    from tcip_web.app import app
-
-    return TestClient(app, base_url="http://127.0.0.1")
-
-
 def test_is_bucket_name_admits_a_date_an_undated_token_and_a_literal():
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, is_bucket_name
 

@@ -582,9 +582,26 @@ def confirm_trait_revision(payload: ConfirmRevisionPayload) -> dict:
 # ── Registered models ───────────────────────────────────────────────────
 
 
+class RegisteredModel(BaseModel):
+    """One registered model as the browser lists it: its name, its checkpoint, its tags and the
+    run that produced it."""
+
+    name: str
+    checkpoint_path: str
+    tags: list[str]
+    experiment_id: str | None
+
+
+class RegisteredModels(BaseModel):
+    """The open project's registered models as the browser lists them."""
+
+    models: list[RegisteredModel]
+
+
 @router.get("/models/registered")
-def registered_models(tag: Optional[str] = None) -> dict:
-    """The open project's registered models (:func:`~tcip_mcp.tools.model_tools.registered_listing`)."""
+def registered_models(tag: Optional[str] = None) -> RegisteredModels:
+    """The open project's registered models under ``tag``
+    (:func:`~tcip_mcp.tools.model_tools.registered_listing`), each as the browser lists it."""
     from tcip_mcp.tools.model_tools import registered_listing
 
-    return registered_listing(store.open_root(), tag=tag)
+    return RegisteredModels.model_validate(registered_listing(store.open_root(), tag=tag))

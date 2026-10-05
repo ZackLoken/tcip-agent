@@ -365,7 +365,7 @@ def attributed_series(
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
     from tests._image_fixtures import write_geo_image
-    from tests._mapping_fixtures import register_plant_registry_for
+    from tests._mapping_fixtures import register_plant_registry_for, write_plant_csv
     from tests._producer_fixtures import label_image
     from tests._verified_checkpoint_fixtures import worker_run
     from tests._web_fixtures import open_new_project
@@ -438,11 +438,9 @@ def attributed_series(
         assert "error" not in published, published
         predictions[date] = f"series/{date}"
 
-    plants_csv = raw / "plants.csv"
-    plants_csv.write_text(
-        "plot_name,accession_name,WGS84_centroid_x,WGS84_centroid_y\n" + "".join(
-            f"{plant},Acc{plant[-1]},{lon},{lat}\n" for plant, (lat, lon) in PLANTS.items()),
-        encoding="utf-8")
+    plants_csv = write_plant_csv(raw / "plants.csv", [
+        {"plot": plant, "accession": f"Acc{plant[-1]}", "lat": lat, "lon": lon}
+        for plant, (lat, lon) in PLANTS.items()])
     registry = register_plant_registry_for(project, [plants_csv])
     mapped = build_plant_mapping(project, name="valley", images_root=str(root / "images"),
                                  plant_registry=registry, dates=list(dates))

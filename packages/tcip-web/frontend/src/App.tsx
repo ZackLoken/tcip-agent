@@ -31,9 +31,8 @@ import { MetaTab } from "@/tabs/MetaTab";
 // "app", handled by its own subscription below).
 const TAB_PANELS: readonly TabName[] = TAB_NAMES;
 
-// Code-split the recharts-heavy tabs (recharts + its d3 deps are ~5MB unpacked and used only
-// here) so the Annotate workflow (the primary use) paints without them. App mounts
-// exactly one tab at a time, so deferring these chunks costs no UX.
+// Code-split every tab but Annotate (ResultsTab carries recharts and its d3 deps, ~5MB unpacked)
+// so Annotate paints without them; App mounts one tab at a time, so deferring costs no UX.
 const InferenceTab = lazy(() =>
   import("@/tabs/InferenceTab").then((m) => ({ default: m.InferenceTab })),
 );
@@ -42,7 +41,6 @@ const SetupTab = lazy(() => import("@/tabs/SetupTab").then((m) => ({ default: m.
 const TrainingTab = lazy(() =>
   import("@/tabs/TrainingTab").then((m) => ({ default: m.TrainingTab })),
 );
-const TuningTab = lazy(() => import("@/tabs/TuningTab").then((m) => ({ default: m.TuningTab })));
 
 function TabFallback() {
   return (
@@ -78,8 +76,8 @@ function App() {
   // Every active_tab writer converges here; the backend GUI state follows what is on screen.
   useActiveTabSync();
 
-  // Browser ctrl+wheel zoom stays off inside the app; iframe-embedded tools (TensorBoard, Ray)
-  // receive wheel events inside their own documents and keep it.
+  // Browser ctrl+wheel zoom stays off inside the app; an iframe-embedded tool (TensorBoard)
+  // receives wheel events inside its own document and keeps it.
   useEffect(() => {
     if (!rootRef.current) return;
     return attachCtrlWheelGuard(rootRef.current);
@@ -224,7 +222,6 @@ function App() {
     annotate: datasetReady ? <AnnotateTab /> : <ProjectPicker />,
     results: datasetReady ? <ResultsTab /> : <ProjectPicker />,
     training: <TrainingTab />,
-    tuning: <TuningTab />,
     inference: <InferenceTab />,
     meta: <MetaTab />,
   };

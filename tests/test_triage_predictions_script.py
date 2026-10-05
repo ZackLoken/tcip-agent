@@ -7,17 +7,9 @@ this door always runs reads the registry of that project, never only for one opt
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 
-
-def _run(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, "-m", "tcip_web.cli", "triage-predictions", *args],
-        cwd=str(cwd), capture_output=True, text=True, timeout=60,
-    )
+from tests._cli_fixtures import run_tcip
 
 
 def test_refuses_a_run_naming_no_project_and_plants_no_store(tmp_path):
@@ -26,7 +18,9 @@ def test_refuses_a_run_naming_no_project_and_plants_no_store(tmp_path):
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
-    result = _run(["--checkpoint", str(tmp_path / "x.pt"), "--images-dir", str(images)], cwd=cwd)
+    result = run_tcip("triage-predictions",
+                      ["--checkpoint", str(tmp_path / "x.pt"), "--images-dir", str(images)],
+                      cwd=cwd)
 
     assert result.returncode != 0, result.stdout
     assert "--project" in result.stderr

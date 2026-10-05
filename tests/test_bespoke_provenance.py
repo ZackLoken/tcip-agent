@@ -16,7 +16,9 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 from tcip_mcp.pipelines.execution import Stated, prepare_pass  # noqa: E402
-from tcip_mcp.pipelines.model_build import build_model, snapshot_model_source  # noqa: E402
+from tcip_mcp.pipelines.model_build import (  # noqa: E402
+    CONFIG_KEY, METRICS_KEY, STATE_DICT_KEY, build_model, snapshot_model_source,
+)
 from tests import bespoke_models  # noqa: E402
 
 
@@ -142,8 +144,8 @@ def test_a_pass_rebuilds_a_bespoke_detector_and_predicts(tmp_path):
     assert isinstance(model, bespoke_models.BespokeGNDetector)  # built via the importable builder
 
     ckpt = tmp_path / "model_best.pt"
-    torch.save({"model_state_dict": model.state_dict(), "metrics": {"val_loss": 0.3, "epoch": 1},
-                "config": {"model_source": src, "data": _DATA}}, ckpt)
+    torch.save({STATE_DICT_KEY: model.state_dict(), METRICS_KEY: {"val_loss": 0.3, "epoch": 1},
+                CONFIG_KEY: {"model_source": src, "data": _DATA}}, ckpt)
 
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.model_tools import register_model
@@ -175,7 +177,7 @@ def test_predictor_loads_at_the_two_channels_its_run_recorded(tmp_path):
     config = {"model_source": src, "data": {"num_channels": 2, "num_classes": 2, "scope": {}}}
     model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "model_best.pt"
-    torch.save({"model_state_dict": model.state_dict(), "config": config}, ckpt)
+    torch.save({STATE_DICT_KEY: model.state_dict(), CONFIG_KEY: config}, ckpt)
 
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.model_tools import register_model

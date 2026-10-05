@@ -1,12 +1,6 @@
-"""Tests for per-plant aggregation postprocessing.
-
-Covers the plant_id hard requirement (plant identity is never guessed from a
-filename; a record must carry an explicit plant_id_key value or one plant_id_fn resolves),
-identity-provenance pass-through (the assignment rows' own source/distance_m), the
-crops.yml-derived units column, and the
-aggregation strategies (count / mean / mode / sum). Phenology milestones are not here; they
-are the positive-fraction crossing, tested in test_phenology.py.
-"""
+"""Per-plant aggregation: a record carries an explicit ``plant_id_key`` value or one
+``plant_id_fn`` resolves, the assignment rows' ``source``/``distance_m`` pass through, the units
+column comes from ``crops.yml``, and each strategy (count, mean, mode, sum) aggregates."""
 
 from __future__ import annotations
 
@@ -20,7 +14,7 @@ from tcip_mcp.pipelines.postprocessing.aggregation import (
     deliver_per_plant_aggregate,
 )
 from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE, PER_PLANT_REGRESSION_AGGREGATE
-from tests import _trait_fixtures as fx
+from tests import _trait_fixtures as fx, csv_rows
 
 
 @pytest.fixture(autouse=True)
@@ -274,8 +268,7 @@ def test_a_dimensional_value_key_labels_its_units_squared_for_an_area(tmp_path):
     out_path = tmp_path / "out.csv"
     _deliver(tmp_path, results, out_path, "plant_surface_area",
              delivery_kind=PER_PLANT_REGRESSION_AGGREGATE)
-    with open(out_path, newline="") as f:
-        rows = list(csv.DictReader(f))
+    rows = csv_rows(out_path)
     assert rows[0]["units"] == "mm2"
 
 
@@ -325,8 +318,7 @@ def test_a_delivery_never_labels_a_pixel_value_with_crops_yml_units(tmp_path):
     out_path = tmp_path / "out.csv"
     _deliver(tmp_path, results, out_path, "bark_thickness",
              delivery_kind=PER_PLANT_REGRESSION_AGGREGATE)
-    with open(out_path, newline="") as f:
-        rows = list(csv.DictReader(f))
+    rows = csv_rows(out_path)
     assert rows[0]["units"] == ""
     assert rows[0]["value"] == "124.0"
 

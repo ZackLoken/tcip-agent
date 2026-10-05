@@ -183,7 +183,7 @@ def test_a_completed_runs_metrics_come_from_its_best_checkpoint_not_its_last_epo
 ):
     """A run the default trainer completes names its best checkpoint, whose metrics are that
     epoch's own, sourced ``trainer``; the registry lists it under the run's id."""
-    pytest.importorskip("torch")
+    torch = pytest.importorskip("torch")
     from tcip_mcp.experiments import METRICS_FILE, read_rows
     from tcip_mcp.model_registry import ModelRegistry
     from tests._verified_checkpoint_fixtures import worker_run
@@ -202,8 +202,9 @@ def test_a_completed_runs_metrics_come_from_its_best_checkpoint_not_its_last_epo
 
     entry = _named(ModelRegistry(str(tmp_path)), "exp-best")
     assert entry["metrics_source"] == "trainer"
-    best_epoch = entry["metrics"]["epoch"]
-    assert best_epoch in {row["epoch"] for row in read_rows(run_dir / METRICS_FILE)[0]}
+    best = torch.load(run_dir / "model_best.pt", weights_only=False)
+    (row,) = [r for r in read_rows(run_dir / METRICS_FILE)[0] if r["epoch"] == best["epoch"]]
+    assert entry["metrics"]["selection"] == row["selection"]
 
 
 def test_a_registry_payload_that_json_cannot_hold_is_refused_at_register_model(tmp_path):

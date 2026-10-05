@@ -32,7 +32,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Literal, Protocol, cast
 
 import tcip_store
-from tcip_store import Key, Version
+from tcip_store import Key, Version, scalar_number
 
 from tcip_annotation.state import (
     Annotation, BBox, Point, Polygon, bbox_of, is_detection, polygonal,
@@ -64,7 +64,7 @@ def _numbers(value, key: str, count: int | None = None) -> list[float]:
     ``ValueError`` naming ``key`` for anything else, a numeric string included.
     """
     if (not isinstance(value, list) or (count is not None and len(value) != count)
-            or not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value)):
+            or not all(scalar_number(v) for v in value)):
         raise ValueError(f"{key} {value!r} is not a list of {count or 'some'} numbers")
     return [float(v) for v in value]
 

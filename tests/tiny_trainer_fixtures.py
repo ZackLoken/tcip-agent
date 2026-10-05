@@ -203,6 +203,35 @@ def trainer_run(config: dict, output_dir, *, project, has_val_loader: bool, id: 
                     project=Path(project), output_dir=str(output_dir))
 
 
+def opposed_regression_loaders(train_intensities, val_intensities):
+    """A regression training loader over ``train_intensities`` fit by weight +2 and a holdout
+    loader over ``val_intensities`` fit by weight -5, batches of two."""
+    from torch.utils.data import DataLoader
+
+    from tcip_mcp.pipelines.training.collation import task_collate
+
+    train_ds = ConstantImageDataset(train_intensities, [2.0 * c for c in train_intensities])
+    val_ds = ConstantImageDataset(
+        val_intensities, [-5.0 * c for c in val_intensities], height=8, width=12)
+    collate = task_collate("regression")
+    return (DataLoader(train_ds, batch_size=2, collate_fn=collate),
+            DataLoader(val_ds, batch_size=2, collate_fn=collate))
+
+
+def capture_model(monkeypatch, sink: list) -> None:
+    """Every model ``generic_trainer.build_model`` builds appended to ``sink`` as it is built."""
+    from tcip_mcp.pipelines.training import generic_trainer as gt
+
+    real_build_model = gt.build_model
+
+    def build(config, dims):
+        model = real_build_model(config, dims)
+        sink.append(model)
+        return model
+
+    monkeypatch.setattr(gt, "build_model", build)
+
+
 class _CallScheduledModel(MeanIntensityRegressor):
     """A :class:`MeanIntensityRegressor` answering its weight-fit loss on the one-based
     training-forward calls ``finite(call)`` admits and a non-finite loss on every other."""

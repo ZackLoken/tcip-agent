@@ -7,6 +7,10 @@ import random
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tcip_mcp.experiments import RunObservation
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +65,19 @@ class TrainRun:
         return any(cancel_requested(d) for d in directories)
 
 
-def trained_config(record: dict) -> dict:
-    """The config a run's body trains under, from its launch record: the launch ``config`` with
-    the ``data`` section its launch ``resolved`` laid over it."""
-    return {**record["config"], "data": record["resolved"]["data"]}
+def observed_run(observation: RunObservation, *, origin: str = "training") -> TrainRun:
+    """The :class:`TrainRun` of an observed run, of ``origin``: named for its directory, training
+    under its launch ``config`` with the ``data`` section its launch resolved laid over it, toward
+    the objective that resolution carries. A run whose input resolved to nothing ended at its
+    opening and has none."""
+    from tcip_mcp.experiments import project_of_run
+
+    resolved = observation.resolution
+    assert resolved is not None, "a run whose input resolved to nothing ended at its opening"
+    return TrainRun(id=observation.directory.name,
+                    config={**observation.record["config"], "data": resolved["data"]},
+                    objective=resolved["objective"], project=project_of_run(observation.directory),
+                    output_dir=str(observation.directory), origin=origin)
 
 
 def draw_seed_if_unset(config: dict) -> None:

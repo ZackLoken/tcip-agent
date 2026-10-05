@@ -9,21 +9,13 @@ from __future__ import annotations
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 from PIL import Image
 
 from tcip_annotation.state import Annotation, BBox
+from tests._cli_fixtures import run_tcip
 from tests._producer_fixtures import label_image
-
-
-def _run(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, "-m", "tcip_web.cli", "visualize", *args],
-        cwd=str(cwd), capture_output=True, text=True, timeout=60,
-    )
 
 
 def _fixture(root: Path) -> Path:
@@ -40,7 +32,7 @@ def test_refuses_without_a_project_and_plants_no_store(tmp_path):
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
-    result = _run(["--source", "annotations", "--path", str(img)], cwd=cwd)
+    result = run_tcip("visualize", ["--source", "annotations", "--path", str(img)], cwd=cwd)
 
     assert result.returncode != 0, result.stdout
     assert "--project" in result.stderr
@@ -52,8 +44,9 @@ def test_refuses_a_directory_holding_no_project_record(tmp_path):
     bare = tmp_path / "bare"
     bare.mkdir()
 
-    result = _run(["--source", "annotations", "--path", str(img), "--project", str(bare)],
-                  cwd=tmp_path)
+    result = run_tcip(
+        "visualize", ["--source", "annotations", "--path", str(img), "--project", str(bare)],
+        cwd=tmp_path)
 
     assert result.returncode != 0, result.stdout
     assert "initialize_project" in result.stdout + result.stderr
@@ -65,8 +58,9 @@ def test_renders_annotations_under_the_named_project(project, tmp_path):
     cwd = tmp_path.parent / "operator_cwd"
     cwd.mkdir()
 
-    result = _run(["--source", "annotations", "--path", str(img), "--project", str(project)],
-                  cwd=cwd)
+    result = run_tcip(
+        "visualize", ["--source", "annotations", "--path", str(img), "--project", str(project)],
+        cwd=cwd)
 
     assert result.returncode == 0, result.stderr
     body = json.loads(result.stdout)

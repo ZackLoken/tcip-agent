@@ -6,12 +6,12 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
-from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parent.parent
-SCRIPT = REPO / "tools" / "serve_capture_app.py"
+from tests import REPO_ROOT
+
+SCRIPT = REPO_ROOT / "tools" / "serve_capture_app.py"
 
 
 def _load():

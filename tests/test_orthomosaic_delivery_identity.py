@@ -19,10 +19,11 @@ pytest.importorskip("torchvision")
 
 from tests.test_orthomosaic_tools import (  # noqa: E402, F401
     _GRID, _PLANT_PIXELS, SCOPE, TIEPOINT_NATIVE_X, TILE, _bespoke_detection_checkpoint,
-    _plant_grid_csv, _plant_registry, _raster, _recorded_meaning, _write_geo_raster,
+    _plant_grid_csv, _plant_registry, _raster, _write_geo_raster,
 )
 
 BUCKET = "preds/2026-01-01"
+pytestmark = pytest.mark.usefixtures("confirmed_count_aggregate")
 
 
 def _produced_bucket(tmp_path: Path, raster_path: Path) -> str:

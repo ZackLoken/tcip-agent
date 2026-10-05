@@ -29,6 +29,11 @@ function datasetIdentityChanged(
   return a.dataset_root !== b.dataset_root || a.date !== b.date || a.subject !== b.subject;
 }
 
+/** The tab a project opens on: the one last worked in, else the default tab. */
+function landingTab(project: OpenProject | null): TabName {
+  return (project && loadLastTab(project.id)) ?? GUI_STATE_DEFAULTS.active_tab;
+}
+
 /** The open project's directory, or null when the backend has none open. */
 export const selectProjectRoot = (s: Pick<AppState, "openProject">): string | null =>
   s.openProject?.path ?? null;
@@ -105,8 +110,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
       return {
         gui: {
           ...s.gui,
-          // Land on the project's last-used tab; a project never opened before gets Annotate.
-          active_tab: loadLastTab(project.id) ?? "annotate",
+          active_tab: landingTab(project),
           dataset: { ...sel, current_image_index: index },
         },
         openProject: project,
@@ -137,7 +141,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
           gui: project
             ? {
                 ...incoming,
-                active_tab: loadLastTab(project.id) ?? "annotate",
+                active_tab: landingTab(project),
                 active_subject: incoming.active_subject ?? null,
               }
             : { ...local, dataset: DEFAULT_DATASET },
@@ -157,7 +161,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
         return {
           gui: {
             ...incoming,
-            active_tab: (project && loadLastTab(project.id)) ?? "annotate",
+            active_tab: landingTab(project),
             active_subject: incoming.active_subject ?? null,
           },
           wsVersion: nextVersion,

@@ -1,16 +1,7 @@
-"""Standalone parent process for the TensorBoard lifetime tests.
-
-Launches a stand-in child through the manager, then prints two pids on one line: the pid
-``launch_tensorboard`` returned, and the TensorBoard stand-in's own pid (its guardian-spawned
-child on POSIX with the tie enabled, the same pid on Windows or under ``--no-tie`` where no
-guardian exists). Then either sleeps until killed or exits, depending on the ``mode`` argument, so
-the test can watch what becomes of each process on each path. ``--no-tie`` disables the platform
-lifetime tie before launching, so a test can prove the ``atexit`` hook in isolation; ``--thread``
-launches from a background thread that has already finished before the pids are printed, since
-every real launch site runs on a worker thread rather than the main one. ``_standin_pid`` is also
-imported directly by ``tests.test_tensorboard_process_lifetime``, which needs the same
-guardian-child lookup against a process it launched in-process rather than through this script.
-"""
+"""A parent process that launches a TensorBoard stand-in through the manager and prints, on one
+line, the pid ``launch_tensorboard`` returned and the stand-in's own pid; then sleeps until killed
+or exits, by its ``mode`` argument. ``--no-tie`` disables the platform lifetime tie before the
+launch; ``--thread`` launches from a background thread that has finished before the pids print."""
 
 from __future__ import annotations
 
@@ -71,7 +62,7 @@ def main() -> None:
     launched: dict = {}
 
     def _launch() -> None:
-        launched["info"] = tb.launch_tensorboard(logdir, key="lifetime-parent")
+        launched["info"] = tb.launch_tensorboard(logdir)
 
     if "--thread" in flags:
         thread = threading.Thread(target=_launch)

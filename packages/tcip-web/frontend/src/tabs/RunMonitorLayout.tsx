@@ -1,7 +1,6 @@
 /**
- * The shell the Training and Tuning tabs share: a fixed-width scrolling sidebar of runs beside a
- * detail region. Each tab's list is its own (Training's is one row per run, Tuning's is a sweep
- * row that expands into its trials), so it arrives as `children` rather than a row template here.
+ * The Training tab's shell: a fixed-width scrolling sidebar of runs and sweeps beside a detail
+ * region. The list arrives as `children` rather than a row template here.
  */
 
 import type { ReactNode } from "react";

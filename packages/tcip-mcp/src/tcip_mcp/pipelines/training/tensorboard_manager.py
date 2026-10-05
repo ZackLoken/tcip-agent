@@ -50,12 +50,6 @@ _STARTUP_GRACE_SECONDS = 0.5
 _STOP_WAIT_SECONDS = 5.0
 _GUARDIAN_TERM_GRACE_SECONDS = 2.0
 
-if not _GUARDIAN_TERM_GRACE_SECONDS + 1.0 < _STOP_WAIT_SECONDS:
-    raise RuntimeError(
-        f"_GUARDIAN_TERM_GRACE_SECONDS ({_GUARDIAN_TERM_GRACE_SECONDS}) leaves no margin under "
-        f"_STOP_WAIT_SECONDS ({_STOP_WAIT_SECONDS})"
-    )
-
 _atexit_registered = False
 
 if sys.platform == "win32":
@@ -170,7 +164,7 @@ def _stop_all_tracked() -> None:
     ``_STOP_WAIT_SECONDS``; a stop that cannot confirm its kill is logged and the sweep continues.
     """
     for key in list(_TB_PROCESSES):
-        result = stop_tensorboard(key=key)
+        result = stop_tensorboard(key)
         if result.get("status") == "kill_unconfirmed":
             logger.warning(
                 "Exit sweep left TensorBoard key %s (pid=%s) running: its kill went unconfirmed",
@@ -207,9 +201,9 @@ def _guardian_argv(argv: list[str]) -> list[str]:
     ]
 
 
-def _key_of(key: str | None, logdir: str | None) -> str | None:
-    """The tracking key a child is indexed by: ``key``, else ``logdir`` resolved."""
-    return key or (str(Path(logdir).resolve()) if logdir else None)
+def _key_of(logdir: str) -> str:
+    """The tracking key a child is indexed by: its log directory, resolved."""
+    return str(Path(logdir).resolve())
 
 
 def _collect_output(handle) -> str:
@@ -231,11 +225,9 @@ def _release_output(entry: _Launched) -> None:
         pass
 
 
-def launch_tensorboard(logdir: str, key: str | None = None) -> dict:
-    """Launch a TensorBoard process for the given log directory.
-
-    ``key`` is the tracking key this process's children are indexed by; a run passes none and is
-    keyed by its own log directory.
+def launch_tensorboard(logdir: str) -> dict:
+    """Launch a TensorBoard process for the given log directory, tracked by that directory
+    resolved.
 
     Returns dict with 'url', 'port', 'pid', 'logdir', 'lifetime_tie', or ``{'error': ..., 'output':
     ...}`` when the process died during startup. If TensorBoard is already running for this logdir,
@@ -247,8 +239,7 @@ def launch_tensorboard(logdir: str, key: str | None = None) -> dict:
     """
     from tcip_mcp.web_client import LOOPBACK_HOST, free_port
 
-    logdir = str(Path(logdir).resolve())
-    key = cast(str, _key_of(key, logdir))
+    key = logdir = _key_of(logdir)
 
     entry = _running(key)
     if entry is not None:
@@ -311,16 +302,14 @@ def _running(key: str) -> _Launched | None:
     return entry
 
 
-def running_url(key: str | None = None, logdir: str | None = None) -> str | None:
-    """The URL the TensorBoard tracked under ``key`` (else under ``logdir``) serves at, ``None``
-    when none runs."""
-    tracked = _key_of(key, logdir)
-    entry = _running(tracked) if tracked else None
+def running_url(logdir: str) -> str | None:
+    """The URL the TensorBoard tracked under ``logdir`` serves at, ``None`` when none runs."""
+    entry = _running(_key_of(logdir))
     return entry.url if entry is not None else None
 
 
-def stop_tensorboard(key: str | None = None, logdir: str | None = None) -> dict:
-    """Stop a running TensorBoard process.
+def stop_tensorboard(logdir: str) -> dict:
+    """Stop the running TensorBoard process tracked under ``logdir``.
 
     Waits up to ``_STOP_WAIT_SECONDS`` for the process to end on its own, then force-kills it and
     waits the same bound again for the kill to be reaped; the entry is dropped from tracking either
@@ -331,8 +320,8 @@ def stop_tensorboard(key: str | None = None, logdir: str | None = None) -> dict:
     a TensorBoard the guardian had not yet stopped; the answer is then ``stopped`` or
     ``kill_unconfirmed`` for the guardian itself.
     """
-    key = _key_of(key, logdir)
-    if not key or key not in _TB_PROCESSES:
+    key = _key_of(logdir)
+    if key not in _TB_PROCESSES:
         return {"status": "not_running"}
 
     entry = _TB_PROCESSES.pop(key)

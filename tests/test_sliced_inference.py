@@ -12,6 +12,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
+
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 pytest.importorskip("sahi")
 
@@ -48,7 +50,7 @@ def _checkpoint(tmp_path: Path, *, in_chans: int = 3, with_masks: bool = False,
                 **(data or {}), **({"tiling": tiling} if tiling else {})}
     config = {"model_source": model_source, "data": data_cfg}
     model = build_model(config, recorded_model_dims(config))
-    torch.save({"model_state_dict": model.state_dict(), "config": config}, str(ckpt))
+    torch.save({STATE_DICT_KEY: model.state_dict(), CONFIG_KEY: config}, str(ckpt))
     result = register_model(name="blob", checkpoint_path=str(ckpt), config={},
                             project=tmp_path)
     assert "error" not in result, result

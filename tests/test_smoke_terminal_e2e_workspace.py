@@ -9,12 +9,11 @@ import dataclasses
 import importlib.util
 import os
 import sys
-from pathlib import Path
 from urllib.parse import urlsplit
 
 from tcip_web import terminal as pty_host
+from tests import REPO_ROOT
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "tools" / "smoke_terminal_e2e.py"
 
 
@@ -57,14 +56,9 @@ def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
     assert len(tcip_store.read_log(audit_log_key(live_project)).records) == live_lines
 
 
-def test_the_websocket_url_is_absolute_and_carries_the_served_host(tmp_path, monkeypatch):
+def test_the_websocket_url_is_absolute_and_carries_the_served_host(tmp_path, client):
     """``terminal_ws_url`` is absolute and names the client's own host."""
-    from fastapi.testclient import TestClient
-
-    from tcip_web.app import app
-
     mod = _load()
-    client = TestClient(app, base_url="http://127.0.0.1")
 
     url = mod.terminal_ws_url(client, "abc123")
 

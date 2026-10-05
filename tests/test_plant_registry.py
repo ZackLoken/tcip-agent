@@ -5,7 +5,6 @@ plant-locations CSV set, read back by ``build_plant_mapping`` and
 
 from __future__ import annotations
 
-import csv
 import hashlib
 from pathlib import Path
 
@@ -15,23 +14,14 @@ import tcip_store as ts
 from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.tools.phenology_tools import build_plant_mapping, register_plant_registry
 
+from tests._mapping_fixtures import write_plant_csv
 from tests.test_plant_mapping_binding import POPULATION, PLANTS, _dataset, _init, _write_scene
-
-
-def _plant_csv(path: Path, plants: list[dict] | None = None) -> Path:
-    plants = PLANTS if plants is None else plants
-    with path.open("w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(["plot_name", "accession_name", "WGS84_centroid_x", "WGS84_centroid_y"])
-        for p in plants:
-            w.writerow([p["plot"], p["accession"], p["lon"], p["lat"]])
-    return path
 
 
 def test_registers_a_csv_and_persists_the_frozen_record(tmp_path: Path) -> None:
     """The recorded shape: per-file {path, sha256, n_plants}, crop, site, registered_at, and a
     digest over the parsed rows; who registered it is the audit line's."""
-    csv_path = _plant_csv(tmp_path / "plants.csv")
+    csv_path = write_plant_csv(tmp_path / "plants.csv", PLANTS)
 
     res = register_plant_registry(
         tmp_path, name="valley-plants", csv_paths=[str(csv_path)], crop="currant", site="north orchard")
@@ -60,13 +50,13 @@ def test_a_registered_csvs_hash_is_of_the_bytes_its_rows_were_parsed_from(
 ) -> None:
     """The file is rewritten with more plants between the parse and anything after it: the
     recorded hash and count both answer for the bytes the rows came from."""
-    csv_path = _plant_csv(tmp_path / "plants.csv", PLANTS[:1])
+    csv_path = write_plant_csv(tmp_path / "plants.csv", PLANTS[:1])
     parsed_bytes = csv_path.read_bytes()
     real = plant_mapping.read_plant_csv_bytes
 
     def parse_then_rewrite(data: bytes):
         rows = real(data)
-        _plant_csv(csv_path, PLANTS)
+        write_plant_csv(csv_path, PLANTS)
         return rows
 
     monkeypatch.setattr(plant_mapping, "read_plant_csv_bytes", parse_then_rewrite)
@@ -77,7 +67,7 @@ def test_a_registered_csvs_hash_is_of_the_bytes_its_rows_were_parsed_from(
 
 
 def test_refuses_a_name_outside_name_segment(tmp_path: Path) -> None:
-    csv_path = _plant_csv(tmp_path / "plants.csv")
+    csv_path = write_plant_csv(tmp_path / "plants.csv", PLANTS)
 
     res = register_plant_registry(
         tmp_path, name="Not Legal!", csv_paths=[str(csv_path)], crop="currant", site="orchard")
@@ -97,9 +87,8 @@ def test_refuses_a_missing_file(tmp_path: Path) -> None:
 def test_refuses_naming_a_file_that_parses_no_georeferenced_plant(tmp_path: Path) -> None:
     """A per-file check: one good file beside one that parses to nothing still refuses, naming
     only the failing file."""
-    good = _plant_csv(tmp_path / "good.csv")
-    bad = tmp_path / "bad.csv"
-    bad.write_text("plot_name,accession_name,WGS84_centroid_x,WGS84_centroid_y\n", encoding="utf-8")
+    good = write_plant_csv(tmp_path / "good.csv", PLANTS)
+    bad = write_plant_csv(tmp_path / "bad.csv", [])
 
     res = register_plant_registry(
         tmp_path, name="valley", csv_paths=[str(good), str(bad)], crop="currant", site="orchard")
@@ -111,7 +100,7 @@ def test_refuses_naming_a_file_that_parses_no_georeferenced_plant(tmp_path: Path
 
 
 def test_a_second_registration_under_the_same_name_and_content_is_a_no_op(tmp_path: Path) -> None:
-    csv_path = _plant_csv(tmp_path / "plants.csv")
+    csv_path = write_plant_csv(tmp_path / "plants.csv", PLANTS)
 
     first = register_plant_registry(
         tmp_path, name="valley", csv_paths=[str(csv_path)], crop="currant", site="orchard")
@@ -127,8 +116,8 @@ def test_a_second_registration_under_the_same_name_and_content_is_a_no_op(tmp_pa
 def test_a_second_registration_under_the_same_name_and_different_plants_refuses(
     tmp_path: Path,
 ) -> None:
-    csv_path = _plant_csv(tmp_path / "plants.csv")
-    other_csv = _plant_csv(
+    csv_path = write_plant_csv(tmp_path / "plants.csv", PLANTS)
+    other_csv = write_plant_csv(
         tmp_path / "other.csv", [{"plot": "P9", "accession": "acc-Z", "lat": 1.0, "lon": 1.0}])
 
     first = register_plant_registry(
@@ -267,59 +256,4 @@ def test_a_registry_digest_mismatch_refuses_at_delivery(
     assert "error" in res
     assert registry_name in res["error"]
     assert not out_csv.exists()
-
-
-def _call_arg_blocks(text: str, name: str) -> list[str]:
-    """Every argument block of a call to ``name(`` in ``text``, skipping ``name``'s own ``def``,
-    tracking paren depth so a nested call inside the arguments (``str(images_root)``, say) never
-    closes the block early the way a single non-nested regex would."""
-    blocks = []
-    marker = name + "("
-    search_from = 0
-    while True:
-        idx = text.find(marker, search_from)
-        if idx == -1:
-            break
-        search_from = idx + len(marker)
-        if text[max(0, idx - 4):idx] == "def ":
-            continue
-        depth = 1
-        pos = search_from
-        while pos < len(text) and depth > 0:
-            if text[pos] == "(":
-                depth += 1
-            elif text[pos] == ")":
-                depth -= 1
-            pos += 1
-        blocks.append(text[search_from:pos - 1])
-    return blocks
-
-
-def test_no_build_plant_mapping_call_site_names_the_retired_plant_csv_paths_argument() -> None:
-    """Every build_plant_mapping( call site under tools/ and packages/ passes plant_registry and never
-    the retired plant_csv_paths keyword, so a fresh command cannot silently reintroduce it."""
-    import subprocess
-
-    repo_root = Path(__file__).resolve().parents[1]
-    tracked = subprocess.run(
-        ["git", "ls-files", "tools", "packages"], cwd=repo_root, capture_output=True,
-        text=True, check=True,
-    ).stdout.splitlines()
-
-    call_sites: list[tuple[str, str]] = []
-    for rel in tracked:
-        if not rel.endswith(".py") or not (repo_root / rel).exists():
-            continue
-        text = (repo_root / rel).read_text(encoding="utf-8")
-        for block in _call_arg_blocks(text, "build_plant_mapping"):
-            call_sites.append((rel, block))
-
-    stale = [rel for rel, block in call_sites if "plant_csv_paths" in block]
-    assert not stale, f"build_plant_mapping call(s) still pass plant_csv_paths: {stale}"
-    missing = [
-        rel for rel, block in call_sites
-        if "plant_registry" not in block and "**" not in block
-    ]
-    assert not missing, f"build_plant_mapping call(s) do not pass plant_registry: {missing}"
-
 

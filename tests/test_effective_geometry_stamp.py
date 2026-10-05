@@ -169,15 +169,13 @@ def test_an_untiled_runs_resolved_record_drops_the_requested_geometry(monkeypatc
 
 
 def _trial(tmp_path, base_config):
-    """One HPO trial run through the sweep's own trial body; its run directory."""
-    from tcip_mcp.experiments import sweeps_dir
-    from tcip_mcp.tools.training_tools import _run_hpo_trial
+    """One HPO trial of a sweep over ``base_config``, opened by the sweep's own trial producer;
+    its run directory."""
+    from tcip_mcp.tools.training_tools import open_trial
+    from tests._verified_checkpoint_fixtures import opened_sweep
 
-    trial_dir = sweeps_dir(tmp_path) / "hpo_study" / "trial_0"
-    trial_dir.parent.mkdir(parents=True)
-    _run_hpo_trial({"lr": 3e-4}, [].append, base_config, trial_dir, project=tmp_path,
-                   objective={"selection_metric": "loss", "higher_is_better": False})
-    return trial_dir
+    Path(base_config["data"]["images_dir"]).mkdir(parents=True, exist_ok=True)
+    return open_trial(opened_sweep(tmp_path, base_config), "0", {"lr": 3e-4})
 
 
 def test_an_hpo_trials_resolved_record_replaces_unrealized_tiling(monkeypatch, tmp_path):

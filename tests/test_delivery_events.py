@@ -94,20 +94,17 @@ def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(tmp
     assert {r.output_path for r in records} == {str(first_csv), str(second_csv)}
 
 
-def test_a_web_route_writes_its_delivery_event_under_the_open_project_only(tmp_path):
+def test_a_web_route_writes_its_delivery_event_under_the_open_project_only(tmp_path, client):
     """A delivery through the web backend lands its record under the project the backend has
     open, and nowhere else."""
     pytest.importorskip("torch")
-    from fastapi.testclient import TestClient
-
-    from tcip_web.app import app
     from tests._chain_fixtures import attributed_series
 
     other_project = tmp_path / "other_project"
     other_project.mkdir()
     body = attributed_series(tmp_path, fractions=(0.0, 1.0)).body()
 
-    resp = TestClient(app, base_url="http://127.0.0.1").post(
+    resp = client.post(
         "/api/results/export_csv",
         json={**body, "payload": "milestones", "filename": "x.csv", "user": "tester"})
 
@@ -116,20 +113,17 @@ def test_a_web_route_writes_its_delivery_event_under_the_open_project_only(tmp_p
     assert read_delivery_events(other_project) == []
 
 
-def test_a_look_on_screen_records_no_delivery_event_and_no_audit_line(tmp_path):
+def test_a_look_on_screen_records_no_delivery_event_and_no_audit_line(tmp_path, client):
     """Looking at a number is not delivering it: phenology_measurement changes no state."""
     pytest.importorskip("torch")
-    from fastapi.testclient import TestClient
-
     from tcip_mcp.audit import audit_log_key
-    from tcip_web.app import app
     from tests._chain_fixtures import attributed_series
 
     series = attributed_series(tmp_path, fractions=(0.0, 1.0))
     logs = (audit_log_key(tmp_path), audit_log_key(series.root))
     before = [list(ts.read_log(k).records) for k in logs]
 
-    resp = TestClient(app, base_url="http://127.0.0.1").post(
+    resp = client.post(
         "/api/results/phenology_measurement", json=series.body())
 
     assert resp.status_code == 200, resp.text
@@ -254,21 +248,13 @@ def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid() -> None:
 DELIVERY_EVENTS_ROUTE = "/api/results/delivery-events"
 
 
-def _client():
-    from fastapi.testclient import TestClient
-
-    from tcip_web.app import app
-
-    return TestClient(app, base_url="http://127.0.0.1")
-
-
 def test_delivery_events_route_lists_a_recorded_event_with_its_revision(
-    opened_project: Path,
+    opened_project: Path, client,
 ) -> None:
     revision = seed_confirmed_count(opened_project)
     _record(opened_project, revision)
 
-    resp = _client().get(DELIVERY_EVENTS_ROUTE)
+    resp = client.get(DELIVERY_EVENTS_ROUTE)
 
     assert resp.status_code == 200
     (record,) = resp.json()["records"]
@@ -278,14 +264,14 @@ def test_delivery_events_route_lists_a_recorded_event_with_its_revision(
     assert record["delivery_kind"] == PER_IMAGE_COUNT
 
 
-def test_delivery_events_route_refuses_while_no_project_is_open() -> None:
-    resp = _client().get(DELIVERY_EVENTS_ROUTE)
+def test_delivery_events_route_refuses_while_no_project_is_open(client) -> None:
+    resp = client.get(DELIVERY_EVENTS_ROUTE)
 
     assert resp.status_code == 409
 
 
 def test_delivery_events_route_serves_a_delivered_plant_mapping_disclosure_unchanged(
-    tmp_path: Path,
+    tmp_path: Path, client,
 ) -> None:
     """The disclosure a phenology delivery records over a built mapping is the one the route
     serves."""
@@ -297,7 +283,7 @@ def test_delivery_events_route_serves_a_delivered_plant_mapping_disclosure_uncha
                                              tmp_path / "out" / "bud.csv")
     (recorded,) = read_delivery_events(tmp_path)
 
-    resp = _client().get(DELIVERY_EVENTS_ROUTE)
+    resp = client.get(DELIVERY_EVENTS_ROUTE)
 
     assert resp.status_code == 200
     (record,) = resp.json()["records"]

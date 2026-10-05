@@ -15,21 +15,18 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from tcip_mcp.pipelines.model_build import CONFIG_KEY, METRICS_KEY, STATE_DICT_KEY  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
 
 
 def _context(tmp_path, **kwargs) -> tuple[TrainContext, Path]:
     """A context over a run directory the launcher's own writer opened under ``tmp_path``."""
-    from tcip_mcp.experiments import RUN_FILE, read_record
-    from tcip_mcp.pipelines.training.run_registry import TrainRun, trained_config
+    from tcip_mcp.experiments import observe
+    from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
     run_dir = opened_run(tmp_path, detection_config(tmp_path / "data", device="cpu"))
-    record = read_record(run_dir / RUN_FILE)
-    run = TrainRun(id=run_dir.name, config=trained_config(record),
-                   objective=record["resolved"]["objective"], project=tmp_path,
-                   output_dir=str(run_dir))
-    return TrainContext(run=run, train_loader=None, **kwargs), run_dir
+    return TrainContext(run=observed_run(observe(run_dir)), train_loader=None, **kwargs), run_dir
 
 
 def _rows(run_dir: Path) -> list[dict]:
@@ -63,6 +60,22 @@ def test_epoch_signal_reaches_the_trial_hook(tmp_path):
     ctx.log_metrics(4, {"val_loss": 0.25})
 
     assert seen == [(4, {"val_loss": 0.25})]
+
+
+def test_the_sink_is_the_one_stamp_of_a_rows_epoch_and_instant(tmp_path):
+    """Metrics carrying the epoch or the instant refuse naming the key and write nothing; the
+    same metrics without it record the epoch the sink was handed."""
+    from tcip_mcp.experiments import EPOCH_KEY, TIMESTAMP_KEY
+
+    ctx, run_dir = _context(tmp_path)
+
+    for reserved in (EPOCH_KEY, TIMESTAMP_KEY):
+        with pytest.raises(ValueError, match=reserved):
+            ctx.log_metrics(2, {reserved: 99, "val_loss": 0.5})
+    assert _rows(run_dir) == []
+
+    ctx.log_metrics(2, {"val_loss": 0.5})
+    assert _rows(run_dir) == [{"val_loss": 0.5, EPOCH_KEY: 2}]
 
 
 def test_metrics_file_accumulates_one_row_per_epoch(tmp_path):
@@ -114,28 +127,28 @@ def test_checkpoint_lands_under_the_tag_it_was_asked_for(tmp_path):
     """Distinct tags are distinct files; a periodic save never overwrites the best one."""
     ctx, run_dir = _context(tmp_path)
 
-    best = ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.2}}, "model_best")
+    best = ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.2}}, "model_best")
     periodic = ctx.save_checkpoint(
-        {"model_state_dict": {}, "metrics": {"val_loss": 0.9}}, "checkpoint_epoch_3")
+        {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.9}}, "checkpoint_epoch_3")
 
     assert best.endswith("model_best.pt")
     assert periodic.endswith("checkpoint_epoch_3.pt")
     saved_best = torch.load(run_dir / "model_best.pt", weights_only=False)
     saved_periodic = torch.load(run_dir / "checkpoint_epoch_3.pt", weights_only=False)
-    assert saved_best["metrics"]["val_loss"] == 0.2
-    assert saved_periodic["metrics"]["val_loss"] == 0.9
-    assert saved_best["config"]["data"]["num_channels"] == 3
+    assert saved_best[METRICS_KEY]["val_loss"] == 0.2
+    assert saved_periodic[METRICS_KEY]["val_loss"] == 0.9
+    assert saved_best[CONFIG_KEY]["data"]["num_channels"] == 3
 
 
 def test_a_checkpoint_name_written_twice_refuses_and_keeps_the_first(tmp_path):
     """A checkpoint is written once: a second save under one tag refuses and the file under that
     name stays the bytes the first save published."""
     ctx, run_dir = _context(tmp_path)
-    ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.2}}, "model_best")
+    ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.2}}, "model_best")
     first = (run_dir / "model_best.pt").read_bytes()
 
     with pytest.raises(FileExistsError):
-        ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.1}}, "model_best")
+        ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.1}}, "model_best")
 
     assert (run_dir / "model_best.pt").read_bytes() == first
     assert not [p.name for p in run_dir.iterdir() if p.name.endswith(".staging")]
@@ -152,7 +165,7 @@ def test_a_checkpoint_tag_cannot_walk_out_of_the_run_directory(tmp_path):
     ctx, run_dir = _context(tmp_path)
 
     with pytest.raises(BadKey):
-        ctx.save_checkpoint({"model_state_dict": {}}, "../escaped")
+        ctx.save_checkpoint({STATE_DICT_KEY: {}}, "../escaped")
 
     assert not (run_dir.parent / "escaped.pt").exists()
 
@@ -160,12 +173,12 @@ def test_a_checkpoint_tag_cannot_walk_out_of_the_run_directory(tmp_path):
 def test_checkpoint_stamping_leaves_the_callers_state_untouched(tmp_path):
     """The stamp goes onto the saved payload, never back into the loop's own live state dict."""
     ctx, run_dir = _context(tmp_path)
-    state = {"model_state_dict": {}, "metrics": {"val_loss": 0.2}}
+    state = {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.2}}
 
     ctx.save_checkpoint(state, "model_best")
 
-    assert set(state) == {"model_state_dict", "metrics"}
-    assert "config" in torch.load(run_dir / "model_best.pt", weights_only=False)
+    assert set(state) == {STATE_DICT_KEY, METRICS_KEY}
+    assert CONFIG_KEY in torch.load(run_dir / "model_best.pt", weights_only=False)
 
 
 def test_record_artifact_copies_the_file_into_the_run(tmp_path):

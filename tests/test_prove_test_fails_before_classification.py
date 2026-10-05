@@ -20,8 +20,9 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parent.parent
-SCRIPT = REPO / "tools" / "prove_test_fails_before.py"
+from tests import REPO_ROOT
+
+SCRIPT = REPO_ROOT / "tools" / "prove_test_fails_before.py"
 SCRIPT_SOURCE = SCRIPT.read_text(encoding="utf-8")
 
 EXIT = {"GUARDS": 0, "VACUOUS": 1, "INDETERMINATE": 2, "REFUSED": 3}
@@ -424,40 +425,6 @@ def test_a_hung_test_under_per_test_timeout_reports_indeterminate_naming_it(tmp_
 
     assert "INDETERMINATE" in proc.stdout
     assert "test_hangs_forever" in proc.stdout
-
-
-# ── build_module_inventory.py's root resolution works inside a .git-less sandbox ──
-
-
-def _load_inventory_builder():
-    """Import the real build_module_inventory.py by path, module-level REPO_ROOT resolution
-    included; that resolution runs against this file's own location, not a test tree."""
-    script = REPO / "tools" / "build_module_inventory.py"
-    spec = importlib.util.spec_from_file_location("build_module_inventory_under_test", script)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_repo_root_resolves_by_the_packages_and_tools_marker_with_no_git_present(tmp_path):
-    """A git-archive sandbox carries no .git; find_repo_root resolves by an ancestor holding both
-    packages/ and tools/ instead, the marker true of such a sandbox as well as a real checkout."""
-    builder = _load_inventory_builder()
-    tree = tmp_path / "tree"
-    (tree / "packages").mkdir(parents=True)
-    (tree / "tools").mkdir()
-
-    assert builder.find_repo_root(tree) == tree
-
-
-def test_repo_root_resolution_climbs_from_a_nested_subdirectory(tmp_path):
-    builder = _load_inventory_builder()
-    tree = tmp_path / "tree"
-    nested = tree / "packages" / "tcip-mcp" / "src" / "tcip_mcp"
-    nested.mkdir(parents=True)
-    (tree / "tools").mkdir()
-
-    assert builder.find_repo_root(nested) == tree
 
 
 def test_a_key_error_on_a_package_result_guards(tmp_path):

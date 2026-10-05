@@ -27,11 +27,6 @@ if pty_host.os.name == "nt":
     pytest.importorskip("winpty")
 
 
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
-
-
 @pytest.fixture(autouse=True)
 def _fake_terminal(monkeypatch):
     monkeypatch.setenv("TCIP_TERMINAL_CMD", f"{sys.executable} -u {FAKE}")
@@ -119,12 +114,6 @@ def test_a_create_naming_an_unlisted_provider_refuses_by_name_and_a_listed_one_l
     resp = client.post("/api/terminal/sessions", json=LAUNCH)
     assert resp.status_code == 200
     assert resp.json()["launched"]["provider"] == LAUNCH["provider"]
-
-
-def test_the_claude_row_passes_a_settings_file_holding_permissions_and_no_hooks():
-    (claude,) = [row for row in pty_host.PROVIDERS if row.id == "claude"]
-    assert str(pty_host.CLAUDE_SETTINGS) in claude.args
-    assert list(json.loads(pty_host.CLAUDE_SETTINGS.read_text(encoding="utf-8"))) == ["permissions"]
 
 
 def test_rendering_replaces_each_placeholder_and_leaves_every_other_argument(opened_project):

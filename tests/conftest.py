@@ -26,34 +26,14 @@ def _pin_torch_single_thread():
     torch.set_num_threads(1)
 
 
-def _drain_background_store_writers() -> None:
-    """Join any sweep worker still writing through the bound backend, when the tuning routes are
-    loaded; raises ``RuntimeError`` naming a worker that outlasts the wait."""
-    tuning = sys.modules.get("tcip_web.routes.tuning")
-    if tuning is None:
-        return
-    from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S
-
-    # A worker's slowest single act is one store write, bounded by the seam's own lock wait.
-    bound = 2 * DEFAULT_LOCK_TIMEOUT_S
-    still_running = tuning.wait_for_workers(timeout_s=bound)
-    if still_running:
-        raise RuntimeError(
-            f"sweep workers {', '.join(still_running)} were still writing after {bound}s, so "
-            "this test's storage backend was not closed under them. The test that launched "
-            "them has to wait on tcip_web.routes.tuning.wait_for_workers before returning."
-        )
-
-
 @pytest.fixture(autouse=True)
 def _bind_storage_backend():
     """Bind the storage backend before every test, the way a process entry point does, and close
-    it after the test once background writers are drained."""
+    it after the test."""
     import tcip_store
 
     backend = tcip_store.bind()
     yield
-    _drain_background_store_writers()
     backend.close()
 
 
@@ -129,12 +109,28 @@ def opened_project(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def tb_launches(monkeypatch) -> list[tuple[str, str]]:
-    """Record what the routes hand ``launch_tensorboard`` instead of starting a real one."""
-    calls: list[tuple[str, str]] = []
+def client():
+    """A client of the web backend at the loopback address a browser on this machine uses."""
+    from fastapi.testclient import TestClient
 
-    def fake_launch(logdir: str, key: str | None = None) -> dict:
-        calls.append((logdir, key or ""))
+    from tcip_web.app import app
+
+    return TestClient(app, base_url="http://127.0.0.1")
+
+
+@pytest.fixture
+def opened_client(opened_project: Path, client):
+    """:func:`client` with :func:`opened_project` open in the backend."""
+    return client
+
+
+@pytest.fixture
+def tb_launches(monkeypatch) -> list[str]:
+    """Record every logdir handed to ``launch_tensorboard`` instead of starting a real one."""
+    calls: list[str] = []
+
+    def fake_launch(logdir: str) -> dict:
+        calls.append(logdir)
         from tcip_mcp.web_client import LOOPBACK_HOST
 
         return {"url": f"http://{LOOPBACK_HOST}:6006", "port": 6006, "pid": 1, "logdir": logdir}
@@ -179,6 +175,17 @@ def seed_bud_operationalization(tmp_path: Path, seed_bud_trait_spec):
 
 
 @pytest.fixture
+def confirmed_count_aggregate(tmp_path: Path) -> None:
+    """Confirm, in this test's ``tmp_path`` project, every delivery trait of
+    ``tests/_trait_fixtures`` and the per-plant aggregate meaning of the one delivering
+    ``stem_count``."""
+    from tests import _trait_fixtures as fx
+
+    fx.seed_delivery_traits(tmp_path)
+    fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
+
+
+@pytest.fixture
 def real_hpo_base_config(tmp_path: Path) -> dict:
     """A base config the sweep door's own preflight admits: an importable builder and a data
     section over two labeled frames of its subject (``_verified_checkpoint_fixtures.
@@ -206,8 +213,7 @@ def data_dir(tmp_path: Path) -> Path:
 
     One label document per image of capture ``2-11-26`` holding every subject (here one detection
     subject, ``bud``), a published bucket named ``live/2-11-26``, and one nested
-    ``subjects.json``. Geometry is two boxes per image on a 640x480 frame, matching the
-    count/geometry expectations downstream.
+    ``subjects.json``. Geometry is two boxes per image on a 640x480 frame.
     """
     from PIL import Image
 

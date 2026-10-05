@@ -15,15 +15,14 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from PIL import Image
 
 import tcip_store
 from tcip_mcp.audit import audit_log_key
 from tcip_mcp.tools.project_tools import upsert_dataset
-from tcip_web.app import app
 from tcip_web.paths import assert_path_allowed
 from tcip_web.state import store
 
+from tests._producer_fixtures import write_image
 from tests._trait_fixtures import propose, seed_confirmed_crossing
 from tests._trait_fixtures import BUD_OPENING
 from tests._web_fixtures import new_project, open_new_project
@@ -31,20 +30,9 @@ from tests.test_results_mapping_summary_and_audit_anchoring import _capture_fixt
 
 
 @pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
-
-
-@pytest.fixture
 def outside(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A directory beside the test's workspace that no allow-set rule admits."""
     return tmp_path_factory.mktemp("outside")
-
-
-def _image(path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (8, 8)).save(path)
-    return path
 
 
 # ── the derived allow-set ──────────────────────────────────────────────────
@@ -184,8 +172,8 @@ def test_dataset_routes_refuse_an_outside_root_and_serve_an_inside_one(
 ) -> None:
     open_new_project(tmp_path)
     inside = tmp_path / "proj"
-    _image(inside / "images" / "2026-02-11" / "a.jpg")
-    _image(outside / "images" / "2026-02-11" / "a.jpg")
+    write_image(inside / "images" / "2026-02-11" / "a.jpg", (8, 8))
+    write_image(outside / "images" / "2026-02-11" / "a.jpg", (8, 8))
 
     assert client.get("/api/dataset/tree", params={"dataset_root": str(outside)}).status_code == 403
     assert client.post("/api/dataset/select", json={
@@ -205,11 +193,11 @@ def test_the_proposals_route_confines_the_image_whose_bucket_it_reads(
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     inside = open_new_project(tmp_path / "proj")
-    image = _image(inside / "images" / "2026-02-11" / "a.jpg")
+    image = write_image(inside / "images" / "2026-02-11" / "a.jpg", (8, 8))
     staged = stage_proposals(inside, str(image), model_name="sketch", boxes=[
         {"subject": "bud", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.2, "h": 0.2}])
     assert "error" not in staged, staged
-    stranger = _image(outside / "images" / "2026-02-11" / "a.jpg")
+    stranger = write_image(outside / "images" / "2026-02-11" / "a.jpg", (8, 8))
 
     assert client.get("/api/annotate/proposals", params={
         "image_path": str(stranger), "bucket": staged["bucket"]}).status_code == 403
@@ -305,7 +293,7 @@ def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
     assert resp.status_code == 200, resp.text
     assert not elsewhere.exists()
 
-    foreign_images = _image(outside / "images" / "2026-02-11" / "z.jpg").parent.parent
+    foreign_images = write_image(outside / "images" / "2026-02-11" / "z.jpg", (8, 8)).parent.parent
     resp = client.post("/api/results/plant_mapping/build",
                        json={**payload, "images_root": str(foreign_images)})
     assert resp.status_code == 403

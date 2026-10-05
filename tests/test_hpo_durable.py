@@ -4,21 +4,18 @@ Tune search itself is faked so the test doesn't init Ray or train."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 
 def _stub_search(monkeypatch, *, during=None) -> dict:
-    """Replace Ray Tune's search with one that first calls ``during(**kw)`` and answers the
-    sweep's log directory; returns the keywords it was last called with."""
+    """Replace Ray Tune's search with one that calls ``during(**kw)``; returns the keywords it
+    was last called with."""
     captured: dict = {}
 
     def fake_search(**kw):
         captured.update(kw)
         if during is not None:
             during(**kw)
-        return str(Path(kw["storage_path"]) / kw["study_name"])
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
     return captured
@@ -32,12 +29,12 @@ def test_run_hyperparameter_search_threads_the_sweeps_directory_and_records_its_
     captured = _stub_search(monkeypatch)
     tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=1, search_seed=0)
 
-    assert captured["study_name"].startswith("hpo_")
-    assert Path(captured["storage_path"]) == tmp_path / ".tcip" / "hpo"
+    assert captured["sweep_dir"].name.startswith("hpo_")
+    assert captured["sweep_dir"].parent == tmp_path / ".tcip" / "experiments"
     assert captured["mode"] == "min"  # the composite objective is lower=better
     assert captured["metric"] == "objective"
-    sweep = tt.monitor_training(tmp_path, sweep_id=captured["study_name"])
-    assert sweep["status"] == "completed"
+    sweep = tt.monitor_training(tmp_path, captured["sweep_dir"].name)["sweep"]
+    assert sweep["state"] == "completed"
     assert sweep["trials"] == [] and sweep["outcome"]["best_params"] is None
 
 
@@ -71,12 +68,12 @@ def test_a_sweep_is_on_disk_while_it_runs_and_its_trials_are_its_own_run_directo
 
     observed: dict = {}
 
-    def fake_trial(point, report, base_config, trial_dir, **kwargs):
-        observed["trial_dir"] = trial_dir
+    def fake_trial(point, report, sweep, trial_id):
+        observed["trial"] = tt.open_trial(sweep, trial_id, point)
         report(0.25)
 
     def during(**kw):
-        observed["while_running"] = tt.monitor_training(tmp_path, sweep_id=kw["study_name"])
+        observed["while_running"] = tt.monitor_training(tmp_path, kw["sweep_dir"].name)["sweep"]
         kw["objective_fn"]({"lr": 0.1}, lambda value: None)
 
     monkeypatch.setattr(tt, "_run_hpo_trial", fake_trial)
@@ -84,32 +81,17 @@ def test_a_sweep_is_on_disk_while_it_runs_and_its_trials_are_its_own_run_directo
 
     result = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=1,
                                           search_seed=0)
-    study = result["study_name"]
+    sweep_id = result["sweep"]["sweep_id"]
 
     running = observed["while_running"]
-    assert running["status"] == "running"
+    assert running["state"] == "running"
     assert running["input"]["n_trials"] == 1
     assert running["input"]["param_space"]  # the space the sweep is searching
-    assert observed["trial_dir"].parent == tt.sweep_dir(study, project=tmp_path)
-    assert observed["trial_dir"].name.startswith("trial_")
+    assert observed["trial"].parent == tt.experiments.experiment_dir(sweep_id, project=tmp_path)
 
-    assert tt.monitor_training(tmp_path, sweep_id=study)["status"] == "completed"
-
-
-def test_run_hyperparameter_search_honors_a_callers_study_name(
-    tmp_path, real_hpo_base_config, monkeypatch,
-):
-    """A caller that already minted its own sweep id (the Tuning route's relaunch, so its own
-    job and every sweep route agree on it) has the sweep's directory written under that id."""
-    import tcip_mcp.tools.training_tools as tt
-
-    _stub_search(monkeypatch)
-    given_id = "hpo-caller-supplied-id"
-    result = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=1,
-                                          study_name=given_id, search_seed=0)
-
-    assert result["study_name"] == given_id
-    assert tt.monitor_training(tmp_path, sweep_id=given_id)["status"] == "completed"
+    sweep = tt.monitor_training(tmp_path, sweep_id)["sweep"]
+    assert sweep["state"] == "completed"
+    assert [t["experiment_id"] for t in sweep["trials"]] == [observed["trial"].name]
 
 
 def test_a_sweep_whose_search_raises_ends_failed_naming_the_error(
@@ -120,7 +102,7 @@ def test_a_sweep_whose_search_raises_ends_failed_naming_the_error(
     captured: dict = {}
 
     def exploding_search(**kw):
-        captured["study_name"] = kw["study_name"]
+        captured["sweep_id"] = kw["sweep_dir"].name
         raise RuntimeError("no ray here")
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", exploding_search)
@@ -129,28 +111,9 @@ def test_a_sweep_whose_search_raises_ends_failed_naming_the_error(
         tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=1,
                                      search_seed=0)
 
-    sweep = tt.monitor_training(tmp_path, sweep_id=captured["study_name"])
-    assert sweep["status"] == "failed"
+    sweep = tt.monitor_training(tmp_path, captured["sweep_id"])["sweep"]
+    assert sweep["state"] == "failed"
     assert "no ray here" in sweep["error"]
-
-
-def test_a_second_launch_under_one_study_name_refuses_and_leaves_the_first_as_written(
-    tmp_path, real_hpo_base_config, monkeypatch
-):
-    """A sweep's directory is written by one launch: a second launch naming it refuses before
-    its search starts, and the first sweep's input and final status are what it wrote."""
-    import tcip_mcp.tools.training_tools as tt
-
-    _stub_search(monkeypatch)
-    tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=1,
-                                 study_name="hpo_once0001", search_seed=0)
-    first = tt.monitor_training(tmp_path, sweep_id="hpo_once0001")
-
-    again = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=3,
-                                         study_name="hpo_once0001", search_seed=0)
-
-    assert "already exists" in again["error"]
-    assert tt.monitor_training(tmp_path, sweep_id="hpo_once0001") == first
 
 
 def test_run_hyperparameter_search_refuses_before_minting_when_the_base_config_fails_preflight(
@@ -167,7 +130,7 @@ def test_run_hyperparameter_search_refuses_before_minting_when_the_base_config_f
 
     assert "error" in result
     assert not captured
-    assert not (tmp_path / ".tcip" / "hpo").exists()
+    assert not tt.experiments.experiments_dir(tmp_path).exists()
 
 
 def test_run_hyperparameter_search_checks_a_swept_placeholder_axis_at_its_resolved_value(
@@ -186,7 +149,7 @@ def test_run_hyperparameter_search_checks_a_swept_placeholder_axis_at_its_resolv
             "type": "categorical", "choices": ["tests.bespoke_models:build_bespoke_detection"]}},
         n_trials=1, search_seed=0)
 
-    assert "error" not in result
+    assert "error" not in result, result
 
 
 @pytest.mark.parametrize("choices", [["still:bad"],
@@ -227,21 +190,7 @@ def test_run_hyperparameter_search_admits_a_swept_axis_whose_every_choice_resolv
                         "tests.bespoke_models:build_bare_score_thresh_detector"]}},
         n_trials=1, search_seed=0)
 
-    assert "error" not in result
-
-
-def test_a_non_finite_best_value_names_why_in_the_outcome():
-    """A completed trial whose selection is non-finite still names why in the sweep's outcome,
-    rather than a bare null with no reason a served sweep can show."""
-    import tcip_mcp.tools.training_tools as tt
-
-    trials = [{"trial_id": "a", "status": "completed", "error": None, "has_metrics": True,
-               "params": {"lr": 0.01}, "value": float("nan")}]
-    outcome = tt.sweep_outcome(trials, {"objective": {"higher_is_better": False},
-                                        "input": {"split_draws": 1}})
-
-    assert outcome["best_value"] is None
-    assert outcome["best_value_state"] == "nan"
+    assert "error" not in result, result
 
 
 def test_run_hyperparameter_search_passes_agent_search_and_scheduler_choices(

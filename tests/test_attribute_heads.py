@@ -18,6 +18,8 @@ import numpy as np
 import pytest
 
 pytest.importorskip("torch")
+
+from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
 pytest.importorskip("torchvision")
 import torch  # noqa: E402
 
@@ -298,7 +300,7 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
               "data": {"num_channels": 3, "scope": asdict(scope)}}
     ckpt = tmp_path / "model_best.pt"
     model = build_model(config, recorded_model_dims(config))
-    torch.save({"model_state_dict": model.state_dict(), "config": config}, str(ckpt))
+    torch.save({STATE_DICT_KEY: model.state_dict(), CONFIG_KEY: config}, str(ckpt))
     assert "error" not in register_model(name="whole", checkpoint_path=str(ckpt), config={},
                                          project=tmp_path)
     frame = np.zeros((200, 200, 3), dtype=np.uint8)
@@ -347,7 +349,7 @@ def test_evaluate_reports_each_attributes_agreement_over_the_pairs_it_assesses(t
 
     images_dir = _frames(tmp_path / "ds", {"color": "blue", "grade": "high"})
     label_image(
-        Path(images_dir) / "frame1.png",
+        Path(images_dir) / "img1.png",
         [Annotation(subject=SUBJECT, geometry=BBox(8, 8, 24, 24), attributes={"color": "blue"})],
         64, 48)
     dataset, data = run_over("detection", images_dir, subject=SUBJECT, stated={"num_channels": 3})

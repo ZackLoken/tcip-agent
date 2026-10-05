@@ -15,17 +15,10 @@ import pytest
 from PIL import Image
 
 pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
 
 import tcip_store  # noqa: E402
 from tcip_mcp.project_record import read_record  # noqa: E402
 from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key  # noqa: E402
-from tcip_web.app import app  # noqa: E402
-
-
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _payload(project: Path, image_path: str, shapes=None, **over) -> dict:
@@ -178,28 +171,15 @@ def test_a_push_waits_for_a_holder_of_the_records_lock_and_then_lands(opened_pro
     import tcip_store as ts
 
     from tcip_web.routes.canvas import CanvasStatePayload, push_canvas_state
+    from tests._audit_fixtures import held_by_another_writer
 
     key = canvas_meta_key(str(opened_project))
-    holding = threading.Event()
-    release = threading.Event()
-
-    def hold() -> None:
-        with ts.transaction(key):
-            holding.set()
-            release.wait(10)
-
-    holder = threading.Thread(target=hold)
-    holder.start()
-    assert holding.wait(10)
-
     payload = CanvasStatePayload(**_payload(opened_project, A_IMG))
     pushing = threading.Thread(target=lambda: push_canvas_state(payload))
-    pushing.start()
-    pushing.join(0.5)
-    waiting = pushing.is_alive()
-
-    release.set()
-    holder.join(10)
+    with held_by_another_writer(key):
+        pushing.start()
+        pushing.join(0.5)
+        waiting = pushing.is_alive()
     pushing.join(10)
     assert waiting, "the push wrote while another writer held the record's lock"
     assert not pushing.is_alive()
@@ -220,9 +200,9 @@ def test_heartbeat_for_new_image_invalidates_geometry_by_identity(client, opened
 # ── renderer: origin/scale placement + two-pass draw + tolerance ────────────
 
 def _make_image(tmp_path: Path) -> str:
-    p = tmp_path / "img.jpg"
-    Image.new("RGB", (200, 100), (90, 110, 90)).save(p)
-    return str(p)
+    from tests._producer_fixtures import write_image
+
+    return str(write_image(tmp_path / "img.jpg", (200, 100), (90, 110, 90)))
 
 
 def _pixels(image_path: str, region=None, scale: float = 1.0):
@@ -243,6 +223,12 @@ def _pixels(image_path: str, region=None, scale: float = 1.0):
         return np.asarray(frame)
 
 
+def _red_over_green(rendered: Image.Image, xy: tuple[int, int]) -> int:
+    """How far red exceeds green at pixel ``xy`` of ``rendered``."""
+    red, green, _ = rendered.getpixel(xy)
+    return red - green
+
+
 def test_render_places_a_shape_at_its_offset_inside_a_cropped_region(tmp_path):
     """A shape's native coordinate lands where the crop origin puts it, not where it sat in the
     full frame: the placement the viewport read replaced the renderer's own crop with."""
@@ -254,12 +240,8 @@ def test_render_places_a_shape_at_its_offset_inside_a_cropped_region(tmp_path):
                               output_path=str(tmp_path / "crop.png"))
     px = Image.open(out).convert("RGB")
     assert px.size == (100, 100)                        # exactly the region handed in
-
-    def r_at(xy):
-        return px.getpixel(xy)[0] - px.getpixel(xy)[1]
-
-    assert r_at((50, 50)) > 40      # native x=100 minus origin x=50
-    assert r_at((95, 50)) < 10      # nothing near where the unshifted coordinate would have hit
+    assert _red_over_green(px, (50, 50)) > 40      # native x=100 minus origin x=50
+    assert _red_over_green(px, (95, 50)) < 10      # nothing where the unshifted one would hit
 
 
 def test_render_scales_a_shape_with_the_pixels_it_is_drawn_on(tmp_path):
@@ -270,12 +252,8 @@ def test_render_scales_a_shape_with_the_pixels_it_is_drawn_on(tmp_path):
                               output_path=str(tmp_path / "half.png"))
     px = Image.open(out).convert("RGB")
     assert px.size == (100, 50)
-
-    def r_at(xy):
-        return px.getpixel(xy)[0] - px.getpixel(xy)[1]
-
-    assert r_at((50, 25)) > 40      # native (100, 50) at half resolution
-    assert r_at((90, 25)) < 10
+    assert _red_over_green(px, (50, 25)) > 40      # native (100, 50) at half resolution
+    assert _red_over_green(px, (90, 25)) < 10
 
 
 def test_render_two_pass_fill_does_not_erase_outlines(tmp_path):
@@ -304,13 +282,9 @@ def test_render_draws_a_point_shape_and_never_widens_it_to_a_box(tmp_path):
     out = render_canvas_state(_pixels(img), shapes, origin=(0, 0), scale=1.0,
                               output_path=str(tmp_path / "point.png"))
     px = Image.open(out).convert("RGB")
-
-    def r_at(xy):  # red-over-green dominance at one pixel
-        return px.getpixel(xy)[0] - px.getpixel(xy)[1]
-
-    assert r_at((100, 50)) > 40          # the core sits on the coordinate
-    assert r_at((100, 42)) > 40          # a radial tick above it (the mark's reticle)
-    assert r_at((140, 50)) < 10          # nothing 40px away: no box, no fill, no outline
+    assert _red_over_green(px, (100, 50)) > 40     # the core sits on the coordinate
+    assert _red_over_green(px, (100, 42)) > 40     # a radial tick above it (the mark's reticle)
+    assert _red_over_green(px, (140, 50)) < 10     # nothing 40px away: no box, fill or outline
 
 
 @pytest.mark.parametrize("bad", [

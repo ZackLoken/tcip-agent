@@ -3,6 +3,7 @@ metrics its own checkpoint recorded and never fabricating any."""
 
 from pathlib import Path
 
+from tcip_mcp.pipelines.model_build import METRICS_KEY
 from tests._verified_checkpoint_fixtures import opened_run
 
 
@@ -12,10 +13,10 @@ def _stock_run(root: Path, builder: dict, epochs: int, experiment_id: str) -> Pa
     in-memory regression loaders. Returns the run directory."""
     from torch.utils.data import DataLoader
 
-    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
-    from tcip_mcp.pipelines.training.run_registry import TrainRun, trained_config
+    from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests.tiny_trainer_fixtures import ConstantImageDataset, write_regression_dataset
 
     train_ds = ConstantImageDataset([0.1, 0.3, 0.5, 0.7], [0.2, 0.6, 1.0, 1.4])
@@ -33,12 +34,8 @@ def _stock_run(root: Path, builder: dict, epochs: int, experiment_id: str) -> Pa
         "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
     run_dir = opened_run(root, config, experiment_id=experiment_id)
-    record = read_record(run_dir / RUN_FILE)
-    run = TrainRun(id=run_dir.name, config=trained_config(record),
-                   objective=record["resolved"]["objective"], project=root,
-                   output_dir=str(run_dir))
     run_training_envelope(TrainContext(
-        run=run, train_loader=DataLoader(train_ds, batch_size=2, collate_fn=collate),
+        run=observed_run(observe(run_dir)), train_loader=DataLoader(train_ds, batch_size=2, collate_fn=collate),
         val_loader=DataLoader(val_ds, batch_size=2, collate_fn=collate)))
     return run_dir
 
@@ -71,11 +68,10 @@ def test_a_stock_trainer_run_registers_with_trainer_source_and_the_best_epochs_m
     assert entry["metrics_source"] == "trainer"
 
     best = torch.load(run_dir / "model_best.pt", weights_only=False)
-    assert entry["metrics"] == best["metrics"]
-    assert entry["metrics"]["epoch"] == best["epoch"]
+    assert entry["metrics"] == best[METRICS_KEY]
 
     final = torch.load(run_dir / "model_final.pt", weights_only=False)
-    assert isinstance(final["metrics"], dict)  # one mapping, never a per-epoch list
+    assert isinstance(final[METRICS_KEY], dict)  # one mapping, never a per-epoch list
 
 
 def test_a_diverged_stock_run_ends_failed_and_registers_nothing(tmp_path):
@@ -112,9 +108,9 @@ def test_a_completed_run_with_a_diverged_val_metric_registers_it_as_null(tmp_pat
     assert observe(run_dir).state == "completed", observe(run_dir).final
 
     final = torch.load(run_dir / "model_final.pt", weights_only=False)
-    assert final["metrics"]["train_loss"] is not None
-    assert final["metrics"]["val_mae"] is None
-    assert final["metrics"]["val_mae_state"] == "nan"
+    assert final[METRICS_KEY]["train_loss"] is not None
+    assert final[METRICS_KEY]["val_mae"] is None
+    assert final[METRICS_KEY]["val_mae_state"] == "nan"
 
     entry = _entry(tmp_path, "exp-nan-val")
     assert entry is not None

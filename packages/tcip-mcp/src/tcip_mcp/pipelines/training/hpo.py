@@ -16,26 +16,19 @@ import os
 import subprocess
 import sys
 import threading
-from collections import Counter
 from collections.abc import Generator
 from contextlib import contextmanager
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Callable
 
-from tcip_store import Key
-
-
 logger = logging.getLogger(__name__)
 
 # Ray is one cluster per process, shared by every concurrent sweep, so its lifetime is
 # refcounted rather than owned by whichever sweep happened to start first.
 _ray_lifecycle = threading.Lock()
-# The live sweeps, counted per project: the cluster lives while any runs, and a project's
-# recorded dashboard while any of that project's runs.
-_active_searches: Counter[Path] = Counter()
-# The dashboard of the cluster this module started, while it runs; None otherwise.
-_ray_dashboard_url: str | None = None
+# The live sweeps: the cluster lives while any runs.
+_active_searches = 0
 # Whether the running cluster is one this module started.
 _ray_started = False
 # The PYTHONPATH this module handed ray.init() for the still-running cluster; None until it starts one.
@@ -230,68 +223,6 @@ def _default_trial_resources(max_concurrent: int) -> dict[str, float]:
     return {"cpu": 1.0, "gpu": gpu}
 
 
-RAY_DASHBOARD_STORE = "ray_dashboard"
-
-
-def ray_dashboard_key(project: Path) -> Key:
-    """Where a running cluster's dashboard URL is written down, under the project whose sweep
-    started the cluster, whole in one shot."""
-    return Key(RAY_DASHBOARD_STORE, str(project.resolve()), ("ray_dashboard",))
-
-
-def _publish_ray_dashboard(project: Path, dashboard_url: str | None) -> None:
-    """Record the dashboard of the cluster this process just started.
-
-    ``ray.init()`` reports the dashboard as a bare ``host:port``; what is written down is a
-    fetchable URL, so every reader agrees on one form. The pid is the initiating process,
-    which is what tells a later reader (in any process) whether the cluster is still up.
-    """
-    if not dashboard_url:
-        logger.info("Ray started without a dashboard; no URL to publish")
-        return
-    from tcip_store import StoreError, store
-
-    try:
-        store.replace(ray_dashboard_key(project),
-                      {"url": f"http://{dashboard_url}", "pid": os.getpid()})
-    except (OSError, StoreError):
-        # A dashboard URL nobody could record is a missing convenience, never a reason to
-        # sink the sweep the cluster was started for.
-        logger.warning("could not record the Ray dashboard URL", exc_info=True)
-
-
-def _clear_ray_dashboard(project: Path) -> None:
-    """Drop the dashboard recorded under ``project`` so a torn-down cluster's URL is never
-    served."""
-    from tcip_store import StoreError, store
-
-    try:
-        store.delete(ray_dashboard_key(project))
-    except (OSError, StoreError):
-        logger.warning("could not clear the recorded Ray dashboard URL", exc_info=True)
-
-
-def read_ray_dashboard(project: Path) -> dict | None:
-    """The live Ray dashboard recorded under ``project``: ``{url, pid}``, or ``None`` when none is
-    recorded or the recording process is gone, since that process's exit takes the cluster with
-    it. A record that will not read raises the store's own error, and one that is not exactly a
-    non-empty url and a pid raises ``ValueError``.
-    """
-    import psutil
-
-    from tcip_store import store
-
-    state = store.read(ray_dashboard_key(project), default=None)
-    if state is None:
-        return None
-    if (not isinstance(state, dict) or set(state) != {"url", "pid"}
-            or not isinstance(state["url"], str) or not state["url"]
-            or not isinstance(state["pid"], int)):
-        raise ValueError(f"the Ray dashboard recorded under {project} is not a url and a pid: "
-                         f"{state!r}")
-    return state if psutil.pid_exists(state["pid"]) else None
-
-
 def _has_attached_console() -> bool:
     """Whether this process has a console to signal Ray's daemons through: always on a platform
     other than Windows; on Windows, when ``GetConsoleCP`` reads nonzero."""
@@ -350,36 +281,30 @@ def _kill_ray_daemons_before_shutdown(ray: Any) -> None:
 
 
 @contextmanager
-def _ray_session(ray: Any, num_cpus: int, project: Path) -> Generator[None]:
-    """Keep Ray up for the duration of one sweep of ``project``, shutting it down only when the
-    last concurrent sweep leaves and only if this module is what started it. The lock covers both
-    the check-then-init and the decrement-then-shutdown sequences.
+def _ray_session(ray: Any, num_cpus: int) -> Generator[None]:
+    """Keep Ray up for the duration of one sweep, shutting it down only when the last concurrent
+    sweep leaves and only if this module is what started it. The lock covers both the
+    check-then-init and the decrement-then-shutdown sequences.
 
     ``num_cpus`` is the CPU count the cluster is started with when this call starts it: the sweep's
     own request, every concurrent trial's CPUs together. A sweep that joins a cluster a sibling
-    started runs on the sibling's size. The dashboard of a cluster this module started is recorded
-    under ``project`` while a sweep of ``project`` runs, and cleared when the last one leaves.
+    started runs on the sibling's size.
     """
-    global _ray_dashboard_url, _ray_started, _ray_runtime_pythonpath
+    global _ray_started, _ray_runtime_pythonpath, _active_searches
     global _external_cluster_warned
 
     from tcip_mcp.pipelines.model_build import child_pythonpath
-    from tcip_mcp.web_client import LOOPBACK_HOST
 
     with _ray_lifecycle:
         if not ray.is_initialized():
-            # A bare ray[tune] install has no aiohttp; probe rather than assume, so a sweep still runs without it.
-            include_dashboard = find_spec("aiohttp") is not None
             # Only this branch configures Ray; the not-taken branch below leaves an
             # already-initialized cluster's runtime_env alone, whoever started it.
             pythonpath = child_pythonpath()
-            context = ray.init(num_cpus=num_cpus, include_dashboard=include_dashboard,
-                               dashboard_host=LOOPBACK_HOST, log_to_driver=False,
-                               ignore_reinit_error=True, configure_logging=False,
-                               runtime_env={"env_vars": {"PYTHONPATH": pythonpath}})
+            ray.init(num_cpus=num_cpus, include_dashboard=False, log_to_driver=False,
+                     ignore_reinit_error=True, configure_logging=False,
+                     runtime_env={"env_vars": {"PYTHONPATH": pythonpath}})
             _ray_started = True
             _ray_runtime_pythonpath = pythonpath
-            _ray_dashboard_url = context.dashboard_url if include_dashboard else None
         elif _ray_started:
             if child_pythonpath() != _ray_runtime_pythonpath:
                 logger.warning(
@@ -393,21 +318,14 @@ def _ray_session(ray: Any, num_cpus: int, project: Path) -> Generator[None]:
                 "Ray was already initialized outside this module; no import-path "
                 "propagation was applied to its workers"
             )
-        if _ray_started:
-            _publish_ray_dashboard(project, _ray_dashboard_url)
-        _active_searches[project] += 1
+        _active_searches += 1
     try:
         yield
     finally:
         with _ray_lifecycle:
-            _active_searches[project] -= 1
-            if not _active_searches[project]:
-                del _active_searches[project]
-                if _ray_started:
-                    _clear_ray_dashboard(project)
+            _active_searches -= 1
             if not _active_searches and _ray_started:
                 _ray_started = False
-                _ray_dashboard_url = None
                 _ray_runtime_pythonpath = None
                 if not _has_attached_console():
                     _kill_ray_daemons_before_shutdown(ray)
@@ -447,8 +365,7 @@ def _build_sweep_stopper(sweep_root: Path) -> tuple[Any, Any]:
         def on_trial_complete(self, iteration: int, trials: list, trial: Any, **info: Any) -> None:
             self.live_trial_ids.discard(trial.trial_id)
 
-        def on_trial_error(self, iteration: int, trials: list, trial: Any, **info: Any) -> None:
-            self.live_trial_ids.discard(trial.trial_id)
+        on_trial_error = on_trial_complete
 
     live_trials = _LiveTrialsCallback()
 
@@ -547,7 +464,6 @@ def tune_search(
     objective_fn: Callable[[dict, Callable[[float], None]], Any],
     param_space: dict | None = None,
     *,
-    project: Path,
     metric: str = "objective",
     mode: str = "min",
     num_samples: int = 20,
@@ -559,20 +475,17 @@ def tune_search(
     max_concurrent: int = 1,
     warm_start: bool = False,
     baseline_params: dict | None = None,
-    storage_path: str | None = None,
-    study_name: str = "tcip_hpo",
+    sweep_dir: Path,
     resources_per_trial: dict | None = None,
     split_draws: int = 1,
-) -> str:
-    """Run an HPO sweep on Ray Tune and return its TensorBoard logdir, Ray's experiment store
-    ``<storage_path>/<study_name>``. A cancel requested of that directory
+) -> None:
+    """Run an HPO sweep on Ray Tune, its results in Ray's experiment store at ``sweep_dir``.
+    A cancel requested of that directory
     (``experiments.request_cancel``) stops it (:func:`_build_sweep_stopper`).
 
     Args:
         objective_fn: ``fn(config, report)``, trains one trial for the trial's ``config`` and calls
             ``report(value)`` for each step it wants the searcher/scheduler to see.
-        project: the project the sweep belongs to, where a cluster this sweep starts records its
-            dashboard.
         param_space: platform param-space dict (see ``get_default_space``); ``None`` uses it.
         metric / mode: the reported metric name and whether to ``min`` or ``max`` it.
         num_samples: number of trials (with a grid space, samples over the grid); the count
@@ -582,8 +495,8 @@ def tune_search(
         seed: the searcher's own seed, the sweep's stated one; required.
         max_concurrent: trials to run at once (default 1, safe for single-GPU training).
         warm_start: seed the search with ``baseline_params`` (or the default baseline).
-        storage_path: where Ray persists trial results (also the TensorBoard logdir root).
-            Required. Accepts a local path; Ray's ``storage_path`` also takes a cloud URI.
+        sweep_dir: the local directory Ray persists the sweep's trial results in, its parent
+            Ray's ``storage_path`` and its name Ray's experiment name.
         resources_per_trial: Ray resource request per trial (``{"cpu": ..., "gpu": ...}``, GPU as a
             fraction for sharing). Omit to derive one from the host's real GPU count and
             ``max_concurrent``. A cluster this sweep starts is sized to ``cpu`` times
@@ -594,14 +507,6 @@ def tune_search(
             ``constant_grid_search``, so every sampled point is trained once per seed whether
             ``search_alg`` is ``random`` or ``grid``; a backend ``search_alg`` refuses.
     """
-    if not storage_path:
-        raise ValueError(
-            "tune_search needs storage_path: trial results are persisted where the caller "
-            "says, never Ray's own home-directory default. run_hyperparameter_search resolves it for a "
-            "training sweep (the project's own .tcip/hpo via sweeps_dir/sweep_dir); a bespoke "
-            "search names its own directory."
-        )
-
     if split_draws > 1 and SPLIT_DRAW_SEED_KEY not in (param_space or {}):
         raise ValueError(
             f"tune_search: split_draws={split_draws} pairs {SPLIT_DRAW_SEED_KEY!r} as a grid "
@@ -649,11 +554,11 @@ def tune_search(
     # A trainable with no CPU request gets one CPU from Ray, so the cluster is sized the same way.
     cluster_cpus = math.ceil(float(resources.get("cpu", 1.0)) * max(max_concurrent, 1))
 
-    stopper, live_trials_callback = _build_sweep_stopper(Path(storage_path) / study_name)
+    stopper, live_trials_callback = _build_sweep_stopper(sweep_dir)
     run_kwargs: dict[str, Any] = {
         "verbose": 0,
-        "storage_path": Path(storage_path).resolve().as_posix(),
-        "name": study_name,
+        "storage_path": sweep_dir.parent.resolve().as_posix(),
+        "name": sweep_dir.name,
         "stop": stopper,
         "callbacks": [live_trials_callback],
     }
@@ -669,7 +574,7 @@ def tune_search(
                 var, value, run_kwargs["storage_path"],
             )
     try:
-        with _ray_session(ray, cluster_cpus, project):
+        with _ray_session(ray, cluster_cpus):
             tuner = tune.Tuner(
                 trainable,
                 param_space=space,
@@ -683,4 +588,3 @@ def tune_search(
             tuner.fit()
     finally:
         os.environ.update(removed_env)
-    return f"{run_kwargs['storage_path']}/{study_name}"

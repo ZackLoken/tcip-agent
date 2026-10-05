@@ -17,8 +17,9 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
+from tcip_mcp.pipelines.model_build import CONFIG_KEY  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
-from tests._producer_fixtures import label_image  # noqa: E402
+from tests._producer_fixtures import label_image, seed_bud_images  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     SCOPED_DATA, project_checkpoint, verified_checkpoint,
 )
@@ -98,21 +99,6 @@ def test_all_negative_only_loader_is_not_skipped():
 
 # ── tiled evaluation regimes ──────────────────────────────────────────────
 
-def _det_dataset(tmp_path, n=3, size=128):
-    """``n`` images in ``tmp_path``'s undated capture, each labeled with one ``bud`` box."""
-    from PIL import Image
-
-    from tcip_annotation.state import Annotation, BBox
-
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True, exist_ok=True)
-    for i in range(n):
-        Image.new("RGB", (size, size), color=(120, 120, 120)).save(images_dir / f"img{i}.png")
-        label_image(images_dir / f"img{i}.png",
-                    [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], size, size)
-    return images_dir
-
-
 def _capture_run_test_evaluation(monkeypatch):
     """Patch run_test_evaluation to record the built dataset + tiling instead of loading a model."""
     import tcip_mcp.pipelines.training.eval_runners as runners
@@ -133,7 +119,7 @@ def test_run_id_reuses_training_tiling(tmp_path, monkeypatch):
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import finished_run
 
-    images_dir = _det_dataset(tmp_path)
+    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
     data = {**SCOPED_DATA, "tiling": {"enabled": True, "tile_size": 64, "sliver_frac": 0.5}}
     run_dir = finished_run(tmp_path, experiment_id="det-measure-tiled", data=data)
 
@@ -156,7 +142,7 @@ def test_evaluating_a_run_leaves_its_directory_byte_identical(tmp_path, monkeypa
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import finished_run
 
-    images_dir = _det_dataset(tmp_path)
+    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
     run_dir = finished_run(tmp_path, experiment_id="det-evaluated")
 
     def snapshot() -> dict:
@@ -177,7 +163,7 @@ def test_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    images_dir = _det_dataset(tmp_path)
+    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
     ckpt = registered_checkpoint(tmp_path)
 
     captured = _capture_run_test_evaluation(monkeypatch)
@@ -193,7 +179,7 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, 
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    images_dir = _det_dataset(tmp_path)  # three-band sources
+    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)  # three-band sources
     scope = {"subject": "bud"}
     one_band = {"builder": "tests.bespoke_models:build_bespoke_detection",
                 "builder_kwargs": {"min_size": 64, "max_size": 128,
@@ -210,7 +196,7 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, 
 
     # A checkpoint whose own data section records no band count, written past the producer.
     payload = torch.load(ckpt, map_location="cpu", weights_only=False)
-    del payload["config"]["data"]["num_channels"]
+    del payload[CONFIG_KEY]["data"]["num_channels"]
     unstated = tmp_path / "unstated.pt"
     torch.save(payload, str(unstated))
     assert "error" not in register_model(tmp_path, name="unstated-width",
@@ -232,7 +218,7 @@ def _detections_as_ground_truth(payload, images_dir, *, subject: str, limit: int
     from tcip_mcp.pipelines.model_build import STATE_DICT_KEY, build_model, recorded_model_dims
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
 
-    model = build_model(payload["config"], recorded_model_dims(payload["config"]))
+    model = build_model(payload[CONFIG_KEY], recorded_model_dims(payload[CONFIG_KEY]))
     model.load_state_dict(payload[STATE_DICT_KEY])
     model.eval()
     set_detector_operating_point(model, score_thresh=0.0)
@@ -311,8 +297,8 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     assert len(builds) == 1
 
     torch.manual_seed(777)
-    dims = model_build.recorded_model_dims(verified.payload["config"])
-    independent_model = build_model(verified.payload["config"], dims)
+    dims = model_build.recorded_model_dims(verified.payload[CONFIG_KEY])
+    independent_model = build_model(verified.payload[CONFIG_KEY], dims)
     independent_model.load_state_dict(verified.payload[STATE_DICT_KEY])
     independent_model.to(recorded["device"])
     kw = recorded["kw"]
@@ -344,7 +330,7 @@ def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    images_dir = _det_dataset(tmp_path)
+    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
     ckpt = registered_checkpoint(tmp_path)
 
     captured = _capture_run_test_evaluation(monkeypatch)
@@ -353,40 +339,23 @@ def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
     assert isinstance(captured["ds"], TiledDetectionDataset)
 
 
-class _SlicedStub:
-    """A predictor answering one fixed sliced result, recording the execution each call ran
-    under."""
-
-    task = "detection"
-    in_chans = 3
-    train_native_size = None
-    train_augmentation = None
-
-    def __init__(self, boxes, *, train_tile_size=None, train_overlap=None):
-        self.boxes = boxes
-        self.train_tile_size, self.train_overlap = train_tile_size, train_overlap
-        self.executions: list = []
-
-    def predict_sliced(self, path, **kw):
-        self.executions.append(kw["execution"])
-        return {"image": path, "width": 128, "height": 128, "boxes": self.boxes,
-                "scores": [0.9] * len(self.boxes), "labels": [1] * len(self.boxes),
-                "count": len(self.boxes), "cap_hit": False}
+def _sliced_stub(boxes, **training) -> StubPredictor:
+    """A three-band detector answering ``boxes`` at 0.9 on a 128px frame, trained at
+    ``training``'s geometry."""
+    return StubPredictor(task="detection", in_chans=3, width=128, height=128, boxes=boxes,
+                         scores=(0.9,) * len(boxes), **training)
 
 
 def _full_frame(tmp_path, monkeypatch, stub, annotations, *, checkpoint=None, **stated) -> dict:
     """``run_full_frame_evaluation`` of one 128px frame labeled with ``annotations`` through
     ``stub``."""
-    from PIL import Image
-
-    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
+    from tests._producer_fixtures import blank_image
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
-    Image.new("RGB", (128, 128)).save(images_dir / "a.png")
-    label_image(images_dir / "a.png", annotations, 128, 128, keep_empty=True)
-    monkeypatch.setattr(predictor_mod, "GenericPredictor", lambda *a, **kw: stub)
+    image = blank_image(tmp_path, "a.png", (128, 128))
+    label_image(image, annotations, 128, 128, keep_empty=True)
+    images_dir = image.parent
+    install(monkeypatch, stub)
     checkpoint = checkpoint or verified_checkpoint(tmp_path)
     return run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
                                      stated=Stated(**stated))
@@ -397,7 +366,7 @@ def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
 
     # An object straddling the x=64 tile seam; this stub carries no persisted geometry, so the
     # caller states it.
-    r = _full_frame(tmp_path, monkeypatch, _SlicedStub([[54, 54, 74, 74]]),
+    r = _full_frame(tmp_path, monkeypatch, _sliced_stub([[54, 54, 74, 74]]),
                     [Annotation(subject="bud", geometry=BBox(54, 54, 74, 74))],
                     tile_size=64, overlap=0.2)
 
@@ -412,7 +381,7 @@ def test_full_frame_scores_a_detection_in_a_crowd_region_as_neither(tmp_path, mo
     from tcip_annotation.state import Annotation, BBox
 
     r = _full_frame(tmp_path, monkeypatch,
-                    _SlicedStub([[10, 10, 30, 30], [60, 60, 120, 120]]),
+                    _sliced_stub([[10, 10, 30, 30], [60, 60, 120, 120]]),
                     [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30)),
                      Annotation(subject="bud", geometry=BBox(60, 60, 120, 120), iscrowd=True)],
                     tile_size=64, overlap=0.2)
@@ -435,7 +404,7 @@ def test_full_frame_reads_each_ground_truth_box_on_the_stored_grid(tmp_path, mon
 
     monkeypatch.setattr(evaluation, "image_record", recording)
     bur = {"num_channels": 3, "scope": {"subject": "bur"}}
-    _full_frame(tmp_path, monkeypatch, _SlicedStub([[10.1, 10.1, 40.3, 30.3]]),
+    _full_frame(tmp_path, monkeypatch, _sliced_stub([[10.1, 10.1, 40.3, 30.3]]),
                 [Annotation(subject="bur", geometry=BBox(10.1, 10.1, 40.3, 30.3))],
                 checkpoint=verified_checkpoint(tmp_path, data=bur), tile_size=64, overlap=0.2)
 
@@ -508,7 +477,7 @@ def test_the_evaluation_refuses_an_unresolvable_tile_geometry(tmp_path, monkeypa
     from tcip_mcp.pipelines.execution import ExecutionRefused
 
     with pytest.raises(ExecutionRefused, match="tile_size"):
-        _full_frame(tmp_path, monkeypatch, _SlicedStub([]), [])
+        _full_frame(tmp_path, monkeypatch, _sliced_stub([]), [])
 
 
 def test_the_evaluation_derives_tile_geometry_from_the_checkpoint(tmp_path, monkeypatch):
@@ -516,7 +485,7 @@ def test_the_evaluation_derives_tile_geometry_from_the_checkpoint(tmp_path, monk
     arbitrary fixed scale."""
     from tcip_annotation.state import Annotation, BBox
 
-    stub = _SlicedStub([], train_tile_size=224, train_overlap=0.1)
+    stub = _sliced_stub([], train_tile_size=224, train_overlap=0.1)
 
     r = _full_frame(tmp_path, monkeypatch, stub,
                     [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))])
@@ -540,13 +509,11 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
     import os
-    import time
 
-    from PIL import Image
-    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.experiments import run_resolution
     import tcip_mcp.pipelines.training.generic_trainer as gt
     from tcip_mcp.tools import training_tools
+    from tests._verified_checkpoint_fixtures import run_to_end
 
     def _poison_train(*a, **k):
         raise AssertionError(
@@ -554,12 +521,7 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
 
     monkeypatch.setattr(gt, "train", _poison_train)
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
-    for i in range(2):
-        Image.new("RGB", (128, 128)).save(images_dir / f"t{i}.png")
-        label_image(images_dir / f"t{i}.png",
-                    [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
+    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET, n=2)
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
@@ -583,13 +545,4 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
     assert tiling["overlap"] == pytest.approx(0.2)
 
     # "completed", not any terminal state: a child run inside this process would hit _poison_train.
-    final_status = None
-    deadline = time.monotonic() + 90
-    while time.monotonic() < deadline:
-        final_status = training_tools.monitor_training(tmp_path, eid).get("status")
-        if final_status in ("completed", "failed", "canceled"):
-            break
-        time.sleep(0.5)
-    else:
-        pytest.fail("timed out waiting for training subprocess to finish")
-    assert final_status == "completed"
+    assert run_to_end(tmp_path, eid)["state"] == "completed"

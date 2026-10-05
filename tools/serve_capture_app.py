@@ -3,7 +3,7 @@
 ``start`` launches ``python -m tcip_web`` with ``TCIP_WORKSPACE`` pointed at a scratch directory
 under a caller-named harness root, waits until the projects route answers, and records pid and
 port in ``server_info.json`` under that root; ``stop`` kills the recorded process tree and removes
-the record. It seeds nothing.
+the record.
 
 ``stop`` is Windows-only (``taskkill /T``) and refuses on any other host.
 
@@ -68,8 +68,7 @@ def _refuse_unsafe_root(root: Path) -> None:
 def build_environ(root: Path, port: int) -> dict[str, str]:
     """The environment ``start`` launches ``python -m tcip_web`` under: a scratch workspace
     beneath ``root``, the port to bind, unbuffered output, and the repository root prefixed onto
-    ``PYTHONPATH``, so a run's subprocess can import a module of the repository by dotted name.
-    Refuses an unsafe root before building anything.
+    ``PYTHONPATH``. Refuses an unsafe root before building anything.
     """
     _refuse_unsafe_root(root)
     workspace = root / "workspace"

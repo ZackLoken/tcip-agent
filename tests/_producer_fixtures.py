@@ -17,40 +17,84 @@ def label_image(image_path, annotations, width: int, height: int, **kwargs: Any)
     return write_label_document(image_label_key(image_path), annotations, width, height, **kwargs)
 
 
-def seed_leaf_detection_dataset(root) -> tuple:
-    """Two training and one validation 128px image under ``root``'s image tree, captures
-    ``train`` and ``val``, each with a label document holding one ``leaf`` box;
-    ``(images, val_images)``."""
-    from PIL import Image
+def box_annotation(x1: float, y1: float, x2: float, y2: float, *, subject: str = "bud",
+                   score: float | None = None, **attributes: str):
+    """An annotation of ``subject`` boxed at pixel ``(x1, y1, x2, y2)`` carrying ``attributes``;
+    a prediction when ``score`` is given."""
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir, val_images = root / "images" / "train", root / "images" / "val"
-    for d in (images_dir, val_images):
-        d.mkdir(parents=True)
-    leaf = [Annotation(subject="leaf", geometry=BBox(10, 10, 30, 30))]
-    for images, stem in ((images_dir, "t0"), (images_dir, "t1"), (val_images, "v0")):
-        Image.new("RGB", (128, 128)).save(images / f"{stem}.png")
-        label_image(images / f"{stem}.png", leaf, 128, 128)
-    return images_dir, val_images
+    return Annotation(subject=subject, geometry=BBox(x1, y1, x2, y2), score=score,
+                      attributes=dict(attributes))
 
 
-def seed_two_bud_images(images_dir) -> None:
-    """Make ``images_dir``, a capture of a dataset image tree, and write two 32px images, each
-    with a label document holding one ``bud`` box, so a drawn split holds one out for
-    validation."""
+def saved_annotations(image) -> list:
+    """The annotations of the label document of the image at ``image``."""
+    from tcip_annotation.json_io import read_label_document
+
+    return read_label_document(image_label_key(image)).annotations
+
+
+def write_image(path, size: tuple[int, int] = (100, 80), color: tuple[int, int, int] = (0, 0, 0)):
+    """A flat ``color`` three-band ``size`` image written at ``path``, its directory made;
+    ``path``."""
     from PIL import Image
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", size, color).save(path)
+    return path
+
+
+def gray_frame(where, size: int = 128, name: str = "img.png") -> str:
+    """A flat gray ``size``px square ``name`` in ``where`` (:func:`write_image`); its path."""
+    return str(write_image(where / name, (size, size), (120, 120, 120)))
+
+
+def blank_image(root, name: str = "IMG_0001.JPG", size: tuple[int, int] = (100, 80)):
+    """:func:`write_image` of ``name`` in ``root``'s undated capture."""
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
+    return write_image(root / "images" / UNDATED_BUCKET / name, size)
+
+
+def one_labeled_capture(root):
+    """``root`` holding one image in its ``2026-03-04`` capture with an empty label document over
+    it, and the subject registry that decodes it; ``root``."""
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
+
+    image = root / "images" / "2026-03-04" / "a_1.jpg"
+    image.parent.mkdir(parents=True, exist_ok=True)
+    image.write_bytes(b"\xff\xd8\xff")
+    label_image(image, [], 8, 8, keep_empty=True)
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
+    return root
+
+
+def seed_labeled_images(images_dir, annotations, *, n: int, width: int, height: int):
+    """Make ``images_dir``, a capture of a dataset image tree, and write ``n`` three-band
+    ``width`` by ``height`` images ``img<i>.png``, each with a label document holding
+    ``annotations``; ``images_dir``."""
+    from PIL import Image
+
+    images_dir.mkdir(parents=True, exist_ok=True)
+    for i in range(n):
+        Image.new("RGB", (width, height), color=(10 * i, 0, 0)).save(images_dir / f"img{i}.png")
+        label_image(images_dir / f"img{i}.png", annotations, width, height)
+    return images_dir
+
+
+def seed_bud_images(images_dir, *, n: int = 3, size: int = 128,
+                    box: tuple[float, float, float, float] = (10, 10, 40, 40)):
+    """:func:`seed_labeled_images` of ``n`` square ``size``px images, each holding one ``bud``
+    box at ``box``."""
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir.mkdir(parents=True)
-    for i in range(2):
-        Image.new("RGB", (32, 32), color=(10 * i, 0, 0)).save(images_dir / f"img{i}.png")
-        label_image(images_dir / f"img{i}.png",
-                    [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
+    return seed_labeled_images(images_dir, [Annotation(subject="bud", geometry=BBox(*box))],
+                               n=n, width=size, height=size)
 
 
-def small_detection_config(images_dir, experiment_id: str) -> dict:
-    """A one-epoch CPU detection run of the bespoke detector over ``images_dir`` under
-    ``experiment_id``, drawing its split at seed 0."""
+def small_detection_config(images_dir) -> dict:
+    """A one-epoch CPU detection run of the bespoke detector over ``images_dir``, drawing its
+    split at seed 0."""
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 128},
@@ -59,7 +103,6 @@ def small_detection_config(images_dir, experiment_id: str) -> dict:
                  "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
         "mixed_precision": False, "device": "cpu",
-        "experiment_id": experiment_id,
     }
 
 
@@ -149,3 +192,23 @@ def run_over(
 def dataset_over(task: str, images_dir, ground_truth=None, **kwargs: Any):
     """The loader :func:`run_over` builds."""
     return run_over(task, images_dir, ground_truth, **kwargs)[0]
+
+
+def fake_popen(monkeypatch, captured: list[list[str]]) -> None:
+    """Replace ``subprocess.Popen`` with one recording each argv into ``captured`` and starting
+    nothing, and ``launch_tensorboard`` with one starting no TensorBoard, so a launch door is
+    driven through its own records without a child process."""
+    import subprocess
+
+    import tcip_mcp.tools.training_tools  # noqa: F401  # imported before Popen is replaced
+
+    class _FakeProc:
+        pid = 424242
+
+    def _popen(argv, **kwargs):
+        captured.append(argv)
+        return _FakeProc()
+
+    monkeypatch.setattr(subprocess, "Popen", _popen)
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})

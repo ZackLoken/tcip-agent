@@ -25,13 +25,3 @@ export function defaultTrainingRequest(datasetRoot: string | null, subject: stri
     "Let me know once it's running so I can watch it here."
   );
 }
-
-export function defaultSweepRequest(datasetRoot: string | null): string {
-  const where = datasetRoot ? ` for the dataset at ${datasetRoot}` : "";
-  return (
-    `Run a hyperparameter sweep${where}. Pick the training config and task, decide which ` +
-    "hyperparameters are worth searching (e.g. learning rate, batch size, weight decay) and " +
-    "reasonable ranges for them, choose a search algorithm and scheduler and a sensible " +
-    "number of trials, then launch it. Let me know once it's running so I can watch it here."
-  );
-}

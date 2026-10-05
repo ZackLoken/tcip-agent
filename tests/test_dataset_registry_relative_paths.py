@@ -5,8 +5,6 @@ accessor (``dataset_entry_path``).
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 from PIL import Image
@@ -14,6 +12,7 @@ from PIL import Image
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.subject_registry import SubjectRegistry, Subject
 from tcip_mcp.tools.project_tools import read_datasets, register_dataset
+from tests._cli_fixtures import run_tcip
 from tests._producer_fixtures import label_image, registry_over
 
 
@@ -25,13 +24,6 @@ def _make_dataset(root: Path) -> None:
     label_image(root / "images" / "2-11-26" / "img_000.jpg",
                 [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
-
-
-def _run_check(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, "-m", "tcip_web.cli", "check-dataset-identity", *args],
-        capture_output=True, text=True, timeout=60,
-    )
 
 
 # ── the writer: stores "." for the project's own tree ──────────────────────────
@@ -141,7 +133,7 @@ def test_check_dataset_identity_stays_quiet_for_a_self_registered_project(tmp_pa
     _make_dataset(src)
     register_dataset(src, str(src), crop="currant")
 
-    result = _run_check(str(src), "--project", str(src))
+    result = run_tcip("check-dataset-identity", [str(src), "--project", str(src)])
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "MOVED" not in result.stdout
@@ -162,7 +154,7 @@ def test_check_dataset_identity_still_fires_for_a_genuinely_moved_dataset(tmp_pa
     tcip_store.release_root(orig)
     shutil.copytree(orig, moved)
 
-    result = _run_check(str(moved), "--project", str(orig))
+    result = run_tcip("check-dataset-identity", [str(moved), "--project", str(orig)])
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "MOVED" in result.stdout

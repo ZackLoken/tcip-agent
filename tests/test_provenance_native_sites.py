@@ -1,16 +1,11 @@
 """Native provenance stamping at the non-web write sites, the read path that carries it back out,
-plus the identity helper.
-
-The web save door is covered in test_tcip_web_routes.py; the proposal engines (stage_proposals)
-in test_vision.py / test_review_channel.py.
-"""
+and the identity helper."""
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import pytest
-from PIL import Image
+
+from tests._producer_fixtures import blank_image
 
 
 # ── the one actor function ───────────────────────────────────────────────────
@@ -32,13 +27,6 @@ def test_actor_refuses_a_request_that_names_no_one_whatever_the_process_runs_as(
 
 # ── MCP save_annotations: optional producer created_by ───────────────────────
 
-def _img(tmp_path):
-    p = tmp_path / "images" / UNDATED_BUCKET / "IMG_0001.JPG"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (100, 80)).save(p)
-    return p
-
-
 def _records(img) -> list[dict]:
     """The records of ``img``'s label document as stored."""
     import tcip_store
@@ -55,7 +43,7 @@ def test_save_annotations_takes_no_producer_and_names_itself(tmp_path):
 
     from tcip_mcp.tools.annotation_tools import save_annotations
     assert "created_by" not in inspect.signature(save_annotations).parameters
-    img = _img(tmp_path)
+    img = blank_image(tmp_path)
     save_annotations(tmp_path, tmp_path.parent, str(img),
                      annotations=[{"subject": "bud", "bbox": [10, 10, 30, 30]}])
     obj = _records(img)[0]
@@ -66,7 +54,7 @@ def test_save_annotations_takes_no_producer_and_names_itself(tmp_path):
 def test_save_annotations_never_reads_provenance_off_a_shape(tmp_path):
     """A shape's own ``created_by`` is not an author: every new shape carries the door's."""
     from tcip_mcp.tools.annotation_tools import save_annotations
-    img = _img(tmp_path)
+    img = blank_image(tmp_path)
     save_annotations(
         tmp_path, tmp_path.parent, str(img),
         annotations=[

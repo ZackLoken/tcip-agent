@@ -104,25 +104,18 @@ def test_a_trial_over_a_data_axis_records_the_dataset_its_own_input_names(tmp_pa
     """A sweep trial whose sampled point names another dataset records that dataset's identity,
     read off the trial's own input, never the identity of the sweep's base dataset."""
     pytest.importorskip("torch")
-    from types import SimpleNamespace
-
-    from tcip_mcp.experiments import RUN_FILE, read_record, sweeps_dir
-    from tcip_mcp.pipelines.training import subprocess_worker
+    from tcip_mcp.experiments import RUN_FILE, read_record
     from tcip_mcp.tools.project_tools import register_dataset
-    from tcip_mcp.tools.training_tools import _run_hpo_trial
+    from tcip_mcp.tools.training_tools import open_trial
+    from tests._verified_checkpoint_fixtures import opened_sweep
 
     base_images = _make_dataset(tmp_path / "base")
     register_dataset(tmp_path / "base", str(tmp_path / "base"), crop="currant")
     other_images = _make_dataset(tmp_path / "other", shade=200)
     other = register_dataset(tmp_path / "other", str(tmp_path / "other"), crop="currant")
-    monkeypatch.setattr(subprocess_worker, "run_directory",
-                        lambda *a, **k: SimpleNamespace(status="failed"))
-    trial_dir = sweeps_dir(tmp_path) / "sweep" / "trial_a"
-    trial_dir.parent.mkdir(parents=True)
 
-    _run_hpo_trial({"data.images_dir": str(other_images)},
-                   [].append, _config(base_images), trial_dir, project=tmp_path,
-                   objective={"selection_metric": "loss", "higher_is_better": False})
+    trial_dir = open_trial(opened_sweep(tmp_path, _config(base_images)), "a",
+                           {"data.images_dir": str(other_images)})
 
     dataset = read_record(trial_dir / RUN_FILE)["dataset"]
     assert dataset == {"id": other["id"], "fingerprint": other["fingerprint"]}
@@ -135,7 +128,7 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(tmp_path, mon
     import subprocess
 
     pytest.importorskip("torch")
-    from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
+    from tcip_mcp.experiments import RUN_FILE, read_record
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.tools.training_tools import launch_training
 
@@ -159,9 +152,8 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(tmp_path, mon
         "data": {"images_dir": str(images_dir), "scope": {"subject": SUBJECT},
                  "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}], "device": "cpu",
-        "experiment_id": "exp-identity",
     }, actor=None)
     assert "error" not in launched, launched
 
-    dataset = read_record(experiment_dir("exp-identity", project=tmp_path) / RUN_FILE)["dataset"]
+    dataset = read_record(Path(launched["output_dir"]) / RUN_FILE)["dataset"]
     assert dataset == {"id": registered["id"], "fingerprint": registered["fingerprint"]}

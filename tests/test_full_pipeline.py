@@ -13,11 +13,13 @@ from pathlib import Path
 
 import pytest
 torch = pytest.importorskip("torch")
+
+from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
 from torch.utils.data import DataLoader
 torchvision = pytest.importorskip("torchvision")
 from torchvision.utils import save_image
 
-from tests import bespoke_models  # noqa: E402
+from tests import REPO_ROOT, bespoke_models  # noqa: E402
 from tests._producer_fixtures import run_over  # noqa: E402
 
 
@@ -113,9 +115,9 @@ class TestFullClassificationPipeline:
         run = trainer_run(config, output_dir, project=tmp_path,
                           has_val_loader=val_loader is not None, id="auto-run-32")
 
-        rows: list[dict] = []
+        rows: list[tuple[int, dict]] = []
         completed_run = train(run, loader, val_loader=val_loader,
-                              epoch_callback=lambda epoch, metrics: rows.append(dict(metrics)))
+                              epoch_callback=lambda epoch, metrics: rows.append((epoch, metrics)))
 
         assert completed_run.status == "completed"
         assert completed_run.current_epoch == 2
@@ -128,14 +130,13 @@ class TestFullClassificationPipeline:
         assert (out / "model_best.pt").is_file()
         assert (out / "model_final.pt").is_file()
         # Every epoch's row reached the log through the run's own sink.
-        assert len(rows) == 2
-        assert "epoch" in rows[0]
-        assert "train_loss" in rows[0]
+        assert [epoch for epoch, _ in rows] == [1, 2]
+        assert "train_loss" in rows[0][1]
 
         # Verify checkpoint has required keys
         ckpt = torch.load(out / "model_best.pt", map_location="cpu", weights_only=False)
-        assert "model_state_dict" in ckpt
-        assert "model_source" in ckpt["config"] and "model_source" not in ckpt
+        assert STATE_DICT_KEY in ckpt
+        assert "model_source" in ckpt[CONFIG_KEY] and "model_source" not in ckpt
 
         # --- Step 5: Register the checkpoint, load it verified, and run inference ---
         from tcip_mcp.pipelines.execution import Stated, prepare_pass
@@ -163,7 +164,7 @@ class TestFullClassificationPipeline:
 # ---------------------------------------------------------------------------
 
 SAMPLE_PROJECT = Path(os.environ.get(
-    "TCIP_SAMPLE_PROJECT", str(Path(__file__).resolve().parent.parent / "data")))
+    "TCIP_SAMPLE_PROJECT", str(REPO_ROOT / "data")))
 """A real dataset to run the detection pipeline against: TCIP_SAMPLE_PROJECT names a project
 root holding subjects.json, images/<date>/ and their label documents; defaults to an in-repo
 <repo>/data sample. The tests below skip when neither is present."""
@@ -262,8 +263,8 @@ class TestDetectionPipelineRealData:
 
         # Verify checkpoint format
         ckpt = torch.load(out / "model_best.pt", map_location="cpu", weights_only=False)
-        assert "model_state_dict" in ckpt
-        assert "model_source" in ckpt["config"] and "model_source" not in ckpt
+        assert STATE_DICT_KEY in ckpt
+        assert "model_source" in ckpt[CONFIG_KEY] and "model_source" not in ckpt
 
         # --- Step 4: Register the checkpoint, load it verified, and run inference ---
         from tcip_mcp.pipelines.execution import Stated, prepare_pass

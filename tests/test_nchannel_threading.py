@@ -7,6 +7,8 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._producer_fixtures import dataset_over  # noqa: E402
 
 torch = pytest.importorskip("torch")
+
+from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
 pytest.importorskip("torchvision")
 
 
@@ -327,7 +329,7 @@ def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
         "in_chans": 1, "num_classes": 2, "img_size": 224}
 
     ckpt = tmp_path / "model_best.pt"
-    torch.save({"config": config, "model_state_dict": build_model(config, dims).state_dict()},
+    torch.save({CONFIG_KEY: config, STATE_DICT_KEY: build_model(config, dims).state_dict()},
                str(ckpt))
     assert "error" not in register_model(name="single-band", checkpoint_path=str(ckpt),
                                          config={}, project=tmp_path)

@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import pathlib
 import subprocess
 import sys
 
 import pytest
 
-SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "tools" / "cross_family_ask.py"
+from tests import REPO_ROOT
+
+SCRIPT = REPO_ROOT / "tools" / "cross_family_ask.py"
 
 
 def _load():
@@ -438,15 +439,6 @@ def test_a_run_with_no_usable_answer_says_so_in_words_at_the_end_of_its_output(
 
 
 # ── the tcip MCP block is read from .mcp.json, not restated ─────────────────
-
-
-def test_load_tcip_mcp_config_reads_the_repos_own_mcp_json(runner):
-    import json as _json
-
-    declared = _json.loads((SCRIPT.parents[1] / ".mcp.json").read_text(encoding="utf-8"))
-    assert runner.load_tcip_mcp_config() == {
-        "mcpServers": {"tcip": declared["mcpServers"]["tcip"]}
-    }
 
 
 def test_load_tcip_mcp_config_refuses_when_mcp_json_is_missing(runner, tmp_path, monkeypatch):

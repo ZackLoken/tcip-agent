@@ -3,6 +3,7 @@
 import pytest
 
 from tcip_mcp.pipelines.execution import Stated
+from tests._producer_fixtures import write_image
 
 STATED = Stated(tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2)
 """The execution values every inference job here states."""
@@ -87,15 +88,6 @@ def _fake_predictor(monkeypatch) -> None:
     install(monkeypatch, StubPredictor(width=16, height=16, boxes=(), scores=()))
 
 
-def _one_image(tmp_path):
-    from PIL import Image
-
-    images_dir = tmp_path / "images" / "2026-01-01"
-    images_dir.mkdir(parents=True)
-    Image.new("RGB", (16, 16)).save(images_dir / "img.jpg")
-    return images_dir
-
-
 def test_inference_cancel_endpoint_and_worker(tmp_path, opened_project, monkeypatch):
     pytest.importorskip("fastapi")
     monkeypatch.chdir(tmp_path)
@@ -106,7 +98,7 @@ def test_inference_cancel_endpoint_and_worker(tmp_path, opened_project, monkeypa
     from tests._audit_fixtures import audit_rows
     from tests._verified_checkpoint_fixtures import project_checkpoint
 
-    images_dir = _one_image(tmp_path)
+    images_dir = write_image(tmp_path / "images" / "2026-01-01" / "img.jpg", (16, 16)).parent
     _fake_predictor(monkeypatch)
 
     job = InferenceJob(job_id="j1", actor="user:tester", project=str(tmp_path),

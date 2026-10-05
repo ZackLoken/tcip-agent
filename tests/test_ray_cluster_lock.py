@@ -11,9 +11,8 @@ import os
 import subprocess
 import sys
 import textwrap
-from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[1]
+from tests import REPO_ROOT
 
 TWO_MARKED_TESTS = textwrap.dedent(
     """
@@ -55,7 +54,7 @@ def test_two_marked_tests_on_two_workers_run_one_after_the_other(tmp_path):
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", str(test_file), "-n", "2", "-p", "no:cacheprovider",
          "-p", "tests.ray_cluster_lock", "--basetemp", str(basetemp), "-q"],
-        cwd=REPO, capture_output=True, text=True, timeout=120,
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=120,
         env={**os.environ, "INTERVALS_DIR": str(intervals_dir)},
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr

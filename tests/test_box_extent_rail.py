@@ -7,26 +7,13 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from PIL import Image
 
 import tcip_store as ts
 from tcip_annotation.json_io import label_document, read_label_document, write_label_document
 from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
 from tcip_mcp.pipelines.data.label_queries import registry_scope
-from tests._producer_fixtures import image_label_key
-
-
-def _write_image(path: Path, size=(200, 150)) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", size, color=(100, 100, 100)).save(path)
-
-
-@pytest.fixture
-def client() -> TestClient:
-    from tcip_web.app import app
-
-    return TestClient(app, base_url="http://127.0.0.1")
+from tests._producer_fixtures import image_label_key, write_image
 
 
 # ── the shared constructor ──────────────────────────────────────────────────
@@ -138,7 +125,7 @@ def test_save_annotations_refuses_an_inverted_box(tmp_path):
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     img = tmp_path / "images" / UNDATED_BUCKET / "img_001.jpg"
-    _write_image(img)
+    write_image(img, (200, 150))
 
     result = save_annotations(tmp_path, tmp_path.parent, str(img),
                               annotations=[{"subject": "leaf", "bbox": [10, 10, 5, 5]}])
@@ -151,7 +138,7 @@ def test_save_annotations_admits_an_ordered_box(tmp_path):
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     img = tmp_path / "images" / UNDATED_BUCKET / "img_001.jpg"
-    _write_image(img)
+    write_image(img, (200, 150))
 
     result = save_annotations(tmp_path, tmp_path.parent, str(img),
                               annotations=[{"subject": "leaf", "bbox": [5, 5, 10, 20]}])
@@ -165,7 +152,7 @@ def test_save_annotations_admits_an_ordered_box(tmp_path):
 
 def test_annotate_save_refuses_an_inverted_box(client: TestClient, tmp_path: Path) -> None:
     img = tmp_path / "images" / UNDATED_BUCKET / "img_001.jpg"
-    _write_image(img)
+    write_image(img, (200, 150))
 
     resp = client.post(
         "/api/annotate/labels",
@@ -179,7 +166,7 @@ def test_annotate_save_refuses_an_inverted_box(client: TestClient, tmp_path: Pat
 
 def test_annotate_save_admits_an_ordered_box(client: TestClient, tmp_path: Path) -> None:
     img = tmp_path / "images" / UNDATED_BUCKET / "img_001.jpg"
-    _write_image(img)
+    write_image(img, (200, 150))
 
     resp = client.post(
         "/api/annotate/labels",
@@ -203,7 +190,7 @@ def _seed_review_dataset(tmp_path: Path, *, pred_box=(10, 10, 20, 20), gt_box=No
 
     dataset_root = open_new_project(tmp_path)
     img = dataset_root / "images" / UNDATED_BUCKET / "img_001.jpg"
-    _write_image(img)
+    write_image(img, (200, 150))
     registry_over(dataset_root, SubjectRegistry(subjects=(Subject(name="leaf"),)))
     gt_annotations = (
         [Annotation(subject="leaf", geometry=BBox(*gt_box))] if gt_box is not None else []
@@ -343,7 +330,7 @@ def test_stage_proposals_drops_a_degenerate_box_and_reports_the_count(tmp_path):
 
     images_dir = tmp_path / "images" / "2026-01-01"
     image = images_dir / "img_001.jpg"
-    _write_image(image)
+    write_image(image, (200, 150))
 
     result = stage_proposals(
         tmp_path, str(image), model_name="sam",
@@ -365,7 +352,7 @@ def test_stage_proposals_refuses_a_shape_stating_no_confidence(tmp_path, shape):
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     image = tmp_path / "images" / "2026-01-01" / "img_001.jpg"
-    _write_image(image)
+    write_image(image, (200, 150))
     unscored = ({"boxes": [{"subject": "leaf", "cx": 0.5, "cy": 0.5, "w": 0.2, "h": 0.2}]}
                 if shape == "box" else
                 {"polygons": [{"subject": "leaf", "points": [[0.1, 0.1], [0.4, 0.1], [0.4, 0.4]]}]})
@@ -382,7 +369,7 @@ def test_stage_proposals_refuses_a_shape_stating_no_subject_by_its_index(tmp_pat
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     image = tmp_path / "images" / "2026-01-01" / "img_001.jpg"
-    _write_image(image)
+    write_image(image, (200, 150))
     unstated = ({"boxes": [{"conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.2, "h": 0.2}]}
                 if shape == "box" else
                 {"polygons": [{"conf": 0.9, "points": [[0.1, 0.1], [0.4, 0.1], [0.4, 0.4]]}]})

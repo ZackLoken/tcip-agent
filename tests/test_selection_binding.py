@@ -1,9 +1,6 @@
-"""Training and tuning binding to a named selection (``data.split.selection_dir``).
-
-The selection is drawn by ``draw_splits`` (see ``test_data_tools.py``); this file covers the
-consumer side: ``auto_train_val``'s own branch that binds a run to one, the redraw inside a bound
-selection, the refusals a launch raises, and what the run's own partition record carries.
-"""
+"""A run's and a sweep's binding to a named selection (``data.split.selection_dir``):
+``auto_train_val``'s branch that binds a run to one, the redraw inside a bound selection, the
+refusals a launch raises, and what the run's own partition record carries."""
 
 from __future__ import annotations
 
@@ -23,15 +20,11 @@ from tcip_mcp.pipelines.data.split_construction import partition_samples
 from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
 from tcip_mcp.tools.data_tools import draw_splits
 from tests._producer_fixtures import label_image, registry_over
+from tests._verified_checkpoint_fixtures import partition_side
 
 SUBJECT = "leaf"
 OTHER_SUBJECT = "bud"
 DATES = ("2-11-26", "2-12-01")
-
-
-def _side_members(partition: dict, side: str) -> list[str]:
-    """The member names a resolved partition put on ``side``."""
-    return sorted({s.member for s in partition_samples(partition) if s.side == side})
 
 
 def _write_stem(images_dir: Path, stem: str, annotations) -> None:
@@ -380,7 +373,7 @@ def test_a_selected_label_a_human_confirmed_negative_still_trains(tmp_path: Path
 
     assert len(train_ds) == len(drawn.on("train"))
     assert len(val_ds) == len(drawn.on("val"))
-    assert emptied.member in set(_side_members(partition, "train"))
+    assert emptied.member in set(partition_side(partition, "train"))
 
 
 def test_a_bound_run_admits_when_an_unselected_images_stem_turns_ambiguous(tmp_path: Path):
@@ -671,8 +664,7 @@ def test_auto_train_val_refuses_a_selection_with_an_empty_side(tmp_path: Path):
 
 
 def _strip_the_recorded_subject(out: Path) -> None:
-    """Rewrite a drawn selection's record with no subject, past the writer, which refuses one
-    (:func:`test_the_selection_writer_refuses_a_document_selection_with_no_subject`)."""
+    """Rewrite a drawn selection's record with no subject, past the writer."""
     import tcip_store as ts
 
     from tcip_mcp.pipelines.data.selection import selection_key
@@ -985,8 +977,8 @@ def test_the_resolved_partition_carries_the_selection_it_bound(tmp_path: Path):
     partition = observe(run_dir).record["resolved"]["partition"]
 
     assert partition["selection"]["selection_dir"] == str(out)
-    assert _side_members(partition, "train") == sorted({s.member for s in drawn.on("train")})
-    assert _side_members(partition, "val") == sorted({s.member for s in drawn.on("val")})
+    assert partition_side(partition, "train") == sorted({s.member for s in drawn.on("train")})
+    assert partition_side(partition, "val") == sorted({s.member for s in drawn.on("val")})
     # The selection's own named grouping policy, carried rather than collapsed into the finite
     # per-sample groups beside it: a stem the groups do not cover is what the policy answers for.
     assert partition["group_by"] == drawn.group_by == "tile_prefix"
@@ -1009,5 +1001,5 @@ def test_a_run_that_draws_its_own_split_records_no_binding(tmp_path: Path):
     resolved = read_record(run_dir / RUN_FILE)["resolved"]
 
     assert resolved["partition"]["selection"] is None
-    assert _side_members(resolved["partition"], "train")
-    assert _side_members(resolved["partition"], "val")
+    assert partition_side(resolved["partition"], "train")
+    assert partition_side(resolved["partition"], "val")

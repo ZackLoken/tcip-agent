@@ -12,14 +12,12 @@ from __future__ import annotations
 import pytest
 
 torch = pytest.importorskip("torch")
-from torch.utils.data import DataLoader
-
-from tcip_mcp.pipelines.training import generic_trainer as gt
+from tcip_mcp.pipelines.model_build import METRICS_KEY
 from tcip_mcp.pipelines.training.evaluation import evaluate
 from tcip_mcp.pipelines.training.generic_trainer import train
-from tcip_mcp.pipelines.training.collation import task_collate
 from tests.tiny_trainer_fixtures import (
-    ConstantImageDataset,
+    capture_model,
+    opposed_regression_loaders,
     trainer_run,
     write_regression_dataset,
 )
@@ -30,16 +28,6 @@ BUILDER = "tests.tiny_trainer_fixtures:build_mean_intensity_regressor"
 # opposite-signed weights, so training progress on one is a regression on the other.
 TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
 VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
-
-
-def _loaders():
-    train_ds = ConstantImageDataset(
-        TRAIN_INTENSITIES, [2.0 * c for c in TRAIN_INTENSITIES])
-    val_ds = ConstantImageDataset(
-        VAL_INTENSITIES, [-5.0 * c for c in VAL_INTENSITIES], height=8, width=12)
-    collate = task_collate("regression")
-    return (DataLoader(train_ds, batch_size=2, collate_fn=collate),
-            DataLoader(val_ds, batch_size=2, collate_fn=collate))
 
 
 def _config(out_dir, *, epochs: int, early_stopping: dict) -> dict:
@@ -56,28 +44,16 @@ def _config(out_dir, *, epochs: int, early_stopping: dict) -> dict:
     }
 
 
-def _capture_model(monkeypatch, sink: list) -> None:
-    """Keep a reference to the model the run actually built and trained."""
-    real_build_model = gt.build_model
-
-    def build(config, dims):
-        model = real_build_model(config, dims)
-        sink.append(model)
-        return model
-
-    monkeypatch.setattr(gt, "build_model", build)
-
-
 def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path, monkeypatch):
     """The ``val_`` metrics an epoch records equal a real evaluation of that epoch's model on the
     holdout loader, and differ from the same evaluation run over the training loader."""
-    train_loader, val_loader = _loaders()
+    train_loader, val_loader = opposed_regression_loaders(TRAIN_INTENSITIES, VAL_INTENSITIES)
     models: list = []
-    _capture_model(monkeypatch, models)
+    capture_model(monkeypatch, models)
 
-    from tcip_mcp.experiments import METRICS_FILE, RUN_FILE, read_record, read_rows
+    from tcip_mcp.experiments import METRICS_FILE, observe, read_rows
     from tcip_mcp.pipelines.training.envelope import TrainContext
-    from tcip_mcp.pipelines.training.run_registry import TrainRun, trained_config
+    from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._verified_checkpoint_fixtures import opened_run
 
     images_dir, csv_path = write_regression_dataset(
@@ -86,10 +62,7 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
     config["data"] = {**config["data"], "images_dir": str(images_dir),
                       "labels_dir": str(csv_path), "split": {"seed": 1, "val_ratio": 0.15}}
     out_dir = opened_run(tmp_path, config)
-    record = read_record(out_dir / RUN_FILE)
-    run = TrainRun(id=out_dir.name, config=trained_config(record),
-                   objective=record["resolved"]["objective"], project=tmp_path,
-                   output_dir=str(out_dir))
+    run = observed_run(observe(out_dir))
     # The production wiring: the trainer hands each row to the envelope's sink, which logs it
     # to the run's own metrics log.
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader)
@@ -121,9 +94,9 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
 def test_best_checkpoint_and_early_stopping_follow_the_holdout_loader(tmp_path, monkeypatch):
     """With holdout loss worsening while training loss improves, the run stops early and keeps the
     first epoch's checkpoint: both decisions read the holdout loader, not the training one."""
-    train_loader, val_loader = _loaders()
+    train_loader, val_loader = opposed_regression_loaders(TRAIN_INTENSITIES, VAL_INTENSITIES)
     models: list = []
-    _capture_model(monkeypatch, models)
+    capture_model(monkeypatch, models)
 
     out_dir = tmp_path / "out"
     config = _config(out_dir, epochs=4,
@@ -133,7 +106,7 @@ def test_best_checkpoint_and_early_stopping_follow_the_holdout_loader(tmp_path, 
 
     assert run.status == "completed", run.error
     history = run.metrics_history
-    assert len(history) == 2, [r["epoch"] for r in history]
+    assert len(history) == 2, history
     # The two directions disagree: training improves epoch over epoch while holdout degrades.
     assert history[1]["train_loss"] < history[0]["train_loss"]
     assert history[1]["val_loss"] > history[0]["val_loss"]
@@ -141,4 +114,4 @@ def test_best_checkpoint_and_early_stopping_follow_the_holdout_loader(tmp_path, 
     assert run.best_metric == pytest.approx(history[0]["val_loss"], abs=1e-6)
     best = torch.load(out_dir / "model_best.pt", weights_only=False)
     assert best["epoch"] == 1
-    assert best["metrics"]["val_loss"] == pytest.approx(history[0]["val_loss"], abs=1e-6)
+    assert best[METRICS_KEY]["val_loss"] == pytest.approx(history[0]["val_loss"], abs=1e-6)

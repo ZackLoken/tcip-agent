@@ -2,39 +2,13 @@
 
 import { getJson, postJson, wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
-import type { TrainingMetricFrame, TrainingStatusFrame } from "@/api/types.generated";
+import type {
+  TrainingDetail,
+  TrainingListing,
+  TrainingMetricFrame,
+  TrainingStatusFrame,
+} from "@/api/types.generated";
 import { createReconnectingSocket, jsonFrameHandlers } from "@/lib/reconnectingSocket";
-import type { DeclaredIdentity } from "@/store/slices/agentActivity";
-
-export interface TrainingRunSummary {
-  /** A training run's own id: an experiment record's, always (no record, no run). */
-  experiment_id: string;
-  status: string;
-  current_epoch?: number;
-  best_metric?: number;
-  /** The bare metric name (val_-unprefixed) ``best_metric`` was selected on; null when the
-   * run's config cannot resolve one. */
-  best_metric_name?: string | null;
-  output_dir?: string;
-  /** The agent identity the run's launch event carries: empty for a launch no agent declared
-   * itself to, null when no launch event names the run. */
-  launch?: DeclaredIdentity | null;
-  /** The run directory's last sign of life (ISO-8601): no process id is recorded anywhere, so
-   * this is the one signal a stale ``running`` row (its process gone, read as live for the rest
-   * of the heartbeat window) can show. */
-  heartbeat?: string | null;
-}
-
-export interface TrainingRunDetail {
-  experiment_id?: string;
-  status?: string;
-  epoch?: number | null;
-  best_metric?: number | null;
-  output_dir?: string | null;
-  error?: string;
-  /** Set only while a TensorBoard this backend started is still serving the run. */
-  tensorboard_url?: string | null;
-}
 
 export interface TensorboardLaunch {
   url?: string;
@@ -47,21 +21,8 @@ export interface TensorboardLaunch {
 }
 
 export interface MetricRow {
-  epoch?: number;
-  step?: number;
   // The producer (tcip_store.values) writes null for a non-finite metric value.
   [metric: string]: number | string | null | undefined;
-}
-
-export interface LaunchableConfig {
-  experiment_id: string;
-  builder: string | null;
-  task: string | null;
-  images_dir: string | null;
-  subject: string | null;
-  created: string | null;
-  state: string;
-  parent_experiment: string | null;
 }
 
 export interface AsRecordedChoice {
@@ -113,7 +74,6 @@ export interface CompareExperiment {
   error?: string;
   state?: string | null;
   n_epochs?: number;
-  n_rows?: number;
   last_logged_metrics?: MetricRow;
   rows_after_end?: number | null;
   /** The status record's own failure reason; null for a run that never failed. */
@@ -150,27 +110,29 @@ export interface CompareBestResult {
   experiment_id: string | null;
   metrics: Record<string, number | string | null>;
   metrics_source: string | null;
+  /** The metric the answer was ranked by. */
+  ranking_basis: string;
   higher_is_better: boolean;
   direction_source: string;
   excluded_unverified: CompareBestExcluded[];
 }
 
 export const trainingApi = {
-  listConfigs: () => getJson<{ configs: LaunchableConfig[] }>(ROUTES.getTrainingConfigs),
-
   listSplitChoices: (experiment_id: string) =>
     getJson<SplitChoices>(ROUTES.getTrainingConfigsByExperimentIdSplits(experiment_id)),
 
-  relaunch: (experiment_id: string, user: string, selection_dir?: string | null) =>
-    postJson<{ experiment_id?: string; [k: string]: unknown }>(
+  /** Start a new run or sweep from the recorded one ``relaunched_from`` names; the answer names
+   * a run by ``experiment_id`` and a sweep by ``sweep_id``. */
+  relaunch: (relaunched_from: string, user: string, selection_dir?: string | null) =>
+    postJson<{ experiment_id?: string; sweep_id?: string; [k: string]: unknown }>(
       ROUTES.postTrainingRuns,
-      selection_dir ? { experiment_id, selection_dir, user } : { experiment_id, user },
+      selection_dir ? { relaunched_from, selection_dir, user } : { relaunched_from, user },
     ),
 
-  listRuns: () => getJson<{ runs: TrainingRunSummary[] }>(ROUTES.getTrainingRuns),
+  listRuns: () => getJson<TrainingListing>(ROUTES.getTrainingRuns),
 
   getRun: (experiment_id: string) =>
-    getJson<TrainingRunDetail>(ROUTES.getTrainingRunsByExperimentId(experiment_id)),
+    getJson<TrainingDetail>(ROUTES.getTrainingRunsByExperimentId(experiment_id)),
 
   launchTensorboard: (experiment_id: string) =>
     postJson<TensorboardLaunch>(
@@ -179,7 +141,7 @@ export const trainingApi = {
     ),
 
   cancel: (experiment_id: string, user: string) =>
-    postJson<{ experiment_id: string; status: string; cancel_requested: boolean }>(
+    postJson<{ experiment_id: string; state: string; cancel_requested: boolean }>(
       ROUTES.postTrainingRunsByExperimentIdCancel(experiment_id),
       { user },
     ),
@@ -203,10 +165,10 @@ export const trainingApi = {
 export type TrainingStreamMsg = TrainingMetricFrame | TrainingStatusFrame;
 
 /**
- * Open a live metrics stream for a training run of the open project, auto-reconnecting with
- * capped backoff.
+ * Open a live metrics stream for a training run or trial of the open project, auto-reconnecting
+ * with capped backoff.
  * The server replays all rows from the start on each (re)connect, so the consumer must
- * dedupe by epoch/step. A ``status`` frame carrying a report is terminal; one carrying only
+ * dedupe by epoch. A ``status`` frame carrying a report is terminal; one carrying only
  * ``error`` names an id no record claims (selected at its launch moment, before the record
  * exists, or simply unknown), and the socket keeps reconnecting under backoff until a report
  * arrives. That error-only frame never resets the backoff, so the reconnect delay grows to the

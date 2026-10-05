@@ -1,12 +1,6 @@
-"""A real Ray cluster's exit from a console-free process, the scenario the fake-Ray lifecycle
-tests in ``test_hpo_ray_lifecycle.py`` cannot reach: on Windows, ``ray.shutdown()`` ends each
-daemon by signaling ``CTRL_BREAK_EVENT`` through its console, which raises ``OSError: [WinError
-6] The handle is invalid`` on a daemon started without one (a server launched under
-``DETACHED_PROCESS``, as the GUI capture harness does). This drives ``tune_search`` inside a
-subprocess created with ``DETACHED_PROCESS`` and checks both that the call returns normally and
-that every daemon Ray started, and every process those daemons spawned, is actually gone
-afterward.
-"""
+"""A real Ray cluster's exit from a console-free process: ``tune_search`` inside a subprocess
+created with ``DETACHED_PROCESS`` returns normally, and every daemon Ray started, and every process
+those daemons spawned, is gone afterward."""
 
 from __future__ import annotations
 
@@ -84,15 +78,14 @@ _SUBPROCESS_SCRIPT = textwrap.dedent(
         def objective_fn(config, report):
             report(1.0)
 
-        storage_path = sys.argv[1]
-        logdir = tune_search(
+        tune_search(
             objective_fn=objective_fn,
             param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
             num_samples=1,
             search_alg="random",
             scheduler=None,
             resources_per_trial={"cpu": 1},
-            storage_path=storage_path, seed=0, project=Path(sys.argv[2])
+            sweep_dir=Path(sys.argv[1]), seed=0
         )
 
         if not ready.wait(timeout=60):
@@ -101,7 +94,6 @@ _SUBPROCESS_SCRIPT = textwrap.dedent(
 
         print("PIDS " + " ".join(str(pid) for pid in pids), flush=True)
         print("DESCENDANTS " + " ".join(str(pid) for pid in descendants), flush=True)
-        print("logdir=" + logdir, flush=True)
         print("EXIT_OK", flush=True)
 
 
@@ -135,7 +127,7 @@ def test_a_detached_console_free_sweep_exits_cleanly_and_leaves_no_ray_daemon_be
 
     with open(output_path, "w") as output_file:
         proc = subprocess.Popen(
-            [sys.executable, str(script_path), str(storage_path), str(tmp_path)],
+            [sys.executable, str(script_path), str(storage_path / "sweep")],
             creationflags=DETACHED_PROCESS,
             stdout=output_file,
             stderr=subprocess.STDOUT,
@@ -159,7 +151,7 @@ def test_a_detached_console_free_sweep_exits_cleanly_and_leaves_no_ray_daemon_be
         proc.wait(timeout=240)
         output = output_path.read_text(encoding="utf-8", errors="replace")
         assert proc.returncode == 0, f"detached sweep exited {proc.returncode}:\n{output}"
-        assert f"logdir={storage_path.resolve().as_posix()}/tcip_hpo" in output, output
+        assert (storage_path / "sweep").is_dir(), output
 
         daemon_pids, descendant_pids = read_reported_pids()
         assert daemon_pids, "the subprocess never reported the daemon pids it read from Ray's node"

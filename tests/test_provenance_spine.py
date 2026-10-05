@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pytest
 
+from tcip_mcp.pipelines.model_build import STATE_DICT_KEY
+
 
 # ── capture_env records code + library fingerprint ────────────────────────────
 
@@ -46,7 +48,7 @@ def test_the_producer_of_a_foreign_checkpoint_names_no_run(tmp_path):
     from tcip_mcp.model_registry import ModelRegistry, load_registered_checkpoint
 
     ckpt = tmp_path / "foreign.pt"
-    torch.save({"model_state_dict": {}}, ckpt)
+    torch.save({STATE_DICT_KEY: {}}, ckpt)
     ModelRegistry(str(tmp_path)).register_model("foreign", str(ckpt), {})
 
     producer = load_registered_checkpoint(ckpt, project=tmp_path).producer
@@ -62,7 +64,7 @@ def test_a_payloads_own_experiment_id_names_no_producer(tmp_path):
     from tcip_mcp.model_registry import ModelRegistry, load_registered_checkpoint
 
     ckpt = tmp_path / "stamped.pt"
-    torch.save({"model_state_dict": {}, "experiment_id": "expStamped"}, ckpt)
+    torch.save({STATE_DICT_KEY: {}, "experiment_id": "expStamped"}, ckpt)
     ModelRegistry(str(tmp_path)).register_model("stamped", str(ckpt), {})
 
     producer = load_registered_checkpoint(ckpt, project=tmp_path).producer
@@ -105,7 +107,7 @@ def test_a_delivery_event_names_its_producer_and_write_time_and_its_rows_repeat_
     """The checkpoint and run behind a delivered count are on the delivery's one event, beside
     the time it was written; every row carries only the delivery columns, never the producer."""
     pytest.importorskip("torch")
-    import csv
+    from tests import csv_rows
     from datetime import datetime
 
     from tcip_mcp.buckets import read_bucket
@@ -128,7 +130,7 @@ def test_a_delivery_event_names_its_producer_and_write_time_and_its_rows_repeat_
     (event,) = read_delivery_events(tmp_path)
     assert event.producer.model_dump() == read_bucket(bucket.root, bucket.name).producer
     datetime.fromisoformat(event.produced_at)
-    (row,) = list(csv.DictReader(out.open(newline="", encoding="utf-8")))
+    (row,) = csv_rows(out)
     assert set(DELIVERY_COLUMNS) <= set(row)
     assert not {"producer_model_sha256", "producing_experiment_id", "produced_at"} & set(row)
 

@@ -15,6 +15,8 @@ from pathlib import Path
 import pytest
 
 torch = pytest.importorskip("torch")
+
+from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
 pytest.importorskip("torchvision")
 
 import tcip_store  # noqa: E402
@@ -34,7 +36,7 @@ def _instance_seg_checkpoint(tmp_path: Path) -> str:
               "data": {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}}}
     model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "instance_seg.pt"
-    torch.save({"config": config, "model_state_dict": model.state_dict()}, str(ckpt))
+    torch.save({CONFIG_KEY: config, STATE_DICT_KEY: model.state_dict()}, str(ckpt))
     result = register_model(tmp_path, name="instance-seg-test-model", checkpoint_path=str(ckpt),
                             config={})
     assert "error" not in result, result

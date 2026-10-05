@@ -21,6 +21,7 @@ torch = pytest.importorskip("torch")
 
 from tcip_mcp.audit import audit_log_key  # noqa: E402
 from tcip_mcp.experiments import observe  # noqa: E402
+from tcip_mcp.pipelines.model_build import METRICS_KEY, STATE_DICT_KEY  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope  # noqa: E402
 from tests._verified_checkpoint_fixtures import completed_checkpoint as _completed  # noqa: E402
 
@@ -33,16 +34,13 @@ def _audit_statuses(root, tool="training_run"):
 def _start(tmp_path, body_name, *, deadline: float | None = None) -> tuple[TrainContext, Path]:
     """Run the body ``body_name`` of this module through the envelope, over a run directory the
     launcher's own writer opened."""
-    from tcip_mcp.experiments import RUN_FILE, read_record
-    from tcip_mcp.pipelines.training.run_registry import TrainRun, trained_config
+    from tcip_mcp.experiments import observe
+    from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
     run_dir = opened_run(tmp_path, detection_config(
         tmp_path / "data", training_source=f"{__name__}:{body_name}", device="cpu"))
-    record = read_record(run_dir / RUN_FILE)
-    run = TrainRun(id=run_dir.name, config=trained_config(record),
-                   objective=record["resolved"]["objective"], project=tmp_path,
-                   output_dir=str(run_dir))
+    run = observed_run(observe(run_dir))
     run.deadline = deadline
     ctx = TrainContext(run=run, train_loader=None, val_loader=None)
     run_training_envelope(ctx)
@@ -51,8 +49,8 @@ def _start(tmp_path, body_name, *, deadline: float | None = None) -> tuple[Train
 
 def _train_saves_best_then_final(ctx):
     """A loop keeping a best-so-far checkpoint plus a last-epoch one, as the stock trainer does."""
-    ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.2, "epoch": 4}}, "model_best")
-    ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.8, "epoch": 9}}, "model_final")
+    ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.2, "epoch": 4}}, "model_best")
+    ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.8, "epoch": 9}}, "model_final")
 
 
 def test_best_checkpoint_outranks_the_last_one_as_the_deliverable(tmp_path):
@@ -69,9 +67,9 @@ def test_best_checkpoint_outranks_the_last_one_as_the_deliverable(tmp_path):
 
 def _train_declares_its_own_deliverable(ctx):
     """A loop whose shippable weights live under a tag outside the model_best/model_final pair."""
-    ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.8, "epoch": 9}}, "model_best")
+    ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.8, "epoch": 9}}, "model_best")
     ctx.save_checkpoint(
-        {"model_state_dict": {}, "metrics": {"val_loss": 0.2, "epoch": 4}}, "ema_weights")
+        {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.2, "epoch": 4}}, "ema_weights")
     ctx.set_final_weights("ema_weights")
 
 
@@ -104,7 +102,7 @@ class _OutsideTheContract:
 
 def _train_leaves_an_undecodable_deliverable(ctx):
     """A loop whose declared deliverable holds state the verified reader refuses to unpickle."""
-    ctx.save_checkpoint({"model_state_dict": {}, "extra": _OutsideTheContract()}, "model_best")
+    ctx.save_checkpoint({STATE_DICT_KEY: {}, "extra": _OutsideTheContract()}, "model_best")
     ctx.set_final_weights("model_best")
 
 
@@ -125,7 +123,7 @@ def _train_stops_on_cancel(ctx):
     """A loop that checkpoints, then honors a cancellation request and returns."""
     from tcip_mcp.experiments import request_cancel
 
-    ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.4}}, "model_final")
+    ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.4}}, "model_final")
     request_cancel(ctx.run_dir)
 
 
@@ -141,7 +139,7 @@ def test_a_canceled_run_completes_no_checkpoint_despite_its_weights(tmp_path):
 
 def _train_records_its_own_failure(ctx):
     """A loop that detects a bad run itself and marks it failed rather than raising."""
-    ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.4}}, "model_best")
+    ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.4}}, "model_best")
     ctx.run.status = "failed"
     ctx.run.error = "loss diverged at stage 2"
 
@@ -159,7 +157,7 @@ def test_a_body_that_marks_itself_failed_is_not_promoted_to_completed(tmp_path):
 
 def _train_raises_after_checkpointing(ctx):
     """A loop that declares its best checkpoint as it improves, then dies partway through."""
-    ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.4}}, "model_best")
+    ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.4}}, "model_best")
     ctx.set_final_weights("model_best")
     raise RuntimeError("device ran out of memory mid-epoch")
 
@@ -176,7 +174,7 @@ def test_a_raised_failure_closes_the_run_failed_and_completes_nothing(tmp_path):
 
 def _train_finishes_past_the_wall_clock(ctx):
     """A loop that finishes normally and declares its weights after its deadline passed."""
-    ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.3}}, "model_best")
+    ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.3}}, "model_best")
     ctx.set_final_weights("model_best")
 
 

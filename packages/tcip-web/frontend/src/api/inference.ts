@@ -13,18 +13,11 @@ import type {
   PhenologyPayload,
   PlantMappingDisclosure,
   PlantRegistryDisclosure,
+  RegisteredModels,
   Stated,
   TraitRevision,
 } from "@/api/types.generated";
 import { createReconnectingSocket, jsonFrameHandlers } from "@/lib/reconnectingSocket";
-
-/** One entry from the project's trained-model registry: the fields of it this UI reads. */
-export interface RegisteredModel {
-  name: string;
-  checkpoint_path: string;
-  tags?: string[];
-  experiment_id?: string | null;
-}
 
 export type InferenceStatus = JobStatus;
 
@@ -299,7 +292,7 @@ export type DeliveryEventRecord = StoredDeliveryEventRecord & {
 };
 
 export const resultsApi = {
-  registeredModels: () => getJson<{ models: RegisteredModel[] }>(ROUTES.getResultsModelsRegistered),
+  registeredModels: () => getJson<RegisteredModels>(ROUTES.getResultsModelsRegistered),
 
   // The open project's own trait records, so a tab resolves which trait it works on from the
   // project instead of assuming one, and the Setup tab shows each revision for confirmation.

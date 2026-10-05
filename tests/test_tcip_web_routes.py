@@ -15,14 +15,7 @@ from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.subject_registry import SubjectRegistry, Subject
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import image_label_key, label_image, registry_over
-from tcip_web.app import app
 from tcip_web.paths import safe_join
-
-
-@pytest.fixture
-def client(opened_project: Path) -> TestClient:
-    """A client of the backend with ``tmp_path`` open as its project."""
-    return TestClient(app, base_url="http://127.0.0.1")
 
 
 # ── per-image JSON label fixtures (canonical on-disk format) ─────────────────
@@ -125,8 +118,8 @@ def dataset_root(tmp_path: Path) -> Path:
     return root
 
 
-def test_dataset_tree(client: TestClient, dataset_root: Path) -> None:
-    resp = client.get("/api/dataset/tree", params={"dataset_root": str(dataset_root)})
+def test_dataset_tree(opened_client: TestClient, dataset_root: Path) -> None:
+    resp = opened_client.get("/api/dataset/tree", params={"dataset_root": str(dataset_root)})
     assert resp.status_code == 200
     body = resp.json()
     assert "2-11-26" in body["dates_with_images"]
@@ -142,13 +135,13 @@ def test_dataset_tree(client: TestClient, dataset_root: Path) -> None:
 
 
 def test_dataset_tree_reports_a_label_problem_and_keeps_listing_other_dates(
-    client: TestClient, dataset_root: Path,
+    opened_client: TestClient, dataset_root: Path,
 ) -> None:
     """A corrupt label costs its own subjects, never the whole tree: the other date's
     dates_with_images/subjects_by_date entries are unaffected."""
     _unreadable(dataset_root / "images" / "2-11-26" / "IMG_0000.JPG")
 
-    resp = client.get("/api/dataset/tree", params={"dataset_root": str(dataset_root)})
+    resp = opened_client.get("/api/dataset/tree", params={"dataset_root": str(dataset_root)})
     assert resp.status_code == 200
     body = resp.json()
     assert "2-11-26" in body["dates_with_images"] and "3-2-26" in body["dates_with_images"]
@@ -159,24 +152,24 @@ def test_dataset_tree_reports_a_label_problem_and_keeps_listing_other_dates(
 
 
 def test_dataset_tree_label_problem_is_not_stale_after_an_edit(
-    client: TestClient, dataset_root: Path,
+    opened_client: TestClient, dataset_root: Path,
 ) -> None:
     """label_problem never answers from a tree built before a document changed."""
     image = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     _write_gt(image, [(1, 1, 3, 3)])
 
-    first = client.get("/api/dataset/tree", params={"dataset_root": str(dataset_root)}).json()
+    first = opened_client.get("/api/dataset/tree", params={"dataset_root": str(dataset_root)}).json()
     assert first["label_problem"] is None
 
     _unreadable(image)
 
-    second = client.get("/api/dataset/tree", params={"dataset_root": str(dataset_root)}).json()
+    second = opened_client.get("/api/dataset/tree", params={"dataset_root": str(dataset_root)}).json()
     assert second["label_problem"] is not None
     assert "IMG_0000" in second["label_problem"]
 
 
 def test_dataset_tree_per_date_reflects_actual_labels(
-    client: TestClient, tmp_path: Path, opened_project: Path,
+    opened_client: TestClient, tmp_path: Path, opened_project: Path,
 ) -> None:
     root = tmp_path / "ds"
     (root / "images" / "2026-02-11").mkdir(parents=True)
@@ -189,21 +182,21 @@ def test_dataset_tree_per_date_reflects_actual_labels(
                              root / "images" / "2026-02-11" / "IMG_1.JPG", [1],
                              scope={"subject": "bud"})
 
-    body = client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
+    body = opened_client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
     assert body["subjects_by_date"]["2026-02-11"] == ["bud"]
     assert body["subjects_by_date"]["2026-03-24"] == []
     assert body["buckets_by_date"] == {"2026-02-11": [name], "2026-03-24": []}
 
 
 def test_dataset_select_carries_a_label_problem_with_no_subject_named(
-    client: TestClient, dataset_root: Path, opened_project: Path,
+    opened_client: TestClient, dataset_root: Path, opened_project: Path,
 ) -> None:
     """A corrupt label makes the date's own subject list empty, which is exactly the date a
     subject-less default-open selects; the advisory must name the problem even then, not only
     when a subject happens to be named."""
     _unreadable(dataset_root / "images" / "2-11-26" / "IMG_0000.JPG")
 
-    resp = client.post(
+    resp = opened_client.post(
         "/api/dataset/select",
         json={"dataset_root": str(dataset_root), "subject": None, "date": "2-11-26"},
     )
@@ -215,9 +208,9 @@ def test_dataset_select_carries_a_label_problem_with_no_subject_named(
 
 
 def test_dataset_select_populates_state(
-    client: TestClient, dataset_root: Path, opened_project: Path,
+    opened_client: TestClient, dataset_root: Path, opened_project: Path,
 ) -> None:
-    resp = client.post(
+    resp = opened_client.post(
         "/api/dataset/select",
         json={
             "dataset_root": str(dataset_root),
@@ -235,11 +228,11 @@ def test_dataset_select_populates_state(
 
 
 def test_dataset_select_returns_400_for_a_stem_collision(
-    client: TestClient, dataset_root: Path, opened_project: Path
+    opened_client: TestClient, dataset_root: Path, opened_project: Path
 ) -> None:
     Image.new("RGB", (100, 80)).save(dataset_root / "images" / "2-11-26" / "IMG_0000.PNG")
 
-    resp = client.post(
+    resp = opened_client.post(
         "/api/dataset/select",
         json={
             "dataset_root": str(dataset_root),
@@ -251,16 +244,16 @@ def test_dataset_select_returns_400_for_a_stem_collision(
 
 
 def test_dataset_select_advisory_reflects_actual_labels(
-    client: TestClient, dataset_root: Path, opened_project: Path
+    opened_client: TestClient, dataset_root: Path, opened_project: Path
 ) -> None:
     body = {"dataset_root": str(dataset_root), "subject": "bud", "date": "2-11-26"}
     bucket = "baseline/2-11-26"
     # No label documents and no bucket yet → advisory says "starts empty"; a bucket name no
     # bucket is published under is refused rather than read as one holding nothing.
-    r1 = client.post("/api/dataset/select", json=body).json()
+    r1 = opened_client.post("/api/dataset/select", json=body).json()
     assert r1["annotations_present"] is False
     assert r1["predictions_present"] is False
-    refused = client.post("/api/dataset/select", json={**body, "bucket": bucket})
+    refused = opened_client.post("/api/dataset/select", json={**body, "bucket": bucket})
     assert refused.status_code == 400 and "no bucket" in refused.json()["detail"]
     body["bucket"] = bucket
 
@@ -269,19 +262,19 @@ def test_dataset_select_advisory_reflects_actual_labels(
     image = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     _write_gt(image, [(40, 32, 60, 48)])
     _published_bucket(opened_project, bucket, image, [1], scope={"subject": "bud"})
-    r2 = client.post("/api/dataset/select", json=body).json()
+    r2 = opened_client.post("/api/dataset/select", json=body).json()
     assert r2["annotations_present"] is True
     assert r2["predictions_present"] is True
 
 
 def test_dataset_select_still_selects_over_an_unreadable_label(
-    client: TestClient, dataset_root: Path, opened_project: Path
+    opened_client: TestClient, dataset_root: Path, opened_project: Path
 ) -> None:
     """The advisory check never blocks a selection: an unreadable label reads as advisory-absent
     rather than refusing the select outright."""
     _unreadable(dataset_root / "images" / "2-11-26" / "IMG_0000.JPG")
 
-    resp = client.post(
+    resp = opened_client.post(
         "/api/dataset/select",
         json={
             "dataset_root": str(dataset_root),
@@ -297,7 +290,7 @@ def test_dataset_select_still_selects_over_an_unreadable_label(
 
 
 def test_an_undated_captures_subjects_are_listed_by_every_door_alike(
-    client: TestClient, tmp_path: Path, opened_project: Path,
+    opened_client: TestClient, tmp_path: Path, opened_project: Path,
 ) -> None:
     """The tree, the selection, the subjects route and the core query each list an ``undated``
     capture's subjects, and the selection lists its image."""
@@ -309,10 +302,10 @@ def test_an_undated_captures_subjects_are_listed_by_every_door_alike(
     Image.new("RGB", (100, 80)).save(image)
     _write_gt(image, [(40, 32, 60, 48)])
 
-    tree = client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
-    selected = client.post("/api/dataset/select", json={
+    tree = opened_client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
+    selected = opened_client.post("/api/dataset/select", json={
         "dataset_root": str(root), "subject": "bud", "date": UNDATED_BUCKET}).json()
-    loaded = client.get("/api/subjects/load",
+    loaded = opened_client.get("/api/subjects/load",
                         params={"dataset_root": str(root), "date": UNDATED_BUCKET}).json()
 
     assert tree["subjects_by_date"] == {UNDATED_BUCKET: ["bud"]}, tree
@@ -322,35 +315,37 @@ def test_an_undated_captures_subjects_are_listed_by_every_door_alike(
     assert capture_subjects(root, UNDATED_BUCKET) == (["bud"], [])
 
 
-def test_a_selection_states_its_capture(client: TestClient, tmp_path: Path,
+def test_a_selection_states_its_capture(opened_client: TestClient, tmp_path: Path,
                                         opened_project: Path) -> None:
     root = tmp_path / "no_capture_named"
     (root / "images").mkdir(parents=True)
 
-    resp = client.post("/api/dataset/select", json={"dataset_root": str(root), "subject": "bud"})
+    resp = opened_client.post("/api/dataset/select", json={"dataset_root": str(root), "subject": "bud"})
 
     assert resp.status_code == 422, resp.text
 
 
 def test_dataset_select_rejects_a_dataset_root_outside_the_allowed_roots(
-    client: TestClient, opened_project: Path, tmp_path_factory,
+    opened_client: TestClient, opened_project: Path, tmp_path_factory,
 ) -> None:
     outside = tmp_path_factory.mktemp("outside")
-    resp = client.post("/api/dataset/select",
+    resp = opened_client.post("/api/dataset/select",
                        json={"dataset_root": str(outside), "date": "2-11-26"})
     assert resp.status_code == 403
 
 
-def test_dataset_select_refuses_while_no_project_is_open(dataset_root: Path) -> None:
-    resp = TestClient(app, base_url="http://127.0.0.1").post(
+def test_dataset_select_refuses_while_no_project_is_open(
+    client: TestClient, dataset_root: Path,
+) -> None:
+    resp = client.post(
         "/api/dataset/select", json={"dataset_root": str(dataset_root), "date": "2-11-26"})
     assert resp.status_code == 409
 
 
 def test_dataset_nav_persists_current_index(
-    client: TestClient, dataset_root: Path, opened_project: Path
+    opened_client: TestClient, dataset_root: Path, opened_project: Path
 ) -> None:
-    client.post(
+    opened_client.post(
         "/api/dataset/select",
         json={
             "dataset_root": str(dataset_root),
@@ -359,49 +354,49 @@ def test_dataset_nav_persists_current_index(
         },
     )
     # A valid position is accepted and shows up in the live GuiState the agent reads.
-    ok = client.post("/api/dataset/nav", json={"current_image_index": 2})
+    ok = opened_client.post("/api/dataset/nav", json={"current_image_index": 2})
     assert ok.status_code == 200
     assert ok.json()["current_image_index"] == 2
-    assert client.get("/api/state").json()["dataset"]["current_image_index"] == 2
+    assert opened_client.get("/api/state").json()["dataset"]["current_image_index"] == 2
     # Out of range (3 images → valid 0..2) is rejected, not silently clamped.
-    assert client.post("/api/dataset/nav", json={"current_image_index": 9}).status_code == 400
+    assert opened_client.post("/api/dataset/nav", json={"current_image_index": 9}).status_code == 400
 
 
 # ── /api/images ──────────────────────────────────────────────────────────
 
 
-def test_images_serve(client: TestClient, dataset_root: Path) -> None:
+def test_images_serve(opened_client: TestClient, dataset_root: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    resp = client.get("/api/images", params={"path": str(img_path)})
+    resp = opened_client.get("/api/images", params={"path": str(img_path)})
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "image/jpeg"
     im = Image.open(io.BytesIO(resp.content))
     assert im.size == (100, 80)
 
 
-def test_images_downsample(client: TestClient, dataset_root: Path) -> None:
+def test_images_downsample(opened_client: TestClient, dataset_root: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    resp = client.get("/api/images", params={"path": str(img_path), "max_width": 50})
+    resp = opened_client.get("/api/images", params={"path": str(img_path), "max_width": 50})
     im = Image.open(io.BytesIO(resp.content))
     assert im.size[0] == 50
 
 
-def test_images_etag_revalidation(client: TestClient, dataset_root: Path) -> None:
+def test_images_etag_revalidation(opened_client: TestClient, dataset_root: Path) -> None:
     # First fetch carries an ETag + Cache-Control; re-requesting with If-None-Match gets a
     # cheap 304 (no re-decode/re-encode), and the ETag varies with the render params.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    first = client.get("/api/images", params={"path": str(img_path)})
+    first = opened_client.get("/api/images", params={"path": str(img_path)})
     etag = first.headers.get("etag")
     assert etag and "cache-control" in first.headers
 
-    again = client.get(
+    again = opened_client.get(
         "/api/images", params={"path": str(img_path)}, headers={"If-None-Match": etag}
     )
     assert again.status_code == 304
     assert again.content == b""
 
     # A different max_width is a different variant -> different ETag -> full 200.
-    variant = client.get(
+    variant = opened_client.get(
         "/api/images",
         params={"path": str(img_path), "max_width": 50},
         headers={"If-None-Match": etag},
@@ -410,36 +405,36 @@ def test_images_etag_revalidation(client: TestClient, dataset_root: Path) -> Non
     assert variant.headers["etag"] != etag
 
 
-def test_images_not_found(client: TestClient, tmp_path: Path) -> None:
-    resp = client.get("/api/images", params={"path": str(tmp_path / "does_not_exist.jpg")})
+def test_images_not_found(opened_client: TestClient, tmp_path: Path) -> None:
+    resp = opened_client.get("/api/images", params={"path": str(tmp_path / "does_not_exist.jpg")})
     assert resp.status_code == 404
 
 
-def test_images_serve_returns_400_for_a_stem_collision(client: TestClient, dataset_root: Path) -> None:
+def test_images_serve_returns_400_for_a_stem_collision(opened_client: TestClient, dataset_root: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     Image.new("RGB", (100, 80)).save(dataset_root / "images" / "2-11-26" / "IMG_0000.PNG")
 
-    resp = client.get("/api/images", params={"path": str(img_path)})
+    resp = opened_client.get("/api/images", params={"path": str(img_path)})
     assert resp.status_code == 400
     assert "IMG_0000.JPG" in resp.text and "IMG_0000.PNG" in resp.text
 
 
-def test_images_bands_returns_400_for_a_stem_collision(client: TestClient, dataset_root: Path) -> None:
+def test_images_bands_returns_400_for_a_stem_collision(opened_client: TestClient, dataset_root: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     Image.new("RGB", (100, 80)).save(dataset_root / "images" / "2-11-26" / "IMG_0000.PNG")
 
-    resp = client.get("/api/images/bands", params={"path": str(img_path)})
+    resp = opened_client.get("/api/images/bands", params={"path": str(img_path)})
     assert resp.status_code == 400
 
 
 # ── /api/annotate ────────────────────────────────────────────────────────
 
 
-def test_annotate_load_and_save_roundtrip(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
+def test_annotate_load_and_save_roundtrip(opened_client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
 
     # Save a box annotation and a polygon annotation into the single per-image document.
-    resp = client.post(
+    resp = opened_client.post(
         "/api/annotate/labels",
         json={
             "image_path": str(img_path),
@@ -454,7 +449,7 @@ def test_annotate_load_and_save_roundtrip(client: TestClient, dataset_root: Path
     assert len(_stored(img_path)) == 2
 
     # Load
-    body = client.get(
+    body = opened_client.get(
         "/api/annotate/labels",
         params={"image_path": str(img_path)},
     ).json()
@@ -468,7 +463,7 @@ def test_annotate_load_and_save_roundtrip(client: TestClient, dataset_root: Path
 
 
 def test_an_image_under_an_additive_image_root_loads_and_saves(
-    client: TestClient, tmp_path_factory: pytest.TempPathFactory,
+    opened_client: TestClient, tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
     """An image the backend admits through a ``TCIP_IMAGE_ROOTS`` entry, a dataset registered to
     no project, is annotated by its own label key like any other."""
@@ -480,10 +475,10 @@ def test_an_image_under_an_additive_image_root_loads_and_saves(
     Image.new("RGB", (100, 80)).save(image)
     store.configure(store.workspace, (extra.resolve(),))
 
-    saved = client.post("/api/annotate/labels", json={
+    saved = opened_client.post("/api/annotate/labels", json={
         "image_path": str(image), "annotations": [{"subject": "bud", "bbox": [10, 20, 50, 60]}],
         "user": "breeder"})
-    loaded = client.get("/api/annotate/labels", params={"image_path": str(image)})
+    loaded = opened_client.get("/api/annotate/labels", params={"image_path": str(image)})
 
     assert saved.status_code == 200, saved.text[:300]
     assert loaded.status_code == 200, loaded.text[:300]
@@ -492,12 +487,12 @@ def test_an_image_under_an_additive_image_root_loads_and_saves(
 
 
 def test_annotate_load_returns_400_for_a_stem_collision(
-    client: TestClient, dataset_root: Path, tmp_path: Path,
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path,
 ) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     Image.new("RGB", (100, 80)).save(dataset_root / "images" / "2-11-26" / "IMG_0000.PNG")
 
-    resp = client.get(
+    resp = opened_client.get(
         "/api/annotate/labels",
         params={"image_path": str(img_path)},
     )
@@ -505,12 +500,12 @@ def test_annotate_load_returns_400_for_a_stem_collision(
 
 
 def test_annotate_load_refuses_an_unreadable_label(
-    client: TestClient, dataset_root: Path, tmp_path: Path,
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path,
 ) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     _unreadable(img_path)
 
-    resp = client.get(
+    resp = opened_client.get(
         "/api/annotate/labels",
         params={"image_path": str(img_path)},
     )
@@ -519,7 +514,7 @@ def test_annotate_load_refuses_an_unreadable_label(
 
 
 def test_annotate_load_authorship_person_tool_and_unattributed(
-    client: TestClient, dataset_root: Path, tmp_path: Path,
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path,
 ) -> None:
     """The load route's authorship field classifies each record: a person's own created_by reads
     person, a bare producer with no accepted_by reads tool, and no created_by at all reads
@@ -532,7 +527,7 @@ def test_annotate_load_authorship_person_tool_and_unattributed(
     ]
     label_image(img_path, anns, 100, 80)
 
-    body = client.get(
+    body = opened_client.get(
         "/api/annotate/labels",
         params={"image_path": str(img_path)},
     ).json()
@@ -543,7 +538,7 @@ def test_annotate_load_authorship_person_tool_and_unattributed(
 
 
 def test_annotate_load_authorship_agrees_with_is_unadjudicated_agent_authorship(
-    client: TestClient, dataset_root: Path, tmp_path: Path,
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path,
 ) -> None:
     """authorship_of and is_unadjudicated_agent_authorship classify every shape the same way: one
     predicate, never two spellings of the agent-authorship rule."""
@@ -559,7 +554,7 @@ def test_annotate_load_authorship_agrees_with_is_unadjudicated_agent_authorship(
     ]
     label_image(img_path, anns, 100, 80)
 
-    body = client.get(
+    body = opened_client.get(
         "/api/annotate/labels",
         params={"image_path": str(img_path)},
     ).json()
@@ -570,7 +565,7 @@ def test_annotate_load_authorship_agrees_with_is_unadjudicated_agent_authorship(
 
 
 def test_annotate_load_authorship_tool_accepted_through_the_editor(
-    client: TestClient, dataset_root: Path, tmp_path: Path,
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path,
 ) -> None:
     """A model's own proposal, once a person accepts it into ground truth, reads tool_accepted:
     its created_by travels into GT and accepted_by is the person's sign-off, so it is no longer
@@ -581,12 +576,12 @@ def test_annotate_load_authorship_tool_accepted_through_the_editor(
     produced_by = read_label_document(bucket.document_key(img_path.stem)).annotations[0].created_by
     assert str(produced_by).startswith("model:")
 
-    resp = client.post("/api/annotate/labels", json={
+    resp = opened_client.post("/api/annotate/labels", json={
         "image_path": str(img_path), "annotations": [],
         "user": "breeder", "bucket": bucket.name, "accept": [0]})
     assert resp.status_code == 200, resp.text
 
-    body = client.get(
+    body = opened_client.get(
         "/api/annotate/labels",
         params={"image_path": str(img_path)},
     ).json()
@@ -596,13 +591,13 @@ def test_annotate_load_authorship_tool_accepted_through_the_editor(
 
 
 def test_annotate_save_empty_preserves_negative(
-    client: TestClient, dataset_root: Path, tmp_path: Path
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     # Clearing all annotations and saving must keep the label document (an {"annotations": []}
     # record), not delete it: it becomes a confirmed negative once the image is completed.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
 
-    client.post(
+    opened_client.post(
         "/api/annotate/labels",
         json={
             "image_path": str(img_path),
@@ -612,7 +607,7 @@ def test_annotate_save_empty_preserves_negative(
     )
     assert len(_stored(img_path)) == 1
 
-    resp = client.post(
+    resp = opened_client.post(
         "/api/annotate/labels",
         json={"image_path": str(img_path), "annotations": [], "user": "breeder"},
     )
@@ -623,13 +618,13 @@ def test_annotate_save_empty_preserves_negative(
 
 
 def test_annotate_save_of_an_image_outside_allowed_root_403(
-    client: TestClient, tmp_path_factory: pytest.TempPathFactory
+    opened_client: TestClient, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
     """An image outside every allowed root is refused, and no document is written for it."""
     outside = tmp_path_factory.mktemp("outside") / "images" / "2-11-26" / "IMG_0000.JPG"
     outside.parent.mkdir(parents=True)
     Image.new("RGB", (100, 80)).save(outside)
-    resp = client.post(
+    resp = opened_client.post(
         "/api/annotate/labels",
         json={"image_path": str(outside), "annotations": [], "user": "breeder"},
     )
@@ -637,8 +632,8 @@ def test_annotate_save_of_an_image_outside_allowed_root_403(
     assert not tcip_store.exists(image_label_key(outside))
 
 
-def _save_box(client: TestClient, img_path, **extra) -> dict:
-    resp = client.post(
+def _save_box(opened_client: TestClient, img_path, **extra) -> dict:
+    resp = opened_client.post(
         "/api/annotate/labels",
         json={
             "image_path": str(img_path),
@@ -651,15 +646,15 @@ def _save_box(client: TestClient, img_path, **extra) -> dict:
 
 
 def test_annotate_save_refuses_a_token_the_document_has_moved_past(
-    client: TestClient, dataset_root: Path, tmp_path: Path
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    base = _save_box(client, img_path).json()["base_mtime"]
+    base = _save_box(opened_client, img_path).json()["base_mtime"]
 
     # A concurrent writer changes the document after our client loaded it.
     _write_gt(img_path, [], keep_empty=True)
 
-    resp = client.post(
+    resp = opened_client.post(
         "/api/annotate/labels",
         json={
             "image_path": str(img_path),
@@ -672,14 +667,14 @@ def test_annotate_save_refuses_a_token_the_document_has_moved_past(
 
 
 def test_annotate_save_with_the_current_token_is_accepted(
-    client: TestClient, dataset_root: Path, tmp_path: Path
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    base = _save_box(client, img_path).json()["base_mtime"]
+    base = _save_box(opened_client, img_path).json()["base_mtime"]
 
     # No external change → the token still names the stored document → the save is accepted and
     # returns a fresh one.
-    resp = _save_box(client, img_path, base_mtime=base)
+    resp = _save_box(opened_client, img_path, base_mtime=base)
     assert resp.status_code == 200
     token = resp.json()["base_mtime"]
     assert token is not None
@@ -689,38 +684,38 @@ def test_annotate_save_with_the_current_token_is_accepted(
 
 
 def test_annotate_load_hands_back_a_token_its_own_save_accepts(
-    client: TestClient, dataset_root: Path, tmp_path: Path
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     """The load and save pair is one compare-and-set over what the client was actually shown."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     params = {"image_path": str(img_path)}
 
-    loaded = client.get("/api/annotate/labels", params=params).json()
+    loaded = opened_client.get("/api/annotate/labels", params=params).json()
     assert loaded["annotations"] == []
-    assert _save_box(client, img_path, base_mtime=loaded["base_mtime"]).status_code == 200
+    assert _save_box(opened_client, img_path, base_mtime=loaded["base_mtime"]).status_code == 200
 
     # That token said the document did not exist, so replaying it cannot overwrite what the first
     # save created; the token from a fresh load can.
-    assert _save_box(client, img_path, base_mtime=loaded["base_mtime"]).status_code == 409
-    reloaded = client.get("/api/annotate/labels", params=params).json()
-    assert _save_box(client, img_path, base_mtime=reloaded["base_mtime"]).status_code == 200
+    assert _save_box(opened_client, img_path, base_mtime=loaded["base_mtime"]).status_code == 409
+    reloaded = opened_client.get("/api/annotate/labels", params=params).json()
+    assert _save_box(opened_client, img_path, base_mtime=reloaded["base_mtime"]).status_code == 200
 
 
 def test_annotate_save_without_a_token_still_writes(
-    client: TestClient, dataset_root: Path, tmp_path: Path
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     """A caller that supplies no token skips the comparison and its write still lands."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    assert _save_box(client, img_path).status_code == 200
-    assert _save_box(client, img_path).status_code == 200
+    assert _save_box(opened_client, img_path).status_code == 200
+    assert _save_box(opened_client, img_path).status_code == 200
     assert len(_stored(img_path)) == 1
 
 
-def test_annotate_save_persists_polygon_as_polygon(client, dataset_root, tmp_path) -> None:
+def test_annotate_save_persists_polygon_as_polygon(opened_client, dataset_root, tmp_path) -> None:
     # A polygon annotation round-trips as a polygon (its points are the source of truth), never
     # collapsed to a box on disk. Image is 100x80.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    resp = client.post(
+    resp = opened_client.post(
         "/api/annotate/labels",
         json={
             "image_path": str(img_path),
@@ -736,7 +731,7 @@ def test_annotate_save_persists_polygon_as_polygon(client, dataset_root, tmp_pat
     assert anns[0].geometry.rings == [[(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]]
 
 
-def test_annotate_multi_ring_polygon_round_trips_through_the_route(client, dataset_root, tmp_path):
+def test_annotate_multi_ring_polygon_round_trips_through_the_route(opened_client, dataset_root, tmp_path):
     """An occlusion-split shape loaded onto the canvas and re-saved unedited must keep every ring.
 
     The save side accepts ``rings`` for exactly this, and the load side reports ``rings`` back, so a
@@ -745,7 +740,7 @@ def test_annotate_multi_ring_polygon_round_trips_through_the_route(client, datas
     """
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     rings = [[[10, 10], [30, 10], [30, 30], [10, 30]], [[60, 10], [80, 10], [80, 30], [60, 30]]]
-    resp = client.post("/api/annotate/labels", json={
+    resp = opened_client.post("/api/annotate/labels", json={
         "image_path": str(img_path),
         "annotations": [{"subject": "bud", "rings": rings}], "user": "breeder",
     })
@@ -755,19 +750,19 @@ def test_annotate_multi_ring_polygon_round_trips_through_the_route(client, datas
     assert len(stored) == 1  # one instance, not one per contour
     assert stored[0].geometry.rings == [[tuple(map(float, p)) for p in r] for r in rings]
 
-    body = client.get("/api/annotate/labels", params={
+    body = opened_client.get("/api/annotate/labels", params={
         "image_path": str(img_path)}).json()
     (ann,) = body["annotations"]
     assert ann["rings"] == rings
 
 
-def test_annotate_save_prefers_rings_over_points_when_both_are_sent(client, dataset_root, tmp_path):
+def test_annotate_save_prefers_rings_over_points_when_both_are_sent(opened_client, dataset_root, tmp_path):
     """`rings` is the full shape and `points` only ever one contour, so `rings` wins: otherwise a
     client that sends both (a loaded multi-ring shape plus a single-ring mirror of it) would
     persist the truncated version."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     rings = [[[10, 10], [30, 10], [30, 30]], [[60, 10], [80, 10], [80, 30]]]
-    resp = client.post("/api/annotate/labels", json={
+    resp = opened_client.post("/api/annotate/labels", json={
         "image_path": str(img_path),
         "annotations": [{"subject": "bud", "rings": rings, "points": rings[0]}], "user": "breeder",
     })
@@ -776,9 +771,9 @@ def test_annotate_save_prefers_rings_over_points_when_both_are_sent(client, data
     assert len(stored.geometry.rings) == 2
 
 
-def test_annotate_save_persists_box_as_box(client, dataset_root, tmp_path) -> None:
+def test_annotate_save_persists_box_as_box(opened_client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    resp = client.post(
+    resp = opened_client.post(
         "/api/annotate/labels",
         json={
             "image_path": str(img_path),
@@ -794,7 +789,7 @@ def test_annotate_save_persists_box_as_box(client, dataset_root, tmp_path) -> No
 
 
 def test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote(
-    client: TestClient, dataset_root: Path, tmp_path: Path
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     """Labels travel with their dataset, so the trail of a label write is recorded beside them
     and not in the log of the project that happened to have the dataset open. The route and the
@@ -804,7 +799,7 @@ def test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote(
 
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     before = len(audit_rows(dataset_root))
-    resp = _save_box(client, img_path)
+    resp = _save_box(opened_client, img_path)
     assert resp.status_code == 200
     answer = save_annotations(tmp_path, tmp_path.parent, str(img_path),
                               annotations=[{"subject": "bud", "bbox": [1, 1, 5, 5]}])
@@ -820,7 +815,7 @@ def test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote(
 
 
 def test_a_document_the_bucket_record_does_not_name_is_no_prediction_of_it(
-    client: TestClient, dataset_root: Path,
+    opened_client: TestClient, dataset_root: Path,
 ) -> None:
     """A bucket's documents are the ones its record names: an image it never predicted has no
     document in it."""
@@ -867,7 +862,7 @@ BUCKET = "baseline/2026-02-11"
 
 
 def test_a_launch_into_a_bucket_that_exists_fails_its_job_and_writes_nothing(
-    client: TestClient, tmp_path: Path, monkeypatch,
+    opened_client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
     """The publication refuses a bucket that exists, as it refuses every door's: the job ends
     failed naming the rule, the bucket keeps exactly the record it held, and no line is logged."""
@@ -886,7 +881,7 @@ def test_a_launch_into_a_bucket_that_exists_fails_its_job_and_writes_nothing(
     before = tcip_store.read_versioned(bucket_key(dataset_root, BUCKET)).version
     logged = len(audit_rows(Path(dataset_root)))
 
-    resp = client.post("/api/inference/launch", json={
+    resp = opened_client.post("/api/inference/launch", json={
         "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root,
         "date": date, "bucket": BUCKET, "stated": {"tile": False},
     })
@@ -901,7 +896,7 @@ def test_a_launch_into_a_bucket_that_exists_fails_its_job_and_writes_nothing(
 
 
 def test_inference_launch_leaves_the_bucket_for_its_publication_to_create(
-    client: TestClient, tmp_path: Path, monkeypatch,
+    opened_client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
     import tcip_store
 
@@ -909,7 +904,7 @@ def test_inference_launch_leaves_the_bucket_for_its_publication_to_create(
 
     ckpt, dataset_root, date, _inference_routes = _launch_setup(tmp_path, monkeypatch)
 
-    resp = client.post("/api/inference/launch", json={
+    resp = opened_client.post("/api/inference/launch", json={
         "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root,
         "date": date, "bucket": BUCKET,
     })
@@ -920,7 +915,7 @@ def test_inference_launch_leaves_the_bucket_for_its_publication_to_create(
 
 
 def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
-    client: TestClient, tmp_path: Path, monkeypatch,
+    opened_client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
     """A second launch of the same model and date while the first job still writes is refused
     naming that job; once the first job is terminal the launch is admitted again, the
@@ -930,14 +925,14 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
     ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
     event = _held_worker(monkeypatch, inference_routes)
 
-    first = client.post("/api/inference/launch", json={
+    first = opened_client.post("/api/inference/launch", json={
         "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root,
         "date": date, "bucket": BUCKET,
     })
     assert first.status_code == 200, first.text
     job_id = first.json()["job_id"]
 
-    second = client.post("/api/inference/launch", json={
+    second = opened_client.post("/api/inference/launch", json={
         "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root,
         "date": date, "bucket": BUCKET,
     })
@@ -959,7 +954,7 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
         time.sleep(0.05)
     assert job.status == "completed"
 
-    third = client.post("/api/inference/launch", json={
+    third = opened_client.post("/api/inference/launch", json={
         "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root,
         "date": date, "bucket": BUCKET,
     })
@@ -967,7 +962,7 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
 
 
 def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset_root(
-    client: TestClient, tmp_path: Path, monkeypatch,
+    opened_client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
     """The live job a refusal names is found by resolved directory identity, so a
     trailing-separator spelling of the same dataset root still names the first job."""
@@ -977,14 +972,14 @@ def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset
     ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
     event = _held_worker(monkeypatch, inference_routes)
 
-    first = client.post("/api/inference/launch", json={
+    first = opened_client.post("/api/inference/launch", json={
         "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root,
         "date": date, "bucket": BUCKET,
     })
     assert first.status_code == 200, first.text
     job_id = first.json()["job_id"]
 
-    second = client.post("/api/inference/launch", json={
+    second = opened_client.post("/api/inference/launch", json={
         "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root + os.sep,
         "date": date, "bucket": BUCKET,
     })
@@ -1003,7 +998,7 @@ def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset
 
 
 def test_inference_launch_resolves_explicit_conf_and_max_dets_source_from_the_payload(
-    client: TestClient, tmp_path: Path, monkeypatch,
+    opened_client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
     """A caller-stated conf/max_dets equal to the platform default travels on the job as stated,
     which the worker's pass records as stated."""
@@ -1011,7 +1006,7 @@ def test_inference_launch_resolves_explicit_conf_and_max_dets_source_from_the_pa
 
     ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
 
-    resp = client.post("/api/inference/launch", json={
+    resp = opened_client.post("/api/inference/launch", json={
         "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root, "date": date,
         "bucket": BUCKET, "stated": {"conf": DEFAULT_CONF, "max_dets": DEFAULT_MAX_DETS},
     })
@@ -1022,13 +1017,13 @@ def test_inference_launch_resolves_explicit_conf_and_max_dets_source_from_the_pa
 
 
 def test_inference_launch_defaults_conf_and_max_dets_source_when_omitted(
-    client: TestClient, tmp_path: Path, monkeypatch,
+    opened_client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
     """An omitted conf/max_dets travels on the job as unstated, never as a value, and the
     worker's pass resolves the platform default."""
     ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
 
-    resp = client.post("/api/inference/launch", json={
+    resp = opened_client.post("/api/inference/launch", json={
         "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root, "date": date,
         "bucket": BUCKET,
     })
@@ -1041,8 +1036,8 @@ def test_inference_launch_defaults_conf_and_max_dets_source_when_omitted(
 # ── /api/state ───────────────────────────────────────────────────────────
 
 
-def test_state_snapshot_available(client: TestClient) -> None:
-    resp = client.get("/api/state")
+def test_state_snapshot_available(opened_client: TestClient) -> None:
+    resp = opened_client.get("/api/state")
     body = resp.json()
     # Minimal shape sanity
     assert "active_tab" in body
@@ -1050,51 +1045,51 @@ def test_state_snapshot_available(client: TestClient) -> None:
     assert "dataset" in body
 
 
-def test_state_tab_push_mutates_the_store(client: TestClient) -> None:
+def test_state_tab_push_mutates_the_store(opened_client: TestClient) -> None:
     from tcip_mcp.web_client import TAB_NAMES
 
     assert "results" in TAB_NAMES
-    resp = client.post("/api/state/tab", json={"active_tab": "results"})
+    resp = opened_client.post("/api/state/tab", json={"active_tab": "results"})
     assert resp.status_code == 200
-    assert client.get("/api/state").json()["active_tab"] == "results"
-    client.post("/api/state/tab", json={"active_tab": "annotate"})
+    assert opened_client.get("/api/state").json()["active_tab"] == "results"
+    opened_client.post("/api/state/tab", json={"active_tab": "annotate"})
 
 
-def test_state_tab_push_rejects_unknown_tabs(client: TestClient) -> None:
-    before = client.get("/api/state").json()["active_tab"]
+def test_state_tab_push_rejects_unknown_tabs(opened_client: TestClient) -> None:
+    before = opened_client.get("/api/state").json()["active_tab"]
     for retired in ("dashboard", "review"):
-        resp = client.post("/api/state/tab", json={"active_tab": retired})
+        resp = opened_client.post("/api/state/tab", json={"active_tab": retired})
         assert resp.status_code == 400
         assert retired in resp.json()["detail"]
-    assert client.get("/api/state").json()["active_tab"] == before
+    assert opened_client.get("/api/state").json()["active_tab"] == before
 
 
-def test_state_socket_broadcasts_a_mutation_while_open(client: TestClient) -> None:
+def test_state_socket_broadcasts_a_mutation_while_open(opened_client: TestClient) -> None:
     """A mutation made while ``/ws/state`` is connected pushes the same envelope shape the
     connect-time replay sends: the broadcast and the replay build it from different inputs
     (a subscriber payload versus the store's own snapshot and version), and only this exercises
     the broadcast path."""
-    with client.websocket_connect("ws://127.0.0.1/ws/state") as ws:
+    with opened_client.websocket_connect("ws://127.0.0.1/ws/state") as ws:
         replay = ws.receive_json()
         assert replay["type"] == "state_snapshot"
-        client.post("/api/state/tab", json={"active_tab": "training"})
+        opened_client.post("/api/state/tab", json={"active_tab": "training"})
         pushed = ws.receive_json()
     assert pushed["type"] == "state_snapshot"
     assert pushed["state"]["active_tab"] == "training"
     assert pushed["version"] == replay["version"] + 1
-    client.post("/api/state/tab", json={"active_tab": "annotate"})
+    opened_client.post("/api/state/tab", json={"active_tab": "annotate"})
 
 
-def test_dataset_state_route_is_retired(client: TestClient) -> None:
+def test_dataset_state_route_is_retired(opened_client: TestClient) -> None:
     """``/api/dataset/state`` is not registered; ``/api/state`` is the one route over the
     singleton snapshot."""
-    assert client.get("/api/dataset/state").status_code == 404
+    assert opened_client.get("/api/dataset/state").status_code == 404
 
 
 # ── /api/fs (folder browser) ───────────────────────────────────────────────
 
 
-def test_fs_list_directories(client: TestClient, tmp_path: Path) -> None:
+def test_fs_list_directories(opened_client: TestClient, tmp_path: Path) -> None:
     (tmp_path / "alpha").mkdir()
     (tmp_path / "beta" / "images").mkdir(parents=True)  # looks like a dataset root
     (tmp_path / ".hidden").mkdir()
@@ -1104,7 +1099,7 @@ def test_fs_list_directories(client: TestClient, tmp_path: Path) -> None:
     (tmp_path / "System Volume Information").mkdir()
     (tmp_path / "FOUND.000").mkdir()
 
-    resp = client.get("/api/fs/list", params={"path": str(tmp_path)})
+    resp = opened_client.get("/api/fs/list", params={"path": str(tmp_path)})
     assert resp.status_code == 200
     body = resp.json()
     names = {e["name"]: e for e in body["entries"]}
@@ -1119,29 +1114,29 @@ def test_fs_list_directories(client: TestClient, tmp_path: Path) -> None:
     assert body["path"] == str(tmp_path)
 
 
-def test_fs_list_404_for_non_dir(client: TestClient, tmp_path: Path) -> None:
+def test_fs_list_404_for_non_dir(opened_client: TestClient, tmp_path: Path) -> None:
     f = tmp_path / "x.txt"
     f.write_text("x")
-    assert client.get("/api/fs/list", params={"path": str(f)}).status_code == 404
+    assert opened_client.get("/api/fs/list", params={"path": str(f)}).status_code == 404
 
 
 def test_fs_list_is_unconfined_from_a_local_connection(
-    client: TestClient, tmp_path_factory: pytest.TempPathFactory
+    opened_client: TestClient, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
     # The picker route is unconfined on a connection from this machine (the default TestClient);
     # confinement on a routable arrival is covered by test_web_path_guard_permanent_on.py.
     outside = tmp_path_factory.mktemp("outside")
     (outside / "sub").mkdir()
-    assert client.get("/api/fs/list", params={"path": str(outside)}).status_code == 200
+    assert opened_client.get("/api/fs/list", params={"path": str(outside)}).status_code == 200
 
 
 # ── native provenance (created_by / accepted_by) ─────────────────
 
 
-def test_annotate_save_stamps_created_by(client, dataset_root, tmp_path) -> None:
+def test_annotate_save_stamps_created_by(opened_client, dataset_root, tmp_path) -> None:
     """A human-drawn box is stamped created_by=user:<gui-user> + created_at."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    resp = client.post("/api/annotate/labels", json={
+    resp = opened_client.post("/api/annotate/labels", json={
         "image_path": str(img_path),
         "annotations": [{"subject": "bud", "bbox": [50, 40, 70, 60]}],
         "user": "breeder",
@@ -1152,10 +1147,10 @@ def test_annotate_save_stamps_created_by(client, dataset_root, tmp_path) -> None
     assert obj["created_at"]
 
 
-def test_annotate_save_polygon_stamps_author(client, dataset_root, tmp_path) -> None:
+def test_annotate_save_polygon_stamps_author(opened_client, dataset_root, tmp_path) -> None:
     """A human-drawn polygon is stamped created_by=user:<gui-user> (not None)."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    resp = client.post("/api/annotate/labels", json={
+    resp = opened_client.post("/api/annotate/labels", json={
         "image_path": str(img_path),
         "annotations": [{"subject": "bud", "points": [[10, 10], [30, 10], [30, 30]]}],
         "user": "emily",
@@ -1165,11 +1160,11 @@ def test_annotate_save_polygon_stamps_author(client, dataset_root, tmp_path) -> 
 
 
 def test_annotate_save_naming_no_one_refuses_and_writes_nothing(
-        client, dataset_root, tmp_path, monkeypatch) -> None:
+        opened_client, dataset_root, tmp_path, monkeypatch) -> None:
     """A save whose request names no one refuses, whatever the backend process runs as."""
     monkeypatch.setenv("TCIP_USER", "osuser")
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    resp = client.post("/api/annotate/labels", json={
+    resp = opened_client.post("/api/annotate/labels", json={
         "image_path": str(img_path),
         "annotations": [{"subject": "bud", "bbox": [50, 40, 70, 60]}], "user": " ",
     })
@@ -1180,12 +1175,12 @@ def test_annotate_save_naming_no_one_refuses_and_writes_nothing(
 # ── Provenance round-trip fidelity (load → edit → save keeps the original creator) ──
 
 
-def test_annotate_load_returns_provenance(client, dataset_root, tmp_path) -> None:
+def test_annotate_load_returns_provenance(opened_client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_image(img_path, [Annotation(
         subject="bud", geometry=BBox(10, 10, 40, 40), created_by="derived:user:breeder",
         created_at="2026-02-11T00:00:00+00:00", accepted_by="user:breeder")], 100, 80)
-    resp = client.get(
+    resp = opened_client.get(
         "/api/annotate/labels",
         params={"image_path": str(img_path)},
     )
@@ -1196,16 +1191,16 @@ def test_annotate_load_returns_provenance(client, dataset_root, tmp_path) -> Non
     assert a["accepted_by"] == "user:breeder"
 
 
-def test_annotate_resave_preserves_original_creator(client, dataset_root, tmp_path) -> None:
+def test_annotate_resave_preserves_original_creator(opened_client, dataset_root, tmp_path) -> None:
     """A re-save must not wholesale re-stamp loaded shapes to the current annotator: the
     original creator survives (keep-original-creator policy); only new shapes get stamped."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_image(img_path, [Annotation(
         subject="bud", geometry=BBox(10, 10, 40, 40), created_by="derived:user:breeder",
         created_at="2026-02-11T00:00:00+00:00", accepted_by="user:breeder")], 100, 80)
-    loaded = client.get("/api/annotate/labels", params={
+    loaded = opened_client.get("/api/annotate/labels", params={
         "image_path": str(img_path)}).json()["annotations"]
-    resp = client.post("/api/annotate/labels", json={
+    resp = opened_client.post("/api/annotate/labels", json={
         "image_path": str(img_path),
         "annotations": [*loaded, {"subject": "bud", "bbox": [50, 50, 70, 70]}],
         "user": "emily",
@@ -1218,7 +1213,7 @@ def test_annotate_resave_preserves_original_creator(client, dataset_root, tmp_pa
     assert objs[1]["created_by"] == "user:emily"                 # only the new shape is Emily's
 
 
-def test_annotate_resave_keeps_the_crowd_flag(client, dataset_root, tmp_path) -> None:
+def test_annotate_resave_keeps_the_crowd_flag(opened_client, dataset_root, tmp_path) -> None:
     """A crowd region the load route hands the canvas comes back on save as a crowd region: the
     flag round-trips through the payload, and a shape that never carried one saves without it."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
@@ -1226,12 +1221,12 @@ def test_annotate_resave_keeps_the_crowd_flag(client, dataset_root, tmp_path) ->
         Annotation(subject="bud", geometry=BBox(10, 10, 40, 40), iscrowd=True),
         Annotation(subject="bud", geometry=BBox(50, 50, 70, 70))], 100, 100)
 
-    load = client.get(
+    load = opened_client.get(
         "/api/annotate/labels", params={"image_path": str(img_path)})
     loaded = load.json()
     assert [a["iscrowd"] for a in loaded["annotations"]] == [True, False]
 
-    resp = client.post("/api/annotate/labels", json={
+    resp = opened_client.post("/api/annotate/labels", json={
         "image_path": str(img_path),
         "annotations": loaded["annotations"], "base_mtime": loaded["base_mtime"], "user": "emily",
     })
@@ -1244,11 +1239,11 @@ def test_annotate_resave_keeps_the_crowd_flag(client, dataset_root, tmp_path) ->
     (None, 200, False), (True, 200, True), (1, 200, True),
 ], ids=["yes", "false_string", "zero_string", "two", "null", "true", "one"])
 def test_annotate_save_reads_the_crowd_flag_through_the_decoders_check(
-        client, dataset_root, tmp_path, flag, status, crowd) -> None:
+        opened_client, dataset_root, tmp_path, flag, status, crowd) -> None:
     """The save route interprets the flag once, through the decoder's own check: a string is no
     flag and refuses, where a coercing model would have read it as one; a null reads as no crowd."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    resp = client.post("/api/annotate/labels", json={
+    resp = opened_client.post("/api/annotate/labels", json={
         "image_path": str(img_path),
         "annotations": [{"subject": "bud", "bbox": [10, 10, 40, 40], "iscrowd": flag}],
         "user": "breeder",
@@ -1262,7 +1257,7 @@ def test_annotate_save_reads_the_crowd_flag_through_the_decoders_check(
 
 
 def test_the_mcp_read_and_the_web_load_project_an_annotation_alike(
-        client, dataset_root, tmp_path) -> None:
+        opened_client, dataset_root, tmp_path) -> None:
     """Both read doors hand a writer-produced crowd annotation to their client through the one
     projection: the MCP read's dict and the web load's are the same but for ``authorship``."""
     from tcip_mcp.tools.annotation_tools import read_annotations as mcp_read
@@ -1274,7 +1269,7 @@ def test_the_mcp_read_and_the_web_load_project_an_annotation_alike(
         Annotation(subject="bud", geometry=Polygon([[(50.0, 50.0), (70.0, 50.0), (70.0, 70.0)]]),
                    attributes={"stage": "open"})], 100, 100)
 
-    web = client.get("/api/annotate/labels", params={
+    web = opened_client.get("/api/annotate/labels", params={
         "image_path": str(img_path)}).json()["annotations"]
     mcp = mcp_read(str(img_path))["labels"]["annotations"]
 
@@ -1283,14 +1278,14 @@ def test_the_mcp_read_and_the_web_load_project_an_annotation_alike(
     assert mcp[0]["iscrowd"] is True and mcp[1]["iscrowd"] is False
 
 
-def test_annotate_polygons_keep_and_stamp_provenance(client, dataset_root, tmp_path) -> None:
+def test_annotate_polygons_keep_and_stamp_provenance(opened_client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_image(img_path, [Annotation(
         subject="bud", geometry=Polygon([[(10.0, 10.0), (30.0, 10.0), (30.0, 30.0)]]),
         created_by="user:emily", created_at="2026-03-02T00:00:00+00:00")], 100, 80)
-    loaded = client.get("/api/annotate/labels", params={
+    loaded = opened_client.get("/api/annotate/labels", params={
         "image_path": str(img_path)}).json()["annotations"]
-    resp = client.post("/api/annotate/labels", json={
+    resp = opened_client.post("/api/annotate/labels", json={
         "image_path": str(img_path),
         "annotations": [*loaded, {"subject": "bud", "points": [[50, 50], [70, 50], [70, 70]]}],
         "user": "breeder",

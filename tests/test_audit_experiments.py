@@ -138,9 +138,9 @@ def test_list_experiments(tmp_path):
     opened_run(tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-a")
     opened_run(tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-b")
 
-    listing = exp.list_experiments(tmp_path)
-    assert {e["experiment_id"] for e in listing} == {"exp-a", "exp-b"}
-    assert {e["state"] for e in listing} == {"running"}
+    listing = exp.run_rows(tmp_path)
+    assert {e.experiment_id for e in listing} == {"exp-a", "exp-b"}
+    assert {e.state for e in listing} == {"running"}
 
 
 def test_compare_experiments(tmp_path):
@@ -162,12 +162,12 @@ def test_get_experiment_lineage(tmp_path):
     import tcip_mcp.experiments as exp
 
     config = detection_config(tmp_path / "ds")
-    opened_run(tmp_path, config, experiment_id="exp-l", parent_experiment="exp-k")
+    opened_run(tmp_path, config, experiment_id="exp-l", relaunched_from="exp-k")
 
     lineage = exp.get_experiment_lineage("exp-l", project=tmp_path)["lineage"]
     assert lineage["data"]["images_dir"] == config["data"]["images_dir"]
     assert lineage["data"]["scope"]["subject"] == config["data"]["scope"]["subject"]
-    assert lineage["parent_experiment"] == "exp-k"
+    assert lineage["relaunched_from"] == "exp-k"
     assert lineage["checkpoint"] is None
 
 

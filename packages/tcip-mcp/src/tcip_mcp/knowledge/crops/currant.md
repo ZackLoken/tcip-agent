@@ -158,14 +158,11 @@ Mechanics live in the annotation skill; currant-specific difficulties:
 - Cryptic disease signal: early SWD is invisible externally; WPBR pustules are on
   the leaf underside; both demand the right view, not just any frame.
 - An image with no open flowers on a date is a real observation, not noise, but it trains as
-  a negative only once the breeder confirms it Complete; an empty label document alone reads as
-  unannotated (see CLAUDE.md's negative invariant).
+  a negative of a subject only once the breeder marks that subject complete on it; an empty label
+  document alone reads as unannotated.
 
 ## Measurement integrity
 
-Per the CLAUDE.md measurement-integrity invariant (never a geometric/pixel proxy; validate
-against a reference sized to the trait: GT annotations, or a breeder-confirmed sample of the
-model's own outputs (review-confirmation), before any result, not dense GT for every trait).
 Currant-specific traps:
 
 - Never substitute a raw RGB color threshold for ripeness. `fruit_ripe_*` depends

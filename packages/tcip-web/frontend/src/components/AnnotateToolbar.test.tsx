@@ -10,6 +10,7 @@ import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
 import { useStore } from "@/store";
 import type { SubjectState } from "@/store/types";
+import { openTestProject } from "@/test/store";
 
 const initialStoreState = useStore.getState();
 
@@ -188,17 +189,7 @@ describe("AnnotateToolbar Cut button", () => {
 
 describe("AnnotateToolbar subject authoring", () => {
   function seedDataset() {
-    useStore.setState((s) => ({
-      gui: {
-        ...s.gui,
-        dataset: {
-          ...s.gui.dataset,
-          dataset_root: "C:/data",
-          date: "2026-01-01",
-        },
-      },
-      openProject: { id: "a1b2c3d4e5f6", path: "C:/proj" },
-    }));
+    openTestProject({ dataset_root: "C:/data", date: "2026-01-01" });
   }
 
   function openSubjectMenu() {

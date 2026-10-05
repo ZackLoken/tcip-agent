@@ -12,28 +12,21 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 from PIL import Image
 
 from tcip_mcp import workspace
-from tcip_mcp.tools.project_tools import initialize_project
-from tcip_web.app import app
 from tests._audit_fixtures import audit_rows
-
-
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
+from tests._web_fixtures import named_project
 
 
 def _project(ws: Path, directory: str, display_name: str) -> tuple[Path, str]:
-    """A project made through the creation door, with one image; its path and id."""
-    result = initialize_project(str(ws / directory), display_name, "north orchard")
-    assert "error" not in result, result
-    images = ws / directory / "images" / "2026-03-04"
+    """A project made through the creation door (``named_project``), with one image; its path
+    and id."""
+    project, project_id = named_project(ws / directory, display_name)
+    images = project / "images" / "2026-03-04"
     images.mkdir(parents=True)
     Image.new("RGB", (8, 8), (0, 0, 0)).save(images / "img.jpg")
-    return ws / directory, result["id"]
+    return project, project_id
 
 
 def test_removal_archives_moves_and_records_one_line(client, tmp_path):

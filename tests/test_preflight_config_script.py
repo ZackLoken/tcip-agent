@@ -6,9 +6,9 @@ Structural validation always runs, for the project --project names.
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 from pathlib import Path
+
+from tests._cli_fixtures import run_tcip
 
 
 def _fixture_config(root: Path) -> Path:
@@ -27,19 +27,12 @@ def _fixture_config(root: Path) -> Path:
     return config_path
 
 
-def _run(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, "-m", "tcip_web.cli", "preflight-config", *args],
-        cwd=str(cwd), capture_output=True, text=True, timeout=60,
-    )
-
-
 def test_refuses_a_run_naming_no_project(tmp_path):
     config_path = _fixture_config(tmp_path)
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
-    result = _run(["--config", str(config_path)], cwd=cwd)
+    result = run_tcip("preflight-config", ["--config", str(config_path)], cwd=cwd)
 
     assert result.returncode != 0, result.stdout
     assert "--project" in result.stderr
@@ -51,7 +44,7 @@ def test_validates_a_fixture_config_for_the_named_project(project, tmp_path):
     cwd = tmp_path.parent / "operator_cwd"
     cwd.mkdir()
 
-    result = _run(["--config", str(config_path), "--project", str(project)], cwd=cwd)
+    result = run_tcip("preflight-config", ["--config", str(config_path), "--project", str(project)], cwd=cwd)
 
     assert result.returncode == 0, result.stdout
     body = json.loads(result.stdout)

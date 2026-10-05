@@ -140,14 +140,12 @@ def test_resolved_mapping_key_for_citation_names_the_archive_once_superseded(
 
 
 def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive(
-    tmp_path: Path,
+    tmp_path: Path, client,
 ) -> None:
     """The panel route's own plant_mapping_resolved_key names the archive once a supersede
     rebuild has moved the cited name on, and the plain name while it has not."""
     import asyncio
 
-    from fastapi.testclient import TestClient
-    from tcip_web.app import app
     from tcip_web.state import store
 
     images_root, _ = _cited_mapping(tmp_path)
@@ -155,7 +153,6 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
     assert before is not None
 
     asyncio.run(store.open_project(tmp_path))
-    client = TestClient(app, base_url="http://127.0.0.1")
     resp = client.get("/api/results/delivery-events")
     assert resp.status_code == 200, resp.text
     record = next(r for r in resp.json()["records"] if r.get("plant_mapping"))

@@ -178,15 +178,11 @@ def test_load_canopy_segments_refuses_a_machine_authored_polygon_with_no_persons
 
 
 def test_load_canopy_segments_admits_a_proposed_polygon_accepted_through_the_save_door(
-    tmp_path: Path,
+    tmp_path: Path, client,
 ) -> None:
     """A staged polygon proposal accepted through the editor's save door delivers: the platform's
     own producer of a person's ``accepted_by``, never a hand-written provenance pair.
     """
-    from fastapi.testclient import TestClient
-
-    from tcip_web.app import app
-
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     _dataset_root, raster_path, _georef, identity = _setup(tmp_path)
@@ -195,7 +191,6 @@ def test_load_canopy_segments_admits_a_proposed_polygon_accepted_through_the_sav
         {"subject": "canopy", "conf": 0.9, "rings": [ring]}])
     assert "error" not in staged, staged
 
-    client = TestClient(app, base_url="http://127.0.0.1")
     resp = client.post("/api/annotate/labels", json={
         "image_path": str(raster_path), "annotations": [],
         "bucket": staged["bucket"], "accept": [0], "user": "breeder",

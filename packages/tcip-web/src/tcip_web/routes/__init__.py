@@ -22,7 +22,6 @@ from tcip_web.routes import (
     subjects,
     terminal,
     training,
-    tuning,
 )
 
 
@@ -36,7 +35,6 @@ def register_all(app: FastAPI) -> None:
     app.include_router(training.router)
     app.include_router(inference.router)
     app.include_router(results.router)
-    app.include_router(tuning.router)
     app.include_router(subjects.router)
     app.include_router(sessions.router)
     app.include_router(meta.router)

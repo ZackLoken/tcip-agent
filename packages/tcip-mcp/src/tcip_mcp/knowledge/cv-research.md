@@ -63,7 +63,7 @@ proof takes `sample_batch=`, an `(images, targets)` pair from your dataset, sinc
 target shape is invented for it.
 
 Fit to the data in hand, don't transplant blind. A paper's hyperparameters are for its dataset.
-Derive the operating points from *your* data at runtime (CLAUDE.md: derive, don't pin): anchor sizes
+Derive the operating points from *your* data at runtime: anchor sizes
 from your GT box distribution, norm choice from your real batch size, pyramid levels from your object
 scale. A method that assumed 118k images and batch 64 will not behave the same on a few hundred tiles
 at batch 2; adapt the mechanism to that reality or expect it to fail.
@@ -85,8 +85,8 @@ The discipline:
    improvement for this platform; it is a benchmark artifact. Validate against a reference sized to
    the trait: GT annotations, or a breeder-confirmed sample of the model's own outputs
    (review-confirmation), not dense GT for every trait, the same bar every measurement faces (either
-   reference passes the identical disjoint-split + count-bias gate). This is the
-   measurement-integrity invariant (CLAUDE.md); a new technique gets no exemption from it.
+   reference passes the identical disjoint-split + count-bias gate); a new technique gets no
+   exemption from it.
 4. Keep it only if it wins. If it ties or loses, discard it and record why in a retrospective.
    If it wins, it becomes the new baseline; log the source and the delta in the experiment lineage.
 5. Until a researched technique clears step 3 it stays labeled not-yet-validated and must not

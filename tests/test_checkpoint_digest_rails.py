@@ -13,6 +13,7 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
+from tcip_mcp.pipelines.model_build import METRICS_KEY, STATE_DICT_KEY  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     finished_run,
     foreign_checkpoint,
@@ -337,7 +338,7 @@ class _SideEffectOnUnpickle:
 def test_run_inference_refuses_without_unpickling_a_side_effect_payload(tmp_path):
     marker = tmp_path / "unpickled.marker"
     ckpt = tmp_path / "m.pt"
-    torch.save({"model_state_dict": {},
+    torch.save({STATE_DICT_KEY: {},
                 "carries_side_effect": _SideEffectOnUnpickle(str(marker))}, str(ckpt))
 
     assert "register_model" in _infer(tmp_path, str(ckpt))["error"]
@@ -374,8 +375,8 @@ def test_run_inference_admits_the_same_checkpoint_copied_to_another_path(tmp_pat
 def _best_and_final(ctx) -> None:
     """A body saving two checkpoints: the model as built as model_best, and a second build as
     model_final."""
-    ctx.save_checkpoint({"model_state_dict": ctx.build_model().state_dict()}, "model_best")
-    ctx.save_checkpoint({"model_state_dict": ctx.build_model().state_dict()}, "model_final")
+    ctx.save_checkpoint({STATE_DICT_KEY: ctx.build_model().state_dict()}, "model_best")
+    ctx.save_checkpoint({STATE_DICT_KEY: ctx.build_model().state_dict()}, "model_final")
 
 
 def test_run_inference_admits_a_second_checkpoint_of_a_run_registered_under_a_distinct_name(
@@ -431,7 +432,7 @@ def test_a_completed_runs_final_status_and_the_load_agree_on_its_digest(tmp_path
     loaded = load_registered_checkpoint(checkpoint["path"], project=tmp_path)
     assert loaded.sha256 == checkpoint["sha256"]
     [entry] = ModelRegistry(str(tmp_path)).list_models()
-    assert entry["metrics"] == {"map": 0.9} == loaded.payload["metrics"]
+    assert entry["metrics"] == {"map": 0.9} == loaded.payload[METRICS_KEY]
     assert entry["metrics_source"] == "training_source"
 
 
@@ -446,7 +447,7 @@ def test_ctx_save_checkpoint_admits_a_state_naming_no_reserved_key(tmp_path):
                       project=tmp_path, has_val_loader=False, id="auto-run-4")
     ctx = TrainContext(run=run, train_loader=None)
 
-    path = ctx.save_checkpoint({"model_state_dict": {}})
+    path = ctx.save_checkpoint({STATE_DICT_KEY: {}})
     assert Path(path).is_file()
 
 

@@ -6,15 +6,20 @@ import asyncio
 from pathlib import Path
 
 
-def new_project(path: Path) -> Path:
-    """Make ``path`` a project through the platform's own creation door (``initialize_project``),
-    its record holding an id, a display name and a site; returns ``path``. Refuses (by assertion)
-    when ``path`` already records another name or site."""
+def named_project(path: Path, display_name: str) -> tuple[Path, str]:
+    """Make ``path`` a project named ``display_name`` through the platform's own creation door
+    (``initialize_project``), its record holding an id, that name and a site; ``(path, id)``.
+    Refuses (by assertion) when ``path`` already records another name or site."""
     from tcip_mcp.tools.project_tools import initialize_project
 
-    result = initialize_project(str(path), "Test project", "north orchard")
+    result = initialize_project(str(path), display_name, "north orchard")
     assert "error" not in result, result
-    return path
+    return path, result["id"]
+
+
+def new_project(path: Path) -> Path:
+    """Make ``path`` a project named "Test project" (:func:`named_project`); returns ``path``."""
+    return named_project(path, "Test project")[0]
 
 
 def open_new_project(path: Path) -> Path:

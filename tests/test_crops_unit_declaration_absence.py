@@ -9,7 +9,6 @@ matched against.
 
 from __future__ import annotations
 
-import csv
 from pathlib import Path
 
 import pytest
@@ -19,7 +18,7 @@ from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
 from tcip_mcp.traits import (
     PER_PLANT_COUNT_AGGREGATE, PER_PLANT_REGRESSION_AGGREGATE, crops_units,
 )
-from tests import _trait_fixtures as fx
+from tests import _trait_fixtures as fx, csv_rows
 
 
 @pytest.fixture(autouse=True)
@@ -107,8 +106,7 @@ def test_a_count_valued_delivery_ships_with_a_blank_units_column(tmp_path: Path)
     ]
     out_path = tmp_path / "counts.csv"
     _deliver(tmp_path, results, out_path, "stem_count", delivery_kind=PER_PLANT_COUNT_AGGREGATE)
-    with open(out_path, newline="") as f:
-        rows = list(csv.DictReader(f))
+    rows = csv_rows(out_path)
     assert [r["units"] for r in rows] == ["", ""]
     assert [r["value"] for r in rows] == ["7", "2"]
 
@@ -129,8 +127,7 @@ def test_a_dimensional_value_ships_for_a_trait_crops_yml_declares_no_unit_for(tm
     out_path = tmp_path / "area.csv"
     _deliver(tmp_path, results, out_path, "plant_surface_area",
              delivery_kind=PER_PLANT_REGRESSION_AGGREGATE)
-    with open(out_path, newline="") as f:
-        rows = list(csv.DictReader(f))
+    rows = csv_rows(out_path)
     assert rows[0]["units"] == "mm2"
 
 

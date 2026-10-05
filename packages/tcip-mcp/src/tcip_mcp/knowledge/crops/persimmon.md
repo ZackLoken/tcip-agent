@@ -132,9 +132,6 @@ specific difficulties are:
 
 ## Measurement integrity
 
-Per the CLAUDE.md measurement-integrity invariant (never a geometric/pixel proxy; validate
-against a reference sized to the trait: GT annotations, or a breeder-confirmed sample of the
-model's own outputs (review-confirmation), before any result, not dense GT for every trait).
 Persimmon-specific traps:
 
 - `fruit_ripe_50per_date`: American persimmon loses astringency only on softening

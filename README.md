@@ -8,7 +8,7 @@ Current scope: 2D imagery (RGB + N-channel) from any capture modality, object de
 
 Six crops in scope: hazelnut, chestnut, currant, elderberry, persimmon, black locust. Phase 1 target is hazelnut catkin phenology.
 
-Status: the browser GUI is built out across all tabs (Annotate / Review / Training / Tuning / Inference / Results / Meta), the MCP tool surface is in place (run `python tools/list_tools.py` for the current count), and every delivered phenotype (a count, a dimensional measurement, a phenology milestone) is gated on validated measurement inputs end to end: an uncalibrated confidence threshold, an unproven physical scale, or a fabricated tile geometry refuses delivery. Phase 1 focus remains hazelnut catkin phenology; the orthomosaic capability described above is built, not yet exercised end to end against a first live delivery.
+Status: the browser GUI is built out across all its tabs, the MCP tool surface is in place (run `python tools/list_tools.py` for the current count), and every delivered phenotype (a count, a dimensional measurement, a phenology milestone) is gated on validated measurement inputs end to end: an uncalibrated confidence threshold, an unproven physical scale, or a fabricated tile geometry refuses delivery. Phase 1 focus remains hazelnut catkin phenology; the orthomosaic capability described above is built, not yet exercised end to end against a first live delivery.
 
 ## Architecture
 
@@ -26,14 +26,14 @@ Status: the browser GUI is built out across all tabs (Annotate / Review / Traini
            │ HTTP
            ▼
 ┌──────────────────────────────┐
-│  FastAPI + React GUI         │  Annotate / Review / Training / Tuning /
-│  (packages/tcip-web)         │  Inference / Results / Meta tabs
+│  FastAPI + React GUI         │  the breeder's tabs, one per
+│  (packages/tcip-web)         │  stage of the work
 └──────────────────────────────┘
 ```
 
 All three processes share `.tcip/` on disk (experiment state, model registry, audit logs, GUI state).
 
-Supporting libraries: `packages/tcip-annotation` (headless annotation engine: label I/O, IoU matching, SAM wrapper) and `packages/tcip-store` (the storage seam: one locked, atomic interface for the platform's records, append-only logs and blobs). `tcip-store` is the bottom of the stack, depending on nothing else here; `tcip-annotation` depends on it and on neither of the other two.
+Supporting libraries: `packages/tcip-annotation` (headless annotation engine: label I/O, IoU matching) and `packages/tcip-store` (the storage seam: one locked, atomic interface for the platform's records, append-only logs and blobs). `tcip-store` is the bottom of the stack, depending on nothing else here; `tcip-annotation` depends on it and on neither of the other two.
 
 Records and append-only logs go into one SQLite database per root, `<root>/.tcip/store.db`, label and prediction documents among them; imagery stays files. `tcip dump-store <project> <out_dir>` writes a project's records and logs out as files a person can read.
 
@@ -57,7 +57,7 @@ packages/
   tcip-web/                    # FastAPI backend + React frontend
     src/tcip_web/
       cli/                     # the tcip console command's own dispatcher (declared in pyproject.toml)
-      routes/                  # annotate, review, training, tuning, inference, results, ...
+      routes/                  # annotate, training, inference, results, ...
     frontend/src/              # Vite + React 18 + TypeScript + Tailwind + Konva
 tools/                         # CI + development tooling, never a project-facing command; see tools/README.md
 tests/                         # pytest suite
@@ -190,7 +190,7 @@ Working now:
   threads to the backbone's `in_chans`, and an `in_chans != 3` detector takes per-band
   `image_mean`/`image_std` from `derivations.band_normalization_stats`).
 - Training that loads the native per-image label documents directly, experiment tracking,
-  annotation/review, SAM-assisted labeling, assessment of a trait's positive-state classifier
+  annotation/review, model-proposed labels reviewed on the canvas, assessment of a trait's positive-state classifier
   (`assess_checkpoint` for a state-crossing delivery), and per-plant CSV export, including a
   percentile-crossing phenology-milestone deliverable (per-plant `<trait>_05/50/95per_date` = the
   dates a plant's classified positive-state fraction of detected objects crosses 5/50/95%; the
@@ -295,5 +295,5 @@ does and doesn't promise. Adopter-visible changes are recorded in
 ## License
 
 TCIP Agent is released under the [Apache License 2.0](LICENSE) (© 2026 Zack Loken).
-Commercial use is permitted. Bundled third-party components (e.g. timm, SAM2, also
-under Apache-2.0) are attributed in [NOTICE](NOTICE).
+Commercial use is permitted. Bundled third-party components (e.g. timm, also under
+Apache-2.0) are attributed in [NOTICE](NOTICE).

@@ -31,6 +31,8 @@ import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
 
 from torch.utils.data import DataLoader  # noqa: E402
 
+from tcip_mcp.pipelines.model_build import CONFIG_KEY  # noqa: E402
+
 from tests import bespoke_models  # noqa: E402 (the agent-authored bespoke model + train loop)
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tests._image_fixtures import write_noise_image  # noqa: E402
@@ -117,7 +119,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
 
     # ---- (b) the custom loop's checkpoint names its builder; provenance snapshot present ----
     best = torch.load(ckpt, weights_only=False)
-    assert best["config"]["model_source"]["builder"].endswith(":build_bespoke_detector")
+    assert best[CONFIG_KEY]["model_source"]["builder"].endswith(":build_bespoke_detector")
 
     launch = read_record(out / RUN_FILE)
     assert launch["environment"]["torch"]

@@ -32,25 +32,18 @@ def detection_images(where: Path, scope: dict, *, n: int = 2, polygons: bool = F
     holding one box (``polygons``: one square polygon) of ``scope``'s subject, carrying
     ``values`` as its attribute values, and ``registry`` as the dataset's subject registry when
     one is given. Returns the ``images_dir`` a data section names it by."""
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox, Polygon
 
-    from tests._producer_fixtures import label_image, registry_over
+    from tests._producer_fixtures import registry_over, seed_labeled_images
 
-    images_dir = where / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True, exist_ok=True)
     if registry is not None:
         registry_over(where, registry)
-    attributes = dict(values or {})
     geometry = (Polygon([[(8, 8), (24, 8), (24, 24), (8, 24)]]) if polygons
                 else BBox(8, 8, 24, 24))
-    for i in range(n):
-        stem = f"frame{i}"
-        Image.new("RGB", (64, 48), color=(60 + 40 * i, 90, 60)).save(images_dir / f"{stem}.png")
-        label_image(images_dir / f"{stem}.png",
-                    [Annotation(subject=scope["subject"], geometry=geometry, attributes=attributes)],
-                    64, 48, keep_empty=True)
+    annotation = Annotation(subject=scope["subject"], geometry=geometry,
+                            attributes=dict(values or {}))
+    images_dir = seed_labeled_images(where / "images" / UNDATED_BUCKET, [annotation],
+                                     n=n, width=64, height=48)
     return {"images_dir": str(images_dir)}
 
 
@@ -107,6 +100,30 @@ def opened_run(root: str | Path, config: dict, *, experiment_id: str | None = No
     return run_dir
 
 
+SWEEP_ARGUMENTS: dict[str, Any] = {
+    "param_space": {"lr": {"type": "loguniform", "low": 1e-4, "high": 1e-2}}, "n_trials": 1,
+    "search_alg": "random", "scheduler": "none", "grace_period": 1, "reduction_factor": 2,
+    "warm_start": False, "baseline_params": None, "max_concurrent": 1,
+    "resources_per_trial": None, "split_draws": 1, "split_draw_seeds": None, "search_seed": 0,
+    "trial_budget": None, "relaunched_from": None,
+}
+"""A one-trial random sweep over the learning rate, run to completion; ``open_sweep``'s other
+arguments."""
+
+
+def opened_sweep(root: str | Path, base_config: dict, **given: Any) -> Path:
+    """A sweep directory under the project ``root`` opened by the sweep door's own producer
+    (``training_tools.open_sweep``) over ``base_config``, :data:`SWEEP_ARGUMENTS` with ``given``
+    laid over them. Returns the directory; its trials open through ``training_tools.open_trial``."""
+    from tcip_mcp.tools.training_tools import open_sweep
+
+    arguments = {**SWEEP_ARGUMENTS, **given}
+    opened = open_sweep(Path(root), base_config, arguments.pop("param_space"), actor=None,
+                        **arguments)
+    assert isinstance(opened, Path), opened
+    return opened
+
+
 def partition_side(partition: dict, side: str) -> list[str]:
     """The members a resolved partition records on ``side``, sorted, read through the platform's
     own partition reader."""
@@ -117,15 +134,11 @@ def partition_side(partition: dict, side: str) -> list[str]:
 
 def log_epoch(run_dir: Path, epoch: int, metrics: dict) -> None:
     """Append one epoch row to ``run_dir``'s metrics log through the envelope's own sink."""
-    from tcip_mcp.experiments import RUN_FILE, project_of_run, read_record
+    from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.envelope import TrainContext
-    from tcip_mcp.pipelines.training.run_registry import TrainRun, trained_config
+    from tcip_mcp.pipelines.training.run_registry import observed_run
 
-    record = read_record(run_dir / RUN_FILE)
-    run = TrainRun(id=run_dir.name, config=trained_config(record),
-                   objective=record["resolved"]["objective"], project=project_of_run(run_dir),
-                   output_dir=str(run_dir))
-    TrainContext(run=run, train_loader=None)._epoch_sink(epoch, metrics)
+    TrainContext(run=observed_run(observe(run_dir)), train_loader=None)._epoch_sink(epoch, metrics)
 
 
 def finished_run(
@@ -214,6 +227,24 @@ def worker_run(root: str | Path, config: dict, *,
     return run_dir
 
 
+def run_to_end(project: str | Path, experiment_id: str, *, seconds: float = 120) -> dict:
+    """The row ``monitor_training`` answers for ``experiment_id`` once its state is terminal,
+    polled for at most ``seconds``; fails the test naming the last row read otherwise."""
+    import time
+
+    from tcip_mcp.experiments import TERMINAL_STATES
+    from tcip_mcp.tools.training_tools import monitor_training
+
+    deadline = time.monotonic() + seconds
+    row: dict = {}
+    while time.monotonic() < deadline:
+        row = monitor_training(Path(project), experiment_id)["run"]
+        if row.get("state") in TERMINAL_STATES:
+            return row
+        time.sleep(0.2)
+    pytest.fail(f"{experiment_id} reached no terminal state within {seconds}s: {row}")
+
+
 def registered_checkpoint(project_root: str | Path, **kwargs: Any) -> str:
     """The path of the checkpoint a :func:`finished_run` under ``project_root`` registered by
     completing (``kwargs`` are its own)."""
@@ -231,14 +262,19 @@ def foreign_checkpoint(project_root: str | Path, *, name: str | None = None,
     after it), registered into ``project_root`` under ``name`` (by default one naming the run)
     through ``register_model``'s explicit mode; its path. ``kwargs`` are :func:`finished_run`'s
     own."""
-    from tcip_mcp.tools.model_tools import register_model
-
     project_root = Path(project_root)
     path = registered_checkpoint(project_root.parent / f"{project_root.name}-elsewhere", **kwargs)
-    result = register_model(project_root, name=name or f"model-{Path(path).parent.name}",
-                            checkpoint_path=path, config={})
-    assert "error" not in result, result
+    register_checkpoint(project_root, path, name=name or f"model-{Path(path).parent.name}")
     return path
+
+
+def register_checkpoint(project_root: str | Path, path: str, *, name: str) -> None:
+    """Register the checkpoint at ``path`` into ``project_root`` under ``name`` through
+    ``register_model``'s explicit mode, asserting it admitted it."""
+    from tcip_mcp.tools.model_tools import register_model
+
+    result = register_model(project_root, name=name, checkpoint_path=path, config={})
+    assert "error" not in result, result
 
 
 _PROJECT_CHECKPOINTS: dict[str, str] = {}

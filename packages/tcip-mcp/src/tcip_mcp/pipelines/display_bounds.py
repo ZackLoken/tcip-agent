@@ -1,7 +1,7 @@
 """Pixel bounds for what the platform serves to a screen or writes as an agent-facing artifact.
 
-``DISPLAY_MAX_EDGE`` bounds the longest output edge of a display-bound read. Source: the 4096 width
-cap the frontend previously hardcoded; a documented cap pending a real derivation.
+``DISPLAY_MAX_EDGE`` bounds the longest output edge of a display-bound read. Provisional: a 4096
+cap, pending a derivation.
 
 ``DISPLAY_MAX_PIXELS`` caps the output-pixel area of an explicit region request. Source: the edge
 bound squared.
