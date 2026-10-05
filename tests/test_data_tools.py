@@ -91,7 +91,7 @@ def test_draw_splits_basic(data_dir: Path, tmp_path: Path):
     # The fixture's 4 stems (img_001..003 plus one grown group) are 4 distinct foreground
     # groups, exactly the manifest floor (one each for train/val, two for calibration).
     result = draw_splits(data_dir, str(data_dir), output_path=str(out), subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                         seed=1, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in result, result
     assert result["total_stems"] == 4
     assert result["groups"] == 4
@@ -133,7 +133,7 @@ def test_a_draw_without_stratification_reports_the_counted_annotations(tmp_path:
     """Turning the balancing off changes how the draw sides its members, never what it counts:
     every side's foreground is the subject's own annotations it holds."""
     root = _leaf_scene(tmp_path / "ds")
-    result = draw_splits(tmp_path, str(root), subject="leaf", stratify_foreground=False)
+    result = draw_splits(tmp_path, str(root), seed=1, subject="leaf", stratify_foreground=False)
     assert "error" not in result, result
     assert result["stratified"] is False
     assert result["total_annotations"] == sum(range(1, 7))
@@ -148,8 +148,8 @@ def test_draw_splits_and_a_runs_own_draw_side_the_same_members(tmp_path: Path):
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _leaf_scene(tmp_path / "ds")
-    drawn = draw_splits(tmp_path, str(root), subject="leaf", train_ratio=0.5, val_ratio=0.5,
-                        group_by="stem", seed=7)
+    drawn = draw_splits(tmp_path, str(root), subject="leaf", val_ratio=0.5, calibration_ratio=0,
+                        holdout_ratio=0, group_by="stem", seed=7)
     assert "error" not in drawn, drawn
     data_cfg = {"images_dir": str(root / "images" / LEAF_DATE), "scope": {"subject": "leaf"},
                 "split": {"val_ratio": 0.5, "seed": 7, "group_by": "stem"}}
@@ -175,20 +175,20 @@ def test_every_draw_refuses_a_tree_short_of_its_floor_the_same_way(tmp_path: Pat
     one_group = {f"{LEAF_DATE}/s{i}": "plot" for i in range(2)}
     floor = "1 foreground group(s), fewer than the 2 the requested sides need"
 
-    drawn = draw_splits(tmp_path, str(root), subject="leaf", train_ratio=0.5, val_ratio=0.5,
-                        group_key_map=one_group)
+    drawn = draw_splits(tmp_path, str(root), subject="leaf", seed=1, val_ratio=0.5,
+                        calibration_ratio=0, holdout_ratio=0, group_key_map=one_group)
     assert floor in drawn["error"]
     data_cfg = {"images_dir": str(root / "images" / LEAF_DATE), "scope": {"subject": "leaf"},
-                "split": {"val_ratio": 0.5, "group_key_map": one_group}}
+                "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": one_group}}
     with pytest.raises(ValueError, match=floor.replace("(", r"\(").replace(")", r"\)")):
         auto_train_val(tmp_path, "detection", data_cfg, None)
 
 
 def test_draw_splits_stats_only_admits_a_nonzero_calibration_ratio(data_dir: Path):
-    """A stats-only call (no output_path) may pass any calibration_ratio, a zero holdout_ratio
-    included; only writing a selection requires every ratio non-zero."""
-    result = draw_splits(data_dir, str(data_dir), train_ratio=0.7, val_ratio=0.2,
-                         calibration_ratio=0.1, subject="bud")
+    """A stats-only call (no output_path) draws a calibration side beside a holdout stated at
+    zero, which it does not draw."""
+    result = draw_splits(data_dir, str(data_dir), seed=1, val_ratio=0.2,
+                         calibration_ratio=0.1, holdout_ratio=0, subject="bud")
     assert "error" not in result, result
     assert result["splits"]["calibration"] > 0
     assert result["splits"]["holdout"] == 0
@@ -206,7 +206,7 @@ def test_draw_splits_reports_an_unreadable_label_by_name(data_dir: Path, tmp_pat
     _spoil(data_dir, "img_001")
 
     result = draw_splits(data_dir, str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                         seed=1, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
     assert "'img_001'" in result["error"]
@@ -221,7 +221,7 @@ def test_draw_splits_reports_an_unreadable_label_sorted_last(
     _spoil(data_dir, "img_003")
 
     result = draw_splits(data_dir, str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                         seed=1, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
     assert "'img_003'" in result["error"]
@@ -241,7 +241,7 @@ def test_draw_splits_writes_nothing_when_a_marked_document_will_not_read(
     out = tmp_path / "selection"
 
     result = draw_splits(data_dir, str(data_dir), output_path=str(out), subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                         seed=1, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
     assert "'img_002'" in result["error"]
@@ -253,7 +253,7 @@ def test_draw_splits_stats_only_reports_an_unreadable_first_sorted_label(data_di
     an unreadable first-sorted candidate is an error naming it."""
     _spoil(data_dir, "img_001")
 
-    result = draw_splits(data_dir, str(data_dir), subject="bud")
+    result = draw_splits(data_dir, str(data_dir), seed=1, subject="bud")
 
     assert "error" in result
     assert "'img_001'" in result["error"]
@@ -264,7 +264,7 @@ def test_draw_splits_stats_only_reports_an_unreadable_label_during_stratificatio
     readable first candidate is an error naming the document, not a raw raise."""
     _spoil(data_dir, "img_003")
 
-    result = draw_splits(data_dir, str(data_dir), subject="bud")
+    result = draw_splits(data_dir, str(data_dir), seed=1, subject="bud")
 
     assert "error" in result
     assert "'img_003'" in result["error"]
@@ -291,7 +291,7 @@ def test_draw_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(tmp_pa
                 4, 4)
 
     result = draw_splits(tmp_path, str(root), output_path=str(tmp_path / "manifests"), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                         seed=1, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
     assert "plotA" in result["error"]
@@ -316,7 +316,7 @@ def test_draw_splits_stats_only_answers_an_ambiguous_image_stem_as_an_error(tmp_
     label_image(images_dir / "plotA.jpg", [Annotation(subject="leaf", geometry=BBox(1, 1, 3, 3))],
                 4, 4)
 
-    result = draw_splits(tmp_path, str(root), subject="leaf")
+    result = draw_splits(tmp_path, str(root), seed=1, subject="leaf")
 
     assert "error" in result
     assert "plotA" in result["error"]
@@ -378,7 +378,7 @@ def test_draw_splits_refuses_an_incomplete_band_group_before_writing(tmp_path: P
     out = tmp_path / "m"
 
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                         seed=1, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
     assert "plotA" in result["error"] and "R" in result["error"]
@@ -386,18 +386,35 @@ def test_draw_splits_refuses_an_incomplete_band_group_before_writing(tmp_path: P
 
 
 def test_draw_splits_bad_ratios(data_dir: Path):
-    result = draw_splits(data_dir, str(data_dir), train_ratio=0.5, val_ratio=0.5,
+    result = draw_splits(data_dir, str(data_dir), seed=1, val_ratio=0.5,
                          calibration_ratio=0.25, holdout_ratio=0.25)
     assert "error" in result
 
 
-def test_draw_splits_ratios_not_summing_to_one_names_every_share(tmp_path: Path):
-    """The sum refusal names every share it was given, not just the raw sum."""
+def test_shares_leaving_train_nothing_refuse_naming_every_share(tmp_path: Path):
+    """Shares that leave ``train`` no remainder refuse naming every share they were given."""
     root = _multi_source_dataset(tmp_path / "ds")
-    result = draw_splits(tmp_path, str(root), subject="bud", train_ratio=0.7, val_ratio=0.2,
-                         calibration_ratio=0.1, holdout_ratio=0.1)
-    assert "summing to exactly 1" in result["error"]
+    result = draw_splits(tmp_path, str(root), seed=1, subject="bud", val_ratio=0.5,
+                         calibration_ratio=0.3, holdout_ratio=0.3)
+    assert "the shares must leave it some" in result["error"]
     assert all(side in result["error"] for side in ("train", "val", "calibration", "holdout"))
+
+
+def test_a_dry_draw_leaves_no_audit_line_and_a_written_selection_leaves_one(tmp_path: Path):
+    import tcip_mcp.audit as audit
+
+    root = _multi_source_dataset(tmp_path / "ds")
+
+    def lines() -> list[dict]:
+        return [row for row in ts.read_log(audit.audit_log_key(tmp_path)).records
+                if row["tool"] == "draw_splits"]
+
+    assert "error" not in draw_splits(tmp_path, str(root), seed=1, subject="bud")
+    assert lines() == []
+    out = tmp_path / "m"
+    assert "error" not in draw_splits(tmp_path, str(root), seed=1, subject="bud",
+                                      output_path=str(out))
+    assert [row["arguments"]["output_path"] for row in lines()] == [str(out)]
 
 
 def test_draw_splits_selection_carries_all_four_sides(tmp_path: Path):
@@ -405,7 +422,7 @@ def test_draw_splits_selection_carries_all_four_sides(tmp_path: Path):
     out = tmp_path / "m"
 
     result = draw_splits(tmp_path, str(root), output_path=str(out), seed=1, subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                         val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" not in result, result
     counts = read_selection(out, project=tmp_path).counts()
@@ -423,7 +440,7 @@ def test_draw_splits_floor_refuses_before_any_write_regardless_of_stratify_foreg
     out = tmp_path / "m"
 
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="bud", seed=1,
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125,
+                         val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125,
                          stratify_foreground=False)
 
     assert "error" in result
@@ -436,8 +453,7 @@ def test_draw_splits_answers_one_draw_whether_or_not_it_writes(tmp_path: Path):
     ``output_path``: what is drawn never depends on whether it is written."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    ratios = {"train_ratio": 0.75, "val_ratio": 0.0, "calibration_ratio": 0.125,
-              "holdout_ratio": 0.125}
+    ratios = {"val_ratio": 0.0, "calibration_ratio": 0.125, "holdout_ratio": 0.125}
 
     stats = draw_splits(tmp_path, str(root), subject="bud", seed=1, **ratios)
     written = draw_splits(tmp_path, str(root), output_path=str(out), subject="bud", seed=1,
@@ -449,9 +465,9 @@ def test_draw_splits_answers_one_draw_whether_or_not_it_writes(tmp_path: Path):
     assert written["splits"]["val"] == 0
     for output_path in (None, str(tmp_path / "negative")):
         refused = draw_splits(tmp_path, str(root), output_path=output_path, subject="bud",
-                              seed=1, train_ratio=0.875, val_ratio=-0.25,
+                              seed=1, val_ratio=-0.25,
                               calibration_ratio=0.25, holdout_ratio=0.125)
-        assert "share in (0, 1)" in refused["error"]
+        assert "share in [0, 1)" in refused["error"]
     assert not ts.exists(selection_key(tmp_path / "negative"))
 
 
@@ -483,7 +499,7 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
 
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf", seed=1,
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                         val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
     assert "foreground group" in result["error"]
@@ -525,7 +541,7 @@ def test_draw_splits_calibration_side_holds_real_foreground_regardless_of_strati
     for seed in range(1, 21):
         out = tmp_path / f"m{seed}"
         result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf", seed=seed,
-                             train_ratio=0.8, val_ratio=0.1, calibration_ratio=0.05,
+                             val_ratio=0.1, calibration_ratio=0.05,
                              holdout_ratio=0.05, stratify_foreground=False)
         assert "error" not in result, (seed, result)
         assert result["calibration_foreground_groups"] >= 2, (seed, result)
@@ -569,20 +585,21 @@ def _spied_draws(monkeypatch) -> list[bool]:
     return calls
 
 
-@pytest.mark.parametrize("ratios", [
-    {"train": 1.0}, {"train": 0.75, "val": 0.0, "calibration": 0.25},
-    {"train": 1.25, "val": -0.25}, {"train": 0.5, "val": 0.495}],
-    ids=["one", "zero", "negative", "short_of_one"])
-def test_draw_sides_refuses_a_share_outside_zero_to_one_before_any_draw(
-    tmp_path: Path, monkeypatch, ratios,
-):
-    from tcip_mcp.pipelines.data.split_construction import draw_sides
+@pytest.mark.parametrize("sides", [
+    {"train": 0.5}, {"val": 1.0}, {"val": -0.25}, {"val": 0.5, "holdout": 0.5}, {"test": 0.1}],
+    ids=["train_stated", "one", "negative", "no_remainder", "unknown_side"])
+def test_check_shares_refuses_shares_that_are_not_a_draw(sides):
+    from tcip_mcp.pipelines.data.split_construction import check_shares
 
-    membership = _bud_membership(_multi_source_dataset(tmp_path / "ds"))
-    draws = _spied_draws(monkeypatch)
-    with pytest.raises(ValueError, match=r"share in \(0, 1\)"):
-        draw_sides(membership.samples, membership.scope, ratios=ratios, seed=1, stratify=True)
-    assert draws == []
+    with pytest.raises(ValueError, match=r"share in \[0, 1\)"):
+        check_shares(sides)
+
+
+def test_check_shares_gives_train_the_remainder_and_draws_no_zero_side():
+    from tcip_mcp.pipelines.data.split_construction import check_shares
+
+    assert check_shares({"val": 0.25, "calibration": 0.0, "holdout": 0.125}) == {
+        "train": 0.625, "val": 0.25, "holdout": 0.125}
 
 
 @pytest.mark.parametrize("stratify", [True, False])
@@ -606,7 +623,7 @@ def test_draw_splits_groups_tiles_together(tmp_path: Path):
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), seed=1, subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                         val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert result["groups"] == 4  # 4 source prefixes, not 12 tiles
 
     # No source prefix may appear in more than one split.
@@ -627,7 +644,7 @@ def test_draw_splits_group_key_map_never_straddles(tmp_path: Path):
         "2-11-26/w_0_0": "gC", "2-11-26/v_0_0": "gD",
     }
     result = draw_splits(tmp_path, str(root), output_path=str(out), seed=1,
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125,
+                         val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125,
                          group_by="tile_prefix", group_key_map=group_key_map, subject="bud")
     assert "error" not in result, result
     assert result["group_by"] == "explicit_map"
@@ -645,7 +662,7 @@ def test_draw_splits_unrecognized_group_by_refuses_without_writing(tmp_path: Pat
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), group_by="not_a_real_key", subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                         seed=1, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" in result
     assert not ts.exists(selection_key(out))
 
@@ -656,7 +673,7 @@ def test_draw_splits_refuses_to_write_a_selection_with_no_subject(tmp_path: Path
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out),
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                         seed=1, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" in result and "subject" in result["error"]
     assert not ts.exists(selection_key(out))
 
@@ -688,7 +705,7 @@ def test_two_dates_sharing_a_filename_stay_distinct_samples(tmp_path: Path):
     root = _two_date_collision_dataset(tmp_path / "ds", subject="leaf")
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125, seed=1)
+                         val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125, seed=1)
     assert "error" not in result, result
     assert result["total_stems"] == 4
 
@@ -733,7 +750,7 @@ def test_draw_splits_holds_only_the_named_subjects_admitted_samples(tmp_path: Pa
     root = _two_subject_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125, seed=1)
+                         val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125, seed=1)
     assert "error" not in result, result
     assert result["total_stems"] == 4
     drawn = read_selection(out, project=tmp_path)
@@ -775,7 +792,7 @@ def test_draw_splits_records_every_declared_attribute_and_keeps_an_unassessed_sa
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125, seed=1)
+                         val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125, seed=1)
     assert "error" not in result, result
     assert result["total_stems"] == 5
     drawn = read_selection(out, project=tmp_path)
@@ -795,7 +812,7 @@ def test_draw_splits_nothing_admitted_names_the_searched_images(tmp_path: Path):
     out = tmp_path / "m"
 
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                         seed=1, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
     assert str(root / "images" / "2-11-26") in result["error"]
@@ -817,7 +834,7 @@ def test_draw_splits_draws_an_undated_capture_beside_a_dated_one(tmp_path: Path)
 
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                         seed=1, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" not in result, result
     assert result["total_stems"] == 5
@@ -845,7 +862,7 @@ def test_draw_splits_holds_no_sample_for_a_date_that_admits_nothing(tmp_path: Pa
 
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                         seed=1, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in result, result
     drawn = read_selection(out, project=tmp_path)
 

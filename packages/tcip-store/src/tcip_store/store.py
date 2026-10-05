@@ -82,11 +82,11 @@ def replace(key: Key, value: Any, *, expect: Version | None = None) -> Version:
     return _backend().replace(key, value, expect=expect)
 
 
-def delete(key: Key, *, expect: Version | None = None) -> None:
-    """Remove the record; absence is not an error. Same ``expect`` and transaction rules as
-    ``replace``."""
+def delete(key: Key, *, expect: Version | None = None) -> bool:
+    """Remove the record and answer whether one was there to remove; absence is not an error.
+    Same ``expect`` and transaction rules as ``replace``."""
     refuse_inside_transaction("delete")
-    _backend().delete(key, expect=expect)
+    return _backend().delete(key, expect=expect)
 
 
 @contextmanager

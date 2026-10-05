@@ -7,11 +7,6 @@ child runs under a guardian process (``tensorboard_guardian``) that watches this
 and, on its death, ends the child within ``_PARENT_POLL_SECONDS`` plus
 ``_GUARDIAN_TERM_GRACE_SECONDS``. Everywhere, a normal interpreter exit runs an ``atexit`` hook
 that stops every tracked child.
-
-``_GUARDIAN_TERM_GRACE_SECONDS`` must stay more than a second under ``_STOP_WAIT_SECONDS``, the
-wait ``stop_tensorboard`` gives the guardian to end before force-killing it; a module-level check
-at import raises if it does not. Uncovered: a guardian that fails to exit within that first wait,
-and a guardian the kernel ends outright, leaving TensorBoard running unwatched.
 """
 
 from __future__ import annotations
@@ -19,7 +14,6 @@ from __future__ import annotations
 import atexit
 import logging
 import os
-import socket
 import subprocess
 import sys
 import tempfile
@@ -36,18 +30,19 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class _Launched:
-    """A TensorBoard child this process tracks: its port, output capture and lifetime tie."""
+    """A TensorBoard child this process tracks: its port, the URL it serves at, output capture
+    and lifetime tie."""
 
     proc: subprocess.Popen
     port: int
+    url: str
     output: IO[bytes]
     lifetime_tie: str
 
 
 _TB_PROCESSES: dict[str, _Launched] = {}
 
-# How long to let the child prove it survived before reporting a URL; anything slower is
-# caught later by the poll in ``list_tensorboard``.
+# How long to let the child prove it survived before reporting a URL.
 _STARTUP_GRACE_SECONDS = 0.5
 
 # The guardian's escalation grace, passed as --term-grace, must stay more than a second under
@@ -60,10 +55,6 @@ if not _GUARDIAN_TERM_GRACE_SECONDS + 1.0 < _STOP_WAIT_SECONDS:
         f"_GUARDIAN_TERM_GRACE_SECONDS ({_GUARDIAN_TERM_GRACE_SECONDS}) leaves no margin under "
         f"_STOP_WAIT_SECONDS ({_STOP_WAIT_SECONDS})"
     )
-
-# Test seam: the lifetime test helper sets this to launch bare, with no platform tie at all,
-# so a test can prove the atexit hook in isolation from the job object or the guardian.
-_DISABLE_LIFETIME_TIE = False
 
 _atexit_registered = False
 
@@ -108,8 +99,7 @@ if sys.platform == "win32":
         ]
 
     def _get_win_kernel32() -> ctypes.WinDLL:
-        """The kernel32 handle for the job-object calls, with pointer-sized signatures set once
-        so a 64-bit handle is never truncated by ctypes' default 32-bit return type."""
+        """The kernel32 handle for the job-object calls, with pointer-sized signatures set once."""
         global _win_kernel32
         if _win_kernel32 is None:
             dll = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -176,9 +166,8 @@ if sys.platform == "win32":
 
 
 def _stop_all_tracked() -> None:
-    """Stop every child this process still has tracked, for the atexit hook to call, serially, each
-    up to twice ``_STOP_WAIT_SECONDS``. A stop that cannot confirm its kill is logged and the sweep
-    continues.
+    """Stop every child this process still has tracked, serially, each up to twice
+    ``_STOP_WAIT_SECONDS``; a stop that cannot confirm its kill is logged and the sweep continues.
     """
     for key in list(_TB_PROCESSES):
         result = stop_tensorboard(key=key)
@@ -199,17 +188,18 @@ def _register_atexit_once() -> None:
 
 
 def _tensorboard_argv(logdir: str, port: int) -> list[str]:
-    """The child's command line, as its own function so a test can run a stand-in process."""
-    # tensorboard has no __main__.py ("-m tensorboard" fails with "cannot be directly executed");
-    # tensorboard.main defines run_main() under an `if __name__ == "__main__"` guard.
+    """The TensorBoard child's command line over ``logdir`` at ``port``."""
+    from tcip_mcp.web_client import LOOPBACK_HOST
+
+    # tensorboard has no __main__.py; tensorboard.main runs under its own __main__ guard.
     return [
         sys.executable, "-m", "tensorboard.main", "--logdir", logdir,
-        "--port", str(port), "--host", "127.0.0.1", "--reload_interval", "5",
+        "--port", str(port), "--host", LOOPBACK_HOST, "--reload_interval", "5",
     ]
 
 
 def _guardian_argv(argv: list[str]) -> list[str]:
-    """Wrap ``argv`` to run under the POSIX lifetime guardian instead of bare."""
+    """``argv`` run under the POSIX lifetime guardian."""
     return [
         sys.executable, "-m", "tcip_mcp.pipelines.training.tensorboard_guardian",
         "--parent", str(os.getpid()), "--term-grace", str(_GUARDIAN_TERM_GRACE_SECONDS),
@@ -217,16 +207,9 @@ def _guardian_argv(argv: list[str]) -> list[str]:
     ]
 
 
-def _find_free_port(start: int = 6006, end: int = 6099) -> int:
-    """Find a free TCP port in the given range."""
-    for port in range(start, end):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            try:
-                s.bind(("127.0.0.1", port))
-                return port
-            except OSError:
-                continue
-    raise RuntimeError(f"No free port found in range {start}-{end}")
+def _key_of(key: str | None, logdir: str | None) -> str | None:
+    """The tracking key a child is indexed by: ``key``, else ``logdir`` resolved."""
+    return key or (str(Path(logdir).resolve()) if logdir else None)
 
 
 def _collect_output(handle) -> str:
@@ -262,34 +245,29 @@ def launch_tensorboard(logdir: str, key: str | None = None) -> dict:
     ``_STOP_WAIT_SECONDS`` named by pid in that message); a platform tie call returning falsy for
     failure still succeeds with ``lifetime_tie`` ``"none: <reason>"``.
     """
+    from tcip_mcp.web_client import LOOPBACK_HOST, free_port
+
     logdir = str(Path(logdir).resolve())
-    key = key or logdir
+    key = cast(str, _key_of(key, logdir))
 
-    # Check if already running
-    if key in _TB_PROCESSES:
-        entry = _TB_PROCESSES[key]
-        if entry.proc.poll() is None:  # still alive
-            # Recover port from stored info
-            return {"url": f"http://localhost:{entry.port}", "port": entry.port,
-                    "pid": entry.proc.pid, "logdir": logdir, "lifetime_tie": entry.lifetime_tie}
-        else:
-            _release_output(_TB_PROCESSES.pop(key))
+    entry = _running(key)
+    if entry is not None:
+        return {"url": entry.url, "port": entry.port, "pid": entry.proc.pid, "logdir": logdir,
+                "lifetime_tie": entry.lifetime_tie}
 
-    port = _find_free_port()
+    port = free_port(6006)
     _register_atexit_once()
 
     # The child outlives this call and nothing reads its streams, so they go to a temp file:
     # an undrained pipe blocks the writer as soon as the OS buffer fills.
     output = tempfile.TemporaryFile()
     argv = _tensorboard_argv(logdir, port)
-    launch_argv = argv if (_DISABLE_LIFETIME_TIE or sys.platform == "win32") else _guardian_argv(argv)
+    launch_argv = argv if sys.platform == "win32" else _guardian_argv(argv)
 
     proc: subprocess.Popen | None = None
     try:
         proc = subprocess.Popen(launch_argv, stdout=output, stderr=subprocess.STDOUT)
-        if _DISABLE_LIFETIME_TIE:
-            lifetime_tie = "none: disabled for test"
-        elif sys.platform == "win32":
+        if sys.platform == "win32":
             failure = _assign_to_win_job(proc)
             lifetime_tie = "job" if failure is None else f"none: {failure}"
         else:
@@ -316,15 +294,29 @@ def launch_tensorboard(logdir: str, key: str | None = None) -> dict:
             "logdir": logdir,
         }
 
-    _TB_PROCESSES[key] = _Launched(proc=proc, port=port, output=output, lifetime_tie=lifetime_tie)
-    logger.info("TensorBoard started: http://localhost:%d (pid=%d, logdir=%s)", port, proc.pid, logdir)
-    return {
-        "url": f"http://localhost:{port}",
-        "port": port,
-        "pid": proc.pid,
-        "logdir": logdir,
-        "lifetime_tie": lifetime_tie,
-    }
+    url = f"http://{LOOPBACK_HOST}:{port}"
+    _TB_PROCESSES[key] = _Launched(proc=proc, port=port, url=url, output=output,
+                                   lifetime_tie=lifetime_tie)
+    logger.info("TensorBoard started: %s (pid=%d, logdir=%s)", url, proc.pid, logdir)
+    return {"url": url, "port": port, "pid": proc.pid, "logdir": logdir,
+            "lifetime_tie": lifetime_tie}
+
+
+def _running(key: str) -> _Launched | None:
+    """The child tracked under ``key`` while it runs; one that has exited is dropped."""
+    entry = _TB_PROCESSES.get(key)
+    if entry is not None and entry.proc.poll() is not None:
+        _release_output(_TB_PROCESSES.pop(key))
+        return None
+    return entry
+
+
+def running_url(key: str | None = None, logdir: str | None = None) -> str | None:
+    """The URL the TensorBoard tracked under ``key`` (else under ``logdir``) serves at, ``None``
+    when none runs."""
+    tracked = _key_of(key, logdir)
+    entry = _running(tracked) if tracked else None
+    return entry.url if entry is not None else None
 
 
 def stop_tensorboard(key: str | None = None, logdir: str | None = None) -> dict:
@@ -339,7 +331,7 @@ def stop_tensorboard(key: str | None = None, logdir: str | None = None) -> dict:
     a TensorBoard the guardian had not yet stopped; the answer is then ``stopped`` or
     ``kill_unconfirmed`` for the guardian itself.
     """
-    key = key or (str(Path(logdir).resolve()) if logdir else None)
+    key = _key_of(key, logdir)
     if not key or key not in _TB_PROCESSES:
         return {"status": "not_running"}
 
@@ -360,20 +352,3 @@ def stop_tensorboard(key: str | None = None, logdir: str | None = None) -> dict:
                 return {"status": "kill_unconfirmed", "pid": entry.proc.pid}
     _release_output(entry)
     return {"status": "stopped", "pid": entry.proc.pid}
-
-
-def list_tensorboard() -> list[dict]:
-    """List all running TensorBoard instances."""
-    result = []
-    for key, entry in list(_TB_PROCESSES.items()):
-        alive = entry.proc.poll() is None
-        if not alive:
-            _release_output(_TB_PROCESSES.pop(key))
-            continue
-        result.append({
-            "key": key,
-            "url": f"http://localhost:{entry.port}",
-            "port": entry.port,
-            "pid": entry.proc.pid,
-        })
-    return result

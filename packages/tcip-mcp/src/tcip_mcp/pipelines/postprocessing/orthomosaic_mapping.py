@@ -160,25 +160,17 @@ def _read_projected_epsg(geokeys: tuple[int, ...], path: Path) -> int:
 
 def pixel_to_native(transform: GeoTransform, pixel_x: float, pixel_y: float) -> tuple[float, float]:
     """The (easting, northing) in ``transform``'s native projected CRS for pixel (column, row)
-    ``(pixel_x, pixel_y)``, via the standard tiepoint + pixel-scale GeoTIFF affine.
-
-    GeoTIFF pixel rows increase downward while northing increases upward, so the y term is
-    subtracted where the x term is added; get this backwards and every coordinate this module
-    produces is silently flipped north-for-south.
-    """
+    ``(pixel_x, pixel_y)``, via the tiepoint + pixel-scale GeoTIFF affine, rows increasing
+    southward."""
     native_x = transform.tiepoint_native_x + (pixel_x - transform.tiepoint_pixel_x) * transform.pixel_scale_x
     native_y = transform.tiepoint_native_y - (pixel_y - transform.tiepoint_pixel_y) * transform.pixel_scale_y
     return native_x, native_y
 
 
 def native_to_pixel(transform: GeoTransform, native_x: float, native_y: float) -> tuple[float, float]:
-    """The pixel (column, row) for a native-CRS coordinate ``(native_x, native_y)``: the exact
-    inverse of :func:`pixel_to_native`.
-
-    Refuses by name when ``transform``'s own ``pixel_scale_x`` or ``pixel_scale_y`` is zero: the
-    affine this module implements has no inverse at a degenerate scale, and dividing by it would
-    silently produce an infinite or NaN pixel position instead of a real one.
-    """
+    """The pixel (column, row) for a native-CRS coordinate ``(native_x, native_y)``, the inverse
+    of :func:`pixel_to_native`; a zero ``pixel_scale_x`` or ``pixel_scale_y`` refuses
+    (``ValueError``) naming it."""
     if transform.pixel_scale_x == 0:
         raise ValueError(
             "native_to_pixel: transform.pixel_scale_x is zero; the tiepoint + pixel-scale affine "
@@ -195,11 +187,8 @@ def native_to_pixel(transform: GeoTransform, native_x: float, native_y: float) -
 
 
 class OrthomosaicGeoreference:
-    """Resolves a real-world coordinate for any pixel in a whole-mosaic GeoTIFF.
-
-    Built once per file (``from_file``) and reused for every subsequent pixel lookup: building a
-    ``pyproj.Transformer`` isn't cheap, so it's cached on first use rather than rebuilt per call.
-    """
+    """A whole-mosaic GeoTIFF's pixels in its native CRS and in WGS84, one transformer per
+    instance."""
 
     def __init__(self, transform: GeoTransform):
         self.transform = transform
@@ -213,47 +202,33 @@ class OrthomosaicGeoreference:
         """(easting, northing) in this raster's own native projected CRS."""
         return pixel_to_native(self.transform, pixel_x, pixel_y)
 
-    def pixel_to_wgs84(self, pixel_x: float, pixel_y: float) -> tuple[float, float]:
-        """(lat, lon) in WGS84 for raster pixel ``(pixel_x, pixel_y)``, the order
-        ``plant_mapping``'s ``PlantRecord``/``haversine_m`` use.
-        """
+    def _transformer(self) -> "pyproj.Transformer":
+        """This raster's native CRS to WGS84, built on first use."""
         import pyproj
 
         if self._to_wgs84 is None:
             self._to_wgs84 = pyproj.Transformer.from_crs(
                 f"EPSG:{self.transform.epsg}", f"EPSG:{WGS84_EPSG}", always_xy=True
             )
+        return self._to_wgs84
+
+    def pixel_to_wgs84(self, pixel_x: float, pixel_y: float) -> tuple[float, float]:
+        """(lat, lon) in WGS84 for raster pixel ``(pixel_x, pixel_y)``."""
         native_x, native_y = self.pixel_to_native(pixel_x, pixel_y)
-        lon, lat = self._to_wgs84.transform(native_x, native_y)
+        lon, lat = self._transformer().transform(native_x, native_y)
         return lat, lon
 
     def wgs84_to_pixel(self, lat: float, lon: float) -> tuple[float, float]:
-        """The pixel (column, row) in this raster for a WGS84 ``(lat, lon)``: the exact inverse
-        of :meth:`pixel_to_wgs84`, run through the same cached transformer this instance already
-        built (never a second one) with ``direction="INVERSE"``, then :func:`native_to_pixel`.
-        """
-        import pyproj
-
-        if self._to_wgs84 is None:
-            self._to_wgs84 = pyproj.Transformer.from_crs(
-                f"EPSG:{self.transform.epsg}", f"EPSG:{WGS84_EPSG}", always_xy=True
-            )
-        native_x, native_y = self._to_wgs84.transform(lon, lat, direction="INVERSE")
+        """The pixel (column, row) in this raster for a WGS84 ``(lat, lon)``, the inverse of
+        :meth:`pixel_to_wgs84`."""
+        native_x, native_y = self._transformer().transform(lon, lat, direction="INVERSE")
         return native_to_pixel(self.transform, native_x, native_y)
 
 
-# ── Per-detection plant assignment ──────────────────────────────────────
-#
-# plant_mapping.assign_plants anchors on a walker's capture *sequence* between separate image
-# files: meaningless here, since every detection in one static mosaic frame is simultaneous, so
-# there is no "row run" or timestamp order to segment. This is pure point-in/point-out: resolve
-# each detection's own pixel location to (lat, lon) via OrthomosaicGeoreference, then the same
-# nearest-neighbor primitives plant_mapping already owns (_nearest_plant/haversine_m/
-# resolve_nn_tolerance_m), reused directly rather than reimplemented.
-
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (  # noqa: E402
+    GpsSource,
     PlantRecord,
-    _nearest_plant,
+    nearest_plant,
 )
 
 
@@ -263,10 +238,8 @@ class DetectionAssignment:
 
     ``detection_index`` is the detection's position in the source ``predict_sliced``-shaped result's
     ``boxes``/``scores``/``labels`` lists; ``pixel_x``/``pixel_y`` (the box centroid, in the same
-    full-mosaic pixel space) is carried alongside.
-
-    ``source`` is ``"nearest_neighbor"`` (a plant lies within tolerance) or ``"unmapped"`` (none
-    does, never force-assigned). No 0-1 confidence, only ``distance_m``.
+    full-mosaic pixel space) is carried alongside. ``source`` is ``"nearest_neighbor"`` (a plant
+    lies within tolerance) or ``"unmapped"`` (none does).
     """
 
     detection_index: int
@@ -276,7 +249,7 @@ class DetectionAssignment:
     lon: float
     plot_name: str | None
     accession_name: str | None
-    source: str  # "nearest_neighbor" | "unmapped"
+    source: GpsSource
     distance_m: float | None
 
     plant_attribution: ClassVar[str] = "detection"
@@ -287,11 +260,12 @@ class DetectionAssignment:
 
 
 def detection_location(box: Sequence[float]) -> tuple[float, float]:
-    """A detection's own location: its box centroid ``((x1+x2)/2, (y1+y2)/2)``, in the same pixel
-    space the box itself is stated in.
-    """
-    x1, y1, x2, y2 = box
-    return (x1 + x2) / 2.0, (y1 + y2) / 2.0
+    """A detection's own location: the center of its corner box
+    (:func:`~tcip_annotation.matching.box_centers`), in the pixel space the box is stated in."""
+    from tcip_annotation.matching import box_centers
+
+    cx, cy = box_centers([box])[0].tolist()
+    return cx, cy
 
 
 def plants_in_frame(
@@ -314,38 +288,27 @@ def plants_in_frame(
 
 
 def assign_detections_to_plants(
-    detections: dict,
+    boxes: Sequence[Sequence[float]],
     georeference: OrthomosaicGeoreference,
     plants: list[PlantRecord],
     *,
     nn_tolerance_m: float,
 ) -> list[DetectionAssignment]:
-    """One :class:`DetectionAssignment` per box in a ``predict_sliced``-shaped ``detections`` result
-    (``{"boxes": [[x1, y1, x2, y2], ...], ...}`` in full-mosaic pixel space).
-
-    Each detection's :func:`detection_location` is resolved to (lat, lon) via
-    ``georeference.pixel_to_wgs84``, then matched to the nearest plant in ``plants``.
-    ``nn_tolerance_m`` is the resolved tolerance
-    (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.resolve_nn_tolerance_m`); a detection
-    farther than it from every plant is unmapped.
+    """One :class:`DetectionAssignment` per xyxy box of ``boxes`` (full-mosaic pixel space): its
+    :func:`detection_location` resolved to (lat, lon) via ``georeference.pixel_to_wgs84``, then
+    matched to the nearest plant in ``plants`` within ``nn_tolerance_m``, the resolved tolerance
+    (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.resolve_nn_tolerance_m`); a
+    detection farther than it from every plant is unmapped.
     """
-    boxes = detections.get("boxes") or []
-
     out: list[DetectionAssignment] = []
     for i, box in enumerate(boxes):
         cx, cy = detection_location(box)
         lat, lon = georeference.pixel_to_wgs84(cx, cy)
-        plant, distance_m = _nearest_plant(lat, lon, plants) if plants else (None, None)
-        if plant is not None and distance_m is not None and distance_m <= nn_tolerance_m:
-            out.append(DetectionAssignment(
-                detection_index=i, pixel_x=cx, pixel_y=cy, lat=lat, lon=lon,
-                plot_name=plant.plot_name, accession_name=plant.accession_name,
-                source="nearest_neighbor", distance_m=distance_m,
-            ))
-        else:
-            out.append(DetectionAssignment(
-                detection_index=i, pixel_x=cx, pixel_y=cy, lat=lat, lon=lon,
-                plot_name=None, accession_name=None,
-                source="unmapped", distance_m=distance_m,
-            ))
+        index, distance_m = nearest_plant((lat, lon), plants, within_m=nn_tolerance_m)
+        plant = plants[index] if index is not None else None
+        out.append(DetectionAssignment(
+            detection_index=i, pixel_x=cx, pixel_y=cy, lat=lat, lon=lon,
+            plot_name=plant.plot_name if plant else None,
+            accession_name=plant.accession_name if plant else None,
+            source="nearest_neighbor" if plant else "unmapped", distance_m=distance_m))
     return out

@@ -6,7 +6,7 @@ georeferencing tags), this script derives the group key from location: each imag
 pixel resolves to a (lat, lon) via its GeoTIFF tags, then to the nearest plant in a plant-locations
 CSV, so every capture of one physical plant across every date lands in the same split side.
 
-Uses ``read_plant_csvs``, ``OrthomosaicGeoreference.pixel_to_wgs84`` and ``_nearest_plant``, then
+Uses ``read_plant_csvs``, ``OrthomosaicGeoreference.pixel_to_wgs84`` and ``nearest_plant``, then
 hands the resulting ``{identity: group_key}`` map to ``draw_splits(group_key_map=...)``.
 ``identity`` is ``<date>/<stem>``, since a stem is unique only within one capture date.
 
@@ -15,11 +15,12 @@ admission and refuses to write a selection without one.
 
 Usage:
     tcip plant-aware-group-splits <dataset_root> --project <project> --plant-csv <plants.csv> \
-        [--plant-csv <more_plants.csv> ...] --subject <subject> \
-        --train-ratio <ratio> --val-ratio <ratio> --calibration-ratio <ratio> \
-        --holdout-ratio <ratio> [--seed 42] [--tolerance-m 5.0] [--output-path <dir>]
+        [--plant-csv <more_plants.csv> ...] --subject <subject> --seed <seed> \
+        [--val-ratio <ratio>] [--calibration-ratio <ratio>] [--holdout-ratio <ratio>] \
+        [--tolerance-m <meters>] [--output-path <dir>]
 
-The four ratios have no default and are required, as ``draw_splits`` takes them.
+The ratios default to ``draw_splits``'s own (``splits.DEFAULT_SHARES``), train the remainder; the
+seed has no default.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ import json
 import sys
 from pathlib import Path
 
-from tcip_mcp.pipelines.data.splits import DEFAULT_SEED
+from tcip_mcp.pipelines.data.splits import DEFAULT_SHARES
 
 
 def _raster_pixel_extent(path: Path) -> tuple[int, int]:
@@ -69,7 +70,7 @@ def derive_plant_group_key_map(
         RotatedRasterError,
     )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        _nearest_plant,
+        nearest_plant,
         resolve_nn_tolerance_m,
     )
 
@@ -90,14 +91,14 @@ def derive_plant_group_key_map(
             failures.append(f"{stem} ({path}): could not georeference - {exc}")
             continue
 
-        plant, distance_m = _nearest_plant(lat, lon, plants)
-        if plant is None or distance_m is None or distance_m > tolerance_m:
-            observed = f"{distance_m:.1f}m" if distance_m is not None else "no plants in the CSV"
+        index, distance_m = nearest_plant((lat, lon), plants, within_m=tolerance_m)
+        if index is None:
             failures.append(
-                f"{stem} ({path}): nearest plant is {observed} away, outside tolerance "
+                f"{stem} ({path}): nearest plant is {distance_m:.1f}m away, outside tolerance "
                 f"{tolerance_m:.1f}m (lat={lat:.6f}, lon={lon:.6f})"
             )
             continue
+        plant = plants[index]
         if not plant.plot_name:
             failures.append(f"{stem} ({path}): the matched plant record has no plot_name")
             continue
@@ -121,21 +122,18 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                         help="The project the draw acts on and records its audit line under.")
     parser.add_argument("--plant-csv", action="append", required=True, dest="plant_csv_paths",
                          help="Plant-locations CSV (read_plant_csvs schema); repeatable.")
-    parser.add_argument("--train-ratio", type=float, required=True,
-                         help="Fraction for the training side; the four ratios must sum to 1.0. "
-                              "No default.")
-    parser.add_argument("--val-ratio", type=float, required=True,
-                         help="Fraction for the validation side. No default.")
-    parser.add_argument("--calibration-ratio", type=float, required=True,
-                         help="Fraction an assessment fits its operating point on. No default.")
-    parser.add_argument("--holdout-ratio", type=float, required=True,
-                         help="Fraction an assessment checks its operating point against. No "
-                              "default. A side whose ratio is zero is not drawn.")
-    parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    parser.add_argument("--val-ratio", type=float, default=DEFAULT_SHARES["val"],
+                         help="Fraction for the validation side; train takes the remainder.")
+    parser.add_argument("--calibration-ratio", type=float, default=DEFAULT_SHARES["calibration"],
+                         help="Fraction an assessment fits its operating point on.")
+    parser.add_argument("--holdout-ratio", type=float, default=DEFAULT_SHARES["holdout"],
+                         help="Fraction an assessment checks its operating point against. A side "
+                              "whose ratio is zero is not drawn.")
+    parser.add_argument("--seed", type=int, required=True,
+                         help="The seed the draw is reproduced by. No default.")
     parser.add_argument("--tolerance-m", type=float, default=None,
-                         help="Max GPS distance (m) to the nearest plant. Defaults to "
-                              "grid_pitch_m(plants)/6, the same derivation build_mapping/"
-                              "assign_detections_to_plants already use.")
+                         help="Max GPS distance (m) to the nearest plant. Unstated, it derives "
+                              "from the plant grid (plant_mapping.resolve_nn_tolerance_m).")
     parser.add_argument("--output-path", default=None,
                          help="Where draw_splits writes the selection.")
     parser.add_argument("--subject", required=True,
@@ -179,7 +177,6 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     result = draw_splits(
         project,
         folder_path=args.dataset_root,
-        train_ratio=args.train_ratio,
         val_ratio=args.val_ratio,
         calibration_ratio=args.calibration_ratio,
         holdout_ratio=args.holdout_ratio,

@@ -114,7 +114,7 @@ def test_split_reports_a_redrawn_bound_selection_distinctly(tmp_path):
 
 
 def test_split_reports_a_drawn_seed_with_no_binding(tmp_path):
-    _opened(tmp_path, "exp-drawn-split", split={"seed": 99})
+    _opened(tmp_path, "exp-drawn-split", split={"seed": 99, "val_ratio": 0.15})
 
     (c,) = _compared(tmp_path, "exp-drawn-split")
     assert c["split"] == {"case": "drawn", "seed": 99}

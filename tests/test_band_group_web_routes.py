@@ -88,6 +88,16 @@ def test_serve_image_plain_photo_unaffected_by_new_params(client: TestClient, gr
     assert baseline.headers["etag"] == with_defaults.headers["etag"]
 
 
+def test_serve_image_refuses_a_band_members_own_path_naming_its_manifest(
+        client: TestClient, grouped_dataset: Path):
+    """A band of a grouped capture is no image of its own at the serve door either: its path
+    answers 404 naming the manifest, never a single-band render."""
+    member = grouped_dataset / "images" / "2026-05-01" / "cap_001_NIR.tif"
+    resp = client.get("/api/images", params={"path": str(member)})
+    assert resp.status_code == 404
+    assert "cap_001.bandgroup" in resp.json()["detail"]
+
+
 def test_serve_image_composites_a_band_group_by_default(client: TestClient, grouped_dataset: Path):
     manifest = grouped_dataset / "images" / "2026-05-01" / "cap_001.bandgroup"
     resp = client.get("/api/images", params={"path": str(manifest)})
@@ -208,13 +218,13 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     from tcip_mcp.pipelines.execution import Stated
     from tcip_web.routes.inference import InferenceJob, _worker
 
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
+    images_dir = tmp_path / "images" / "2026-01-01"
+    images_dir.mkdir(parents=True)
     _write_group(images_dir, "cap_001")
     ckpt = foreign_checkpoint(tmp_path)
 
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.pipelines.image_utils import display_source_path
+    from tcip_mcp.pipelines.image_utils import source_path_of
     from tests._predictor_fixtures import StubPredictor, install
 
     seen = []
@@ -225,7 +235,7 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
 
         def predict_batch(self, paths, execution=None, **kw):
             seen.extend(paths)
-            return [{**result, "image": display_source_path(p)}
+            return [{**result, "image": source_path_of(p)}
                     for p, result in zip(paths, super().predict_batch(paths, execution, **kw))]
 
     install(monkeypatch, ObservingPredictor(width=20, height=24, boxes=(), scores=(),

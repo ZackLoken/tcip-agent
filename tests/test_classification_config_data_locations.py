@@ -44,7 +44,8 @@ def test_a_classification_config_launches_with_images_and_csv_only(
     cfg = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_classifier",
                          "task": "classification"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path),
+                 "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 4, "stages": [{"freeze_to": 0, "epochs": 1}],
         "mixed_precision": False, "device": "cpu",
         "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
@@ -84,7 +85,8 @@ def test_a_detection_config_names_its_images_alone(tmp_path: Path) -> None:
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {}, "task": "detection"},
-        "data": {**detection_images(tmp_path / "ds", scope), "scope": scope},
+        "data": {**detection_images(tmp_path / "ds", scope), "scope": scope,
+                 "split": {"seed": 0, "val_ratio": 0.15}},
     }
 
     result = preflight_config(tmp_path, cfg)

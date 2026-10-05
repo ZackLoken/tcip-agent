@@ -43,8 +43,19 @@ class ConvBackbone(torch.nn.Module):
         self.backbone = torch.nn.Conv2d(3, 8, 3, padding=1)
 
 
+class ScorelessDetector(torch.nn.Module):
+    """Returns one box and its label and no ``scores``."""
+
+    def forward(self, imgs):
+        return [{"boxes": torch.zeros((1, 4)), "labels": torch.zeros((1,), dtype=torch.int64)}]
+
+
 def build_empty_then_low(**_: Any) -> torch.nn.Module:
     return EmptyThenLowDetector()
+
+
+def build_scoreless(**_: Any) -> torch.nn.Module:
+    return ScorelessDetector()
 
 
 def build_two_head(**_: Any) -> torch.nn.Module:

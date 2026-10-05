@@ -42,7 +42,7 @@ def test_run_inference_publishes_each_document_the_record_and_one_audit_line(
     from tcip_mcp.tools.inference_tools import run_inference
 
     ckpt = Path(project_checkpoint(tmp_path))
-    images_dir = _images(tmp_path / "images")
+    images_dir = _images(tmp_path / "images" / "2026-01-01")
     _stubbed(monkeypatch)
 
     ran = run_inference(tmp_path, str(ckpt), str(images_dir), bucket=BUCKET, stated=UNTILED)
@@ -104,8 +104,8 @@ def test_a_run_over_an_empty_images_directory_refuses_and_publishes_nothing(
 ):
     from tcip_mcp.tools.inference_tools import run_inference
 
-    empty = tmp_path / "images"
-    empty.mkdir()
+    empty = tmp_path / "images" / "2026-01-01"
+    empty.mkdir(parents=True)
     _stubbed(monkeypatch)
 
     ran = run_inference(tmp_path, project_checkpoint(tmp_path), str(empty), bucket=BUCKET,
@@ -115,19 +115,41 @@ def test_a_run_over_an_empty_images_directory_refuses_and_publishes_nothing(
     assert not tcip_store.exists(bucket_key(tmp_path, BUCKET))
 
 
-def test_a_run_over_images_under_no_dataset_tree_refuses_naming_them(tmp_path, monkeypatch):
-    """A bucket is published under the dataset root its source images belong to, so images under
-    no dataset image tree have no root to publish under."""
+@pytest.mark.parametrize("where", [("captures",), ("images",), ("images", "2026-01-01", "sub")],
+                         ids=["no_image_tree", "the_image_tree", "inside_a_capture"])
+def test_an_images_dir_that_is_no_capture_refuses_naming_it(tmp_path, monkeypatch, where):
+    """A pass over images publishes its capture, so a directory that is no capture
+    (``<root>/images/<capture>``) refuses at the door naming it, before any prediction."""
     from tcip_mcp.tools.inference_tools import run_inference
 
-    images_dir = _images(tmp_path / "captures")
+    images_dir = _images(tmp_path.joinpath(*where))
     _stubbed(monkeypatch)
 
     ran = run_inference(tmp_path, project_checkpoint(tmp_path), str(images_dir), bucket=BUCKET,
                         stated=UNTILED)
 
-    assert "lies under no dataset image tree" in ran["error"]
-    assert str(images_dir) in ran["error"]
+    assert f"{str(images_dir)!r} is not a capture" in ran["error"]
+    assert not tcip_store.exists(bucket_key(tmp_path, BUCKET))
+
+
+def test_a_raster_outside_a_capture_is_admitted(tmp_path, monkeypatch):
+    """A raster is the one source published outside a capture: one under the image tree but in no
+    capture directory reaches the pass."""
+    import numpy as np
+    import tifffile
+
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    raster = tmp_path / "images" / "mosaic.tif"
+    raster.parent.mkdir(parents=True)
+    tifffile.imwrite(str(raster), np.zeros((64, 64, 3), dtype=np.uint8))
+    _stubbed(monkeypatch)
+
+    result = run_inference(tmp_path, project_checkpoint(tmp_path), raster_path=str(raster),
+                           bucket=BUCKET, stated=Stated(tile_size=32, overlap=0.0), dry_run=True)
+
+    assert "error" not in result, result
+    assert result["dataset_root"] == str(tmp_path)
 
 
 def test_a_dry_run_previews_the_both_sources_refusal(tmp_path):
@@ -149,7 +171,7 @@ def test_a_dry_run_previews_the_both_sources_refusal(tmp_path):
 def test_a_dry_run_names_the_bucket_and_the_execution_and_writes_nothing(tmp_path, monkeypatch):
     from tcip_mcp.tools.inference_tools import run_inference
 
-    images_dir = _images(tmp_path / "images")
+    images_dir = _images(tmp_path / "images" / "2026-01-01")
     _stubbed(monkeypatch)
 
     result = run_inference(tmp_path, project_checkpoint(tmp_path), str(images_dir),

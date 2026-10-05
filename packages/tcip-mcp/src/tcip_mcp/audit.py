@@ -11,7 +11,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, TypeVar, overload
+from typing import Any, Callable, Mapping, TypeVar, overload
 
 from tcip_store import Key, append
 
@@ -62,6 +62,28 @@ def audit_log_key(scope: str | Path) -> Key:
     hangs off (a dataset root when the event changed a record that travels with the data, the
     project root otherwise)."""
     return Key(AUDIT_LOG_STORE, str(Path(scope).resolve()), _AUDIT_PARTS)
+
+
+def audit_entries(scope: str | Path, *,
+                  after: str | None = None) -> tuple[list[Mapping[str, Any]], str]:
+    """Every entry of ``scope``'s log (:func:`audit_entry`'s shape), in the order they landed
+    past the cursor ``after``, and the log's cursor. A log carrying undecodable entries raises
+    ``ValueError`` naming how many."""
+    from tcip_store import read_log
+
+    key = audit_log_key(scope)
+    page = read_log(key, after=after)
+    if page.corrupt:
+        raise ValueError(f"the audit log at {key.root} carries {len(page.corrupt)} undecodable "
+                         "entries; repair the log before trusting a read of it")
+    return list(page.records), page.cursor
+
+
+def acts_of(scope: str | Path, tools: tuple[str, ...], *,
+            after: str | None = None) -> tuple[list[Mapping[str, Any]], str]:
+    """The ``ok`` entries of ``tools`` among :func:`audit_entries`, and the log's cursor."""
+    entries, cursor = audit_entries(scope, after=after)
+    return [e for e in entries if e["status"] == "ok" and e["tool"] in tools], cursor
 
 
 def now_iso() -> str:

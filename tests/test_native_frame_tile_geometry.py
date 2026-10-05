@@ -68,7 +68,7 @@ class _MiddleHalfDetector(torch.nn.Module):
 
 
 def _geometry(stub, *, tile_size=None, overlap=None, tiled=True) -> tuple:
-    from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
+    from tcip_mcp.pipelines.slicing import resolve_tile_geometry
 
     g = resolve_tile_geometry(stub, tiled=tiled, tile_size=tile_size, overlap=overlap)
     return g.tile_size, g.tile_size_source
@@ -192,7 +192,7 @@ def test_an_unbuildable_recorded_config_raises_rather_than_reading_as_no_resize(
 def test_the_recorded_resize_travels_only_with_a_native_frame_tile_edge():
     """An explicit or persisted-geometry tile edge means the tile as it stands, which is what every
     count already produced at those tiers was measured at."""
-    from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
+    from tcip_mcp.pipelines.slicing import resolve_tile_geometry
 
     augmentation = {"resize": [640, 640]}
     native = _GeometryStub(train_native_size=[512, 512], train_augmentation=augmentation)
@@ -480,7 +480,7 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
     tile through and undo, so the two runs are not merely two identical no-resize calls."""
     import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     from tcip_mcp.pipelines.execution import Stated, tiled_execution, untiled_execution
-    from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
+    from tcip_mcp.pipelines.slicing import resolve_tile_geometry
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
@@ -560,7 +560,7 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
 
 
 def test_an_explicit_edge_contradicting_persisted_geometry_refuses():
-    from tcip_mcp.pipelines.inference.predictor import TileEdgeContradiction, resolve_tile_geometry
+    from tcip_mcp.pipelines.slicing import TileEdgeContradiction, resolve_tile_geometry
 
     stub = _GeometryStub(train_tile_size=128)
 
@@ -574,7 +574,7 @@ def test_an_explicit_edge_contradicting_persisted_geometry_refuses():
 
 
 def test_an_explicit_edge_contradicting_the_native_frame_refuses():
-    from tcip_mcp.pipelines.inference.predictor import TileEdgeContradiction, resolve_tile_geometry
+    from tcip_mcp.pipelines.slicing import TileEdgeContradiction, resolve_tile_geometry
 
     stub = _GeometryStub(train_native_size=[512, 512])
 
@@ -589,7 +589,7 @@ def test_an_explicit_edge_contradicting_the_native_frame_refuses():
 
 def test_an_untiled_call_with_a_contradicting_stated_edge_is_inert():
     """The edge never governs a count when the run doesn't tile, so it is never checked."""
-    from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
+    from tcip_mcp.pipelines.slicing import resolve_tile_geometry
 
     stub = _GeometryStub(train_tile_size=128)
 
@@ -599,7 +599,7 @@ def test_an_untiled_call_with_a_contradicting_stated_edge_is_inert():
 
 
 def test_an_explicit_edge_equal_to_persisted_geometry_clears():
-    from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
+    from tcip_mcp.pipelines.slicing import resolve_tile_geometry
 
     stub = _GeometryStub(train_tile_size=128)
 
@@ -610,7 +610,7 @@ def test_an_explicit_edge_equal_to_persisted_geometry_clears():
 
 
 def test_an_explicit_edge_equal_to_the_native_frame_clears():
-    from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
+    from tcip_mcp.pipelines.slicing import resolve_tile_geometry
 
     stub = _GeometryStub(train_native_size=[512, 512])
 
@@ -622,7 +622,7 @@ def test_an_explicit_edge_equal_to_the_native_frame_clears():
 
 def test_an_explicit_edge_on_a_checkpoint_recording_no_geometry_clears():
     """The foreign-checkpoint case: nothing to contradict, so any stated edge stands."""
-    from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
+    from tcip_mcp.pipelines.slicing import resolve_tile_geometry
 
     stub = _GeometryStub()
 

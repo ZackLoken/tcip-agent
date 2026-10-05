@@ -142,14 +142,13 @@ def save_labels(payload: SavePayload) -> dict:
         proposals_hidden=payload.proposals_hidden)
     person = actor(payload.user)
     try:
-        save_label_document(
+        version, doc = save_label_document(
             store.project_root, key, [ap.model_dump() for ap in payload.annotations],
             width=w, height=h, author=person, actor=person, expect=expect, gestures=gestures)
     except VersionConflict as exc:
         raise HTTPException(409, {"error": "label document changed since it was loaded"}) from exc
     except (ValueError, UnreadableLabelDocument) as exc:
         raise HTTPException(400, str(exc)) from exc
-    doc, version = _read(key)
     return {"status": "ok", "image_path": payload.image_path,
             "n_annotations": len(doc.annotations), "base_mtime": version.token,
             "completion": _completion(doc)}

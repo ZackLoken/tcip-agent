@@ -414,7 +414,7 @@ describe("TuningTab sweep TensorBoard before the sweep's run starts", () => {
           "sweep not found: hpo-pending",
         ),
       )
-      .mockResolvedValue({ url: "http://localhost:6006" });
+      .mockResolvedValue({ url: "http://127.0.0.1:6006" });
 
     vi.useFakeTimers();
     try {
@@ -537,7 +537,7 @@ describe("TuningTab selection change", () => {
     vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: null });
     const launchTbSpy = vi
       .spyOn(tuningApi, "launchSweepTensorboard")
-      .mockImplementation((id) => Promise.resolve({ url: `http://localhost:6006/${id}` }));
+      .mockImplementation((id) => Promise.resolve({ url: `http://127.0.0.1:6006/${id}` }));
 
     render(<TuningTab />);
     fireEvent.click(await screen.findByText("hpo-a"));
@@ -547,7 +547,7 @@ describe("TuningTab selection change", () => {
     await waitFor(() => expect(launchTbSpy).toHaveBeenCalledWith("hpo-b"));
     expect(screen.getByTitle("Sweep TensorBoard")).toHaveAttribute(
       "src",
-      "http://localhost:6006/hpo-b",
+      "http://127.0.0.1:6006/hpo-b",
     );
   });
 });
@@ -813,9 +813,9 @@ describe("TuningTab heading", () => {
       sweepDetail({ sweep_id: "hpo-heading", status: "completed" }),
     );
     vi.spyOn(tuningApi, "listTrials").mockResolvedValue({ sweep_id: "hpo-heading", trials: [] });
-    vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: "http://localhost:8265" });
+    vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: "http://127.0.0.1:8265" });
     vi.spyOn(tuningApi, "launchSweepTensorboard").mockResolvedValue({
-      url: "http://localhost:6006",
+      url: "http://127.0.0.1:6006",
     });
 
     render(<TuningTab />);

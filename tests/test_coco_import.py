@@ -104,7 +104,7 @@ def _targets(task: str, root: Path) -> dict:
 def _person_label() -> list:
     """One leaf a person drew, stamped as the save door stamps it."""
     return [json_io.stamped([json_io.annotation_from_payload(
-        {"subject": "leaf", "bbox": [1, 1, 5, 5]})], [], actor="user:breeder", now="2025-09-16")[0]]
+        {"subject": "leaf", "bbox": [1, 1, 5, 5]})], [], author="user:breeder", now="2025-09-16")[0]]
 
 
 def test_an_imported_documents_images_train_with_the_boxes_it_stated(tmp_path: Path):
@@ -594,7 +594,7 @@ def test_a_crowd_region_imports_and_reaches_training_and_evaluation_as_one(tmp_p
     x, y, w, h = BOX
     assert heads["boxes"].tolist() == [[x, y, x + w, y + h]] and heads["iscrowd"].tolist() == [0]
 
-    _, from_annotations = records_from_annotation(gt, [], width=IMG, height=IMG)
+    from_annotations = records_from_annotation(gt, [], width=IMG, height=IMG)
     no_detections = {"boxes": torch.zeros((0, 4)), "labels": torch.zeros((0,), dtype=torch.int64),
                      "scores": torch.zeros((0,))}
     from_detector = records_from_detector(target, no_detections, width=IMG, height=IMG)

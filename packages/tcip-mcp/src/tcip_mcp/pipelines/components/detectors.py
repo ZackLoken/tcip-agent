@@ -7,7 +7,6 @@ mode and ``list[dict]`` predictions in eval mode.
 
 from __future__ import annotations
 
-import inspect
 from collections import OrderedDict
 from typing import Any, cast
 
@@ -65,13 +64,9 @@ def _probe_in_chans(adapter: Any) -> int | None:
 
 def _normalization(adapter: Any, in_chans: int | None, image_mean, image_std,
                    detector: str) -> dict:
-    """Validated ``image_mean``/``image_std`` kwargs for a torchvision detector.
-
-    torchvision's ``GeneralizedRCNNTransform`` defaults to 3-element ImageNet statistics and
-    broadcasts them against a ``[C, H, W]`` input, so any ``C != 3`` raises inside the transform
-    with an error naming no channel concept. An N-channel build without per-band statistics is
-    refused; derive them with ``pipelines.derivations.band_normalization_stats`` and pass them.
-    """
+    """Validated ``image_mean``/``image_std`` kwargs for a torchvision detector at ``in_chans``
+    (probed from ``adapter`` when ``None``): a build at other than three bands stating no
+    per-band statistics refuses naming ``pipelines.derivations.band_normalization_stats``."""
     # The caller is authoritative: only they know the band count, and the probe is a registration-
     # order guess that is wrong for band-projection and neck-first adapters alike.
     if in_chans is None:
@@ -207,49 +202,33 @@ def _build_mask_rcnn(
     )
 
 
-_DETECTOR_BUILDERS = {
-    "faster_rcnn": _build_faster_rcnn,
-    "fcos": _build_fcos,
-    "retinanet": _build_retinanet,
-    "mask_rcnn": _build_mask_rcnn,
+_DETECTORS = {
+    "faster_rcnn": (_build_faster_rcnn, "FasterRCNN"),
+    "fcos": (_build_fcos, "FCOS"),
+    "retinanet": (_build_retinanet, "RetinaNet"),
+    "mask_rcnn": (_build_mask_rcnn, "MaskRCNN"),
 }
-
-# The torchvision class each builder constructs. Its own constructor parameters (box_score_thresh,
-# rpn_nms_thresh, detections_per_img, ...) are part of the surface an agent may tune, so they are
-# accepted and forwarded rather than rejected as unknown, while a typo still raises.
-_DETECTOR_CLASSES = {
-    "faster_rcnn": ("torchvision.models.detection", "FasterRCNN"),
-    "fcos": ("torchvision.models.detection", "FCOS"),
-    "retinanet": ("torchvision.models.detection", "RetinaNet"),
-    "mask_rcnn": ("torchvision.models.detection", "MaskRCNN"),
-}
+"""Each detector name's builder and the ``torchvision.models.detection`` class it constructs, whose
+own constructor parameters the builder forwards."""
 
 
-# Structural arguments the builders construct and pass themselves. Accepting them would let a
-# caller past the guard only to hit "got multiple values for keyword argument" from torchvision;
-# they are shaped through anchor_base_size / aspect_ratios / featmap_names / num_levels instead.
+# Structural arguments the builders construct and pass themselves; a caller shapes them through
+# anchor_base_size / aspect_ratios / featmap_names / num_levels instead.
 _BUILDER_SUPPLIED = frozenset({
     "rpn_anchor_generator", "anchor_generator", "box_roi_pool", "mask_roi_pool",
 })
 
 
 def _accepted_kwargs(name: str) -> set[str]:
-    """Every keyword ``build_detector(name, ...)` accepts.
+    """Every keyword ``build_detector(name, ...)`` accepts: the builder's own named parameters
+    plus its torchvision class's, less what the builder supplies itself."""
+    import torchvision.models.detection as detection
 
-    The builder's own named parameters plus the torchvision detector class's, since the builder
-    forwards its ``**kwargs`` to that constructor.
-    """
-    import importlib
+    from tcip_mcp.pipelines.model_build import keyword_parameters
 
-    def _named(obj) -> set[str]:
-        return {n for n, p in inspect.signature(obj).parameters.items()
-                if p.kind not in (p.VAR_KEYWORD, p.VAR_POSITIONAL)}
-
-    module, cls_name = _DETECTOR_CLASSES[name]
-    cls = getattr(importlib.import_module(module), cls_name)
-    return (_named(_DETECTOR_BUILDERS[name]) | _named(cls)) - {
-        "adapter", "backbone", "num_classes",
-    } - _BUILDER_SUPPLIED
+    builder, cls_name = _DETECTORS[name]
+    return (keyword_parameters(builder)[0] | keyword_parameters(getattr(detection, cls_name))[0]
+            ) - {"adapter", "backbone", "num_classes"} - _BUILDER_SUPPLIED
 
 
 def _held(name: str) -> property:
@@ -345,28 +324,18 @@ def build_detector(name: str, adapter: Any, num_classes: int, *, attributes: Any
     """Instantiate a detector builder by name, held by an :class:`AttributeDetector` carrying one
     head per record of ``attributes`` when it names any.
 
-    Raises ``KeyError`` for an unknown name and ``TypeError`` for an unrecognized kwarg. Accepted
-    keys are the builder's own plus the torchvision detector class's, which the builder forwards.
-
-    An ``in_chans != 3`` build additionally requires ``image_mean``/``image_std`` of that length;
-    see ``_normalization``.
+    Raises ``ValueError`` for an unknown name and ``TypeError`` for an unrecognized kwarg, naming
+    the detectors that do take it. Accepted keys are the builder's own plus the torchvision
+    detector class's, which the builder forwards. An ``in_chans != 3`` build additionally
+    requires ``image_mean``/``image_std`` of that length (``_normalization``).
     """
-    try:
-        fn = _DETECTOR_BUILDERS[name]
-    except KeyError:
-        raise KeyError(
-            f"Unknown detector '{name}'. Available: {sorted(_DETECTOR_BUILDERS)}"
-        ) from None
+    from tcip_mcp.pipelines.model_build import resolve_named
+
+    fn, _cls_name = resolve_named(name, _DETECTORS, kind="detector")
     accepted = _accepted_kwargs(name)
     unknown = sorted(set(kwargs) - accepted)
     if unknown:
-        # Name the detectors that do take each rejected kwarg. A key valid elsewhere is an
-        # architecture difference (fcos is anchor-free, so it has no aspect_ratios) rather than a
-        # typo, and the two need different responses from the caller.
-        elsewhere = {
-            k: [o for o in _DETECTOR_BUILDERS if k in _accepted_kwargs(o)]
-            for k in unknown
-        }
+        elsewhere = {k: [o for o in _DETECTORS if k in _accepted_kwargs(o)] for k in unknown}
         detail = "; ".join(
             f"{k!r} is accepted by {others}" if (others := elsewhere[k]) else f"{k!r} by none"
             for k in unknown

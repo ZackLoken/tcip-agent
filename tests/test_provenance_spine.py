@@ -89,7 +89,7 @@ def test_draw_splits_selection_embeds_digests_and_seed(data_dir, tmp_path):
 
     out = tmp_path / "splits"
     result = draw_splits(tmp_path, str(data_dir), output_path=str(out), seed=7, subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                         val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert result["seed"] == 7
     drawn = read_selection(out, project=tmp_path)
     assert drawn.seed == 7

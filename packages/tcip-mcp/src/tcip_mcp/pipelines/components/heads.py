@@ -18,7 +18,6 @@ class BaseHead(nn.Module, abc.ABC):
     """Abstract base for all task heads."""
 
     task_type: str = ""
-    default_loss: str = ""
     target_key: str = ""
     """The key a head's target carries its truth under and its decode its prediction under."""
 
@@ -45,7 +44,6 @@ class ClassificationHead(BaseHead):
     """Multi-class classification from a flat feature vector."""
 
     task_type = "classification"
-    default_loss = "cross_entropy"
     target_key = "labels"
 
     def __init__(self, in_channels: int, num_classes: int, dropout: float = 0.0,
@@ -83,14 +81,11 @@ class ClassificationHead(BaseHead):
 # ====================================================================
 
 class OrdinalHead(BaseHead):
-    """Ordinal classification via CORN (Conditional Ordinal Regression).
-
-    Trains K-1 binary classifiers where classifier k predicts
-    P(Y > k | Y > k-1).  Ref: Shi et al. 2021.
-    """
+    """Ordinal classification via CORN (conditional ordinal regression): K-1 binary classifiers
+    where classifier k predicts P(Y > k | Y > k-1), trained by
+    :func:`~tcip_mcp.pipelines.components.losses.corn_loss`."""
 
     task_type = "ordinal"
-    default_loss = "corn"
     target_key = "ranks"
 
     def __init__(self, in_channels: int, num_ranks: int, dropout: float = 0.0) -> None:
@@ -105,10 +100,10 @@ class OrdinalHead(BaseHead):
         return {"logits": logits}
 
     def compute_loss(self, outputs, targets):
-        logits = outputs["logits"]  # [B, K-1]
-        ranks = targets[self.target_key]  # [B] int, 0-indexed
-        loss = _corn_loss(logits, ranks, self.num_ranks)
-        return {"ordinal_loss": loss}
+        from tcip_mcp.pipelines.components.losses import corn_loss
+
+        return {"ordinal_loss": corn_loss(outputs["logits"], targets[self.target_key],
+                                          self.num_ranks)}
 
     def decode(self, outputs):
         logits = outputs["logits"]
@@ -117,11 +112,7 @@ class OrdinalHead(BaseHead):
         cum_probs = torch.cumprod(probs, dim=-1)
         # Predicted rank = number of thresholds exceeded
         predicted_ranks = (cum_probs > 0.5).sum(dim=-1)
-        # Per-instance confidence: the marginal probability mass CORN's own cumulative outputs
-        # imply at the predicted rank, P(Y=k) = P(Y>=k) - P(Y>=k+1), from the extended sequence
-        # P(Y>=0)=1, P(Y>=k)=cum_probs[:,k-1] for k=1..num_ranks-1, P(Y>=num_ranks)=0 - the CORN
-        # analog of ClassificationHead.decode's confs = probs.max(dim=-1).values (probability mass
-        # at the argmax), not an invented heuristic.
+        # Confidence is the marginal P(Y=k) = P(Y>=k) - P(Y>=k+1) at the predicted rank.
         batch = cum_probs.shape[0]
         p_ge = torch.cat(
             [cum_probs.new_ones((batch, 1)), cum_probs, cum_probs.new_zeros((batch, 1))], dim=-1)
@@ -134,24 +125,6 @@ class OrdinalHead(BaseHead):
         }
 
 
-def _corn_loss(logits: torch.Tensor, ranks: torch.Tensor, num_ranks: int) -> torch.Tensor:
-    """CORN loss: conditional ordinal regression.
-
-    For each rank k in [0, K-2], classifier k is trained only on
-    samples where Y >= k, predicting P(Y > k | Y >= k).
-    """
-    loss = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
-    n_tasks = 0
-    for k in range(num_ranks - 1):
-        mask = ranks >= k
-        if mask.sum() == 0:
-            continue
-        target_k = (ranks[mask] > k).float()
-        loss = loss + F.binary_cross_entropy_with_logits(logits[mask, k], target_k)
-        n_tasks += 1
-    return loss / max(n_tasks, 1)
-
-
 # ====================================================================
 # Regression Head
 # ====================================================================
@@ -160,7 +133,6 @@ class RegressionHead(BaseHead):
     """Continuous value regression from a flat feature vector."""
 
     task_type = "regression"
-    default_loss = "smooth_l1"
 
     def __init__(self, in_channels: int, dropout: float = 0.0, loss: str | None = None) -> None:
         super().__init__()
@@ -192,14 +164,10 @@ class RegressionHead(BaseHead):
 # ====================================================================
 
 class SemanticSegHead(BaseHead):
-    """Pixel-wise semantic segmentation (DeepLab-style).
-
-    Computes its own CE + multi-class Dice in ``compute_loss``; takes no ``loss`` name
-    (``default_loss`` is empty); ``class_weights`` applies to the CE term.
-    """
+    """Pixel-wise semantic segmentation (DeepLab-style), trained by cross-entropy and
+    multi-class Dice over the softmax; ``class_weights`` applies to the cross-entropy term."""
 
     task_type = "semantic_seg"
-    default_loss = ""
 
     def __init__(self, in_channels: int, num_classes: int,
                  class_weights: list | None = None) -> None:
@@ -232,14 +200,12 @@ class SemanticSegHead(BaseHead):
         # Resize logits to match target
         if logits.shape[-2:] != mask.shape[-2:]:
             logits = F.interpolate(logits, size=mask.shape[-2:], mode="bilinear", align_corners=False)
+        from tcip_mcp.pipelines.components.losses import dice_loss
+
         ce = F.cross_entropy(logits, mask.long(), weight=self.ce_weight)
-        # Dice loss
-        probs = F.softmax(logits, dim=1)
-        flat_probs = probs.flatten(2)
-        flat_mask = F.one_hot(mask.long(), self.num_classes).permute(0, 3, 1, 2).float().flatten(2)
-        intersection = (flat_probs * flat_mask).sum(-1)
-        dice = 1.0 - (2.0 * intersection + 1e-6) / (flat_probs.sum(-1) + flat_mask.sum(-1) + 1e-6)
-        return {"ce_loss": ce, "dice_loss": dice.mean()}
+        one_hot = F.one_hot(mask.long(), self.num_classes).permute(0, 3, 1, 2).float()
+        return {"ce_loss": ce,
+                "dice_loss": dice_loss(F.softmax(logits, dim=1).flatten(2), one_hot.flatten(2))}
 
     def decode(self, outputs):
         logits = outputs["logits"]

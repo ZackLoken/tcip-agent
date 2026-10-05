@@ -9,8 +9,7 @@ import tcip_store
 
 from tcip_annotation import Annotation
 from tcip_annotation.json_io import (
-    UnreadableLabelDocument, client_annotation, read_document_versioned, read_label_document,
-    read_predictions,
+    UnreadableLabelDocument, client_annotation, read_document_versioned, read_predictions,
 )
 
 from tcip_annotation.matching import REVIEW_CONF_FLOOR, Matching
@@ -66,23 +65,21 @@ def save_annotations(
     workspace: Path,
     image_path: str,
     annotations: list[dict],
-    created_by: str = "save_annotations",
 ) -> dict:
     """Write an image's annotations as its single per-image label document (all subjects, one
     document), keyed by the image's dataset root, capture and stem
-    (:func:`~tcip_mcp.dataset_layout.label_key`). Each annotation is a dict carrying a
-    ``subject`` (required, refused when absent), an optional geometry (``bbox`` = [x1,y1,x2,y2],
-    ``points`` = [[x,y],...] for a single-ring polygon contour, ``rings`` = [[[x,y],...], ...] for
-    a multi-ring polygon, whose ring vertices may be ``{x,y}`` dicts or ``[x,y]`` pairs, ``point``
-    = [x,y] for a single prompt/keypoint location, or none of them for an image-level label), and
-    optional ``attributes`` (attribute name -> value name).
+    (:func:`~tcip_mcp.dataset_layout.label_key`), each written annotation stamped as this tool's
+    own. Each annotation is a dict carrying a ``subject`` (required, refused when absent), an
+    optional geometry (``bbox`` = [x1,y1,x2,y2], ``points`` = [[x,y],...] for a single-ring
+    polygon contour, ``rings`` = [[[x,y],...], ...] for a multi-ring polygon, whose ring vertices
+    may be ``{x,y}`` dicts or ``[x,y]`` pairs, ``point`` = [x,y] for a single prompt/keypoint
+    location, or none of them for an image-level label), and optional ``attributes`` (attribute
+    name -> value name).
 
     Args:
         image_path: Absolute path to the image file.
         annotations: List of ``{subject, bbox?/points?/rings?/point?, attributes?}`` dicts (pixel
             coords); an empty list writes an empty document.
-        created_by: Producer stamped on each written annotation; this tool's own name when the
-            caller names none.
 
     Returns ``{capture, written, count}``, ``written`` the stem of the document written.
     """
@@ -97,7 +94,7 @@ def save_annotations(
     try:
         key = label_key_of(image_path)
         save_label_document(project, key, annotations, width=w, height=h,
-                            author=created_by, actor=None)
+                            author="save_annotations", actor=None)
     except ValueError as exc:
         return {"error": str(exc)}
 
@@ -107,61 +104,14 @@ def save_annotations(
     return {"capture": capture, "written": [stem], "count": len(annotations)}
 
 
-def _scored(images: list[Path], bucket: Bucket, *, iou_threshold: float, conf_threshold: float,
-            trait: TraitEntry | None) -> dict:
-    """``bucket``'s documents for ``images`` scored against their ground truth: each predicted
-    image's annotations read once, one subject-to-id map across all of them, one COCO record per
-    image, the comparability metrics over those records, and each image's matching
-    (:func:`~tcip_annotation.matching.pair_proposals`, its TP/FP/FN) under the one criterion
-    that governs them (``governing_criterion``): the trait's own when ``trait`` is given, the IoU
-    convention at ``iou_threshold`` otherwise. An image the bucket's record names no document for
-    is not predicted, so it is left out of every count and listed under ``not_predicted``; a
-    predicted image with no label document refuses (``UnreadableLabelDocument``). Returns
-    ``{"read", "iou_type", "metrics", "matchings", "governing_criterion", "not_predicted"}``,
-    ``read`` each scored image's ``(image, gt, preds, width, height)``."""
-    from tcip_annotation.matching import pair_proposals
-    from tcip_annotation.state import polygonal
-
-    from tcip_mcp.pipelines.training.evaluation import (
-        coco_detection_metrics, records_from_annotation, resolve_match_criterion,
-        subject_category_ids,
-    )
-
-    documents = {img: bucket.document_key(img.stem) for img in images}
-    read = [(img, read_label_document(label_key_of(img)).annotations,
-             read_predictions(document), *image_path_dimensions(img))
-            for img, document in documents.items() if document is not None]
-    annotations = [a for _img, gt, preds, _w, _h in read for a in (*gt, *preds)]
-    segm = any(polygonal(a.geometry) for a in annotations)
-    name_id = subject_category_ids(annotations)
-    records = [records_from_annotation(gt, preds, width=w, height=h, force_segm=segm,
-                                       name_id=name_id)[1]
-               for _img, gt, preds, w, h in read]
-    iou_type = "segm" if segm else "bbox"
-    metrics = coco_detection_metrics(records, iou_type=iou_type, iou_threshold=iou_threshold,
-                                     conf_threshold=conf_threshold)
-    criterion = (resolve_match_criterion(trait, records) if trait is not None
-                 else resolve_match_criterion(None, [], iou_threshold=iou_threshold))
-    matchings = [pair_proposals(gt, preds, criterion, conf_threshold=conf_threshold)
-                 for _img, gt, preds, _w, _h in read]
-    return {"read": read, "iou_type": iou_type, "metrics": metrics, "matchings": matchings,
-            "governing_criterion": criterion,
-            "not_predicted": [str(img) for img, document in documents.items() if document is None]}
-
-
 def _counts(m: Matching) -> dict:
     """One matching's TP, FP and FN."""
-    return {"tp": len(m.pairs), "fp": len(m.unpaired), "fn": len(m.missed)}
+    return dict(zip(("tp", "fp", "fn"), m.counts))
 
 
-def _totals(scored: dict) -> dict:
-    """The TP/FP/FN a scoring reports, summed over its images' matchings, with the precision,
-    recall and F1 they give."""
-    from tcip_mcp.pipelines.training.evaluation import precision_recall_f1
-
-    per_image = [_counts(m) for m in scored["matchings"]]
-    tp, fp, fn = (sum(c[k] for c in per_image) for k in ("tp", "fp", "fn"))
-    return {"tp": tp, "fp": fp, "fn": fn, **precision_recall_f1(tp, fp, fn)}
+def _totals(metrics: dict) -> dict:
+    """The TP/FP/FN a scoring's ``metrics`` report with the precision, recall and F1 they give."""
+    return {k: metrics[k] for k in ("tp", "fp", "fn", "precision", "recall", "f1")}
 
 
 def _detection_breakdown(m: Matching, gt: list[Annotation],
@@ -184,51 +134,58 @@ def _rounded(totals: dict) -> dict:
 
 def _evaluate_image(image: Path, bucket: Bucket, iou_threshold: float, conf_threshold: float,
                     detail: bool, trait: TraitEntry | None) -> dict:
-    """``bucket``'s predictions for one image matched against its ground truth (:func:`_scored`),
-    with ``matches``, the ``[gt_idx, pred_idx]`` pairs the one matcher
-    (:func:`~tcip_annotation.matching.pair_proposals`) draws per subject over the predictions at
-    or above ``conf_threshold`` under the scoring's criterion, ordered by prediction index, the
-    same matching its TP/FP/FN count. An image the bucket's record names no document for refuses
+    """``bucket``'s predictions for one image matched against its ground truth
+    (:func:`~tcip_mcp.pipelines.training.evaluation.score_bucket`), with ``matches``, the
+    ``[gt_idx, pred_idx]`` pairs the one matcher draws per subject over the predictions at or above
+    ``conf_threshold`` under the scoring's criterion, ordered by prediction index, the same
+    matching its TP/FP/FN count. An image the bucket's record names no document for refuses
     (``ValueError``): it was not predicted, so there is nothing to score."""
-    scored = _scored([image], bucket, iou_threshold=iou_threshold, conf_threshold=conf_threshold,
-                     trait=trait)
-    if scored["not_predicted"]:
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tcip_mcp.pipelines.training.evaluation import score_bucket
+
+    (one,), metrics = score_bucket([resolve_image_path(image)], bucket,
+                                   iou_threshold=iou_threshold, conf_threshold=conf_threshold,
+                                   trait=trait)
+    if one.preds is None:
         raise ValueError(f"bucket {bucket.name!r} names no document for {image.name}: it was "
                          "not predicted, so there is nothing to score.")
-    _img, gt, preds, w, h = scored["read"][0]
-    (m,) = scored["matchings"]
-    out = {"image": str(image), **_rounded(_totals(scored)),
-           "map50": round(scored["metrics"]["map50"], 4), "iou_type": scored["iou_type"],
+    out = {"image": str(image), **_rounded(_totals(metrics)),
+           "map50": round(metrics["map50"], 4),
+           "governing_criterion": metrics["governing_criterion"],
            "iou_threshold": iou_threshold, "conf_threshold": conf_threshold,
-           "matches": [list(pair) for pair in m.pairs]}
+           "matches": [list(pair) for pair in one.matching.pairs]}
     if detail:
-        out.update(img_w=w, img_h=h, detections=_detection_breakdown(m, gt, preds))
+        out.update(img_w=one.width, img_h=one.height,
+                   detections=_detection_breakdown(one.matching, one.gt, one.preds))
     return out
 
 
 def _evaluate_folder(images_dir: str, bucket: Bucket, iou_threshold: float,
                      conf_threshold: float, trait: TraitEntry | None) -> dict:
     """Aggregate detection metrics across the logical images of one images directory against
-    ``bucket``'s documents for them (:func:`_scored`).
+    ``bucket``'s documents for them
+    (:func:`~tcip_mcp.pipelines.training.evaluation.score_bucket`), the images it names no
+    document for listed under ``not_predicted`` and left out of every count.
 
     A ``.bandgroup``-grouped capture scores as one logical image, and a nested folder is not
     descended. A directory holding two raw images under one case-folded stem is refused by
     ``list_logical_images``.
     """
-    from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
+    from tcip_mcp.pipelines.image_utils import list_logical_images, source_path_of
+    from tcip_mcp.pipelines.training.evaluation import score_bucket
 
-    images = sorted(src.manifest_path if isinstance(src, BandGroupRef) else src
-                    for src in list_logical_images(images_dir).values())
-    scored = _scored(images, bucket, iou_threshold=iou_threshold,
-                     conf_threshold=conf_threshold, trait=trait)
+    images = sorted(list_logical_images(images_dir).values(), key=source_path_of)
+    scored, m = score_bucket(images, bucket, iou_threshold=iou_threshold,
+                             conf_threshold=conf_threshold, trait=trait)
+    predicted = [one for one in scored if one.preds is not None]
     counts = {"tp": "total_tp", "fp": "total_fp", "fn": "total_fn"}
-    totals = {counts.get(k, k): v for k, v in _rounded(_totals(scored)).items()}
-    m = scored["metrics"]
-    return {"path": images_dir, "image_count": len(scored["read"]),
-            "not_predicted": scored["not_predicted"], "map": round(m["map"], 4),
-            "map50": round(m["map50"], 4), **totals, "iou_type": scored["iou_type"],
-            "per_image": [{"image": img.name, **_counts(match)}
-                          for (img, *_rest), match in zip(scored["read"], scored["matchings"])]}
+    totals = {counts.get(k, k): v for k, v in _rounded(_totals(m)).items()}
+    return {"path": images_dir, "image_count": len(predicted),
+            "not_predicted": [source_path_of(one.image) for one in scored if one.preds is None],
+            "map": round(m["map"], 4), "map50": round(m["map50"], 4), **totals,
+            "governing_criterion": m["governing_criterion"],
+            "per_image": [{"image": Path(source_path_of(one.image)).name, **_counts(one.matching)}
+                          for one in predicted]}
 
 
 def score_predictions(
@@ -239,13 +196,13 @@ def score_predictions(
     detail: bool = False,
     trait: TraitEntry | None = None,
 ) -> dict:
-    """Score a published bucket's predictions against the images' own label documents
-    (COCOeval).
+    """Score a published bucket's predictions against the images' own label documents through the
+    platform's one matcher.
 
     Dispatches on the input: a single image file returns per-box ``matches`` (plus an optional
     per-detection ``detections`` breakdown with ``img_w`` / ``img_h`` when ``detail=True``); an
-    images directory returns aggregate metrics plus ``per_image`` TP/FP/FN. Both regimes share
-    ``coco_detection_metrics``.
+    images directory returns aggregate metrics plus ``per_image`` TP/FP/FN. Both regimes are
+    :func:`~tcip_mcp.pipelines.training.evaluation.score_bucket`'s.
 
     A prediction carries its object class in ``subject``, so this scores the localization of the
     object class, never an attribute head's call.
@@ -282,21 +239,12 @@ def write_subject_registry(
     project: Path, dataset_root: str, subjects: dict,
     allow_removals: bool = False, allow_type_changes: bool = False,
 ) -> dict:
-    """Author the dataset's nested subject registry, a thin wrapper over ``subject_registry``.
-
-    ``subjects`` is the nested registry mapping the expert defines, subjects to their
-    ``description`` and zero or more ``attributes`` (each ``categorical`` |
-    ``ordinal`` with ordered ``values``). It is validated through
-    :func:`subject_registry.registry_from_request` (a malformed shape refuses) and written to
-    ``<dataset_root>/subjects.json`` via :func:`subject_registry.replace_registry`, which guards
-    only the store's own window between its read and its put and refuses an empty registry. No
-    numeric class ids, no colors, no id enumeration.
-
-    A write that would drop a subject, attribute or attribute value the stored registry declares is
-    refused unless ``allow_removals`` is set; the same flag also allows replacing a stored registry
-    whose bytes will not decode. A write that keeps an attribute's name and values but changes its
-    ``type`` (categorical to ordinal or back) is refused independently of ``allow_removals`` unless
-    ``allow_type_changes`` is set.
+    """Write the dataset's subject registry: ``subjects``, each subject's ``description`` and
+    ``attributes`` (each ``categorical`` or ``ordinal`` with ordered ``values``), validated
+    (:func:`subject_registry.registry_from_request`) and written
+    (:func:`subject_registry.replace_registry`), whose refusals answer as errors: an empty
+    registry; a dropped subject, attribute or value, or a stored registry that will not decode,
+    without ``allow_removals``; an attribute's type changed without ``allow_type_changes``.
 
     Args:
         dataset_root: Dataset root; the registry is written to ``<dataset_root>/subjects.json``.

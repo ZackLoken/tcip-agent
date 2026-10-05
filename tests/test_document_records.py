@@ -47,7 +47,7 @@ def _audit_tools(root: Path) -> list[str]:
 
 def _save(root: Path, image: Path, payloads: list[dict], **kwargs):
     return save_label_document(root, image_label_key(image), payloads, width=SIZE, height=SIZE,
-                               author="user:breeder", actor="user:breeder", **kwargs)
+                               author="user:breeder", actor="user:breeder", **kwargs)[0]
 
 
 # ── the save door ──────────────────────────────────────────────────────────

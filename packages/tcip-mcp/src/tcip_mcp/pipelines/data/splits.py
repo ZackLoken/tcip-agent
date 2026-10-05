@@ -25,10 +25,13 @@ if TYPE_CHECKING:
 # the full stem.
 _TILE_GROUP_RE = re.compile(r"^(.*)_\d+_\d+$")
 
-# The draw defaults every split door applies when its config states none.
+# The grouping policy every split door applies when its config states none.
 DEFAULT_GROUP_BY = "tile_prefix"
-DEFAULT_SEED = 42
-DEFAULT_VAL_RATIO = 0.2
+
+DEFAULT_SHARES = {"val": 0.15, "calibration": 0.10, "holdout": 0.05}
+"""Provisional: the owner's documented default share of each side beside ``train``, which takes
+the remainder (0.70); soft targets the group draw rounds to whole groups. A door states any of
+them to replace it, a share of zero drawing no such side."""
 
 
 def default_group_key(stem: str) -> str:
@@ -230,12 +233,9 @@ def resolve_group_key_fn(
             more = f" (+{len(missing) - 10} more)" if len(missing) > 10 else ""
             raise ValueError(f"group_key_map is missing {len(missing)} stem(s): {preview}{more}")
         return lambda s: group_key_map[s]
-    if group_by not in GROUP_KEY_FNS:
-        raise ValueError(
-            f"Unrecognized group_by {group_by!r}; must be one of {sorted(GROUP_KEY_FNS)}, "
-            "or supply group_key_map."
-        )
-    return GROUP_KEY_FNS[group_by]
+    from tcip_mcp.pipelines.model_build import resolve_named
+
+    return resolve_named(group_by, GROUP_KEY_FNS, kind="group_by policy")
 
 
 def recorded_group_key_fn(
@@ -286,7 +286,7 @@ def stem_of_spatial_identity(identity: str) -> str:
 
 @dataclass(frozen=True)
 class SpatialStripSplit:
-    """A within-image train/val(/test) split: the image partitioned into contiguous pixel-space
+    """A within-image split over named sides: the image partitioned into contiguous pixel-space
     strips along one axis, each strip assigned whole to one side, with a buffer band excluded at
     every boundary between differently-assigned strips.
 
@@ -420,13 +420,12 @@ def _strip_regions(
 
 def spatial_strip_split(
     width: int, height: int, tile_size: int, overlap: float, *,
-    fractions: tuple[float, ...],
-    split_names: tuple[str, ...] = ("train", "val", "test"),
+    fractions: tuple[float, ...], split_names: tuple[str, ...],
     buffer: int | None = None, discard_ceiling: float = 0.05, stripes_per_split: int = 1,
 ) -> SpatialStripSplit:
     """Split one image's own tile lattice into disjoint pixel-space strips, one side per name, for
     the case where there are too few source images to hold one out whole: a strip is train, val, or
-    test instead of a stem.
+    holdout instead of a stem.
 
     The tile lattice is :func:`~tcip_mcp.pipelines.slicing.slice_lattice`'s at this
     ``tile_size``/``overlap``. The split runs along whichever axis (width or height) offers more distinct tile positions. Piece count

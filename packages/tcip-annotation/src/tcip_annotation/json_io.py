@@ -167,13 +167,13 @@ def annotation_from_payload(payload: Mapping) -> Annotation:
     })
 
 
-def stamped(contents: Iterable[Annotation], stored: Iterable[Annotation], *, actor: str,
+def stamped(contents: Iterable[Annotation], stored: Iterable[Annotation], *, author: str,
             now: str) -> list[Annotation]:
     """``contents`` with their provenance: each one whose stored content (:func:`stored_content`)
     equals a not yet claimed record of ``stored`` takes that record's provenance, and every other
-    one is authored by ``actor`` at ``now`` with no sign-off. Refuses (``ValueError``) a blank
-    ``actor``."""
-    if not actor.strip():
+    one is authored by ``author`` at ``now`` with no sign-off. Refuses (``ValueError``) a blank
+    ``author``."""
+    if not author.strip():
         raise ValueError("a saved annotation records its producer; name who or what wrote it")
     unclaimed: dict[str, list[Annotation]] = {}
     for record in stored:
@@ -181,7 +181,7 @@ def stamped(contents: Iterable[Annotation], stored: Iterable[Annotation], *, act
     out = []
     for content in contents:
         held = unclaimed.get(_content_key(content))
-        source = held.pop(0) if held else Annotation(content.subject, created_by=actor,
+        source = held.pop(0) if held else Annotation(content.subject, created_by=author,
                                                      created_at=now)
         out.append(replace(content, **_held_provenance(source)))
     return out

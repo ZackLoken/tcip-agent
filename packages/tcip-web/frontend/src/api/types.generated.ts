@@ -234,7 +234,7 @@ export interface ExportCountCsvPayload {
 
 export interface MatchTolerance {
   value: number;
-  source: string;
+  source: "grid_pitch" | "stated" | "stated_capped";
 }
 
 export interface PlantRegistryReference {
@@ -282,12 +282,6 @@ export interface SegmentTieDisclosure {
   clearance_m: number;
 }
 
-export interface UnattributedDetectionsBySource {
-  outside_segments: number;
-  overlapping_segments: number;
-  segment_without_plant: number;
-}
-
 export interface CanopySegmentDisclosure {
   plant_registry: PlantRegistryReference;
   raster_identity: Record<string, unknown>;
@@ -298,7 +292,7 @@ export interface CanopySegmentDisclosure {
   plants_without_segment: string[];
   plants_with_ambiguous_detections: string[];
   detections_unattributed: number;
-  detections_unattributed_by_source: UnattributedDetectionsBySource;
+  detections_unattributed_by_source: Record<string, number>;
   detections_unattributed_scope: "delivered_raster";
   plant_attribution: string;
 }

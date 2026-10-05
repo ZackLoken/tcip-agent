@@ -213,14 +213,6 @@ def load_project_memory(
     return {"error": f"unknown kind '{kind}'", "valid_kinds": ["reports", "retrospectives"]}
 
 
-def _entry_time(entry: Mapping[str, Any]) -> datetime:
-    """An audit entry's own timestamp, as :func:`~tcip_mcp.audit.now_iso` wrote it. Refuses
-    (``ValueError``) an entry carrying none, which no producer writes."""
-    if "timestamp" not in entry:
-        raise ValueError(f"an audit entry carries no timestamp, so no producer wrote it: {entry}")
-    return datetime.fromisoformat(entry["timestamp"])
-
-
 def _parse_audit_bound(label: str, value: str, *, end_of_day: bool = False) -> datetime:
     """Parse a caller-supplied ``since``/``until`` bound (ISO-8601, a trailing ``Z`` accepted, a
     naive value read as UTC), or raise naming which bound and why.
@@ -259,7 +251,7 @@ def read_audit_log(
     ``images/`` tree resolves up to its dataset root, and a bare directory counts as a root only when it carries its own ``.tcip``
     directory or a ``subjects.json``, which a project root does too. ``scope=None`` reads the
     project's own log. A ``scope`` that resolves to none of these refuses by name. The whole log is read
-    through ``tcip_store.read_log``, filtered in memory on each entry's own ``tool`` name,
+    through ``tcip_mcp.audit.audit_entries``, filtered in memory on each entry's own ``tool`` name,
     ``status``, and ``timestamp``, then returned newest first by each entry's own stated timestamp.
     ``skipped`` states how many entries this call is not returning, whether filtered out or
     truncated by ``limit``.
@@ -281,7 +273,7 @@ def read_audit_log(
         status: Exact status filter, 'ok' or 'exception'.
         limit: Maximum entries to return (default 200), newest first.
     """
-    from tcip_mcp.audit import audit_log_key, dataset_scope_of
+    from tcip_mcp.audit import audit_entries, audit_log_key, dataset_scope_of
 
     if scope is None:
         key = audit_log_key(project)
@@ -298,30 +290,19 @@ def read_audit_log(
             }
         key = audit_log_key(resolved_scope)
 
-    page = tcip_store.read_log(key)
-    if page.corrupt:
-        undecodable = len(page.corrupt)
-        return {
-            "error": (
-                f"the audit log at {key.root} carries {undecodable} undecodable "
-                f"entr{'y' if undecodable == 1 else 'ies'}; repair the log before trusting a "
-                "read of it"
-            ),
-            "scope_resolved": key.root,
-        }
-
     try:
+        records, _cursor = audit_entries(key.root)
         since_dt = _parse_audit_bound("since", since) if since is not None else None
         until_dt = (
             _parse_audit_bound("until", until, end_of_day=True) if until is not None else None
         )
-        timed = [(_entry_time(entry), entry) for entry in page.records]
+        timed = [(datetime.fromisoformat(entry["timestamp"]), entry) for entry in records]
     except ValueError as exc:
         return {"error": str(exc), "scope_resolved": key.root}
 
     def _matches(at: datetime, entry: Mapping[str, Any]) -> bool:
-        return ((tool is None or entry.get("tool") == tool)
-                and (status is None or entry.get("status") == status)
+        return ((tool is None or entry["tool"] == tool)
+                and (status is None or entry["status"] == status)
                 and (since_dt is None or at >= since_dt)
                 and (until_dt is None or at <= until_dt))
 
@@ -330,7 +311,7 @@ def read_audit_log(
                                                    reverse=True)]
     truncated = max(0, len(newest_first) - limit)
     entries = newest_first[:limit]
-    skipped = (len(page.records) - len(filtered)) + truncated
+    skipped = (len(records) - len(filtered)) + truncated
 
     return {
         "entries": entries,

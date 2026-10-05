@@ -127,7 +127,7 @@ def _assessed(tmp_path: Path, builder: str) -> dict:
                     size, size)
     selection_dir = tmp_path / "selection"
     drawn = draw_splits(tmp_path, str(root), output_path=str(selection_dir), subject="bud", seed=2,
-                        train_ratio=0.25, val_ratio=0.25, calibration_ratio=0.25,
+                        val_ratio=0.25, calibration_ratio=0.25,
                         holdout_ratio=0.25)
     assert "error" not in drawn, drawn
     confirm_count_trait(tmp_path)

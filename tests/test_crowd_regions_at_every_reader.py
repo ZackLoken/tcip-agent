@@ -74,6 +74,21 @@ def _detection_loader(root: Path, task: str = "detection"):
     return dataset_over(task, _labeled(root), subject=SUBJECT)
 
 
+def test_crowd_of_refuses_a_target_stating_no_flag_and_reads_the_producers_own():
+    """Whether a row is a crowd region is its producer's to state: a target the platform's own
+    producer built answers its flags, one stating none refuses rather than reading as no crowd."""
+    from tcip_mcp.pipelines.data.datasets import crowd_of
+    from tcip_mcp.pipelines.data.label_queries import json_det_targets
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
+    target = json_det_targets([Annotation(subject=SUBJECT, geometry=OBJECT),
+                               Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True)],
+                              ClassScope(subject=SUBJECT, attributes=()))
+    assert list(crowd_of(target)) == [False, True]
+    with pytest.raises(ValueError, match="states no 'iscrowd'"):
+        crowd_of({"boxes": target["boxes"], "labels": target["labels"]})
+
+
 def test_the_instance_loader_carries_each_polygons_crowd_flag(tmp_path: Path):
     images = tmp_path / "images" / UNDATED_BUCKET
     images.mkdir(parents=True)
@@ -205,7 +220,7 @@ def _records(tmp_path: Path, crowd: bool, n_crowd: int = 120) -> list[dict]:
             anns += [Annotation(subject=SUBJECT, geometry=BBox(40, 40, 99, 99), iscrowd=True)
                      for _ in range(n_crowd)]
         records.append(records_from_annotation(_read_back(tmp_path, f"r{i}_{crowd}", anns), [],
-                                               width=IMG, height=IMG)[1])
+                                               width=IMG, height=IMG))
     return records
 
 
@@ -242,14 +257,15 @@ def test_the_object_size_and_spacing_ignore_crowd_regions(tmp_path: Path):
 
 
 def test_a_crowd_prediction_is_no_detection_at_the_scoring_side(tmp_path: Path):
-    from tcip_mcp.pipelines.training.evaluation import coco_detection_metrics, records_from_annotation
+    from tcip_mcp.pipelines.training.evaluation import detection_metrics, records_from_annotation
 
     preds = _read_back(tmp_path, "p", [
         Annotation(subject=SUBJECT, geometry=CROWD, score=0.9, iscrowd=True)])
-    _, record = records_from_annotation([], preds, width=IMG, height=IMG)
+    record = records_from_annotation([], preds, width=IMG, height=IMG)
     assert record["dt"] == []
-    m = coco_detection_metrics([record])
-    assert (m["tp"], m["fp"], m["fn"], m["n_pred"]) == (0, 0, 0, 0)
+    m = detection_metrics([record], trait=None, conf_threshold=0.25, iou_threshold=0.5,
+                          by_mask=False)
+    assert (m["tp"], m["fp"], m["fn"]) == (0, 0, 0)
 
 
 def test_one_selector_answers_both_halves_of_the_crowd_split(tmp_path: Path):
@@ -300,9 +316,9 @@ def _center_records(tmp_path: Path) -> list[dict]:
                            [Annotation(subject=SUBJECT, geometry=BBox(60.0, 60.0, 80.0, 80.0),
                                        score=0.9)])
         records.append(records_from_annotation(gt, preds, width=IMG, height=IMG,
-                                               name_id=name_id)[1])
+                                               name_id=name_id))
     missed = _read_back(tmp_path, "missed", [Annotation(subject=SUBJECT, geometry=OBJECT)])
-    records.append(records_from_annotation(missed, [], width=IMG, height=IMG, name_id=name_id)[1])
+    records.append(records_from_annotation(missed, [], width=IMG, height=IMG, name_id=name_id))
     return records
 
 
@@ -375,7 +391,7 @@ def test_the_derived_spacing_and_cross_tile_nms_ignore_crowd_regions(tmp_path: P
             if crowd:
                 anns += [Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True)] * 3
             out.append(records_from_annotation(_read_back(tmp_path, f"s{i}_{crowd}", anns), [],
-                                               width=IMG, height=IMG)[1])
+                                               width=IMG, height=IMG))
         return out
 
     boxes = {crowd: [[a["bbox"] for a in gt_objects(r)] for r in records(crowd)]

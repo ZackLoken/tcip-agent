@@ -82,10 +82,11 @@ def test_the_tiny_detector_trains_and_finds_one_object_per_frame(tmp_path: Path)
 
 
 def test_a_reference_document_edited_after_its_read_is_never_measured(tmp_path: Path, monkeypatch):
-    """The loaders measure each reference document at the version the assessment read and
-    retained: one edited between that read and the measurement refuses naming it, rather than the
-    edit being measured under the retained record's name."""
+    """The loaders measure each reference document as the assessment's one read answered it, the
+    version it retained: an edit landing after that read is never measured, and the record names
+    the version read, not the edit."""
     from tcip_mcp import assessment as assessment_mod
+    from tcip_mcp.pipelines.data.selection import ground_truth_digest
     from tests._chain_fixtures import assess, confirm_count_trait
 
     root = tmp_path / "ds"
@@ -103,11 +104,13 @@ def test_a_reference_document_edited_after_its_read_is_never_measured(tmp_path: 
         return real_retained(run_dir, samples, reads)
 
     monkeypatch.setattr(assessment_mod, "_retained", edited_first)
-    refused = assess(tmp_path, checkpoint_path, selection_dir)
+    assessed = assess(tmp_path, checkpoint_path, selection_dir)
 
     (moved,) = edited
-    assert "error" in refused, refused
-    assert moved.parts[-1] in refused["error"] and "version" in refused["error"], refused
+    assert "error" not in assessed, assessed
+    recorded = assessment_mod.read_assessment(tmp_path, assessed["assessment_id"])
+    (retained,) = [f for f in recorded.reference.ground_truth if f.ground_truth == moved]
+    assert retained.digest != ground_truth_digest(moved)
 
 
 def test_the_assessment_passes_and_the_bucket_published_under_it_names_it(tmp_path: Path):

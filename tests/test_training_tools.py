@@ -18,11 +18,12 @@ pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 def _labeled(tmp_path: Path) -> dict:
     """A data section over two labeled frames of ``bud`` under ``tmp_path``
-    (``_verified_checkpoint_fixtures.detection_images``)."""
+    (``_verified_checkpoint_fixtures.detection_images``), drawn at seed 0."""
     from tests._verified_checkpoint_fixtures import detection_images
 
     scope = {"subject": "bud"}
-    return {**detection_images(tmp_path / "labeled", scope), "scope": scope}
+    return {**detection_images(tmp_path / "labeled", scope), "scope": scope,
+            "split": {"seed": 0, "val_ratio": 0.15}}
 
 
 def _bud_image(image: Path, *, labeled: bool = True) -> None:
@@ -245,7 +246,7 @@ def test_preflight_config_no_coverage_warning_when_everything_trains(tmp_path):
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "scope": {"subject": "bud"}},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 2,
     }
     assert preflight_config(tmp_path, cfg)["warnings"] == []
@@ -270,7 +271,7 @@ def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(tmp_pa
     _bud_image(imgs / "bad.jpg")
     _damaged(imgs / "bad.jpg", b"{not json")
 
-    data_cfg = {"images_dir": str(imgs), "scope": {"subject": "bud"}}
+    data_cfg = {"images_dir": str(imgs), "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}}
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
@@ -314,8 +315,8 @@ def test_preflight_admits_the_run_once(tmp_path):
                          "task": "detection"},
         "data": {"images_dir": str(imgs), "scope": {"subject": "bud"},
                  "tiling": {"enabled": True, "tile_size": 64, "overlap": 0.2},
-                 "split": {"reserve_calibration_fraction": 0.15, "val_ratio": 0.2,
-                           "test_ratio": 0.1, "seed": 1}},
+                 "split": {"calibration_ratio": 0.15, "val_ratio": 0.2,
+                           "holdout_ratio": 0.1, "seed": 1}},
         "batch_size": 2,
     }
     with pytest.MonkeyPatch.context() as patch:
@@ -350,7 +351,7 @@ def test_preflight_config_blocks_a_document_only_the_admission_reader_refuses(
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "scope": {"subject": "bud"}},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 2,
     }
     r = preflight_config(tmp_path, cfg)
@@ -436,7 +437,7 @@ def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(tmp_p
     cfg: dict[str, object] = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "scope": {"subject": "bud"}},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 2,
         "evaluation": "not_a_mapping",
     }
@@ -444,8 +445,8 @@ def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(tmp_p
     assert any("evaluation" in i and "mapping" in i for i in r["issues"])
 
 
-# preflight_config's reserve_calibration_fraction feasibility check: a training-launch-time
-# refusal through this module's own validation surface, never review_calibration._FAILURE_MESSAGES.
+# preflight_config's reserved-region feasibility check: a training-launch-time refusal through
+# this module's own validation surface, never review_calibration._FAILURE_MESSAGES.
 
 def _reserve_cal_big_single_source(root, width=4000, height=3000, tile_size=128):
     """One large single-image detection source with real width/height, real GT scattered evenly
@@ -466,7 +467,7 @@ def _reserve_cal_big_single_source(root, width=4000, height=3000, tile_size=128)
     return images_dir
 
 
-def test_preflight_reserve_calibration_fraction_wrong_task_flags_issue(tmp_path):
+def test_preflight_calibration_ratio_wrong_task_flags_issue(tmp_path):
     """A classification run never resolves to the within-image split a calibration region
     reserves from, so the fraction is named as having no effect."""
     from PIL import Image
@@ -484,14 +485,14 @@ def test_preflight_reserve_calibration_fraction_wrong_task_flags_issue(tmp_path)
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
                          "task": "classification"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(tmp_path / "labels.csv"),
-                 "split": {"reserve_calibration_fraction": 0.15}},
+                 "split": {"calibration_ratio": 0.15, "val_ratio": 0.15, "seed": 1}},
         "batch_size": 2,
     }
     r = preflight_config(tmp_path, cfg)
-    assert any("reserve_calibration_fraction" in i and "has no effect" in i for i in r["issues"])
+    assert any("calibration_ratio" in i and "no effect" in i for i in r["issues"]), r["issues"]
 
 
-def test_preflight_reserve_calibration_fraction_multi_member_flags_issue(tmp_path):
+def test_preflight_calibration_ratio_multi_member_flags_issue(tmp_path):
     """Two admitted members resolve to the group-balanced split, which reserves no calibration
     region, so the fraction is named as having no effect."""
     from tcip_mcp.tools.training_tools import preflight_config
@@ -505,14 +506,14 @@ def test_preflight_reserve_calibration_fraction_multi_member_flags_issue(tmp_pat
         "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
                  # sliver_frac stated: two boxes derive no size spread.
                  "tiling": {"enabled": True, "tile_size": 32, "sliver_frac": 0.5},
-                 "split": {"reserve_calibration_fraction": 0.15}},
+                 "split": {"calibration_ratio": 0.15, "val_ratio": 0.15, "seed": 1}},
         "batch_size": 2,
     }
     r = preflight_config(tmp_path, cfg)
-    assert any("reserve_calibration_fraction" in i and "has no effect" in i for i in r["issues"])
+    assert any("calibration_ratio" in i and "no effect" in i for i in r["issues"]), r["issues"]
 
 
-def test_preflight_reserve_calibration_fraction_infeasible_layout_refuses_under_smoke(tmp_path):
+def test_preflight_reserved_regions_infeasible_layout_refuses_under_smoke(tmp_path):
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -523,20 +524,20 @@ def test_preflight_reserve_calibration_fraction_infeasible_layout_refuses_under_
         "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
                  "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
                  # Nothing left for a real train fraction at this mosaic size.
-                 "split": {"val_ratio": 0.45, "test_ratio": 0.45, "seed": 1,
-                          "reserve_calibration_fraction": 0.3}},
+                 "split": {"val_ratio": 0.33, "holdout_ratio": 0.33, "seed": 1,
+                          "calibration_ratio": 0.33}},
         "batch_size": 2,
     }
     r = preflight_config(tmp_path, cfg, smoke=True)
-    assert any("reserve_calibration_fraction" in i for i in r["issues"]), r["issues"]
+    assert any("is infeasible" in i for i in r["issues"]), r["issues"]
 
     # The run's resolution builds its datasets whether or not the model is smoked, so the same
     # geometry refuses without smoke too.
     r_no_smoke = preflight_config(tmp_path, cfg, smoke=False)
-    assert any("reserve_calibration_fraction" in i for i in r_no_smoke["issues"])
+    assert any("is infeasible" in i for i in r_no_smoke["issues"])
 
 
-def test_preflight_reserve_calibration_fraction_reports_an_unreadable_label_by_name(tmp_path):
+def test_preflight_reserved_regions_report_an_unreadable_label_by_name(tmp_path):
     """This probe's own generic except Exception must not swallow an unreadable label into a
     silently-logged build failure: the breeder needs to see which document is broken."""
     pytest.importorskip("torch")
@@ -549,17 +550,17 @@ def test_preflight_reserve_calibration_fraction_reports_an_unreadable_label_by_n
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
                  "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-                 "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
-                          "reserve_calibration_fraction": 0.15}},
+                 "split": {"val_ratio": 0.2, "holdout_ratio": 0.1, "seed": 1,
+                          "calibration_ratio": 0.15}},
         "batch_size": 2,
     }
     r = preflight_config(tmp_path, cfg, smoke=True)
     assert any("mosaic" in i and "decode" in i for i in r["issues"]), r["issues"]
 
 
-def test_preflight_reserve_calibration_fraction_admits_a_feasible_layout(tmp_path):
-    """A real, feasible reserve_calibration_fraction config produces no
-    reserve_calibration_fraction issue under smoke=True."""
+def test_preflight_reserved_regions_admit_a_feasible_layout(tmp_path):
+    """A real, feasible reserved-region config produces no spatial-split issue under
+    smoke=True."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -570,12 +571,13 @@ def test_preflight_reserve_calibration_fraction_admits_a_feasible_layout(tmp_pat
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
                  "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-                 "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
-                          "reserve_calibration_fraction": 0.15}},
+                 "split": {"val_ratio": 0.2, "holdout_ratio": 0.1, "seed": 1,
+                          "calibration_ratio": 0.15}},
         "batch_size": 2,
     }
     r = preflight_config(tmp_path, cfg, smoke=True)
-    assert not any("reserve_calibration_fraction" in i for i in r["issues"]), r["issues"]
+    assert not any("spatial split" in i or "calibration_ratio" in i for i in r["issues"]), \
+        r["issues"]
 
 
 # --------------------------------------------------------------------------
@@ -787,7 +789,7 @@ def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
         if captured is not None:
             captured["transforms"] = transforms
             captured["data_cfg"] = data_cfg
-        return ds, ds, None
+        return ds, ds, {"seed": None, "group_by": "stem", "samples": [], "selection": None}
 
     monkeypatch.setattr(sc, "auto_train_val", fake_auto_train_val)
     monkeypatch.setattr(sc, "recorded_datasets", lambda *a, **k: (ds, ds))
@@ -977,7 +979,7 @@ def _fake_auto_train_val_reading_seed_like_split_construction(
     split_cfg = data_cfg.setdefault("split", {})
     split_cfg.get("seed", 42)
     ds = _TiledFakeDataset()
-    return ds, ds, None
+    return ds, ds, {"samples": []}
 
 
 def test_run_hpo_trial_dotted_seed_axis_reaches_the_trials_own_records(monkeypatch, tmp_path):
@@ -1037,7 +1039,7 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
                  "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-                 "split": {"val_ratio": 0.25, "test_ratio": 0.1}},
+                 "split": {"val_ratio": 0.25, "holdout_ratio": 0.1, "calibration_ratio": 0}},
         "batch_size": 2,
     }
 
@@ -1129,9 +1131,13 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path):
     from tests._chain_fixtures import published
     from tests._producer_fixtures import label_image
 
+    from PIL import Image
+
     images = tmp_path / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
     scored = {"confident": [0.9, 0.9], "shaky": [0.1, 0.1]}
     for stem, scores in scored.items():
+        Image.new("RGB", (100, 100)).save(images / f"{stem}.png")
         # Matching GT count → missed = extra = 0, error is exactly (1 - avg_conf).
         gt_anns = [Annotation(subject="bud", geometry=BBox(20.0, 11.0, 40.0, 31.0)) for _ in scores]
         label_image(images / f"{stem}.png", gt_anns, 100, 100)
@@ -1319,7 +1325,8 @@ def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_a
     base_config = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
                          "task": "regression"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path),
+                 "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 5}],
                      "mixed_precision": False, "device": "cpu",
                      "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},

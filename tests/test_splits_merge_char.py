@@ -55,7 +55,7 @@ def test_draw_splits_stats_golden(tmp_path: Path):
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), seed=1, subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                         val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     result.pop("selection_dir")
     assert result.pop("scope") == {"subject": "bud", "attributes": ()}
     assert result.pop("tallies") == {"partial": 12}
@@ -75,7 +75,7 @@ def test_draw_splits_selection_document_golden(tmp_path: Path):
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "s"
     result = draw_splits(tmp_path, str(root), output_path=str(out), seed=1, subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                         val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert result["splits"] == GOLDEN_DRAW_SPLITS["splits"]
     assert result["total_stems"] == 12
     assert result["seed"] == 1

@@ -29,7 +29,7 @@ def test_build_each_builtin_detector(detector):
 
 def test_build_detector_unknown_name_raises():
     from tcip_mcp.pipelines.components.detectors import build_detector
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError, match="Unknown detector 'does_not_exist'"):
         build_detector("does_not_exist", object(), 1, featmap_names=["0"], num_levels=1)
 
 

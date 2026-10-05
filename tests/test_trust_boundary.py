@@ -36,25 +36,26 @@ def test_the_authority_parser_canonicalises_every_spelling() -> None:
 def test_an_arrival_is_local_or_not() -> None:
     assert local_arrival(_scope(("127.0.0.1", 8765), None))
     assert local_arrival(_scope(("::ffff:127.0.0.1", 8765), None))
-    assert local_arrival(_scope(("localhost", 80), None))
     assert local_arrival(_scope(("/tmp/tcip.sock", None), None))
     assert not local_arrival(_scope(("192.168.1.23", 8765), None))
+    assert not local_arrival(_scope(("localhost", 80), None))
     for unclassifiable in (("testserver", 80), ("", None), None):
         assert not local_arrival(_scope(unclassifiable, None))
     assert is_loopback_host("[::ffff:127.0.0.1]") and not is_loopback_host("0.0.0.0")
 
 
-def test_the_host_must_be_a_loopback_name_at_the_arrival_port() -> None:
+def test_the_host_must_be_the_loopback_host_at_the_arrival_port() -> None:
     assert host_allowed(_scope(("127.0.0.1", 8765), "127.0.0.1:8765"))
-    assert host_allowed(_scope(("127.0.0.1", 8765), "localhost:8765"))
-    assert not host_allowed(_scope(("127.0.0.1", 8765), "localhost:9999"))
+    assert not host_allowed(_scope(("127.0.0.1", 8765), "127.0.0.1:9999"))
+    assert not host_allowed(_scope(("127.0.0.1", 8765), "localhost:8765"))
     assert not host_allowed(_scope(("127.0.0.1", 8765), "orchard-pc:8765"))
     assert not host_allowed(_scope(("127.0.0.1", 8765), None))
 
 
 def test_a_loopback_origin_at_any_port_is_served_on_a_local_arrival() -> None:
     scope = _scope(("127.0.0.1", 8765), "127.0.0.1:8765", scheme="ws")
-    assert origin_allowed("http://localhost:5173", scope)
+    assert origin_allowed("http://127.0.0.1:5173", scope)
+    assert not origin_allowed("http://localhost:5173", scope)
     assert origin_allowed("ws://127.0.0.1:8765", scope)
     assert origin_allowed(None, scope)
     assert not origin_allowed("http://evil.example.com", scope)

@@ -14,9 +14,9 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 torch = pytest.importorskip("torch")
 
-SCOPED_DATA = {"num_channels": 3, "scope": {"subject": "bud"}}
-"""A three-band detection run's data section, stating the one subject it is scoped to; the
-admission reads the attributes the registry declares for it."""
+SCOPED_DATA = {"num_channels": 3, "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}}
+"""A three-band detection run's data section, stating the one subject it is scoped to and the
+seed its own draw is made at; the admission reads the attributes the registry declares for it."""
 
 BUILT_DETECTOR = {
     "builder": "tests.bespoke_models:build_bespoke_detection",
@@ -154,7 +154,8 @@ def finished_run(
     time it ends, and ``cancel_requested`` requests its cancellation before it starts.
     ``model_source`` defaults to :data:`BUILT_DETECTOR` and ``data`` to :data:`SCOPED_DATA` for a
     detection or instance_seg model, three bands otherwise; ``registry`` is the subject registry
-    its own frames' dataset declares, so its admission records that registry's attributes.
+    its own frames' dataset declares, so its admission records that registry's attributes. A run
+    drawing its own split draws it at ``data.split.seed`` 0 unless ``data`` states one.
     Returns the run directory."""
     from tcip_mcp import experiments
     from tcip_mcp.pipelines.training.subprocess_worker import run_directory
@@ -170,6 +171,9 @@ def finished_run(
                                    registry=registry)
                   if geometric else table_images(where))
         stated = {**frames, **stated}
+    split = stated.get("split") or {}
+    if "selection_dir" not in split:
+        stated = {**stated, "split": {"seed": 0, "val_ratio": 0.15, **split}}
     config: dict[str, Any] = {
         "model_source": model_source,
         "data": stated,
@@ -267,7 +271,7 @@ def tiled_record(*, tile_size: int, overlap: float, conf: float,
     from types import SimpleNamespace
 
     from tcip_mcp.pipelines.execution import tiled_execution, untiled_execution
-    from tcip_mcp.pipelines.inference.predictor import TileGeometry
+    from tcip_mcp.pipelines.slicing import TileGeometry
 
     detector = SimpleNamespace(task="detection", path="detector.pt")
     geometry = TileGeometry(tile_size=tile_size, tile_size_source="explicit",

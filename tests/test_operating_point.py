@@ -7,22 +7,15 @@ import pytest
 
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
 
-from tests._dense_op_fixtures import _box, dense_records, good_cal_holdout  # noqa: E402
+from tests._dense_op_fixtures import _box, dense_records  # noqa: E402
 from tests._dense_op_fixtures import ann as _ann  # noqa: E402
 from tests._dense_op_fixtures import toy_records as _records  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     gt_class_avg_size,
-    gt_facts,
     pick_count_unbiased,
     pick_f1_max,
     derive_operating_point_curve,
 )
-
-
-def test_good_cal_holdout_sides_share_no_ground_truth_and_differ_in_counts():
-    cal, hold = good_cal_holdout()
-    assert not {repr(gt_facts(r)) for r in cal} & {repr(gt_facts(r)) for r in hold}
-    assert {len(r["gt"]) for r in cal} != {len(r["gt"]) for r in hold}
 
 
 def test_gt_class_avg_size_derived_from_data():

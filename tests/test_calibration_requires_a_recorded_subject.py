@@ -48,7 +48,7 @@ class _MaskBoxDataset(Dataset):
         mask = np.array(Image.open(sample.ground_truth)) > 0
         ys, xs = np.nonzero(mask)
         box = [float(xs.min()), float(ys.min()), float(xs.max() + 1), float(ys.max() + 1)]
-        return pil_to_tensor(load_image(Path(sample.source), 3)), {
+        return pil_to_tensor(load_image(sample.image, 3)), {
             "boxes": torch.tensor([box]), "labels": torch.tensor([1]),
             "iscrowd": torch.tensor([0]), "image_id": idx}
 

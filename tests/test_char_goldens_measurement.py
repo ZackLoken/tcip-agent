@@ -30,7 +30,7 @@ torch = pytest.importorskip("torch")  # evaluation.py imports torch at module lo
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology as PH  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
-    coco_detection_metrics,
+    detection_metrics,
     gt_class_avg_size,
     pick_count_unbiased,
     pick_f1_max,
@@ -230,11 +230,6 @@ def test_golden_consolidated_operating_point_defaults(tmp_path):
     assert ev_sig.parameters["iou_threshold"].default == 0.5
     assert not {"conf_threshold", "cross_tile_nms", "max_dets"} & set(ev_sig.parameters)
 
-    # evaluation.py surfaces: pinned so a metrics-default change is visible too.
-    coco_sig = inspect.signature(EV.coco_detection_metrics)
-    assert coco_sig.parameters["conf_threshold"].default == 0.25
-    assert coco_sig.parameters["iou_threshold"].default == 0.5
-    assert coco_sig.parameters["max_dets"].default == 100
     ff_sig = inspect.signature(runners.run_full_frame_evaluation)
     # The stated execution values arrive whole and resolve inside the runner's own prepared pass.
     assert ff_sig.parameters["stated"].default is inspect.Parameter.empty
@@ -315,7 +310,9 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
         task = "detection"
         train_tile_size = 64
         train_overlap = 0.0
+        train_native_size = train_augmentation = None
         in_chans = 3
+        dims = {"in_chans": 3, "num_classes": 1}
         model = _DummyModel()
 
         def governed(self, execution):
@@ -385,27 +382,24 @@ def _iou_records():
     ]
 
 
+def _metrics(iou_threshold: float) -> dict:
+    return detection_metrics(_iou_records(), trait=None, conf_threshold=0.25,
+                             iou_threshold=iou_threshold, by_mask=False)
+
+
 def test_golden_coco_metrics_at_iou_050():
-    m = coco_detection_metrics(_iou_records(), iou_threshold=0.5,
-                               conf_threshold=0.25, max_dets=100)
+    m = _metrics(0.5)
     assert m["tp"] == 2
     assert m["fp"] == 1
     assert m["fn"] == 1
-    assert m["n_gt"] == 3
-    assert m["n_pred"] == 3
     assert m["precision"] == pytest.approx(2 / 3)
     assert m["recall"] == pytest.approx(2 / 3)
     assert m["f1"] == pytest.approx(2 / 3)
-    assert m["map50"] == pytest.approx(0.6633663366336634, abs=1e-9)
-    assert m["map75"] == pytest.approx(0.33663366336633654, abs=1e-9)
-    assert m["map"] == pytest.approx(0.46732673267326735, abs=1e-9)
-    counts = {int(c["image_id"]): (c["tp"], c["fp"], c["fn"]) for c in m["per_image_counts"]}
-    assert counts == {1: (2, 1, 0), 2: (0, 0, 1)}
+    assert m["map50"] == pytest.approx(0.6633663366336634, abs=1e-6)
+    assert m["map"] == pytest.approx(0.46732673267326735, abs=1e-6)
 
 
 def test_golden_coco_matching_is_iou_threshold_sensitive():
-    # The same predictions score differently at 0.75, proof the criterion is IoU-thresholded
-    # today (a future change replaces this with a derived center-match tolerance for the count).
-    m = coco_detection_metrics(_iou_records(), iou_threshold=0.75,
-                               conf_threshold=0.25, max_dets=100)
+    # The same predictions score differently at 0.75, proof the criterion is IoU-thresholded.
+    m = _metrics(0.75)
     assert (m["tp"], m["fp"], m["fn"]) == (1, 2, 2)

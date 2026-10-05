@@ -6,14 +6,14 @@ from __future__ import annotations
 import random
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, NamedTuple
+from typing import TYPE_CHECKING, Callable, NamedTuple, cast
 
 import tcip_store as ts
 
 from tcip_annotation import Annotation, Point, bbox_of
 from tcip_annotation.state import box_derivable, polygonal, prediction_score
 from tcip_annotation.json_io import (
-    UnreadableLabelDocument, read_document_versioned, read_label_document, read_predictions,
+    UnreadableLabelDocument, read_document_versioned, read_predictions,
 )
 from tcip_annotation.viz import (
     render_canvas_state,
@@ -105,40 +105,13 @@ def _read_for_display(source: "str | Path | BandGroupRef", *,
                        rect, spec.scale, native)
 
 
-def _display_for_stem(images_dir: str | Path, stem: str) -> DisplayRead | None:
-    """Display pixels for ``stem`` in ``images_dir``; ``None`` if ``stem`` isn't a resolvable
-    logical image (missing, or a stale band-group manifest)."""
-    from tcip_mcp.pipelines import image_utils
-
-    try:
-        source = image_utils.resolve_image_source(images_dir, stem)
-    except (FileNotFoundError, image_utils.BandGroupIncomplete):
-        return None
-    return _read_for_display(source)
-
-
-def _source_for_path(image_path: str) -> "str | Path | BandGroupRef":
-    """The logical image source behind ``image_path``, for a caller that has a path rather than a
-    ``(dir, stem)`` pair.
-
-    The enumeration primitive's own resolution of it, so a ``.bandgroup``-grouped capture reads as
-    the group it names. A path the primitive doesn't resolve (one outside any recognized
-    ``images/`` layout) is returned as itself.
-    """
-    from tcip_mcp.pipelines import image_utils
-
-    try:
-        return image_utils.resolve_image_path(image_path)
-    except (FileNotFoundError, image_utils.BandGroupIncomplete):
-        return Path(image_path)
-
-
-def _display_for_path(image_path: str, *, max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
+def _display_for_path(image_path: str | Path, *, max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
                       region: tuple[float, float, float, float] | None = None) -> DisplayRead:
-    """As ``_display_for_stem``, for a caller that already has a path rather than a
-    ``(dir, stem)`` pair.
-    """
-    return _read_for_display(_source_for_path(image_path), max_edge=max_edge, region=region)
+    """Display pixels of the logical image ``image_path`` names
+    (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`, whose refusals propagate)."""
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
+
+    return _read_for_display(resolve_image_path(image_path), max_edge=max_edge, region=region)
 
 
 def _subject_indexer() -> tuple[dict[str, int], Callable[[str], int]]:
@@ -198,7 +171,7 @@ def _box_dict(a: Annotation, index: Callable[[str], int], *, scope=None) -> dict
     d = {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2,
         "class_id": index(_legend_name(a, scope=scope))}
     if a.score is not None:
-        d["confidence"] = a.score
+        d["score"] = a.score
     return d
 
 
@@ -276,11 +249,9 @@ def visualize(
     }
 
 
-def _image_labels(image_path: str | Path) -> list[Annotation] | None:
-    """The annotations of ``image_path``'s own label document, ``None`` when it has none."""
-    from tcip_mcp.dataset_layout import label_key_of
-
-    document, version = read_document_versioned(label_key_of(image_path))
+def _labels_at(key: ts.Key) -> list[Annotation] | None:
+    """The annotations of the label document ``key``, ``None`` when there is none."""
+    document, version = read_document_versioned(key)
     return None if version == ts.Version.ABSENT else document.annotations
 
 
@@ -290,21 +261,27 @@ def _viz_annotations(
     task: str = "detect",
     class_names: str = "",
 ) -> dict:
-    """Render ground-truth annotations on a single image."""
+    """Render ground-truth annotations on the logical image ``image_path`` names
+    (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`, whose refusals answer as an
+    error), read from its own label document."""
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
+    from tcip_mcp.dataset_layout import label_key_of
+    from tcip_mcp.pipelines.image_utils import resolve_image_path, source_path_of
+
     try:
-        anns = _image_labels(image_path)
-    except (UnreadableLabelDocument, ValueError) as exc:
+        source = resolve_image_path(image_path)
+        anns = _labels_at(label_key_of(source_path_of(source)))
+    except (UnreadableLabelDocument, ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}
     if anns is None:
         return {"error": f"No labels found for {img.stem}"}
     idx, index = _subject_indexer()
 
     n_points = _n_points(anns)
-    read = _display_for_path(image_path)
+    read = _read_for_display(source)
     if task == "detect":
         shapes = _boxable(anns)
         out = render_detections(read.pixels, [_box_dict(a, index) for a in shapes],
@@ -334,17 +311,6 @@ def _viz_annotations(
     }
 
 
-def _bucket_document(bucket: str, image_path: str):
-    """``(document key or None, class scope)`` for ``image_path`` in the bucket named ``bucket``
-    under the image's dataset root; no such bucket, or one whose record will not read, refuses
-    (``ValueError``)."""
-    from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.dataset_layout import parse_image_path
-
-    found = read_bucket(parse_image_path(image_path)[0], bucket)
-    return found.document_key(Path(image_path).stem), found.scope
-
-
 def _viz_predictions(
     project: Path,
     image_path: str,
@@ -353,27 +319,36 @@ def _viz_predictions(
     class_names: str = "",
     conf_threshold: float = 0.0,
 ) -> dict:
-    """Render a bucket's predictions on a single image.
+    """Render a bucket's predictions on the logical image ``image_path`` names
+    (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`, whose refusals answer as an
+    error), read from the bucket's document for it.
 
     The legend keys each detection by its subject and the values it carries under the attributes
     the bucket's recorded scope declares (:func:`_legend_name`).
     """
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.dataset_layout import parse_image_path
+    from tcip_mcp.pipelines.image_utils import resolve_image_path, source_path_of
+
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
     try:
-        pred_key, scope = _bucket_document(bucket, image_path)
+        source = resolve_image_path(image_path)
+        root, _capture, stem = parse_image_path(source_path_of(source))
+        found = read_bucket(root, bucket)
+        pred_key, scope = found.document_key(stem), found.scope
         if pred_key is None:
-            return {"error": f"No predictions found for {img.stem} in bucket {bucket!r}"}
+            return {"error": f"No predictions found for {stem} in bucket {bucket!r}"}
         preds = read_predictions(pred_key)
-    except (UnreadableLabelDocument, ValueError) as exc:
+    except (UnreadableLabelDocument, ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}
     preds = [a for a in preds if prediction_score(a) >= conf_threshold]
     idx, index = _subject_indexer()
 
     n_points = _n_points(preds)
-    read = _display_for_path(image_path)
+    read = _read_for_display(source)
     if task == "detect":
         shapes = _boxable(preds)
         out = render_detections(
@@ -410,15 +385,16 @@ def _viz_comparison(
     """Render GT vs prediction comparison with match indicators.
 
     Green = ground truth, Red = predictions, Yellow lines = matched pairs, and the TP/FP/FN
-    counts, all as the single-image scoring
-    (:func:`~tcip_mcp.tools.annotation_tools.score_predictions`) states them at ``iou_threshold``
-    over the predictions at or above ``conf_threshold``; the legend keys the prediction side by
-    its decoded value (:func:`_legend_name`).
+    counts, all as the image's scoring
+    (:func:`~tcip_mcp.pipelines.training.evaluation.score_bucket`) matches them at
+    ``iou_threshold`` over the predictions at or above ``conf_threshold``; the legend keys the
+    prediction side by its decoded value (:func:`_legend_name`). An image the bucket names no
+    document for draws its ground truth alone, every object missed.
     """
-    from tcip_annotation.matching import pair_proposals
-
-    from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
-    from tcip_mcp.tools.annotation_tools import score_predictions
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.dataset_layout import parse_image_path
+    from tcip_mcp.pipelines.image_utils import resolve_image_path, source_path_of
+    from tcip_mcp.pipelines.training.evaluation import score_bucket
 
     img = Path(image_path)
     if not img.is_file():
@@ -426,39 +402,24 @@ def _viz_comparison(
 
     idx, index = _subject_indexer()
     try:
-        labels = _image_labels(image_path)
-        pred_key, scope = _bucket_document(bucket, image_path)
-    except (UnreadableLabelDocument, ValueError) as exc:
+        source = resolve_image_path(image_path)
+        found = read_bucket(parse_image_path(source_path_of(source))[0], bucket)
+        (one,), _metrics = score_bucket([source], found, iou_threshold=iou_threshold,
+                                        conf_threshold=conf_threshold, trait=None)
+    except (UnreadableLabelDocument, ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}
-    if labels is None:
-        return {"error": f"No labels found for {img.stem}"}
-    gt_all = labels
-    gt = _boxable(gt_all)
-    gt_dicts = [_box_dict(a, index) for a in gt]
-    pred_dicts: list[dict] = []
-    tp_matches: list[tuple[int, int]] = []
-    unpredicted = pair_proposals(
-        gt_all, [], resolve_match_criterion(None, [], iou_threshold=iou_threshold))
-    tp, fp, fn = 0, 0, len(unpredicted.missed)
-    if pred_key is not None:
-        try:
-            preds_all = read_predictions(pred_key)
-        except UnreadableLabelDocument as exc:
-            return {"error": str(exc)}
-        pred_dicts = [_box_dict(a, index, scope=scope) for a in _boxable(preds_all)]
-        scored = score_predictions(image_path, bucket, iou_threshold=iou_threshold,
-                                   conf_threshold=conf_threshold, detail=True)
-        if "error" in scored:
-            return {"error": scored["error"]}
-        # The scoring indexes the whole documents; the renderer draws their boxable entries.
-        gpos = {i: k for k, i in enumerate(
-            i for i, a in enumerate(gt_all) if box_derivable(a.geometry))}
-        ppos = {i: k for k, i in enumerate(
-            i for i, a in enumerate(preds_all) if box_derivable(a.geometry))}
-        tp_matches = [(gpos[g], ppos[p]) for g, p in scored["matches"]]
-        tp, fp, fn = scored["tp"], scored["fp"], scored["fn"]
+    preds_all = one.preds or []
+    gt_dicts = [_box_dict(a, index) for a in _boxable(one.gt)]
+    pred_dicts = [_box_dict(a, index, scope=found.scope) for a in _boxable(preds_all)]
+    # The matching indexes the whole documents; the renderer draws their boxable entries.
+    gpos = {i: k for k, i in enumerate(
+        i for i, a in enumerate(one.gt) if box_derivable(a.geometry))}
+    ppos = {i: k for k, i in enumerate(
+        i for i, a in enumerate(preds_all) if box_derivable(a.geometry))}
+    tp_matches = [(gpos[g], ppos[p]) for g, p in one.matching.pairs]
+    tp, fp, fn = one.matching.counts
 
-    read = _display_for_path(image_path)
+    read = _read_for_display(one.image)
     out = render_comparison(read.pixels, gt_dicts, pred_dicts, native_size=read.native_size,
                             matches=tp_matches, class_names=_name_map(idx),
                             output_path=viz_output_path(project, "comparison"))
@@ -483,28 +444,42 @@ def get_worst_predictions(bucket: Bucket, top_k: int = 8) -> dict:
     the documents the bucket's record names are ranked, each against the label document of its
     image in the bucket's capture (answered as ``capture``); a labeled image of that capture it
     names none for was not predicted, and is listed under ``not_predicted`` rather than scored. A
-    bucket recording no capture refuses (``ValueError``), and a ranked image with no label document
+    bucket recording no capture refuses (``ValueError``), a ranked image naming no logical image
+    (``FileNotFoundError``), and a ranked image with no label document
     (``UnreadableLabelDocument``).
 
     Args:
         bucket: The published bucket whose recorded documents are ranked.
         top_k: Number of worst images to return.
     """
+    return _ranked(bucket, top_k)[0]
+
+
+def _ranked(bucket: Bucket, top_k: int) -> tuple[dict, dict[str, tuple]]:
+    """:func:`get_worst_predictions`'s answer beside the one read it ranked over
+    (:func:`~tcip_mcp.pipelines.training.evaluation.bucket_reads` of the bucket's own documents),
+    by stem."""
     from tcip_annotation.json_io import detection_annotations
 
-    from tcip_mcp.dataset_layout import capture_label_keys, label_key
+    from tcip_mcp.dataset_layout import capture_label_keys, image_dir
+    from tcip_mcp.pipelines.image_utils import resolve_image_paths, source_path_of
+    from tcip_mcp.pipelines.training.evaluation import bucket_reads
 
     capture = bucket.date
     if capture is None:
         raise ValueError(f"bucket {bucket.name!r} records no capture, so no label document "
                          "answers for its images.")
+    read = bucket_reads(resolve_image_paths(
+        image_dir(bucket.root, capture) / name for _stem, name in sorted(bucket.documents.items())),
+        bucket)
+    # Every image is one of the bucket's own documents, so each carries its predictions.
+    by_stem = {Path(source_path_of(src)).stem: (src, gt, cast(list, preds))
+               for src, gt, preds in read}
     # Both sides counted as a count counts: objects with a box, a crowd region and a Point none.
     scores: list[tuple[str, float]] = []
-    for pred_key in bucket.document_keys:
-        stem = pred_key.parts[-1]
-        preds = detection_annotations(read_label_document(pred_key).annotations)
-        gt_anns = detection_annotations(read_label_document(
-            label_key(bucket.root, capture, stem)).annotations)
+    for stem, (_img, gt, predicted) in by_stem.items():
+        preds = detection_annotations(predicted)
+        gt_anns = detection_annotations(gt)
 
         n_pred = len(preds)
         n_gt = len(gt_anns)
@@ -527,7 +502,7 @@ def get_worst_predictions(bucket: Bucket, top_k: int = 8) -> dict:
         "total_evaluated": len(scores),
         "not_predicted": [key.parts[-1] for key in capture_label_keys(bucket.root, capture)
                           if key.parts[-1] not in bucket.documents],
-    }
+    }, by_stem
 
 
 def render_failure_cases(
@@ -556,38 +531,26 @@ def render_failure_cases(
         class_names: Comma-separated class names.
     """
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.dataset_layout import image_dir, label_key, prediction_key
 
     try:
-        found = read_bucket(dataset_root, bucket)
-        worst = get_worst_predictions(found, top_k=top_k)
-    except (UnreadableLabelDocument, ValueError) as exc:
+        worst, by_stem = _ranked(read_bucket(dataset_root, bucket), top_k)
+    except (UnreadableLabelDocument, ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}
-    capture = worst["capture"]
 
     worst_items = worst.get("worst_images", [])
     if not worst_items:
         return {"summary": "No prediction errors found", "image_path": None}
 
-    # One GT-vs-prediction render per case, titled in the same pass so a case that can't be
-    # resolved drops its title with it.
     case_paths: list[str] = []
     titles: list[str] = []
-    img_dir = image_dir(found.root, capture)
     for item in worst_items:
         stem = item["stem"]
-        read = _display_for_stem(img_dir, stem)
-        if read is None:
-            continue
+        source, gt, preds = by_stem[stem]
+        read = _read_for_display(source)
 
         idx, index = _subject_indexer()
-        try:
-            gt_dicts = [_box_dict(a, index) for a in _boxable(read_label_document(
-                label_key(found.root, capture, stem)).annotations)]
-            pred_dicts = [_box_dict(a, index) for a in _boxable(read_predictions(
-                prediction_key(found.root, found.name, stem)))]
-        except UnreadableLabelDocument as exc:
-            return {"error": str(exc)}
+        gt_dicts = [_box_dict(a, index) for a in _boxable(gt)]
+        pred_dicts = [_box_dict(a, index) for a in _boxable(preds)]
 
         out = viz_output_path(project, f"failure_{len(case_paths):03d}_{stem}")
         render_comparison(read.pixels, gt_dicts, pred_dicts, native_size=read.native_size,
@@ -617,9 +580,9 @@ def _viz_dataset_sample(
     class_names: str = "",
 ) -> dict:
     """Render a grid of random annotated dataset samples."""
-    from tcip_mcp.dataset_layout import image_root
+    from tcip_mcp.dataset_layout import image_dir, image_root, label_key, list_dates
     from tcip_mcp.pipelines.image_utils import (
-        BandGroupIncomplete, list_logical_images, refuse_incomplete_band_group, source_path_of,
+        BandGroupIncomplete, list_logical_images, refuse_incomplete_band_group,
     )
 
     root = Path(folder_path)
@@ -627,23 +590,22 @@ def _viz_dataset_sample(
     if not images_dir.is_dir():
         return {"error": f"Images directory not found: {images_dir}"}
 
-    # Every logical image at or under images_dir, a grouped capture as one entry, at any depth.
-    dirs = {images_dir} | {p for p in images_dir.rglob("*") if p.is_dir()}
-    all_images = [(stem, src) for d in sorted(dirs)
-                  for stem, src in sorted(list_logical_images(d).items())]
+    # Every logical image of every capture, a grouped capture as one entry.
+    all_images = [(capture, stem, src) for capture in list_dates(root)
+                  for stem, src in sorted(list_logical_images(image_dir(root, capture)).items())]
     if not all_images:
         return {"error": "No images found in dataset"}
 
     sample = random.sample(all_images, min(n, len(all_images)))
     rendered_paths = []
     titles = []
-    for stem, enumerated in sample:
+    for capture, stem, enumerated in sample:
         try:
             source = refuse_incomplete_band_group(enumerated)
         except BandGroupIncomplete:
             continue
         try:
-            anns = _image_labels(source_path_of(source))
+            anns = _labels_at(label_key(root, capture, stem))
         except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
         read = _read_for_display(source)
@@ -766,20 +728,19 @@ def capture_live_canvas(
         region = (float(viewport.get("x", 0)), float(viewport.get("y", 0)),
                   float(viewport["w"]), float(viewport["h"]))
     read = _display_for_path(src_image, max_edge=max_edge, region=region)
-    out = render_canvas_state(read.pixels, shapes,
-                              origin=(read.rect.x0, read.rect.y0), scale=read.scale,
-                              output_path=viz_output_path(project, "canvas", suffix=".jpg"))
+    try:
+        out = render_canvas_state(read.pixels, shapes,
+                                  origin=(read.rect.x0, read.rect.y0), scale=read.scale,
+                                  output_path=viz_output_path(project, "canvas", suffix=".jpg"))
+    except ValueError as exc:
+        return {"error": f"the pushed canvas state for {src_image} will not render: {exc}"}
     ping_delivered = bool(ping.get("delivered"))
 
     now = datetime.now(timezone.utc)
-    tag_counts: dict[str, int] = {}
-    creator_counts: dict[str, int] = {}
-    for s in shapes:
-        if isinstance(s, dict):
-            tag_counts[str(s.get("tag") or "untagged")] = tag_counts.get(str(s.get("tag") or "untagged"), 0) + 1
-            cb = s.get("created_by")
-            if cb:
-                creator_counts[str(cb)] = creator_counts.get(str(cb), 0) + 1
+    from collections import Counter
+
+    tag_counts = dict(Counter(str(s.get("tag") or "untagged") for s in shapes))
+    creator_counts = dict(Counter(str(s["created_by"]) for s in shapes if s.get("created_by")))
 
     age = round((now - _received_at(state, "canvas_live")).total_seconds(), 1)
     if refreshed or age < 5.0:

@@ -29,7 +29,6 @@ from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 from typing import Any, BinaryIO
 
-import tcip_store
 from tcip_store import (
     BadKey, DecodeError, decode_value, encode_log_line, encode_record,
 )
@@ -454,12 +453,11 @@ def launch_declarations(project: Path | str) -> dict[str, dict[str, Any]]:
     """The agent identity each run's ``launch_training`` line in ``project``'s audit log carries,
     by the experiment id it names: empty for a launch no agent declared itself to."""
     from tcip_mcp import agent_identity
-    from tcip_mcp.audit import audit_log_key
+    from tcip_mcp.audit import acts_of
 
     return {entry["arguments"]["experiment_id"]:
             {field: entry[field] for field in agent_identity.RECORD_FIELDS if field in entry}
-            for entry in tcip_store.read_log(audit_log_key(project)).records
-            if entry.get("tool") == "launch_training"}
+            for entry in acts_of(project, ("launch_training",))[0]}
 
 
 def _distinct_epoch_count(rows: list[dict[str, Any]]) -> int:

@@ -154,7 +154,7 @@ def test_real_data_stale_manifest_recovers_by_deleting_it(dji_copy):
     """Deleting a stem's .bandgroup is the one recovery path for a manifest whose sibling was
     since deleted; the next detection pass sees the survivors as ungrouped again."""
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, detect_and_write_band_groups
-    from tcip_mcp.pipelines.image_utils import resolve_image_source
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
 
     result = detect_and_write_band_groups(dji_copy)
     stem = result["formed"][0]["stem"]
@@ -162,7 +162,7 @@ def test_real_data_stale_manifest_recovers_by_deleting_it(dji_copy):
     (dji_copy / f"{stem}_G.TIF").unlink()
 
     with pytest.raises(BandGroupIncomplete):
-        resolve_image_source(dji_copy, stem)
+        resolve_image_path(manifest_path)
 
     manifest_path.unlink()
     redo = detect_and_write_band_groups(dji_copy)
@@ -171,7 +171,7 @@ def test_real_data_stale_manifest_recovers_by_deleting_it(dji_copy):
     reformed = {g["stem"]: g for g in redo["formed"]}
     assert stem in reformed
     assert sorted(reformed[stem]["bands"]) == ["NIR", "Red", "RedEdge"]
-    ref = resolve_image_source(dji_copy, stem)
+    ref = resolve_image_path(manifest_path)
     assert sorted(ref.bands) == ["NIR", "Red", "RedEdge"]
 
 

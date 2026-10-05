@@ -2,7 +2,7 @@
 
 A mosaic reference band has no image identity of its own, so the only proof it was held out is its
 geometry: the rect has to sit fully inside a region the run's partition actually recorded as
-non-train (``val_region``/``test_region``/``calibration_region``) and clear of every recorded train
+non-train (``val_region``/``holdout_region``/``calibration_region``) and clear of every recorded train
 region. Missing the containment obligation admits a rect that lies in no attested region at all: a
 gap between regions, or coordinates the persisted geometry never covered.
 """
@@ -22,7 +22,7 @@ from tcip_mcp.pipelines.operating_point import spatial_disjointness  # noqa: E40
 
 MOSAIC_W, MOSAIC_H = 4000, 3000
 GAPPED = {"train_region": [[0, 0, 400, 1000]], "val_region": [[600, 0, 1000, 1000]],
-          "test_region": [], "calibration_region": []}
+          "holdout_region": [], "calibration_region": []}
 """A manifest reserving x<400 for training and x>=600 for validation, silent on the strip
 between them."""
 
@@ -78,8 +78,7 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
     data_cfg = {
         "images_dir": str(images_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
-                  "reserve_calibration_fraction": 0.15},
+        "split": {"val_ratio": 0.2, "holdout_ratio": 0.1, "calibration_ratio": 0.15, "seed": 1},
     }
     resolved_run(tmp_path, data_cfg, experiment_id="exp_four_way")
     spatial = run_resolution("exp_four_way", project=tmp_path)["data"]["split"]["spatial_manifest"]
@@ -111,7 +110,7 @@ def test_a_spatial_runs_resolved_record_carries_no_drawn_seed(tmp_path):
     data_cfg = {
         "images_dir": str(images_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 7},
+        "split": {"val_ratio": 0.2, "holdout_ratio": 0.1, "calibration_ratio": 0, "seed": 7},
     }
     resolved_run(tmp_path, data_cfg, experiment_id="exp_spatial_no_seed")
     resolved = run_resolution("exp_spatial_no_seed", project=tmp_path)

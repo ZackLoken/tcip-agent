@@ -7,7 +7,6 @@ sampler orders a tiled dataset's reads to stay inside GDAL's block cache.
 
 from __future__ import annotations
 
-import inspect
 import logging
 import math
 from collections.abc import Sequence
@@ -22,17 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 def _target_class_id(target: dict, class_key: str | None = None) -> int | None:
-    """Class id for a sample's target, honoring an explicit ``class_key`` or task defaults.
-
-    A dataset that names its class field differently than the ``label``/``ranks``/``labels``
-    defaults below can pass ``class_key`` instead of silently bucketing every sample as class 0.
-    Returns None when no class is found.
-
-    Detection/instance-seg tensor ``labels`` are 1-indexed (cid + 1, background = 0)
-    while ``class_distribution`` keys are 0-indexed cids, so that fallback branch shifts
-    back by 1. An explicit ``class_key`` returns the raw value unshifted: don't pass
-    ``class_key="labels"`` for detection targets; rely on the fallback instead.
-    """
+    """A sample's class id: its target's ``class_key`` value, raw, when one is named, else its
+    ``label``, its ``ranks``, or its first detection ``labels`` row shifted from 1-indexed to the
+    0-indexed id ``class_distribution`` keys; ``None`` when none is found."""
     if class_key is not None:
         val = target.get(class_key)
     elif "label" in target:
@@ -52,10 +43,7 @@ def _target_class_id(target: dict, class_key: str | None = None) -> int | None:
 
 
 class ClassBalancedSampler(Sampler):
-    """Over-/under-samples so each class appears equally often per epoch.
-
-    Good for disease scoring and ordinal traits where some ranks are rare.
-    """
+    """Over-/under-samples so each class appears equally often per epoch."""
 
     def __init__(self, dataset: BaseDataset, class_key: str | None = None) -> None:
         self.class_key = class_key
@@ -73,15 +61,17 @@ class ClassBalancedSampler(Sampler):
     def _compute_weights(
         dataset: BaseDataset, dist: dict[int, int], class_key: str | None = None,
     ) -> torch.Tensor:
-        total = sum(dist.values())
-        n_classes = len(dist)
-        class_weight = {cid: total / (n_classes * cnt) for cid, cnt in dist.items()}
+        """Each sample's draw weight: its class's balanced weight
+        (:func:`~tcip_mcp.pipelines.components.losses.compute_class_weights`), 1.0 for a sample
+        with no class or one outside ``dist``."""
+        from tcip_mcp.pipelines.components.losses import compute_class_weights
 
+        class_weight = compute_class_weights(dist, normalize=False).tolist()
         weights = []
         for i in range(len(dataset)):
             _, target = dataset[i]
             cid = _target_class_id(target, class_key)
-            weights.append(class_weight.get(cid, 1.0) if cid is not None else 1.0)
+            weights.append(class_weight[cid] if cid in dist else 1.0)
         return torch.tensor(weights, dtype=torch.double)
 
     def __iter__(self):
@@ -95,10 +85,7 @@ class ClassBalancedSampler(Sampler):
 
 
 class OverSampler(Sampler):
-    """Duplicate minority-class samples so all classes have >= min_count.
-
-    Use when some classes have <10 samples (common for rare phenotypes).
-    """
+    """Duplicate minority-class samples so all classes have >= min_count."""
 
     def __init__(self, dataset: BaseDataset, min_count: int = 50, class_key: str | None = None) -> None:
         dist = dataset.class_distribution
@@ -177,34 +164,16 @@ def _interleave_lanes(lanes: list[list[int]], batch_size: int) -> list[int]:
 
 
 class TileLocalitySampler(Sampler):
-    """Spatially local read order over a tiled dataset's tile lattice.
-
-    Fully shuffled tile access on a windowed raster whose compression blocks span full-width
-    strips re-decodes each strip for nearly every tile that touches it, because the block
-    cache evicts a strip long before the shuffle returns to its row. This sampler keeps each
-    reading process inside a contiguous band of tile rows so a band's strips stay resident,
-    while training still sees randomness at every level per epoch: source order is shuffled,
-    band order within a source is shuffled, and tile order within a band is shuffled.
-
-    The band height is derived at construction, never pinned: half the per-reader GDAL cache
-    share (the other half absorbs overlap reads crossing into the neighbor band) divided by
-    the costliest windowed source's decoded row bytes, converted to tile rows through the
-    lattice's row pitch. With ``num_workers > 1`` each worker process holds its own GDAL
-    cache, so the share is the process budget divided by the worker count. The derived band
-    and its inputs are logged at construction.
-
-    Multi-worker loading keeps per-worker locality through lanes: torch's multiprocessing
-    DataLoader dispatches batch ``i`` to worker ``i mod num_workers``, in order (measured to
-    hold across batch sizes, prefetch factors, and persistent_workers), so bands are dealt
-    round-robin onto ``num_workers`` lanes and the emitted order interleaves the lanes at
-    ``batch_size`` granularity, meaning worker ``w`` reads lane ``w``'s bands back to back.
-    Once a lane exhausts it leaves the rotation, so alignment loosens over the epoch's tail
-    chunks; every earlier batch lands on its lane's worker.
+    """A tiled dataset's tiles in bands of contiguous tile rows, sources, bands and tiles within
+    a band each shuffled per epoch; with ``num_workers > 1`` bands are dealt round-robin onto one
+    lane per worker and the lanes interleaved ``batch_size`` tiles at a time. The band height is
+    derived at construction from half the per-reader GDAL cache share over the costliest windowed
+    source's decoded row bytes, and logged.
 
     Requires a dataset exposing ``tile_entries`` (index-ordered ``(stem, (x0, y0, x1, y1))``)
     and ``source_frames`` (per-stem frame facts including ``windowed``), at least one
     windowed source, and the loader context: ``num_workers`` always, ``batch_size`` when
-    ``num_workers > 1`` (the lane interleaving is defined in batches).
+    ``num_workers > 1``; anything else refuses naming why.
     """
 
     def __init__(self, dataset, num_workers: int | None = None,
@@ -338,12 +307,12 @@ def build_sampler(name: str, dataset: BaseDataset, *, num_workers: int | None = 
     constructor accepts them; a sampler that needs one and was built without it refuses,
     naming what to pass. A sampler whose constructor takes neither is built without them.
     """
-    if name not in _SAMPLER_MAP:
-        raise ValueError(f"Unknown sampler '{name}'. Available: {list(_SAMPLER_MAP.keys())}")
-    cls = _SAMPLER_MAP[name]
+    from tcip_mcp.pipelines.model_build import keyword_parameters, resolve_named
+
+    cls = resolve_named(name, _SAMPLER_MAP, kind="sampler")
     if cls is None:
         return None
-    params = inspect.signature(cls).parameters
+    params, _open = keyword_parameters(cls)
     if "num_workers" in params:
         kwargs.setdefault("num_workers", num_workers)
     if "batch_size" in params:

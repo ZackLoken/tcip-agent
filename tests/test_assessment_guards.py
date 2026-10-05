@@ -144,7 +144,7 @@ def test_a_mosaic_reference_band_is_held_out_only_inside_a_non_training_region()
     from tcip_mcp.pipelines.operating_point import spatial_disjointness
 
     spatial = {"train_region": [[0, 0, 500, 1000]], "val_region": [[500, 0, 650, 1000]],
-               "calibration_region": [[650, 0, 800, 1000]], "test_region": [[800, 0, 1000, 1000]]}
+               "calibration_region": [[650, 0, 800, 1000]], "holdout_region": [[800, 0, 1000, 1000]]}
 
     assert spatial_disjointness(spatial, [(550, 100, 600, 300), (680, 100, 780, 300),
                                           (850, 100, 950, 300)]) == []
@@ -408,3 +408,6 @@ def test_a_restored_record_runs_as_recorded_and_a_changed_overlap_or_merge_refus
         prepare_pass(checkpoint, Stated(overlap=0.5), restored=recorded)
     with pytest.raises(ExecutionRefused, match="postprocess stated 'nmm', recorded 'nms'"):
         prepare_pass(checkpoint, Stated(postprocess="nmm"), restored=recorded)
+    # A blank merge is a name the vocabulary refuses, never the default an omitted one takes.
+    with pytest.raises(ValueError, match="Unknown cross-tile merge ''.*nms"):
+        prepare_pass(checkpoint, Stated(tile=True, overlap=0.2, postprocess=""))

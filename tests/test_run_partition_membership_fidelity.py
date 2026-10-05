@@ -37,7 +37,7 @@ def _single_source_mosaic(root: Path, width: int = 4000, height: int = 3000) -> 
 
 
 def _data_cfg(images_dir: Path, **split) -> dict:
-    cfg = {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1}
+    cfg = {"val_ratio": 0.25, "holdout_ratio": 0.1, "calibration_ratio": 0, "seed": 1}
     cfg.update(split)
     return {"images_dir": str(images_dir), "scope": {"subject": "bud"},
             "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
@@ -86,8 +86,7 @@ def test_persisted_calibration_region_is_reserved_away_from_train(tmp_path: Path
     from tcip_mcp.pipelines.operating_point import spatial_disjointness
 
     images_dir, _stem = _single_source_mosaic(tmp_path / "ds")
-    data_cfg = _data_cfg(images_dir, val_ratio=0.2, test_ratio=0.1,
-                         reserve_calibration_fraction=0.15)
+    data_cfg = _data_cfg(images_dir, val_ratio=0.2, holdout_ratio=0.1, calibration_ratio=0.15)
 
     split = _persisted_split(tmp_path, "exp_reserved_cal", data_cfg)
     spatial = split["spatial"]

@@ -32,7 +32,7 @@ def test_a_scope_the_admission_produced_round_trips_through_the_selection_and_th
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject=SUBJECT,
-                         seed=1, train_ratio=0.5, val_ratio=0.25,
+                         seed=1, val_ratio=0.25,
                          calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in result, result
 

@@ -247,8 +247,8 @@ class TestPortDiscovery:
         from tcip_mcp import web_client
         from tcip_web import __main__ as web_main
 
-        assert web_main.BACKEND_HOST is web_client.BACKEND_HOST
-        assert web_client.BACKEND_HOST == "127.0.0.1"
+        assert web_main.LOOPBACK_HOST is web_client.LOOPBACK_HOST
+        assert web_client.LOOPBACK_HOST == "127.0.0.1"
 
 
 class TestSharedWebStateDeclarations:
@@ -317,7 +317,8 @@ class TestTrainingToolOutputSchema:
             "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                              "builder_kwargs": {"min_size": 64, "max_size": 128},
                              "task": "detection"},
-            "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"}},
+            "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
+                     "split": {"seed": 0, "val_ratio": 0.15}},
             "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                          "mixed_precision": False, "device": "cpu",
         }

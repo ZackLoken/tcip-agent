@@ -223,6 +223,18 @@ def test_visualize_annotations_on_a_grouped_capture(tmp_path, grouped_dataset):
     assert Path(result["image_path"]).is_file()
 
 
+def test_visualize_annotations_on_a_band_member_answers_the_resolvers_refusal(tmp_path,
+                                                                             grouped_dataset):
+    from tcip_mcp.dataset_layout import image_dir
+    from tcip_mcp.tools.vision_tools import visualize
+
+    member = image_dir(grouped_dataset, "2026-04-01") / "capture_001_G.tif"
+    for source in ("annotations", "predictions", "comparison"):
+        result = visualize(tmp_path, source=source, path=str(member), bucket="preds")
+        assert "capture_001.bandgroup" in result["error"], (source, result)
+        assert "name the manifest" in result["error"]
+
+
 def test_viz_dataset_sample_folds_a_grouped_capture_into_one_entry(tmp_path, grouped_dataset):
     from tcip_mcp.tools.vision_tools import visualize
 
@@ -242,7 +254,7 @@ def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(tmp_path
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.data.selection import read_selection
-    from tcip_mcp.pipelines.image_utils import resolve_source_path
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.tools.data_tools import draw_splits
 
     # The fixture's own two groups (capture_001, plain_002) need two more to clear a draw's
@@ -255,14 +267,15 @@ def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(tmp_path
 
     out = grouped_dataset / "splits"
     result = draw_splits(tmp_path, str(grouped_dataset), output_path=str(out),
-                         subject="bud", train_ratio=0.5, val_ratio=0.25,
+                         subject="bud", seed=1, val_ratio=0.25,
                          calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in result, result
 
     drawn = read_selection(out, project=tmp_path)
     grouped = next(s for s in drawn.samples if Path(s.source).stem == "capture_001")
     assert Path(grouped.source).parent == images_dir  # read in place, never copied
-    resolved = resolve_source_path(grouped.source)
+    assert Path(grouped.source).suffix == ".bandgroup"  # the admission records the manifest
+    resolved = resolve_image_path(grouped.source)
     assert isinstance(resolved, BandGroupRef)
     assert all(p.is_file() for p in resolved.bands.values())
 

@@ -84,7 +84,7 @@ def test_the_gui_worker_and_the_mcp_door_publish_the_same_bucket_record(tmp_path
     from tcip_web.routes.inference import _worker
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    images_dir = _two_images(tmp_path / "images")
+    images_dir = _two_images(tmp_path / "images" / DATE)
     ckpt = registered_checkpoint(tmp_path)
     install(monkeypatch, StubPredictor())
     job = _job("prepared", images_dir, f"gui/{DATE}", ckpt, tmp_path)
@@ -205,7 +205,7 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(tmp_path, monke
     from tcip_web.routes.inference import _summary, _worker
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    images_dir = _two_images(tmp_path / "images")
+    images_dir = _two_images(tmp_path / "images" / DATE)
     ckpt = registered_checkpoint(tmp_path)
 
     install(monkeypatch, StubPredictor())

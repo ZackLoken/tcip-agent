@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 from tcip_mcp.registry_paths import nearest_containing_ancestor
 
@@ -151,21 +152,52 @@ def allowed_path(path: str | Path) -> Path:
         raise HTTPException(403, str(exc)) from exc
 
 
-def allowed_image(path: str) -> tuple[Path, int, int]:
-    """The image ``path`` names admitted by :func:`allowed_path`: its resolved path and its
-    dimensions (:func:`~tcip_mcp.pipelines.image_utils.image_path_dimensions`). No file there
-    answers 404, an ambiguous stem 400."""
+def allowed_file(path: str) -> Path:
+    """:func:`allowed_path` of a client-supplied file path; no file there answers 404."""
     from fastapi import HTTPException
-
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, image_path_dimensions
 
     p = allowed_path(path)
     if not p.is_file():
-        raise HTTPException(404, f"image not found: {path}")
+        raise HTTPException(404, f"not a file: {path}")
+    return p
+
+
+def _resolving(read: Any, path: str) -> tuple[Path, Any]:
+    """The client-supplied image ``path`` (:func:`allowed_file`) and what ``read``, a reader of
+    the logical image a path names, answers for it, the resolver's refusals translated: a path
+    naming no logical image (a band of a grouped capture) answers 404 naming why, a grouped
+    capture missing a band 409, and an ambiguous stem 400."""
+    from fastapi import HTTPException
+
+    from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
+
+    p = allowed_file(path)
     try:
-        return p, *image_path_dimensions(p)
+        return p, read(p)
+    except BandGroupIncomplete as exc:
+        raise HTTPException(409, str(exc)) from exc
     except AmbiguousImageStem as exc:
         raise HTTPException(400, str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+def resolved_image(path: str) -> tuple[Path, Any]:
+    """The client-supplied image ``path`` and the logical image it names
+    (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`, :func:`_resolving`)."""
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
+
+    return _resolving(resolve_image_path, path)
+
+
+def allowed_image(path: str) -> tuple[Path, int, int]:
+    """The client-supplied image ``path`` and the dimensions of the logical image it names
+    (:func:`~tcip_mcp.pipelines.image_utils.image_path_dimensions`, :func:`_resolving`)."""
+    from tcip_mcp.pipelines.image_utils import image_path_dimensions
+
+    p, (width, height) = _resolving(image_path_dimensions, path)
+    return p, width, height
 
 
 def allowed_optional(path: str | None) -> str | None:

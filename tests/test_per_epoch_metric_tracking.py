@@ -68,7 +68,7 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "scope": {"subject": "leaf"}},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": "leaf"}, "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 2}],
                      "mixed_precision": False, "device": "cpu",
     }

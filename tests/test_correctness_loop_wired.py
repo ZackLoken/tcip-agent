@@ -187,7 +187,7 @@ def test_preflight_smoke_blocks_broken_builder(tmp_path, monkeypatch):
     imgs = _admitted_tree(tmp_path)
     cfg = {
         "model_source": {"builder": f"{__name__}:_broken_builder", "task": "detection"},
-        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"}},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"}, "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
     # Fast path (no smoke) is structurally valid: the builder imports fine.
@@ -208,7 +208,7 @@ def test_preflight_smoke_passes_valid_builder(tmp_path, monkeypatch):
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"}},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"}, "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
     r = preflight_config(tmp_path, cfg, smoke=True, overfit=True)
@@ -234,7 +234,8 @@ def test_preflight_builds_and_smokes_at_the_count_the_run_resolved(tmp_path, mon
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_semantic_seg",
                          "task": "semantic_seg"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(masks_dir)},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
+                 "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
 
@@ -263,7 +264,8 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(tmp_path, monk
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_semantic_seg",
                          "task": "semantic_seg"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(masks_dir)},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
+                 "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
 
@@ -294,7 +296,7 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
     imgs = _admitted_tree(tmp_path)
     cfg = {
         "model_source": {"builder": f"{__name__}:_bespoke_task_model", "task": "bunch_compactness"},
-        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"}, "split": {"seed": 0, "val_ratio": 0.15},
                  "dataset_source": {"builder": f"{__name__}:_bespoke_task_dataset",
                                     "task": "bunch_compactness"}},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
@@ -320,7 +322,7 @@ def test_preflight_smoke_batch_matches_what_the_run_will_build(tmp_path, monkeyp
     from tcip_mcp.tools.training_tools import _one_real_batch
 
     imgs = _admitted_tree(tmp_path)
-    data = {"images_dir": str(imgs), "scope": {"subject": "leaf"},
+    data = {"images_dir": str(imgs), "scope": {"subject": "leaf"}, "split": {"seed": 0, "val_ratio": 0.15},
             "dataset_source": {"builder": f"{__name__}:_strict_bespoke_dataset",
                                "task": "bunch_compactness"}}
     resolution = resolve_run({"model_source": {"task": "bunch_compactness"}, "data": data}, project=tmp_path)
@@ -339,7 +341,7 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
     imgs = _admitted_tree(tmp_path)
     cfg = {  # structurally valid, but the dataset cannot produce an item
         "model_source": {"builder": f"{__name__}:_bespoke_task_model", "task": "bunch_compactness"},
-        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"}, "split": {"seed": 0, "val_ratio": 0.15},
                  "dataset_source": {"builder": f"{__name__}:_unbuildable_dataset",
                                     "task": "bunch_compactness"}},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
@@ -399,6 +401,7 @@ def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(tmp_path,
         writer.writerow(("stem", "label"))
         writer.writerows(rows)
     data = {"images_dir": str(imgs), "labels_dir": str(table), "num_classes": 3,
+            "split": {"seed": 0, "val_ratio": 0.15},
             "dataset_source": {"builder": f"{__name__}:_bespoke_classification_dataset"}}
     config = {"model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
                                "task": "classification"},

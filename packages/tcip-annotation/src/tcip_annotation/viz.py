@@ -1,14 +1,9 @@
-"""Visualization rendering: draws annotations and predictions on images.
+"""Visualization rendering: annotations and predictions drawn on images, each render written to
+the ``output_path`` its caller names and that path returned.
 
-All functions write to the ``output_path`` their caller names and return it, for the agent's own
-image-capable read tool to consume.
-
-The renderers take display pixels, never a path. Annotation coordinates stay in the raster's own
+The renderers take display pixels, never a path, and pixel coordinates in the raster's own
 full-resolution frame, so a renderer handed reduced pixels also takes the ``native_size`` those
-coordinates are in and scales them itself. ``render_grid`` is the exception: it tiles
-already-rendered artifacts and so takes their paths.
-
-Coordinates: functions accept pixel coordinates.
+coordinates are in. ``render_grid`` tiles already-rendered artifacts and so takes their paths.
 """
 
 from __future__ import annotations
@@ -73,7 +68,24 @@ def _get_scale(orig_w: int, orig_h: int, render_w: int, render_h: int) -> tuple[
 
 
 def _color_for_class(class_id: int) -> tuple[int, int, int]:
+    """The palette color of ``class_id``, cycling through :data:`COLOR_PALETTE`."""
     return COLOR_PALETTE[class_id % len(COLOR_PALETTE)]
+
+
+def _saved(img: Image.Image, output_path: str, **options) -> str:
+    """``img`` written to ``output_path``, its directory made first; the path."""
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    img.save(output_path, **options)
+    return output_path
+
+
+def _label(draw: ImageDraw.ImageDraw, xy: tuple[float, float], text: str, font,
+           background, fill=(255, 255, 255)) -> None:
+    """``text`` at ``xy`` over a ``background`` box padded two pixels each side."""
+    x, y = xy
+    left, top, right, bottom = font.getbbox(text)
+    draw.rectangle([x, y, x + right - left + 4, y + bottom - top + 4], fill=background)
+    draw.text((x + 2, y + 2), text, fill=fill, font=font)
 
 
 def _try_font(size: int = 12) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -95,19 +107,17 @@ def render_detections(
     class_names: dict[int, str] | None = None,
     output_path: str,
     line_width: int = 2,
-    conf_key: str | None = "confidence",
 ) -> str:
     """Draw bounding boxes on display pixels. Returns output path.
 
     Args:
         image: Display pixels (uint8 RGB array or PIL image).
-        boxes: List of dicts with x1, y1, x2, y2, class_id (pixel coords in the native frame).
-               Optionally include 'confidence' for score display.
+        boxes: List of dicts with x1, y1, x2, y2, class_id (pixel coords in the native frame);
+               a prediction's also carries its 'score', which its label shows.
         native_size: ``(width, height)`` of the frame ``boxes`` are measured in.
         class_names: Mapping from class_id to display name.
         output_path: Where to save.
         line_width: Box outline width in pixels.
-        conf_key: Key for confidence score in box dicts. None to hide scores.
     """
     class_names = class_names or {}
 
@@ -118,7 +128,7 @@ def render_detections(
     sx, sy = _get_scale(orig_w, orig_h, img.size[0], img.size[1])
 
     for box in boxes:
-        cid = box.get("class_id", 0)
+        cid = box["class_id"]
         color = _color_for_class(cid)
         x1 = box["x1"] * sx
         y1 = box["y1"] * sy
@@ -127,19 +137,12 @@ def render_detections(
         draw.rectangle([x1, y1, x2, y2], outline=color, width=line_width)
 
         label = class_names.get(cid, str(cid))
-        if conf_key and conf_key in box:
-            label += f" {box[conf_key]:.2f}"
+        if "score" in box:
+            label += f" {box['score']:.2f}"
+        top, bottom = font.getbbox(label)[1::2]
+        _label(draw, (x1, max(y1 - (bottom - top) - 4, 0)), label, font, color)
 
-        # Label background
-        bbox = font.getbbox(label)
-        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        label_y = max(y1 - th - 4, 0)
-        draw.rectangle([x1, label_y, x1 + tw + 4, label_y + th + 4], fill=color)
-        draw.text((x1 + 2, label_y + 2), label, fill=(255, 255, 255), font=font)
-
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    img.save(output_path)
-    return output_path
+    return _saved(img, output_path)
 
 
 def render_segmentations(
@@ -173,10 +176,10 @@ def render_segmentations(
     sx, sy = _get_scale(orig_w, orig_h, img.size[0], img.size[1])
 
     for poly in polygons:
-        cid = poly.get("class_id", 0)
+        cid = poly["class_id"]
         color = _color_for_class(cid)
         all_pts: list[tuple[float, float]] = []
-        for ring in poly.get("rings", []):
+        for ring in poly["rings"]:
             pts = [(x * sx, y * sy) for x, y in ring]
             draw.polygon(pts, fill=color + (int(255 * alpha),), outline=color)
             all_pts.extend(pts)
@@ -187,11 +190,7 @@ def render_segmentations(
             label = class_names.get(cid, str(cid))
             draw.text((cx, cy), label, fill=(255, 255, 255), font=font)
 
-    img = Image.blend(img, overlay.convert("RGB"), alpha)
-
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    img.save(output_path)
-    return output_path
+    return _saved(Image.blend(img, overlay.convert("RGB"), alpha), output_path)
 
 
 def render_comparison(
@@ -209,7 +208,7 @@ def render_comparison(
     Args:
         image: Display pixels (uint8 RGB array or PIL image).
         gt_boxes: Ground truth boxes (x1, y1, x2, y2, class_id) in the native frame.
-        pred_boxes: Prediction boxes (x1, y1, x2, y2, class_id, confidence) in the native frame.
+        pred_boxes: Prediction boxes (x1, y1, x2, y2, class_id, score) in the native frame.
         native_size: ``(width, height)`` of the frame the boxes are measured in.
         matches: ``(gt_idx, pred_idx)`` pairs indexing into ``gt_boxes``/``pred_boxes`` in the
             order they were built from the same lists.
@@ -233,7 +232,7 @@ def render_comparison(
         x1, y1 = box["x1"] * sx, box["y1"] * sy
         x2, y2 = box["x2"] * sx, box["y2"] * sy
         draw.rectangle([x1, y1, x2, y2], outline=gt_color, width=2)
-        label = "GT:" + class_names.get(box.get("class_id", 0), str(box.get("class_id", 0)))
+        label = "GT:" + class_names.get(box["class_id"], str(box["class_id"]))
         draw.text((x1, max(y1 - 14, 0)), label, fill=gt_color, font=font)
 
     # Draw pred boxes
@@ -241,25 +240,20 @@ def render_comparison(
         x1, y1 = box["x1"] * sx, box["y1"] * sy
         x2, y2 = box["x2"] * sx, box["y2"] * sy
         draw.rectangle([x1, y1, x2, y2], outline=pred_color, width=2)
-        label = "P:" + class_names.get(box.get("class_id", 0), str(box.get("class_id", 0)))
-        if "confidence" in box:
-            label += f" {box['confidence']:.2f}"
+        label = "P:" + class_names.get(box["class_id"], str(box["class_id"]))
+        label += f" {box['score']:.2f}"
         draw.text((x1, y2 + 2), label, fill=pred_color, font=font)
 
     # Draw match lines (center-to-center), resolved from the gt/pred lists already in hand.
     if matches:
-        for gt_idx, pred_idx in matches:
-            gt = gt_boxes[gt_idx]
-            pred = pred_boxes[pred_idx]
-            gt_cx = (gt["x1"] + gt["x2"]) / 2 * sx
-            gt_cy = (gt["y1"] + gt["y2"]) / 2 * sy
-            pr_cx = (pred["x1"] + pred["x2"]) / 2 * sx
-            pr_cy = (pred["y1"] + pred["y2"]) / 2 * sy
-            draw.line([(gt_cx, gt_cy), (pr_cx, pr_cy)], fill=match_color, width=1)
+        from tcip_annotation.matching import box_centers
 
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    img.save(output_path)
-    return output_path
+        for gt_idx, pred_idx in matches:
+            ends = box_centers([[b["x1"], b["y1"], b["x2"], b["y2"]]
+                                for b in (gt_boxes[gt_idx], pred_boxes[pred_idx])]) * (sx, sy)
+            draw.line([tuple(end) for end in ends.tolist()], fill=match_color, width=1)
+
+    return _saved(img, output_path)
 
 
 def render_grid(
@@ -285,8 +279,7 @@ def render_grid(
         img = Image.new("RGB", (cell_size, cell_size), (64, 64, 64))
         draw = ImageDraw.Draw(img)
         draw.text((10, cell_size // 2), "No images", fill=(200, 200, 200))
-        img.save(output_path)
-        return output_path
+        return _saved(img, output_path)
 
     rows = (n + cols - 1) // cols
     grid = Image.new("RGB", (cols * cell_size, rows * cell_size), (32, 32, 32))
@@ -312,17 +305,9 @@ def render_grid(
             draw.text((x_off + 4, y_off + cell_size // 2), "Error", fill=(255, 128, 128))
 
         if titles and i < len(titles):
-            tx = col * cell_size + 4
-            ty = row * cell_size + 2
-            # Dark background for readability
-            bbox = font.getbbox(titles[i])
-            tw = bbox[2] - bbox[0]
-            draw.rectangle([tx, ty, tx + tw + 4, ty + 16], fill=(0, 0, 0, 180))
-            draw.text((tx + 2, ty + 1), titles[i], fill=(255, 255, 255), font=font)
+            _label(draw, (col * cell_size + 4, row * cell_size + 2), titles[i], font, (0, 0, 0))
 
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    grid.save(output_path)
-    return output_path
+    return _saved(grid, output_path)
 
 
 def render_candidates(
@@ -333,16 +318,13 @@ def render_candidates(
     output_path: str,
     alpha: float = 0.35,
 ) -> str:
-    """Render numbered proposal-engine candidate masks on display pixels for agent review.
-
-    Each candidate is drawn as a semi-transparent colored polygon with a
-    large numbered label. Colors cycle through the palette. Engine-agnostic.
-    Every ring of a candidate is drawn: an occlusion-split proposal must look split, not whole.
+    """Render numbered proposal candidates on display pixels: every ring of each a
+    semi-transparent polygon in its palette color, one number and score per candidate.
 
     Args:
         image: Display pixels (uint8 RGB array or PIL image).
-        candidates: Neutral candidate dicts, each with candidate_id, bbox, rings, area, score
-            (SAM populates these via its proposer adapter); coordinates in the native frame.
+        candidates: Candidate dicts, each with candidate_id, rings and score, coordinates in the
+            native frame.
         native_size: ``(width, height)`` of the frame the candidates are measured in.
         output_path: Where to save.
         alpha: Fill transparency (0=transparent, 1=opaque).
@@ -365,7 +347,7 @@ def render_candidates(
 
     for cand in candidates:
         cid = cand["candidate_id"]
-        color = COLOR_PALETTE[cid % len(COLOR_PALETTE)]
+        color = _color_for_class(cid)
         rings = [[(x * sx, y * sy) for x, y in ring] for ring in cand["rings"]]
 
         # Fill every ring; one number for the candidate as a whole
@@ -392,17 +374,10 @@ def render_candidates(
         )
 
         # Proposal score below the number (neutral across engines)
-        info = f"s={cand.get('score', 0):.2f}"
+        info = f"s={cand['score']:.2f}"
         overlay_draw.text((cx - 12, cy + radius + 2), info, fill=color, font=font_small)
 
-    # Composite overlay onto image
-    img_rgba = img.convert("RGBA")
-    composited = Image.alpha_composite(img_rgba, overlay)
-    result = composited.convert("RGB")
-
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    result.save(output_path)
-    return output_path
+    return _saved(Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB"), output_path)
 
 
 def render_grid_overlay(
@@ -463,35 +438,22 @@ def render_grid_overlay(
     for name, x0, y0, x1, y1 in scaled:
         if min(x1 - x0, y1 - y0) < label_min_edge:
             continue
-        bbox = font.getbbox(name)
-        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        if tw + 6 > x1 - x0:
+        left, _top, right, _bottom = font.getbbox(name)
+        if right - left + 6 > x1 - x0:
             continue
-        x = int(x0) + 3
-        y = int(y0) + 2
-        # Dark background for readability
-        draw.rectangle([x - 1, y - 1, x + tw + 3, y + th + 3], fill=(0, 0, 0))
-        draw.text((x + 1, y), name, fill=label_color, font=font)
+        _label(draw, (int(x0) + 2, int(y0) + 1), name, font, (0, 0, 0), fill=label_color)
 
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    img.save(output_path)
-    return output_path
+    return _saved(img, output_path)
 
 
-# ── Live GUI canvas render (display-resolved shapes from the canvas-state push) ──
+def _hex_rgb(color: str) -> tuple[int, int, int]:
+    """``#RRGGBB`` (or ``#RGB``) as an RGB tuple; anything else refuses (``ValueError``) naming
+    it."""
+    from PIL import ImageColor
 
-
-def _hex_rgb(color: str, fallback: tuple[int, int, int] = (255, 255, 255)) -> tuple[int, int, int]:
-    """``#RRGGBB`` (or ``#RGB``) → RGB tuple; anything unparsable falls back to white."""
-    c = (color or "").lstrip("#")
-    try:
-        if len(c) == 3:
-            return tuple(int(ch * 2, 16) for ch in c)  # type: ignore[return-value]
-        if len(c) >= 6:
-            return int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
-    except ValueError:
-        pass
-    return fallback
+    if not (isinstance(color, str) and color.startswith("#") and len(color) in (4, 7)):
+        raise ValueError(f"shape color {color!r} is not #RGB or #RRGGBB")
+    return ImageColor.getrgb(color)[:3]  # type: ignore[return-value]
 
 
 def _dashed_segment(draw, p1, p2, fill, width: int, dash: float, gap: float) -> None:
@@ -537,7 +499,9 @@ def render_canvas_state(
     ``image`` is whatever region of the raster the caller read (the human's viewport, or the whole
     frame), ``origin`` is that region's top-left corner in the raster's own full-resolution grid
     and ``scale`` is the served resolution as a fraction of native. Shape coordinates arrive in the
-    native grid and are placed by those two. The render is written to ``output_path`` as JPEG.
+    native grid and are placed by those two. The render is written to ``output_path`` as JPEG. A
+    shape that is none of those kinds, lacks its coordinates, or names a color that is not
+    ``#RGB`` or ``#RRGGBB`` refuses (``ValueError``) naming its index.
     """
     img = _rgb_frame(image)
     ox, oy = float(origin[0]), float(origin[1])
@@ -558,29 +522,23 @@ def render_canvas_state(
     # otherwise punch its silhouette out of earlier shapes' opaque outlines.
     parsed: list[tuple[dict, list[tuple[float, float]], tuple[int, int, int], bool]] = []
     labels: list[tuple[tuple[float, float], str, tuple[int, int, int]]] = []
-    for s in shapes:
-        if not isinstance(s, dict):
-            continue
-        color = _hex_rgb(str(s.get("color", "")))
-        kind = s.get("kind")
+    for i, s in enumerate(shapes):
         try:
-            if kind == "box" and s.get("xyxy"):
-                x1, y1 = tx(s["xyxy"][:2])
-                x2, y2 = tx(s["xyxy"][2:4])
+            color = _hex_rgb(s["color"])
+            kind = s["kind"]
+            if kind == "box":
+                (x1, y1), (x2, y2) = tx(s["xyxy"][:2]), tx(s["xyxy"][2:4])
                 pts = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
-                closed = True
-            elif kind == "point" and s.get("points"):
+            elif kind == "point":
                 pts = [tx(s["points"][0])]
-                closed = False
-            elif kind in ("polygon", "polyline") and s.get("points"):
+            elif kind in ("polygon", "polyline") and len(s["points"]) >= 2:
                 pts = [tx(p) for p in s["points"]]
-                if len(pts) < 2:
-                    continue
-                closed = kind == "polygon"
             else:
-                continue
-        except (TypeError, ValueError, IndexError):
-            continue  # a malformed shape must never sink the whole render
+                raise ValueError(f"kind {kind!r} with {s.get('points')!r}")
+        except (KeyError, TypeError, ValueError, IndexError) as exc:
+            raise ValueError(f"canvas shape {i} is not a box, point, polygon or polyline the "
+                             f"canvas draws: {exc!r}") from exc
+        closed = kind in ("box", "polygon")
         parsed.append((s, pts, color, closed))
         label = s.get("label")
         if label:
@@ -590,7 +548,7 @@ def render_canvas_state(
         if s.get("fill") and closed and len(pts) >= 3:
             draw.polygon(pts, fill=color + (38,))
     for s, pts, color, closed in parsed:  # pass 2: outlines + vertices
-        if s.get("kind") == "point":
+        if s["kind"] == "point":
             # The GUI's reticle: a core plus four radial ticks converging on the coordinate, the
             # mark that distinguishes a location from a very small box on the same canvas.
             px, py = pts[0]
@@ -604,7 +562,7 @@ def render_canvas_state(
                 )
             continue
         _draw_path(draw, pts, color + (255,), lw, bool(s.get("dashed")), closed=closed)
-        if s.get("kind") == "polyline":  # in-progress drawing: show the laid vertices
+        if s["kind"] == "polyline":  # in-progress drawing: show the laid vertices
             for px, py in pts:
                 draw.ellipse([px - dot_r, py - dot_r, px + dot_r, py + dot_r],
                              fill=color + (255,))
@@ -617,6 +575,4 @@ def render_canvas_state(
             draw2.text((x + dx, y + dy), text, fill=(0, 0, 0), font=font)
         draw2.text((x, y), text, fill=color, font=font)
 
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    img.save(output_path, quality=88)
-    return output_path
+    return _saved(img, output_path, quality=88)

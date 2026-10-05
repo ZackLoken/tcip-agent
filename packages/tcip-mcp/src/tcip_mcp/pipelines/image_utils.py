@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,11 +23,11 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AmbiguousImageStem", "BandGroupIncomplete", "BandGroupRef", "IMAGE_EXTS",
-    "bucket_logical_identities", "capture_kind", "display_source_path",
+    "bucket_logical_identities", "capture_kind",
     "image_dimensions", "list_logical_images", "load_image", "load_multiband",
     "logical_image_name", "pil_to_tensor", "pixel_array",
-    "refuse_incomplete_band_group", "resolve_image_path", "resolve_image_source",
-    "stem_collision_key", "stem_of",
+    "refuse_incomplete_band_group", "resolve_image_path", "resolve_image_paths",
+    "source_path_of", "stem_collision_key", "stem_of",
     "to_pil_if_faithful",
 ]
 
@@ -105,21 +106,25 @@ def list_logical_images(images_dir: str | Path) -> dict[str, "Path | BandGroupRe
     if not d.is_dir():
         return {}
     scanned = _scan_identities(d)
-    ambiguous = {key: entries for key, entries in scanned.items() if len(entries) > 1}
-    if ambiguous:
-        names = sorted(str(path) for entries in ambiguous.values() for path, _ref in entries)
+    _refuse_ambiguous(d, scanned.values())
+    return {stem_of(source): source for source in map(_identity, scanned.values())}
+
+
+def _identity(entries: list[tuple[Path, "BandGroupRef | None"]]) -> "Path | BandGroupRef":
+    """The logical image one unambiguous :func:`_scan_identities` key holds."""
+    path, ref = entries[0]
+    return ref if ref is not None else path
+
+
+def _refuse_ambiguous(d: Path, keys: "Iterable[list[tuple[Path, BandGroupRef | None]]]") -> None:
+    """Refuse (:class:`AmbiguousImageStem`) the :func:`_scan_identities` keys of ``d`` holding
+    more than one identity, naming their paths."""
+    names = sorted(str(path) for entries in keys if len(entries) > 1 for path, _ref in entries)
+    if names:
         raise AmbiguousImageStem(
             f"{d}: {names} name more than one logical image under one case-folded stem, "
             "refusing to silently keep one. Rename so each logical image has its own stem."
         )
-    result: dict[str, Path | BandGroupRef] = {}
-    for entries in scanned.values():
-        path, ref = entries[0]
-        if ref is not None:
-            result[ref.stem] = ref
-        else:
-            result[path.stem] = path
-    return result
 
 
 def capture_kind(source: "Path | BandGroupRef") -> str:
@@ -148,25 +153,38 @@ def refuse_incomplete_band_group(source: "Path | BandGroupRef") -> "Path | BandG
     return source
 
 
-def resolve_image_source(images_dir: str | Path, stem: str) -> "Path | BandGroupRef":
-    """``list_logical_images(images_dir)[stem]``.
+def resolve_image_paths(paths: "Iterable[str | Path]") -> "list[Path | BandGroupRef]":
+    """The logical image each of ``paths`` names, each directory scanned once
+    (:func:`_scan_identities`): a ``.bandgroup`` manifest's grouped capture, a raw image its own
+    file.
 
-    Raises ``FileNotFoundError`` for an unknown stem, and ``AmbiguousImageStem`` (propagated from
-    ``list_logical_images``) when ``images_dir`` holds a collision, whether or not ``stem`` is one
-    of the colliding keys. A grouped capture missing a band refuses through
-    :func:`refuse_incomplete_band_group`.
+    Refuses ``FileNotFoundError`` for a path naming no logical image, naming the manifest that
+    claims it when it is a band of a grouped capture; :class:`AmbiguousImageStem` when its own
+    stem names more than one; ``BandGroupIncomplete`` for a grouped capture missing a band.
     """
-    src = list_logical_images(images_dir).get(stem)
-    if src is None:
-        raise FileNotFoundError(f"No image for stem: {stem}")
-    return refuse_incomplete_band_group(src)
+    named_paths = [Path(p) for p in paths]
+    scanned = {d: _scan_identities(d) if d.is_dir() else {}
+               for d in {p.parent for p in named_paths}}
+
+    def named(path: Path) -> "Path | BandGroupRef":
+        entries = scanned[path.parent].get(stem_collision_key(path.stem), [])
+        _refuse_ambiguous(path.parent, [entries])
+        if not entries or entries[0][0].name != path.name:
+            owners = [str(ref.manifest_path) for (_p, ref), *_ in scanned[path.parent].values()
+                      if ref is not None and path.name in {b.name for b in ref.bands.values()}]
+            raise FileNotFoundError(
+                f"{path} names no logical image" + (
+                    f": it is a band of the grouped capture {owners[0]}; name the manifest"
+                    if owners else ""))
+        return refuse_incomplete_band_group(_identity(entries))
+
+    return [named(p) for p in named_paths]
 
 
 def resolve_image_path(image_path: str | Path) -> "Path | BandGroupRef":
-    """The logical image ``image_path`` names in its own directory (:func:`resolve_image_source`
-    over its directory and stem); its refusals propagate."""
-    path = Path(image_path)
-    return resolve_image_source(path.parent, path.stem)
+    """The logical image ``image_path`` names (:func:`resolve_image_paths`); its refusals
+    propagate."""
+    return resolve_image_paths([image_path])[0]
 
 
 def image_path_dimensions(image_path: str | Path) -> tuple[int, int]:
@@ -176,28 +194,10 @@ def image_path_dimensions(image_path: str | Path) -> tuple[int, int]:
     return image_dimensions(resolve_image_path(image_path))
 
 
-def resolve_source_path(source: str | Path) -> "Path | BandGroupRef":
-    """The logical image one recorded source path names, for a reader holding the path itself
-    rather than a directory and a stem.
-
-    A ``.bandgroup`` path resolves to the grouped capture it stands for, checked through
-    :func:`refuse_incomplete_band_group`. Any other path is the image itself, refused by name when
-    it is not on disk.
-    """
-    path = Path(source)
-    if path.suffix.lower() != MANIFEST_EXT:
-        if not path.exists():
-            raise FileNotFoundError(f"No image at the recorded source path: {path}")
-        return path
-    if not path.is_file():
-        raise FileNotFoundError(f"No band group manifest at the recorded source path: {path}")
-    return refuse_incomplete_band_group(read_band_group_manifest(path))
-
-
-def source_path_of(source: "Path | BandGroupRef") -> str:
-    """The path a selection records this logical image under: a grouped capture's own
-    ``.bandgroup`` manifest, a plain image's own file. The inverse
-    :func:`resolve_source_path` reads back."""
+def source_path_of(source: "str | Path | BandGroupRef") -> str:
+    """The path this logical image is named by, recorded and displayed: a grouped capture's own
+    ``.bandgroup`` manifest, a plain image's own file. The inverse :func:`resolve_image_path`
+    reads back."""
     return str(source.manifest_path if isinstance(source, BandGroupRef) else source)
 
 
@@ -227,14 +227,35 @@ def stem_of(source: "str | Path | BandGroupRef") -> str:
     return Path(source).stem
 
 
-def display_source_path(source: "str | Path | BandGroupRef") -> str:
-    """A JSON-safe, human-meaningful identity string for a predict result's ``image`` field: a
-    :class:`BandGroupRef`'s ``.bandgroup`` manifest path, else the path/string as-is. Never a
-    decodable source.
-    """
-    if isinstance(source, BandGroupRef):
-        return str(source.manifest_path)
-    return str(source)
+CAPTURE_TIME_FORMATS = ("%Y:%m:%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S",
+                        "%Y-%m-%d")
+"""The spellings a capture time arrives in: the colon form EXIF's DateTimeOriginal and TIFF's
+DateTime tag are specified to use, and the ISO forms a stitching engine writes its own in."""
+
+_EXIF_IFD_TAG = 0x8769
+_DT_ORIGINAL_TAG = 0x9003
+
+
+def exif_capture_time(exif) -> object | None:
+    """The raw DateTimeOriginal an image's ``exif`` (``Image.getexif()``) carries: from the Exif
+    sub-IFD where a camera nests it, else from the top level where a fresh ``PIL.Image.Exif``
+    writes it; ``None`` when it carries none."""
+    raw = exif.get_ifd(_EXIF_IFD_TAG).get(_DT_ORIGINAL_TAG)
+    return exif.get(_DT_ORIGINAL_TAG) if raw is None else raw
+
+
+def parse_capture_time(raw: object):
+    """A capture-time value in any of :data:`CAPTURE_TIME_FORMATS` as a ``datetime``; ``None``
+    when none fits."""
+    from datetime import datetime
+
+    text = str(raw).strip()
+    for fmt in CAPTURE_TIME_FORMATS:
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
 
 
 def _channels_from_shape(shape: tuple[int, ...]) -> int:
@@ -269,8 +290,14 @@ def image_dimensions(path: "str | Path | BandGroupRef", num_channels: int = 3) -
         frame = raster_source.tiff_frame(path, num_channels)
         if frame is not None:
             return int(frame[1]), int(frame[0])
-    arr = load_multiband(path, num_channels)
-    return int(arr.shape[1]), int(arr.shape[0])
+    return frame_size(load_multiband(path, num_channels))
+
+
+def frame_size(img) -> tuple[int, int]:
+    """``(width, height)`` of a decoded image: a PIL image, or an ``[H, W, ...]`` array."""
+    if isinstance(img, Image.Image):
+        return img.size
+    return int(img.shape[1]), int(img.shape[0])
 
 
 def pixel_array(img) -> tuple[np.ndarray, tuple[str, ...] | None]:

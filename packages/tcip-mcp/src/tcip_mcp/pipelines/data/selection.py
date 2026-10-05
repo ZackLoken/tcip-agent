@@ -8,7 +8,7 @@ one location (the source path, and the rect when a sample is a region of a large
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence, cast
 
@@ -26,7 +26,7 @@ SIDES = ("train", "val", "calibration", "holdout")
 ``holdout`` build neither and are the reference an assessment fits its operating point on and
 checks it against, held out from both training and selection."""
 
-REFERENCE_SIDES = ("calibration", "holdout")
+REFERENCE_SIDES = SIDES[2:]
 """The two sides an assessment reads."""
 
 DOCUMENT = "document"
@@ -75,7 +75,14 @@ class Sample:
 
     ``rect`` is the half-open pixel rect ``(x0, y0, x1, y1)`` a within-image draw assigned, or
     ``None`` when the sample is the whole source. ``ground_truth_digest`` is the ground truth's
-    :func:`ground_truth_digest` when it was read.
+    :func:`ground_truth_digest` when it was read, and ``read`` what that one read answered: the
+    decoded label document, or the table row's value; ``None`` for a mask, whose pixels a loader
+    reads, and for a sample no admission of this act has read; ``stored`` is what the store
+    answered for that read (``tcip_store.Versioned``), the bytes or record a reference retains.
+    ``image`` is the logical image this act resolved ``source`` to (a
+    :class:`~tcip_mcp.pipelines.image_utils.BandGroupRef` for a grouped capture,
+    :func:`~tcip_mcp.pipelines.data.label_queries.resolved`). None of the three is ever recorded
+    or compared.
     """
 
     member: str
@@ -86,6 +93,9 @@ class Sample:
     rect: tuple[int, int, int, int] | None = None
     row_key: str | None = None
     ground_truth_digest: str | None = None
+    read: Any = field(default=None, compare=False, repr=False)
+    stored: Any = field(default=None, compare=False, repr=False)
+    image: Any = field(default=None, compare=False, repr=False)
 
     @property
     def location(self) -> str:
@@ -216,13 +226,14 @@ def source_digests(samples: Iterable[Sample]) -> dict[str, str]:
     region. Two samples with one digest are the same image whatever their files are named."""
     import hashlib
 
-    from tcip_mcp.pipelines.image_utils import BandGroupRef, resolve_source_path
+    from tcip_mcp.pipelines.data.label_queries import resolved
+    from tcip_mcp.pipelines.image_utils import BandGroupRef
 
     by_source: dict[str, bytes] = {}
     out: dict[str, str] = {}
-    for sample in samples:
+    for sample in resolved(list(samples)):
         if sample.source not in by_source:
-            source = resolve_source_path(sample.source)
+            source = sample.image
             files = list(source.bands.values()) if isinstance(source, BandGroupRef) else [source]
             h = hashlib.sha256()
             for path in files:
@@ -504,19 +515,3 @@ def selection_digest(selection: Selection, project: str | Path) -> str:
     import hashlib
 
     return hashlib.sha256(encode_record(stored_selection_document(selection, project))).hexdigest()
-
-
-def with_sides(selection: Selection, assignment: dict[str, str]) -> Selection:
-    """``selection`` with each sample's side replaced by ``assignment[sample.location]``, for a
-    redraw that repartitions a selection's own members without changing which samples it holds.
-    Refuses a location the assignment does not name.
-    """
-    missing = sorted(s.location for s in selection.samples if s.location not in assignment)
-    if missing:
-        raise ValueError(
-            f"the redraw assigns no side to {len(missing)} of the selection's samples "
-            f"({missing[:5]}): a redraw states the whole partition it draws.")
-    redrawn = tuple(
-        replace(sample, side=assignment[sample.location]) for sample in selection.samples)
-    refuse_crossing_sides(redrawn)
-    return replace(selection, samples=redrawn)

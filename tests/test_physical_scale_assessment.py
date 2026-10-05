@@ -70,7 +70,7 @@ def _reference(project: Path, *, n: int = 8, extents_mm: list[float] | None = No
     _write_csv(csv_path, rows)
     selection = project / "selection"
     drawn = draw_splits(project, str(root), output_path=str(selection), subject=SUBJECT,
-                        group_by="stem", seed=1, train_ratio=0.25, val_ratio=0.25,
+                        group_by="stem", seed=1, val_ratio=0.25,
                         calibration_ratio=0.25, holdout_ratio=0.25)
     assert "error" not in drawn, drawn
     return selection, csv_path
@@ -251,8 +251,8 @@ def test_the_reference_csv_is_read_by_column_name(tmp_path):
     _write_csv(path, [("mm", "r1", 10.0), ("mm", "r2", 12.5)],
                header=("unit", "image_stem", "physical_extent"))
 
-    assert _read_reference_csv(str(path)) == {"r1": {"physical_extent": 10.0, "unit": "mm"},
-                                              "r2": {"physical_extent": 12.5, "unit": "mm"}}
+    assert _read_reference_csv(path.read_bytes(), str(path)) == {
+        "r1": {"physical_extent": 10.0, "unit": "mm"}, "r2": {"physical_extent": 12.5, "unit": "mm"}}
 
 
 @pytest.mark.parametrize(("rows", "match"), [
@@ -268,7 +268,7 @@ def test_a_malformed_reference_csv_refuses_naming_its_line(tmp_path, rows, match
     path = tmp_path / "reference.csv"
     _write_csv(path, rows)
     with pytest.raises(AssessmentRefused, match=match):
-        _read_reference_csv(path)
+        _read_reference_csv(path.read_bytes(), str(path))
 
 
 def test_the_scale_is_measured_from_the_retained_table(tmp_path, monkeypatch):
@@ -280,13 +280,13 @@ def test_the_scale_is_measured_from_the_retained_table(tmp_path, monkeypatch):
 
     _author_tolerance(tmp_path)
     selection, csv_path = _reference(tmp_path)
-    read = module._read_reference
+    read = module._reference_reads
 
     def changed_as_it_is_read(samples, extra=()):
         _write_csv(csv_path, [(f"r{i}", 20.0, "mm") for i in range(8)])
         return read(samples, extra)
 
-    monkeypatch.setattr(module, "_read_reference", changed_as_it_is_read)
+    monkeypatch.setattr(module, "_reference_reads", changed_as_it_is_read)
     scale = _calibrate(tmp_path, selection, csv_path)
     monkeypatch.undo()
 

@@ -1,4 +1,4 @@
-"""image_utils.list_logical_images / resolve_image_source, and the BandGroupRef-accepting
+"""image_utils.list_logical_images / resolve_image_path, and the BandGroupRef-accepting
 overloads of load_image / load_multiband / image_dimensions.
 
 Uses the real DJI multispectral sample (copied into tmp_path, never mutated in place) for at least
@@ -44,7 +44,7 @@ def grouped_dir(tmp_path: Path) -> Path:
     return d
 
 
-# ── list_logical_images / resolve_image_source ─────────────────────────────────────────
+# ── list_logical_images / resolve_image_path ───────────────────────────────────────────
 
 
 def test_list_logical_images_folds_a_group_and_keeps_the_rest(grouped_dir):
@@ -59,27 +59,39 @@ def test_list_logical_images_folds_a_group_and_keeps_the_rest(grouped_dir):
     assert "cap_G" not in logical and "cap_R" not in logical
 
 
-def test_resolve_image_source_is_the_single_lookup(grouped_dir):
-    from tcip_mcp.pipelines.image_utils import list_logical_images, resolve_image_source
+def test_resolve_image_path_answers_what_the_listing_names(grouped_dir):
+    from tcip_mcp.pipelines.image_utils import (
+        list_logical_images, resolve_image_paths, source_path_of,
+    )
 
     logical = list_logical_images(grouped_dir)
-    for stem in logical:
-        assert resolve_image_source(grouped_dir, stem) == logical[stem]
+    assert resolve_image_paths(source_path_of(src) for src in logical.values()) == list(
+        logical.values())
 
 
-def test_resolve_image_source_unknown_stem_raises_file_not_found(grouped_dir):
-    from tcip_mcp.pipelines.image_utils import resolve_image_source
+def test_resolve_image_path_refuses_a_band_member_naming_its_manifest(grouped_dir):
+    """A band of a grouped capture is no logical image of its own: its path refuses naming the
+    manifest that claims it, and the manifest's path admits the grouped capture."""
+    from tcip_mcp.pipelines.image_utils import BandGroupRef, resolve_image_path
+
+    with pytest.raises(FileNotFoundError, match="cap.bandgroup"):
+        resolve_image_path(grouped_dir / "cap_R.tif")
+    assert isinstance(resolve_image_path(grouped_dir / "cap.bandgroup"), BandGroupRef)
+
+
+def test_resolve_image_path_unknown_path_raises_file_not_found(grouped_dir):
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
 
     with pytest.raises(FileNotFoundError):
-        resolve_image_source(grouped_dir, "does_not_exist")
+        resolve_image_path(grouped_dir / "does_not_exist.jpg")
 
 
-def test_resolve_image_source_stale_group_raises_band_group_incomplete(grouped_dir):
-    from tcip_mcp.pipelines.image_utils import BandGroupIncomplete, resolve_image_source
+def test_resolve_image_path_stale_group_raises_band_group_incomplete(grouped_dir):
+    from tcip_mcp.pipelines.image_utils import BandGroupIncomplete, resolve_image_path
 
     (grouped_dir / "cap_R.tif").unlink()
     with pytest.raises(BandGroupIncomplete):
-        resolve_image_source(grouped_dir, "cap")
+        resolve_image_path(grouped_dir / "cap.bandgroup")
 
 
 def test_list_logical_images_skips_a_corrupt_manifest_without_raising(tmp_path):
@@ -203,26 +215,25 @@ def test_image_exts_recognizes_npy_npz_and_bandgroup():
 
 
 def test_stem_of_a_plain_path_and_a_band_group(grouped_dir):
-    from tcip_mcp.pipelines.image_utils import resolve_image_source, stem_of
+    from tcip_mcp.pipelines.image_utils import resolve_image_path, stem_of
 
     assert stem_of(str(grouped_dir / "plain.jpg")) == "plain"
     assert stem_of(grouped_dir / "plain.jpg") == "plain"
-    assert stem_of(resolve_image_source(grouped_dir, "cap")) == "cap"
+    assert stem_of(resolve_image_path(grouped_dir / "cap.bandgroup")) == "cap"
 
 
-def test_logical_image_name_agrees_with_display_source_paths_basename(grouped_dir):
-    """A caller building a by-name filename map can reach for either the direct
-    ``logical_image_name`` call or ``Path(display_source_path(x)).name``; pin them to the same
-    value for a plain path and a band group, so a caller's choice between the two is cosmetic."""
+def test_logical_image_name_agrees_with_source_paths_basename(grouped_dir):
+    """A by-name reader's ``logical_image_name`` is the basename of the path the image is recorded
+    under, for a plain path and a band group alike."""
     from tcip_mcp.pipelines.image_utils import (
-        display_source_path, logical_image_name, resolve_image_source,
+        logical_image_name, resolve_image_path, source_path_of,
     )
 
     plain = grouped_dir / "plain.jpg"
-    assert Path(display_source_path(plain)).name == logical_image_name(plain) == "plain.jpg"
+    assert Path(source_path_of(plain)).name == logical_image_name(plain) == "plain.jpg"
 
-    ref = resolve_image_source(grouped_dir, "cap")
-    assert Path(display_source_path(ref)).name == logical_image_name(ref)
+    ref = resolve_image_path(grouped_dir / "cap.bandgroup")
+    assert Path(source_path_of(ref)).name == logical_image_name(ref)
 
 
 def test_probe_channels_of_a_plain_tif_does_not_decode_pixels(grouped_dir, monkeypatch):
@@ -249,16 +260,16 @@ def test_probe_channels_of_a_plain_tif_does_not_decode_pixels(grouped_dir, monke
 
 
 def test_image_dimensions_of_a_band_group(grouped_dir):
-    from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
+    from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_path
 
-    ref = resolve_image_source(grouped_dir, "cap")
+    ref = resolve_image_path(grouped_dir / "cap.bandgroup")
     assert image_dimensions(ref) == (8, 8)
 
 
 def test_load_multiband_stacks_siblings_in_declared_order(grouped_dir):
-    from tcip_mcp.pipelines.image_utils import load_multiband, resolve_image_source
+    from tcip_mcp.pipelines.image_utils import load_multiband, resolve_image_path
 
-    ref = resolve_image_source(grouped_dir, "cap")
+    ref = resolve_image_path(grouped_dir / "cap.bandgroup")
     arr = load_multiband(ref, 2)
     assert arr.shape == (8, 8, 2)
     # Declared order is {"Green": band_a (111), "Red": band_b (222)}.
@@ -267,9 +278,9 @@ def test_load_multiband_stacks_siblings_in_declared_order(grouped_dir):
 
 
 def test_load_image_dispatches_a_band_group_to_load_multiband(grouped_dir):
-    from tcip_mcp.pipelines.image_utils import load_image, resolve_image_source
+    from tcip_mcp.pipelines.image_utils import load_image, resolve_image_path
 
-    ref = resolve_image_source(grouped_dir, "cap")
+    ref = resolve_image_path(grouped_dir / "cap.bandgroup")
     arr = load_image(ref, 2)
     assert isinstance(arr, np.ndarray)
     assert arr.shape == (8, 8, 2)
@@ -277,9 +288,9 @@ def test_load_image_dispatches_a_band_group_to_load_multiband(grouped_dir):
 
 def test_probe_channels_of_a_band_group_sums_each_siblings_own_count(grouped_dir):
     from tcip_mcp.pipelines.derivations import probe_channels
-    from tcip_mcp.pipelines.image_utils import resolve_image_source
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
 
-    ref = resolve_image_source(grouped_dir, "cap")
+    ref = resolve_image_path(grouped_dir / "cap.bandgroup")
     assert probe_channels(ref) == 2  # 1 band each, summed (never assumed)
 
 
@@ -291,7 +302,7 @@ def test_real_dji_capture_decodes_as_a_4_band_stack(tmp_path):
     from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
     from tcip_mcp.pipelines.derivations import probe_channels
     from tcip_mcp.pipelines.image_utils import (
-        image_dimensions, load_image, resolve_image_source,
+        image_dimensions, load_image, resolve_image_path,
     )
 
     d = tmp_path / "images"
@@ -301,7 +312,7 @@ def test_real_dji_capture_decodes_as_a_4_band_stack(tmp_path):
     detect_and_write_band_groups(d)
 
     logical_stem = sorted(p.stem for p in d.glob("*.bandgroup"))[0]
-    ref = resolve_image_source(d, logical_stem)
+    ref = resolve_image_path(d / f"{logical_stem}.bandgroup")
     assert probe_channels(ref) == 4
     assert image_dimensions(ref) == (2592, 1944)  # the real DJI M3M frame size
 

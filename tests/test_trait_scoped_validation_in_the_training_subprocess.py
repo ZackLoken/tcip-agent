@@ -51,7 +51,7 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "scope": {"subject": "leaf"}},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": "leaf"}, "split": {"seed": 0, "val_ratio": 0.15}},
         "evaluation": {"trait": "leaf"},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",

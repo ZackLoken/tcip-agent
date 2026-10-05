@@ -165,7 +165,7 @@ class TestE2EPipeline:
 
         split_dir = tmp_path / "splits"
         split_result = draw_splits(project_dir, root, output_path=str(split_dir),
-                                   subject="bud", train_ratio=0.5, val_ratio=0.25,
+                                   subject="bud", seed=1, val_ratio=0.25,
                                    calibration_ratio=0.125, holdout_ratio=0.125)
         assert split_result["total_stems"] == 5
         drawn = read_selection(split_dir, project=project_dir)

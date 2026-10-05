@@ -7,7 +7,7 @@ from pathlib import Path
 
 from tcip_mcp.server import tool
 from tcip_mcp.audit import audited
-from tcip_mcp.pipelines.data.splits import DEFAULT_GROUP_BY, DEFAULT_SEED, DEFAULT_VAL_RATIO
+from tcip_mcp.pipelines.data.splits import DEFAULT_GROUP_BY, DEFAULT_SHARES
 
 
 @tool()
@@ -43,7 +43,10 @@ def freeze_selection(project: Path, experiment_id: str, output_path: str | None 
     from tcip_mcp.pipelines.data.selection import (
         ClassScope, Selection, read_selection_checked, write_selection,
     )
-    from tcip_mcp.pipelines.data.split_construction import moved_since_run, partition_samples
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    from tcip_mcp.pipelines.data.label_queries import acquired
+    from tcip_mcp.pipelines.data.split_construction import partition_samples
 
     try:
         resolved = run_resolution(experiment_id, project=project)
@@ -59,16 +62,16 @@ def freeze_selection(project: Path, experiment_id: str, output_path: str | None 
     samples = [s for s in partition_samples(partition) if s.side in ("train", "val")]
     n_train = sum(1 for s in samples if s.side == "train")
     n_val = len(samples) - n_train
-    moved = moved_since_run(samples)
     if not n_val:
         return {"error": f"{experiment_id!r} trained without validation (an empty val side): "
                          "a partition no bind can use."}
-    if moved:
-        return {"error": f"the ground truth of {len(moved)} member(s) changed since "
-                         f"{experiment_id!r} trained ({moved[:5]}): a selection "
-                         "composed from them would bind a later run to ground truth this run "
-                         "never saw. Freeze a run whose members have not moved, or draw a fresh "
-                         "split over the current data."}
+    try:
+        samples = acquired(samples)
+    except (UnreadableLabelDocument, ValueError) as exc:
+        return {"error": f"a member's ground truth changed since {experiment_id!r} trained "
+                         f"({exc}): a selection composed from it would bind a later run to "
+                         "ground truth this run never saw. Freeze a run whose members have not "
+                         "moved, or draw a fresh split over the current data."}
 
     a_source = samples[0].source
     dataset_root = dataset_root_of(a_source)
@@ -87,7 +90,8 @@ def freeze_selection(project: Path, experiment_id: str, output_path: str | None 
     try:
         write_selection(out_dir, Selection(
             samples=tuple(samples), scope=scope, seed=partition["seed"],
-            group_by=partition["group_by"], dataset_fingerprint=dataset_fingerprint(dataset_root),
+            group_by=partition["group_by"],
+            dataset_fingerprint=dataset_fingerprint(dataset_root, samples),
         ), project=project)
     except ValueError as exc:
         return {"error": f"{experiment_id!r}'s resolved record: {exc}"}
@@ -113,11 +117,10 @@ def _scan_dataset(root: str) -> dict:
 
     from tcip_mcp.buckets import buckets_under
     from tcip_mcp.dataset_layout import LABEL_DOCUMENTS, image_dir, label_key_of, list_dates
-    from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
+    from tcip_mcp.pipelines.image_utils import list_logical_images, source_path_of
 
     root_path = Path(root).resolve()
-    images = [str(source.manifest_path if isinstance(source, BandGroupRef) else source)
-              for capture in list_dates(root_path)
+    images = [source_path_of(source) for capture in list_dates(root_path)
               for source in list_logical_images(image_dir(root_path, capture)).values()]
     return {
         "images": {image: label_key_of(image) for image in images},
@@ -157,15 +160,13 @@ def scan_dataset(folder_path: str) -> dict:
 
 
 @tool()
-@audited
 def draw_splits(
     project: Path,
     folder_path: str,
-    train_ratio: float = 1.0 - DEFAULT_VAL_RATIO,
-    val_ratio: float = DEFAULT_VAL_RATIO,
-    calibration_ratio: float = 0.0,
-    holdout_ratio: float = 0.0,
-    seed: int = DEFAULT_SEED,
+    seed: int,
+    val_ratio: float = DEFAULT_SHARES["val"],
+    calibration_ratio: float = DEFAULT_SHARES["calibration"],
+    holdout_ratio: float = DEFAULT_SHARES["holdout"],
     group_by: str = DEFAULT_GROUP_BY,
     group_key_map: dict[str, str] | None = None,
     stratify_foreground: bool = True,
@@ -177,7 +178,8 @@ def draw_splits(
 
     Non-destructive: it copies nothing and moves nothing. With ``output_path`` it writes a
     selection record listing, per sample, the image source, the label document, the group key and
-    the side; without one it answers the same draw's statistics and writes nothing. Sibling tiles
+    the side, and the project's audit log records the write; without one it answers the same
+    draw's statistics and writes nothing, the log included. Sibling tiles
     of one source image are kept in the same split, and, when ``stratify_foreground`` is set,
     splits are balanced by annotation count. Groups whole source images; a within-image split for
     a folder holding a single source is a training run's own route (``data.tiling`` in the run
@@ -201,22 +203,24 @@ def draw_splits(
     row, admitted when the image its key names exists. Neither takes ``subject``.
     Balancing by foreground count applies to label documents only.
 
-    The ``calibration`` and ``holdout`` sides are the reference an assessment fits an operating
-    point on and checks it against, drawn as one share and cut between the two at the same seed;
-    a side whose ratio is zero is not drawn, and a negative ratio refuses. The draw refuses,
-    before any write, when the tree holds fewer foreground groups of ``subject`` than one per
-    requested side. The answer's
+    ``train`` takes the remainder of the other sides' shares
+    (:func:`~tcip_mcp.pipelines.data.split_construction.check_shares`), each of which defaults to
+    :data:`~tcip_mcp.pipelines.data.splits.DEFAULT_SHARES`. The ``calibration`` and ``holdout``
+    sides are the reference an assessment fits an operating point on and checks it against, drawn
+    as one share and cut between the two at the same seed; a side whose ratio is zero is not
+    drawn, and shares leaving ``train`` nothing refuse. The draw refuses, before any write, when
+    the tree holds fewer foreground groups of ``subject`` than one per requested side, and when a
+    side would be left empty, naming it. The answer's
     ``calibration_foreground_groups`` reports how many of the reference's groups carry a
     foreground annotation, and ``realized_ratios`` each side's share of the draw actually
     delivered, which can diverge from the ratios asked for on a tree sized at the floor.
 
     Args:
         folder_path: Path to the dataset root directory.
-        train_ratio: Fraction for training set.
+        seed: Random seed the draw is reproduced by; no default.
         val_ratio: Fraction for validation set.
         calibration_ratio: Fraction held out for an assessment to fit its operating point on.
         holdout_ratio: Fraction held out for an assessment to check its operating point against.
-        seed: Random seed for reproducibility.
         group_by: Group selector: ``"tile_prefix"`` (strip a trailing ``_<x>_<y>`` tile offset) or
             ``"stem"`` (one group per member). Ignored when ``group_key_map`` is given. The
             resolved key is recorded on every sample.
@@ -242,7 +246,9 @@ def draw_splits(
     from tcip_mcp.pipelines.data.selection import (
         REFERENCE_SIDES, SIDES, ClassScope, Selection, write_selection,
     )
-    from tcip_mcp.pipelines.data.split_construction import admitted_membership, draw_sides
+    from tcip_mcp.pipelines.data.split_construction import (
+        admitted_membership, check_shares, draw_sides,
+    )
     from tcip_mcp.pipelines.data.splits import foreground_group_count
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, BandGroupIncomplete
 
@@ -262,15 +268,15 @@ def draw_splits(
                              "subject-scoped selection from; annotate its images, or convert an "
                              "external COCO document into label documents with import_coco."}
 
-    ratios = {"train": train_ratio, "val": val_ratio, "calibration": calibration_ratio,
-              "holdout": holdout_ratio}
     try:
+        ratios = check_shares({"val": val_ratio, "calibration": calibration_ratio,
+                               "holdout": holdout_ratio})
         membership = admitted_membership(
             places, scope=ClassScope(subject=subject), group_by=group_by,
             group_key_map=group_key_map)
         drawn, counted = draw_sides(
             membership.samples, membership.scope, seed=seed, stratify=stratify_foreground,
-            ratios={side: share for side, share in ratios.items() if share != 0})
+            ratios=ratios)
     except (UnreadableLabelDocument, AmbiguousImageStem, BandGroupIncomplete,
             FileNotFoundError, ValueError, OSError) as exc:
         return {"error": str(exc)}
@@ -296,11 +302,18 @@ def draw_splits(
     }
     if not output_path:
         return response
+    from tcip_mcp.audit import record_event_or_raise
+
     try:
         write_selection(output_path, Selection(
             samples=tuple(drawn[key] for key in sorted(drawn)), scope=membership.scope, seed=seed,
-            group_by=membership.group_by, dataset_fingerprint=dataset_fingerprint(folder_path),
+            group_by=membership.group_by,
+            dataset_fingerprint=dataset_fingerprint(folder_path, drawn.values()),
         ), project=project)
     except ValueError as exc:
         return {"error": str(exc)}
+    record_event_or_raise("draw_splits", {
+        "folder_path": folder_path, "output_path": output_path, "seed": seed, "ratios": ratios,
+        "group_by": membership.group_by, "subject": subject, "ground_truth": ground_truth},
+        actor=None, scope=project)
     return response

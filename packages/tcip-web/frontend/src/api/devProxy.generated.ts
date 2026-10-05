@@ -12,3 +12,5 @@ export const DEV_PROXY: DevProxyEntry[] = [
   { path: "/api", ws: true },
   { path: "/ws", ws: true },
 ];
+
+export const LOOPBACK_HOST = "127.0.0.1";

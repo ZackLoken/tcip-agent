@@ -235,7 +235,7 @@ def test_draw_splits_keeps_every_plants_stems_on_one_split_side(
 
     out_dir = tmp_path / "splits_out"
     result = draw_splits(
-        tmp_path, folder_path=str(dataset_root), train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125,
+        tmp_path, folder_path=str(dataset_root), val_ratio=0.25, calibration_ratio=0.125,
         holdout_ratio=0.125, seed=0, group_key_map=group_key_map, output_path=str(out_dir), subject=SUBJECT,
     )
 
@@ -272,7 +272,7 @@ def test_main_cli_end_to_end(tmp_path: Path, project: Path, four_plant_csv: Path
     out_dir = tmp_path / "cli_splits_out"
     rc = main([
         str(dataset_root), "--project", str(project), "--plant-csv", str(four_plant_csv), "--subject", SUBJECT,
-        "--train-ratio", "0.5", "--val-ratio", "0.25", "--calibration-ratio", "0.125",
+        "--val-ratio", "0.25", "--calibration-ratio", "0.125",
         "--holdout-ratio", "0.125", "--seed", "0", "--output-path", str(out_dir),
     ])
 
@@ -280,39 +280,49 @@ def test_main_cli_end_to_end(tmp_path: Path, project: Path, four_plant_csv: Path
     assert ts.exists(selection_key(out_dir))
 
 
-def test_main_cli_states_all_four_ratios_and_writes_a_four_sided_selection(
+def test_the_cli_and_the_tool_draw_one_selection_at_the_default_shares(
     tmp_path: Path, project: Path, four_plant_csv: Path,
 ) -> None:
-    """The four ratios have no default and are all stated: the write lands a real four-sided
-    selection."""
+    """Stated only a seed, the CLI and ``draw_splits`` draw at the one set of default shares: the
+    two selections place every member on the same side, all four sides drawn."""
+    from tcip_mcp.dataset_layout import parse_image_path
     from tcip_mcp.pipelines.data.selection import read_selection
+    from tcip_mcp.pipelines.data.splits import member_identity
+    from tcip_mcp.tools.data_tools import _scan_dataset, draw_splits
 
     dataset_root = _four_plant_dataset(tmp_path)
-
-    out_dir = tmp_path / "cli_defaults_out"
-    rc = main([str(dataset_root), "--project", str(project), "--plant-csv", str(four_plant_csv), "--subject", SUBJECT,
-              "--calibration-ratio", "0.1", "--holdout-ratio", "0.1", "--train-ratio", "0.6",
-              "--val-ratio", "0.2", "--output-path", str(out_dir)])
-
+    cli_out, tool_out = tmp_path / "cli_out", tmp_path / "tool_out"
+    rc = main([str(dataset_root), "--project", str(project), "--plant-csv", str(four_plant_csv),
+               "--subject", SUBJECT, "--seed", "3", "--output-path", str(cli_out)])
     assert rc == 0
-    drawn = read_selection(out_dir, project=project)
-    assert drawn.on("train")
-    assert drawn.on("val")
-    assert drawn.on("calibration")
-    assert drawn.on("holdout")
+
+    stem_to_raster = {}
+    for p in _scan_dataset(str(dataset_root))["images"]:
+        _root, date, stem = parse_image_path(p)
+        stem_to_raster[member_identity(date, stem)] = Path(p)
+    result = draw_splits(project, folder_path=str(dataset_root), seed=3, subject=SUBJECT,
+                         group_key_map=derive_plant_group_key_map(stem_to_raster,
+                                                                  _plants(four_plant_csv)),
+                         output_path=str(tool_out))
+    assert "error" not in result, result
+
+    def sides(out: Path) -> dict[str, str]:
+        return {s.member: s.side for s in read_selection(out, project=project).samples}
+
+    assert sides(cli_out) == sides(tool_out)
+    assert set(sides(cli_out).values()) == {"train", "val", "calibration", "holdout"}
 
 
-def test_main_cli_missing_a_required_ratio_flag_refuses(tmp_path: Path, project: Path,
-                                                        four_plant_csv: Path) -> None:
-    """The four ratios all have no default and are required: omitting --train-ratio refuses via
-    argparse before anything is written, rather than silently falling back to a default."""
+def test_main_cli_without_a_seed_refuses(tmp_path: Path, project: Path,
+                                         four_plant_csv: Path) -> None:
+    """The seed has no default: omitting --seed refuses via argparse before anything is
+    written."""
     dataset_root = _four_plant_dataset(tmp_path)
     out_dir = tmp_path / "cli_defaults_out"
 
     with pytest.raises(SystemExit):
-        main([str(dataset_root), "--project", str(project), "--plant-csv", str(four_plant_csv), "--subject", SUBJECT,
-             "--val-ratio", "0.2", "--calibration-ratio", "0.1", "--holdout-ratio", "0.1",
-             "--output-path", str(out_dir)])
+        main([str(dataset_root), "--project", str(project), "--plant-csv", str(four_plant_csv),
+              "--subject", SUBJECT, "--output-path", str(out_dir)])
 
     assert not out_dir.exists()
 
@@ -323,7 +333,7 @@ def test_main_cli_reports_refusal_and_nonzero_exit(tmp_path: Path, project: Path
     _write_dataset_stem(dataset_root, "2026-02-01", "far_stem", FAR_TIEPOINT)
 
     rc = main([str(dataset_root), "--project", str(project), "--plant-csv", str(two_plant_csv), "--subject", SUBJECT,
-              "--train-ratio", "0.8", "--val-ratio", "0.1", "--calibration-ratio", "0.05",
+              "--seed", "0", "--val-ratio", "0.1", "--calibration-ratio", "0.05",
               "--holdout-ratio", "0.05"])
 
     assert rc == 1

@@ -25,7 +25,8 @@ def _stock_run(root: Path, builder: dict, epochs: int, experiment_id: str) -> Pa
         root / f"{experiment_id}-data", [0.1, 0.3, 0.5, 0.7], [0.2, 0.6, 1.0, 1.4])
     config = {
         "model_source": {**builder, "task": "regression"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path), "num_channels": 1},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path), "num_channels": 1,
+                 "split": {"seed": 0, "val_ratio": 0.15}},
         "device": "cpu", "mixed_precision": False,
         "stages": [{"freeze_to": 0, "epochs": epochs}],
         "optimizer": {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0},

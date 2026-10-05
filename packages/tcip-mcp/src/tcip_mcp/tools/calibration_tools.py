@@ -92,10 +92,10 @@ def assess_reserved_regions(
     device: str | None = None,
 ) -> dict:
     """Assess a checkpoint trained on one mosaic against that mosaic's own reserved calibration and
-    test regions, for a count delivery of a trait, and record the result as an assessment.
+    holdout regions, for a count delivery of a trait, and record the result as an assessment.
 
     The checkpoint's run must have drawn a within-image split with
-    ``data.split.reserve_calibration_fraction`` set; the regions are cut into ``k_cal`` and
+    ``data.split.calibration_ratio`` set; the regions are cut into ``k_cal`` and
     ``k_test`` buffered bands, predicted through the tiled pass at the split's own tile edge, and
     the count criterion is measured as for :func:`assess_checkpoint`. A raster published under the
     assessment is validated only when it is the same mosaic.

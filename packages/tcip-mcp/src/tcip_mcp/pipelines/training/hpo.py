@@ -48,7 +48,15 @@ _ENV_VARS_RAY_TUNE_REFUSES = ("TUNE_RESULT_DIR", "RAY_AIR_LOCAL_CACHE_DIR")
 
 # Native samplers (BasicVariantGenerator), no extra dependency. ``grid`` becomes a grid
 # over the discrete axes of the space; ``random`` samples them.
-_NATIVE_SEARCH = {"random", "grid", "variant_generator", "", None}
+_NATIVE_SEARCH = {"random", "grid", "variant_generator"}
+
+
+def search_alg_key(search_alg: str | None) -> str:
+    """The searcher a sweep names: ``random`` where it names none, its own name lower-cased
+    otherwise, a blank one included."""
+    return "random" if search_alg is None else search_alg.lower()
+
+
 _SEARCH_BACKENDS: dict[str, tuple[str, str, str, str]] = {
     "optuna": ("optuna", "ray.tune.search.optuna", "OptunaSearch", "seed"),
     "hyperopt": ("hyperopt", "ray.tune.search.hyperopt", "HyperOptSearch", "random_state_seed"),
@@ -157,9 +165,13 @@ def build_search_alg(
     that is not installed, and for ``constant_grid_search`` asked of a backend; the choice is
     honored, never swapped for another algorithm.
     """
-    key = (name or "random").lower()
+    from tcip_mcp.pipelines.model_build import resolve_named
+
+    key = search_alg_key(name)
+    backend = resolve_named(key, {**dict.fromkeys(_NATIVE_SEARCH), **_SEARCH_BACKENDS},
+                            kind="search_alg")
     points = list(points_to_evaluate) if points_to_evaluate else None
-    if key in _NATIVE_SEARCH:
+    if backend is None:
         from ray.tune.search.basic_variant import BasicVariantGenerator
 
         return BasicVariantGenerator(points_to_evaluate=points, random_state=seed,
@@ -167,12 +179,7 @@ def build_search_alg(
     if constant_grid_search:
         raise ValueError(f"constant_grid_search is the native sampler's, and search_alg '{key}' "
                          "is a backend searcher; choose random or grid.")
-    if key not in _SEARCH_BACKENDS:
-        raise ValueError(
-            f"search_alg '{key}' is not offered: every searcher here takes the sweep's seed, and "
-            f"this one does not or is unknown. Choose one of {available_search_algs()}."
-        )
-    module, wrapper_module, wrapper_class, seed_kw = _SEARCH_BACKENDS[key]
+    module, wrapper_module, wrapper_class, seed_kw = backend
     if find_spec(module) is None:
         raise ValueError(
             f"search_alg '{key}' needs the '{module}' backend, which is not installed. "
@@ -286,14 +293,8 @@ def read_ray_dashboard(project: Path) -> dict | None:
 
 
 def _has_attached_console() -> bool:
-    """True when this process should use Ray's plain, console-signal shutdown path.
-
-    Only Windows distinguishes an attached console from a detached one, so every other
-    platform always answers True. Ray's console-signal shutdown calls
-    ``GenerateConsoleCtrlEvent``, which fails unless the calling process, this one, is itself
-    attached to a console; ``GetConsoleCP`` is the primitive here because it answers exactly
-    that question, reading 0 when this process has none.
-    """
+    """Whether this process has a console to signal Ray's daemons through: always on a platform
+    other than Windows; on Windows, when ``GetConsoleCP`` reads nonzero."""
     if sys.platform != "win32":
         return True
     import ctypes
@@ -302,14 +303,9 @@ def _has_attached_console() -> bool:
 
 
 def _kill_ray_daemons_before_shutdown(ray: Any) -> None:
-    """Kill every daemon (raylet, gcs server, the rest, the reaper last) and each one's descendants
-    (``psutil.Process(pid).children(recursive=True)``) that this process's Ray cluster started,
-    ahead of ``ray.shutdown()``, so a process with no console never signals one
-    (``ConsolePopen.terminate``'s ``CTRL_BREAK_EVENT`` raises ``WinError 6`` there). Waits one
-    second on them together through ``psutil.wait_procs``; skips a process already gone
-    (``psutil.NoSuchProcess``) or unreachable (``psutil.AccessDenied``). A no-op for a cluster this
-    module did not start.
-    """
+    """Kill every daemon this process's Ray cluster started (the reaper last) and each one's
+    descendants, ahead of ``ray.shutdown()``, waiting one second on them together; a process
+    already gone or unreachable is skipped. A no-op for a cluster this module did not start."""
     import psutil
 
     private = getattr(ray, "_private", None)
@@ -368,6 +364,7 @@ def _ray_session(ray: Any, num_cpus: int, project: Path) -> Generator[None]:
     global _external_cluster_warned
 
     from tcip_mcp.pipelines.model_build import child_pythonpath
+    from tcip_mcp.web_client import LOOPBACK_HOST
 
     with _ray_lifecycle:
         if not ray.is_initialized():
@@ -377,7 +374,7 @@ def _ray_session(ray: Any, num_cpus: int, project: Path) -> Generator[None]:
             # already-initialized cluster's runtime_env alone, whoever started it.
             pythonpath = child_pythonpath()
             context = ray.init(num_cpus=num_cpus, include_dashboard=include_dashboard,
-                               dashboard_host="127.0.0.1", log_to_driver=False,
+                               dashboard_host=LOOPBACK_HOST, log_to_driver=False,
                                ignore_reinit_error=True, configure_logging=False,
                                runtime_env={"env_vars": {"PYTHONPATH": pythonpath}})
             _ray_started = True
@@ -479,8 +476,8 @@ def split_draw_search_space(
     """The search space for ``tune_search`` and :func:`planned_trial_count`: ``param_space``
     itself, unaugmented, at ``split_draws`` of one or below; above one, a copy carrying
     :data:`SPLIT_DRAW_SEED_KEY` as a categorical grid axis over the resolved draw seeds
-    (``split_draw_seeds`` when given, else ``base_config``'s own ``data.split.seed``, or
-    ``DEFAULT_SEED``, plus the draw index).
+    (``split_draw_seeds`` when given, else ``base_config``'s own ``data.split.seed`` plus the draw
+    index, refused when it states none).
 
     Returns ``(search_param_space, resolved_draw_seeds)``: the second element is ``None`` at one
     draw and the list of seeds paired above it.
@@ -489,11 +486,11 @@ def split_draw_search_space(
         return param_space, None
     from tcip_mcp.pipelines.data.split_construction import split_seed
 
-    base_seed = split_seed((base_config.get("data") or {}).get("split") or {})
-    resolved_draw_seeds = (
-        list(split_draw_seeds) if split_draw_seeds is not None
-        else [base_seed + i for i in range(split_draws)]
-    )
+    if split_draw_seeds is not None:
+        resolved_draw_seeds = list(split_draw_seeds)
+    else:
+        base_seed = split_seed((base_config.get("data") or {}).get("split") or {})
+        resolved_draw_seeds = [base_seed + i for i in range(split_draws)]
     search_param_space = {
         **param_space,
         SPLIT_DRAW_SEED_KEY: {"type": "categorical", "choices": resolved_draw_seeds},
@@ -511,7 +508,7 @@ def _search_space_and_points(
     every discrete axis under ``grid`` and over :data:`SPLIT_DRAW_SEED_KEY` above one draw, plus
     the warm-start baseline filtered to the space's own keys.
     """
-    normalized_search_alg = (search_alg or "").lower()
+    normalized_search_alg = search_alg_key(search_alg)
     grid_keys = frozenset({SPLIT_DRAW_SEED_KEY}) if split_draws > 1 else frozenset()
     space = _to_tune_space(param_space or get_default_space(),
                            grid=(normalized_search_alg == "grid"), grid_keys=grid_keys)

@@ -91,11 +91,11 @@ def test_propose_annotations_records_in_the_dataset_named_by_the_image_it_ran_ag
     assert _rows_for(project, "propose_annotations") == []
 
 
-def test_propose_annotations_against_a_file_under_no_images_directory_stays_in_the_project(
+def test_propose_annotations_staging_nothing_leaves_no_audit_line(
     project: Path, tmp_path: Path
 ) -> None:
-    """A location that resolves to no dataset is never guessed into one, for propose_annotations
-    just as for its sibling: the call still succeeds and stays in the project's log."""
+    """A location that resolves to no dataset is never guessed into one: the call still succeeds,
+    stages nothing, and so records no act in any log."""
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
     loose = tmp_path / "loose"
@@ -108,7 +108,7 @@ def test_propose_annotations_against_a_file_under_no_images_directory_stays_in_t
     assert "error" not in result, result
     assert result["staged"] is False
 
-    assert len(_rows_for(project, "propose_annotations")) == 1
+    assert _rows_for(project, "propose_annotations") == []
     assert _entries(loose) == []
 
 

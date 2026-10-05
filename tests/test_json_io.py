@@ -128,7 +128,7 @@ def test_provenance_is_the_stored_records_or_the_actors_never_the_payloads() -> 
     kept, new = stamped([
         annotation_from_payload({"subject": "bur", "bbox": [1, 2, 3, 4], "created_by": "user:x"}),
         annotation_from_payload({"subject": "bur", "bbox": [5, 6, 7, 8], "accepted_by": "user:x"}),
-    ], [stored], actor="user:b", now="t")
+    ], [stored], author="user:b", now="t")
     assert (kept.created_by, kept.created_at, kept.accepted_by, kept.accepted_at) == (
         "model:m", "2026-01-02", "user:a", "2026-01-03")
     assert (new.created_by, new.created_at, new.accepted_by) == ("user:b", "t", None)

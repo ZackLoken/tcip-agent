@@ -13,6 +13,8 @@ import tcip_store
 from tcip_store import Key, decode_value
 
 if TYPE_CHECKING:
+    from tcip_annotation.json_io import LabelDocument
+
     from tcip_mcp.buckets import Bucket
 
 #: Geometry kinds a task authors, kept as a selector, not a label-path segment.
@@ -266,10 +268,10 @@ def save_label_document(
     project: str | Path | None, key: Key, payloads: Iterable[dict], *,
     width: int, height: int, author: str, actor: Optional[str],
     expect: Optional[tcip_store.Version] = None, gestures: Gestures = Gestures(),
-) -> tcip_store.Version:
+) -> "tuple[tcip_store.Version, LabelDocument]":
     """Write the label document ``key`` names (:func:`label_key_of` an image), the verdicts its
     ``gestures`` decide and the save's one audit line by ``actor``, in one commit under the
-    document's dataset root. Returns the document's new version.
+    document's dataset root. Returns the document's new version and the document as written.
 
     The document holds every annotation parsed from ``payloads``, provenance stamped
     (:func:`~tcip_annotation.json_io.stamped`): a record unchanged since it was stored keeps its
@@ -287,8 +289,8 @@ def save_label_document(
     when ``expect`` is not the version the commit reads.
     """
     from tcip_annotation.json_io import (
-        CompletionMark, annotation_from_payload, document_at, document_payload, stamped,
-        subject_digest,
+        CompletionMark, LabelDocument, annotation_from_payload, document_at, document_payload,
+        stamped, subject_digest,
     )
     from tcip_annotation.verdicts import Verdict, VerdictAction, record_verdicts
 
@@ -318,7 +320,7 @@ def save_label_document(
         stored = document_at(key, read)
         if expect is not None and expect != read.version:
             raise tcip_store.VersionConflict(key, expect, read.version)
-        annotations = stamped(contents, stored.annotations, actor=author, now=now)
+        annotations = stamped(contents, stored.annotations, author=author, now=now)
         verdicts: list[Verdict] = []
         if decides:
             paired = proposal_pairs(project, bucket, annotations, proposals)
@@ -347,7 +349,7 @@ def save_label_document(
             "version": version.token, "accepted": sorted(gestures.accept),
             "rejected": sorted(gestures.reject), "complete": dict(gestures.complete),
         }, actor, "ok"))
-    return version
+    return version, LabelDocument(annotations, width, height, marks)
 
 
 def list_subjects(dataset_root: str | Path) -> list[str]:

@@ -67,23 +67,12 @@ def upsert_dataset(project: str | Path, entry: dict) -> None:
 @tool()
 @audited(scope_arg="dataset_root")
 def register_dataset(project: Path, dataset_root: str, crop: str) -> dict:
-    """Record a dataset's identity so a delivered number can be traced to the exact data behind it.
-
-    Writes ``<dataset_root>/dataset.json = {crop, id, fingerprint}`` (identity travels with the
-    data) and upserts the dataset's id and path into the project's dataset registry.
-    ``crop`` is the
-    human's fact and is required, never inferred from a path or slug. ``id`` is minted once and
-    preserved across re-runs and path moves; ``fingerprint`` is the whole-dataset content digest
-    (labels + image pixels + registry + confirmed negatives), recomputed here, but the stored value
-    is a cache, and recompute-on-read (``dataset_fingerprint.dataset_fingerprint``) is the
-    authority.
-
-    The identity write is compare-and-set against the version this call read. A conflict re-reads
-    what committed and keeps the id it carries, and the project registry is reconciled against that
-    committed id rather than the one this call proposed.
-
-    The registry's stored ``path`` follows :func:`~tcip_mcp.registry_paths.stored_path`: relative
-    to the project whenever the dataset sits under it, absolute for an external dataset.
+    """Record a dataset's identity, ``{crop, id, fingerprint}``, with the dataset, and its id and
+    path (:func:`~tcip_mcp.registry_paths.stored_path`) in the project's dataset registry. ``id``
+    is minted once and kept across re-runs and moves, ``fingerprint`` is
+    :func:`~tcip_mcp.pipelines.data.dataset_fingerprint.dataset_fingerprint` now, and the identity
+    write is compare-and-set against the version this call read, a conflict keeping the id that
+    committed.
 
     Args:
         dataset_root: Root of the dataset (holds ``images/``, ``subjects.json`` and the database
@@ -244,17 +233,15 @@ def _recent_activity(project: Path) -> dict:
     the time of the last report or retrospective. A log carrying undecodable entries answers
     ``status_unavailable`` naming how many.
     """
-    from tcip_mcp.audit import audit_log_key
+    from tcip_mcp.audit import acts_of
 
-    page = tcip_store.read_log(audit_log_key(project))
-    if page.corrupt:
-        return {"status_unavailable": f"the project's audit log carries {len(page.corrupt)} "
-                                      "undecodable entries"}
+    try:
+        lines, _cursor = acts_of(project, _ACTIVITY_TOOLS)
+    except ValueError as exc:
+        return {"status_unavailable": str(exc)}
     activity: dict = {"reports_since_last_retrospective": 0, "reports_since_last_distillation": 0,
                       "retrospectives_since_last_distillation": 0}
-    for line in page.records:
-        if line["status"] != "ok" or line["tool"] not in _ACTIVITY_TOOLS:
-            continue
+    for line in lines:
         if line["tool"] == "record_distillation_pass":
             activity["reports_since_last_distillation"] = 0
             activity["retrospectives_since_last_distillation"] = 0

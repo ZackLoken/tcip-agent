@@ -87,8 +87,8 @@ def focus_human_attention(
         subject: Annotation subject (e.g. "fruit").
         date: Capture-date bucket (e.g. "2026-03-02").
         image_index: Index into the date's sorted image list.
-        mode: "box", "polygon" or "point" (default: inferred from the geometry the labels on
-            that frame actually carry).
+        mode: "box", "polygon" or "point" (default: inferred from the geometry that frame's
+            document, the bucket's when one is named, actually carries).
         bucket: The name of the published bucket or staged proposals whose proposals the canvas
             shows.
         proposal: The index of the proposal, in the bucket's document for the frame, to focus.
@@ -113,23 +113,21 @@ def focus_human_attention(
     except ValueError as exc:
         return {"error": str(exc)}
 
-    def _labels(name: str) -> list[Annotation]:
-        return read_document_versioned(
-            label_key(dataset_root, date, Path(name).stem))[0].annotations
-
-    holding: list[int] = []
+    held: dict[str, list[Annotation]] = {}
     unreadable: dict[str, str] = {}
-    for i, name in enumerate(images):
+    for name in images:
+        stem = Path(name).stem
         try:
             if found is None:
-                held = _labels(name)
+                held[name] = read_document_versioned(
+                    label_key(dataset_root, date, stem))[0].annotations
             else:
-                document = found.document_key(Path(name).stem)
-                held = read_label_document(document).annotations if document else []
-            if annotations_hold_subject(held, subject):
-                holding.append(i)
+                document = found.document_key(stem)
+                held[name] = read_label_document(document).annotations if document else []
         except UnreadableLabelDocument as exc:
             unreadable[name] = str(exc)
+    holding = [i for i, name in enumerate(images)
+               if name in held and annotations_hold_subject(held[name], subject)]
 
     if image_index is None:
         image_index = holding[0] if holding else 0
@@ -140,11 +138,7 @@ def focus_human_attention(
     if target_name in unreadable:
         return {"error": unreadable[target_name]}
     if mode is None:
-        try:
-            task = _subject_task(_labels(target_name), subject)
-        except UnreadableLabelDocument as exc:
-            return {"error": str(exc)}
-        mode = _TASK_MODE.get(task or "", "box")
+        mode = _TASK_MODE.get(_subject_task(held[target_name], subject) or "", "box")
     if mode not in ANNOTATE_MODES:
         vocabulary = ", ".join(repr(m) for m in ANNOTATE_MODES)
         return {"error": f"mode must be one of {vocabulary}, got {mode!r}"}

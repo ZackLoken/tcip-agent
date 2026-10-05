@@ -21,7 +21,9 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-DASHBOARD_HOST_PORT = "127.0.0.1:8265"
+from tcip_mcp.web_client import LOOPBACK_HOST
+
+DASHBOARD_HOST_PORT = f"{LOOPBACK_HOST}:8265"
 
 
 class _FakeDaemonProcess:
@@ -261,7 +263,7 @@ def test_the_dashboard_url_is_readable_while_the_cluster_is_up_and_gone_after(tm
     assert entered[0].wait(timeout=30)
 
     assert ray.init_kwargs["include_dashboard"] is True
-    assert ray.init_kwargs["dashboard_host"] == "127.0.0.1"
+    assert ray.init_kwargs["dashboard_host"] == LOOPBACK_HOST
 
     published = read_ray_dashboard(tmp_path)
     assert published is not None

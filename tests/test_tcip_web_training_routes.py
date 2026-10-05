@@ -267,7 +267,7 @@ def test_tensorboard_route_launches_under_the_run_output_dir(
 
     resp = client.post("/api/training/runs/run-42/tensorboard", json={})
     assert resp.status_code == 200
-    assert resp.json()["url"] == "http://localhost:6006"
+    assert resp.json()["url"] == "http://127.0.0.1:6006"
     # No key of its own: keyed by log directory, so a repeat call here reuses the run's own
     # TensorBoard entry rather than starting a second one.
     assert tb_launches == [(f"{tmp_path}/tensorboard", "")]
@@ -411,7 +411,8 @@ def _regression_config(tmp_path: Path) -> dict:
     return {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
                          "task": "regression"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path),
+                 "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
         "mixed_precision": False, "device": "cpu",
         "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},

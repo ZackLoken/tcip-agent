@@ -46,7 +46,7 @@ def _draw(project: Path, root: Path, out: Path, *, seed: int = 2):
     from tcip_mcp.tools.data_tools import draw_splits
 
     result = draw_splits(project, str(root), output_path=str(out), subject=SUBJECT, seed=seed,
-                         train_ratio=0.4, val_ratio=0.3, calibration_ratio=0.15, holdout_ratio=0.15)
+                         val_ratio=0.3, calibration_ratio=0.15, holdout_ratio=0.15)
     assert "error" not in result, result
     return read_selection(out, project=project)
 
@@ -115,13 +115,12 @@ def test_the_run_binding_records_the_selection_digest_once_never_on_a_sample(
     assert not any("selection_sha256" in sample for sample in resolved["partition"]["samples"])
 
 
-def test_a_document_emptied_after_its_admission_refuses_at_the_loader(
+def test_a_document_emptied_after_its_admission_never_trains_as_empty(
         tmp_path: Path, monkeypatch) -> None:
-    """Each sample records the version the read that admitted it saw, so a document emptied
-    between that admission and the sample list refuses at the loader's versioned read rather
-    than training as an image with nothing on it."""
-    from tcip_annotation.json_io import UnreadableLabelDocument
+    """The loaders train the document the admission read, at the version its sample records: one
+    emptied between that read and the loaders is never trained as an image with nothing on it."""
     from tcip_mcp.pipelines.data import label_queries
+    from tcip_mcp.pipelines.data.selection import ground_truth_digest
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _dataset(tmp_path / "ds")
@@ -133,10 +132,16 @@ def test_a_document_emptied_after_its_admission_refuses_at_the_loader(
         return real_samples(self, assignment, group_of)
 
     monkeypatch.setattr(label_queries.Admission, "samples", emptied_first)
-    data_cfg = {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}}
+    data_cfg = {"images_dir": str(images_dir), "scope": {"subject": SUBJECT},
+                "split": {"seed": 0, "val_ratio": 0.15}}
 
-    with pytest.raises(UnreadableLabelDocument, match="'a'.* is at version"):
-        auto_train_val(tmp_path, "detection", data_cfg, None)
+    train, val, _partition = auto_train_val(tmp_path, "detection", data_cfg, None)
+
+    (key,) = [k for ds in (train, val) for k in ds.stems if Path(k).stem == "a"]
+    held = next(ds for ds in (train, val) if key in ds.stems)
+    assert held.document(key).annotations
+    assert held.sample_of(key).ground_truth_digest != ground_truth_digest(
+        held.sample_of(key).ground_truth)
 
 
 def test_the_partition_alone_carries_the_per_sample_digests(tmp_path: Path) -> None:

@@ -22,8 +22,8 @@ def test_a_canceled_inference_job_reads_as_canceled(tmp_path, monkeypatch):
     from tcip_web.routes import inference
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
+    images_dir = tmp_path / "images" / "2026-01-01"
+    images_dir.mkdir(parents=True)
     Image.new("RGB", (16, 16)).save(images_dir / "img.jpg")
     ckpt = foreign_checkpoint(tmp_path)
 

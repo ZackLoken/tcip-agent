@@ -53,7 +53,8 @@ def launch(tmp_path, monkeypatch, children):
             "model_source": {
                 "builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
                 "task": "regression"},
-            "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
+            "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path),
+                     "split": {"seed": 0, "val_ratio": 0.15}},
             "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": epochs}],
             "mixed_precision": False, "device": "cpu",
             "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False}, **extra,

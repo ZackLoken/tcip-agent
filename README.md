@@ -131,14 +131,14 @@ Annotation itself happens in the GUI's Annotate tab: a human labels a sample of 
 image with nothing to label is marked done as a negative there, never inferred from an empty
 label document alone.
 
-For a first training run, `draw_splits(folder_path, subject=subject, train_ratio=0.7,
-val_ratio=0.15, calibration_ratio=0.15, output_path=<path>)` draws a fresh leakage-free
-train/val/calibration split over the labeled data and writes its manifest, binding a later run
-that reads it to the same partition; `output_path` (or `materialize=True`) and `subject` are both
-required to write one, and all three ratios must be non-zero, since a manifest always draws all
-three sides. A call with only `folder_path` answers with split stats over the whole tree instead,
-no manifest written and no subject needed. `freeze_split_manifest` is for afterward, binding a
-later run to a partition an earlier run already drew, not for drawing the first one.
+For a first training run, `draw_splits(folder_path, seed=<seed>, subject=subject,
+output_path=<path>)` draws a fresh leakage-free train/val/calibration/holdout selection over the
+labeled data and writes it, binding a later run that reads it to the same partition. Each side but
+`train` takes a share (`val_ratio`, `calibration_ratio`, `holdout_ratio`, each defaulting to a
+provisional share the owner documented) and `train` the remainder; the seed has no default. A call
+without `output_path` answers the same draw's statistics and writes nothing. `freeze_selection` is
+for afterward, binding a later run to a partition an earlier run already drew, not for drawing the
+first one.
 
 | Tool | Purpose |
 |------|---------|
@@ -232,7 +232,7 @@ labels or seeding training data when it fits.
 The detection training pipeline mirrors a production drone-phenotyping workflow:
 
 - Metrics & selection: real per-task validation metrics (detection/instance-seg
-  mAP via `pycocotools` `COCOeval`; accuracy/F1; MAE/rank-acc) and a composite
+  mAP from the platform's one matcher; accuracy/F1; MAE/rank-acc) and a composite
   best-model objective (blends loss, F1, mAP50) instead of raw `val_loss`.
 - Progressive unfreezing: multi-stage training with optimizer-momentum handoff
   between stages, optional inter-stage LR warmup, and effective-batch LR scaling.

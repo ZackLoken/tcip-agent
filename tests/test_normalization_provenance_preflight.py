@@ -231,7 +231,7 @@ def test_preflight_keeps_every_sample_of_a_two_date_selection(tmp_path):
 
     assert "error" not in draw_splits(
         tmp_path, str(root), output_path=str(out), subject=SUBJECT, seed=7,
-        train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125), "the draw is the fixture"
+        val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125), "the draw is the fixture"
     drawn = read_selection(out, project=tmp_path)
     bound = [s for s in drawn.samples if s.side in ("train", "val")]
     assert len({s.member for s in bound}) < len(bound), (

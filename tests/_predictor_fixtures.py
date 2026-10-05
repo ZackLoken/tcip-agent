@@ -12,12 +12,17 @@ BOX = (10.0, 10.0, 30.0, 30.0)
 class StubPredictor:
     """A predictor answering the same detections for every image it is handed: ``boxes`` scored
     ``scores``, each labeled 1, on a ``width`` by ``height`` frame, with ``attributes`` when
-    given. Every other keyword becomes an attribute a caller reads off a predictor (``task``,
-    ``train_tile_size``). Counts its calls, and keeps each execution it ran under and the
-    checkpoint it was built for."""
+    given. It states the recorded training geometry a predictor exposes (none unless given), and
+    every other keyword becomes an attribute a caller reads off a predictor (``task``). Counts its
+    calls, and keeps each execution it ran under and the checkpoint it was built for."""
 
     def __init__(self, *, width: int = 100, height: int = 100, boxes=(BOX,), scores=(0.9,),
-                 attributes=None, **traits: Any) -> None:
+                 attributes=None, train_tile_size=None, train_overlap=None,
+                 train_native_size=None, train_augmentation=None, **traits: Any) -> None:
+        self.train_tile_size = train_tile_size
+        self.train_overlap = train_overlap
+        self.train_native_size = train_native_size
+        self.train_augmentation = train_augmentation
         self.record: dict[str, Any] = {
             "width": width, "height": height, "boxes": [list(b) for b in boxes],
             "scores": list(scores), "labels": [1] * len(boxes), "count": len(boxes),

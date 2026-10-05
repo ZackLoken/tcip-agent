@@ -20,14 +20,15 @@ from typing import Any, Protocol, runtime_checkable
 
 from tcip_store.values import finite_or_none, stored_number
 
-_DETECTION_TASKS = {"detection", "instance_seg"}
+DETECTION_TASKS = frozenset({"detection", "instance_seg"})
+"""The tasks whose model answers boxes, scores and labels per image."""
 # The tasks ``_synth_batch`` can shape a batch for. A task outside this set is not refused as
 # unsupported (the platform has no fixed task taxonomy), but it cannot be smoked blind, so the
 # caller supplies ``sample_batch=`` instead of the contract inventing a shape for it.
-_SYNTHESIZABLE_TASKS = _DETECTION_TASKS | {
+_SYNTHESIZABLE_TASKS = DETECTION_TASKS | {
     "classification", "ordinal", "regression", "semantic_seg",
 }
-_COUNTED_TASKS = _SYNTHESIZABLE_TASKS - _DETECTION_TASKS - {"regression"}
+_COUNTED_TASKS = _SYNTHESIZABLE_TASKS - DETECTION_TASKS - {"regression"}
 """The tasks whose synthetic target carries a class or rank id, so a batch for one cannot be
 shaped without the run's own count. A detector labels its one box foreground and a regression
 target is a value, so neither reads one."""
@@ -86,7 +87,7 @@ def _synth_batch(task: str, *, in_chans: int, img_size: int, device: Any,
 
     collate = task_collate(task)
 
-    if task in _DETECTION_TASKS:
+    if task in DETECTION_TASKS:
         img = torch.rand(in_chans, img_size, img_size, device=device)
         box = [img_size * 0.2, img_size * 0.2, img_size * 0.7, img_size * 0.7]
         # One foreground instance (labels are 1-indexed), through the loaders' own tensor builder.
@@ -130,7 +131,7 @@ def _driving_batch(task: str, dims: "Mapping[str, int] | None", sample_batch: An
 
     images, targets = (sample_batch if sample_batch is not None else
                        _synth_batch(task, device=device, **(dims or {})))
-    return images, instance_targets(targets) if task in _DETECTION_TASKS else targets
+    return images, instance_targets(targets) if task in DETECTION_TASKS else targets
 
 
 def _contains_tensor(value: Any, _depth: int = 0, _max_depth: int = 4) -> bool:
@@ -192,7 +193,7 @@ def check_model_contract(
     report: dict[str, Any] = {"ok": False, "issues": issues, "train_loss": None,
                               "eval_output_type": None, "not_smokeable": None,
                               "gradient_magnitudes": None, "operating_point_knobs": None}
-    if task in _DETECTION_TASKS:
+    if task in DETECTION_TASKS:
         # Which of score_thresh/detections_per_img the model exposes, wherever it holds
         # them (detector_operating_point_holder), a fact beside the smoke's own pass/fail verdict.
         from tcip_mcp.pipelines.operating_point import (
@@ -250,7 +251,7 @@ def check_model_contract(
         images, _ = _driving_batch(task, dims, sample_batch, dev)
         with torch.no_grad():
             out = model(images)
-        if task in _DETECTION_TASKS:
+        if task in DETECTION_TASKS:
             report["eval_output_type"] = "list[dict]"
             required = {"boxes", "scores", "labels"}
             if task == "instance_seg":

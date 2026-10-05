@@ -158,7 +158,7 @@ def build_recording_dataset(samples=None, scope=None, **kwargs) -> _RecordingDat
 
 def _draw(project: Path, root: Path, out: Path, *, subject: str = SUBJECT, seed: int = 2):
     result = draw_splits(project, str(root), output_path=str(out), subject=subject,
-                         seed=seed, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                         seed=seed, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in result, result
     return read_selection(out, project=project)
 
@@ -858,7 +858,7 @@ def test_the_explicit_draw_the_runs_own_draw_and_the_redraw_agree_member_for_mem
     registry_over(root, SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
     out = tmp_path / "m"
     explicit = draw_splits(tmp_path, str(root), output_path=str(out), subject=SUBJECT, seed=2,
-                           train_ratio=0.75, val_ratio=0.25)
+                           val_ratio=0.25, calibration_ratio=0, holdout_ratio=0)
     assert explicit["splits"]["val"] == 2, explicit
     selection = read_selection(out, project=tmp_path)
 
@@ -1004,6 +1004,7 @@ def test_a_run_that_draws_its_own_split_records_no_binding(tmp_path: Path):
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     run_dir = resolved_run(tmp_path, {
         "images_dir": str(root / "images" / DATES[0]), "scope": {"subject": SUBJECT},
+        "split": {"seed": 0, "val_ratio": 0.15},
     }, experiment_id="exp-drawn")
     resolved = read_record(run_dir / RUN_FILE)["resolved"]
 

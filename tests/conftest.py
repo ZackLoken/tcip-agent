@@ -64,8 +64,7 @@ def _stop_leaked_tensorboards():
     tb = sys.modules.get("tcip_mcp.pipelines.training.tensorboard_manager")
     if tb is None:
         return
-    for entry in tb.list_tensorboard():
-        tb.stop_tensorboard(key=entry["key"])
+    tb._stop_all_tracked()
 
 
 def pytest_collection_modifyitems(config, items):
@@ -136,7 +135,9 @@ def tb_launches(monkeypatch) -> list[tuple[str, str]]:
 
     def fake_launch(logdir: str, key: str | None = None) -> dict:
         calls.append((logdir, key or ""))
-        return {"url": "http://localhost:6006", "port": 6006, "pid": 1, "logdir": logdir}
+        from tcip_mcp.web_client import LOOPBACK_HOST
+
+        return {"url": f"http://{LOOPBACK_HOST}:6006", "port": 6006, "pid": 1, "logdir": logdir}
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", fake_launch
@@ -181,14 +182,15 @@ def seed_bud_operationalization(tmp_path: Path, seed_bud_trait_spec):
 def real_hpo_base_config(tmp_path: Path) -> dict:
     """A base config the sweep door's own preflight admits: an importable builder and a data
     section over two labeled frames of its subject (``_verified_checkpoint_fixtures.
-    detection_images``)."""
+    detection_images``), drawn at seed 0."""
     from tests._verified_checkpoint_fixtures import detection_images
 
     scope = {"subject": DATA_DIR_SUBJECT}
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {}, "task": "detection"},
-        "data": {**detection_images(tmp_path / "hpo-data", scope), "scope": scope},
+        "data": {**detection_images(tmp_path / "hpo-data", scope), "scope": scope,
+                 "split": {"seed": 0, "val_ratio": 0.15}},
     }
 
 

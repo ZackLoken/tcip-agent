@@ -29,8 +29,8 @@ def _unregistered(tmp_path: Path, **kwargs) -> str:
 def _images(tmp_path: Path, n: int = 1, size: int = 100):
     from PIL import Image
 
-    images_dir = tmp_path / "images"
-    images_dir.mkdir(exist_ok=True)
+    images_dir = tmp_path / "images" / "2026-01-01"
+    images_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     for i in range(n):
         p = images_dir / f"img{i}.png"

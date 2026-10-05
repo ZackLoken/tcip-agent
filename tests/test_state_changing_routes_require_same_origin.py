@@ -106,7 +106,7 @@ def test_a_permitted_origin_still_reaches_the_handler(client: TestClient) -> Non
     dev server's origin, and with no Origin header reach the handler's own outcome: both
     origins are loopback hosts, and a missing Origin is a non-browser client."""
     body = ActiveTabPayload(active_tab="annotate").model_dump()
-    for origin in ("http://127.0.0.1", "http://localhost:5173", None):
+    for origin in ("http://127.0.0.1", "http://127.0.0.1:5173", None):
         headers = {"origin": origin} if origin else {}
         resp = client.post("/api/state/tab", json=body, headers=headers)
         assert resp.status_code == 200, (origin, resp.status_code, resp.text)

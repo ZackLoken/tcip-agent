@@ -66,13 +66,13 @@ def test_pixel_reencode_under_same_filename_changes_the_fingerprint(tmp_path):
     untouched, changes the fingerprint and not the labels term."""
     _make_dataset(tmp_path, pixel=(120, 120, 120), ext="bmp")
     before_fp = dataset_fingerprint(tmp_path)
-    before_labels = fingerprint_mod._labels_term(tmp_path)
+    before_labels = fingerprint_mod._labels_term(tmp_path, {})
     img_path = tmp_path / "images" / "2026-02-11" / "IMG_1.bmp"
     size_before = img_path.stat().st_size
     # re-encode the image with different pixels, same filename, labels untouched
     Image.new("RGB", (64, 64), color=(0, 200, 0)).save(img_path)
     assert img_path.stat().st_size == size_before  # confirms the size channel is closed, not just JPEG luck
-    assert fingerprint_mod._labels_term(tmp_path) == before_labels  # labels-only: blind
+    assert fingerprint_mod._labels_term(tmp_path, {}) == before_labels  # labels-only: blind
     assert dataset_fingerprint(tmp_path) != before_fp  # fingerprint: pixel-aware, catches it even though size didn't
 
 
@@ -133,8 +133,8 @@ def test_the_labels_term_keys_each_document_by_its_capture(tmp_path):
     json_io.write_label_document(label_key(undated, UNDATED_BUCKET, "A"), box, 32, 32)
     json_io.write_label_document(label_key(dated, "2026-02-11", "A"), box, 32, 32)
 
-    assert fingerprint_mod._labels_term(undated) != fingerprint_mod._labels_term(dated)
-    assert fingerprint_mod._labels_term(tmp_path / "unlabeled") is None
+    assert fingerprint_mod._labels_term(undated, {}) != fingerprint_mod._labels_term(dated, {})
+    assert fingerprint_mod._labels_term(tmp_path / "unlabeled", {}) is None
 
 
 def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_own_determinism(
@@ -150,7 +150,7 @@ def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_
     registry_over(
         tmp_path, SubjectRegistry(subjects=(Subject(name="bud", description="a bud"),)))
 
-    assert dataset_fingerprint(tmp_path) == "f99f475bf2cc00f2"
+    assert dataset_fingerprint(tmp_path) == "107a8fbb2dddc690"
 
 
 def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(tmp_path):
@@ -175,6 +175,26 @@ def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(tmp_
     json.dump({"bands": {"r": "band_r.png", "nir": "band_nir.png"},
               "central_wavelength_nm": {"r": 660.0, "nir": 850.0}}, open(manifest_path, "w"))
     assert dataset_fingerprint(tmp_path) != fp1
+
+
+def test_a_malformed_registry_refuses_the_fingerprint_and_an_absent_one_admits_it(tmp_path):
+    """A registry whose bytes will not decode refuses the fingerprint rather than reading as no
+    registry; a dataset holding no registry still fingerprints, unlike one holding a registry."""
+    import pytest
+
+    from tcip_mcp.dataset_layout import subjects_path
+    from tcip_mcp.subject_registry import RegistryError
+
+    _make_dataset(tmp_path)
+    with_registry = dataset_fingerprint(tmp_path)
+    path = subjects_path(tmp_path)
+    ts.put_blob(path, b"{not json")
+    with pytest.raises(RegistryError):
+        dataset_fingerprint(tmp_path)
+
+    ts.delete_blob(path)
+    without = dataset_fingerprint(tmp_path)
+    assert without is not None and without != with_registry
 
 
 def test_bespoke_dataset_has_no_fingerprint(tmp_path):

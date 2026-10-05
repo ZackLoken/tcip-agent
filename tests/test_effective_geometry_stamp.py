@@ -135,14 +135,15 @@ def _serve(monkeypatch, train_ds):
     from tcip_mcp.pipelines.data import split_construction as sc
 
     monkeypatch.setattr(
-        sc, "auto_train_val", lambda project, task, data_cfg, transforms, **_: (train_ds, None, None))
+        sc, "auto_train_val",
+        lambda project, task, data_cfg, transforms, **_: (train_ds, None, {"samples": []}))
 
 
 def _base_config(tiling, project: Path):
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(project / "imgs"), "tiling": tiling},
+        "data": {"images_dir": str(project / "imgs"), "tiling": tiling, "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 2, "evaluation": {"selection_metric": "loss"},
     }
 

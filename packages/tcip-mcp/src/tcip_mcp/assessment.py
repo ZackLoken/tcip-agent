@@ -204,34 +204,27 @@ def _finish(project: Path, run_dir: Path, revision: TraitRevision,
     return read_assessment(project, run_dir.name)
 
 
-def _read_reference(samples: list[Sample], extra: tuple[str, ...] = ()
-                    ) -> dict[Key | str, Any]:
-    """The one read of each distinct ground truth of ``samples`` and each file of ``extra``, the
-    store's required read: what it answered for it (``Versioned``). A ground truth that is not
-    there refuses (:class:`AssessmentRefused`) with the store's own ``NotFound`` message."""
+def _reference_reads(samples: list[Sample], extra: tuple[str, ...] = ()
+                     ) -> dict[Key | str, Any]:
+    """What the store answered (``Versioned``) for each distinct ground truth of the admitted
+    ``samples``, their admission's own read (``stored``), and for each file of ``extra``, read
+    once here; an ``extra`` file that is not there refuses (:class:`AssessmentRefused`) with the
+    store's own ``NotFound`` message."""
     import tcip_store
 
-    reads = {}
-    for gt in dict.fromkeys([*(s.ground_truth for s in samples), *extra]):
+    reads: dict[Key | str, Any] = {s.ground_truth: s.stored for s in samples}
+    for path in extra:
         try:
-            reads[gt] = (tcip_store.read_versioned(gt) if isinstance(gt, Key)
-                         else tcip_store.read_blob_versioned(Path(gt)))
+            reads[path] = tcip_store.read_blob_versioned(Path(path))
         except tcip_store.NotFound as exc:
             raise AssessmentRefused(f"the reference cannot be read, so it cannot be assessed: "
                                     f"{exc}") from exc
     return reads
 
 
-def _documents(reads: dict[Key | str, Any]) -> dict[Key, Any]:
-    """The label documents among ``reads`` (:func:`_read_reference`), decoded."""
-    from tcip_annotation.json_io import document_at
-
-    return {gt: document_at(gt, stored) for gt, stored in reads.items() if isinstance(gt, Key)}
-
-
 def _retained(run_dir: Path, samples: list[Sample], reads: dict[Key | str, Any]
               ) -> tuple[list[RetainedFile], list[Sample]]:
-    """Each of ``reads`` (:func:`_read_reference`) copied once into the run's reference folder
+    """Each of ``reads`` (:func:`_reference_reads`) copied once into the run's reference folder
     before anything is measured, a label document as its stored record
     (:func:`tcip_store.encode_record`); and ``samples`` measuring what was retained: a mask's or a
     table's copy, and a document's record at the retained version (its ``ground_truth_digest``)."""
@@ -302,7 +295,9 @@ def _prepared(project: Path, *, checkpoint_path: str, trait: str, delivery_kind:
 
     revision = confirmed_revision(delivery_kind, project=project, trait=trait)
     checkpoint = load_registered_checkpoint(checkpoint_path, project=project)
-    expected = (("detection", "instance_seg") if delivery_kind in DETECTOR_KINDS
+    from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+
+    expected = (tuple(sorted(DETECTION_TASKS)) if delivery_kind in DETECTOR_KINDS
                 else ("ordinal",) if delivery_kind == PER_PLANT_ORDINAL_AGGREGATE
                 else ("regression",))
     if checkpoint.task not in expected:
@@ -312,17 +307,19 @@ def _prepared(project: Path, *, checkpoint_path: str, trait: str, delivery_kind:
                                   tile_batch_size=tile_batch_size)
 
 
-def _admit_reference(samples: list[Sample], scope: Any, documents: dict[Key, Any]) -> None:
-    """Refuse a reference the platform's own admission would not admit under ``scope``
-    (:func:`~tcip_mcp.pipelines.data.label_queries.readmitted_samples`), and one whose
-    label ``documents`` (:func:`_documents`) only the model stands behind
-    (:func:`~tcip_annotation.json_io.require_reference_ground_truth`)."""
+def _admit_reference(samples: list[Sample], scope: Any) -> list[Sample]:
+    """``samples`` as the platform's own admission re-admits them under ``scope``
+    (:func:`~tcip_mcp.pipelines.data.label_queries.readmitted_samples`), each carrying its read;
+    refuses a reference that admission would not admit, and one whose label documents only the
+    model stands behind (:func:`~tcip_annotation.json_io.require_reference_ground_truth`)."""
     from tcip_annotation.json_io import require_reference_ground_truth
 
     from tcip_mcp.pipelines.data.label_queries import readmitted_samples
 
-    readmitted_samples(samples, scope)
-    require_reference_ground_truth([a for d in documents.values() for a in d.annotations])
+    admitted = readmitted_samples(samples, scope)
+    require_reference_ground_truth([a for s in admitted if isinstance(s.ground_truth, Key)
+                                    for a in s.read.annotations])
+    return admitted
 
 
 def _run_sides(project: Path, experiment_id: str | None) -> dict[str, list[Sample]] | None:
@@ -395,8 +392,9 @@ def assess(
         raise AssessmentRefused(
             f"{checkpoint_path} classifies no {state}: a state fraction is measured off a "
             "classifier of the trait's positive state.")
-    reads = _read_reference(cal + hold)
-    _admit_reference(cal + hold, p.scope, _documents(reads))
+    admitted = _admit_reference(cal + hold, p.scope)
+    cal, hold = admitted[:len(cal)], admitted[len(cal):]
+    reads = _reference_reads(cal + hold)
     digest_of = source_digests(cal + hold)
     disjointness, failures = _disjointness(digest_of, cal, hold,
                                            _run_sides(project, p.checkpoint.experiment_id))
@@ -462,11 +460,10 @@ def _records(p: Pass, ds: Any, digest_of: dict[str, str], execution: Execution) 
     """One evaluation record per sample of the loader ``ds``, predicted under ``execution``
     (:func:`~tcip_mcp.pipelines.training.evaluation.prediction_record`), the sample's source digest
     as its ``image_id``."""
-    from tcip_mcp.pipelines.image_utils import resolve_source_path
     from tcip_mcp.pipelines.training.evaluation import gt_records, prediction_record
 
-    results = (p.predict([resolve_source_path(ds.sample_of(k).source) for k in ds.stems],
-                         execution=execution) if ds.stems else [])
+    results = (p.predict([ds.image_of(k) for k in ds.stems], execution=execution)
+               if ds.stems else [])
     return [prediction_record(r, gt_records(ds.det_targets(ds.document(k))), image_id=digest_of[k])
             for k, r in zip(ds.stems, results, strict=True)]
 
@@ -525,8 +522,6 @@ def _scalar(p: Pass, hold: list[Sample], entry: TraitEntry,
     name; a regression delivery is scored by the revision's own ``regression_criterion``, one the
     platform does not register refusing by name."""
     from tcip_mcp.pipelines.data.datasets import table_values
-    from tcip_mcp.pipelines.image_utils import resolve_source_path
-    from tcip_mcp.pipelines.model_build import recorded_model_dims
     from tcip_mcp.pipelines.operating_point import REGRESSION_CRITERIA, scalar_criterion
     from tcip_mcp.pipelines.training.evaluation import quadratic_weighted_kappa
 
@@ -536,7 +531,7 @@ def _scalar(p: Pass, hold: list[Sample], entry: TraitEntry,
                                 f"{entry.regression_criterion!r}, and a regression delivery is "
                                 f"assessed by one of {sorted(REGRESSION_CRITERIA)}.")
     suffix, cast_to = ("_ranks", int) if ordinal else ("_values", float)
-    predictions = p.predict([resolve_source_path(s.source) for s in hold])
+    predictions = p.predict([s.image for s in hold])
     if len(predictions) != len(hold):
         raise AssessmentRefused(f"the checkpoint returned {len(predictions)} predictions for "
                                 f"{len(hold)} holdout samples: the reference is scored one "
@@ -551,7 +546,7 @@ def _scalar(p: Pass, hold: list[Sample], entry: TraitEntry,
         held.append({"image_id": digest_of[sample.location], "true": cast_to(truth),
                      "predicted": cast_to(values[0][0])})
     if ordinal:
-        num_ranks = recorded_model_dims(p.checkpoint.payload.get("config") or {})["num_ranks"]
+        num_ranks = p.predictor.dims["num_ranks"]
         return scalar_criterion(
             held, score=lambda pred, gt: quadratic_weighted_kappa(pred, gt, num_ranks),
             floor=cast(float, entry.ordinal_agreement_floor),
@@ -567,7 +562,7 @@ def assess_reserved_regions(
     device: str | None = None, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
 ) -> Assessment:
     """Assess a checkpoint trained on one mosaic against that mosaic's own reserved calibration
-    and test regions (its run's within-image split with ``reserve_calibration_fraction``), cut
+    and holdout regions (its run's within-image split with ``calibration_ratio``), cut
     into ``k_cal`` and ``k_test`` buffered bands, for a count delivery of ``trait``; record the
     result as a new assessment and return it.
 
@@ -582,16 +577,17 @@ def assess_reserved_regions(
     changed since the split, and a mosaic label document only the model stands behind.
     """
     import numpy as np
-    from tcip_annotation.json_io import require_reference_ground_truth
 
     from tcip_mcp.experiments import run_resolution
+    from tcip_annotation.json_io import xywh
+    from tcip_annotation.state import object_rows
+
     from tcip_mcp.pipelines import block_calibration as blocks
-    from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS, object_rows
+    from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS, crowd_of
     from tcip_mcp.pipelines.data.label_queries import json_det_targets
     from tcip_mcp.pipelines.data.selection import DOCUMENT, Sample, source_digests
     from tcip_mcp.pipelines.data.split_construction import partition_samples
     from tcip_mcp.pipelines.derivations import derive_block_scale_px
-    from tcip_mcp.pipelines.image_utils import resolve_source_path
     from tcip_mcp.pipelines.operating_point import spatial_disjointness
     from tcip_mcp.pipelines.raster_source import BandGroupRef, open_raster
     from tcip_mcp.pipelines.training.evaluation import gt_records
@@ -612,8 +608,7 @@ def assess_reserved_regions(
     if spatial is None:
         raise AssessmentRefused(
             f"run {experiment_id!r} resolved no within-image spatial split with a reserved "
-            "calibration and test region (train it with data.split.reserve_calibration_fraction "
-            "set).")
+            "calibration and holdout region (train it with data.split.calibration_ratio set).")
     (mosaic,) = partition_samples(resolved["partition"])
     stem = mosaic.member
     tile_size, overlap = int(spatial["tile_size"]), float(spatial["overlap"])
@@ -623,19 +618,19 @@ def assess_reserved_regions(
             f"{p.execution.tile_size}px; the assessed pass and the published one run at one tile "
             "edge.")
     scope = p.scope.admitted_for(DOCUMENT, f"experiment {experiment_id!r}")
-    reads = _read_reference([mosaic])
-    document = _documents(reads)[cast(Key, mosaic.ground_truth)]
-    require_reference_ground_truth(document.annotations)
-    cal_rect, test_rect = (tuple(spatial[k][0]) for k in ("calibration_region", "test_region"))
+    (mosaic,) = _admit_reference([mosaic], scope)
+    document = mosaic.read
+    reads = _reference_reads([mosaic])
+    cal_rect, test_rect = (tuple(spatial[k][0]) for k in ("calibration_region", "holdout_region"))
     blocks.check_completeness(document, f"{stem}'s label document", cast(str, scope.subject),
-                              {"calibration_region": cal_rect, "test_region": test_rect})
-    source = resolve_source_path(mosaic.source)
+                              {"calibration_region": cal_rect, "holdout_region": test_rect})
+    source = mosaic.image
     run_dir = _open_run(project)
     retained, _measured = _retained(run_dir, [mosaic], reads)
     target = json_det_targets(document.annotations, scope)
     gt = {k: np.asarray(target[k]) for k in PER_BOX_KEYS if k in target}
     gt["boxes"] = gt["boxes"].astype(np.float32).reshape(-1, 4)
-    objects = gt["boxes"][object_rows(gt["iscrowd"])]
+    objects = gt["boxes"][object_rows(crowd_of(gt))]
     calibration_objects = objects[blocks.centered_in(objects, cal_rect)]
     plants = None
     if resolved["data"].get("plant_csv_paths"):
@@ -645,8 +640,7 @@ def assess_reserved_regions(
     try:
         buffer_px, scale_source = derive_block_scale_px(
             tile_size=tile_size, plants=plants,
-            gt_boxes_per_image=[[[x1, y1, x2 - x1, y2 - y1]
-                                 for x1, y1, x2, y2 in calibration_objects.tolist()]],
+            gt_boxes_per_image=[[xywh(*box) for box in calibration_objects.tolist()]],
             raster_path=None if isinstance(source, BandGroupRef) else source)
         bands = {"calibration": blocks.band_rects(cal_rect, k_cal, tile_size, overlap, buffer_px,
                                                   "cal"),
@@ -659,13 +653,13 @@ def assess_reserved_regions(
     if leaks:
         raise AssessmentRefused(f"band(s) {leaks} are not held out from run {experiment_id!r}'s "
                                 "training regions, so they cannot stand as its reference.")
-    band_counts = {side: {name: int(object_rows(blocks.select_gt_for_band(gt, rect)["iscrowd"]).sum())
+    band_counts = {side: {name: sum(object_rows(crowd_of(blocks.select_gt_for_band(gt, rect))))
                           for name, rect in side_bands.items()}
                    for side, side_bands in bands.items()}
     for side, counts in band_counts.items():
         blocks.check_feasibility(counts, side=side)
-    samples = [Sample(member=name, source=str(source), ground_truth=mosaic.ground_truth,
-                      group=name, side=side, rect=cast(Any, tuple(rect)))
+    samples = [Sample(member=name, source=mosaic.source, ground_truth=mosaic.ground_truth,
+                      group=name, side=side, rect=cast(Any, tuple(rect)), image=source)
                for side, side_bands in bands.items() for name, rect in side_bands.items()]
     digest_of = source_digests(samples)
 
@@ -717,7 +711,7 @@ def _band_records(reader: Any, bands: dict[str, tuple[int, int, int, int]], p: P
 
     from tcip_mcp.pipelines import block_calibration as blocks
     from tcip_mcp.pipelines.data.selection import Sample
-    from tcip_mcp.pipelines.inference.generic_predictor import DETECTION_ROWS
+    from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS
     from tcip_mcp.pipelines.raster_source import Rect, _RegionView
     from tcip_mcp.pipelines.slicing import slice_lattice
     from tcip_mcp.pipelines.training.evaluation import gt_records, prediction_record
@@ -738,7 +732,7 @@ def _band_records(reader: Any, bands: dict[str, tuple[int, int, int, int]], p: P
         boxes = np.asarray(result["boxes"], dtype=np.float64).reshape(-1, 4) + [hx0, hy0, hx0, hy0]
         kept = blocks.centered_in(boxes, inner)
         rows = {key: [v for v, k in zip(result[key], kept) if k]
-                for key in DETECTION_ROWS if key in result}
+                for key in PER_BOX_KEYS if key in result}
         records.append(prediction_record(
             {**result, **rows, "width": ix1 - ix0, "height": iy1 - iy0,
              "boxes": (boxes[kept] - [ix0, iy0, ix0, iy0]).tolist()},
@@ -746,15 +740,16 @@ def _band_records(reader: Any, bands: dict[str, tuple[int, int, int, int]], p: P
     return records
 
 
-def _read_reference_csv(csv_path: Path) -> dict[str, dict[str, Any]]:
-    """``stem -> {"physical_extent": float, "unit": str}`` from a breeder's reference CSV, its
-    ``image_stem``, ``physical_extent`` and ``unit`` columns read by name. A missing column, a
-    short row, a non-numeric or non-positive extent and a repeated stem each refuse naming the
-    line."""
+def _read_reference_csv(data: bytes, csv_path: str) -> dict[str, dict[str, Any]]:
+    """``stem -> {"physical_extent": float, "unit": str}`` from the bytes ``data`` of the
+    breeder's reference CSV at ``csv_path``, its ``image_stem``, ``physical_extent`` and ``unit``
+    columns read by name. A missing column, a short row, a non-numeric or non-positive extent and
+    a repeated stem each refuse naming the line."""
     import csv
+    import io
 
     out: dict[str, dict[str, Any]] = {}
-    with open(csv_path, newline="") as f:
+    with io.StringIO(data.decode("utf-8"), newline="") as f:
         reader = csv.reader(f)
         header = next(reader, None) or []
         columns = ("image_stem", "physical_extent", "unit")
@@ -794,7 +789,7 @@ def assess_physical_scale(
     its sides must share no source digest. Each reference image carries exactly one
     ``reference_subject`` polygon or mask, whose principal-axis extent is its pixel extent;
     ``reference_csv`` (``image_stem, physical_extent, unit``) is the breeder's physical extent of
-    the same object, retained with the reference and read from its retained copy. The scale is the mean implied scale of
+    the same object, read once, retained with the reference and measured as read. The scale is the mean implied scale of
     the calibration side; it passes when the holdout's own relative dispersion and the scale's
     relative deviation from the holdout mean are both within ``scale_tolerance_frac``. Refuses an
     unauthored tolerance, a unit that is not a linear length unit crops.yml declares, a selection
@@ -819,15 +814,14 @@ def assess_physical_scale(
                                 f"linear length unit crops.yml declares "
                                 f"({sorted(crops_length_units())}).")
     selection, cal, hold = _reference_sides(project, selection_dir)
-    reads = _read_reference(cal + hold, (reference_csv,))
-    documents = _documents(reads)
-    _admit_reference(cal + hold, selection.scope, documents)
+    admitted = _admit_reference(cal + hold, selection.scope)
+    cal, hold = admitted[:len(cal)], admitted[len(cal):]
+    reads = _reference_reads(cal + hold, (reference_csv,))
     digest_of = source_digests(cal + hold)
     disjointness, failures = _disjointness(digest_of, cal, hold, {})
     run_dir = _open_run(project)
     retained, measured = _retained(run_dir, cal + hold, reads)
-    rows = _read_reference_csv(
-        run_dir / next(f.copy for f in retained if f.ground_truth == reference_csv))
+    rows = _read_reference_csv(reads[reference_csv].value, reference_csv)
     implied: dict[str, dict[str, float]] = {"calibration": {}, "holdout": {}}
     for sample in measured:
         row = rows.get(sample.member)
@@ -838,8 +832,7 @@ def assess_physical_scale(
             raise AssessmentRefused(f"{reference_csv} states {sample.member!r} in "
                                     f"{row['unit']!r}, not {unit!r}; a reference is never "
                                     "converted between units.")
-        found = [a for a in documents[cast(Key, sample.ground_truth)].annotations
-                 if a.subject == reference_subject]
+        found = [a for a in sample.read.annotations if a.subject == reference_subject]
         if len(found) != 1 or not polygonal(found[0].geometry):
             raise AssessmentRefused(
                 f"{sample.member!r} carries {len(found)} {reference_subject!r} annotation(s); a "

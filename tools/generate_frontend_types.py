@@ -70,7 +70,7 @@ def declared_models() -> list[type[BaseModel]]:
     from tcip_mcp.pipelines.delivery_events_schema import (
         Acknowledgment, BucketFinding, CanopySegmentDisclosure, CanopySegmentsDocument,
         DeliveryEventRecord, MatchTolerance, PlantMappingDisclosure, PlantRegistryDisclosure,
-        PlantRegistryReference, Producer, SegmentTieDisclosure, UnattributedDetectionsBySource,
+        PlantRegistryReference, Producer, SegmentTieDisclosure,
     )
     from tcip_web.routes.annotate import LaunchPriorityQueuePayload
     from tcip_web.routes.sessions import ImageEntry, ImageEventPayload, SessionSummary
@@ -89,8 +89,7 @@ def declared_models() -> list[type[BaseModel]]:
             AcknowledgmentPayload, ExportCsvPayload, PerImageCountDelivery,
             OrthomosaicPlantCountsDelivery, ExportCountCsvPayload, MatchTolerance,
             PlantRegistryReference, PlantMappingDisclosure, PlantRegistryDisclosure,
-            CanopySegmentsDocument, SegmentTieDisclosure, UnattributedDetectionsBySource,
-            CanopySegmentDisclosure, Producer, BucketFinding, Acknowledgment,
+            CanopySegmentsDocument, SegmentTieDisclosure, CanopySegmentDisclosure, Producer, BucketFinding, Acknowledgment,
             DeliveryEventRecord, Operationalization, PositiveState, TraitEntry, TraitRevision,
             ConfirmRevisionPayload, Stated]
 

@@ -44,8 +44,7 @@ def test_local_browser_and_non_browser_clients_are_still_admitted() -> None:
     """Loopback pages, and only a client that sends no Origin at all (never an empty one),
     keep working."""
     assert origin_allowed("http://127.0.0.1:8765", LOCAL_ARRIVAL)
-    assert origin_allowed("http://localhost:5173", LOCAL_ARRIVAL)
-    assert origin_allowed("http://[::1]:8765", LOCAL_ARRIVAL)
+    assert origin_allowed("http://127.0.0.1:5173", LOCAL_ARRIVAL)
     assert origin_allowed(None, LOCAL_ARRIVAL)
 
 

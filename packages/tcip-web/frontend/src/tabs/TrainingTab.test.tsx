@@ -335,7 +335,7 @@ describe("TrainingTab heading", () => {
     vi.spyOn(trainingApi, "getRun").mockResolvedValue({
       experiment_id: "train-heading",
       status: "completed",
-      tensorboard_url: "http://localhost:6006",
+      tensorboard_url: "http://127.0.0.1:6006",
     });
 
     render(<TrainingTab />);
@@ -862,7 +862,7 @@ describe("TrainingTab switching between runs directly", () => {
     const launchSpy = vi
       .spyOn(trainingApi, "launchTensorboard")
       .mockImplementation((experimentId: string) =>
-        Promise.resolve({ url: `http://localhost:6006/${experimentId}` }),
+        Promise.resolve({ url: `http://127.0.0.1:6006/${experimentId}` }),
       );
 
     render(<TrainingTab />);
@@ -873,7 +873,7 @@ describe("TrainingTab switching between runs directly", () => {
     await waitFor(() => expect(launchSpy).toHaveBeenCalledWith("train-y"));
     expect(screen.getByTitle("TensorBoard")).toHaveAttribute(
       "src",
-      "http://localhost:6006/train-y",
+      "http://127.0.0.1:6006/train-y",
     );
   });
 });

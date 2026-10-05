@@ -213,7 +213,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_wo
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"split": {"selection_dir": str(selection_dir)}},
+        "data": {"split": {"selection_dir": str(selection_dir), "seed": 0}},
     }
     result = tt.run_hyperparameter_search(tmp_path, base_config=cfg, n_trials=1,
                         scheduler="none", split_draws=2, search_seed=0)
@@ -532,7 +532,7 @@ def test_run_hyperparameter_search_reports_the_seed_axis_refusal_over_a_prefligh
 
 
 def _bound_hpo_config(selection_dir, *, auto_val: bool | None = None) -> dict:
-    data: dict = {"split": {"selection_dir": str(selection_dir)}}
+    data: dict = {"split": {"selection_dir": str(selection_dir), "seed": 42}}
     if auto_val is not None:
         data["auto_val"] = auto_val
     return {
@@ -557,7 +557,7 @@ def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection_and_s
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     selection_dir = tmp_path / "m"
     make_result = draw_splits(tmp_path, str(root), output_path=str(selection_dir), subject=SUBJECT,
-                              seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                              seed=2, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in make_result, make_result
 
     captured = _search(monkeypatch)
@@ -570,7 +570,8 @@ def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection_and_s
     assert captured["param_space"]["data.split.seed"] == {
         "type": "categorical", "choices": [42, 43],
     }
-    assert cfg["data"]["split"] == {"selection_dir": str(selection_dir)}  # the caller's own copy
+    assert cfg["data"]["split"] == {"selection_dir": str(selection_dir),
+                                    "seed": 42}  # the caller's own copy
 
     manifest = tt.monitor_training(tmp_path, sweep_id=result["study_name"])["input"]
     recorded_split = manifest["base_config"]["data"]["split"]
@@ -589,7 +590,7 @@ def test_run_hyperparameter_search_admits_split_draws_bound_with_auto_val_false(
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     selection_dir = tmp_path / "m"
     make_result = draw_splits(tmp_path, str(root), output_path=str(selection_dir), subject=SUBJECT,
-                              seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+                              seed=2, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in make_result, make_result
 
     _search(monkeypatch)
@@ -604,11 +605,12 @@ def test_run_hyperparameter_search_admits_split_draws_bound_with_auto_val_false(
 def test_run_hyperparameter_search_admits_split_draws_and_derives_seeds_from_the_base_config(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
-    """The default draw seeds are the base config's own data.split.seed (else 42) plus the
-    draw index, and the space Ray actually searches carries the paired grid axis."""
+    """The default draw seeds are the base config's own data.split.seed plus the draw index, and
+    the space Ray actually searches carries the paired grid axis."""
     import tcip_mcp.tools.training_tools as tt
 
     captured = _search(monkeypatch, best_params={"lr": 0.1}, best_value=0.2)
+    real_hpo_base_config["data"]["split"]["seed"] = 42
 
     result = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=2,
                         scheduler="none", split_draws=3, trial_budget=6, search_seed=0)
@@ -665,7 +667,7 @@ def test_run_hyperparameter_search_admits_split_draws_for_instance_seg(tmp_path,
     cfg["model_source"] = {**cfg["model_source"], "task": "instance_seg"}
     scope = cfg["data"]["scope"]
     cfg["data"] = {**detection_images(tmp_path / "polygons", scope, polygons=True),
-                   "scope": scope}
+                   "scope": scope, "split": {"seed": 0, "val_ratio": 0.15}}
 
     _search(monkeypatch)
 
@@ -1272,7 +1274,7 @@ def _one_source_tiled_cfg(images_dir) -> dict:
                          "task": "detection"},
         "data": {
             "images_dir": str(images_dir), "scope": {"subject": "bud"},
-            "auto_val": True, "split": {"val_ratio": 0.2, "test_ratio": 0.1},
+            "auto_val": True, "split": {"val_ratio": 0.2, "seed": 1},
             # sliver_frac stated: a fixture this small derives no box-size spread.
             "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2, "sliver_frac": 0.5},
         },
@@ -1318,6 +1320,8 @@ def test_run_hyperparameter_search_admits_a_single_source_spatial_config_at_one_
 
     images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     cfg = _one_source_tiled_cfg(images_dir)
+    # The default holdout strip is narrower than this mosaic's tile lattice admits.
+    cfg["data"]["split"]["holdout_ratio"] = 0.1
 
     _search(monkeypatch)
 

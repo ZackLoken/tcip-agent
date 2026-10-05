@@ -1,5 +1,5 @@
 """The network trust boundary: the backend serves connections that arrived through this machine,
-and answers only to loopback names.
+and answers only to the loopback host it binds.
 
 Locality is a property of the accepted connection, never of a configured bind host: the ASGI
 ``scope["server"]`` is the local address the connection arrived on, and a connection through
@@ -25,7 +25,6 @@ Authority = tuple[str, int | None]
 """A canonical host and a port; ``None`` stands for the arrival's own port."""
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
-_LOOPBACK_NAMES = frozenset({"localhost"})
 
 STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 """HTTP methods the trust boundary treats as mutating: a request using one of these must carry
@@ -95,19 +94,12 @@ def parse_authority(value: str, default_port: int | None) -> Authority:
 
 
 def is_loopback_host(host: str) -> bool:
-    """True if ``host`` names only the local machine (127.0.0.0/8, ::1, localhost).
+    """True if ``host``, canonically spelled, is the one loopback host every server here binds
+    (:data:`~tcip_mcp.web_client.LOOPBACK_HOST`); a malformed host is not."""
+    from tcip_mcp.web_client import LOOPBACK_HOST
 
-    ``0.0.0.0`` / ``::`` mean "all interfaces" and are therefore not loopback: binding
-    them exposes the server to the network.
-    """
     try:
-        h = canonical_host(host)
-    except ValueError:
-        return False
-    if h in _LOOPBACK_NAMES:
-        return True
-    try:
-        return ipaddress.ip_address(h).is_loopback
+        return canonical_host(host) == LOOPBACK_HOST
     except ValueError:
         return False
 
@@ -121,8 +113,8 @@ def arrival(scope: Mapping[str, Any]) -> tuple[str, int | None] | None:
 
 
 def local_arrival(scope: Mapping[str, Any]) -> bool:
-    """True when the connection arrived through this machine: a loopback address or name, or a
-    UNIX socket path."""
+    """True when the connection arrived through this machine: the loopback host, or a UNIX socket
+    path."""
     at = arrival(scope)
     if at is None:
         return False
@@ -156,7 +148,7 @@ def request_authority(scope: Mapping[str, Any]) -> Authority | None:
 
 
 def host_allowed(scope: Mapping[str, Any]) -> bool:
-    """Whether the request's Host is a loopback name at the port the connection arrived on."""
+    """Whether the request's Host is the loopback host at the port the connection arrived on."""
     at = arrival(scope)
     authority = request_authority(scope)
     if at is None or authority is None:
@@ -181,8 +173,8 @@ def origin_allowed(origin: str | None, scope: Mapping[str, Any]) -> bool:
     """Whether an Origin is one this backend serves.
 
     Only an absent Origin (``None``) is a non-browser client and is allowed. A present Origin,
-    empty included, is refused unless it parses as a bare authority naming a loopback host, at any
-    port.
+    empty included, is refused unless it parses as a bare authority naming the loopback host, at
+    any port.
     """
     if origin is None:
         return True

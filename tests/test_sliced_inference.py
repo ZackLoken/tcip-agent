@@ -428,7 +428,7 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(tmp_path, monkeypat
     images = _blob_capture(tmp_path)
     selection = tmp_path / "selection"
     drawn = draw_splits(tmp_path, str(tmp_path / "ds"), output_path=str(selection),
-                        subject="bud", seed=2, train_ratio=0.4, val_ratio=0.2,
+                        subject="bud", seed=2, val_ratio=0.2,
                         calibration_ratio=0.2, holdout_ratio=0.2)
     assert "error" not in drawn, drawn
     ckpt, _record = _checkpoint(tmp_path)

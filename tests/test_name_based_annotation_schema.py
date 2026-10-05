@@ -281,7 +281,7 @@ def test_geometryless_only_image_is_refused_by_the_loader_that_reads_no_target_f
     assert [Path(s).stem for s in ds.stems] == ["boxed"]
 
 
-# (i) eval accumulates every per-image record into one COCOeval, so a subject must carry the same
+# (i) eval accumulates every per-image record into one score, so a subject must carry the same
 # category id across images: records_from_annotation must honor a passed global name_id.
 def test_records_from_annotation_honors_a_global_name_id():
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
@@ -291,7 +291,7 @@ def test_records_from_annotation_honors_a_global_name_id():
     name_id = {"bush": 1, "bud": 2}  # one global map
     # An image whose only subject is bud: a per-image-local map would give bud id 1; the global
     # map must keep it 2, matching every other image's bud.
-    _iou, rec = records_from_annotation(
+    rec = records_from_annotation(
         [Ann(subject="bud", geometry=B(0, 0, 10, 10))],
         [Ann(subject="bud", geometry=B(0, 0, 10, 10), score=0.9)],
         width=100, height=100, name_id=name_id)
