@@ -26,7 +26,7 @@ import { useServingGrid } from "@/hooks/useServingGrid";
 import { compositeParams } from "@/lib/bandSelection";
 import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
 import type { LoadedImage } from "@/lib/imageLoader";
-import { currentImage, labelPath } from "@/lib/paths";
+import { currentImage } from "@/lib/paths";
 import { fitView } from "@/lib/viewGeometry";
 import {
   buildAnnotateShapes,
@@ -164,16 +164,14 @@ export function AnnotateTab() {
   const pointDragRef = useRef<number | null>(null);
 
   // I/O safety. The canvas belongs to exactly the image last loaded from disk:
-  //  - loadedPathsRef: the (image, label) the current shapes came from. save() writes there,
-  //    never to a path recomputed from a since-changed dataset, which could write one
-  //    image's shapes onto another's file.
+  //  - loadedPathsRef: the image the current shapes came from. save() writes its labels, never
+  //    a since-changed dataset's current image, which could write one image's shapes onto another's.
   //  - loadedKeyRef: gates reloads to a genuine image-identity change, so unrelated store updates
   //    (a WS snapshot, a mode/subject toggle) don't re-read disk and clobber unsaved edits.
   //  - saveBlocked: set when a load failed, so a blank canvas can't overwrite the labels on disk.
   const loadedKeyRef = useRef<string | null>(null);
   const loadedPathsRef = useRef<{
     image: string;
-    label: string | null;
     mtime: string | null;
   } | null>(null);
   const [ioError, setIoError] = useState<string | null>(null);
@@ -231,7 +229,7 @@ export function AnnotateTab() {
   }
 
   // ── Proposals: the selected bucket's, paired and decided server-side ────────
-  const bucket = dataset.predictions_dir;
+  const bucket = dataset.bucket;
   // Per image: hiding proposals while annotating is recorded on the mark the person then makes.
   const [hideProposals, setHideProposals] = useState(false);
   const [proposalTick, setProposalTick] = useState(0);
@@ -240,8 +238,7 @@ export function AnnotateTab() {
   useEffect(() => {
     if (!imgPath || !currentImageName || !bucket || hideProposals) return;
     let canceled = false;
-    const label = labelPath(dataset, currentImageName);
-    api.annotate.proposals(imgPath, bucket, label).then(
+    api.annotate.proposals(imgPath, bucket).then(
       (r) => {
         if (!canceled) setServed({ key: proposalKey, proposals: r.proposals });
       },
@@ -436,23 +433,15 @@ export function AnnotateTab() {
     const interactive = opts?.interactive ?? true;
     const gestures = opts?.gestures;
     const paths = loadedPathsRef.current;
-    if (!paths) return; // no confirmed load → refuse to overwrite on-disk labels
+    if (!paths) return; // no confirmed load → refuse to overwrite the stored labels
     const c = useStore.getState().canvas;
     if (!c.dirty && !gestures) return;
-    if (!paths.label) {
-      // No annotations directory is set for this dataset, so there is nowhere to write; a
-      // server round trip would only come back with the same refusal.
-      if (interactive)
-        setIoError("This dataset has no annotations directory set; select one to save.");
-      return;
-    }
     const imgFileName = paths.image.split(/[/\\]/).pop() ?? "image";
 
     let result;
     try {
       result = await api.annotate.save({
         image_path: paths.image,
-        label_path: paths.label,
         annotations: canvasToAnnotations({
           boxes: c.boxes,
           polygons: c.polygons,
@@ -496,14 +485,10 @@ export function AnnotateTab() {
       return;
     }
 
-    if (result.status === "unrecorded") {
-      useStore.getState().pushToast(result.message);
-    }
-
     // Staleness guard: flushLeaving() fires this save without awaiting it, so by
     // the time the POST resolves the load effect may already have loaded the next
     // image and repointed loadedPathsRef. Rewinding the ref here would make every
-    // later save write the new image's shapes onto the old image's label file
+    // later save write the new image's shapes onto the old image's label document
     // (with an echoed mtime that matches it, so the backend's 409 guard can't catch
     // it), and markClean() would silently drop edits already made on the new image.
     if (loadedPathsRef.current !== paths) return;
@@ -526,7 +511,7 @@ export function AnnotateTab() {
     const paths = loadedPathsRef.current;
     if (!paths) return;
     try {
-      const labels = await api.annotate.load(paths.image, paths.label);
+      const labels = await api.annotate.load(paths.image);
       loadLabels(labels);
       loadedPathsRef.current = { ...paths, mtime: labels.base_mtime };
       setIoError(null);
@@ -555,12 +540,8 @@ export function AnnotateTab() {
       return;
     const paths = loadedPathsRef.current;
     if (!paths) return;
-    const written = Array.isArray(agentActivity.data.written)
-      ? (agentActivity.data.written as string[])
-      : [];
-    const norm = (p: string | null) => (p ? p.replace(/\\/g, "/") : "");
-    const current = norm(paths.label);
-    if (!current || !written.some((w) => norm(w) === current)) return;
+    const norm = (p: unknown) => (typeof p === "string" ? p.replace(/\\/g, "/") : "");
+    if (norm(agentActivity.data.image_path) !== norm(paths.image)) return;
     if (useStore.getState().canvas.dirty) {
       setConflict(true);
       const client = agentActivity.client ?? "A process";
@@ -575,13 +556,10 @@ export function AnnotateTab() {
 
   useEffect(() => {
     if (!imgPath || !currentImageName) return;
-    const label = labelPath(dataset, currentImageName);
-    const key = `${imgPath}\0${label ?? ""}`;
+    const key = imgPath;
 
-    // Already displaying this exact image + label target. Ignore: this is what
-    // stops an unrelated store change (a WS state snapshot, a mode/subject toggle,
-    // any patchGui that swaps the dataset object) from re-reading disk and
-    // discarding unsaved canvas edits.
+    // Already displaying this image: an unrelated store change (a WS snapshot, a mode or
+    // subject toggle) must not re-read the labels and discard unsaved canvas edits.
     if (loadedKeyRef.current === key) return;
 
     // Switching images: flush the previous image's work first (to the path it
@@ -591,11 +569,11 @@ export function AnnotateTab() {
     let canceled = false;
     void (async () => {
       try {
-        const labels = await api.annotate.load(imgPath, label);
+        const labels = await api.annotate.load(imgPath);
         if (canceled) return;
         loadLabels(labels);
         loadedKeyRef.current = key;
-        loadedPathsRef.current = { image: imgPath, label, mtime: labels.base_mtime };
+        loadedPathsRef.current = { image: imgPath, mtime: labels.base_mtime };
         setSaveBlocked(false);
         setIoError(null);
         setConflict(false);
@@ -626,10 +604,9 @@ export function AnnotateTab() {
     return () => {
       canceled = true;
     };
-    // Keyed on image identity + label dir only (see loadedKeyRef guard); save /
-    // loadLabels / tracking actions are stable or ref-based.
+    // Keyed on image identity only (see loadedKeyRef); the actions it calls are ref-based.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imgPath, currentImageName, dataset.annotations_dir]);
+  }, [imgPath, currentImageName]);
 
   function commitPolygonAndTrack() {
     // Closing always ends a live stream: a double-click's leading clicks re-arm streaming,

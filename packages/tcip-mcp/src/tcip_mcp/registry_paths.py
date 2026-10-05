@@ -118,7 +118,8 @@ def resolved_registry_path(root: str | Path, stored: str) -> Path:
 PathFields = tuple[tuple[str, ...], ...]
 """The fields of one record shape that name a path, each a sequence of steps from the record's
 top: a key, ``"[]"`` for every item of a list, ``"*"`` for every value of a mapping, or ``"{}"``
-for every key of a mapping."""
+for every key of a mapping. A field whose value is a mapping where a path ends, or a path where a
+key step continues, names no path in that record and is left as it is."""
 
 
 def within(prefix: tuple[str, ...], fields: PathFields) -> PathFields:
@@ -130,7 +131,7 @@ def _each_path(value: Any, steps: tuple[str, ...], convert: Callable[[str], str]
     if value is None:
         return None
     if not steps:
-        return convert(str(value))
+        return value if isinstance(value, dict) else convert(str(value))
     step, rest = steps[0], steps[1:]
     if step == "[]":
         return [_each_path(item, rest, convert) for item in value]
@@ -138,7 +139,7 @@ def _each_path(value: Any, steps: tuple[str, ...], convert: Callable[[str], str]
         return {key: _each_path(item, rest, convert) for key, item in value.items()}
     if step == "{}":
         return {convert(key): item for key, item in value.items()}
-    if step not in value:
+    if not isinstance(value, dict) or step not in value:
         return value
     return {**value, step: _each_path(value[step], rest, convert)}
 

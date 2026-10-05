@@ -12,6 +12,7 @@ from PIL import Image
 
 import tcip_store as ts
 from tcip_mcp.tools.project_tools import register_dataset
+from tests._producer_fixtures import label_image
 from tests._web_fixtures import new_project
 
 
@@ -25,13 +26,9 @@ def _run_script(root: Path, project: Path) -> subprocess.CompletedProcess:
 
 def _real_dataset(root: Path) -> None:
     images = root / "images" / "2024-01-01"
-    labels = root / "annotations" / "2024-01-01"
     images.mkdir(parents=True)
-    labels.mkdir(parents=True)
     Image.new("RGB", (10, 10), (1, 2, 3)).save(images / "a.png")
-    (labels / "a.json").write_text(
-        '{"image": "a", "width": 10, "height": 10, "annotations": []}', encoding="utf-8"
-    )
+    label_image(images / "a.png", [], 10, 10, keep_empty=True)
 
 
 def _registered(tmp_path: Path, *, content: bool = True) -> tuple[Path, Path, dict]:
@@ -58,10 +55,8 @@ def test_a_matching_fingerprint_reports_ok(tmp_path):
 
 def test_a_real_content_change_still_reports_changed(tmp_path):
     project, root, _ = _registered(tmp_path)
-    (root / "annotations" / "2024-01-01" / "b.json").write_text(
-        '{"image": "b", "width": 10, "height": 10, "annotations": []}', encoding="utf-8"
-    )
     Image.new("RGB", (10, 10), (4, 5, 6)).save(root / "images" / "2024-01-01" / "b.png")
+    label_image(root / "images" / "2024-01-01" / "b.png", [], 10, 10, keep_empty=True)
 
     completed = _run_script(root, project)
 
@@ -86,6 +81,7 @@ def test_the_same_identity_at_another_path_is_reported_moved(tmp_path):
     dataset the registry names now also lives here."""
     project, root, result = _registered(tmp_path)
     copy = tmp_path / "copied"
+    ts.release_root(root)
     shutil.copytree(root, copy)
 
     completed = _run_script(copy, project)

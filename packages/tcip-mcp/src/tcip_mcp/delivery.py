@@ -132,17 +132,17 @@ def _bucket_reason(bucket: Bucket, assessment: Assessment | None, finding: str |
     measured the bucket's own producer under its own execution record over a reference covering
     its capture."""
     if bucket.assessment_id is None:
-        return (f"no assessment answers for {bucket.path}: assess its checkpoint against a "
+        return (f"no assessment answers for bucket {bucket.name!r}: assess its checkpoint against a "
                 "held-out reference selection and publish its predictions under that "
                 "assessment.")
     if assessment is None or finding is not None:
         return finding
     if (assessment.producer, assessment.execution) != (bucket.producer, bucket.execution):
-        return (f"{bucket.path} was not produced by the checkpoint and execution record "
+        return (f"bucket {bucket.name!r} was not produced by the checkpoint and execution record "
                 f"assessment {assessment.assessment_id} measured.")
     if not _covers(assessment, bucket):
         return (f"assessment {assessment.assessment_id}'s reference does not cover "
-                f"{bucket.path}'s capture ({bucket.dataset_id}, {bucket.date}).")
+                f"bucket {bucket.name!r}'s capture ({bucket.dataset_id}, {bucket.date}).")
     return None
 
 
@@ -185,7 +185,7 @@ def admitted_conf(project: Path, bucket: Bucket) -> tuple[float | None, str]:
     if reason is not None:
         return None, reason
     if bucket.execution is None or bucket.execution.conf is None:
-        return None, f"{bucket.path} holds no detector's predictions, which no conf admits."
+        return None, f"bucket {bucket.name!r} holds no detector's predictions, which no conf admits."
     return bucket.execution.conf, ""
 
 
@@ -218,7 +218,8 @@ def gate(
     capture.
 
     Refuses (:class:`DeliveryRefused`) outright no buckets at all, buckets naming more than one
-    producer or proposing rather than predicting, a state-crossing delivery over a bucket that
+    producer or proposing rather than predicting, (``ValueError``) buckets under more than one
+    dataset root (:func:`~tcip_mcp.buckets.shared_root`), a state-crossing delivery over a bucket that
     classifies no positive state, a scale assessment named for a value in no unit, and a detector
     delivery in a unit naming none; refuses
     (:class:`~tcip_mcp.operationalization.OperationalizationRefused`) a detector delivery whose
@@ -228,13 +229,15 @@ def gate(
     written (:func:`result_digest`); otherwise it refuses with one sentence per finding, carrying
     the result's digest.
     """
+    from tcip_mcp.buckets import shared_root
     from tcip_mcp.operationalization import bind
     from tcip_mcp.traits import DETECTOR_KINDS, STATE_CROSSING_DATES
 
     if not buckets:
         raise DeliveryRefused("a delivery names no prediction bucket, so nothing states what its "
                               "numbers were measured from; name the published buckets it ships.")
-    proposed = [str(b.path) for b in buckets if "checkpoint_sha256" not in b.producer]
+    shared_root(buckets)
+    proposed =[b.name for b in buckets if "checkpoint_sha256" not in b.producer]
     if proposed:
         raise DeliveryRefused(f"{proposed} hold staged proposals, which no model predicted and "
                               "no assessment measures: a delivery ships a model's predictions.")
@@ -242,15 +245,15 @@ def gate(
     if len(producers) > 1:
         raise DeliveryRefused(
             "the delivered buckets were produced by more than one checkpoint or run ("
-            + "; ".join(f"{b.path}: {b.producer['checkpoint_sha256']} / "
+            + "; ".join(f"{b.name}: {b.producer['checkpoint_sha256']} / "
                         f"{b.producer['experiment_id']}" for b in buckets)
             + "): one delivered series names one producer, so deliver the buckets one producer "
             "made.")
     if delivery_kind in DETECTOR_KINDS:
-        bind(revision, delivery_kind, buckets={str(b.path): b.scope.subject for b in buckets})
+        bind(revision, delivery_kind, buckets={b.name: b.scope.subject for b in buckets})
     if delivery_kind == STATE_CROSSING_DATES:
         state = revision.entry.positive_state
-        unclassified = [str(b.path) for b in buckets if b.scope.state_ids(state) is None]
+        unclassified = [b.name for b in buckets if b.scope.state_ids(state) is None]
         if unclassified:
             raise DeliveryRefused(
                 f"{unclassified} classify no {state}: the classifier that produced them never "
@@ -269,7 +272,8 @@ def gate(
     rows = []
     for bucket in buckets:
         reason = _bucket_reason(bucket, *found[bucket.assessment_id])
-        rows.append(BucketFinding(path=str(bucket.path), date=bucket.date,
+        rows.append(BucketFinding(dataset_root=str(bucket.root), bucket=bucket.name,
+                                  date=bucket.date,
                                   assessment_id=bucket.assessment_id, validated=reason is None,
                                   reason=reason))
     scale_finding = None
@@ -346,7 +350,7 @@ DELIVERY_EVENTS_STORE = "delivery_events"
 """One record per completed delivery, keyed by its own id, each written exactly once."""
 
 DELIVERY_EVENT_PATHS: PathFields = (
-    ("output_path",), ("plant_mapping", "dataset_root"), ("buckets", "[]", "path"))
+    ("output_path",), ("plant_mapping", "dataset_root"), ("buckets", "[]", "dataset_root"))
 """The fields of a delivery event record that name a path, stored against its project."""
 
 
@@ -365,11 +369,9 @@ def deliver_csv(
     whether it is validated, the acknowledgment it ships under, and the result's population,
     missingness rule and plant-mapping disclosure), validating the event before anything is
     written; then write the CSV at ``output_path``, the event, and its one audit line by
-    ``actor``, ``delivery_event``, in the log of the dataset the buckets sit in (the project's
-    when they sit in none). Returns what was delivered: ``csv_path``, ``validated``,
-    ``delivery_event_id``, ``trait_revision``, ``producer`` and ``acknowledged_by``."""
-    from tcip_mcp.subject_registry import distinct_dataset_root
-
+    ``actor``, ``delivery_event``, in the log of the dataset root the buckets are published
+    under. Returns what was delivered: ``csv_path``, ``validated``, ``delivery_event_id``,
+    ``trait_revision``, ``producer`` and ``acknowledged_by``."""
     event_id = uuid.uuid4().hex
     data = result.encoded(
         {"validated": clearance.validated, **revision.ref, "delivery_event_id": event_id})
@@ -387,8 +389,7 @@ def deliver_csv(
     tcip_store.replace(delivery_event_key(project, event_id),
                        recorded_paths(event.model_dump(mode="json"), DELIVERY_EVENT_PATHS, project))
     record_event_or_raise("delivery_event", {"event_id": event_id}, actor=actor,
-                          scope=distinct_dataset_root([b.path for b in clearance.buckets])
-                          or project)
+                          scope=clearance.buckets[0].dataset_root)
     ack = clearance.acknowledgment
     return {"csv_path": str(path), "validated": clearance.validated,
             "delivery_event_id": event_id, "trait_revision": revision.number,

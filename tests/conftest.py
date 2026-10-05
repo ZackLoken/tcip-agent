@@ -194,31 +194,29 @@ def real_hpo_base_config(tmp_path: Path) -> dict:
 
 #: The single detection subject the canonical test dataset declares (``data_dir``).
 DATA_DIR_SUBJECT = "bud"
+#: The bucket the canonical test dataset publishes (``data_dir``).
+DATA_DIR_BUCKET = "live/2-11-26"
 
 
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
     """A minimal dataset in the canonical layout: name-based per-image labels + a registry.
 
-    One file per image under ``annotations/<date>/`` holding every subject (here one detection
-    subject, ``bud``), a published bucket under ``predictions/live/<date>/``, and one nested
+    One label document per image of capture ``2-11-26`` holding every subject (here one detection
+    subject, ``bud``), a published bucket named ``live/2-11-26``, and one nested
     ``subjects.json``. Geometry is two boxes per image on a 640x480 frame, matching the
     count/geometry expectations downstream.
     """
     from PIL import Image
 
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import label_image, registry_over
 
     date = "2-11-26"
     subject = DATA_DIR_SUBJECT
     images_dir = tmp_path / "images" / date
     images_dir.mkdir(parents=True)
-    labels_dir = tmp_path / "annotations" / date
-    labels_dir.mkdir(parents=True)
-    preds_dir = tmp_path / "predictions" / "live" / date
 
     # One nested registry traveling with the labels: a single detection subject, no attributes.
     registry_over(tmp_path, SubjectRegistry(subjects=(Subject(name=subject, description="a bud"),)))
@@ -226,17 +224,14 @@ def data_dir(tmp_path: Path) -> Path:
     for name in ("img_001", "img_002", "img_003"):
         Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{name}.jpg")
         # GT: 2 boxes per image (pixel xyxy), by subject name.
-        json_io.write_annotations(
-            labels_dir / f"{name}.json",
-            [Annotation(subject=subject, geometry=BBox(288, 216, 352, 264)),
-             Annotation(subject=subject, geometry=BBox(176, 132, 208, 156))],
-            640, 480,
-        )
+        label_image(images_dir / f"{name}.jpg",
+                    [Annotation(subject=subject, geometry=BBox(288, 216, 352, 264)),
+                     Annotation(subject=subject, geometry=BBox(176, 132, 208, 156))], 640, 480)
     # Predictions, published as one bucket: 1 matching (TP) + 1 elsewhere (FP) per image.
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
-    published(tmp_path, preds_dir, [
+    published(tmp_path, DATA_DIR_BUCKET, [
         {"image": str(images_dir / f"{name}.jpg"), "width": 640, "height": 480,
          "boxes": [[288, 216, 352, 264], [496, 372, 528, 396]], "scores": [0.9, 0.7],
          "labels": [1, 1]} for name in ("img_001", "img_002", "img_003")],

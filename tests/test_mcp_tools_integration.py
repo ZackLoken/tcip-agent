@@ -1,32 +1,35 @@
 """Integration tests for MCP tool functions.
 
-Tests tool functions directly (not through MCP server protocol) to verify
-end-to-end behavior with actual file I/O and annotation parsing on the canonical
-per-image JSON labels.
+Tests tool functions directly (not through MCP server protocol) to verify end-to-end behavior
+over real images and the canonical per-image label documents.
 """
 
 from __future__ import annotations
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 from pathlib import Path
 
 import pytest
 from PIL import Image
 
+from tests.conftest import DATA_DIR_BUCKET
+
 
 DATE = "2-11-26"
 """The capture date conftest's ``data_dir`` lays its images and its published bucket under."""
 
 
-def _empty_bucket(project: Path, *images: Path) -> Path:
-    """A bucket published at ``predictions/m`` under ``project`` that predicted nothing on each of
-    ``images`` (8 by 8 px)."""
+def _empty_bucket(project: Path, *images: Path) -> str:
+    """A bucket ``m/2024-01-01`` that predicted nothing on each of ``images`` (8 by 8 px), under
+    their dataset root; its name."""
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
-    return published(project, project / "predictions" / "m", [
+    return published(project, "m/2024-01-01", [
         {"image": str(image), "width": 8, "height": 8, "boxes": [], "scores": [], "labels": []}
         for image in images],
-        scope={"subject": "bud"}).path
+        scope={"subject": "bud"}).name
 
 
 # ── Annotation tool integration tests ───────────────────────────────────────
@@ -45,60 +48,23 @@ class TestReadAnnotations:
         A stored annotation can be occlusion-split (one instance, several contours), so reporting a
         single flat point list would silently hide part of the object from the agent reading it.
         """
-        from tcip_annotation import json_io
         from tcip_annotation.state import Annotation, Polygon
         from tcip_mcp.tools.annotation_tools import read_annotations
+        from tests._producer_fixtures import label_image
 
-        images_dir, labels_dir = tmp_path / "images", tmp_path / "annotations"
-        images_dir.mkdir()
-        labels_dir.mkdir()
+        images_dir = tmp_path / "images" / UNDATED_BUCKET
+        images_dir.mkdir(parents=True)
         Image.new("RGB", (100, 100)).save(images_dir / "a.jpg")
-        json_io.write_annotations(
-            str(labels_dir / "a.json"),
-            [Annotation(subject="bud", geometry=Polygon([
-                [(10.0, 10.0), (30.0, 10.0), (30.0, 30.0)],
-                [(60.0, 10.0), (80.0, 10.0), (80.0, 30.0)],
-            ]))], 100, 100)
+        label_image(images_dir / "a.jpg", [Annotation(subject="bud", geometry=Polygon([
+            [(10.0, 10.0), (30.0, 10.0), (30.0, 30.0)],
+            [(60.0, 10.0), (80.0, 10.0), (80.0, 30.0)],
+        ]))], 100, 100)
 
         result = read_annotations(str(images_dir / "a.jpg"))
         (ann,) = result["labels"]["annotations"]
         assert "points" not in ann
         assert ann["rings"] == [[[10.0, 10.0], [30.0, 10.0], [30.0, 30.0]],
                                 [[60.0, 10.0], [80.0, 10.0], [80.0, 30.0]]]
-
-    def test_a_labelme_shaped_document_is_an_error_not_a_silent_zero(self, tmp_path):
-        """A document carrying no per-image ``annotations`` list is refused, not read as a store
-        with zero annotations."""
-        from tcip_mcp.tools.annotation_tools import read_annotations
-
-        images_dir, labels_dir = tmp_path / "images", tmp_path / "annotations"
-        images_dir.mkdir()
-        labels_dir.mkdir()
-        Image.new("RGB", (100, 100)).save(images_dir / "a.jpg")
-        (labels_dir / "a.json").write_text(
-            '{"shapes": [{"label": "bud", "points": [[1, 1], [8, 8]]}]}'
-        )
-
-        result = read_annotations(str(images_dir / "a.jpg"))
-        assert "error" in result
-        assert "labels" not in result
-
-    def test_an_old_objects_schema_document_is_an_error_not_a_silent_zero(self, tmp_path):
-        """The old 'objects'-keyed schema carries no per-image ``annotations`` list either, and
-        is refused the same way, never read in place as an empty document."""
-        from tcip_mcp.tools.annotation_tools import read_annotations
-
-        images_dir, labels_dir = tmp_path / "images", tmp_path / "annotations"
-        images_dir.mkdir()
-        labels_dir.mkdir()
-        Image.new("RGB", (100, 100)).save(images_dir / "a.jpg")
-        (labels_dir / "a.json").write_text(
-            '{"image": "a", "objects": [{"category_id": 0, "bbox": [1, 1, 9, 9]}]}'
-        )
-
-        result = read_annotations(str(images_dir / "a.jpg"))
-        assert "error" in result
-        assert "labels" not in result
 
 
 # ── Evaluate predictions integration test ───────────────────────────────────
@@ -111,8 +77,7 @@ class TestEvaluatePredictions:
         from tcip_mcp.tools.annotation_tools import score_predictions
 
         img = str(data_dir / "images" / DATE / "img_001.jpg")
-        result = score_predictions(img, str(data_dir / "predictions" / "live" / DATE),
-                                   iou_threshold=0.5, conf_threshold=0.25)
+        result = score_predictions(img, DATA_DIR_BUCKET, iou_threshold=0.5, conf_threshold=0.25)
         assert "error" not in result
         assert result["tp"] >= 0
         assert result["fp"] >= 0
@@ -123,8 +88,7 @@ class TestEvaluatePredictions:
     def test_evaluate_folder(self, data_dir: Path):
         from tcip_mcp.tools.annotation_tools import score_predictions
 
-        result = score_predictions(str(data_dir / "images" / DATE),
-                                   str(data_dir / "predictions" / "live" / DATE),
+        result = score_predictions(str(data_dir / "images" / DATE), DATA_DIR_BUCKET,
                                    iou_threshold=0.5)
         assert result["image_count"] == 3
         assert "precision" in result
@@ -141,8 +105,7 @@ class TestEvaluatePredictionsDetail:
         from tcip_mcp.tools.annotation_tools import score_predictions
 
         img = str(data_dir / "images" / DATE / "img_001.jpg")
-        result = score_predictions(img, str(data_dir / "predictions" / "live" / DATE),
-                                   iou_threshold=0.5, detail=True)
+        result = score_predictions(img, DATA_DIR_BUCKET, iou_threshold=0.5, detail=True)
         assert "error" not in result
         assert "detections" in result
 
@@ -150,11 +113,10 @@ class TestEvaluatePredictionsDetail:
 # ── score_predictions(images directory) enumeration ────
 
 
-def _write_empty_label(path: Path, w: int, h: int) -> None:
-    from tcip_annotation import json_io
+def _write_empty_label(image: Path, w: int, h: int) -> None:
+    from tests._producer_fixtures import label_image
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    json_io.write_annotations(str(path), [], w, h, keep_empty=True)
+    label_image(image, [], w, h, keep_empty=True)
 
 
 class TestEvaluateFolderEnumeration:
@@ -171,10 +133,10 @@ class TestEvaluateFolderEnumeration:
         tifffile.imwrite(str(band_a), np.full((8, 8), 111, dtype=np.uint16))
         tifffile.imwrite(str(band_b), np.full((8, 8), 222, dtype=np.uint16))
         write_band_group_manifest(images_dir, "cap", {"Green": band_a, "Red": band_b})
-        _write_empty_label(tmp_path / "annotations" / "2024-01-01" / "cap.json", 8, 8)
+        _write_empty_label(images_dir / "cap.bandgroup", 8, 8)
 
         bucket = _empty_bucket(tmp_path, images_dir / "cap.bandgroup")
-        result = score_predictions(str(images_dir), str(bucket), iou_threshold=0.5)
+        result = score_predictions(str(images_dir), bucket, iou_threshold=0.5)
         assert result["image_count"] == 1
         assert [row["image"] for row in result["per_image"]] == ["cap.bandgroup"]
 
@@ -186,10 +148,10 @@ class TestEvaluateFolderEnumeration:
         images_dir = tmp_path / "images" / "2024-01-01"
         images_dir.mkdir(parents=True)
         np.savez(str(images_dir / "cap.npz"), bands=np.zeros((8, 8, 3), dtype=np.uint16))
-        _write_empty_label(tmp_path / "annotations" / "2024-01-01" / "cap.json", 8, 8)
+        _write_empty_label(images_dir / "cap.npz", 8, 8)
 
         bucket = _empty_bucket(tmp_path, images_dir / "cap.npz")
-        result = score_predictions(str(images_dir), str(bucket), iou_threshold=0.5)
+        result = score_predictions(str(images_dir), bucket, iou_threshold=0.5)
         assert result["image_count"] == 1
         assert [row["image"] for row in result["per_image"]] == ["cap.npz"]
 
@@ -200,8 +162,11 @@ class TestEvaluateFolderEnumeration:
         nested = images_dir / "nested"
         nested.mkdir(parents=True)
         Image.new("RGB", (8, 8)).save(nested / "inner.jpg")
+        elsewhere = tmp_path / "images" / "2024-01-02" / "other.jpg"
+        elsewhere.parent.mkdir(parents=True)
+        Image.new("RGB", (8, 8)).save(elsewhere)
 
-        result = score_predictions(str(images_dir), str(_empty_bucket(tmp_path)),
+        result = score_predictions(str(images_dir), _empty_bucket(tmp_path, elsewhere),
                                    iou_threshold=0.5)
         assert result["image_count"] == 0
 
@@ -267,18 +232,20 @@ class TestAugmentations:
 
 class TestReadAnnotationsUnknownFormat:
     def test_unrecognized_store_returns_error_not_raise(self, tmp_path):
-        """The per-image reader refuses an unknown store; read_annotations must surface that as an
-        error dict, matching its own convention and the docs, not propagate an uncaught error."""
+        """The per-image reader refuses a record of a shape it does not read; read_annotations
+        surfaces that as an error dict, matching its own convention and the docs, not an
+        uncaught error."""
+        import tcip_store
         from PIL import Image
 
         from tcip_mcp.tools.annotation_tools import read_annotations
+        from tests._producer_fixtures import image_label_key
 
-        det = tmp_path / "annotations"
-        det.mkdir(parents=True)
-        (tmp_path / "images").mkdir()
-        Image.new("RGB", (32, 32)).save(tmp_path / "images" / "a.jpg")
-        (det / "a.json").write_text('{"regions": []}')  # a schema we do not recognize
+        (tmp_path / "images" / UNDATED_BUCKET).mkdir(parents=True)
+        Image.new("RGB", (32, 32)).save(tmp_path / "images" / UNDATED_BUCKET / "a.jpg")
+        # A record of a schema this platform does not read, stored past the writer.
+        tcip_store.replace(image_label_key(tmp_path / "images" / UNDATED_BUCKET / "a.jpg"), {"regions": []})
 
-        result = read_annotations(str(tmp_path / "images" / "a.jpg"))
+        result = read_annotations(str(tmp_path / "images" / UNDATED_BUCKET / "a.jpg"))
         assert "error" in result
         assert "not the list a label document holds" in result["error"]

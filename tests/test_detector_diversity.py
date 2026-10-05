@@ -5,6 +5,8 @@ Uses ``resnet18`` (FPN normalizes the channel difference); CPU, tiny inputs, 1 e
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 import math
 from pathlib import Path
 
@@ -84,25 +86,18 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
     from torch.utils.data import DataLoader
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.pipelines.training.collation import task_collate
-    from tcip_annotation import json_io
+    from tests._producer_fixtures import label_image
     from tests.tiny_trainer_fixtures import trainer_run
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
     for i in range(4):
         save_image(torch.rand(3, 64, 64), str(images_dir / f"img{i}.png"))
-        json_io.write_annotations(
-            str(labels_dir / f"img{i}.json"),
-            [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
-            64,
-            64,
-            keep_empty=True,
-        )
+        label_image(images_dir / f"img{i}.png",
+                    [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))], 64, 64)
 
-    ds, data = run_over("detection", str(images_dir), str(labels_dir), subject="bud")
+    ds, data = run_over("detection", str(images_dir), subject="bud")
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
     model_source = {

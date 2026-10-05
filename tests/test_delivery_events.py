@@ -20,11 +20,13 @@ from tests._trait_fixtures import COUNT_SUBJECT, seed_confirmed_count
 
 
 def _bucket(project: Path):
-    """An unassessed bucket of no documents counting the count trait's measured subject."""
+    """An unassessed bucket of one document detecting nothing, counting the count trait's
+    measured subject."""
     pytest.importorskip("torch")
-    from tests._chain_fixtures import published
+    from tests._chain_fixtures import predicted, published
 
-    return published(project, project / "ds" / "predictions" / "m" / "2026-01-01", [],
+    return published(project, "m/2026-01-01",
+                     [predicted(project / "ds" / "images" / "2026-01-01" / "a.png", [])],
                      scope={"subject": COUNT_SUBJECT})
 
 
@@ -68,7 +70,8 @@ def test_a_completed_crossing_delivery_writes_the_gates_finding_for_every_bucket
     assert record.output_path == str(out_csv)
     assert record.validated is True and record.acknowledgment is None
     assert record.producer.model_dump() == series.assessment["producer"]
-    assert {b.path for b in record.buckets} == set(series.buckets.values())
+    assert {b.bucket for b in record.buckets} == set(series.buckets.values())
+    assert {b.dataset_root for b in record.buckets} == {str(series.root)}
     for finding in record.buckets:
         assert (finding.assessment_id, finding.validated, finding.reason) == (
             series.assessment["assessment_id"], True, None)
@@ -215,7 +218,8 @@ def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid() -> None:
     canopy = {
         "plant_registry": {"name": "reg", "digest": "0" * 64},
         "raster_identity": {"width": 10, "height": 10},
-        "canopy_segments": {"path": "x", "sha256": "0" * 64, "subject": "canopy", "n_segments": 1},
+        "canopy_segments": {"capture": "2026-01-01", "stem": "x", "sha256": "0" * 64,
+                            "subject": "canopy", "n_segments": 1},
         "segment_ties": [], "segments_without_plant": 0, "plants_outside_raster": [],
         "plants_without_segment": [], "plants_with_ambiguous_detections": [],
         "detections_unattributed": 0,

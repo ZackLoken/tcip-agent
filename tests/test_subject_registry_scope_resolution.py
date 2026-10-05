@@ -56,8 +56,7 @@ def _scope(tmp_path: Path, registry: SubjectRegistry, subject: str):
     from tcip_mcp.pipelines.data.label_queries import registry_scope
 
     registry_over(tmp_path, registry)
-    (tmp_path / "annotations").mkdir(exist_ok=True)
-    return registry_scope(tmp_path / "annotations", subject)
+    return registry_scope(tmp_path / "images", subject)
 
 
 def test_attribute_lookup_resolves_the_exactly_named_attribute(tmp_path: Path):

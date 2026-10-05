@@ -18,7 +18,7 @@ FLAT_CONFIG = {
         "builder_kwargs": {},
         "task": "detection",
     },
-    "data": {"images_dir": "", "labels_dir": ""},
+    "data": {"images_dir": ""},
     "batch_size": 4,
     "num_workers": 0,
     "mixed_precision": True,

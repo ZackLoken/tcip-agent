@@ -80,8 +80,8 @@ what they serialize to."""
 
 
 class DatasetSelection(BaseModel):
-    """Which dataset the GUI is looking at inside the open project, with the image list and the
-    paths of each image's records."""
+    """Which dataset the GUI is looking at inside the open project: the capture, its image list,
+    and the name of the bucket under the dataset root whose proposals the canvas shows."""
 
     model_config = _TRANSPORT
 
@@ -91,11 +91,7 @@ class DatasetSelection(BaseModel):
     image_list: list[str] = Field(default_factory=list)
     current_image_index: int = 0
     images_dir: Optional[str] = None
-    annotations_dir: Optional[str] = None
-    predictions_dir: Optional[str] = None
-    # Each listed image's own ground-truth and prediction record, by its name in image_list.
-    label_paths: dict[str, str] = Field(default_factory=dict)
-    prediction_paths: dict[str, str] = Field(default_factory=dict)
+    bucket: Optional[str] = None
 
 
 class ViewState(BaseModel):
@@ -128,16 +124,15 @@ class GuiState(_GuiFields):
 
 
 class _DatasetChoice(BaseModel):
-    """The chosen part of a selection, the only part the GUI snapshot holds; ``dataset_root`` and
-    ``predictions_dir`` spelled by :func:`tcip_mcp.registry_paths.stored_path` against the
-    project."""
+    """The chosen part of a selection, the only part the GUI snapshot holds; ``dataset_root``
+    spelled by :func:`tcip_mcp.registry_paths.stored_path` against the project."""
 
     model_config = ConfigDict(extra="forbid")
 
     dataset_root: str
     subject: Optional[str]
-    date: Optional[str]
-    predictions_dir: Optional[str]
+    date: str
+    bucket: Optional[str]
     current_image_index: int
 
 
@@ -162,34 +157,26 @@ def require_whole(model: BaseModel, where: str) -> None:
             require_whole(value, f"{where}.{name}")
 
 
-def selection_for(dataset_root: Path, subject: Optional[str], date: Optional[str],
-                  predictions_dir: Optional[str], current_image_index: int) -> DatasetSelection:
-    """The selection a choice names: its image list and every reference the browser reads, the
-    labels through :mod:`tcip_mcp.dataset_layout` and each image's prediction document as the
-    record of the bucket at ``predictions_dir`` names it (:func:`~tcip_mcp.buckets.read_bucket`,
-    refusing a directory that is no bucket). ``current_image_index`` is clamped to the list.
-    Raises ``AmbiguousImageStem`` for a date directory holding two images of one stem."""
-    from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.dataset_layout import annotation_dir, annotation_path, image_dir
+def selection_for(dataset_root: Path, subject: Optional[str], date: str,
+                  bucket: Optional[str], current_image_index: int) -> DatasetSelection:
+    """The selection a choice names: the image list of capture ``date`` and the name of the
+    bucket under ``dataset_root`` whose proposals the canvas shows. ``current_image_index`` is
+    clamped to the list. Raises ``AmbiguousImageStem`` for a capture holding two images of one
+    stem, and ``ValueError`` for a ``date`` that is no capture name."""
+    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.image_utils import logical_images_by_name
 
-    named = logical_images_by_name(image_dir(dataset_root, date)) if date else {}
-    image_list = list(named)
+    images_dir = image_dir(dataset_root, date)
+    image_list = list(logical_images_by_name(images_dir))
     index = max(0, min(current_image_index, len(image_list) - 1)) if image_list else 0
-    bucket = read_bucket(predictions_dir) if predictions_dir else None
-    documents = {name: bucket.document(name) for name in named} if bucket is not None else {}
     return DatasetSelection(
         dataset_root=str(dataset_root),
         subject=subject,
         date=date,
         image_list=image_list,
         current_image_index=index,
-        images_dir=str(image_dir(dataset_root, date)) if date else None,
-        annotations_dir=str(annotation_dir(dataset_root, date)) if date else None,
-        predictions_dir=predictions_dir,
-        label_paths={name: str(annotation_path(dataset_root, date, stem))
-                     for name, stem in named.items()},
-        prediction_paths={name: str(path) for name, path in documents.items() if path},
+        images_dir=str(images_dir),
+        bucket=bucket or None,
     )
 
 
@@ -206,11 +193,10 @@ def write_gui_snapshot(project: Path, state: GuiState) -> None:
     from tcip_mcp.registry_paths import stored_path
 
     dataset = state.dataset
-    choice = None if dataset.dataset_root is None else _DatasetChoice(
+    choice = None if dataset.dataset_root is None or dataset.date is None else _DatasetChoice(
         dataset_root=stored_path(dataset.dataset_root, project), subject=dataset.subject,
         date=dataset.date, current_image_index=dataset.current_image_index,
-        predictions_dir=(stored_path(dataset.predictions_dir, project)
-                         if dataset.predictions_dir else None))
+        bucket=dataset.bucket)
     document = _PersistedGuiState(**{**state.model_dump(exclude={"dataset"}), "dataset": choice})
     tcip_store.replace(gui_snapshot_key(project), document.model_dump(mode="json"))
 
@@ -230,8 +216,7 @@ def read_gui_snapshot(project: Path) -> Optional[GuiState]:
     choice = persisted.dataset
     dataset = DatasetSelection() if choice is None else selection_for(
         resolved_registry_path(project, choice.dataset_root), choice.subject, choice.date,
-        str(resolved_registry_path(project, choice.predictions_dir))
-        if choice.predictions_dir else None, choice.current_image_index)
+        choice.bucket, choice.current_image_index)
     return GuiState(**{**persisted.model_dump(exclude={"dataset"}), "dataset": dataset})
 
 # One panel per GUI tab, plus "app" for steering the GUI itself (open a project, focus a tab).
@@ -287,19 +272,11 @@ def post_panel_event(
     *,
     timeout: float = 2.0,
 ) -> dict[str, Any]:
-    """POST a panel event for ``project`` to the tcip-web backend serving ``workspace``, which
-    delivers it only when that project is the one it has open.
-
-    Every return carries a ``delivered`` bool so callers don't mistake "backend down"
-    for success. Returns one of:
-      * ``{"status": "ok", "delivered": True, "response": ..., ...}`` on 2xx response, where
-        ``response`` is the parsed JSON body (``None`` for a body that does not decode as JSON).
-      * ``{"error": ..., "delivered": False, "open_project_id": ...}`` when the backend has another
-        project open, or none.
-      * ``{"status": "no_subscribers", "delivered": False, ...}`` if the backend is down, with
-        ``error`` naming why when no backend has recorded its port.
-      * ``{"error": ..., "delivered": False, ...}`` on any HTTP/serialization failure.
-    """
+    """POST a panel event for ``project`` to the tcip-web backend serving ``workspace``, delivered
+    only when that project is the one it has open. Every answer carries ``delivered``: on a 2xx,
+    ``status`` ``"ok"`` and ``response`` (the JSON body, ``None`` when it does not decode); with
+    the backend down, ``status`` ``"no_subscribers"``; otherwise ``error`` naming why, with
+    ``open_project_id`` when another project, or none, is open."""
     import json
     import urllib.error
     import urllib.request

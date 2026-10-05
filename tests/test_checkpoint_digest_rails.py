@@ -48,14 +48,23 @@ def _register(tmp_path: Path, ckpt_path: str, *, name: str = "rail-model",
     return result
 
 
-def _infer(tmp_path: Path, ckpt: str, out: str = "preds") -> dict:
-    """``run_inference`` of ``ckpt`` over one image, untiled, publishing ``tmp_path / out``."""
+def _infer(tmp_path: Path, ckpt: str, bucket: str = "preds") -> dict:
+    """``run_inference`` of ``ckpt`` over one image, untiled, publishing the bucket named
+    ``bucket`` under ``tmp_path``."""
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
 
     images_dir, _ = _images(tmp_path)
-    return run_inference(tmp_path, ckpt, images_dir=str(images_dir),
-                         output_dir=str(tmp_path / out), device="cpu", stated=Stated(tile=False))
+    return run_inference(tmp_path, ckpt, images_dir=str(images_dir), bucket=bucket,
+                         device="cpu", stated=Stated(tile=False))
+
+
+def _published(tmp_path: Path, bucket: str) -> bool:
+    import tcip_store
+
+    from tcip_mcp.dataset_layout import bucket_key
+
+    return tcip_store.exists(bucket_key(tmp_path, bucket))
 
 
 # Rail 1: an unregistered checkpoint the platform's own producer wrote is refused by name, at
@@ -66,7 +75,7 @@ def test_run_inference_refuses_an_unregistered_checkpoint_and_writes_nothing(tmp
 
     assert "register_model" in r["error"]
     assert repr(str(tmp_path)) in r["error"]
-    assert not (tmp_path / "preds").exists()
+    assert not _published(tmp_path, "preds")
 
 
 def test_evaluate_model_refuses_an_unregistered_checkpoint_by_bare_path(tmp_path):
@@ -75,7 +84,7 @@ def test_evaluate_model_refuses_an_unregistered_checkpoint_by_bare_path(tmp_path
 
     from tcip_mcp.tools.training_tools import evaluate_model
 
-    r = evaluate_model(tmp_path, ckpt, str(images_dir), str(images_dir))
+    r = evaluate_model(tmp_path, ckpt, str(images_dir))
     assert "register_model" in r["error"]
 
 
@@ -100,15 +109,15 @@ def test_web_inference_worker_refuses_an_unregistered_checkpoint(tmp_path):
 
     ckpt = _unregistered(tmp_path)
     images_dir, _ = _images(tmp_path)
-    out_dir = tmp_path / "out"
 
-    job = InferenceJob(job_id="rail1", actor="user:tester", checkpoint_path=ckpt, images_dir=str(images_dir),
-                       output_dir=str(out_dir), project=str(tmp_path),
+    job = InferenceJob(job_id="rail1", actor="user:tester", checkpoint_path=ckpt,
+                       images_dir=str(images_dir), dataset_root=str(tmp_path), bucket="out",
+                       project=str(tmp_path),
                        stated=Stated(tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2))
     _worker(job)
     assert job.status == "failed"
     assert "register_model" in job.error
-    assert not out_dir.exists()
+    assert not _published(tmp_path, "out")
     assert job.done == 0
 
 
@@ -347,7 +356,7 @@ def test_run_inference_admits_a_registered_checkpoint_and_records_its_digest(tmp
     assert "error" not in r, r
     digest = hashlib.sha256(Path(ckpt).read_bytes()).hexdigest()
     assert r["checkpoint_sha256"] == digest
-    bucket = read_bucket(tmp_path / "preds")
+    bucket = read_bucket(tmp_path, "preds")
     assert bucket.producer["checkpoint_sha256"] == digest and bucket.assessment_id is None
 
 
@@ -447,24 +456,24 @@ def test_ctx_save_checkpoint_admits_a_state_naming_no_reserved_key(tmp_path):
 def test_doctor_lists_a_bucket_naming_an_unregistered_digest_and_stays_silent_on_a_registered_one(
     tmp_path,
 ):
-    from tcip_store import decode_value, encode_record
+    import tcip_store
 
     from tcip_mcp.cli import doctor as doctor_module
-    from tcip_mcp.dataset_layout import prediction_root
+    from tcip_mcp.dataset_layout import bucket_key
 
     ckpt = _unregistered(tmp_path)
     reg = _register(tmp_path, ckpt, name="good-model")
-    good = _infer(tmp_path, ckpt, "predictions/baseline/2026-01-01")
-    stale = _infer(tmp_path, ckpt, "predictions/stale/2026-01-01")
-    # A bucket is any directory its caller names, a date segment or none.
-    undated_dir = prediction_root(tmp_path) / "undated-model"
-    undated = _infer(tmp_path, ckpt, str(undated_dir.relative_to(tmp_path)))
+    good = _infer(tmp_path, ckpt, "baseline/2026-01-01")
+    stale = _infer(tmp_path, ckpt, "stale/2026-01-01")
+    # A bucket is any name its caller gives, a date segment or none.
+    undated = _infer(tmp_path, ckpt, "undated-model")
     assert "error" not in good and "error" not in stale and "error" not in undated
     assert good["checkpoint_sha256"] == reg["sha256"]
-    for bucket, digest in ((Path(stale["output_dir"]), "a" * 64), (undated_dir, "b" * 64)):
-        record = decode_value((bucket / "bucket.json").read_bytes())
-        (bucket / "bucket.json").write_bytes(encode_record(
-            {**record, "producer": {**record["producer"], "checkpoint_sha256": digest}}))
+    for bucket, digest in (("stale/2026-01-01", "a" * 64), ("undated-model", "b" * 64)):
+        key = bucket_key(tmp_path, bucket)
+        record = tcip_store.read(key)
+        tcip_store.replace(key, {**record, "producer": {**record["producer"],
+                                                        "checkpoint_sha256": digest}})
 
     findings: list = []
     doctor_module.check_registry(tmp_path, findings)
@@ -472,5 +481,5 @@ def test_doctor_lists_a_bucket_naming_an_unregistered_digest_and_stays_silent_on
     messages = [m for _, m in findings]
     assert len([m for m in messages if "a" * 64 in m]) == 1, messages
     (undated_finding,) = [m for m in messages if "b" * 64 in m]
-    assert str(undated_dir.relative_to(tmp_path)) in undated_finding
+    assert "'undated-model'" in undated_finding
     assert not any(reg["sha256"] in m for m in messages)

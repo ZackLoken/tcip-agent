@@ -13,12 +13,8 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import traits
 from tcip_mcp.subject_registry import SubjectRegistry, Subject
-from tests._producer_fixtures import mark_complete, registry_over
-from tcip_mcp.dataset_layout import (
-    annotation_dir,
-    annotation_path,
-    image_dir,
-)
+from tests._producer_fixtures import image_label_key, label_image, mark_complete, registry_over
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.model_registry import ModelRegistry
 from tests import _trait_fixtures as fx
 from tests._web_fixtures import new_project
@@ -37,22 +33,18 @@ def _record_localizing(tmp_path: Path, name: str, localization: str) -> dict:
 
 def _project(tmp_path: Path) -> Path:
     root = tmp_path / "proj"
-    (root / "images" / "2026-02-11").mkdir(parents=True)
-    ann = root / "annotations" / "2026-02-11"
-    ann.mkdir(parents=True)
-    state = root / ".tcip" / "state"
-    state.mkdir(parents=True)
+    images = root / "images" / "2026-02-11"
+    images.mkdir(parents=True)
+    (root / ".tcip" / "state").mkdir(parents=True)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     for name in ("IMG_A", "IMG_B", "IMG_C"):
-        Image.new("RGB", (32, 32)).save(root / "images" / "2026-02-11" / f"{name}.JPG")
-    # A: confirmed negative (empty + a mark). B: empty with no mark (the IMG_0150 case).
-    # C: holds an object.
-    json_io.write_annotations(ann / "IMG_A.json", [], 32, 32, keep_empty=True)
-    json_io.write_annotations(ann / "IMG_B.json", [], 32, 32, keep_empty=True)
-    json_io.write_annotations(ann / "IMG_C.json",
-                              [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
-    mark_complete(root / "images" / "2026-02-11" / "IMG_A.JPG", ann / "IMG_A.json", "bud",
-                  project=root)
+        Image.new("RGB", (32, 32)).save(images / f"{name}.JPG")
+    # A: confirmed negative (empty + a mark). B: empty with no mark. C: holds an object.
+    label_image(images / "IMG_A.JPG", [], 32, 32, keep_empty=True)
+    label_image(images / "IMG_B.JPG", [], 32, 32, keep_empty=True)
+    label_image(images / "IMG_C.JPG", [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
+                32, 32)
+    mark_complete(images / "IMG_A.JPG", "bud", project=root)
     return root
 
 
@@ -102,35 +94,16 @@ def test_doctor_flags_registry_checkpoint_path_under_a_temp_directory(tmp_path):
     assert "IMG_C" not in out                                # an annotated image is clean
 
 
-def test_doctor_admits_a_confirmed_negative_under_dated_labels_flat_images(tmp_path):
-    """A confirmed negative is the document's own mark, so dated labels over images never split
-    into date buckets read the same as any other, never as an unconfirmed empty."""
-    root = tmp_path / "proj"
-    (root / "images").mkdir(parents=True)
-    ann = root / "annotations" / "2026-02-11"
-    ann.mkdir(parents=True)
-    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
-    Image.new("RGB", (32, 32)).save(root / "images" / "IMG_A.JPG")
-    json_io.write_annotations(ann / "IMG_A.json", [], 32, 32, keep_empty=True)
-    mark_complete(root / "images" / "IMG_A.JPG", ann / "IMG_A.json", "bud", project=root)
-
-    res = _run(root)
-
-    assert "not marked complete" not in res.stdout
-
-
 def test_doctor_reports_a_stem_collision_and_completes(tmp_path):
-    """A bucket already holding two identities for one stem key refuses at every reader; the
+    """A capture already holding two identities for one stem refuses at every reader; the
     doctor names it as a finding instead of crashing on the exception."""
     root = tmp_path / "proj"
     images = root / "images" / "2026-02-11"
     images.mkdir(parents=True)
-    ann = root / "annotations" / "2026-02-11"
-    ann.mkdir(parents=True)
-    registry_over(root, SubjectRegistry(subjects=(Subject(name="bloom"),)))
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     Image.new("RGB", (32, 32)).save(images / "foo.jpg")
     Image.new("RGB", (32, 32)).save(images / "foo.png")
-    json_io.write_annotations(ann / "foo.json", [], 32, 32, keep_empty=True)
+    label_image(images / "foo.jpg", [], 32, 32, keep_empty=True)
 
     res = _run(root)
 
@@ -158,16 +131,7 @@ def test_doctor_flags_incomplete_source_snapshot(tmp_path):
     """A bespoke run's source snapshot that failed to capture a declared file is
     self-describing (``missing``/``snapshot_errors``); ``tcip doctor`` surfaces it rather than
     the manifest reading as complete."""
-    root = tmp_path / "clean"
-    (root / "images" / "d").mkdir(parents=True)
-    ann = root / "annotations" / "d"
-    ann.mkdir(parents=True)
-    (root / ".tcip" / "state").mkdir(parents=True)
-    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
-    Image.new("RGB", (32, 32)).save(root / "images" / "d" / "IMG_A.JPG")
-    json_io.write_annotations(
-        ann / "IMG_A.json",
-        [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9), created_by="user:breeder")], 32, 32)
+    root = _clean_project(tmp_path)
 
     from tests._verified_checkpoint_fixtures import (
         BUILT_DETECTOR, detection_config, fixture_data_dir, opened_run,
@@ -184,28 +148,31 @@ def test_doctor_flags_incomplete_source_snapshot(tmp_path):
     assert "source snapshot" in res.stdout and "1 missing file" in res.stdout
 
 
-def test_doctor_clean_project_exits_zero(tmp_path):
+def _clean_project(tmp_path: Path) -> Path:
+    """One image under capture ``d`` whose label document holds one breeder-drawn ``bud``."""
     root = tmp_path / "clean"
-    (root / "images" / "d").mkdir(parents=True)
-    ann = root / "annotations" / "d"
-    ann.mkdir(parents=True)
+    images = root / "images" / "d"
+    images.mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
-    Image.new("RGB", (32, 32)).save(root / "images" / "d" / "IMG_A.JPG")
-    json_io.write_annotations(
-        ann / "IMG_A.json",
-        [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9), created_by="user:breeder")], 32, 32)
+    Image.new("RGB", (32, 32)).save(images / "IMG_A.JPG")
+    label_image(images / "IMG_A.JPG",
+                [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9), created_by="user:breeder")],
+                32, 32)
+    return root
+
+
+def test_doctor_clean_project_exits_zero(tmp_path):
+    root = _clean_project(tmp_path)
     new_project(root)
     res = _run(root)
     assert res.returncode == 0, res.stdout
 
 
 def _layout_project(tmp_path: Path, date: str | None, name: str = "resolved") -> Path:
-    """A project whose image and label trees are placed by the layout resolver, so a scan root
-    that drifts from the canonical layout shows up as findings the doctor never makes."""
+    """A project whose image tree for capture ``date`` is placed by the layout resolver."""
     root = tmp_path / name
     image_dir(root, date).mkdir(parents=True)
-    annotation_dir(root, date).mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
     registry_over(root,
                    SubjectRegistry(subjects=(Subject(name="bud"), Subject(name="leaf"))))
@@ -216,35 +183,33 @@ def _lines(stdout: str, needle: str) -> list[str]:
     return [ln for ln in stdout.splitlines() if needle in ln]
 
 
-def test_labels_are_scanned_where_the_layout_resolver_places_them(tmp_path):
-    """An unmarked empty label is named by the path the resolver builds, so the checker's scan
-    root and the canonical annotations tree cannot drift apart unnoticed."""
+def test_an_unmarked_empty_label_is_named_by_its_capture_and_stem(tmp_path):
     date = "2026-03-04"
     root = _layout_project(tmp_path, date)
-    Image.new("RGB", (48, 32)).save(image_dir(root, date) / "IMG_R.JPG")
-    label = annotation_path(root, date, "IMG_R")
-    json_io.write_annotations(label, [], 48, 32, keep_empty=True)
+    image = image_dir(root, date) / "IMG_R.JPG"
+    Image.new("RGB", (48, 32)).save(image)
+    label_image(image, [], 48, 32, keep_empty=True)
 
     res = _run(root)
     assert res.returncode == 2, res.stdout
     unmarked = _lines(res.stdout, "not marked complete")
     assert len(unmarked) == 1, res.stdout
-    assert str(label.relative_to(root)) in unmarked[0]
+    assert f"{date}/IMG_R" in unmarked[0]
 
 
 def test_a_mark_for_any_subject_finishes_an_empty_label_on_a_dateless_dataset(tmp_path):
-    """A dataset with no capture-date buckets places its labels flat; an empty one marked
-    complete for a subject is a confirmed negative there too."""
-    root = tmp_path / "flat"
-    image_dir(root, None).mkdir(parents=True)
-    annotation_dir(root, None).mkdir(parents=True)
+    """An empty label of the undated capture marked complete for a subject is a confirmed
+    negative there too."""
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
+    root = tmp_path / "dateless"
+    image_dir(root, UNDATED_BUCKET).mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
-    image = image_dir(root, None) / "IMG_F.JPG"
+    image = image_dir(root, UNDATED_BUCKET) / "IMG_F.JPG"
     Image.new("RGB", (40, 24)).save(image)
-    label = annotation_path(root, None, "IMG_F")
-    json_io.write_annotations(label, [], 40, 24, keep_empty=True)
-    mark_complete(image, label, "bud", project=root)
+    label_image(image, [], 40, 24, keep_empty=True)
+    mark_complete(image, "bud", project=root)
 
     res = _run(root)
     assert "not marked complete" not in res.stdout, res.stdout
@@ -317,16 +282,42 @@ def test_a_checkpoint_under_a_temp_rooted_project_is_not_pollution(tmp_path):
 
 
 def test_image_census_counts_every_capture_the_loaders_admit(tmp_path):
-    """The doctor's image census reads the platform's own extension set, so an .npz capture or a
-    band-group manifest is matched to its label rather than reported missing."""
-    from tcip_mcp.cli.doctor import _image_stems
+    """The doctor's image census reads the platform's own extension set, so an .npz capture is
+    keyed to its own label document rather than reported missing."""
+    from tcip_mcp.cli import doctor
 
     images = tmp_path / "images" / "2026-03-04"
     images.mkdir(parents=True)
     (images / "plotA_0_0.npz").write_bytes(b"\x00")
     (images / "plotA_0_1.jpg").write_bytes(b"\xff\xd8")
 
-    assert _image_stems(tmp_path) == {"plotA_0_0": "plotA_0_0.npz", "plotA_0_1": "plotA_0_1.jpg"}
+    census = doctor._census(tmp_path, [])
+    assert census is not None
+    assert sorted(key.parts for key in census["images"].values()) == [
+        ("2026-03-04", "plotA_0_0"), ("2026-03-04", "plotA_0_1")]
+
+
+def test_one_stem_in_two_captures_is_two_images_each_paired_with_its_own_label(tmp_path):
+    """Two captures each holding ``same.png``, only one labeled: one image has no label record and
+    no label lacks its image, at the census and at the doctor alike."""
+    from tcip_mcp.cli import doctor
+    from tcip_mcp.tools.data_tools import scan_dataset
+
+    root = _layout_project(tmp_path, "2026-03-04")
+    image_dir(root, "2026-03-05").mkdir(parents=True)
+    for date in ("2026-03-04", "2026-03-05"):
+        Image.new("RGB", (32, 32)).save(image_dir(root, date) / "same.png")
+    label_image(image_dir(root, "2026-03-04") / "same.png",
+                [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
+
+    scan = scan_dataset(str(root))
+    findings: list[tuple[str, str]] = []
+    doctor.check_data_quality(root, findings, census=doctor._census(root, findings))
+
+    assert (scan["paired_images"], scan["unlabeled_images"]) == (1, 1), scan
+    assert not [msg for _, msg in findings if "no matching image" in msg], findings
+    (unlabeled,) = [msg for _, msg in findings if "no label record" in msg]
+    assert unlabeled.startswith("1 of 2") and "2026-03-05/same" in unlabeled, unlabeled
 
 
 def test_only_the_unreadable_trait_record_is_reported(tmp_path):
@@ -408,38 +399,28 @@ def test_doctor_errors_on_a_project_whose_record_does_not_decode(tmp_path):
     assert "does not decode" in res.stdout
 
 
+def _unreadable_label(image: Path) -> None:
+    """A label document for ``image`` whose stored bytes no longer decode."""
+    from tests._record_damage_fixtures import damage_record
+
+    label_image(image, [], 32, 32, keep_empty=True)
+    damage_record(image_label_key(image), b"not json {][")
+
+
 def test_doctor_flags_an_unreadable_label(tmp_path):
-    """A corrupt label file is an error-level finding, never a pass: the reader raises on it, and
-    the doctor reports it rather than letting the corruption pass as an empty document."""
+    """A corrupt label document is an error-level finding, never a pass: the reader raises on it,
+    and the doctor reports it rather than letting the corruption pass as an empty document."""
     date = "2026-03-04"
     root = _layout_project(tmp_path, date)
-    Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_S.JPG")
-    annotation_path(root, date, "IMG_S").write_text("not json {][", encoding="utf-8")
+    image = image_dir(root, date) / "IMG_S.JPG"
+    Image.new("RGB", (32, 32)).save(image)
+    _unreadable_label(image)
 
     res = _run(root)
     assert res.returncode == 2, res.stdout
     unreadable = _lines(res.stdout, "will not read")
     assert len(unreadable) >= 1, res.stdout
     assert any("IMG_S" in ln for ln in unreadable), res.stdout
-
-
-def test_doctor_flags_an_image_and_a_label_with_a_reserved_stem(tmp_path):
-    """A stem reserved for a prediction bucket's own record is excluded from every bucket walk,
-    so it is invisible to those readers; the doctor's own ``rglob`` walk still sees it and reports
-    it, since data not brought in through ingest can still carry one."""
-    date = "2026-03-04"
-    root = _layout_project(tmp_path, date)
-    Image.new("RGB", (32, 32)).save(image_dir(root, date) / "bucket.jpg")
-    # Written by hand: the platform's own encoder refuses a document under a reserved stem.
-    reserved = annotation_path(root, date, "bucket")
-    reserved.parent.mkdir(parents=True, exist_ok=True)
-    reserved.write_text('{"annotations": []}', encoding="utf-8")
-
-    res = _run(root)
-    assert res.returncode == 2, res.stdout
-    findings = _lines(res.stdout, "reserved for a prediction bucket")
-    assert any("bucket.jpg" in ln for ln in findings), res.stdout
-    assert any("bucket.json" in ln for ln in findings), res.stdout
 
 
 def test_a_marked_empty_label_is_clean_to_the_data_quality_check(tmp_path):
@@ -451,12 +432,11 @@ def test_a_marked_empty_label_is_clean_to_the_data_quality_check(tmp_path):
     root = _layout_project(tmp_path, date)
     image = image_dir(root, date) / "IMG_S.JPG"
     Image.new("RGB", (32, 32)).save(image)
-    label = annotation_path(root, date, "IMG_S")
-    json_io.write_annotations(label, [], 32, 32, keep_empty=True)
-    mark_complete(image, label, "bud", project=root)
+    label_image(image, [], 32, 32, keep_empty=True)
+    mark_complete(image, "bud", project=root)
 
     findings: list[tuple[str, str]] = []
-    doctor.check_data_quality(root, findings, census=doctor._census(root, findings, set()))
+    doctor.check_data_quality(root, findings, census=doctor._census(root, findings))
     assert findings == []
 
 
@@ -470,26 +450,25 @@ def test_a_doctor_run_reads_each_label_once_and_reports_an_unreadable_one_once(
     date = "2026-03-04"
     root = _layout_project(tmp_path, date)
     Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_U.JPG")
-    annotation_path(root, date, "IMG_U").write_bytes(b"{not json")
+    _unreadable_label(image_dir(root, date) / "IMG_U.JPG")
     Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_A.JPG")
-    readable = annotation_path(root, date, "IMG_A")
-    json_io.write_annotations(readable, [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
-                              32, 32)
+    label_image(image_dir(root, date) / "IMG_A.JPG",
+                [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
 
     reads: list[str] = []
     real_read = json_io.read_label_document
 
-    def _counting_read(path, *args, **kwargs):
-        reads.append(Path(path).name)
-        return real_read(path, *args, **kwargs)
+    def _counting_read(key, *args, **kwargs):
+        reads.append(key.parts[-1])
+        return real_read(key, *args, **kwargs)
 
     monkeypatch.setattr(json_io, "read_label_document", _counting_read)
     findings: list[tuple[str, str]] = []
-    census = doctor._census(root, findings, set())
+    census = doctor._census(root, findings)
     for check in (doctor.check_data_quality, doctor.check_provenance):
         check(root, findings, census=census)
 
-    assert sorted(reads) == ["IMG_A.json", "IMG_U.json"]
-    unreadable = [msg for _, msg in findings if "label file will not read" in msg]
+    assert sorted(reads) == ["IMG_A", "IMG_U"]
+    unreadable = [msg for _, msg in findings if "label document will not read" in msg]
     assert len(unreadable) == 1, findings
-    assert "IMG_U.json" in unreadable[0]
+    assert "IMG_U" in unreadable[0]

@@ -18,10 +18,7 @@ function selection(over: Partial<DatasetSelection> = {}): DatasetSelection {
     image_list: ["a.jpg"],
     current_image_index: 0,
     images_dir: null,
-    annotations_dir: null,
-    predictions_dir: null,
-    label_paths: {},
-    prediction_paths: {},
+    bucket: null,
     ...over,
   };
 }

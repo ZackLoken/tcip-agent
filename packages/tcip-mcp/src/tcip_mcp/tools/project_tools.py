@@ -86,7 +86,8 @@ def register_dataset(project: Path, dataset_root: str, crop: str) -> dict:
     to the project whenever the dataset sits under it, absolute for an external dataset.
 
     Args:
-        dataset_root: Root of the dataset (holds ``images/``, ``annotations/``, ``subjects.json``).
+        dataset_root: Root of the dataset (holds ``images/``, ``subjects.json`` and the database
+            its label documents are records in).
         crop: The crop this dataset's imagery is of, as ``crops.yml`` names it. Required; the
             expert's fact.
     """

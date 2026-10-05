@@ -3,14 +3,13 @@
 A pass over a small (64x64, tile 32, no overlap: exactly four tiles) geo-referenced raster
 records its own identity under the project before the first tile and one batch record per
 flushed tile (tile_batch_size=1 here, so each tile is its own batch). Interruption is simulated
-by making the
-store's own replace raise once the pass has durably recorded one batch, the same shape a real
-crash mid-pass leaves: the identity record and that one batch record survive, nothing else does.
+by making the store's own replace raise once the pass has durably recorded one batch, the same
+shape a real crash mid-pass leaves: the identity record and that one batch record survive,
+nothing else does.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -18,10 +17,10 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-from tcip_store.file_backend import is_bookkeeping  # noqa: E402
+import tcip_store  # noqa: E402
 
 from tests.test_orthomosaic_tools import (  # noqa: E402
-    TILE, _bespoke_detection_checkpoint, _write_geo_raster,
+    TILE, _bespoke_detection_checkpoint, _raster, _write_geo_raster,
 )
 
 
@@ -44,19 +43,20 @@ def _instance_seg_checkpoint(tmp_path: Path) -> str:
 
 def _setup(tmp_path: Path) -> tuple[str, Path]:
     """A registered bespoke detection checkpoint and a real, readable 64x64 geo raster (four
-    32px tiles at overlap 0.0), in the project ``tmp_path``."""
-    raster_path = tmp_path / "mosaic.tif"
+    32px tiles at overlap 0.0) in the undated capture of the dataset ``ds``, in the project
+    ``tmp_path``."""
+    raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path, height=64, width=64)
     return _bespoke_detection_checkpoint(tmp_path), raster_path
 
 
-def _run(project: Path, ckpt: str, raster_path: Path, out: Path, *, conf: float = 0.0,
+def _run(project: Path, ckpt: str, raster_path: Path, bucket: str, *, conf: float = 0.0,
          **kwargs) -> dict:
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
 
     call_kwargs = {
-        "raster_path": str(raster_path), "output_dir": str(out),
+        "raster_path": str(raster_path), "bucket": bucket,
         "stated": Stated(conf=conf, tile_size=TILE, overlap=0.0), "tile_batch_size": 1,
         "device": "cpu",
     }
@@ -64,12 +64,23 @@ def _run(project: Path, ckpt: str, raster_path: Path, out: Path, *, conf: float 
     return run_inference(project, ckpt, **call_kwargs)
 
 
-def _progress(project: Path, out: Path) -> list[str]:
-    """The segments of every progress record a raster pass toward ``out`` left under
+def _progress(project: Path, raster_path: Path, bucket: str) -> list[str]:
+    """The segments of every progress record a raster pass toward ``bucket`` left under
     ``project``."""
+    from tcip_mcp.dataset_layout import dataset_root_of
     from tcip_mcp.tools.inference_tools import _progress_keys
 
-    return sorted(key.parts[1] for key in _progress_keys(project, out))
+    root = dataset_root_of(raster_path)
+    assert root is not None
+    return sorted(key.parts[-1] for key in _progress_keys(project, root, bucket))
+
+
+def _published(raster_path: Path, bucket: str) -> bool:
+    from tcip_mcp.dataset_layout import bucket_key, dataset_root_of
+
+    root = dataset_root_of(raster_path)
+    assert root is not None
+    return tcip_store.exists(bucket_key(root, bucket))
 
 
 def _interrupt_after_one_batch(monkeypatch) -> None:
@@ -82,7 +93,7 @@ def _interrupt_after_one_batch(monkeypatch) -> None:
     seen = {"batches": 0}
 
     def _flaky_replace(key, value, **kw):
-        if key.store == "raster_pass_progress" and key.parts[1].startswith("batch-"):
+        if key.store == "raster_pass_progress" and key.parts[-1].startswith("batch-"):
             seen["batches"] += 1
             if seen["batches"] == 2:
                 raise RuntimeError("simulated crash mid-pass")
@@ -91,17 +102,29 @@ def _interrupt_after_one_batch(monkeypatch) -> None:
     monkeypatch.setattr(store_mod, "replace", _flaky_replace)
 
 
-def _interrupted(tmp_path: Path, monkeypatch, out: Path, ckpt: str, raster_path: Path,
+def _interrupted(tmp_path: Path, monkeypatch, bucket: str, ckpt: str, raster_path: Path,
                  **kwargs) -> None:
     _interrupt_after_one_batch(monkeypatch)
     with pytest.raises(RuntimeError, match="simulated crash"):
-        _run(tmp_path, ckpt, raster_path, out, **kwargs)
+        _run(tmp_path, ckpt, raster_path, bucket, **kwargs)
     monkeypatch.undo()
 
 
-def _as_produced(out: Path, stem: str = "mosaic") -> list[tuple]:
-    doc = json.loads((out / f"{stem}.json").read_text())
-    return [(tuple(a["bbox"]), a["score"], a["subject"]) for a in doc["annotations"]]
+def _document(raster_path: Path, bucket: str) -> dict:
+    """The one document a whole-raster bucket holds, as stored."""
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.dataset_layout import dataset_root_of
+
+    root = dataset_root_of(raster_path)
+    assert root is not None
+    key = read_bucket(root, bucket).document_key(raster_path.stem)
+    assert key is not None
+    return tcip_store.read(key)
+
+
+def _as_produced(raster_path: Path, bucket: str) -> list[tuple]:
+    return [(tuple(a["bbox"]), a["score"], a["subject"])
+            for a in _document(raster_path, bucket)["annotations"]]
 
 
 def test_resume_refuses_with_images_dir(tmp_path):
@@ -111,19 +134,18 @@ def test_resume_refuses_with_images_dir(tmp_path):
     images_dir.mkdir()
 
     result = run_inference(tmp_path, str(tmp_path / "m.pt"), images_dir=str(images_dir),
-                           output_dir=str(tmp_path / "out"), resume=True)
+                           bucket="out/2026-01-01", resume=True)
 
     assert "resume applies only to a raster_path pass" in result["error"]
 
 
 def test_resume_refuses_with_no_recorded_progress(tmp_path):
     ckpt, raster_path = _setup(tmp_path)
-    out = tmp_path / "preds"
 
-    result = _run(tmp_path, ckpt, raster_path, out, resume=True)
+    result = _run(tmp_path, ckpt, raster_path, "preds/2026-01-01", resume=True)
 
     assert "no raster-pass progress toward" in result["error"]
-    assert not out.exists()
+    assert not _published(raster_path, "preds/2026-01-01")
 
 
 def test_an_interrupted_instance_segmentation_pass_resumes_to_the_uninterrupted_masks(
@@ -131,70 +153,70 @@ def test_an_interrupted_instance_segmentation_pass_resumes_to_the_uninterrupted_
 ):
     """The recorded progress carries each slice's shifted predictions whole, polygons included,
     so the resumed pass merges the seeded masks exactly as the uninterrupted pass does."""
-    raster_path = tmp_path / "mosaic.tif"
+    raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path, height=64, width=64)
     ckpt = _instance_seg_checkpoint(tmp_path)
-    interrupted_out, uninterrupted_out = tmp_path / "interrupted", tmp_path / "uninterrupted"
+    interrupted, uninterrupted = "interrupted/2026-01-01", "uninterrupted/2026-01-01"
 
-    baseline = _run(tmp_path, ckpt, raster_path, uninterrupted_out, require_masks=True)
+    baseline = _run(tmp_path, ckpt, raster_path, uninterrupted, require_masks=True)
     assert "error" not in baseline, baseline
-    _interrupted(tmp_path, monkeypatch, interrupted_out, ckpt, raster_path, require_masks=True)
-    resumed = _run(tmp_path, ckpt, raster_path, interrupted_out, resume=True, require_masks=True)
+    _interrupted(tmp_path, monkeypatch, interrupted, ckpt, raster_path, require_masks=True)
+    resumed = _run(tmp_path, ckpt, raster_path, interrupted, resume=True, require_masks=True)
     assert "error" not in resumed, resumed
 
-    def _annotations(out: Path) -> list[dict]:
-        doc = json.loads((out / "mosaic.json").read_text())
-        return [{k: v for k, v in a.items() if k != "created_at"} for a in doc["annotations"]]
+    def _annotations(bucket: str) -> list[dict]:
+        return [{k: v for k, v in a.items() if k != "created_at"}
+                for a in _document(raster_path, bucket)["annotations"]]
 
-    baseline_annotations = _annotations(uninterrupted_out)
+    baseline_annotations = _annotations(uninterrupted)
     assert any(a.get("segmentation") for a in baseline_annotations)
-    assert _annotations(interrupted_out) == baseline_annotations
+    assert _annotations(interrupted) == baseline_annotations
 
 
 def test_an_interrupted_pass_leaves_one_identity_and_one_batch_record_and_no_bucket(
     tmp_path, monkeypatch,
 ):
     """The progress sits under the project, apart from the bucket the pass will publish, and the
-    bucket directory is created only once the pass is whole."""
+    bucket is published only once the pass is whole."""
     ckpt, raster_path = _setup(tmp_path)
-    out = tmp_path / "preds"
+    bucket = "preds/2026-01-01"
 
-    _interrupted(tmp_path, monkeypatch, out, ckpt, raster_path)
+    _interrupted(tmp_path, monkeypatch, bucket, ckpt, raster_path)
 
-    assert _progress(tmp_path, out) == ["batch-000000", "identity"]
-    assert not out.exists()
+    assert _progress(tmp_path, raster_path, bucket) == ["batch-000000", "identity"]
+    assert not _published(raster_path, bucket)
 
 
 def test_resume_completes_an_interrupted_pass_with_the_same_detections_and_clears_progress(
     tmp_path, monkeypatch,
 ):
     ckpt, raster_path = _setup(tmp_path)
-    interrupted_out = tmp_path / "interrupted"
-    _interrupted(tmp_path, monkeypatch, interrupted_out, ckpt, raster_path)
+    interrupted = "interrupted/2026-01-01"
+    _interrupted(tmp_path, monkeypatch, interrupted, ckpt, raster_path)
 
-    resumed = _run(tmp_path, ckpt, raster_path, interrupted_out, resume=True)
+    resumed = _run(tmp_path, ckpt, raster_path, interrupted, resume=True)
 
     assert "error" not in resumed, resumed
-    assert _progress(tmp_path, interrupted_out) == []
-    uninterrupted_out = tmp_path / "uninterrupted"
-    baseline = _run(tmp_path, ckpt, raster_path, uninterrupted_out)
+    assert _progress(tmp_path, raster_path, interrupted) == []
+    uninterrupted = "uninterrupted/2026-01-01"
+    baseline = _run(tmp_path, ckpt, raster_path, uninterrupted)
     assert "error" not in baseline, baseline
     assert resumed["execution"] == baseline["execution"]
     # As produced, not sorted: a resumed pass reconstructs the identical detection set in the
     # identical order, not merely the same boxes in some order.
-    assert _as_produced(interrupted_out) == _as_produced(uninterrupted_out)
+    assert _as_produced(raster_path, interrupted) == _as_produced(raster_path, uninterrupted)
 
 
 def test_a_fresh_pass_over_recorded_progress_refuses_and_leaves_it(tmp_path, monkeypatch):
     ckpt, raster_path = _setup(tmp_path)
-    out = tmp_path / "preds"
-    _interrupted(tmp_path, monkeypatch, out, ckpt, raster_path)
+    bucket = "preds/2026-01-01"
+    _interrupted(tmp_path, monkeypatch, bucket, ckpt, raster_path)
 
-    result = _run(tmp_path, ckpt, raster_path, out)
+    result = _run(tmp_path, ckpt, raster_path, bucket)
 
     assert "already recorded" in result["error"]
-    assert _progress(tmp_path, out) == ["batch-000000", "identity"]
-    assert not out.exists()
+    assert _progress(tmp_path, raster_path, bucket) == ["batch-000000", "identity"]
+    assert not _published(raster_path, bucket)
 
 
 def test_a_published_bucket_whose_progress_clear_failed_refuses_every_later_pass(
@@ -202,45 +224,40 @@ def test_a_published_bucket_whose_progress_clear_failed_refuses_every_later_pass
 ):
     """A crash between publication and the progress clear leaves a whole bucket and a progress
     record beside it: a fresh pass refuses on the recorded progress, and a resume refuses on the
-    bucket rather than publishing over it; every file of the bucket stays as published."""
+    bucket rather than publishing over it; the bucket stays as published."""
     import tcip_mcp.tools.inference_tools as itools
 
     ckpt, raster_path = _setup(tmp_path)
-    out = tmp_path / "preds"
+    bucket = "preds/2026-01-01"
 
     def _raise_after_publish(*_args):
         raise RuntimeError("simulated crash between publication and the progress clear")
 
     monkeypatch.setattr(itools, "_clear_raster_pass_progress", _raise_after_publish)
     with pytest.raises(RuntimeError, match="simulated crash"):
-        _run(tmp_path, ckpt, raster_path, out)
+        _run(tmp_path, ckpt, raster_path, bucket)
     monkeypatch.undo()
 
-    def files() -> dict[str, bytes]:
-        return {p.name: p.read_bytes() for p in sorted(out.iterdir())
-                if not is_bookkeeping(p.name)}
+    published = _document(raster_path, bucket)
 
-    published = files()
-    assert set(published) == {"bucket.json", "mosaic.json"}
-
-    fresh = _run(tmp_path, ckpt, raster_path, out)
-    resumed = _run(tmp_path, ckpt, raster_path, out, resume=True)
+    fresh = _run(tmp_path, ckpt, raster_path, bucket)
+    resumed = _run(tmp_path, ckpt, raster_path, bucket, resume=True)
 
     assert "already recorded" in fresh["error"]
-    assert "already exists" in resumed["error"]
-    assert files() == published
+    assert "already" in resumed["error"]
+    assert _document(raster_path, bucket) == published
 
 
 def test_resume_refuses_a_call_that_differs_from_the_recorded_pass(tmp_path, monkeypatch):
     ckpt, raster_path = _setup(tmp_path)
-    out = tmp_path / "preds"
-    _interrupted(tmp_path, monkeypatch, out, ckpt, raster_path)
+    bucket = "preds/2026-01-01"
+    _interrupted(tmp_path, monkeypatch, bucket, ckpt, raster_path)
 
-    result = _run(tmp_path, ckpt, raster_path, out, resume=True, conf=0.9)
+    result = _run(tmp_path, ckpt, raster_path, bucket, resume=True, conf=0.9)
 
     assert "conf" in result["error"]
     # A refused resume leaves the recorded progress untouched.
-    assert _progress(tmp_path, out) == ["batch-000000", "identity"]
+    assert _progress(tmp_path, raster_path, bucket) == ["batch-000000", "identity"]
 
 
 def test_resume_refuses_when_the_recorded_identity_carries_an_extra_top_level_key(
@@ -252,15 +269,15 @@ def test_resume_refuses_when_the_recorded_identity_carries_an_extra_top_level_ke
     from tcip_store import store
 
     ckpt, raster_path = _setup(tmp_path)
-    out = tmp_path / "preds"
-    _interrupted(tmp_path, monkeypatch, out, ckpt, raster_path)
-    identity_key = _progress_key(tmp_path, out, "identity")
+    bucket = "preds/2026-01-01"
+    _interrupted(tmp_path, monkeypatch, bucket, ckpt, raster_path)
+    identity_key = _progress_key(tmp_path, tmp_path / "ds", bucket, "identity")
     body = dict(store.read(identity_key))
     body["future_field"] = "a value this reader does not expect"
     with store.transaction(identity_key) as txn:
         txn.write(identity_key, body)
 
-    result = _run(tmp_path, ckpt, raster_path, out, resume=True)
+    result = _run(tmp_path, ckpt, raster_path, bucket, resume=True)
 
     assert "future_field" in result["error"]
 
@@ -271,7 +288,6 @@ def test_content_identity_failure_after_open_refuses_naming_the_raster(tmp_path,
     import tcip_mcp.pipelines.raster_source as raster_source_module
 
     ckpt, raster_path = _setup(tmp_path)
-    out = tmp_path / "preds"
     real_open_raster = raster_source_module.open_raster
 
     def _flaky_open_raster(source, num_channels):
@@ -285,10 +301,10 @@ def test_content_identity_failure_after_open_refuses_naming_the_raster(tmp_path,
 
     monkeypatch.setattr(raster_source_module, "open_raster", _flaky_open_raster)
 
-    result = _run(tmp_path, ckpt, raster_path, out)
+    result = _run(tmp_path, ckpt, raster_path, "preds/2026-01-01")
 
     assert str(raster_path) in result["error"]
-    assert not out.exists()
+    assert not _published(raster_path, "preds/2026-01-01")
 
 
 def test_an_interrupted_pass_under_an_assessment_resumes_under_that_assessment(
@@ -305,28 +321,27 @@ def test_an_interrupted_pass_under_an_assessment_resumes_under_that_assessment(
     fx.seed_confirmed_count(tmp_path, measured_subject="bud")
     exp = _attested(tmp_path)
     assessment = _assess(exp)
-    call = {"raster_path": str(exp["raster_path"]), "tile_batch_size": 50, "device": "cpu",
+    raster_path = exp["raster_path"]
+    call = {"raster_path": str(raster_path), "tile_batch_size": 50, "device": "cpu",
             "assessment_id": assessment["assessment_id"]}
-    interrupted_out = tmp_path / "interrupted"
+    interrupted = "interrupted/2026-01-01"
     _interrupt_after_one_batch(monkeypatch)
     with pytest.raises(RuntimeError, match="simulated crash"):
-        run_inference(tmp_path, exp["checkpoint_path"], output_dir=str(interrupted_out), **call)
+        run_inference(tmp_path, exp["checkpoint_path"], bucket=interrupted, **call)
     monkeypatch.undo()
 
-    other = run_inference(tmp_path, exp["checkpoint_path"], output_dir=str(interrupted_out),
+    other = run_inference(tmp_path, exp["checkpoint_path"], bucket=interrupted,
                           resume=True, **{**call, "assessment_id": "another"})
-    resumed = run_inference(tmp_path, exp["checkpoint_path"], output_dir=str(interrupted_out),
+    resumed = run_inference(tmp_path, exp["checkpoint_path"], bucket=interrupted,
                             resume=True, **call)
-    uninterrupted_out = tmp_path / "uninterrupted"
-    baseline = run_inference(tmp_path, exp["checkpoint_path"],
-                             output_dir=str(uninterrupted_out), **call)
+    uninterrupted = "uninterrupted/2026-01-01"
+    baseline = run_inference(tmp_path, exp["checkpoint_path"], bucket=uninterrupted, **call)
 
     assert "error" in other
     assert "error" not in resumed, resumed
     assert "error" not in baseline, baseline
-    bucket = read_bucket(interrupted_out)
+    bucket = read_bucket(resumed["dataset_root"], interrupted)
     assert bucket.assessment_id == assessment["assessment_id"]
     assert bucket.execution.record() == assessment["execution"]
     assert bucket.execution.tile_size == BLOCK_TILE
-    assert _as_produced(interrupted_out, exp["stem"]) == _as_produced(uninterrupted_out,
-                                                                       exp["stem"])
+    assert _as_produced(raster_path, interrupted) == _as_produced(raster_path, uninterrupted)

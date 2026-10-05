@@ -1,24 +1,24 @@
 """The admission rails: which samples a place holding ground truth admits, and why each one that
 is dropped was dropped.
 
-Covers the one shape read over a place (``ground_truth_shape``), the label store's own
-subject-scoped admission and its completion marks, and the targets the loaders read off each
-admitted sample's own document, an unassessed attribute among them."""
-
-import json
+Covers the one shape read over a run's ground truth (``ground_truth_shape``), the label
+documents' own subject-scoped admission and their completion marks, and the targets the loaders
+read off each admitted sample's own document, an unassessed attribute among them."""
 
 import pytest
 
 torch = pytest.importorskip("torch")
 from PIL import Image  # noqa: E402
 
+import tcip_store as ts  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key  # noqa: E402
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject  # noqa: E402
 
 from tests._producer_fixtures import (  # noqa: E402
-    admit_over, dataset_over, mark_complete, registry_over,
+    admit_over, dataset_over, image_label_key, label_image, mark_complete, registry_over,
 )
 
 BUD = "bud"
@@ -28,6 +28,12 @@ def _make_images(images_dir, stems):
     images_dir.mkdir(parents=True, exist_ok=True)
     for s in stems:
         Image.new("RGB", (100, 100)).save(images_dir / f"{s}.jpg")
+
+
+def _label(images_dir, stem, annotations, **kwargs):
+    """``annotations`` as the label document of the 100px image ``<stem>.jpg`` of
+    ``images_dir``."""
+    label_image(images_dir / f"{stem}.jpg", annotations, 100, 100, **kwargs)
 
 
 def _box(x1, y1, x2, y2, *, subject=BUD, score=None, **attrs):
@@ -48,13 +54,10 @@ def _multi_poly(rings, *, subject=BUD, **attrs):
 
 # ── the one shape read ──────────────────────────────────────────────────────
 
-def test_ground_truth_shape_reads_a_directory_of_documents(tmp_path):
+def test_ground_truth_shape_reads_no_place_as_the_images_own_documents():
     from tcip_mcp.pipelines.data.label_queries import ground_truth_shape
 
-    d = tmp_path / "detect"
-    d.mkdir()
-    json_io.write_annotations(d / "a.json", [_box(10, 10, 50, 50)], 100, 100)
-    assert ground_truth_shape(d) == "document"
+    assert ground_truth_shape(None) == "document"
 
 
 def test_ground_truth_shape_reads_masks_and_tables(tmp_path):
@@ -70,132 +73,53 @@ def test_ground_truth_shape_reads_masks_and_tables(tmp_path):
     assert ground_truth_shape(table) == "table"
 
 
-def test_ground_truth_shape_reads_an_empty_directory_as_documents(tmp_path):
-    """Nothing annotated yet is the document shape with nothing in it; the admission below names
-    what is missing image by image rather than the shape read refusing the whole directory."""
-    from tcip_mcp.pipelines.data.label_queries import ground_truth_shape
-
-    d = tmp_path / "nothing"
-    d.mkdir()
-    assert ground_truth_shape(d) == "document"
-
-
-def test_ground_truth_shape_ignores_a_bucket_record(tmp_path):
-    """A directory holding only a bucket's own record has no label document in it."""
+def test_ground_truth_shape_refuses_a_directory_holding_no_mask(tmp_path):
+    """A directory with no ``<stem>.png`` in it names no ground truth a run reads: label documents
+    are records of the images' own dataset, never files a run is pointed at."""
     from tcip_mcp.pipelines.data.label_queries import ground_truth_shape
 
     d = tmp_path / "detect"
     d.mkdir()
-    (d / "bucket.json").write_text("{}")
-    assert ground_truth_shape(d) == "document"
-
-
-def test_ground_truth_shape_treats_the_old_objects_schema_as_documents(tmp_path):
-    """The shape read names which kind of ground truth a place holds and never reads a document:
-    a directory holding an old 'objects' document is the document shape, whose reader refuses
-    that document when admission reads it."""
-    from tcip_mcp.pipelines.data.label_queries import ground_truth_shape
-
-    d = tmp_path / "detect"
-    d.mkdir()
-    (d / "a.json").write_text(json.dumps({"objects": [{"label": "bud"}]}))
-    assert ground_truth_shape(d) == "document"
-
-
-def _subject_bearing_coco(path):
-    """A two-image dataset-level COCO whose records also carry the per-image ``subject`` key, the
-    shape the per-image decoder would otherwise read as one image's labels."""
-    path.write_text(json.dumps({
-        "images": [{"id": 1, "file_name": "img0.jpg"}, {"id": 2, "file_name": "img1.jpg"}],
-        "categories": [{"id": 1, "name": BUD}],
-        "annotations": [
-            {"id": 1, "image_id": 1, "category_id": 1, "subject": BUD, "bbox": [1, 1, 9, 9]},
-            {"id": 2, "image_id": 2, "category_id": 1, "subject": BUD, "bbox": [20, 20, 9, 9]},
-        ],
-    }))
-
-
-def test_a_dataset_level_coco_at_a_label_path_is_refused_by_the_one_reader(tmp_path):
-    """No training or calibration reader reads a COCO document under another name: the per-image
-    reader every one of them shares refuses it, the loaders' target read and admission alike."""
-    from tcip_mcp.pipelines.data.label_queries import json_det_targets
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
-
-    images = tmp_path / "images"
-    labels = tmp_path / "detect"
-    labels.mkdir()
-    _make_images(images, ["img0", "img1"])
-    json_io.write_annotations(labels / "img1.json", [_box(10, 10, 50, 50)], 100, 100)
-    _subject_bearing_coco(labels / "img0.json")
-
-    from tcip_mcp.pipelines.data.label_queries import registry_scope
-
-    with pytest.raises(json_io.UnreadableLabelDocument, match="import_coco"):
-        json_det_targets(str(labels / "img0.json"), registry_scope(labels, BUD))
-    with pytest.raises(json_io.UnreadableLabelDocument, match="dataset-level COCO"):
-        auto_train_val(tmp_path, "detection", {"images_dir": str(images), "labels_dir": str(labels),
-                                     "scope": {"subject": BUD}}, None)
-
-
-def test_a_same_stem_bucket_record_is_never_read_as_that_images_label(tmp_path):
-    """A bucket's own record shares a stem with an image of that name. Admission pairs each
-    candidate with the document its directory actually holds for it, so the record is never
-    opened as a label: that image is unannotated, and the rest of the directory still trains."""
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    labels.mkdir(parents=True)
-    _make_images(images, ["img0", "img1", "bucket"])
-    for stem in ("img0", "img1"):
-        json_io.write_annotations(labels / f"{stem}.json", [_box(10, 10, 50, 50)], 100, 100)
-    (labels / "bucket.json").write_text("{}", encoding="utf-8")
-
-    admitted = admit_over(images, labels, subject=BUD)
-    assert sorted(r.member for r in admitted.records) == ["img0", "img1"]
+    (d / "a.json").write_text('{"annotations": []}', encoding="utf-8")
+    with pytest.raises(ValueError, match="neither a .csv table nor a directory of <stem>.png"):
+        ground_truth_shape(d)
 
 
 def test_a_document_with_no_image_is_not_admitted(tmp_path):
     """Membership is the images the place holds ground truth for. A document whose image was
     deleted or renamed names nothing to train on, so it never enters the run."""
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    labels.mkdir(parents=True)
+    images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["kept"])
-    for stem in ("kept", "orphan"):
-        json_io.write_annotations(labels / f"{stem}.json", [_box(10, 10, 50, 50)], 100, 100)
+    _label(images, "kept", [_box(10, 10, 50, 50)])
+    json_io.write_label_document(label_key(tmp_path, UNDATED_BUCKET, "orphan"), [_box(10, 10, 50, 50)],
+                                 100, 100)
 
-    admitted = admit_over(images, labels, subject=BUD)
+    admitted = admit_over(images, subject=BUD)
     assert [r.member for r in admitted.records] == ["kept"]
 
 
-def test_a_noncanonical_labelme_document_refuses_rather_than_reading_as_empty(tmp_path):
-    """A document in another tool's schema is unreadable ground truth, not an empty one: reading
+def test_a_noncanonical_labelme_record_refuses_rather_than_reading_as_empty(tmp_path):
+    """A record in another tool's schema is unreadable ground truth, not an empty one: reading
     it as empty would train a labeled image as entirely background."""
-    from tcip_annotation.json_io import UnreadableLabelDocument
-
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    labels.mkdir(parents=True)
+    images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["a"])
-    (labels / "a.json").write_text(json.dumps({
+    ts.replace(image_label_key(images / "a.jpg"), {
         "version": "5.0.1", "imageWidth": 100, "imageHeight": 100,
-        "shapes": [{"label": BUD, "shape_type": "rectangle",
-                    "points": [[10, 10], [50, 50]]}],
-    }), encoding="utf-8")
+        "shapes": [{"label": BUD, "shape_type": "rectangle", "points": [[10, 10], [50, 50]]}],
+    })
 
-    with pytest.raises(UnreadableLabelDocument):
-        admit_over(images, labels, subject=BUD)
+    with pytest.raises(json_io.UnreadableLabelDocument):
+        admit_over(images, subject=BUD)
 
 
 # ── targets read off each sample's own document ─────────────────────────────
 
 def test_detection_reads_its_samples_own_documents(tmp_path):
-    images = tmp_path / "images"
-    labels = tmp_path / "detect"
-    labels.mkdir()
+    images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["img0"])
-    json_io.write_annotations(labels / "img0.json", [_box(10, 10, 50, 50)], 100, 100)
+    _label(images, "img0", [_box(10, 10, 50, 50)])
 
-    ds = dataset_over("detection", images, labels, subject=BUD)
+    ds = dataset_over("detection", images, subject=BUD)
     _, target = ds[0]
     assert target["boxes"].shape == (1, 4)
     assert target["boxes"].tolist()[0] == pytest.approx([10, 10, 50, 50])
@@ -213,24 +137,21 @@ def test_a_point_document_is_admitted_and_trains_through_the_builder_that_reads_
 
     from tcip_annotation.state import Point
 
-    images, labels = tmp_path / "images", tmp_path / "annotations"
-    labels.mkdir(parents=True)
+    images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["p0", "p1"])
     for index, stem in enumerate(("p0", "p1")):
-        json_io.write_annotations(
-            labels / f"{stem}.json",
-            [Annotation(subject=BUD, geometry=Point(20 + index, 30 + index))], 100, 100)
+        _label(images, stem, [Annotation(subject=BUD, geometry=Point(20 + index, 30 + index))])
 
-    admitted = admit_over(images, labels, subject=BUD)
+    admitted = admit_over(images, subject=BUD)
     assert sorted(r.member for r in admitted.records) == ["p0", "p1"]
 
     with pytest.raises(ValueError, match="only in geometries a detection loader does not read"):
-        dataset_over("detection", images, labels, subject=BUD)
+        dataset_over("detection", images, subject=BUD)
 
     # Admits valid work: a builder that reads points is handed the same admitted samples, reads
     # each document's own coordinates, and trains over them.
     built = dataset_over(
-        "keypoints", images, labels, subject=BUD,
+        "keypoints", images, subject=BUD,
         dataset_source={"builder": "tests.test_dataset_source_seam:build_point_ds"})
     assert sorted(s.member for s in built.samples) == ["p0", "p1"]
     assert built.points == [(20.0, 30.0), (21.0, 31.0)]
@@ -255,15 +176,13 @@ def test_class_distribution_counts_only_this_loaders_own_samples(tmp_path):
     dataset's unsplit whole: each reads the documents its own samples name."""
     from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
 
-    images, labels = tmp_path / "images", tmp_path / "annotations"
+    images = tmp_path / "images" / UNDATED_BUCKET
     stems = [f"img{i}" for i in range(4)]
     _make_images(images, stems)
-    labels.mkdir(parents=True)
     for i, stem in enumerate(stems):
-        json_io.write_annotations(labels / f"{stem}.json", [_box(10, 10, 30, 30)] * (i + 1),
-                                  100, 100)
+        _label(images, stem, [_box(10, 10, 30, 30)] * (i + 1))
 
-    admitted = admit_over(images, labels, subject=BUD)
+    admitted = admit_over(images, subject=BUD)
     samples = admitted.samples({stem: "train" for stem in stems}, lambda s: s)
     by_stem = {sample.member: sample for sample in samples}
     # The run's own sizes, resolved once over both sides, as a run builds its loaders.
@@ -279,15 +198,11 @@ def test_class_distribution_counts_only_this_loaders_own_samples(tmp_path):
 
 
 def test_instance_seg_reads_its_samples_own_documents(tmp_path):
-    images = tmp_path / "images"
-    labels = tmp_path / "segment"
-    labels.mkdir()
+    images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["img0"])
-    json_io.write_annotations(
-        labels / "img0.json",
-        [_poly([(10, 10), (50, 10), (50, 50), (10, 50)])], 100, 100)
+    _label(images, "img0", [_poly([(10, 10), (50, 10), (50, 50), (10, 50)])])
 
-    ds = dataset_over("instance_seg", images, labels, subject=BUD)
+    ds = dataset_over("instance_seg", images, subject=BUD)
     _, target = ds[0]
     assert target["boxes"].shape == (1, 4)
     assert target["masks"].shape[0] == 1
@@ -316,12 +231,11 @@ def _assert_one_mask_over_both_lobes(target) -> None:
 def test_instance_seg_rasterizes_a_two_ring_instance_into_one_mask(tmp_path):
     """An occlusion-split instance (a bud behind a branch) is one object with two regions, and
     every ring of it rasterizes into that instance's single mask."""
-    images, labels = tmp_path / "images", tmp_path / "annotations"
-    labels.mkdir(parents=True)
+    images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["img0"])
-    json_io.write_annotations(labels / "img0.json", [_multi_poly([LOBE_A, LOBE_B])], 100, 100)
+    _label(images, "img0", [_multi_poly([LOBE_A, LOBE_B])])
 
-    ds = dataset_over("instance_seg", images, labels, subject=BUD)
+    ds = dataset_over("instance_seg", images, subject=BUD)
     _, target = ds[0]
     _assert_one_mask_over_both_lobes(target)
 
@@ -329,51 +243,49 @@ def test_instance_seg_rasterizes_a_two_ring_instance_into_one_mask(tmp_path):
 def test_instance_seg_two_single_ring_instances_stay_two_masks(tmp_path):
     """The rail admits the ordinary case too: the same two lobes authored as separate annotations
     are two instances with two masks; multi-ring support must not merge distinct objects."""
-    images, labels = tmp_path / "images", tmp_path / "annotations"
-    labels.mkdir(parents=True)
+    images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["img0"])
-    json_io.write_annotations(
-        labels / "img0.json", [_poly(LOBE_A), _poly(LOBE_B)], 100, 100)
+    _label(images, "img0", [_poly(LOBE_A), _poly(LOBE_B)])
 
-    ds = dataset_over("instance_seg", images, labels, subject=BUD)
+    ds = dataset_over("instance_seg", images, subject=BUD)
     _, target = ds[0]
     assert target["masks"].shape[0] == 2
     assert target["boxes"].tolist() == [[10.0, 10.0, 30.0, 30.0], [60.0, 10.0, 80.0, 30.0]]
 
 
-def test_count_label_lines_reads_json_objects(tmp_path):
+def test_count_label_lines_reads_a_documents_instances(tmp_path):
     from tcip_mcp.pipelines.data.splits import count_label_lines
-    labels = tmp_path / "detect"
-    labels.mkdir()
-    json_io.write_annotations(labels / "a.json", [_box(0, 0, 10, 10), _box(0, 0, 20, 20)], 100, 100)
-    json_io.write_annotations(labels / "neg.json", [], 100, 100, keep_empty=True)
-    assert count_label_lines(labels / "a.json", ClassScope()) == 2
-    assert count_label_lines(labels / "neg.json", ClassScope()) == 0
-    with pytest.raises(FileNotFoundError):
-        count_label_lines(labels / "missing.json", ClassScope())
+
+    images = tmp_path / "images" / UNDATED_BUCKET
+    _make_images(images, ["a", "neg"])
+    _label(images, "a", [_box(0, 0, 10, 10), _box(0, 0, 20, 20)])
+    _label(images, "neg", [], keep_empty=True)
+    assert count_label_lines(json_io.read_label_document(image_label_key(images / "a.jpg")),
+                             ClassScope()) == 2
+    assert count_label_lines(json_io.read_label_document(image_label_key(images / "neg.jpg")),
+                             ClassScope()) == 0
 
 
-# ── the label store's own rails ─────────────────────────────────────────────
+# ── the label documents' own rails ──────────────────────────────────────────
 
 def _rail_fixture(tmp_path):
-    """One annotated image, one empty-unconfirmed, one with no label file, one confirmed negative."""
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    labels.mkdir(parents=True)
+    """One annotated image, one empty-unconfirmed, one with no label document, one confirmed
+    negative."""
+    images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["ann", "empty", "nolabel", "neg"])
-    json_io.write_annotations(labels / "ann.json", [_box(4, 4, 12, 12)], 100, 100, keep_empty=True)
-    json_io.write_annotations(labels / "empty.json", [], 100, 100, keep_empty=True)
-    json_io.write_annotations(labels / "neg.json", [], 100, 100, keep_empty=True)
-    mark_complete(images / "neg.jpg", labels / "neg.json", BUD, project=tmp_path)
-    return images, labels
+    _label(images, "ann", [_box(4, 4, 12, 12)], keep_empty=True)
+    _label(images, "empty", [], keep_empty=True)
+    _label(images, "neg", [], keep_empty=True)
+    mark_complete(images / "neg.jpg", BUD, project=tmp_path)
+    return images
 
 
 def test_only_annotated_and_confirmed_negatives_train(tmp_path):
     """Samples come from the annotated set, never from an image list: a project where the breeder
     labeled 30 of 400 images must not train on the other 370 asserted to be empty."""
-    images, labels = _rail_fixture(tmp_path)
+    images = _rail_fixture(tmp_path)
 
-    admitted = admit_over(images, labels, subject=BUD)
+    admitted = admit_over(images, subject=BUD)
     assert sorted(r.member for r in admitted.records) == ["ann", "neg"]
     assert admitted.tallies["partial"] == 1
     assert admitted.tallies["negative"] == 1
@@ -381,47 +293,38 @@ def test_only_annotated_and_confirmed_negatives_train(tmp_path):
 
 
 def test_a_corrupt_confirmed_negative_refuses_the_admission(tmp_path):
-    """A stored 'negative' whose label document is corrupt must never train as a zero-object
-    negative: the admission raises rather than reading the file as empty."""
-    from tcip_annotation.json_io import UnreadableLabelDocument
+    """A stored 'negative' whose label document is not a document must never train as a
+    zero-object negative: the admission raises rather than reading it as empty."""
+    images = _rail_fixture(tmp_path)
+    ts.replace(image_label_key(images / "neg.jpg"), ["not", "a", "document"])
 
-    images, labels = _rail_fixture(tmp_path)
-    (labels / "neg.json").write_text("not json {][", encoding="utf-8")
-
-    with pytest.raises(UnreadableLabelDocument):
-        admit_over(images, labels, subject=BUD)
+    with pytest.raises(json_io.UnreadableLabelDocument):
+        admit_over(images, subject=BUD)
 
 
 def test_caller_supplied_members_are_filtered_too(tmp_path):
     """A narrowed candidate set goes through the same gate, otherwise a narrowing reintroduces the
     fabrications."""
-    images, labels = _rail_fixture(tmp_path)
-    admitted = admit_over(images, labels, subject=BUD,
-                          members=["ann", "empty", "nolabel", "neg"])
+    images = _rail_fixture(tmp_path)
+    admitted = admit_over(images, subject=BUD, members=["ann", "empty", "nolabel", "neg"])
     assert sorted(r.member for r in admitted.records) == ["ann", "neg"]
 
 
 def test_no_trainable_samples_raises_rather_than_training_on_nothing(tmp_path):
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    labels.mkdir(parents=True)
+    images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["a", "b"])
-    json_io.write_annotations(labels / "a.json", [], 100, 100, keep_empty=True)  # unconfirmed empty
+    _label(images, "a", [], keep_empty=True)  # unconfirmed empty
 
     with pytest.raises(ValueError, match="no trainable samples"):
-        admit_over(images, labels, subject=BUD)
+        admit_over(images, subject=BUD)
 
 
 def test_instance_seg_applies_the_same_rail(tmp_path):
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    labels.mkdir(parents=True)
+    images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["ann", "nolabel"])
-    json_io.write_annotations(labels / "ann.json",
-                              [_poly([(4, 4), (12, 4), (12, 12), (4, 12)])], 100, 100,
-                              keep_empty=True)
+    _label(images, "ann", [_poly([(4, 4), (12, 4), (12, 12), (4, 12)])], keep_empty=True)
 
-    ds = dataset_over("instance_seg", images, labels, subject=BUD)
+    ds = dataset_over("instance_seg", images, subject=BUD)
     assert [ds.sample_of(k).member for k in ds.stems] == ["ann"]
 
 
@@ -429,19 +332,16 @@ def test_instance_seg_admits_a_partially_assessed_stem_on_its_subject_marks(tmp_
     """An image with an instance never assessed for an attribute is admitted on its subject's
     marks alone, every attribute of the registry read into the scope."""
     root = tmp_path / "ds"
-    images_dir, labels_dir = root / "images", root / "annotations"
+    images_dir = root / "images" / UNDATED_BUCKET
     _make_images(images_dir, ["complete", "partial"])
-    labels_dir.mkdir(parents=True)
-    json_io.write_annotations(labels_dir / "complete.json", [
-        _poly([(4, 4), (12, 4), (12, 12), (4, 12)], opening="open"),
-    ], 100, 100)
-    json_io.write_annotations(labels_dir / "partial.json", [
+    _label(images_dir, "complete", [_poly([(4, 4), (12, 4), (12, 12), (4, 12)], opening="open")])
+    _label(images_dir, "partial", [
         _poly([(4, 4), (12, 4), (12, 12), (4, 12)], opening="closed"),
         _poly([(40, 40), (60, 40), (60, 60), (40, 60)]),  # unassessed: no opening value
-    ], 100, 100)
+    ])
     reg = _write_registry_for(root, attribute="opening", values=("open", "closed"))
 
-    admitted = admit_over(images_dir, labels_dir, subject=BUD)
+    admitted = admit_over(images_dir, subject=BUD)
 
     assert [r.member for r in admitted.records] == ["complete", "partial"]
     assert admitted.scope.attributes == reg.subjects[0].attributes
@@ -463,8 +363,8 @@ def test_semantic_seg_requires_a_mask_but_admits_an_all_background_one(tmp_path)
     import numpy as np
     from PIL import Image as _Image
 
-    images, masks = tmp_path / "images", tmp_path / "masks"
-    images.mkdir()
+    images, masks = tmp_path / "images" / UNDATED_BUCKET, tmp_path / "masks"
+    images.mkdir(parents=True)
     masks.mkdir()
     for stem in ("has_mask", "all_background", "no_mask"):
         _Image.new("RGB", (32, 32)).save(images / f"{stem}.jpg")
@@ -478,40 +378,38 @@ def test_semantic_seg_requires_a_mask_but_admits_an_all_background_one(tmp_path)
 def test_sample_counts_distinguish_unannotated_from_unconfirmed_empty(tmp_path):
     """"Annotate this" and "confirm this empty one" are different jobs: the count must say which,
     each tally the state its ground truth reads as, or absent."""
-    images, labels = _rail_fixture(tmp_path)
-    admitted = admit_over(images, labels, subject=BUD)
+    images = _rail_fixture(tmp_path)
+    admitted = admit_over(images, subject=BUD)
     assert admitted.tallies == {"partial": 1, "negative": 1, "absent": 1, "unannotated": 1}
 
 
 def test_a_confirmation_does_not_leak_across_subjects(tmp_path):
     """A Complete is a statement about one trait. Re-applying it elsewhere trains an image full of
     bushes as containing no bushes."""
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    labels.mkdir(parents=True)
+    images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["ann", "shared"])
-    # Every subject's annotation records share one per-image file; subject is a field in the record.
-    json_io.write_annotations(labels / "ann.json",
-                              [_box(4, 4, 12, 12, subject="bud"),
-                               _box(4, 4, 12, 12, subject="bush")], 100, 100, keep_empty=True)
-    json_io.write_annotations(labels / "shared.json", [], 100, 100, keep_empty=True)
+    # Every subject's annotation records share one per-image document; subject is a field in it.
+    _label(images, "ann", [_box(4, 4, 12, 12, subject="bud"), _box(4, 4, 12, 12, subject="bush")],
+           keep_empty=True)
+    _label(images, "shared", [], keep_empty=True)
     # Confirmed negative for bud only; the breeder never judged it for bush.
-    mark_complete(images / "shared.jpg", labels / "shared.json", "bud", project=tmp_path)
+    mark_complete(images / "shared.jpg", "bud", project=tmp_path)
 
-    assert sorted(r.member for r in admit_over(images, labels, subject="bud").records) == [
+    assert sorted(r.member for r in admit_over(images, subject="bud").records) == [
         "ann", "shared"]
-    assert [r.member for r in admit_over(images, labels, subject="bush").records] == ["ann"]
+    assert [r.member for r in admit_over(images, subject="bush").records] == ["ann"]
 
 
 def test_a_negative_mark_dies_with_an_edit_of_its_subject(tmp_path):
     """A mark names its subject's annotations when it was made: once a bud is drawn on a marked
     negative, the mark no longer holds and the image trains as annotated, never as a negative."""
-    images, labels = _rail_fixture(tmp_path)
-    marks = json_io.read_label_document(labels / "neg.json").marks
-    json_io.write_annotations(labels / "neg.json", [_box(4, 4, 12, 12)], 100, 100, marks=marks)
+    images = _rail_fixture(tmp_path)
+    neg = image_label_key(images / "neg.jpg")
+    marks = json_io.read_label_document(neg).marks
+    json_io.write_label_document(neg, [_box(4, 4, 12, 12)], 100, 100, marks=marks)
 
-    assert json_io.read_label_document(labels / "neg.json").marks == {}
-    tallies = admit_over(images, labels, subject=BUD).tallies
+    assert json_io.read_label_document(neg).marks == {}
+    tallies = admit_over(images, subject=BUD).tallies
     assert (tallies["partial"], tallies.get("negative", 0)) == (2, 0)
 
 
@@ -522,28 +420,29 @@ def test_json_det_targets_marks_an_unassessed_row_and_refuses_an_undeclared_valu
     from tcip_mcp.pipelines.data.label_queries import json_det_targets, registry_scope
 
     root = tmp_path / "ds"
-    labels = root / "annotations"
-    labels.mkdir(parents=True)
+    images = root / "images" / UNDATED_BUCKET
+    _make_images(images, ["IMG_A", "IMG_B"])
     _write_registry_for(root, attribute="opening", values=("open", "closed"))
-    path = labels / "IMG_A.json"
-    json_io.write_annotations(path, [
+    _label(images, "IMG_A", [
         Annotation(subject="bud", geometry=BBox(10, 10, 30, 30),
-                  attributes={"opening": "closed"}),
+                   attributes={"opening": "closed"}),
         Annotation(subject="bud", geometry=BBox(40, 40, 60, 60), attributes={}),  # unassessed
-    ], 100, 100)
+    ])
 
-    scope = registry_scope(labels, BUD)
-    target = json_det_targets(str(path), scope)
+    scope = registry_scope(images, BUD)
+    target = json_det_targets(
+        json_io.read_label_document(image_label_key(images / "IMG_A.jpg")).annotations, scope)
     assert len(target["boxes"]) == 2 and target["labels"] == [1, 1]
     assert target["attributes"].tolist() == [[1], [json_io.UNASSESSED]]
 
-    undeclared = labels / "IMG_B.json"
-    json_io.write_annotations(undeclared, [
+    _label(images, "IMG_B", [
         Annotation(subject="bud", geometry=BBox(10, 10, 30, 30),
-                  attributes={"opening": "not-a-real-value"}),
-    ], 100, 100)
+                   attributes={"opening": "not-a-real-value"}),
+    ])
     with pytest.raises(json_io.UndeclaredValue):
-        json_det_targets(str(undeclared), scope)
+        json_det_targets(
+            json_io.read_label_document(image_label_key(images / "IMG_B.jpg")).annotations,
+            scope)
 
 
 def test_detection_and_its_tiles_keep_a_partially_assessed_stem(tmp_path):
@@ -551,24 +450,21 @@ def test_detection_and_its_tiles_keep_a_partially_assessed_stem(tmp_path):
     its unassessed row carried in step with its box through every row filter, so no real object
     trains as background."""
     root = tmp_path / "ds"
-    images_dir, labels_dir = root / "images", root / "annotations"
+    images_dir = root / "images" / UNDATED_BUCKET
     _make_images(images_dir, ["complete", "partial"])
-    labels_dir.mkdir(parents=True)
     _write_registry_for(root, attribute="opening", values=("open", "closed"))
-    json_io.write_annotations(labels_dir / "complete.json", [
-        _box(10, 10, 30, 30, opening="open"),
-    ], 100, 100)
-    json_io.write_annotations(labels_dir / "partial.json", [
+    _label(images_dir, "complete", [_box(10, 10, 30, 30, opening="open")])
+    _label(images_dir, "partial", [
         _box(10, 10, 30, 30, opening="closed"),
         _box(40, 40, 60, 60),  # unassessed: no opening value at all
-    ], 100, 100)
+    ])
 
-    ds = dataset_over("detection", images_dir, labels_dir, subject=BUD)
+    ds = dataset_over("detection", images_dir, subject=BUD)
     _image, target = ds[ds.stems.index(next(k for k in ds.stems
                                             if ds.sample_of(k).member == "partial"))]
     assert target["attributes"].tolist() == [[1], [json_io.UNASSESSED]]
 
-    tiled = dataset_over("detection", images_dir, labels_dir, subject=BUD,
+    tiled = dataset_over("detection", images_dir, subject=BUD,
                          tiling={"enabled": True, "tile_size": 64, "overlap": 0.0,
                                  "sliver_frac": 0.5})  # stated: one box derives no spread
     assert {tiled.sample_of(k).member for k in tiled.stems} == {"complete", "partial"}

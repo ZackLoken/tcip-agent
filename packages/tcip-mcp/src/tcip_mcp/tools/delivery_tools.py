@@ -15,6 +15,7 @@ def deliver_per_plant_csv(
     delivered_phenotype: str,
     delivery_kind: str,
     plants: list[str],
+    dataset_root: str,
     buckets: list[str],
     crop: str = "",
     pipeline_version: str = "",
@@ -43,8 +44,9 @@ def deliver_per_plant_csv(
         delivery_kind: ``per_plant_count_aggregate``, ``per_plant_ordinal_aggregate`` or
             ``per_plant_regression_aggregate``.
         plants: The delivery's population.
-        buckets: The published buckets the values came from, one per capture date; each stands
-            for the date its own record states.
+        dataset_root: The dataset root the buckets are published under.
+        buckets: The names of the published buckets the values came from, one per capture date;
+            each stands for the date its own record states.
         crop / pipeline_version: Written into every row.
         plant_mapping: The persisted plant mapping the rows' plant ids came from, or empty.
         scale_assessment_id: The physical-scale assessment a dimensional value rests on.
@@ -57,7 +59,7 @@ def deliver_per_plant_csv(
     from tcip_mcp.traits import TraitUnknownError
 
     try:
-        delivered = [read_bucket(Path(project, b)) for b in buckets]
+        delivered = [read_bucket(dataset_root, b) for b in buckets]
         wanted = population(plants)
         disclosure = (mapping.plant_mapping_disclosure(
             project, plant_mapping, by_recorded_date(delivered), wanted)

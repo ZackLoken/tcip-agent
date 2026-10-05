@@ -1,17 +1,5 @@
-r"""Path confinement for client-supplied paths.
-
-:func:`assert_path_allowed` resolves a client-supplied path and returns it. The allow-set is always
-non-empty: the backend's workspace root, every workspace project's registered dataset roots, and
-the additive image roots the backend was started with. Containment is decided by filesystem identity (the same device and file
-as an allowed root, walking the candidate's resolved ancestors), never by comparing spellings, so a
-case variant, a substituted or mapped drive, a junction, or an extended ``\\\\?\\`` prefix neither
-admits an outside path nor refuses an inside one. Any error while resolving or comparing refuses.
-
-Two directory names are excluded regardless of containment, by name: ``.imports`` (the import
-door's private staging tree) and ``.removed`` (the workspace's holding directory a removed project
-moves into); a registered dataset or a ``TCIP_IMAGE_ROOTS`` entry under a directory of either name
-is refused too.
-"""
+"""Path confinement for client-supplied paths: :func:`assert_path_allowed` and the route forms
+built on it."""
 
 from __future__ import annotations
 
@@ -163,10 +151,10 @@ def allowed_path(path: str | Path) -> Path:
         raise HTTPException(403, str(exc)) from exc
 
 
-def allowed_image_dimensions(path: str) -> tuple[int, int]:
-    """The dimensions of the image ``path`` names behind :func:`allowed_path`
-    (:func:`~tcip_mcp.pipelines.image_utils.image_path_dimensions`): no file there answers 404,
-    an ambiguous stem 400."""
+def allowed_image(path: str) -> tuple[Path, int, int]:
+    """The image ``path`` names admitted by :func:`allowed_path`: its resolved path and its
+    dimensions (:func:`~tcip_mcp.pipelines.image_utils.image_path_dimensions`). No file there
+    answers 404, an ambiguous stem 400."""
     from fastapi import HTTPException
 
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, image_path_dimensions
@@ -175,7 +163,7 @@ def allowed_image_dimensions(path: str) -> tuple[int, int]:
     if not p.is_file():
         raise HTTPException(404, f"image not found: {path}")
     try:
-        return image_path_dimensions(p)
+        return p, *image_path_dimensions(p)
     except AmbiguousImageStem as exc:
         raise HTTPException(400, str(exc)) from exc
 

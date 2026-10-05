@@ -2,27 +2,28 @@
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 import numpy as np
-from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._producer_fixtures import dataset_over, label_image  # noqa: E402
 
 
 def _multiband_detection_fixture(tmp_path, width=40, height=24, bands=5, patch=(28, 12)):
-    """A non-square multi-band GeoTIFF with a bright patch, and a GT box on that patch."""
+    """A non-square multi-band GeoTIFF with a bright patch, and a GT box on that patch; its
+    images directory."""
     import tifffile
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     arr = np.zeros((height, width, bands), dtype=np.uint8)
     px, py = patch
     arr[py:py + 6, px:px + 6, :] = 255
     tifffile.imwrite(images_dir / "a.tif", arr)
-    json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="bud", geometry=BBox(px, py, px + 6, py + 6))],
-                              width, height, keep_empty=True)
-    return images_dir, labels_dir
+    label_image(images_dir / "a.tif",
+                [Annotation(subject="bud", geometry=BBox(px, py, px + 6, py + 6))],
+                width, height, keep_empty=True)
+    return images_dir
 
 
 def test_tiled_detection_reads_multiband_and_keeps_boxes_on_their_pixels(tmp_path):
@@ -34,8 +35,8 @@ def test_tiled_detection_reads_multiband_and_keeps_boxes_on_their_pixels(tmp_pat
     import torch
 
 
-    images_dir, labels_dir = _multiband_detection_fixture(tmp_path)
-    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
+    images_dir = _multiband_detection_fixture(tmp_path)
+    ds = dataset_over("detection", str(images_dir), subject="bud",
                       stated={"num_channels": 5},
                       tiling={"enabled": True, "tile_size": 16, "overlap": 0.0, "sliver_frac": 0.5})
     assert ds.expected_channels == 5
@@ -63,53 +64,51 @@ def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(tmp_path):
     """
     import pytest
     import tifffile
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_annotation.utils import get_image_dimensions
 
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     arr = np.zeros((24, 40, 5), dtype=np.uint8)
     arr[12:18, 28:34, :] = 255
     tifffile.imwrite(images_dir / "a.tif", arr)
 
     pil_w, pil_h = get_image_dimensions(str(images_dir / "a.tif"))
     assert (pil_w, pil_h) == (5, 40), "fixture assumes PIL misreads this multi-band raster"
-    json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="bud", geometry=BBox(1, 12, 4, 18))], pil_w, pil_h,
-                              keep_empty=True)
+    label_image(images_dir / "a.tif", [Annotation(subject="bud", geometry=BBox(1, 12, 4, 18))],
+                pil_w, pil_h, keep_empty=True)
 
     with pytest.raises(ValueError, match="the labels record a 5x40 image but it decodes as 40x24"):
-        dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
+        dataset_over("detection", str(images_dir), subject="bud",
                      stated={"num_channels": 5},
                      tiling={"enabled": True, "tile_size": 16, "overlap": 0.0, "sliver_frac": 0.5})
 
 
 def test_the_authored_frame_raises_on_a_corrupt_label_rather_than_reading_as_no_frame(tmp_path):
-    """The tiled dataset's frame-mismatch check reads the label's authored frame through the one
-    label reader (splits.label_document_extent), so a present, unreadable label raises rather
-    than silently disabling the check for that sample."""
+    """The tiled dataset reads each label's authored frame off its stored document, so a present,
+    unreadable label raises rather than silently disabling the frame check for that sample."""
     import pytest
     from tcip_annotation.json_io import UnreadableLabelDocument
 
-    from tcip_mcp.pipelines.data.splits import label_document_extent
+    from tests._producer_fixtures import image_label_key
+    from tests._record_damage_fixtures import damage_record
 
-    labels_dir = tmp_path / "labels"
-    labels_dir.mkdir()
-    (labels_dir / "a.json").write_bytes(b"{not json")
+    images_dir = _multiband_detection_fixture(tmp_path)
+    damage_record(image_label_key(images_dir / "a.tif"), b"{not json")
 
     with pytest.raises(UnreadableLabelDocument):
-        label_document_extent(labels_dir / "a.json")
+        dataset_over("detection", str(images_dir), subject="bud",
+                     stated={"num_channels": 5},
+                     tiling={"enabled": True, "tile_size": 16, "overlap": 0.0, "sliver_frac": 0.5})
 
 
 def test_ctx_tiled_dataset_inherits_the_band_count(tmp_path):
     """ctx.tiled_dataset constructs the tiler directly: it must not fall back to 3 channels."""
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
-    images_dir, labels_dir = _multiband_detection_fixture(tmp_path)
-    base = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
+    images_dir = _multiband_detection_fixture(tmp_path)
+    base = dataset_over("detection", str(images_dir), subject="bud",
                         stated={"num_channels": 5})
     assert TiledDetectionDataset(base, tile_size=16, sliver_frac=0.5).expected_channels == 5
 
@@ -117,21 +116,18 @@ def test_ctx_tiled_dataset_inherits_the_band_count(tmp_path):
 def test_tiled_detection_handles_channel_first_rasters(tmp_path):
     """The other common GeoTIFF layout, where the axis-order heuristic is observable."""
     import tifffile
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     arr = np.zeros((24, 40, 5), dtype=np.uint8)
     arr[12:18, 28:34, :] = 255
     tifffile.imwrite(images_dir / "a.tif", np.transpose(arr, (2, 0, 1)))  # [C, H, W]
-    json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="bud", geometry=BBox(28, 12, 34, 18))], 40, 24,
-                              keep_empty=True)
+    label_image(images_dir / "a.tif", [Annotation(subject="bud", geometry=BBox(28, 12, 34, 18))],
+                40, 24, keep_empty=True)
 
-    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
+    ds = dataset_over("detection", str(images_dir), subject="bud",
                       stated={"num_channels": 5},
                       tiling={"enabled": True, "tile_size": 16, "overlap": 0.0, "sliver_frac": 0.5})
     with_boxes =[(t, tgt) for t, tgt in (ds[i] for i in range(len(ds))) if len(tgt["boxes"])]

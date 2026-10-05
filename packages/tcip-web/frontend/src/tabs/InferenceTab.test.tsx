@@ -28,9 +28,9 @@ function job(overrides: Partial<InferenceJob> & { job_id: string }): InferenceJo
     done: 1,
     total: 9,
     images_dir: "C:/data/images/2026-01-01",
-    output_dir: "C:/data/predictions/baseline/2026-01-01",
+    dataset_root: "C:/data",
+    bucket: "baseline/2026-01-01",
     error: null,
-    audit_warning: null,
     ...overrides,
   };
 }
@@ -51,7 +51,7 @@ function mockTree(dates: string[]) {
     dates_with_images: dates,
     subjects: ["subject_a"],
     subjects_by_date: {},
-    prediction_dirs: {},
+    buckets_by_date: {},
     label_problem: null,
   });
 }
@@ -60,12 +60,12 @@ function selectBaseline() {
   fireEvent.change(screen.getByRole("combobox"), {
     target: { value: "C:/proj/.tcip/models/baseline/best.pt" },
   });
-  fireEvent.change(screen.getByLabelText("Bucket directory"), {
-    target: { value: "C:/data/predictions/baseline" },
+  fireEvent.change(screen.getByLabelText("Bucket name"), {
+    target: { value: "baseline" },
   });
 }
 
-// The refusal's path renders in its own <span>, so the sentence's default per-node text (which
+// The refusal's bucket renders in its own <span>, so the sentence's default per-node text (which
 // excludes nested elements) never carries it whole; match on a <p>'s full textContent instead.
 function paragraphMatching(pattern: RegExp) {
   return (_content: string, element: Element | null) =>
@@ -76,10 +76,9 @@ function existsRefusal(overrides: Partial<BucketExistsRefusal> = {}): Structured
   const detail: BucketExistsRefusal = {
     kind: "bucket_exists",
     message:
-      "C:/data/predictions/baseline/2026-01-01 already exists: a bucket is published once, and " +
-      "a new run names a new bucket.",
+      "bucket 'baseline/2026-01-01' under C:/data is the bucket job inf-live is still writing.",
     date: "2026-01-01",
-    requested_output_dir: "C:/data/predictions/baseline/2026-01-01",
+    requested_bucket: "baseline/2026-01-01",
     job_id: "inf-live",
     ...overrides,
   };
@@ -90,12 +89,13 @@ function existsRefusal(overrides: Partial<BucketExistsRefusal> = {}): Structured
   );
 }
 
-function launched(date: string, outputDir: string) {
+function launched(date: string, bucket: string) {
   return {
     status: "launched",
     job_id: `inf-${date}`,
     images_dir: `C:/data/images/${date}`,
-    output_dir: outputDir,
+    dataset_root: "C:/data",
+    bucket,
   };
 }
 
@@ -111,14 +111,14 @@ afterEach(() => {
 });
 
 describe("InferenceTab date selection", () => {
-  it("launches one job per selected date, each into its own child of the named bucket directory", async () => {
+  it("launches one job per selected date, each its own bucket under the named one", async () => {
     mockTree(["2026-01-01", "2026-01-08"]);
     vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({
       models: [{ name: "baseline", checkpoint_path: "C:/proj/.tcip/models/baseline/best.pt" }],
     });
     const launchSpy = vi
       .spyOn(inferenceApi, "launch")
-      .mockImplementation((body) => Promise.resolve(launched(body.date, body.output_dir)));
+      .mockImplementation((body) => Promise.resolve(launched(body.date, body.bucket)));
     useStore.setState({ user: "jordan" });
 
     render(<InferenceTab />);
@@ -135,7 +135,7 @@ describe("InferenceTab date selection", () => {
         checkpoint_path: "C:/proj/.tcip/models/baseline/best.pt",
         dataset_root: "C:/data",
         date: "2026-01-01",
-        output_dir: "C:/data/predictions/baseline/2026-01-01",
+        bucket: "baseline/2026-01-01",
         stated: {},
         assessment_id: null,
         user: "jordan",
@@ -144,7 +144,7 @@ describe("InferenceTab date selection", () => {
         checkpoint_path: "C:/proj/.tcip/models/baseline/best.pt",
         dataset_root: "C:/data",
         date: "2026-01-08",
-        output_dir: "C:/data/predictions/baseline/2026-01-08",
+        bucket: "baseline/2026-01-08",
         stated: {},
         assessment_id: null,
         user: "jordan",
@@ -231,27 +231,6 @@ describe("InferenceTab job table", () => {
     expect(await screen.findByText(/Status: running · 4 \/ 9/)).toBeInTheDocument();
   });
 
-  it("carries a final frame's audit_warning into the watched job panel", async () => {
-    vi.mocked(inferenceApi.listJobs).mockResolvedValue({ jobs: [job({ job_id: "inf-live" })] });
-
-    render(<InferenceTab />);
-    fireEvent.click(await screen.findByRole("button", { name: "Watch" }));
-    await waitFor(() => expect(vi.mocked(openInferenceStream)).toHaveBeenCalled());
-
-    const onFrame = vi.mocked(openInferenceStream).mock.calls[0][1];
-    act(() =>
-      onFrame({
-        type: "final",
-        status: "completed",
-        error: null,
-        audit_warning:
-          "prediction_bucket_published completed and its audit entry could not be written",
-      }),
-    );
-
-    expect(await screen.findByText(/its audit entry could not be written/)).toBeInTheDocument();
-  });
-
   it("carries a final frame's error into the watched job panel", async () => {
     vi.mocked(inferenceApi.listJobs).mockResolvedValue({ jobs: [job({ job_id: "inf-live" })] });
 
@@ -310,14 +289,14 @@ describe("InferenceTab bucket refusals", () => {
     fireEvent.click(screen.getByRole("button", { name: /launch inference/i }));
   }
 
-  it("renders the job still writing the bucket and its path, with no toast", async () => {
+  it("renders the job still writing the bucket and its name, with no toast", async () => {
     vi.spyOn(inferenceApi, "launch").mockRejectedValue(existsRefusal());
     await launchOneRefused();
 
     expect(
       await screen.findByText(
         paragraphMatching(
-          /2026-01-01: job inf-live is still writing the bucket at C:\/data\/predictions\/baseline\/2026-01-01\./,
+          /2026-01-01: job inf-live is still writing the bucket baseline\/2026-01-01\./,
         ),
       ),
     ).toBeInTheDocument();
@@ -337,7 +316,7 @@ describe("InferenceTab bucket refusals", () => {
     expect(await screen.findByText(/Status: running/)).toBeInTheDocument();
   });
 
-  it("seeds the watched stub's output_dir from the refusal when the poll hasn't listed the job yet", async () => {
+  it("seeds the watched stub's bucket from the refusal when the poll hasn't listed the job yet", async () => {
     vi.spyOn(inferenceApi, "launch").mockRejectedValue(existsRefusal({ job_id: "inf-live" }));
     await launchOneRefused();
 
@@ -345,15 +324,15 @@ describe("InferenceTab bucket refusals", () => {
       await screen.findByRole("button", { name: "Watch job inf-live for 2026-01-01" }),
     );
 
-    // Once in the refused entry, once as the watched job's output.
-    expect(await screen.findAllByText("C:/data/predictions/baseline/2026-01-01")).toHaveLength(2);
+    // Once in the refused entry, once as the watched job's bucket.
+    expect(await screen.findAllByText("baseline/2026-01-01")).toHaveLength(2);
   });
 
   it("keeps one refused entry and one job row when one of two dates launches and the other refuses", async () => {
     mockTree(["2026-01-01", "2026-01-08"]);
     vi.spyOn(inferenceApi, "launch").mockImplementation((body) =>
       body.date === "2026-01-01"
-        ? Promise.resolve(launched(body.date, body.output_dir))
+        ? Promise.resolve(launched(body.date, body.bucket))
         : Promise.reject(existsRefusal({ date: body.date })),
     );
 

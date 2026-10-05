@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-from tcip_annotation import (
-    Annotation,
-    BBox,
-    read_annotations,
-    write_annotations,
-)
+from tcip_annotation import Annotation, BBox
+from tcip_annotation.json_io import label_document, read_label_document, write_label_document
 from tcip_annotation.matching import iou_matrix, pair_proposals
 
 
@@ -19,32 +14,30 @@ def test_bbox_creation():
     assert (b.x1, b.y1, b.x2, b.y2) == (10, 20, 50, 60)
 
 
-def test_read_annotations(tmp_path: Path):
-    # Canonical on-disk label is the name-based per-image JSON: bbox is pixel xywh, subject by name.
-    label_path = tmp_path / "img_001.json"
-    label_path.write_text(
-        json.dumps({
-            "image": "img_001", "width": 640, "height": 480,
-            "annotations": [
-                {"subject": "bud", "bbox": [100, 100, 50, 50]},
-                {"subject": "bud", "bbox": [200, 200, 40, 40]},
-            ],
-        })
-    )
-    anns = read_annotations(str(label_path))
+def test_label_document_reads_the_name_based_record():
+    # A label document is the name-based per-image record: bbox is pixel xywh, subject by name.
+    anns = label_document({
+        "image": "img_001", "width": 640, "height": 480,
+        "annotations": [
+            {"subject": "bud", "bbox": [100, 100, 50, 50]},
+            {"subject": "bud", "bbox": [200, 200, 40, 40]},
+        ],
+    }).annotations
     assert len(anns) == 2
     assert all(isinstance(a.geometry, BBox) for a in anns)
     assert {a.subject for a in anns} == {"bud"}
 
 
 def test_write_and_read_roundtrip(tmp_path: Path):
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
+
     anns = [
         Annotation(subject="bud", geometry=BBox(x1=100, y1=100, x2=200, y2=200)),
         Annotation(subject="leaf", geometry=BBox(x1=300, y1=300, x2=350, y2=350)),
     ]
-    path = tmp_path / "test.json"
-    write_annotations(str(path), anns, 640, 480)
-    read_back = read_annotations(str(path))
+    key = label_key(tmp_path, UNDATED_BUCKET, "test")
+    write_label_document(key, anns, 640, 480)
+    read_back = read_label_document(key).annotations
     assert len(read_back) == 2
     assert {a.subject for a in read_back} == {"bud", "leaf"}
     # Check approximate roundtrip (floating point tolerance)
@@ -73,8 +66,7 @@ def test_score_predictions_single_image(data_dir: Path):
     from tcip_mcp.tools.annotation_tools import score_predictions
 
     img = data_dir / "images" / "2-11-26" / "img_001.jpg"
-    result = score_predictions(str(img), str(data_dir / "predictions" / "live" / "2-11-26"),
-                               iou_threshold=0.5, conf_threshold=0.25)
+    result = score_predictions(str(img), "live/2-11-26", iou_threshold=0.5, conf_threshold=0.25)
     assert "tp" in result
     assert "fp" in result
     assert "fn" in result

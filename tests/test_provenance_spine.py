@@ -73,22 +73,19 @@ def test_a_payloads_own_experiment_id_names_no_producer(tmp_path):
 # ── draw_splits records each sample's digest and the seed ─────────────────────
 
 def test_draw_splits_selection_embeds_digests_and_seed(data_dir, tmp_path):
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.data_tools import draw_splits
+    from tests._producer_fixtures import label_image
 
     # A selection needs at least four foreground groups to clear the floor; the fixture's own
     # three (img_001..003) need one more, added here rather than in the shared fixture.
     from PIL import Image
 
     images_dir = data_dir / "images" / "2-11-26"
-    labels_dir = data_dir / "annotations" / "2-11-26"
     Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / "img_004.jpg")
-    json_io.write_annotations(
-        labels_dir / "img_004.json",
-        [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))], 640, 480,
-    )
+    label_image(images_dir / "img_004.jpg",
+                [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))], 640, 480)
 
     out = tmp_path / "splits"
     result = draw_splits(tmp_path, str(data_dir), output_path=str(out), seed=7, subject="bud",
@@ -119,17 +116,17 @@ def test_a_delivery_event_names_its_producer_and_write_time_and_its_rows_repeat_
 
     fx.seed_delivery_traits(tmp_path)
     fx.seed_confirmed_count(tmp_path)
-    bucket = published(tmp_path, tmp_path / "ds" / "predictions" / "m" / "2026-01-01",
-                       [predicted("a", [fx.COUNT_SUBJECT] * 3)],
-                       scope={"subject": fx.COUNT_SUBJECT}).path
+    image = tmp_path / "ds" / "images" / "2026-01-01" / "a.png"
+    bucket = published(tmp_path, "m/2026-01-01", [predicted(image, [fx.COUNT_SUBJECT] * 3)],
+                       scope={"subject": fx.COUNT_SUBJECT})
     out = tmp_path / "counts.csv"
 
     acknowledged(tmp_path, lambda ack: deliver_per_image_counts_csv(
-        tmp_path, bucket, str(out), trait=fx.COUNT_TRAIT, acknowledgment_id=ack,
-        door="test_provenance", actor=None))
+        tmp_path, bucket.root, bucket.name, str(out), trait=fx.COUNT_TRAIT,
+        acknowledgment_id=ack, door="test_provenance", actor=None))
 
     (event,) = read_delivery_events(tmp_path)
-    assert event.producer.model_dump() == read_bucket(bucket).producer
+    assert event.producer.model_dump() == read_bucket(bucket.root, bucket.name).producer
     datetime.fromisoformat(event.produced_at)
     (row,) = list(csv.DictReader(out.open(newline="", encoding="utf-8")))
     assert set(DELIVERY_COLUMNS) <= set(row)

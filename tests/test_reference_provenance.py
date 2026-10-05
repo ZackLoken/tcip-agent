@@ -22,15 +22,17 @@ IMG = 32
 PRODUCER = "model:m_best@c9f632ba98b2"  # the shape a publication stamps on every prediction
 
 
-def _documents(root: Path, stems, annotations) -> list[Path]:
-    """One label document per stem holding ``annotations(stem)``."""
-    root.mkdir(parents=True, exist_ok=True)
-    paths = []
+def _documents(root: Path, stems, annotations) -> list[Annotation]:
+    """One label document per stem holding ``annotations(stem)``; every annotation they hold,
+    read back."""
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
+
+    held = []
     for s in stems:
-        path = root / f"{s}.json"
-        json_io.write_annotations(str(path), annotations(s), IMG, IMG, keep_empty=True)
-        paths.append(path)
-    return paths
+        key = label_key(root, UNDATED_BUCKET, s)
+        json_io.write_label_document(key, annotations(s), IMG, IMG, keep_empty=True)
+        held += json_io.read_label_document(key).annotations
+    return held
 
 
 def _prediction(box=(2, 2, 10, 10)):
@@ -111,12 +113,12 @@ def test_the_assessment_refuses_a_reference_of_the_models_own_predictions(tmp_pa
     )
 
     root = tmp_path / "ds"
-    _images, labels_dir = synthetic_capture(root)
+    synthetic_capture(root)
     selection = draw_reference_selection(tmp_path, root, tmp_path / "selection")
     checkpoint = train_on(tmp_path / "selection", tmp_path, "exp-self-reference")
     confirm_count_trait(tmp_path)
     held = selection.on("holdout")[0]
-    json_io.write_annotations(held.ground_truth, [_prediction()], 64, 64)
+    json_io.write_label_document(held.ground_truth, [_prediction()], 64, 64)
 
     record = assess(tmp_path, checkpoint, tmp_path / "selection")
 

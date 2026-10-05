@@ -38,20 +38,25 @@ TWO_HEADS = {"builder": "tests.bespoke_models:build_bespoke_detection",
              "builder_kwargs": {"min_size": 64, "max_size": 64}, "task": "detection"}
 
 
-def _documents(bucket: str | Path) -> dict[str, list[dict]]:
-    """Every prediction document of ``bucket`` by file name, its annotations as written."""
-    return {p.name: json.loads(p.read_text(encoding="utf-8"))["annotations"]
-            for p in sorted(Path(bucket).glob("*.json")) if p.name != "bucket.json"}
+def _documents(root: Path, bucket: str) -> dict[str, list[dict]]:
+    """Every prediction document of the bucket named ``bucket`` under ``root`` by stem, its
+    annotations as written."""
+    import tcip_store
+
+    from tcip_mcp.buckets import read_bucket
+
+    return {key.parts[-1]: tcip_store.read(key)["annotations"]
+            for key in read_bucket(root, bucket).document_keys}
 
 
-def _frames(where: Path, values: dict[str, str]) -> tuple[str, str]:
+def _frames(where: Path, values: dict[str, str]) -> str:
     """Two :func:`~tests._verified_checkpoint_fixtures.detection_images` frames of
-    :data:`SUBJECT` under :data:`REGISTRY`, each object carrying ``values``; the images and
-    labels directories."""
+    :data:`SUBJECT` under :data:`REGISTRY`, each object carrying ``values``; the images
+    directory."""
     from tests._verified_checkpoint_fixtures import detection_images
 
-    made = detection_images(where, {"subject": SUBJECT}, values=values, registry=REGISTRY)
-    return made["images_dir"], made["labels_dir"]
+    return detection_images(where, {"subject": SUBJECT}, values=values,
+                            registry=REGISTRY)["images_dir"]
 
 
 # --- two attributes, end to end ------------------------------------------
@@ -75,8 +80,8 @@ def test_two_attributes_train_two_heads_publish_both_values_and_deliver(tmp_path
     selection = read_selection(tmp_path / "selection", project=tmp_path)
     assert selection.scope.attributes == (OPENING, COLOR)
     boxes = [a for bucket in series.buckets.values()
-             for written in _documents(bucket).values() for a in written]
-    assert boxes, {b: _documents(b) for b in series.buckets.values()}
+             for written in _documents(series.root, bucket).values() for a in written]
+    assert boxes, {b: _documents(series.root, b) for b in series.buckets.values()}
     for a in boxes:
         assert set(a["attributes"]) == {ATTRIBUTE, COLOR.name}, a
         assert a["attributes"][ATTRIBUTE] in VALUES and a["attributes"]["color"] in COLOR.values
@@ -90,6 +95,7 @@ def test_two_attributes_train_two_heads_publish_both_values_and_deliver(tmp_path
 
     measurement = measure_phenology(tmp_path, trait=series.trait,
                                     mapping_name=series.mapping_name,
+                                    dataset_root=str(series.root),
                                     buckets=list(series.buckets.values()), plants=list(PLANTS),
                                     require_all_dates_complete=True)
     out = tmp_path / "out" / "milestones.csv"
@@ -106,8 +112,10 @@ def test_a_selection_and_the_bucket_a_run_over_it_publishes_carry_one_scope_reco
     """The draw writes the scope its samples were admitted under; the run over the selection
     records it, and the bucket the run's checkpoint publishes states it. Both written records,
     compared to each other."""
+    import tcip_store
+
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.experiments import read_record
+    from tcip_mcp.dataset_layout import bucket_key
     from tcip_mcp.pipelines.data.selection import read_selection
 
     series = attributed_series(tmp_path, fractions=(0.0, 1.0), assessed=False,
@@ -115,9 +123,9 @@ def test_a_selection_and_the_bucket_a_run_over_it_publishes_carry_one_scope_reco
 
     drawn = read_selection(tmp_path / "selection", project=tmp_path).scope
     for bucket in series.buckets.values():
-        published = read_bucket(bucket).scope
+        published = read_bucket(series.root, bucket).scope
         assert published == drawn
-        assert read_record(Path(bucket) / "bucket.json")["scope"] == json.loads(
+        assert tcip_store.read(bucket_key(series.root, bucket))["scope"] == json.loads(
             json.dumps(asdict(drawn)))
 
 
@@ -135,8 +143,8 @@ def test_a_scope_with_no_attribute_builds_the_plain_detector_and_writes_no_attri
     from tcip_mcp.tools.inference_tools import run_inference
     from tests._verified_checkpoint_fixtures import predicted_over, registered_checkpoint
 
-    images_dir = tmp_path / "frames"
-    images_dir.mkdir()
+    images_dir = tmp_path / "images" / "frames"
+    images_dir.mkdir(parents=True)
     for i in range(2):
         Image.new("RGB", (64, 64), (40 + 60 * i, 90, 60)).save(images_dir / f"f{i}.png")
     checkpoint = registered_checkpoint(tmp_path)
@@ -145,11 +153,11 @@ def test_a_scope_with_no_attribute_builds_the_plain_detector_and_writes_no_attri
     assert type(p.predictor.model.detector) is FasterRCNN
     assert results and all("attributes" not in r for r in results), results
 
-    out = tmp_path / "bucket"
-    published = run_inference(tmp_path, checkpoint, str(images_dir), output_dir=str(out),
+    published = run_inference(tmp_path, checkpoint, str(images_dir), bucket="plain",
                               stated=Stated(tile=False, conf=0.0))
     assert "error" not in published, published
-    for written in _documents(out).values():
+    assert len(_documents(tmp_path, "plain")) == 2
+    for written in _documents(tmp_path, "plain").values():
         assert all(not a.get("attributes") for a in written), written
 
 
@@ -165,9 +173,9 @@ def test_a_document_scope_whose_attributes_were_never_read_sizes_no_model(tmp_pa
     with pytest.raises(ValueError, match="records no attributes"):
         recorded_model_dims(unread)
 
-    _images_dir, labels_dir = _frames(tmp_path / "ds", {"color": "red"})
+    images_dir = _frames(tmp_path / "ds", {"color": "red"})
     read = {"model_source": dict(BUILT_DETECTOR),
-            "data": {"num_channels": 3, "scope": asdict(registry_scope(labels_dir, SUBJECT))}}
+            "data": {"num_channels": 3, "scope": asdict(registry_scope(images_dir, SUBJECT))}}
     assert recorded_model_dims(read)["attributes"] == (COLOR, GRADE)
 
 
@@ -183,9 +191,8 @@ def test_an_instance_unassessed_for_one_attribute_trains_that_head_on_nothing_an
     from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tests._producer_fixtures import run_over
 
-    images_dir, labels_dir = _frames(tmp_path / "ds", {"grade": "high"})
-    loader, data = run_over("detection", images_dir, labels_dir, subject=SUBJECT,
-                            stated={"num_channels": 3})
+    images_dir = _frames(tmp_path / "ds", {"grade": "high"})
+    loader, data = run_over("detection", images_dir, subject=SUBJECT, stated={"num_channels": 3})
     assert len(loader) == 2
     image, target = loader[0]
     assert target["attributes"].tolist() == [[UNASSESSED, 2]]
@@ -245,16 +252,16 @@ def test_the_tiler_carries_exactly_the_per_box_keys_the_loader_names(
     from tcip_mcp.pipelines.data import datasets
     from tests._producer_fixtures import dataset_over
 
-    images_dir, labels_dir = _frames(tmp_path / "ds", {"color": "red", "grade": "mid"})
+    images_dir = _frames(tmp_path / "ds", {"color": "red", "grade": "mid"})
     tiling = {"enabled": True, "tile_size": 32, "overlap": 0.0, "sliver_frac": 0.5}
 
-    tiled = dataset_over("detection", images_dir, labels_dir, subject=SUBJECT, tiling=tiling)
+    tiled = dataset_over("detection", images_dir, subject=SUBJECT, tiling=tiling)
     rows = [tiled[i][1] for i in range(len(tiled))]
     assert rows and all(r["attributes"].tolist() == [[0, 1]] * len(r["boxes"]) for r in rows)
 
     monkeypatch.setattr(datasets, "PER_BOX_KEYS",
                         tuple(k for k in datasets.PER_BOX_KEYS if k != "attributes"))
-    unnamed = dataset_over("detection", images_dir, labels_dir, subject=SUBJECT, tiling=tiling)
+    unnamed = dataset_over("detection", images_dir, subject=SUBJECT, tiling=tiling)
     assert all("attributes" not in unnamed[i][1] for i in range(len(unnamed)))
 
 
@@ -285,8 +292,7 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
 
     registry_over(tmp_path / "ds", cr.SubjectRegistry(
         subjects=(cr.Subject(name=SUBJECT, attributes=(WHOLE,)),)))
-    (tmp_path / "ds" / "annotations").mkdir()
-    scope = registry_scope(tmp_path / "ds" / "annotations", SUBJECT)
+    scope = registry_scope(tmp_path / "ds" / "images", SUBJECT)
     config = {"model_source": {"builder": "tests.bespoke_models:build_whole_blob_detector",
                                "builder_kwargs": {}, "task": "detection"},
               "data": {"num_channels": 3, "scope": asdict(scope)}}
@@ -332,21 +338,19 @@ class _CallsEveryFrameOnce(torch.nn.Module):
 def test_evaluate_reports_each_attributes_agreement_over_the_pairs_it_assesses(tmp_path: Path):
     """Two frames whose one object each assesses ``color`` and only the first assesses ``grade``:
     color agrees over two matched pairs and grade over the one its reference assesses."""
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.model_build import model_dims
     from tcip_mcp.pipelines.training.evaluation import evaluate
-    from tests._producer_fixtures import run_over
+    from tests._producer_fixtures import label_image, run_over
 
-    images_dir, labels_dir = _frames(tmp_path / "ds", {"color": "blue", "grade": "high"})
-    json_io.write_annotations(
-        str(Path(labels_dir) / "frame1.json"),
+    images_dir = _frames(tmp_path / "ds", {"color": "blue", "grade": "high"})
+    label_image(
+        Path(images_dir) / "frame1.png",
         [Annotation(subject=SUBJECT, geometry=BBox(8, 8, 24, 24), attributes={"color": "blue"})],
         64, 48)
-    dataset, data = run_over("detection", images_dir, labels_dir, subject=SUBJECT,
-                             stated={"num_channels": 3})
+    dataset, data = run_over("detection", images_dir, subject=SUBJECT, stated={"num_channels": 3})
     images, targets = zip(*(dataset[i] for i in range(len(dataset))))
     dims = model_dims(ClassScope.of(data), {"num_channels": 3})
 

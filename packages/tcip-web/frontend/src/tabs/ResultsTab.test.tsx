@@ -63,12 +63,9 @@ describe("ResultsTab structured predictions-by-date picker", () => {
       dates_with_images: ["2026-01-01", "2026-01-08"],
       subjects: ["subject_a"],
       subjects_by_date: {},
-      prediction_dirs: {
-        "2026-01-01": {
-          baseline: "C:/data/predictions/baseline/2026-01-01",
-          v2: "C:/data/predictions/v2/2026-01-01",
-        },
-        "2026-01-08": {},
+      buckets_by_date: {
+        "2026-01-01": ["baseline/2026-01-01", "v2/2026-01-01"],
+        "2026-01-08": [],
       },
       label_problem: null,
     });
@@ -93,12 +90,13 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     expect(selects[0].value).toBe("");
     expect(selects[1]).toBeDisabled();
 
-    fireEvent.change(selects[0], { target: { value: "C:/data/predictions/v2/2026-01-01" } });
+    fireEvent.change(selects[0], { target: { value: "v2/2026-01-01" } });
     fireEvent.change(screen.getByLabelText(/plants to measure/i), { target: { value: "P1" } });
     fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
     await waitFor(() => expect(measurementSpy).toHaveBeenCalled());
-    // The dir is the one the tree response supplied, never a path the tab assembled.
-    expect(measurementSpy.mock.calls[0][0].buckets).toEqual(["C:/data/predictions/v2/2026-01-01"]);
+    // The name is the one the tree response supplied, never one the tab assembled.
+    expect(measurementSpy.mock.calls[0][0].buckets).toEqual(["v2/2026-01-01"]);
+    expect(measurementSpy.mock.calls[0][0].dataset_root).toBe("C:/data");
   });
 
   it("shows the tree's label_problem beside the date list without blocking it", async () => {
@@ -107,8 +105,8 @@ describe("ResultsTab structured predictions-by-date picker", () => {
       dates_with_images: ["2026-01-01"],
       subjects: ["subject_a"],
       subjects_by_date: {},
-      prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
-      label_problem: "C:/data/annotations/2026-01-08/IMG_0000.json does not decode as JSON",
+      buckets_by_date: { "2026-01-01": ["baseline/2026-01-01"] },
+      label_problem: "label_documents['2026-01-08', 'IMG_0000'] under C:/data: is a list",
     });
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
       curves: { rows: [], n_plants: 0 },
@@ -119,9 +117,7 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     render(<ResultsTab />);
 
     expect(
-      await screen.findByText(
-        "C:/data/annotations/2026-01-08/IMG_0000.json does not decode as JSON",
-      ),
+      await screen.findByText("label_documents['2026-01-08', 'IMG_0000'] under C:/data: is a list"),
     ).toBeInTheDocument();
     expect(screen.getByText("2026-01-01")).toBeInTheDocument();
   });
@@ -132,7 +128,7 @@ describe("ResultsTab structured predictions-by-date picker", () => {
       dates_with_images: ["2026-01-01"],
       subjects: ["subject_a"],
       subjects_by_date: {},
-      prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
+      buckets_by_date: { "2026-01-01": ["baseline/2026-01-01"] },
       label_problem: null,
     });
     const measurementSpy = vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
@@ -148,7 +144,7 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
 
     const select = screen.getByTitle("The bucket whose predictions to use for this date");
-    fireEvent.change(select, { target: { value: "C:/data/predictions/baseline/2026-01-01" } });
+    fireEvent.change(select, { target: { value: "baseline/2026-01-01" } });
     fireEvent.change(select, { target: { value: "" } });
     fireEvent.change(screen.getByLabelText(/plants to measure/i), { target: { value: "P1" } });
     fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
@@ -217,7 +213,7 @@ describe("ResultsTab evidence gate", () => {
   const UNVALIDATED = {
     validated: false,
     unvalidated_reason:
-      "no assessment answers for C:/data/predictions/baseline/2026-01-01: assess best against a " +
+      "no assessment answers for bucket 'baseline/2026-01-01': assess best against a " +
       "held-out reference selection and publish its predictions under that assessment.",
     trait: "subject_a",
     trait_revision: 1,
@@ -237,7 +233,7 @@ describe("ResultsTab evidence gate", () => {
       dates_with_images: ["2026-01-01"],
       subjects: [],
       subjects_by_date: {},
-      prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
+      buckets_by_date: { "2026-01-01": ["baseline/2026-01-01"] },
       label_problem: null,
     });
   }
@@ -247,7 +243,7 @@ describe("ResultsTab evidence gate", () => {
     await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
     fireEvent.change(screen.getByTitle("The bucket whose predictions to use for this date"), {
-      target: { value: "C:/data/predictions/baseline/2026-01-01" },
+      target: { value: "baseline/2026-01-01" },
     });
     fireEvent.change(screen.getByLabelText(/plants to measure/i), { target: { value: "P1" } });
     fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
@@ -396,7 +392,7 @@ describe("ResultsTab onset table validity marker", () => {
       dates_with_images: ["2026-01-01"],
       subjects: ["subject_a"],
       subjects_by_date: {},
-      prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
+      buckets_by_date: { "2026-01-01": ["baseline/2026-01-01"] },
       label_problem: null,
     });
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
@@ -519,7 +515,7 @@ describe("ResultsTab meaning refusals", () => {
       dates_with_images: ["2026-01-01"],
       subjects: ["subject_a"],
       subjects_by_date: {},
-      prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
+      buckets_by_date: { "2026-01-01": ["baseline/2026-01-01"] },
       label_problem: null,
     });
     vi.spyOn(resultsApi, "phenologyMeasurement").mockRejectedValue(
@@ -556,7 +552,7 @@ describe("ResultsTab meaning refusals", () => {
       dates_with_images: ["2026-01-01"],
       subjects: ["subject_a"],
       subjects_by_date: {},
-      prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
+      buckets_by_date: { "2026-01-01": ["baseline/2026-01-01"] },
       label_problem: null,
     });
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
@@ -625,14 +621,16 @@ describe("ResultsTab delivery events (read-only)", () => {
     producer: { checkpoint_sha256: "c".repeat(64), experiment_id: "exp-1" },
     buckets: [
       {
-        path: "C:/data/predictions/baseline/2026-01-01",
+        dataset_root: "C:/data",
+        bucket: "baseline/2026-01-01",
         date: "2026-01-01",
         assessment_id: "assessment-1",
         validated: true,
         reason: null,
       },
       {
-        path: "C:/data/predictions/baseline/2026-01-08",
+        dataset_root: "C:/data",
+        bucket: "baseline/2026-01-08",
         date: "2026-01-08",
         assessment_id: null,
         validated: false,
@@ -662,14 +660,10 @@ describe("ResultsTab delivery events (read-only)", () => {
       within(row).getByText("C:/proj/results_export/subject_a_phenology.csv"),
     ).toBeInTheDocument();
     expect(
-      within(row).getByText(
-        "C:/data/predictions/baseline/2026-01-01: validated by assessment assessment-1",
-      ),
+      within(row).getByText("baseline/2026-01-01: validated by assessment assessment-1"),
     ).toBeInTheDocument();
     expect(
-      within(row).getByText(
-        "C:/data/predictions/baseline/2026-01-08: not validated (no assessment answers for it)",
-      ),
+      within(row).getByText("baseline/2026-01-08: not validated (no assessment answers for it)"),
     ).toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: /confirm/i })).not.toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: /withdraw/i })).not.toBeInTheDocument();
@@ -794,7 +788,8 @@ describe("ResultsTab delivery events (read-only)", () => {
         plant_registry: { name: "orchard-block", digest: "0".repeat(64) },
         raster_identity: { width: 4096, height: 4096 },
         canopy_segments: {
-          path: "C:/proj/annotations/2024-06-01/mosaic.json",
+          capture: "2024-06-01",
+          stem: "mosaic",
           sha256: "1".repeat(64),
           subject: "canopy",
           n_segments: 3,
@@ -883,7 +878,7 @@ describe("ResultsTab count export", () => {
       dates_with_images: ["2026-01-01"],
       subjects: [],
       subjects_by_date: {},
-      prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
+      buckets_by_date: { "2026-01-01": ["baseline/2026-01-01"] },
       label_problem: null,
     });
   }
@@ -907,13 +902,13 @@ describe("ResultsTab count export", () => {
     if (!panel) throw new Error("Count export panel not found");
     // The Trait and Prediction bucket selects only fill in once their own async loads resolve.
     await within(panel as HTMLElement).findByText("subject_a");
-    await within(panel as HTMLElement).findByText("2026-01-01 (baseline)");
+    await within(panel as HTMLElement).findByText("2026-01-01 (baseline/2026-01-01)");
     return panel as HTMLElement;
   }
 
   function chooseBucket(panel: HTMLElement) {
     fireEvent.change(controlFollowing(panel, "Prediction bucket"), {
-      target: { value: "C:/data/predictions/baseline/2026-01-01" },
+      target: { value: "baseline/2026-01-01" },
     });
   }
 
@@ -938,7 +933,8 @@ describe("ResultsTab count export", () => {
     expect(downloadCountCsv.mock.calls[0][0]).toMatchObject({
       delivery: {
         kind: "per_image_count",
-        predictions_dir: "C:/data/predictions/baseline/2026-01-01",
+        dataset_root: "C:/data",
+        bucket: "baseline/2026-01-01",
         trait: "subject_a",
       },
       filename: "counts.csv",
@@ -978,7 +974,8 @@ describe("ResultsTab count export", () => {
     expect(downloadCountCsv.mock.calls[0][0]).toMatchObject({
       delivery: {
         kind: "orthomosaic_plant_counts",
-        predictions_dir: "C:/data/predictions/baseline/2026-01-01",
+        dataset_root: "C:/data",
+        bucket: "baseline/2026-01-01",
         plant_registry: "reg",
         delivered_phenotype: "stem_count",
         plants: ["PLOT-01", "PLOT-02"],
@@ -1018,7 +1015,7 @@ describe("ResultsTab count export", () => {
   it("decodes a delivery refusal and offers the acknowledgment controls", async () => {
     const panel = await renderCountPanel();
     const message =
-      "no assessment answers for C:/data/predictions/baseline/2026-01-01: assess best against a " +
+      "no assessment answers for bucket 'baseline/2026-01-01': assess best against a " +
       "held-out reference selection and publish its predictions under that assessment.";
     vi.spyOn(resultsApi, "downloadCountCsv").mockRejectedValue(
       new StructuredRefusalError(

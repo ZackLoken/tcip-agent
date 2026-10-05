@@ -9,13 +9,14 @@ gap between regions, or coordinates the persisted geometry never covered.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 import pytest
 
 pytest.importorskip("torch")
 
-from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.operating_point import spatial_disjointness  # noqa: E402
 
@@ -44,21 +45,21 @@ def test_a_rect_inside_an_attested_region_is_admitted():
     assert spatial_disjointness(GAPPED, [(650, 100, 750, 300)]) == []
 
 
-def _mosaic_dataset(root: Path) -> tuple[Path, Path, str]:
+def _mosaic_dataset(root: Path) -> Path:
     """One large single-source mosaic with GT spread across its whole extent, enough for the real
-    spatial-strip split to derive a four-way layout over it."""
+    spatial-strip split to derive a four-way layout over it; returns its images directory."""
     from PIL import Image
 
-    images_dir, labels_dir = root / "images", root / "labels"
+    from tests._producer_fixtures import label_image
+
+    images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
-    stem = "mosaic"
-    Image.new("RGB", (MOSAIC_W, MOSAIC_H), color=(90, 90, 90)).save(images_dir / f"{stem}.png")
+    image = images_dir / "mosaic.png"
+    Image.new("RGB", (MOSAIC_W, MOSAIC_H), color=(90, 90, 90)).save(image)
     boxes = [Annotation(subject="bud", geometry=BBox(x, y, x + 20, y + 20))
              for x in range(20, MOSAIC_W - 20, 200) for y in range(20, MOSAIC_H - 20, 200)]
-    json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, MOSAIC_W, MOSAIC_H,
-                              keep_empty=True)
-    return images_dir, labels_dir, stem
+    label_image(image, boxes, MOSAIC_W, MOSAIC_H, keep_empty=True)
+    return images_dir
 
 
 def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_the_unattested(
@@ -73,9 +74,9 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
     from tcip_mcp.experiments import run_resolution
     from tests._verified_checkpoint_fixtures import resolved_run
 
-    images_dir, labels_dir, stem = _mosaic_dataset(tmp_path / "ds")
+    images_dir = _mosaic_dataset(tmp_path / "ds")
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
+        "images_dir": str(images_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                   "reserve_calibration_fraction": 0.15},
@@ -106,9 +107,9 @@ def test_a_spatial_runs_resolved_record_carries_no_drawn_seed(tmp_path):
     from tcip_mcp.experiments import run_resolution
     from tests._verified_checkpoint_fixtures import resolved_run
 
-    images_dir, labels_dir, stem = _mosaic_dataset(tmp_path / "ds")
+    images_dir = _mosaic_dataset(tmp_path / "ds")
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
+        "images_dir": str(images_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 7},
     }

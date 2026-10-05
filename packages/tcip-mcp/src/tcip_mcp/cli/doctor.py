@@ -16,19 +16,16 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from tcip_mcp.project_paths import project_state_dir
+
+def _named(key) -> str:
+    """A label document's key as a finding names it: ``<capture>/<stem>``."""
+    return "/".join(key.parts)
 
 
-def _census(root: Path, findings: list, seen: "set[str]") -> dict | None:
-    """The one dataset census a doctor run reads (``data_tools._scan_dataset``), or ``None`` with
-    its failure reported: an ``images/`` stem collision or an unreadable ``.bandgroup``
-    manifest.
-
-    ``label_reads`` maps each census label's resolved path to its document as the one per-image
-    reader (``json_io.read_label_document``) returns it, or to the ``UnreadableLabelDocument`` it
-    raised: every check that reads a label reads it from here, so a run reads each label once, and
-    only :func:`check_data_quality` reports an unreadable one.
-    """
+def _census(root: Path, findings: list) -> dict | None:
+    """The dataset census (``data_tools._scan_dataset``) with ``label_reads``, each label key's
+    document or the ``UnreadableLabelDocument`` it raised; ``None`` with an error finding for an
+    ``images/`` stem collision or an unreadable ``.bandgroup`` manifest."""
     from tcip_annotation.json_io import UnreadableLabelDocument, read_label_document
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
     from tcip_mcp.tools.data_tools import _scan_dataset
@@ -36,55 +33,24 @@ def _census(root: Path, findings: list, seen: "set[str]") -> dict | None:
     try:
         scan = _scan_dataset(str(root))
     except AmbiguousImageStem as exc:
-        _report_stem_collision(findings, exc, seen)
+        findings.append(("error", str(exc)))
         return None
-    label_reads: dict[Path, object] = {}
-    for label in scan["labels"]:
+    label_reads: dict = {}
+    for key in scan["labels"]:
         try:
-            label_reads[Path(label).resolve()] = read_label_document(label)
+            label_reads[key] = read_label_document(key)
         except UnreadableLabelDocument as exc:
-            label_reads[Path(label).resolve()] = exc
+            label_reads[key] = exc
     return {**scan, "label_reads": label_reads}
 
 
-def _report_stem_collision(findings: list, exc: Exception, seen: "set[str] | None") -> None:
-    """Append one collided-bucket finding, skipping a message this run already reported; ``seen``
-    is ``None`` for a check run standalone.
-    """
-    message = str(exc)
-    if seen is not None:
-        if message in seen:
-            return
-        seen.add(message)
-    findings.append(("error", message))
-
-
-def _image_stems(root: Path) -> dict[str, str]:
-    """stem -> file name for every image under images/ (the flat form and every date bucket),
-    through the platform's own bucket enumeration, so a stem collision within one bucket refuses
-    here too. A stem present in more than one bucket keeps the latest bucket's file, buckets
-    visited in sorted (chronological, for ISO dates) order.
-    """
-    from tcip_mcp.dataset_layout import image_root
-    from tcip_mcp.pipelines.image_utils import list_logical_images, logical_image_name
-
-    out: dict[str, str] = {}
-    images = image_root(root)
-    if not images.is_dir():
-        return out
-    buckets = [images] + sorted(p for p in images.iterdir() if p.is_dir())
-    for bucket in buckets:
-        for stem, source in list_logical_images(bucket).items():
-            out[stem] = logical_image_name(source)
-    return out
-
-
 def check_data_quality(root: Path, findings: list, *, census: dict | None) -> None:
-    """Per-file annotation quality, each file read on its own so one bad document never hides the
-    findings about the rest: a label with no matching image, a label the one per-image reader
-    refuses (undecodable, a dataset-level COCO, an unrecognized shape, a malformed mark), an empty
-    label no live mark finishes for any subject, and one line counting the images with no label
-    record. Reads the run's one dataset census (``census``, ``None`` when it could not be taken).
+    """Per-document annotation quality, each document read on its own so one bad document never
+    hides the findings about the rest, each named by its capture and stem: a label with no
+    matching image, a label the one per-image reader refuses (undecodable, an unrecognized shape,
+    a malformed mark), an empty label no live mark finishes for any subject, and one line counting
+    the images with no label record. Reads the run's one dataset census (``census``, ``None`` when
+    it could not be taken).
     """
     from tcip_annotation.json_io import LabelDocument
 
@@ -93,45 +59,27 @@ def check_data_quality(root: Path, findings: list, *, census: dict | None) -> No
     if census is None:
         return
     scan = census
-    image_stems = {Path(p).stem for p in scan["images"]}
-    labeled: set[str] = set()
-    for label_path in scan["labels"]:
-        label = Path(label_path)
-        rel = label.relative_to(root) if label.is_relative_to(root) else label
-        labeled.add(label.stem)
-        if label.stem not in image_stems:
-            findings.append(("error", f"{rel}: no matching image"))
-        doc = scan["label_reads"][label.resolve()]
+    imaged = set(scan["images"].values())
+    for key in scan["labels"]:
+        named = _named(key)
+        if key not in imaged:
+            findings.append(("error", f"{named}: no matching image"))
+        doc = scan["label_reads"][key]
         if not isinstance(doc, LabelDocument):
-            findings.append(("error", f"{rel}: label file will not read: {doc}"))
+            findings.append(("error", f"{named}: label document will not read: {doc}"))
         elif not doc.annotations and not any(admits(doc.state(s)) for s in doc.marks):
-            findings.append(("error", f"{rel}: empty label file, not marked complete for any "
-                            "subject; excluded from training"))
+            findings.append(("error", f"{named}: empty label document, not marked complete for "
+                            "any subject; excluded from training"))
 
     # Images with no label record at all: excluded from training, so a breeder who labeled 30 of
     # 400 trains on 30. Reported as one line, not one per image (the dominant case at small scale).
-    unannotated = sorted(image_stems - labeled)
+    labeled = set(scan["labels"])
+    unannotated = sorted(_named(key) for key in scan["images"].values() if key not in labeled)
     if unannotated:
         shown = ", ".join(unannotated[:5]) + ("…" if len(unannotated) > 5 else "")
-        findings.append(("info", f"{len(unannotated)} of {len(image_stems)} image(s) have no "
+        findings.append(("info", f"{len(unannotated)} of {len(scan['images'])} image(s) have no "
                         f"label record and are excluded from training ({shown}). Annotate them, "
                         "or mark the genuinely-empty ones Complete to train them as negatives."))
-
-
-def check_reserved_names(root: Path, findings: list, *, census: dict | None) -> None:
-    """Flag every image and label document whose stem is reserved for a prediction bucket's own
-    record (``tcip_annotation.json_io.is_bucket_record``), as the dataset census names them."""
-    if census is None:
-        return
-    scan = census
-    for p in scan["reserved_name_images"]:
-        findings.append(("error", f"{Path(p).relative_to(root)}: image stem is reserved for a "
-                        "prediction bucket's own record; its label can never be read "
-                        "through any bucket walk"))
-    for p in scan["reserved_name_labels"]:
-        findings.append(("error", f"{Path(p).relative_to(root)}: label filename is reserved for "
-                        "a prediction bucket's own record; it is excluded from every "
-                        "bucket walk and its annotations are unreadable through them"))
 
 
 TEMP_TREE_MARKERS = ("pytest-of-", "\\Temp\\", "/Temp/")
@@ -148,9 +96,11 @@ def check_registry(root: Path, findings: list) -> None:
     Every way the registry can refuse to be read (a store that will not decode, a database file
     that will not open) comes out as a finding, not as a traceback.
     """
+    import tcip_store
     from tcip_store import StoreError
 
-    from tcip_mcp.buckets import bucket_dirs, read_bucket
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.dataset_layout import PREDICTION_BUCKETS
     from tcip_mcp.model_registry import registered_entries
     from tcip_mcp.registry_paths import (
         RegistryPathEmpty, RegistryPathTraversal, resolved_registry_path,
@@ -181,18 +131,18 @@ def check_registry(root: Path, findings: list) -> None:
             findings.append(("error", f"registry entry {m['name']!r} checkpoint missing: {ckpt}"))
 
     registered_shas = {m["sha256"] for m in entries}
-    for bucket in bucket_dirs(root):
+    for key in tcip_store.keys(PREDICTION_BUCKETS, str(root_resolved)):
+        name = key.parts[0]
         try:
-            sha = read_bucket(bucket).producer.get("checkpoint_sha256")
+            sha = read_bucket(root_resolved, name).producer.get("checkpoint_sha256")
         except ValueError as exc:
-            findings.append(("error", f"{bucket.relative_to(root)}: bucket record will not "
-                            f"read: {exc}"))
+            findings.append(("error", f"bucket {name!r}: bucket record will not read: {exc}"))
             continue
         if sha is not None and sha not in registered_shas:
-            findings.append(("warn", f"{bucket.relative_to(root)}: prediction bucket's "
-                            f"record names checkpoint {sha}, which no registry entry "
-                            "names; register the checkpoint to make this bucket's "
-                            "provenance verifiable going forward."))
+            findings.append(("warn", f"bucket {name!r}: prediction bucket's record names "
+                            f"checkpoint {sha}, which no registry entry names; register the "
+                            "checkpoint to make this bucket's provenance verifiable going "
+                            "forward."))
 
 
 def check_provenance(root: Path, findings: list, *, census: dict | None) -> None:
@@ -201,12 +151,11 @@ def check_provenance(root: Path, findings: list, *, census: dict | None) -> None
     from tcip_mcp.experiments import run_observations
 
     unstamped = 0
-    for label in map(Path, census["labels"] if census is not None else []):
-        doc = census["label_reads"][label.resolve()] if census is not None else None
+    for key, doc in (census["label_reads"] if census is not None else {}).items():
         for a in doc.annotations if isinstance(doc, LabelDocument) else []:
             if a.accepted_by and not a.created_by:
-                findings.append(("warn", f"{label.relative_to(root)}: annotation has accepted_by "
-                                "without created_by (acceptance without origin)"))
+                findings.append(("warn", f"{_named(key)}: annotation has accepted_by without "
+                                "created_by (acceptance without origin)"))
             if not a.created_by:
                 unstamped += 1
     if unstamped:
@@ -221,30 +170,28 @@ def check_provenance(root: Path, findings: list, *, census: dict | None) -> None
                             f"{len(source['snapshot_errors'])} import error(s)"))
 
 
-def check_state(root: Path, findings: list, *, seen: "set[str] | None" = None) -> None:
+def check_state(root: Path, findings: list) -> None:
     """Warn of every verdict shard that will not read through the one decoder
-    (:func:`~tcip_annotation.verdicts.read_verdicts`) and every one naming an image the dataset
-    does not hold. ``seen`` carries a stem-collision message across the checks that enumerate the
-    same ``images/`` tree, so one collision is reported once per run."""
+    (:func:`~tcip_annotation.verdicts.read_verdicts`) and every one naming an image its bucket's
+    record names no document for (:func:`~tcip_mcp.buckets.read_bucket`)."""
     import tcip_store
     from tcip_annotation.verdicts import REVIEW_VERDICTS_STORE, read_verdicts
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
     from tcip_store import StoreError
 
-    try:
-        stems = _image_stems(root)
-    except AmbiguousImageStem as exc:
-        _report_stem_collision(findings, exc, seen)
-        return
-    for key in tcip_store.keys(REVIEW_VERDICTS_STORE, str(project_state_dir(root))):
-        bucket, image = key.parts
+    from tcip_mcp.buckets import read_bucket
+
+    resolved = Path(root).resolve()
+    for key in tcip_store.keys(REVIEW_VERDICTS_STORE, str(resolved)):
+        bucket, stem = key.parts
         try:
             read_verdicts(key)
+            known = stem in read_bucket(resolved, bucket).documents
         except (ValueError, StoreError) as exc:
-            findings.append(("warn", f"verdict shard {bucket}/{image} will not read: {exc}"))
-        if Path(image).stem not in stems:
-            findings.append(("warn", f"verdict shard {bucket}/{image} names unknown image "
-                            f"{image!r}"))
+            findings.append(("warn", f"verdict shard {bucket}/{stem} will not read: {exc}"))
+            continue
+        if not known:
+            findings.append(("warn", f"verdict shard {bucket}/{stem} names image {stem!r}, "
+                            "which its bucket's record names no document for"))
 
 
 def check_traits(root: Path, findings: list) -> None:
@@ -279,7 +226,7 @@ def check_project_record(root: Path, findings: list) -> None:
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], prog=prog)
-    ap.add_argument("project_root", help="project directory holding images/ annotations/ .tcip/")
+    ap.add_argument("project_root", help="project directory holding images/ and .tcip/")
     args = ap.parse_args(argv)
     root = Path(args.project_root)
     if not root.is_dir():
@@ -291,17 +238,12 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     bind()
 
     findings: list[tuple[str, str]] = []
-    # Shared across the checks that independently enumerate images/, so an images/ tree
-    # collision is reported once, not once per check.
-    ambiguous_seen: set[str] = set()
-    census = _census(root, findings, ambiguous_seen)
-    checks_taking_census = (check_data_quality, check_reserved_names, check_provenance)
-    for check in (check_data_quality, check_reserved_names, check_registry, check_provenance,
-                  check_state, check_traits, check_project_record):
+    census = _census(root, findings)
+    checks_taking_census = (check_data_quality, check_provenance)
+    for check in (check_data_quality, check_registry, check_provenance, check_state,
+                  check_traits, check_project_record):
         run: Callable[..., None] = check
-        if check is check_state:
-            run(root, findings, seen=ambiguous_seen)
-        elif check in checks_taking_census:
+        if check in checks_taking_census:
             run(root, findings, census=census)
         else:
             run(root, findings)

@@ -8,6 +8,7 @@ from functools import partial
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
+    from tcip_mcp.pipelines.data.label_queries import Admission
     from tcip_mcp.pipelines.execution import Pass, Stated
     from tcip_mcp.traits import TraitEntry
 
@@ -73,7 +74,7 @@ def run_test_evaluation(
 
 
 def run_full_frame_evaluation(
-    checkpoint, images_dir: str, labels_dir: str, *, stated: Stated,
+    checkpoint, admitted: "Admission", *, stated: Stated,
     iou_threshold: float = 0.5, device: str | None = None, trait: TraitEntry | None = None,
 ) -> dict:
     """Delivery-grade detection eval: tiled inference reconstructed to full frame, matched to
@@ -86,10 +87,10 @@ def run_full_frame_evaluation(
     The pass is :func:`~tcip_mcp.pipelines.execution.prepare_pass`'s tiled pass over ``stated``,
     and refuses as it does; its execution record is returned under ``execution``.
 
-    The measured set is the detection loader a run over ``images_dir``/``labels_dir`` would build,
-    over the platform's own admission under the class space the checkpoint records, its map
-    included: the capture date whose confirmed negatives count is the one that admission reads,
-    and a document carrying the subject only in geometry a detector cannot read refuses by name.
+    The measured set is the detection loader a run over ``admitted`` would build (the platform's
+    own admission, :func:`~tcip_mcp.pipelines.data.label_queries.admit`, under the class space the
+    checkpoint records, its map included); an empty admission, and a document carrying the subject
+    only in geometry a detector cannot read, refuse by name.
 
     A box metric (``iou_type="bbox"``): it requests boxes-only tiled inference
     (``predict_sliced(require_masks=False)``), so an instance_seg checkpoint is gated here on its
@@ -108,10 +109,8 @@ def run_full_frame_evaluation(
 
     # The loader a run over this same ground truth builds, over the samples the producer admits.
     from tcip_mcp.pipelines.data.datasets import DetectionDataset, build_dataset, resolve_sizes
-    from tcip_mcp.pipelines.data.label_queries import admit, require_admitted
-    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.data.label_queries import require_admitted
 
-    admitted = admit(images_dir, labels_dir, scope=ClassScope.of(checkpoint.data_config))
     require_admitted(admitted)
     # At the width the predictor reads at, like every other measurement door: this gate reads
     # targets and source paths off the loader, and the predictor reads each source itself.
@@ -124,7 +123,8 @@ def run_full_frame_evaluation(
         prediction_record(
             predictor.predict_sliced(measured.sample_of(key).source, execution=execution,
                                      tile_batch_size=pass_.tile_batch_size, require_masks=False),
-            gt_records(measured.det_targets(key)), image_id=measured.sample_of(key).member)
+            gt_records(measured.det_targets(measured.document(key))),
+            image_id=measured.sample_of(key).member)
         for key in measured.stems]
 
     m = coco_detection_metrics(per_image, iou_threshold=iou_threshold,

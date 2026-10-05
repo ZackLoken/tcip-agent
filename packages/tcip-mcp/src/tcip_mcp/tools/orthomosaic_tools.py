@@ -23,7 +23,8 @@ _PER_PLANT_VALUE_KEY = "count"
 
 def orthomosaic_plant_counts(
     project: Path,
-    predictions_dir: str,
+    dataset_root: str,
+    bucket: str,
     registry_record: dict,
     output_csv_path: str,
     delivered_phenotype: str,
@@ -37,7 +38,8 @@ def orthomosaic_plant_counts(
     door: str,
     actor: str | None,
 ) -> dict:
-    """Per-plant detection counts from a published whole-raster prediction bucket, for exactly the
+    """Per-plant detection counts from the whole-raster prediction bucket ``bucket`` published under
+    ``dataset_root``, for exactly the
     plants ``plants`` names, delivered as a ``per_plant_count_aggregate`` CSV under ``project`` by
     ``actor`` through the door ``door`` names, over the registered plant registry ``registry_record``
     (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.load_registry`).
@@ -61,7 +63,7 @@ def orthomosaic_plant_counts(
     ``PlantRegistryDisclosure`` or, under ``canopy_subject``, a ``CanopySegmentDisclosure``.
     Refuses (``ValueError``) everything named above and whatever the delivery refuses.
     """
-    from tcip_annotation.json_io import detection_annotations
+    from tcip_annotation.json_io import detection_annotations, read_label_document
     from tcip_annotation.state import bbox_of
 
     from tcip_mcp.buckets import read_bucket
@@ -79,24 +81,24 @@ def orthomosaic_plant_counts(
         raise ValueError("canopy_subject and nn_tolerance_m are refused together: the segment "
                          "regime attributes by containment and takes no match tolerance.")
     wanted = population(plants)
-    bucket = read_bucket(Path(project, predictions_dir))
-    raster_path, recorded_identity = bucket.raster(project), bucket.raster_identity
+    found = read_bucket(dataset_root, bucket)
+    raster_path, recorded_identity = found.raster(project), found.raster_identity
     if raster_path is None or recorded_identity is None:
-        raise ValueError(f"{bucket.path} is a bucket of per-image predictions, not of one "
+        raise ValueError(f"bucket {bucket!r} is a bucket of per-image predictions, not of one "
                          "raster: deliver its counts through deliver_per_image_counts.")
     mismatch = georeferenced_raster_identity_mismatch(recorded_identity, raster_path)
     if mismatch is not None:
-        raise ValueError(f"{raster_path} is no longer the raster {bucket.path} was predicted on. "
-                         f"{mismatch}")
+        raise ValueError(f"{raster_path} is no longer the raster bucket {bucket!r} was predicted "
+                         f"on. {mismatch}")
     registry_entries = registry_csv_entries(registry_record, project)
     missing, rewritten, csv_bytes = verify_registry_csv_bytes(registry_entries)
     if missing or rewritten:
         raise ValueError(f"{rewritten or f'plant CSV(s) not found: {missing}'}: restore the "
                          "registered bytes, or register the current file under a new name.")
     registered = [p for e in registry_entries for p in read_plant_csv_bytes(csv_bytes[e["path"]])]
-    boxes = [[b.x1, b.y1, b.x2, b.y2] for path in bucket.document_paths
+    boxes = [[b.x1, b.y1, b.x2, b.y2] for key in found.document_keys
              for b in (bbox_of(cast("BBox | Polygon", a.geometry))
-                       for a in detection_annotations(path))]
+                       for a in detection_annotations(read_label_document(key).annotations))]
     georef = OrthomosaicGeoreference.from_file(raster_path)
     width, height = int(recorded_identity["width"]), int(recorded_identity["height"])
     registry_ref = {"name": registry_record["name"], "digest": registry_record["digest"]}
@@ -104,7 +106,7 @@ def orthomosaic_plant_counts(
     uncountable: dict[str, str] = {}
     if canopy_subject:
         counts, disclosure, uncountable = _segment_counts(
-            project, bucket, raster_path, recorded_identity, canopy_subject, registered, georef,
+            raster_path, recorded_identity, canopy_subject, registered, georef,
             width, height, boxes, registry_ref)
         attribution = disclosure["plant_attribution"]
     else:
@@ -138,7 +140,7 @@ def orthomosaic_plant_counts(
     delivered = deliver_per_plant_aggregate(
         project, results, str(Path(project, output_csv_path)),
         delivered_phenotype=delivered_phenotype, delivery_kind=PER_PLANT_COUNT_AGGREGATE,
-        buckets=[bucket], plants=wanted, crop=crop, pipeline_version=pipeline_version,
+        buckets=[found], plants=wanted, crop=crop, pipeline_version=pipeline_version,
         door=door, plant_mapping=disclosure, acknowledgment_id=acknowledgment_id, actor=actor)
     return {**delivered, "n_detections": len(boxes),
             "detections_unattributed": disclosure["detections_unattributed"],
@@ -146,37 +148,31 @@ def orthomosaic_plant_counts(
 
 
 def _segment_counts(
-    project: Path, bucket: Any, raster_path: str, recorded_identity: dict, canopy_subject: str,
+    raster_path: str, recorded_identity: dict, canopy_subject: str,
     registered: list, georef: Any, width: int, height: int, boxes: list, registry_ref: dict,
 ) -> tuple[dict[str, int], dict, dict[str, str]]:
     """Per-plant counts under the segment regime: each detection counted to the tied plant whose
     canopy segment contains its centroid. Returns the counts, the ``CanopySegmentDisclosure`` and
     each registry plant that regime leaves uncounted, with why. The canopy document is the
-    raster's own label document under the dataset the bucket and the raster share."""
-    import hashlib
+    raster's own label document (:func:`~tcip_mcp.dataset_layout.label_key_of`)."""
+    from tcip_annotation.json_io import UnreadableLabelDocument, document_at, read_stored
 
-    from tcip_mcp.dataset_layout import (
-        annotation_path_for_image, dataset_root_of, require_dataset_identity,
-    )
+    from tcip_mcp.dataset_layout import label_key_of
     from tcip_mcp.pipelines.postprocessing.segment_attribution import (
         SEGMENT_ASSIGNMENT_SOURCES, SegmentAssignment, assign_detections_to_segments,
         load_canopy_segments, tie_segments_to_plants,
     )
-    from tcip_mcp.registry_paths import stored_path
 
-    raster_root = dataset_root_of(Path(raster_path))
-    if raster_root is None or bucket.dataset_id is None or (
-            require_dataset_identity(raster_root)["id"] != bucket.dataset_id):
-        raise ValueError(f"canopy_subject delivery refused: {raster_path} and {bucket.path} do "
-                         "not lie under one registered dataset, where the canopy document is "
-                         "resolved.")
-    document_path = annotation_path_for_image(raster_path)
-    if not document_path.is_file():
-        raise ValueError(f"canopy_subject delivery refused: no label document at {document_path}; "
-                         f"author the canopy boundaries for {canopy_subject!r} there first.")
-    document_bytes = document_path.read_bytes()
-    segments = load_canopy_segments(document_bytes, subject=canopy_subject,
-                                    raster_stem=Path(raster_path).stem,
+    stem = Path(raster_path).stem
+    key = label_key_of(raster_path)
+    try:
+        stored = read_stored(key)
+    except UnreadableLabelDocument as exc:
+        raise ValueError(f"canopy_subject delivery refused: the canopy boundaries for "
+                         f"{canopy_subject!r} on the raster {stem!r} do not read (author the "
+                         f"canopy boundaries where none exist): {exc}") from exc
+    document, version = document_at(key, stored), stored.version
+    segments = load_canopy_segments(document, subject=canopy_subject, raster_stem=stem,
                                     raster_identity=recorded_identity)
     tie = tie_segments_to_plants(segments, registered, georef, width=width, height=height)
     assignments = assign_detections_to_segments({"boxes": boxes}, tie)
@@ -198,8 +194,7 @@ def _segment_counts(
                                               for a in assignments)}
     disclosure = {
         "plant_registry": registry_ref, "raster_identity": recorded_identity,
-        "canopy_segments": {"path": stored_path(document_path, project),
-                            "sha256": hashlib.sha256(document_bytes).hexdigest(),
+        "canopy_segments": {"capture": key.parts[0], "stem": stem, "sha256": version.token,
                             "subject": canopy_subject, "n_segments": len(segments)},
         "segment_ties": [{"segment_index": t.segment_index, "plot_name": t.plot_name,
                           "clearance_m": t.clearance_m} for t in tie.tied],
@@ -221,7 +216,8 @@ def _segment_counts(
 @tool()
 def deliver_orthomosaic_plant_counts(
     project: Path,
-    predictions_dir: str,
+    dataset_root: str,
+    bucket: str,
     plant_registry: str,
     output_csv_path: str,
     delivered_phenotype: str,
@@ -243,7 +239,8 @@ def deliver_orthomosaic_plant_counts(
 
     try:
         return orthomosaic_plant_counts(
-            project, predictions_dir, load_registry(project, plant_registry), output_csv_path,
+            project, dataset_root, bucket, load_registry(project, plant_registry),
+            output_csv_path,
             delivered_phenotype, plants, crop=crop, pipeline_version=pipeline_version,
             nn_tolerance_m=nn_tolerance_m, canopy_subject=canopy_subject,
             acknowledgment_id=acknowledgment_id, door="deliver_orthomosaic_plant_counts",

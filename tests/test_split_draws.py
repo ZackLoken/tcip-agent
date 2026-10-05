@@ -1263,7 +1263,7 @@ def test_tune_search_split_draws_end_to_end_pairs_every_point_with_every_seed(tm
 # -- the single-source spatial-strip leg -----------------------------------------
 
 
-def _one_source_tiled_cfg(images_dir, labels_dir) -> dict:
+def _one_source_tiled_cfg(images_dir) -> dict:
     """A base config wrapping a one-source tiled mosaic, the shape ``auto_train_val`` takes
     into ``spatial_single_source_split`` when tiling is on and fewer than two stems are
     admitted, given a ``model_source`` block the way ``real_hpo_base_config`` gives its own."""
@@ -1271,8 +1271,7 @@ def _one_source_tiled_cfg(images_dir, labels_dir) -> dict:
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
         "data": {
-            "images_dir": str(images_dir), "labels_dir": str(labels_dir),
-            "scope": {"subject": "bud"},
+            "images_dir": str(images_dir), "scope": {"subject": "bud"},
             "auto_val": True, "split": {"val_ratio": 0.2, "test_ratio": 0.1},
             # sliver_frac stated: a fixture this small derives no box-size spread.
             "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2, "sliver_frac": 0.5},
@@ -1292,8 +1291,8 @@ def test_run_hyperparameter_search_refuses_split_draws_over_a_single_source_spat
     import tcip_mcp.tools.training_tools as tt
     from tests.test_training_autoval import _big_single_source
 
-    images_dir, labels_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
-    cfg = _one_source_tiled_cfg(images_dir, labels_dir)
+    images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    cfg = _one_source_tiled_cfg(images_dir)
 
     ran = []
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
@@ -1317,8 +1316,8 @@ def test_run_hyperparameter_search_admits_a_single_source_spatial_config_at_one_
     import tcip_mcp.tools.training_tools as tt
     from tests.test_training_autoval import _big_single_source
 
-    images_dir, labels_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
-    cfg = _one_source_tiled_cfg(images_dir, labels_dir)
+    images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    cfg = _one_source_tiled_cfg(images_dir)
 
     _search(monkeypatch)
 
@@ -1338,8 +1337,8 @@ def test_run_hyperparameter_search_admits_split_draws_over_a_two_source_tiled_co
     import tcip_mcp.tools.training_tools as tt
     from tests.test_training_autoval import _detection_dataset
 
-    images_dir, labels_dir, _stems = _detection_dataset(tmp_path / "ds")
-    cfg = _one_source_tiled_cfg(images_dir, labels_dir)
+    images_dir, _stems = _detection_dataset(tmp_path / "ds")
+    cfg = _one_source_tiled_cfg(images_dir)
 
     _search(monkeypatch)
 
@@ -1360,9 +1359,9 @@ def test_split_draws_over_one_bespoke_source_refuse_the_validation_they_cannot_d
     import tcip_mcp.tools.training_tools as tt
     from tests.test_training_autoval import _big_single_source
 
-    images_dir, labels_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
-    cfg = _one_source_tiled_cfg(images_dir, labels_dir)
-    untiled = {k: v for k, v in cfg["data"].items() if k != "tiling"}
+    images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    cfg = _one_source_tiled_cfg(images_dir)
+    untiled ={k: v for k, v in cfg["data"].items() if k != "tiling"}
     cfg["data"] = {**untiled, "dataset_source": {
         "builder": "tests.test_dataset_source_seam:build_bespoke_ds"}}
     # One source holds nothing out, so the run selects on its training loss.
@@ -1395,43 +1394,4 @@ def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(
 
     assert "error" in result and "auto_val" in result["error"]
     assert "spatial strip path" not in result["error"]
-    assert not ran
-
-
-def test_a_misrouted_coco_is_named_by_the_producer_not_by_the_single_source_leg(
-    tmp_path, monkeypatch,
-):
-    """A dataset-level COCO document misrouted into data.labels_dir, at an image's label path, is
-    the one reader's refusal, raised where the run admits and reported at preflight in those same
-    words. This leg adds nothing of its own: neither its single-source message nor a spatial-strip
-    claim about a membership nothing could admit."""
-    pytest.importorskip("torch")
-    pytest.importorskip("torchvision")
-    import json
-
-    import tcip_mcp.tools.training_tools as tt
-    from tests.test_training_autoval import _save_png
-
-    images_dir, labels_dir = tmp_path / "ds" / "images", tmp_path / "ds" / "detect"
-    labels_dir.mkdir(parents=True)
-    _save_png(images_dir / "img0.png")
-    (labels_dir / "img0.json").write_text(json.dumps(
-        {"images": [{"id": 1, "file_name": "img0.png"}], "annotations": [], "categories": []}))
-    cfg = _one_source_tiled_cfg(images_dir, labels_dir)
-
-    preflight = tt.preflight_config(tmp_path, cfg)
-    assert any("dataset-level COCO" in issue for issue in preflight["issues"]), preflight
-    assert not any("one trainable source" in issue or "spatial strip path" in issue
-                   for issue in preflight["issues"])
-    assert not any("stem(s) admitted" in warning for warning in preflight["warnings"])
-
-    ran = []
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
-
-    result = tt.run_hyperparameter_search(tmp_path, base_config=cfg, n_trials=1,
-                        scheduler="none", split_draws=2, trial_budget=2, search_seed=0)
-
-    # The sweep refuses on the admission's own message, and searches nothing over data no run
-    # could admit.
-    assert any("dataset-level COCO" in issue for issue in result["issues"]), result
     assert not ran

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 import csv
 import random
 from pathlib import Path
@@ -52,7 +54,7 @@ from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 
 def _classification_data(tmp_path: Path, n: int = 6):
     from PIL import Image
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
     rows = []
     for i in range(n):

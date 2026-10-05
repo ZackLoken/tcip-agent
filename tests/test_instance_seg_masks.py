@@ -12,6 +12,9 @@ alongside the default mask-carrying path.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tests._producer_fixtures import checkpoint_admission
+
 from pathlib import Path
 
 import numpy as np
@@ -180,7 +183,7 @@ def test_predict_sliced_require_masks_false_returns_boxes_only(instance_seg_ckpt
                               device="cpu")
     pred = tiled_pass.predictor
     assert pred.task == "instance_seg"
-    img = _image(tmp_path / "images")
+    img = _image(tmp_path / "images" / UNDATED_BUCKET)
 
     tiled = pred.predict_sliced(img, execution=tiled_pass.execution, tile_batch_size=8,
                                 require_masks=False)
@@ -201,7 +204,7 @@ def test_run_inference_instance_seg_unset_tile_runs_tiled_with_masks(instance_se
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     p, results = predicted_over(tmp_path, instance_seg_ckpt,
-                                str(Path(_image(tmp_path / "images")).parent), device="cpu",
+                                str(Path(_image(tmp_path / "images" / UNDATED_BUCKET)).parent), device="cpu",
                                 tile_size=TILE, conf=0.0)
     assert p.execution.tiled
     assert len(results) == 1
@@ -218,7 +221,7 @@ def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(ins
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     p, results = predicted_over(tmp_path, instance_seg_ckpt,
-                                str(Path(_image(tmp_path / "images")).parent), device="cpu",
+                                str(Path(_image(tmp_path / "images" / UNDATED_BUCKET)).parent), device="cpu",
                                 tile=True, tile_size=TILE, conf=0.0)
     assert p.execution.tiled
     assert len(results) == 1
@@ -229,13 +232,21 @@ def test_run_inference_instance_seg_unset_tile_writes_tiled(instance_seg_ckpt, t
     from tcip_mcp.tools.inference_tools import run_inference
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     _image(images_dir)
-    r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), output_dir=str(tmp_path / "preds"),
+    r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), bucket="preds/2026-01-01",
                       device="cpu", stated=Stated(tile_size=TILE, conf=0.0))
     assert "error" not in r
     assert r["execution"]["tile_size"] == TILE
-    assert (Path(r["output_dir"]) / "img.json").is_file()
+    assert _document(r, images_dir) is not None
+
+
+def _document(published: dict, images_dir: Path):
+    """The key of ``img.png``'s document in the bucket a ``run_inference`` result names."""
+    from tcip_mcp.buckets import read_bucket
+
+    bucket = read_bucket(published["dataset_root"], published["bucket"])
+    return bucket.document_key("img")
 
 
 def test_a_masked_bucket_delivers_the_same_counts_on_every_read(instance_seg_ckpt, tmp_path):
@@ -249,22 +260,22 @@ def test_a_masked_bucket_delivers_the_same_counts_on_every_read(instance_seg_ckp
     from tests import _trait_fixtures as fx
     from tests._chain_fixtures import acknowledged
 
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     _image(images_dir)
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     fx.seed_confirmed_count(tmp_path)
-    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    ran = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), output_dir=str(bucket),
+    bucket = "baseline/2026-01-01"
+    ran = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), bucket=bucket,
                         device="cpu", stated=Stated(tile_size=TILE, conf=0.0))
     assert "error" not in ran, ran
 
-    refused = deliver_per_image_counts(tmp_path, str(bucket), str(tmp_path / "refused.csv"),
-                                       trait=fx.COUNT_TRAIT)
+    refused = deliver_per_image_counts(tmp_path, str(tmp_path), bucket,
+                                       str(tmp_path / "refused.csv"), trait=fx.COUNT_TRAIT)
     rows = []
     for name in ("a", "b"):
         out = tmp_path / f"{name}.csv"
         acknowledged(tmp_path, lambda ack: deliver_per_image_counts_csv(
-            tmp_path, bucket, str(out), trait=fx.COUNT_TRAIT, acknowledgment_id=ack,
+            tmp_path, tmp_path, bucket, str(out), trait=fx.COUNT_TRAIT, acknowledgment_id=ack,
             door="test_instance_seg", actor=None))
         rows.append([{k: v for k, v in r.items() if k != "delivery_event_id"}
                      for r in csv.DictReader(out.open(newline="", encoding="utf-8"))])
@@ -278,20 +289,18 @@ def test_run_inference_never_stamps_a_mask_threshold_into_annotation_attributes(
 ):
     """Annotation.attributes is the domain trait namespace, so no pass value lands there.
     Exercised on the tiled path, so the sliced (merged polygon) mask shape reaches export too."""
-    import json
+    import tcip_store
 
     from tcip_mcp.tools.inference_tools import run_inference
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     _image(images_dir)
-    out = tmp_path / "preds"
-    r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), output_dir=str(out), device="cpu",
-                      stated=Stated(tile_size=TILE, conf=0.0))  # force a (masked) detection
+    r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), bucket="preds/2026-01-01",
+                      device="cpu", stated=Stated(tile_size=TILE, conf=0.0))  # a masked detection
     assert "error" not in r
 
-    pred_json = json.loads((Path(r["output_dir"]) / "img.json").read_text())
-    for ann in pred_json["annotations"]:
+    for ann in tcip_store.read(_document(r, images_dir))["annotations"]:
         assert ann.get("attributes", {}) == {}  # never per-annotation
 
 
@@ -301,32 +310,30 @@ def test_run_inference_instance_seg_explicit_tile_true_writes_tiled(instance_seg
     from tcip_mcp.tools.inference_tools import run_inference
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     _image(images_dir)
-    out = tmp_path / "preds"
-    r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), output_dir=str(out), device="cpu",
-                      stated=Stated(tile=True, tile_size=TILE, conf=0.0))
+    r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), bucket="preds/2026-01-01",
+                      device="cpu", stated=Stated(tile=True, tile_size=TILE, conf=0.0))
     assert "error" not in r
-    assert (Path(r["output_dir"]) / "img.json").is_file()
+    assert _document(r, images_dir) is not None
 
 
 def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_ckpt, tmp_path):
     """The delivery-gating eval never consumed masks: it reads boxes/scores/labels only, so a
     tile-trained Mask R-CNN must still evaluate here instead of crashing on the mask refusal."""
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
+    from tests._producer_fixtures import label_image
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     _image(images_dir, "a.png")
-    labels_dir.mkdir(parents=True)
-    json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="stem", geometry=BBox(54, 54, 74, 74))], 128, 128)
+    label_image(images_dir / "a.png", [Annotation(subject="stem", geometry=BBox(54, 54, 74, 74))],
+                128, 128)
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     checkpoint = load_registered_checkpoint(instance_seg_ckpt, project=tmp_path)
-    r = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
+    r = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
                                   stated=Stated(tile_size=TILE, overlap=0.2))
     assert r["eval_regime"] == "full-frame-tiled-inference"
     assert r["scored_images"] == 1
@@ -342,11 +349,11 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_
 
 def _encoded(result: dict) -> tuple[list, int]:
     """``result`` encoded under :data:`LEAF` and read back, and the count it dropped."""
-    from tcip_annotation.json_io import annotations_from_bytes
+    from tcip_annotation.json_io import label_document
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
     data, dropped = encode_predictions(result, "model:fixture", scope=LEAF)
-    return annotations_from_bytes(data, source=result["image"]), dropped
+    return label_document(data).annotations, dropped
 
 
 def _mask_record(mask: np.ndarray) -> dict:

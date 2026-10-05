@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from collections import defaultdict
 
 import pytest
@@ -300,20 +302,20 @@ def test_stem_of_spatial_identity_passes_through_a_non_spatial_string():
 
 
 def test_label_document_extent_reads_the_frame_off_the_document_it_is_handed(tmp_path):
-    """The extent comes from the path a sample records, never from a name composed under a
-    directory: a split derived here reads the same file the loader will."""
+    """The extent is the frame the stored document records; a document stating none refuses
+    naming where it was read."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    labels_dir = tmp_path / "labels"
-    labels_dir.mkdir()
-    json_io.write_annotations(
-        str(labels_dir / "mosaic1.json"),
-        [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 4000, 3000,
-    )
-    assert label_document_extent(labels_dir / "mosaic1.json") == (4000, 3000)
-    with pytest.raises(json_io.UnreadableLabelDocument, match="missing.json"):
-        label_document_extent(labels_dir / "missing.json")
+    from tests._producer_fixtures import image_label_key, label_image
+
+    image = tmp_path / "images" / UNDATED_BUCKET / "mosaic1.png"
+    label_image(image, [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 4000, 3000)
+
+    stored = json_io.read_label_document(image_label_key(image))
+    assert label_document_extent(stored, "mosaic1") == (4000, 3000)
+    with pytest.raises(ValueError, match="frameless"):
+        label_document_extent(json_io.label_document({"annotations": []}), "frameless")
 
 
 # -- scope normalization ---------------------------------------------------------
@@ -327,16 +329,16 @@ def test_count_label_lines_counts_every_instance_of_the_subject_assessed_or_not(
     from tcip_mcp import subject_registry as cr
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.data.splits import count_label_lines
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import image_label_key, label_image, registry_over
 
-    labels_dir = tmp_path / "annotations"
-    labels_dir.mkdir()
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     registry_over(tmp_path, cr.SubjectRegistry(subjects=(cr.Subject(name="leaf", attributes=(
         cr.Attribute("condition", "categorical", ("healthy", "damaged")),)),)))
-    json_io.write_annotations(labels_dir / "a.json", [
+    label_image(images_dir / "a.png", [
         Annotation(subject="leaf", geometry=BBox(1, 1, 5, 5)),
         Annotation(subject="leaf", geometry=BBox(6, 6, 9, 9), attributes={"condition": "healthy"}),
         Annotation(subject="bush", geometry=BBox(10, 10, 20, 20))], 32, 32)
+    stored = json_io.read_label_document(image_label_key(images_dir / "a.png"))
 
-    assert count_label_lines(labels_dir / "a.json", registry_scope(labels_dir, "leaf")) == 2
+    assert count_label_lines(stored, registry_scope(images_dir, "leaf")) == 2
 

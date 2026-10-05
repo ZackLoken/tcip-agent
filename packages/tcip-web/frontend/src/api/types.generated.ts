@@ -156,7 +156,7 @@ export interface ProjectSummary {
   dates: string[];
   subjects: string[];
   subjects_by_date: Record<string, string[]>;
-  prediction_dirs: Record<string, Record<string, string>>;
+  buckets_by_date: Record<string, string[]>;
   image_count: number;
   is_open: boolean;
   label_problem: string | null;
@@ -180,6 +180,7 @@ export interface RenameRequest {
 
 export interface PhenologyPayload {
   mapping_name: string;
+  dataset_root: string;
   buckets: string[];
   trait: string;
   plants: string[];
@@ -194,6 +195,7 @@ export interface AcknowledgmentPayload {
 
 export interface ExportCsvPayload {
   mapping_name: string;
+  dataset_root: string;
   buckets: string[];
   trait: string;
   plants: string[];
@@ -206,13 +208,15 @@ export interface ExportCsvPayload {
 
 export interface PerImageCountDelivery {
   kind: "per_image_count";
-  predictions_dir: string;
+  dataset_root: string;
+  bucket: string;
   trait: string;
 }
 
 export interface OrthomosaicPlantCountsDelivery {
   kind: "orthomosaic_plant_counts";
-  predictions_dir: string;
+  dataset_root: string;
+  bucket: string;
   plant_registry: string;
   delivered_phenotype: string;
   plants: string[];
@@ -265,7 +269,8 @@ export interface PlantRegistryDisclosure {
 }
 
 export interface CanopySegmentsDocument {
-  path: string;
+  capture: string;
+  stem: string;
   sha256: string;
   subject: string;
   n_segments: number;
@@ -304,7 +309,8 @@ export interface Producer {
 }
 
 export interface BucketFinding {
-  path: string;
+  dataset_root: string;
+  bucket: string;
   date: string | null;
   assessment_id: string | null;
   validated: boolean;
@@ -423,10 +429,7 @@ export interface DatasetSelection {
   image_list: string[];
   current_image_index: number;
   images_dir: string | null;
-  annotations_dir: string | null;
-  predictions_dir: string | null;
-  label_paths: Record<string, string>;
-  prediction_paths: Record<string, string>;
+  bucket: string | null;
 }
 
 export interface ViewState {
@@ -451,9 +454,6 @@ export const GUI_STATE_DEFAULTS: GuiState = {
     "image_list": [],
     "current_image_index": 0,
     "images_dir": null,
-    "annotations_dir": null,
-    "predictions_dir": null,
-    "label_paths": {},
-    "prediction_paths": {}
+    "bucket": null
   }
 };

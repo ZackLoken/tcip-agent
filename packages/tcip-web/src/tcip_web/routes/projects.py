@@ -41,13 +41,12 @@ class ProjectSummary(BaseModel):
     dates: list[str]
     subjects: list[str]
     # Per-date availability: which subjects have labels / which buckets are published on each
-    # date (name to directory), so the pickers never offer a date with nothing there.
+    # date (by name), so the pickers never offer a date with nothing there.
     subjects_by_date: dict[str, list[str]]
-    prediction_dirs: dict[str, dict[str, str]]
+    buckets_by_date: dict[str, list[str]]
     image_count: int
     is_open: bool
-    # The first date's labels that would not read, naming the file; the project still lists, and
-    # its subjects_by_date reports that date empty rather than aborting the scan.
+    # The first date's labels that would not read, naming the documents; the project still lists.
     label_problem: str | None
 
 
@@ -72,7 +71,7 @@ def _summarize(project_dir: Path) -> ProjectSummary:
         dates=dates,
         subjects=dataset_layout.list_subjects(project_dir),
         subjects_by_date=subjects_by_date,
-        prediction_dirs=buckets_by_date(project_dir, dates),
+        buckets_by_date=buckets_by_date(project_dir, dates),
         image_count=image_count,
         is_open=record["id"] is not None and record["id"] == store.project_id,
         label_problem=label_problem,

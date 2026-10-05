@@ -1,9 +1,8 @@
-"""Per-image JSON: the on-disk label format of ground truth and predictions alike, one document
-per image holding every subject's annotations by name.
+"""The per-image document, ground truth or predictions, one record per image under its store key.
 
 Schema::
 
-    { "image": "<stem>", "width": W, "height": H,
+    { "width": W, "height": H,
       "annotations": [
         { "subject": "<subject>",
           "bbox": [x, y, w, h],                 # COCO xywh, pixel, a box only
@@ -18,11 +17,9 @@ Schema::
         { "rect": [x, y, w, h], "by": "user:breeder", "at": "...",
           "digest": "<the subject's annotations>", "proposals_hidden": false } ]} }
 
-A missing file reads as unannotated (``[]``), and so does an empty document
-(``{"annotations": []}``). A present document this format cannot make sense of (undecodable text, a
-non-dict document, an ``annotations`` that is not a list, a record :func:`annotation_of_record`
-refuses, or a completion mark :func:`completion_marks` refuses) raises
-:class:`UnreadableLabelDocument`. A record the writer stores is one the reader accepts.
+A stored value that is not this object (``null`` included), an ``annotations`` that is not a
+list, a record :func:`annotation_of_record` refuses or a completion mark :func:`completion_marks`
+refuses raises :class:`UnreadableLabelDocument` naming its key.
 """
 
 from __future__ import annotations
@@ -30,14 +27,12 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
-from pathlib import Path
-from typing import Literal, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
 import tcip_store
-from tcip_store import Version
+from tcip_store import Key, Version
 
 from tcip_annotation.state import (
     Annotation, BBox, Point, Polygon, bbox_of, is_detection, polygonal,
@@ -45,141 +40,13 @@ from tcip_annotation.state import (
 )
 
 ANNOTATIONS_KEY = "annotations"  # the one top-level list key
-LABEL_SUFFIX = ".json"
-"""The suffix of every per-image label and prediction document, stated once for every package."""
 _PROV_KEYS = ("created_by", "created_at", "accepted_by", "accepted_at")
-
-
-def _document_bytes(payload: dict) -> bytes:
-    """The exact on-disk bytes of one per-image document, encoded with ``allow_nan=False``."""
-    return json.dumps(payload, ensure_ascii=False, indent=1, allow_nan=False).encode("utf-8")
 
 
 class UnreadableLabelDocument(Exception):
     """A present label document this platform's readers cannot make sense of; not a
     :class:`ValueError` subclass.
     """
-
-
-def parse_json_document(text: str, *, source: str) -> dict:
-    """A JSON document's parsed dict, from its raw text: decode and dict-shape only.
-
-    Raises :class:`UnreadableLabelDocument`, naming ``source``, for text that does not decode as
-    JSON or that decodes to something other than a dict. Does not check the document's shape
-    (:func:`parse_label_document` does).
-    """
-    try:
-        data = json.loads(text)
-    except (json.JSONDecodeError, ValueError) as exc:
-        raise UnreadableLabelDocument(f"{source} does not decode as JSON: {exc}") from exc
-    if not isinstance(data, dict):
-        raise UnreadableLabelDocument(
-            f"{source} decodes to a {type(data).__name__}, not the object a label document is"
-        )
-    return data
-
-
-def is_dataset_level_document(data: dict) -> bool:
-    """Whether a parsed document carries a dataset-level COCO's keys (``images`` or
-    ``categories``) rather than being one image's label document."""
-    return "images" in data or "categories" in data
-
-
-def parse_label_document(text: str, *, source: str) -> dict:
-    """A per-image label document's parsed dict, from its raw text.
-
-    Raises :class:`UnreadableLabelDocument`, naming ``source``, for text that does not decode as
-    JSON, that decodes to something other than a dict (:func:`parse_json_document`), or that
-    carries a dataset-level COCO's keys.
-    """
-    data = parse_json_document(text, source=source)
-    if is_dataset_level_document(data):
-        raise UnreadableLabelDocument(
-            f"{source} is a dataset-level COCO document (an 'images' or 'categories' key), not a "
-            "per-image label document: convert it with import_coco"
-        )
-    return data
-
-
-def decode_document_bytes(data: bytes, *, source: str) -> str:
-    """A JSON document's bytes, decoded strictly as UTF-8 (``utf-8-sig``: a leading byte-order mark
-    accepted). Bytes that are not valid UTF-8 (a UTF-16 document, for instance) raise
-    :class:`UnreadableLabelDocument` naming ``source``.
-    """
-    try:
-        return data.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise UnreadableLabelDocument(f"{source} is not valid UTF-8: {exc}") from exc
-
-
-def read_document_bytes(path: str | Path) -> bytes:
-    """A present document's bytes, the one file read every document loader shares.
-
-    Raises :class:`UnreadableLabelDocument`, naming ``path``, when the file cannot be opened (a
-    missing file, a permission error, a directory where a file was expected).
-    """
-    p = Path(path)
-    try:
-        return p.read_bytes()
-    except OSError as exc:
-        raise UnreadableLabelDocument(f"{p} could not be opened: {exc}") from exc
-
-
-def load_label_document(path: str | Path) -> dict:
-    """A per-image label document's parsed dict, read from ``path``.
-
-    Raises :class:`UnreadableLabelDocument`, naming ``path``, for a file that will not open, bytes
-    that are not valid UTF-8, or contents :func:`parse_label_document` refuses.
-    """
-    source = str(path)
-    return parse_label_document(
-        decode_document_bytes(read_document_bytes(path), source=source), source=source)
-
-
-def annotations_from_bytes(data: bytes, *, source: str) -> list[Annotation]:
-    """The typed annotation records a label document's raw bytes hold: the shared decode,
-    :func:`parse_label_document`, then the record construction :func:`read_annotations` performs.
-    Raises :class:`UnreadableLabelDocument`, naming ``source``, for anything the file reader would
-    refuse.
-    """
-    return _annotations_of(parse_label_document(decode_document_bytes(data, source=source),
-                                                source=source))
-
-
-BUCKET_RECORD = "bucket.json"
-"""The one file a prediction bucket holds beside its per-image documents: the record of who
-produced them and how. It is never a per-image document."""
-
-
-def is_bucket_record(filename: str) -> bool:
-    """Whether ``filename`` names a bucket's own record, compared case-insensitively."""
-    return filename.lower() == BUCKET_RECORD
-
-
-def is_reserved_stem(stem: str) -> bool:
-    """Whether an image of stem ``stem`` would name its per-image document after a bucket's own
-    record, so that no such document can ever be written."""
-    return is_bucket_record(f"{stem}{LABEL_SUFFIX}")
-
-
-def prediction_documents(bucket: str | Path) -> list[Path]:
-    """Every per-image document in a prediction bucket, sorted, its record excluded. A missing or
-    non-directory ``bucket`` yields nothing.
-    """
-    d = Path(bucket)
-    if not d.is_dir():
-        return []
-    return sorted(f for f in d.glob(f"*{LABEL_SUFFIX}")
-                  if f.is_file() and not is_bucket_record(f.name))
-
-
-def _load(path: str) -> dict | None:
-    """The parsed document at ``path``, or ``None`` when there is no file there. A present file
-    that will not read raises :class:`UnreadableLabelDocument`.
-    """
-    if not os.path.exists(path):
-        return None
-    return load_label_document(path)
 
 
 def safe_score(x) -> float:
@@ -368,15 +235,16 @@ def annotation_of_record(o) -> Annotation:
     )
 
 
-def _annotations_of(data: dict | None) -> list[Annotation]:
-    """Parse a loaded per-image dict into :class:`Annotation` records.
+def _annotations_of(data: Any) -> list[Annotation]:
+    """Parse a stored per-image document into :class:`Annotation` records.
 
-    Raises :class:`UnreadableLabelDocument` for a document whose ``annotations`` is present but not
-    a list (covers it being absent or ``null`` too), and for any record
-    :func:`annotation_of_record` refuses, naming the record's index.
+    Raises :class:`UnreadableLabelDocument` for a document that is not an object (``null``
+    included), one whose ``annotations`` is not a list (covers it being absent or ``null`` too),
+    and for any record :func:`annotation_of_record` refuses, naming the record's index.
     """
-    if data is None:
-        return []
+    if not isinstance(data, dict):
+        raise UnreadableLabelDocument(f"is a {type(data).__name__}, not the object a label "
+                                      "document is")
     raw = data.get(ANNOTATIONS_KEY)
     if not isinstance(raw, list):
         raise UnreadableLabelDocument(
@@ -389,15 +257,6 @@ def _annotations_of(data: dict | None) -> list[Annotation]:
         except ValueError as exc:
             raise UnreadableLabelDocument(f"record {i} {exc}") from exc
     return out
-
-
-def annotations_of_document(document: dict) -> list[Annotation]:
-    """The typed annotation records a parsed per-image document holds, for a caller that already
-    parsed it (:func:`parse_label_document` or :func:`annotations_from_bytes`'s decode) and keeps
-    the document's own ``image``, ``width`` and ``height`` fields. Raises
-    :class:`UnreadableLabelDocument` for the same shapes :func:`_annotations_of` refuses.
-    """
-    return _annotations_of(document)
 
 
 # ── completion marks ───────────────────────────────────────────────────────
@@ -458,13 +317,13 @@ def _live(marks: Mapping[str, list[CompletionMark]],
     return live
 
 
-def completion_marks(data: dict | None,
+def completion_marks(data: dict,
                      annotations: list[Annotation]) -> dict[str, list[CompletionMark]]:
     """The live completion marks a parsed document holds, by subject: the ones whose digest still
     names that subject's ``annotations``. Raises :class:`UnreadableLabelDocument` naming the
     subject and index of a mark that is not a rect of four numbers, a person, a time, a digest and
     a ``proposals_hidden`` flag."""
-    raw = (data or {}).get(COMPLETION_KEY) or {}
+    raw = data.get(COMPLETION_KEY) or {}
     if not isinstance(raw, dict):
         raise UnreadableLabelDocument(f"{COMPLETION_KEY!r} is {raw!r}, not marks by subject")
     marks: dict[str, list[CompletionMark]] = {}
@@ -538,33 +397,69 @@ def annotations_hold_subject(annotations: Iterable[Annotation], subject: str) ->
     return any(a.subject == subject for a in annotations)
 
 
-def label_document(data: dict | None) -> LabelDocument:
-    """A parsed per-image document (``None`` for no document) as a :class:`LabelDocument`;
-    refuses as :func:`_annotations_of` and :func:`completion_marks` do."""
+def label_document(data: dict) -> LabelDocument:
+    """A stored per-image document as a :class:`LabelDocument`; refuses as
+    :func:`_annotations_of` and :func:`completion_marks` do."""
     annotations = _annotations_of(data)
-    return LabelDocument(annotations=annotations, width=(data or {}).get("width"),
-                         height=(data or {}).get("height"),
-                         marks=completion_marks(data, annotations))
+    return LabelDocument(annotations=annotations, width=data.get("width"),
+                         height=data.get("height"), marks=completion_marks(data, annotations))
+
+
+NO_DOCUMENT = LabelDocument(annotations=[], width=None, height=None, marks={})
+"""What :func:`read_document_versioned` answers for a key holding no record."""
 
 
 # ── reader ─────────────────────────────────────────────────────────────────
 
 
-def read_label_document(path) -> LabelDocument:
-    """The label document at ``path`` (:func:`label_document`), an empty one with no marks when
-    there is no file."""
-    return label_document(_load(str(path)))
+def document_at(key: Key, stored: tcip_store.Versioned) -> LabelDocument:
+    """``stored``, what the store answered for ``key``, as a :class:`LabelDocument`:
+    :data:`NO_DOCUMENT` at ``Version.ABSENT``, else its value decoded, a value
+    :func:`label_document` refuses raising :class:`UnreadableLabelDocument` naming ``key``."""
+    if stored.version == Version.ABSENT:
+        return NO_DOCUMENT
+    try:
+        return label_document(stored.value)
+    except UnreadableLabelDocument as exc:
+        raise UnreadableLabelDocument(
+            f"{key.store}{list(key.parts)} under {key.root}: {exc}") from exc
 
 
-def read_annotations(path) -> list[Annotation]:
-    return _annotations_of(_load(str(path)))
+def read_stored(key: Key, **default: Any) -> tcip_store.Versioned:
+    """The store's read of ``key`` (:func:`tcip_store.read_versioned`, ``default`` passed
+    through); a record that does not decode, and an absent one read with no default
+    (``NotFound``), raise :class:`UnreadableLabelDocument` with the store's own message."""
+    try:
+        return tcip_store.read_versioned(key, **default)
+    except (tcip_store.DecodeError, tcip_store.NotFound) as exc:
+        raise UnreadableLabelDocument(str(exc)) from exc
 
 
-def read_predictions(path) -> list[Annotation]:
+def read_document_versioned(key: Key) -> tuple[LabelDocument, Version]:
+    """The editor's read: the document ``key`` names (:func:`document_at`, :data:`NO_DOCUMENT`
+    where the store holds none) and the version it was read at. A record that does not decode
+    raises :class:`UnreadableLabelDocument` naming it."""
+    stored = read_stored(key, default=None)
+    return document_at(key, stored), stored.version
+
+
+def read_label_document(key: Key, version: str | None = None) -> LabelDocument:
+    """The document ``key`` names, read through the store's required read, at ``version`` (a
+    version token) when one is given. No record, another version, or a record that does not
+    decode raises :class:`UnreadableLabelDocument` naming it."""
+    stored = read_stored(key)
+    if version is not None and stored.version.token != version:
+        raise UnreadableLabelDocument(f"{key.store}{list(key.parts)} under {key.root} is at "
+                                      f"version {stored.version.token}, not {version}, the one "
+                                      "measured")
+    return document_at(key, stored)
+
+
+def read_predictions(key: Key) -> list[Annotation]:
     """A prediction document's records, each stating its ``score``: a record stating none raises
     :class:`UnreadableLabelDocument` naming it (:func:`~tcip_annotation.state.prediction_score`).
     """
-    annotations = read_annotations(path)
+    annotations = read_label_document(key).annotations
     for i, a in enumerate(annotations):
         try:
             prediction_score(a)
@@ -573,28 +468,11 @@ def read_predictions(path) -> list[Annotation]:
     return annotations
 
 
-def detection_annotations(path: str | Path) -> list[Annotation]:
-    """A prediction document's annotations narrowed to the detections a count counts
+def detection_annotations(annotations: Iterable[Annotation]) -> list[Annotation]:
+    """``annotations`` narrowed to the detections a count counts
     (:func:`~tcip_annotation.state.is_detection`: a crowd region and a ``Point`` excluded).
     """
-    return [a for a in read_annotations(str(path)) if is_detection(a)]
-
-
-def read_document_versioned(target: str | Path) -> tuple[LabelDocument, Version]:
-    """An image's label document (:func:`label_document`) and the version it was read at.
-
-    The token names exactly the bytes the client was shown. An absent document reads as an empty
-    one at ``Version.ABSENT``; a present document is told apart by the store's own version, never
-    by the bytes (a present document can be zero bytes long). A present document that will not
-    decode or will not parse raises :class:`UnreadableLabelDocument`, decoded through the same
-    strict policy as :func:`read_annotations`.
-    """
-    stored = tcip_store.read_blob_versioned(Path(target), default=b"")
-    if stored.version == Version.ABSENT:
-        return label_document(None), stored.version
-    source = str(target)
-    return label_document(parse_label_document(
-        decode_document_bytes(stored.value, source=source), source=source)), stored.version
+    return [a for a in annotations if is_detection(a)]
 
 
 # ── reference admissibility ────────────────────────────────────────────────
@@ -690,15 +568,14 @@ def provenance_facts(annotations: list[Annotation]) -> ProvenanceFacts:
     )
 
 
-def require_reference_ground_truth(documents: Iterable[str | Path]) -> None:
-    """Refuse the label ``documents`` as a measurement reference when only the model stands behind
-    them.
+def require_reference_ground_truth(annotations: list[Annotation]) -> None:
+    """Refuse the label documents' ``annotations`` as a measurement reference when only the model
+    stands behind them.
 
     Refuses on a record carrying a prediction ``score`` and on a record an agent authored as
     ground truth with no person's ``accepted_by``. Refuses the whole reference, never by dropping
     the offending records.
     """
-    annotations = [a for path in map(Path, documents) for a in read_annotations(path)]
     facts = provenance_facts(annotations)
     scored, total, agent_authored = facts.scored, facts.total, facts.machine_authored
     if scored:
@@ -759,7 +636,7 @@ def _rounded_rings(rings: list[list[tuple[float, float]]]) -> list[list[tuple[fl
 def geometry_extent_ok(geometry: BBox | Polygon) -> bool:
     """Whether ``geometry`` still has positive extent once written to its stored grid. A
     :class:`Polygon`'s vertices round to two decimals before its box is derived, the same order
-    :func:`write_annotations` stores them in.
+    :func:`document_payload` stores them in.
     """
     if polygonal(geometry):
         return stored_box_extent_ok(bbox_of(Polygon(_rounded_rings(geometry.rings))))
@@ -801,7 +678,7 @@ def client_annotation(a: Annotation) -> dict:
     """``a`` as the dict a client reads.
 
     ``bbox`` in corner form ``[x1, y1, x2, y2]``; ``rings`` for a polygon, every ring; ``point``
-    for a placed prompt or keypoint, the on-disk key; ``attributes``; ``score`` for a prediction;
+    for a placed prompt or keypoint, the stored key; ``attributes``; ``score`` for a prediction;
     ``iscrowd`` always stated; and the provenance fields the record holds
     (:func:`_held_provenance`).
     """
@@ -818,59 +695,44 @@ def client_annotation(a: Annotation) -> dict:
     return {**out, **_held_provenance(a)}
 
 
-def encode_annotations(target: str | Path, annotations, img_w: int, img_h: int, *,
-                       keep_empty: bool = False,
-                       marks: Mapping[str, list[CompletionMark]] | None = None,
-                       ) -> tuple[Path, bytes | None]:
-    """The document path ``target`` names and the exact bytes its per-image document holds.
-
-    The writer's one encoder, apart from the write so a caller placing several documents can
-    encode every one of them, and refuse on the first geometry the stored grid collapses
-    (``ValueError``), before any lands; a document of a reserved stem (:func:`is_reserved_stem`)
-    refuses the same way. Of ``marks`` it keeps each subject's whose digest still names that
-    subject's annotations here, so an edit of one subject's annotations drops that subject's marks
-    in the same write. ``None`` for the bytes when neither a record nor a mark survives and
-    ``keep_empty`` is not set: such a document is removed rather than written.
+def document_payload(annotations, width: int, height: int, *,
+                     keep_empty: bool = False,
+                     marks: Mapping[str, list[CompletionMark]] | None = None) -> dict | None:
+    """The record one image's per-image document holds: its frame, its annotations and, of
+    ``marks``, each subject's whose digest still names that subject's annotations here. Refuses
+    (``ValueError``) the first geometry the stored grid collapses. ``None`` when neither a record
+    nor a mark survives and ``keep_empty`` is not set.
     """
-    path = Path(target)
-    if is_reserved_stem(path.stem):
-        raise ValueError(f"{path.stem} would name its document after a prediction bucket's "
-                         "own record, so it can never have a per-image document.")
     annotations = list(annotations)
     records = [{**stored_content(a), **_held_provenance(a)} for a in annotations]
     live = _live(marks or {}, annotations)
     if not records and not live and not keep_empty:
-        return path, None
-    payload: dict = {"image": path.stem, "width": int(img_w), "height": int(img_h),
-                     ANNOTATIONS_KEY: records}
+        return None
+    payload: dict = {"width": int(width), "height": int(height), ANNOTATIONS_KEY: records}
     if live:
         payload[COMPLETION_KEY] = {
             subject: [{"rect": list(m.rect), "by": m.by, "at": m.at, "digest": m.digest,
                        "proposals_hidden": m.proposals_hidden} for m in held]
             for subject, held in sorted(live.items())}
-    return path, _document_bytes(payload)
+    return payload
 
 
-def write_annotations(target: str | Path, annotations, img_w: int, img_h: int, *,
-                      keep_empty: bool = False, expect: Version | None = None,
-                      marks: Mapping[str, list[CompletionMark]] | None = None,
-                      ) -> Version | None:
+def write_label_document(key: Key, annotations, width: int, height: int, *,
+                         keep_empty: bool = False, expect: Version | None = None,
+                         marks: Mapping[str, list[CompletionMark]] | None = None,
+                         ) -> Version | None:
     """Write all of an image's annotations, and the completion ``marks`` still live over them
-    (:func:`encode_annotations`), to its per-image JSON document at ``target``.
-
-    Empty list: ``keep_empty`` writes ``{"annotations": []}`` (unannotated until a human confirms
-    it), else removes the document.
-
-    ``expect`` is the version the caller read (:func:`tcip_store.read_blob_versioned`), turning the
-    write into a compare-and-set: anything that changed underneath raises ``VersionConflict`` and
-    nothing is written. Returns the new version, or ``None`` when the document was removed.
+    (:func:`document_payload`), as the document ``key`` names. An empty list writes an empty
+    document under ``keep_empty``, else removes the document. ``expect`` (a version
+    :func:`read_document_versioned` answered) makes the write a compare-and-set raising
+    ``VersionConflict`` with nothing written. Returns the new version, or ``None`` when the
+    document was removed.
     """
-    path, data = encode_annotations(target, annotations, img_w, img_h, keep_empty=keep_empty,
-                                    marks=marks)
-    if data is None:
-        tcip_store.delete_blob(path, expect=expect)
+    payload = document_payload(annotations, width, height, keep_empty=keep_empty, marks=marks)
+    if payload is None:
+        tcip_store.delete(key, expect=expect)
         return None
-    return tcip_store.put_blob(path, data, expect=expect)
+    return tcip_store.replace(key, payload, expect=expect)
 
 
 # ── attribute values as ids ──────────────────────────────────────────────────

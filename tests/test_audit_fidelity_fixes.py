@@ -4,17 +4,20 @@ carry model provenance, and stratified splits count JSON objects, not JSON lines
 
 from __future__ import annotations
 
-import json
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 import pytest
 from PIL import Image
 
+import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 
+from tests._producer_fixtures import image_label_key, label_image
+
 
 def _img(tmp_path, name="IMG_0001.JPG", size=(100, 80)):
-    p = tmp_path / "images" / name
+    p = tmp_path / "images" / UNDATED_BUCKET / name
     p.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", size).save(p)
     return p
@@ -22,17 +25,15 @@ def _img(tmp_path, name="IMG_0001.JPG", size=(100, 80)):
 
 def test_mcp_save_annotations_empty_writes_the_empty_document_the_route_writes(tmp_path):
     """An empty save writes an empty label document through the one save both label doors call:
-    the file stays, holding nothing, never deleted."""
+    the document stays, holding nothing, never deleted."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     img = _img(tmp_path)
-    det = tmp_path / "det.json"
-    json_io.write_annotations(det, [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
-                              100, 80)  # existing GT
-    res = save_annotations(tmp_path, tmp_path.parent, str(img), annotations=[], path=str(det))
-    assert res == {"written": [str(det)], "count": 0}
-    assert det.is_file()
-    assert json_io.read_annotations(det) == []
+    label_image(img, [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 100, 80)
+    res = save_annotations(tmp_path, tmp_path.parent, str(img), annotations=[])
+    assert res == {"capture": "undated", "written": [img.stem], "count": 0}
+    assert ts.read(image_label_key(img), default=None) is not None
+    assert json_io.read_label_document(image_label_key(img)).annotations == []
 
 
 @pytest.mark.parametrize("bad", ["a bur", {"bbox": [1, 1, 5, 5]}, {"subject": ""}],
@@ -43,12 +44,10 @@ def test_mcp_save_annotations_refuses_by_index_through_the_decoders_checks(tmp_p
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     img = _img(tmp_path)
-    det = tmp_path / "det.json"
     res = save_annotations(tmp_path, tmp_path.parent, str(img),
-                           annotations=[{"subject": "bur", "bbox": [1, 1, 5, 5]}, bad],
-                           path=str(det))
+                           annotations=[{"subject": "bur", "bbox": [1, 1, 5, 5]}, bad])
     assert res["error"].startswith("annotation 1 ")
-    assert not det.exists()
+    assert ts.read(image_label_key(img), default=None) is None
 
 
 def test_encode_predictions_stamps_model_provenance(tmp_path):
@@ -59,7 +58,7 @@ def test_encode_predictions_stamps_model_provenance(tmp_path):
         {"image": "pred.jpg", "width": 100, "height": 80,
          "boxes": [[10, 10, 30, 30]], "scores": [0.9], "labels": [1]},
         created_by="model:best_bud", scope=registry_scope(tmp_path, "bud"))
-    obj = json.loads(data)["annotations"][0]
+    obj = data["annotations"][0]
     assert obj["created_by"] == "model:best_bud"
     assert obj["created_at"]
     assert obj["score"] == pytest.approx(0.9)
@@ -71,20 +70,16 @@ def test_draw_splits_counts_json_objects_not_lines(tmp_path):
 
     from tests._producer_fixtures import mark_complete
 
-    for i in range(4):
-        _img(tmp_path, name=f"img_{i}.JPG")
-    labels = tmp_path / "annotations"
-    labels.mkdir(parents=True)
+    images = [_img(tmp_path, name=f"img_{i}.JPG") for i in range(4)]
 
     def _box() -> Annotation:
         return Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))
 
-    json_io.write_annotations(labels / "img_0.json", [_box(), _box(), _box()], 100, 80)
-    json_io.write_annotations(labels / "img_1.json", [_box()], 100, 80)
-    for negative in ("img_2", "img_3"):
-        json_io.write_annotations(labels / f"{negative}.json", [], 100, 80, keep_empty=True)
-        mark_complete(tmp_path / "images" / f"{negative}.JPG", labels / f"{negative}.json", "bud",
-                      project=tmp_path)
+    label_image(images[0], [_box(), _box(), _box()], 100, 80)
+    label_image(images[1], [_box()], 100, 80)
+    for negative in images[2:]:
+        label_image(negative, [], 100, 80, keep_empty=True)
+        mark_complete(negative, "bud", project=tmp_path)
 
     res = draw_splits(tmp_path, str(tmp_path), train_ratio=0.5, val_ratio=0.5, calibration_ratio=0.0,
                       group_by="stem", subject="bud")

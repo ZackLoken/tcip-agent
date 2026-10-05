@@ -128,7 +128,8 @@ def test_an_unfinished_inference_job_refuses_the_removal(client, tmp_path):
     ws = tmp_path.parent
     project, project_id = _project(ws, "valley_block", "Valley block")
     job = inference.InferenceJob(job_id="job-live", actor="user:tester", project=str(project),
-                                 checkpoint_path="m.pt", images_dir="images", output_dir="out",
+                                 checkpoint_path="m.pt", dataset_root="ds",
+                                 images_dir="ds/images", bucket="out/2026-01-01",
                                  status="running")
     inference._registry.register(job.job_id, job)
     try:

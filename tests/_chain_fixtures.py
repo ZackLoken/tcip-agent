@@ -1,11 +1,6 @@
-"""The measurement chain's producers, for any test that needs a real assessment or a real bucket:
-ingest a synthetic capture, draw a reference selection, train a tiny detector on it, confirm the
-count trait, assess the checkpoint and publish its predictions under the assessment.
-
-Every record here is made by the platform's own function, never written by hand. The model is
-tiny and its predictions are stable (one bright square per frame, found at conf 0.5), so the
-chain runs in seconds and a test built on it measures the platform, not a fit.
-"""
+"""The measurement chain's producers: ingest a synthetic capture, draw a reference selection,
+train a tiny detector on it (one bright square per frame, found at conf 0.5), confirm the count
+trait, assess the checkpoint and publish its predictions under the assessment."""
 
 from __future__ import annotations
 
@@ -14,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 
 IMG = 64
@@ -33,12 +27,13 @@ def object_at(index: int) -> tuple[int, int, int]:
     return x0, y0, size
 
 
-def synthetic_capture(root: Path, *, date: str = DATE) -> tuple[Path, Path]:
+def synthetic_capture(root: Path, *, date: str = DATE) -> Path:
     """Ingest one capture date of dim frames through ``ingest_images``, each holding one bright
-    square its label names; ``(images_dir, labels_dir)``."""
+    square its label document names; the capture's image directory."""
     from PIL import Image, ImageDraw
 
     from tcip_mcp.tools.ingest_tools import ingest_images
+    from tests._producer_fixtures import label_image
 
     raw = root.parent / f"raw-{date}"
     raw.mkdir(parents=True, exist_ok=True)
@@ -54,14 +49,13 @@ def synthetic_capture(root: Path, *, date: str = DATE) -> tuple[Path, Path]:
     assert "error" not in ingested, ingested
     assert ingested["copied"] == len(STEMS), ingested
 
-    images_dir, labels_dir = root / "images" / date, root / "annotations" / date
-    labels_dir.mkdir(parents=True, exist_ok=True)
+    images_dir = root / "images" / date
     for index, stem in enumerate(STEMS):
         x0, y0, size = object_at(index)
-        json_io.write_annotations(
-            str(labels_dir / f"{stem}.json"),
-            [Annotation(subject=SUBJECT, geometry=BBox(x0, y0, x0 + size, y0 + size))], IMG, IMG)
-    return images_dir, labels_dir
+        label_image(images_dir / f"{stem}.png",
+                    [Annotation(subject=SUBJECT, geometry=BBox(x0, y0, x0 + size, y0 + size))],
+                    IMG, IMG)
+    return images_dir
 
 
 def draw_reference_selection(project: Path, root: Path, out: Path):
@@ -134,33 +128,40 @@ def assess(project: Path, checkpoint_path: str, selection_dir: Path, *,
 
 @dataclass
 class Chain:
-    """What one run of the flow leaves behind, for a test to deliver from or disturb."""
+    """What one run of the flow leaves behind, for a test to deliver from or disturb: ``bucket``
+    is the name its predictions are published under ``root``."""
 
     root: Path
     images_dir: Path
-    labels_dir: Path
     selection_dir: Path
     checkpoint_path: str
     assessment: dict
-    bucket: Path
+    bucket: str
     published: dict
 
+    def read(self):
+        """The chain's published bucket, as its record states it."""
+        from tcip_mcp.buckets import read_bucket
 
-def unassessed_bucket(project: Path, *, experiment_id: str, bucket_name: str = "plain") -> Path:
+        return read_bucket(self.root, self.bucket)
+
+
+def unassessed_bucket(project: Path, *, experiment_id: str, bucket_name: str = "plain"):
     """A bucket published under no assessment: ingest, draw, train and publish under ``project``;
-    the bucket's directory."""
+    the bucket."""
+    from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
 
     root = project / "ds"
-    images_dir, _labels_dir = synthetic_capture(root)
+    images_dir = synthetic_capture(root)
     selection_dir = project / "selection"
     draw_reference_selection(project, root, selection_dir)
     checkpoint_path = train_on(selection_dir, project, experiment_id)
-    bucket = root / "predictions" / bucket_name / DATE
+    bucket = f"{bucket_name}/{DATE}"
     published = run_inference(project, checkpoint_path=checkpoint_path,
-                              images_dir=str(images_dir), output_dir=str(bucket))
+                              images_dir=str(images_dir), bucket=bucket)
     assert "error" not in published, published
-    return bucket
+    return read_bucket(root, bucket)
 
 
 def acknowledged(project: Path, deliver: Callable[[str | None], Any], *,
@@ -188,11 +189,10 @@ def deliver_acknowledged(project: Path, results: list[dict], out: Path, delivere
     """``deliver_per_plant_aggregate`` of ``results``' plants over ``buckets`` (by default a bucket
     published under no assessment, :func:`unassessed_bucket`), shipped unvalidated under the
     breeder's acknowledgment (:func:`acknowledged`)."""
-    from tcip_mcp.buckets import read_bucket
     from tcip_mcp.pipelines.postprocessing.aggregation import deliver_per_plant_aggregate
 
     delivered = buckets if buckets is not None else [
-        read_bucket(unassessed_bucket(project, experiment_id="exp-acknowledged"))]
+        unassessed_bucket(project, experiment_id="exp-acknowledged")]
     return acknowledged(project, lambda ack: deliver_per_plant_aggregate(
         project, results, str(out), delivered_phenotype=delivered_phenotype,
         delivery_kind=delivery_kind, buckets=delivered,
@@ -200,11 +200,11 @@ def deliver_acknowledged(project: Path, results: list[dict], out: Path, delivere
         actor=None, **kwargs))
 
 
-def predicted(stem: str, values: list[str], attributes: tuple = ()) -> dict:
-    """One predictor result for the image ``<stem>.png``: a detection of the subject per entry of
+def predicted(image: Path, values: list[str], attributes: tuple = ()) -> dict:
+    """One predictor result for the image at ``image``: a detection of the subject per entry of
     ``values``, each carrying that value's id under the first of ``attributes`` (the scope's
     attribute records) and the first value of every other; no ``attributes`` row for none."""
-    result = {"image": f"{stem}.png", "width": IMG, "height": IMG,
+    result = {"image": str(image), "width": IMG, "height": IMG,
               "boxes": [[4.0 * k, 0.0, 4.0 * k + 3.0, 3.0] for k in range(len(values))],
               "scores": [0.9] * len(values), "labels": [1] * len(values)}
     if attributes:
@@ -213,12 +213,13 @@ def predicted(stem: str, values: list[str], attributes: tuple = ()) -> dict:
     return result
 
 
-def published(project: Path, out: Path, results: list[dict], *, scope: dict,
+def published(project: Path, name: str, results: list[dict], *, scope: dict,
               registry: Any = None, raster_path: Path | None = None) -> Any:
-    """``results`` published as the bucket ``out`` (:func:`~tcip_mcp.buckets.publish`), under the
-    untiled pass a registered checkpoint stating ``scope`` runs (its frames' dataset declaring
-    ``registry``), over the raster ``raster_path`` when one is named; the bucket."""
-    from tcip_mcp.buckets import pass_documents, publish
+    """``results`` published as the bucket named ``name`` (:func:`~tcip_mcp.buckets.publish`)
+    under their images' dataset root, under the untiled pass a registered checkpoint stating
+    ``scope`` runs (its frames' dataset declaring ``registry``), over the raster ``raster_path``
+    when one is named; the bucket."""
+    from tcip_mcp.buckets import pass_documents, publish, source_root
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.data.split_construction import raster_identity
     from tcip_mcp.pipelines.execution import Stated, prepare_pass
@@ -232,7 +233,8 @@ def published(project: Path, out: Path, results: list[dict], *, scope: dict,
     identity = (decode_value(encode_record(raster_identity(raster_path)))
                 if raster_path is not None else None)
     p = prepare_pass(checkpoint, Stated(tile=False))
-    return publish(project, out, pass_documents(p, results), producer=checkpoint.producer,
+    root = source_root([raster_path] if raster_path is not None else [r["image"] for r in results])
+    return publish(project, root, name, pass_documents(p, results), producer=checkpoint.producer,
                    scope=p.scope, execution=p.execution,
                    raster_path=str(raster_path) if raster_path is not None else None,
                    raster_identity=identity, assessment_id=None, actor=None)
@@ -309,7 +311,7 @@ def confirm_crossing_trait(project_root: Path, **fields: Any):
 @dataclass
 class Series:
     """What the attributed chain leaves behind: its dataset, the checkpoint, the assessment (when
-    one was run), the plant mapping and one published bucket per date."""
+    one was run), the plant mapping and the name of one published bucket per date."""
 
     root: Path
     checkpoint_path: str
@@ -321,7 +323,8 @@ class Series:
     def body(self, **extra: Any) -> dict:
         """The request body a phenology door takes over this series."""
         return {"mapping_name": self.mapping_name, "trait": self.trait,
-                "buckets": list(self.buckets.values()), "plants": list(PLANTS), **extra}
+                "dataset_root": str(self.root), "buckets": list(self.buckets.values()),
+                "plants": list(PLANTS), **extra}
 
 
 def deliver_milestones(project: Path, body: dict, out_csv: Path) -> dict:
@@ -331,7 +334,8 @@ def deliver_milestones(project: Path, body: dict, out_csv: Path) -> dict:
 
     return deliver_phenology_milestones(
         project, trait=body["trait"], mapping_name=body["mapping_name"], plants=body["plants"],
-        buckets=body["buckets"], output_csv_path=str(out_csv))
+        dataset_root=body["dataset_root"], buckets=body["buckets"],
+        output_csv_path=str(out_csv))
 
 
 def attributed_series(
@@ -361,6 +365,7 @@ def attributed_series(
     from tcip_mcp.traits import registered_crops
     from tests._image_fixtures import write_geo_image
     from tests._mapping_fixtures import register_plant_registry_for
+    from tests._producer_fixtures import label_image
     from tests._verified_checkpoint_fixtures import worker_run
     from tests._web_fixtures import open_new_project
 
@@ -392,10 +397,8 @@ def attributed_series(
                             when + timedelta(hours=2, minutes=index), blob_frame(frame_values, index))
         ingested = ingest_images(root, source=str(capture), date_from=date)
         assert "error" not in ingested, ingested
-        labels_dir = root / "annotations" / date
-        labels_dir.mkdir(parents=True, exist_ok=True)
         for stem, (index, frame_values) in labeled.items():
-            json_io.write_annotations(str(labels_dir / f"{stem}.json"), [
+            label_image(root / "images" / date / f"{stem}.jpg", [
                 Annotation(subject=SUBJECT, geometry=box, attributes={
                     a.name: value if a.name == ATTRIBUTE else a.values[(index + k) % len(a.values)]
                     for a in attributes})
@@ -427,13 +430,12 @@ def attributed_series(
 
     predictions: dict[str, str] = {}
     for date in dates:
-        out = root / "predictions" / "series" / date
         published = run_inference(
             project, checkpoint_path=checkpoint_path, images_dir=str(root / "images" / date),
-            output_dir=str(out), stated=stated,
+            bucket=f"series/{date}", stated=stated,
             assessment_id=assessment["assessment_id"] if assessment else None)
         assert "error" not in published, published
-        predictions[date] = str(out)
+        predictions[date] = f"series/{date}"
 
     plants_csv = raw / "plants.csv"
     plants_csv.write_text(
@@ -453,7 +455,7 @@ def run_the_chain(project: Path, *, experiment_id: str, bucket_name: str = "chai
     from tcip_mcp.tools.inference_tools import run_inference
 
     root = project / "ds"
-    images_dir, labels_dir = synthetic_capture(root)
+    images_dir = synthetic_capture(root)
     selection_dir = project / "selection"
     draw_reference_selection(project, root, selection_dir)
     checkpoint_path = train_on(selection_dir, project, experiment_id)
@@ -463,10 +465,9 @@ def run_the_chain(project: Path, *, experiment_id: str, bucket_name: str = "chai
     assert "error" not in assessment, assessment
     assert assessment["passed"] is True, assessment["failures"]
 
-    bucket = root / "predictions" / bucket_name / DATE
+    bucket = f"{bucket_name}/{DATE}"
     published = run_inference(
         project, checkpoint_path=checkpoint_path, images_dir=str(images_dir),
-        output_dir=str(bucket), assessment_id=assessment["assessment_id"])
+        bucket=bucket, assessment_id=assessment["assessment_id"])
     assert "error" not in published, published
-    return Chain(root, images_dir, labels_dir, selection_dir, checkpoint_path, assessment,
-                 bucket, published)
+    return Chain(root, images_dir, selection_dir, checkpoint_path, assessment, bucket, published)

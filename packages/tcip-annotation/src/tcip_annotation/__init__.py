@@ -1,4 +1,4 @@
-"""Headless annotation library: canonical name-based per-image JSON labels, and a COCO reader."""
+"""Headless annotation library."""
 
 from tcip_annotation.state import (
     Annotation,
@@ -6,11 +6,6 @@ from tcip_annotation.state import (
     Point,
     Polygon,
     bbox_of,
-)
-# Label I/O is the canonical per-image JSON (json_io); a dataset-level COCO is only ever read.
-from tcip_annotation.json_io import (
-    read_annotations,
-    write_annotations,
 )
 from tcip_annotation.format_io import parse_coco_annotations
 from tcip_annotation.matching import point_in_polygon
@@ -24,9 +19,6 @@ __all__ = [
     "Point",
     "Polygon",
     "bbox_of",
-    # Canonical per-image JSON: the platform's native on-disk label format (primary read/write path)
-    "read_annotations",
-    "write_annotations",
     # An external COCO document's records (import only)
     "parse_coco_annotations",
     "point_in_polygon",

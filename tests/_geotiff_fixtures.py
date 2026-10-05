@@ -1,8 +1,4 @@
-"""The one GeoTIFF-writing helper every suite that needs a real (or deliberately incomplete or
-rotated) georeferenced raster on disk imports, so test_orthomosaic_mapping.py,
-test_orthomosaic_tools.py and test_segment_attribution.py never drift into slightly different
-recipes for "the same" fixture.
-"""
+"""GeoTIFF writers: a real, deliberately incomplete or rotated georeferenced raster on disk."""
 
 from __future__ import annotations
 
@@ -86,13 +82,7 @@ def write_canonical_dataset_raster(
     width: int = 64, height: int = 64, crop: str = "chestnut", channels: int = 3,
 ) -> Path:
     """A georeferenced raster at ``<dataset_root>/images/<date>/<stem>.tif``, its dataset
-    registered (``register_dataset``), so its own label document resolves through
-    ``annotation_path_for_image`` and its identity is a real, registered one.
-
-    The one canonical-position raster fixture every canopy-segment and whole-raster delivery
-    test that needs a registered dataset behind its raster builds through, so none of them
-    re-derives the layout by hand.
-    """
+    registered (``register_dataset``) under ``crop``; the raster's path."""
     from tcip_mcp.tools.project_tools import register_dataset
 
     raster_path = dataset_root / "images" / date / f"{stem}.tif"

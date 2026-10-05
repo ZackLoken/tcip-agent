@@ -4,6 +4,8 @@ never survives an untiled run."""
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 import pytest
@@ -69,20 +71,19 @@ def test_stamp_untiled_run_replaces_tiling_record_wholesale():
 def _detection_dataset(tmp_path, sizes):
     """A real DetectionDataset over tiny generated images, one per (width, height) in sizes."""
     from PIL import Image
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
 
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
+    from tests._producer_fixtures import label_image
+
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     registry_over(tmp_path, SubjectRegistry((Subject("bud"),)))
     for i, (w, h) in enumerate(sizes):
         Image.new("RGB", (w, h)).save(images_dir / f"img{i}.png")
-        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], w, h)
-    return dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
+        label_image(images_dir / f"img{i}.png",
+                    [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], w, h)
+    return dataset_over('detection', str(images_dir), subject="bud")
 
 
 def test_stamp_untiled_uniform_frames_record_train_native_size(tmp_path):
@@ -141,8 +142,7 @@ def _base_config(tiling, project: Path):
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(project / "imgs"), "labels_dir": str(project / "lbls"),
-                 "tiling": tiling},
+        "data": {"images_dir": str(project / "imgs"), "tiling": tiling},
         "batch_size": 2, "evaluation": {"selection_metric": "loss"},
     }
 

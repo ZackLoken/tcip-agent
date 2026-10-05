@@ -11,16 +11,13 @@ from tcip_mcp.tools.project_tools import archive_project, import_project
 
 def _project(tmp_path: Path) -> Path:
     """A minimal project: one image, one label, and the registry that decodes it."""
-    from tcip_annotation import json_io
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import label_image, registry_over
 
     root = tmp_path / "project"
     (root / "images" / "2026-03-04").mkdir(parents=True)
     (root / "images" / "2026-03-04" / "a_1.jpg").write_bytes(b"\xff\xd8\xff")
-    (root / "annotations" / "2026-03-04").mkdir(parents=True)
-    json_io.write_annotations(
-        str(root / "annotations" / "2026-03-04" / "a_1.json"), [], 10, 10, keep_empty=True)
+    label_image(root / "images" / "2026-03-04" / "a_1.jpg", [], 10, 10, keep_empty=True)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     return root
 
@@ -125,11 +122,15 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
     assert "error" not in imported, imported
     assert imported["files_extracted"] == exported["files_added"]
 
+    from tcip_annotation.json_io import read_label_document
+    from tcip_mcp.dataset_layout import label_key
+
     status = inspect_project(dest)
     assert status["display_name"] == "Source project"
-    assert (dest / "annotations" / "2026-03-04" / "a_1.json").is_file()
-
     date = "2026-03-04"
+    assert read_label_document(label_key(dest.resolve(), date, "a_1")) == read_label_document(
+        label_key(src.resolve(), date, "a_1"))
+    assert read_label_document(label_key(dest.resolve(), date, "a_1")).annotations
     restored_images = dest / "images" / date
     restored_manifest = restored_images / manifest.name
     assert restored_manifest.is_file()
@@ -160,19 +161,16 @@ def _populate_project(src: Path) -> tuple[Path, Path]:
     """
     from PIL import Image
 
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import label_image, registry_over
 
     date = "2026-03-04"
     images = src / "images" / date
-    labels = src / "annotations" / date
     images.mkdir(parents=True)
-    labels.mkdir(parents=True)
     Image.new("RGB", (32, 32)).save(images / "a_1.jpg")
-    json_io.write_annotations(
-        str(labels / "a_1.json"), [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
+    label_image(images / "a_1.jpg", [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
+                32, 32)
     registry_over(src, SubjectRegistry(subjects=(Subject(name="bud"),)))
 
     # A multispectral capture written one file per band: the manifest beside the bands is what

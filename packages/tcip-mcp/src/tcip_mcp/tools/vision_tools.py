@@ -1,8 +1,5 @@
-"""Vision tools: render annotations and predictions for visual analysis.
-
-Each tool saves a rendered image under the project's ``.tcip/artifacts/viz/`` and returns the path
-so the agent can call its client's own image-capable read tool on it to visually inspect it.
-"""
+"""Vision tools: render annotations and predictions to an image under the project's
+``.tcip/artifacts/viz/`` and return its path."""
 
 from __future__ import annotations
 
@@ -15,8 +12,9 @@ import tcip_store as ts
 
 from tcip_annotation import Annotation, Point, bbox_of
 from tcip_annotation.state import box_derivable, polygonal, prediction_score
-from tcip_annotation.json_io import UnreadableLabelDocument, read_predictions
-from tcip_annotation.json_io import read_annotations as read_labels
+from tcip_annotation.json_io import (
+    UnreadableLabelDocument, read_document_versioned, read_label_document, read_predictions,
+)
 from tcip_annotation.viz import (
     render_canvas_state,
     render_comparison,
@@ -220,7 +218,7 @@ def visualize(
     conf_threshold: float = REVIEW_CONF_FLOOR,
     iou_threshold: float = 0.5,
     n: int = 16,
-    predictions_dir: str = "",
+    bucket: str = "",
 ) -> dict:
     """Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid.
 
@@ -243,8 +241,8 @@ def visualize(
             'predictions' = model predictions on a single image (path = image file);
             'comparison'  = GT (green) vs predictions (red) with TP/FP/FN match stats
             (path = image file);
-            'dataset'     = grid of n random annotated samples (path = dataset folder
-            containing images/ and labels/).
+            'dataset'     = grid of n random annotated samples (path = dataset root folder
+            containing images/).
         path: Image file (annotations/predictions/comparison) or dataset folder (dataset).
         task: 'detect' or 'segment'.
         class_names: Comma-separated class names (e.g. "fruit,shoot").
@@ -253,21 +251,22 @@ def visualize(
             filter ``matching.REVIEW_CONF_FLOOR``.
         iou_threshold: IoU threshold for a positive match (source='comparison' only).
         n: Number of samples in the grid (source='dataset' only).
-        predictions_dir: The published bucket whose document for the image is rendered
-            (source='predictions' and 'comparison', where it is required).
+        bucket: The name of the bucket, published under the image's dataset root, whose document
+            for the image is rendered (source='predictions' and 'comparison', where it is
+            required).
     """
     if source == "annotations":
         return _viz_annotations(project, path, task=task, class_names=class_names)
-    if source in ("predictions", "comparison") and not predictions_dir:
-        return {"error": f"source={source!r} requires predictions_dir, the published bucket "
-                         "whose predictions to render."}
+    if source in ("predictions", "comparison") and not bucket:
+        return {"error": f"source={source!r} requires bucket, the published bucket whose "
+                         "predictions to render."}
     if source == "predictions":
         return _viz_predictions(
-            project, path, predictions_dir, task=task, class_names=class_names,
+            project, path, bucket, task=task, class_names=class_names,
             conf_threshold=conf_threshold)
     if source == "comparison":
         return _viz_comparison(
-            project, path, predictions_dir, task=task, iou_threshold=iou_threshold,
+            project, path, bucket, task=task, iou_threshold=iou_threshold,
             class_names=class_names, conf_threshold=conf_threshold)
     if source == "dataset":
         return _viz_dataset_sample(project, path, n=n, task=task, class_names=class_names)
@@ -277,6 +276,14 @@ def visualize(
     }
 
 
+def _image_labels(image_path: str | Path) -> list[Annotation] | None:
+    """The annotations of ``image_path``'s own label document, ``None`` when it has none."""
+    from tcip_mcp.dataset_layout import label_key_of
+
+    document, version = read_document_versioned(label_key_of(image_path))
+    return None if version == ts.Version.ABSENT else document.annotations
+
+
 def _viz_annotations(
     project: Path,
     image_path: str,
@@ -284,21 +291,16 @@ def _viz_annotations(
     class_names: str = "",
 ) -> dict:
     """Render ground-truth annotations on a single image."""
-    from tcip_mcp.dataset_layout import find_gt_label
-
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    stem = img.stem
-    label_path = find_gt_label(image_path)
-    if label_path is None:
-        return {"error": f"No labels found for {stem}"}
-
     try:
-        anns = read_labels(str(label_path))
-    except UnreadableLabelDocument as exc:
+        anns = _image_labels(image_path)
+    except (UnreadableLabelDocument, ValueError) as exc:
         return {"error": str(exc)}
+    if anns is None:
+        return {"error": f"No labels found for {img.stem}"}
     idx, index = _subject_indexer()
 
     n_points = _n_points(anns)
@@ -332,20 +334,21 @@ def _viz_annotations(
     }
 
 
-def _bucket_document(project: Path, predictions_dir: str, image_path: str):
-    """``(document path or None, class scope)`` for ``image_path`` in the published bucket at
-    ``predictions_dir``; a directory that is no bucket, or whose record will not read, refuses
+def _bucket_document(bucket: str, image_path: str):
+    """``(document key or None, class scope)`` for ``image_path`` in the bucket named ``bucket``
+    under the image's dataset root; no such bucket, or one whose record will not read, refuses
     (``ValueError``)."""
     from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.dataset_layout import parse_image_path
 
-    bucket = read_bucket(Path(project, predictions_dir))
-    return bucket.document(image_path), bucket.scope
+    found = read_bucket(parse_image_path(image_path)[0], bucket)
+    return found.document_key(Path(image_path).stem), found.scope
 
 
 def _viz_predictions(
     project: Path,
     image_path: str,
-    predictions_dir: str,
+    bucket: str,
     task: str = "detect",
     class_names: str = "",
     conf_threshold: float = 0.0,
@@ -360,10 +363,10 @@ def _viz_predictions(
         return {"error": f"Image not found: {image_path}"}
 
     try:
-        pred_file, scope = _bucket_document(project, predictions_dir, image_path)
-        if pred_file is None:
-            return {"error": f"No predictions found for {img.stem} in {predictions_dir}"}
-        preds = read_predictions(str(pred_file))
+        pred_key, scope = _bucket_document(bucket, image_path)
+        if pred_key is None:
+            return {"error": f"No predictions found for {img.stem} in bucket {bucket!r}"}
+        preds = read_predictions(pred_key)
     except (UnreadableLabelDocument, ValueError) as exc:
         return {"error": str(exc)}
     preds = [a for a in preds if prediction_score(a) >= conf_threshold]
@@ -398,7 +401,7 @@ def _viz_predictions(
 def _viz_comparison(
     project: Path,
     image_path: str,
-    predictions_dir: str,
+    bucket: str,
     task: str = "detect",
     iou_threshold: float = 0.5,
     class_names: str = "",
@@ -414,7 +417,6 @@ def _viz_comparison(
     """
     from tcip_annotation.matching import pair_proposals
 
-    from tcip_mcp.dataset_layout import find_gt_label
     from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
     from tcip_mcp.tools.annotation_tools import score_predictions
 
@@ -422,37 +424,30 @@ def _viz_comparison(
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    stem = img.stem
     idx, index = _subject_indexer()
-
-    label_path = find_gt_label(image_path)
-    if label_path is None:
-        return {"error": f"No labels found for {stem}"}
     try:
-        gt_all = read_labels(str(label_path))
-    except UnreadableLabelDocument as exc:
+        labels = _image_labels(image_path)
+        pred_key, scope = _bucket_document(bucket, image_path)
+    except (UnreadableLabelDocument, ValueError) as exc:
         return {"error": str(exc)}
+    if labels is None:
+        return {"error": f"No labels found for {img.stem}"}
+    gt_all = labels
     gt = _boxable(gt_all)
     gt_dicts = [_box_dict(a, index) for a in gt]
-
-    try:
-        pred_file, scope = _bucket_document(project, predictions_dir, image_path)
-    except ValueError as exc:
-        return {"error": str(exc)}
     pred_dicts: list[dict] = []
     tp_matches: list[tuple[int, int]] = []
     unpredicted = pair_proposals(
         gt_all, [], resolve_match_criterion(None, [], iou_threshold=iou_threshold))
     tp, fp, fn = 0, 0, len(unpredicted.missed)
-    if pred_file is not None:
+    if pred_key is not None:
         try:
-            preds_all = read_predictions(str(pred_file))
+            preds_all = read_predictions(pred_key)
         except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
         pred_dicts = [_box_dict(a, index, scope=scope) for a in _boxable(preds_all)]
-        scored = score_predictions(image_path, str(Path(project, predictions_dir)),
-                                   iou_threshold=iou_threshold, conf_threshold=conf_threshold,
-                                   detail=True)
+        scored = score_predictions(image_path, bucket, iou_threshold=iou_threshold,
+                                   conf_threshold=conf_threshold, detail=True)
         if "error" in scored:
             return {"error": scored["error"]}
         # The scoring indexes the whole documents; the renderer draws their boxable entries.
@@ -477,7 +472,7 @@ def _viz_comparison(
     }
 
 
-def get_worst_predictions(bucket: Bucket, labels_dir: str, top_k: int = 8) -> dict:
+def get_worst_predictions(bucket: Bucket, top_k: int = 8) -> dict:
     """Return the ``top_k`` images ranked worst by a count-mismatch + low-confidence triage heuristic.
 
     This is a cheap triage signal, not a quality metric: it does no IoU matching and computes
@@ -485,25 +480,31 @@ def get_worst_predictions(bucket: Bucket, labels_dir: str, top_k: int = 8) -> di
     the difference in box *counts* plus mean confidence, so an image with the right count but
     every box mislocated scores as good. Use it to surface likely-bad frames for a human to look
     at; for true TP/FP/FN ranking use ``score_predictions`` (``detail=True``, IoU-matched). Only
-    the documents the bucket's record names are ranked; a labeled image it names none for was not
-    predicted, and is listed under ``not_predicted`` rather than scored.
+    the documents the bucket's record names are ranked, each against the label document of its
+    image in the bucket's capture (answered as ``capture``); a labeled image of that capture it
+    names none for was not predicted, and is listed under ``not_predicted`` rather than scored. A
+    bucket recording no capture refuses (``ValueError``), and a ranked image with no label document
+    (``UnreadableLabelDocument``).
 
     Args:
         bucket: The published bucket whose recorded documents are ranked.
-        labels_dir: Directory with per-image JSON ground-truth label files.
         top_k: Number of worst images to return.
     """
-    gt_path = Path(labels_dir)
-    if not gt_path.is_dir():
-        return {"error": f"Labels directory not found: {labels_dir}"}
+    from tcip_annotation.json_io import detection_annotations
 
-    from tcip_annotation.json_io import detection_annotations, prediction_documents
+    from tcip_mcp.dataset_layout import capture_label_keys, label_key
 
+    capture = bucket.date
+    if capture is None:
+        raise ValueError(f"bucket {bucket.name!r} records no capture, so no label document "
+                         "answers for its images.")
     # Both sides counted as a count counts: objects with a box, a crowd region and a Point none.
     scores: list[tuple[str, float]] = []
-    for pred_file in bucket.document_paths:
-        preds = detection_annotations(pred_file)
-        gt_anns = detection_annotations(gt_path / pred_file.name)
+    for pred_key in bucket.document_keys:
+        stem = pred_key.parts[-1]
+        preds = detection_annotations(read_label_document(pred_key).annotations)
+        gt_anns = detection_annotations(read_label_document(
+            label_key(bucket.root, capture, stem)).annotations)
 
         n_pred = len(preds)
         n_gt = len(gt_anns)
@@ -515,24 +516,24 @@ def get_worst_predictions(bucket: Bucket, labels_dir: str, top_k: int = 8) -> di
 
         # Higher score = worse prediction
         error_score = missed * 2.0 + extra * 1.0 + (1.0 - avg_conf)
-        scores.append((pred_file.stem, error_score))
+        scores.append((stem, error_score))
 
     scores.sort(key=lambda x: x[1], reverse=True)
     worst = scores[:top_k]
 
     return {
+        "capture": capture,
         "worst_images": [{"stem": s, "error_score": round(sc, 3)} for s, sc in worst],
         "total_evaluated": len(scores),
-        "not_predicted": [f.stem for f in prediction_documents(gt_path)
-                          if f.stem not in bucket.documents],
+        "not_predicted": [key.parts[-1] for key in capture_label_keys(bucket.root, capture)
+                          if key.parts[-1] not in bucket.documents],
     }
 
 
 def render_failure_cases(
     project: Path,
-    predictions_dir: str,
-    labels_dir: str,
-    images_dir: str = "",
+    dataset_root: str,
+    bucket: str,
     task: str = "detect",
     top_k: int = 10,
     class_names: str = "",
@@ -542,53 +543,37 @@ def render_failure_cases(
     Ranks by a count-mismatch + low-confidence heuristic (`get_worst_predictions`); no IoU
     matching, so an image with the right box count but every box mislocated scores as good. Not a
     substitute for `score_predictions`(`detail=True`)'s IoU-matched TP/FP/FN when mislocalization
-    itself is the question.
+    itself is the question. Each case renders its image of the bucket's capture against the label
+    document of that image.
 
     Returns a grid image and individual failure case images.
 
     Args:
-        predictions_dir: The published bucket whose documents are ranked and rendered.
-        labels_dir: Directory with ground-truth label files.
-        images_dir: Directory with source images. Auto-detected if empty.
+        dataset_root: The dataset root the bucket is published under.
+        bucket: The published bucket whose documents are ranked and rendered.
         task: 'detect' or 'segment'.
         top_k: Number of worst cases to render.
         class_names: Comma-separated class names.
     """
     from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.dataset_layout import image_dir, label_key, prediction_key
 
     try:
-        bucket = read_bucket(Path(project, predictions_dir))
-    except ValueError as exc:
+        found = read_bucket(dataset_root, bucket)
+        worst = get_worst_predictions(found, top_k=top_k)
+    except (UnreadableLabelDocument, ValueError) as exc:
         return {"error": str(exc)}
-    # Auto-detect images_dir
-    if not images_dir:
-        from tcip_mcp.dataset_layout import image_root
-
-        labels_path = Path(labels_dir)
-        candidate = image_root(labels_path.parent.parent)
-        if candidate.is_dir():
-            images_dir = str(candidate)
-        else:
-            return {"error": "images_dir not specified and could not be auto-detected"}
-
-    try:
-        worst = get_worst_predictions(bucket, labels_dir, top_k=top_k)
-    except UnreadableLabelDocument as exc:
-        return {"error": str(exc)}
-    if "error" in worst:
-        return worst
+    capture = worst["capture"]
 
     worst_items = worst.get("worst_images", [])
     if not worst_items:
         return {"summary": "No prediction errors found", "image_path": None}
 
-    from tcip_mcp.dataset_layout import label_filename
-
     # One GT-vs-prediction render per case, titled in the same pass so a case that can't be
     # resolved drops its title with it.
     case_paths: list[str] = []
     titles: list[str] = []
-    img_dir = Path(images_dir)
+    img_dir = image_dir(found.root, capture)
     for item in worst_items:
         stem = item["stem"]
         read = _display_for_stem(img_dir, stem)
@@ -596,14 +581,11 @@ def render_failure_cases(
             continue
 
         idx, index = _subject_indexer()
-
-        gt_file = Path(labels_dir) / label_filename(stem)
-        pred_file = bucket.document(bucket.documents[stem]) if stem in bucket.documents else None
         try:
-            gt_dicts = ([_box_dict(a, index) for a in _boxable(read_labels(str(gt_file)))]
-                        if gt_file.is_file() else [])
-            pred_dicts = ([_box_dict(a, index) for a in _boxable(read_predictions(str(pred_file)))]
-                          if pred_file is not None else [])
+            gt_dicts = [_box_dict(a, index) for a in _boxable(read_label_document(
+                label_key(found.root, capture, stem)).annotations)]
+            pred_dicts = [_box_dict(a, index) for a in _boxable(read_predictions(
+                prediction_key(found.root, found.name, stem)))]
         except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
 
@@ -635,7 +617,7 @@ def _viz_dataset_sample(
     class_names: str = "",
 ) -> dict:
     """Render a grid of random annotated dataset samples."""
-    from tcip_mcp.dataset_layout import find_gt_label, image_root
+    from tcip_mcp.dataset_layout import image_root
     from tcip_mcp.pipelines.image_utils import (
         BandGroupIncomplete, list_logical_images, refuse_incomplete_band_group, source_path_of,
     )
@@ -660,15 +642,13 @@ def _viz_dataset_sample(
             source = refuse_incomplete_band_group(enumerated)
         except BandGroupIncomplete:
             continue
-        rep_path = source_path_of(source)
-        label_path = find_gt_label(str(rep_path))
+        try:
+            anns = _image_labels(source_path_of(source))
+        except UnreadableLabelDocument as exc:
+            return {"error": str(exc)}
         read = _read_for_display(source)
-        if label_path is not None:
+        if anns is not None:
             idx, index = _subject_indexer()
-            try:
-                anns = read_labels(str(label_path))
-            except UnreadableLabelDocument as exc:
-                return {"error": str(exc)}
             if task == "detect":
                 shapes = _boxable(anns)
                 out = render_detections(read.pixels, [_box_dict(a, index) for a in shapes],

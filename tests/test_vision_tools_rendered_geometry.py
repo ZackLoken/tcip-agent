@@ -1,12 +1,9 @@
-"""What the vision tools actually draw: per-ring mask coverage and the failure-case layers.
-
-These artifacts are the agent's eyes, so the assertions here read pixels out of the rendered
-image rather than checking that a file was written: a mask that renders one region of a
-two-region instance, or a failure case whose green layer is the prediction file again, both
-write a perfectly readable picture of the wrong thing.
-"""
+"""What the vision tools draw, read off the rendered pixels: per-ring mask coverage and the
+failure-case layers."""
 
 from __future__ import annotations
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 from pathlib import Path
 
@@ -43,17 +40,15 @@ def _red_over_gray(px: Image.Image, xy: tuple[int, int]) -> int:
 def split_instance_dataset(tmp_path: Path) -> Path:
     """A dataset whose one image carries a two-region ground-truth mask, each region far from
     the other."""
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, Polygon
 
-    images = tmp_path / "images"
-    images.mkdir()
-    Image.new("RGB", (320, 180), BACKGROUND).save(images / "split.png")
+    from tests._producer_fixtures import label_image
 
-    labels = tmp_path / "annotations"
-    labels.mkdir()
-    json_io.write_annotations(
-        labels / "split.json",
+    images = tmp_path / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
+    Image.new("RGB", (320, 180), BACKGROUND).save(images / "split.png")
+    label_image(
+        images / "split.png",
         [Annotation(subject="leaf", geometry=Polygon(rings=[GT_RING_LEFT, GT_RING_RIGHT]))],
         320, 180,
     )
@@ -75,7 +70,7 @@ def test_every_region_of_a_split_annotation_is_drawn_on_the_mask_render(
     from tcip_mcp.tools.vision_tools import visualize
 
     result = visualize(split_instance_dataset, "annotations",
-                       str(split_instance_dataset / "images" / "split.png"), task="segment")
+                       str(split_instance_dataset / "images" / UNDATED_BUCKET / "split.png"), task="segment")
     assert "error" not in result, result
     assert result["count"] == 1                     # one instance, drawn as its several regions
 
@@ -94,16 +89,14 @@ def test_every_region_of_a_split_prediction_is_drawn_on_the_mask_render(
     from tests._chain_fixtures import published
 
     root = split_instance_dataset
-    image = root / "images" / "split.png"
-    bucket = root / "predictions" / "split-masks"
-    published(root, bucket, [{
+    image = root / "images" / UNDATED_BUCKET / "split.png"
+    published(root, "split-masks", [{
         "image": str(image), "width": 320, "height": 180,
         "boxes": [[30.0, 15.0, 305.0, 165.0]], "scores": [0.8], "labels": [1],
         "masks": [{"segmentation": [_flat(PRED_RING_LOW), _flat(PRED_RING_HIGH)]}],
     }], scope={"subject": "leaf"})
 
-    result = visualize(root, "predictions", str(image), task="segment",
-                       predictions_dir=str(bucket))
+    result = visualize(root, "predictions", str(image), task="segment", bucket="split-masks")
     assert "error" not in result, result
     assert result["count"] == 1
 
@@ -134,47 +127,39 @@ def _mask_center(arr: np.ndarray, channel: int) -> tuple[float, float]:
 @pytest.fixture
 def mislocalized_prediction_dataset(tmp_path: Path) -> Path:
     """One image whose single prediction sits nowhere near its single ground-truth box."""
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    images = tmp_path / "images"
-    images.mkdir()
-    Image.new("RGB", (300, 200), BACKGROUND).save(images / "miss.png")
+    from tests._producer_fixtures import label_image
 
-    labels = tmp_path / "annotations"
-    labels.mkdir()
-    json_io.write_annotations(
-        labels / "miss.json", [Annotation(subject="bud", geometry=BBox(*GT_BOX))], 300, 200,
-    )
+    images = tmp_path / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
+    Image.new("RGB", (300, 200), BACKGROUND).save(images / "miss.png")
+    label_image(images / "miss.png", [Annotation(subject="bud", geometry=BBox(*GT_BOX))],
+                300, 200)
 
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
-    published(tmp_path, tmp_path / "predictions" / "live", [
+    published(tmp_path, "live", [
         {"image": str(images / "miss.png"), "width": 300, "height": 200,
          "boxes": [list(PRED_BOX)], "scores": [0.4], "labels": [1]}],
         scope={"subject": "bud"})
     return tmp_path
 
 
-def test_a_failure_case_draws_ground_truth_from_the_label_tree(
+def test_a_failure_case_draws_ground_truth_from_the_label_document(
     mislocalized_prediction_dataset: Path,
 ) -> None:
     """The green layer of a failure case is the image's ground truth, not its predictions again.
 
-    Both layers coming from one file renders a perfect overlap on exactly the images the ranking
-    flagged as worst, so the agent reads the artifact as a model that matched ground truth.
+    Both layers coming from one document renders a perfect overlap on exactly the images the
+    ranking flagged as worst, so the agent reads the artifact as a model that matched ground
+    truth.
     """
     from tcip_mcp.tools.vision_tools import render_failure_cases
 
     root = mislocalized_prediction_dataset
-    result = render_failure_cases(
-        root,
-        predictions_dir=str(root / "predictions" / "live"),
-        labels_dir=str(root / "annotations"),
-        images_dir=str(root / "images"),
-        top_k=3,
-    )
+    result = render_failure_cases(root, str(root), "live", top_k=3)
     assert "error" not in result, result
     assert len(result["case_images"]) == 1
 
@@ -186,5 +171,5 @@ def test_a_failure_case_draws_ground_truth_from_the_label_tree(
     assert abs(gt_cy - (GT_BOX[1] + GT_BOX[3]) / 2) < 25
     assert abs(pred_cx - (PRED_BOX[0] + PRED_BOX[2]) / 2) < 25
     assert abs(pred_cy - (PRED_BOX[1] + PRED_BOX[3]) / 2) < 25
-    # The two layers are distinct geometry, never one file drawn twice.
+    # The two layers are distinct geometry, never one document drawn twice.
     assert abs(gt_cx - pred_cx) > 100

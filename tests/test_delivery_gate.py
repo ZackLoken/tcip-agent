@@ -25,23 +25,28 @@ def _recorded_meaning(tmp_path):
     fx.seed_confirmed_count(tmp_path, measured_subject=fx.COUNT_SUBJECT)
 
 
-def _bucket(project: Path, results: list[dict], name: str = "m") -> Path:
+def _image(project: Path, stem: str) -> Path:
+    """Where the capture's image ``stem`` sits under the project's dataset."""
+    return project / "ds" / "images" / "2026-01-01" / f"{stem}.png"
+
+
+def _bucket(project: Path, results: list[dict], name: str = "m") -> str:
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
-    return published(project, project / "ds" / "predictions" / name / "2026-01-01", results,
-                     scope=SCOPE).path
+    return published(project, f"{name}/2026-01-01", results, scope=SCOPE).name
 
 
-def _deliver(project: Path, bucket: Path, acknowledgment_id: str | None = None) -> dict:
+def _deliver(project: Path, bucket: str, acknowledgment_id: str | None = None) -> dict:
     from tcip_mcp.pipelines.postprocessing.export import deliver_per_image_counts_csv
 
-    return deliver_per_image_counts_csv(project, bucket, str(project / "out" / "counts.csv"),
+    return deliver_per_image_counts_csv(project, project / "ds", bucket,
+                                        str(project / "out" / "counts.csv"),
                                         trait=fx.COUNT_TRAIT, acknowledgment_id=acknowledgment_id,
                                         door="test_door", actor=None)
 
 
-def _acknowledged(project: Path, bucket: Path) -> dict:
+def _acknowledged(project: Path, bucket: str) -> dict:
     from tests._chain_fixtures import acknowledged
 
     return acknowledged(project, lambda ack: _deliver(project, bucket, ack))
@@ -63,7 +68,7 @@ def test_an_acknowledgment_names_who_and_why_both_non_empty(tmp_path, who, why):
 def test_an_unassessed_bucket_refuses_with_no_acknowledgment_and_writes_nothing(tmp_path):
     from tests._chain_fixtures import predicted
 
-    bucket = _bucket(tmp_path, [predicted("a", [fx.COUNT_SUBJECT])])
+    bucket = _bucket(tmp_path, [predicted(_image(tmp_path, "a"), [fx.COUNT_SUBJECT])])
 
     with pytest.raises(DeliveryRefused, match="no assessment answers") as refused:
         _deliver(tmp_path, bucket)
@@ -76,7 +81,7 @@ def test_an_acknowledged_delivery_ships_stamped_unvalidated_with_the_act_on_its_
     from tcip_mcp.delivery import read_delivery_events
     from tests._chain_fixtures import acknowledged, predicted
 
-    bucket = _bucket(tmp_path, [predicted("a", [fx.COUNT_SUBJECT])])
+    bucket = _bucket(tmp_path, [predicted(_image(tmp_path, "a"), [fx.COUNT_SUBJECT])])
 
     result = acknowledged(tmp_path, lambda ack: _deliver(tmp_path, bucket, ack),
                           reason="a look before assessing")
@@ -97,8 +102,8 @@ def test_an_acknowledgment_given_for_another_result_refuses(tmp_path):
     result's digest ships nothing, and the refusal names the result this delivery computed."""
     from tests._chain_fixtures import predicted
 
-    bucket = _bucket(tmp_path, [predicted("a", [fx.COUNT_SUBJECT])])
-    elsewhere = _bucket(tmp_path, [predicted("b", [fx.COUNT_SUBJECT])], "n")
+    bucket = _bucket(tmp_path, [predicted(_image(tmp_path, "a"), [fx.COUNT_SUBJECT])])
+    elsewhere = _bucket(tmp_path, [predicted(_image(tmp_path, "b"), [fx.COUNT_SUBJECT])], "n")
     with pytest.raises(DeliveryRefused) as other:
         _deliver(tmp_path, elsewhere)
     act = record_acknowledgment(tmp_path, acknowledged_by="user:breeder", reason="the other one",
@@ -117,19 +122,21 @@ def test_an_acknowledgment_binds_the_rows_and_refuses_once_a_document_changes(tm
     from tcip_annotation import json_io
 
     from tcip_mcp.audit import audit_log_key
+    from tcip_mcp.buckets import read_bucket
     from tests._chain_fixtures import predicted
 
     import tcip_store
 
-    bucket = _bucket(tmp_path, [predicted("a", [fx.COUNT_SUBJECT] * 6)])
+    bucket = _bucket(tmp_path, [predicted(_image(tmp_path, "a"), [fx.COUNT_SUBJECT] * 6)])
     with pytest.raises(DeliveryRefused) as six:
         _deliver(tmp_path, bucket)
     act = record_acknowledgment(tmp_path, acknowledged_by="user:breeder", reason="six of them",
                                 result_sha256=str(six.value.result_sha256))
-    document = bucket / "a.json"
-    annotations = json_io.read_annotations(document)
+    document = read_bucket(tmp_path / "ds", bucket).document_key(_image(tmp_path, "a").stem)
+    assert document is not None
+    annotations = json_io.read_predictions(document)
     # Twelve where six were published, as an edit in place would leave it: no head re-emits one.
-    json_io.write_annotations(document, annotations * 2, 64, 64)
+    json_io.write_label_document(document, annotations * 2, 64, 64)
 
     with pytest.raises(DeliveryRefused, match="another result"):
         _deliver(tmp_path, bucket, act.acknowledgment_id)
@@ -151,9 +158,9 @@ def test_an_mcp_door_executes_a_recorded_acknowledgment_and_never_originates_one
 
     assert not {"acknowledged_by", "reason", "acknowledgment"} & set(
         inspect.signature(deliver_per_image_counts).parameters)
-    bucket = _bucket(tmp_path, [predicted("a", [fx.COUNT_SUBJECT])])
+    bucket = _bucket(tmp_path, [predicted(_image(tmp_path, "a"), [fx.COUNT_SUBJECT])])
 
-    refused = deliver_per_image_counts(tmp_path, str(bucket), "out/counts.csv",
+    refused = deliver_per_image_counts(tmp_path, str(tmp_path / "ds"), bucket, "out/counts.csv",
                                        trait=fx.COUNT_TRAIT, acknowledgment_id="invented")
 
     assert "no acknowledgment 'invented' is recorded" in refused["error"]
@@ -161,7 +168,7 @@ def test_an_mcp_door_executes_a_recorded_acknowledgment_and_never_originates_one
         _deliver(tmp_path, bucket)
     act = record_acknowledgment(tmp_path, acknowledged_by="user:breeder", reason="a look",
                                 result_sha256=str(computed.value.result_sha256))
-    shipped = deliver_per_image_counts(tmp_path, str(bucket), "out/counts.csv",
+    shipped = deliver_per_image_counts(tmp_path, str(tmp_path / "ds"), bucket, "out/counts.csv",
                                        trait=fx.COUNT_TRAIT, acknowledgment_id=act.acknowledgment_id)
     assert shipped["validated"] is False and shipped["acknowledged_by"] == "user:breeder"
 
@@ -171,6 +178,7 @@ def test_a_validated_delivery_carries_no_acknowledgment(tmp_path):
     from tests._chain_fixtures import run_the_chain
 
     chain = run_the_chain(tmp_path, experiment_id="exp-ack")
+    assert chain.root == tmp_path / "ds"
 
     result = _deliver(tmp_path, chain.bucket)
 
@@ -184,7 +192,7 @@ def test_the_delivery_skill_documents_the_per_image_csv_the_door_writes(tmp_path
     from tcip_mcp.knowledge import document_path
     from tests._chain_fixtures import predicted
 
-    bucket = _bucket(tmp_path, [predicted("a", [fx.COUNT_SUBJECT])])
+    bucket = _bucket(tmp_path, [predicted(_image(tmp_path, "a"), [fx.COUNT_SUBJECT])])
     result = _acknowledged(tmp_path, bucket)
     with open(result["csv_path"], newline="") as f:
         written = next(csv.reader(f))
@@ -204,13 +212,13 @@ def test_the_delivery_skill_documents_the_per_image_csv_the_door_writes(tmp_path
 def test_a_zero_extent_box_is_counted_by_neither_the_document_nor_the_delivery(tmp_path):
     """A box that collapses to zero width is never a detection: the published document drops it,
     the bucket records the drop, and the delivered row counts and averages the one survivor."""
-    bucket_dir = _bucket(tmp_path, [{
-        "image": "a.png", "width": 200, "height": 150,
+    bucket = _bucket(tmp_path, [{
+        "image": str(_image(tmp_path, "a")), "width": 200, "height": 150,
         "boxes": [[10, 10, 20, 20], [30, 30, 30, 40]], "scores": [0.9, 0.5], "labels": [1, 1]}])
     from tcip_mcp.buckets import read_bucket
 
-    assert read_bucket(bucket_dir).dropped_boxes == 1
-    (row,) = _rows(_acknowledged(tmp_path, bucket_dir))
+    assert read_bucket(tmp_path / "ds", bucket).dropped_boxes == 1
+    (row,) = _rows(_acknowledged(tmp_path, bucket))
 
     assert int(row["detection_count"]) == 1
     assert float(row["avg_confidence"]) == pytest.approx(0.9)
@@ -218,16 +226,18 @@ def test_a_zero_extent_box_is_counted_by_neither_the_document_nor_the_delivery(t
 
 def test_a_non_finite_score_refuses_the_publication_so_no_average_ever_reads_it(tmp_path):
     """No stored number stands in for a score the model did not give: the publication refuses
-    naming it, and the directory never becomes a bucket a delivery could average over."""
-    from tcip_annotation.json_io import BUCKET_RECORD
+    naming it, and no bucket a delivery could average over is ever recorded."""
+    import tcip_store
+
+    from tcip_mcp.dataset_layout import bucket_key
 
     with pytest.raises(ValueError, match="nan"):
         _bucket(tmp_path, [{
-            "image": "a.png", "width": 64, "height": 64,
+            "image": str(_image(tmp_path, "a")), "width": 64, "height": 64,
             "boxes": [[1, 1, 5, 5], [10, 10, 15, 15]], "scores": [float("nan"), 0.5],
             "labels": [1, 1]}])
 
-    assert not (tmp_path / "ds" / "predictions" / "m" / "2026-01-01" / BUCKET_RECORD).exists()
+    assert not tcip_store.exists(bucket_key(tmp_path / "ds", "m/2026-01-01"))
 
 
 def test_a_delivery_over_no_bucket_refuses_and_carries_no_result_to_acknowledge(tmp_path):
@@ -257,11 +267,12 @@ def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(tmp_pa
 
     def deliver(subject: str, name: str) -> dict:
         pytest.importorskip("torch")
-        bucket = published(tmp_path, tmp_path / "ds" / "predictions" / name / "2026-01-01",
-                           [predicted("a", [subject])], scope={"subject": subject})
+        bucket = published(tmp_path, f"{name}/2026-01-01",
+                           [predicted(_image(tmp_path, "a"), [subject])],
+                           scope={"subject": subject})
         return deliver_acknowledged(
             tmp_path, rows, tmp_path / f"{name}.csv", "stem_count",
-            delivery_kind=PER_PLANT_COUNT_AGGREGATE, buckets=[read_bucket(bucket.path)])
+            delivery_kind=PER_PLANT_COUNT_AGGREGATE, buckets=[read_bucket(bucket.root, bucket.name)])
 
     with pytest.raises(OperationalizationRefused, match=f"measures '{fx.COUNT_SUBJECT}'"):
         deliver("leaf", "other")

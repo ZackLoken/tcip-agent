@@ -10,17 +10,18 @@ from tcip_annotation.state import Annotation, BBox
 from pathlib import Path
 
 from tcip_mcp.cli import doctor
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
 from tcip_mcp.pipelines.data.label_queries import registry_scope
 from tcip_mcp.pipelines.data.selection import (
     ClassScope, Sample, Selection, read_selection, selection_key, write_selection,
 )
 from tcip_mcp.tools.data_tools import scan_dataset, draw_splits
-from tests._producer_fixtures import registry_over
+from tests._producer_fixtures import label_image, registry_over
 
 
 def _quality_findings(root) -> list[tuple[str, str]]:
     findings: list[tuple[str, str]] = []
-    doctor.check_data_quality(Path(root), findings, census=doctor._census(Path(root), findings, set()))
+    doctor.check_data_quality(Path(root), findings, census=doctor._census(Path(root), findings))
     return findings
 
 
@@ -50,55 +51,20 @@ def test_doctor_check_data_quality_missing_dir(tmp_path: Path):
     assert not [f for f in findings if f[0] == "error"]
 
 
-def test_scan_dataset_reports_a_reserved_stem_the_census_still_counted(tmp_path: Path):
-    """The census walks with a raw glob and counts a label named like a bucket's own record,
-    unlike every bucket walk through prediction_documents; reserved_name_labels names it so a
-    caller does not read the difference as a disagreement."""
-    root = tmp_path / "ds"
-    images_dir = root / "images" / "2-11-26"
-    images_dir.mkdir(parents=True)
-    labels_dir = root / "annotations" / "2-11-26"
-    labels_dir.mkdir(parents=True)
-    # Written by hand: the platform's own encoder refuses a document under a reserved stem.
-    (labels_dir / "bucket.json").write_text('{"annotations": []}', encoding="utf-8")
-    reserved_label = str(labels_dir / "bucket.json")
-
-    scan_result = scan_dataset(str(root))
-
-    assert scan_result["reserved_name_labels"] == [reserved_label]
-
-
-def test_scan_dataset_reports_a_reserved_stem_image_with_no_label(tmp_path: Path):
-    """An image whose own stem is reserved for a bucket's own record must be named, not folded
-    into unlabeled_images with no signal that its label can never be read through any bucket
-    walk."""
-    root = tmp_path / "ds"
-    images_dir = root / "images" / "2-11-26"
-    images_dir.mkdir(parents=True)
-    (images_dir / "bucket.jpg").write_bytes(b"\xff\xd8\xff")
-    (images_dir / "ordinary.jpg").write_bytes(b"\xff\xd8\xff")
-    reserved_image = str(images_dir / "bucket.jpg")
-
-    scan_result = scan_dataset(str(root))
-
-    assert scan_result["reserved_name_images"] == [reserved_image]
-    assert scan_result["unlabeled_images"] == 2
-
-
-def test_scan_dataset_counts_only_the_documents_of_published_buckets(tmp_path: Path):
-    """A directory of documents under ``predictions/`` holding no ``bucket.json`` is no
-    bucket, so the census counts only a published bucket's documents."""
+def test_scan_dataset_counts_only_the_documents_a_published_bucket_names(tmp_path: Path):
+    """A prediction document no bucket record names is no bucket's, so the census counts only
+    the documents a published bucket's record names."""
     pytest.importorskip("torch")
+    from tcip_mcp.dataset_layout import prediction_key
     from tests._chain_fixtures import predicted, published
 
     root = tmp_path / "ds"
-    published(tmp_path, root / "predictions" / "modelA" / "2-11-26",
-              [predicted("imgA", ["bud"])], scope={"subject": "bud"})
-    staged = root / "predictions" / "modelB" / "2-11-26"
-    staged.mkdir(parents=True)
-    json_io.write_annotations(
-        staged / "imgB.json", [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 32, 32,
-    )
+    published(tmp_path, "modelA/2-11-26",
+              [predicted(root / "images" / "2-11-26" / "imgA.png", ["bud"])],
+              scope={"subject": "bud"})
+    json_io.write_label_document(prediction_key(root, "modelB/2-11-26", "imgB"),
+                                 [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5),
+                                             score=0.9)], 32, 32)
 
     scan_result = scan_dataset(str(root))
 
@@ -113,14 +79,11 @@ def _add_extra_bud_groups(data_dir: Path, count: int) -> None:
     from PIL import Image
 
     images_dir = data_dir / "images" / "2-11-26"
-    labels_dir = data_dir / "annotations" / "2-11-26"
     for i in range(count):
         stem = f"extra_{i:03d}"
         Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{stem}.jpg")
-        json_io.write_annotations(
-            labels_dir / f"{stem}.json",
-            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))], 640, 480,
-        )
+        label_image(images_dir / f"{stem}.jpg",
+                    [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))], 640, 480)
 
 def test_draw_splits_basic(data_dir: Path, tmp_path: Path):
     _add_extra_bud_groups(data_dir, 1)
@@ -143,7 +106,7 @@ def test_draw_splits_basic(data_dir: Path, tmp_path: Path):
     assert drawn.dataset_fingerprint is not None
     for sample in drawn.samples:
         assert Path(sample.source).is_file()
-        assert Path(sample.ground_truth).is_file()
+        assert ts.exists(sample.ground_truth)
         assert sample.ground_truth_digest
 
 
@@ -155,12 +118,11 @@ def _leaf_scene(root: Path, n: int = 6) -> Path:
     buds, so a count scoped to the leaf and one over every record disagree."""
     from PIL import Image
 
-    images, labels = root / "images" / LEAF_DATE, root / "annotations" / LEAF_DATE
+    images = root / "images" / LEAF_DATE
     images.mkdir(parents=True)
-    labels.mkdir(parents=True)
     for i in range(n):
         Image.new("RGB", (100, 80), (128, 128, 128)).save(images / f"s{i}.jpg")
-        json_io.write_annotations(labels / f"s{i}.json", [
+        label_image(images / f"s{i}.jpg", [
             *(Annotation(subject="leaf", geometry=BBox(2, 2, 6, 6)) for _ in range(i + 1)),
             *(Annotation(subject="bud", geometry=BBox(8, 8, 12, 12)) for _ in range(5 * (n - i))),
         ], 100, 80)
@@ -189,8 +151,7 @@ def test_draw_splits_and_a_runs_own_draw_side_the_same_members(tmp_path: Path):
     drawn = draw_splits(tmp_path, str(root), subject="leaf", train_ratio=0.5, val_ratio=0.5,
                         group_by="stem", seed=7)
     assert "error" not in drawn, drawn
-    data_cfg = {"images_dir": str(root / "images" / LEAF_DATE),
-                "labels_dir": str(root / "annotations" / LEAF_DATE), "scope": {"subject": "leaf"},
+    data_cfg = {"images_dir": str(root / "images" / LEAF_DATE), "scope": {"subject": "leaf"},
                 "split": {"val_ratio": 0.5, "seed": 7, "group_by": "stem"}}
     _train, _val, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
 
@@ -217,8 +178,7 @@ def test_every_draw_refuses_a_tree_short_of_its_floor_the_same_way(tmp_path: Pat
     drawn = draw_splits(tmp_path, str(root), subject="leaf", train_ratio=0.5, val_ratio=0.5,
                         group_key_map=one_group)
     assert floor in drawn["error"]
-    data_cfg = {"images_dir": str(root / "images" / LEAF_DATE),
-                "labels_dir": str(root / "annotations" / LEAF_DATE), "scope": {"subject": "leaf"},
+    data_cfg = {"images_dir": str(root / "images" / LEAF_DATE), "scope": {"subject": "leaf"},
                 "split": {"val_ratio": 0.5, "group_key_map": one_group}}
     with pytest.raises(ValueError, match=floor.replace("(", r"\(").replace(")", r"\)")):
         auto_train_val(tmp_path, "detection", data_cfg, None)
@@ -234,17 +194,22 @@ def test_draw_splits_stats_only_admits_a_nonzero_calibration_ratio(data_dir: Pat
     assert result["splits"]["holdout"] == 0
 
 
+def _spoil(data_dir: Path, stem: str) -> None:
+    """The label document of the fixture's image ``stem`` replaced, past its writer, by a record
+    that is not a label document."""
+    ts.replace(label_key(data_dir, "2-11-26", stem), ["not", "a", "document"])
+
+
 def test_draw_splits_reports_an_unreadable_label_by_name(data_dir: Path, tmp_path: Path):
-    """A present, unreadable label among the candidates is an error naming the file, never a
+    """A present, unreadable label among the candidates is an error naming the document, never a
     raise through the tool boundary."""
-    bad = next((data_dir / "annotations" / "2-11-26").glob("*.json"))
-    bad.write_bytes(b"{not json")
+    _spoil(data_dir, "img_001")
 
     result = draw_splits(data_dir, str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
-    assert str(bad) in result["error"]
+    assert "'img_001'" in result["error"]
 
 
 def test_draw_splits_reports_an_unreadable_label_sorted_last(
@@ -253,14 +218,13 @@ def test_draw_splits_reports_an_unreadable_label_sorted_last(
     """A corrupt label reached last in sort order is caught by the same per-stem admission read
     as the first-sorted case above, regardless of where in the candidate order it falls, and
     answers the same error dict, never a raw raise."""
-    bad = sorted((data_dir / "annotations" / "2-11-26").glob("*.json"))[-1]
-    bad.write_bytes(b"{not json")
+    _spoil(data_dir, "img_003")
 
     result = draw_splits(data_dir, str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
-    assert str(bad) in result["error"]
+    assert "'img_003'" in result["error"]
 
 
 def test_draw_splits_writes_nothing_when_a_marked_document_will_not_read(
@@ -272,41 +236,38 @@ def test_draw_splits_writes_nothing_when_a_marked_document_will_not_read(
     from tcip_mcp.dataset_layout import image_dir
     from tests._producer_fixtures import mark_complete
 
-    bad = data_dir / "annotations" / "2-11-26" / "img_002.json"
-    mark_complete(image_dir(data_dir, "2-11-26") / "img_002.jpg", bad, "bud", project=data_dir)
-    bad.write_bytes(b"{not json")
+    mark_complete(image_dir(data_dir, "2-11-26") / "img_002.jpg", "bud", project=data_dir)
+    _spoil(data_dir, "img_002")
     out = tmp_path / "selection"
 
     result = draw_splits(data_dir, str(data_dir), output_path=str(out), subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
-    assert str(bad) in result["error"]
+    assert "'img_002'" in result["error"]
     assert not ts.exists(selection_key(out))
 
 
 def test_draw_splits_stats_only_reports_an_unreadable_first_sorted_label(data_dir: Path):
     """A stats-only call (no output_path) draws through the same admission a written one does, so
     an unreadable first-sorted candidate is an error naming it."""
-    bad = data_dir / "annotations" / "2-11-26" / "img_001.json"
-    bad.write_bytes(b"{not json")
+    _spoil(data_dir, "img_001")
 
     result = draw_splits(data_dir, str(data_dir), subject="bud")
 
     assert "error" in result
-    assert str(bad) in result["error"]
+    assert "'img_001'" in result["error"]
 
 
 def test_draw_splits_stats_only_reports_an_unreadable_label_during_stratification(data_dir: Path):
     """A stats-only call still reads every stem's label, so a corrupt label reached after a
-    readable first candidate is an error naming the file, not a raw raise."""
-    bad = data_dir / "annotations" / "2-11-26" / "img_003.json"
-    bad.write_bytes(b"{not json")
+    readable first candidate is an error naming the document, not a raw raise."""
+    _spoil(data_dir, "img_003")
 
     result = draw_splits(data_dir, str(data_dir), subject="bud")
 
     assert "error" in result
-    assert str(bad) in result["error"]
+    assert "'img_003'" in result["error"]
 
 
 def test_draw_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(tmp_path: Path):
@@ -320,13 +281,14 @@ def test_draw_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(tmp_pa
     root = tmp_path / "ds"
     images_dir = root / "images" / "2-11-26"
     images_dir.mkdir(parents=True)
-    (root / "annotations" / "2-11-26").mkdir(parents=True)
 
     band_a, band_b = images_dir / "plotA_B1.npy", images_dir / "plotA_B2.npy"
     np.save(band_a, np.zeros((4, 4), dtype=np.uint8))
     np.save(band_b, np.zeros((4, 4), dtype=np.uint8))
     write_band_group_manifest(images_dir, "plotA", {"B1": band_a, "B2": band_b})
     (images_dir / "plotA.jpg").write_bytes(b"\xff\xd8\xff")
+    label_image(images_dir / "plotA.jpg", [Annotation(subject="leaf", geometry=BBox(1, 1, 3, 3))],
+                4, 4)
 
     result = draw_splits(tmp_path, str(root), output_path=str(tmp_path / "manifests"), subject="leaf",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
@@ -345,13 +307,14 @@ def test_draw_splits_stats_only_answers_an_ambiguous_image_stem_as_an_error(tmp_
     root = tmp_path / "ds"
     images_dir = root / "images" / "2-11-26"
     images_dir.mkdir(parents=True)
-    (root / "annotations" / "2-11-26").mkdir(parents=True)
 
     band_a, band_b = images_dir / "plotA_B1.npy", images_dir / "plotA_B2.npy"
     np.save(band_a, np.zeros((4, 4), dtype=np.uint8))
     np.save(band_b, np.zeros((4, 4), dtype=np.uint8))
     write_band_group_manifest(images_dir, "plotA", {"B1": band_a, "B2": band_b})
     (images_dir / "plotA.jpg").write_bytes(b"\xff\xd8\xff")
+    label_image(images_dir / "plotA.jpg", [Annotation(subject="leaf", geometry=BBox(1, 1, 3, 3))],
+                4, 4)
 
     result = draw_splits(tmp_path, str(root), subject="leaf")
 
@@ -382,7 +345,7 @@ def test_scan_dataset_answers_an_ambiguous_image_stem_as_an_error(tmp_path: Path
     assert "plotA" in result["error"]
 
 
-def _add_extra_leaf_groups(images_dir: Path, labels_dir: Path, count: int) -> None:
+def _add_extra_leaf_groups(images_dir: Path, count: int) -> None:
     """Adds ``count`` more plain single-tile foreground groups (subject ``leaf``) beside a
     band-group fixture, so a manifest write over it clears the four-foreground-group floor."""
     from PIL import Image
@@ -391,10 +354,8 @@ def _add_extra_leaf_groups(images_dir: Path, labels_dir: Path, count: int) -> No
     for i in range(count):
         stem = f"plot{letters[i]}"
         Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
-        json_io.write_annotations(
-            labels_dir / f"{stem}.json",
-            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
-        )
+        label_image(images_dir / f"{stem}.jpg",
+                    [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80)
 
 
 def test_draw_splits_refuses_an_incomplete_band_group_before_writing(tmp_path: Path):
@@ -407,17 +368,13 @@ def test_draw_splits_refuses_an_incomplete_band_group_before_writing(tmp_path: P
     root = tmp_path / "ds"
     images_dir = root / "images" / "2-11-26"
     images_dir.mkdir(parents=True)
-    labels_dir = root / "annotations" / "2-11-26"
-    labels_dir.mkdir(parents=True)
 
     band_g, band_r = images_dir / "plotA_G.npy", images_dir / "plotA_R.npy"
     np.save(band_g, np.zeros((4, 4), dtype=np.uint8))
     write_band_group_manifest(images_dir, "plotA", {"G": band_g, "R": band_r})  # R never created
-    json_io.write_annotations(
-        labels_dir / "plotA.json",
-        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
-    )
-    _add_extra_leaf_groups(images_dir, labels_dir, 3)
+    label_image(images_dir / "plotA.bandgroup",
+                [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80)
+    _add_extra_leaf_groups(images_dir, 3)
     out = tmp_path / "m"
 
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
@@ -425,7 +382,7 @@ def test_draw_splits_refuses_an_incomplete_band_group_before_writing(tmp_path: P
 
     assert "error" in result
     assert "plotA" in result["error"] and "R" in result["error"]
-    assert not out.exists()
+    assert not ts.exists(selection_key(out))
 
 
 def test_draw_splits_bad_ratios(data_dir: Path):
@@ -471,7 +428,7 @@ def test_draw_splits_floor_refuses_before_any_write_regardless_of_stratify_foreg
 
     assert "error" in result
     assert "foreground group" in result["error"]
-    assert not out.exists()
+    assert not ts.exists(selection_key(out))
 
 
 def test_draw_splits_answers_one_draw_whether_or_not_it_writes(tmp_path: Path):
@@ -495,7 +452,7 @@ def test_draw_splits_answers_one_draw_whether_or_not_it_writes(tmp_path: Path):
                               seed=1, train_ratio=0.875, val_ratio=-0.25,
                               calibration_ratio=0.25, holdout_ratio=0.125)
         assert "share in (0, 1)" in refused["error"]
-    assert not (tmp_path / "negative").exists()
+    assert not ts.exists(selection_key(tmp_path / "negative"))
 
 
 def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(tmp_path: Path):
@@ -510,24 +467,19 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
 
     root = tmp_path / "ds"
     date = "2-11-26"
-    images_dir, labels_dir = root / "images" / date, root / "annotations" / date
+    images_dir = root / "images" / date
     images_dir.mkdir(parents=True)
-    labels_dir.mkdir(parents=True)
     registry_over(root,SubjectRegistry(subjects=(
         Subject(name="leaf"), Subject(name="bud"),
     )))
     for stem in ("p1", "p2", "p3"):
         Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
-        json_io.write_annotations(
-            labels_dir / f"{stem}.json",
-            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
-        )
+        label_image(images_dir / f"{stem}.jpg",
+                    [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80)
     Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / "p4.jpg")
-    json_io.write_annotations(
-        labels_dir / "p4.json",
-        [Annotation(subject="bud", geometry=BBox(4, 4, 12, 12))], 100, 80, keep_empty=True,
-    )
-    mark_complete(images_dir / "p4.jpg", labels_dir / "p4.json", "leaf", project=root)
+    label_image(images_dir / "p4.jpg", [Annotation(subject="bud", geometry=BBox(4, 4, 12, 12))],
+                100, 80, keep_empty=True)
+    mark_complete(images_dir / "p4.jpg", "leaf", project=root)
 
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf", seed=1,
@@ -535,7 +487,7 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
 
     assert "error" in result
     assert "foreground group" in result["error"]
-    assert not out.exists()
+    assert not ts.exists(selection_key(out))
 
 
 def _leaf_dataset_with_negatives(root: Path, date: str, n_foreground: int, n_negative: int) -> None:
@@ -545,22 +497,18 @@ def _leaf_dataset_with_negatives(root: Path, date: str, n_foreground: int, n_neg
 
     from tests._producer_fixtures import mark_complete
 
-    images_dir, labels_dir = root / "images" / date, root / "annotations" / date
+    images_dir = root / "images" / date
     images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
     for i in range(n_foreground):
         stem = f"{date}_fg{i}"
         Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
-        json_io.write_annotations(
-            labels_dir / f"{stem}.json",
-            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
-        )
+        label_image(images_dir / f"{stem}.jpg",
+                    [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80)
     for i in range(n_negative):
         stem = f"{date}_bg{i}"
         Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
-        json_io.write_annotations(labels_dir / f"{stem}.json", [], 100, 80, keep_empty=True)
-        mark_complete(images_dir / f"{stem}.jpg", labels_dir / f"{stem}.json", "leaf",
-                      project=root)
+        label_image(images_dir / f"{stem}.jpg", [], 100, 80, keep_empty=True)
+        mark_complete(images_dir / f"{stem}.jpg", "leaf", project=root)
 
 
 def test_draw_splits_calibration_side_holds_real_foreground_regardless_of_stratify_foreground(
@@ -588,15 +536,12 @@ def _multi_source_dataset(root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"),
     date = "2-11-26"
     images_dir = root / "images" / date
     images_dir.mkdir(parents=True)
-    labels_dir = root / "annotations" / date
-    labels_dir.mkdir(parents=True)
     for pref in prefixes:
         for t in range(tiles):
             stem = f"{pref}_{t}_0"
             Image.new("RGB", (64, 64), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
-            json_io.write_annotations(labels_dir / f"{stem}.json",
-                                      [Annotation(subject="bud", geometry=BBox(19, 13, 45, 51))],
-                                      64, 64)
+            label_image(images_dir / f"{stem}.jpg",
+                        [Annotation(subject="bud", geometry=BBox(19, 13, 45, 51))], 64, 64)
     return root
 
 
@@ -604,9 +549,9 @@ def _bud_membership(root: Path):
     from tcip_mcp.pipelines.data.split_construction import admitted_membership
 
     date = "2-11-26"
-    return admitted_membership(
-        [(date, root / "images" / date, str(root / "annotations" / date))],
-        scope=ClassScope(subject="bud"), group_by="tile_prefix", group_key_map=None)
+    return admitted_membership([(date, root / "images" / date, None)],
+                               scope=ClassScope(subject="bud"), group_by="tile_prefix",
+                               group_key_map=None)
 
 
 def _spied_draws(monkeypatch) -> list[bool]:
@@ -667,7 +612,7 @@ def test_draw_splits_groups_tiles_together(tmp_path: Path):
     # No source prefix may appear in more than one split.
     seen: dict[str, str] = {}
     for sample in read_selection(out, project=tmp_path).samples:
-        g = default_group_key(Path(sample.ground_truth).stem)
+        g = default_group_key(sample.member)
         assert seen.get(g, sample.side) == sample.side, f"group {g} spans splits"
         seen[g] = sample.side
 
@@ -688,7 +633,7 @@ def test_draw_splits_group_key_map_never_straddles(tmp_path: Path):
     assert result["group_by"] == "explicit_map"
 
     drawn = read_selection(out, project=tmp_path)
-    by_stem = {Path(s.ground_truth).stem: s for s in drawn.samples}
+    by_stem = {s.member: s for s in drawn.samples}
     assert by_stem["x_0_0"].side == by_stem["y_0_0"].side  # gA never straddles
     assert by_stem["x_0_0"].group == by_stem["y_0_0"].group == "gA"
     assert drawn.group_by == "explicit_map"
@@ -702,7 +647,7 @@ def test_draw_splits_unrecognized_group_by_refuses_without_writing(tmp_path: Pat
     result = draw_splits(tmp_path, str(root), output_path=str(out), group_by="not_a_real_key", subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" in result
-    assert not out.exists() or not (out / "selection.json").is_file()
+    assert not ts.exists(selection_key(out))
 
 
 def test_draw_splits_refuses_to_write_a_selection_with_no_subject(tmp_path: Path):
@@ -713,7 +658,7 @@ def test_draw_splits_refuses_to_write_a_selection_with_no_subject(tmp_path: Path
     result = draw_splits(tmp_path, str(root), output_path=str(out),
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" in result and "subject" in result["error"]
-    assert not out.exists()
+    assert not ts.exists(selection_key(out))
 
 
 def _two_date_collision_dataset(root: Path, subject: str) -> Path:
@@ -724,20 +669,15 @@ def _two_date_collision_dataset(root: Path, subject: str) -> Path:
 
     for date, box_x in (("2-11-26", 4), ("2-12-01", 40)):
         images_dir = root / "images" / date
-        labels_dir = root / "annotations" / date
         images_dir.mkdir(parents=True)
-        labels_dir.mkdir(parents=True)
         Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / "shared.jpg")
-        json_io.write_annotations(
-            labels_dir / "shared.json",
-            [Annotation(subject=subject, geometry=BBox(box_x, 4, box_x + 8, 12))], 100, 80,
-        )
+        label_image(images_dir / "shared.jpg",
+                    [Annotation(subject=subject, geometry=BBox(box_x, 4, box_x + 8, 12))],
+                    100, 80)
         extra_stem = f"extra_{date}"
         Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{extra_stem}.jpg")
-        json_io.write_annotations(
-            labels_dir / f"{extra_stem}.json",
-            [Annotation(subject=subject, geometry=BBox(4, 4, 12, 12))], 100, 80,
-        )
+        label_image(images_dir / f"{extra_stem}.jpg",
+                    [Annotation(subject=subject, geometry=BBox(4, 4, 12, 12))], 100, 80)
     return root
 
 
@@ -753,14 +693,15 @@ def test_two_dates_sharing_a_filename_stay_distinct_samples(tmp_path: Path):
     assert result["total_stems"] == 4
 
     drawn = read_selection(out, project=tmp_path)
-    shared = [s for s in drawn.samples if Path(s.ground_truth).stem == "shared"]
+    shared = [s for s in drawn.samples if s.member == "shared"]
     assert len(shared) == 2
     assert {Path(s.source).parent.name for s in shared} == {"2-11-26", "2-12-01"}
-    assert {Path(s.ground_truth).parent.name for s in shared} == {"2-11-26", "2-12-01"}
+    assert {s.ground_truth.parts[0] for s in shared} == {"2-11-26", "2-12-01"}
     assert len({s.location for s in shared}) == 2
     # Each sample's own label document is the one under its own date, never the other's.
     boxes = {
-        json_io.read_annotations(s.ground_truth)[0].geometry.x1 for s in shared  # type: ignore[union-attr]
+        json_io.read_label_document(s.ground_truth).annotations[0].geometry.x1  # type: ignore[union-attr,arg-type]
+        for s in shared
     }
     assert boxes == {4.0, 40.0}
 
@@ -774,9 +715,7 @@ def _two_subject_dataset(root: Path) -> Path:
 
     date = "2-11-26"
     images_dir = root / "images" / date
-    labels_dir = root / "annotations" / date
     images_dir.mkdir(parents=True)
-    labels_dir.mkdir(parents=True)
     registry_over(root,SubjectRegistry(subjects=(
         Subject(name="leaf"), Subject(name="bud"),
     )))
@@ -785,10 +724,8 @@ def _two_subject_dataset(root: Path) -> Path:
         ("bud_a", "bud"), ("bud_b", "bud"),
     ):
         Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
-        json_io.write_annotations(
-            labels_dir / f"{stem}.json",
-            [Annotation(subject=subject, geometry=BBox(4, 4, 12, 12))], 100, 80,
-        )
+        label_image(images_dir / f"{stem}.jpg",
+                    [Annotation(subject=subject, geometry=BBox(4, 4, 12, 12))], 100, 80)
     return root
 
 
@@ -800,8 +737,7 @@ def test_draw_splits_holds_only_the_named_subjects_admitted_samples(tmp_path: Pa
     assert "error" not in result, result
     assert result["total_stems"] == 4
     drawn = read_selection(out, project=tmp_path)
-    assert {Path(s.ground_truth).stem for s in drawn.samples} == {
-        "leaf_a", "leaf_b", "leaf_c", "leaf_d"}
+    assert {s.member for s in drawn.samples} == {"leaf_a", "leaf_b", "leaf_c", "leaf_d"}
 
 
 def _attribute_scoped_dataset(root: Path) -> Path:
@@ -813,9 +749,7 @@ def _attribute_scoped_dataset(root: Path) -> Path:
 
     date = "2-11-26"
     images_dir = root / "images" / date
-    labels_dir = root / "annotations" / date
     images_dir.mkdir(parents=True)
-    labels_dir.mkdir(parents=True)
     registry_over(root,SubjectRegistry(subjects=(
         Subject(name="leaf", attributes=(
             Attribute(name="condition", type="categorical", values=("healthy", "damaged")),
@@ -826,16 +760,12 @@ def _attribute_scoped_dataset(root: Path) -> Path:
         ("assessed_c", "healthy"), ("assessed_d", "damaged"),
     ):
         Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
-        json_io.write_annotations(
-            labels_dir / f"{stem}.json",
-            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12),
-                       attributes={"condition": condition})], 100, 80,
-        )
+        label_image(images_dir / f"{stem}.jpg",
+                    [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12),
+                                attributes={"condition": condition})], 100, 80)
     Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / "unassessed.jpg")
-    json_io.write_annotations(
-        labels_dir / "unassessed.json",
-        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
-    )
+    label_image(images_dir / "unassessed.jpg",
+                [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80)
     return root
 
 
@@ -850,243 +780,86 @@ def test_draw_splits_records_every_declared_attribute_and_keeps_an_unassessed_sa
     assert result["total_stems"] == 5
     drawn = read_selection(out, project=tmp_path)
     assert [a.name for a in drawn.scope.attributes] == ["condition"]
-    assert {Path(s.ground_truth).stem for s in drawn.samples} == {
+    assert {s.member for s in drawn.samples} == {
         "assessed_a", "assessed_b", "assessed_c", "assessed_d", "unassessed"}
 
 
-def _two_date_flat_images_dataset(root: Path, subject: str) -> Path:
-    """Two dated label directories whose images were never split into date buckets: both
-    entries fall back to the same flat images/ root."""
-    from PIL import Image
-
-    images_dir = root / "images"
-    images_dir.mkdir(parents=True)
-    for date in ("2-11-26", "2-12-01"):
-        labels_dir = root / "annotations" / date
-        labels_dir.mkdir(parents=True)
-        for stem in ("w", "x", "y", "z"):
-            dst = images_dir / f"{stem}.jpg"
-            if not dst.exists():
-                Image.new("RGB", (100, 80), (128, 128, 128)).save(dst)
-            json_io.write_annotations(
-                labels_dir / f"{stem}.json",
-                [Annotation(subject=subject, geometry=BBox(4, 4, 12, 12))], 100, 80,
-            )
-    return root
-
-
-def test_draw_splits_refuses_two_dated_label_dirs_sharing_a_flat_images_root(tmp_path: Path):
-    """Two label dates whose images were never split into date buckets both resolve to the
-    same flat images/ root: a manifest keyed by <date>/<stem> would admit one image file once
-    per date and could place the same pixels on both sides of the split."""
-    root = _two_date_flat_images_dataset(tmp_path / "ds", subject="leaf")
+def test_draw_splits_nothing_admitted_names_the_searched_images(tmp_path: Path):
+    """A capture whose only label document names an image that is gone admits nothing: the
+    refusal names the images directory it searched, and nothing is written."""
+    root = tmp_path / "ds"
+    (root / "images" / "2-11-26").mkdir(parents=True)
+    json_io.write_label_document(label_key(root, "2-11-26", "a"),
+                                 [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))],
+                                 100, 80)
     out = tmp_path / "m"
 
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
-    assert "2-11-26" in result["error"] and "2-12-01" in result["error"]
-    assert not out.exists()
+    assert str(root / "images" / "2-11-26") in result["error"]
+    assert not ts.exists(selection_key(out))
 
 
-def test_draw_splits_refuses_a_dated_dir_and_loose_labels_sharing_a_flat_images_root(
-    tmp_path: Path,
-):
-    """A dated label directory with no images/<date>/ bucket of its own and a loose label
-    beside it both fall back to the same flat images/ root: the same leak, mirrored."""
+def test_draw_splits_draws_an_undated_capture_beside_a_dated_one(tmp_path: Path):
+    """Both captures' label documents enter one draw, each sample naming its own."""
     from PIL import Image
 
     root = tmp_path / "ds"
-    images_dir = root / "images"
-    dated_labels = root / "annotations" / "2-11-26"
-    images_dir.mkdir(parents=True)
-    dated_labels.mkdir(parents=True)
-    for stem in ("a", "b", "c", "d"):
-        Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
-    for stem in ("b", "c", "d"):
-        json_io.write_annotations(
-            dated_labels / f"{stem}.json",
-            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
-        )
-    json_io.write_annotations(
-        root / "annotations" / "a.json",
-        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
-    )
-    out = tmp_path / "m"
-
-    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
-
-    assert "error" in result
-    assert "2-11-26" in result["error"]
-    assert "annotations/ (loose labels)" in result["error"]
-    assert not out.exists()
-
-
-def test_draw_splits_nothing_admitted_names_the_searched_directories(tmp_path: Path):
-    """A tree whose labels sit flat while its images were split into a date bucket admits
-    nothing: the refusal names each entry's searched directory."""
-    from PIL import Image
-
-    root = tmp_path / "ds"
-    dated_images = root / "images" / "2-11-26"
-    dated_images.mkdir(parents=True)
-    (root / "annotations").mkdir(parents=True)
-    Image.new("RGB", (100, 80), (128, 128, 128)).save(dated_images / "a.jpg")
-    json_io.write_annotations(
-        root / "annotations" / "a.json",
-        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
-    )
-    out = tmp_path / "m"
-
-    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
-
-    assert "error" in result
-    assert "annotations/ (loose labels)" in result["error"]
-    assert str(root / "images") in result["error"]
-    assert not out.exists()
-
-
-def _dated_labels_flat_images_dataset(root: Path, stems: tuple[str, ...]) -> Path:
-    """Labels dated but images never split into date buckets: a layout the platform's other
-    readers already resolve (``annotation_tools.py``'s stage-shape door)."""
-    from PIL import Image
-
-    images_dir = root / "images"
-    labels_dir = root / "annotations" / "2-11-26"
-    images_dir.mkdir(parents=True)
-    labels_dir.mkdir(parents=True)
-    for stem in stems:
-        Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
-        json_io.write_annotations(
-            labels_dir / f"{stem}.json",
-            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
-        )
-    return root
-
-
-def test_draw_splits_manifest_admits_dated_labels_over_flat_images(tmp_path: Path):
-    root = _dated_labels_flat_images_dataset(tmp_path / "ds", ("p0", "p1", "p2", "p3", "p4"))
-    out = tmp_path / "m"
-    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
-    assert "error" not in result
-    assert result["total_stems"] == 5
-    assert result["tallies"] == {"partial": 5}
-
-
-def test_draw_splits_manifest_admits_a_loose_label_beside_a_dated_one(tmp_path: Path):
-    """A label sitting loose in ``annotations/`` beside a dated bucket enters the draw as a
-    dateless member, rather than being invisible to both the manifest and its own counts."""
-    from PIL import Image
-
-    root = tmp_path / "ds"
-    dated_images = root / "images" / "2-11-26"
-    dated_labels = root / "annotations" / "2-11-26"
-    dated_images.mkdir(parents=True)
-    dated_labels.mkdir(parents=True)
-    for stem in ("a", "b", "c"):
-        Image.new("RGB", (100, 80), (128, 128, 128)).save(dated_images / f"{stem}.jpg")
-        json_io.write_annotations(
-            dated_labels / f"{stem}.json",
-            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
-        )
-    for stem in ("loose1", "loose2"):
-        Image.new("RGB", (100, 80), (128, 128, 128)).save(root / "images" / f"{stem}.jpg")
-        json_io.write_annotations(
-            root / "annotations" / f"{stem}.json",
-            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
-        )
+    for capture, stems in (("2-11-26", ("a", "b", "c")), (UNDATED_BUCKET, ("loose1", "loose2"))):
+        images = root / "images" / capture
+        images.mkdir(parents=True)
+        for stem in stems:
+            Image.new("RGB", (100, 80), (128, 128, 128)).save(images / f"{stem}.jpg")
+            label_image(images / f"{stem}.jpg",
+                        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80)
 
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
-    assert "error" not in result
+    assert "error" not in result, result
     assert result["total_stems"] == 5
     assert result["tallies"] == {"partial": 5}
     drawn = read_selection(out, project=tmp_path)
-    assert {Path(s.ground_truth).stem for s in drawn.samples} == {"a", "b", "c", "loose1", "loose2"}
-    assert {str(Path(s.ground_truth).parent.relative_to(root)) for s in drawn.samples} == {
-        str(Path("annotations") / "2-11-26"), "annotations"}
-
-
-def test_a_stray_bucket_record_under_annotations_is_not_searched_as_loose_labels(
-    tmp_path: Path,
-):
-    """A bucket's own record sitting loose directly under ``annotations/`` is not a loose label,
-    so a draw that admits nothing names only the dated place it searched."""
-    root = tmp_path / "ds"
-    (root / "annotations" / "2-11-26").mkdir(parents=True)
-    (root / "images" / "2-11-26").mkdir(parents=True)
-    (root / "annotations" / "bucket.json").write_text('{"checkpoint": "m"}', encoding="utf-8")
-
-    result = draw_splits(tmp_path, str(root), subject="leaf")
-
-    assert "error" in result
-    assert "2-11-26 ->" in result["error"]
-    assert "loose labels" not in result["error"]
+    assert {s.member for s in drawn.samples} == {"a", "b", "c", "loose1", "loose2"}
+    assert {s.ground_truth.parts[0] for s in drawn.samples} == {"2-11-26", UNDATED_BUCKET}
 
 
 def test_draw_splits_holds_no_sample_for_a_date_that_admits_nothing(tmp_path: Path):
-    """A capture date whose only label resolves to no image anywhere contributes no sample, so a
+    """A capture whose only label document names no image anywhere contributes no sample, so a
     selection never carries a member whose pixels are gone."""
     from PIL import Image
 
     root = tmp_path / "ds"
     images_dir = root / "images" / "2-11-26"
-    labels_dir = root / "annotations" / "2-11-26"
     images_dir.mkdir(parents=True)
-    labels_dir.mkdir(parents=True)
     for stem in ("a", "b", "c", "d"):
         Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
-        json_io.write_annotations(
-            labels_dir / f"{stem}.json",
-            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
-        )
-    orphan_labels = root / "annotations" / "2-12-26"
-    orphan_labels.mkdir(parents=True)
-    json_io.write_annotations(
-        orphan_labels / "orphan.json",
-        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
-    )
+        label_image(images_dir / f"{stem}.jpg",
+                    [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80)
+    json_io.write_label_document(label_key(root, "2-12-26", "orphan"),
+                                 [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))],
+                                 100, 80)
 
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
-    assert "error" not in result
+    assert "error" not in result, result
     drawn = read_selection(out, project=tmp_path)
 
-    assert all(Path(s.ground_truth).parent.name == "2-11-26" for s in drawn.samples)
-    assert "orphan" not in {Path(s.ground_truth).stem for s in drawn.samples}
-
-
-def test_doctor_check_data_quality_admits_a_confirmed_negative_under_dated_labels_flat_images(
-    tmp_path: Path,
-):
-    """A human-confirmed negative resolves the same way the doctor's check reads it as the
-    draw that admits it: labels dated, images never split into date buckets."""
-    from tests._producer_fixtures import mark_complete
-
-    root = _dated_labels_flat_images_dataset(tmp_path / "ds", ("p0",))
-    label = root / "annotations" / "2-11-26" / "p0.json"
-    label.unlink()
-    json_io.write_annotations(label, [], 100, 80, keep_empty=True)
-    mark_complete(root / "images" / "p0.jpg", label, "leaf", project=root)
-
-    assert _quality_findings(root) == []
+    assert all(s.ground_truth.parts[0] == "2-11-26" for s in drawn.samples)
+    assert "orphan" not in {s.member for s in drawn.samples}
 
 
 def _write_one_sample_selection(root: Path, out: Path) -> None:
     """A one-sample selection of the project ``root`` written under ``out``, its source and
-    label under ``root``."""
+    label document under ``root``."""
     write_selection(out, Selection(
-        samples=(Sample(member="a", source=str(root / "images" / "a.jpg"),
-                        ground_truth=str(root / "annotations" / "a.json"), group="a",
-                        side="train"),),
-        scope=registry_scope(root, "leaf"), seed=1, group_by="stem",
+        samples=(Sample(member="a", source=str(root / "images" / UNDATED_BUCKET / "a.jpg"),
+                        ground_truth=label_key(root, UNDATED_BUCKET, "a"), group="a", side="train"),),
+        scope=registry_scope(root / "images", "leaf"), seed=1, group_by="stem",
     ), project=root)
 
 
@@ -1096,12 +869,14 @@ def test_read_selection_admits_the_writers_own_record(tmp_path: Path):
     out = tmp_path / "m"
     _write_one_sample_selection(tmp_path, out)
 
-    assert ts.read(selection_key(out))["samples"][0]["source"] == "images/a.jpg"
+    assert ts.read(selection_key(out))["samples"][0]["source"] == f"images/{UNDATED_BUCKET}/a.jpg"
     drawn = read_selection(out, project=tmp_path)
 
-    assert drawn.scope == registry_scope(tmp_path, "leaf")
+    assert drawn.scope == registry_scope(tmp_path / "images", "leaf")
     assert drawn.seed == 1
-    assert [s.location for s in drawn.samples] == [str(tmp_path.resolve() / "images" / "a.jpg")]
+    assert [s.location for s in drawn.samples] == [
+        str(tmp_path.resolve() / "images" / UNDATED_BUCKET / "a.jpg")]
+    assert [s.ground_truth for s in drawn.samples] == [label_key(tmp_path, UNDATED_BUCKET, "a")]
 
 
 def test_read_selection_refuses_an_absent_record_by_name(tmp_path: Path):
@@ -1139,8 +914,7 @@ def test_read_selection_refuses_one_source_on_two_sides(tmp_path: Path):
     _write_one_sample_selection(tmp_path, out)
     document = ts.read(selection_key(out))
     document["samples"].append(
-        {"member": "a", "source": "images/a.jpg", "ground_truth": "annotations/a.json",
-         "group": "b", "side": "calibration"})
+        {**document["samples"][0], "group": "b", "side": "calibration"})
     ts.replace(selection_key(out), document)
 
     with pytest.raises(ValueError, match="on more than one side"):
@@ -1155,8 +929,8 @@ def test_read_selection_refuses_one_group_on_two_sides(tmp_path: Path):
     document = ts.read(selection_key(out))
     document["samples"].append(
         {"member": "a_0_1", "source": "images/a_0_1.jpg",
-         "ground_truth": "annotations/a_0_1.json", "group": "a",
-         "side": "val"})
+         "ground_truth": {**document["samples"][0]["ground_truth"], "stem": "a_0_1"},
+         "group": "a", "side": "val"})
     ts.replace(selection_key(out), document)
 
     with pytest.raises(ValueError, match="group"):

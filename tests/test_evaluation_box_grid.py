@@ -69,8 +69,7 @@ def test_an_annotation_prediction_off_the_stored_grid_is_put_on_it_before_scorin
 
 
 def test_the_grid_is_the_one_the_label_writer_owns():
-    """Two implementations of the same quantum would drift; the scorer derives through the writer's
-    own, so a change to the stored grid can never leave the scorer behind."""
+    """The scorer's box conversion is the label writer's own."""
     from tcip_annotation import json_io
     from tcip_mcp.pipelines.training import evaluation
 
@@ -87,14 +86,16 @@ def test_scoring_labels_read_back_from_disk_is_unaffected_by_the_shared_grid(tmp
         coco_detection_metrics, records_from_annotation,
     )
 
-    label_path = tmp_path / "image_one.json"
-    json_io.write_annotations(
-        str(label_path),
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
+
+    label = label_key(tmp_path, UNDATED_BUCKET, "image_one")
+    json_io.write_label_document(
+        label,
         [Annotation(subject="target", geometry=BBox(*ON_GRID_BOX)),
          Annotation(subject="target", geometry=BBox(100.0, 100.5, 140.25, 150.75))],
         200, 200)
 
-    stored = json_io.read_annotations(str(label_path))
+    stored = json_io.read_label_document(label).annotations
     preds = [Annotation(subject=a.subject, geometry=a.geometry, score=0.9) for a in stored]
     _iou_type, record = records_from_annotation(stored, preds, width=200, height=200)
 

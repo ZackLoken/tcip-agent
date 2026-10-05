@@ -81,7 +81,7 @@ ACTOR_KEY = "actor"
 """The entry key naming the person who performed the act, absent for an act no person made."""
 
 
-def _entry(
+def audit_entry(
     tool: str,
     arguments: dict[str, Any] | None,
     actor: str | None,
@@ -124,7 +124,7 @@ def record_event_or_raise(
     failed append is raised as :class:`AuditEntryNotWritten`, naming the mutation that committed
     unrecorded.
     """
-    entry = _entry(tool, arguments, actor, status, extra)
+    entry = audit_entry(tool, arguments, actor, status, extra)
     try:
         append(audit_log_key(scope), entry)
     except Exception as exc:
@@ -134,11 +134,11 @@ def record_event_or_raise(
 def dataset_scope_of(value: Any) -> Path | None:
     """The dataset root ``value`` names, or ``None`` when it does not name one.
 
-    ``value`` is whatever a tool's declared scope argument holds: a path inside the dataset (an
-    annotations or predictions directory, an image), or the dataset root itself. A path under a
-    canonical dataset segment resolves through :func:`dataset_layout.dataset_root_of`. A path that
-    is not under one counts as a root only when it is a directory that actually carries dataset or
-    project state (its own ``.tcip/`` or a subject registry); anything else yields ``None``.
+    ``value`` is whatever a tool's declared scope argument holds: a path inside the dataset's
+    ``images/`` tree (an image, a capture directory), or the dataset root itself. A path under
+    ``images/`` resolves through :func:`dataset_layout.dataset_root_of`. A path that is not under
+    one counts as a root only when it is a directory that actually carries dataset or project
+    state (its own ``.tcip/`` or a subject registry); anything else yields ``None``.
     """
     from tcip_mcp.dataset_layout import SUBJECTS_FILENAME, dataset_root_of
 
@@ -195,7 +195,7 @@ def audited(
             logged_args: dict[str, Any] = dict(bound.arguments)
             project = logged_args.pop("project")
             logged_args.pop("workspace", None)
-            entry = _entry(tool_name, logged_args, logged_args.pop(ACTOR_KEY, None))
+            entry = audit_entry(tool_name, logged_args, logged_args.pop(ACTOR_KEY, None))
 
             def record() -> None:
                 """Resolve the scope, stamp the duration, and append. Raises what it cannot do."""

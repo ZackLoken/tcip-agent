@@ -1,9 +1,10 @@
-"""The producer: where a directory of ground truth or a ground-truth table becomes the samples a
-run trains, evaluates or calibrates over.
+"""The producer: where a capture's label documents, a directory of masks or a ground-truth table
+becomes the samples a run trains, evaluates or calibrates over.
 
-It reads a dataset's per-image label documents with their completion marks, its ``<stem>.png``
-masks or its table of rows, and its ``subjects.json`` registry, admits by the shape the ground
-truth itself carries (:func:`ground_truth_shape`), and answers an :class:`Admission`.
+It reads a dataset's per-image label documents with their completion marks by their images' own
+keys, its ``<stem>.png`` masks or its table of rows, and its ``subjects.json`` registry, admits by
+the shape the ground truth carries (:func:`ground_truth_shape`), and answers an
+:class:`Admission`.
 """
 
 from __future__ import annotations
@@ -13,7 +14,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from tcip_annotation.state import BBox, Polygon, box_derivable
+from tcip_store import Key
+
+from tcip_annotation.state import Annotation, BBox, Polygon, box_derivable
 
 from tcip_mcp.pipelines.image_utils import list_logical_images
 
@@ -21,27 +24,19 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.selection import ClassScope, Sample
 
 
-def registered_dataset_root(dataset_dir) -> Path | None:
-    """The root of the dataset containing ``dataset_dir`` when it holds a subject registry, else
-    ``None``."""
-    from tcip_mcp.dataset_layout import dataset_root_of, subjects_path
-
-    root = dataset_root_of(dataset_dir)
-    return root if root is not None and subjects_path(root).is_file() else None
-
-
-def registry_scope(labels_dir, subject: str | None) -> "ClassScope":
-    """The class space ``subject`` is read under over ``labels_dir``: the subject with every
-    attribute its dataset's ``subjects.json`` declares for it, none for a dataset holding no
-    registry; no subject is the empty class space, reading no registry. A registry not declaring
-    ``subject`` refuses by name."""
+def registry_scope(images_dir, subject: str | None) -> "ClassScope":
+    """The class space ``subject`` is read under over the images ``images_dir`` holds: the subject
+    with every attribute their dataset's ``subjects.json`` declares for it, none for a dataset
+    holding no registry; no subject is the empty class space, reading no registry. A registry not
+    declaring ``subject`` refuses by name."""
     from tcip_mcp import subject_registry
+    from tcip_mcp.dataset_layout import dataset_root_of, subjects_path
     from tcip_mcp.pipelines.data.selection import ClassScope
 
     if not subject:
         return ClassScope()
-    root = registered_dataset_root(labels_dir)
-    if root is None:
+    root = dataset_root_of(images_dir)
+    if root is None or not subjects_path(root).is_file():
         return ClassScope(subject=subject, attributes=())
     declared = subject_registry.read_registry(root).subject(subject)
     if declared is None:
@@ -50,10 +45,10 @@ def registry_scope(labels_dir, subject: str | None) -> "ClassScope":
     return ClassScope(subject=subject, attributes=declared.attributes)
 
 
-def json_det_targets(path, scope: "ClassScope",
+def json_det_targets(annotations: Sequence[Annotation], scope: "ClassScope",
                      reads: Callable[[Any], bool] = box_derivable) -> dict[str, Any]:
-    """One image's detection target from the name-based per-image JSON, read under ``scope``, an
-    admitted document class space.
+    """One image's detection target from its label document's ``annotations``, read under
+    ``scope``, an admitted document class space.
 
     ``{"boxes", "labels", "iscrowd"}`` as parallel lists (pixel xyxy, the subject's label 1, crowd
     flag), ``"geometry"``, each row's own geometry, which a mask is rasterized from, and, when the
@@ -71,7 +66,7 @@ def json_det_targets(path, scope: "ClassScope",
     attributes = cast(tuple, scope.attributes)
     target: dict[str, Any] = {"boxes": [], "labels": [], "iscrowd": [], "geometry": []}
     rows: list[list[int]] = []
-    for a in json_io.read_annotations(path):
+    for a in annotations:
         if not reads(a.geometry):
             continue
         ids = json_io.attribute_ids(a, cast(str, scope.subject), attributes)
@@ -91,35 +86,28 @@ def json_det_targets(path, scope: "ClassScope",
 
 
 def ground_truth_shape(ground_truth) -> str:
-    """Which of :data:`~tcip_mcp.pipelines.data.selection.GROUND_TRUTH_SHAPES` lives at
-    ``ground_truth``, the place a config names; each name found there is interpreted by
-    :func:`~tcip_mcp.pipelines.data.selection.shape_of`.
-
-    A ``.csv`` is a table, one row per sample. A directory holding per-image label documents is the
-    document shape and one holding ``<stem>.png`` rasters the mask shape. A directory holding
-    neither documents nor masks reads as the document shape, whose own admission then names what is
-    missing image by image. A dataset-level COCO sitting among the documents is refused by the
-    per-image reader when admission reads it, naming the import door.
+    """Which of :data:`~tcip_mcp.pipelines.data.selection.GROUND_TRUTH_SHAPES` a run's
+    ``ground_truth`` names: none names the label documents its images' own keys address, a
+    ``.csv`` a table of one row per sample, and a directory holding ``<stem>.png`` rasters masks.
+    Anything else refuses (``ValueError``) naming it.
     """
-    from tcip_annotation.json_io import prediction_documents
-    from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK, TABLE, shape_of
+    from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK, TABLE
 
+    if ground_truth is None:
+        return DOCUMENT
     path = Path(ground_truth)
-    if shape_of(str(path), None) == TABLE:
+    if path.suffix.lower() == ".csv":
         if not path.is_file():
             raise ValueError(
                 f"{path} names a ground-truth table that does not exist; name where this run's "
                 "ground truth actually lives.")
         return TABLE
-    if not path.is_dir():
-        raise ValueError(
-            f"{ground_truth!r} is neither a .csv table nor a directory of ground truth: a run "
-            "reads one label document per image, one <stem>.png mask per image, or one row of a "
-            "table, and this names none of them.")
-    if prediction_documents(path):
-        return DOCUMENT
-    held = {shape_of(str(p), None) for p in path.iterdir() if p.is_file()}
-    return MASK if MASK in held else DOCUMENT
+    if path.is_dir() and any(is_mask(p) for p in path.iterdir()):
+        return MASK
+    raise ValueError(
+        f"{ground_truth!r} is neither a .csv table nor a directory of <stem>.png masks: a run "
+        "names one of those as its ground truth, or names none to read the label documents of "
+        "its own images.")
 
 
 ABSENT = "absent"
@@ -141,24 +129,42 @@ class Candidate:
 
     member: str
     source: str | None
-    ground_truth: str | None
+    ground_truth: Key | str | None
     row_key: str | None = None
 
 
+_Tables = dict[str, tuple[dict[str, str], "str | None"]]
+"""Each ground-truth table one admission read, by path: its rows and the version token of the one
+read, ``({}, None)`` for a table that is not there."""
+
+
+def _table(tables: _Tables, path: str) -> tuple[dict[str, str], "str | None"]:
+    """The rows and version of the table at ``path`` (:func:`parse_ground_truth_table`), read once
+    per admission."""
+    import tcip_store
+
+    if path not in tables:
+        stored = tcip_store.read_blob_versioned(Path(path), default=None)
+        tables[path] = (({}, None) if stored.version == tcip_store.Version.ABSENT
+                        else (parse_ground_truth_table(stored.value, path), stored.version.token))
+    return tables[path]
+
+
 def _candidates(shape: str, ground_truth, images_dir, members,
-                tables: dict[str, dict[str, str]]) -> list[Candidate]:
+                tables: _Tables) -> list[Candidate]:
     """Every candidate one place holding ground truth of ``shape`` offers: ``members`` when named,
-    else every image (a document or a mask directory) or every row (a table). A mask directory
+    else every image (documents or a mask directory) or every row (a table), an image's label
+    document being its own key (:func:`~tcip_mcp.dataset_layout.label_key`). A mask directory
     holding another format beside an image of the same stem, and no ``<stem>.png``, refuses."""
-    from tcip_annotation.json_io import prediction_documents
+    from tcip_mcp.dataset_layout import label_key_of
     from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK
     from tcip_mcp.pipelines.image_utils import source_path_of
 
     sources = {stem: source_path_of(src) for stem, src in list_logical_images(images_dir).items()}
     if shape == DOCUMENT:
-        documents = {p.stem: str(p) for p in prediction_documents(ground_truth)}
         names = list(members) if members is not None else sorted(sources)
-        return [Candidate(m, sources.get(m), documents.get(m)) for m in names]
+        return [Candidate(m, sources.get(m), label_key_of(sources[m]) if m in sources else None)
+                for m in names]
     if shape == MASK:
         labels_p = Path(ground_truth)
         entries = list(labels_p.iterdir()) if labels_p.is_dir() else []
@@ -173,44 +179,53 @@ def _candidates(shape: str, ground_truth, images_dir, members,
                 f"training the image without its mask would train it as entirely background."
             )
         return [Candidate(m, sources.get(m), masks.get(m)) for m in names]
-    table = tables.setdefault(str(ground_truth), ground_truth_table(ground_truth))
+    table, _version = _table(tables, str(ground_truth))
     names = list(members) if members is not None else sorted(table)
     return [Candidate(k, sources.get(k), str(ground_truth), row_key=k) for k in names]
 
 
 def _tally(shape: str, candidate: Candidate, scope: "ClassScope",
-           tables: dict[str, dict[str, str]]) -> str:
-    """What one candidate's ground truth reads as: its label document's state for ``scope``'s
-    subject, ``complete`` for a mask or a row that is there, :data:`ABSENT` for anything missing."""
-    from tcip_annotation.json_io import read_label_document
+           tables: _Tables) -> tuple[str, "str | None"]:
+    """What one candidate's ground truth reads as, and the version token of that one read: its
+    label document's state for ``scope``'s subject, ``complete`` for a mask or a row that is
+    there, :data:`ABSENT` (no version) for anything missing."""
+    import tcip_store
+
+    from tcip_annotation.json_io import read_document_versioned
     from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK
 
     found = candidate.ground_truth
     if candidate.source is None or found is None:
-        return ABSENT
+        return ABSENT, None
     if shape == DOCUMENT:
-        return (read_label_document(found).state(cast(str, scope.subject))
-                if Path(found).is_file() else ABSENT)
+        document, version = read_document_versioned(cast(Key, found))
+        if version == tcip_store.Version.ABSENT:
+            return ABSENT, None
+        return document.state(cast(str, scope.subject)), version.token
+    found = cast(str, found)
     if shape == MASK:
-        return "complete" if is_mask(Path(found)) else ABSENT
-    if found not in tables:
-        tables[found] = ground_truth_table(found) if Path(found).is_file() else {}
-    return "complete" if holds_row(tables[found], candidate.row_key) else ABSENT
+        if not is_mask(Path(found)):
+            return ABSENT, None
+        return "complete", tcip_store.read_blob_versioned(Path(found)).version.token
+    rows, token = _table(tables, found)
+    return ("complete", token) if holds_row(rows, candidate.row_key) else (ABSENT, None)
 
 
 def _admission(shape: str, candidates: "Sequence[Candidate]", scope: "ClassScope",
-               tables: dict[str, dict[str, str]]) -> tuple[list[Admitted], dict[str, int]]:
+               tables: _Tables) -> tuple[list[Admitted], dict[str, int]]:
     """The candidates :func:`admits` admits by their :func:`_tally`, each with its source resolved
-    (a grouped capture missing a band refuses), and how many were tallied each way."""
+    (a grouped capture missing a band refuses) and the version its tally read, and how many were
+    tallied each way."""
     from tcip_mcp.pipelines.image_utils import resolve_source_path, source_path_of
 
     records: list[Admitted] = []
     tallies: dict[str, int] = {}
     for candidate in candidates:
-        tally = _tally(shape, candidate, scope, tables)
+        tally, version = _tally(shape, candidate, scope, tables)
         if admits(tally):
             source = source_path_of(resolve_source_path(cast(str, candidate.source)))
-            records.append(Admitted(candidate.member, source, cast(str, candidate.ground_truth),
+            records.append(Admitted(candidate.member, source,
+                                    cast("Key | str", candidate.ground_truth), cast(str, version),
                                     candidate.row_key))
         tallies[tally] = tallies.get(tally, 0) + 1
     return records, tallies
@@ -222,35 +237,34 @@ class Admitted:
 
     ``member`` is the name a membership record names it by, the image stem for ground truth that is
     one file per sample and the row key for a table. ``source`` is the image source the admission
-    resolved for it, already a path (a ``.bandgroup`` manifest for a grouped capture), and
-    ``ground_truth`` the file that answers for it, with ``row_key`` naming its row when one file
-    answers for many.
+    resolved for it, already a path (a ``.bandgroup`` manifest for a grouped capture),
+    ``ground_truth`` its label document's key or the file that answers for it, and
+    ``ground_truth_digest`` the version token of the read that admitted it, with ``row_key``
+    naming its row when one file answers for many.
     """
 
     member: str
     source: str
-    ground_truth: str
+    ground_truth: Key | str
+    ground_truth_digest: str
     row_key: str | None = None
 
 
 def samples_over(
     records: "Sequence[Admitted]", assignment: dict[str, str],
-    group_of: "Callable[[str], str]", *, digests: Mapping[str, str] | None = None,
+    group_of: "Callable[[str], str]",
 ) -> list["Sample"]:
-    """Admitted records as explicit samples, one per record.
-
-    ``assignment`` maps each member to the side it landed on, ``group_of`` gives its group key, and
-    ``digests`` its ground-truth digest when the caller computed one. Each sample carries the
-    source and the ground truth the admission already resolved for that member.
+    """Admitted records as explicit samples, one per record: ``assignment`` maps each member to
+    the side it landed on and ``group_of`` gives its group key. Each sample carries the source,
+    the ground truth and its digest the admission resolved for that member.
     """
     from tcip_mcp.pipelines.data.selection import Sample
 
-    digests = digests or {}
     return [
         Sample(
             member=record.member, source=record.source, ground_truth=record.ground_truth, row_key=record.row_key,
             group=group_of(record.member), side=assignment[record.member],
-            ground_truth_digest=digests.get(record.member),
+            ground_truth_digest=record.ground_truth_digest,
         )
         for record in sorted(records, key=lambda r: r.member)
         if record.member in assignment
@@ -264,15 +278,18 @@ def foreground_counts(
 
     A member is an :class:`Admitted` record or the
     :class:`~tcip_mcp.pipelines.data.selection.Sample` it became. A label document carries a count
-    of its own annotations of ``scope``'s subject, read from the path the sample records. A mask raster and a table row count as one each.
+    of its own annotations of ``scope``'s subject, read by the key the member records. A mask
+    raster and a table row count as one each.
 
     The caller's own index is the result's index.
     """
+    from tcip_annotation.json_io import read_label_document
+
     from tcip_mcp.pipelines.data.selection import DOCUMENT, shape_of
     from tcip_mcp.pipelines.data.splits import count_label_lines
 
     return {
-        key: (count_label_lines(member.ground_truth, scope)
+        key: (count_label_lines(read_label_document(cast(Key, member.ground_truth)), scope)
               if shape_of(member.ground_truth, member.row_key) == DOCUMENT else 1)
         for key, member in members.items()
     }
@@ -284,24 +301,29 @@ def is_mask(path: Path) -> bool:
 
 
 def ground_truth_table(csv_path) -> dict[str, str]:
-    """One ground-truth table as ``{row key: value}``, the row key being the image stem its first
-    column names and the value its second, both as written. A key naming more than one row refuses
-    by name.
+    """The ground-truth table at ``csv_path`` (:func:`parse_ground_truth_table` of its bytes)."""
+    return parse_ground_truth_table(Path(csv_path).read_bytes(), csv_path)
+
+
+def parse_ground_truth_table(data: bytes, csv_path) -> dict[str, str]:
+    """One ground-truth table's bytes as ``{row key: value}``, the row key being the image stem
+    its first column names and the value its second, both as written. A key naming more than one
+    row refuses naming ``csv_path``.
     """
     import csv as _csv
+    import io
 
     rows: dict[str, str] = {}
     repeated: list[str] = []
-    with open(csv_path, newline="") as handle:
-        reader = _csv.reader(handle)
-        next(reader, None)  # the header row
-        for row in reader:
-            if len(row) < 2:
-                continue
-            key = row[0].strip()
-            if key in rows:
-                repeated.append(key)
-            rows[key] = row[1].strip()
+    reader = _csv.reader(io.StringIO(data.decode("utf-8-sig"), newline=""))
+    next(reader, None)  # the header row
+    for row in reader:
+        if len(row) < 2:
+            continue
+        key = row[0].strip()
+        if key in rows:
+            repeated.append(key)
+        rows[key] = row[1].strip()
     if repeated:
         raise ValueError(
             f"{csv_path} names {sorted(set(repeated))[:5]} on more than one row: a sample "
@@ -321,22 +343,27 @@ def _refused(tallies: Mapping[str, int]) -> str:
                      if not admits(name))
 
 
-def refuse_inadmissible_samples(samples: "Sequence[Sample]", scope: "ClassScope") -> None:
-    """Refuse recorded samples the admission no longer admits, naming which and the tallies that
-    refused them. Each sample is re-admitted as a :class:`Candidate` through the same evaluation
-    :func:`admit` runs, under ``scope`` held to its shape (``ClassScope.admitted_for``, so a
-    document read under a scope naming no subject refuses by name). Membership is never changed
-    here."""
+def readmitted_samples(samples: "Sequence[Sample]", scope: "ClassScope") -> list["Sample"]:
+    """``samples`` re-admitted, each as a :class:`Candidate` through the same evaluation
+    :func:`admit` runs under ``scope`` held to its shape (``ClassScope.admitted_for``, so a
+    document read under a scope naming no subject refuses by name), each carrying the version
+    that re-admission read as its ``ground_truth_digest``. A sample the admission no longer admits
+    refuses (``ValueError``) naming which and the tallies that refused them; membership is never
+    changed."""
+    from dataclasses import replace
+
     refused: list[str] = []
     tallies: dict[str, int] = {}
-    tables: dict[str, dict[str, str]] = {}
+    tables: _Tables = {}
+    version_of: dict[str, str] = {}
     for shape in sorted({s.shape for s in samples}):
         held = [s for s in samples if s.shape == shape]
         records, counts = _admission(
             shape, [Candidate(s.location, s.source if Path(s.source).exists() else None,
                               s.ground_truth, s.row_key) for s in held],
             scope.admitted_for(shape, "the class space these samples are read under"), tables)
-        refused += sorted({s.location for s in held} - {r.member for r in records})
+        version_of.update((r.member, r.ground_truth_digest) for r in records)
+        refused += sorted({s.location for s in held} - set(version_of))
         for name, count in counts.items():
             tallies[name] = tallies.get(name, 0) + count
     if refused:
@@ -344,10 +371,11 @@ def refuse_inadmissible_samples(samples: "Sequence[Sample]", scope: "ClassScope"
             f"{len(refused)} of this selection's samples are no longer admissible "
             f"({refused[:5]}): {_refused(tallies)}. The data moved under the selection since it "
             "was drawn: a label emptied with nobody marking that image complete, a mask or a "
-            "label file deleted, a row dropped from its table, or an image moved. Restore what "
+            "label document deleted, a row dropped from its table, or an image moved. Restore what "
             "those name, finish the annotation or the mark, or draw the selection again over the "
             "current data."
         )
+    return [replace(s, ground_truth_digest=version_of[s.location]) for s in samples]
 
 
 def require_admitted(admitted: "Admission") -> None:
@@ -361,12 +389,12 @@ def require_admitted(admitted: "Admission") -> None:
         MASK: f"An image needs its <stem>.png mask in {admitted.ground_truth}, since one with "
               "no mask would train as entirely background. Write the masks, or point "
               "data.labels_dir at the directory holding them.",
-        DOCUMENT: "An empty label file is a negative only once a human marks that image "
+        DOCUMENT: "An empty label document is a negative only once a human marks that image "
                   "Complete; until then it reads as unannotated. Annotate some images, or mark "
                   "the genuinely-empty ones Complete.",
     }.get(admitted.shape, f"A row needs an image under {admitted.images_dir}. Fix the row keys, "
                           "or point data.images_dir at the directory holding those images.")
-    raise ValueError(f"no trainable samples in {admitted.ground_truth} over "
+    raise ValueError(f"no trainable samples in the {admitted.shape} ground truth over "
                      f"{admitted.images_dir}: {_refused(admitted.tallies)}. {fix}")
 
 
@@ -380,27 +408,26 @@ class Admission:
     each :class:`Admitted` carrying its member name, its image source and its own ground truth.
     :meth:`samples` turns a side assignment over those records into explicit samples.
 
-    ``scope`` and ``date`` are the class space a document admission read class ids under and the
-    capture date its documents sit under; the scope is empty and the date ``None`` for a shape no
-    registry answers for: a mask raster and a table row carry their own classes.
+    ``ground_truth`` is the mask directory or table the run named, ``None`` for label documents.
+    ``scope`` is the class space a document admission read class ids under, empty for a mask
+    raster or a table row, which carry their own classes; ``date`` is the capture the images sit
+    under.
     """
 
     shape: str
     images_dir: str
-    ground_truth: str
+    ground_truth: str | None
     records: list[Admitted]
     tallies: dict[str, int]
     """How many places the admission tallied each way (:func:`admits`); never a foreground
     count."""
     scope: "ClassScope"
-    date: str | None = None
+    date: str
 
-    def samples(
-        self, assignment: dict[str, str], group_of: "Callable[[str], str]",
-        digests: Mapping[str, str] | None = None,
-    ) -> list["Sample"]:
+    def samples(self, assignment: dict[str, str],
+                group_of: "Callable[[str], str]") -> list["Sample"]:
         """The admitted records this assignment names, as samples on the sides it gives them."""
-        return samples_over(self.records, assignment, group_of, digests=digests)
+        return samples_over(self.records, assignment, group_of)
 
     def every_sample(self) -> list["Sample"]:
         """Every admitted record as a sample, all on the training side, each member grouped by the
@@ -413,32 +440,34 @@ class Admission:
 
 
 def admit(
-    images_dir, ground_truth, *, scope: "ClassScope | None" = None,
+    images_dir, ground_truth=None, *, scope: "ClassScope | None" = None,
     members: list[str] | None = None,
 ) -> Admission:
-    """The membership one place holding ground truth admits, through the admission its own shape
-    reads.
+    """The membership the images of ``images_dir`` and their ground truth admit, through the
+    admission its own shape reads.
 
-    Dispatches once on :func:`ground_truth_shape`: the label documents and their completion marks
-    for per-image documents, under ``scope``; the mask's own existence beside the image for mask
-    rasters, and the row's own presence beside a resolvable image for a table, both under an empty
-    scope. The admitted scope is held to its shape
+    Dispatches once on :func:`ground_truth_shape`: with no ``ground_truth``, each image's own
+    label document and its completion marks, under ``scope``; the mask's own existence beside the
+    image for a mask directory, and the row's own presence beside a resolvable image for a table,
+    both under an empty scope. The admitted scope is held to its shape
     (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.admitted_for`), so a document scope with
-    no subject or no attributes read refuses by name, and a scope naming anything over a mask or a table
-    refuses by name, since that ground truth carries its own classes.
+    no subject or no attributes read refuses by name, and a scope naming anything over a mask or a
+    table refuses by name, since that ground truth carries its own classes.
 
-    A place that names no ground truth this platform reads, or a directory holding a dataset-level
-    COCO, refuses by name. An empty admission is returned as such; :func:`require_admitted` refuses
-    it where a non-empty membership is needed.
+    A ``ground_truth`` this platform does not read, and an ``images_dir`` that is no capture
+    (:func:`~tcip_mcp.dataset_layout.parse_capture_dir`), refuse by name. An empty admission is
+    returned as such; :func:`require_admitted` refuses it where a non-empty membership is needed.
     """
-    from tcip_mcp.dataset_layout import annotation_date
-    from tcip_mcp.pipelines.data.selection import DOCUMENT, ClassScope
+    from tcip_mcp.dataset_layout import parse_capture_dir
+    from tcip_mcp.pipelines.data.selection import ClassScope
 
+    _root, capture = parse_capture_dir(images_dir)
     shape = ground_truth_shape(ground_truth)
-    admitted = (scope or ClassScope()).admitted_for(shape, f"the run over {ground_truth}")
-    tables: dict[str, dict[str, str]] = {}
+    admitted = (scope or ClassScope()).admitted_for(
+        shape, f"the run over {ground_truth or images_dir}")
+    tables: _Tables = {}
     records, counts = _admission(
         shape, _candidates(shape, ground_truth, images_dir, members, tables), admitted, tables)
-    return Admission(shape=shape, images_dir=str(images_dir), ground_truth=str(ground_truth),
-                     records=records, tallies=counts, scope=admitted,
-                     date=annotation_date(ground_truth) if shape == DOCUMENT else None)
+    return Admission(shape=shape, images_dir=str(images_dir),
+                     ground_truth=None if ground_truth is None else str(ground_truth),
+                     records=records, tallies=counts, scope=admitted, date=capture)

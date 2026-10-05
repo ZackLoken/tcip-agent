@@ -51,17 +51,17 @@ def decode_verdict(entry: Mapping) -> Verdict:
 REVIEW_VERDICTS_STORE = "review_verdicts"
 
 
-def verdict_key(state_dir: str | Path, bucket: str, img_name: str) -> Key:
-    """One image's verdict shard under one prediction bucket, in a dataset's state directory."""
-    return Key(REVIEW_VERDICTS_STORE, str(state_dir), (bucket, img_name))
+def verdict_key(dataset_root: str | Path, bucket: str, stem: str) -> Key:
+    """The verdict shard of the image of stem ``stem`` under the prediction bucket named
+    ``bucket``, under the dataset root the bucket and the image's label document belong to."""
+    return Key(REVIEW_VERDICTS_STORE, str(dataset_root), (bucket, stem))
 
 
-def record_verdicts(key: Key, verdicts: list[Verdict]) -> None:
-    """Append ``verdicts`` to the shard ``key`` names, each through :func:`encode_verdict`, in one
-    commit: every one lands or none does."""
-    with tcip_store.transaction(key) as txn:
-        for verdict in verdicts:
-            txn.append(key, encode_verdict(verdict))
+def record_verdicts(txn: tcip_store.Txn, key: Key, verdicts: list[Verdict]) -> None:
+    """Append ``verdicts`` to the shard ``key`` names inside ``txn``, each through
+    :func:`encode_verdict`, so they commit with whatever else the transaction writes."""
+    for verdict in verdicts:
+        txn.append(key, encode_verdict(verdict))
 
 
 def read_verdicts(key: Key) -> list[Verdict]:

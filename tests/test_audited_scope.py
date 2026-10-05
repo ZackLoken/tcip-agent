@@ -130,10 +130,11 @@ def test_unscoped_mutating_tool_records_in_the_project_log_with_the_entry_shape(
     assert _rows_for(dataset_root, "report_friction") == []
 
 
-def test_scope_argument_naming_no_dataset_leaves_the_call_in_the_project(
+def test_a_label_write_of_an_image_under_no_dataset_refuses_and_records_nothing(
     project: Path, tmp_path: Path
 ) -> None:
-    """A location that resolves to no dataset is never guessed into one."""
+    """An image under no dataset image tree has no label document to write: the save refuses
+    rather than guessing a dataset for it, and no log receives a line."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     loose = tmp_path / "loose"
@@ -144,11 +145,10 @@ def test_scope_argument_naming_no_dataset_leaves_the_call_in_the_project(
     result = save_annotations(
         project, project.parent, str(image),
         annotations=[{"subject": "bud", "bbox": [10, 10, 40, 40]}],
-        path=str(loose / "out.json"),
     )
-    assert "error" not in result
+    assert "is not a capture" in result["error"]
 
-    assert len(_rows_for(project, "save_label_document")) == 1
+    assert _rows_for(project, "save_label_document") == []
     assert _entries(loose) == []
 
 

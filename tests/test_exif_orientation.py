@@ -11,6 +11,8 @@ spatially, through the real dataset classes.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 import numpy as np
@@ -31,19 +33,18 @@ UP_W, UP_H = 80, 120  # upright is portrait (taller than wide), like a rotated b
 MARKER = (20, 30, 55, 60)  # red rectangle in upright pixel coords (x1, y1, x2, y2)
 
 
-def _make_orient6_dataset(tmp_path: Path) -> tuple[Path, Path, tuple[int, int, int, int]]:
-    """Write ``images/m.jpg`` (Orientation 6) + ``labels/m.json`` (upright-frame pixel box).
+def _make_orient6_dataset(tmp_path: Path) -> tuple[Path, tuple[int, int, int, int]]:
+    """Write ``images/m.jpg`` (Orientation 6) and its label document (upright-frame pixel box).
 
     The on-disk pixels are the upright image rotated 90° so that auto-orient's rotate(270)
     restores the upright frame, mirroring a real orientation-6 capture.
     """
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
+    from tests._producer_fixtures import label_image
+
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
 
     up = Image.new("RGB", (UP_W, UP_H), (0, 0, 0))
     ImageDraw.Draw(up).rectangle(list(MARKER), fill=(255, 0, 0))
@@ -53,10 +54,9 @@ def _make_orient6_dataset(tmp_path: Path) -> tuple[Path, Path, tuple[int, int, i
     raw.save(images_dir / "m.jpg", format="JPEG", exif=exif, quality=95)
 
     x1, y1, x2, y2 = MARKER  # already pixel xyxy in the upright frame
-    json_io.write_annotations(str(labels_dir / "m.json"),
-                              [Annotation(subject="bud", geometry=BBox(x1, y1, x2, y2))],
-                              UP_W, UP_H, keep_empty=True)
-    return images_dir, labels_dir, MARKER
+    label_image(images_dir / "m.jpg", [Annotation(subject="bud", geometry=BBox(x1, y1, x2, y2))],
+                UP_W, UP_H)
+    return images_dir, MARKER
 
 
 def _red_fraction(rchan: "np.ndarray | torch.Tensor", g: "np.ndarray | torch.Tensor") -> float:
@@ -73,8 +73,8 @@ def _red_fraction(rchan: "np.ndarray | torch.Tensor", g: "np.ndarray | torch.Ten
 # --------------------------------------------------------------------------
 
 def test_orientation6_fixture_is_real(tmp_path: Path) -> None:
-    images_dir, _, _ = _make_orient6_dataset(tmp_path)
-    reop = Image.open(images_dir / "m.jpg")
+    images_dir, _ = _make_orient6_dataset(tmp_path)
+    reop =Image.open(images_dir / "m.jpg")
     assert reop.size == (UP_H, UP_W)  # stored landscape (raw), differs from upright
     assert (reop._getexif() or {}).get(274) == 6  # the orientation the code must honor
 
@@ -89,7 +89,7 @@ def test_load_image_frame_matches_get_image_dimensions(tmp_path: Path) -> None:
     from tcip_annotation.utils import get_image_dimensions
     from tcip_mcp.pipelines.image_utils import load_image
 
-    images_dir, _, _ = _make_orient6_dataset(tmp_path)
+    images_dir, _ = _make_orient6_dataset(tmp_path)
     p = str(images_dir / "m.jpg")
     assert load_image(p, 3).size == get_image_dimensions(p) == (UP_W, UP_H)  # upright, not (UP_H, UP_W)
 
@@ -100,8 +100,8 @@ def test_load_image_frame_matches_get_image_dimensions(tmp_path: Path) -> None:
 
 def test_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
 
-    images_dir, labels_dir, _ = _make_orient6_dataset(tmp_path)
-    ds = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
+    images_dir, _ = _make_orient6_dataset(tmp_path)
+    ds = dataset_over('detection', str(images_dir), subject="bud")
     img_t, target = ds[0]
 
     assert img_t.shape[1:] == (UP_H, UP_W)  # [C, H, W] upright, not the raw sensor frame
@@ -123,8 +123,8 @@ def test_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
 def test_tiled_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
-    images_dir, labels_dir, _ = _make_orient6_dataset(tmp_path)
-    base = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
+    images_dir, _ = _make_orient6_dataset(tmp_path)
+    base = dataset_over('detection', str(images_dir), subject="bud")
     # sliver_frac stated: one marker box derives no size spread.
     tiled = TiledDetectionDataset(base, tile_size=64, overlap=0.25, skip_empty=True,
                                   sliver_frac=0.5)
@@ -155,12 +155,12 @@ def test_train_and_eval_read_paths_share_one_frame(tmp_path: Path) -> None:
     from tcip_annotation.utils import get_image_dimensions
     from tcip_mcp.pipelines.image_utils import load_image
 
-    images_dir, labels_dir, _ = _make_orient6_dataset(tmp_path)
+    images_dir, _ = _make_orient6_dataset(tmp_path)
     p = str(images_dir / "m.jpg")
 
     train_frame = load_image(p, 3).size          # training loader read
     eval_frame = get_image_dimensions(p)          # eval / viz / GUI read
-    ds_frame = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")[0][0].shape[1:]
+    ds_frame = dataset_over('detection', str(images_dir), subject="bud")[0][0].shape[1:]
 
     assert train_frame == eval_frame == (UP_W, UP_H)
     assert tuple(ds_frame) == (UP_H, UP_W)  # (H, W) == upright

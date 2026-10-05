@@ -3,14 +3,14 @@ delivering a bucket's per-image counts."""
 
 from __future__ import annotations
 
-import hashlib
 import logging
-import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from tcip_store import Key, Version, VersionConflict, decode_value, encode_record, store
+from tcip_store import (
+    Key, Version, VersionConflict, canonical_path, decode_value, encode_record, store,
+)
 
 from tcip_mcp.pipelines.execution import DEFAULT_TILE_BATCH_SIZE, Stated
 from tcip_mcp.server import tool
@@ -18,30 +18,33 @@ from tcip_mcp.server import tool
 logger = logging.getLogger(__name__)
 
 RASTER_PASS_PROGRESS_STORE = "raster_pass_progress"
-"""One tiled raster pass's resume state, kept under the project rather than in the bucket it will
-publish: an ``identity`` record naming the pass, plus one ``batch-<index>`` record per tile batch
-already predicted, both keyed under the bucket's digest."""
+"""One tiled raster pass's resume state under the project: an ``identity`` record naming the
+pass, plus one ``batch-<index>`` record per tile batch already predicted, both keyed under the
+bucket's dataset root and name."""
 
 
 def infer(
     project: Path, *, checkpoint_path: str, images_dir: str | None, raster_path: str | None,
-    output_dir: str, assessment_id: str | None, stated: Stated | None, device: str | None,
+    bucket: str, assessment_id: str | None, stated: Stated | None, device: str | None,
     tile_batch_size: int, dry_run: bool, require_masks: bool, resume: bool,
     progress: Callable[[int, int], None] | None = None,
     canceled: Callable[[], bool] | None = None, actor: str | None,
 ) -> dict:
     """Run a registered checkpoint's pass over ``images_dir`` or ``raster_path`` and publish its
-    predictions as the bucket ``output_dir`` by ``actor``, answering the publication's result or
+    predictions as the bucket named ``bucket`` under their dataset root
+    (:func:`~tcip_mcp.buckets.source_root`) by ``actor``, answering the publication's result or
     the error dict naming a refusal. ``progress`` is called with ``(done, total)`` images once the
     pass is prepared and after each image, and ``canceled`` asked before each image: once it
-    answers true the pass stops at that image boundary and publishes the documents written."""
+    answers true the pass stops at that image boundary and publishes the documents predicted, or
+    publishes nothing when it predicted none."""
     from tcip_mcp.assessment import read_assessment
-    from tcip_mcp.buckets import BucketExists, pass_documents, publish
+    from tcip_mcp.buckets import pass_documents, publish, source_root
+    from tcip_mcp.dataset_layout import bucket_key
     from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Execution, ExecutionRefused, prepare_pass
 
-    if not output_dir:
-        return {"error": "output_dir is required"}
+    if not bucket:
+        return {"error": "bucket is required: the name the predictions are published under"}
     if (images_dir is None) == (raster_path is None):
         return {"error": "Provide exactly one of images_dir or raster_path."}
     if resume and raster_path is None:
@@ -49,16 +52,17 @@ def infer(
                          "its whole bucket at once."}
     if raster_path is not None and not Path(raster_path).is_file():
         return {"error": f"raster_path not found: {raster_path}"}
-    out = Path(project, output_dir)
     try:
+        root = source_root([cast(str, raster_path or images_dir)])
         checkpoint = load_registered_checkpoint(checkpoint_path, project=project)
-    except (UnregisteredCheckpoint, FileNotFoundError) as exc:
+    except (UnregisteredCheckpoint, FileNotFoundError, ValueError) as exc:
         return {"error": str(exc)}
 
-    recorded = (store.read(_progress_key(project, out, "identity"), default=None)
+    recorded = (store.read(_progress_key(project, root, bucket, "identity"), default=None)
                 if resume else None)
     if resume and recorded is None:
-        return {"error": f"resume=True but no raster-pass progress toward {out} is recorded."}
+        return {"error": f"resume=True but no raster-pass progress toward bucket {bucket!r} "
+                         f"under {root} is recorded."}
     stated = stated or Stated()
     if raster_path is not None:
         stated = stated.model_copy(update={"tile": True})
@@ -87,47 +91,53 @@ def infer(
         differing = sorted(k for k in recorded.keys() | pass_identity.keys()
                            if recorded.get(k) != pass_identity.get(k))
         if differing:
-            return {"error": f"resume=True but the recorded pass toward {out} differs from this "
-                             f"call in {differing}: a resumed pass is the identical pass."}
+            return {"error": f"resume=True but the recorded pass toward bucket {bucket!r} differs "
+                             f"from this call in {differing}: a resumed pass is the identical "
+                             "pass."}
     if dry_run:
-        return {"dry_run": True, "output_dir": str(out), "bucket_exists": out.exists(),
+        return {"dry_run": True, "dataset_root": str(root), "bucket": bucket,
+                "bucket_exists": store.exists(bucket_key(root, bucket)),
                 "execution": p.execution.record(), "assessment_id": assessment_id}
 
     results: Any
     if raster_path is not None:
         try:
-            results = [_raster_pass(project, out, p, raster_path,
+            results = [_raster_pass(project, root, bucket, p, raster_path,
                                     {**pass_identity, "execution": p.execution.record()},
                                     require_masks=require_masks, resumed=recorded is not None)]
         except VersionConflict:
-            return {"error": f"a raster pass toward {out} is already recorded: resume it "
-                             "(resume=True), or name a bucket no pass has been recorded toward."}
+            return {"error": f"a raster pass toward bucket {bucket!r} is already recorded: resume "
+                             "it (resume=True), or name a bucket no pass has been recorded "
+                             "toward."}
     else:
-        results = _image_results(p, progress, canceled)
+        results = list(_image_results(p, progress, canceled))
+        if not results and canceled is not None and canceled():
+            return {"dataset_root": str(root), "bucket": bucket, "image_count": 0}
     try:
-        bucket = publish(project, out, pass_documents(p, results), producer=p.checkpoint.producer,
-                         scope=p.scope, execution=p.execution, raster_path=raster_path,
-                         raster_identity=raster_identity, assessment_id=assessment_id,
-                         actor=actor)
-    except BucketExists as exc:
+        published = publish(project, root, bucket, pass_documents(p, results),
+                            producer=p.checkpoint.producer, scope=p.scope, execution=p.execution,
+                            raster_path=raster_path, raster_identity=raster_identity,
+                            assessment_id=assessment_id, actor=actor)
+    except ValueError as exc:
         return {"error": str(exc)}
     if raster_path is not None:
-        _clear_raster_pass_progress(project, out)
+        _clear_raster_pass_progress(project, root, bucket)
     from tcip_mcp.buckets import detection_rows
 
-    rows = detection_rows(bucket) if p.execution.conf is not None else None
+    rows = detection_rows(published) if p.execution.conf is not None else None
     return {
-        "output_dir": str(out), "image_count": len(bucket.documents),
+        "dataset_root": str(published.root), "bucket": published.name,
+        "image_count": len(published.documents),
         "total_detections": sum(r["count"] for r in rows) if rows is not None else None,
-        "execution": p.execution.record(), "assessment_id": bucket.assessment_id,
-        **bucket.producer, "date": bucket.date, "dropped_boxes": bucket.dropped_boxes,
+        "execution": p.execution.record(), "assessment_id": published.assessment_id,
+        **published.producer, "date": published.date, "dropped_boxes": published.dropped_boxes,
     }
 
 
 def _image_results(p: Any, progress: Callable[[int, int], None] | None,
                    canceled: Callable[[], bool] | None):
-    """The pass's prediction per image, one image at a time as the publication consumes them,
-    reporting each and stopping at the image boundary a cancel is first seen at."""
+    """The pass's prediction per image, one image at a time, reporting each and stopping at the
+    image boundary a cancel is first seen at."""
     total = len(p.paths)
     if progress is not None:
         progress(0, total)
@@ -145,7 +155,7 @@ def run_inference(
     checkpoint_path: str,
     images_dir: str | None = None,
     raster_path: str | None = None,
-    output_dir: str = "",
+    bucket: str = "",
     assessment_id: str | None = None,
     stated: Stated | None = None,
     device: str | None = None,
@@ -156,13 +166,14 @@ def run_inference(
 ) -> dict:
     """Run a trained model over images or a raster, and publish the predictions as a bucket.
 
-    Provide exactly one of ``images_dir`` (an ordinary directory of per-image captures) or
-    ``raster_path`` (a single raster, potentially too large to decode whole, always tiled). The
-    bucket is ``output_dir``: a new directory holding one ``<stem>.json`` per image (one for the
-    raster, in full-raster pixels) and ``bucket.json``, the record of the checkpoint, class scope,
-    execution record, capture and assessment behind them. A bucket is published once: an existing
-    ``output_dir`` refuses, before an image pass predicts anything and once a raster pass has
-    predicted its raster, and a new run names a new bucket.
+    Provide exactly one of ``images_dir`` (a capture directory under a dataset's ``images/``
+    tree) or ``raster_path`` (a single raster there, potentially too large to decode whole, always
+    tiled). The predictions are published under the dataset root those images lie under as the
+    bucket named ``bucket``: one prediction document per image (one for the raster, in
+    full-raster pixels) and the bucket's record of the checkpoint, class scope, execution record,
+    capture and assessment behind them, in one commit. A bucket is published once: a name already
+    published under that root refuses once the pass has predicted, and a new run names a new
+    bucket.
 
     With ``assessment_id`` the pass runs exactly that assessment's execution record (its conf,
     cap, tile edge, overlap, merge and threshold) and the bucket names the assessment, which is
@@ -174,7 +185,7 @@ def run_inference(
         checkpoint_path: A checkpoint registered in this project.
         images_dir: Directory of input images (exclusive with ``raster_path``).
         raster_path: A single raster (exclusive with ``images_dir``).
-        output_dir: The bucket directory to publish; a relative path is under the project.
+        bucket: The name to publish the predictions under, e.g. ``<model>/<date>``.
         assessment_id: The assessment whose execution record the pass runs and whose id the
             bucket records.
         stated: The execution values to state rather than derive (``execution.Stated``):
@@ -186,38 +197,33 @@ def run_inference(
         dry_run: Resolve the execution record and the bucket and report them, with whether the
             bucket already exists, predicting and publishing nothing.
         require_masks: Collect masks for an ``instance_seg`` checkpoint over a raster.
-        resume: ``raster_path`` only: continue a raster pass toward ``output_dir`` whose progress
+        resume: ``raster_path`` only: continue a raster pass toward ``bucket`` whose progress
             the project records, under the execution record that progress recorded; a stated
             value it records differently refuses by name, and so does a different checkpoint,
             raster, assessment, tile batch size or mask choice.
     """
     return infer(project, checkpoint_path=checkpoint_path, images_dir=images_dir,
-                 raster_path=raster_path, output_dir=output_dir, assessment_id=assessment_id,
+                 raster_path=raster_path, bucket=bucket, assessment_id=assessment_id,
                  stated=stated, device=device, tile_batch_size=tile_batch_size, dry_run=dry_run,
                  require_masks=require_masks, resume=resume, actor=None)
 
 
-def _progress_key(project: Path, bucket: Path, segment: str) -> Key:
-    """One raster pass's progress record toward ``bucket``, kept under ``project``: the identity
-    (``segment="identity"``) or one flushed tile batch (``segment=f"batch-{index:06d}"``)."""
-    return Key(RASTER_PASS_PROGRESS_STORE, str(project), (_bucket_digest(bucket), segment))
+def _progress_key(project: Path, root: Path, bucket: str, segment: str) -> Key:
+    """One raster pass's progress record toward the bucket ``bucket`` under the dataset ``root``,
+    kept under ``project``: the identity (``segment="identity"``) or one flushed tile batch
+    (``segment=f"batch-{index:06d}"``)."""
+    return Key(RASTER_PASS_PROGRESS_STORE, str(project),
+               (canonical_path(root), bucket, segment))
 
 
-def _bucket_digest(bucket: Path) -> str:
-    """The progress store's name for the bucket a raster pass will publish: a digest of its
-    resolved path."""
-    return hashlib.sha256(os.path.normcase(str(bucket.resolve())).encode("utf-8")).hexdigest()[:16]
+def _progress_keys(project: Path, root: Path, bucket: str) -> list[Key]:
+    """Every progress record a raster pass toward ``bucket`` under ``root`` left under
+    ``project``."""
+    return store.keys(RASTER_PASS_PROGRESS_STORE, str(project), (canonical_path(root), bucket))
 
 
-def _progress_keys(project: Path, bucket: Path) -> list[Key]:
-    """Every progress record a raster pass toward ``bucket`` left under ``project``."""
-    name = _bucket_digest(bucket)
-    return [key for key in store.keys(RASTER_PASS_PROGRESS_STORE, str(project))
-            if key.parts[0] == name]
-
-
-def _raster_pass(project: Path, out: Path, p: Any, raster_path: str, pass_identity: dict, *,
-                 require_masks: bool, resumed: bool) -> dict:
+def _raster_pass(project: Path, root: Path, bucket: str, p: Any, raster_path: str,
+                 pass_identity: dict, *, require_masks: bool, resumed: bool) -> dict:
     """The one tiled pass over the raster: its identity recorded first on a fresh pass, each
     flushed tile batch recorded as it lands, the batches already recorded fed back in on a
     resumed one."""
@@ -225,20 +231,20 @@ def _raster_pass(project: Path, out: Path, p: Any, raster_path: str, pass_identi
 
     prior: dict[str, list] | None = None
     if resumed:
-        indexed = sorted((int(key.parts[1][len("batch-"):]), key)
-                         for key in _progress_keys(project, out)
-                         if key.parts[1].startswith("batch-"))
+        indexed = sorted((int(key.parts[-1][len("batch-"):]), key)
+                         for key in _progress_keys(project, root, bucket)
+                         if key.parts[-1].startswith("batch-"))
         prior = {"slices": [], "predictions": []}
         for _index, key in indexed:
             batch = store.read(key)
             prior["slices"].extend(batch["slices"])
             prior["predictions"].extend(batch["predictions"])
     else:
-        store.replace(_progress_key(project, out, "identity"), pass_identity,
+        store.replace(_progress_key(project, root, bucket, "identity"), pass_identity,
                       expect=Version.ABSENT)
 
     def record(start: int, _end: int, batch: dict) -> None:
-        store.replace(_progress_key(project, out, f"batch-{start:06d}"), batch,
+        store.replace(_progress_key(project, root, bucket, f"batch-{start:06d}"), batch,
                       expect=Version.ABSENT)
 
     with open_raster(raster_path, p.predictor.in_chans) as reader:
@@ -248,10 +254,10 @@ def _raster_pass(project: Path, out: Path, p: Any, raster_path: str, pass_identi
             progress=record)
 
 
-def _clear_raster_pass_progress(project: Path, bucket: Path) -> None:
-    """Delete every progress record a raster pass toward ``bucket`` left, in one transaction: a
-    published pass has nothing left to resume."""
-    keys = _progress_keys(project, bucket)
+def _clear_raster_pass_progress(project: Path, root: Path, bucket: str) -> None:
+    """Delete every progress record a raster pass toward ``bucket`` under ``root`` left, in one
+    transaction: a published pass has nothing left to resume."""
+    keys = _progress_keys(project, root, bucket)
     if not keys:
         return
     with store.transaction(*keys) as txn:
@@ -260,7 +266,7 @@ def _clear_raster_pass_progress(project: Path, bucket: Path) -> None:
 
 
 @tool()
-def deliver_per_image_counts(project: Path, predictions_dir: str, output_path: str, *,
+def deliver_per_image_counts(project: Path, dataset_root: str, bucket: str, output_path: str, *,
                              trait: str, acknowledgment_id: str | None = None) -> dict:
     """Deliver a published bucket's per-image detection counts as a CSV.
 
@@ -273,7 +279,8 @@ def deliver_per_image_counts(project: Path, predictions_dir: str, output_path: s
     delivery appends one delivery event.
 
     Args:
-        predictions_dir: The published bucket; a relative path is under the project.
+        dataset_root: The dataset root the bucket is published under.
+        bucket: The published bucket's name.
         output_path: The CSV to write; a relative path is under the project.
         trait: The trait whose confirmed per-image-count operationalization this rests on.
         acknowledgment_id: A breeder's recorded acknowledgment of this unvalidated result.
@@ -285,7 +292,7 @@ def deliver_per_image_counts(project: Path, predictions_dir: str, output_path: s
 
     try:
         return deliver_per_image_counts_csv(
-            project, Path(project, predictions_dir), str(Path(project, output_path)),
+            project, dataset_root, bucket, str(Path(project, output_path)),
             trait=trait, acknowledgment_id=acknowledgment_id, door="deliver_per_image_counts",
             actor=None)
     except (DeliveryRefused, OperationalizationRefused, TraitUnknownError, ValueError) as exc:

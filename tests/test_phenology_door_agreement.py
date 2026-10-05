@@ -35,7 +35,8 @@ def test_the_web_and_mcp_deliveries_agree_on_the_majority_column_and_the_revisio
     out_csv = tmp_path / "mcp_delivery.csv"
     result = deliver_phenology_milestones(
         tmp_path, trait=body["trait"], mapping_name=body["mapping_name"], plants=body["plants"],
-        buckets=body["buckets"], output_csv_path=str(out_csv))
+        dataset_root=body["dataset_root"], buckets=body["buckets"],
+        output_csv_path=str(out_csv))
     assert "error" not in result, result
     with out_csv.open(newline="", encoding="utf-8") as fh:
         mcp_row = next(iter(csv.DictReader(fh)))

@@ -16,7 +16,6 @@ from tcip_annotation.json_io import (
     ANNOTATIONS_KEY,
     annotation_object,
     annotation_of_record,
-    is_dataset_level_document,
 )
 from tcip_annotation.mask_contours import mask_to_polygon_rings
 from tcip_annotation.state import Annotation
@@ -82,7 +81,7 @@ def parse_coco_annotations(
     :func:`~tcip_annotation.mask_contours.mask_to_polygon_rings`; a mask that yields no ring is
     refused by the decoder like any other segmentation with no ring.
     """
-    if not is_dataset_level_document(coco):
+    if "images" not in coco and "categories" not in coco:
         raise ValueError(
             "the document is not a dataset-level COCO document: it carries no 'images' or "
             "'categories' key"

@@ -28,8 +28,8 @@ def test_a_canceled_inference_job_reads_as_canceled(tmp_path, monkeypatch):
     ckpt = foreign_checkpoint(tmp_path)
 
     job = inference.InferenceJob(job_id="canceled-job", actor="user:tester", checkpoint_path=ckpt,
-                                 images_dir=str(images_dir), output_dir=str(tmp_path / "out"),
-                                 project=str(tmp_path), stated=Stated(
+                                 images_dir=str(images_dir), dataset_root=str(tmp_path),
+                                 bucket="out", project=str(tmp_path), stated=Stated(
                                      tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2))
     inference._register(job)
     job.cancel_event.set()

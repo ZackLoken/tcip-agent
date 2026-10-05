@@ -62,9 +62,11 @@ GOLDEN_DATASET = {
 def test_evaluate_single_image_golden(data_dir: Path):
     from tcip_mcp.tools.annotation_tools import score_predictions
 
+    from tests.conftest import DATA_DIR_BUCKET
+
     img = data_dir / "images" / "2-11-26" / "img_001.jpg"
-    result = score_predictions(str(img), str(data_dir / "predictions" / "live" / "2-11-26"),
-                               iou_threshold=0.5, conf_threshold=0.5, detail=True)
+    result = score_predictions(str(img), DATA_DIR_BUCKET, iou_threshold=0.5, conf_threshold=0.5,
+                               detail=True)
     assert result.pop("image") == str(img)
     # The two predictions name the checkpoint that published them; the reference names none.
     produced_by = [d.pop("created_by", None) for d in result["detections"]]
@@ -77,8 +79,9 @@ def test_evaluate_single_image_golden(data_dir: Path):
 def test_evaluate_folder_golden(data_dir: Path):
     from tcip_mcp.tools.annotation_tools import score_predictions
 
+    from tests.conftest import DATA_DIR_BUCKET
+
     images_dir = str(data_dir / "images" / "2-11-26")
-    result = score_predictions(images_dir, str(data_dir / "predictions" / "live" / "2-11-26"),
-                               iou_threshold=0.5, conf_threshold=0.5)
+    result = score_predictions(images_dir, DATA_DIR_BUCKET, iou_threshold=0.5, conf_threshold=0.5)
     assert result.pop("path") == images_dir
     assert result == GOLDEN_DATASET

@@ -26,7 +26,7 @@ function project(overrides: Partial<ProjectSummary> & { id: string }): ProjectSu
     dates: [],
     subjects: [],
     subjects_by_date: {},
-    prediction_dirs: {},
+    buckets_by_date: {},
     image_count: 0,
     is_open: false,
     label_problem: null,
@@ -66,10 +66,7 @@ describe("openProjectById", () => {
         dates: ["2026-02-11", "2026-03-24"],
         subjects: ["bush", "subject_a"], // flat list would pick "bush"
         subjects_by_date: { "2026-02-11": ["subject_a"], "2026-03-24": [] },
-        prediction_dirs: {
-          "2026-02-11": { baseline: "/ws/hz/predictions/baseline" },
-          "2026-03-24": {},
-        },
+        buckets_by_date: { "2026-02-11": ["baseline"], "2026-03-24": [] },
       }),
     ]);
 
@@ -79,7 +76,7 @@ describe("openProjectById", () => {
     // Lands on 2026-02-11 (newest date with labels) + its subject, not the empty newest date.
     expect(arg.date).toBe("2026-02-11");
     expect(arg.subject).toBe("subject_a");
-    expect(arg.predictions_dir).toBe("/ws/hz/predictions/baseline");
+    expect(arg.bucket).toBe("baseline");
   });
 
   it("falls back to the newest date when nothing is labeled yet (empty project)", async () => {
@@ -88,7 +85,7 @@ describe("openProjectById", () => {
         id: "fresh",
         dates: ["2026-02-11", "2026-03-24"],
         subjects_by_date: { "2026-02-11": [], "2026-03-24": [] },
-        prediction_dirs: { "2026-02-11": {}, "2026-03-24": {} },
+        buckets_by_date: { "2026-02-11": [], "2026-03-24": [] },
       }),
     ]);
 
@@ -109,6 +106,17 @@ describe("openProjectById", () => {
     expect(useStore.getState().openProject).toEqual({ id: "site-a", path: "/ws/site-a" });
   });
 
+  it("opens a project holding no capture with no dataset selected", async () => {
+    listed([project({ id: "empty" })]);
+
+    await openProjectById("empty");
+
+    expect(api.projects.open).toHaveBeenCalledWith("empty");
+    expect(api.dataset.select).not.toHaveBeenCalled();
+    expect(useStore.getState().gui.dataset.dataset_root).toBeNull();
+    expect(useStore.getState().openProject).toEqual({ id: "empty", path: "/ws/empty" });
+  });
+
   it("returns null for an id the workspace does not list", async () => {
     listed([]);
     expect(await openProjectById("nope")).toBeNull();
@@ -123,7 +131,7 @@ describe("openWorkspaceProject", () => {
       status: "ok",
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       selection: { image_list: [], current_image_index: 0 } as any,
-      label_problem: "C:/data/annotations/2026-02-11/IMG_0000.json does not decode as JSON",
+      label_problem: "label_documents['2026-02-11', 'IMG_0000'] under C:/data: is a list",
     });
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
 
@@ -135,7 +143,7 @@ describe("openWorkspaceProject", () => {
     );
 
     expect(pushToast).toHaveBeenCalledWith(
-      "C:/data/annotations/2026-02-11/IMG_0000.json does not decode as JSON",
+      "label_documents['2026-02-11', 'IMG_0000'] under C:/data: is a list",
     );
   });
 });

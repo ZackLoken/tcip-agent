@@ -10,6 +10,8 @@ which records the subject it was trained on.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 import pytest
@@ -59,7 +61,7 @@ def _capture(root: Path) -> tuple[Path, Path]:
     """Frames holding one bright square, and its mask raster."""
     from PIL import Image, ImageDraw
 
-    images, masks = root / "images", root / "masks"
+    images, masks = root / "images" / UNDATED_BUCKET, root / "masks"
     for d in (images, masks):
         d.mkdir(parents=True)
     for index, stem in enumerate(STEMS):

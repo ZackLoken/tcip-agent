@@ -13,6 +13,8 @@ Proves the whole CV-scientist vision at once:
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from functools import partial
 from pathlib import Path
 
@@ -30,10 +32,9 @@ import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
 from torch.utils.data import DataLoader  # noqa: E402
 
 from tests import bespoke_models  # noqa: E402 (the agent-authored bespoke model + train loop)
-from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tests._image_fixtures import write_noise_image  # noqa: E402
-from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._producer_fixtures import dataset_over, label_image  # noqa: E402
 
 IMG = 64
 
@@ -60,21 +61,19 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     from tcip_mcp.pipelines.training.collation import task_collate
 
     # 1. Synthetic detection data: open (tall) boxes so GT-derived anchors differ from defaults.
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    labels_dir.mkdir(parents=True, exist_ok=True)
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     shapes = [(15, 36), (16, 40), (17, 44)]
     gt_wh: list[tuple[int, int]] = []
     for i in range(6):
         _save_png(images_dir / f"img{i}.png")
         w, h = shapes[i % len(shapes)]
         x1, y1 = 32 - w / 2, 32 - h / 2
-        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="bud", geometry=BBox(x1, y1, x1 + w, y1 + h))],
-                                  IMG, IMG, keep_empty=True)
+        label_image(images_dir / f"img{i}.png",
+                    [Annotation(subject="bud", geometry=BBox(x1, y1, x1 + w, y1 + h))],
+                    IMG, IMG, keep_empty=True)
         gt_wh.append((w, h))
 
-    dataset = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
+    dataset = dataset_over("detection", str(images_dir), subject="bud")
     val_loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("detection"))
 
     # 2. Bespoke model_source + custom training_source, run through the audited envelope.
@@ -85,8 +84,8 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
             "builder_kwargs": {"gt_boxes_wh": gt_wh, "min_size": IMG, "max_size": IMG * 2},
             "task": "detection", "source_files": [src_file],
         },
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "num_channels": 3, "scope": asdict(dataset.scope)},
+        "data": {"images_dir": str(images_dir), "num_channels": 3,
+                 "scope": asdict(dataset.scope)},
         "training_source": "tests.bespoke_models:train_bespoke",
         "device": "cpu", "epochs": 2, "seed": 0,
     }

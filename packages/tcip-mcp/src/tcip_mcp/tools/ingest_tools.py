@@ -14,7 +14,6 @@ from pathlib import Path
 
 import tcip_store
 
-from tcip_annotation.json_io import is_reserved_stem
 from tcip_mcp import dataset_layout
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.data.band_groups import MANIFEST_EXT
@@ -241,13 +240,9 @@ def ingest_images(
             ``False``.
 
     Returns a manifest: ``{image_root, total, found, copied, moved, buckets, undated,
-    skipped_collisions, reserved_name_skips, errors, unreadable_dates, move, band_groups}``,
-    where ``unreadable_dates`` names each ingested file whose capture date could
-    not be read and the reason, and ``reserved_name_skips`` names each source file not ingested
-    because its own stem is reserved for a prediction bucket's own record.
-    ``skipped_collisions`` names only an exact re-ingest. A band group whose formed stem (the
-    siblings' common prefix) is reserved the same way is not written as a manifest either;
-    ``band_groups.reserved_name_skips`` names each one, in the shape of ``band_groups.formed``.
+    skipped_collisions, errors, unreadable_dates, move, band_groups}``, where
+    ``unreadable_dates`` names each ingested file whose capture date could not be read and the
+    reason. ``skipped_collisions`` names only an exact re-ingest.
     """
     try:
         _validate_bucket_literal(date_from)
@@ -258,15 +253,7 @@ def ingest_images(
     if not sources:
         return {"error": f"No images found under {source!r}"}
 
-    reserved_name_skips: list[dict] = []
-    resolved_sources: list[tuple[Path, str, str | None]] = []
-    for src_path in sources:
-        if is_reserved_stem(src_path.stem):
-            # A bucket's own record name is reserved so no bucket walk can mistake it for a label.
-            reserved_name_skips.append({"stem": src_path.stem, "source": str(src_path)})
-            continue
-        bucket, date_unreadable = _bucket_for(src_path, date_from)
-        resolved_sources.append((src_path, bucket, date_unreadable))
+    resolved_sources = [(src_path, *_bucket_for(src_path, date_from)) for src_path in sources]
 
     collision_error = _collision_refusal(project, resolved_sources)
     if collision_error is not None:
@@ -325,9 +312,7 @@ def ingest_images(
         else:
             buckets[bucket] = buckets.get(bucket, 0) + 1
 
-    band_groups_result: dict = {
-        "formed": [], "refused": [], "manifests": [], "reserved_name_skips": [],
-    }
+    band_groups_result: dict = {"formed": [], "refused": [], "manifests": []}
     if detect_band_groups:
         from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
 
@@ -339,11 +324,9 @@ def ingest_images(
             for g in result["refused"]:
                 band_groups_result["refused"].append({**g, "bucket": bucket})
             band_groups_result["manifests"].extend(result["manifests"])
-            for g in result["reserved_name_skips"]:
-                band_groups_result["reserved_name_skips"].append({**g, "bucket": bucket})
 
     return {
-        "image_root": str(dataset_layout.image_dir(project, None)),
+        "image_root": str(dataset_layout.image_root(project)),
         "total": copied + moved,
         "found": len(sources),
         "copied": copied,
@@ -351,7 +334,6 @@ def ingest_images(
         "buckets": dict(sorted(buckets.items())),
         "undated": undated,
         "skipped_collisions": skipped_collisions,
-        "reserved_name_skips": reserved_name_skips,
         "errors": errors,
         "unreadable_dates": unreadable_dates,
         "move": not copy,
@@ -368,28 +350,26 @@ def import_coco(document: str, dataset_root: str, date: str) -> dict:
     a subject the dataset's registry declares, and each image is the capture's image of that exact
     file name (a ``.bandgroup`` capture by stem). Every fault found before writing is named
     together and refuses the import with nothing written: a malformed or unregistered category, a
-    malformed record, a duplicate id or image, an image not in the capture, a frame that disagrees
-    with the image, or a per-image document already there. Documents are then written as one
-    store transaction, each checked absent under the locks, so a label placed meanwhile refuses
-    the whole import with nothing written; an import that wrote no document leaves no event. A
-    crowd region keeps its flag and a run-length mask becomes rings. An image with no annotations
-    writes nothing.
+    malformed record, a duplicate id or image, an image not in the capture, or a frame that
+    disagrees with the image. The documents and the import's audit line then commit as one store
+    transaction, each document checked absent inside it, so a label already there refuses the
+    whole import with nothing written; an import that writes no document leaves no event. A crowd
+    region keeps its flag and a run-length mask becomes rings. An image with no annotations writes
+    nothing.
 
     Args:
         document: Absolute path to the COCO ``.json`` (an ``images``/``categories`` key).
         dataset_root: The dataset the images were ingested into.
-        date: The capture bucket under ``images/`` the images sit in (for a dataset with no dated
-            buckets, the flat ``images/`` root); the documents are written under
-            ``annotations/<date>/``, or the flat ``annotations/`` root beside flat images. A COCO
-            document states no capture date, so it is named.
+        date: The capture under ``images/`` the images sit in, which the documents are keyed
+            under; one ``list_dates`` does not list refuses. A COCO document states no capture,
+            so it is named.
 
-    Returns ``{document, date, written}`` with every per-image document written.
+    Returns ``{document, capture, written}``, ``written`` the stem of every label document
+    written.
     """
-    from tcip_annotation.json_io import UnreadableLabelDocument
-
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
 
     try:
         return import_coco_document(document, dataset_root, date=date)
-    except (ValueError, FileNotFoundError, UnreadableLabelDocument) as exc:
+    except (ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}

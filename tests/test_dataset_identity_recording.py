@@ -18,53 +18,52 @@ from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, opened_run
 SUBJECT = "bud"
 
 
-def _make_dataset(root: Path, *, shade: int = 0,
-                  images: str = "images") -> tuple[Path, Path]:
-    """Two labeled images of ``shade`` under one capture date, in an images directory named
-    ``images`` (a name outside the dataset layout leaves them under no dataset root); answers
-    ``(images_dir, labels_dir)``."""
+def _make_dataset(root: Path, *, shade: int = 0) -> Path:
+    """Two labeled images of ``shade`` under one capture date; answers their images
+    directory."""
     from PIL import Image
 
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import label_image, registry_over
 
-    images_dir, labels_dir = root / images / "2-11-26", root / "annotations" / "2-11-26"
+    images_dir = root / "images" / "2-11-26"
     images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
     for i in range(2):
         Image.new("RGB", (32, 32), color=(shade, 10 * i, 0)).save(images_dir / f"img_{i:03d}.jpg")
-        json_io.write_annotations(str(labels_dir / f"img_{i:03d}.json"),
-                                  [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 9, 9))], 32, 32)
+        label_image(images_dir / f"img_{i:03d}.jpg",
+                    [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 9, 9))], 32, 32)
     registry_over(root, SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
-    return images_dir, labels_dir
+    return images_dir
 
 
-def _config(images_dir: Path, labels_dir: Path) -> dict:
-    """A :data:`BUILT_DETECTOR` run's config over ``images_dir`` and ``labels_dir``."""
+def _config(images_dir: Path) -> dict:
+    """A :data:`BUILT_DETECTOR` run's config over ``images_dir``."""
     return {"model_source": dict(BUILT_DETECTOR),
-            "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                     "scope": {"subject": SUBJECT}}}
+            "data": {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}}}
 
 
 def test_compare_experiments_surfaces_shared_fingerprint(tmp_path):
-    first = _config(*_make_dataset(tmp_path / "first"))
+    first = _config(_make_dataset(tmp_path / "first"))
     opened_run(tmp_path, first, experiment_id="a")
     opened_run(tmp_path, first, experiment_id="b")
     assert compare_experiments(["a", "b"], project=tmp_path)["same_dataset_fingerprint"] is True
-    opened_run(tmp_path, _config(*_make_dataset(tmp_path / "second", shade=200)),
+    opened_run(tmp_path, _config(_make_dataset(tmp_path / "second", shade=200)),
                experiment_id="c")
     assert compare_experiments(["a", "c"], project=tmp_path)["same_dataset_fingerprint"] is False
 
 
 def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(tmp_path):
-    """One run with a known fingerprint compared against a run whose images sit under no dataset
-    root (None) must report unknown identity, not a false apples-to-apples True: the two
+    """One run with a known fingerprint compared against a run over a dataset holding no label
+    document (None) must report unknown identity, not a false apples-to-apples True: the two
     demonstrably did not train on the same (known) data."""
-    opened_run(tmp_path, _config(*_make_dataset(tmp_path / "first")), experiment_id="a")
-    opened_run(tmp_path, _config(*_make_dataset(tmp_path / "loose", images="frames")),
-               experiment_id="b")
+    from tests._verified_checkpoint_fixtures import table_images
+
+    opened_run(tmp_path, _config(_make_dataset(tmp_path / "first")), experiment_id="a")
+    opened_run(tmp_path, {
+        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_classifier",
+                         "task": "classification"},
+        "data": table_images(tmp_path / "loose")}, experiment_id="b")
     assert compare_experiments(["a", "b"], project=tmp_path)["same_dataset_fingerprint"] is None
 
 
@@ -111,17 +110,17 @@ def test_a_trial_over_a_data_axis_records_the_dataset_its_own_input_names(tmp_pa
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.tools.training_tools import _run_hpo_trial
 
-    base_images, base_labels = _make_dataset(tmp_path / "base")
+    base_images = _make_dataset(tmp_path / "base")
     register_dataset(tmp_path / "base", str(tmp_path / "base"), crop="currant")
-    other_images, other_labels = _make_dataset(tmp_path / "other", shade=200)
+    other_images = _make_dataset(tmp_path / "other", shade=200)
     other = register_dataset(tmp_path / "other", str(tmp_path / "other"), crop="currant")
     monkeypatch.setattr(subprocess_worker, "run_directory",
                         lambda *a, **k: SimpleNamespace(status="failed"))
     trial_dir = sweeps_dir(tmp_path) / "sweep" / "trial_a"
     trial_dir.parent.mkdir(parents=True)
 
-    _run_hpo_trial({"data.images_dir": str(other_images), "data.labels_dir": str(other_labels)},
-                   [].append, _config(base_images, base_labels), trial_dir, project=tmp_path,
+    _run_hpo_trial({"data.images_dir": str(other_images)},
+                   [].append, _config(base_images), trial_dir, project=tmp_path,
                    objective={"selection_metric": "loss", "higher_is_better": False})
 
     dataset = read_record(trial_dir / RUN_FILE)["dataset"]
@@ -150,14 +149,13 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(tmp_path, mon
 
     monkeypatch.setattr(subprocess, "Popen", _StubChild)
 
-    images_dir, labels_dir = _make_dataset(tmp_path)
+    images_dir = _make_dataset(tmp_path)
     registered = register_dataset(tmp_path, str(tmp_path), crop="currant")
     launched = launch_training(tmp_path, {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 64},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "scope": {"subject": SUBJECT}},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}], "device": "cpu",
         "experiment_id": "exp-identity",
     }, actor=None)

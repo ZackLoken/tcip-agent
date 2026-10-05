@@ -11,7 +11,7 @@ from pathlib import Path
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
-from tcip_mcp.dataset_layout import annotation_dir, image_dir
+from tcip_mcp.dataset_layout import image_dir, label_key
 from tcip_mcp.tools.gui_tools import focus_human_attention
 
 
@@ -23,18 +23,25 @@ def _scene(root: Path, date: str, images: list[str]) -> None:
 
 
 def _label(root: Path, subject: str, date: str, task: str, stem: str, count: int) -> None:
-    # Write the one per-image JSON label (all subjects, name-based). count==0 writes a present
-    # {"annotations": []}; count>0 writes `count` shapes of `subject`, with the
-    # geometry `task` names ('segment' -> polygon, 'point' -> point, else box), so focus_human_attention infers the
-    # mode from the frame's own geometry.
-    d = Path(annotation_dir(root, date))
+    """Write the one per-image label document (all subjects, name-based): ``count`` 0 writes a
+    present empty document, else ``count`` shapes of ``subject`` with the geometry ``task`` names
+    (``segment`` a polygon, ``point`` a point, else a box), so focus_human_attention infers the
+    mode from the frame's own geometry."""
     geoms = {"segment": Polygon([[(10.0, 10.0), (20.0, 10.0), (20.0, 20.0)]]),
              "point": Point(10.0, 10.0)}
     anns = []
     for _ in range(count):
         geom = geoms.get(task, BBox(10.0, 10.0, 20.0, 20.0))
         anns.append(Annotation(subject=subject, geometry=geom))
-    json_io.write_annotations(str(d / f"{stem}.json"), anns, 100, 100, keep_empty=True)
+    json_io.write_label_document(label_key(root, date, stem), anns, 100, 100, keep_empty=True)
+
+
+def _unreadable(root: Path, date: str, stem: str) -> None:
+    """A label document for ``stem`` whose stored bytes no longer decode."""
+    from tests._record_damage_fixtures import damage_record
+
+    _label(root, "bush", date, "segment", stem, 0)
+    damage_record(label_key(root, date, stem), b"{not json")
 
 
 def test_focus_annotate_lands_on_first_annotated_polygon_frame(tmp_path: Path) -> None:
@@ -221,10 +228,7 @@ def test_focus_annotate_navigates_past_an_unreadable_label_on_another_frame(tmp_
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
     _scene(root, date, imgs)
-    d = Path(annotation_dir(root, date))
-    d.mkdir(parents=True, exist_ok=True)
-    bad = d / "IMG_0000.json"
-    bad.write_bytes(b"{not json")
+    _unreadable(root, date, "IMG_0000")
     _label(root, "bush", date, "segment", "IMG_0002", 1)
 
     res = focus_human_attention(root, root.parent, str(root), "bush", date)
@@ -234,18 +238,15 @@ def test_focus_annotate_navigates_past_an_unreadable_label_on_another_frame(tmp_
 
 
 def test_focus_annotate_refuses_when_the_landed_frame_itself_is_unreadable(tmp_path: Path) -> None:
-    """A present, unreadable label naming the requested frame is an error naming the file, never
-    a raise through the tool boundary."""
+    """A present, unreadable label naming the requested frame is an error naming the document,
+    never a raise through the tool boundary."""
     root = tmp_path / "proj"
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
     _scene(root, date, imgs)
-    d = Path(annotation_dir(root, date))
-    d.mkdir(parents=True, exist_ok=True)
-    bad = d / "IMG_0000.json"
-    bad.write_bytes(b"{not json")
+    _unreadable(root, date, "IMG_0000")
     _label(root, "bush", date, "segment", "IMG_0002", 1)
 
     res = focus_human_attention(root, root.parent, str(root), "bush", date, image_index=0)
     assert "error" in res
-    assert str(bad) in res["error"]
+    assert "IMG_0000" in res["error"]

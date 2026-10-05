@@ -226,7 +226,7 @@ export function ProjectPicker() {
     const d = defaultDate(p.dates);
     setDate(d);
     setSubject(subjectsForDate(p, d)[0] ?? "");
-    setBucket(Object.values(bucketsForDate(p, d))[0] ?? "");
+    setBucket(bucketsForDate(p, d)[0] ?? "");
     setOpenError(null);
   }
 
@@ -235,7 +235,7 @@ export function ProjectPicker() {
   function chooseDate(p: ProjectSummary, newDate: string) {
     setDate(newDate);
     const subjects = subjectsForDate(p, newDate);
-    const buckets = Object.values(bucketsForDate(p, newDate));
+    const buckets = bucketsForDate(p, newDate);
     setSubject((prev) => (subjects.includes(prev) ? prev : (subjects[0] ?? "")));
     setBucket((prev) => (buckets.includes(prev) ? prev : (buckets[0] ?? "")));
   }
@@ -421,9 +421,7 @@ export function ProjectPicker() {
                         <span>
                           {p.subjects.length} subject{p.subjects.length === 1 ? "" : "s"}
                         </span>
-                        <span>
-                          {Object.values(p.prediction_dirs).flatMap(Object.keys).length} bucket(s)
-                        </span>
+                        <span>{Object.values(p.buckets_by_date).flat().length} bucket(s)</span>
                       </div>
                       <span className="text-[10px] text-tcip-muted">
                         Updated {relativeTime(p.modified)}
@@ -481,17 +479,13 @@ export function ProjectPicker() {
                             <option
                               value=""
                               aria-label={
-                                Object.keys(bucketsForDate(p, date)).length
-                                  ? "no model chosen"
-                                  : undefined
+                                bucketsForDate(p, date).length ? "no model chosen" : undefined
                               }
                             >
-                              {Object.keys(bucketsForDate(p, date)).length
-                                ? UNSET_GLYPH
-                                : "no preds"}
+                              {bucketsForDate(p, date).length ? UNSET_GLYPH : "no preds"}
                             </option>
-                            {Object.entries(bucketsForDate(p, date)).map(([name, dir]) => (
-                              <option key={dir} value={dir}>
+                            {bucketsForDate(p, date).map((name) => (
+                              <option key={name} value={name}>
                                 {name}
                               </option>
                             ))}

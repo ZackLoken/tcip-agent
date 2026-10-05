@@ -9,6 +9,8 @@ scaling, and a two-stage handoff smoke test. Tiny synthetic data, CPU,
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 import csv
 import math
 from functools import partial
@@ -125,7 +127,7 @@ _save_png = partial(write_noise_image, size=IMG)
 
 
 def _classification_loader(tmp_path: Path, n: int = 6, batch_size: int = 2) -> DataLoader:
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     rows = []
     for i in range(n):
         _save_png(images_dir / f"img{i}.png", bright=(i % 2 == 0))

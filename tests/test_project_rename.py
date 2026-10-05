@@ -7,6 +7,8 @@ through the platform's own creation door under this test's workspace (``tmp_path
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 import os
 from pathlib import Path
 
@@ -149,9 +151,10 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     checkpoint = Path(observe(first).checkpoint["path"])
     opened_run(project, detection_config(project / "data"),
                experiment_id="exp-resumed", resume_from=str(checkpoint))
-    bucket = project / "data" / "predictions" / "live" / "2-11-26"
+    bucket = "live/2-11-26"
     published = run_inference(project, checkpoint_path=str(checkpoint),
-                              images_dir=str(project / "data" / "images"), output_dir=str(bucket),
+                              images_dir=str(project / "data" / "images" / UNDATED_BUCKET),
+                              bucket=bucket,
                               stated=Stated(tile=False))
     assert "error" not in published, published
     other_images = str(project / "data" / "other")
@@ -175,20 +178,20 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     assert Path(resumed.resume_from) == (moved / checkpoint.relative_to(project)).resolve()
     assert Path(resumed.resume_from).is_file()
     for data in (observed.record["config"]["data"], observed.record["resolved"]["data"]):
-        for key in ("images_dir", "labels_dir"):
-            assert Path(data[key]).is_dir() and Path(data[key]).is_relative_to(moved.resolve())
+        assert Path(data["images_dir"]).is_dir()
+        assert Path(data["images_dir"]).is_relative_to(moved.resolve())
     partition = observed.record["resolved"]["partition"]
     for sample in partition_samples(partition):
-        assert Path(sample.source).is_file() and Path(sample.ground_truth).is_file()
-    assert all(Path(gt).is_file() for gt in partition["ground_truth_digests"])
+        assert Path(sample.source).is_file() and ts.exists(sample.ground_truth)
+        assert Path(sample.ground_truth.root).is_relative_to(moved.resolve())
 
     moved_checkpoint = Path(observe(find_run("exp-first", project=moved)).checkpoint["path"])
     assert moved_checkpoint.is_file() and moved_checkpoint.is_relative_to(moved)
     (entry,) = [m for m in ModelRegistry(str(moved)).list_models() if m["name"] == "exp-first"]
     assert Path(entry["checkpoint_path"]).resolve() == moved_checkpoint.resolve()
 
-    record = read_bucket(moved / bucket.relative_to(project))
-    assert all((record.path / f"{stem}.json").is_file() for stem in record.documents)
+    record = read_bucket(moved / "data", bucket)
+    assert record.document_keys and all(ts.exists(key) for key in record.document_keys)
 
     moved_other = str(moved.resolve() / "data" / "other")
     swept = observe(sweeps_dir(moved) / "study", SWEEP_FILE).record["input"]

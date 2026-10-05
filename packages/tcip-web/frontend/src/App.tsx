@@ -63,7 +63,7 @@ function App() {
       `${s.gui.dataset.dataset_root ?? ""}::${s.gui.dataset.subject ?? ""}::${s.gui.dataset.date ?? ""}`,
   );
   const imageList = useStore((s) => s.gui.dataset.image_list);
-  const annotationsDir = useStore((s) => s.gui.dataset.annotations_dir);
+  const date = useStore((s) => s.gui.dataset.date);
   const subject = useStore((s) => s.gui.dataset.subject);
   const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
   const setRegistry = useStore((s) => s.setRegistry);
@@ -117,7 +117,7 @@ function App() {
 
       // Agent → GUI "focus the Annotate tab" through local setters (see applyAnnotateFocus).
       if (ev.event_type === PANEL_EVENT_ANNOTATE_FOCUS) {
-        void applyAnnotateFocus(ev.data as AnnotateFocusData).catch(() => {
+        void applyAnnotateFocus(ev.data as unknown as AnnotateFocusData).catch(() => {
           useStore
             .getState()
             .pushToast("Agent tried to focus the Annotate tab, but it couldn't be applied.");
@@ -188,17 +188,17 @@ function App() {
 
   // Hydrate the subject registry whenever the dataset selection changes.
   useEffect(() => {
-    if (!projectRoot || !datasetRoot || imageList.length === 0) return;
+    if (!projectRoot || !datasetRoot || !date || imageList.length === 0) return;
     void (async () => {
       try {
-        const reg = await subjectsApi.load(datasetRoot, annotationsDir);
+        const reg = await subjectsApi.load(datasetRoot, date);
         const declared = reg.subjects ?? {};
         setRegistry(declared, reg.version, reg.discovered);
         if (reg.unreadable.length) {
           useStore
             .getState()
             .pushToast(
-              `${reg.unreadable.length} label file(s) could not be read: ${reg.unreadable.join(", ")}`,
+              `${reg.unreadable.length} label document(s) could not be read: ${reg.unreadable.join(", ")}`,
             );
         }
         // Default the active authoring subject to the selection's subject when it exists in the
@@ -215,7 +215,7 @@ function App() {
         useStore.getState().pushToast("Could not load the registry for this project.");
       }
     })();
-  }, [projectRoot, datasetKey, imageList, subject, datasetRoot, annotationsDir, setRegistry]);
+  }, [projectRoot, datasetKey, imageList, subject, datasetRoot, date, setRegistry]);
 
   // Only Annotate / Results need an imagery dataset+date and show the picker until one is set;
   // Setup needs an open project. Keyed by TabName, so an added tab with no entry fails the typecheck.

@@ -19,14 +19,11 @@ from tcip_store.file_backend import lock_file_for
 def _project(root: Path) -> Path:
     """A dataset root with one image, one empty label, and the registry that decodes it."""
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import label_image, registry_over
 
     (root / "images" / "2026-03-04").mkdir(parents=True, exist_ok=True)
     (root / "images" / "2026-03-04" / "a_1.jpg").write_bytes(b"\xff\xd8\xff")
-    (root / "annotations" / "2026-03-04").mkdir(parents=True, exist_ok=True)
-    (root / "annotations" / "2026-03-04" / "a_1.json").write_text(
-        '{"annotations": []}', encoding="utf-8"
-    )
+    label_image(root / "images" / "2026-03-04" / "a_1.jpg", [], 8, 8, keep_empty=True)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     return root
 
@@ -279,22 +276,17 @@ def _annotated_dataset(root: Path, n: int) -> None:
     draw_splits' floor (one group each for train/val, two for calibration)."""
     from PIL import Image
 
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import label_image, registry_over
 
     images_dir = root / "images" / "2026-03-04"
-    labels_dir = root / "annotations" / "2026-03-04"
     images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
     for i in range(n):
         stem = f"img_{i:03d}"
         Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{stem}.jpg")
-        json_io.write_annotations(
-            labels_dir / f"{stem}.json",
-            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))], 640, 480,
-        )
+        label_image(images_dir / f"{stem}.jpg",
+                    [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))], 640, 480)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
 
 
@@ -370,7 +362,6 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
         root, base_config={"model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                                       "task": "detection"},
                      "data": {"images_dir": str(root / "images" / "2026-03-04"),
-                              "labels_dir": str(root / "annotations" / "2026-03-04"),
                               "scope": {"subject": "bud"}}},
         n_trials=1, search_seed=0
     )

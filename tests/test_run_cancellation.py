@@ -1,6 +1,7 @@
 """Training-run cancellation (cancel_training; graceful stop)."""
 
 import pytest
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._producer_fixtures import run_over  # noqa: E402
 
 torch = pytest.importorskip("torch")
@@ -37,8 +38,8 @@ def test_cancel_before_training_yields_canceled(tmp_path):
     from tcip_mcp.experiments import request_cancel
     from tests.tiny_trainer_fixtures import trainer_run
 
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     rows = ["stem,label"]
     for i in range(4):
         Image.new("RGB", (32, 32), (20 * i, 30, 40)).save(images_dir / f"img{i}.png")

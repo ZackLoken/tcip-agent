@@ -13,9 +13,9 @@ torch = pytest.importorskip("torch")
 
 from PIL import Image  # noqa: E402
 
-from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
-from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
+from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
+from tests._producer_fixtures import dataset_over, label_image, run_over  # noqa: E402
 
 BUD = "bud"
 
@@ -26,11 +26,9 @@ def _make_images(images_dir, stems, size):
         Image.new("RGB", size).save(images_dir / f"{stem}.jpg")
 
 
-def _write(labels_dir, stem, boxes, size):
-    json_io.write_annotations(
-        labels_dir / f"{stem}.json",
-        [Annotation(subject=BUD, geometry=BBox(*b)) for b in boxes],
-        size[0], size[1], keep_empty=True)
+def _write(images_dir, stem, boxes, size):
+    label_image(images_dir / f"{stem}.jpg", [Annotation(subject=BUD, geometry=BBox(*b)) for b in boxes],
+                size[0], size[1])
 
 
 def test_a_boxs_width_and_height_reach_the_loader_unswapped(tmp_path):
@@ -41,12 +39,11 @@ def test_a_boxs_width_and_height_reach_the_loader_unswapped(tmp_path):
     """
 
     size = (120, 80)
-    images, labels = tmp_path / "images", tmp_path / "annotations"
-    labels.mkdir(parents=True)
+    images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["img0"], size)
-    _write(labels, "img0", [(10, 20, 70, 40), (80, 5, 95, 75)], size)
+    _write(images, "img0", [(10, 20, 70, 40), (80, 5, 95, 75)], size)
 
-    ds = dataset_over("detection", str(images), str(labels), subject=BUD)
+    ds = dataset_over("detection", str(images), subject=BUD)
     _img, target = ds[0]
     assert target["boxes"].tolist() == [[10.0, 20.0, 70.0, 40.0], [80.0, 5.0, 95.0, 75.0]]
 
@@ -74,12 +71,11 @@ def test_a_seam_fragment_is_not_indexed_as_a_whole_object(tmp_path, sliver_frac)
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
     size = (320, 256)
-    images, labels = tmp_path / "images", tmp_path / "annotations"
-    labels.mkdir(parents=True)
+    images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["img0"], size)
-    _write(labels, "img0", SEAM_BOXES, size)
+    _write(images, "img0", SEAM_BOXES, size)
 
-    base = dataset_over('detection', str(images), str(labels), subject=BUD)
+    base = dataset_over('detection', str(images), subject=BUD)
     ds = TiledDetectionDataset(base, tile_size=64, overlap=0.0, sliver_frac=sliver_frac)
 
     per_tile = {e["slice"][:2]: len(e["boxes"]) for e in ds._index}
@@ -97,14 +93,13 @@ def test_each_detection_sample_carries_its_own_index_as_image_id(tmp_path):
     """
 
     size = (120, 80)
-    images, labels = tmp_path / "images", tmp_path / "annotations"
-    labels.mkdir(parents=True)
+    images = tmp_path / "images" / UNDATED_BUCKET
     stems = ["a", "b", "c"]
     _make_images(images, stems, size)
     for i, stem in enumerate(stems):
-        _write(labels, stem, [(5 + 20 * k, 6, 25 + 20 * k, 44) for k in range(i + 1)], size)
+        _write(images, stem, [(5 + 20 * k, 6, 25 + 20 * k, 44) for k in range(i + 1)], size)
 
-    ds = dataset_over("detection", str(images), str(labels), subject=BUD)
+    ds = dataset_over("detection", str(images), subject=BUD)
     assert len(ds) == 3
     samples = [ds[i][1] for i in range(len(ds))]
     assert [t["image_id"] for t in samples] == [0, 1, 2]
@@ -117,7 +112,7 @@ def test_an_ordinal_sample_carries_the_rank_count_its_head_decodes_with(tmp_path
     two are different numbers.
     """
 
-    images = tmp_path / "images"
+    images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["s0", "s1", "s2"], (48, 32))
     csv_path = tmp_path / "ranks.csv"
     csv_path.write_text("stem,rank\ns0,0\ns1,2\ns2,5\n", encoding="utf-8")

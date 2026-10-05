@@ -11,7 +11,9 @@ import copy
 import logging
 from dataclasses import asdict
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
+
+from tcip_store import Key
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -27,22 +29,24 @@ _SELECTION_CONFLICT_KEYS = (
 
 
 def data_dir_issues(data_cfg: dict) -> list[str]:
-    """Every objection to the data locations this run's own producer reads: ``data.images_dir``
-    or ``data.labels_dir`` missing, or naming a path that does not exist, whatever the task and
-    whatever builds its loaders. Empty for a config bound to a selection.
-    """
+    """Every objection to the data locations an unbound run's producer reads: ``data.images_dir``
+    missing or naming a path that does not exist, and a stated ``data.labels_dir`` that is not a
+    mask directory or a table (:func:`~tcip_mcp.pipelines.data.label_queries.ground_truth_shape`).
+    Empty for a config bound to a selection (:func:`selection_compatibility`)."""
+    from tcip_mcp.pipelines.data.label_queries import ground_truth_shape
+
     split_cfg = data_cfg.get("split")
     if isinstance(split_cfg, dict) and split_cfg.get("selection_dir"):
         return []
-    issues: list[str] = []
-    for name in ("images_dir", "labels_dir"):
-        path = data_cfg.get(name)
-        if not path:
-            issues.append(f"Missing 'data.{name}'")
-        elif not Path(path).exists():
-            # Named without claiming a shape: what ground truth is there is the producer's own
-            # read, and a config pointing at nothing is the only fact this check has.
-            issues.append(f"Not found: data.{name} = '{path}'")
+    images_dir = data_cfg.get("images_dir")
+    issues = [] if images_dir else ["Missing 'data.images_dir'"]
+    if images_dir and not Path(images_dir).exists():
+        issues.append(f"Not found: data.images_dir = '{images_dir}'")
+    if data_cfg.get("labels_dir") is not None:
+        try:
+            ground_truth_shape(data_cfg["labels_dir"])
+        except ValueError as exc:
+            issues.append(f"data.labels_dir: {exc}")
     return issues
 
 
@@ -51,10 +55,9 @@ def selection_compatibility(data_cfg: dict, selection: "Selection | None",
     """Every objection binding a run's data section ``data_cfg`` to ``selection`` (read at
     ``selection_dir``; ``None`` when it would not read) raises: a drawn split's own key under
     ``data.split`` beside the selection (``seed`` admitted only beside
-    ``redraw_within_selection``), that flag with no seed, and, with a selection in hand, a stated
-    ``data.scope`` (the selection records its own class space) and an empty train or val side.
-    Whether the selected loader can read the ground truth these samples name is that loader's own
-    refusal.
+    ``redraw_within_selection``), that flag with no seed, a stated ``data.labels_dir`` (each
+    sample names its own ground truth), and, with a selection in hand, a stated ``data.scope``
+    (the selection records its own class space) and an empty train or val side.
     """
     split_cfg_raw = data_cfg.get("split")
     split_cfg: dict = split_cfg_raw if isinstance(split_cfg_raw, dict) else {}
@@ -72,6 +75,11 @@ def selection_compatibility(data_cfg: dict, selection: "Selection | None",
             "data.split.redraw_within_selection=true requires data.split.seed: the seed the "
             "redraw draws train and val at."
         )
+    if "labels_dir" in data_cfg:
+        issues.append(
+            "data.labels_dir is stated beside data.split.selection_dir, whose samples each name "
+            "their own ground truth; a second place would not be the one the run reads. Drop "
+            "data.labels_dir.")
     if selection is None:
         return issues
     if "scope" in data_cfg:
@@ -90,10 +98,10 @@ def selection_compatibility(data_cfg: dict, selection: "Selection | None",
 
 
 class Membership(NamedTuple):
-    """Every member the places of one draw admit, keyed by its identity (``<date>/<stem>``, the
-    bare stem for a dateless place), each a sample on the ``train`` side under its group key and
-    carrying its ground truth's digest; the class space they were admitted in, the recorded
-    grouping policy and the admissions' summed tallies."""
+    """Every member the places of one draw admit, keyed by its identity (``<capture>/<stem>``),
+    each a sample on the ``train`` side under its group key and carrying the digest its admission
+    read; the class space they were admitted in, the recorded grouping policy and the admissions'
+    summed tallies."""
 
     samples: dict[str, "Sample"]
     scope: "ClassScope"
@@ -102,11 +110,12 @@ class Membership(NamedTuple):
 
 
 def admitted_membership(
-    places: "Sequence[tuple[str, Path | str, str]]", *, scope: "ClassScope", group_by: str,
+    places: "Sequence[tuple[str, Path | str, str | None]]", *, scope: "ClassScope", group_by: str,
     group_key_map: "Mapping[str, str] | None",
 ) -> Membership:
-    """Admit each place ``(name, images_dir, ground_truth)``
-    (:func:`~tcip_mcp.pipelines.data.label_queries.admit`, under ``scope``, read from that place's
+    """Admit each place ``(name, images_dir, ground_truth)``, ``ground_truth`` ``None`` for the
+    images' own label documents
+    (:func:`~tcip_mcp.pipelines.data.label_queries.admit`, under ``scope``, read from the images'
     registry when it carries no attributes yet,
     :func:`~tcip_mcp.pipelines.data.label_queries.registry_scope`) and group every admitted member
     (:func:`~tcip_mcp.pipelines.data.splits.resolve_group_key_fn` over the identities).
@@ -116,7 +125,6 @@ def admitted_membership(
     the admissions' own refusals propagate.
     """
     from tcip_mcp.pipelines.data.label_queries import admit, registry_scope, require_admitted
-    from tcip_mcp.pipelines.data.selection import ground_truth_digests
     from tcip_mcp.pipelines.data.splits import (
         member_identity, recorded_group_by, resolve_group_key_fn,
     )
@@ -126,7 +134,7 @@ def admitted_membership(
     for _name, images_dir, ground_truth in places:
         admitted = admit(images_dir, ground_truth,
                          scope=scope if scope.attributes is not None
-                         else registry_scope(ground_truth, scope.subject))
+                         else registry_scope(images_dir, scope.subject))
         admissions.append(admitted)
         for key, value in admitted.tallies.items():
             tallies[key] = tallies.get(key, 0) + value
@@ -140,14 +148,11 @@ def admitted_membership(
             raise ValueError(f"{exc} Searched {searched} ({tallies}).") from exc
     group_of = resolve_group_key_fn(group_by, sorted(identities.values()),
                                     group_key_map=dict(group_key_map) if group_key_map else None)
-    digest_of = ground_truth_digests(record.ground_truth for admitted in admissions
-                                     for record in admitted.records)
     samples: dict[str, Sample] = {}
     for where, admitted in enumerate(admissions):
         built = admitted.samples(
             {record.member: "train" for record in admitted.records},
-            {r.member: group_of(identities[where, r.member]) for r in admitted.records}.__getitem__,
-            digests={r.member: digest_of[r.ground_truth] for r in admitted.records})
+            {r.member: group_of(identities[where, r.member]) for r in admitted.records}.__getitem__)
         samples.update((identities[where, sample.member], sample) for sample in built)
     return Membership(samples, admissions[0].scope, recorded_group_by(group_by, group_key_map),
                       tallies)
@@ -155,15 +160,14 @@ def admitted_membership(
 
 def run_membership(data_cfg: "Mapping[str, Any]") -> Membership:
     """:func:`admitted_membership` over a run's data section: its one place (``images_dir`` and
-    ``labels_dir``), under the ``scope`` it states (the empty one when it states none), grouped by
-    its ``split`` section's policy."""
+    the ``labels_dir`` a mask or table run names), under the ``scope`` it states (the empty one
+    when it states none), grouped by its ``split`` section's policy."""
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.data.splits import DEFAULT_GROUP_BY
 
     split_cfg = data_cfg.get("split") or {}
-    labels_dir = data_cfg["labels_dir"]
     return admitted_membership(
-        [(str(labels_dir), data_cfg["images_dir"], labels_dir)],
+        [(str(data_cfg["images_dir"]), data_cfg["images_dir"], data_cfg.get("labels_dir"))],
         scope=ClassScope.of(data_cfg) if "scope" in data_cfg else ClassScope(),
         group_by=split_cfg.get("group_by", DEFAULT_GROUP_BY),
         group_key_map=split_cfg.get("group_key_map"))
@@ -311,6 +315,8 @@ def spatial_single_source_split(
     document's frame is read through
     :func:`~tcip_mcp.pipelines.data.splits.label_document_extent`, whose refusals propagate.
     """
+    from tcip_annotation.json_io import read_label_document
+
     from tcip_mcp.pipelines.data.datasets import TILE_SIZE
     from tcip_mcp.pipelines.data.splits import label_document_extent, spatial_strip_split
     from tcip_mcp.pipelines.execution import DEFAULT_OVERLAP
@@ -321,7 +327,8 @@ def spatial_single_source_split(
     remedy = ("reduce reserve_calibration_fraction or drop it" if reserve_cal
               else "set data.auto_val=False to train on it without validation")
 
-    width, height = label_document_extent(sample.ground_truth)
+    width, height = label_document_extent(
+        read_label_document(cast(Key, sample.ground_truth)), f"{stem}'s label document")
 
     tile_options = _tile_options(tiling)
     # The tiler's own defaults, so the geometry derived here and the views built below resolve
@@ -449,17 +456,15 @@ def _partition_record(samples: "Sequence[Sample]", *, seed: int | None, group_by
     """The partition a run's resolved record holds: the draw's ``seed`` (``None`` for a route
     that drew nothing) and resolved ``group_by``, every sample the run bound on the side it
     landed on in its one recorded shape
-    (:func:`~tcip_mcp.pipelines.data.selection.sample_document`), ``ground_truth_digests``, each
-    ground-truth file's digest when this run read it, keyed by its path, and ``selection``, the
-    selection a bound run bound (its directory, its digest and whether the run redrew inside it),
-    ``None`` for a run that drew its own."""
-    from tcip_mcp.pipelines.data.selection import ground_truth_digests, sample_document
+    (:func:`~tcip_mcp.pipelines.data.selection.sample_document`), with the ground-truth digest it
+    carries, and ``selection``, the selection a bound run bound (its directory, its digest and
+    whether the run redrew inside it), ``None`` for a run that drew its own."""
+    from tcip_mcp.pipelines.data.selection import sample_document
 
     return {
         "seed": seed,
         "group_by": group_by,
         "samples": [sample_document(s) for s in samples],
-        "ground_truth_digests": ground_truth_digests(s.ground_truth for s in samples),
         "selection": selection,
     }
 
@@ -473,14 +478,15 @@ def partition_samples(partition: "Mapping[str, Any]") -> list["Sample"]:
             for position, raw in enumerate(partition["samples"])]
 
 
-def moved_since_run(samples: Iterable["Sample"], at_run: Mapping[str, str]) -> list[str]:
-    """The members among ``samples`` whose ground truth no longer digests to what ``at_run`` (a
-    run's resolved partition's ``ground_truth_digests``, keyed by path) recorded, sorted
+def moved_since_run(samples: Iterable["Sample"]) -> list[str]:
+    """The members among ``samples``, as a run's resolved partition records them, whose ground
+    truth no longer digests to the digest recorded with it, sorted
     (:func:`~tcip_mcp.pipelines.data.selection.moved_ground_truth`)."""
     from tcip_mcp.pipelines.data.selection import moved_ground_truth
 
     samples = list(samples)
-    moved = set(moved_ground_truth({s.ground_truth: at_run[s.ground_truth] for s in samples}))
+    moved = set(moved_ground_truth({s.ground_truth: cast(str, s.ground_truth_digest)
+                                    for s in samples}))
     return sorted({s.member for s in samples if s.ground_truth in moved})
 
 
@@ -573,8 +579,9 @@ def auto_train_val(project: Path, task: str, data_cfg: dict, transforms, *,
         ``data.split.redraw_within_selection: true`` (beside ``selection_dir`` and ``seed``)
         redraws train and val fresh inside the selection's own train-plus-val samples, calibration
         still untouched; a starved side refuses.
-      2. Otherwise -> :func:`_drawn_split`, which admits once through the producer over whatever
-        ground truth ``data.labels_dir`` holds and builds every loader from the resulting samples.
+      2. Otherwise -> :func:`_drawn_split`, which admits once through the producer over the
+        images' own label documents, or the mask directory or table ``data.labels_dir`` names, and
+        builds every loader from the resulting samples.
         A bespoke ``data.dataset_source`` builder takes this route too and is handed those samples.
 
     Reads ``auto_val`` / ``split.*`` from ``data_cfg`` (== config["data"]).
@@ -599,7 +606,7 @@ def auto_train_val(project: Path, task: str, data_cfg: dict, transforms, *,
     # 1. A named selection is an explicit partition auto_val does not govern; every refusal
     # here, and any build failure while binding to it, raises rather than degrading.
     if selection_dir:
-        from tcip_mcp.pipelines.data.label_queries import refuse_inadmissible_samples
+        from tcip_mcp.pipelines.data.label_queries import readmitted_samples
         from tcip_mcp.pipelines.data.selection import (
             REFERENCE_SIDES, read_selection, selection_digest,
         )
@@ -625,14 +632,15 @@ def auto_train_val(project: Path, task: str, data_cfg: dict, transforms, *,
             seed = int(split_cfg_raw["seed"])
             selection = redrawn_selection(selection, selection_dir, seed)
 
-        train_samples, val_samples = selection.on("train"), selection.on("val")
         reference_samples = [s for s in selection.samples if s.side in REFERENCE_SIDES]
 
-        # Checked before either loader is built: a selected label that has since emptied with
+        # Re-admitted before either loader is built: a selected label that has since emptied with
         # nobody confirming that image negative would otherwise train as background.
-        refuse_inadmissible_samples(train_samples + val_samples, selection.scope)
+        trained = readmitted_samples(selection.on("train") + selection.on("val"), selection.scope)
+        train_samples = [s for s in trained if s.side == "train"]
+        val_samples = [s for s in trained if s.side == "val"]
 
-        bound = train_samples + val_samples + reference_samples
+        bound = trained + reference_samples
         # The selection's own scope and exact map become this run's, so the checkpoint records
         # the vocabulary it trained in rather than one rediscovered from a live registry.
         data_cfg["scope"] = asdict(selection.scope)

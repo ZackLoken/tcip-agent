@@ -1,5 +1,5 @@
 /**
- * The single mapping between the unified name-based label file (one Annotation list per image)
+ * The single mapping between the unified name-based label document (one Annotation list per image)
  * and the Annotate canvas' drawing model (boxes + polygons + points + geometry-less ratings). Load
  * and save share this so the round-trip is symmetric: a box stays a box, a polygon stays a polygon,
  * a point stays a point, and a geometry-less rating is never silently dropped on the next save.

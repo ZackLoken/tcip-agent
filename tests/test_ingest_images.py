@@ -63,7 +63,7 @@ def test_the_workspace_from_the_environment_is_the_one_tcip_workspace_names():
 
 
 def test_image_path_builders(tmp_path):
-    assert dataset_layout.image_dir(tmp_path, None) == tmp_path / "images"
+    assert dataset_layout.image_root(tmp_path) == tmp_path / "images"
     assert dataset_layout.image_dir(tmp_path, "2026-02-11") == tmp_path / "images" / "2026-02-11"
     assert (
         dataset_layout.image_path(tmp_path, "2026-02-11", "IMG_1", ".jpg")
@@ -264,8 +264,8 @@ def test_ingest_two_sources_with_one_stem_refuse_the_whole_call(project, tmp_pat
 
 
 def test_ingest_same_stem_in_two_different_buckets_is_admitted(project, tmp_path):
-    """A rail must admit valid work: the collision key is scoped per bucket, so foo.jpg into one
-    date and foo.png into another land side by side, no collision."""
+    """foo.jpg into one date and foo.png into another land side by side: the collision key is
+    scoped per bucket."""
     src = tmp_path / "raw"
     _make_image(src / "foo.jpg", exif_date="2026:02:11 10:00:00")
     _make_image(src / "foo.png", exif_date="2026:03:01 10:00:00")
@@ -275,37 +275,6 @@ def test_ingest_same_stem_in_two_different_buckets_is_admitted(project, tmp_path
     assert "error" not in manifest
     assert (project / "images" / "2026-02-11" / "foo.jpg").is_file()
     assert (project / "images" / "2026-03-01" / "foo.png").is_file()
-
-
-def test_ingest_refuses_a_stem_reserved_for_a_bucket_record(project, tmp_path):
-    """An image whose stem names a prediction bucket's own record would produce a label file no
-    bucket walk can tell apart from that record; it is reported and not placed."""
-    src = tmp_path / "raw"
-    _make_image(src / "bucket.png")
-    _make_image(src / "ordinary.png")
-
-    manifest = ingest_images(project, source=str(src))
-
-    assert manifest["undated"] == 1
-    assert len(manifest["reserved_name_skips"]) == 1
-    assert manifest["reserved_name_skips"][0]["stem"] == "bucket"
-    assert not (project / "images" / "undated" / "bucket.png").is_file()
-    assert (project / "images" / "undated" / "ordinary.png").is_file()
-
-
-def test_ingest_refuses_a_case_variant_of_a_reserved_stem(project, tmp_path):
-    """The reserved-name check is case-insensitive: a source stem differing only in case from a
-    bucket's own record would still collide with it on a case-insensitive filesystem."""
-    src = tmp_path / "raw"
-    _make_image(src / "Bucket.png")
-    _make_image(src / "ordinary.png")
-
-    manifest = ingest_images(project, source=str(src))
-
-    assert len(manifest["reserved_name_skips"]) == 1
-    assert manifest["reserved_name_skips"][0]["stem"] == "Bucket"
-    assert not (project / "images" / "undated" / "Bucket.png").is_file()
-    assert (project / "images" / "undated" / "ordinary.png").is_file()
 
 
 def test_ingest_same_stem_different_ext_refuses_the_whole_call(project, tmp_path):
@@ -367,8 +336,8 @@ def test_ingest_case_variant_stem_collision_across_two_calls_refuses(project, tm
 
 def test_ingest_admits_a_source_after_a_band_group_manifest_with_a_different_stem(project,
                                                                                   tmp_path):
-    """A rail must admit valid work: a manifest at one stem never blocks an ordinary source at a
-    genuinely distinct stem in the same bucket."""
+    """A manifest at one stem never blocks an ordinary source at another stem in the same
+    bucket."""
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
     src = tmp_path / "raw"

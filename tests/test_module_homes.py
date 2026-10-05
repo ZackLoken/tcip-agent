@@ -176,8 +176,7 @@ def test_label_query_functions_have_one_home():
     lost its underscore; a helper only ``label_queries.py`` calls internally kept its private
     name."""
     _assert_one_home(
-        {"registered_dataset_root", "registry_scope",
-         "json_det_targets", "ground_truth_shape", "admit", "samples_over",
+        {"registry_scope", "json_det_targets", "ground_truth_shape", "admit", "samples_over",
          "require_admitted"},
         _module_path("pipelines/data/datasets.py"),
         _module_path("pipelines/data/label_queries.py"),
@@ -232,25 +231,13 @@ def test_vision_side_proposal_tools_have_one_home():
     plus the staging primitives beneath them
     (``proposal_staging_key``, ``_staging_key_for``, ``_unresolvable_staging_source``,
     ``_region_rect_from_cells``, ``_write_region_crop``, ``_offset_candidates``), moved out of
-    ``vision_tools.py`` into ``tools/proposal_tools.py``, beside the annotation-side pair below.
-    ``StagingAddress`` (checked separately below, it is a class) moved with them."""
+    ``vision_tools.py`` into ``tools/proposal_tools.py``, beside the annotation-side pair below."""
     _assert_one_home(
         {"propose_annotations", "stage_proposals", "proposal_staging_key",
          "_staging_key_for", "_unresolvable_staging_source", "_region_rect_from_cells",
          "_write_region_crop", "_offset_candidates"},
         _module_path("tools/vision_tools.py"),
         _module_path("tools/proposal_tools.py"),
-    )
-
-
-def test_staging_address_class_has_one_home():
-    """``StagingAddress`` moved out of ``vision_tools.py`` into ``tools/proposal_tools.py``,
-    beside the staging functions it addresses (checked above)."""
-    _assert_one_home(
-        {"StagingAddress"},
-        _module_path("tools/vision_tools.py"),
-        _module_path("tools/proposal_tools.py"),
-        node_types=(ast.ClassDef,),
     )
 
 

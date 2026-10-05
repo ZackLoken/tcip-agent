@@ -3,6 +3,8 @@ record from the assessment through the bucket published under it."""
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 import numpy as np
@@ -273,20 +275,17 @@ def test_a_windowed_pass_resumed_mid_raster_matches_an_uninterrupted_one(tmp_pat
 def test_training_and_inference_slice_one_frame_on_one_lattice(tmp_path):
     """The tiled training dataset's slices and a sliced inference pass's recorded slices over the
     same frame, each read whole off its own route's record."""
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
     from tcip_mcp.pipelines.raster_source import open_raster
-    from tests._producer_fixtures import dataset_over
+    from tests._producer_fixtures import dataset_over, label_image
 
-    images, labels = tmp_path / "images", tmp_path / "labels"
-    images.mkdir()
-    labels.mkdir()
+    images = tmp_path / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
     np.save(images / "frame.npy", _frame())
-    json_io.write_annotations(str(labels / "frame.json"),
-                              [Annotation(subject="bud", geometry=BBox(*SEAM_BLOB))],
-                              FRAME, FRAME, keep_empty=True)
-    ds = dataset_over("detection", str(images), str(labels), subject="bud",
+    label_image(images / "frame.npy", [Annotation(subject="bud", geometry=BBox(*SEAM_BLOB))],
+                FRAME, FRAME, keep_empty=True)
+    ds = dataset_over("detection", str(images), subject="bud",
                       stated={"num_channels": 3},
                       tiling={"enabled": True, "tile_size": TILE, "overlap": OVERLAP,
                               "sliver_frac": 0.5})  # stated: one box derives no spread
@@ -363,20 +362,19 @@ def test_the_dry_run_reports_the_record_the_bucket_keeps(tmp_path):
     from tcip_mcp.tools.inference_tools import run_inference
 
     ckpt, _checkpoint_record = _checkpoint(tmp_path)
-    images = tmp_path / "images"
-    images.mkdir()
+    images = tmp_path / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
     _png(images, _frame())
-    out = tmp_path / "bucket"
     stated = Stated(tile=True, tile_size=TILE, overlap=OVERLAP, conf=0.2,
                     cross_tile_nms=0.4, max_dets=50, postprocess="greedynmm")
 
-    dry = run_inference(tmp_path, ckpt, images_dir=str(images), output_dir=str(out),
+    dry = run_inference(tmp_path, ckpt, images_dir=str(images), bucket="sliced",
                         dry_run=True, stated=stated)
-    real = run_inference(tmp_path, ckpt, images_dir=str(images), output_dir=str(out),
+    real = run_inference(tmp_path, ckpt, images_dir=str(images), bucket="sliced",
                          stated=stated)
 
     assert "error" not in dry and "error" not in real, (dry, real)
-    assert dry["execution"] == read_bucket(out).execution.record()
+    assert dry["execution"] == read_bucket(real["dataset_root"], "sliced").execution.record()
 
 
 N_CALIBRATION_IMAGES = 20
@@ -387,15 +385,14 @@ def _blob_capture(project: Path) -> Path:
     two share ground truth, labeled with 32px boxes that overlap their row neighbors by 10px (a
     neighbor tail every metric derives a threshold from), ingested as one capture date of the
     dataset ``ds``; its images directory."""
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
     from tcip_mcp.tools.ingest_tools import ingest_images
+    from tests._producer_fixtures import label_image
 
     root, raw, date = project / "ds", project / "raw", "2026-01-01"
     raw.mkdir()
-    labels = root / "annotations" / date
-    labels.mkdir(parents=True)
+    labels = {}
     for i in range(N_CALIBRATION_IMAGES):
         arr = np.zeros((FRAME, FRAME, 3), dtype=np.uint8)
         boxes = []
@@ -405,12 +402,13 @@ def _blob_capture(project: Path) -> Path:
                 arr[y0:y0 + 20, x0:x0 + 20] = 255
                 boxes.append(BBox(x0 - 6, y0 - 6, x0 + 26, y0 + 26))
         _png(raw, arr, f"img{i:02d}.png")
-        json_io.write_annotations(str(labels / f"img{i:02d}.json"),
-                                  [Annotation(subject="bud", geometry=b) for b in boxes],
-                                  FRAME, FRAME, keep_empty=True)
+        labels[f"img{i:02d}.png"] = [Annotation(subject="bud", geometry=b) for b in boxes]
     ingested = ingest_images(root, source=str(raw), date_from=date)
     assert "error" not in ingested, ingested
-    return root / "images" / date
+    images = root / "images" / date
+    for name, boxed in labels.items():
+        label_image(images / name, boxed, FRAME, FRAME, keep_empty=True)
+    return images
 
 
 def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(tmp_path, monkeypatch):
@@ -449,8 +447,7 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(tmp_path, monkeypat
         stated=Stated(tile=True, tile_size=TILE, overlap=OVERLAP, postprocess="nmm"))
     assert "error" not in assessment, assessment
     reference_passes = len(merged_at)
-    out = tmp_path / "ds" / "predictions" / "blob" / "2026-01-01"
-    published = run_inference(tmp_path, ckpt, images_dir=str(images), output_dir=str(out),
+    published = run_inference(tmp_path, ckpt, images_dir=str(images), bucket="blob/2026-01-01",
                               assessment_id=assessment["assessment_id"], device="cpu")
     assert "error" not in published, published
 
@@ -458,7 +455,8 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(tmp_path, monkeypat
     assert execution["sources"]["cross_tile_nms"] == CROSS_TILE_NMS_DERIVATIONS["IOS"]
     assert reference_passes > 0 and len(merged_at) > reference_passes
     assert set(merged_at) == {execution["cross_tile_nms"]}
-    assert read_bucket(out).execution.record() == execution
+    assert read_bucket(published["dataset_root"], "blob/2026-01-01").execution.record() == (
+        execution)
 
 
 def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(tmp_path):
@@ -469,16 +467,15 @@ def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(tmp_path):
 
     ckpt, _checkpoint_record = _checkpoint(tmp_path, tiling={"tile_size": TILE,
                                                              "overlap": OVERLAP})
-    images = tmp_path / "images"
-    images.mkdir()
+    images = tmp_path / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
     _png(images, _frame())
-    out = tmp_path / "bucket"
 
-    response = run_inference(tmp_path, ckpt, images_dir=str(images), output_dir=str(out),
+    response = run_inference(tmp_path, ckpt, images_dir=str(images), bucket="sliced",
                              stated=Stated(conf=0.0, postprocess="nmm"))
 
     assert "error" not in response, response
-    execution = read_bucket(out).execution
+    execution = read_bucket(response["dataset_root"], "sliced").execution
     assert (execution.tile_size, execution.overlap) == (TILE, OVERLAP)
     assert (execution.postprocess, execution.merge_type, execution.match_metric) == (
         "nmm", "NMM", "IOS")

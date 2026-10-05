@@ -6,6 +6,8 @@ never under the server process's cwd.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 import time
 from pathlib import Path
 
@@ -27,25 +29,16 @@ def test_launch_training_defaults_into_the_projects_experiment_store(
     monkeypatch.chdir(tmp_path)
 
     from PIL import Image
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools import training_tools
+    from tests._producer_fixtures import label_image
 
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    val_images = tmp_path / "val_images"
-    val_labels = tmp_path / "val_labels"
-    for d in (images_dir, labels_dir, val_images, val_labels):
-        d.mkdir()
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     for i in range(2):
         Image.new("RGB", (128, 128)).save(images_dir / f"t{i}.png")
-        json_io.write_annotations(
-            str(labels_dir / f"t{i}.json"),
-            [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
-    Image.new("RGB", (128, 128)).save(val_images / "v0.png")
-    json_io.write_annotations(
-        str(val_labels / "v0.json"),
-        [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
+        label_image(images_dir / f"t{i}.png",
+                    [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
 
@@ -53,8 +46,7 @@ def test_launch_training_defaults_into_the_projects_experiment_store(
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "scope": {"subject": "bud"}},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
     }

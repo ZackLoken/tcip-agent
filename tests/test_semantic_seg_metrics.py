@@ -8,6 +8,8 @@ run surfaces the metric alongside ``loss``.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 import pytest
@@ -102,7 +104,7 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
     from tests import bespoke_models
 
     IMG = 64
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
     masks_dir = tmp_path / "masks"
     images_dir.mkdir(parents=True, exist_ok=True)
     masks_dir.mkdir(parents=True, exist_ok=True)

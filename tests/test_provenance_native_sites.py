@@ -7,7 +7,7 @@ in test_vision.py / test_review_channel.py.
 
 from __future__ import annotations
 
-import json
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 import pytest
 from PIL import Image
@@ -33,19 +33,28 @@ def test_actor_refuses_a_request_that_names_no_one_whatever_the_process_runs_as(
 # ── MCP save_annotations: optional producer created_by ───────────────────────
 
 def _img(tmp_path):
-    p = tmp_path / "images" / "IMG_0001.JPG"
+    p = tmp_path / "images" / UNDATED_BUCKET / "IMG_0001.JPG"
     p.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (100, 80)).save(p)
     return p
 
 
+def _records(img) -> list[dict]:
+    """The records of ``img``'s label document as stored."""
+    import tcip_store
+
+    from tests._producer_fixtures import image_label_key
+
+    return tcip_store.read(image_label_key(img))["annotations"]
+
+
 def test_save_annotations_stamps_created_by_when_given(tmp_path):
     from tcip_mcp.tools.annotation_tools import save_annotations
     img = _img(tmp_path)
-    out = tmp_path / "labels.json"
-    save_annotations(tmp_path, tmp_path.parent, str(img), annotations=[{"subject": "bud", "bbox": [10, 10, 30, 30]}],
-                     path=str(out), created_by="claude")
-    obj = json.loads(out.read_text())["annotations"][0]
+    save_annotations(tmp_path, tmp_path.parent, str(img),
+                     annotations=[{"subject": "bud", "bbox": [10, 10, 30, 30]}],
+                     created_by="claude")
+    obj = _records(img)[0]
     assert obj["created_by"] == "claude"        # producer named by the agent
     assert obj["created_at"]
 
@@ -54,40 +63,40 @@ def test_save_annotations_names_itself_when_the_caller_names_no_producer(tmp_pat
     """Every saved record carries a producer and its time: with none named, the tool's own."""
     from tcip_mcp.tools.annotation_tools import save_annotations
     img = _img(tmp_path)
-    out = tmp_path / "labels.json"
-    save_annotations(tmp_path, tmp_path.parent, str(img), annotations=[{"subject": "bud", "bbox": [10, 10, 30, 30]}],
-                     path=str(out))
-    obj = json.loads(out.read_text())["annotations"][0]
+    save_annotations(tmp_path, tmp_path.parent, str(img),
+                     annotations=[{"subject": "bud", "bbox": [10, 10, 30, 30]}])
+    obj = _records(img)[0]
     assert obj["created_by"] == "save_annotations"
     assert obj["created_at"]
 
 
 def test_save_annotations_refuses_a_blank_producer_and_writes_nothing(tmp_path):
+    import tcip_store
+
     from tcip_mcp.tools.annotation_tools import save_annotations
+    from tests._producer_fixtures import image_label_key
+
     img = _img(tmp_path)
-    out = tmp_path / "labels.json"
     result = save_annotations(tmp_path, tmp_path.parent, str(img),
                               annotations=[{"subject": "bud", "bbox": [10, 10, 30, 30]}],
-                              path=str(out), created_by="  ")
+                              created_by="  ")
     assert "records its producer" in result["error"]
-    assert not out.exists()
+    assert not tcip_store.exists(image_label_key(img))
 
 
 def test_save_annotations_never_reads_provenance_off_a_shape(tmp_path):
     """A shape's own ``created_by`` is not an author: every new shape carries the door's."""
     from tcip_mcp.tools.annotation_tools import save_annotations
     img = _img(tmp_path)
-    out = tmp_path / "labels.json"
     save_annotations(
         tmp_path, tmp_path.parent, str(img),
         annotations=[
             {"subject": "bud", "bbox": [10, 10, 30, 30], "created_by": "someone-else"},
             {"subject": "bud", "bbox": [40, 40, 60, 60]},
         ],
-        path=str(out), created_by="claude",
+        created_by="claude",
     )
-    objs = json.loads(out.read_text())["annotations"]
-    assert [o["created_by"] for o in objs] == ["claude", "claude"]
+    assert [o["created_by"] for o in _records(img)] == ["claude", "claude"]
 
 
 # ── MCP read_annotations: authorship travels back out of the read path ───────

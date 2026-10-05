@@ -3,13 +3,7 @@
  * All routes hit /api/* and return typed payloads.
  */
 
-import {
-  committedOf,
-  getJson,
-  isAuditEntryNotWritten,
-  postJson,
-  StructuredRefusalError,
-} from "@/api/http";
+import { getJson, postJson, StructuredRefusalError } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import { stateSocket } from "@/api/ws";
 import {
@@ -69,13 +63,11 @@ export type LoadedLabels = ImageLabels & { base_mtime: string | null };
  *  by the person ``user`` names. */
 export interface SaveLabelsBody {
   image_path: string;
-  // Non-empty: the backend refuses a save with nowhere to write (422); resolve that locally.
-  label_path: string;
   annotations: AnnotationPayload[];
   /** Echo the loaded mtime token so the backend can 409 a stale (lost-update) write. */
   base_mtime?: string | null;
   user: string;
-  /** The bucket whose proposals ``accept`` and ``reject`` name by index. */
+  /** The name of the bucket whose proposals ``accept`` and ``reject`` name by index. */
   bucket?: string | null;
   accept?: number[];
   reject?: number[];
@@ -92,12 +84,7 @@ interface Saved {
   completion: Record<string, SubjectState>;
 }
 
-export type SaveResult =
-  | ({ status: "ok" } & Saved)
-  | { status: "conflict" }
-  // The save committed but its audit line did not: the client heals exactly as it does on "ok";
-  // message names the gap for a toast.
-  | ({ status: "unrecorded"; message: string } & Saved);
+export type SaveResult = ({ status: "ok" } & Saved) | { status: "conflict" };
 
 /** One band's symbology, as `GET /api/images/bands` reports it: a declared name where the
  *  source has one (else its 0-index as a string), the sensor's own wavelength when known. */
@@ -170,19 +157,18 @@ export const api = {
         dates_with_images: string[];
         subjects: string[];
         subjects_by_date: Record<string, string[]>;
-        // date -> each published bucket's name (its path under predictions/) -> its directory.
-        // Index it; never reassemble the path here.
-        prediction_dirs: Record<string, Record<string, string>>;
-        // The first date's labels that would not read, naming the file; the tree still lists
-        // every other date.
+        // date -> the name of each bucket published under the dataset root for it.
+        buckets_by_date: Record<string, string[]>;
+        // The first date's labels that would not read, naming the document; the tree still
+        // lists every other date.
         label_problem: string | null;
       }>(`${ROUTES.getDatasetTree}?${q({ dataset_root })}`),
 
     select: (body: {
       dataset_root: string;
       subject?: string | null;
-      date?: string | null;
-      predictions_dir?: string | null;
+      date: string;
+      bucket?: string | null;
     }) =>
       postJson<{
         status: string;
@@ -191,8 +177,8 @@ export const api = {
         // predictions. False → the canvas will start empty (not an error).
         annotations_present?: boolean;
         predictions_present?: boolean;
-        // Set when annotations_present read false because the label document would not read,
-        // naming the file; the selection still succeeds.
+        // Set when annotations_present read false because a label document would not read,
+        // naming it; the selection still succeeds.
         label_problem?: string | null;
       }>(ROUTES.postDatasetSelect, body),
 
@@ -271,9 +257,9 @@ export const api = {
   },
 
   annotate: {
-    // Read the one unified per-image label file, splitting the annotation list into the canvas'
+    // Read the image's one label document, splitting the annotation list into the canvas'
     // box / polygon / point / geometry-less buckets (shared with save via labelSerde).
-    load: async (image_path: string, label_path?: string | null): Promise<LoadedLabels> => {
+    load: async (image_path: string): Promise<LoadedLabels> => {
       const raw = await getJson<{
         image_path: string;
         img_width: number;
@@ -281,7 +267,7 @@ export const api = {
         annotations: Annotation[];
         completion: Record<string, SubjectState>;
         base_mtime: string | null;
-      }>(`${ROUTES.getAnnotateLabels}?${q({ image_path, label_path })}`);
+      }>(`${ROUTES.getAnnotateLabels}?${q({ image_path })}`);
       const { boxes, polygons, points, imageAnnotations } = annotationsToCanvas(
         raw.annotations ?? [],
       );
@@ -299,24 +285,19 @@ export const api = {
     },
 
     // The chosen bucket's proposals for the image, each paired, decided and admitted server-side.
-    proposals: (image_path: string, bucket: string, label_path?: string | null) =>
+    proposals: (image_path: string, bucket: string) =>
       getJson<{ bucket: string; proposals: Proposal[] }>(
-        `${ROUTES.getAnnotateProposals}?${q({ image_path, bucket, label_path })}`,
+        `${ROUTES.getAnnotateProposals}?${q({ image_path, bucket })}`,
       ),
 
-    // A 409 (the label file changed underneath the client, or the save committed and its audit
-    // line did not) is an expected outcome the caller resolves, not an error.
+    // A 409 (the label document changed underneath the client) is an expected outcome the
+    // caller resolves, not an error.
     save: async (body: SaveLabelsBody): Promise<SaveResult> => {
       try {
         const data = await postJson<Saved>(ROUTES.postAnnotateLabels, body);
         return { status: "ok", base_mtime: data.base_mtime, completion: data.completion };
       } catch (e) {
         if (!isConflict(e)) throw e;
-        const committed = committedOf<Saved>(e);
-        if (isAuditEntryNotWritten(e) && committed) {
-          const { base_mtime, completion } = committed;
-          return { status: "unrecorded", base_mtime, completion, message: e.message };
-        }
         return { status: "conflict" };
       }
     },

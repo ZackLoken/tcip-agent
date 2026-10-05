@@ -121,8 +121,9 @@ def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture
         "2026-03-09": {"P1": (3, 7), "P2": (3, 1)},
         "2026-03-13": {"P1": (9, 1), "P2": (4, 0)},
     }
-    buckets = {d: published(tmp_path, tmp_path / "ds" / "predictions" / "run" / d, [
-        predicted(f"{plant}_{d}", _states(pos, neg), (SPARSE,))
+    buckets = {d: published(tmp_path, f"run/{d}", [
+        predicted(tmp_path / "ds" / "images" / d / f"{plant}_{d}.jpg", _states(pos, neg),
+                  (SPARSE,))
         for plant, (pos, neg) in counts[d].items()], scope={"subject": "bud"},
         registry=REGISTRY) for d in dates}
     mapping = {d: [_Assignment(f"P1_{d}", "P1", "acc-noisy"),
@@ -158,8 +159,10 @@ def test_positive_detections_are_the_named_value_not_a_fixed_position(tmp_path):
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tests._producer_fixtures import registry_over
 
-    p = tmp_path / "img.json"
-    json_io.write_annotations(
+    from tcip_mcp.dataset_layout import prediction_key
+
+    p = prediction_key(tmp_path, "run/2026-03-05", "img")
+    json_io.write_label_document(
         p,
         [Annotation(subject="bud", geometry=BBox(1, 1, 4, 9), score=0.9,
                    attributes={"opening": "open"}),
@@ -171,8 +174,7 @@ def test_positive_detections_are_the_named_value_not_a_fixed_position(tmp_path):
     )
 
     registry_over(tmp_path, REGISTRY)
-    (tmp_path / "annotations").mkdir()
-    scope = registry_scope(tmp_path / "annotations", "bud")
+    scope = registry_scope(tmp_path / "images", "bud")
     total, positive, unclassified = phenology.count_by_class(p, BUD_OPENING.positive_state,
                                                              scope=scope)
 
@@ -188,12 +190,13 @@ def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes
     pytest.importorskip("torch")
     from tests._chain_fixtures import predicted, published
 
-    bucket = published(tmp_path, tmp_path / "ds" / "predictions" / "run" / "2026-03-05",
-                       [predicted("P1_2026-03-05", ["open", "closed", "open"], (SPARSE,))],
+    image = tmp_path / "ds" / "images" / "2026-03-05" / "P1_2026-03-05.jpg"
+    bucket = published(tmp_path, "run/2026-03-05",
+                       [predicted(image, ["open", "closed", "open"], (SPARSE,))],
                        scope={"subject": "bud"}, registry=REGISTRY)
 
     assert bucket.scope.attributes == (SPARSE,)
-    counts = phenology.count_by_class(bucket.path / "P1_2026-03-05.json",
+    counts = phenology.count_by_class(bucket.document_key(image.stem),
                                       BUD_OPENING.positive_state, scope=bucket.scope)
     assert counts == (3, 2, 0)
 
@@ -215,7 +218,8 @@ def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path:
 
     res = deliver_phenology_milestones(
         tmp_path, trait=body["trait"], mapping_name=body["mapping_name"], plants=["PLANT_A"],
-        buckets=body["buckets"], output_csv_path=str(out_csv))
+        dataset_root=body["dataset_root"], buckets=body["buckets"],
+        output_csv_path=str(out_csv))
 
     assert "error" not in res, res
     with out_csv.open(encoding="utf-8", newline="") as f:

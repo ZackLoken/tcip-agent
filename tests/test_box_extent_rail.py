@@ -1,19 +1,20 @@
-"""An inverted or zero-extent box is refused wherever a writer builds one, and a save naming no
-label document is refused rather than silently skipped: both touch the same route module and the
-same per-image reader/writer."""
+"""An inverted or zero-extent box is refused wherever a writer builds one: the save doors, the
+per-image writer and the prediction encoder."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from tcip_annotation.json_io import read_annotations, write_annotations
+import tcip_store as ts
+from tcip_annotation.json_io import label_document, read_label_document, write_label_document
 from tcip_annotation.state import Annotation, BBox, Polygon
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
 from tcip_mcp.pipelines.data.label_queries import registry_scope
+from tests._producer_fixtures import image_label_key
 
 
 def _write_image(path: Path, size=(200, 150)) -> None:
@@ -36,7 +37,6 @@ def test_the_encoding_keeps_only_what_has_extent_on_the_stored_grid(tmp_path):
     encoding keeps the one detection with extent, and the count it reports is the document's."""
     import numpy as np
 
-    from tcip_annotation.json_io import annotations_from_bytes
     from tcip_annotation.mask_contours import mask_to_polygon_rings
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
@@ -56,7 +56,7 @@ def test_the_encoding_keeps_only_what_has_extent_on_the_stored_grid(tmp_path):
     written = result()
     data, _dropped = encode_predictions(written, "model:fixture",
                                         scope=registry_scope(tmp_path, "bur"))
-    (kept,) = annotations_from_bytes(data, source="a.json")
+    (kept,) = label_document(data).annotations
     assert written["count"] == 1
     assert kept.score == written["scores"][0] == 0.8
 
@@ -90,52 +90,45 @@ def test_a_corner_box_is_refused_and_admitted_through_the_save_conversion():
     assert (box.x1, box.y1, box.x2, box.y2) == (5, 5, 10, 20)
 
 
-# ── the persistence boundary: write_annotations covers every writer at once ──
+# ── the persistence boundary: the one writer covers every writer at once ──
 
 
-def test_write_annotations_refuses_an_inverted_box(tmp_path):
+def test_the_writer_refuses_an_inverted_box(tmp_path):
+    key = label_key(tmp_path, UNDATED_BUCKET, "img")
     with pytest.raises(ValueError):
-        write_annotations(
-            str(tmp_path / "img.json"),
-            [Annotation(subject="leaf", geometry=BBox(10, 10, 5, 5))],
-            200, 150,
-        )
-    assert not (tmp_path / "img.json").exists()
+        write_label_document(key, [Annotation(subject="leaf", geometry=BBox(10, 10, 5, 5))],
+                             200, 150)
+    assert ts.read(key, default=None) is None
 
 
-def test_write_annotations_admits_an_ordered_box(tmp_path):
+def test_the_writer_admits_an_ordered_box(tmp_path):
     # admits valid work: every existing writer builds an ordered box.
-    path = tmp_path / "img.json"
-    write_annotations(
-        str(path), [Annotation(subject="leaf", geometry=BBox(5, 5, 10, 20))], 200, 150,
-    )
-    saved = json.loads(path.read_text(encoding="utf-8"))
-    assert saved["annotations"][0]["bbox"] == [5, 5, 5, 15]
+    key = label_key(tmp_path, UNDATED_BUCKET, "img")
+    write_label_document(key, [Annotation(subject="leaf", geometry=BBox(5, 5, 10, 20))], 200, 150)
+    assert ts.read(key)["annotations"][0]["bbox"] == [5, 5, 5, 15]
 
 
-def test_write_annotations_refuses_a_collinear_polygon(tmp_path):
+def test_the_writer_refuses_a_collinear_polygon(tmp_path):
     """A polygon whose points all sit on one line has a derived bbox with no real extent either:
     the same boundary check catches it, not only a bare BBox."""
+    key = label_key(tmp_path, UNDATED_BUCKET, "img")
     with pytest.raises(ValueError):
-        write_annotations(
-            str(tmp_path / "img.json"),
+        write_label_document(
+            key,
             [Annotation(subject="leaf", geometry=Polygon(rings=[[(5, 10), (8, 10), (12, 10)]]))],
-            200, 150,
-        )
-    assert not (tmp_path / "img.json").exists()
+            200, 150)
+    assert ts.read(key, default=None) is None
 
 
-def test_write_annotations_admits_a_real_polygon(tmp_path):
+def test_the_writer_admits_a_real_polygon(tmp_path):
     # admits valid work: a polygon with real area is unaffected by the collinear-polygon refusal.
-    path = tmp_path / "img.json"
-    write_annotations(
-        str(path),
-        [Annotation(subject="leaf", geometry=Polygon(rings=[[(5, 10), (15, 10), (15, 20)]]))],
-        200, 150,
-    )
-    saved = json.loads(path.read_text(encoding="utf-8"))
-    assert "bbox" not in saved["annotations"][0]
-    assert read_annotations(str(path))[0].geometry == Polygon(rings=[[(5, 10), (15, 10), (15, 20)]])
+    key = label_key(tmp_path, UNDATED_BUCKET, "img")
+    write_label_document(
+        key, [Annotation(subject="leaf", geometry=Polygon(rings=[[(5, 10), (15, 10), (15, 20)]]))],
+        200, 150)
+    assert "bbox" not in ts.read(key)["annotations"][0]
+    assert read_label_document(key).annotations[0].geometry == Polygon(
+        rings=[[(5, 10), (15, 10), (15, 20)]])
 
 
 # ── the MCP save door ────────────────────────────────────────────────────────
@@ -144,153 +137,110 @@ def test_write_annotations_admits_a_real_polygon(tmp_path):
 def test_save_annotations_refuses_an_inverted_box(tmp_path):
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    img = tmp_path / "images" / "img_001.jpg"
+    img = tmp_path / "images" / UNDATED_BUCKET / "img_001.jpg"
     _write_image(img)
-    out_path = tmp_path / "annotations" / "img_001.json"
 
-    result = save_annotations(
-        tmp_path, tmp_path.parent, str(img), annotations=[{"subject": "leaf", "bbox": [10, 10, 5, 5]}],
-        path=str(out_path),
-    )
+    result = save_annotations(tmp_path, tmp_path.parent, str(img),
+                              annotations=[{"subject": "leaf", "bbox": [10, 10, 5, 5]}])
 
     assert "error" in result
-    assert not out_path.exists()
+    assert ts.read(image_label_key(img), default=None) is None
 
 
 def test_save_annotations_admits_an_ordered_box(tmp_path):
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    img = tmp_path / "images" / "img_001.jpg"
+    img = tmp_path / "images" / UNDATED_BUCKET / "img_001.jpg"
     _write_image(img)
-    out_path = tmp_path / "annotations" / "img_001.json"
 
-    result = save_annotations(
-        tmp_path, tmp_path.parent, str(img), annotations=[{"subject": "leaf", "bbox": [5, 5, 10, 20]}],
-        path=str(out_path),
-    )
+    result = save_annotations(tmp_path, tmp_path.parent, str(img),
+                              annotations=[{"subject": "leaf", "bbox": [5, 5, 10, 20]}])
 
     assert "error" not in result
-    assert out_path.is_file()
+    assert len(read_label_document(image_label_key(img)).annotations) == 1
 
 
 # ── the annotate route's save door ──────────────────────────────────────────
 
 
 def test_annotate_save_refuses_an_inverted_box(client: TestClient, tmp_path: Path) -> None:
-    img = tmp_path / "images" / "img_001.jpg"
+    img = tmp_path / "images" / UNDATED_BUCKET / "img_001.jpg"
     _write_image(img)
-    label_path = tmp_path / "annotations" / "img_001.json"
 
     resp = client.post(
         "/api/annotate/labels",
-        json={
-            "image_path": str(img), "label_path": str(label_path),
-            "annotations": [{"subject": "leaf", "bbox": [10, 10, 5, 5]}], "user": "breeder",
-        },
+        json={"image_path": str(img), "annotations": [{"subject": "leaf", "bbox": [10, 10, 5, 5]}],
+              "user": "breeder"},
     )
 
     assert resp.status_code == 400
-    assert not label_path.exists()
+    assert ts.read(image_label_key(img), default=None) is None
 
 
 def test_annotate_save_admits_an_ordered_box(client: TestClient, tmp_path: Path) -> None:
-    img = tmp_path / "images" / "img_001.jpg"
-    _write_image(img)
-    label_path = tmp_path / "annotations" / "img_001.json"
-
-    resp = client.post(
-        "/api/annotate/labels",
-        json={
-            "image_path": str(img), "label_path": str(label_path),
-            "annotations": [{"subject": "leaf", "bbox": [5, 5, 10, 20]}], "user": "breeder",
-        },
-    )
-
-    assert resp.status_code == 200
-    assert label_path.is_file()
-
-
-def test_annotate_save_refuses_an_empty_label_path(client: TestClient, tmp_path: Path) -> None:
-    img = tmp_path / "images" / "img_001.jpg"
+    img = tmp_path / "images" / UNDATED_BUCKET / "img_001.jpg"
     _write_image(img)
 
     resp = client.post(
         "/api/annotate/labels",
-        json={"image_path": str(img), "label_path": "", "annotations": []},
-    )
-
-    assert resp.status_code == 422
-
-
-def test_annotate_save_admits_every_selected_dataset_save(
-    client: TestClient, tmp_path: Path
-) -> None:
-    # admits valid work: every Python caller passes a real label path.
-    img = tmp_path / "images" / "img_001.jpg"
-    _write_image(img)
-    label_path = tmp_path / "annotations" / "img_001.json"
-
-    resp = client.post(
-        "/api/annotate/labels",
-        json={"image_path": str(img), "label_path": str(label_path), "annotations": [],
+        json={"image_path": str(img), "annotations": [{"subject": "leaf", "bbox": [5, 5, 10, 20]}],
               "user": "breeder"},
     )
 
     assert resp.status_code == 200
-    assert resp.json()["status"] == "ok"
+    assert len(read_label_document(image_label_key(img)).annotations) == 1
 
 
 # ── the save door's corrected box and accepted proposal ─────────────────────
 
 
-def _seed_review_dataset(tmp_path: Path, *, pred_box=(10, 10, 20, 20), gt_box=None) -> tuple[Path, Path]:
+def _seed_review_dataset(tmp_path: Path, *, pred_box=(10, 10, 20, 20), gt_box=None):
+    """The label document of one image and the bucket ``m`` proposing ``pred_box`` on it; the
+    label document's key."""
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import label_image, registry_over
     from tests._web_fixtures import open_new_project
 
     dataset_root = open_new_project(tmp_path)
-    img = dataset_root / "images" / "img_001.jpg"
+    img = dataset_root / "images" / UNDATED_BUCKET / "img_001.jpg"
     _write_image(img)
     registry_over(dataset_root, SubjectRegistry(subjects=(Subject(name="leaf"),)))
-    gt_path = dataset_root / "annotations" / "img_001.json"
     gt_annotations = (
         [Annotation(subject="leaf", geometry=BBox(*gt_box))] if gt_box is not None else []
     )
-    write_annotations(str(gt_path), gt_annotations, 200, 150, keep_empty=True)
+    label_image(img, gt_annotations, 200, 150, keep_empty=True)
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
     x1, y1, x2, y2 = pred_box
     ordered = x2 > x1 and y2 > y1
-    bucket = published(dataset_root, dataset_root / "predictions" / "m", [
+    bucket = published(dataset_root, "m", [
         {"image": str(img), "width": 200, "height": 150,
          "boxes": [list(pred_box) if ordered else [10, 10, 20, 20]], "scores": [0.9],
          "labels": [1]}], scope={"subject": "leaf"})
-    pred_path = bucket.path / "img_001.json"
     if not ordered:
-        # A degenerate box can reach a document only by an edit in place after publication,
-        # as a hand-edited file would carry it.
-        pred_path.write_text(json.dumps({
-            "image": "img_001", "width": 200, "height": 150,
+        # A degenerate box can reach a document only by an edit in place after publication.
+        ts.replace(bucket.document_key(img.stem), {
+            "width": 200, "height": 150,
             "annotations": [{"subject": "leaf", "bbox": [x1, y1, x2 - x1, y2 - y1],
                             "score": 0.9, "created_by": "m"}],
-        }), encoding="utf-8")
-    return gt_path, pred_path
+        })
+    return image_label_key(img)
 
 
-def _save(dataset_root: Path, gt_path: Path, annotations: list, **gestures) -> dict:
-    return {"image_path": str(dataset_root / "images" / "img_001.jpg"),
-            "label_path": str(gt_path), "annotations": annotations, "user": "breeder", **gestures}
+def _save(dataset_root: Path, annotations: list, **gestures) -> dict:
+    return {"image_path": str(dataset_root / "images" / UNDATED_BUCKET / "img_001.jpg"),
+            "annotations": annotations, "user": "breeder", **gestures}
 
 
 def test_the_save_door_refuses_an_inverted_box(client: TestClient, tmp_path: Path) -> None:
-    gt_path, _pred_path = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
+    gt = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
 
     resp = client.post("/api/annotate/labels", json=_save(
-        tmp_path, gt_path, [{"subject": "leaf", "bbox": [10, 10, 5, 5]}]))
+        tmp_path, [{"subject": "leaf", "bbox": [10, 10, 5, 5]}]))
 
     assert resp.status_code == 400
-    assert json.loads(gt_path.read_text())["annotations"][0]["bbox"] == [1, 1, 2, 2]
+    assert ts.read(gt)["annotations"][0]["bbox"] == [1, 1, 2, 2]
 
 
 @pytest.mark.parametrize("shape", [
@@ -304,23 +254,22 @@ def test_a_corrected_geometry_is_checked_as_any_saved_shape_is(
 ) -> None:
     """A geometry correction is a save like any other, so every value the corrected shape carries
     is checked, whichever geometry it resolves to."""
-    gt_path, _pred_path = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
+    gt = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
 
-    resp = client.post("/api/annotate/labels", json=_save(
-        tmp_path, gt_path, [{"subject": "leaf", **shape}]))
+    resp = client.post("/api/annotate/labels", json=_save(tmp_path, [{"subject": "leaf", **shape}]))
 
     assert resp.status_code == 400, resp.text
-    assert json.loads(gt_path.read_text())["annotations"][0]["bbox"] == [1, 1, 2, 2]
+    assert ts.read(gt)["annotations"][0]["bbox"] == [1, 1, 2, 2]
 
 
 def test_the_save_door_admits_an_ordered_corrected_box(client: TestClient, tmp_path: Path) -> None:
-    gt_path, _pred_path = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
+    gt = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
 
     resp = client.post("/api/annotate/labels", json=_save(
-        tmp_path, gt_path, [{"subject": "leaf", "bbox": [5, 5, 10, 20]}]))
+        tmp_path, [{"subject": "leaf", "bbox": [5, 5, 10, 20]}]))
 
     assert resp.status_code == 200
-    assert json.loads(gt_path.read_text())["annotations"][0]["bbox"] == [5, 5, 5, 15]
+    assert ts.read(gt)["annotations"][0]["bbox"] == [5, 5, 5, 15]
 
 
 def test_the_save_door_refuses_accepting_a_degenerate_proposal(
@@ -328,25 +277,23 @@ def test_the_save_door_refuses_accepting_a_degenerate_proposal(
 ) -> None:
     # A degenerate proposal reaching the document bypasses the publication's own drop (an
     # edit in place): accepting it still refuses.
-    gt_path, pred_path = _seed_review_dataset(tmp_path, pred_box=(10, 10, 10, 20))
+    gt = _seed_review_dataset(tmp_path, pred_box=(10, 10, 10, 20))
 
-    resp = client.post("/api/annotate/labels", json=_save(
-        tmp_path, gt_path, [], bucket=str(pred_path.parent), accept=[0]))
+    resp = client.post("/api/annotate/labels", json=_save(tmp_path, [], bucket="m", accept=[0]))
 
     assert resp.status_code == 400, resp.text
-    assert json.loads(gt_path.read_text())["annotations"] == []
+    assert ts.read(gt)["annotations"] == []
 
 
 def test_the_save_door_admits_accepting_an_ordered_proposal(
     client: TestClient, tmp_path: Path
 ) -> None:
-    gt_path, pred_path = _seed_review_dataset(tmp_path)
+    gt = _seed_review_dataset(tmp_path)
 
-    resp = client.post("/api/annotate/labels", json=_save(
-        tmp_path, gt_path, [], bucket=str(pred_path.parent), accept=[0]))
+    resp = client.post("/api/annotate/labels", json=_save(tmp_path, [], bucket="m", accept=[0]))
 
     assert resp.status_code == 200, resp.text
-    assert json.loads(gt_path.read_text())["annotations"][0]["bbox"] == [10, 10, 10, 10]
+    assert ts.read(gt)["annotations"][0]["bbox"] == [10, 10, 10, 10]
 
 
 # ── prediction writers drop a degenerate box and report it, rather than fail ─
@@ -369,7 +316,7 @@ def test_encode_predictions_drops_a_degenerate_box_and_reports_the_count():
     data, dropped = encode_predictions(result, "model:fixture", scope=LEAF)
 
     assert dropped == 1
-    assert len(json.loads(data)["annotations"]) == 1
+    assert len(data["annotations"]) == 1
 
 
 def test_encode_predictions_drops_a_box_that_rounds_to_zero_extent():
@@ -388,31 +335,7 @@ def test_encode_predictions_drops_a_box_that_rounds_to_zero_extent():
     data, dropped = encode_predictions(result, "model:fixture", scope=LEAF)
 
     assert dropped == 1
-    assert len(json.loads(data)["annotations"]) == 1
-
-
-def test_encode_predictions_refuses_the_buckets_record_name():
-    """An image stem that names a bucket's own record never reaches a per-image prediction
-    document: the record written into that same bucket would otherwise destroy or refuse over
-    it."""
-    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
-
-    result = {"image": "bucket.jpg", "width": 100, "height": 100, "boxes": [[1, 1, 5, 5]],
-              "scores": [0.9], "labels": [1]}
-
-    with pytest.raises(ValueError, match="bucket"):
-        encode_predictions(result, "model:fixture", scope=LEAF)
-
-
-def test_encode_predictions_still_encodes_an_ordinary_stem():
-    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
-
-    result = {"image": "IMG_0001.jpg", "width": 100, "height": 100, "boxes": [[1, 1, 5, 5]],
-              "scores": [0.9], "labels": [1]}
-
-    data, _dropped = encode_predictions(result, "model:fixture", scope=LEAF)
-    assert json.loads(data)["image"] == "IMG_0001"
-    assert len(json.loads(data)["annotations"]) == 1
+    assert len(data["annotations"]) == 1
 
 
 def test_stage_proposals_drops_a_degenerate_box_and_reports_the_count(tmp_path):

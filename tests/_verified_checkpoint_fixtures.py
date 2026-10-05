@@ -10,6 +10,8 @@ from typing import Any
 
 import pytest
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 torch = pytest.importorskip("torch")
 
 SCOPED_DATA = {"num_channels": 3, "scope": {"subject": "bud"}}
@@ -29,17 +31,15 @@ def detection_images(where: Path, scope: dict, *, n: int = 2, polygons: bool = F
     """A tiny detection dataset rooted at ``where``: ``n`` three-band frames, each label document
     holding one box (``polygons``: one square polygon) of ``scope``'s subject, carrying
     ``values`` as its attribute values, and ``registry`` as the dataset's subject registry when
-    one is given. Returns the ``images_dir`` and ``labels_dir`` a data section names it by."""
+    one is given. Returns the ``images_dir`` a data section names it by."""
     from PIL import Image
 
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox, Polygon
 
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import label_image, registry_over
 
-    images_dir, labels_dir = where / "images", where / "annotations"
+    images_dir = where / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
     if registry is not None:
         registry_over(where, registry)
     attributes = dict(values or {})
@@ -48,11 +48,10 @@ def detection_images(where: Path, scope: dict, *, n: int = 2, polygons: bool = F
     for i in range(n):
         stem = f"frame{i}"
         Image.new("RGB", (64, 48), color=(60 + 40 * i, 90, 60)).save(images_dir / f"{stem}.png")
-        json_io.write_annotations(
-            str(labels_dir / f"{stem}.json"),
-            [Annotation(subject=scope["subject"], geometry=geometry, attributes=attributes)],
-            64, 48, keep_empty=True)
-    return {"images_dir": str(images_dir), "labels_dir": str(labels_dir)}
+        label_image(images_dir / f"{stem}.png",
+                    [Annotation(subject=scope["subject"], geometry=geometry, attributes=attributes)],
+                    64, 48, keep_empty=True)
+    return {"images_dir": str(images_dir)}
 
 
 def table_images(where: Path, *, n: int = 2) -> dict:
@@ -63,7 +62,7 @@ def table_images(where: Path, *, n: int = 2) -> dict:
 
     from PIL import Image
 
-    images_dir = where / "images"
+    images_dir = where / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
     table = where / "labels.csv"
     with open(table, "w", newline="", encoding="utf-8") as handle:

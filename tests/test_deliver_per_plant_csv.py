@@ -67,15 +67,15 @@ def _mapped(tmp_path: Path, plants=ONE_PLANT, **stated) -> tuple[Path, str]:
 
 def _bucket(project: Path, dataset_root: Path, date: str, counts: dict[str, int],
             name: str = "manual") -> str:
-    """A bucket ``predictions/<name>/<date>`` under ``dataset_root`` holding ``counts[stem]``
-    detections on each image ``images/<date>/<stem>.jpg``, published under ``project``."""
+    """A bucket named ``<name>/<date>`` under ``dataset_root`` holding ``counts[stem]``
+    detections on each image ``images/<date>/<stem>.jpg``, published under ``project``; its
+    name."""
     from tests._chain_fixtures import published
 
     results = [{"image": str(dataset_root / "images" / date / f"{stem}.jpg"), "width": 8,
                 "height": 8, "boxes": [[1.0, 1.0, 3.0, 3.0]] * n, "scores": [0.9] * n,
                 "labels": [1] * n} for stem, n in counts.items()]
-    return str(published(project, dataset_root / "predictions" / name / date, results,
-                         scope=SCOPE).path)
+    return published(project, f"{name}/{date}", results, scope=SCOPE).name
 
 
 def _results(*plant_counts: tuple[str, int | None]) -> list[dict]:
@@ -87,12 +87,12 @@ def _results(*plant_counts: tuple[str, int | None]) -> list[dict]:
     return aggregate_per_plant(records, strategy="count", value_key="count")
 
 
-def _deliver(tmp_path: Path, results: list[dict], plants: list[str], buckets: list[str],
-             **kwargs) -> dict:
+def _deliver(tmp_path: Path, results: list[dict], plants: list[str], dataset_root: Path,
+             buckets: list[str], **kwargs) -> dict:
     from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
 
     return deliver_per_plant_csv(tmp_path, results, str(tmp_path / "o.csv"), "stem_count", KIND,
-                                 plants, buckets, **kwargs)
+                                 plants, str(dataset_root), buckets, **kwargs)
 
 
 def test_a_verified_mapping_over_an_unassessed_bucket_reaches_the_gate_and_refuses_there(
@@ -105,8 +105,8 @@ def test_a_verified_mapping_over_an_unassessed_bucket_reaches_the_gate_and_refus
     dataset_root, date = _mapped(tmp_path, TWO_PLANTS)
     bucket = _bucket(tmp_path, dataset_root, date, {"P1": 2, "P2": 1}, name="run")
 
-    refused = _deliver(tmp_path, _results(("P1", 2), ("P2", 1)), ["P1", "P2"], [bucket],
-                       crop="currant", plant_mapping="valley")
+    refused = _deliver(tmp_path, _results(("P1", 2), ("P2", 1)), ["P1", "P2"], dataset_root,
+                       [bucket], crop="currant", plant_mapping="valley")
 
     assert "no assessment answers" in refused["error"]
     assert not (tmp_path / "o.csv").exists()
@@ -118,7 +118,7 @@ def test_an_unknown_plant_mapping_refuses_by_name(tmp_path):
     dataset_root, date = _mapped(tmp_path, nn_tolerance_m=10.0)
     bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
 
-    res = _deliver(tmp_path, _results(("P1", 3)), ["P1"], [bucket],
+    res = _deliver(tmp_path, _results(("P1", 3)), ["P1"], dataset_root, [bucket],
                    plant_mapping="no-such-mapping")
 
     assert "no-such-mapping" in res["error"]
@@ -134,7 +134,7 @@ def test_a_delivered_date_the_mapping_does_not_cover_refuses(tmp_path):
     write_geo_image(dataset_root / "images" / uncovered / "P1.jpg", *ONE_PLANT["P1"],
                     datetime(2026, 3, 1, 9, 30))
 
-    res = _deliver(tmp_path, _results(("P1", 1)), ["P1"], [
+    res = _deliver(tmp_path, _results(("P1", 1)), ["P1"], dataset_root, [
         _bucket(tmp_path, dataset_root, date, {"P1": 1}),
         _bucket(tmp_path, dataset_root, uncovered, {"P1": 1})], plant_mapping="valley")
 
@@ -154,7 +154,7 @@ def test_predictions_under_another_dataset_than_the_mappings_refuse(tmp_path):
     assert "error" not in register_dataset(tmp_path, str(other),
                                            crop=sorted(registered_crops())[0])
 
-    res = _deliver(tmp_path, _results(("P1", 1)), ["P1"],
+    res = _deliver(tmp_path, _results(("P1", 1)), ["P1"], other,
                    [_bucket(tmp_path, other, date, {"P1": 1})], plant_mapping="valley")
 
     assert "different dataset" in res["error"]
@@ -177,8 +177,8 @@ def test_a_mapping_with_no_capture_at_all_for_a_delivered_date_refuses(tmp_path,
         plant_csvs=[{"path": str(plant_csv), "sha256": "0" * 64, "n_plants": len(PLANTS)}],
         assignments={DATE: []})
 
-    res = _deliver(tmp_path, _results(("P1", 3)), ["P1"], list(preds_by_date.values()),
-                   plant_mapping="valley")
+    res = _deliver(tmp_path, _results(("P1", 3)), ["P1"], dataset_root,
+                   list(preds_by_date.values()), plant_mapping="valley")
 
     assert "recorded no capture at all" in res["error"]
     assert not (tmp_path / "o.csv").exists()
@@ -190,8 +190,8 @@ def test_a_delivered_plant_the_mapping_never_assigned_refuses_by_name(tmp_path):
     dataset_root, date = _mapped(tmp_path, nn_tolerance_m=10.0)
     bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
 
-    res = _deliver(tmp_path, _results(("P1", 1), ("GHOST", 2)), ["P1", "GHOST"], [bucket],
-                   plant_mapping="valley")
+    res = _deliver(tmp_path, _results(("P1", 1), ("GHOST", 2)), ["P1", "GHOST"], dataset_root,
+                   [bucket], plant_mapping="valley")
 
     assert "GHOST" in res["error"] and "'P1'" not in res["error"]
     assert not (tmp_path / "o.csv").exists()
@@ -207,7 +207,8 @@ def test_a_capture_added_since_the_mapping_was_built_refuses(tmp_path):
     write_geo_image(dataset_root / "images" / date / "P2.jpg", 43.19680, -90.057000,
                     datetime(2026, 2, 11, 9, 35))
 
-    res = _deliver(tmp_path, _results(("P1", 1)), ["P1"], [bucket], plant_mapping="valley")
+    res = _deliver(tmp_path, _results(("P1", 1)), ["P1"], dataset_root, [bucket],
+                   plant_mapping="valley")
 
     assert "does not cover what is on disk now" in res["error"]
     assert not (tmp_path / "o.csv").exists()

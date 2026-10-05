@@ -11,11 +11,10 @@ from pathlib import Path
 
 from PIL import Image
 
-from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.subject_registry import SubjectRegistry, Subject
 from tcip_mcp.tools.project_tools import read_datasets, register_dataset
-from tests._producer_fixtures import registry_over
+from tests._producer_fixtures import label_image, registry_over
 
 
 def _make_dataset(root: Path) -> None:
@@ -23,10 +22,8 @@ def _make_dataset(root: Path) -> None:
     rather than the ``None`` a check_dataset_identity.py run reads as bespoke-or-empty."""
     (root / "images" / "2-11-26").mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (32, 32)).save(root / "images" / "2-11-26" / "img_000.jpg")
-    (root / "annotations" / "2-11-26").mkdir(parents=True, exist_ok=True)
-    json_io.write_annotations(
-        str(root / "annotations" / "2-11-26" / "img_000.json"),
-        [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
+    label_image(root / "images" / "2-11-26" / "img_000.jpg",
+                [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
 
 
@@ -153,6 +150,8 @@ def test_check_dataset_identity_stays_quiet_for_a_self_registered_project(tmp_pa
 def test_check_dataset_identity_still_fires_for_a_genuinely_moved_dataset(tmp_path: Path):
     import shutil
 
+    import tcip_store
+
     from tests._web_fixtures import new_project
 
     orig = new_project(tmp_path / "orig")
@@ -160,6 +159,7 @@ def test_check_dataset_identity_still_fires_for_a_genuinely_moved_dataset(tmp_pa
     register_dataset(orig, str(orig), crop="currant")
 
     moved = tmp_path / "moved"
+    tcip_store.release_root(orig)
     shutil.copytree(orig, moved)
 
     result = _run_check(str(moved), "--project", str(orig))

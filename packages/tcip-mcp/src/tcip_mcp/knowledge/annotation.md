@@ -1,18 +1,20 @@
 ---
 name: annotation
-description: "Annotation and review workflows for TCIP's native per-image JSON labels, and the import of an external dataset-level COCO into them. Covers engine-assisted auto-labeling (a method-neutral proposal seam over engines you name), the one editor where a person accepts, corrects or rejects proposals and marks an image complete, active learning scoring, and quality metrics. Load when labeling or reviewing image annotations, scoring unlabeled images for active learning, running engine-assisted auto-labeling, or preparing/QCing training data."
+description: "Annotation and review workflows for TCIP's native per-image label documents, and the import of an external dataset-level COCO into them. Covers engine-assisted auto-labeling (a method-neutral proposal seam over engines you name), the one editor where a person accepts, corrects or rejects proposals and marks an image complete, active learning scoring, and quality metrics. Load when labeling or reviewing image annotations, scoring unlabeled images for active learning, running engine-assisted auto-labeling, or preparing/QCing training data."
 ---
 
 # Annotation Workflow
 
-## Canonical format: per-image JSON with provenance
+## Canonical format: per-image label document with provenance
 
-The on-disk default for both GT and predictions is one per-image, COCO-shaped `.json`
-(`tcip_annotation.json_io`), carrying `created_by` / `created_at` / `accepted_by` /
-`accepted_at` provenance per object. `stage_proposals` publishes this schema
-as a bucket of its own per image, its record naming the engine or agent that proposed it (its
-`assignments` regime reads back the proposal record `propose_annotations` staged in a prior run,
-not a label file). It is the one label document shape the platform
+Both GT and predictions are one per-image, COCO-shaped document (`tcip_annotation.json_io`), a
+record in the database of the dataset root the image belongs to, keyed by the image's capture and
+stem (a prediction by its bucket's name and stem), carrying `created_by` / `created_at` /
+`accepted_by` / `accepted_at` provenance per object. Every tool addresses a document through its
+image; a person reads the documents as files through `tcip dump-store`. `stage_proposals`
+publishes this schema as a bucket of its own per image, its record naming the engine or agent that
+proposed it (its `assignments` regime reads back the proposal record `propose_annotations` staged
+in a prior run, not a label document). It is the one label document shape the platform
 writes; object ground truth trains from it, beside the mask rasters and tables other tasks read.
 Provenance is stamped by the save on the server from the person saving: a record unchanged since
 it was stored keeps its own, any other is that person's at the save's time, and nothing a client
@@ -29,25 +31,23 @@ the loss of its marks are one write of one document; another subject's marks are
 ## Reading labels, and importing an external COCO
 
 Nothing here trains or calibrates on a dataset-level COCO file (an `images` or `categories`
-key): the per-image reader refuses one wherever it sits, naming `import_coco`, and every
-training, calibration and review reader reads through it. An external COCO export becomes
-per-image documents on the way in through `import_coco(document, dataset_root, date)`, over
-images `ingest_images` already placed. `date` names the capture: the dated bucket under
-`images/`, or the flat `images/` root for a dataset with no dated buckets. Every declared category
+key): it is never a per-image document, and the only way in is the import. An external COCO
+export becomes per-image documents through `import_coco(document, dataset_root, date)`, over
+images `ingest_images` already placed. `date` names the capture: the dated folder under
+`images/`, or the flat `images/` root for a dataset with no dated folders. Every declared category
 must be a subject the dataset's registry declares. An ordinary image is the capture's image with
 exactly the document's `file_name`; a `.bandgroup` capture is tied by stem. An image with no
 annotations writes nothing. Before anything is written the import reports every fault it finds
 together and refuses: a malformed, repeated or unregistered category, a record the reader or the
 writer refuses (a record's `image_id` and its content are checked independently, so one record
 can report both), an image id that is not an integer or is listed twice, an image not in the
-capture, a stated frame the image does not have, or an existing per-image document. The writes are
-then create-only, one document at a time: a label placed meanwhile raises on its document and
-leaves those written before it. A crowd region keeps its `iscrowd` flag, and a run-length mask
+capture, a stated frame the image does not have, or an existing per-image document. Every
+document and the import's audit event then commit together, or none does: a label placed
+meanwhile refuses the whole import. A crowd region keeps its `iscrowd` flag, and a run-length mask
 becomes the rings `mask_contours.mask_to_polygon_rings` extracts from it. The records keep the
-provenance the COCO carried and gain none. Once a document is written, the import's audit event
-records the document's path, the digest of the bytes read and the documents written, and on a
-later failed write the error, naming the document that failed; an import that wrote no document, whether refused, failed
-on its first write or carrying no annotations, changed nothing and leaves no line.
+provenance the COCO carried and gain none. The audit event records the COCO file's path, the
+digest of the bytes read and the documents written; an import that writes no document, whether
+refused or carrying no annotations, changes nothing and leaves no line.
 
 A record carrying `iscrowd` is a region of unseparated objects, never one instance: the built-in
 detection and instance heads train its region as background (they read no crowd flag, so a crowd
@@ -56,12 +56,12 @@ false positive at evaluation, and it counts as no object wherever a ground-truth
 or an object is paired, the classifier calibration's pairing included. Every loader target keeps
 it under `iscrowd`, so a `train(ctx)` of your own can act on it.
 
-The per-image document is read by `json_io.read_annotations`, wrapped for the agent by
+The per-image document is read by `json_io.read_label_document`, wrapped for the agent by
 `annotation_tools.read_annotations`, a library call, not a tool of its own, and written by
-`save_annotations`. A missing label file reads as no annotations; a present one the reader cannot
-make sense of raises `json_io.UnreadableLabelDocument` naming the file or the malformed record's
-index, rather than reading short: undecodable text, a non-dict document, a dataset-level COCO,
-a completion mark missing any of its fields, an `annotations` value that is not a list, a record
+`save_annotations`. A missing label document reads as no annotations; a present one the reader
+cannot make sense of raises `json_io.UnreadableLabelDocument` naming the document or the malformed
+record's index, rather than reading short: a stored value that does not decode, a non-dict
+document, a completion mark missing any of its fields, an `annotations` value that is not a list, a record
 that is not a dict,
 a record with no string subject, and a record carrying a value that is not what the schema states,
 whichever geometry the record resolves to (a `bbox` that is not four numbers or has no positive
@@ -71,11 +71,12 @@ numbers, a `score` that is not a number, an attribute value that is not a non-em
 optional field. A shape `save_annotations` or the Annotate tab saves is translated into this
 record and decoded by the same decoder, so it is refused for the same values. The import's COCO
 reader, `format_io.parse_coco_annotations`, names each record's subject from the document's own
-`categories` and hands each record to that same decoder. An unreadable file is not the same fact
-as no file.
+`categories` and hands each record to that same decoder. An unreadable document is not the same
+fact as no document.
 
 A collaborator's delivery in a schema other than COCO is yours to convert: read a sample, write a
-one-off converter script, and emit the canonical per-image JSON. COCO is the one built-in import.
+one-off converter script that emits a COCO document, and import it. COCO is the one built-in
+import.
 
 ## Coordinate frame: upright, EXIF applied once
 
@@ -203,33 +204,33 @@ point admits it (`delivery.admitted_conf`), the reason riding beside them when n
 
 ### The review channel: propose on canvas, never write GT blind
 
-The agent must never write ground truth the human hasn't seen. Stage proposals to the
-*predictions* tree and drive the human to review them:
+The agent must never write ground truth the human hasn't seen. Stage proposals as a prediction
+bucket and drive the human to review them:
 
 - `stage_proposals(image_path, *, assignments=None, boxes=None, polygons=None, model_name=None)`
-  writes model-/agent-proposed shapes to the predictions tree, not `annotations/`, so nothing here
-  becomes ground truth before a human reviews it. Exactly one input regime per call:
+  publishes model-/agent-proposed shapes as prediction documents, never the image's label
+  document, so nothing here becomes ground truth before a human reviews it. Exactly one input regime per call:
   `assignments` reads back the candidates `propose_annotations` staged for this image, each a
   `{candidate_id, subject}` mapping, stamped `created_by=<engine>`; `model_name` is refused
   alongside `assignments`, since the staged record already names the engine. `boxes`/`polygons`
   are explicit shapes an agent or another model already has in hand, with no cached record to
   read back; they require `model_name`, stamped as each object's `created_by`. Either way the
-  image's proposal is published once as its own bucket at
-  `predictions/<producer>/<date>/<stem>/`, its record naming the engine or `model_name` as what
+  image's proposal is published once as its own bucket named `<producer>/[<date>/]<stem>`, the
+  name the answer's `bucket` carries, its record naming the engine or `model_name` as what
   proposed it and no checkpoint or execution record, and renders on the Annotate canvas for the
   person to accept, correct or reject; for the explicit regime, name the real producer in
   `model_name` (`claude`, `groundingdino`, `model:<run>`), not a generic placeholder. A second
   stage of the same image under the same producer refuses, since a reviewer may already have
   judged it, so further shapes go under another `model_name`. No delivery ships a proposal.
-- `focus_human_attention(dataset_root, subject, date, image_index, mode, predictions_dir,
-  proposal)` drives the live Annotate tab to a frame, showing the proposals of the bucket at
-  `predictions_dir` (a published bucket's directory, a proposal's included) with `proposal`
-  selected, so the person sees exactly what you flagged without hunting. The event names this
+- `focus_human_attention(dataset_root, subject, date, image_index, mode, bucket, proposal)` drives
+  the live Annotate tab to a frame, showing the proposals of the bucket named `bucket` under
+  `dataset_root` (a published bucket, a proposal's included) with `proposal` selected, so the
+  person sees exactly what you flagged without hunting. The event names this
   server's project by its id, and the backend delivers it only while the GUI has that project
   open: otherwise the answer is `delivered: false` with the id of the project the GUI does have
   open, and a backend that is not running answers `delivered: false` too.
 
-Flow: run inference (or `stage_proposals`) → `focus_human_attention(predictions_dir=...)` the
+Flow: run inference (or `stage_proposals`) → `focus_human_attention(bucket=...)` the
 person to the weakest/flagged frames → they accept on the canvas → only then does it become GT. See
 `packages/tcip-mcp/src/tcip_mcp/knowledge/delivery.md` for what ships after sign-off.
 
@@ -240,9 +241,9 @@ person to the weakest/flagged frames → they accept on the canvas → only then
   person's completion mark for that subject over the whole image (`state == "negative"`). The
   admission, the review queue and the editor's own listing all read it through
   `LabelDocument.state`. An empty document nobody marked is unannotated: you cannot manufacture
-  negatives, since writing empty label files does not create them; only the person's mark does.
-  `tcip doctor <root>` reports an empty document no mark finishes. Never delete empty label files
-  without asking.
+  negatives, since writing empty label documents does not create them; only the person's mark
+  does. `tcip doctor <root>` reports an empty document no mark finishes. Never delete empty label
+  documents without asking.
 
 ## Active Learning
 

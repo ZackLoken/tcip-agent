@@ -91,10 +91,11 @@ derive from the data, not from the phrasing (see
   CV task. Which task measures that is yours to derive from object scale, separability, and what
   the trait actually counts; their verb is vocabulary, not the answer.
 - Subject: the object class the annotations isolate (e.g. `catkin`, `bush`), not a path
-  segment. Labels are one file per image (`annotations/<date>/<stem>.json`; see
-  `dataset_layout.py`), holding every subject's annotation records for that image; `subject` is a
-  field inside each record, resolved through the dataset's `subjects.json` registry. Multiple
-  subjects coexist in the same file (a bush isolated alongside its catkins).
+  segment. Labels are one document per image, a record in the dataset root's database keyed by
+  the image's capture and stem (see `dataset_layout.py`), holding every subject's annotation
+  records for that image; `subject` is a field inside each record, resolved through the dataset's
+  `subjects.json` registry. Multiple subjects coexist in the same document (a bush isolated
+  alongside its catkins).
 - Subjects: register the subject/attribute vocabulary in `subjects.json` via the audited
   `write_subject_registry(dataset_root, subjects)` tool (never hand-edit the file) for what the
   breeder actually distinguishes: it validates the nested subject/attribute shape and writes the
@@ -114,18 +115,18 @@ There must be something to train on. Three paths (see
   image-capable read tool on the returned `image_path`) → `stage_proposals`
   with `assignments=[...]` for the good ones. `grid_cells=[...]` restricts a pass to a region of a large or crowded image
   instead of the whole frame. Trial engines and keep the one whose high-conf
-  proposals survive review. An empty label file is not a negative on its own; it trains as one
-  only once the breeder marks that image complete for the subject (a completion mark in the label
-  document itself), so an empty file you write reads as unannotated until then. Never delete or
-  skip them.
+  proposals survive review. An empty label document is not a negative on its own; it trains as
+  one only once the breeder marks that image complete for the subject (a completion mark in the
+  label document itself), so an empty document you write reads as unannotated until then. Never
+  delete or skip them.
 - Human path: hand off to the GUI Annotate tab for the breeder to label a seed set.
 - Existing labels in an external dataset-level COCO: `import_coco(document, dataset_root, date)`
   converts them into per-image documents over the images `ingest_images` placed under that date.
   Nothing trains on the COCO file itself.
 
 Never train or evaluate on an unconfirmed format: the one per-image label reader refuses any
-document of another shape (a dataset-level COCO, the old `objects` schema, an unrecognized one)
-rather than guessing, and every training, calibration and review reader reads through it.
+document of another shape rather than guessing, every training, calibration and review reader
+reads through it, and a dataset-level COCO enters only through `import_coco`.
 
 ## 5. Select: `draw_splits`
 

@@ -11,6 +11,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+import tcip_store as ts  # noqa: E402
+from tcip_mcp.dataset_layout import capture_label_keys, label_key  # noqa: E402
 from tcip_mcp.experiments import (  # noqa: E402
     RUN_FILE,
     experiment_dir,
@@ -34,11 +36,10 @@ def _real_drawn_experiment(
     own resolution, recorded in ``experiment_id``'s launch record under ``project``; a run with
     ``auto_val`` off selects on its training loss. Returns the resolved ``data`` section."""
     images_dir = root / "images" / date
-    labels_dir = root / "annotations" / date
     opened_run(project, {
         "model_source": {"task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "scope": {"subject": subject}, "auto_val": auto_val},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": subject},
+                 "auto_val": auto_val},
         **({} if auto_val else {"evaluation": {"selection_metric": "loss"}}),
     }, experiment_id=experiment_id)
     return run_resolution(experiment_id, project=project)["data"]
@@ -75,10 +76,10 @@ def test_freeze_selection_round_trips_through_a_real_bind(tmp_path: Path):
     frozen = read_selection(selection_dir, project=tmp_path)
     assert frozen.counts()["calibration"] == frozen.counts()["holdout"] == 0
     assert frozen.counts()["train"] and frozen.counts()["val"]
-    assert {Path(s.ground_truth).stem for s in frozen.samples} <= set("abcdef")
+    assert {s.ground_truth.parts[-1] for s in frozen.samples} <= set("abcdef")
     for sample in frozen.samples:
         assert Path(sample.source).parent == root / "images" / DATES[0]
-        assert Path(sample.ground_truth).is_file()
+        assert ts.exists(sample.ground_truth)
 
     second_cfg: dict[str, Any] = {
         "model_source": {"builder": BUILDER, "task": "detection"},
@@ -128,19 +129,21 @@ def test_freeze_selection_keeps_two_scopes_same_named_members_apart(tmp_path: Pa
     date's member and bind a later run to half the partition its record describes. The partition
     is composed through the resolution's own partition producer over the run's samples and set
     into a real run's launch record past its writer."""
-    from tcip_mcp.pipelines.data.selection import Sample
+    from tcip_mcp.pipelines.data.selection import Sample, ground_truth_digest
     from tcip_mcp.pipelines.data.split_construction import _partition_record
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     train, val = [], []
     for date in DATES:
-        images_dir, labels_dir = root / "images" / date, root / "annotations" / date
-        stems = sorted(p.stem for p in labels_dir.glob("*.json"))[:2]
+        images_dir = root / "images" / date
+        stems = [key.parts[-1] for key in capture_label_keys(root, date)][:2]
         for index, stem in enumerate(stems):
+            key = label_key(root, date, stem)
             sample = Sample(member=stem, source=str(images_dir / f"{stem}.jpg"),
-                            ground_truth=str(labels_dir / f"{stem}.json"), group=stem,
-                            side="train" if index == 0 else "val")
+                            ground_truth=key, group=stem,
+                            side="train" if index == 0 else "val",
+                            ground_truth_digest=ground_truth_digest(key))
             (train if index == 0 else val).append(sample)
     assert {s.member for s in train} == {s.member for s in train[:1]}, (
         "both dates must contribute the same member name for this to bite")
@@ -170,10 +173,9 @@ def test_freeze_selection_carries_an_explicit_group_key_map_onto_its_samples(tmp
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
+    images_dir = root / "images" / DATES[0]
     resolved_run(tmp_path, {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir),
-        "scope": {"subject": SUBJECT},
+        "images_dir": str(images_dir), "scope": {"subject": SUBJECT},
         "split": {"group_key_map":
                   {member_identity(DATES[0], s): "g1" for s in ("a", "b", "c")}
                   | {member_identity(DATES[0], s): "g2" for s in ("d", "e", "f")}}},
@@ -228,7 +230,7 @@ def test_a_bound_run_freezes_and_a_later_run_rebinds_to_its_membership(
 
     def _sides(experiment_id: str) -> dict:
         samples = partition_samples(run_resolution(experiment_id, project=tmp_path)["partition"])
-        return {side: sorted(s.ground_truth for s in samples if s.side == side)
+        return {side: {s.ground_truth for s in samples if s.side == side}
                 for side in ("train", "val")}
 
     assert _sides("exp-rebound") == _sides("exp-bound")
@@ -259,10 +261,9 @@ def test_freeze_selection_refuses_a_member_whose_ground_truth_moved(tmp_path: Pa
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    data_cfg = _real_drawn_experiment(tmp_path, root, "exp-moved")
+    _real_drawn_experiment(tmp_path, root, "exp-moved")
 
-    moved = Path(data_cfg["labels_dir"]) / "a.json"
-    json_io.write_annotations(moved, [
+    json_io.write_label_document(label_key(root, DATES[0], "a"), [
         Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20)),
         Annotation(subject=SUBJECT, geometry=BBox(30, 30, 50, 50)),
     ], 64, 64, keep_empty=True)
@@ -272,18 +273,16 @@ def test_freeze_selection_refuses_a_member_whose_ground_truth_moved(tmp_path: Pa
     assert "'a'" in result["error"]
 
 
-def test_freeze_selection_reads_a_member_replaced_by_another_extension_as_moved(tmp_path: Path):
-    """The record names the file each member's ground truth was, so a member's document replaced
-    by one of another extension carrying the identical bytes reads as moved rather than as
-    unchanged: a later bind would otherwise be composed from a path nothing holds."""
+def test_freeze_selection_reads_a_members_removed_document_as_moved(tmp_path: Path):
+    """The record names the document each member's ground truth was, so a member whose document
+    was removed since reads as moved rather than as unchanged: a later bind would otherwise be
+    composed from a document nothing holds."""
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    data_cfg = _real_drawn_experiment(tmp_path, root, "exp-renamed")
+    _real_drawn_experiment(tmp_path, root, "exp-renamed")
 
-    document = Path(data_cfg["labels_dir"]) / "a.json"
-    document.with_suffix(".txt").write_bytes(document.read_bytes())
-    document.unlink()
+    ts.delete(label_key(root, DATES[0], "a"))
 
     result = freeze_selection(tmp_path, "exp-renamed")
     assert "error" in result and "changed since" in result["error"]
@@ -322,11 +321,9 @@ def test_freeze_selection_refuses_labels_changed_since_the_run(tmp_path: Path):
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     _real_drawn_experiment(tmp_path, root, "exp-stale-labels")
 
-    labels_dir = root / "annotations" / DATES[0]
-    json_io.write_annotations(
-        labels_dir / "a.json", [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 5, 5))], 64, 64,
-        keep_empty=True,
-    )
+    json_io.write_label_document(
+        label_key(root, DATES[0], "a"), [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 5, 5))],
+        64, 64, keep_empty=True)
 
     result = freeze_selection(tmp_path, "exp-stale-labels")
     assert "error" in result and "changed" in result["error"]

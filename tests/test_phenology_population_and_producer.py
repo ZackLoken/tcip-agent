@@ -32,7 +32,7 @@ def test_the_csv_row_count_equals_the_population(tmp_path: Path) -> None:
 
     res = deliver_phenology_milestones(
         tmp_path, trait=body["trait"], mapping_name=body["mapping_name"],
-        buckets=body["buckets"], output_csv_path=str(out_csv),
+        dataset_root=body["dataset_root"], buckets=body["buckets"], output_csv_path=str(out_csv),
         plants=["PLANT_A", "PLANT_UNMAPPED"])
 
     assert "error" not in res, res
@@ -55,7 +55,7 @@ def test_an_empty_population_refuses_naming_the_argument(tmp_path: Path) -> None
 
     res = deliver_phenology_milestones(
         tmp_path, trait=body["trait"], mapping_name=body["mapping_name"],
-        buckets=body["buckets"],
+        dataset_root=body["dataset_root"], buckets=body["buckets"],
         output_csv_path=str(tmp_path / "out" / "bud.csv"), plants=[])
 
     assert "plants=[...]" in res["error"]
@@ -94,25 +94,25 @@ def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:
 
     res = deliver_phenology_milestones(
         tmp_path, trait=body["trait"], mapping_name=body["mapping_name"],
-        buckets=body["buckets"], output_csv_path=str(one),
+        dataset_root=body["dataset_root"], buckets=body["buckets"], output_csv_path=str(one),
         plants=["PLANT_A"])
     assert "error" not in res, res
 
     config = {**run_config(tmp_path / "selection"), "model_source": dict(BLOB_BUILDER)}
     other = observe(worker_run(tmp_path, config, experiment_id="exp-other")).checkpoint
     assert other is not None
-    other_bucket = series.root / "predictions" / "other" / second
+    other_bucket = f"other/{second}"
     published = run_inference(tmp_path, checkpoint_path=other["path"],
                               images_dir=str(series.root / "images" / second),
-                              output_dir=str(other_bucket))
+                              bucket=other_bucket)
     assert "error" not in published, published
 
     out_csv = tmp_path / "out" / "two_producers.csv"
     res = deliver_phenology_milestones(
         tmp_path, trait=body["trait"], mapping_name=body["mapping_name"],
-        buckets=[series.buckets[first], str(other_bucket)],
+        dataset_root=body["dataset_root"], buckets=[series.buckets[first], other_bucket],
         output_csv_path=str(out_csv), plants=["PLANT_A"])
 
     assert "more than one checkpoint or run" in res["error"], res
-    assert str(other_bucket) in res["error"]
+    assert other_bucket in res["error"]
     assert not out_csv.exists()

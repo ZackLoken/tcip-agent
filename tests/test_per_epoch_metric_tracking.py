@@ -63,13 +63,12 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
 
     from tests._producer_fixtures import seed_leaf_detection_dataset
 
-    images_dir, labels_dir, val_images, val_labels = seed_leaf_detection_dataset(tmp_path / "ds")
+    images_dir, _val_images = seed_leaf_detection_dataset(tmp_path / "ds")
     base_config = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "scope": {"subject": "leaf"}},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": "leaf"}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 2}],
                      "mixed_precision": False, "device": "cpu",
     }

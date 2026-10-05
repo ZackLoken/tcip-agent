@@ -18,63 +18,42 @@ name-based label is undecodable without it.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from tcip_web.label_annotations_cache import cached_label_annotations
 from tcip_web.paths import allowed_path
 
 router = APIRouter(prefix="/api/subjects", tags=["subjects"])
 
 
-def _subjects_in_dir(d: Path) -> tuple[set[str], list[str]]:
-    """Distinct subject names present in a dir's per-image label files, and the paths that would
-    not read: one bad file costs its own name, never the whole scan."""
-    from tcip_annotation.json_io import UnreadableLabelDocument, prediction_documents
-
-    subjects: set[str] = set()
-    unreadable: list[str] = []
-    for jf in prediction_documents(d):
-        try:
-            annotations = cached_label_annotations(jf)
-        except UnreadableLabelDocument:
-            unreadable.append(str(jf))
-            continue
-        for record in annotations:
-            subjects.add(record.subject)
-    return subjects, unreadable
-
-
 @router.get("/load")
-def load_subjects(dataset_root: str, annotations_dir: Optional[str] = None) -> dict:
+def load_subjects(dataset_root: str, date: str) -> dict:
     """Load the subject registry of the dataset at ``dataset_root``.
 
     Returns ``{"subjects": <nested registry mapping> | None, "discovered": [names], "version":
-    <token> | None, "unreadable": [paths]}``: ``subjects`` and ``version`` (its compare-and-set
-    token) are the stored registry's, both ``None`` when none is stored; ``discovered`` names the
-    subjects present in the labels under ``annotations_dir``, and ``unreadable`` every per-image
-    label file there that would not read, both scanned whether or not a registry is stored. A save
-    posting this ``version`` back is refused with 409 if the stored registry has moved on since; a
-    save posting ``None`` asserts no registry is stored and is refused with 409 when one is.
+    <token> | None, "unreadable": [stems]}``: ``subjects`` and ``version`` (its compare-and-set
+    token) are the stored registry's, both ``None`` when none is stored; ``discovered`` and
+    ``unreadable`` are :func:`~tcip_mcp.dataset_layout.capture_subjects` of capture ``date``,
+    read whether or not a registry is stored. A save posting this ``version`` back is
+    refused with 409 if the stored registry has moved on since; a save posting ``None`` asserts no
+    registry is stored and is refused with 409 when one is.
     """
+    from tcip_mcp.dataset_layout import capture_subjects
     from tcip_mcp.subject_registry import RegistryError, read_versioned_registry, registry_to_dict
 
-    discovered: set[str] = set()
-    unreadable: list[str] = []
-    if annotations_dir and (guarded := allowed_path(annotations_dir)).is_dir():
-        discovered, unreadable = _subjects_in_dir(guarded)
+    root = allowed_path(dataset_root)
+    discovered, unreadable = capture_subjects(root, date)
     subjects, token = None, None
     try:
-        registry, version = read_versioned_registry(allowed_path(dataset_root))
+        registry, version = read_versioned_registry(root)
         subjects, token = registry_to_dict(registry), version.token
     except FileNotFoundError:
         pass
     except (OSError, RegistryError) as exc:
         raise HTTPException(500, f"could not parse the subject registry: {exc}") from exc
-    return {"subjects": subjects, "discovered": sorted(discovered), "version": token,
+    return {"subjects": subjects, "discovered": discovered, "version": token,
             "unreadable": unreadable}
 
 

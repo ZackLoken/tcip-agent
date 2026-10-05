@@ -6,6 +6,8 @@ predictor, active learning scorers, and tool imports.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 import pytest
 torch = pytest.importorskip("torch")
 import torch.nn as nn
@@ -21,8 +23,8 @@ class TestDatasets:
         """Classification dataset from its ground-truth table, one row per image."""
         from torchvision.utils import save_image
 
-        images_dir = tmp_path / "images"
-        images_dir.mkdir()
+        images_dir = tmp_path / "images" / UNDATED_BUCKET
+        images_dir.mkdir(parents=True)
         rows = ["stem,label"]
         for i in range(4):
             img = torch.randint(0, 255, (3, 32, 32), dtype=torch.uint8)
@@ -37,23 +39,22 @@ class TestDatasets:
         assert ds.task_type == "classification"
 
     def test_build_dataset_detection(self, tmp_path):
-        """Detection dataset from per-image JSON labels."""
-        from tcip_annotation import json_io
+        """Detection dataset from per-image label documents."""
         from tcip_annotation.state import Annotation, BBox
-        imgs = tmp_path / "images"
-        lbls = tmp_path / "labels"
-        imgs.mkdir()
-        lbls.mkdir()
+
+        from tests._producer_fixtures import label_image
+        imgs = tmp_path / "images" / UNDATED_BUCKET
+        imgs.mkdir(parents=True)
         # Create one image + label
         img = torch.randint(0, 255, (3, 64, 64), dtype=torch.uint8)
         from torchvision.utils import save_image
         save_image(img.float() / 255.0, str(imgs / "test.png"))
-        json_io.write_annotations(str(lbls / "test.json"),
-                                  [Annotation(subject="bud", geometry=BBox(25.6, 22.4, 38.4, 41.6)),
-                                   Annotation(subject="bud", geometry=BBox(16.0, 16.0, 22.4, 22.4))],
-                                  64, 64, keep_empty=True)
+        label_image(imgs / "test.png",
+                    [Annotation(subject="bud", geometry=BBox(25.6, 22.4, 38.4, 41.6)),
+                     Annotation(subject="bud", geometry=BBox(16.0, 16.0, 22.4, 22.4))],
+                    64, 64, keep_empty=True)
 
-        ds = dataset_over("detection", str(imgs), str(lbls), subject="bud")
+        ds = dataset_over("detection", str(imgs), subject="bud")
         assert ds.task_type == "detection"
         assert len(ds) == 1
 

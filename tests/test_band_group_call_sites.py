@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import tifffile
-from tests._producer_fixtures import dataset_over, registry_over  # noqa: E402
+from tests._producer_fixtures import dataset_over, label_image, registry_over  # noqa: E402
 
 
 def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
@@ -31,31 +31,25 @@ def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
 @pytest.fixture
 def grouped_dataset(tmp_path: Path) -> Path:
     """A minimal dataset root: one grouped capture + one plain photo, each with a detection GT
-    label, the canonical images/ + annotations/ layout ``build_dataset`` reads.
+    label document, under the canonical images/ layout ``build_dataset`` reads.
     """
     from PIL import Image
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
 
     root = tmp_path / "proj"
     date = "2026-04-01"
     images_dir = root / "images" / date
-    labels_dir = root / "annotations" / date
     images_dir.mkdir(parents=True)
-    labels_dir.mkdir(parents=True)
 
-    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
+    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud", description="a bud"),)))
 
     _write_group(images_dir, "capture_001")
     Image.new("RGB", (16, 16), (5, 5, 5)).save(images_dir / "plain_002.jpg")
 
-    for stem in ("capture_001", "plain_002"):
-        json_io.write_annotations(
-            labels_dir / f"{stem}.json",
-            [Annotation(subject="bud", geometry=BBox(2, 2, 6, 6))],
-            16, 16,
-        )
+    for source in ("capture_001.bandgroup", "plain_002.jpg"):
+        label_image(images_dir / source, [Annotation(subject="bud", geometry=BBox(2, 2, 6, 6))],
+                    16, 16)
     return root
 
 
@@ -79,12 +73,10 @@ def test_detection_dataset_trains_on_a_grouped_capture(grouped_dataset):
     """The grouped capture alone: this bucket also holds a plain RGB source, and one model reads
     one band count, so a run over both refuses rather than reading either at the other's count."""
     torch = pytest.importorskip("torch")
-    from tcip_mcp.dataset_layout import image_dir, annotation_dir
+    from tcip_mcp.dataset_layout import image_dir
 
-    ds = dataset_over(
-        'detection', str(image_dir(grouped_dataset, "2026-04-01")),
-        str(annotation_dir(grouped_dataset, "2026-04-01")), subject="bud",
-        members=["capture_001"])
+    ds = dataset_over('detection', str(image_dir(grouped_dataset, "2026-04-01")), subject="bud",
+                      members=["capture_001"])
     assert ds.expected_channels == 2  # derived from the group's own bands, not defaulted to RGB
     members = [ds.sample_of(key).member for key in ds.stems]
     assert "capture_001" in members
@@ -96,12 +88,11 @@ def test_detection_dataset_trains_on_a_grouped_capture(grouped_dataset):
 
 
 def test_the_channel_probe_derives_2_for_the_grouped_sample(grouped_dataset):
-    from tcip_mcp.dataset_layout import annotation_dir, image_dir
+    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.data.datasets import _band_count
     from tests._producer_fixtures import samples_over
 
-    samples = samples_over(str(image_dir(grouped_dataset, "2026-04-01")),
-                           str(annotation_dir(grouped_dataset, "2026-04-01")), subject="bud",
+    samples = samples_over(str(image_dir(grouped_dataset, "2026-04-01")), subject="bud",
                            members=["capture_001"])
     assert _band_count(samples) == 2
 
@@ -111,6 +102,7 @@ def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaul
     along with genuinely unexpected errors and silently default to 3 channels: a
     confidently-wrong value on exactly the parameter 'derive, don't pin' exists to guard
     against."""
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, write_band_group_manifest
     from tcip_mcp.pipelines.data.datasets import _band_count
     from tcip_mcp.pipelines.data.selection import Sample
@@ -124,8 +116,8 @@ def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaul
     manifest = write_band_group_manifest(images_dir, "cap", {"Green": band_a, "Red": band_b})
     band_b.unlink()  # the manifest now references a sibling that no longer exists
 
-    sample = Sample(member="cap", source=str(manifest), ground_truth=str(tmp_path / "cap.json"),
-                    group="g", side="train")
+    sample = Sample(member="cap", source=str(manifest),
+                    ground_truth=label_key(tmp_path, UNDATED_BUCKET, "cap"), group="g", side="train")
     with pytest.raises(BandGroupIncomplete):
         _band_count([sample])
 
@@ -247,7 +239,6 @@ def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(tmp_path
     that path resolves back to the whole group in place: the group's bands are read where they
     were captured, never copied into a side's own directory."""
     from PIL import Image
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.data.selection import read_selection
@@ -257,13 +248,10 @@ def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(tmp_path
     # The fixture's own two groups (capture_001, plain_002) need two more to clear a draw's
     # foreground floor, added here rather than in the shared fixture.
     images_dir = grouped_dataset / "images" / "2026-04-01"
-    labels_dir = grouped_dataset / "annotations" / "2026-04-01"
     for stem in ("plain_003", "plain_004"):
         Image.new("RGB", (16, 16), (5, 5, 5)).save(images_dir / f"{stem}.jpg")
-        json_io.write_annotations(
-            labels_dir / f"{stem}.json",
-            [Annotation(subject="bud", geometry=BBox(2, 2, 6, 6))], 16, 16,
-        )
+        label_image(images_dir / f"{stem}.jpg",
+                    [Annotation(subject="bud", geometry=BBox(2, 2, 6, 6))], 16, 16)
 
     out = grouped_dataset / "splits"
     result = draw_splits(tmp_path, str(grouped_dataset), output_path=str(out),

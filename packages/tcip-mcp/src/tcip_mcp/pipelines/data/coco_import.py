@@ -20,14 +20,34 @@ def _rle_mask(segmentation: dict) -> Any:
         raise ValueError(f"carries a run-length mask that does not decode ({exc!r})") from exc
 
 
-def import_coco_document(document: str | Path, dataset_root: str | Path, *, date: str) -> dict:
-    """Write one per-image label document for every image ``document`` lists, under
-    ``annotations/<date>/`` of ``dataset_root``, and record the import on the dataset's audit log
-    with the document's path and the digest of the one read of its bytes, once a document has been
-    written: an import that wrote nothing leaves no line.
+def _read_coco(document: Path) -> tuple[dict, str]:
+    """The external COCO file's parsed object and the digest of the one read of its bytes
+    (:func:`tcip_store.read_blob_versioned`'s version). A file that is absent, not UTF-8 (a
+    leading byte-order mark accepted), not JSON or not an object refuses (``ValueError``) naming
+    it."""
+    import json
 
-    ``date`` names the capture: the dated bucket ``images/<date>/`` when the dataset has dated
-    buckets, the flat ``images/`` root only when it has none. Each declared category must be a
+    import tcip_store
+
+    try:
+        stored = tcip_store.read_blob_versioned(document)
+        coco = json.loads(stored.value.decode("utf-8-sig"))
+    except (tcip_store.NotFound, OSError, ValueError) as exc:
+        raise ValueError(f"{document} does not read as a JSON document: {exc}") from exc
+    if not isinstance(coco, dict):
+        raise ValueError(f"{document} decodes to a {type(coco).__name__}, not the object a COCO "
+                         "document is")
+    return coco, stored.version.token
+
+
+def import_coco_document(document: str | Path, dataset_root: str | Path, *, date: str) -> dict:
+    """Write one per-image label document for every image ``document`` lists, keyed under the
+    capture ``date`` of ``dataset_root``, and record the import on the dataset's audit log with
+    the document's path and the digest of the one read of its bytes, in one commit with the
+    documents: an import that writes nothing leaves no line.
+
+    ``date`` names the capture ``images/<date>/``; one :func:`~tcip_mcp.dataset_layout.list_dates`
+    does not list refuses. Each declared category must be a
     subject the dataset's registry declares, and names the subject its records carry. An ordinary
     image is the logical image whose own file name the document's ``file_name`` is; a
     ``.bandgroup`` capture is tied by stem. Each document is encoded at the frame its image decodes
@@ -36,38 +56,30 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
     and gain none; a run-length mask becomes the rings its mask yields.
 
     Every fault the reader and one pass over the listed images find is reported together, and any
-    of them refuses the import before anything is written: a malformed or repeated category
-    declaration, an unregistered category, a record the reader or the writer's encoder refuses, an
-    image id that is not an integer or is listed twice, an image not in the capture, two records
-    naming one capture, an annotation naming an unlisted image, a stated frame the image does not
-    have, and a per-image document already present. The writes then commit as one store
-    transaction over every document, each checked absent under the locks: a label placed after
-    validation refuses the whole import with nothing written, and a failure while publishing is
-    rolled back, leaving no document of the import behind while the rollback itself succeeds
-    (``tcip_store.blob_transaction``).
+    of them refuses the import with nothing written: a malformed or repeated category declaration,
+    an unregistered category, a record the reader or the writer's encoder refuses, an image id
+    that is not an integer or is listed twice, an image not in the capture, two records naming one
+    capture, an annotation naming an unlisted image, a stated frame the image does not have, and a
+    per-image document already present, checked inside the one transaction that writes them.
     """
     import tcip_store
     from tcip_annotation.format_io import is_coco_id, parse_coco_annotations
-    from tcip_annotation.json_io import (
-        decode_document_bytes, encode_annotations, parse_json_document, read_document_bytes,
-    )
+    from tcip_annotation.json_io import document_payload
 
     from tcip_mcp import dataset_layout
-    from tcip_mcp.audit import record_event_or_raise
+    from tcip_mcp.audit import audit_entry, audit_log_key
     from tcip_mcp.pipelines.image_utils import (
         BandGroupRef, image_dimensions, list_logical_images, refuse_incomplete_band_group,
     )
-    from tcip_mcp.pipelines.data.selection import digest_bytes
     from tcip_mcp.subject_registry import registry_for_dataset_root
 
     document, root = Path(document).resolve(), Path(dataset_root).resolve()
     source = str(document)
-    raw = read_document_bytes(document)
-    coco = parse_json_document(decode_document_bytes(raw, source=source), source=source)
+    coco, digest = _read_coco(document)
     categories, by_image, problems = parse_coco_annotations(coco, decode_rle=_rle_mask)
 
     dates = dataset_layout.list_dates(root)
-    if not dataset_layout.is_bucket_name(date) or (dates and date not in dates):
+    if date not in dates:
         raise ValueError(f"{date!r} names no capture under {dataset_layout.image_root(root)} "
                          f"(its buckets: {dates})")
     images = coco.get("images")
@@ -81,10 +93,9 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
     declared = {repr(s.name) for s in registry.subjects}
     problems += [f"category {name} is not a subject the registry declares"
                  for name in sorted(set(map(repr, categories.values())) - declared)]
-    capture = date if dates else None
-    images_dir = dataset_layout.image_dir(root, capture)
+    images_dir = dataset_layout.image_dir(root, date)
     logical = list_logical_images(images_dir)
-    writes: list[tuple[Path, bytes]] = []
+    writes: dict[tcip_store.Key, dict] = {}
     ids: set[int] = set()
     stems: set[str] = set()
     for i, record in enumerate(images):
@@ -105,9 +116,6 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
             problems.append(f"image {name!r} is not in {images_dir}")
             found = None
         stem = found.stem if found is not None else Path(name).stem
-        target = dataset_layout.annotation_path(root, capture, stem)
-        if target.exists():
-            problems.append(f"{target} already exists")
         if found is None:
             continue
         if stem in stems:
@@ -121,25 +129,29 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
         if not identified:
             continue
         try:
-            path, data = encode_annotations(target, by_image.get(image_id, []), width, height)
+            data = document_payload(by_image.get(image_id, []), width, height)
         except ValueError as exc:
             problems.append(f"image {name!r}: {exc}")
             continue
         if data is not None:
-            writes.append((path, data))
+            writes[dataset_layout.label_key(root, date, stem)] = data
     problems += [f"annotations name image id {image_id!r}, which the document does not list"
                  for image_id in sorted(set(by_image) - ids)]
     if problems:
         raise ValueError(f"{source} was not imported, nothing written: " + "; ".join(problems))
 
-    arguments = {"document": source, "date": date, "written": [str(path) for path, _ in writes]}
+    arguments = {"document": source, "capture": date,
+                 "written": sorted(key.parts[-1] for key in writes)}
     if writes:
-        with tcip_store.blob_transaction(*(path for path, _ in writes)) as txn:
-            for path, data in writes:
-                if txn.read(path, default=None) is not None:
-                    raise ValueError(f"{source} was not imported, nothing written: {path} "
-                                     "already exists")
-                txn.write(path, data)
-        record_event_or_raise("coco_document_imported", arguments, actor=None, scope=root,
-                              document_digest=digest_bytes(raw))
+        audit = audit_log_key(root)
+        with tcip_store.transaction(audit, *writes) as txn:
+            present = sorted(key.parts[-1] for key in writes if txn.read_versioned(
+                key, default=None).version != tcip_store.Version.ABSENT)
+            if present:
+                raise ValueError(f"{source} was not imported, nothing written: the capture "
+                                 f"already holds a label document for {present}")
+            for key, data in writes.items():
+                txn.write(key, data)
+            txn.append(audit, audit_entry("coco_document_imported", arguments, None, "ok",
+                                          {"document_digest": digest}))
     return arguments

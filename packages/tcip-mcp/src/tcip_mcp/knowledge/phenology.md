@@ -63,7 +63,7 @@ count-bias gate). See the `evaluation` skill.
 
 ```
 per date:  images ─► detect catkins ─► call each catkin elongated vs not (validated)
-                  ─► write per-image JSON preds (carrying the elongation call)
+                  ─► publish per-image prediction documents (carrying that call)
 across dates: plant mapping (image → plant_id) ─► per (plant, date) elongated fraction
                   ─► crossings at 5/50/95% (and the confirmed majority crossing above) ─► per-plant CSV
                   ─► carry genotype/accession through to the deliverable

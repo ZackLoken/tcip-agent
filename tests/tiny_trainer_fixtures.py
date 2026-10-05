@@ -310,7 +310,9 @@ def write_regression_dataset(root, intensities, values, *, height: int = 6, widt
 
     if len(intensities) != len(values):
         raise ValueError("intensities and values must be the same length")
-    images_dir = Path(root) / "images"
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
+    images_dir = Path(root) / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
     csv_path = Path(root) / "values.csv"
     rows = ["stem,value"]

@@ -6,6 +6,8 @@ the door writes an artifact and carries an audit line, both under that project.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 import json
 import subprocess
 import sys
@@ -13,8 +15,8 @@ from pathlib import Path
 
 from PIL import Image
 
-from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
+from tests._producer_fixtures import label_image
 
 
 def _run(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
@@ -25,14 +27,11 @@ def _run(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
 
 
 def _fixture(root: Path) -> Path:
-    images = root / "images"
-    images.mkdir()
+    images = root / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
     img = images / "a.jpg"
     Image.new("RGB", (100, 80), color=(120, 120, 120)).save(img)
-    labels = root / "annotations"
-    labels.mkdir()
-    write_annotations(labels / "a.json",
-                      [Annotation(subject="bud", geometry=BBox(1, 1, 40, 30))], 100, 80)
+    label_image(img, [Annotation(subject="bud", geometry=BBox(1, 1, 40, 30))], 100, 80)
     return img
 
 

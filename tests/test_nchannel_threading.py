@@ -3,6 +3,7 @@ guard, and dataset channel metadata. Multi-channel *readers* are separate; here 
 carries channel counts and validates them."""
 
 import pytest
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._producer_fixtures import dataset_over  # noqa: E402
 
 torch = pytest.importorskip("torch")
@@ -260,19 +261,17 @@ def test_sampled_band_normalization_stats_admit_underivable(tmp_path):
 def test_build_dataset_sets_expected_channels(tmp_path):
     from PIL import Image
 
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
-    labels_dir = tmp_path / "labels"
-    labels_dir.mkdir()
-    Image.new("RGB", (16, 16)).save(images_dir / "a.png")
-    json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="bud", geometry=BBox(6.4, 6.4, 9.6, 9.6))],
-                              16, 16, keep_empty=True)
 
-    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
-                      stated={"num_channels": 4})
+    from tests._producer_fixtures import label_image
+
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
+    Image.new("RGB", (16, 16)).save(images_dir / "a.png")
+    label_image(images_dir / "a.png",
+                [Annotation(subject="bud", geometry=BBox(6.4, 6.4, 9.6, 9.6))], 16, 16)
+
+    ds = dataset_over("detection", str(images_dir), subject="bud", stated={"num_channels": 4})
     assert ds.expected_channels == 4
 
 
@@ -285,8 +284,8 @@ def _classification_run(tmp_path, *, num_channels: int | None):
 
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
-    images_dir, csv_path = tmp_path / "images", tmp_path / "labels.csv"
-    images_dir.mkdir()
+    images_dir, csv_path = tmp_path / "images" / UNDATED_BUCKET, tmp_path / "labels.csv"
+    images_dir.mkdir(parents=True)
     rows = []
     for index in range(4):
         Image.new("RGB", (32, 32), (40 * index, 90, 120)).save(images_dir / f"img{index}.png")
@@ -359,17 +358,16 @@ def test_a_source_whose_band_count_cannot_be_read_refuses_rather_than_defaulting
 
     from PIL import Image
 
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
+    from tests._producer_fixtures import label_image
+
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     Image.new("RGB", (16, 16)).save(images_dir / "a.png")
-    json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="bud", geometry=BBox(6.4, 6.4, 9.6, 9.6))],
-                              16, 16, keep_empty=True)
+    label_image(images_dir / "a.png",
+                [Annotation(subject="bud", geometry=BBox(6.4, 6.4, 9.6, 9.6))], 16, 16)
     (images_dir / "a.png").write_bytes(b"not an image")
 
     with pytest.raises(ValueError, match="band count"):
-        dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
+        dataset_over("detection", str(images_dir), subject="bud")

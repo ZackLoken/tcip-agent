@@ -72,12 +72,12 @@ them.
   names, say) is trusted for reading and never for writing; `assert_path_allowed` is for a
   client-supplied path, not this kind.
 - A job registry (`jobstore.JobRegistry`) holds this process's live jobs only; what survives a
-  restart is what each job's own directory or bucket records.
+  restart is what each job's own run directory or published bucket records.
 - The workspace and image roots are read once, in `python -m tcip_web`'s `main`, which writes the
   port record under that workspace and hands both to `StateStore.configure` before serving; an
   unset `TCIP_WORKSPACE` refuses there. A test or script configures the store itself, with a
   scratch workspace.
-- The editor saves the one label shape, the per-image JSON document, through the one label save
+- The editor saves the one label shape, the per-image label document, through the one label save
   (see `packages/tcip-annotation/CLAUDE.md`); don't add a frontend format option.
 - The GUI follows minimalist design without dropping functionality: prefer nesting related
   actions into one structure (a menu, a split button, a grouped control)

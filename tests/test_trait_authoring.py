@@ -217,33 +217,27 @@ def test_a_positive_state_its_registry_does_not_declare_refuses_at_proposal(tmp_
 
 # ── the positive state resolved from a prediction bucket's own recorded scope ──
 
-def _bucket(project: Path, date: str, *, attributes: tuple,
-            images: list[Path] | None = None) -> Path:
-    """Each of ``images`` (by default one frame ``P1.png``) holding one ``bud`` detection
-    carrying the last value of each of ``attributes``, published as the bucket
-    ``ds/predictions/run/<date>`` from a checkpoint whose scope declares them
-    (``_chain_fixtures.published``)."""
+def _bucket(project: Path, date: str, *, attributes: tuple, images: list[Path] | None = None):
+    """Each of ``images`` (by default one frame ``P1.png`` of capture ``date`` of the dataset
+    ``ds``) holding one ``bud`` detection carrying the last value of each of ``attributes``,
+    published as the bucket ``run/<date>`` from a checkpoint whose scope declares them
+    (``_chain_fixtures.published``); the bucket."""
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
-    bucket = project / "ds" / "predictions" / "run" / date
     registry = cr.SubjectRegistry(subjects=(cr.Subject(name="bud", attributes=attributes),))
-    published(project, bucket, [{"image": str(image), "width": 8, "height": 8,
-                                 "boxes": [[1.0, 1.0, 3.0, 3.0]], "scores": [0.9],
-                                 "labels": [1],
-                                 **({"attributes": [[len(a.values) - 1 for a in attributes]]}
-                                    if attributes else {})}
-                                for image in images or [Path("P1.png")]],
-              scope={"subject": "bud"}, registry=registry)
-    return bucket
+    return published(project, f"run/{date}", [
+        {"image": str(image), "width": 8, "height": 8, "boxes": [[1.0, 1.0, 3.0, 3.0]],
+         "scores": [0.9], "labels": [1],
+         **({"attributes": [[len(a.values) - 1 for a in attributes]]} if attributes else {})}
+        for image in images or [project / "ds" / "images" / date / "P1.png"]],
+        scope={"subject": "bud"}, registry=registry)
 
 
 def test_the_positive_state_resolves_by_name_from_the_buckets_own_scope(tmp_path: Path):
-    from tcip_mcp.buckets import read_bucket
-
-    named = read_bucket(_bucket(tmp_path, "2026-02-11", attributes=(OPENING,)))
-    absent = read_bucket(_bucket(tmp_path, "2026-02-25", attributes=(
-        cr.Attribute("opening", "categorical", ("closed", "bud")),)))
+    named = _bucket(tmp_path, "2026-02-11", attributes=(OPENING,))
+    absent = _bucket(tmp_path, "2026-02-25", attributes=(
+        cr.Attribute("opening", "categorical", ("closed", "bud")),))
 
     assert named.scope.state_ids(BUD_OPENING.positive_state) == (0, OPENING.values.index("open"))
     assert absent.scope.state_ids(BUD_OPENING.positive_state) is None
@@ -260,12 +254,13 @@ def _deliver_series(tmp_path: Path, *, attributed: bool) -> dict:
     from tests._trait_fixtures import seed_positive_class
 
     captures = map_captures(tmp_path, tmp_path / "ds", ["2026-02-11", "2026-03-09"])
-    buckets = [str(_bucket(tmp_path, d, attributes=(OPENING,) if attributed else (),
-                           images=images)) for d, images in captures.items()]
+    buckets = [_bucket(tmp_path, d, attributes=(OPENING,) if attributed else (),
+                       images=images).name for d, images in captures.items()]
     seed_positive_class(tmp_path / "ds", "bud", BUD_OPENING.positive_state)
     try:
         measurement = phenology.measure_phenology(
-            tmp_path, trait="bud_opening", mapping_name="valley", buckets=buckets,
+            tmp_path, trait="bud_opening", mapping_name="valley",
+            dataset_root=tmp_path / "ds", buckets=buckets,
             plants=list(PLOTS), require_all_dates_complete=phenology.REQUIRE_ALL_DATES_COMPLETE)
         return acknowledged(tmp_path, lambda ack: phenology.deliver_phenology(
             tmp_path, measurement, curves=False, output_path=tmp_path / "out.csv",

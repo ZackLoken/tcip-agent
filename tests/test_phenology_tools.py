@@ -175,19 +175,21 @@ def test_an_unassessed_series_refuses_at_the_door_that_takes_no_acknowledgment(t
 
 
 def test_an_unreadable_prediction_document_is_reported_by_name(tmp_path: Path):
-    """A present, unreadable document is an error naming the file, never a raise through the tool
+    """A present, unreadable document is an error naming it, never a raise through the tool
     boundary and never read as this plant's date contributing nothing."""
     pytest.importorskip("torch")
+    from tcip_mcp.dataset_layout import prediction_key
     from tests._chain_fixtures import attributed_series
+    from tests._record_damage_fixtures import damage_record
 
     series = attributed_series(tmp_path, fractions=(0.0, 1.0))
     date = sorted(series.buckets)[1]
-    bad = Path(series.buckets[date]) / f"PLANT_A_{date}_0.json"
-    bad.write_text("not json {][", encoding="utf-8")
+    stem = f"PLANT_A_{date}_0"
+    damage_record(prediction_key(series.root, series.buckets[date], stem), b"not json {][")
 
     res = deliver_milestones(tmp_path, series.body(), tmp_path / "out" / "bud.csv")
 
-    assert str(bad) in res["error"], res
+    assert stem in res["error"], res
 
 
 def test_predictions_that_never_classified_the_positive_state_refuse(tmp_path: Path):
@@ -200,9 +202,8 @@ def test_predictions_that_never_classified_the_positive_state_refuse(tmp_path: P
     bare = []
     for date in series.buckets:
         images = sorted((series.root / "images" / date).iterdir())
-        results = [{**predicted(p.stem, ["bud", "bud"]), "image": str(p)} for p in images]
-        bare.append(str(published(tmp_path, series.root / "predictions" / "bare" / date,
-                                  results, scope={"subject": "bud"}).path))
+        results = [predicted(p, ["bud", "bud"]) for p in images]
+        bare.append(published(tmp_path, f"bare/{date}", results, scope={"subject": "bud"}).name)
     out_csv = tmp_path / "out" / "bud.csv"
 
     res = deliver_milestones(tmp_path, series.body(buckets=bare), out_csv)
@@ -214,28 +215,27 @@ def test_predictions_that_never_classified_the_positive_state_refuse(tmp_path: P
 def test_each_bucket_stands_for_the_date_its_record_states_and_two_on_one_date_refuse(
     tmp_path: Path,
 ):
-    """The date a bucket stands for is the capture its own record states, whatever its directory
-    is named: a bucket published under a directory naming another date delivers as its recorded
-    date, and two buckets recording one date refuse naming both."""
+    """The date a bucket stands for is the capture its own record states, whatever it is named: a
+    bucket published under a name naming another date delivers as its recorded date, and two
+    buckets recording one date refuse naming both."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.inference_tools import run_inference
     from tests._chain_fixtures import attributed_series
 
     series = attributed_series(tmp_path, fractions=(0.0, 1.0))
     first, second = sorted(series.buckets)
-    misnamed = series.root / "predictions" / "misnamed" / "2099-12-31"
+    misnamed = "misnamed/2099-12-31"
     published = run_inference(tmp_path, checkpoint_path=series.checkpoint_path,
-                              images_dir=str(series.root / "images" / second),
-                              output_dir=str(misnamed),
+                              images_dir=str(series.root / "images" / second), bucket=misnamed,
                               assessment_id=series.assessment["assessment_id"])
     assert "error" not in published, published
     assert published["date"] == second
 
     shipped = deliver_milestones(
-        tmp_path, series.body(buckets=[series.buckets[first], str(misnamed)]),
+        tmp_path, series.body(buckets=[series.buckets[first], misnamed]),
         tmp_path / "out" / "a.csv")
     both = deliver_milestones(
-        tmp_path, series.body(buckets=[*series.buckets.values(), str(misnamed)]),
+        tmp_path, series.body(buckets=[*series.buckets.values(), misnamed]),
         tmp_path / "out" / "b.csv")
 
     assert "error" not in shipped, shipped

@@ -27,9 +27,7 @@ function selection(over: Record<string, unknown>) {
     image_list: [],
     current_image_index: 0, // backend always resets to 0
     images_dir: null,
-    predictions_dir: null,
-    label_paths: {},
-    prediction_paths: {},
+    bucket: null,
     ...over,
   };
 }
@@ -45,11 +43,7 @@ describe("applyAnnotateFocus", () => {
     seedDataset({ dataset_root: "/ws/proj", subject: "subject_a", date: "2026-02-11" });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
-      selection: selection({
-        subject: "bush",
-        date: "2026-03-02",
-        annotations_dir: "/ws/proj/annotations/2026-03-02",
-      }),
+      selection: selection({ subject: "bush", date: "2026-03-02" }),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
@@ -77,11 +71,7 @@ describe("applyAnnotateFocus", () => {
 
   it("keeps the focus index even if the /select WS snapshot (index 0) arrives afterward", async () => {
     seedDataset({ dataset_root: "/ws/proj", subject: "subject_a", date: "2026-02-11" });
-    const newIdentity = selection({
-      subject: "bush",
-      date: "2026-03-02",
-      annotations_dir: "/ws/proj/annotations/2026-03-02",
-    });
+    const newIdentity = selection({ subject: "bush", date: "2026-03-02" });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -135,11 +125,7 @@ describe("applyAnnotateFocus", () => {
     seedDataset({ dataset_root: "/ws/proj", subject: "bush", date: "2026-03-02" });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
-      selection: selection({
-        subject: "bush",
-        date: "2026-03-02",
-        predictions_dir: "/ws/proj/predictions/m1/2026-03-02",
-      }),
+      selection: selection({ subject: "bush", date: "2026-03-02", bucket: "m1/2026-03-02" }),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
@@ -147,12 +133,12 @@ describe("applyAnnotateFocus", () => {
       dataset_root: "/ws/proj",
       subject: "bush",
       date: "2026-03-02",
-      predictions_dir: "/ws/proj/predictions/m1/2026-03-02",
+      bucket: "m1/2026-03-02",
       proposal: 3,
     });
 
     expect(vi.mocked(api.dataset.select).mock.calls[0][0]).toMatchObject({
-      predictions_dir: "/ws/proj/predictions/m1/2026-03-02",
+      bucket: "m1/2026-03-02",
     });
     expect(useStore.getState().annotateUi.focusedProposal).toBe(3);
   });
@@ -162,12 +148,8 @@ describe("applyAnnotateFocus", () => {
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
-      selection: selection({
-        subject: "subject_a",
-        date: "2026-02-11",
-        annotations_dir: "/ws/proj/annotations/2026-02-11",
-      }),
-      label_problem: "/ws/proj/annotations/2026-02-11/IMG_0000.json does not decode as JSON",
+      selection: selection({ subject: "subject_a", date: "2026-02-11" }),
+      label_problem: "label_documents['2026-02-11', 'IMG_0000'] under /ws/proj: is a list",
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
@@ -178,7 +160,7 @@ describe("applyAnnotateFocus", () => {
     });
 
     expect(pushToast).toHaveBeenCalledWith(
-      "/ws/proj/annotations/2026-02-11/IMG_0000.json does not decode as JSON",
+      "label_documents['2026-02-11', 'IMG_0000'] under /ws/proj: is a list",
     );
   });
 });

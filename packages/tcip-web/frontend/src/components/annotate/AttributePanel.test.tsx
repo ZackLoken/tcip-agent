@@ -14,7 +14,7 @@ beforeEach(() => {
   useStore.setState((s) => ({
     gui: {
       ...s.gui,
-      dataset: { ...s.gui.dataset, dataset_root: "C:/data" },
+      dataset: { ...s.gui.dataset, dataset_root: "C:/data", date: "undated" },
     },
     openProject: { id: "a1b2c3d4e5f6", path: "C:/proj" },
   }));

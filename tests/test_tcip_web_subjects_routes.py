@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
 from tcip_web.app import app
 from tests._audit_fixtures import AUDIT_ENTRY_KEYS, audit_rows
+from tests._producer_fixtures import image_label_key, label_image
 
 
 @pytest.fixture
@@ -24,20 +23,36 @@ def _bud(x1, y1, x2, y2, *, subject: str = "bud") -> Annotation:
     return Annotation(subject=subject, geometry=BBox(x1, y1, x2, y2))
 
 
+DATE = "2026-03-02"
+
+
+def _label(root: Path, stem: str, annotations: list[Annotation]) -> None:
+    """``annotations`` saved as the label document of image ``stem`` of capture :data:`DATE`."""
+    label_image(root / "images" / DATE / f"{stem}.jpg", annotations, 100, 100)
+
+
+def _unreadable(root: Path, stem: str) -> None:
+    """A label document of image ``stem`` of capture :data:`DATE` whose bytes no longer
+    decode."""
+    from tests._record_damage_fixtures import damage_record
+
+    _label(root, stem, [_bud(1, 1, 2, 2)])
+    damage_record(image_label_key(root / "images" / DATE / f"{stem}.jpg"), b"not json {][")
+
+
 def test_a_missing_registry_answers_discovery_never_a_registry(
     client: TestClient, tmp_path: Path
 ) -> None:
     """With no registry stored, the load answers no registry and the names the labels hold as
     discovery, never a registry made of those names."""
-    ann = tmp_path / "annotations" / "d"
-    ann.mkdir(parents=True)
-    write_annotations(str(ann / "IMG_A.json"), [_bud(50, 50, 60, 60)], 100, 100)
+    _label(tmp_path, "IMG_A", [_bud(50, 50, 60, 60)])
 
-    resp = client.get("/api/subjects/load", params={"dataset_root": str(tmp_path)})
+    resp = client.get("/api/subjects/load",
+                      params={"dataset_root": str(tmp_path), "date": "2026-04-01"})
     assert resp.status_code == 200
     assert resp.json() == {"subjects": None, "discovered": [], "version": None, "unreadable": []}
     found = client.get("/api/subjects/load", params={
-        "dataset_root": str(tmp_path), "annotations_dir": str(ann)}).json()
+        "dataset_root": str(tmp_path), "date": DATE}).json()
     assert found == {"subjects": None, "discovered": ["bud"], "version": None, "unreadable": []}
 
 
@@ -65,7 +80,7 @@ def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
 
     load = client.get(
         "/api/subjects/load",
-        params={"dataset_root": str(tmp_path)},
+        params={"dataset_root": str(tmp_path), "date": DATE},
     ).json()
     subjects = load["subjects"]
     assert set(subjects) == {"bud", "bush"}
@@ -122,7 +137,7 @@ def test_load_returns_the_version_and_save_round_trips_it(
 
     load = client.get(
         "/api/subjects/load",
-        params={"dataset_root": str(tmp_path)},
+        params={"dataset_root": str(tmp_path), "date": DATE},
     ).json()
     assert load["version"]
 
@@ -146,7 +161,7 @@ def test_save_refuses_a_stale_version(client: TestClient, tmp_path: Path) -> Non
     )
     stale_load = client.get(
         "/api/subjects/load",
-        params={"dataset_root": str(tmp_path)},
+        params={"dataset_root": str(tmp_path), "date": DATE},
     ).json()
     client.post(
         "/api/subjects/save",
@@ -279,43 +294,21 @@ def test_registry_holds_multiple_subjects(client: TestClient, tmp_path: Path) ->
 
     load = client.get(
         "/api/subjects/load",
-        params={"dataset_root": str(tmp_path)},
+        params={"dataset_root": str(tmp_path), "date": DATE},
     ).json()
     assert load["subjects"]["bud"]["description"] == "a bud"
     assert load["subjects"]["bush"]["description"] == "a bush"
     assert (tmp_path / "subjects.json").is_file()
 
 
-def test_a_door_naming_an_annotation_dir_and_no_dataset_is_refused_and_writes_nothing(
-    client: TestClient, tmp_path: Path
-) -> None:
-    """The dataset is named by ``dataset_root`` alone; an annotation directory never stands in."""
-    ann = tmp_path / "annotations" / "2026-03-02"
-    ann.mkdir(parents=True)
-    saved = client.post(
-        "/api/subjects/save",
-        json={"annotations_dir": str(ann),
-              "subjects": {"bud": {"description": "a bud"}}, "version": None, "user": "tester"},
-    )
-
-    assert saved.status_code == 422
-    assert not (tmp_path / "subjects.json").exists()
-
-
 def test_load_derives_subjects_from_labels_when_registry_absent(
     client: TestClient, tmp_path: Path
 ) -> None:
     # No saved registry, but labels exist: the subjects present are discovered, sorted.
-    ann = tmp_path / "annotations" / "d"
-    ann.mkdir(parents=True)
-    write_annotations(
-        str(ann / "IMG_A.json"),
-        [_bud(50, 50, 60, 60), _bud(20, 20, 30, 30, subject="bush")],
-        100, 100,
-    )
+    _label(tmp_path, "IMG_A", [_bud(50, 50, 60, 60), _bud(20, 20, 30, 30, subject="bush")])
     load = client.get(
         "/api/subjects/load",
-        params={"dataset_root": str(tmp_path), "annotations_dir": str(ann)},
+        params={"dataset_root": str(tmp_path), "date": DATE},
     ).json()
     assert load["discovered"] == ["bud", "bush"]
     assert load["unreadable"] == []
@@ -324,30 +317,26 @@ def test_load_derives_subjects_from_labels_when_registry_absent(
 def test_load_reports_an_unreadable_label_and_still_derives_the_rest(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """One corrupt label file costs its own name, never the whole discovery scan."""
-    ann = tmp_path / "annotations" / "d"
-    ann.mkdir(parents=True)
-    write_annotations(str(ann / "IMG_A.json"), [_bud(50, 50, 60, 60)], 100, 100)
-    (ann / "IMG_B.json").write_text("not json {][", encoding="utf-8")
+    """One corrupt label document costs its own name, never the whole discovery scan."""
+    _label(tmp_path, "IMG_A", [_bud(50, 50, 60, 60)])
+    _unreadable(tmp_path, "IMG_B")
 
     load = client.get(
         "/api/subjects/load",
-        params={"dataset_root": str(tmp_path), "annotations_dir": str(ann)},
+        params={"dataset_root": str(tmp_path), "date": DATE},
     ).json()
     assert load["discovered"] == ["bud"]
-    assert load["unreadable"] == [str(ann / "IMG_B.json")]
+    assert load["unreadable"] == ["IMG_B"]
 
 
 def test_load_reports_an_unreadable_label_beside_a_saved_registry(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A saved subjects.json answers the subject list, but a corrupt label file under
-    annotations_dir is still worth surfacing: the registry load must not stop scanning for
-    unreadable documents just because a registry was found."""
-    ann = tmp_path / "annotations" / "d"
-    ann.mkdir(parents=True)
-    write_annotations(str(ann / "IMG_A.json"), [_bud(50, 50, 60, 60)], 100, 100)
-    (ann / "IMG_B.json").write_text("not json {][", encoding="utf-8")
+    """A saved subjects.json answers the subject list, but a corrupt label document of the
+    capture is still worth surfacing: the registry load must not stop scanning for unreadable
+    documents just because a registry was found."""
+    _label(tmp_path, "IMG_A", [_bud(50, 50, 60, 60)])
+    _unreadable(tmp_path, "IMG_B")
 
     save = client.post(
         "/api/subjects/save",
@@ -358,151 +347,24 @@ def test_load_reports_an_unreadable_label_beside_a_saved_registry(
 
     load = client.get(
         "/api/subjects/load",
-        params={"dataset_root": str(tmp_path),
-                "annotations_dir": str(ann)},
+        params={"dataset_root": str(tmp_path), "date": DATE},
     ).json()
     assert set(load["subjects"]) == {"bud"}
-    assert load["unreadable"] == [str(ann / "IMG_B.json")]
+    assert load["unreadable"] == ["IMG_B"]
 
 
-def test_load_reports_the_guards_resolved_path_not_the_clients_spelling(
+def test_load_derived_subjects_follow_a_label_write(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A dotdot segment names the same directory once resolved; the unreadable path reported is
-    the guard's resolved path, never the client's own unnormalized string."""
-    ann = tmp_path / "annotations" / "d"
-    ann.mkdir(parents=True)
-    (ann / "IMG_B.json").write_text("not json {][", encoding="utf-8")
-    (tmp_path / "annotations" / "sibling").mkdir()
-    raw = str(tmp_path / "annotations" / "sibling" / ".." / "d")
-    assert raw != str(ann)
+    """Discovery answers the documents as they are stored now, never a scan from before a
+    write."""
+    _label(tmp_path, "IMG_A", [_bud(50, 50, 60, 60)])
 
-    load = client.get(
-        "/api/subjects/load",
-        params={"dataset_root": str(tmp_path), "annotations_dir": raw},
-    ).json()
-    assert load["unreadable"] == [str(ann.resolve() / "IMG_B.json")]
-
-
-def test_cached_label_annotations_raises_on_a_read_failure_other_than_absence(
-    tmp_path: Path, monkeypatch
-) -> None:
-    """Only a missing file derives an empty status; any other OSError reading its bytes (a
-    permission error on a present file) is a read failure, not a fact about absence."""
-    from tcip_web.label_annotations_cache import cached_label_annotations
-
-    label = tmp_path / "a.json"
-    write_annotations(str(label), [_bud(1, 1, 2, 2)], 10, 10)
-
-    real_read_bytes = Path.read_bytes
-
-    def _denied(self, *args, **kwargs):
-        if self == label:
-            raise PermissionError(f"denied: {self}")
-        return real_read_bytes(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "read_bytes", _denied)
-
-    from tcip_annotation.json_io import UnreadableLabelDocument
-
-    with pytest.raises(UnreadableLabelDocument):
-        cached_label_annotations(label)
-
-
-def test_cached_label_annotations_detects_an_edit_that_lands_on_the_same_mtime(
-    tmp_path: Path,
-) -> None:
-    """Two writes close enough together can land on the identical filesystem timestamp; a memo
-    keyed on mtime alone would then serve the first write's parse for the second. Forcing that
-    exact collision here (rather than hoping two real writes race into it) makes the guard
-    reproducible."""
-    from tcip_web.label_annotations_cache import cached_label_annotations
-
-    label = tmp_path / "a.json"
-    write_annotations(str(label), [_bud(1, 1, 2, 2)], 10, 10)
-    os.utime(label, (1_000_000, 1_000_000))
-    first = cached_label_annotations(label)
-    assert len(first) == 1
-
-    label.write_text("not json {][", encoding="utf-8")
-    os.utime(label, (1_000_000, 1_000_000))  # identical mtime, different size
-
-    from tcip_annotation.json_io import UnreadableLabelDocument
-
-    with pytest.raises(UnreadableLabelDocument):
-        cached_label_annotations(label)
-
-
-def test_cached_label_annotations_detects_a_same_size_edit_that_lands_on_the_same_mtime(
-    tmp_path: Path,
-) -> None:
-    """A same-size in-place edit (one subject renamed to an equal-length name) forced onto the
-    same mtime as the write it replaces cannot hide behind an (mtime, size) fingerprint; the memo
-    answers the edit's own content."""
-    from tcip_web.label_annotations_cache import cached_label_annotations
-
-    label = tmp_path / "a.json"
-    write_annotations(str(label), [_bud(1, 1, 2, 2, subject="bud")], 10, 10)
-    os.utime(label, (1_000_000, 1_000_000))
-    first = cached_label_annotations(label)
-    assert [a.subject for a in first] == ["bud"]
-
-    write_annotations(str(label), [_bud(1, 1, 2, 2, subject="leafxx")], 10, 10)
-    os.utime(label, (1_000_000, 1_000_000))  # identical mtime and byte count, different content
-
-    second = cached_label_annotations(label)
-    assert [a.subject for a in second] == ["leafxx"]
-
-
-def test_cached_label_annotations_hands_out_the_same_records_on_a_hit(tmp_path: Path) -> None:
-    """Every caller reading one path under one digest shares the same tuple of records; a memo
-    hit is not a fresh parse."""
-    from tcip_web.label_annotations_cache import cached_label_annotations
-
-    label = tmp_path / "a.json"
-    write_annotations(str(label), [_bud(1, 1, 2, 2)], 10, 10)
-
-    first = cached_label_annotations(label)
-    second = cached_label_annotations(label)
-    assert first is second
-
-
-def test_load_derives_subjects_excludes_a_bucket_record(
-    client: TestClient, tmp_path: Path
-) -> None:
-    """A file named as a bucket's own record is not a per-image label: it is not discovered from,
-    and it is not reported under unreadable either, since it was never meant to be read as one."""
-    ann = tmp_path / "annotations" / "d"
-    ann.mkdir(parents=True)
-    write_annotations(str(ann / "IMG_A.json"), [_bud(50, 50, 60, 60)], 100, 100)
-    (ann / "bucket.json").write_text('{"scope": {"subject": "bush"}}', encoding="utf-8")
-
-    load = client.get(
-        "/api/subjects/load",
-        params={"dataset_root": str(tmp_path), "annotations_dir": str(ann)},
-    ).json()
-    assert load["discovered"] == ["bud"]
-    assert load["unreadable"] == []
-
-
-def test_load_derived_registry_cache_invalidates_on_label_write(
-    client: TestClient, tmp_path: Path
-) -> None:
-    # Same memo, exercised through load_subjects' label-derived subject list.
-    ann = tmp_path / "annotations" / "d"
-    ann.mkdir(parents=True)
-    label = ann / "IMG_A.json"
-    write_annotations(str(label), [_bud(50, 50, 60, 60)], 100, 100)
-    os.utime(label, (1_000_000, 1_000_000))
-
-    params = {"dataset_root": str(tmp_path), "annotations_dir": str(ann)}
+    params = {"dataset_root": str(tmp_path), "date": DATE}
     first = client.get("/api/subjects/load", params=params).json()
     assert first["discovered"] == ["bud"]
 
-    write_annotations(
-        str(label), [_bud(50, 50, 60, 60), _bud(20, 20, 30, 30, subject="bush")], 100, 100
-    )
-    os.utime(label, (2_000_000, 2_000_000))
+    _label(tmp_path, "IMG_A", [_bud(50, 50, 60, 60), _bud(20, 20, 30, 30, subject="bush")])
 
     second = client.get("/api/subjects/load", params=params).json()
     assert second["discovered"] == ["bud", "bush"]
@@ -520,27 +382,24 @@ def test_save_subjects_confines_dataset_root_to_allowed_roots(
     assert resp.status_code == 403
 
 
-def test_load_subjects_confines_annotations_dir_before_scanning_it(
-    client: TestClient, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch,
+def test_load_subjects_confines_the_dataset_root_before_scanning_it(
+    client: TestClient, tmp_path_factory: pytest.TempPathFactory, monkeypatch,
 ) -> None:
-    """The guard runs before the scan: a refused annotations_dir is never parsed, so a request
-    naming a dataset_root outside the allowed roots costs nothing beyond the 403 it returns."""
+    """The guard runs before the scan: a refused dataset root's documents are never read, so a
+    request naming one outside the allowed roots costs nothing beyond the 403 it returns."""
     import tcip_annotation.json_io as json_io
 
     outside = tmp_path_factory.mktemp("outside")
-    ann = outside / "annotations"
-    ann.mkdir()
-    write_annotations(str(ann / "SECRET.json"), [_bud(1, 1, 2, 2, subject="leaked")], 10, 10)
+    _label(outside, "SECRET", [_bud(1, 1, 2, 2, subject="leaked")])
 
-    def _must_not_be_called(path):
-        raise AssertionError(f"the annotations dir must be guarded before any file is read: {path}")
+    def _must_not_be_called(key):
+        raise AssertionError(f"the dataset root must be guarded before any document is read: {key}")
 
-    monkeypatch.setattr(json_io, "read_annotations", _must_not_be_called)
+    monkeypatch.setattr(json_io, "read_label_document", _must_not_be_called)
 
     resp = client.get(
         "/api/subjects/load",
-        params={"dataset_root": str(outside),
-                "annotations_dir": str(ann)},
+        params={"dataset_root": str(outside), "date": DATE},
     )
     assert resp.status_code == 403
 
@@ -548,8 +407,7 @@ def test_load_subjects_confines_annotations_dir_before_scanning_it(
 def test_a_dataset_root_inside_the_workspace_clears_the_confinement_guard(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """The rail must admit valid work, not only reject invalid work: with no additive
-    TCIP_IMAGE_ROOTS set, a dataset root under the workspace is still admitted."""
+    """With no additive TCIP_IMAGE_ROOTS set, a dataset root under the workspace is admitted."""
     resp = client.post(
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path),
@@ -634,7 +492,8 @@ def test_a_registry_load_answers_content_and_version_from_one_read(
         return answer
 
     monkeypatch.setattr(tcip_store, "read_blob_versioned", read_then_save)
-    load = client.get("/api/subjects/load", params={"dataset_root": str(tmp_path)}).json()
+    load = client.get("/api/subjects/load",
+                      params={"dataset_root": str(tmp_path), "date": DATE}).json()
     monkeypatch.setattr(tcip_store, "read_blob_versioned", real)
 
     assert "error" not in interleaved[0]

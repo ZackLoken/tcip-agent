@@ -49,4 +49,4 @@ def test_save_checkpoint_writes_the_launch_config_never_the_loops_own(tmp_path) 
         k: v for k, v in launched.items() if k != "data"}
     assert payload["config"]["data"] == {
         k: v for k, v in launched["data"].items() if k not in locations}
-    assert launched["data"].keys() >= locations
+    assert "images_dir" in launched["data"]

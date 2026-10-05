@@ -30,8 +30,8 @@ def _register_model(tmp_path: Path):
 def _deliver_per_image_counts(tmp_path: Path):
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
-    return deliver_per_image_counts(tmp_path, str(tmp_path / "preds"), str(tmp_path / "o.csv"),
-                                    trait="stem")
+    return deliver_per_image_counts(tmp_path, str(tmp_path), "preds/2025-09-14",
+                                    str(tmp_path / "o.csv"), trait="stem")
 
 
 def _import_coco(tmp_path: Path):
@@ -53,22 +53,22 @@ def _deliver_per_plant_csv(tmp_path: Path):
     from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
 
     return deliver_per_plant_csv(tmp_path, [], str(tmp_path / "out.csv"), "cyme count",
-                                 "per_plant_count_aggregate", ["p1"],
-                                 {"2025-09-14": str(tmp_path / "preds")})
+                                 "per_plant_count_aggregate", ["p1"], str(tmp_path),
+                                 ["preds/2025-09-14"])
 
 
 def _deliver_orthomosaic_plant_counts(tmp_path: Path):
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     return deliver_orthomosaic_plant_counts(
-        tmp_path, str(tmp_path / "preds"), "no-registry", str(tmp_path / "out.csv"),
+        tmp_path, str(tmp_path), "preds/2025-09-14", "no-registry", str(tmp_path / "out.csv"),
         "cyme count", ["p1"])
 
 
 def _deliver_phenology_milestones(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
-    return deliver_phenology_milestones(tmp_path, "no-such-trait", "mapping", {},
+    return deliver_phenology_milestones(tmp_path, "no-such-trait", "mapping", str(tmp_path), [],
                                         str(tmp_path / "o.csv"), ["p1"])
 
 
@@ -115,26 +115,4 @@ def test_a_door_refused_before_it_acts_leaves_no_row(tmp_path: Path, door):
     except (ValueError, FileNotFoundError):
         result = {"error": "raised"}
     assert "error" in result, result
-    assert _rows(tmp_path) == []
-
-
-def test_a_label_write_that_raises_leaves_no_line(tmp_path: Path, monkeypatch):
-    """The label save's library writes its line once the document lands, so a write that raises
-    leaves none, through the tool that calls it."""
-    from PIL import Image
-
-    import tcip_annotation.json_io as json_io
-    import tcip_mcp.tools.annotation_tools as annotation_tools
-
-    image = tmp_path / "images" / "2025-09-14" / "a.png"
-    image.parent.mkdir(parents=True)
-    Image.new("RGB", (8, 8)).save(image)
-
-    def _refused_write(*args, **kwargs):
-        raise OSError("the label store refused the write")
-
-    monkeypatch.setattr(json_io, "write_annotations", _refused_write)
-    with pytest.raises(OSError):
-        annotation_tools.save_annotations(tmp_path, tmp_path.parent, str(image),
-                                          annotations=[{"subject": "cyme", "bbox": [1, 1, 5, 5]}])
     assert _rows(tmp_path) == []

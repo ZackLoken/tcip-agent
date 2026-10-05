@@ -1,36 +1,16 @@
-"""Canonical dataset-layout resolver: where an image's ground-truth labels and model predictions
-live on disk.
-
-Canonical layout (the label tree mirrors ``images/<date>/`` so stem-pairing is trivial and capture
-dates never collide). Labels are one file per image, holding every subject's annotations by name;
-the on-disk path carries no subject or task segment: those are properties of the records inside the
-file, resolved through the dataset's single subject registry::
-
-    <dataset_root>/
-        images/<date>/<stem>.<imgext>
-        annotations/<date>/<stem>.json      # ground truth (all subjects for the image)
-        predictions/<model>/<date>/<stem>.json   # model outputs
-        subjects.json                        # the nested registry: subjects -> attributes ->
-        values
-
-The subject registry lives in the dataset and travels with the labels. This module never parses
-``subjects.json`` (its contents belong to :mod:`tcip_mcp.subject_registry`). It owns the paths
-below and the one label save.
-
-``<date>`` of ``None`` (non-dated datasets) simply omits that segment.
-"""
+"""Canonical dataset layout: an image's path, ``<dataset_root>/images/<capture>/<stem>.<imgext>``,
+and the keys of its label document (capture and stem), a prediction bucket (its name) and the
+bucket's documents (name and stem); and the one label save."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 import tcip_store
 from tcip_store import Key, decode_value
-
-from tcip_annotation.json_io import LABEL_SUFFIX
 
 if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
@@ -40,14 +20,32 @@ TASKS = ("detect", "segment")
 SUBJECTS_FILENAME = "subjects.json"
 
 UNDATED_BUCKET = "undated"
-"""The bucket a dateless capture lands in: ``ingest_images`` writes it, and any store key that
-would otherwise hold an empty date segment (the proposal-staging address included) addresses it
-under this token instead of a spelling of its own."""
+"""The capture name of a dateless capture."""
+
+LABEL_DOCUMENTS = "label_documents"
+PREDICTION_DOCUMENTS = "prediction_documents"
+PREDICTION_BUCKETS = "prediction_buckets"
+
+
+def label_key(dataset_root: str | Path, capture: str, stem: str) -> Key:
+    """The label document of the image ``stem`` of ``capture`` under ``dataset_root``, the triple
+    :func:`parse_image_path` answers for an image path."""
+    return Key(LABEL_DOCUMENTS, str(Path(dataset_root)), (capture, stem))
+
+
+def prediction_key(dataset_root: str | Path, bucket: str, stem: str) -> Key:
+    """The prediction document of the image ``stem`` in the bucket named ``bucket``."""
+    return Key(PREDICTION_DOCUMENTS, str(Path(dataset_root)), (bucket, stem))
+
+
+def bucket_key(dataset_root: str | Path, bucket: str) -> Key:
+    """The record of the prediction bucket named ``bucket`` under ``dataset_root``."""
+    return Key(PREDICTION_BUCKETS, str(Path(dataset_root)), (bucket,))
 
 
 def is_bucket_name(name: str) -> bool:
-    """Whether ``name`` is legal as a bucket directory name under ``images/`` or a prediction
-    model directory under ``predictions/``: a single safe path segment (see
+    """Whether ``name`` is legal as a capture bucket directory name under ``images/``: a single
+    safe path segment (see
     ``workspace.is_valid_name``) that does not start with a dot, so a hidden directory (an
     editor's swap file, platform cruft) is never mistaken for one."""
     from tcip_mcp.workspace import is_valid_name
@@ -55,58 +53,50 @@ def is_bucket_name(name: str) -> bool:
     return is_valid_name(name) and not name.startswith(".")
 
 
-def parse_image_path(image_path: str | Path) -> tuple[Path, Optional[str], str]:
-    """Return ``(dataset_root, date, stem)`` for an image path.
+def parse_capture_dir(images_dir: str | Path) -> tuple[Path, str]:
+    """``(dataset_root, capture)`` of a capture directory ``<root>/images/<capture>``; any other
+    directory, the image tree ``<root>/images`` itself included, raises ``ValueError`` naming it."""
+    directory = Path(images_dir)
+    if directory.parent.name != "images":
+        raise ValueError(
+            f"{str(directory)!r} is not a capture: a capture's images sit at "
+            f"<root>/images/<capture>/<stem>, a dateless capture's under {UNDATED_BUCKET!r}.")
+    return directory.parent.parent, directory.name
 
-    Handles both canonical date-nested (``<root>/images/<date>/<stem>``) and flat
-    (``<root>/images/<stem>``) images; ``date`` is ``None`` for the flat form. Raises on any other
-    shape.
-    """
+
+def parse_image_path(image_path: str | Path) -> tuple[Path, str, str]:
+    """``(dataset_root, capture, stem)`` of an image at ``<root>/images/<capture>/<stem>``
+    (:func:`parse_capture_dir` of its directory)."""
     img = Path(image_path)
-    stem = img.stem
-    parent = img.parent
-    if parent.name == "images":
-        return parent.parent, None, stem
-    if parent.parent.name == "images":
-        return parent.parent.parent, parent.name, stem
-    raise ValueError(
-        f"parse_image_path: {image_path!r} is not under a recognized dataset image tree "
-        "(<root>/images/<date>/<stem> or <root>/images/<stem>), refusing to guess a dataset root."
-    )
+    return (*parse_capture_dir(img.parent), img.stem)
 
 
 def capture_of(source: str | Path) -> tuple[Optional[str], Optional[str]]:
-    """``(dataset_id, date)`` of the capture an image source belongs to: the identity record's id
-    of the dataset root whose image tree holds it, and its capture date folder. Each is ``None``
-    when the source sits in no dataset image tree, when the root records no identity, or, for the
-    date, when the image sits in the flat undated tree."""
+    """``(dataset_id, capture)`` of an image source: the identity record's id of the dataset root
+    whose image tree holds it (``None`` when the root records none) and its capture; both
+    ``None`` for a source that is no image of a capture."""
     try:
-        root, date, _stem = parse_image_path(source)
+        root, capture, _stem = parse_image_path(source)
     except ValueError:
         return None, None
     identity = read_dataset_identity(root)
-    return (identity["id"] if identity is not None else None), date
-
-
-def _date_seg(date: Optional[str]) -> tuple[str, ...]:
-    """A capture date as the path segment it names; ``ValueError`` for one that is not a single
-    safe segment."""
-    from tcip_mcp.workspace import is_valid_name
-
-    if date and not is_valid_name(date):
-        raise ValueError(
-            f"date must be a single safe path segment (no separators/'..'), got {date!r}")
-    return (date,) if date else ()
+    return (identity["id"] if identity is not None else None), capture
 
 
 def image_root(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/images/``: the whole image tree, every capture date under it."""
+    """``<dataset_root>/images/``: the whole image tree, every capture under it."""
     return Path(dataset_root, "images")
 
 
-def image_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
-    """``<dataset_root>/images/[<date>/]``: where an image's bytes live."""
-    return image_root(dataset_root).joinpath(*_date_seg(date))
+def image_dir(dataset_root: str | Path, capture: str) -> Path:
+    """``<dataset_root>/images/<capture>/``: where a capture's image bytes live; ``ValueError``
+    for a capture that is not a single safe path segment."""
+    from tcip_mcp.workspace import is_valid_name
+
+    if not is_valid_name(capture):
+        raise ValueError(
+            f"a capture must be a single safe path segment (no separators/'..'), got {capture!r}")
+    return image_root(dataset_root) / capture
 
 
 def image_filename(stem: str, ext: str) -> str:
@@ -114,100 +104,30 @@ def image_filename(stem: str, ext: str) -> str:
     return f"{stem}{ext}"
 
 
-def image_path(dataset_root: str | Path, date: Optional[str], stem: str, ext: str) -> Path:
+def image_path(dataset_root: str | Path, capture: str, stem: str, ext: str) -> Path:
     """Canonical write path for an image (``ext`` includes the leading dot)."""
-    return image_dir(dataset_root, date) / image_filename(stem, ext)
+    return image_dir(dataset_root, capture) / image_filename(stem, ext)
 
 
-def resolve_images_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
-    """The directory one date's images actually live in: ``images/<date>/`` when that bucket exists
-    on disk, else the flat ``images/`` root.
-    """
-    dated = image_dir(dataset_root, date)
-    return dated if dated.is_dir() else image_dir(dataset_root, None)
-
-
-def resolve_image_name(dataset_root: str | Path, date: Optional[str], stem: str) -> Optional[str]:
-    """The on-disk display name of the logical image at ``stem`` for one capture date.
-
-    Resolves through :func:`resolve_images_dir`, then within that directory through the same
-    resolution :func:`~tcip_mcp.pipelines.image_utils.resolve_image_source` gives every other
-    by-name reader, over that module's own extension set. ``None`` when no logical image at
-    ``stem`` resolves in that directory. A stem sitting at the flat ``images/`` root while a dated
-    bucket for the same date also exists on disk is a mixed layout this does not pair:
-    :func:`resolve_images_dir` picks the dated bucket whenever one exists, with no per-stem
-    fallback to the flat root.
-
-    Lets :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem` propagate uncaught.
-    """
-    from tcip_mcp.pipelines.image_utils import logical_image_name, resolve_image_source
-
-    try:
-        source = resolve_image_source(resolve_images_dir(dataset_root, date), stem)
-    except FileNotFoundError:
-        return None
-    return logical_image_name(source)
-
-
-def list_dates(dataset_root: str | Path,
-               tree: Callable[[str | Path], Path] | None = None) -> list[str]:
-    """Sorted bucket names under ``images/``, or under the tree ``tree`` names
-    (:func:`annotation_root`, say): an ISO ``YYYY-MM-DD`` date, ``UNDATED_BUCKET``, or a literal
-    bucket (e.g. a plot name) ``ingest_images`` was told to use. A dot-prefixed directory is never
-    a bucket (see ``is_bucket_name``) and is excluded, so a hidden directory is invisible to every
-    listing here."""
-    imgs = (tree or image_root)(dataset_root)
+def list_dates(dataset_root: str | Path) -> list[str]:
+    """Sorted capture names under ``images/``, each a directory whose name
+    :func:`is_bucket_name` admits."""
+    imgs = image_root(dataset_root)
     if not imgs.is_dir():
         return []
     return sorted(p.name for p in imgs.iterdir() if p.is_dir() and is_bucket_name(p.name))
 
 
-def annotation_root(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/annotations/``: the whole ground-truth tree, every capture date under it."""
-    return Path(dataset_root, "annotations")
-
-
-def annotation_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
-    """``<dataset_root>/annotations/[<date>/]`` (ground truth, one file per image, all subjects)."""
-    return annotation_root(dataset_root).joinpath(*_date_seg(date))
-
-
-def annotation_date(path: str | Path) -> Optional[str]:
-    """The ``<date>`` an annotations dir/file lives under, or ``None`` (declared inverse of the
-    ``annotations/<date>/`` layout; the only recoverable path fact, since subject/task live in the
-    record, not the path).
-
-    ``<root>/annotations`` and non-canonical trees (a split's ``labels/``) yield ``None``.
-    """
-    p = Path(path)
-    parts = p.parts
-    if "annotations" not in parts:
-        return None
-    i = len(parts) - 1 - parts[::-1].index("annotations")
-    rest = parts[i + 1:]
-    # A file (<date>/<stem>.json or <stem>.json) trims its trailing stem first.
-    if rest and rest[-1].endswith(LABEL_SUFFIX):
-        rest = rest[:-1]
-    return rest[0] if len(rest) == 1 else None
-
-
-#: The top-level segments under a dataset root; a path under any of them locates the root.
-#: ``labels`` covers a tree whose label documents sit there rather than under ``annotations/``,
-#: so the same locator resolves both shapes.
-_DATASET_SEGMENTS = ("annotations", "predictions", "images", "labels")
-
-
 def dataset_root_of(path: str | Path) -> Optional[Path]:
-    """The ``<dataset_root>`` a canonical sub-path lives under, or ``None`` if it is not one.
+    """The ``<dataset_root>`` a path under ``<dataset_root>/images/`` lives under, or ``None`` if
+    it lives under none.
 
-    ``<dataset_root>/{annotations|predictions|images}/...`` -> ``<dataset_root>``. Lets a consumer
-    that holds only a label or prediction dir locate the dataset-level ``subjects.json`` that decodes
-    those names. Anchors on the *last* dataset segment in the path, so a dataset physically nested
-    under an ancestor named ``images`` (or another segment) still resolves to the real root rather
-    than the ancestor. A bare segment with nothing above it is not inside a dataset -> ``None``.
+    Anchors on the *last* ``images`` segment in the path, so a dataset physically nested under an
+    ancestor named ``images`` still resolves to the real root rather than the ancestor. A bare
+    segment with nothing above it is not inside a dataset -> ``None``.
     """
     parts = Path(path).parts
-    idxs = [k for k, p in enumerate(parts) if p in _DATASET_SEGMENTS]
+    idxs = [k for k, p in enumerate(parts) if p == "images"]
     if not idxs:
         return None
     i = max(idxs)
@@ -272,30 +192,11 @@ def require_dataset_identity(dataset_root: str | Path) -> dict:
     return identity
 
 
-def prediction_root(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/predictions/``: the whole prediction tree, every model bucket under it."""
-    return Path(dataset_root, "predictions")
-
-
-def label_filename(stem: str) -> str:
-    """The file name one image's label or prediction record is written under."""
-    return f"{stem}{LABEL_SUFFIX}"
-
-
-def annotation_path(dataset_root: str | Path, date: Optional[str], stem: str) -> Path:
-    return annotation_dir(dataset_root, date) / label_filename(stem)
-
-
-def annotation_path_for_image(image_path: str | Path, *, date: Optional[str] = None) -> Path:
-    """Canonical write path for an image's single label file (date derived from the image path)."""
-    root, img_date, stem = parse_image_path(image_path)
-    return annotation_path(root, date if date is not None else img_date, stem)
-
-
 @dataclass(frozen=True)
 class Gestures:
-    """What one save decides beyond the annotations it writes: the proposals of the bucket at
-    ``bucket`` it accepts and rejects, each by its index in that bucket's document for the image;
+    """What one save decides beyond the annotations it writes: the proposals of the bucket named
+    ``bucket``, under the image's own dataset root, it accepts and rejects, each by its index in
+    that bucket's document for the image;
     each subject of ``complete`` marked complete over ``rect`` (pixel ``[x, y, w, h]``, the whole
     image when ``None``) or, mapped to ``False``, its marks withdrawn; and whether proposals were
     hidden while the person annotated."""
@@ -308,36 +209,33 @@ class Gestures:
     proposals_hidden: bool = False
 
 
-def image_proposals(bucket_dir: str | Path, image_path: str | Path) -> tuple["Bucket", list]:
-    """The published bucket at ``bucket_dir`` and its proposals for ``image_path``, in document
-    order; a bucket that names no document for the image refuses (``ValueError``)."""
+def label_key_of(image_path: str | Path) -> Key:
+    """The label document of the image at ``image_path`` (:func:`parse_image_path`, then
+    :func:`label_key`); an image under no dataset image tree refuses (``ValueError``)."""
+    return label_key(*parse_image_path(image_path))
+
+
+def image_proposals(bucket: str, key: Key) -> tuple["Bucket", list]:
+    """The published bucket named ``bucket`` under the root of the label document ``key`` and its
+    proposals for that image, in document order; a bucket that names no document for the image
+    refuses (``ValueError``)."""
     from tcip_annotation.json_io import read_predictions
 
     from tcip_mcp.buckets import read_bucket
 
-    bucket = read_bucket(bucket_dir)
-    document = bucket.document(image_path)
+    found = read_bucket(key.root, bucket)
+    document = found.document_key(key.parts[-1])
     if document is None:
-        raise ValueError(f"{bucket.path} holds no proposals for {Path(image_path).name}")
-    return bucket, read_predictions(str(document))
+        raise ValueError(f"bucket {bucket!r} holds no proposals for {key.parts[-1]}")
+    return found, read_predictions(document)
 
 
-def verdict_key_of(project: str | Path | None, image_path: str | Path,
-                   bucket_dir: str | Path) -> Key:
-    """The verdict shard of ``image_path``'s proposals in the bucket at ``bucket_dir``, in the
-    state directory of the dataset the image lies in, or of ``project`` when it lies in none;
-    refuses (``ValueError``) with neither."""
+def verdict_key_of(key: Key, bucket: str) -> Key:
+    """The verdict shard of the proposals the bucket named ``bucket`` holds for the image whose
+    label document ``key`` names."""
     from tcip_annotation.verdicts import verdict_key
 
-    from tcip_mcp.audit import dataset_scope_of
-    from tcip_mcp.buckets import bucket_key_of
-    from tcip_mcp.project_paths import project_state_dir
-
-    scope = dataset_scope_of(image_path) or project
-    if scope is None:
-        raise ValueError(f"{image_path} lies in no dataset and no project is open to hold its "
-                         "verdicts; open the project the image belongs to")
-    return verdict_key(project_state_dir(scope), bucket_key_of(bucket_dir), Path(image_path).name)
+    return verdict_key(key.root, bucket, key.parts[-1])
 
 
 def proposal_pairs(project: str | Path | None, bucket: "Bucket", annotations: list,
@@ -356,7 +254,7 @@ def proposal_pairs(project: str | Path | None, bucket: "Bucket", annotations: li
     criterion = None
     if bucket.assessment_id is not None:
         if project is None:
-            raise ValueError(f"{bucket.path} was published under assessment "
+            raise ValueError(f"bucket {bucket.name!r} was published under assessment "
                              f"{bucket.assessment_id}, which only its project holds; open it")
         count = read_assessment(project, bucket.assessment_id).criterion.get("count")
         criterion = count["localization"] if count else None
@@ -365,14 +263,13 @@ def proposal_pairs(project: str | Path | None, bucket: "Bucket", annotations: li
 
 
 def save_label_document(
-    project: str | Path | None, image_path: str | Path, label_path: str | Path,
-    payloads: Iterable[dict], *, width: int, height: int, author: str,
-    actor: Optional[str], expect: Optional[tcip_store.Version] = None,
-    gestures: Gestures = Gestures(),
-) -> Optional[tcip_store.Version]:
-    """Write ``image_path``'s label document at ``label_path`` and the save's one audit line by
-    ``actor``, in the log of the dataset ``label_path`` lies in or ``project``'s when it lies in
-    none. Returns the new version.
+    project: str | Path | None, key: Key, payloads: Iterable[dict], *,
+    width: int, height: int, author: str, actor: Optional[str],
+    expect: Optional[tcip_store.Version] = None, gestures: Gestures = Gestures(),
+) -> tcip_store.Version:
+    """Write the label document ``key`` names (:func:`label_key_of` an image), the verdicts its
+    ``gestures`` decide and the save's one audit line by ``actor``, in one commit under the
+    document's dataset root. Returns the document's new version.
 
     The document holds every annotation parsed from ``payloads``, provenance stamped
     (:func:`~tcip_annotation.json_io.stamped`): a record unchanged since it was stored keeps its
@@ -382,27 +279,23 @@ def save_label_document(
     ``author``; one that pairs confirms that annotation and adds nothing.
     The document's completion marks still live over the new annotations stay, beside the marks
     ``gestures`` makes; a subject mapped to ``False`` loses its marks. Each accepted and rejected
-    proposal appends one entry to the image's verdict shard under that bucket, before the
-    document is written.
+    proposal appends one entry to the image's verdict shard under that bucket.
 
-    Raises, before writing anything: ``ValueError`` for a label path in no dataset with no
-    ``project``, a payload that does not parse, a proposal index the bucket's document does not
-    hold or that is both accepted and rejected; ``VersionConflict`` when ``expect`` is not the version read. A document changed
-    between that read and the write raises ``VersionConflict`` with the verdicts appended, and a
-    landed write whose line cannot follow raises ``AuditEntryNotWritten``.
+    Raises with nothing written: ``ValueError`` for a payload that does not parse, a proposal
+    index the bucket's document does not hold or that is both accepted and rejected;
+    ``UnreadableLabelDocument`` for a stored document that does not decode; ``VersionConflict``
+    when ``expect`` is not the version the commit reads.
     """
     from tcip_annotation.json_io import (
-        CompletionMark, annotation_from_payload, read_document_versioned, stamped, subject_digest,
-        write_annotations,
+        CompletionMark, annotation_from_payload, document_at, document_payload, stamped,
+        subject_digest,
     )
     from tcip_annotation.verdicts import Verdict, VerdictAction, record_verdicts
 
-    from tcip_mcp.audit import dataset_scope_of, now_iso, record_event_or_raise
+    from tcip_mcp.audit import audit_entry, audit_log_key, now_iso
 
-    scope = dataset_scope_of(label_path) or project
-    if scope is None:
-        raise ValueError(f"{label_path} lies in no dataset and no project is open to record the "
-                         "save in; open the project the labels belong to")
+    audit = audit_log_key(key.root)
+    capture, stem = key.parts
     now = now_iso()
     contents = []
     for i, payload in enumerate(payloads):
@@ -410,48 +303,50 @@ def save_label_document(
             contents.append(annotation_from_payload(payload))
         except ValueError as exc:
             raise ValueError(f"annotation {i} {exc}") from exc
-    stored, read = read_document_versioned(str(label_path))
-    if expect is not None and expect != read:
-        raise tcip_store.VersionConflict(str(label_path), expect, read)
-    annotations = stamped(contents, stored.annotations, actor=author, now=now)
-    verdicts: list[Verdict] = []
-    if gestures.accept or gestures.reject:
+    decides = bool(gestures.accept or gestures.reject)
+    if decides:
         if gestures.bucket is None:
             raise ValueError("accepting or rejecting a proposal names the bucket it came from")
         both = gestures.accept & gestures.reject
         if both:
             raise ValueError(f"proposal(s) {sorted(both)} are both accepted and rejected; decide "
                              "each once")
-        bucket, proposals = image_proposals(gestures.bucket, image_path)
-        paired = proposal_pairs(project, bucket, annotations, proposals)
-        decided: tuple[tuple[VerdictAction, frozenset[int]], ...] = (
-            ("accepted", gestures.accept), ("rejected", gestures.reject))
-        for action, indices in decided:
-            for i in sorted(indices):
-                if not 0 <= i < len(proposals):
-                    raise ValueError(f"{bucket.path} holds {len(proposals)} proposals for "
-                                     f"{Path(image_path).name}, not one at index {i}")
-                if action == "accepted" and i not in paired:
-                    annotations.append(replace(proposals[i], score=None, attributes={},
-                                               accepted_by=author, accepted_at=now))
-                verdicts.append(Verdict(proposal=i, action=action, by=author, at=now))
-    marks = {s: held for s, held in stored.marks.items() if gestures.complete.get(s, True)}
-    for subject in (s for s, made in gestures.complete.items() if made):
-        marks.setdefault(subject, []).append(CompletionMark(
-            rect=gestures.rect or (0, 0, width, height), by=author, at=now,
-            digest=subject_digest(annotations, subject),
-            proposals_hidden=gestures.proposals_hidden))
-    if verdicts:
-        record_verdicts(verdict_key_of(project, image_path, bucket.path), verdicts)
-    Path(label_path).parent.mkdir(parents=True, exist_ok=True)
-    version = write_annotations(str(label_path), annotations, width, height, keep_empty=True,
-                                expect=read, marks=marks)
-    record_event_or_raise("save_label_document", {
-        "image_path": str(image_path), "label_path": str(Path(label_path).resolve()),
-        "n_annotations": len(annotations), "version": version.token if version else None,
-        "accepted": sorted(gestures.accept), "rejected": sorted(gestures.reject),
-        "complete": dict(gestures.complete),
-    }, actor=actor, scope=scope)
+        bucket, proposals = image_proposals(gestures.bucket, key)
+        verdict = verdict_key_of(key, gestures.bucket)
+    with tcip_store.transaction(key, audit, *([verdict] if decides else [])) as txn:
+        read = txn.read_versioned(key, default=None)
+        stored = document_at(key, read)
+        if expect is not None and expect != read.version:
+            raise tcip_store.VersionConflict(key, expect, read.version)
+        annotations = stamped(contents, stored.annotations, actor=author, now=now)
+        verdicts: list[Verdict] = []
+        if decides:
+            paired = proposal_pairs(project, bucket, annotations, proposals)
+            decided: tuple[tuple[VerdictAction, frozenset[int]], ...] = (
+                ("accepted", gestures.accept), ("rejected", gestures.reject))
+            for action, indices in decided:
+                for i in sorted(indices):
+                    if not 0 <= i < len(proposals):
+                        raise ValueError(f"bucket {bucket.name!r} holds {len(proposals)} "
+                                         f"proposals for {stem}, not one at index {i}")
+                    if action == "accepted" and i not in paired:
+                        annotations.append(replace(proposals[i], score=None, attributes={},
+                                                   accepted_by=author, accepted_at=now))
+                    verdicts.append(Verdict(proposal=i, action=action, by=author, at=now))
+            record_verdicts(txn, verdict, verdicts)
+        marks = {s: held for s, held in stored.marks.items() if gestures.complete.get(s, True)}
+        for subject in (s for s, made in gestures.complete.items() if made):
+            marks.setdefault(subject, []).append(CompletionMark(
+                rect=gestures.rect or (0, 0, width, height), by=author, at=now,
+                digest=subject_digest(annotations, subject),
+                proposals_hidden=gestures.proposals_hidden))
+        version = txn.write(key, document_payload(annotations, width, height, keep_empty=True,
+                                                  marks=marks))
+        txn.append(audit, audit_entry("save_label_document", {
+            "capture": capture, "stem": stem, "n_annotations": len(annotations),
+            "version": version.token, "accepted": sorted(gestures.accept),
+            "rejected": sorted(gestures.reject), "complete": dict(gestures.complete),
+        }, actor, "ok"))
     return version
 
 
@@ -467,43 +362,21 @@ def list_subjects(dataset_root: str | Path) -> list[str]:
     return [s.name for s in subject_registry.read_registry(dataset_root).subjects]
 
 
-def subjects_on_date(
-    dataset_root: str | Path, date: Optional[str], *, reader: Optional[Callable] = None,
-) -> list[str]:
-    """Distinct subjects that actually appear in the per-image label files on ``date``, sorted.
+def capture_label_keys(dataset_root: str | Path, capture: str) -> list[Key]:
+    """Every label document of ``capture`` under ``dataset_root``, in stem order."""
+    return tcip_store.keys(LABEL_DOCUMENTS, str(dataset_root), (capture,))
 
-    Enumerates ``annotations/<date>/`` through ``json_io.prediction_documents`` and reads each
-    document through ``reader`` (``json_io.read_annotations`` by default). Raises
-    :class:`~tcip_annotation.json_io.UnreadableLabelDocument` when a present label file on this
-    date will not read; a missing ``annotations/<date>/`` directory reads as no subjects.
-    """
-    from tcip_annotation import json_io
 
-    if reader is None:
-        reader = json_io.read_annotations
-    d = annotation_dir(dataset_root, date)
-    if not d.is_dir():
-        return []
+def capture_subjects(dataset_root: str | Path, capture: str) -> tuple[list[str], list[str]]:
+    """The distinct subjects the label documents of ``capture`` hold, sorted, and the stem of
+    every one of them that will not read."""
+    from tcip_annotation.json_io import UnreadableLabelDocument, read_label_document
+
     found: set[str] = set()
-    for f in json_io.prediction_documents(d):
-        for a in reader(f):
-            found.add(a.subject)
-    return sorted(found)
-
-
-def subjects_with_labels(
-    dataset_root: str | Path, date: Optional[str], *, reader: Optional[Callable] = None,
-) -> list[str]:
-    """Subjects with at least one label on ``date``."""
-    return subjects_on_date(dataset_root, date, reader=reader)
-
-
-def find_gt_label(image_path: str | Path, *, date: Optional[str] = None) -> Optional[Path]:
-    """Find the existing ground-truth label file for an image (read-time resolver).
-
-    One file per image, so this resolves ``annotations/<date>/<stem>.json`` directly. Returns
-    the file, or ``None``.
-    """
-    root, img_date, stem = parse_image_path(image_path)
-    cand = annotation_path(root, date if date is not None else img_date, stem)
-    return cand if cand.is_file() else None
+    unreadable: list[str] = []
+    for key in capture_label_keys(dataset_root, capture):
+        try:
+            found.update(a.subject for a in read_label_document(key).annotations)
+        except UnreadableLabelDocument:
+            unreadable.append(key.parts[-1])
+    return sorted(found), unreadable

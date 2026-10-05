@@ -43,8 +43,11 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
       <div className="mt-2 flex flex-col gap-0.5">
         <div className="text-[11px] text-tcip-muted">Buckets delivered</div>
         {record.buckets.map((bucket) => (
-          <div key={bucket.path} className="font-mono text-[11px] text-tcip-muted">
-            {`${bucket.path}: ` +
+          <div
+            key={`${bucket.dataset_root}\0${bucket.bucket}`}
+            className="font-mono text-[11px] text-tcip-muted"
+          >
+            {`${bucket.bucket}: ` +
               (bucket.validated
                 ? `validated by assessment ${bucket.assessment_id}`
                 : `not validated (${bucket.reason})`)}

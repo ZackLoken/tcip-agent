@@ -7,6 +7,8 @@ stay the default, and the builder source is snapshotted for provenance.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 import pytest
@@ -53,7 +55,7 @@ class _PointDataset(Dataset):
         self.transforms = transforms
         self.points = [
             next((float(a.geometry.x), float(a.geometry.y))
-                 for a in json_io.read_annotations(sample.ground_truth)
+                 for a in json_io.read_label_document(sample.ground_truth).annotations
                  if isinstance(a.geometry, Point))
             for sample in self.samples
         ]
@@ -83,23 +85,21 @@ DATASET_SOURCE = {
 def _admitted_samples(root: Path):
     """Two samples, admitted the way every run's own membership is: a builder is handed the
     producer's records, never a list a test wrote by hand."""
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from PIL import Image
 
-    from tests._producer_fixtures import registry_over, samples_over
+    from tests._producer_fixtures import label_image, registry_over, samples_over
 
-    images_dir, labels_dir = root / "images", root / "annotations"
+    images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="leaf"),)))
     for stem in ("s0", "s1"):
         Image.new("RGB", (16, 16), (40, 60, 80)).save(images_dir / f"{stem}.png")
-        json_io.write_annotations(labels_dir / f"{stem}.json",
-                                  [Annotation(subject="leaf", geometry=BBox(2, 2, 8, 8))],
-                                  16, 16, keep_empty=True)
-    return samples_over(images_dir, labels_dir, subject="leaf")
+        label_image(images_dir / f"{stem}.png",
+                    [Annotation(subject="leaf", geometry=BBox(2, 2, 8, 8))], 16, 16,
+                    keep_empty=True)
+    return samples_over(images_dir, subject="leaf")
 
 
 def _scope():
@@ -225,14 +225,13 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(tmp_pa
     }
     result = preflight_config(tmp_path, config, smoke=False)
     assert not result["valid"]
-    assert sorted(result["issues"]) == ["Missing 'data.images_dir'", "Missing 'data.labels_dir'"]
+    assert result["issues"] == ["Missing 'data.images_dir'"]
 
     # Admits valid work: the same bespoke source over a real place, whose samples the producer
     # actually admits, passes with no issue.
     root = tmp_path / "ds"
     _admitted_samples(root)
-    located_data = {**data, "images_dir": str(root / "images"),
-                    "labels_dir": str(root / "annotations"), "scope": {"subject": "leaf"}}
+    located_data = {**data, "images_dir": str(root / "images" / UNDATED_BUCKET), "scope": {"subject": "leaf"}}
     admitted = preflight_config(tmp_path, {**config, "data": located_data}, smoke=False)
     assert admitted["issues"] == [], admitted["issues"]
 

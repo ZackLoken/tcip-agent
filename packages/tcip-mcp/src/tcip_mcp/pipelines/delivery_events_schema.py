@@ -78,12 +78,13 @@ class PlantRegistryDisclosure(BaseModel):
 
 
 class CanopySegmentsDocument(BaseModel):
-    """The label document a canopy-segment delivery read its boundaries from, named and hashed
-    over the bytes it actually parsed."""
+    """The label document a canopy-segment delivery read its boundaries from, named by its capture
+    and stem under the delivered bucket's dataset root and by the version it was read at."""
 
     model_config = ConfigDict(extra="forbid")
 
-    path: str
+    capture: str
+    stem: str
     sha256: str
     subject: str
     n_segments: int
@@ -159,11 +160,13 @@ class Producer(BaseModel):
 
 
 class BucketFinding(BaseModel):
-    """What the gate found for one delivered bucket: validated when no reason refuses it."""
+    """What the gate found for one delivered bucket, named by its dataset root and its name:
+    validated when no reason refuses it."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    path: str
+    dataset_root: str
+    bucket: str
     date: Optional[str]
     assessment_id: Optional[str]
     validated: bool

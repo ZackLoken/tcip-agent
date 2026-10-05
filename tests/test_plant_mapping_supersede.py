@@ -20,10 +20,11 @@ from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 
 
 def _deliver(project: Path, preds_by_date: dict[str, str], out_csv: Path) -> dict:
+    """The delivery over the buckets of :func:`_dataset`'s default root."""
     return _deliver_through(
         project, trait="currant_bloom", mapping_name="valley",
-        plants=[p["plot"] for p in PLANTS], buckets=preds_by_date.values(),
-        output_csv_path=str(out_csv))
+        plants=[p["plot"] for p in PLANTS], dataset_root=project / "ds",
+        buckets=preds_by_date.values(), output_csv_path=str(out_csv))
 
 
 def _cited_mapping(tmp_path: Path) -> tuple[str, dict[str, str]]:

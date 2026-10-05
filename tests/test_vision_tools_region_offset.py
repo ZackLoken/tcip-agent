@@ -9,6 +9,8 @@ that sits where no object is, under a bbox that looks right.
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 from pathlib import Path
 
 import numpy as np
@@ -57,8 +59,8 @@ def patched_frame(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A dataset image with one red patch at ``PATCH``, and the patch engine wired in."""
     from tcip_mcp.pipelines import proposal
 
-    images = tmp_path / "images"
-    images.mkdir()
+    images = tmp_path / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
     arr = np.full((FRAME_H, FRAME_W, 3), 20, dtype=np.uint8)
     x1, y1, x2, y2 = PATCH
     arr[y1:y2 + 1, x1:x2 + 1] = (255, 0, 0)
@@ -97,6 +99,8 @@ def test_region_scoped_mask_rings_are_staged_at_their_full_frame_location(
     saw. The region rect starts well inside the frame on both axes, so an untranslated ring
     lands somewhere else entirely."""
     from tcip_annotation import json_io
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.dataset_layout import parse_image_path
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     _propose_over_the_region(tmp_path, patched_frame)
@@ -105,8 +109,8 @@ def test_region_scoped_mask_rings_are_staged_at_their_full_frame_location(
     assert "error" not in accepted, accepted
     assert accepted["proposal_count"] == 1
 
-    staged = json_io.read_annotations(
-        tmp_path / "predictions" / "patch" / "region" / "region.json")
+    bucket = read_bucket(parse_image_path(patched_frame)[0], accepted["bucket"])
+    staged = json_io.read_label_document(bucket.document_key(patched_frame.stem)).annotations
     assert len(staged) == 1
     pts = [p for ring in staged[0].geometry.rings for p in ring]
     assert pts
@@ -126,7 +130,7 @@ def test_region_scoped_bbox_and_mask_rings_describe_the_same_place(
     result = _propose_over_the_region(tmp_path, patched_frame)
     reported = result["candidates"][0]["bbox"]
 
-    envelope = ts.read(_staging_key_for(str(patched_frame)).key)
+    envelope = ts.read(_staging_key_for(str(patched_frame)))
     rings = envelope["candidates"][0]["rings"]
     pts = [p for ring in rings for p in ring]
     assert pts

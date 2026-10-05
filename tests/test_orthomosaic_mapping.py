@@ -478,7 +478,7 @@ def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(tmp_p
 
     data, _dropped = encode_predictions(result, "model:fixture",
                                         scope=registry_scope(tmp_path, "leaf"))
-    anns = json_io.annotations_from_bytes(data, source=str(path))
+    anns = json_io.label_document(data).annotations
     assert isinstance(anns[0].geometry, Polygon)
     xs = [x for ring in anns[0].geometry.rings for x, _ in ring]
     ys = [y for ring in anns[0].geometry.rings for _, y in ring]

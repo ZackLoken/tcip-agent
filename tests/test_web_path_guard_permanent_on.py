@@ -47,16 +47,6 @@ def _image(path: Path) -> Path:
     return path
 
 
-def _link_to(link: Path, target: Path) -> None:
-    """A directory symlink from ``link`` to ``target``, skipping the test where this machine
-    cannot make one rather than failing on an environment limitation."""
-    target.mkdir(parents=True, exist_ok=True)
-    try:
-        link.symlink_to(target, target_is_directory=True)
-    except (OSError, NotImplementedError) as exc:
-        pytest.skip(f"symlinks not available on this machine: {exc}")
-
-
 # ── the derived allow-set ──────────────────────────────────────────────────
 
 
@@ -199,7 +189,7 @@ def test_dataset_routes_refuse_an_outside_root_and_serve_an_inside_one(
 
     assert client.get("/api/dataset/tree", params={"dataset_root": str(outside)}).status_code == 403
     assert client.post("/api/dataset/select", json={
-        "dataset_root": str(outside)}).status_code == 403
+        "dataset_root": str(outside), "date": "2026-02-11"}).status_code == 403
     assert store.state.dataset.dataset_root is None
 
     assert client.get("/api/dataset/tree", params={"dataset_root": str(inside)}).status_code == 200
@@ -209,78 +199,7 @@ def test_dataset_routes_refuse_an_outside_root_and_serve_an_inside_one(
     assert selected.json()["selection"]["image_list"] == ["a.jpg"]
 
 
-def test_an_annotations_link_inside_an_allowed_root_loads_in_both_routes(
-    client: TestClient, tmp_path: Path,
-) -> None:
-    """The subject registry route and the dataset tree's per-date scan read one directory under
-    one guard: a symlink whose target genuinely sits inside the allow-set is admitted by both."""
-    from tcip_annotation.json_io import write_annotations
-    from tcip_annotation.state import Annotation, BBox
-    from tcip_web.routes.dataset import _subjects_by_date
-
-    project = open_new_project(tmp_path)
-    date = "2026-02-11"
-    real_annotations = tmp_path.parent / "nas" / "annotations_store" / date
-    real_annotations.mkdir(parents=True)
-    write_annotations(str(real_annotations / "IMG_0001.json"),
-                      [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 10, 10)
-    ann_dir = project / "annotations"
-    ann_dir.mkdir()
-    _link_to(ann_dir / date, real_annotations)
-
-    by_date, problem = _subjects_by_date(project, [date])
-    assert by_date[date] == ["bud"]
-    assert problem is None
-
-    load = client.get("/api/subjects/load", params={
-        "dataset_root": str(project), "annotations_dir": str(ann_dir / date)})
-    assert load.status_code == 200
-    assert load.json()["discovered"] == ["bud"]
-
-    select = client.post("/api/dataset/select", json={
-        "dataset_root": str(project), "subject": "bud", "date": date})
-    assert select.status_code == 200
-    assert select.json()["annotations_present"] is True
-    assert select.json()["label_problem"] is None
-
-
-def test_an_annotations_link_outside_every_allowed_root_is_refused_by_both_routes(
-    client: TestClient, tmp_path: Path, outside: Path,
-) -> None:
-    """The same directory 403s the subject registry route and is reported as this date's problem
-    by the dataset tree, rather than the tree quietly listing what the registry route refuses."""
-    from tcip_annotation.json_io import write_annotations
-    from tcip_annotation.state import Annotation, BBox
-    from tcip_web.routes.dataset import _subjects_by_date
-
-    project = open_new_project(tmp_path)
-    date = "2026-02-11"
-    real_annotations = outside / "nas" / "annotations_store" / date
-    real_annotations.mkdir(parents=True)
-    write_annotations(str(real_annotations / "IMG_0001.json"),
-                      [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 10, 10)
-    ann_dir = project / "annotations"
-    ann_dir.mkdir()
-    _link_to(ann_dir / date, real_annotations)
-
-    by_date, problem = _subjects_by_date(project, [date])
-    assert by_date[date] == []
-    assert problem is not None and "outside the allowed roots" in problem
-
-    resp = client.get("/api/subjects/load", params={
-        "dataset_root": str(project), "annotations_dir": str(ann_dir / date)})
-    assert resp.status_code == 403
-
-    # The selection door is advisory and never rejects, so it reports the same refusal as the
-    # date's label problem rather than scanning what the other two routes refuse.
-    select = client.post("/api/dataset/select", json={
-        "dataset_root": str(project), "subject": "bud", "date": date})
-    assert select.status_code == 200
-    assert select.json()["annotations_present"] is False
-    assert "outside the allowed roots" in (select.json()["label_problem"] or "")
-
-
-def test_the_proposals_route_confines_the_bucket_and_the_label_file_it_reads(
+def test_the_proposals_route_confines_the_image_whose_bucket_it_reads(
     client: TestClient, tmp_path: Path, outside: Path,
 ) -> None:
     from tcip_mcp.tools.proposal_tools import stage_proposals
@@ -290,43 +209,16 @@ def test_the_proposals_route_confines_the_bucket_and_the_label_file_it_reads(
     staged = stage_proposals(inside, str(image), model_name="sketch", boxes=[
         {"subject": "bud", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.2, "h": 0.2}])
     assert "error" not in staged, staged
-    bucket = str(Path(staged["path"]).parent)
+    stranger = _image(outside / "images" / "2026-02-11" / "a.jpg")
 
     assert client.get("/api/annotate/proposals", params={
-        "image_path": str(image), "bucket": str(outside)}).status_code == 403
-    assert client.get("/api/annotate/proposals", params={
-        "image_path": str(image), "bucket": bucket,
-        "label_path": str(outside / "a.json")}).status_code == 403
+        "image_path": str(stranger), "bucket": staged["bucket"]}).status_code == 403
     assert not (outside / ".tcip").exists()
 
-    resp = client.get("/api/annotate/proposals", params={"image_path": str(image), "bucket": bucket})
+    resp = client.get("/api/annotate/proposals", params={
+        "image_path": str(image), "bucket": staged["bucket"]})
     assert resp.status_code == 200, resp.text
     assert len(resp.json()["proposals"]) == 1
-
-
-def test_a_label_write_is_refused_before_it_happens_when_its_dataset_root_is_outside(
-    client: TestClient, tmp_path: Path, outside: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The label path is guarded before the label is written, so a refused write leaves no label
-    behind. The image is admitted through the additive roots so that only the label's own place
-    is what refuses."""
-    from tcip_web.state import store
-
-    image = _image(outside / "dataset" / "images" / "2026-02-11" / "a.jpg")
-    label = outside / "dataset" / "annotations" / "2026-02-11" / "a.json"
-    store.configure(store.workspace, ((outside / "dataset" / "images").resolve(),))
-    resp = client.post("/api/annotate/labels", json={
-        "image_path": str(image), "label_path": str(label), "annotations": [], "user": "breeder"})
-    assert resp.status_code == 403
-    assert not label.exists()
-
-    inside_image = _image(tmp_path / "proj" / "images" / "2026-02-11" / "a.jpg")
-    inside_label = tmp_path / "proj" / "annotations" / "2026-02-11" / "a.json"
-    ok = client.post("/api/annotate/labels", json={
-        "image_path": str(inside_image), "label_path": str(inside_label), "annotations": [],
-        "user": "breeder"})
-    assert ok.status_code == 200, ok.text
-    assert inside_label.exists()
 
 
 # ── the Results doors belong to the open project ──────────────────────────
@@ -387,9 +279,9 @@ def test_a_delivery_from_a_dataset_registered_to_the_open_project_is_admitted(
 
     body = _series_body(tmp_path)
     copied = outside / "ds"
-    shutil.copytree(tmp_path / "ds", copied)
-    relocated = {**body, "buckets": [str(copied / Path(p).relative_to(tmp_path / "ds"))
-                                     for p in body["buckets"]]}
+    tcip_store.release_root(body["dataset_root"])
+    shutil.copytree(body["dataset_root"], copied)
+    relocated = {**body, "dataset_root": str(copied)}
     refused = client.post("/api/results/phenology_measurement", json=relocated)
     assert refused.status_code == 403
     assert "does not belong to project" in refused.json()["detail"]

@@ -81,10 +81,7 @@ config = {
     # "training_source": "my_module:train",  # optional custom train(ctx) loop, a bare
     #     dotted string ("module:function"), not a dict, see pipeline-design skill
     "data": {
-        "images_dir": "data/images",
-        # where this run's ground truth lives, whatever shape it is: a directory of per-image
-        # label documents, a directory of <stem>.png masks, or a .csv table of one row per image
-        "labels_dir": "data/labels/detect",
+        "images_dir": "data/images",  # each image's own label document is its ground truth
         # the subject it is admitted for; admission adds every attribute the registry declares
         "scope": {"subject": "fruit"},
     },
@@ -100,6 +97,11 @@ config = {
     }
 }
 ```
+
+A mask or table run also names its ground truth, `data.labels_dir`: a directory of `<stem>.png`
+masks or a `.csv` table of one row per image. A detection or instance run names none, since each
+image's own label document is its ground truth, and neither does a run bound to a selection, whose
+samples each name their own.
 
 ## Samplers
 
@@ -191,12 +193,12 @@ Use `draw_splits` to draw a train/val/calibration selection: `draw_splits` has n
 parameter at all, no launch path honors a held-out test list (a separate, within-image
 mechanism, `reserve_calibration_fraction` on the spatial_strip route, not this one). The samples
 are drawn through the same admission a training run uses, and which admission that is depends on
-where the dataset's ground truth lives. A draw over the per-image label tree (no `ground_truth`)
-requires `subject`, since that admission is subject-scoped; the selection's scope then carries
-every attribute the dataset's registry declares for it. `ground_truth` names a
-place explicitly instead of walking that tree, and the producer reads what is there: a directory
-of label documents (subject-scoped the same way), a directory of `<stem>.png` masks, or a `.csv`
-table of one row per image. A mask and a row are admitted by existing beside their image, and the
+what the dataset's ground truth is. A draw over the dataset's label documents (no
+`ground_truth`) requires `subject`, since that admission is subject-scoped; the selection's scope
+then carries every attribute the dataset's registry declares for it. `ground_truth` names ground
+truth that is not label documents, and the producer reads what is there: a directory of
+`<stem>.png` masks, or a `.csv` table of one row per image. A mask and a row are admitted by
+existing beside their image, and the
 class space a run binding such a selection trains in is derived from that ground truth by the
 loader that reads it.
 
@@ -254,8 +256,9 @@ samples to give both train and val one) refuses by name rather than retrying or 
 this flag on its own copy, so a sweep's seed grid redraws inside the selection instead of every
 trial training on its one recorded partition; `freeze_selection` still refuses a bound run,
 redrawn or not, naming the reproduction for a redrawn one (bind a later run to the same selection
-with the same seed and the flag, with the labels this run's own `run.json` recorded unchanged,
-since the redraw reads per-stem annotation counts at run time) rather than a fresh freeze.
+with the same seed and the flag, with the label documents this run's own `run.json` recorded
+unchanged, since the redraw reads per-stem annotation counts at run time) rather than a fresh
+freeze.
 
 Feeding review-corrected labels back into training? A person's accepts and corrections in the
 Annotate tab are written into the label documents themselves (see the `annotation` skill), so the

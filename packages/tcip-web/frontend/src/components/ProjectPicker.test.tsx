@@ -36,10 +36,7 @@ const PROJECTS: ProjectSummary[] = [
     subjects: ["subject_a", "bush"],
     // subject_a labeled (+ the bucket baseline published) on 02-11; bush labeled on 03-01.
     subjects_by_date: { "2026-02-11": ["subject_a"], "2026-03-01": ["bush"] },
-    prediction_dirs: {
-      "2026-02-11": { baseline: "/ws/valley/predictions/baseline" },
-      "2026-03-01": {},
-    },
+    buckets_by_date: { "2026-02-11": ["baseline"], "2026-03-01": [] },
     image_count: 42,
     is_open: false,
     label_problem: null,
@@ -55,7 +52,7 @@ const PROJECTS: ProjectSummary[] = [
     dates: [],
     subjects: [],
     subjects_by_date: {},
-    prediction_dirs: {},
+    buckets_by_date: {},
     image_count: 0,
     is_open: false,
     label_problem: null,
@@ -82,10 +79,7 @@ function selection(root: string) {
       image_list: [],
       current_image_index: 0,
       images_dir: null,
-      annotations_dir: null,
-      predictions_dir: null,
-      label_paths: {},
-      prediction_paths: {},
+      bucket: null,
     },
   };
 }

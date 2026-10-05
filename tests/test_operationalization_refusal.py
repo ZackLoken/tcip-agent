@@ -372,12 +372,12 @@ def test_the_count_tool_hands_back_no_counts_when_it_refuses(delivery_root: Path
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
     from tests._chain_fixtures import predicted, published
 
-    bucket = published(tmp_path, tmp_path / "ds" / "predictions" / "m" / "d",
-                       [predicted("a", [fx.COUNT_SUBJECT])],
-                       scope={"subject": fx.COUNT_SUBJECT}).path
+    bucket = published(tmp_path, "m/d",
+                       [predicted(tmp_path / "ds" / "images" / "a.png", [fx.COUNT_SUBJECT])],
+                       scope={"subject": fx.COUNT_SUBJECT})
 
-    res = deliver_per_image_counts(tmp_path, str(bucket), str(tmp_path / "o.csv"),
-                                   trait=fx.COUNT_TRAIT)
+    res = deliver_per_image_counts(tmp_path, str(bucket.root), bucket.name,
+                                   str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT)
 
     assert "states no operationalization" in res["error"]
     assert "image_count" not in res and "total_detections" not in res
@@ -438,4 +438,4 @@ def test_deliver_per_image_counts_refuses_with_no_trait_argument(tmp_path: Path)
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
     with pytest.raises(TypeError, match="'trait'"):
-        deliver_per_image_counts(tmp_path, str(tmp_path), str(tmp_path / "o.csv"))  # type: ignore[call-arg]  # the omission is the subject
+        deliver_per_image_counts(tmp_path, str(tmp_path), "m/d", str(tmp_path / "o.csv"))  # type: ignore[call-arg]  # the omission is the subject

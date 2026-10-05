@@ -22,9 +22,8 @@ def test_the_raster_door_records_the_execution_its_prepared_pass_states(tmp_path
     from tests.test_block_calibration import _build_experiment
 
     exp = _build_experiment(tmp_path)
-    out = tmp_path / "preds"
     result = run_inference(
-        tmp_path, exp["checkpoint_path"], output_dir=str(out),
+        tmp_path, exp["checkpoint_path"], bucket="preds/2026-01-01",
         raster_path=str(exp["raster_path"]), stated=Stated(conf=0.0, tile_size=TILE, overlap=0.2))
     assert "error" not in result, result
 
@@ -32,4 +31,5 @@ def test_the_raster_door_records_the_execution_its_prepared_pass_states(tmp_path
         load_registered_checkpoint(exp["checkpoint_path"], project=tmp_path),
         Stated(tile=True, tile_size=TILE, overlap=0.2, conf=0.0))
     assert result["execution"] == prepared.execution.record()
-    assert read_bucket(out).execution.record() == prepared.execution.record()
+    bucket = read_bucket(result["dataset_root"], result["bucket"])
+    assert bucket.execution.record() == prepared.execution.record()

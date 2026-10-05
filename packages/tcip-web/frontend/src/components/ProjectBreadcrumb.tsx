@@ -98,7 +98,7 @@ export function ProjectBreadcrumb() {
         dataset.subject && subjects.includes(dataset.subject)
           ? dataset.subject
           : (subjects[0] ?? null);
-      const bucket = Object.values(bucketsForDate(current, newDate))[0] ?? null;
+      const bucket = bucketsForDate(current, newDate)[0] ?? null;
       // openWorkspaceProject saves the outgoing date's UI state and restores the new date's.
       await openWorkspaceProject(current, newDate, subject, bucket);
     } catch (e) {

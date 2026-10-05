@@ -7,12 +7,11 @@ registered-dataset raster (:mod:`tests._geotiff_fixtures`).
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
-from tcip_annotation.json_io import write_annotations
+from tcip_annotation.json_io import LabelDocument, read_label_document
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
 
 from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import OrthomosaicGeoreference
@@ -25,6 +24,7 @@ from tcip_mcp.pipelines.postprocessing.segment_attribution import (
 )
 
 from tests._geotiff_fixtures import write_canonical_dataset_raster
+from tests._producer_fixtures import image_label_key, label_image
 
 WIDTH = HEIGHT = 64
 
@@ -37,17 +37,17 @@ def _setup(tmp_path: Path) -> tuple[Path, Path, OrthomosaicGeoreference, dict]:
     return dataset_root, raster_path, georef, raster_identity
 
 
-def _doc_path(raster_path: Path) -> Path:
-    from tcip_mcp.dataset_layout import annotation_path_for_image
+def _stored(raster_path: Path) -> LabelDocument:
+    """The raster's own label document, read by its key."""
+    return read_label_document(image_label_key(raster_path))
 
-    return annotation_path_for_image(raster_path)
 
-
-def _write_document(raster_path: Path, annotations: list[Annotation]) -> bytes:
-    doc_path = _doc_path(raster_path)
-    doc_path.parent.mkdir(parents=True, exist_ok=True)
-    write_annotations(str(doc_path), annotations, WIDTH, HEIGHT, keep_empty=True)
-    return doc_path.read_bytes()
+def _write_document(raster_path: Path, annotations: list[Annotation],
+                    width: int = WIDTH) -> LabelDocument:
+    """``annotations`` saved as the raster's label document at ``width`` by ``HEIGHT``; the
+    document as read back."""
+    label_image(raster_path, annotations, width, HEIGHT, keep_empty=True)
+    return _stored(raster_path)
 
 
 def _square(x0: float, y0: float, x1: float, y1: float) -> Polygon:
@@ -96,32 +96,15 @@ def test_load_canopy_segments_excludes_annotations_of_another_subject(tmp_path: 
     assert len(segments) == 1
 
 
-def test_load_canopy_segments_refuses_a_document_naming_another_image_stem(tmp_path: Path) -> None:
-    _, raster_path, _georef, identity = _setup(tmp_path)
-    data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=_square(5, 5, 20, 20), created_by="user:breeder"),
-    ])
-    raw = json.loads(data)
-    raw["image"] = "some-other-stem"
-    edited = json.dumps(raw).encode("utf-8")
-
-    with pytest.raises(CanopySegmentRefusal, match="some-other-stem"):
-        load_canopy_segments(
-            edited, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
-
-
 def test_load_canopy_segments_refuses_a_document_whose_size_differs(tmp_path: Path) -> None:
     _, raster_path, _georef, identity = _setup(tmp_path)
     data = _write_document(raster_path, [
         Annotation(subject="canopy", geometry=_square(5, 5, 20, 20), created_by="user:breeder"),
-    ])
-    raw = json.loads(data)
-    raw["width"] = 999
-    edited = json.dumps(raw).encode("utf-8")
+    ], width=999)
 
     with pytest.raises(CanopySegmentRefusal, match="999"):
         load_canopy_segments(
-            edited, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
+            data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
 
 
 def test_load_canopy_segments_refuses_when_no_annotation_of_subject_exists(tmp_path: Path) -> None:
@@ -211,24 +194,21 @@ def test_load_canopy_segments_admits_a_proposed_polygon_accepted_through_the_sav
     staged = stage_proposals(tmp_path, str(raster_path), model_name="segmenter", polygons=[
         {"subject": "canopy", "conf": 0.9, "rings": [ring]}])
     assert "error" not in staged, staged
-    bucket = Path(staged["path"]).parent
-    gt_path = _doc_path(raster_path)
 
     client = TestClient(app, base_url="http://127.0.0.1")
     resp = client.post("/api/annotate/labels", json={
-        "image_path": str(raster_path), "label_path": str(gt_path), "annotations": [],
-        "bucket": str(bucket), "accept": [0], "user": "breeder",
+        "image_path": str(raster_path), "annotations": [],
+        "bucket": staged["bucket"], "accept": [0], "user": "breeder",
     })
     assert resp.status_code == 200, resp.text
 
+    stored = _stored(raster_path)
     segments = load_canopy_segments(
-        gt_path.read_bytes(), subject="canopy", raster_stem=raster_path.stem,
-        raster_identity=identity)
+        stored, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
     assert len(segments) == 1
-    stored = json.loads(gt_path.read_text())
-    assert stored["annotations"][0]["created_by"] == "segmenter"
-    assert stored["annotations"][0]["accepted_by"] == "user:breeder"
-    assert "score" not in stored["annotations"][0]
+    accepted = stored.annotations[0]
+    assert (accepted.created_by, accepted.accepted_by, accepted.score) == (
+        "segmenter", "user:breeder", None)
 
 
 # ── tie_segments_to_plants ────────────────────────────────────────────────

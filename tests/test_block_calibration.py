@@ -18,7 +18,9 @@ pytest.importorskip("torchvision")
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tests import _trait_fixtures as fx  # noqa: E402
+from tests._producer_fixtures import image_label_key, label_image  # noqa: E402
 
 TILE = 32
 OVERLAP = 0.2
@@ -101,21 +103,18 @@ def _build_experiment(tmp_path: Path, *, reserve_frac: float = 0.15,
     plant pitch over ground-truth object spacing.
     """
     root = tmp_path / "ds"
-    images_dir, labels_dir = root / "images", root / "annotations"
+    images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
     stem = "mosaic"
     raster_path = images_dir / f"{stem}.tif"
     _write_mosaic(raster_path, georeferenced=bool(plant_csv_paths))
 
     boxes = [Annotation(subject="bud", geometry=BBox(x, 80, x + 15, 110))
              for x in range(10, WIDTH - 20, BOX_STEP)]
-    json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, WIDTH, HEIGHT,
-                              keep_empty=True)
+    label_image(raster_path, boxes, WIDTH, HEIGHT, keep_empty=True)
 
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir),
-        "scope": {"subject": "bud"},
+        "images_dir": str(images_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": TILE, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.15, "seed": 1,
                   "reserve_calibration_fraction": reserve_frac},
@@ -123,9 +122,9 @@ def _build_experiment(tmp_path: Path, *, reserve_frac: float = 0.15,
     if plant_csv_paths:
         data_cfg["plant_csv_paths"] = plant_csv_paths
     return {
-        "project": tmp_path, "root": root, "images_dir": images_dir, "labels_dir": labels_dir,
-        "stem": stem, "raster_path": raster_path, "experiment_id": experiment_id,
-        **_completed_over(tmp_path, data_cfg, experiment_id),
+        "project": tmp_path, "root": root, "images_dir": images_dir,
+        "label": image_label_key(raster_path), "stem": stem, "raster_path": raster_path,
+        "experiment_id": experiment_id, **_completed_over(tmp_path, data_cfg, experiment_id),
     }
 
 
@@ -133,12 +132,11 @@ def _attest_regions_complete(root: Path, stem: str, regions: list[list[tuple[int
                              *, subject: str = "bud") -> None:
     """Mark every rect of ``regions`` complete for ``subject`` in the mosaic's label document,
     through the editor's own save door, one mark per rect."""
-    from tcip_mcp.dataset_layout import annotation_path
     from tests._producer_fixtures import mark_complete
 
     for x0, y0, x1, y1 in (r for region in regions for r in region):
-        mark_complete(root / "images" / f"{stem}.tif", annotation_path(root, None, stem), subject,
-                      project=root.parent, rect=(x0, y0, x1 - x0, y1 - y0))
+        mark_complete(root / "images" / UNDATED_BUCKET / f"{stem}.tif", subject, project=root.parent,
+                      rect=(x0, y0, x1 - x0, y1 - y0))
 
 
 def _attested(tmp_path: Path, **kwargs) -> dict:
@@ -250,6 +248,31 @@ def test_every_band_runs_under_the_execution_record_the_assessment_records(
         record["criterion"]["count"]["staged_conf_floor"]}
 
 
+def test_the_document_retained_is_the_document_measured(tmp_path: Path, monkeypatch):
+    """A document emptied after the assessment read it and before it retains it changes neither:
+    the bands are measured from the one read, and that read is what the reference keeps."""
+    import tcip_store
+
+    from tcip_mcp import assessment
+    from tcip_mcp.assessment import assessment_dir, read_assessment
+
+    exp = _attested(tmp_path)
+    real_retained = assessment._retained
+
+    def emptied_first(run_dir, samples, *args):
+        label_image(exp["raster_path"], [], WIDTH, HEIGHT, keep_empty=True)
+        return real_retained(run_dir, samples, *args)
+
+    monkeypatch.setattr(assessment, "_retained", emptied_first)
+    record = _assess(exp)
+
+    (kept,) = read_assessment(exp["project"], record["assessment_id"]).reference.ground_truth
+    copy = assessment_dir(exp["project"], record["assessment_id"]) / kept.copy
+    retained = json_io.label_document(tcip_store.decode_value(copy.read_bytes()))
+    assert _band_total(record) > 0
+    assert len(retained.annotations) > 0
+
+
 def test_an_attested_mosaic_is_assessed_and_recorded(tmp_path: Path):
     """Once every reserved cell is attested complete, the call that refused above records an
     assessment: one reference sample per band on each side, ground truth in both, no band inside
@@ -315,9 +338,9 @@ def test_band_counts_and_spacing_count_objects_not_crowd_regions(tmp_path: Path)
         project.mkdir()
         fx.seed_confirmed_count(project, measured_subject="bud")
         exp = _build_experiment(project, experiment_id=f"exp_{project.name}")
-        label = exp["labels_dir"] / f"{exp['stem']}.json"
-        boxes = json_io.read_annotations(str(label))
-        json_io.write_annotations(str(label), [
+        label = exp["label"]
+        boxes = json_io.read_label_document(label).annotations
+        json_io.write_label_document(label, [
             Annotation(subject=a.subject, geometry=a.geometry,
                        iscrowd=crowd_every_other and i % 2 == 1) for i, a in enumerate(boxes)],
             WIDTH, HEIGHT, keep_empty=True)
@@ -371,12 +394,11 @@ def test_the_recorded_cap_is_derived_from_the_calibration_bands_alone(tmp_path: 
 
     exp = _build_experiment(tmp_path)
     manifest = exp["spatial_manifest"]
-    label_path = exp["labels_dir"] / f"{exp['stem']}.json"
-    existing = json_io.read_annotations(str(label_path))
+    existing = json_io.read_label_document(exp["label"]).annotations
     tx0, _ty0, tx1, _ty1 = manifest["test_region"][0]
     dense = [Annotation(subject="bud", geometry=BBox(x, y, x + 15, y + 30))
              for x in range(int(tx0) + 5, int(tx1) - 20, 2) for y in (40, 80, 120)]
-    json_io.write_annotations(str(label_path), existing + dense, WIDTH, HEIGHT, keep_empty=True)
+    json_io.write_label_document(exp["label"], existing + dense, WIDTH, HEIGHT, keep_empty=True)
     _attest_regions_complete(
         exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
 
@@ -395,8 +417,7 @@ def test_an_unstated_merge_threshold_derives_from_the_calibration_bands(tmp_path
     threshold; the record states it as derived, never the documented default."""
     exp = _build_experiment(tmp_path)
     manifest = exp["spatial_manifest"]
-    label = exp["labels_dir"] / f"{exp['stem']}.json"
-    json_io.write_annotations(str(label), [
+    json_io.write_label_document(exp["label"], [
         Annotation(subject="bud", geometry=BBox(x + dx, 80 + dx, x + 15 + dx, 110 + dx))
         for x in range(10, WIDTH - 20, BOX_STEP) for dx in (0, 5)], WIDTH, HEIGHT,
         keep_empty=True)
@@ -422,12 +443,11 @@ def test_a_raster_pass_stamps_an_explicit_conf_as_explicit_and_an_omitted_one_as
 
     exp = _build_experiment(tmp_path, reserve_frac=0.0, experiment_id="exp_conf")
     for name, stated in (("stated", {"conf": DEFAULT_CONF}), ("omitted", {})):
-        out = tmp_path / name
-        result = run_inference(tmp_path, exp["checkpoint_path"], output_dir=str(out),
+        result = run_inference(tmp_path, exp["checkpoint_path"], bucket=name,
                                raster_path=str(exp["raster_path"]),
                                stated=Stated(tile_size=TILE, overlap=0.2, **stated))
         assert "error" not in result, result
-        execution = read_bucket(out).execution
+        execution = read_bucket(exp["root"], name).execution
         assert execution.conf == DEFAULT_CONF
         assert execution.sources["conf"] == ("explicit" if stated else "default")
 
@@ -479,17 +499,18 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(tmp_path: Path):
             return {"boxes": [[10.1, 10.1, 40.3, 30.3]], "scores": [0.9], "labels": [1],
                     "cap_hit": False}
 
-    label = tmp_path / "mosaic.json"
-    json_io.write_annotations(str(label), [
+    label = image_label_key(tmp_path / "images" / UNDATED_BUCKET / "mosaic.tif")
+    json_io.write_label_document(label, [
         Annotation(subject="bur", geometry=BBox(20.3, 20.7, 40.1, 60.9)),
         Annotation(subject="bur", geometry=BBox(100.0, 100.0, 180.0, 180.0), iscrowd=True)],
         200, 200)
-    target = json_det_targets(str(label), registry_scope(tmp_path, "bur"))
+    target = json_det_targets(json_io.read_label_document(label).annotations,
+                              registry_scope(tmp_path / "images", "bur"))
     gt = {"boxes": np.asarray(target["boxes"], dtype=np.float32).reshape(-1, 4),
           "labels": np.asarray(target["labels"], dtype=np.int64),
           "iscrowd": np.asarray(target["iscrowd"], dtype=bool)}
     stub = SimpleNamespace(predictor=_OneDetection(), tile_batch_size=8)
-    band = Sample(member="a", source="mosaic.tif", ground_truth="", group="a", side="",
+    band = Sample(member="a", source="mosaic.tif", ground_truth=label, group="a", side="",
                   rect=(0, 0, 200, 200))
 
     records = _band_records(SimpleNamespace(height=200, width=200, num_channels=3),
@@ -561,9 +582,8 @@ def _build_attribute_scoped_experiment(
                 Attribute(name="stage", type="categorical", values=values),)),)))
 
     root = tmp_path / "ds_attribute"
-    images_dir, labels_dir = root / "images", root / "annotations"
+    images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
     stem = "mosaic"
     _write_mosaic(images_dir / f"{stem}.tif")
     _write_registry(trained_values)
@@ -571,12 +591,10 @@ def _build_attribute_scoped_experiment(
     boxes = [Annotation(subject="bud", geometry=BBox(x, 80, x + 15, 110),
                         attributes={"stage": labeled_value})
              for x in range(10, WIDTH - 20, BOX_STEP)]
-    json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, WIDTH, HEIGHT,
-                              keep_empty=True)
+    label_image(images_dir / f"{stem}.tif", boxes, WIDTH, HEIGHT, keep_empty=True)
 
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir),
-        "scope": {"subject": "bud"}, "auto_val": True,
+        "images_dir": str(images_dir), "scope": {"subject": "bud"}, "auto_val": True,
         "tiling": {"enabled": True, "tile_size": TILE, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.15, "seed": 1,
                   "reserve_calibration_fraction": 0.15},
@@ -589,7 +607,7 @@ def _build_attribute_scoped_experiment(
     manifest = completed["spatial_manifest"]
     _attest_regions_complete(root, stem, [manifest["calibration_region"],
                                           manifest["test_region"]])
-    return {"project": tmp_path, "root": root, "labels_dir": labels_dir, "stem": stem,
+    return {"project": tmp_path, "root": root, "stem": stem,
             "experiment_id": experiment_id, **completed, "recorded_scope": recorded_scope}
 
 
@@ -624,21 +642,19 @@ def test_regions_marked_through_the_editors_save_admit_the_assessment(tmp_path: 
     region marked complete through the save the Annotate canvas posts to."""
     from fastapi.testclient import TestClient
 
-    from tcip_mcp.dataset_layout import annotation_path
     from tcip_web.app import app
     from tests._web_fixtures import open_new_project
 
     exp = _build_experiment(tmp_path)
     open_new_project(tmp_path)
     manifest = exp["spatial_manifest"]
-    label = annotation_path(exp["root"], None, exp["stem"])
     client = TestClient(app, base_url="http://127.0.0.1")
     for region in (manifest["calibration_region"], manifest["test_region"]):
         x0, y0, x1, y1 = region[0]
         current = client.get("/api/annotate/labels", params={
-            "image_path": str(exp["raster_path"]), "label_path": str(label)}).json()
+            "image_path": str(exp["raster_path"])}).json()
         resp = client.post("/api/annotate/labels", json={
-            "image_path": str(exp["raster_path"]), "label_path": str(label),
+            "image_path": str(exp["raster_path"]),
             "annotations": current["annotations"], "base_mtime": current["base_mtime"],
             "user": "breeder", "complete": {"bud": True}, "rect": [x0, y0, x1 - x0, y1 - y0]})
         assert resp.status_code == 200, resp.text

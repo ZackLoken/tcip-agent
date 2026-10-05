@@ -1,6 +1,6 @@
 """``deliver_per_image_counts`` over a published bucket: the bucket's own record states whose
 predictions they are and what they count, and the one gate reads the assessment it was published
-under. A directory that is no bucket, a mosaic bucket, a bucket counting another subject and an
+under. A name that is no bucket, a mosaic bucket, a bucket counting another subject and an
 unassessed bucket each refuse; an assessed bucket delivers validated, reading it imports no torch.
 """
 
@@ -32,38 +32,29 @@ def _recorded_meaning(tmp_path):
     fx.seed_confirmed_count(tmp_path, measured_subject=fx.COUNT_SUBJECT)
 
 
-def _deliver(project: Path, bucket: Path, **overrides) -> dict:
+def _deliver(project: Path, root: Path, bucket: str, **overrides) -> dict:
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
-    return deliver_per_image_counts(project, predictions_dir=str(bucket),
-                                    output_path=str(project / "out" / "counts.csv"),
+    return deliver_per_image_counts(project, str(root), bucket,
+                                    str(project / "out" / "counts.csv"),
                                     trait=overrides.get("trait", fx.COUNT_TRAIT))
 
 
-def _bucket(project: Path, scope: dict = SCOPE, **published_kw) -> Path:
+def _bucket(project: Path, scope: dict = SCOPE, **published_kw) -> str:
     from tests._chain_fixtures import predicted, published
 
-    name = scope["subject"] or "raster"
-    bucket = project / "ds" / "predictions" / name / "2026-01-01"
+    name = f"{scope['subject'] or 'raster'}/2026-01-01"
     names = [scope["subject"]] * 2 if scope["subject"] else []
-    return published(project, bucket, [predicted("a", names)], scope=scope, **published_kw).path
+    image = project / "ds" / "images" / "2026-01-01" / "a.png"
+    return published(project, name, [predicted(image, names)], scope=scope, **published_kw).name
 
 
-def test_a_directory_holding_no_bucket_record_refuses(tmp_path):
-    """A directory of label documents with no record (a ground-truth tree) is refused, never
-    counted: nothing states whose predictions they are."""
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
+def test_a_name_no_bucket_record_answers_for_refuses(tmp_path):
+    """A name no bucket is published under is refused, never counted: nothing states whose
+    predictions they would be."""
+    res = _deliver(tmp_path, tmp_path / "ds", "nothing/2026-01-01")
 
-    labels = tmp_path / "ds" / "annotations" / "2026-01-01"
-    labels.mkdir(parents=True)
-    json_io.write_annotations(str(labels / "a.json"),
-                              [Annotation(subject=fx.COUNT_SUBJECT, geometry=BBox(1, 1, 5, 5))],
-                              32, 32)
-
-    res = _deliver(tmp_path, labels)
-
-    assert "bucket.json" in res["error"]
+    assert "no bucket 'nothing/2026-01-01' is published" in res["error"]
     assert not (tmp_path / "out" / "counts.csv").exists()
 
 
@@ -71,15 +62,15 @@ def test_a_mosaic_bucket_refuses_naming_the_per_plant_door(tmp_path):
     import numpy as np
     import tifffile
 
-    raster = tmp_path / "mosaic.tif"
+    raster = tmp_path / "ds" / "images" / "undated" / "mosaic.tif"
+    raster.parent.mkdir(parents=True)
     tifffile.imwrite(str(raster), np.zeros((32, 32, 3), dtype=np.uint8))
     from tests._chain_fixtures import predicted, published
 
-    bucket = published(tmp_path, tmp_path / "ds" / "predictions" / "mosaic" / "run",
-                       [{**predicted("mosaic", [fx.COUNT_SUBJECT]),
-                         "image": str(raster)}], scope=SCOPE, raster_path=raster).path
+    bucket = published(tmp_path, "mosaic/run", [predicted(raster, [fx.COUNT_SUBJECT])],
+                       scope=SCOPE, raster_path=raster).name
 
-    res = _deliver(tmp_path, bucket)
+    res = _deliver(tmp_path, tmp_path / "ds", bucket)
 
     assert "deliver_orthomosaic_plant_counts" in res["error"]
 
@@ -93,15 +84,15 @@ def test_a_bucket_counting_another_subject_refuses_and_its_own_subject_is_admitt
     other = _bucket(tmp_path, {"subject": "leaf"})
     own = _bucket(tmp_path)
 
-    refused = _deliver(tmp_path, other)
-    reached = _deliver(tmp_path, own)
+    refused = _deliver(tmp_path, tmp_path / "ds", other)
+    reached = _deliver(tmp_path, tmp_path / "ds", own)
 
     assert fx.COUNT_SUBJECT in refused["error"] and "leaf" in refused["error"]
     assert "no assessment answers" in reached["error"]
 
 
 def test_an_unknown_trait_answers_an_error_dict(tmp_path):
-    res = _deliver(tmp_path, _bucket(tmp_path), trait="no-such-trait")
+    res = _deliver(tmp_path, tmp_path / "ds", _bucket(tmp_path), trait="no-such-trait")
 
     assert "no-such-trait" in res["error"]
 
@@ -112,7 +103,7 @@ def test_an_assessed_bucket_delivers_validated_counts_naming_the_producer(tmp_pa
 
     chain = run_the_chain(tmp_path, experiment_id="exp-counts")
 
-    res = _deliver(tmp_path, chain.bucket)
+    res = _deliver(tmp_path, chain.root, chain.bucket)
 
     assert "error" not in res, res
     assert res["validated"] is True
@@ -148,8 +139,8 @@ import tcip_store
 tcip_store.bind()
 import tcip_mcp.tools.inference_tools as itools
 from pathlib import Path
-r = itools.deliver_per_image_counts(Path({str(tmp_path)!r}), predictions_dir={str(chain.bucket)!r},
-                                    output_path={str(out_csv)!r}, trait={fx.COUNT_TRAIT!r})
+r = itools.deliver_per_image_counts(Path({str(tmp_path)!r}), {str(chain.root)!r},
+                                    {chain.bucket!r}, {str(out_csv)!r}, trait={fx.COUNT_TRAIT!r})
 assert "error" not in r, r
 assert "torch" not in sys.modules, "the delivery pulled torch into sys.modules"
 print("ok")

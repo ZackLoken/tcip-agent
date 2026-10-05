@@ -175,26 +175,14 @@ def test_a_confirmed_crossing_whose_registry_still_declares_the_class_delivers(
         registry=cr.registry_for_dataset_root(project)) == revision
 
 
-# ── registry_for_pred_dirs ─────────────────────────────────────────────────────
+# ── the registry of the buckets' dataset root ──────────────────────────────────
 
 
-def test_registry_for_pred_dirs_refuses_directories_spanning_two_dataset_roots(
+def test_a_crossing_delivery_reads_the_registry_of_its_buckets_dataset_root(
     tmp_path: Path,
 ) -> None:
-    bucket_a = tmp_path / "ds_a" / "predictions" / "run" / "2026-02-11"
-    bucket_b = tmp_path / "ds_b" / "predictions" / "run" / "2026-02-11"
-    bucket_a.mkdir(parents=True)
-    bucket_b.mkdir(parents=True)
-
-    with pytest.raises(cr.RegistryError, match="more than one dataset root"):
-        cr.registry_for_pred_dirs([str(bucket_a), str(bucket_b)])
-
-
-def test_registry_for_pred_dirs_resolves_the_registry_through_deliver_phenology_milestoness_own_path(
-    tmp_path: Path,
-) -> None:
-    """deliver_phenology_milestones resolves its registry from the buckets it delivers, not from
-    the project root: a registry written where the buckets resolve to is what a crossing
+    """deliver_phenology_milestones resolves its registry from the dataset root its buckets are
+    published under, not from the project root: a registry written there is what a crossing
     delivery's positive-class check reads."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
@@ -205,7 +193,8 @@ def test_registry_for_pred_dirs_resolves_the_registry_through_deliver_phenology_
     def deliver(out: str) -> dict:
         return deliver_phenology_milestones(
             tmp_path, trait=series.trait, mapping_name=series.mapping_name, plants=list(PLANTS),
-            buckets=list(series.buckets.values()), output_csv_path=str(tmp_path / out))
+            dataset_root=str(series.root), buckets=list(series.buckets.values()),
+            output_csv_path=str(tmp_path / out))
 
     res = deliver("out.csv")
 

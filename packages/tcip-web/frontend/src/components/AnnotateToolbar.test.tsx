@@ -195,7 +195,6 @@ describe("AnnotateToolbar subject authoring", () => {
           ...s.gui.dataset,
           dataset_root: "C:/data",
           date: "2026-01-01",
-          annotations_dir: "C:/data/annotations/2026-01-01",
         },
       },
       openProject: { id: "a1b2c3d4e5f6", path: "C:/proj" },

@@ -23,7 +23,9 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, cast
 
-from tcip_mcp.dataset_layout import label_filename
+from tcip_store import Key
+
+from tcip_mcp.dataset_layout import prediction_key
 
 if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
@@ -208,9 +210,9 @@ def plant_milestones(series: list[tuple[str, float]], spec) -> dict:
 
 
 def count_by_class(
-    json_path: Path, state: PositiveState | None, *, scope: ClassScope,
+    document: Key, state: PositiveState | None, *, scope: ClassScope,
 ) -> tuple[int, int, int]:
-    """``(n_total, n_positive, n_unclassified)`` for one image's predictions.
+    """``(n_total, n_positive, n_unclassified)`` for one image's prediction ``document``.
 
     ``scope`` is the bucket's own recorded scope. When it declares no attribute of ``state``
     listing its value (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.state_ids`), every
@@ -222,7 +224,7 @@ def count_by_class(
     """
     from tcip_annotation import json_io
 
-    annotations = json_io.detection_annotations(json_path)
+    annotations = json_io.detection_annotations(json_io.read_label_document(document).annotations)
     total = len(annotations)
     found = scope.state_ids(state)
     if found is None:
@@ -233,7 +235,8 @@ def count_by_class(
         ids = json_io.attribute_ids(a, cast(str, scope.subject), cast(tuple, scope.attributes))
         if ids is None or ids[column] == json_io.UNASSESSED:
             raise json_io.UndeclaredValue(
-                f"{json_path}#{i}: a record of {a.subject!r} with attributes {a.attributes}, "
+                f"{'/'.join(document.parts)}#{i}: a record of {a.subject!r} with attributes "
+                f"{a.attributes}, "
                 f"where this bucket's every record is of {scope.subject!r} with a value under "
                 f"{cast('PositiveState', state).attribute!r}.")
         positive += ids[column] == wanted
@@ -312,7 +315,7 @@ def per_plant_series(
                 acc[3] += 1
                 continue
             total, positive, unclassified = count_by_class(
-                bucket.path / label_filename(str(stem)), state, scope=bucket.scope)
+                prediction_key(bucket.root, bucket.name, str(stem)), state, scope=bucket.scope)
             acc[0] += total
             acc[1] += positive
             acc[2] += unclassified
@@ -409,35 +412,35 @@ class PhenologyMeasurement:
 
 
 def measure_phenology(
-    project: Path, *, trait: str, mapping_name: str, buckets: Sequence[str | Path],
-    plants: Sequence[str], require_all_dates_complete: bool,
+    project: Path, *, trait: str, mapping_name: str, dataset_root: str | Path,
+    buckets: Sequence[str], plants: Sequence[str], require_all_dates_complete: bool,
 ) -> PhenologyMeasurement:
-    """Measure ``trait``'s phenology over the published ``buckets``, each at the capture date its
-    record states (:func:`~tcip_mcp.buckets.by_recorded_date`), through the plant mapping
-    ``mapping_name``, for exactly ``plants``.
+    """Measure ``trait``'s phenology over the buckets named ``buckets`` published under
+    ``dataset_root``, each at the capture date its record states
+    (:func:`~tcip_mcp.buckets.by_recorded_date`), through the plant mapping ``mapping_name``, for
+    exactly ``plants``.
 
     Reads the trait's latest confirmed revision stating a ``state_crossing_dates``
-    operationalization, bound against the delivered dataset's registry (refusing, ``ValueError``,
-    buckets whose dataset has none), then the buckets and the mapping
-    (``plant_mapping.resolve_delivery_mapping``); each refuses as it does, and so does
-    :func:`per_plant_phenology` (:func:`measurement_refusals`).
+    operationalization, bound against the dataset's registry (refusing, ``ValueError``, a dataset
+    with none), then the buckets and the mapping (``plant_mapping.resolve_delivery_mapping``);
+    each refuses as it does, and so does :func:`per_plant_phenology`
+    (:func:`measurement_refusals`).
     """
     from tcip_mcp.buckets import by_recorded_date, read_bucket
     from tcip_mcp.operationalization import confirmed_revision
     from tcip_mcp.pipelines.postprocessing import plant_mapping
-    from tcip_mcp.subject_registry import registry_for_pred_dirs
+    from tcip_mcp.subject_registry import registry_for_dataset_root
     from tcip_mcp.traits import STATE_CROSSING_DATES
 
-    registry = registry_for_pred_dirs([str(b) for b in buckets])
+    registry = registry_for_dataset_root(dataset_root)
     if registry is None:
         raise ValueError(
-            f"no subject registry is reachable for the dataset behind {list(map(str, buckets))}: "
-            "register the dataset or write its subjects.json, so the trait's positive state can "
-            "be checked against it.")
+            f"{dataset_root} holds no subject registry: register the dataset or write its "
+            "subjects.json, so the trait's positive state can be checked against it.")
     revision = confirmed_revision(STATE_CROSSING_DATES, project=project, trait=trait,
                                   registry=registry)
     wanted = population(plants)
-    dated = by_recorded_date(map(read_bucket, buckets))
+    dated = by_recorded_date(read_bucket(dataset_root, name) for name in buckets)
     mapping_build, verified = plant_mapping.resolve_delivery_mapping(project, mapping_name, dated)
     measured = per_plant_phenology(mapping_build.rows(), dated, revision.entry, wanted,
                                    require_all_dates_complete=require_all_dates_complete)

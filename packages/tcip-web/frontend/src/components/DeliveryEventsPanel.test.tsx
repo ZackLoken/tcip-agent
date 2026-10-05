@@ -16,7 +16,8 @@ const BASE: DeliveryEventRecord = {
   producer: { checkpoint_sha256: "c".repeat(64), experiment_id: "exp-1" },
   buckets: [
     {
-      path: "C:/data/predictions/baseline/2026-01-01",
+      dataset_root: "C:/data",
+      bucket: "baseline/2026-01-01",
       date: "2026-01-01",
       assessment_id: "assessment-1",
       validated: true,
@@ -47,14 +48,16 @@ describe("DeliveryEventsPanel bucket findings", () => {
       },
       buckets: [
         {
-          path: "C:/data/predictions/baseline/2026-01-01",
+          dataset_root: "C:/data",
+          bucket: "baseline/2026-01-01",
           date: "2026-01-01",
           assessment_id: "assessment-1",
           validated: true,
           reason: null,
         },
         {
-          path: "C:/data/predictions/baseline/2026-01-08",
+          dataset_root: "C:/data",
+          bucket: "baseline/2026-01-08",
           date: "2026-01-08",
           assessment_id: null,
           validated: false,
@@ -67,14 +70,10 @@ describe("DeliveryEventsPanel bucket findings", () => {
     const row = screen.getByTestId("delivery-with-buckets");
 
     expect(
-      within(row).getByText(
-        "C:/data/predictions/baseline/2026-01-01: validated by assessment assessment-1",
-      ),
+      within(row).getByText("baseline/2026-01-01: validated by assessment assessment-1"),
     ).toBeInTheDocument();
     expect(
-      within(row).getByText(
-        "C:/data/predictions/baseline/2026-01-08: not validated (no assessment answers for it)",
-      ),
+      within(row).getByText("baseline/2026-01-08: not validated (no assessment answers for it)"),
     ).toBeInTheDocument();
     expect(within(row).getByText("user:breeder")).toBeInTheDocument();
     expect(within(row).getByText("shipping before assessing")).toBeInTheDocument();

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from tcip_annotation.json_io import annotations_from_bytes
+from tcip_annotation.json_io import label_document
 from tcip_mcp import subject_registry as cr
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.postprocessing.export import encode_predictions
@@ -26,8 +26,7 @@ def _scope(tmp_path: Path, *attributes: cr.Attribute) -> ClassScope:
 
     registry_over(tmp_path, cr.SubjectRegistry(subjects=(
         cr.Subject(name=SUBJECT, attributes=attributes),)))
-    (tmp_path / "annotations").mkdir(exist_ok=True)
-    return registry_scope(tmp_path / "annotations", SUBJECT)
+    return registry_scope(tmp_path / "images", SUBJECT)
 
 
 COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
@@ -44,7 +43,7 @@ def _result(*, boxes, scores, labels, attributes=None, width=100, height=80) -> 
 
 def _decoded(result: dict, scope: ClassScope) -> list:
     data, _dropped = encode_predictions(result, "model:fixture", scope=scope)
-    return annotations_from_bytes(data, source="img1.json")
+    return label_document(data).annotations
 
 
 def test_an_attributed_run_writes_every_attributes_value_on_every_box(tmp_path) -> None:
@@ -90,9 +89,9 @@ def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(tmp
     """A head that returns no boxes publishes what it returned through the one publication, in
     its own document shape, rather than being refused by a detection document's fields."""
     pytest.importorskip("torch")
-    import json
-
     from PIL import Image
+
+    import tcip_store
 
     from tcip_mcp.buckets import pass_documents, publish
     from tcip_mcp.pipelines.execution import Stated, prepare_pass
@@ -105,13 +104,13 @@ def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(tmp
     Image.new("RGB", (32, 32), color=(90, 90, 90)).save(images / "a.png")
     p = prepare_pass(checkpoint, Stated(), images_dir=str(images))
 
-    bucket = publish(tmp_path, tmp_path / "ds" / "predictions" / "r" / "2026-01-01",
+    bucket = publish(tmp_path, tmp_path / "ds", "r/2026-01-01",
                      pass_documents(p, p.predict(p.paths)), producer=checkpoint.producer,
                      scope=p.scope, execution=p.execution, raster_path=None,
                      raster_identity=None, assessment_id=None, actor=None)
 
-    document = bucket.document("a.png")
+    document = bucket.document_key("a")
     assert document is not None
-    decoded = json.loads(document.read_bytes())
-    assert (decoded["image"], decoded["task"], decoded["width"]) == ("a", "regression", 32)
+    decoded = tcip_store.read(document)
+    assert (decoded["task"], decoded["width"]) == ("regression", 32)
     assert decoded["outputs"] and all(isinstance(v, list) for v in decoded["outputs"].values())

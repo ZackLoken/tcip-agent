@@ -5,6 +5,8 @@ its own config's model source, and the dimensions a builder is handed are the ru
 
 from __future__ import annotations
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 import importlib
 from dataclasses import asdict
 from pathlib import Path
@@ -91,37 +93,33 @@ def test_contract_dims_take_the_admitted_attributes_without_the_loader_backgroun
     has since gained a third, and a re-resolution would smoke a head one value wider than the head
     that trains."""
     from PIL import Image
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    from tests._producer_fixtures import admit_over
+    from tests._producer_fixtures import admit_over, label_image
 
     dataset_root = tmp_path / "currant_2026"
-    images_dir = dataset_root / "images"
-    labels_dir = dataset_root / "annotations"
+    images_dir = dataset_root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
-    labels_dir.mkdir(parents=True)
     registry_over(dataset_root,subject_registry.SubjectRegistry(
         subjects=(subject_registry.Subject(
             name="leaf", attributes=(subject_registry.Attribute(
                 name="condition", type="ordinal", values=("healthy", "mild")),)),)))
     for stem, condition in (("leaf_a", "healthy"), ("leaf_b", "mild")):
         Image.new("RGB", (64, 64)).save(images_dir / f"{stem}.png")
-        json_io.write_annotations(
-            str(labels_dir / f"{stem}.json"),
-            [Annotation(subject="leaf", geometry=BBox(8, 8, 24, 24),
-                        attributes={"condition": condition})], 64, 64)
+        label_image(images_dir / f"{stem}.png",
+                    [Annotation(subject="leaf", geometry=BBox(8, 8, 24, 24),
+                                attributes={"condition": condition})], 64, 64)
 
-    scope = admit_over(images_dir, labels_dir, subject="leaf").scope
+    scope = admit_over(images_dir, subject="leaf").scope
     assert [len(a.values) for a in scope.attributes] == [2]  # the head this run trains
     cfg = {
         "model_source": {"builder_kwargs": {}, "task": "detection"},
-        "data": {"scope": asdict(scope), "num_channels": 5, "labels_dir": str(labels_dir),
+        "data": {"scope": asdict(scope), "num_channels": 5, "images_dir": str(images_dir),
                  "tiling": {"enabled": True, "tile_size": 640}},
     }
 
     _write_registry(dataset_root)  # a third condition value declared since
-    assert len(registry_scope(labels_dir, "leaf").attributes[0].values) == 3
+    assert len(registry_scope(images_dir, "leaf").attributes[0].values) == 3
 
     dims = resolve_contract_dims(cfg, "detection", recorded_model_dims(cfg))
 
@@ -134,14 +132,14 @@ def test_contract_dims_count_only_the_subject_for_a_scope_declaring_no_attribute
     itself, and hands no attributes. The resolved count stays at that one class rather than
     gaining a background slot."""
     dataset_root = tmp_path / "subject_2026"
-    labels_dir = dataset_root / "annotations"
-    labels_dir.mkdir(parents=True)
+    images_dir = dataset_root / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
     _write_registry(dataset_root)
 
     cfg = {
         "model_source": {"builder_kwargs": {}, "task": "instance_seg"},
-        "data": {"scope": asdict(registry_scope(labels_dir, "bud")), "num_channels": 3,
-                 "labels_dir": str(labels_dir)},
+        "data": {"scope": asdict(registry_scope(images_dir, "bud")), "num_channels": 3,
+                 "images_dir": str(images_dir)},
     }
 
     dims = resolve_contract_dims(cfg, "instance_seg", recorded_model_dims(cfg))
@@ -266,23 +264,20 @@ def test_a_run_builds_at_the_width_and_heads_its_admitted_data_records(tmp_path)
     three-value attribute all differ from ``build_probe_net``'s defaults, so a build that dropped
     any of them would come out at the default shape."""
     from PIL import Image
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    from tests._producer_fixtures import run_over
+    from tests._producer_fixtures import label_image, run_over
 
     dataset_root = tmp_path / "hazel_2026"
-    images_dir, labels_dir = dataset_root / "images", dataset_root / "annotations"
+    images_dir = dataset_root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
-    labels_dir.mkdir(parents=True)
     _write_registry(dataset_root)
     for stem, condition in (("leaf_a", "healthy"), ("leaf_b", "mild"), ("leaf_c", "severe")):
         Image.new("L", (64, 64)).save(images_dir / f"{stem}.png")
-        json_io.write_annotations(
-            str(labels_dir / f"{stem}.json"),
-            [Annotation(subject="leaf", geometry=BBox(8, 8, 24, 24),
-                        attributes={"condition": condition})], 64, 64)
-    _dataset, data = run_over("detection", images_dir, labels_dir, subject="leaf")
+        label_image(images_dir / f"{stem}.png",
+                    [Annotation(subject="leaf", geometry=BBox(8, 8, 24, 24),
+                                attributes={"condition": condition})], 64, 64)
+    _dataset, data = run_over("detection", images_dir, subject="leaf")
     config = {"model_source": {"builder": f"{__name__}:build_probe_net", "task": "detection"},
               "data": data}
 

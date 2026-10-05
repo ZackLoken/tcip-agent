@@ -111,21 +111,20 @@ def _assessed(tmp_path: Path, builder: str) -> dict:
     size, labeled at exactly the box ``BareScoreThreshDetector``/``BareNoKnobDetector`` always
     predict for that size, so every image matches and no two collide on content."""
     from PIL import Image
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
     from tcip_mcp.tools.data_tools import draw_splits
     from tests._chain_fixtures import assess, confirm_count_trait
+    from tests._producer_fixtures import label_image
 
     root = tmp_path / "ds"
-    images_dir, labels_dir = root / "images" / "2-11-26", root / "annotations" / "2-11-26"
+    images_dir = root / "images" / "2-11-26"
     images_dir.mkdir(parents=True)
-    labels_dir.mkdir(parents=True)
     for i, size in enumerate(range(32, 96, 8)):
         Image.new("RGB", (size, size), (100, 100, 100)).save(images_dir / f"img{i}.png")
         box = BBox(size * 0.25, size * 0.25, size * 0.75, size * 0.75)
-        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="bud", geometry=box)], size, size)
+        label_image(images_dir / f"img{i}.png", [Annotation(subject="bud", geometry=box)],
+                    size, size)
     selection_dir = tmp_path / "selection"
     drawn = draw_splits(tmp_path, str(root), output_path=str(selection_dir), subject="bud", seed=2,
                         train_ratio=0.25, val_ratio=0.25, calibration_ratio=0.25,
