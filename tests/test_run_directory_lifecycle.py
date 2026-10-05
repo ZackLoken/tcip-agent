@@ -10,6 +10,7 @@ uses.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -17,6 +18,8 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("torch")
+
+from tcip_mcp.pipelines.model_build import STATE_DICT_KEY  # noqa: E402
 
 
 @pytest.fixture
@@ -181,7 +184,7 @@ def test_progress_logged_after_the_final_status_never_reopens_the_run(launch, tm
         FINAL_STATUS_FILE, METRICS_FILE, RunEnded, best_selection, observe, read_rows,
     )
     from tcip_mcp.pipelines.training.envelope import TrainContext
-    from tcip_mcp.pipelines.training.run_registry import TrainRun
+    from tcip_mcp.pipelines.training.run_registry import observed_run
     from tcip_mcp.tools.training_tools import monitor_training
 
     res = launch(epochs=2)
@@ -189,9 +192,7 @@ def test_progress_logged_after_the_final_status_never_reopens_the_run(launch, tm
     assert _wait_final(run_dir)["state"] == "completed"
     before = {name: (run_dir / name).read_bytes() for name in (FINAL_STATUS_FILE, METRICS_FILE)}
     observation = observe(run_dir)
-    run = TrainRun(id=run_dir.name, config=observation.record["config"],
-                   objective=observation.record["resolved"]["objective"],
-                   project=tmp_path, output_dir=str(run_dir))
+    run = observed_run(observation)
 
     with pytest.raises(RunEnded):
         TrainContext(run=run, train_loader=None).log_metrics(
@@ -199,8 +200,8 @@ def test_progress_logged_after_the_final_status_never_reopens_the_run(launch, tm
 
     assert {name: (run_dir / name).read_bytes() for name in before} == before
     rows = read_rows(observation.metrics_log)[0]
-    summary = monitor_training(tmp_path, res["experiment_id"])
-    assert summary["status"] == "completed"
+    summary = monitor_training(tmp_path, res["experiment_id"])["run"]
+    assert summary["state"] == "completed"
     assert summary["best_metric"] is not None
     assert summary["best_metric"] == best_selection(
         rows, observation.record["resolved"]["objective"])
@@ -245,36 +246,75 @@ def test_a_completed_run_missing_its_checkpoint_refuses_naming_it(tmp_path):
         checkpoint_payload(named["path"], named["sha256"])
 
 
-def test_a_launch_into_an_existing_directory_refuses_and_writes_nothing(launch, tmp_path):
-    """Every launch is a new run: naming a directory that exists, a run's or one left holding no
-    launch record at all, refuses by name and leaves it as it was."""
-    from tcip_mcp.experiments import RUN_FILE, experiment_dir
+def test_a_config_naming_its_run_refuses_naming_the_key_and_writes_nothing(launch, tmp_path):
+    """The platform mints every run's id: a config stating ``experiment_id`` refuses naming the
+    key, whatever name it states, and no directory is made; the launch it leaves out mints one."""
+    from tcip_mcp.experiments import run_dirs
 
     first = launch()
     run_dir = Path(first["output_dir"])
+    assert run_dir.name == first["experiment_id"]
     _wait_final(run_dir)
     before = _contents(run_dir)
 
-    again = launch(experiment_id=first["experiment_id"])
-    assert "already exists" in again["error"], again
+    for named in (first["experiment_id"], "a-name-of-my-own"):
+        refused = launch(experiment_id=named)
+        assert "config.experiment_id" in refused["error"], refused
     assert _contents(run_dir) == before
-
-    leftover = experiment_dir("leftover-run", project=tmp_path)
-    leftover.mkdir(parents=True)
-    (leftover / "notes.txt").write_text("left by hand", encoding="utf-8")
-
-    refused = launch(experiment_id="leftover-run")
-    assert "already exists" in refused["error"], refused
-    assert not (leftover / RUN_FILE).exists()
-    assert _contents(leftover) == {"notes.txt": b"left by hand"}
+    assert run_dirs(tmp_path) == [run_dir]
 
 
-def _trial(tmp_path, monkeypatch, **extra) -> tuple[Path, list[float]]:
-    """One HPO trial over a tiny regression dataset, run through the sweep's own trial body under
-    the sweep's objective (``loss``, lower better); its run directory and every value it
-    reported."""
-    from tcip_mcp.experiments import sweeps_dir
+def test_a_name_is_reserved_by_the_directory_that_takes_it_first(
+    tmp_path, real_hpo_base_config,
+):
+    """A directory created before its record is written already holds its name: a second
+    creation under it refuses, and a run under a sweep's name refuses naming its directory. A
+    run, a sweep and one of its trials are each found once by name."""
+    from tcip_mcp.experiments import (
+        RunDirectoryExists, create_run_directory, experiment_dir, find_run, find_sweep,
+        named_directory,
+    )
+    from tcip_mcp.tools.training_tools import open_trial
+    from tests._verified_checkpoint_fixtures import detection_config, opened_run, opened_sweep
+
+    composing = create_run_directory(experiment_dir("composing", project=tmp_path))
+    with pytest.raises(RunDirectoryExists, match=re.escape(str(composing))):
+        create_run_directory(composing)
+
+    sweep = opened_sweep(tmp_path, real_hpo_base_config)
+    trial = open_trial(sweep, "a", {"lr": 0.01})
+    config = detection_config(tmp_path.parent / "run-data")
+    with pytest.raises(RunDirectoryExists, match=re.escape(str(sweep))):
+        opened_run(tmp_path, config, experiment_id=sweep.name)
+    run = opened_run(tmp_path, config, experiment_id="a-free-name")
+
+    assert (find_run(run.name, project=tmp_path), find_run(trial.name, project=tmp_path),
+            find_sweep(sweep.name, project=tmp_path)) == (run, trial, sweep)
+    assert [named_directory(d.name, project=tmp_path) for d in (run, trial, sweep)] == [
+        run, trial, sweep]
+
+
+def test_the_live_run_conflict_reads_the_projects_one_listing(tmp_path, monkeypatch):
+    """A running run is the conflict the listing shows it as, and a listing showing nothing
+    running is no conflict."""
+    from tcip_mcp import experiments
+    from tests._verified_checkpoint_fixtures import detection_config, opened_run
+
+    opened_run(tmp_path, detection_config(tmp_path.parent / "run-data"), experiment_id="live-run")
+    assert "live-run" in (experiments.live_run_conflict(tmp_path) or "")
+
+    monkeypatch.setattr(experiments, "training_listing",
+                        lambda project: experiments.TrainingListing(runs=[], sweeps=[]))
+    assert experiments.live_run_conflict(tmp_path) is None
+
+
+def _trial(tmp_path, point: dict | None = None, **extra) -> tuple[Path, list[float]]:
+    """One HPO trial of a sweep over a tiny regression dataset at ``point`` (by default a
+    learning rate), run through the sweep's own trial body under the sweep's objective
+    (``loss``, lower better); its run directory and every value it reported."""
+    from tcip_mcp.experiments import run_dirs
     from tcip_mcp.tools.training_tools import _run_hpo_trial
+    from tests._verified_checkpoint_fixtures import opened_sweep
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
     images_dir, csv_path = write_regression_dataset(
@@ -289,23 +329,28 @@ def _trial(tmp_path, monkeypatch, **extra) -> tuple[Path, list[float]]:
         "mixed_precision": False, "device": "cpu",
         "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False}, **extra,
     }
-    trial_dir = sweeps_dir(tmp_path) / "hpo_study" / "trial_a"
-    trial_dir.parent.mkdir(parents=True)
+    sweep = opened_sweep(tmp_path, base_config)
     reported: list[float] = []
-    _run_hpo_trial({"lr": 0.01}, reported.append, base_config, trial_dir, project=tmp_path,
-                   objective={"selection_metric": "loss", "higher_is_better": False})
+    _run_hpo_trial(point or {"lr": 0.01}, reported.append, sweep, "a")
+    (trial_dir,) = run_dirs(tmp_path)
     return trial_dir, reported
 
 
-def test_an_hpo_trial_is_a_run_directory_reporting_the_sweeps_one_objective(
-        tmp_path, monkeypatch):
+def _trial_row(project: Path, trial_dir: Path) -> dict:
+    """The row the project's listing reads for ``trial_dir``, under its sweep."""
+    from tcip_mcp.experiments import training_listing
+
+    (sweep,) = training_listing(project).sweeps
+    return next(row for row in sweep.trials if row.experiment_id == trial_dir.name).model_dump()
+
+
+def test_an_hpo_trial_is_a_run_directory_reporting_the_sweeps_one_objective(tmp_path):
     """A trial is a run directory like any launched run's, its sampled point and what it resolved
     on its launch record, and it reports the sweep's objective each epoch; its result is the best
     of what it reported, in the sweep's direction."""
     from tcip_mcp.experiments import RUN_FILE, observe, read_record
-    from tcip_mcp.tools.training_tools import _trial_row
 
-    trial_dir, reported = _trial(tmp_path, monkeypatch)
+    trial_dir, reported = _trial(tmp_path)
 
     record = read_record(trial_dir / RUN_FILE)
     objective = {"selection_metric": "loss", "higher_is_better": False}
@@ -314,49 +359,41 @@ def test_an_hpo_trial_is_a_run_directory_reporting_the_sweeps_one_objective(
     assert record["resolved"]["objective"] == objective
     assert observe(trial_dir).state == "completed"
     assert len(reported) == 2
-    assert _trial_row(observe(trial_dir), objective)["value"] == min(reported)
+    assert _trial_row(tmp_path, trial_dir)["best_metric"] == min(reported)
 
 
-def test_a_trial_whose_resolution_fails_is_a_directory_whose_final_status_names_it(
-        tmp_path, monkeypatch):
+def test_a_trial_whose_resolution_fails_is_a_directory_whose_final_status_names_it(tmp_path):
     """A trial whose sampled point cannot resolve still opens its run directory, and its final
-    status is ``failed`` naming why; the sweep's projection lists it."""
-    from tcip_mcp.experiments import SWEEP_FILE, observe, write_once
-    from tcip_mcp.tools.training_tools import read_sweep
+    status is ``failed`` naming why; the sweep's listing reads it as a row with no objective."""
+    from tcip_mcp.experiments import observe
 
-    trial_dir, reported = _trial(tmp_path, monkeypatch, data={"images_dir": str(tmp_path / "gone"),
-                                                             "labels_dir": str(tmp_path / "gone")})
+    trial_dir, reported = _trial(tmp_path, {"data.labels_dir": str(tmp_path / "gone")})
 
     final = observe(trial_dir).final
     assert final["state"] == "failed" and final["error"]
     assert reported == []
-    write_once(trial_dir.parent / SWEEP_FILE,
-               {"objective": {"selection_metric": "loss", "higher_is_better": False},
-                "input": {"split_draws": 1}})
-    (row,) = read_sweep(observe(trial_dir.parent, SWEEP_FILE))["trials"]
-    assert (row["trial_id"], row["status"], row["error"]) == ("a", "failed", final["error"])
+    row = _trial_row(tmp_path, trial_dir)
+    assert (row["state"], row["error"], row["best_metric"], row["best_metric_name"]) == (
+        "failed", final["error"], None, None)
 
 
 def _reports_only(ctx):
     """A bespoke body that reports its objective through ``ctx.report_objective`` alone and saves
     a checkpoint carrying no metrics."""
     ctx.report_objective(0.25)
-    ctx.save_checkpoint({"model_state_dict": ctx.build_model().state_dict()}, "model_final")
+    ctx.save_checkpoint({STATE_DICT_KEY: ctx.build_model().state_dict()}, "model_final")
 
 
-def test_a_report_only_trial_projects_the_value_it_reported(tmp_path, monkeypatch):
+def test_a_report_only_trial_projects_the_value_it_reported(tmp_path):
     """A bespoke trial reporting only through ``report_objective`` projects that value as its
     result, the same value the sweep's scheduler saw."""
     from tcip_mcp.experiments import observe
-    from tcip_mcp.tools.training_tools import _trial_row
 
-    trial_dir, reported = _trial(tmp_path, monkeypatch,
-                                 training_source=f"{__name__}:_reports_only")
+    trial_dir, reported = _trial(tmp_path, training_source=f"{__name__}:_reports_only")
 
     assert observe(trial_dir).state == "completed"
     assert reported == [0.25]
-    row = _trial_row(observe(trial_dir), {"selection_metric": "loss", "higher_is_better": False})
-    assert row["value"] == 0.25
+    assert _trial_row(tmp_path, trial_dir)["best_metric"] == 0.25
 
 
 def test_the_sweep_the_live_summary_and_a_trial_read_one_recorded_objective(
@@ -365,25 +402,24 @@ def test_the_sweep_the_live_summary_and_a_trial_read_one_recorded_objective(
     live summary names, even for a point whose own config states another metric: the three read
     one record. The trial's body is not run."""
     import tcip_mcp.tools.training_tools as tt
-    from tcip_mcp.experiments import observe, run_summary
+    from tcip_mcp.experiments import find_sweep, observe, run_dirs, run_summary
     from tcip_mcp.pipelines.training import subprocess_worker
 
     monkeypatch.setattr(subprocess_worker, "run_directory", lambda *a, **k: None)
 
     def one_trial(**kw):
         kw["objective_fn"]({"evaluation.selection_metric": "loss"}, lambda value: None)
-        return str(Path(kw["storage_path"]) / kw["study_name"])
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", one_trial)
     result = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config,
                                           n_trials=1, search_seed=0, auto_tensorboard=False)
-    sweep = tt.sweep_observation(result["study_name"], project=tmp_path)
-    (trial_dir,) = [d for d in sweep.directory.iterdir() if d.name.startswith("trial_")]
+    sweep = observe(find_sweep(result["sweep"]["sweep_id"], project=tmp_path))
+    (trial_dir,) = run_dirs(tmp_path)
     trial = observe(trial_dir)
 
     assert sweep.record["objective"]["selection_metric"] != "loss"
-    assert trial.record["resolved"]["objective"] == sweep.record["objective"]
-    assert (run_summary(trial, [])["best_metric_name"]
+    assert trial.resolution["objective"] == sweep.record["objective"]
+    assert (run_summary(trial, [], None).best_metric_name
             == sweep.record["objective"]["selection_metric"])
 
 
@@ -402,6 +438,6 @@ def test_a_context_for_an_ended_run_is_refused_and_writes_nothing(tmp_path, monk
         run_directory(run_dir)
     ctx = prepare_run_context(observe(run_dir))
     with pytest.raises(RunEnded):
-        ctx.save_checkpoint({"model_state_dict": {}}, "after_terminal")
+        ctx.save_checkpoint({STATE_DICT_KEY: {}}, "after_terminal")
 
     assert _contents(run_dir) == before

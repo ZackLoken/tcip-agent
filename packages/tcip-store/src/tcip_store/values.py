@@ -41,6 +41,16 @@ NOT_FINITE_SUFFIX = "_state"
 """Appended to a numeric field's name for the sibling that says why it is null."""
 
 
+def scalar_number(value: Any) -> bool:
+    """Whether ``value`` is a number other than a boolean."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def finite_number(value: Any) -> bool:
+    """Whether ``value`` is a finite :func:`scalar_number`."""
+    return scalar_number(value) and math.isfinite(value)
+
+
 def non_finite_state(value: float) -> str | None:
     """The token naming why a float cannot be stored, or None when it can."""
     if math.isnan(value):
@@ -76,11 +86,7 @@ def stored_numbers(values: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def finite_or_none(value: Any) -> Any:
-    """The value a record carries in place of a non-finite number, with no state beside it.
-
-    For a number nested where a sibling field has nowhere to go, inside a list of sweep rows
-    a reader indexes positionally. Prefer :func:`stored_number` wherever a sibling fits.
-    """
+    """``None`` for a non-finite float, ``value`` otherwise; no state companion is written."""
     if isinstance(value, float) and non_finite_state(value) is not None:
         return None
     return value

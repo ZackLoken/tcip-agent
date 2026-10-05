@@ -28,23 +28,13 @@ describe("LaunchPicker", () => {
     expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
   });
 
-  it("omits the list entirely and offers only the agent row when no list is given", () => {
-    render(
-      <LaunchPicker
-        composerLabel="Describe a new one to the agent"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
-      />,
-    );
-    expect(screen.queryByText("Configs in this project")).not.toBeInTheDocument();
-    expect(screen.getByText("Describe a new one to the agent")).toBeInTheDocument();
-  });
+  const NO_ROWS = { title: "Runs and sweeps in this project", emptyMessage: "none", rows: [] };
 
   it("sends the composer's request to the agent", () => {
     const onSend = vi.fn();
     render(
       <LaunchPicker
+        list={NO_ROWS}
         composerLabel="Describe a new one to the agent"
         request="train something"
         onRequestChange={noop}
@@ -58,6 +48,7 @@ describe("LaunchPicker", () => {
   it("disables the send action until the composer holds text", () => {
     render(
       <LaunchPicker
+        list={NO_ROWS}
         composerLabel="Describe a new one"
         request=""
         onRequestChange={noop}

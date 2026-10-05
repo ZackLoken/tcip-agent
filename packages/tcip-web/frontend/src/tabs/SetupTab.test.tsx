@@ -6,19 +6,14 @@ import { resultsApi, type ServedPlantMapping } from "@/api/inference";
 import type { MatchTolerance } from "@/api/types.generated";
 import { useStore } from "@/store";
 import { SetupTab } from "@/tabs/SetupTab";
+import { openTestProject } from "@/test/store";
 import { TRAIT_LISTINGS } from "@/test/traitRecords";
 
 const initialStoreState = useStore.getState();
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
-  useStore.setState((s) => ({
-    gui: {
-      ...s.gui,
-      dataset: { ...s.gui.dataset, dataset_root: "C:/data" },
-    },
-    openProject: { id: "a1b2c3d4e5f6", path: "C:/proj" },
-  }));
+  openTestProject({ dataset_root: "C:/data" });
   vi.spyOn(resultsApi, "traits").mockResolvedValue({ traits: [], unreadable: [], definitions: {} });
   vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue({ names: [] });
 });

@@ -1,13 +1,9 @@
-"""Prove a test actually fails against the code it was written to catch.
+"""Run a test against a baseline tree the change under test is absent from, and report whether it
+fails there.
 
-A test added alongside a fix is only a guard if it fails *before* the fix. Reasoning that it would
-is not evidence: a test can pass everywhere because an unrelated path produces the same outcome,
-and a vacuous test passes in the normal gate too.
-
-This materializes a baseline tree with ``git archive`` (the working tree is never touched), overlays
-the current ``tests/`` directory so the test's own conftest and helpers travel with it, proves the
-baseline's own source is what gets imported, runs pytest there, and reads pytest's per-test outcome
-rather than its exit code.
+The baseline is materialized with ``git archive`` (the working tree is never touched), the current
+``tests/`` directory is overlaid on it, the baseline's own source is proved to be what gets
+imported, and pytest's per-test outcome is read rather than its exit code.
 
     python tools/prove_test_fails_before.py tests/test_foo.py
     python tools/prove_test_fails_before.py tests/test_foo.py -k "new_behavior"
@@ -16,7 +12,7 @@ rather than its exit code.
     python tools/prove_test_fails_before.py tests/test_foo.py --test-rev 8b09bd17 --baseline ae3dbbb8
     python tools/prove_test_fails_before.py tests/test_foo.py --per-test-timeout 30
 
-Four verdicts, four exit codes, because an exit code alone cannot carry this:
+Four verdicts, each its own exit code:
 
     GUARDS (0)         at least one selected test failed at the baseline in the call phase, on
                        the assertion it names (the raised exception's own class is
@@ -42,30 +38,19 @@ Four verdicts, four exit codes, because an exit code alone cannot carry this:
                        failure that constructs its inputs wrongly in any other way, whatever the
                        exception class, is behavioral: the code under test was reached
 
-A baseline is only usable if the change under test is absent from it. With uncommitted work that is
-``HEAD``. In a history where one commit carries one file, the commit before the test file is inside
-the change rather than before it, so the previous commit is not a baseline: pass the pre-change
-revision with ``--baseline``, or let the tool take the merge-base against the integration branch.
-Which baseline was used, how it was chosen, and which source files the change touches are all
-recorded, so a later reader can check the verdict rather than trust it.
+The baseline is ``--baseline`` when given, else ``HEAD`` for uncommitted work, else the
+merge-base against the integration branch; the baseline used, how it was chosen and the source
+files the change touches are recorded with the verdict.
 
-``--test-rev`` takes the test tree from a revision instead of the working tree, which is how a guard
-claim already in the history gets checked. It requires an explicit baseline, since the revision
-before a test commit is the tree a one-file-per-commit history makes untrustworthy.
+``--test-rev`` takes the test tree from a revision instead of the working tree, and requires
+``--baseline``.
 
-``--baseline-from-working-tree`` snapshots the current working tree (tracked modifications and
-untracked files, ignored files excluded) into a commit object, printing its hash, without touching
-the working tree, the index, or the stash list. It computes no verdict by itself: take the
-snapshot *before* applying the fix under test, since a snapshot that already holds the fix is a
-baseline the change does not precede, and a passing run against it is the same INDETERMINATE case
-as any other baseline already containing the change, never evidence the test guards anything.
-Apply the fix, then re-run normally with ``--baseline <the printed hash>``.
+``--baseline-from-working-tree`` snapshots the working tree (tracked modifications and untracked
+files, ignored files excluded) into a commit object and prints its hash, touching neither the
+working tree, the index nor the stash list, and computes no verdict.
 
-``--per-test-timeout`` passes ``--timeout`` through to pytest-timeout (already a suite
-dependency). Where SIGALRM exists, a timeout raises inside the test with pytest-timeout's own
-message; where it does not (this project's Windows harness), the process is killed outright
-before it can report anything. Either way the tool names the timed-out test and returns
-INDETERMINATE rather than reading a hang as a real pass, fail, or refusal.
+``--per-test-timeout`` passes ``--timeout`` through to pytest-timeout; a selected test that does
+not finish within it is named and the verdict is INDETERMINATE.
 """
 from __future__ import annotations
 
@@ -272,11 +257,8 @@ def _resolve_baseline(named: str | None, integration: str) -> tuple[str | None, 
 
 
 def _changed_source_files(baseline: str, declared: list[str], test_rev: str | None) -> tuple[list[str], str]:
-    """The source-side files that differ between the baseline and the tree the test comes from.
-
-    A caller-declared path still has to differ. Trusting the declaration would let the caller decide
-    the verdict, which is the thing this tool exists to stop.
-    """
+    """The source-side files that differ between the baseline and the tree the test comes from,
+    and how they were found; a ``declared`` path counts only when it differs too."""
     if test_rev:
         tracked = git_output("diff", "--name-only", baseline, test_rev, "--").splitlines()
         untracked: list[str] = []
@@ -349,12 +331,7 @@ def snapshot_working_tree() -> tuple[str, str]:
 
 
 def materialize(rev: str, dest: Path) -> None:
-    """Extract a revision's whole tree into `dest`. The working tree is never touched.
-
-    ``git archive`` never carries a ``.git`` into what it extracts; ``tools/build_module_inventory.py``
-    resolves its own repo root by walking up for an ancestor holding both ``packages/`` and
-    ``tools/``, a marker this materialized tree already carries, so nothing is added here.
-    """
+    """Extract a revision's whole tree into `dest`. The working tree is never touched."""
     dest.mkdir(parents=True, exist_ok=True)
     archive = subprocess.run(
         ["git", "archive", rev], cwd=REPO, check=True, stdout=subprocess.PIPE
@@ -364,12 +341,8 @@ def materialize(rev: str, dest: Path) -> None:
 
 
 def _overlay_test_tree(dest: Path, test_rev: str | None) -> int:
-    """Bring one whole test tree across, so conftest and helper modules match the test.
-
-    The point of overlaying the tree rather than the single file is that a test's support files are
-    part of the test: a helper added alongside it is missing from the baseline, and a baseline that
-    cannot import the test yields a collection error rather than a verdict.
-    """
+    """Copy the whole test tree, from ``test_rev`` or the working tree, into ``dest``; the number
+    of files copied."""
     if test_rev:
         archive = subprocess.run(
             ["git", "archive", test_rev, "--", TEST_TREE], cwd=REPO, check=True,
@@ -447,11 +420,7 @@ def install_outcome_plugin(tree: Path) -> None:
 
 def run_capturing_outcome(tree: Path, targets: list[str], expr: str, env: dict[str, str],
                           outcome_json: Path, timeout: int, per_test_timeout: float | None = None):
-    """Run pytest in `tree` and return its process plus what it observed, or None if it reported none.
-
-    The observed record, not the exit code, is what a caller judges on: an exit code cannot tell a
-    real failure apart from an empty selection, a collection error or a usage error.
-    """
+    """Run pytest in `tree` and return its process plus what it observed, or None if it reported none."""
     # The child session keeps its temporary root inside this run's own tree: pytest deletes all
     # but the last few roots under the shared one, including another session's, at every start.
     cmd = [

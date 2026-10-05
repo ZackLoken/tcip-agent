@@ -52,20 +52,11 @@ def test_dedup_boxes_class_aware():
 # --------------------------------------------------------------------------
 
 def _det_dataset(tmp_path: Path, n: int = 1, size: int = 128) -> Path:
-    from PIL import Image
-    from tcip_annotation.state import Annotation, BBox
+    """``n`` square ``size``px images, each holding one centered ``bud`` box a tenth as wide."""
+    from tests._producer_fixtures import seed_bud_images
 
-    from tests._producer_fixtures import label_image
-
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True, exist_ok=True)
-    for i in range(n):
-        Image.new("RGB", (size, size), (120, 120, 120)).save(images_dir / f"img{i}.jpg")
-        # YOLO "0 0.5 0.5 0.1 0.1" (normalized) -> pixel xyxy in a size×size image
-        box = BBox(0.45 * size, 0.45 * size, 0.55 * size, 0.55 * size)
-        label_image(images_dir / f"img{i}.jpg", [Annotation(subject="bud", geometry=box)],
-                    size, size, keep_empty=True)
-    return images_dir
+    return seed_bud_images(tmp_path / "images" / UNDATED_BUCKET, n=n, size=size,
+                           box=(0.45 * size, 0.45 * size, 0.55 * size, 0.55 * size))
 
 
 def test_a_dataset_too_sparse_to_derive_its_sliver_cutoff_refuses_naming_the_field(tmp_path):

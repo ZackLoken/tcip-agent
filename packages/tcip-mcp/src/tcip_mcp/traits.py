@@ -20,8 +20,7 @@ from tcip_mcp.audit import now_iso
 if TYPE_CHECKING:
     from tcip_mcp.subject_registry import SubjectRegistry
 
-# Count objectives, the names ``operating_point.COUNT_OBJECTIVE_PICKERS`` fits a conf under, kept
-# torch-free here.
+# Count objectives, each the name of one conf picker.
 COUNT_UNBIASED = "count_unbiased"  # minimize signed per-image count bias E[FP-FN]; the phenotype is a count
 DETECTION_F1 = "detection_f1"      # optimize matching quality; the phenotype is presence/localization
 PRESENCE = "presence"             # only whether the object is present
@@ -440,7 +439,6 @@ def resolve_statement_registry(project: str | Path, dataset_root: str) -> Subjec
             ) from exc
 
     registered = read_datasets(project)
-    # The resolved root, never the registry's own stored spelling ("." for the project's own tree).
     roots = [str(dataset_entry_path(project, d)) for d in registered]
     if len(registered) > 1:
         raise ValueError(
@@ -509,8 +507,7 @@ def propose_trait(
 
 
 class RevisionMoved(ValueError):
-    """Raised when a confirmation's hash is not the revision's own: the surface showed something
-    other than what the revision holds."""
+    """Raised when a confirmation's hash is not the hash of the revision it names."""
 
 
 def confirm_revision(

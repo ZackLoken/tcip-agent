@@ -11,7 +11,6 @@ when no bucket's scope declares the positive state's attribute.
 
 from __future__ import annotations
 
-import csv
 from pathlib import Path
 
 import pytest
@@ -22,15 +21,8 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     plant_mapping_key,
 )
 from tcip_mcp.tools.phenology_tools import build_plant_mapping
+from tests import csv_rows
 from tests._chain_fixtures import deliver_milestones
-
-
-def _plant_csv(path: Path) -> None:
-    path.write_text(
-        "plot_name,accession_name,WGS84_centroid_x,WGS84_centroid_y\n"
-        "P1,acc-9,-90.058,43.197\n",
-        encoding="utf-8",
-    )
 
 
 def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
@@ -39,7 +31,7 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
     from tcip_mcp.tools.project_tools import initialize_project, register_dataset
     from tcip_mcp.traits import registered_crops
     from tests._image_fixtures import write_geo_image
-    from tests._mapping_fixtures import register_plant_registry_for
+    from tests._mapping_fixtures import register_plant_registry_for, write_plant_csv
 
     assert "error" not in initialize_project(str(tmp_path), "Orchard", site="orchard block")
     images_root = tmp_path / "images"
@@ -47,8 +39,8 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
         images_root / "2026-02-11" / "img1.jpg", 43.19670, -90.058000,
         datetime(2026, 2, 11, 9, 30))
     register_dataset(tmp_path, str(tmp_path), crop=sorted(registered_crops())[0])
-    csv_path = tmp_path / "plants.csv"
-    _plant_csv(csv_path)
+    csv_path = write_plant_csv(tmp_path / "plants.csv", [
+        {"plot": "P1", "accession": "acc-9", "lat": 43.197, "lon": -90.058}])
     name = "valley"
 
     registry = register_plant_registry_for(tmp_path, [csv_path])
@@ -108,11 +100,6 @@ def test_build_plant_mapping_missing_registry(tmp_path: Path) -> None:
 # ── deliver_phenology_milestones over a published, assessed series ─────────────────────────
 
 
-def _rows(out_csv: Path) -> list[dict]:
-    with out_csv.open(newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
-
-
 def test_an_assessed_series_delivers_validated_milestones_under_its_revision(tmp_path: Path):
     pytest.importorskip("torch")
     from tcip_mcp.delivery import read_delivery_events
@@ -131,7 +118,7 @@ def test_an_assessed_series_delivers_validated_milestones_under_its_revision(tmp
     assert res["trait_revision"] == revision.number
     assert res["columns"] == phenology_csv_columns(revision.entry)
     assert res["n_images_unattributed"] > 0  # the reference frames stand at no plant
-    rows = _rows(out_csv)
+    rows = csv_rows(out_csv)
     assert [r["plant_id"] for r in rows] == ["PLANT_A", "PLANT_B"]
     assert {r["validated"] for r in rows} == {"True"}
     assert {r["delivery_event_id"] for r in rows} == {res["delivery_event_id"]}
@@ -239,7 +226,7 @@ def test_each_bucket_stands_for_the_date_its_record_states_and_two_on_one_date_r
         tmp_path / "out" / "b.csv")
 
     assert "error" not in shipped, shipped
-    assert _rows(tmp_path / "out" / "a.csv")[0]["n_dates"] == "2"
+    assert csv_rows(tmp_path / "out" / "a.csv")[0]["n_dates"] == "2"
     assert f"both record capture date {second}" in both["error"]
     assert not (tmp_path / "out" / "b.csv").exists()
 

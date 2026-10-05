@@ -10,14 +10,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tcip_mcp.identity import NoActor, actor
-from tcip_web.app import app
 from tests._audit_fixtures import audit_rows
 
 DOORS = [
-    ("/api/training/runs", {"experiment_id": "exp-1"}),
+    ("/api/training/runs", {"relaunched_from": "exp-1"}),
     ("/api/training/runs/exp-1/cancel", {}),
-    ("/api/tuning/sweeps", {"study_name": "hpo_1"}),
-    ("/api/tuning/sweeps/hpo_1/cancel", {}),
     ("/api/inference/launch", {"checkpoint_path": "m.pt", "dataset_root": "d",
                                "date": "2026-01-01", "bucket": "o"}),
     ("/api/inference/jobs/inf-1/cancel", {}),
@@ -52,9 +49,8 @@ def test_actor_spells_a_name_once_with_or_without_its_prefix() -> None:
 
 @pytest.mark.parametrize(("route", "body"), DOORS, ids=[route for route, _ in DOORS])
 def test_a_door_refuses_a_body_naming_no_one_and_records_nothing(
-    opened_project: Path, route: str, body: dict,
+    opened_project: Path, client: TestClient, route: str, body: dict,
 ) -> None:
-    client = TestClient(app, base_url="http://127.0.0.1")
     before = audit_rows(opened_project)
 
     omitted = client.post(route, json=body)

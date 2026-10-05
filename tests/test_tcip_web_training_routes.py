@@ -2,50 +2,14 @@
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from tcip_web.app import app
 
-
-@pytest.fixture
-def client(opened_project) -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
-
-
-def _wait_terminal(project: Path, experiment_id: str, deadline_s: float = 60) -> dict:
-    from tcip_mcp.tools.training_tools import monitor_training
-
-    deadline = time.monotonic() + deadline_s
-    status: dict = {}
-    while time.monotonic() < deadline:
-        status = monitor_training(project, experiment_id)
-        if status.get("status") in ("failed", "completed", "canceled"):
-            return status
-        time.sleep(0.2)
-    return status
-
-
-def test_the_validate_route_is_not_registered(client: TestClient) -> None:
-    """Nothing serves ``/api/training/validate``: the browser never submits a typed config, so
-    no route validates one. ``preflight_config`` keeps its own coverage in
-    tests/test_training_tools.py; this pins the route's absence alone."""
-    resp = client.post("/api/training/validate", json={"config": {}})
-    assert resp.status_code == 404
-
-
-def test_the_launch_route_is_not_registered(client: TestClient) -> None:
-    """Nothing serves ``/api/training/launch``: a run starts only from a recorded config,
-    through ``/api/training/runs``, never from a client-submitted one."""
-    resp = client.post("/api/training/launch", json={"config": {}, "output_dir": ""})
-    assert resp.status_code == 404
-
-
-def test_the_run_list_refuses_while_no_project_is_open() -> None:
-    resp = TestClient(app, base_url="http://127.0.0.1").get("/api/training/runs")
+def test_the_run_list_refuses_while_no_project_is_open(client: TestClient) -> None:
+    resp = client.get("/api/training/runs")
     assert resp.status_code == 409
 
 
@@ -59,54 +23,53 @@ def _opened(experiment_id: str, tmp_path: Path, builder: str = "my_models:chestn
     return opened_run(tmp_path, config, experiment_id=experiment_id)
 
 
-def test_list_configs_route_reports_a_launchable_config(opened_project) -> None:
-    from tcip_web.routes.training import list_configs_route
+def test_a_listed_run_row_carries_what_the_launch_picker_shows(opened_client: TestClient,
+                                                               opened_project) -> None:
+    _opened("exp-picker-1", opened_project, builder="my_models:leaf_det")
 
-    _opened("exp-picker-1", opened_project)
+    resp = opened_client.get("/api/training/runs")
 
-    by_id = {r["experiment_id"]: r for r in list_configs_route()["configs"]}
-    row = by_id["exp-picker-1"]
-    assert (row["builder"], row["task"], row["subject"]) == (
-        "my_models:chestnut_burr_det", "detection", "bud")
+    assert resp.status_code == 200
+    (row,) = resp.json()["runs"]
+    assert (row["experiment_id"], row["builder"], row["task"]) == (
+        "exp-picker-1", "my_models:leaf_det", "detection")
     assert row["state"] == "running"  # launched, its heartbeat still fresh
-    assert row["parent_experiment"] is None
+    assert (row["relaunched_from"], row["sweep"]) == (None, None)
+    assert resp.json()["sweeps"] == []
 
 
-def test_relaunch_route_404s_for_an_unknown_experiment(client: TestClient) -> None:
-    resp = client.post("/api/training/runs", json={"experiment_id": "nope", "user": "tester"})
+def test_a_run_is_read_by_its_id_and_an_unknown_id_refuses_naming_it(opened_client: TestClient,
+                                                                       opened_project) -> None:
+    _opened("exp-read", opened_project)
+
+    resp = opened_client.get("/api/training/runs/exp-read")
+    assert resp.status_code == 200
+    assert (resp.json()["run"]["experiment_id"], resp.json()["run"]["state"]) == (
+        "exp-read", "running")
+
+    missing = opened_client.get("/api/training/runs/exp-missing")
+    assert missing.status_code == 404
+    assert "exp-missing" in missing.json()["detail"]
+
+
+def test_relaunch_route_404s_for_an_unknown_experiment(opened_client: TestClient) -> None:
+    resp = opened_client.post("/api/training/runs", json={"relaunched_from": "nope", "user": "tester"})
     assert resp.status_code == 404
 
 
 def test_relaunch_route_422s_with_preflight_issues_for_a_refused_config(
-    tmp_path, client: TestClient
+    tmp_path, opened_client: TestClient
 ) -> None:
     _opened("exp-refused", tmp_path, builder="not.a:module")
 
-    resp = client.post("/api/training/runs", json={"experiment_id": "exp-refused", "user": "tester"})
+    resp = opened_client.post("/api/training/runs",
+                       json={"relaunched_from": "exp-refused", "user": "tester"})
     assert resp.status_code == 422
     assert resp.json()["detail"]["issues"]
 
 
-def test_list_runs_returns_shape(client: TestClient) -> None:
-    resp = client.get("/api/training/runs")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert "runs" in body
-
-
-def test_the_http_metrics_route_is_not_registered(client: TestClient) -> None:
-    """No HTTP metrics route is registered: the WebSocket stream (below) is the single serving
-    surface a run's metrics rows reach the browser through. The sibling GET pins the router as
-    mounted, so the 404 discriminates this one route rather than a router that never mounted."""
-    resp = client.get("/api/training/runs/foo-xxx/metrics")
-    assert resp.status_code == 404
-
-    registered = client.get("/api/training/runs")
-    assert registered.status_code == 200
-
-
-def test_metrics_stream_reports_no_frames_for_a_run_no_record_claims(client: TestClient) -> None:
-    with client.websocket_connect("ws://127.0.0.1/api/training/runs/foo-xxx/stream") as ws:
+def test_metrics_stream_reports_no_frames_for_a_run_no_record_claims(opened_client: TestClient) -> None:
+    with opened_client.websocket_connect("ws://127.0.0.1/api/training/runs/foo-xxx/stream") as ws:
         msg = ws.receive_json()
     assert msg["type"] == "status"
     assert msg["status"] is None
@@ -122,12 +85,12 @@ def _completed_run_with_rows(project: Path, run_id: str) -> Path:
                         rows=[{"epoch": 1, "loss": 0.9}, {"epoch": 2, "loss": 0.4}])
 
 
-def test_metrics_stream_serves_the_rows_the_run_logged(client: TestClient, tmp_path: Path) -> None:
+def test_metrics_stream_serves_the_rows_the_run_logged(opened_client: TestClient, tmp_path: Path) -> None:
     run_id = "exp-abc"
     _completed_run_with_rows(tmp_path, run_id)
 
     frames = []
-    with client.websocket_connect(f"ws://127.0.0.1/api/training/runs/{run_id}/stream") as ws:
+    with opened_client.websocket_connect(f"ws://127.0.0.1/api/training/runs/{run_id}/stream") as ws:
         while True:
             msg = ws.receive_json()
             frames.append(msg)
@@ -140,6 +103,58 @@ def test_metrics_stream_serves_the_rows_the_run_logged(client: TestClient, tmp_p
     for frame in frames:
         assert frame["experiment_id"] == run_id
         assert "run_id" not in frame
+
+
+def test_metrics_stream_sends_a_loss_and_the_selection_logged_after_it_as_one_epoch(
+    tmp_path: Path,
+) -> None:
+    """A loss row followed by a selection row at one epoch streams as one frame carrying both."""
+    import asyncio
+
+    from tcip_web.routes.training import _stream_metrics
+    from tests._verified_checkpoint_fixtures import finished_run
+
+    finished_run(tmp_path, experiment_id="exp-one-epoch", rows=[
+        {"epoch": 1, "loss": 0.9}, {"epoch": 1, "selection": 0.5, "selection_metric": "loss"}])
+    sent: list[dict] = []
+
+    class _Socket:
+        async def send_json(self, payload: dict) -> None:
+            sent.append(payload)
+
+    asyncio.run(_stream_metrics(_Socket(), tmp_path, "exp-one-epoch", poll_seconds=0.0))
+
+    (row,) = [msg["row"] for msg in sent if msg["type"] == "metric"]
+    assert (row["epoch"], row["loss"], row["selection"]) == (1, 0.9, 0.5)
+
+
+def test_a_finite_value_logged_after_a_non_finite_one_at_one_epoch_streams_alone(
+    tmp_path: Path,
+) -> None:
+    """A loss logged non-finite and then finite at one epoch streams as the finite value, its
+    earlier non-finite state gone with the value it described."""
+    import asyncio
+
+    from tcip_store.values import NOT_FINITE_SUFFIX
+
+    from tcip_mcp.experiments import write_final_status
+    from tcip_web.routes.training import _stream_metrics
+    from tests._verified_checkpoint_fixtures import log_epoch
+
+    run_dir = _opened("exp-recovered", tmp_path)
+    log_epoch(run_dir, 2, {"loss": float("nan")})
+    log_epoch(run_dir, 2, {"loss": 0.1})
+    write_final_status(run_dir, "failed", "stopped after the second row", checkpoint=None)
+    sent: list[dict] = []
+
+    class _Socket:
+        async def send_json(self, payload: dict) -> None:
+            sent.append(payload)
+
+    asyncio.run(_stream_metrics(_Socket(), tmp_path, "exp-recovered", poll_seconds=0.0))
+
+    (row,) = [msg["row"] for msg in sent if msg["type"] == "metric"]
+    assert row["loss"] == 0.1 and f"loss{NOT_FINITE_SUFFIX}" not in row
 
 
 def test_metrics_stream_pushes_complete_entries_and_defers_a_partial_one(tmp_path: Path) -> None:
@@ -206,30 +221,39 @@ def test_metrics_stream_reads_the_log_off_the_event_loop(
     assert all(thread is not main_thread for thread in read_threads)
 
 
-def test_compare_route_handles_empty_ids(client: TestClient) -> None:
-    resp = client.post("/api/training/compare", json={"experiment_ids": []})
+def test_compare_route_compares_two_runs_and_names_an_unknown_id(
+    opened_client: TestClient, tmp_path: Path,
+) -> None:
+    _completed_run_with_rows(tmp_path, "exp-left")
+    _completed_run_with_rows(tmp_path, "exp-right")
+
+    resp = opened_client.post("/api/training/compare",
+                       json={"experiment_ids": ["exp-left", "exp-right", "exp-gone"]})
+
     assert resp.status_code == 200
-    # body schema is up to compare_experiments; we only assert the route returns JSON.
-    assert isinstance(resp.json(), dict)
+    left, right, gone = resp.json()["experiments"]
+    assert (left["experiment_id"], left["state"], left["n_epochs"]) == ("exp-left", "completed", 2)
+    assert (right["experiment_id"], right["state"]) == ("exp-right", "completed")
+    assert gone == {"experiment_id": "exp-gone", "error": "Experiment not found: exp-gone"}
+    assert resp.json()["same_dataset_fingerprint"] is None
 
 
-def test_metric_directions_route_answers_the_declared_table(client: TestClient) -> None:
-    """A plain read of evaluation.py's own declared-direction table: the comparison's metric
-    chooser groups by this on mount, never by calling the audited rank tool with no metric."""
+def test_metric_directions_route_answers_the_declared_table(opened_client: TestClient) -> None:
+    """The route answers evaluation.py's own declared-direction table."""
     from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
 
-    resp = client.get("/api/training/metric-directions")
+    resp = opened_client.get("/api/training/metric-directions")
     assert resp.status_code == 200
     assert resp.json()["higher_is_better"] == HIGHER_IS_BETTER_BY_METRIC
 
 
-def test_cancel_unknown_run_returns_404(client: TestClient) -> None:
-    resp = client.post("/api/training/runs/does-not-exist/cancel", json={"user": "tester"})
+def test_cancel_unknown_run_returns_404(opened_client: TestClient) -> None:
+    resp = opened_client.post("/api/training/runs/does-not-exist/cancel", json={"user": "tester"})
     assert resp.status_code == 404
 
 
 def test_a_cancel_naming_its_person_is_admitted_and_its_line_names_them(
-    tmp_path, client: TestClient
+    tmp_path, opened_client: TestClient
 ) -> None:
     from tcip_mcp.audit import audit_log_key
     from tcip_store import read_log
@@ -238,77 +262,51 @@ def test_a_cancel_naming_its_person_is_admitted_and_its_line_names_them(
     opened_run(tmp_path, detection_config(tmp_path / "gui-data"), experiment_id="exp-gui-cancel")
     before = len(read_log(audit_log_key(tmp_path)).records)
 
-    resp = client.post("/api/training/runs/exp-gui-cancel/cancel", json={"user": "tester"})
+    resp = opened_client.post("/api/training/runs/exp-gui-cancel/cancel", json={"user": "tester"})
 
     assert resp.status_code == 200, resp.text
     (line,) = read_log(audit_log_key(tmp_path)).records[before:]
     assert (line["tool"], line["actor"]) == ("cancel_training", "user:tester")
 
 
-def test_tensorboard_route_404s_for_unknown_run(client: TestClient) -> None:
-    resp = client.post("/api/training/runs/does-not-exist/tensorboard", json={})
+def test_tensorboard_route_404s_for_unknown_run(opened_client: TestClient) -> None:
+    resp = opened_client.post("/api/training/runs/does-not-exist/tensorboard", json={})
     assert resp.status_code == 404
     assert "does-not-exist" in resp.json()["detail"]
 
 
-def test_tensorboard_route_launches_under_the_run_output_dir(
-    client: TestClient, monkeypatch, tmp_path: Path, tb_launches: list[tuple[str, str]],
+def test_tensorboard_route_launches_over_the_run_s_own_board(
+    opened_client: TestClient, tmp_path: Path, tb_launches: list[str],
 ) -> None:
     # The GUI's link comes from a TensorBoard this process started, so the route must reach
     # launch_tensorboard with the run's own log directory and hand back what it returned.
-    tb_dir = tmp_path / "tensorboard"
-    tb_dir.mkdir()
-    (tb_dir / "events.out.tfevents.1.host").write_bytes(b"")
+    from tcip_mcp.experiments import board_of
 
-    def fake_status(project: Path, experiment_id: str) -> dict:
-        return {"experiment_id": experiment_id, "status": "running", "output_dir": str(tmp_path)}
+    run_dir = _opened("run-42", tmp_path)
+    board_of(run_dir).mkdir()
+    (board_of(run_dir) / "events.out.tfevents.1.host").write_bytes(b"")
 
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.monitor_training", fake_status)
-
-    resp = client.post("/api/training/runs/run-42/tensorboard", json={})
+    resp = opened_client.post("/api/training/runs/run-42/tensorboard", json={})
     assert resp.status_code == 200
     assert resp.json()["url"] == "http://127.0.0.1:6006"
-    # No key of its own: keyed by log directory, so a repeat call here reuses the run's own
-    # TensorBoard entry rather than starting a second one.
-    assert tb_launches == [(f"{tmp_path}/tensorboard", "")]
+    assert tb_launches == [str(board_of(run_dir))]
 
 
-def test_tensorboard_route_404s_with_no_logs_for_a_run_with_no_output_dir(
-    client: TestClient, monkeypatch,
+def test_tensorboard_route_404s_with_no_logs_for_a_run_with_no_event_file(
+    opened_client: TestClient, tmp_path: Path,
 ) -> None:
-    """A run that failed before writing an output directory has nothing a TensorBoard could
-    ever serve; the refusal names that so the GUI never offers a retry against it."""
+    """A run whose body never reached ``SummaryWriter`` has a real directory but no event file
+    for TensorBoard to serve; that reads as ``no_logs``, not as a launchable board over an empty
+    directory, so the GUI never offers a retry against it."""
+    _opened("run-nologs", tmp_path)
 
-    def fake_status(project: Path, experiment_id: str) -> dict:
-        return {"experiment_id": experiment_id, "status": "failed", "output_dir": "", "error": None}
-
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.monitor_training", fake_status)
-
-    resp = client.post("/api/training/runs/run-nologs/tensorboard", json={})
-    assert resp.status_code == 404
-    assert resp.json()["detail"]["no_logs"] is True
-
-
-def test_tensorboard_route_404s_with_no_logs_for_a_stamped_dir_with_no_event_file(
-    client: TestClient, monkeypatch, tmp_path: Path,
-) -> None:
-    """A run whose output directory was stamped before the child crashed (e.g. it never
-    reached ``SummaryWriter``) has a real output directory but no event file for TensorBoard
-    to serve; that reads as ``no_logs`` too, not as a launchable board over an empty directory."""
-
-    def fake_status(project: Path, experiment_id: str) -> dict:
-        return {"experiment_id": experiment_id, "status": "failed", "output_dir": str(tmp_path),
-                "error": None}
-
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.monitor_training", fake_status)
-
-    resp = client.post("/api/training/runs/run-nologs-2/tensorboard", json={})
+    resp = opened_client.post("/api/training/runs/run-nologs/tensorboard", json={})
     assert resp.status_code == 404
     assert resp.json()["detail"]["no_logs"] is True
 
 
 def test_tensorboard_route_404s_with_no_logs_carrying_the_recorded_error(
-    tmp_path, client: TestClient,
+    tmp_path, opened_client: TestClient,
 ) -> None:
     """A run whose status the platform itself recorded carries a real error (a crash during
     data load, say) and whose output directory holds no event file: the refusal must say both
@@ -319,7 +317,7 @@ def test_tensorboard_route_404s_with_no_logs_carrying_the_recorded_error(
     run_id = "exp-fails-at-data-load"
     finished_run(tmp_path, experiment_id=run_id, training_source=f"{__name__}:_fails_at_data_load")
 
-    resp = client.post(f"/api/training/runs/{run_id}/tensorboard", json={})
+    resp = opened_client.post(f"/api/training/runs/{run_id}/tensorboard", json={})
     assert resp.status_code == 404
     detail = resp.json()["detail"]
     assert detail["no_logs"] is True
@@ -340,43 +338,30 @@ def test_list_runs_reads_every_training_run_directory(opened_project, monkeypatc
     _opened("run_1", opened_project)
     monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", -1.0)
 
-    by_id = {r["experiment_id"]: r for r in training.list_runs_route()["runs"]}
-    assert by_id["run_1"]["status"] == "interrupted"
+    by_id = {r.experiment_id: r for r in training.list_runs_route().runs}
+    assert by_id["run_1"].state == "interrupted"
 
 
 def test_list_runs_route_is_a_pure_pass_through_to_the_tool(opened_project) -> None:
-    """The route adds nothing of its own: its rows equal the tool's ``launched_only=True`` view,
-    exactly, so the route holds no reconstruction of its own."""
+    """The route adds nothing of its own: its listing equals the agent's tool's, exactly, so the
+    route holds no reconstruction of its own."""
     from tcip_mcp.tools.experiment_tools import list_experiments
     from tcip_web.routes.training import list_runs_route
 
     _opened("exp-route-parity", opened_project)
 
-    assert list_runs_route()["runs"] == list_experiments(opened_project, launched_only=True)["runs"]
+    assert list_runs_route().model_dump() == list_experiments(opened_project)
 
 
 def test_a_route_launch_shows_its_declaration_from_its_launch_event(
-    tmp_path, monkeypatch, client: TestClient
+    tmp_path, monkeypatch, opened_client: TestClient
 ) -> None:
     """A run started through the browser-facing door shows the declaration its launch event
-    carries: none, since no agent declared itself to the serving process. Mocks
-    subprocess.Popen so the assertion runs against the launch record without waiting on a real
-    child (test_relaunch_route_forks_a_run_s_config_and_names_the_parent covers the real
-    subprocess path)."""
-    import subprocess
+    carries: none, since no agent declared itself to the serving process."""
+    from tests._producer_fixtures import fake_popen
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
-
-    # Forces the mcp package's own real import before Popen is replaced below: the route
-    # imports training_tools lazily inside the request, too late to see a real Popen.
-    import tcip_mcp.tools.training_tools  # noqa: F401
-
-    class _FakeProc:
-        pid = 424242
-
-    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: _FakeProc())
+    fake_popen(monkeypatch, [])
 
     from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
     from tests._verified_checkpoint_fixtures import detection_config, opened_run
@@ -389,7 +374,8 @@ def test_a_route_launch_shows_its_declaration_from_its_launch_event(
     from tcip_store import read_log
 
     before = len(read_log(audit_log_key(tmp_path)).records)
-    resp = client.post("/api/training/runs", json={"experiment_id": "exp-gui-relaunch", "user": "tester"})
+    resp = opened_client.post("/api/training/runs",
+                       json={"relaunched_from": "exp-gui-relaunch", "user": "tester"})
     assert resp.status_code == 200, resp.json()
 
     minted = resp.json()["experiment_id"]
@@ -397,8 +383,8 @@ def test_a_route_launch_shows_its_declaration_from_its_launch_event(
     assert (line["tool"], line["actor"]) == ("launch_training", "user:tester")
     relaunched = read_record(experiment_dir(minted, project=tmp_path) / RUN_FILE)
     assert "launched_by" not in relaunched
-    assert relaunched["parent_experiment"] == "exp-gui-relaunch"
-    row = next(r for r in client.get("/api/training/runs").json()["runs"]
+    assert relaunched["relaunched_from"] == "exp-gui-relaunch"
+    row = next(r for r in opened_client.get("/api/training/runs").json()["runs"]
                if r["experiment_id"] == minted)
     assert row["launch"] == {}
 
@@ -420,35 +406,36 @@ def _regression_config(tmp_path: Path) -> dict:
 
 
 def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
-    tmp_path, monkeypatch, client: TestClient
+    tmp_path, monkeypatch, opened_client: TestClient
 ) -> None:
     """Relaunching a run's config starts a new run directory through the real launcher and a
     real child, its launch record replaying the picked run's config and naming it as parent."""
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
     from tcip_mcp.tools.training_tools import launch_training
+    from tests._verified_checkpoint_fixtures import run_to_end
 
     first = launch_training(tmp_path, _regression_config(tmp_path), actor=None)
     assert "error" not in first, first
     parent_id = first["experiment_id"]
-    assert _wait_terminal(tmp_path, parent_id)["status"] == "completed"
+    assert run_to_end(tmp_path, parent_id)["state"] == "completed"
 
-    resp = client.post("/api/training/runs", json={"experiment_id": parent_id, "user": "tester"})
+    resp = opened_client.post("/api/training/runs", json={"relaunched_from": parent_id, "user": "tester"})
     assert resp.status_code == 200, resp.json()
     forked_id = resp.json()["experiment_id"]
     assert forked_id != parent_id
-    assert _wait_terminal(tmp_path, forked_id)["status"] == "completed"
+    assert run_to_end(tmp_path, forked_id)["state"] == "completed"
 
     from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
 
     parent = read_record(experiment_dir(parent_id, project=tmp_path) / RUN_FILE)
     forked = read_record(experiment_dir(forked_id, project=tmp_path) / RUN_FILE)
-    assert forked["parent_experiment"] == parent_id
+    assert forked["relaunched_from"] == parent_id
     assert forked["config"] == parent["config"]
 
 
 def test_list_runs_route_names_the_run_s_selection_metric(
-    tmp_path, monkeypatch, client: TestClient
+    tmp_path, monkeypatch, opened_client: TestClient
 ) -> None:
     """A launched (subprocess-delegated) run's row carries the metric the trainer itself
     stamped on its metrics-log rows, and the best value read back beside it, so the Training
@@ -460,14 +447,15 @@ def test_list_runs_route_names_the_run_s_selection_metric(
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
     from tcip_mcp.tools.training_tools import launch_training
+    from tests._verified_checkpoint_fixtures import run_to_end
 
     result = launch_training(tmp_path, _regression_config(tmp_path), actor=None)
     assert "error" not in result, result
-    _wait_terminal(tmp_path, result["experiment_id"])
+    run_to_end(tmp_path, result["experiment_id"])
 
     from tcip_web.routes.training import list_runs_route
 
-    by_id = {r["experiment_id"]: r for r in list_runs_route()["runs"]}
+    by_id = {r["experiment_id"]: r for r in list_runs_route().model_dump()["runs"]}
     row = by_id[result["experiment_id"]]
     # Regression selects on the training loss by default; there is no evaluation.selection_metric
     # override in this config.
@@ -475,19 +463,101 @@ def test_list_runs_route_names_the_run_s_selection_metric(
     assert isinstance(row["best_metric"], (int, float)) and math.isfinite(row["best_metric"])
 
 
-def test_list_runs_excludes_hpo_trials(opened_project) -> None:
-    """An HPO trial's run directory lives under its sweep, so the Training-tab list, which reads
-    the project's run directories, never carries one."""
-    from tcip_mcp.experiments import sweeps_dir
-    from tcip_mcp.pipelines.data.split_construction import resolve_run
-    from tcip_mcp.tools.training_tools import open_run
-    from tcip_web.routes.training import list_runs_route
-    from tests._verified_checkpoint_fixtures import detection_config
+def test_a_sweep_trial_is_listed_read_canceled_and_streamed_by_its_id(
+    opened_client: TestClient, opened_project: Path, real_hpo_base_config: dict,
+) -> None:
+    """A trial is a run directory under its sweep: the run routes reach it by its own id, and the
+    listing groups it under its sweep rather than beside the runs launched on their own."""
+    from tcip_mcp.tools.training_tools import open_trial
+    from tests._verified_checkpoint_fixtures import opened_sweep
 
     _opened("run-a", opened_project)
-    config = detection_config(opened_project / "trial-data")
-    open_run(sweeps_dir(opened_project) / "hpo_study" / "trial_b", config,
-             resolve_run(config, project=opened_project).record,
-             trial_params={"lr": 0.01})
+    opened = opened_sweep(opened_project, real_hpo_base_config)
+    sweep_id = opened.name
+    trial = open_trial(opened, "t0", {"lr": 0.001})
 
-    assert [r["experiment_id"] for r in list_runs_route()["runs"]] == ["run-a"]
+    listing = opened_client.get("/api/training/runs").json()
+    assert [r["experiment_id"] for r in listing["runs"]] == ["run-a"]
+    (sweep,) = listing["sweeps"]
+    assert sweep["sweep_id"] == sweep_id
+    assert [(t["experiment_id"], t["sweep"], t["trial_params"]) for t in sweep["trials"]] == [
+        (trial.name, sweep_id, {"lr": 0.001})]
+
+    read = opened_client.get(f"/api/training/runs/{trial.name}")
+    assert (read.status_code, read.json()["run"]["sweep"]) == (200, sweep_id)
+
+    canceled = opened_client.post(f"/api/training/runs/{trial.name}/cancel", json={"user": "tester"})
+    assert canceled.status_code == 200, canceled.text
+    assert canceled.json()["cancel_requested"] is True
+
+    from tcip_mcp.experiments import write_final_status
+
+    write_final_status(trial, "canceled", "canceled by request", checkpoint=None)
+    with opened_client.websocket_connect(f"ws://127.0.0.1/api/training/runs/{trial.name}/stream") as ws:
+        frame = ws.receive_json()
+    assert frame["type"] == "status"
+    assert (frame["status"]["state"], frame["status"]["sweep"]) == ("canceled", sweep_id)
+
+
+def test_a_sweep_and_its_trial_each_have_one_board_whichever_door_launches_it(
+    opened_client: TestClient, opened_project: Path, real_hpo_base_config: dict, monkeypatch,
+    tb_launches: list[str],
+) -> None:
+    """A sweep's TensorBoard is the sweep's own directory whether its body or the run route
+    starts it, and a trial's is its own run board: one key per directory."""
+    import tcip_mcp.tools.training_tools as tt
+    from tcip_mcp.experiments import board_of, find_sweep
+    from tcip_mcp.pipelines.training.tensorboard_manager import _key_of
+
+    trials: list[Path] = []
+
+    def one_trial_search(**kw) -> None:
+        trial = tt.open_trial(kw["sweep_dir"], "t0", {"lr": 0.1})
+        board_of(trial).mkdir()
+        (board_of(trial) / "events.out.tfevents.1.host").write_bytes(b"")
+        trials.append(trial)
+
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", one_trial_search)
+    sweep_id = tt.run_hyperparameter_search(
+        opened_project, base_config=real_hpo_base_config, n_trials=1,
+        search_seed=0)["sweep"]["sweep_id"]
+    for name in (sweep_id, trials[0].name):
+        resp = opened_client.post(f"/api/training/runs/{name}/tensorboard", json={})
+        assert resp.status_code == 200, resp.text
+
+    sweep_dir = find_sweep(sweep_id, project=opened_project)
+    assert sweep_dir is not None and board_of(sweep_dir) == sweep_dir
+    assert [_key_of(logdir) for logdir in tb_launches] == [
+        _key_of(str(sweep_dir)), _key_of(str(sweep_dir)), _key_of(str(board_of(trials[0])))]
+
+
+def test_a_recorded_sweep_relaunches_through_the_run_launch_door(
+    opened_client: TestClient, opened_project: Path, real_hpo_base_config: dict, monkeypatch,
+) -> None:
+    """A sweep relaunches from its own recorded input through the one launch door: a new sweep
+    is opened naming its source, its audit line names the person, and its body starts in a worker
+    process of its own over the new sweep's directory; a sweep relaunch never takes a partition."""
+    import tcip_store as ts
+    from tcip_mcp.audit import audit_log_key
+    from tcip_mcp.experiments import find_sweep, observe
+    from tests._producer_fixtures import fake_popen
+    from tests._verified_checkpoint_fixtures import opened_sweep
+
+    started: list[list[str]] = []
+    fake_popen(monkeypatch, started)
+    source = opened_sweep(opened_project, real_hpo_base_config).name
+    before = len(ts.read_log(audit_log_key(opened_project)).records)
+
+    resp = opened_client.post("/api/training/runs", json={"relaunched_from": source, "user": "tester"})
+
+    assert resp.status_code == 200, resp.text
+    minted = find_sweep(resp.json()["sweep_id"], project=opened_project)
+    assert minted is not None
+    assert observe(minted).record["input"]["relaunched_from"] == source
+    (line,) = ts.read_log(audit_log_key(opened_project)).records[before:]
+    assert (line["tool"], line["actor"]) == ("open_sweep", "user:tester")
+    assert [argv[-2:] for argv in started] == [["--run-dir", str(minted)]]
+
+    refused = opened_client.post("/api/training/runs", json={
+        "relaunched_from": source, "selection_dir": str(opened_project), "user": "tester"})
+    assert refused.status_code == 422

@@ -15,20 +15,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 from tcip_mcp import subject_registry as cr
-from tcip_web.app import app
 
 BLOOM_STATE = cr.Attribute("bloom_state", "categorical", ("closed", "open"))
 """The attribute of ``flower`` the second trait's positive state names."""
 FLOWERS = cr.SubjectRegistry(subjects=(cr.Subject(name="flower", attributes=(BLOOM_STATE,)),))
-
-
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _seed_currant_bloom_trait(tmp_path: Path) -> None:

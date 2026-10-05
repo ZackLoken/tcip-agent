@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { defaultSweepRequest, defaultTrainingRequest } from "@/tabs/agentPrompts";
+import { defaultTrainingRequest } from "@/tabs/agentPrompts";
 
 describe("defaultTrainingRequest", () => {
   it("names the dataset and the subject when both are selected", () => {
@@ -33,14 +33,7 @@ describe("defaultTrainingRequest", () => {
   });
 });
 
-describe("defaultSweepRequest", () => {
-  it("omits the dataset clause when nothing is selected", () => {
-    expect(defaultSweepRequest(null)).toContain("Run a hyperparameter sweep.");
-    expect(defaultSweepRequest("/data/valley")).toContain("sweep for the dataset at /data/valley.");
-  });
-});
-
-describe("both composer defaults", () => {
+describe("the composer default", () => {
   // snake_case, a dotted module path (segments at least two characters, so "e.g." never
   // trips it), a tools/ path, a .py suffix, or a backticked token.
   const IDENTIFIER_SHAPED =
@@ -51,12 +44,10 @@ describe("both composer defaults", () => {
     // on the breeder's own data, not on wording this function chose.
     expect(defaultTrainingRequest(null, null)).not.toMatch(IDENTIFIER_SHAPED);
     expect(defaultTrainingRequest("/data/valley", "leaf")).not.toMatch(IDENTIFIER_SHAPED);
-    expect(defaultSweepRequest(null)).not.toMatch(IDENTIFIER_SHAPED);
-    expect(defaultSweepRequest("/data/valley")).not.toMatch(IDENTIFIER_SHAPED);
   });
 
   it("catches every shape the guard names, and nothing narrower", () => {
-    expect("tuning.launch").toMatch(IDENTIFIER_SHAPED);
+    expect("training.launch").toMatch(IDENTIFIER_SHAPED);
     expect("`preflight`").toMatch(IDENTIFIER_SHAPED);
     expect("tools/list_tools.py").toMatch(IDENTIFIER_SHAPED);
     // An abbreviation, not a module path: each segment must be at least two characters.

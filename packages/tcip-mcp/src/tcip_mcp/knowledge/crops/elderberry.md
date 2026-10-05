@@ -157,7 +157,7 @@ confirmation (see expert flags).
 
 ## Annotation challenges
 
-Defer all mechanics (tools, formats, IoU, SAM) to the `annotation` skill. Elderberry-specific
+Defer all mechanics (tools, formats, IoU, proposal engines) to the `annotation` skill. Elderberry-specific
 difficulties:
 
 - Elderberry bears no catkins, strigs, racemes, or burrs (those belong to other TCIP
@@ -176,14 +176,11 @@ difficulties:
 - Color / gloss traits need an in-frame calibration target (`fruit_color_rgb`, `bloom_color`,
   `leaf_color_green`, the gloss traits); without it, color is not a valid measurement.
 - An image with no cyme / fruit / symptom is a real observation; never drop it. It trains as
-  a negative only once the breeder confirms it Complete; an empty label document alone reads as
-  unannotated (see CLAUDE.md's negative invariant).
+  a negative of a subject only once the breeder marks that subject complete on it; an empty label
+  document alone reads as unannotated.
 
 ## Measurement integrity (highest rule)
 
-Per the CLAUDE.md measurement-integrity invariant (never a geometric/pixel proxy; validate
-against a reference sized to the trait: GT annotations, or a breeder-confirmed sample of the
-model's own outputs (review-confirmation), before any result, not dense GT for every trait).
 Elderberry-specific traps:
 
 - `cyme_shatter_resistance` is a physical shake/retention test, not something a bounding box,

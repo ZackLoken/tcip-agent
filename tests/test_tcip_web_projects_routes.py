@@ -12,11 +12,6 @@ from tcip_web.app import app
 
 
 @pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
-
-
-@pytest.fixture
 def workspace_dir(tmp_path: Path) -> Path:
     """A fresh workspace the backend is started with."""
     from tcip_web.state import store

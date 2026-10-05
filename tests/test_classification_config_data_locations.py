@@ -5,25 +5,13 @@ their own label documents answering for them.
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 import pytest
 
 pytest.importorskip("torch")
 
-
-def _wait_terminal(project: Path, experiment_id: str, seconds: float = 120) -> dict:
-    from tcip_mcp.tools.training_tools import monitor_training
-
-    deadline = time.monotonic() + seconds
-    status: dict = {}
-    while time.monotonic() < deadline:
-        status = monitor_training(project, experiment_id)
-        if status.get("status") in ("completed", "failed", "canceled"):
-            return status
-        time.sleep(0.5)
-    pytest.fail(f"the training subprocess never reached a terminal state: {status}")
+from tests._verified_checkpoint_fixtures import run_to_end  # noqa: E402
 
 
 def test_a_classification_config_launches_with_images_and_csv_only(
@@ -55,8 +43,8 @@ def test_a_classification_config_launches_with_images_and_csv_only(
 
     assert "error" not in res, res
     assert res["pid"] != os.getpid()
-    status = _wait_terminal(tmp_path, res["experiment_id"])
-    assert status["status"] == "completed", status
+    status = run_to_end(tmp_path, res["experiment_id"])
+    assert status["state"] == "completed", status
 
 
 def test_a_classification_config_naming_a_missing_csv_is_refused_by_name(tmp_path: Path) -> None:

@@ -1,16 +1,12 @@
-"""Split sensitivity as a run_hyperparameter_search sweep factor: split_draws pairs data.split.seed as a grid
-axis with every sampled point through Ray's own BasicVariantGenerator(constant_grid_search=
-True); run_hyperparameter_search groups the resulting trials by point and picks the best by mean over each
-point's draws. tune_search is faked throughout the door's own tests here (as test_hpo_durable.py
-does), while the door's own trial_budget count imports Ray and counts a real search space
-whenever a bound is read, so a test above one draw or naming a trial_budget pays that import and
-no training; the module's real-Ray sweep tests (below, under "a real Ray sweep") keep running
-real trials as before.
-"""
+"""Split sensitivity as a sweep factor: split_draws pairs data.split.seed as a grid axis with
+every sampled point through Ray's own BasicVariantGenerator(constant_grid_search=True), and the
+sweep's outcome groups the trials by point and picks the best by mean over each point's draws."""
 
 from __future__ import annotations
 
 import pytest
+
+from tests._verified_checkpoint_fixtures import opened_sweep
 
 
 def _never_search(ran: list):
@@ -18,20 +14,16 @@ def _never_search(ran: list):
     refused sweep must never reach the search at all."""
     def fake_search(**kw):
         ran.append(1)
-        return {"study_name": kw.get("study_name")}
     return fake_search
 
 
-def _search(monkeypatch, **answer) -> dict:
+def _search(monkeypatch) -> dict:
     """Replace ``tune_search`` with a search that records the keywords it ran with into the
-    returned dict and answers finished: no best params, a best value of 0.1, one trial per sample,
-    each overridden by ``answer``."""
+    returned dict and runs no trial."""
     captured: dict = {}
 
     def fake_search(**kw):
         captured.update(kw)
-        return {"best_params": {}, "best_value": 0.1, "n_trials": kw["num_samples"],
-                "study_name": kw["study_name"], "all_trials": [], **answer}
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
     return captured
@@ -201,7 +193,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_wo
     tmp_path, monkeypatch,
 ):
     """A selection whose train-plus-val members hold one foreground group refuses the sweep
-    before minting, through the same redraw a run's launch makes."""
+    before minting, through the first point's own resolution."""
     import tcip_mcp.tools.training_tools as tt
 
     from tests.test_selection_binding import one_foreground_group_selection
@@ -218,9 +210,10 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_wo
     result = tt.run_hyperparameter_search(tmp_path, base_config=cfg, n_trials=1,
                         scheduler="none", split_draws=2, search_seed=0)
 
-    assert "fewer than the 2 the requested sides need" in result["error"]
+    assert any("fewer than the 2 the requested sides need" in issue
+               for issue in result["issues"]), result
     assert not ran
-    assert list(tmp_path.glob("hpo_*")) == []
+    assert tt.experiments.sweep_dirs(tmp_path) == []
 
 
 def test_run_hyperparameter_search_refuses_split_draws_when_auto_val_is_off(tmp_path, real_hpo_base_config, monkeypatch):
@@ -346,7 +339,7 @@ def test_tune_search_refuses_split_draws_without_the_axis_in_param_space(tmp_pat
         tune_search(
             objective_fn=lambda config, report: report(0.0),
             param_space={"lr": {"type": "loguniform", "low": 1e-4, "high": 1e-2}},
-            storage_path=str(tmp_path), split_draws=2, seed=0, project=tmp_path
+            sweep_dir=tmp_path / "sweep", split_draws=2, seed=0
         )
 
 
@@ -573,10 +566,50 @@ def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection_and_s
     assert cfg["data"]["split"] == {"selection_dir": str(selection_dir),
                                     "seed": 42}  # the caller's own copy
 
-    manifest = tt.monitor_training(tmp_path, sweep_id=result["study_name"])["input"]
+    manifest = result["sweep"]["input"]
     recorded_split = manifest["base_config"]["data"]["split"]
     assert recorded_split["redraw_within_selection"] is True
     assert recorded_split["seed"] == 42
+
+
+def test_a_bound_sweep_reads_and_redraws_its_selection_once_on_opening(tmp_path, monkeypatch):
+    """The first point's resolution is the one read and the one redraw of a bound sweep's
+    selection before its directory is opened."""
+    import tcip_mcp.pipelines.data.selection as selection_mod
+    import tcip_mcp.pipelines.data.split_construction as split_mod
+    import tcip_mcp.tools.training_tools as tt
+    from tcip_mcp.tools.data_tools import draw_splits
+
+    from tests.test_selection_binding import SUBJECT, _two_subject_two_date_dataset
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    selection_dir = tmp_path / "m"
+    assert "error" not in draw_splits(
+        tmp_path, str(root), output_path=str(selection_dir), subject=SUBJECT, seed=2,
+        val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+    calls = {"read": 0, "redraw": 0}
+    real_read, real_redraw = selection_mod.read_selection, split_mod.redrawn_selection
+
+    def read(*args, **kwargs):
+        calls["read"] += 1
+        return real_read(*args, **kwargs)
+
+    def redraw(*args, **kwargs):
+        calls["redraw"] += 1
+        return real_redraw(*args, **kwargs)
+
+    monkeypatch.setattr(selection_mod, "read_selection", read)
+    monkeypatch.setattr(split_mod, "redrawn_selection", redraw)
+    opened = tt.open_sweep(
+        tmp_path, _bound_hpo_config(selection_dir), {"lr": {"type": "loguniform", "low": 1e-4,
+                                                            "high": 1e-2}},
+        n_trials=1, search_alg="random", scheduler="none", grace_period=1, reduction_factor=2,
+        warm_start=False, baseline_params=None, max_concurrent=1, resources_per_trial=None,
+        split_draws=2, split_draw_seeds=None, search_seed=0, trial_budget=2,
+        relaunched_from=None, actor=None)
+
+    assert not isinstance(opened, dict), opened
+    assert calls == {"read": 1, "redraw": 1}
 
 
 def test_run_hyperparameter_search_admits_split_draws_bound_with_auto_val_false(tmp_path, monkeypatch):
@@ -609,19 +642,19 @@ def test_run_hyperparameter_search_admits_split_draws_and_derives_seeds_from_the
     the space Ray actually searches carries the paired grid axis."""
     import tcip_mcp.tools.training_tools as tt
 
-    captured = _search(monkeypatch, best_params={"lr": 0.1}, best_value=0.2)
+    captured = _search(monkeypatch)
     real_hpo_base_config["data"]["split"]["seed"] = 42
 
     result = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=2,
                         scheduler="none", split_draws=3, trial_budget=6, search_seed=0)
 
-    assert "error" not in result
+    assert "error" not in result, result
     assert captured["split_draws"] == 3
     assert captured["param_space"]["data.split.seed"] == {
         "type": "categorical", "choices": [42, 43, 44],
     }
 
-    manifest = tt.monitor_training(tmp_path, sweep_id=result["study_name"])["input"]
+    manifest = result["sweep"]["input"]
     assert manifest["split_draws"] == 3
     assert manifest["split_draw_seeds"] == [42, 43, 44]
     assert "data.split.seed" not in manifest["param_space"]  # the caller's own axes, unaugmented
@@ -635,7 +668,7 @@ def test_run_hyperparameter_search_admits_split_draws_with_explicit_seeds(tmp_pa
     result = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=1,
                         scheduler="none", split_draws=2, split_draw_seeds=[7, 99], trial_budget=2, search_seed=0)
 
-    assert "error" not in result
+    assert "error" not in result, result
     assert captured["param_space"]["data.split.seed"]["choices"] == [7, 99]
 
 
@@ -654,7 +687,7 @@ def test_run_hyperparameter_search_admits_split_draws_with_a_native_search_alg(
     result = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=1,
                         search_alg=search_alg, scheduler="none", split_draws=2, trial_budget=budget, search_seed=0)
 
-    assert "error" not in result
+    assert "error" not in result, result
     assert captured["search_alg"] == search_alg
 
 
@@ -674,7 +707,7 @@ def test_run_hyperparameter_search_admits_split_draws_for_instance_seg(tmp_path,
     result = tt.run_hyperparameter_search(tmp_path, base_config=cfg, n_trials=1,
                         scheduler="none", split_draws=2, trial_budget=2, search_seed=0)
 
-    assert "error" not in result
+    assert "error" not in result, result
 
 
 def test_run_hyperparameter_search_admits_split_draws_with_explicit_auto_val_true(
@@ -692,7 +725,7 @@ def test_run_hyperparameter_search_admits_split_draws_with_explicit_auto_val_tru
     result = tt.run_hyperparameter_search(tmp_path, base_config=cfg, n_trials=1,
                         scheduler="none", split_draws=2, trial_budget=2, search_seed=0)
 
-    assert "error" not in result
+    assert "error" not in result, result
 
 
 def test_run_hyperparameter_search_admits_split_draws_with_a_warm_start_not_naming_the_seed(
@@ -710,7 +743,7 @@ def test_run_hyperparameter_search_admits_split_draws_with_a_warm_start_not_nami
         trial_budget=2, search_seed=0
     )
 
-    assert "error" not in result
+    assert "error" not in result, result
     assert captured["warm_start"] is True
 
 
@@ -729,7 +762,7 @@ def test_run_hyperparameter_search_admits_a_bare_seed_axis_beside_split_draws(
         n_trials=1, scheduler="none", split_draws=2, trial_budget=2, search_seed=0
     )
 
-    assert "error" not in result
+    assert "error" not in result, result
     assert "seed" in captured["param_space"]
     assert "data.split.seed" in captured["param_space"]
 
@@ -821,7 +854,7 @@ def test_run_hyperparameter_search_admits_a_budget_the_count_fits_and_records_it
 
     assert "error" not in result, result
 
-    manifest = tt.monitor_training(tmp_path, sweep_id=result["study_name"])["input"]
+    manifest = result["sweep"]["input"]
     assert manifest["trial_budget"] == 6
 
 
@@ -862,21 +895,8 @@ def test_run_hyperparameter_search_admits_a_one_draw_launch_with_no_stated_budge
 
     assert "error" not in result, result
 
-    manifest = tt.monitor_training(tmp_path, sweep_id=result["study_name"])["input"]
+    manifest = result["sweep"]["input"]
     assert manifest["trial_budget"] is None
-
-
-def _record_source_sweep(tmp_path, study_name: str, base_config: dict, monkeypatch) -> None:
-    """A finished sweep named ``study_name``, recorded by ``run_hyperparameter_search`` itself
-    over a stubbed search: only its directory's ``sweep.json`` is checked by relaunched_from."""
-    import tcip_mcp.tools.training_tools as tt
-
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", lambda **kw: {
-        "best_params": {}, "best_value": 0.1, "n_trials": 1, "study_name": kw["study_name"],
-        "all_trials": []})
-    source = tt.run_hyperparameter_search(tmp_path, base_config=base_config, n_trials=1,
-                                          scheduler="none", study_name=study_name, search_seed=0)
-    assert "error" not in source, source
 
 
 def test_run_hyperparameter_search_relaunch_with_no_budget_replays_as_recorded(
@@ -886,13 +906,13 @@ def test_run_hyperparameter_search_relaunch_with_no_budget_replays_as_recorded(
     all, whatever split_draws says: the door counts nothing and the search is reached."""
     import tcip_mcp.tools.training_tools as tt
 
-    _record_source_sweep(tmp_path, "hpo_relaunch_src1", real_hpo_base_config, monkeypatch)
+    source = opened_sweep(tmp_path, real_hpo_base_config).name
 
     _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, n_trials=1, scheduler="none",
-        split_draws=2, relaunched_from="hpo_relaunch_src1", search_seed=0
+        split_draws=2, relaunched_from=source, search_seed=0
     )
 
     assert "error" not in result, result
@@ -905,14 +925,14 @@ def test_run_hyperparameter_search_relaunch_with_a_budget_is_still_checked(
     the count (2, one draw's worth times two draws under random) exceeds trial_budget=1."""
     import tcip_mcp.tools.training_tools as tt
 
-    _record_source_sweep(tmp_path, "hpo_relaunch_src2", real_hpo_base_config, monkeypatch)
+    source = opened_sweep(tmp_path, real_hpo_base_config).name
 
     ran = []
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, n_trials=1, scheduler="none",
-        split_draws=2, relaunched_from="hpo_relaunch_src2", trial_budget=1, search_seed=0
+        split_draws=2, relaunched_from=source, trial_budget=1, search_seed=0
     )
 
     assert "error" in result and "2" in result["error"]
@@ -1055,27 +1075,44 @@ def test_run_hyperparameter_search_an_empty_param_space_above_one_draw_counts_th
 # -- grouping and the best-by-mean -------------------------------------------------
 
 
-def _trial(lr: float, seed: int | None, value: float | None, status: str = "completed") -> dict:
-    """One trial as the sweep projections read it (``training_tools._trial_row``'s shape)."""
-    params: dict = {"lr": lr} if seed is None else {"lr": lr, "data.split.seed": seed}
-    return {"trial_id": f"{lr}_{seed}", "status": status,
-            "error": "boom" if status == "failed" else None, "has_metrics": True,
-            "params": params, "value": value}
+def _trial_rows(sweep, trials: list[tuple[float, int | None, float | None]]) -> list[dict]:
+    """Each ``(lr, seed, value)`` trial opened under ``sweep`` by its own producer
+    (``training_tools.open_trial``), ``value`` logged as its ``selection`` through the envelope's
+    own sink and the trial ended ``completed``, or ``failed`` with nothing logged when ``value``
+    is ``None``; the rows the project's listing reads for them, in that order."""
+    from tcip_mcp.experiments import project_of_run, run_rows, write_final_status
+    from tcip_mcp.tools.training_tools import open_trial
+    from tests._verified_checkpoint_fixtures import log_epoch
+
+    names = []
+    for i, (lr, seed, value) in enumerate(trials):
+        point: dict = {"lr": lr} if seed is None else {"lr": lr, "data.split.seed": seed}
+        trial = open_trial(sweep, f"t{i}", point)
+        if value is not None:
+            log_epoch(trial, 1, {"selection": value})
+        write_final_status(trial, "completed" if value is not None else "failed",
+                           None if value is not None else "boom", checkpoint=None)
+        names.append(trial.name)
+    by_name = {row.experiment_id: row for row in run_rows(project_of_run(sweep))}
+    return [by_name[name] for name in names]
 
 
-def _two_draw_input(project, real_hpo_base_config) -> dict:
-    """The input a two-draw sweep over ``real_hpo_base_config`` records, written by its own
-    writer (``open_sweep``): its objective is lower=better and its seeds are 42 and 43."""
-    import tcip_mcp.tools.training_tools as tt
+def _two_draw_sweep(project, real_hpo_base_config):
+    """A two-draw sweep over ``real_hpo_base_config`` opened by its own writer (``open_sweep``):
+    its objective is lower=better and its seeds are 42 and 43. Returns its directory."""
+    from tests._verified_checkpoint_fixtures import opened_sweep
 
-    opened = tt.open_sweep(
-        project, real_hpo_base_config, {"lr": {"type": "categorical", "choices": [0.1, 0.2]}},
-        n_trials=2, search_alg="random", scheduler="none", grace_period=5, reduction_factor=3,
-        warm_start=False, baseline_params=None, max_concurrent=1, resources_per_trial=None,
-        study_name=None, split_draws=2, split_draw_seeds=[42, 43], search_seed=0,
-        trial_budget=4, relaunched_from=None, actor=None)
-    assert not isinstance(opened, dict), opened
-    return opened.record
+    return opened_sweep(project, real_hpo_base_config,
+                        param_space={"lr": {"type": "categorical", "choices": [0.1, 0.2]}},
+                        n_trials=2, split_draws=2, split_draw_seeds=[42, 43], trial_budget=4)
+
+
+def _outcome(project, real_hpo_base_config, trials) -> dict:
+    """What ``trials`` (:func:`_trial_rows`) of a :func:`_two_draw_sweep` amount to."""
+    from tcip_mcp.experiments import observe, sweep_outcome
+
+    sweep = _two_draw_sweep(project, real_hpo_base_config)
+    return sweep_outcome(_trial_rows(sweep, trials), observe(sweep).record)
 
 
 def test_a_sweeps_outcome_groups_trials_by_point_and_picks_the_best_by_mean(
@@ -1083,14 +1120,10 @@ def test_a_sweeps_outcome_groups_trials_by_point_and_picks_the_best_by_mean(
 ):
     """Two points, two draws each; real_hpo_base_config's own metric is lower=better, so the
     point with the lower mean wins, and every point keeps its own block."""
-    import tcip_mcp.tools.training_tools as tt
-
-    trials = [
-        _trial(0.1, 42, 0.5), _trial(0.1, 43, 0.7),   # mean 0.6
-        _trial(0.2, 42, 0.2), _trial(0.2, 43, 0.4),   # mean 0.3 (best)
-    ]
-
-    outcome = tt.sweep_outcome(trials, _two_draw_input(tmp_path, real_hpo_base_config))
+    outcome = _outcome(tmp_path, real_hpo_base_config, [
+        (0.1, 42, 0.5), (0.1, 43, 0.7),   # mean 0.6
+        (0.2, 42, 0.2), (0.2, 43, 0.4),   # mean 0.3 (best)
+    ])
 
     assert outcome["best_params"] == {"lr": 0.2}
     assert outcome["best_value"] == pytest.approx(0.3)
@@ -1106,14 +1139,10 @@ def test_a_sweeps_outcome_groups_trials_by_point_and_picks_the_best_by_mean(
 def test_a_sweeps_outcome_marks_a_group_with_a_failed_draw_ineligible(
     tmp_path, real_hpo_base_config,
 ):
-    import tcip_mcp.tools.training_tools as tt
-
-    trials = [
-        _trial(0.1, 42, 0.9), _trial(0.1, 43, None, status="failed"),  # ineligible
-        _trial(0.2, 42, 0.4), _trial(0.2, 43, 0.5),   # both complete, eligible
-    ]
-
-    outcome = tt.sweep_outcome(trials, _two_draw_input(tmp_path, real_hpo_base_config))
+    outcome = _outcome(tmp_path, real_hpo_base_config, [
+        (0.1, 42, 0.9), (0.1, 43, None),   # ineligible
+        (0.2, 42, 0.4), (0.2, 43, 0.5),   # both complete, eligible
+    ])
 
     # The lr=0.1 point never became eligible, so lr=0.2 wins even though 0.9 alone looked worse.
     assert outcome["best_params"] == {"lr": 0.2}
@@ -1129,14 +1158,10 @@ def test_a_sweeps_outcome_never_picks_a_repeated_point_that_never_completed_ever
     that eligible on a mean over one seed twice, and its low value (0.5) would beat the fully
     completed point (0.85) under this fixture's lower-is-better metric; grouping by the planned
     seeds themselves keeps it ineligible."""
-    import tcip_mcp.tools.training_tools as tt
-
-    trials = [
-        _trial(0.1, 42, 0.5), _trial(0.1, 42, 0.6), _trial(0.1, 43, None, status="failed"),
-        _trial(0.2, 42, 0.9), _trial(0.2, 43, 0.8),
-    ]
-
-    outcome = tt.sweep_outcome(trials, _two_draw_input(tmp_path, real_hpo_base_config))
+    outcome = _outcome(tmp_path, real_hpo_base_config, [
+        (0.1, 42, 0.5), (0.1, 42, 0.6), (0.1, 43, None),
+        (0.2, 42, 0.9), (0.2, 43, 0.8),
+    ])
 
     assert outcome["best_params"] == {"lr": 0.2}
     assert outcome["best_value"] == pytest.approx(0.85)
@@ -1145,11 +1170,7 @@ def test_a_sweeps_outcome_never_picks_a_repeated_point_that_never_completed_ever
 def test_a_sweeps_outcome_is_a_null_best_when_no_point_is_eligible(
     tmp_path, real_hpo_base_config,
 ):
-    import tcip_mcp.tools.training_tools as tt
-
-    trials = [_trial(0.1, 42, 0.9), _trial(0.1, 43, None, status="failed")]
-
-    outcome = tt.sweep_outcome(trials, _two_draw_input(tmp_path, real_hpo_base_config))
+    outcome = _outcome(tmp_path, real_hpo_base_config, [(0.1, 42, 0.9), (0.1, 43, None)])
 
     assert outcome["best_params"] is None
     assert outcome["best_value"] is None
@@ -1159,14 +1180,17 @@ def test_a_sweeps_outcome_is_a_null_best_when_no_point_is_eligible(
 # -- group_split_draws direct coverage ----------------------------------------------
 
 
-def test_group_split_draws_with_no_planned_seeds_groups_a_sweep_without_the_axis():
+def test_group_split_draws_with_no_planned_seeds_groups_a_sweep_without_the_axis(
+    tmp_path, real_hpo_base_config,
+):
     """Trials with no data.split.seed axis at all (a sweep that never asked for draws) still
     group cleanly with planned_seeds=[]: one trivially-complete block per distinct point, and a
     point whose trial failed is not eligible."""
-    from tcip_mcp.tools.training_tools import group_split_draws
+    from tcip_mcp.experiments import group_split_draws
+    from tests._verified_checkpoint_fixtures import opened_sweep
 
-    trials = [_trial(0.1, None, 0.4), _trial(0.2, None, 0.6),
-              _trial(0.3, None, None, status="failed")]
+    trials = _trial_rows(opened_sweep(tmp_path, real_hpo_base_config),
+                         [(0.1, None, 0.4), (0.2, None, 0.6), (0.3, None, None)])
 
     groups = group_split_draws(trials, [])
 
@@ -1180,14 +1204,17 @@ def test_group_split_draws_with_no_planned_seeds_groups_a_sweep_without_the_axis
     assert by_point[(("lr", 0.3),)]["eligible"] is False
 
 
-def test_group_split_draws_ineligible_when_a_repeated_point_never_completes_every_planned_seed():
+def test_group_split_draws_ineligible_when_a_repeated_point_never_completes_every_planned_seed(
+    tmp_path, real_hpo_base_config,
+):
     """A point Ray sampled twice under the same seed (grid search repeats every point per
     sample; a categorical-only random space collides) with its other planned seed failing:
     two complete values reach the split count, but only one of the two planned seeds ever
     completed, so the point is not eligible on a mean over that one seed twice."""
-    from tcip_mcp.tools.training_tools import group_split_draws
+    from tcip_mcp.experiments import group_split_draws
 
-    trials = [_trial(0.1, 42, 0.5), _trial(0.1, 42, 0.6), _trial(0.1, 43, None, status="failed")]
+    trials = _trial_rows(_two_draw_sweep(tmp_path, real_hpo_base_config),
+                         [(0.1, 42, 0.5), (0.1, 42, 0.6), (0.1, 43, None)])
 
     groups = group_split_draws(trials, [42, 43])
 
@@ -1205,23 +1232,12 @@ def test_group_split_draws_ineligible_when_a_repeated_point_never_completes_ever
 
 @pytest.mark.ray_cluster
 def test_tune_search_split_draws_end_to_end_pairs_every_point_with_every_seed(tmp_path, monkeypatch):
-    """A real Ray sweep over a trivial objective (the shape test_hpo_ray_detached_exit.py's
-    subprocess script uses: one value reported, resources_per_trial={"cpu": 1}, storage_path
-    under tmp_path): split_draws=2 pairs the seed grid with every sampled point through
-    BasicVariantGenerator(constant_grid_search=True), so each of the two sampled lr points
-    trains once per seed, each trial marking the point it was handed in a file of its own, and
-    group_split_draws groups them into two eligible points.
-
-    Not restricted to one platform: test_imbalance_aug_hpo.py's own
-    test_tune_search_warm_start_and_optimizes already starts a real Ray cluster on every
-    platform through this identical call (only pytest.importorskip("ray")), so this one does
-    too, rather than carrying test_hpo_ray_detached_exit.py's Windows-only skip, which guards a
-    console-signal exit path this test never touches.
-    """
+    """A real Ray sweep over a trivial objective: split_draws=2 pairs the seed grid with every
+    sampled point, so each of the two sampled lr points trains once per seed, each trial marking
+    the point it was handed in a file of its own."""
     pytest.importorskip("ray")
 
     from tcip_mcp.pipelines.training.hpo import tune_search
-    from tcip_mcp.tools.training_tools import group_split_draws
 
     marks = tmp_path / "marks"
     marks.mkdir()
@@ -1240,26 +1256,19 @@ def test_tune_search_split_draws_end_to_end_pairs_every_point_with_every_seed(tm
         search_alg="random",
         scheduler=None,
         resources_per_trial={"cpu": 1},
-        storage_path=str(tmp_path),
-        split_draws=2, seed=0, project=tmp_path
+        sweep_dir=tmp_path / "sweep",
+        split_draws=2, seed=0
     )
 
-    trials = []
     seeds_by_lr: dict[str, set[int]] = {}
     for mark in marks.iterdir():
         lr, seed = mark.name.split("__")
         seeds_by_lr.setdefault(lr, set()).add(int(seed))
-        trials.append({"status": "completed", "value": 1.0,
-                       "params": {"lr": lr, "data.split.seed": int(seed)}})
 
-    assert len(trials) == 4  # 2 sampled points x 2 draws
+    assert len(list(marks.iterdir())) == 4  # 2 sampled points x 2 draws
     assert len(seeds_by_lr) == 2
     for seeds in seeds_by_lr.values():
         assert seeds == {42, 43}
-
-    groups = group_split_draws(trials, [42, 43])
-    eligible = [g for g in groups if g["eligible"]]
-    assert len(eligible) == 2
 
 
 # -- the single-source spatial-strip leg -----------------------------------------
@@ -1284,10 +1293,9 @@ def _one_source_tiled_cfg(images_dir) -> dict:
 def test_run_hyperparameter_search_refuses_split_draws_over_a_single_source_spatial_split(
     tmp_path, monkeypatch,
 ):
-    """One admitted source under a built-in detection config with tiling on takes the
-    single-source spatial-strip path, whose partition no draw of data.split.seed varies:
-    split_draws above 1 refuses, naming the one admitted source and the path, and never
-    reaches the search."""
+    """One admitted source under a built-in detection config with tiling on resolves to a split
+    over its own pixels, whose partition no draw of data.split.seed varies: split_draws above 1
+    refuses, naming the one admitted source and its split, and never reaches the search."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     import tcip_mcp.tools.training_tools as tt
@@ -1295,6 +1303,8 @@ def test_run_hyperparameter_search_refuses_split_draws_over_a_single_source_spat
 
     images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     cfg = _one_source_tiled_cfg(images_dir)
+    # The default holdout strip is narrower than this mosaic's tile lattice admits.
+    cfg["data"]["split"]["holdout_ratio"] = 0.1
 
     ran = []
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
@@ -1302,17 +1312,16 @@ def test_run_hyperparameter_search_refuses_split_draws_over_a_single_source_spat
     result = tt.run_hyperparameter_search(tmp_path, base_config=cfg, n_trials=1,
                         scheduler="none", split_draws=2, search_seed=0)
 
-    assert "error" in result
-    assert "one trainable source" in result["error"]
-    assert "spatial strip path" in result["error"]
+    assert "one admitted source" in result["error"]
+    assert "over its own pixels" in result["error"]
     assert not ran
 
 
 def test_run_hyperparameter_search_admits_a_single_source_spatial_config_at_one_draw(
     tmp_path, monkeypatch,
 ):
-    """The leg sits behind split_draws's own <= 1 return: the identical single-source config
-    that refuses above 1 is admitted at split_draws=1, since split_draws governs nothing there."""
+    """The identical single-source config that refuses above 1 is admitted at split_draws=1,
+    since split_draws governs nothing there."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     import tcip_mcp.tools.training_tools as tt
@@ -1328,14 +1337,14 @@ def test_run_hyperparameter_search_admits_a_single_source_spatial_config_at_one_
     result = tt.run_hyperparameter_search(tmp_path, base_config=cfg, n_trials=1,
                         scheduler="none", split_draws=1, search_seed=0)
 
-    assert "error" not in result
+    assert "error" not in result, result
 
 
 def test_run_hyperparameter_search_admits_split_draws_over_a_two_source_tiled_config(
     tmp_path, monkeypatch,
 ):
-    """An unbound, built-in detection config with tiling on that admits two or more sources never reaches this leg's own single-source branch, so
-    split_draws above 1 mints the sweep."""
+    """An unbound, built-in detection config with tiling on that admits two or more sources
+    resolves to a drawn split, so split_draws above 1 mints the sweep."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     import tcip_mcp.tools.training_tools as tt
@@ -1349,7 +1358,7 @@ def test_run_hyperparameter_search_admits_split_draws_over_a_two_source_tiled_co
     result = tt.run_hyperparameter_search(tmp_path, base_config=cfg, n_trials=1,
                         scheduler="none", split_draws=2, trial_budget=2, search_seed=0)
 
-    assert "error" not in result
+    assert "error" not in result, result
 
 
 def test_split_draws_over_one_bespoke_source_refuse_the_validation_they_cannot_draw(
@@ -1383,8 +1392,8 @@ def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     """A config an earlier leg already refuses (here, ``data.auto_val`` off) reads
-    that leg's own reason, never this one's: the spatial-strip leg runs last and is never
-    reached for a config an earlier leg already rejected."""
+    that leg's own reason, never the spatial split's: that leg reads the first point's
+    resolution, which a config an earlier leg rejected never reaches."""
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -1397,5 +1406,5 @@ def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(
                         scheduler="none", split_draws=2, search_seed=0)
 
     assert "error" in result and "auto_val" in result["error"]
-    assert "spatial strip path" not in result["error"]
+    assert "over its own pixels" not in result["error"]
     assert not ran

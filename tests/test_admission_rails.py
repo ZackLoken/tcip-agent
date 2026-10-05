@@ -18,28 +18,22 @@ from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject  # noqa: E402
 
 from tests._producer_fixtures import (  # noqa: E402
-    admit_over, dataset_over, image_label_key, label_image, mark_complete, registry_over,
+    admit_over, box_annotation, dataset_over, image_label_key, label_image, mark_complete,
+    registry_over, write_image,
 )
 
 BUD = "bud"
 
 
 def _make_images(images_dir, stems):
-    images_dir.mkdir(parents=True, exist_ok=True)
     for s in stems:
-        Image.new("RGB", (100, 100)).save(images_dir / f"{s}.jpg")
+        write_image(images_dir / f"{s}.jpg", (100, 100))
 
 
 def _label(images_dir, stem, annotations, **kwargs):
     """``annotations`` as the label document of the 100px image ``<stem>.jpg`` of
     ``images_dir``."""
     label_image(images_dir / f"{stem}.jpg", annotations, 100, 100, **kwargs)
-
-
-def _box(x1, y1, x2, y2, *, subject=BUD, score=None, **attrs):
-    """A name-based detection annotation (a prediction when ``score`` is set)."""
-    return Annotation(subject=subject, geometry=BBox(x1, y1, x2, y2), score=score,
-                      attributes=dict(attrs))
 
 
 def _poly(points, *, subject=BUD, **attrs):
@@ -90,8 +84,8 @@ def test_a_document_with_no_image_is_not_admitted(tmp_path):
     deleted or renamed names nothing to train on, so it never enters the run."""
     images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["kept"])
-    _label(images, "kept", [_box(10, 10, 50, 50)])
-    json_io.write_label_document(label_key(tmp_path, UNDATED_BUCKET, "orphan"), [_box(10, 10, 50, 50)],
+    _label(images, "kept", [box_annotation(10, 10, 50, 50)])
+    json_io.write_label_document(label_key(tmp_path, UNDATED_BUCKET, "orphan"), [box_annotation(10, 10, 50, 50)],
                                  100, 100)
 
     admitted = admit_over(images, subject=BUD)
@@ -117,7 +111,7 @@ def test_a_noncanonical_labelme_record_refuses_rather_than_reading_as_empty(tmp_
 def test_detection_reads_its_samples_own_documents(tmp_path):
     images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["img0"])
-    _label(images, "img0", [_box(10, 10, 50, 50)])
+    _label(images, "img0", [box_annotation(10, 10, 50, 50)])
 
     ds = dataset_over("detection", images, subject=BUD)
     _, target = ds[0]
@@ -180,7 +174,7 @@ def test_class_distribution_counts_only_this_loaders_own_samples(tmp_path):
     stems = [f"img{i}" for i in range(4)]
     _make_images(images, stems)
     for i, stem in enumerate(stems):
-        _label(images, stem, [_box(10, 10, 30, 30)] * (i + 1))
+        _label(images, stem, [box_annotation(10, 10, 30, 30)] * (i + 1))
 
     admitted = admit_over(images, subject=BUD)
     samples = admitted.samples({stem: "train" for stem in stems}, lambda s: s)
@@ -258,7 +252,7 @@ def test_count_label_lines_reads_a_documents_instances(tmp_path):
 
     images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["a", "neg"])
-    _label(images, "a", [_box(0, 0, 10, 10), _box(0, 0, 20, 20)])
+    _label(images, "a", [box_annotation(0, 0, 10, 10), box_annotation(0, 0, 20, 20)])
     _label(images, "neg", [], keep_empty=True)
     assert count_label_lines(json_io.read_label_document(image_label_key(images / "a.jpg")),
                              ClassScope()) == 2
@@ -273,7 +267,7 @@ def _rail_fixture(tmp_path):
     negative."""
     images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["ann", "empty", "nolabel", "neg"])
-    _label(images, "ann", [_box(4, 4, 12, 12)], keep_empty=True)
+    _label(images, "ann", [box_annotation(4, 4, 12, 12)], keep_empty=True)
     _label(images, "empty", [], keep_empty=True)
     _label(images, "neg", [], keep_empty=True)
     mark_complete(images / "neg.jpg", BUD, project=tmp_path)
@@ -389,7 +383,7 @@ def test_a_confirmation_does_not_leak_across_subjects(tmp_path):
     images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["ann", "shared"])
     # Every subject's annotation records share one per-image document; subject is a field in it.
-    _label(images, "ann", [_box(4, 4, 12, 12, subject="bud"), _box(4, 4, 12, 12, subject="bush")],
+    _label(images, "ann", [box_annotation(4, 4, 12, 12, subject="bud"), box_annotation(4, 4, 12, 12, subject="bush")],
            keep_empty=True)
     _label(images, "shared", [], keep_empty=True)
     # Confirmed negative for bud only; the breeder never judged it for bush.
@@ -406,7 +400,7 @@ def test_a_negative_mark_dies_with_an_edit_of_its_subject(tmp_path):
     images = _rail_fixture(tmp_path)
     neg = image_label_key(images / "neg.jpg")
     marks = json_io.read_label_document(neg).marks
-    json_io.write_label_document(neg, [_box(4, 4, 12, 12)], 100, 100, marks=marks)
+    json_io.write_label_document(neg, [box_annotation(4, 4, 12, 12)], 100, 100, marks=marks)
 
     assert json_io.read_label_document(neg).marks == {}
     tallies = admit_over(images, subject=BUD).tallies
@@ -453,10 +447,10 @@ def test_detection_and_its_tiles_keep_a_partially_assessed_stem(tmp_path):
     images_dir = root / "images" / UNDATED_BUCKET
     _make_images(images_dir, ["complete", "partial"])
     _write_registry_for(root, attribute="opening", values=("open", "closed"))
-    _label(images_dir, "complete", [_box(10, 10, 30, 30, opening="open")])
+    _label(images_dir, "complete", [box_annotation(10, 10, 30, 30, opening="open")])
     _label(images_dir, "partial", [
-        _box(10, 10, 30, 30, opening="closed"),
-        _box(40, 40, 60, 60),  # unassessed: no opening value at all
+        box_annotation(10, 10, 30, 30, opening="closed"),
+        box_annotation(40, 40, 60, 60),  # unassessed: no opening value at all
     ])
 
     ds = dataset_over("detection", images_dir, subject=BUD)

@@ -11,19 +11,18 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from PIL import Image  # noqa: E402
-
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
-from tests._producer_fixtures import dataset_over, label_image, run_over  # noqa: E402
+from tests._producer_fixtures import (  # noqa: E402
+    dataset_over, label_image, run_over, write_image,
+)
 
 BUD = "bud"
 
 
 def _make_images(images_dir, stems, size):
-    images_dir.mkdir(parents=True, exist_ok=True)
     for stem in stems:
-        Image.new("RGB", size).save(images_dir / f"{stem}.jpg")
+        write_image(images_dir / f"{stem}.jpg", size)
 
 
 def _write(images_dir, stem, boxes, size):

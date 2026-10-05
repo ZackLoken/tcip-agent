@@ -8,20 +8,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from tcip_annotation.state import Annotation, BBox
-from tcip_web.app import app
+from tcip_annotation.state import Annotation
 from tests._audit_fixtures import AUDIT_ENTRY_KEYS, audit_rows
-from tests._producer_fixtures import image_label_key, label_image
-
-
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
-
-
-def _bud(x1, y1, x2, y2, *, subject: str = "bud") -> Annotation:
-    return Annotation(subject=subject, geometry=BBox(x1, y1, x2, y2))
-
+from tests._producer_fixtures import box_annotation, image_label_key, label_image
 
 DATE = "2026-03-02"
 
@@ -36,7 +25,7 @@ def _unreadable(root: Path, stem: str) -> None:
     decode."""
     from tests._record_damage_fixtures import damage_record
 
-    _label(root, stem, [_bud(1, 1, 2, 2)])
+    _label(root, stem, [box_annotation(1, 1, 2, 2)])
     damage_record(image_label_key(root / "images" / DATE / f"{stem}.jpg"), b"not json {][")
 
 
@@ -45,7 +34,7 @@ def test_a_missing_registry_answers_discovery_never_a_registry(
 ) -> None:
     """With no registry stored, the load answers no registry and the names the labels hold as
     discovery, never a registry made of those names."""
-    _label(tmp_path, "IMG_A", [_bud(50, 50, 60, 60)])
+    _label(tmp_path, "IMG_A", [box_annotation(50, 50, 60, 60)])
 
     resp = client.get("/api/subjects/load",
                       params={"dataset_root": str(tmp_path), "date": "2026-04-01"})
@@ -305,7 +294,7 @@ def test_load_derives_subjects_from_labels_when_registry_absent(
     client: TestClient, tmp_path: Path
 ) -> None:
     # No saved registry, but labels exist: the subjects present are discovered, sorted.
-    _label(tmp_path, "IMG_A", [_bud(50, 50, 60, 60), _bud(20, 20, 30, 30, subject="bush")])
+    _label(tmp_path, "IMG_A", [box_annotation(50, 50, 60, 60), box_annotation(20, 20, 30, 30, subject="bush")])
     load = client.get(
         "/api/subjects/load",
         params={"dataset_root": str(tmp_path), "date": DATE},
@@ -318,7 +307,7 @@ def test_load_reports_an_unreadable_label_and_still_derives_the_rest(
     client: TestClient, tmp_path: Path
 ) -> None:
     """One corrupt label document costs its own name, never the whole discovery scan."""
-    _label(tmp_path, "IMG_A", [_bud(50, 50, 60, 60)])
+    _label(tmp_path, "IMG_A", [box_annotation(50, 50, 60, 60)])
     _unreadable(tmp_path, "IMG_B")
 
     load = client.get(
@@ -335,7 +324,7 @@ def test_load_reports_an_unreadable_label_beside_a_saved_registry(
     """A saved subjects.json answers the subject list, but a corrupt label document of the
     capture is still worth surfacing: the registry load must not stop scanning for unreadable
     documents just because a registry was found."""
-    _label(tmp_path, "IMG_A", [_bud(50, 50, 60, 60)])
+    _label(tmp_path, "IMG_A", [box_annotation(50, 50, 60, 60)])
     _unreadable(tmp_path, "IMG_B")
 
     save = client.post(
@@ -358,13 +347,13 @@ def test_load_derived_subjects_follow_a_label_write(
 ) -> None:
     """Discovery answers the documents as they are stored now, never a scan from before a
     write."""
-    _label(tmp_path, "IMG_A", [_bud(50, 50, 60, 60)])
+    _label(tmp_path, "IMG_A", [box_annotation(50, 50, 60, 60)])
 
     params = {"dataset_root": str(tmp_path), "date": DATE}
     first = client.get("/api/subjects/load", params=params).json()
     assert first["discovered"] == ["bud"]
 
-    _label(tmp_path, "IMG_A", [_bud(50, 50, 60, 60), _bud(20, 20, 30, 30, subject="bush")])
+    _label(tmp_path, "IMG_A", [box_annotation(50, 50, 60, 60), box_annotation(20, 20, 30, 30, subject="bush")])
 
     second = client.get("/api/subjects/load", params=params).json()
     assert second["discovered"] == ["bud", "bush"]
@@ -390,7 +379,7 @@ def test_load_subjects_confines_the_dataset_root_before_scanning_it(
     import tcip_annotation.json_io as json_io
 
     outside = tmp_path_factory.mktemp("outside")
-    _label(outside, "SECRET", [_bud(1, 1, 2, 2, subject="leaked")])
+    _label(outside, "SECRET", [box_annotation(1, 1, 2, 2, subject="leaked")])
 
     def _must_not_be_called(key):
         raise AssertionError(f"the dataset root must be guarded before any document is read: {key}")

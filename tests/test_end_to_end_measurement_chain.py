@@ -119,7 +119,7 @@ def test_the_assessment_passes_and_the_bucket_published_under_it_names_it(tmp_pa
     its execution record and names it, and no training run is opened for it."""
     from tcip_mcp.assessment import read_assessment
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.experiments import list_experiments
+    from tcip_mcp.experiments import run_rows
 
     chain = run_the_chain(tmp_path, experiment_id="exp-chain-publish")
 
@@ -133,7 +133,7 @@ def test_the_assessment_passes_and_the_bucket_published_under_it_names_it(tmp_pa
     bucket = read_bucket(chain.root, chain.bucket)
     assert bucket.assessment_id == record.assessment_id
     assert (bucket.producer, bucket.execution) == (record.producer, record.execution)
-    assert [e["experiment_id"] for e in list_experiments(tmp_path)] == ["exp-chain-publish"]
+    assert [e.experiment_id for e in run_rows(tmp_path)] == ["exp-chain-publish"]
 
 
 # -- the three detectors -------------------------------------------------------
@@ -147,7 +147,7 @@ def test_the_chain_delivers_a_csv_whose_validated_column_reads_true(tmp_path: Pa
     is edited and nothing is republished, so the delivery stands; the same predictions published
     under no assessment refuse.
     """
-    import csv
+    from tests import csv_rows
 
     from tests import _trait_fixtures as fx
 
@@ -162,8 +162,7 @@ def test_the_chain_delivers_a_csv_whose_validated_column_reads_true(tmp_path: Pa
 
     assert "error" not in delivered, delivered
     assert delivered["validated"] is True
-    with out_csv.open(newline="", encoding="utf-8") as handle:
-        rows = list(csv.DictReader(handle))
+    rows = csv_rows(out_csv)
     assert len(rows) == len(STEMS), len(rows)
     for row in rows:
         assert row["validated"] == "True", row

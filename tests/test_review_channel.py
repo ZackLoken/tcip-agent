@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from PIL import Image
 
 import tcip_store
 from tcip_annotation import json_io
@@ -19,6 +18,7 @@ from tcip_annotation.state import BBox, Polygon
 from tcip_mcp.dataset_layout import LABEL_DOCUMENTS, bucket_key, image_dir, prediction_key
 from tcip_mcp.tools.gui_tools import focus_human_attention
 from tcip_mcp.tools.proposal_tools import stage_proposals
+from tests._producer_fixtures import write_image
 
 
 @pytest.fixture(autouse=True)
@@ -73,10 +73,7 @@ def _publish(root: Path, date: str, preds: dict[str, list[float]]) -> str:
 
 
 def _image(root: Path, date: str, stem: str, size: tuple[int, int] = (640, 480)) -> None:
-    # stage_proposals denormalizes to pixel space, so it needs a real, readable image.
-    idir = Path(image_dir(root, date))
-    idir.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", size, color=(90, 110, 70)).save(idir / f"{stem}.jpg")
+    write_image(Path(image_dir(root, date)) / f"{stem}.jpg", size, (90, 110, 70))
 
 
 def _img_path(root: Path, date: str, stem: str) -> str:

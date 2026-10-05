@@ -6,8 +6,6 @@ otherwise-bad epoch, a healthy run) must never trip the same check.
 
 from __future__ import annotations
 
-import time
-
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -140,7 +138,8 @@ def test_launch_training_real_subprocess_reports_the_diverged_stop(tmp_path, mon
     launch_training subprocess: monitor_training names the diverged stop, not a silent hang
     or the launch-time placeholder."""
     pytest.importorskip("torchvision")
-    from tcip_mcp.tools.training_tools import monitor_training, launch_training
+    from tcip_mcp.tools.training_tools import launch_training
+    from tests._verified_checkpoint_fixtures import run_to_end
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
     monkeypatch.setattr(
@@ -162,14 +161,8 @@ def test_launch_training_real_subprocess_reports_the_diverged_stop(tmp_path, mon
     assert "error" not in res, res
     experiment_id = res["experiment_id"]
 
-    deadline = time.monotonic() + 60
-    status: dict = {}
-    while time.monotonic() < deadline:
-        status = monitor_training(tmp_path, experiment_id)
-        if status.get("status") in ("failed", "completed", "canceled"):
-            break
-        time.sleep(0.5)
+    status = run_to_end(tmp_path, experiment_id, seconds=60)
 
-    assert status.get("status") == "failed", status
+    assert status.get("state") == "failed", status
     assert status.get("error") is not None
     assert DIVERGED_PASSES_PHRASE in status["error"]

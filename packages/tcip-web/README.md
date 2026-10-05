@@ -11,7 +11,7 @@ packages/tcip-web/
     app.py              # FastAPI app
     state.py            # the open project, its GuiState (written to the project's GUI snapshot record on change)
     paths.py            # safe_join + the always-on path guard (derived allow-set, identity containment)
-    jobstore.py         # background job tracking (training/inference/tuning)
+    jobstore.py         # background job tracking (inference, the review queue, image overviews)
     terminal.py         # in-app agent terminal (spawns a provider table row's harness)
     routes/
       annotate.py       # the editor: label document load/save with gestures, proposals, review queue
@@ -27,8 +27,7 @@ packages/tcip-web/
       sessions.py       # GUI session state
       subjects.py       # subject registry load/save
       terminal.py       # in-app agent terminal endpoints
-      training.py       # validate / launch / list / metrics / WS stream
-      tuning.py         # HPO launch + sweep listing
+      training.py       # run and sweep relaunch / list / cancel / TensorBoard / metrics WS stream
   frontend/             # Vite + React + TS + Tailwind + Zustand + Konva
   static/               # vite build output (served at /)
 ```

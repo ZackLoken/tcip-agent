@@ -662,7 +662,6 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     presence, and the test regime carries none of the full-frame regime's fields."""
     from PIL import Image
 
-    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_annotation.state import Annotation, BBox
@@ -692,16 +691,10 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     label_image(images_dir / "a.png", [Annotation(subject="bud", geometry=BBox(4, 4, 12, 12))],
                 32, 32)
 
-    class _StubPredictor:
-        task = "detection"
-        in_chans = 3
-        train_tile_size = train_overlap = train_native_size = train_augmentation = None
+    from tests._predictor_fixtures import StubPredictor, install
 
-        def predict_sliced(self, path, **kw):
-            return {"width": 32, "height": 32, "boxes": [], "scores": [], "labels": [],
-                    "cap_hit": False}
-
-    monkeypatch.setattr(predictor_mod, "GenericPredictor", lambda *a, **kw: _StubPredictor())
+    install(monkeypatch, StubPredictor(task="detection", in_chans=3, width=32, height=32,
+                                       boxes=(), scores=()))
     ff_result = run_full_frame_evaluation(
         checkpoint, checkpoint_admission(checkpoint, images_dir),
         stated=Stated(tile_size=32, overlap=0.0))

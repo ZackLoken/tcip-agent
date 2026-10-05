@@ -10,8 +10,9 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parent.parent
-SCRIPT = REPO / "tools" / "worktree_gate.py"
+from tests import REPO_ROOT
+
+SCRIPT = REPO_ROOT / "tools" / "worktree_gate.py"
 
 
 def _load():

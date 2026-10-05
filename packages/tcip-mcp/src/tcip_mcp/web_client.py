@@ -78,7 +78,7 @@ def annotation_stats_key(project: str) -> Key:
     return Key(ANNOTATION_STATS_STORE, project, _ANNOTATION_STATS_PARTS)
 
 
-ActiveTab = Literal["setup", "annotate", "training", "tuning", "inference", "results", "meta"]
+ActiveTab = Literal["setup", "annotate", "training", "inference", "results", "meta"]
 """The GUI's tabs: the vocabulary ``GuiState.active_tab`` holds and ``POST /api/state/tab`` and
 the canvas push validate against."""
 

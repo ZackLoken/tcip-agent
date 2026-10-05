@@ -29,9 +29,9 @@ def test_a_successful_monitor_result_with_a_null_error_audits_nothing(tmp_path: 
     opened_run(tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-polled")
     before = len(_rows(tmp_path))
 
-    status = monitor_training(tmp_path, "exp-polled")
+    status = monitor_training(tmp_path, "exp-polled")["run"]
 
-    assert status["status"] == "running"
+    assert status["state"] == "running"
     assert status["error"] is None
     assert len(_rows(tmp_path)) == before
 
@@ -49,7 +49,6 @@ def test_read_only_doors_leave_no_line(tmp_path: Path) -> None:
 
     get_experiment(tmp_path, "exp-read")
     list_experiments(tmp_path)
-    list_experiments(tmp_path, launched_only=True)
     monitor_training(tmp_path, "exp-read")
     monitor_training(tmp_path, "no-such-run")
     inspect_compute_resources(tmp_path)
@@ -61,17 +60,12 @@ def test_read_only_doors_leave_no_line(tmp_path: Path) -> None:
     assert len(_rows(tmp_path)) == before
 
 
-def test_a_phenology_look_on_screen_leaves_no_line(tmp_path: Path) -> None:
+def test_a_phenology_look_on_screen_leaves_no_line(tmp_path: Path, client) -> None:
     """The Results tab's measurement door computes and shows; it ships nothing and writes nothing,
     so the project's log reads the same before and after a successful look."""
-    from fastapi.testclient import TestClient
-
-    from tcip_web.app import app
-
     pytest.importorskip("torch")
     from tests._chain_fixtures import attributed_series
 
-    client = TestClient(app, base_url="http://127.0.0.1")
     body = attributed_series(tmp_path).body()
     before = _rows(tmp_path)
 

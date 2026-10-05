@@ -10,16 +10,15 @@ the drift can't recur.
 from __future__ import annotations
 
 import importlib.util
-from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[1]
+from tests import REPO_ROOT
 
 
 def _load_guardrail():
     spec = importlib.util.spec_from_file_location(
-        "verify_skill_traits", REPO / "tools" / "verify_skill_traits.py"
+        "verify_skill_traits", REPO_ROOT / "tools" / "verify_skill_traits.py"
     )
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
@@ -64,9 +63,7 @@ def test_skill_asserts_no_fabricated_traits(name: str) -> None:
     "name,crop_key", [(n, c) for n, c in CROP_SKILLS.items() if c is not None]
 )
 def test_skill_asserts_no_off_crop_traits(name: str, crop_key: str) -> None:
-    """Every real trait a per-crop document backticks must actually be assigned to that crop in
-    crops.yml: the mis-assignment check `test_skill_asserts_no_fabricated_traits` doesn't cover
-    it (that one only checks fabrication, never crop assignment)."""
+    """Every real trait a per-crop document backticks is assigned to that crop in crops.yml."""
     allnames, by_crop = guardrail.load_vocab()
     off_crop = guardrail.off_crop_tokens(_document_text(name), allnames, by_crop[crop_key])
     assert not off_crop, (

@@ -15,7 +15,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PIL import Image
+
+from tests._producer_fixtures import write_image
 
 
 def _install_stub(monkeypatch: pytest.MonkeyPatch, candidates: list[dict]) -> None:
@@ -46,8 +47,7 @@ def _candidate(candidate_id: int, x0: float) -> dict:
 
 
 def _make_image(path: Path, fill: tuple[int, int, int] = (50, 50, 50)) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (64, 64), color=fill).save(path)
+    write_image(path, (64, 64), fill)
 
 
 def _staged(root: Path, bucket: str, stem: str):

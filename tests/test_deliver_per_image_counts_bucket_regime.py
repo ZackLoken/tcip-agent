@@ -6,7 +6,6 @@ unassessed bucket each refuse; an assessed bucket delivers validated, reading it
 
 from __future__ import annotations
 
-import csv
 import subprocess
 import sys
 from pathlib import Path
@@ -14,7 +13,7 @@ from pathlib import Path
 import pytest
 from tcip_store.file_backend import is_bookkeeping
 
-from tests import _trait_fixtures as fx
+from tests import _trait_fixtures as fx, csv_rows
 
 pytest.importorskip("torch")
 
@@ -108,8 +107,7 @@ def test_an_assessed_bucket_delivers_validated_counts_naming_the_producer(tmp_pa
     assert "error" not in res, res
     assert res["validated"] is True
     assert res["producer"] == chain.assessment["producer"]
-    with open(res["csv_path"], newline="") as f:
-        rows = list(csv.DictReader(f))
+    rows = csv_rows(res["csv_path"])
     assert len(rows) == res["image_count"] == len(_images(chain.images_dir))
     assert {r["validated"] for r in rows} == {"True"}
     (event,) = read_delivery_events(tmp_path)

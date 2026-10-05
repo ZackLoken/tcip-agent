@@ -10,13 +10,11 @@ kind a delivery ships.
 
 from __future__ import annotations
 
-import csv
-
 import pytest
 
 from tcip_mcp.pipelines.postprocessing.aggregation import aggregate_per_plant
 from tcip_mcp.traits import PER_IMAGE_COUNT, PER_PLANT_COUNT_AGGREGATE
-from tests import _trait_fixtures as fx
+from tests import _trait_fixtures as fx, csv_rows
 
 
 @pytest.fixture(autouse=True)
@@ -111,8 +109,7 @@ def test_delivery_csv_carries_each_plants_own_value_and_image_count(tmp_path):
     out_path = tmp_path / "per_plant.csv"
     deliver_acknowledged(tmp_path, summaries, out_path, "stem_count",
                          delivery_kind=PER_PLANT_COUNT_AGGREGATE, crop="currant")
-    with open(out_path, newline="") as f:
-        rows = _by_plant(list(csv.DictReader(f)))
+    rows = _by_plant(csv_rows(out_path))
 
     assert [int(rows[p]["n_images"]) for p in ("PLANT_A", "PLANT_B", "PLANT_C")] == [3, 2, 1]
     assert float(rows["PLANT_A"]["value"]) == 4

@@ -14,13 +14,13 @@ from __future__ import annotations
 
 import importlib.util
 import re
-from pathlib import Path
 from typing import Literal, Optional
 
 import pytest
 from pydantic import BaseModel
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+from tests import REPO_ROOT
+
 FRONTEND_SRC = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
 GENERATED = FRONTEND_SRC / "api" / "types.generated.ts"
 GENERATOR = REPO_ROOT / "tools" / "generate_frontend_types.py"

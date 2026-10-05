@@ -12,6 +12,7 @@ import { StructuredRefusalError } from "@/api/http";
 import { sessionsApi } from "@/api/sessions";
 import { useStore } from "@/store";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
+import { openTestProject } from "@/test/store";
 
 // Konva needs a real 2D canvas; these tests exercise label I/O ordering and
 // store->canvas prop flow, not drawing. Render Konva shapes as inspectable divs
@@ -125,24 +126,18 @@ function labelsFor(imagePath: string) {
 const saved = (base_mtime: string): SaveResult => ({ status: "ok", base_mtime, completion: {} });
 
 function setupDataset() {
-  useStore.setState((s) => ({
-    gui: {
-      ...s.gui,
-      mode: "box" as const,
-      active_subject: "subject_a",
-      dataset: {
-        ...s.gui.dataset,
-        dataset_root: "C:/data",
-        subject: "subject_a",
-        date: "2026-01-01",
-        image_list: ["img1.jpg", "img2.jpg"],
-        current_image_index: 0,
-        images_dir: "C:/data/images/2026-01-01",
-        bucket: null,
-      },
+  openTestProject(
+    {
+      dataset_root: "C:/data",
+      subject: "subject_a",
+      date: "2026-01-01",
+      image_list: ["img1.jpg", "img2.jpg"],
+      current_image_index: 0,
+      images_dir: "C:/data/images/2026-01-01",
+      bucket: null,
     },
-    openProject: { id: "a1b2c3d4e5f6", path: "C:/proj" },
-  }));
+    { mode: "box", active_subject: "subject_a" },
+  );
 }
 
 function addBox() {

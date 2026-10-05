@@ -12,7 +12,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from PIL import Image
 
 import tcip_store
 from tcip_annotation import json_io
@@ -21,25 +20,19 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.subject_registry import SubjectRegistry, Subject
 from tcip_mcp.pipelines.data.label_queries import registry_scope
 from tests._producer_fixtures import (  # noqa: E402
-    dataset_over, image_label_key, label_image, registry_over,
+    dataset_over, image_label_key, label_image, registry_over, saved_annotations, write_image,
 )
 
 
-def _write_image(images_dir: Path, stem: str, size=(640, 480)) -> Path:
-    images_dir.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", size, color=(128, 128, 128)).save(images_dir / f"{stem}.jpg")
-    return images_dir / f"{stem}.jpg"
+def _write_image(images_dir: Path, stem: str) -> Path:
+    """The 640 by 480 image ``<stem>.jpg`` of ``images_dir``."""
+    return write_image(images_dir / f"{stem}.jpg", (640, 480))
 
 
 def _write_registry(root: Path, *subjects: Subject) -> SubjectRegistry:
     registry = SubjectRegistry(subjects=tuple(subjects))
     registry_over(root, registry)
     return registry
-
-
-def _saved(image: Path) -> list[Annotation]:
-    """The annotations of ``image``'s label document as the save door left them."""
-    return json_io.read_label_document(image_label_key(image)).annotations
 
 
 # (a) a registry decodes its own labels after the flip.
@@ -69,7 +62,7 @@ def test_geometryless_annotation_roundtrips_and_marks_image_annotated(tmp_path):
     label_image(image, [Annotation(subject="bud")], 640, 480)
 
     # Round-trips losslessly: subject preserved, geometry None.
-    back = _saved(image)
+    back = saved_annotations(image)
     assert len(back) == 1 and back[0].subject == "bud" and back[0].geometry is None
 
     # The image carries a subject annotation, so the admission counts it as annotated rather than
@@ -182,7 +175,7 @@ def test_save_annotations_prefers_points_over_bbox(tmp_path):
     )
     assert res.get("count") == 1
 
-    (ann,) = _saved(image)
+    (ann,) = saved_annotations(image)
     assert isinstance(ann.geometry, Polygon)  # the polygon won; not collapsed to a box
     # "points" is the single-ring input key, wrapped as the one ring it is.
     assert ann.geometry.rings == [[(10.0, 20.0), (110.0, 20.0), (110.0, 220.0)]]
@@ -226,7 +219,7 @@ def test_save_annotations_accepts_rings(tmp_path):
         }],
     )
     assert res.get("count") == 1
-    (ann,) = _saved(image)
+    (ann,) = saved_annotations(image)
     assert isinstance(ann.geometry, Polygon)
     assert len(ann.geometry.rings) == 2  # both occlusion-split regions survived, not just the first
     assert ann.geometry.rings[0] == [(10.0, 20.0), (110.0, 20.0), (110.0, 220.0)]
@@ -238,7 +231,7 @@ def test_save_annotations_accepts_rings(tmp_path):
         annotations=[{"subject": "bud", "rings": [[[1, 2], [3, 2], [3, 4]]]}],
     )
     assert res2.get("count") == 1
-    (ann2,) = _saved(image)
+    (ann2,) = saved_annotations(image)
     assert ann2.geometry.rings == [[(1.0, 2.0), (3.0, 2.0), (3.0, 4.0)]]
 
     # "rings" wins over "points"/"bbox" when more than one is present (never less complete).
@@ -252,7 +245,7 @@ def test_save_annotations_accepts_rings(tmp_path):
         }],
     )
     assert res3.get("count") == 1
-    (ann3,) = _saved(image)
+    (ann3,) = saved_annotations(image)
     assert ann3.geometry.rings == [[(1.0, 2.0), (3.0, 2.0), (3.0, 4.0)]]
 
 
@@ -305,8 +298,7 @@ def test_uppercase_extension_image_still_yields_boxes(tmp_path):
     zero boxes."""
     _write_registry(tmp_path, Subject(name="bud"))
     images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
-    Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / "IMG_1.JPG")
+    write_image(images_dir / "IMG_1.JPG", (640, 480))
     label_image(images_dir / "IMG_1.JPG",
                 [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 640, 480)
 

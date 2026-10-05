@@ -8,16 +8,9 @@ from __future__ import annotations
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
-import time
 from pathlib import Path
 
 import pytest
-
-
-def test_a_sweeps_directory_lies_under_its_project(tmp_path: Path) -> None:
-    from tcip_mcp.tools.training_tools import sweep_dir
-
-    assert sweep_dir("hpo_1", project=tmp_path) == tmp_path / ".tcip" / "hpo" / "hpo_1"
 
 
 def test_launch_training_defaults_into_the_projects_experiment_store(
@@ -28,17 +21,11 @@ def test_launch_training_defaults_into_the_projects_experiment_store(
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
 
-    from PIL import Image
-    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools import training_tools
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import seed_bud_images
+    from tests._verified_checkpoint_fixtures import run_to_end
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
-    for i in range(2):
-        Image.new("RGB", (128, 128)).save(images_dir / f"t{i}.png")
-        label_image(images_dir / f"t{i}.png",
-                    [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
+    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET, n=2)
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
 
@@ -57,14 +44,5 @@ def test_launch_training_defaults_into_the_projects_experiment_store(
 
     # Wait for the subprocess to finish rather than leaking a child that keeps writing into
     # this test's tmp root after the test moves on.
-    deadline = time.monotonic() + 90
-    final_status = None
-    while time.monotonic() < deadline:
-        final_status = training_tools.monitor_training(tmp_path, res["experiment_id"]).get("status")
-        if final_status in ("completed", "failed", "canceled"):
-            break
-        time.sleep(0.5)
-    else:
-        pytest.fail("timed out waiting for the training subprocess to finish")
-    assert final_status == "completed"
+    assert run_to_end(tmp_path, res["experiment_id"])["state"] == "completed"
     assert (run_dir / "model_best.pt").is_file() or (run_dir / "model_final.pt").is_file()

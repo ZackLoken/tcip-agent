@@ -24,13 +24,9 @@ from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
     auto_train_val, partition_samples,
 )
 from tcip_mcp.tools.data_tools import draw_splits  # noqa: E402
+from tests._verified_checkpoint_fixtures import partition_side  # noqa: E402
 
 STEMS = ("a", "b", "c", "d", "e", "f", "g", "h")
-
-
-def _side(partition: dict, side: str) -> list[str]:
-    """The member names a resolved partition put on ``side``."""
-    return sorted({s.member for s in partition_samples(partition) if s.side == side})
 
 
 def _resolved(project: Path, experiment_id: str, task: str, data_cfg: dict):
@@ -103,7 +99,7 @@ def test_a_bound_semantic_seg_run_trains_over_exactly_its_selections_samples(tmp
     assert sorted(val_ds.stems) == sorted(s.location for s in drawn.on("val"))
     held_out = {s.location for s in drawn.on("calibration")}
     assert held_out and not held_out & set(train_ds.stems + val_ds.stems)
-    assert _side(partition, "train") == sorted(s.member for s in drawn.on("train"))
+    assert partition_side(partition, "train") == sorted(s.member for s in drawn.on("train"))
 
 
 def test_a_bound_classification_run_trains_over_exactly_its_selections_samples(tmp_path: Path):
@@ -279,8 +275,8 @@ def test_an_unbound_semantic_seg_run_reads_its_membership_off_its_own_samples(tm
     members = {ds: {ds.sample_of(key).member for key in ds.stems} for ds in (train_ds, val_ds)}
     assert members[train_ds].isdisjoint(members[val_ds])
     assert members[train_ds] | members[val_ds] == set(STEMS)
-    assert _side(partition, "train") == sorted(members[train_ds])
-    assert _side(partition, "val") == sorted(members[val_ds])
+    assert partition_side(partition, "train") == sorted(members[train_ds])
+    assert partition_side(partition, "val") == sorted(members[val_ds])
     # Each loader indexes by its samples' own source identities and holds that sample's own
     # source, ground truth and member name.
     for ds in (train_ds, val_ds):
@@ -305,8 +301,8 @@ def test_an_unbound_regression_run_reads_its_membership_off_its_own_samples(tmp_
     members = {ds: {ds.sample_of(key).member for key in ds.stems} for ds in (train_ds, val_ds)}
     assert members[train_ds].isdisjoint(members[val_ds])
     assert members[train_ds] | members[val_ds] == set(STEMS)
-    assert _side(partition, "train") == sorted(members[train_ds])
-    assert _side(partition, "val") == sorted(members[val_ds])
+    assert partition_side(partition, "train") == sorted(members[train_ds])
+    assert partition_side(partition, "val") == sorted(members[val_ds])
     for ds in (train_ds, val_ds):
         for key in ds.stems:
             sample = ds.sample_of(key)
@@ -386,7 +382,7 @@ def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
     assert sorted(train_ds.stems) == sorted(s.location for s in frozen.on("train"))
     assert val_ds is not None
     assert result["train"] == len(frozen.on("train"))
-    assert _side(partition, "train") == sorted(s.member for s in frozen.on("train"))
+    assert partition_side(partition, "train") == sorted(s.member for s in frozen.on("train"))
 
 
 def test_a_table_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
@@ -494,7 +490,7 @@ def test_a_runs_unstated_class_count_is_read_once_over_every_sample(tmp_path: Pa
 
     # The one mask reaching class 2 is on the validation side, which is the disagreement a
     # per-loader count would produce here.
-    assert _side(partition, "val") == [STEMS[0]]
+    assert partition_side(partition, "val") == [STEMS[0]]
     assert val_ds is not None
     assert data_cfg["num_classes"] == 3
     assert data_cfg["num_channels"] == train_ds.expected_channels

@@ -16,11 +16,9 @@ np = pytest.importorskip("numpy")
 
 
 def _rgb_image(images_dir: Path) -> str:
-    from PIL import Image
+    from tests._producer_fixtures import write_image
 
-    path = images_dir / "capture.png"
-    Image.new("RGB", (120, 90), color=(40, 80, 120)).save(path)  # a non-square frame
-    return str(path)
+    return str(write_image(images_dir / "capture.png", (120, 90), (40, 80, 120)))
 
 
 def _five_band_raster(images_dir: Path) -> str:

@@ -137,10 +137,7 @@ Defer annotation mechanics to the `annotation` skill. Crop-specific difficulties
 
 ## Measurement integrity
 
-Per the CLAUDE.md measurement-integrity invariant (validate against a reference sized to the
-trait: GT annotations, or a breeder-confirmed sample of the model's own outputs (review-confirmation),
-not dense GT for every trait; geometry can't proxy a state or replace the CV step). Hazelnut-specific
-traps:
+Hazelnut-specific traps:
 
 - `catkin_elongation_date`: elongation/anthesis is a breeder-defined *visible morphological
   state* (loosening + pollen shed), established by a validated call against expert scoring: a state,
@@ -161,7 +158,7 @@ traps:
 ## Needs expert confirmation
 
 - `plant_surface_area`: is the delivered quantity the *planimetric crown area* (achievable from a
-  validated 2D mask + in-frame scale calibration, per CLAUDE.md's measurement-integrity invariant)
+  validated 2D mask + in-frame scale calibration)
   or specifically the *3D-canopy-model derivation* crops.yml's current definition names? The two
   are not the same thing, and only the breeder can redefine their own trait's meaning.
 - The program's specific hybrid selections and named releases (general species knowledge is used

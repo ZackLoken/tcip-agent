@@ -20,6 +20,7 @@ from tcip_mcp.pipelines.training.collation import task_collate
 from tests.tiny_trainer_fixtures import (
     ConstantImageDataset,
     build_data_scaled_gradient_model,
+    capture_model,
     trainer_run,
 )
 
@@ -84,17 +85,6 @@ def _record_step_gradients(monkeypatch, sink: list) -> None:
     monkeypatch.setattr(gt, "build_optimizer", build)
 
 
-def _capture_model(monkeypatch, sink: list) -> None:
-    real_build_model = gt.build_model
-
-    def build(config, dims):
-        model = real_build_model(config, dims)
-        sink.append(model)
-        return model
-
-    monkeypatch.setattr(gt, "build_model", build)
-
-
 def test_each_optimizer_step_sees_only_its_own_batch_gradient(tmp_path, monkeypatch):
     """One step per batch at accumulation 1, each carrying that batch's gradient alone."""
     loader = _loader(SKEWED_VALUES, SKEWED_INTENSITIES)
@@ -119,7 +109,7 @@ def test_no_accumulated_gradient_survives_the_run(tmp_path, monkeypatch):
     batches is still sitting there to be descended on again."""
     loader = _loader(SKEWED_VALUES, SKEWED_INTENSITIES)
     models: list = []
-    _capture_model(monkeypatch, models)
+    capture_model(monkeypatch, models)
 
     run = trainer_run(_config(), tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-35")
     run = train(run, loader)

@@ -1,8 +1,7 @@
 """``tcip plant-aware-group-splits``: plant/plot-identity group keys for ``draw_splits``.
 
-Builds synthetic per-stem georeferenced GeoTIFFs (the same tiepoint + pixel-scale + GeoKeyDirectory
-tag pattern ``test_orthomosaic_mapping.py`` uses) at known real-world offsets from two plants, and
-checks the derived ``{stem: group_key}`` map: same physical plant -> same group key regardless of
+Over per-stem georeferenced GeoTIFFs at known real-world offsets from two plants, the derived
+``{stem: group_key}`` map: same physical plant -> same group key regardless of
 which "date" (source raster) the stem came from, a plant far outside tolerance -> a named refusal,
 an ungeoreferenced source -> a named refusal, and the map ``draw_splits(group_key_map=...)`` actually
 accepts, keeping every group's stems on one split side.
@@ -10,7 +9,6 @@ accepts, keeping every group's stems on one split side.
 
 from __future__ import annotations
 
-import csv
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +17,7 @@ import tifffile
 
 import tcip_store as ts
 from tcip_mcp.cli.plant_aware_group_splits import derive_plant_group_key_map, main
+from tests._mapping_fixtures import write_plant_csv
 
 UTM_15N_EPSG = 32615
 PIXEL_SCALE = 1.0
@@ -70,36 +69,25 @@ P4_TIEPOINT = (500_300.0, 4_800_000.0)
 FAR_TIEPOINT = (600_000.0, 4_800_000.0)  # ~100 km away: outside tolerance for both plants
 
 
-def _write_plant_csv(path: Path, plants: list[tuple[str, str, float, float]]) -> None:
-    with path.open("w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(["plot_name", "accession_name", "WGS84_centroid_x", "WGS84_centroid_y"])
-        for plot_name, accession_name, lat, lon in plants:
-            w.writerow([plot_name, accession_name, lon, lat])
+def _plant_at(plot: str, accession: str, tiepoint: tuple[float, float]) -> dict:
+    """A plant sitting at the center of a raster tiled at ``tiepoint``."""
+    lat, lon = _center_latlon(*tiepoint)
+    return {"plot": plot, "accession": accession, "lat": lat, "lon": lon}
 
 
 @pytest.fixture
 def two_plant_csv(tmp_path: Path) -> Path:
-    p1_lat, p1_lon = _center_latlon(*P1_TIEPOINT)
-    p2_lat, p2_lon = _center_latlon(*P2_TIEPOINT)
-    csv_path = tmp_path / "plants.csv"
-    _write_plant_csv(csv_path, [("P1", "acc-A", p1_lat, p1_lon), ("P2", "acc-B", p2_lat, p2_lon)])
-    return csv_path
+    return write_plant_csv(tmp_path / "plants.csv", [
+        _plant_at("P1", "acc-A", P1_TIEPOINT), _plant_at("P2", "acc-B", P2_TIEPOINT)])
 
 
 @pytest.fixture
 def four_plant_csv(tmp_path: Path) -> Path:
     """Four plants, so a manifest write over their capture dates clears the foreground floor
     (one each for train/val, two for calibration) while still exercising group cohesion."""
-    plants = [
-        ("P1", "acc-A", *_center_latlon(*P1_TIEPOINT)),
-        ("P2", "acc-B", *_center_latlon(*P2_TIEPOINT)),
-        ("P3", "acc-C", *_center_latlon(*P3_TIEPOINT)),
-        ("P4", "acc-D", *_center_latlon(*P4_TIEPOINT)),
-    ]
-    csv_path = tmp_path / "plants4.csv"
-    _write_plant_csv(csv_path, plants)
-    return csv_path
+    return write_plant_csv(tmp_path / "plants4.csv", [
+        _plant_at("P1", "acc-A", P1_TIEPOINT), _plant_at("P2", "acc-B", P2_TIEPOINT),
+        _plant_at("P3", "acc-C", P3_TIEPOINT), _plant_at("P4", "acc-D", P4_TIEPOINT)])
 
 
 def _plants(csv_path: Path) -> list:

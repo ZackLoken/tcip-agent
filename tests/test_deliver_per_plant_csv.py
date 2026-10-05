@@ -11,19 +11,13 @@ from pathlib import Path
 import pytest
 
 from tests import _trait_fixtures as fx
+from tests._mapping_fixtures import write_plant_csv
 
 torch = pytest.importorskip("torch")
 
 KIND = "per_plant_count_aggregate"
 SCOPE = {"subject": fx.COUNT_SUBJECT}
-
-
-@pytest.fixture(autouse=True)
-def _recorded_meaning(tmp_path):
-    """The delivery below ships under a trait whose meaning is confirmed for the aggregate
-    kind."""
-    fx.seed_delivery_traits(tmp_path)
-    fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
+pytestmark = pytest.mark.usefixtures("confirmed_count_aggregate")
 
 
 def _scene(tmp_path: Path, plants: dict[str, tuple[float, float]]) -> tuple[Path, Path, str]:
@@ -40,11 +34,9 @@ def _scene(tmp_path: Path, plants: dict[str, tuple[float, float]]) -> tuple[Path
                         datetime(2026, 2, 11, 9, 30 + 5 * i))
     result = register_dataset(tmp_path, str(dataset_root), crop=sorted(registered_crops())[0])
     assert "error" not in result, result
-    plant_csv = tmp_path / "plants.csv"
-    plant_csv.write_text(
-        "plot_name,accession_name,WGS84_centroid_x,WGS84_centroid_y\n" + "".join(
-            f"{plant},acc-{plant},{lon},{lat}\n" for plant, (lat, lon) in plants.items()),
-        encoding="utf-8")
+    plant_csv = write_plant_csv(tmp_path / "plants.csv", [
+        {"plot": plant, "accession": f"acc-{plant}", "lat": lat, "lon": lon}
+        for plant, (lat, lon) in plants.items()])
     return dataset_root, plant_csv, date
 
 
@@ -166,12 +158,11 @@ def test_a_mapping_with_no_capture_at_all_for_a_delivered_date_refuses(tmp_path,
     evidence."""
     from tests.test_plant_mapping_binding import PLANTS
     from tests.test_ungeoreferenced_capture_refusal import (
-        DATE, _delivery_scene, _persist_synthetic_mapping, _write_plant_csv,
+        DATE, _delivery_scene, _persist_synthetic_mapping,
     )
 
     dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
-    plant_csv = tmp_path / "plants.csv"
-    _write_plant_csv(plant_csv, PLANTS)
+    plant_csv = write_plant_csv(tmp_path / "plants.csv", PLANTS)
     _persist_synthetic_mapping(
         tmp_path, dataset_root, "valley",
         plant_csvs=[{"path": str(plant_csv), "sha256": "0" * 64, "n_plants": len(PLANTS)}],

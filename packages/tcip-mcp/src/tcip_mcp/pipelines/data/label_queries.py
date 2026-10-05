@@ -322,8 +322,6 @@ def foreground_counts(
     :class:`~tcip_mcp.pipelines.data.selection.Sample` it became. A label document carries a count
     of its own annotations of ``scope``'s subject, counted in the document its admission read
     (``read``). A mask raster and a table row count as one each.
-
-    The caller's own index is the result's index.
     """
     from tcip_mcp.pipelines.data.selection import DOCUMENT, shape_of
     from tcip_mcp.pipelines.data.splits import count_label_lines
@@ -402,8 +400,7 @@ def readmitted_samples(samples: "Sequence[Sample]", scope: "ClassScope") -> list
     :func:`admit` runs under ``scope`` held to its shape (``ClassScope.admitted_for``, so a
     document read under a scope naming no subject refuses by name), each carrying the version
     that re-admission read as its ``ground_truth_digest``, what it read as its ``read`` and the
-    logical image it resolved as its ``image``, the ones its act's readers consume. A sample the admission no longer admits
-    refuses (``ValueError``) naming which and the tallies that refused them; membership is never
+    logical image it resolved as its ``image``. A sample the admission no longer admits refuses (``ValueError``) naming which and the tallies that refused them; membership is never
     changed."""
     from dataclasses import replace
 

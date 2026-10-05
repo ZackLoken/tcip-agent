@@ -19,10 +19,8 @@ describe("EmbeddedTool", () => {
 
   it("offers a retry on a failure", () => {
     const onRetry = vi.fn();
-    render(
-      <EmbeddedTool title="Ray dashboard" url={null} error="No cluster is up." onRetry={onRetry} />,
-    );
-    expect(screen.getByText("No cluster is up.")).toBeInTheDocument();
+    render(<EmbeddedTool title="TensorBoard" url={null} error="No logs yet." onRetry={onRetry} />);
+    expect(screen.getByText("No logs yet.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /try again/i }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
@@ -52,9 +50,9 @@ describe("EmbeddedTool", () => {
     ).toBeInTheDocument();
     unmount();
 
-    render(<EmbeddedTool title="Ray dashboard" url="http://127.0.0.1:8265" />);
+    render(<EmbeddedTool title="Sweep TensorBoard" url="http://127.0.0.1:6006" />);
     expect(
-      screen.getByRole("link", { name: "Open in a new tab: Ray dashboard" }),
+      screen.getByRole("link", { name: "Open in a new tab: Sweep TensorBoard" }),
     ).toBeInTheDocument();
   });
 

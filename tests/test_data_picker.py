@@ -17,16 +17,10 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 import tcip_store as ts
-from tcip_web.app import app
 
 from tests._verified_checkpoint_fixtures import opened_run
 from tests.test_selection_binding import DATES, OTHER_SUBJECT, SUBJECT, _draw, \
     _two_subject_two_date_dataset
-
-
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _bespoke_config(images_dir: Path, *, subject: str = SUBJECT) -> dict:
@@ -559,14 +553,14 @@ def test_relaunch_route_refuses_a_selection_dir_the_launch_cannot_bind(
     ts.replace(selection_key(broken_dir), {"seed": 1, "samples": []})
 
     resp_unknown = client.post("/api/training/runs", json={
-        "experiment_id": "exp-picker-guard", "selection_dir": str(tmp_path / "never-listed"),
+        "relaunched_from": "exp-picker-guard", "selection_dir": str(tmp_path / "never-listed"),
         "user": "tester",
     })
     assert resp_unknown.status_code == 422
     assert "no selection recorded" in str(resp_unknown.json()["detail"]["issues"])
 
     resp_disabled = client.post("/api/training/runs", json={
-        "experiment_id": "exp-picker-guard", "selection_dir": str(broken_dir), "user": "tester",
+        "relaunched_from": "exp-picker-guard", "selection_dir": str(broken_dir), "user": "tester",
     })
     assert resp_disabled.status_code == 422
 
@@ -583,21 +577,21 @@ def test_relaunch_route_launches_the_stated_data_unchanged_when_no_partition_is_
 
     def fake_launch_training(project, config, *a, **k):
         captured["data"] = config.get("data")
-        return {"experiment_id": config.get("experiment_id"), "status": "launched"}
+        return {"experiment_id": "run_relaunched", "status": "launched"}
 
     monkeypatch.setattr(training_tools_module, "launch_training", fake_launch_training)
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     drawn = _bespoke_config(root / "images" / DATES[0])
     opened_run(tmp_path, drawn, experiment_id="exp-drawn")
-    resp = client.post("/api/training/runs", json={"experiment_id": "exp-drawn", "user": "tester"})
+    resp = client.post("/api/training/runs", json={"relaunched_from": "exp-drawn", "user": "tester"})
     assert resp.status_code == 200, resp.json()
     assert captured["data"] == drawn["data"]
 
     _draw(tmp_path, root, tmp_path / "manifest")
     bound = _bound_config(root, tmp_path / "manifest")
     opened_run(tmp_path, bound, experiment_id="exp-bound")
-    resp = client.post("/api/training/runs", json={"experiment_id": "exp-bound", "user": "tester"})
+    resp = client.post("/api/training/runs", json={"relaunched_from": "exp-bound", "user": "tester"})
     assert resp.status_code == 200, resp.json()
     assert captured["data"] == bound["data"]
 
@@ -629,14 +623,14 @@ def test_relaunch_route_launches_a_new_run_with_the_chosen_partition(
     source_before = read_record(source_path)
 
     resp = client.post("/api/training/runs", json={
-        "experiment_id": "exp-choose-partition", "selection_dir": str(chosen), "user": "tester",
+        "relaunched_from": "exp-choose-partition", "selection_dir": str(chosen), "user": "tester",
     })
     assert resp.status_code == 200, resp.json()
 
     launched = _relaunched_config(tmp_path, resp)
     assert launched["config"]["data"]["split"] == {"selection_dir": str(chosen)}
     assert "scope" not in launched["config"]["data"]
-    assert launched["parent_experiment"] == "exp-choose-partition"
+    assert launched["relaunched_from"] == "exp-choose-partition"
     assert read_record(source_path) == source_before
 
 
@@ -676,7 +670,7 @@ def test_relaunch_route_admits_a_symlinked_spelling_of_an_offered_split_director
     assert identity(other_spelling) == identity(offered)
 
     resp = client.post("/api/training/runs", json={
-        "experiment_id": "exp-symlink-relaunch", "selection_dir": other_spelling,
+        "relaunched_from": "exp-symlink-relaunch", "selection_dir": other_spelling,
         "user": "tester",
     })
     assert resp.status_code == 200, resp.json()

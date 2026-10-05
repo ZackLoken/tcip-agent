@@ -14,18 +14,7 @@ import tcip_store as ts
 from tcip_mcp.tools.project_tools import archive_project, import_project
 from tcip_mcp.web_client import gui_snapshot_key
 from tcip_store.file_backend import lock_file_for
-
-
-def _project(root: Path) -> Path:
-    """A dataset root with one image, one empty label, and the registry that decodes it."""
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
-    from tests._producer_fixtures import label_image, registry_over
-
-    (root / "images" / "2026-03-04").mkdir(parents=True, exist_ok=True)
-    (root / "images" / "2026-03-04" / "a_1.jpg").write_bytes(b"\xff\xd8\xff")
-    label_image(root / "images" / "2026-03-04" / "a_1.jpg", [], 8, 8, keep_empty=True)
-    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
-    return root
+from tests._producer_fixtures import one_labeled_capture
 
 
 def _hand_zip(path: Path, members: dict[str, bytes]) -> Path:
@@ -40,7 +29,7 @@ def _hand_zip(path: Path, members: dict[str, bytes]) -> Path:
 
 
 def test_import_refuses_a_non_empty_destination_and_changes_nothing(tmp_path, monkeypatch):
-    root = _project(tmp_path / "source")
+    root = one_labeled_capture(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
     assert "error" not in archive_project(root, str(zip_path))
 
@@ -58,7 +47,7 @@ def test_import_refuses_a_non_empty_destination_and_changes_nothing(tmp_path, mo
 
 
 def test_import_admits_a_pre_existing_empty_destination(tmp_path):
-    root = _project(tmp_path / "source")
+    root = one_labeled_capture(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
     assert "error" not in archive_project(root, str(zip_path))
 
@@ -128,7 +117,7 @@ def test_extract_zip_refuses_a_sibling_directory_that_shares_stagings_name_as_a_
 
 
 def test_import_refuses_a_corrupt_zip_without_stranding_a_staging_tree(tmp_path):
-    root = _project(tmp_path / "source")
+    root = one_labeled_capture(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
     assert "error" not in archive_project(root, str(zip_path))
     data = zip_path.read_bytes()
@@ -148,7 +137,7 @@ def test_import_refuses_a_corrupt_zip_without_stranding_a_staging_tree(tmp_path)
 
 def test_a_record_travels_inside_the_database_the_archive_copies(tmp_path):
     record = {"active_subject": "x"}
-    root = _project(tmp_path / "source")
+    root = one_labeled_capture(tmp_path / "source")
     ts.replace(gui_snapshot_key(root), record, expect=ts.Version.ABSENT)
     assert "error" not in archive_project(root, str(tmp_path / "bundle.zip"))
 
@@ -166,7 +155,7 @@ def test_a_record_travels_inside_the_database_the_archive_copies(tmp_path):
 def test_a_locked_staging_sibling_is_left_alone_while_another_import_completes(tmp_path):
     import filelock
 
-    root = _project(tmp_path / "source")
+    root = one_labeled_capture(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
     assert "error" not in archive_project(root, str(zip_path))
 
@@ -190,7 +179,7 @@ def test_a_locked_staging_sibling_is_left_alone_while_another_import_completes(t
 
 
 def test_a_free_locked_leftover_staging_sibling_is_swept_with_its_lock_file(tmp_path):
-    root = _project(tmp_path / "source")
+    root = one_labeled_capture(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
     assert "error" not in archive_project(root, str(zip_path))
 
@@ -217,7 +206,7 @@ def test_dataset_registry_stores_the_relative_dot_after_import(tmp_path):
     in before the move."""
     from tcip_mcp.tools.project_tools import read_datasets, register_dataset
 
-    root = _project(tmp_path / "source")
+    root = one_labeled_capture(tmp_path / "source")
     registered = register_dataset(root, str(root), crop="currant")
     assert "error" not in registered
 
@@ -237,7 +226,7 @@ def test_dataset_registry_travels_with_nothing_rewritten(tmp_path):
     imported, so nothing about the registry needed rewriting for the move to survive."""
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets, register_dataset
 
-    root = _project(tmp_path / "source")
+    root = one_labeled_capture(tmp_path / "source")
     registered = register_dataset(root, str(root), crop="currant")
     assert "error" not in registered
 
@@ -254,8 +243,8 @@ def test_dataset_registry_travels_with_nothing_rewritten(tmp_path):
 def test_an_external_dataset_entry_stays_absolute_and_is_disclosed(tmp_path):
     from tcip_mcp.tools.project_tools import register_dataset
 
-    root = _project(tmp_path / "source")
-    external = _project(tmp_path / "external_dataset")
+    root = one_labeled_capture(tmp_path / "source")
+    external = one_labeled_capture(tmp_path / "external_dataset")
     registered = register_dataset(root, str(external), crop="currant")
     assert "error" not in registered
 
@@ -325,7 +314,6 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp import experiments
     from tcip_mcp.pipelines.data.selection import selection_key
-    from tcip_mcp.pipelines.data.split_construction import resolve_run
     from tcip_mcp.traits import read_trait
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.project_tools import (
@@ -345,16 +333,12 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
 
     finished_run(root, experiment_id="exp1", rows=[{"epoch": 1, "loss": 0.5}])
 
-    def fake_trial(point, report, base_config, trial_dir, *, project, objective):
-        config = tt._apply_hpo_params(base_config, point)
-        tt.open_run(trial_dir, config,
-                    resolve_run(config, project=project, objective=objective).record,
-                    trial_params=point)
+    def fake_trial(point, report, sweep, trial_id):
+        tt.open_trial(sweep, trial_id, point)
         report(0.2)
 
     def fake_search(**kw):
         kw["objective_fn"]({"lr": 0.1}, lambda value: None)
-        return str(Path(kw["storage_path"]) / kw["study_name"])
 
     monkeypatch.setattr(tt, "_run_hpo_trial", fake_trial)
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
@@ -365,7 +349,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
                               "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}}},
         n_trials=1, search_seed=0
     )
-    study = hpo_result["study_name"]
+    sweep_id = hpo_result["sweep"]["sweep_id"]
 
     splits_result = draw_splits(root, str(root), output_path=str(root / "splits_out"), subject="bud",
                                 seed=1, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
@@ -396,9 +380,9 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     assert rows[0]["loss"] == 0.5
     assert observation.checkpoint is not None
 
-    sweep = tt.read_sweep(tt.sweep_observation(study, project=dest))
-    assert sweep["status"] == "completed"
-    assert [t["params"] for t in sweep["trials"]] == [{"lr": 0.1}]
+    sweep = tt.monitor_training(dest, sweep_id)["sweep"]
+    assert sweep["state"] == "completed"
+    assert [t["trial_params"] for t in sweep["trials"]] == [{"lr": 0.1}]
 
     selection = ts.read(selection_key(dest / "splits_out"))
     assert selection["scope"]["subject"] == "bud"

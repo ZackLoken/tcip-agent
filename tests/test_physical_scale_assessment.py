@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from tcip_annotation.state import Annotation, BBox, Polygon
-from tests import _trait_fixtures as fx
+from tests import _trait_fixtures as fx, csv_rows
 from tests._producer_fixtures import label_image
 
 DATE = "2026-01-01"
@@ -130,7 +130,7 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(tmp_pa
         deliver(tmp_path / "unscaled.csv")
     deliver(tmp_path / "scaled.csv", scale_assessment_id=scale["assessment_id"])
 
-    (row,) = list(csv.DictReader((tmp_path / "scaled.csv").open()))
+    (row,) = csv_rows(tmp_path / "scaled.csv")
     assert row["units"] == "mm2"
     (event,) = read_delivery_events(tmp_path)
     assert event.scale_assessment_id == scale["assessment_id"]

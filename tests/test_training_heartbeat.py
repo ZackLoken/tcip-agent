@@ -10,13 +10,6 @@ from datetime import datetime, timezone
 from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
 
-def _config(tmp_path) -> dict:
-    """A detector run's config over two frames of its own under ``tmp_path``."""
-    return detection_config(tmp_path / "data",
-                            model_source={"builder": "my_models:build_detector",
-                                          "task": "detection"})
-
-
 def _beat(run_dir, seconds_ago: float) -> float:
     """Touch ``run_dir``'s heartbeat through its own writer, then age it ``seconds_ago``; the
     instant it now reads."""
@@ -28,10 +21,17 @@ def _beat(run_dir, seconds_ago: float) -> float:
     return instant
 
 
+def _listed(project) -> dict:
+    """The project's listed runs (``list_experiments``), by id."""
+    from tcip_mcp.tools.experiment_tools import list_experiments
+
+    return {r["experiment_id"]: r for r in list_experiments(project)["runs"]}
+
+
 def test_the_heartbeat_window_decides_running_against_interrupted(tmp_path):
     from tcip_mcp.experiments import HEARTBEAT_STALE_SECONDS, observe
 
-    run_dir = opened_run(tmp_path, _config(tmp_path))
+    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
     _beat(run_dir, 0)
     assert observe(run_dir).state == "running"
     _beat(run_dir, HEARTBEAT_STALE_SECONDS - 30)
@@ -41,47 +41,41 @@ def test_the_heartbeat_window_decides_running_against_interrupted(tmp_path):
 
 
 def test_listed_runs_read_running_against_interrupted(tmp_path):
-    from tcip_mcp.tools.experiment_tools import list_experiments
+    _beat(opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="live"), 0)
+    _beat(opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="dead"), 2 * 3600)
 
-    _beat(opened_run(tmp_path, _config(tmp_path), experiment_id="live"), 0)
-    _beat(opened_run(tmp_path, _config(tmp_path), experiment_id="dead"), 2 * 3600)
-
-    by_id = {r["experiment_id"]: r for r in list_experiments(tmp_path, launched_only=True)["runs"]}
-    assert by_id["live"]["status"] == "running"
-    assert by_id["dead"]["status"] == "interrupted"
+    by_id = _listed(tmp_path)
+    assert by_id["live"]["state"] == "running"
+    assert by_id["dead"]["state"] == "interrupted"
 
 
 def test_a_listed_row_carries_the_heartbeat_instant(tmp_path):
     """No process id is recorded anywhere a listed row could check, so a client showing a
     'running' row as live needs the heartbeat instant itself, not just the derived state, to
     say how stale that liveness claim already is."""
-    from tcip_mcp.tools.experiment_tools import list_experiments
+    instant = _beat(opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="beating"), 180)
 
-    instant = _beat(opened_run(tmp_path, _config(tmp_path), experiment_id="beating"), 180)
-
-    by_id = {r["experiment_id"]: r for r in list_experiments(tmp_path, launched_only=True)["runs"]}
-    assert by_id["beating"]["status"] == "running"
+    by_id = _listed(tmp_path)
+    assert by_id["beating"]["state"] == "running"
     assert by_id["beating"]["heartbeat"] == datetime.fromtimestamp(
         instant, timezone.utc).isoformat()
 
 
 def test_configured_stale_window_agrees_across_run_list_compare_and_status(tmp_path, monkeypatch):
-    """list_experiments(launched_only=True), compare_experiments and monitor_training derive
-    "interrupted" the same way under a configured heartbeat window, one constant
-    (``experiments.HEARTBEAT_STALE_SECONDS``) read by every consumer: a 300s-old heartbeat reads
-    stale under a 30s window even though it would read fresh under the 600s default."""
+    """list_experiments, compare_experiments and monitor_training derive "interrupted" the same
+    way under a configured heartbeat window, one constant (``experiments.HEARTBEAT_STALE_SECONDS``)
+    read by every consumer: a 300s-old heartbeat reads stale under a 30s window even though it
+    would read fresh under the 600s default."""
     from tcip_mcp import experiments
     from tcip_mcp.experiments import compare_experiments as compare_tool
-    from tcip_mcp.tools.experiment_tools import list_experiments
     from tcip_mcp.tools.training_tools import monitor_training
 
     monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", 30.0)
-    _beat(opened_run(tmp_path, _config(tmp_path), experiment_id="exp-window"), 300)
+    _beat(opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="exp-window"), 300)
 
-    by_id = {r["experiment_id"]: r for r in list_experiments(tmp_path, launched_only=True)["runs"]}
-    assert by_id["exp-window"]["status"] == "interrupted"
+    assert _listed(tmp_path)["exp-window"]["state"] == "interrupted"
 
     cmp = compare_tool(["exp-window"], project=tmp_path)
     assert cmp["experiments"][0]["state"] == "interrupted"
 
-    assert monitor_training(tmp_path, "exp-window")["status"] == "interrupted"
+    assert monitor_training(tmp_path, "exp-window")["run"]["state"] == "interrupted"

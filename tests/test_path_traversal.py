@@ -1,8 +1,5 @@
-"""Path-traversal validation: allowed-root image guard + route-level run_id/path guards.
-
-(safe_join itself is covered by test_tcip_web_routes.py::TestSafeJoin: under-root, parent-traversal,
-absolute, forward-slashes; so it is not re-tested here.)
-"""
+"""Path-traversal validation: the allowed-root image guard and the route-level run id and path
+guards."""
 
 import pytest
 
@@ -23,18 +20,13 @@ def test_assert_path_allowed_admits_the_workspace_and_refuses_a_sibling(
         assert_path_allowed(str(outside))                        # a sibling workspace -> refused
 
 
-def test_training_stream_closes_on_run_id_traversal(opened_project):
+def test_training_stream_closes_on_run_id_traversal(opened_project, client):
     """A run_id carrying a path separator (BadKey) closes the stream rather than resolving to a
     path component. A backslash, not a ``..`` segment, since a URL client normalizes dot segments
     before the request is even sent. The socket is accepted once a project is open, so the
     disconnect surfaces on the first read."""
-    pytest.importorskip("fastapi")
-    from fastapi.testclient import TestClient
     from starlette.websockets import WebSocketDisconnect
 
-    from tcip_web.app import app
-
-    client = TestClient(app, base_url="http://127.0.0.1")
     with pytest.raises(WebSocketDisconnect) as ei:
         with client.websocket_connect("ws://127.0.0.1/api/training/runs/a\\b/stream") as ws:
             ws.receive_json()

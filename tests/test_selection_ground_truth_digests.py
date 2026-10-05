@@ -13,8 +13,7 @@ from pathlib import Path
 import pytest
 
 import tcip_store
-from tests._image_fixtures import write_image
-from tests._producer_fixtures import label_image
+from tests._producer_fixtures import label_image, write_image
 
 torch = pytest.importorskip("torch")
 
@@ -26,7 +25,7 @@ SUBJECT = "leaf"
 DATES = ("2026-02-11", "2026-02-25")
 _STEMS = ("a", "b", "c", "d", "e", "f", "g", "h")
 
-_save_png = partial(write_image, size=IMG)
+_save_png = partial(write_image, size=(IMG, IMG))
 
 
 def _dataset(root: Path, stems=_STEMS) -> Path:

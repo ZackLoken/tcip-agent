@@ -12,12 +12,13 @@ BOX = (10.0, 10.0, 30.0, 30.0)
 class StubPredictor:
     """A predictor answering the same detections for every image it is handed: ``boxes`` scored
     ``scores``, each labeled 1, on a ``width`` by ``height`` frame, with ``attributes`` when
-    given. It states the recorded training geometry a predictor exposes (none unless given), and
-    every other keyword becomes an attribute a caller reads off a predictor (``task``). Counts its
-    calls, and keeps each execution it ran under and the checkpoint it was built for."""
+    given and ``cap_hit`` as stated. It states the recorded training geometry a predictor exposes
+    (none unless given), and every other keyword becomes an attribute a caller reads off a
+    predictor (``task``, ``in_chans``). Counts its calls, and keeps each execution it ran under and
+    the checkpoint it was built for."""
 
     def __init__(self, *, width: int = 100, height: int = 100, boxes=(BOX,), scores=(0.9,),
-                 attributes=None, train_tile_size=None, train_overlap=None,
+                 attributes=None, cap_hit: bool = False, train_tile_size=None, train_overlap=None,
                  train_native_size=None, train_augmentation=None, **traits: Any) -> None:
         self.train_tile_size = train_tile_size
         self.train_overlap = train_overlap
@@ -26,7 +27,7 @@ class StubPredictor:
         self.record: dict[str, Any] = {
             "width": width, "height": height, "boxes": [list(b) for b in boxes],
             "scores": list(scores), "labels": [1] * len(boxes), "count": len(boxes),
-            "cap_hit": False}
+            "cap_hit": cap_hit}
         if attributes is not None:
             self.record["attributes"] = attributes
         for name, value in traits.items():
@@ -44,6 +45,11 @@ class StubPredictor:
         self.calls += 1
         self.executions.append(execution)
         return [{"image": p, **copy.deepcopy(self.record)} for p in paths]
+
+    def predict_sliced(self, path, execution=None, **kw: Any) -> dict:
+        self.calls += 1
+        self.executions.append(execution)
+        return {"image": path, **copy.deepcopy(self.record)}
 
 
 def install(monkeypatch, predictor: StubPredictor) -> StubPredictor:

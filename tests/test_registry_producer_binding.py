@@ -1,9 +1,5 @@
 """The registry's producer binding: a run's own final status names the digest it produced, and
-nothing else can name a producer for weights the run did not complete with.
-
-tests/test_checkpoint_digest_rails.py holds the load boundary's own rails (two runs naming one
-digest, a foreign registration naming a run's name or bytes).
-"""
+nothing else can name a producer for weights the run did not complete with."""
 
 from __future__ import annotations
 
@@ -79,11 +75,11 @@ def test_a_checkpoint_carrying_no_weights_refuses_at_registration_naming_the_fie
 
     torch = pytest.importorskip("torch")
     from tcip_mcp.model_registry import ModelRegistry
-    from tcip_mcp.pipelines.model_build import STATE_DICT_KEY
+    from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY
     from tests._verified_checkpoint_fixtures import checkpoint_file
 
     weightless = tmp_path / "weightless.pt"
-    torch.save({"config": {}}, weightless)
+    torch.save({CONFIG_KEY: {}}, weightless)
     registry = ModelRegistry(str(tmp_path))
 
     with pytest.raises(ValueError, match=STATE_DICT_KEY):
@@ -92,3 +88,34 @@ def test_a_checkpoint_carrying_no_weights_refuses_at_registration_naming_the_fie
     assert registry.list_models() == []
     registry.register_model("weighted", str(checkpoint_file(tmp_path / "w.pt", "weights")), {})
     assert [m["name"] for m in registry.list_models()] == ["weighted"]
+
+
+def test_an_indexed_checkpoint_carrying_no_weights_refuses_at_load_naming_the_field(tmp_path):
+    """The load boundary states the weights rail itself: an index entry naming a weightless
+    payload's digest, written past registration, refuses at ``load_registered_checkpoint``
+    naming the field, while a registered checkpoint carrying weights loads."""
+    import hashlib
+
+    import pytest
+
+    torch = pytest.importorskip("torch")
+    import tcip_store as ts
+    from tcip_mcp.model_registry import (
+        ModelRegistry, load_registered_checkpoint, registry_index_key,
+    )
+    from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY
+    from tests._verified_checkpoint_fixtures import checkpoint_file
+
+    weighted = checkpoint_file(tmp_path / "w.pt", "weights")
+    ModelRegistry(str(tmp_path)).register_model("weighted", str(weighted), {})
+    weightless = tmp_path / "weightless.pt"
+    torch.save({CONFIG_KEY: {}}, weightless)
+    key = registry_index_key(tmp_path)
+    index = ts.read_versioned(key)
+    entry = {**index.value["entries"][0], "name": "weightless", "checkpoint_path": "weightless.pt",
+             "sha256": hashlib.sha256(weightless.read_bytes()).hexdigest()}
+    ts.replace(key, {"entries": [*index.value["entries"], entry]}, expect=index.version)
+
+    assert load_registered_checkpoint(weighted, project=tmp_path).sha256
+    with pytest.raises(ValueError, match=STATE_DICT_KEY):
+        load_registered_checkpoint(weightless, project=tmp_path)

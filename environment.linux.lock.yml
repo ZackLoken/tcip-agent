@@ -2,8 +2,8 @@
 # (Ubuntu 24.04, x86_64) ran `conda env create -f environment.yml` on a clean archive of the
 # tree and `conda env export -n tcip-agent --no-builds` wrote this. A record of one resolution,
 # kept beside the Windows export so a Linux adopter can compare what resolved for them; the
-# four tcip-* lines are the editable installs, and sam-2 is the pinned git commit, so this file
-# is never itself a path to create an environment. Regenerate it the same way after a change
+# four tcip-* lines are the editable installs, so this file is never itself a path to create an
+# environment. Regenerate it the same way after a change
 # to environment.yml.
 name: tcip-agent
 channels:
@@ -216,7 +216,6 @@ dependencies:
       - rpds-py==2026.6.3
       - ruff==0.16.5
       - safetensors==0.8.0
-      - sam-2==1.0
       - scikit-image==0.26.0
       - scikit-learn==1.9.0
       - scipy==1.18.1

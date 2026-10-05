@@ -94,7 +94,7 @@ one convenience, not a requirement.
 | data | `ctx.train_loader`/`ctx.val_loader` (built from the partition the launch resolved), `ctx.build_dataset`, `ctx.tiled_dataset`, `ctx.task_collate`, `ctx.build_sampler`, `ctx.build_augmentation` |
 | optimize / schedule / freeze | `ctx.build_optimizer`, `ctx.build_scheduler`, `ctx.apply_stage_freeze` (progressive-unfreeze + monotonic guard: the primitive the default trainer uses), `ctx.compute_lr_scale`, `ctx.set_seed`, `ctx.evaluate`, `ctx.compute_class_weights` |
 | measurement | `ctx.mask_geometry`, `ctx.instance_geometries` (the operating point a delivery runs at is an assessment's, `assess_checkpoint`, never a training run's) |
-| audited sinks | `ctx.log_metrics`, `ctx.save_checkpoint` (stamps the run's `config`, its `model_source` and task included, which the one predictor builds the model from; refuses a payload with no `model_state_dict`; a `metrics` key in the saved state registers as `metrics_source="training_source"`, unverified, ranked by `rank_registered_models` only with `include_unverified=True`), `ctx.record_artifact` (copies a file in under a name of its own), `ctx.should_cancel`, `ctx.set_final_weights` (declares which saved tag is the deliverable), `ctx.report_objective` (records a `selection` row under the run's objective, the value an HPO trial reports) |
+| audited sinks | `ctx.log_metrics`, `ctx.save_checkpoint` (stamps the run's `config`, its `model_source` and task included, which the one predictor builds the model from; a payload with no `model_state_dict` is saved but refused when the run's checkpoint is registered; a `metrics` key in the saved state registers as `metrics_source="training_source"`, unverified, ranked by `rank_registered_models` only with `include_unverified=True`), `ctx.record_artifact` (copies a file in under a name of its own), `ctx.should_cancel`, `ctx.set_final_weights` (declares which saved tag is the deliverable), `ctx.report_objective` (records a `selection` row under the run's objective, the value an HPO trial reports) |
 
 Route metrics and checkpoints through the sinks and the run stays audited, immutably versioned, and
 provenance-snapshotted no matter what the loop does; each tag and artifact name is written once, and
@@ -112,8 +112,11 @@ swapped for another algorithm: `build_search_alg` raises `ValueError` naming the
 backend and what's actually available. One seam the docstring doesn't carry:
 `tune_search(objective_fn, param_space, …)` is the
 bring-your-own-objective seam under `run_hyperparameter_search`. Bring your own `objective_fn(config, report)`
-(call `report(value)` each step) for a search that isn't a training sweep; `storage_path` is
-required, trial results land where you say, never Ray's home-directory default.
+(call `report(value)` each step) for a search that isn't a training sweep; `sweep_dir` is
+required, trial results land in that directory, never Ray's home-directory default. A training
+sweep's trials are run directories like any run, listed, monitored, canceled and streamed by
+their own ids, and the GUI's Training tab relaunches a recorded sweep through the same door a
+run relaunches through.
 
 ## Concurrent runs: `tcip inspect-compute-resources`
 

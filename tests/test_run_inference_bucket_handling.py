@@ -8,12 +8,11 @@ from pathlib import Path
 import pytest
 
 torch = pytest.importorskip("torch")
-from PIL import Image  # noqa: E402
-
 import tcip_store  # noqa: E402
 from tcip_mcp.dataset_layout import bucket_key  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
+from tests._producer_fixtures import gray_frame  # noqa: E402
 from tests._verified_checkpoint_fixtures import project_checkpoint  # noqa: E402
 
 UNTILED = Stated(tile=False)
@@ -27,8 +26,7 @@ def _stubbed(monkeypatch) -> StubPredictor:
 
 
 def _images(directory: Path) -> Path:
-    directory.mkdir(parents=True)
-    Image.new("RGB", (100, 100), (120, 120, 120)).save(directory / "img.png")
+    gray_frame(directory, 100)
     return directory
 
 

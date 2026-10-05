@@ -1,6 +1,6 @@
-"""The process entry point of one run's body: ``python -m
+"""The process entry point of one run's body or one sweep: ``python -m
 tcip_mcp.pipelines.training.subprocess_worker --run-dir <dir>``, everything else it reads being in
-the directory's ``run.json``.
+the directory's ``run.json``, or its ``sweep.json`` for a sweep.
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ import argparse
 import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from tcip_mcp.experiments import RunObservation
@@ -33,20 +33,17 @@ def prepare_run_context(
     datasets and loaders (:func:`~tcip_mcp.pipelines.data.split_construction.recorded_datasets`).
     ``origin`` and ``epoch_hook`` are the context's own.
     """
-    from tcip_mcp.experiments import project_of_run
     from tcip_mcp.pipelines.data.split_construction import partition_samples, recorded_datasets
     from tcip_mcp.pipelines.model_build import run_task
     from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.generic_trainer import run_loaders, run_transforms
-    from tcip_mcp.pipelines.training.run_registry import TrainRun, trained_config
+    from tcip_mcp.pipelines.training.run_registry import observed_run
 
     run_dir = observation.directory
     run_record = observation.record
-    resolved = run_record["resolved"]
-    config = trained_config(run_record)
-    run_obj = TrainRun(id=run_dir.name, config=config, objective=resolved["objective"],
-                       project=project_of_run(run_dir), output_dir=str(run_dir), origin=origin)
+    run_obj = observed_run(observation, origin=origin)
+    config, resolved = run_obj.config, cast(dict, observation.resolution)
     if run_record["max_wall_clock_seconds"] is not None:
         run_obj.deadline = time.time() + run_record["max_wall_clock_seconds"]
 
@@ -106,7 +103,15 @@ def main() -> None:
     from tcip_store import bind
 
     bind()
-    run_directory(Path(_parse_args().run_dir))
+    from tcip_mcp.experiments import SWEEP_FILE
+
+    directory = Path(_parse_args().run_dir)
+    if (directory / SWEEP_FILE).is_file():
+        from tcip_mcp.tools.training_tools import run_sweep
+
+        run_sweep(directory)
+    else:
+        run_directory(directory)
 
 
 if __name__ == "__main__":

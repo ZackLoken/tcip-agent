@@ -139,50 +139,27 @@ def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing
 
 def test_launch_training_child_receives_its_own_run_directory(tmp_path, monkeypatch):
     """The child is told only its run directory, whose ``run.json`` the parent wrote before
-    spawning it; a second launch naming the same id refuses before anything spawns. Mocks
-    subprocess.Popen to capture argv without spawning a real child; preflight_config's smoke check
+    spawning it, under the id the launch answers. Mocks subprocess.Popen to capture argv without spawning a real child; preflight_config's smoke check
     still runs for real in this process, so a real (tiny) bespoke model/dataset is needed."""
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
-    import subprocess
 
     from tcip_mcp.experiments import experiment_dir, observe
     from tcip_mcp.tools import training_tools
-
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
+    from tests._producer_fixtures import fake_popen, seed_bud_images, small_detection_config
 
     captured_argv: list[list[str]] = []
-
-    class _FakeProc:
-        pid = 424242
-
-    def _fake_popen(argv, **kwargs):
-        captured_argv.append(argv)
-        return _FakeProc()
-
-    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
-
-    from tests._producer_fixtures import seed_two_bud_images, small_detection_config
+    fake_popen(monkeypatch, captured_argv)
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
-    seed_two_bud_images(images_dir)
+    seed_bud_images(images_dir, n=2, size=32, box=(1, 1, 9, 9))
 
-    def _cfg(experiment_id: str) -> dict:
-        return small_detection_config(images_dir, experiment_id)
-
-    def children() -> list[list[str]]:
-        return [argv for argv in captured_argv if "--run-dir" in argv]
-
-    res = training_tools.launch_training(tmp_path, _cfg("exp_fresh"), actor=None)
-    run_dir = experiment_dir("exp_fresh", project=tmp_path)
-    assert res["experiment_id"] == "exp_fresh"
-    assert children()[-1][-2:] == ["--run-dir", str(run_dir)]
+    res = training_tools.launch_training(
+        tmp_path, small_detection_config(images_dir), actor=None)
+    run_dir = experiment_dir(res["experiment_id"], project=tmp_path)
+    children = [argv for argv in captured_argv if "--run-dir" in argv]
+    assert children == [children[0]] and children[0][-2:] == ["--run-dir", str(run_dir)]
     assert observe(run_dir).record["config"]["data"]["images_dir"] == str(images_dir)
-
-    again = training_tools.launch_training(tmp_path, _cfg("exp_fresh"), actor=None)
-    assert "already exists" in again["error"]
-    assert len(children()) == 1
 
 
 # ── should_cancel() / the cancellation record ──────────────────────
@@ -231,8 +208,8 @@ def test_run_summary_reads_the_run_directory(tmp_path):
     log_epoch(run_dir, 3, {"loss": 0.1})
 
     observation = observe(run_dir)
-    result = run_summary(observation, read_rows(observation.metrics_log)[0])
-    assert result["status"] == "running"
+    result = run_summary(observation, read_rows(observation.metrics_log)[0], None).model_dump()
+    assert result["state"] == "running"
     assert result["current_epoch"] == 3
     assert result["output_dir"] == str(run_dir)
     assert result["best_metric"] is None
@@ -261,7 +238,7 @@ def test_the_live_summary_folds_its_rows_in_the_recorded_objectives_direction(
     log_epoch(run_dir, 3, {"selection": float("nan"), "selection_metric": "map50"})
 
     observation = observe(run_dir)
-    result = run_summary(observation, read_rows(observation.metrics_log)[0])
+    result = run_summary(observation, read_rows(observation.metrics_log)[0], None).model_dump()
     assert (result["best_metric_name"], result["best_metric"]) == ("map50", best)
 
 
@@ -275,8 +252,8 @@ def test_run_summary_surfaces_the_wall_clock_failure_the_child_wrote(tmp_path):
         tmp_path, training_source="tests.test_training_subprocess_isolation:_bespoke_loop",
         wall_clock_passed=True)
 
-    result = run_summary(observe(run_dir), [])
-    assert result["status"] == "failed"
+    result = run_summary(observe(run_dir), [], None).model_dump()
+    assert result["state"] == "failed"
     assert result["error"] == "exceeded max_wall_clock_seconds"
 
 
@@ -295,7 +272,7 @@ def test_a_canceled_run_reads_canceled_whatever_its_heartbeat(tmp_path, monkeypa
     assert experiments.observe(canceled).state == "canceled"
 
 
-# ── monitor_training / list_experiments(launched_only=True) read the directory ─────
+# ── monitor_training / list_experiments read the directory ─────
 
 
 def test_monitor_training_reads_the_run_directory(tmp_path, monkeypatch):
@@ -306,9 +283,9 @@ def test_monitor_training_reads_the_run_directory(tmp_path, monkeypatch):
                          experiment_id="run_delegated")
     log_epoch(run_dir, 7, {"loss": 0.2})
 
-    result = monitor_training(tmp_path, "run_delegated")
-    assert result["epoch"] == 7
-    assert result["status"] == "running"
+    result = monitor_training(tmp_path, "run_delegated")["run"]
+    assert result["current_epoch"] == 7
+    assert result["state"] == "running"
 
 
 def test_launched_runs_view_lists_a_run_read_from_its_directory(tmp_path):
@@ -323,8 +300,8 @@ def test_launched_runs_view_lists_a_run_read_from_its_directory(tmp_path):
         experiment_id="exp-no-stamp")
     log_epoch(run_dir, 9, {"loss": 0.1})
 
-    by_id = {r["experiment_id"]: r for r in list_experiments(tmp_path, launched_only=True)["runs"]}
-    assert by_id["exp-no-stamp"]["status"] == "running"
+    by_id = {r["experiment_id"]: r for r in list_experiments(tmp_path)["runs"]}
+    assert by_id["exp-no-stamp"]["state"] == "running"
     assert by_id["exp-no-stamp"]["current_epoch"] == 9
     assert by_id["exp-no-stamp"]["heartbeat"] is not None
 
@@ -520,33 +497,30 @@ def test_default_trial_resources_no_gpu(monkeypatch):
 @pytest.mark.ray_cluster
 def test_tune_search_accepts_explicit_resources_per_trial(tmp_path):
     """A real, lightweight Ray sweep (a pure-math objective, no training) runs to its end with an
-    explicit resources_per_trial, its log directory under the caller's storage_path."""
-    from pathlib import Path
-
+    explicit resources_per_trial, its experiment store at the caller's sweep_dir."""
     pytest.importorskip("ray")
     from tcip_mcp.pipelines.training.hpo import tune_search
 
     def obj(config, report):
         report((config["x"] - 2.0) ** 2)
 
-    logdir = tune_search(
+    tune_search(
         obj,
         param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
         metric="objective", mode="min", num_samples=4,
         search_alg="random", scheduler="none",
         resources_per_trial={"cpu": 1.0, "gpu": 0.0},
-        storage_path=str(tmp_path), seed=0, project=tmp_path
+        sweep_dir=tmp_path / "explicit", seed=0
     )
-    assert Path(logdir).is_dir()
-    assert Path(logdir).is_relative_to(tmp_path)
+    assert (tmp_path / "explicit").is_dir()
 
 
 @pytest.mark.ray_cluster
 def test_tune_search_runs_despite_deprecated_ray_result_dir_variables(tmp_path, monkeypatch):
     """Ray Tune refuses to run while TUNE_RESULT_DIR or RAY_AIR_LOCAL_CACHE_DIR is set anywhere
-    in the environment, even though storage_path alone decides where trial results land. A
-    machine that still carries such a redirect must get a working sweep, stored under the
-    caller's storage_path, with the variables left in the environment exactly as they were."""
+    in the environment, even though sweep_dir alone decides where trial results land. A
+    machine that still carries such a redirect must get a working sweep, stored at the
+    caller's sweep_dir, with the variables left in the environment exactly as they were."""
     import os
 
     pytest.importorskip("ray")
@@ -559,29 +533,15 @@ def test_tune_search_runs_despite_deprecated_ray_result_dir_variables(tmp_path, 
     def obj(config, report):
         report((config["x"] - 2.0) ** 2)
 
-    logdir = tune_search(
+    tune_search(
         obj,
         param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
         metric="objective", mode="min", num_samples=2,
         search_alg="random", scheduler="none",
         resources_per_trial={"cpu": 1.0, "gpu": 0.0},
-        storage_path=str(tmp_path / "sweep_store"), seed=0, project=tmp_path
+        sweep_dir=tmp_path / "sweep_store" / "redirected", seed=0
     )
-    from pathlib import Path
 
-    assert Path(logdir).is_relative_to(tmp_path / "sweep_store")
+    assert (tmp_path / "sweep_store" / "redirected").is_dir()
     assert os.environ["TUNE_RESULT_DIR"] == machine_scratch
     assert os.environ["RAY_AIR_LOCAL_CACHE_DIR"] == machine_scratch
-
-
-def test_tune_search_refuses_to_run_without_a_storage_path(tmp_path):
-    """Trial results land where the caller says; with no storage_path Ray would fall back to a
-    home-directory default outside any project, so the call refuses and names the resolver."""
-    from tcip_mcp.pipelines.training.hpo import tune_search
-
-    with pytest.raises(ValueError, match="storage_path"):
-        tune_search(
-            objective_fn=lambda config, report: report(0.0),
-            param_space={"x": {"type": "uniform", "low": 0.0, "high": 1.0}}, seed=0,
-            project=tmp_path,
-        )

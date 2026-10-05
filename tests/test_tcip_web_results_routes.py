@@ -14,16 +14,10 @@ from fastapi.testclient import TestClient
 
 import tcip_store
 from tcip_mcp.audit import audit_log_key
-from tcip_web.app import app
 
 from tests import _trait_fixtures as fx
 from tests._audit_fixtures import refuse_audit_appends
 from tests._web_fixtures import BROWSER, acknowledged_post, open_new_project
-
-
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _rows(text: str) -> list[dict]:
@@ -661,11 +655,74 @@ def test_registered_models_answers_a_resolved_absolute_checkpoint_path(
     assert Path(resp.json()["models"][0]["checkpoint_path"]) == ckpt.resolve()
 
 
+def test_the_plant_mapping_list_names_each_mapping_the_project_built(
+    client: TestClient, opened_project: Path,
+) -> None:
+    """A mapping ``build_plant_mapping`` built under the open project is listed by its name."""
+    from tests._mapping_fixtures import map_captures
+
+    map_captures(opened_project, opened_project / "ds", ["2026-02-11"], name="valley")
+
+    listed = client.get("/api/results/plant_mapping/list")
+    assert listed.status_code == 200, listed.text
+    assert listed.json() == {"names": ["valley"]}
+
+
+def test_the_plant_mapping_list_refuses_while_no_project_is_open(client: TestClient) -> None:
+    assert client.get("/api/results/plant_mapping/list").status_code == 409
+
+
 def test_inference_launch_missing_checkpoint(client: TestClient, opened_project: Path) -> None:
     resp = client.post("/api/inference/launch", json={
         "checkpoint_path": str(opened_project / "no.pt"), "dataset_root": str(opened_project),
         "date": "2026-02-11", "user": "tester", "bucket": "baseline/2026-02-11"})
     assert resp.status_code == 404
+
+
+def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(
+    client: TestClient, opened_project: Path,
+) -> None:
+    """A job the launch door started is canceled by its id: the answer names it and one
+    ``inference_canceled`` line names the person; an id naming no job refuses by name."""
+    pytest.importorskip("torch")
+    from PIL import Image
+
+    from tcip_mcp.audit import audit_log_key
+    from tcip_mcp.model_registry import ModelRegistry
+    from tcip_mcp.tools.ingest_tools import ingest_images
+    from tcip_store import read_log
+    from tcip_web.routes import inference as inference_routes
+    from tests._verified_checkpoint_fixtures import checkpoint_file
+
+    source = opened_project / "raw"
+    source.mkdir()
+    Image.new("RGB", (16, 16)).save(source / "tree_01.jpg")
+    assert "error" not in ingest_images(opened_project, str(source), date_from="2026-02-11")
+    ckpt = checkpoint_file(opened_project / "m.pt", "cancel fixture weights")
+    ModelRegistry(str(opened_project)).register_model("m", str(ckpt), {})
+    launched = client.post("/api/inference/launch", json={
+        "checkpoint_path": str(ckpt), "dataset_root": str(opened_project), "date": "2026-02-11",
+        "bucket": "baseline/2026-02-11", "user": "tester"})
+    assert launched.status_code == 200, launched.text
+    job_id = launched.json()["job_id"]
+    try:
+        before = len(read_log(audit_log_key(opened_project)).records)
+        canceled = client.post(f"/api/inference/jobs/{job_id}/cancel", json={"user": "tester"})
+        assert canceled.status_code == 200, canceled.text
+        assert (canceled.json()["job_id"], canceled.json()["cancel_requested"]) == (job_id, True)
+        lines = [r for r in read_log(audit_log_key(opened_project)).records[before:]
+                 if r["tool"] == "inference_canceled"]
+        assert [(r["arguments"]["job_id"], r["actor"]) for r in lines] == [(job_id, "user:tester")]
+    finally:
+        job = inference_routes._get(job_id)
+        if job is not None and job.thread is not None:
+            job.thread.join(timeout=60)
+        with inference_routes._registry.lock:
+            inference_routes._registry.jobs.pop(job_id, None)
+
+    missing = client.post("/api/inference/jobs/inf-absent/cancel", json={"user": "tester"})
+    assert missing.status_code == 404
+    assert "inf-absent" in missing.json()["detail"]
 
 
 def test_inference_list_jobs_endpoint(client: TestClient, opened_project: Path) -> None:

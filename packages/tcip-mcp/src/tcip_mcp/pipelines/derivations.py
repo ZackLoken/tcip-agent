@@ -392,29 +392,18 @@ def derive_block_scale_px(
 
 
 def _image_stats_label(path) -> str:
-    """The path string both normalization-statistics derivations record for one raster: its own
-    path, or a band group's manifest path when the source is a :class:`BandGroupRef`.
-    """
+    """The path string recorded for one raster: its own path, or a band group's manifest path
+    when the source is a :class:`BandGroupRef`."""
     return str(getattr(path, "manifest_path", path))
 
 
 def band_normalization_stats(
     image_paths: "Sequence[str | Path | BandGroupRef]", num_channels: int, *, max_images: int = 50,
 ) -> tuple[list[float], list[float], list[str]] | None:
-    """Per-band ``(mean, std, paths_read)`` in [0, 1] over this dataset's rasters, or ``None`` when
-    no raster could be read.
-
-    The statistics a detector normalizes with. torchvision defaults to 3-element ImageNet values,
-    which are wrong on any band set that is not RGB photography: at 1 channel they silently
-    broadcast the image to 3, and at any count other than 3 they raise inside the transform. Sample
-    the training split and pass ``mean``/``std`` to ``build_detector`` as
-    ``image_mean``/``image_std`` through ``model_source.builder_kwargs``: torchvision keeps them as
-    plain lists on the transform, not as buffers, so they are absent from the checkpoint.
-    ``paths_read`` (the paths this call decoded and accepted, after the ``max_images`` cap and
-    after dropping any raster whose band count disagreed) is what :func:`image_stats_provenance`
-    renders into ``model_source.image_stats_sampling``.
-
-    ``max_images`` caps the sample.
+    """Per-band ``(mean, std, paths_read)`` in [0, 1] over at most ``max_images`` of
+    ``image_paths`` read at ``num_channels`` bands, or ``None`` when no raster could be read.
+    ``paths_read`` names the rasters decoded and accepted, a raster whose band count disagreed
+    dropped; :func:`image_stats_provenance` renders it into ``model_source.image_stats_sampling``.
     """
     import numpy as np
 
@@ -437,9 +426,7 @@ def band_normalization_stats(
 
 
 class _BandMoments:
-    """Pixel-weighted per-band first and second moments over [0, 1] tensor pixels, for
-    :func:`band_normalization_stats` and :func:`band_normalization_stats_sampled`.
-    """
+    """Pixel-weighted per-band first and second moments over [0, 1] tensor pixels."""
 
     def __init__(self, num_channels: int):
         import numpy as np
@@ -605,12 +592,8 @@ _STATIC_DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
     IOU_MATCH_DERIVATION: "tcip_mcp.pipelines.derivations.derive_iou_match_threshold",
     MAX_DETS_DERIVATION: "tcip_mcp.pipelines.derivations.derive_max_dets_from_counts",
 }
-"""The derivation labels that are authored here, everything except the count-objective ones.
-
-Every label an execution record's ``sources`` names for a derived value resolves through
-:data:`DERIVATION_IMPLEMENTATIONS` to the callable that computes it, so a data-sounding label
-cannot be recorded without an implementation behind it.
-"""
+"""Each derivation label authored here, every one but the count-objective ones, mapped to the
+callable that computes it."""
 
 _CURVE_IMPLEMENTATION = "tcip_mcp.pipelines.training.evaluation.derive_operating_point_curve"
 

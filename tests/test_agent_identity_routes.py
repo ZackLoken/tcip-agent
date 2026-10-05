@@ -10,11 +10,9 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 
 from tcip_mcp.agent_identity import RECORD_FIELDS as IDENTITY_FIELDS
-from tcip_web.app import app
 
 DECLARED_HEADERS = {
     "X-TCIP-Agent-Client-Name": "reviewing-harness",
@@ -22,9 +20,6 @@ DECLARED_HEADERS = {
     "X-TCIP-Agent-Session": "mcp_0123",
     "X-TCIP-Terminal-Session": "term_abc",
 }
-@pytest.fixture
-def client(opened_project) -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _post_and_capture_broadcast(
@@ -47,10 +42,10 @@ def _post_and_capture_broadcast(
 
 
 def test_a_push_with_the_identity_headers_is_replayed_with_what_it_declared(
-    client: TestClient,
+    opened_client: TestClient,
 ) -> None:
     posted, event = _post_and_capture_broadcast(
-        client, "identity_declared", {}, headers=DECLARED_HEADERS
+        opened_client, "identity_declared", {}, headers=DECLARED_HEADERS
     )
     assert posted.status_code == 200, posted.text
     assert [event[field] for field in IDENTITY_FIELDS] == [
@@ -59,16 +54,18 @@ def test_a_push_with_the_identity_headers_is_replayed_with_what_it_declared(
     assert not any("harness" in field for field in event)
 
 
-def test_a_push_without_the_headers_is_replayed_with_the_fields_empty(client: TestClient) -> None:
-    posted, event = _post_and_capture_broadcast(client, "identity_absent", {})
+def test_a_push_without_the_headers_is_replayed_with_the_fields_empty(
+    opened_client: TestClient,
+) -> None:
+    posted, event = _post_and_capture_broadcast(opened_client, "identity_absent", {})
     assert posted.status_code == 200, posted.text
     assert posted.json()["status"] == "ok"
     assert [event[field] for field in IDENTITY_FIELDS] == [None] * len(IDENTITY_FIELDS)
 
 
-def test_a_partial_declaration_records_only_what_was_sent(client: TestClient) -> None:
+def test_a_partial_declaration_records_only_what_was_sent(opened_client: TestClient) -> None:
     _, event = _post_and_capture_broadcast(
-        client, "identity_partial", {}, headers={"X-TCIP-Agent-Client-Name": "reviewing-harness"}
+        opened_client, "identity_partial", {}, headers={"X-TCIP-Agent-Client-Name": "reviewing-harness"}
     )
     assert event["agent_client_name"] == "reviewing-harness"
     assert event["agent_client_version"] is None

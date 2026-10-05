@@ -160,7 +160,7 @@ fixes the principle. When a trait can't be validly measured from the available p
 - Geometry needs a validated mask and physical scale. Area/length/width off a *validated*
   mask (calibrated to real-world scale) is a valid measurement; an *uncalibrated* box height or
   aspect ratio is scale-, zoom-, and pose-dependent, and geometry can't stand in for the visual
-  call of a biological *state* (that's a validated classification). See CLAUDE.md.
+  call of a biological *state* (that's a validated classification).
 - A vegetation index is a proxy, not the trait. Validate NDVI/red-edge against expert
   ground truth; never deliver the index as the biological quantity.
 - Chemistry is not in RGB pixels. Any RGB-derived oil/protein/moisture/tannin number is

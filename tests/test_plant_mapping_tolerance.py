@@ -5,7 +5,6 @@ nothing is stated and the layout carries too few positioned plants to derive one
 
 from __future__ import annotations
 
-import csv
 from datetime import datetime
 from pathlib import Path
 
@@ -19,19 +18,12 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
 )
 
 from tests._image_fixtures import write_geo_image as _write_geo_image
+from tests._mapping_fixtures import write_plant_csv
 
 PLANTS = [
     {"plot": "P1", "accession": "acc-A", "lat": 43.19670, "lon": -90.058000},
     {"plot": "P2", "accession": "acc-B", "lat": 43.19670, "lon": -90.058037},
 ]
-
-
-def _write_plant_csv(path: Path, plants: list[dict]) -> None:
-    with path.open("w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(["plot_name", "accession_name", "WGS84_centroid_x", "WGS84_centroid_y"])
-        for p in plants:
-            w.writerow([p["plot"], p["accession"], p["lon"], p["lat"]])
 
 
 def _write_one_image(dataset_root: Path) -> Path:
@@ -45,8 +37,7 @@ def _write_one_image(dataset_root: Path) -> Path:
 
 def _build(tmp_path: Path, plants: list[dict], nn_tolerance_m: float | None) -> tuple:
     images_root = _write_one_image(tmp_path)
-    plant_csv = tmp_path / "plants.csv"
-    _write_plant_csv(plant_csv, plants)
+    plant_csv = write_plant_csv(tmp_path / "plants.csv", plants)
     build = build_mapping(
         images_root, [plant_csv], name="valley", dataset_root=tmp_path / "ds",
         dataset_id="ds-1", project=tmp_path,

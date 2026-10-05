@@ -7,17 +7,13 @@ splice two models into one series.
 
 from __future__ import annotations
 
-import csv
 from pathlib import Path
 
 import pytest
 
+from tests import csv_rows
+
 pytest.importorskip("torch")
-
-
-def _rows(path: Path) -> list[dict]:
-    with path.open(newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
 
 
 def test_the_csv_row_count_equals_the_population(tmp_path: Path) -> None:
@@ -36,7 +32,7 @@ def test_the_csv_row_count_equals_the_population(tmp_path: Path) -> None:
         plants=["PLANT_A", "PLANT_UNMAPPED"])
 
     assert "error" not in res, res
-    rows = _rows(out_csv)
+    rows = csv_rows(out_csv)
     assert [r["plant_id"] for r in rows] == ["PLANT_A", "PLANT_UNMAPPED"]
     assert res["n_plants"] == 2
     by_plant = {r["plant_id"]: r for r in rows}
@@ -62,13 +58,9 @@ def test_an_empty_population_refuses_naming_the_argument(tmp_path: Path) -> None
     assert not (tmp_path / "out" / "bud.csv").exists()
 
 
-def test_the_web_route_delivers_the_population_it_was_given(tmp_path: Path) -> None:
-    from fastapi.testclient import TestClient
-
-    from tcip_web.app import app
+def test_the_web_route_delivers_the_population_it_was_given(tmp_path: Path, client) -> None:
     from tests._chain_fixtures import attributed_series
 
-    client = TestClient(app, base_url="http://127.0.0.1")
     body = attributed_series(tmp_path).body(plants=["PLANT_B"])
 
     resp = client.post("/api/results/phenology_measurement", json=body)

@@ -11,13 +11,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tcip_mcp.web_client import VALID_PANELS
-from tcip_web.app import app
-
-
-@pytest.fixture
-def client(opened_project):
-    """A client of the web backend holding ``opened_project`` open."""
-    return TestClient(app, base_url="http://127.0.0.1")
 
 
 @pytest.fixture
@@ -34,8 +27,8 @@ def project_id(opened_project) -> str:
 class TestPostPanelEventRoute:
     """Verify the FastAPI stub route that receives events from MCP tools."""
 
-    def test_accepts_valid_panel(self, client: TestClient, project_id: str) -> None:
-        resp = client.post(
+    def test_accepts_valid_panel(self, opened_client: TestClient, project_id: str) -> None:
+        resp = opened_client.post(
             "/api/events/training",
             json={"project_id": project_id, "event_type": "metrics_update", "data": {"epoch": 5, "mAP50": 0.85}},
         )
@@ -45,19 +38,19 @@ class TestPostPanelEventRoute:
         assert body["panel"] == "training"
         assert body["event_type"] == "metrics_update"
 
-    def test_rejects_invalid_panel(self, client: TestClient, project_id: str) -> None:
-        resp = client.post(
+    def test_rejects_invalid_panel(self, opened_client: TestClient, project_id: str) -> None:
+        resp = opened_client.post(
             "/api/events/bogus",
             json={"project_id": project_id, "event_type": "anything", "data": {}},
         )
         body = resp.json()
         assert "error" in body
 
-    def test_all_valid_panels(self, client: TestClient, project_id: str) -> None:
+    def test_all_valid_panels(self, opened_client: TestClient, project_id: str) -> None:
         # Iterates the shared set the tool and the route both validate against, so a panel added
         # there is covered here without a third copy of the list drifting out of step.
         for panel in sorted(VALID_PANELS):
-            resp = client.post(
+            resp = opened_client.post(
                 f"/api/events/{panel}",
                 json={"project_id": project_id, "event_type": "test", "data": {"ok": True}},
             )
@@ -65,17 +58,17 @@ class TestPostPanelEventRoute:
             assert resp.json()["status"] == "ok", f"panel {panel} should be valid"
 
     def test_events_posted_while_connected_are_delivered_live_in_order(
-        self, client: TestClient, project_id: str
+        self, opened_client: TestClient, project_id: str
     ) -> None:
         """A subscriber connected to a panel receives events pushed after it joined, in the
         order they were posted."""
-        with client.websocket_connect("ws://127.0.0.1/ws/panel/tuning") as ws:
-            client.post(
-                "/api/events/tuning",
+        with opened_client.websocket_connect("ws://127.0.0.1/ws/panel/training") as ws:
+            opened_client.post(
+                "/api/events/training",
                 json={"project_id": project_id, "event_type": "trial_update", "data": {"trial": 1}},
             )
-            client.post(
-                "/api/events/tuning",
+            opened_client.post(
+                "/api/events/training",
                 json={"project_id": project_id, "event_type": "trial_update", "data": {"trial": 2}},
             )
             first = ws.receive_json()
@@ -84,17 +77,17 @@ class TestPostPanelEventRoute:
         assert second["data"] == {"trial": 2}
 
     def test_events_posted_before_connecting_are_replayed_on_connect(
-        self, client: TestClient, project_id: str
+        self, opened_client: TestClient, project_id: str
     ) -> None:
         """A browser that connects after events landed receives them on connect, in the order
         they were posted."""
         panel = "results"
-        client.post("/api/events/results",
+        opened_client.post("/api/events/results",
                     json={"project_id": project_id, "event_type": "count_ready", "data": {"count": 11}})
-        client.post("/api/events/results",
+        opened_client.post("/api/events/results",
                     json={"project_id": project_id, "event_type": "count_ready", "data": {"count": 22}})
 
-        with client.websocket_connect(f"ws://127.0.0.1/ws/panel/{panel}") as ws:
+        with opened_client.websocket_connect(f"ws://127.0.0.1/ws/panel/{panel}") as ws:
             first = ws.receive_json()
             second = ws.receive_json()
         assert first["event_type"] == "count_ready"
@@ -102,24 +95,24 @@ class TestPostPanelEventRoute:
         assert second["data"] == {"count": 22}
 
     def test_an_event_retained_for_one_project_is_not_replayed_once_another_is_open(
-        self, client: TestClient, project_id: str, tmp_path: Path,
+        self, opened_client: TestClient, project_id: str, tmp_path: Path,
     ) -> None:
         """Replay is of the open project's own events: after another project opens, a late
         subscriber is replayed nothing the first project's session retained."""
         from tcip_web.state import store
         from tests._web_fixtures import open_new_project
 
-        client.post("/api/events/results",
+        opened_client.post("/api/events/results",
                     json={"project_id": project_id, "event_type": "count_ready", "data": {}})
         assert len(store.retained_events("results")) == 1
 
         open_new_project(tmp_path.parent / "other")
         assert store.retained_events("results") == []
 
-    def test_annotate_focus_persists_advisory_state(self, client: TestClient, project_id: str) -> None:
+    def test_annotate_focus_persists_advisory_state(self, opened_client: TestClient, project_id: str) -> None:
         """An annotate_focus event carrying a mode and an active_subject writes both into the
         advisory state, alongside the tab it lands on."""
-        resp = client.post(
+        resp = opened_client.post(
             "/api/events/app",
             json={
                 "project_id": project_id,
@@ -128,23 +121,23 @@ class TestPostPanelEventRoute:
             },
         )
         assert resp.status_code == 200
-        state = client.get("/api/state").json()
+        state = opened_client.get("/api/state").json()
         assert state["active_tab"] == "annotate"
         assert state["mode"] == "polygon"
         assert state["active_subject"] == "bud"
 
-    def test_annotate_focus_with_an_unknown_mode_answers_400(self, client: TestClient, project_id: str) -> None:
-        before = client.get("/api/state").json()["mode"]
-        resp = client.post(
+    def test_annotate_focus_with_an_unknown_mode_answers_400(self, opened_client: TestClient, project_id: str) -> None:
+        before = opened_client.get("/api/state").json()["mode"]
+        resp = opened_client.post(
             "/api/events/app",
             json={"project_id": project_id, "event_type": "annotate_focus", "data": {"mode": "lasso"}},
         )
         assert resp.status_code == 400
         assert "lasso" in resp.json()["detail"]
-        assert client.get("/api/state").json()["mode"] == before
+        assert opened_client.get("/api/state").json()["mode"] == before
 
     def test_the_focus_tools_own_annotate_event_reaches_the_advisory_state(
-        self, client: TestClient, opened_project: Path, project_id: str, data_dir: Path,
+        self, opened_client: TestClient, opened_project: Path, project_id: str, data_dir: Path,
         monkeypatch,
     ) -> None:
         """The event ``focus_human_attention`` posts, delivered to the backend, sets the
@@ -165,12 +158,12 @@ class TestPostPanelEventRoute:
         assert "error" not in res, res
         assert posted["event_type"] == "annotate_focus"
 
-        resp = client.post(f"/api/events/{posted['panel']}",
+        resp = opened_client.post(f"/api/events/{posted['panel']}",
                            json={"project_id": project_id, "event_type": posted["event_type"],
                                  "data": posted["data"]})
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
-        state = client.get("/api/state").json()
+        state = opened_client.get("/api/state").json()
         assert state["active_tab"] == "annotate"
         assert state["mode"] == "point"
         assert state["active_subject"] == "bud"
@@ -344,12 +337,12 @@ class TestTrainingToolOutputSchema:
         late = opened_run(tmp_path, config, experiment_id="event-run-late")
         log_epoch(late, 9, {"loss": 0.07})
 
-        status = training_tools.monitor_training(tmp_path, late.name)
+        status = training_tools.monitor_training(tmp_path, late.name)["run"]
         assert status["experiment_id"] == late.name
-        assert status["status"] == "running"
-        assert status["epoch"] == 9
+        assert status["state"] == "running"
+        assert status["current_epoch"] == 9
         assert status["output_dir"] == str(late)
-        assert training_tools.monitor_training(tmp_path, early.name)["epoch"] == 1
+        assert training_tools.monitor_training(tmp_path, early.name)["run"]["current_epoch"] == 1
 
         assert "error" in training_tools.monitor_training(tmp_path, "run_that_was_never_created")
 

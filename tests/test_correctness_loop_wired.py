@@ -18,6 +18,7 @@ pytest.importorskip("torchvision")
 from tcip_mcp.pipelines.model_build import resolve_contract_dims  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
 from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
+from torch.utils.data import Dataset  # noqa: E402
 
 
 def _broken_builder(**kwargs):
@@ -38,32 +39,24 @@ def _broken_builder(**kwargs):
     return _Broken()
 
 
+class _ValuesDataset(Dataset):
+    """Four blank images, each target one scalar value."""
+
+    def __len__(self):
+        return 4
+
+    def __getitem__(self, idx):
+        return torch.zeros(3, 32, 32), {"values": torch.tensor(float(idx))}
+
+
 def _bespoke_task_dataset(**_kwargs):
     """Agent-authored dataset for a task the platform does not enumerate."""
-    from torch.utils.data import Dataset
-
-    class _DS(Dataset):
-        def __len__(self):
-            return 4
-
-        def __getitem__(self, idx):
-            return torch.zeros(3, 32, 32), {"values": torch.tensor(float(idx))}
-
-    return _DS()
+    return _ValuesDataset()
 
 
 def _strict_bespoke_dataset(samples=None, scope=None, transforms=None, task=None):
     """Declares only what the training path passes: no `**kwargs` catch-all to absorb stray keys."""
-    from torch.utils.data import Dataset
-
-    class _DS(Dataset):
-        def __len__(self):
-            return 4
-
-        def __getitem__(self, idx):
-            return torch.zeros(3, 32, 32), {"values": torch.tensor(float(idx))}
-
-    return _DS()
+    return _ValuesDataset()
 
 
 def _unbuildable_dataset(**_kwargs):

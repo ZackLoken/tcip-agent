@@ -8,12 +8,10 @@ trait rather than the pilot's, so nothing here generalizes from one trait's own 
 from __future__ import annotations
 
 import asyncio
-import csv
 from datetime import datetime
 from pathlib import Path
 
 import pytest
-from PIL import Image
 
 import tcip_store as ts
 from tcip_mcp.pipelines.postprocessing import plant_mapping
@@ -21,7 +19,8 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import Assignment, MappingB
 from tcip_mcp.tools.phenology_tools import build_plant_mapping, deliver_phenology_milestones
 
 from tests._image_fixtures import write_geo_image as _write_geo_image
-from tests._mapping_fixtures import register_plant_registry_for
+from tests._mapping_fixtures import register_plant_registry_for, write_plant_csv
+from tests._producer_fixtures import write_image
 from tests.test_plant_mapping_binding import (
     PLANTS, _dataset, _deliver, _events, _init, _publish, _write_scene,
 )
@@ -33,22 +32,13 @@ PLANT_IDS = [p["plot"] for p in PLANTS]
 
 def _write_ungeoreferenced_image(path: Path) -> None:
     """A JPEG carrying no EXIF at all: readable, but with no timestamp and no GPS block."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (8, 8)).save(path)
+    write_image(path, (8, 8))
 
 
 def _write_corrupt_image(path: Path) -> None:
     """A few bytes no decoder can open: unreadable, never a stamp with a position to miss."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"not a jpeg")
-
-
-def _write_plant_csv(path: Path, plants: list[dict]) -> None:
-    with path.open("w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(["plot_name", "accession_name", "WGS84_centroid_x", "WGS84_centroid_y"])
-        for p in plants:
-            w.writerow([p["plot"], p["accession"], p["lon"], p["lat"]])
 
 
 # ── build: no positioned capture refuses, at both doors ────────────────────
@@ -64,7 +54,7 @@ def test_build_plant_mapping_refuses_when_every_capture_carries_no_position(
     images_root = dataset_root / "images"
     _write_ungeoreferenced_image(images_root / DATE / "P1_a.jpg")
     plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
-    _write_plant_csv(plant_csv, PLANTS)
+    write_plant_csv(plant_csv, PLANTS)
     registry = register_plant_registry_for(tmp_path, [plant_csv])
 
     res = build_plant_mapping(
@@ -84,7 +74,7 @@ def test_build_plant_mapping_names_the_unreadable_capture_before_the_position_cl
     images_root = dataset_root / "images"
     _write_corrupt_image(images_root / DATE / "P1_corrupt.jpg")
     plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
-    _write_plant_csv(plant_csv, PLANTS)
+    write_plant_csv(plant_csv, PLANTS)
     registry = register_plant_registry_for(tmp_path, [plant_csv])
 
     res = build_plant_mapping(
@@ -96,10 +86,8 @@ def test_build_plant_mapping_names_the_unreadable_capture_before_the_position_cl
 
 
 def test_build_route_refuses_when_every_capture_carries_no_position(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, client, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fastapi.testclient import TestClient
-    from tcip_web.app import app
     from tcip_web.state import store
 
     _init(tmp_path)
@@ -107,11 +95,10 @@ def test_build_route_refuses_when_every_capture_carries_no_position(
     images_root = dataset_root / "images"
     _write_ungeoreferenced_image(images_root / DATE / "P1_a.jpg")
     plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
-    _write_plant_csv(plant_csv, PLANTS)
+    write_plant_csv(plant_csv, PLANTS)
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     asyncio.run(store.open_project(tmp_path.resolve()))
 
-    client = TestClient(app, base_url="http://127.0.0.1")
     resp = client.post("/api/results/plant_mapping/build", json={
         "name": "valley", "images_root": str(images_root), "plant_registry": registry,
         "user": "tester",
@@ -122,13 +109,11 @@ def test_build_route_refuses_when_every_capture_carries_no_position(
 
 
 def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_an_empty_mapping(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, client, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A selected date with no captures at all refuses in the shared builder, so both the build
     door and this route refuse it the same way rather than the route persisting an empty
     mapping."""
-    from fastapi.testclient import TestClient
-    from tcip_web.app import app
     from tcip_web.state import store
 
     _init(tmp_path)
@@ -138,7 +123,6 @@ def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_a
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     asyncio.run(store.open_project(tmp_path.resolve()))
 
-    client = TestClient(app, base_url="http://127.0.0.1")
     resp = client.post("/api/results/plant_mapping/build", json={
         "name": "valley", "images_root": str(images_root), "plant_registry": registry,
         "user": "tester",
@@ -206,11 +190,9 @@ def _delivery_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Pa
 
 
 def _assert_all_doors_refuse(
-    tmp_path: Path, dataset_root: Path, preds_by_date: dict[str, str], mapping_name: str,
+    client, tmp_path: Path, dataset_root: Path, preds_by_date: dict[str, str], mapping_name: str,
     expected_fragment: str,
 ) -> None:
-    from fastapi.testclient import TestClient
-    from tcip_web.app import app
     from tcip_web.state import store
 
     out_csv = tmp_path / "out.csv"
@@ -223,7 +205,6 @@ def _assert_all_doors_refuse(
     assert not out_csv.exists()
 
     asyncio.run(store.open_project(tmp_path.resolve()))
-    client = TestClient(app, base_url="http://127.0.0.1")
     payload = {
         "mapping_name": mapping_name, "dataset_root": str(dataset_root),
         "buckets": list(preds_by_date.values()), "trait": "currant_bloom",
@@ -241,57 +222,57 @@ def _assert_all_doors_refuse(
 
 
 def test_delivery_refuses_naming_a_date_recorded_with_no_capture_at_all(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, client, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
     plant_csv = tmp_path / "plants.csv"
-    _write_plant_csv(plant_csv, PLANTS)
+    write_plant_csv(plant_csv, PLANTS)
     plant_csvs = [{"path": str(plant_csv), "sha256": "0" * 64, "n_plants": len(PLANTS)}]
     _persist_synthetic_mapping(
         tmp_path, dataset_root, "valley", plant_csvs=plant_csvs, assignments={DATE: []})
 
-    _assert_all_doors_refuse(tmp_path, dataset_root, preds_by_date, "valley",
+    _assert_all_doors_refuse(client, tmp_path, dataset_root, preds_by_date, "valley",
                              "recorded no capture at all")
 
 
 def test_delivery_refuses_naming_the_plant_csvs_when_none_parsed_a_plant(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, client, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
     _persist_synthetic_mapping(
         tmp_path, dataset_root, "valley", plant_csvs=[],
         assignments={DATE: [_unmapped_row("P1_20260211", None)]})
 
-    _assert_all_doors_refuse(tmp_path, dataset_root, preds_by_date, "valley", "parsed no plant")
+    _assert_all_doors_refuse(client, tmp_path, dataset_root, preds_by_date, "valley", "parsed no plant")
 
 
 def test_delivery_refuses_with_the_ungeoreferenced_sentence_when_every_distance_is_none(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, client, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
     plant_csv = tmp_path / "plants.csv"
-    _write_plant_csv(plant_csv, PLANTS)
+    write_plant_csv(plant_csv, PLANTS)
     plant_csvs = [{"path": str(plant_csv), "sha256": "0" * 64, "n_plants": len(PLANTS)}]
     _persist_synthetic_mapping(
         tmp_path, dataset_root, "valley", plant_csvs=plant_csvs,
         assignments={DATE: [_unmapped_row("P1_20260211", None)]})
 
-    _assert_all_doors_refuse(tmp_path, dataset_root, preds_by_date, "valley",
+    _assert_all_doors_refuse(client, tmp_path, dataset_root, preds_by_date, "valley",
                              "plant-tag mechanism")
 
 
 def test_delivery_refuses_naming_the_match_distance_when_every_position_is_too_far(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, client, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
     plant_csv = tmp_path / "plants.csv"
-    _write_plant_csv(plant_csv, PLANTS)
+    write_plant_csv(plant_csv, PLANTS)
     plant_csvs = [{"path": str(plant_csv), "sha256": "0" * 64, "n_plants": len(PLANTS)}]
     _persist_synthetic_mapping(
         tmp_path, dataset_root, "valley", plant_csvs=plant_csvs,
         assignments={DATE: [_unmapped_row("P1_20260211", 5_000.0)]})
 
-    _assert_all_doors_refuse(tmp_path, dataset_root, preds_by_date, "valley",
+    _assert_all_doors_refuse(client, tmp_path, dataset_root, preds_by_date, "valley",
                              "beyond the accepted match")
 
 
@@ -348,13 +329,11 @@ def _delivered_disclosure(project: Path, dataset_root: Path,
 
 
 def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, client, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two images positioned, one not: both doors build, ``summary()`` reports one unattributed
     per date and in total, the load route returns the same summary, and the delivery event
     discloses one unattributed image over the delivered date."""
-    from fastapi.testclient import TestClient
-    from tcip_web.app import app
     from tcip_web.state import store
 
     _init(tmp_path)
@@ -371,7 +350,6 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
     assert build_res["summary"]["totals"]["n_unattributed"] == 1
 
     asyncio.run(store.open_project(tmp_path.resolve()))
-    client = TestClient(app, base_url="http://127.0.0.1")
     load_resp = client.post("/api/results/plant_mapping/load", json={"name": "valley"})
     assert load_resp.status_code == 200, load_resp.text
     loaded_summary = load_resp.json()["summary"]
@@ -477,7 +455,7 @@ def test_a_capture_at_the_origin_is_admitted_as_positioned(
     images_root = dataset_root / "images"
     _write_geo_image(images_root / DATE / "P1_a.jpg", 0.0, 0.0, datetime(2026, 2, 11, 9, 30))
     plant_csv = tmp_path / "plants.csv"
-    _write_plant_csv(plant_csv, [{"plot": "P1", "accession": "acc-A", "lat": 0.0, "lon": 0.0}])
+    write_plant_csv(plant_csv, [{"plot": "P1", "accession": "acc-A", "lat": 0.0, "lon": 0.0}])
 
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     res = build_plant_mapping(

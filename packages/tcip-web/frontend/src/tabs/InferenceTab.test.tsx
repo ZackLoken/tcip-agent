@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-import { api } from "@/api/client";
 import {
   inferenceApi,
   openInferenceStream,
@@ -10,8 +9,11 @@ import {
   type InferenceJob,
 } from "@/api/inference";
 import { StructuredRefusalError } from "@/api/http";
+import type { RegisteredModel } from "@/api/types.generated";
 import { useStore } from "@/store";
 import { InferenceTab } from "@/tabs/InferenceTab";
+import { mockDatasetTree } from "@/test/datasetTree";
+import { openTestProject } from "@/test/store";
 
 // The live job stream owns a real WebSocket; only its frame-to-state mapping is under test here,
 // so the transport is replaced while the rest of the module stays real.
@@ -21,6 +23,13 @@ vi.mock("@/api/inference", async (importOriginal) => {
 });
 
 const initialStoreState = useStore.getState();
+
+const BASELINE_MODEL: RegisteredModel = {
+  name: "baseline",
+  checkpoint_path: "C:/proj/.tcip/models/baseline/best.pt",
+  tags: [],
+  experiment_id: null,
+};
 
 function job(overrides: Partial<InferenceJob> & { job_id: string }): InferenceJob {
   return {
@@ -36,24 +45,11 @@ function job(overrides: Partial<InferenceJob> & { job_id: string }): InferenceJo
 }
 
 function setupDataset() {
-  useStore.setState((s) => ({
-    gui: {
-      ...s.gui,
-      dataset: { ...s.gui.dataset, dataset_root: "C:/data" },
-    },
-    openProject: { id: "a1b2c3d4e5f6", path: "C:/proj" },
-  }));
+  openTestProject({ dataset_root: "C:/data" });
 }
 
 function mockTree(dates: string[]) {
-  vi.spyOn(api.dataset, "tree").mockResolvedValue({
-    dataset_root: "C:/data",
-    dates_with_images: dates,
-    subjects: ["subject_a"],
-    subjects_by_date: {},
-    buckets_by_date: {},
-    label_problem: null,
-  });
+  mockDatasetTree({ dates_with_images: dates, buckets_by_date: {} });
 }
 
 function selectBaseline() {
@@ -114,7 +110,7 @@ describe("InferenceTab date selection", () => {
   it("launches one job per selected date, each its own bucket under the named one", async () => {
     mockTree(["2026-01-01", "2026-01-08"]);
     vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({
-      models: [{ name: "baseline", checkpoint_path: "C:/proj/.tcip/models/baseline/best.pt" }],
+      models: [BASELINE_MODEL],
     });
     const launchSpy = vi
       .spyOn(inferenceApi, "launch")
@@ -277,7 +273,7 @@ describe("InferenceTab bucket refusals", () => {
   beforeEach(() => {
     mockTree(["2026-01-01"]);
     vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({
-      models: [{ name: "baseline", checkpoint_path: "C:/proj/.tcip/models/baseline/best.pt" }],
+      models: [BASELINE_MODEL],
     });
   });
 
@@ -390,8 +386,13 @@ describe("InferenceTab bucket refusals", () => {
   it("drops refused entries on a model change", async () => {
     vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({
       models: [
-        { name: "baseline", checkpoint_path: "C:/proj/.tcip/models/baseline/best.pt" },
-        { name: "other", checkpoint_path: "C:/proj/.tcip/models/other/best.pt" },
+        BASELINE_MODEL,
+        {
+          name: "other",
+          checkpoint_path: "C:/proj/.tcip/models/other/best.pt",
+          tags: [],
+          experiment_id: null,
+        },
       ],
     });
     vi.spyOn(inferenceApi, "launch").mockRejectedValue(existsRefusal());
@@ -485,7 +486,7 @@ describe("InferenceTab model select", () => {
   it("associates the model checkpoint label with the select by accessible name", async () => {
     mockTree([]);
     vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({
-      models: [{ name: "baseline", checkpoint_path: "C:/proj/.tcip/models/baseline/best.pt" }],
+      models: [BASELINE_MODEL],
     });
 
     render(<InferenceTab />);

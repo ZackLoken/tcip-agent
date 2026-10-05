@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -17,9 +15,8 @@ from tests._producer_fixtures import image_label_key, label_image, mark_complete
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.model_registry import ModelRegistry
 from tests import _trait_fixtures as fx
+from tests._cli_fixtures import run_tcip
 from tests._web_fixtures import new_project
-
-PY_EXE = sys.executable
 
 
 def _record_localizing(tmp_path: Path, name: str, localization: str) -> dict:
@@ -46,12 +43,6 @@ def _project(tmp_path: Path) -> Path:
                 32, 32)
     mark_complete(images / "IMG_A.JPG", "bud", project=root)
     return root
-
-
-def _run(root: Path):
-    """Run the doctor against ``root`` in its own process."""
-    return subprocess.run(
-        [PY_EXE, "-m", "tcip_web.cli", "doctor", str(root)], capture_output=True, text=True)
 
 
 def test_doctor_help_prints_the_dispatchers_prog_argument(capsys):
@@ -85,7 +76,7 @@ def test_doctor_flags_registry_checkpoint_path_under_a_temp_directory(tmp_path):
     root = _project(tmp_path)
     _register_absent_checkpoint(root, "junk", tmp_path / "elsewhere" / "model.pt")
 
-    res = _run(root)
+    res = run_tcip("doctor", [str(root)])
     assert res.returncode == 2  # errors present
     out = res.stdout
     assert "IMG_B" in out and "not marked complete" in out   # unconfirmed empty -> error
@@ -105,7 +96,7 @@ def test_doctor_reports_a_stem_collision_and_completes(tmp_path):
     Image.new("RGB", (32, 32)).save(images / "foo.png")
     label_image(images / "foo.jpg", [], 32, 32, keep_empty=True)
 
-    res = _run(root)
+    res = run_tcip("doctor", [str(root)])
 
     assert res.returncode == 2
     assert "foo.jpg" in res.stdout and "foo.png" in res.stdout
@@ -121,7 +112,7 @@ def test_doctor_flags_a_trait_record_that_will_not_read(tmp_path):
     record = _record_localizing(tmp_path, "unicorn", "unicorn_match")
     ts.replace(traits.trait_key(root, "unicorn"), record, expect=ts.Version.ABSENT)
 
-    res = _run(root)
+    res = run_tcip("doctor", [str(root)])
     assert res.returncode == 2  # errors present
     assert "'unicorn' will not read" in res.stdout
     assert "unicorn_match" in res.stdout
@@ -143,7 +134,7 @@ def test_doctor_flags_incomplete_source_snapshot(tmp_path):
         experiment_id="exp1")
     new_project(root)
 
-    res = _run(root)
+    res = run_tcip("doctor", [str(root)])
     assert res.returncode == 1  # warning only, no error
     assert "source snapshot" in res.stdout and "1 missing file" in res.stdout
 
@@ -165,7 +156,7 @@ def _clean_project(tmp_path: Path) -> Path:
 def test_doctor_clean_project_exits_zero(tmp_path):
     root = _clean_project(tmp_path)
     new_project(root)
-    res = _run(root)
+    res = run_tcip("doctor", [str(root)])
     assert res.returncode == 0, res.stdout
 
 
@@ -190,7 +181,7 @@ def test_an_unmarked_empty_label_is_named_by_its_capture_and_stem(tmp_path):
     Image.new("RGB", (48, 32)).save(image)
     label_image(image, [], 48, 32, keep_empty=True)
 
-    res = _run(root)
+    res = run_tcip("doctor", [str(root)])
     assert res.returncode == 2, res.stdout
     unmarked = _lines(res.stdout, "not marked complete")
     assert len(unmarked) == 1, res.stdout
@@ -211,7 +202,7 @@ def test_a_mark_for_any_subject_finishes_an_empty_label_on_a_dateless_dataset(tm
     label_image(image, [], 40, 24, keep_empty=True)
     mark_complete(image, "bud", project=root)
 
-    res = _run(root)
+    res = run_tcip("doctor", [str(root)])
     assert "not marked complete" not in res.stdout, res.stdout
 
 
@@ -233,7 +224,7 @@ def test_registry_findings_are_read_through_the_registrys_own_entry_shape(tmp_pa
     for ckpt in paths.values():
         ckpt.unlink()
 
-    res = _run(root)
+    res = run_tcip("doctor", [str(root)])
     assert res.returncode == 2, res.stdout
     entry_lines = _lines(res.stdout, "registry entry")
     assert len(entry_lines) == 2, res.stdout
@@ -252,7 +243,7 @@ def test_a_missing_checkpoint_and_a_test_checkpoint_are_distinct_registry_findin
     _register_absent_checkpoint(root, "orchard_detector_v2", ghost)
     _register_absent_checkpoint(root, "scratch_detector", scratch)
 
-    res = _run(root)
+    res = run_tcip("doctor", [str(root)])
     assert res.returncode == 2, res.stdout
     entry_lines = _lines(res.stdout, "registry entry")
     assert len(entry_lines) == 2, res.stdout
@@ -275,7 +266,7 @@ def test_a_checkpoint_under_a_temp_rooted_project_is_not_pollution(tmp_path):
     ModelRegistry(str(root)).register_model(
         name="m", checkpoint_path=str(ckpt_dir / "m.pt"), config={})
 
-    res = _run(root)
+    res = run_tcip("doctor", [str(root)])
 
     assert "test/temp" not in res.stdout
     assert "checkpoint missing" not in res.stdout
@@ -331,7 +322,7 @@ def test_only_the_unreadable_trait_record_is_reported(tmp_path):
                _record_localizing(tmp_path, "burr_size", "not_a_localization"),
                expect=ts.Version.ABSENT)
 
-    res = _run(root)
+    res = run_tcip("doctor", [str(root)])
     assert res.returncode == 2, res.stdout
     trait_lines = _lines(res.stdout, "trait '")
     assert len(trait_lines) == 1, res.stdout
@@ -347,7 +338,7 @@ def test_doctor_is_silent_on_a_confirmed_latest_revision(tmp_path: Path):
     root = _leaf_project(tmp_path)
     fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
 
-    res = _run(root)
+    res = run_tcip("doctor", [str(root)])
 
     assert "trait '" not in res.stdout, res.stdout
 
@@ -359,7 +350,7 @@ def test_doctor_warns_on_an_unconfirmed_latest_revision(tmp_path: Path):
     fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
     fx.propose(root, fx.entry("leaf", ("leaf_length",), notes="a second reading"))
 
-    res = _run(root)
+    res = run_tcip("doctor", [str(root)])
 
     assert res.returncode == 1, res.stdout
     lines = _lines(res.stdout, "trait '")
@@ -375,7 +366,7 @@ def test_doctor_reports_an_undecodable_trait_record_without_aborting(tmp_path: P
     fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
     damage_record(traits.trait_key(root, "leaf"), b"{not valid json")
 
-    res = _run(root)
+    res = run_tcip("doctor", [str(root)])
 
     assert res.returncode == 2, res.stdout
     lines = _lines(res.stdout, "trait '")
@@ -393,7 +384,7 @@ def test_doctor_errors_on_a_project_whose_record_does_not_decode(tmp_path):
     # is the store's own decode error rather than "not a site record".
     damage_record(key, b"{not valid json")
 
-    res = _run(root)
+    res = run_tcip("doctor", [str(root)])
 
     assert res.returncode == 2, res.stdout
     assert "does not decode" in res.stdout
@@ -416,7 +407,7 @@ def test_doctor_flags_an_unreadable_label(tmp_path):
     Image.new("RGB", (32, 32)).save(image)
     _unreadable_label(image)
 
-    res = _run(root)
+    res = run_tcip("doctor", [str(root)])
     assert res.returncode == 2, res.stdout
     unreadable = _lines(res.stdout, "will not read")
     assert len(unreadable) >= 1, res.stdout

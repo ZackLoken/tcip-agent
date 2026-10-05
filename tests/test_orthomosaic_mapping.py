@@ -1,6 +1,5 @@
 """Orthomosaic georeferencing, per-detection plant assignment, and the tiled inference pass that
-sources its tiles from a windowed raster read (the reading layer itself: test_raster_source.py).
-"""
+sources its tiles from a windowed raster read."""
 
 from __future__ import annotations
 
@@ -20,6 +19,7 @@ from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
     plants_in_frame,
     read_geotransform,
 )
+from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY
 from tcip_mcp.pipelines.raster_source import open_raster
 
 from tests._geotiff_fixtures import (
@@ -298,16 +298,6 @@ def _sliced(predictor, execution, source, **kwargs) -> dict:
     return predictor.predict_sliced(source, **call)
 
 
-def _register_checkpoint(tmp_path: Path, ckpt_path: str, *, name: str) -> None:
-    """Register a checkpoint the platform's own producer wrote against tmp_path as project root,
-    the same root each test's own load_registered_checkpoint call resolves the registry from."""
-    from tcip_mcp.tools.model_tools import register_model
-
-    result = register_model(name=name, checkpoint_path=ckpt_path, config={},
-                            project=tmp_path)
-    assert "error" not in result, result
-
-
 def _windowed_multiband_tiff(path: Path, *, height: int = 96, width: int = 96,
                               channels: int = 4, rowsperstrip: int = 12) -> np.ndarray:
     """A small multi-band raster with real pixel content (not all-zero, so a from-scratch
@@ -350,7 +340,7 @@ def _bespoke_detection_checkpoint(tmp_path: Path, raster_path: Path, *, in_chans
                        "scope": {"subject": "bud", "attributes": []}}}
     model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "model_best.pt"
-    torch.save({"config": config, "model_state_dict": model.state_dict()}, str(ckpt))
+    torch.save({CONFIG_KEY: config, STATE_DICT_KEY: model.state_dict()}, str(ckpt))
     return str(ckpt)
 
 
@@ -361,11 +351,12 @@ def test_predict_sliced_windowed_source_matches_full_array_predict_sliced(tmp_pa
     """
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
+    from tests._verified_checkpoint_fixtures import register_checkpoint
 
     path = tmp_path / "mosaic.tif"
     arr = _windowed_multiband_tiff(path)
     ckpt = _bespoke_detection_checkpoint(tmp_path, path, in_chans=arr.shape[-1])
-    _register_checkpoint(tmp_path, ckpt, name="ortho-detection")
+    register_checkpoint(tmp_path, ckpt, name="ortho-detection")
 
     full = _pass(tmp_path, ckpt)
     full_result = _sliced(full.predictor, full.execution, str(path))
@@ -399,7 +390,7 @@ def _bespoke_instance_seg_checkpoint(tmp_path: Path, *, in_chans: int = 3, tile_
                        "scope": {"subject": "bud", "attributes": []}}}
     model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "instance_seg_best.pt"
-    torch.save({"config": config, "model_state_dict": model.state_dict()}, str(ckpt))
+    torch.save({CONFIG_KEY: config, STATE_DICT_KEY: model.state_dict()}, str(ckpt))
     return str(ckpt)
 
 
@@ -409,11 +400,12 @@ def test_predict_sliced_windowed_and_full_array_sources_produce_matching_masks(t
     detection-for-detection, masks included."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
+    from tests._verified_checkpoint_fixtures import register_checkpoint
 
     path = tmp_path / "mosaic.tif"
     _windowed_multiband_tiff(path, channels=3)
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
-    _register_checkpoint(tmp_path, ckpt, name="ortho-instance-seg")
+    register_checkpoint(tmp_path, ckpt, name="ortho-instance-seg")
 
     full = _pass(tmp_path, ckpt)
     full_result = _sliced(full.predictor, full.execution, str(path))
@@ -439,11 +431,12 @@ def test_predict_sliced_windowed_source_require_masks_false_carries_no_masks_key
     empty one, mirroring ``predict_sliced``'s own opt-out contract."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
+    from tests._verified_checkpoint_fixtures import register_checkpoint
 
     path = tmp_path / "mosaic.tif"
     _windowed_multiband_tiff(path, channels=3)
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
-    _register_checkpoint(tmp_path, ckpt, name="ortho-instance-seg")
+    register_checkpoint(tmp_path, ckpt, name="ortho-instance-seg")
 
     p = _pass(tmp_path, ckpt)
     with open_raster(path, 3) as reader:
@@ -457,6 +450,7 @@ def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(tmp_p
     ``encode_predictions`` to a polygon at the same full-mosaic pixels."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
+    from tests._verified_checkpoint_fixtures import register_checkpoint
     from tcip_annotation import json_io
     from tcip_annotation.state import Polygon
     from tcip_mcp.pipelines.data.label_queries import registry_scope
@@ -465,7 +459,7 @@ def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(tmp_p
     path = tmp_path / "mosaic.tif"
     _windowed_multiband_tiff(path, channels=3)
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
-    _register_checkpoint(tmp_path, ckpt, name="ortho-instance-seg")
+    register_checkpoint(tmp_path, ckpt, name="ortho-instance-seg")
 
     p = _pass(tmp_path, ckpt)
     with open_raster(path, 3) as reader:
@@ -486,12 +480,9 @@ def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(tmp_p
 
 
 def test_predict_sliced_windowed_source_channel_mismatch_refuses() -> None:
-    """A model's declared ``in_chans`` disagreeing with the raster's own band count must refuse
-    rather than silently truncate/pad the band count the model was trained on. A bare predictor
-    (no real checkpoint) is enough: the refusal happens before any tile is read or any forward
-    pass runs, mirroring ``test_instance_seg_masks.py``'s own ``_bare_predictor`` pattern for a
-    rail check that doesn't need a real model.
-    """
+    """A model's declared ``in_chans`` disagreeing with the raster's own band count refuses
+    before any tile is read, rather than truncating or padding the bands the model was trained
+    on."""
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
@@ -563,30 +554,16 @@ def test_predict_sliced_windowed_source_refuses_non_detection_task() -> None:
 # ── Per-detection plant assignment ───────────────────────────────────────
 
 
-def _write_plant_csv(path: Path, rows: list[dict]) -> None:
-    import csv
-
-    fieldnames = ["plot_name", "accession_name", "plot_number", "row_number", "col_number",
-                  "WGS84_centroid_y", "WGS84_centroid_x"]
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-
-
 def _plant_grid_csv(tmp_path: Path, georef: OrthomosaicGeoreference,
                     plant_pixels: list[tuple[float, float]]) -> Path:
+    from tests._mapping_fixtures import GRID_COLUMNS, write_plant_csv
+
     rows = []
     for i, (px, py) in enumerate(plant_pixels):
         lat, lon = georef.pixel_to_wgs84(px, py)
-        rows.append({
-            "plot_name": f"plot{i}", "accession_name": f"acc{i}",
-            "plot_number": i, "row_number": i // 2, "col_number": i % 2,
-            "WGS84_centroid_y": lat, "WGS84_centroid_x": lon,
-        })
-    csv_path = tmp_path / "plants.csv"
-    _write_plant_csv(csv_path, rows)
-    return csv_path
+        rows.append({"plot": f"plot{i}", "accession": f"acc{i}", "lat": lat, "lon": lon,
+                     "plot_number": i, "row_number": i // 2, "col_number": i % 2})
+    return write_plant_csv(tmp_path / "plants.csv", rows, extra=GRID_COLUMNS)
 
 
 # A 2x2 plant grid, 40px apart (20 m at PIXEL_SCALE=0.5 m/px): a small but real layout to derive

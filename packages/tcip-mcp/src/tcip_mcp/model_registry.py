@@ -13,13 +13,12 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
-import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import tcip_store
-from tcip_store import Key
+from tcip_store import Key, finite_number
 
 from tcip_mcp.audit import now_iso
 from tcip_mcp.registry_paths import (
@@ -64,16 +63,15 @@ def _checkpoint_entry_file(project_path: Path, raw: str) -> Path | None:
 
 def checkpoint_files(project_path: str | Path) -> frozenset[Path]:
     """Every checkpoint file under the project, resolved: each file in ``.tcip/models``, each file
-    a registry entry names under the project, and each ``.pt`` file a run or sweep directory holds
-    beside its run record."""
-    from tcip_mcp.experiments import RUN_FILE, experiments_dir, sweeps_dir
+    a registry entry names under the project, and each ``.pt`` file a run directory
+    (``experiments.run_dirs``, a sweep's trials included) holds beside its run record."""
+    from tcip_mcp.experiments import run_dirs
 
     root = Path(project_path).resolve()
     found = {p for p in (root / ".tcip" / "models").glob("*") if p.is_file()}
     found |= {path for path in (_checkpoint_entry_file(root, e["checkpoint_path"])
                                 for e in read_registry_index(root)) if path is not None}
-    for runs in (experiments_dir(root), sweeps_dir(root)):
-        found |= {p for p in runs.rglob("*.pt") if (p.parent / RUN_FILE).is_file()}
+    found |= {p for run_dir in run_dirs(root) for p in run_dir.glob("*.pt")}
     return frozenset(found)
 
 
@@ -129,13 +127,13 @@ def entry_facts(entry: dict) -> dict:
     (:func:`checkpoint_payload`): the ``metrics`` a ranking reads with their ``metrics_source``. A run's metrics are the ones its payload carries, sourced ``"trainer"``,
     or ``"training_source"`` for a bespoke loop's; a foreign entry's are the ones its registration
     stated, sourced ``"caller"``. No metrics carry no source."""
-    from tcip_mcp.pipelines.model_build import TRAINING_SOURCE_KEY
+    from tcip_mcp.pipelines.model_build import METRICS_KEY, TRAINING_SOURCE_KEY
 
     payload = checkpoint_payload(entry["checkpoint_path"], entry["sha256"])
     if entry["experiment_id"] is None:
         metrics, source = entry["metrics"], "caller"
     else:
-        metrics = payload.get("metrics") or {}
+        metrics = payload.get(METRICS_KEY) or {}
         source = "training_source" if entry["config"].get(TRAINING_SOURCE_KEY) else "trainer"
     return {"metrics": metrics, "metrics_source": source if metrics else None}
 
@@ -184,7 +182,9 @@ class VerifiedCheckpoint:
     def config(self) -> dict:
         """The run config the checkpoint carries, ``{}`` for one carrying none (a foreign
         checkpoint's documented answer)."""
-        return self.payload.get("config") or {}
+        from tcip_mcp.pipelines.model_build import CONFIG_KEY
+
+        return self.payload.get(CONFIG_KEY) or {}
 
     @property
     def data_config(self) -> dict:
@@ -420,7 +420,7 @@ def best_model(
         if not (include_unverified or verified(m)):
             continue
         val = m["metrics"].get(metric_key)
-        if not isinstance(val, (int, float)) or isinstance(val, bool) or not math.isfinite(val):
+        if not finite_number(val):
             continue
         if best_val is None or (val > best_val if higher_is_better else val < best_val):
             best_val = float(val)

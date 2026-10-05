@@ -14,6 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from tcip_mcp.pipelines.derivations import gt_aspect_ratios
+from tcip_mcp.pipelines.model_build import METRICS_KEY, STATE_DICT_KEY
 
 
 # ---------------------------------------------------------------------------
@@ -182,15 +183,15 @@ def train_bespoke(ctx) -> None:
         if sel < best:
             best = sel
             ctx.run.best_metric = best
-            best_state = {"model_state_dict": {k: v.detach().cpu().clone()
-                                               for k, v in model.state_dict().items()},
-                          "metrics": {**metrics, "epoch": epoch}}
+            best_state = {STATE_DICT_KEY: {k: v.detach().cpu().clone()
+                                           for k, v in model.state_dict().items()},
+                          METRICS_KEY: {**metrics, "epoch": epoch}}
 
     ctx.run.current_epoch = epochs
     if best_state is not None:
         ctx.save_checkpoint(best_state, "model_best")
     ctx.save_checkpoint(
-        {"model_state_dict": model.state_dict(), "metrics": {"epoch": epochs}}, "model_final")
+        {STATE_DICT_KEY: model.state_dict(), METRICS_KEY: {"epoch": epochs}}, "model_final")
 
 
 def save_built_weights(ctx) -> None:
@@ -201,9 +202,9 @@ def save_built_weights(ctx) -> None:
     for row in ctx.config.get("fixture_rows") or []:
         ctx.log_metrics(row["epoch"], {k: v for k, v in row.items() if k != "epoch"})
     ctx.set_seed()
-    state = {"model_state_dict": ctx.build_model().state_dict()}
+    state = {STATE_DICT_KEY: ctx.build_model().state_dict()}
     if ctx.config.get("fixture_metrics"):
-        state["metrics"] = dict(ctx.config["fixture_metrics"])
+        state[METRICS_KEY] = dict(ctx.config["fixture_metrics"])
     ctx.save_checkpoint(state, "model_final")
 
 

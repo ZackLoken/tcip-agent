@@ -17,19 +17,14 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from tcip_web.app import app
 from tests._audit_fixtures import AUDIT_ENTRY_KEYS
+from tests._mapping_fixtures import write_plant_csv
 
-PLANTS = (
-    ("PLOT1", "AccA", 43.20000, -90.00000),
-    ("PLOT2", "AccB", 43.20000, -90.00015),
-    ("PLOT3", "AccC", 43.20000, -90.00030),
-)
-
-
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
+PLANTS = [
+    {"plot": "PLOT1", "accession": "AccA", "lat": 43.20000, "lon": -90.00000},
+    {"plot": "PLOT2", "accession": "AccB", "lat": 43.20000, "lon": -90.00015},
+    {"plot": "PLOT3", "accession": "AccC", "lat": 43.20000, "lon": -90.00030},
+]
 
 
 def _dms(deg: float) -> tuple[float, float, float]:
@@ -60,12 +55,7 @@ def _capture_fixture(root: Path) -> dict:
     The first date holds a close match, a looser match, an image taken far from any plant, and an
     image with no GPS fix at all; the second holds a single exact match.
     """
-    csv_path = root / "plants.csv"
-    csv_path.write_text(
-        "plot_name,accession_name,WGS84_centroid_x,WGS84_centroid_y\n"
-        + "".join(f"{plot},{acc},{lon},{lat}\n" for plot, acc, lat, lon in PLANTS),
-        encoding="utf-8",
-    )
+    csv_path = write_plant_csv(root / "plants.csv", PLANTS)
     images = root / "images"
     (images / "2026-02-11").mkdir(parents=True)
     (images / "2026-02-25").mkdir(parents=True)

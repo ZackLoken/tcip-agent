@@ -1,19 +1,11 @@
-"""The instance_seg measurement boundary: masks reach inference and export.
-
-Locks that instance_seg's masks travel end to end instead of being silently dropped:
-``check_model_contract`` requires them for instance_seg, the predictor's one detection record
-carries them as SAHI polygons on the untiled and the sliced path alike (see
-``tests/test_sliced_inference.py``), and ``encode_predictions`` converts each to a real
-(possibly multi-ring) ``Polygon``.
-
-``require_masks=False`` is a boxes-only opt-out for a caller that never reads masks, tested here
-alongside the default mask-carrying path.
-"""
+"""Instance masks reach inference and export: ``check_model_contract`` requires them, the
+predictor's detection record carries them as polygons, ``encode_predictions`` converts each to a
+(possibly multi-ring) ``Polygon``, and ``require_masks=False`` answers boxes alone."""
 
 from __future__ import annotations
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
-from tests._producer_fixtures import checkpoint_admission
+from tests._producer_fixtures import checkpoint_admission, gray_frame
 
 from pathlib import Path
 
@@ -21,6 +13,8 @@ import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
+
+from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
 pytest.importorskip("torchvision")
 cv2 = pytest.importorskip("cv2")
 
@@ -148,17 +142,8 @@ def instance_seg_ckpt(tmp_path_factory) -> str:
                        "scope": {"subject": "stem", "attributes": []}}}
     model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path_factory.mktemp("instance_seg_ckpt") / "model_best.pt"
-    torch.save({"model_state_dict": model.state_dict(), "config": config}, str(ckpt))
+    torch.save({STATE_DICT_KEY: model.state_dict(), CONFIG_KEY: config}, str(ckpt))
     return str(ckpt)
-
-
-def _image(directory: Path, name: str = "img.png", size: int = 128) -> str:
-    from PIL import Image
-
-    directory.mkdir(parents=True, exist_ok=True)
-    p = directory / name
-    Image.new("RGB", (size, size), (120, 120, 120)).save(p)
-    return str(p)
 
 
 def _register_instance_seg_ckpt(ckpt_path: str, project_root: Path) -> None:
@@ -183,7 +168,7 @@ def test_predict_sliced_require_masks_false_returns_boxes_only(instance_seg_ckpt
                               device="cpu")
     pred = tiled_pass.predictor
     assert pred.task == "instance_seg"
-    img = _image(tmp_path / "images" / UNDATED_BUCKET)
+    img = gray_frame(tmp_path / "images" / UNDATED_BUCKET)
 
     tiled = pred.predict_sliced(img, execution=tiled_pass.execution, tile_batch_size=8,
                                 require_masks=False)
@@ -204,7 +189,7 @@ def test_run_inference_instance_seg_unset_tile_runs_tiled_with_masks(instance_se
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     p, results = predicted_over(tmp_path, instance_seg_ckpt,
-                                str(Path(_image(tmp_path / "images" / UNDATED_BUCKET)).parent), device="cpu",
+                                str(Path(gray_frame(tmp_path / "images" / UNDATED_BUCKET)).parent), device="cpu",
                                 tile_size=TILE, conf=0.0)
     assert p.execution.tiled
     assert len(results) == 1
@@ -221,7 +206,7 @@ def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(ins
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     p, results = predicted_over(tmp_path, instance_seg_ckpt,
-                                str(Path(_image(tmp_path / "images" / UNDATED_BUCKET)).parent), device="cpu",
+                                str(Path(gray_frame(tmp_path / "images" / UNDATED_BUCKET)).parent), device="cpu",
                                 tile=True, tile_size=TILE, conf=0.0)
     assert p.execution.tiled
     assert len(results) == 1
@@ -233,7 +218,7 @@ def test_run_inference_instance_seg_unset_tile_writes_tiled(instance_seg_ckpt, t
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     images_dir = tmp_path / "images" / UNDATED_BUCKET
-    _image(images_dir)
+    gray_frame(images_dir)
     r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), bucket="preds/2026-01-01",
                       device="cpu", stated=Stated(tile_size=TILE, conf=0.0))
     assert "error" not in r
@@ -261,7 +246,7 @@ def test_a_masked_bucket_delivers_the_same_counts_on_every_read(instance_seg_ckp
     from tests._chain_fixtures import acknowledged
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
-    _image(images_dir)
+    gray_frame(images_dir)
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     fx.seed_confirmed_count(tmp_path)
     bucket = "baseline/2026-01-01"
@@ -295,7 +280,7 @@ def test_run_inference_never_stamps_a_mask_threshold_into_annotation_attributes(
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     images_dir = tmp_path / "images" / UNDATED_BUCKET
-    _image(images_dir)
+    gray_frame(images_dir)
     r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), bucket="preds/2026-01-01",
                       device="cpu", stated=Stated(tile_size=TILE, conf=0.0))  # a masked detection
     assert "error" not in r
@@ -311,7 +296,7 @@ def test_run_inference_instance_seg_explicit_tile_true_writes_tiled(instance_seg
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     images_dir = tmp_path / "images" / UNDATED_BUCKET
-    _image(images_dir)
+    gray_frame(images_dir)
     r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), bucket="preds/2026-01-01",
                       device="cpu", stated=Stated(tile=True, tile_size=TILE, conf=0.0))
     assert "error" not in r
@@ -328,7 +313,7 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_masks(instance_seg_
     from tests._producer_fixtures import label_image
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
-    _image(images_dir, "a.png")
+    gray_frame(images_dir, name="a.png")
     label_image(images_dir / "a.png", [
         Annotation(subject="stem", geometry=BBox(10, 10, 30, 30)),
         Annotation(subject="stem", geometry=Polygon(rings=[[(54, 54), (74, 54), (74, 74)]]))],
@@ -388,11 +373,8 @@ def test_export_single_component_mask_writes_polygon():
 
 
 def test_export_does_not_pollute_annotation_attributes_with_binarize_threshold(tmp_path):
-    """Stamping the mask-binarize threshold into Annotation.attributes (the domain trait
-    namespace, not a machine-provenance one) would let it survive into GT the moment a breeder
-    accepts the prediction. Under a scope declaring no attribute, attributes must stay empty; an
-    attribute head's own decoded value would land there instead. The threshold travels once into
-    the bucket's record instead (see test_run_inference_records_the_mask_binarize_threshold_once)."""
+    """Under a scope declaring no attribute, an exported mask annotation carries no attributes:
+    the binarize threshold never lands in ``Annotation.attributes``."""
     mask = np.zeros((32, 32), dtype=np.float32)
     mask[5:20, 5:20] = 0.9
     result = {

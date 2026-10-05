@@ -1,16 +1,10 @@
 """A canceled run or job reads back as ``canceled`` through each reader of its status: the web job
-registry, the run directory's derived state, and the frontend's generated union. Each status is
-written by its own producer, never spelled into a fixture."""
+registry and the run directory's derived state. Each status is written by its own producer, never
+spelled into a fixture."""
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
-
 import pytest
-
-GENERATED_TYPES = (Path(__file__).resolve().parents[1] / "packages" / "tcip-web" / "frontend"
-                   / "src" / "api" / "types.generated.ts")
 
 
 def test_a_canceled_inference_job_reads_as_canceled(tmp_path, monkeypatch):
@@ -55,14 +49,3 @@ def test_a_canceled_training_run_derives_as_canceled_from_its_directory(tmp_path
     run_dir = finished_run(tmp_path, training_source=f"{__name__}:_train_stops_on_cancel")
 
     assert observe(run_dir).state == "canceled"
-
-
-def test_the_generated_job_status_union_is_the_backends_own():
-    from tcip_web.jobstore import JOB_STATES
-
-    declared = re.search(r"export type JobStatus = ([^;]+);",
-                         GENERATED_TYPES.read_text(encoding="utf-8"))
-    assert declared is not None
-    members = set(re.findall(r'"([^"]+)"', declared.group(1)))
-    assert members == set(JOB_STATES)
-    assert "canceled" in members

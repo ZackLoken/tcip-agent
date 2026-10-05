@@ -3,8 +3,6 @@ a person reads, each decoding to the value the database holds."""
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -13,6 +11,7 @@ import pytest
 import tcip_store as ts
 from tcip_mcp.cli.dump_store import dump_store
 from tcip_mcp.tools.meta_tools import report_friction, write_retrospective
+from tests._cli_fixtures import run_tcip
 from tests._web_fixtures import new_project
 
 
@@ -111,8 +110,7 @@ def test_the_command_writes_the_dump_and_answers_how_many_files(tmp_path: Path):
     out = tmp_path.parent / "dump"
     ts.release_root(project)
 
-    done = subprocess.run([sys.executable, "-m", "tcip_web.cli", "dump-store", str(project),
-                           str(out)], capture_output=True, text=True, timeout=120)
+    done = run_tcip("dump-store", [str(project), str(out)])
 
     assert done.returncode == 0, done.stderr
     assert "file(s) written" in done.stdout

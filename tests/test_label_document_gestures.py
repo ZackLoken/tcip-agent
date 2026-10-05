@@ -7,13 +7,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from PIL import Image
 
 import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.verdicts import Verdict, read_verdicts
 from tcip_mcp.dataset_layout import Gestures, image_dir, save_label_document, verdict_key_of
-from tests._producer_fixtures import image_label_key
+from tests._producer_fixtures import image_label_key, write_image
 
 DATE = "2026-02-11"
 WIDTH, HEIGHT = 100, 80
@@ -22,10 +21,7 @@ RING = [[10.0, 10.0], [30.0, 10.0], [30.0, 25.0], [10.0, 25.0]]
 
 
 def _image(root: Path, stem: str = "a") -> Path:
-    path = image_dir(root, DATE) / f"{stem}.jpg"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (WIDTH, HEIGHT), (90, 110, 70)).save(path)
-    return path
+    return write_image(image_dir(root, DATE) / f"{stem}.jpg", (WIDTH, HEIGHT), (90, 110, 70))
 
 
 def _save(root: Path, image: Path, payloads: list[dict], *, author: str = "user:breeder",
@@ -198,16 +194,12 @@ def test_a_proposal_both_accepted_and_rejected_refuses_before_any_write(tmp_path
 
 
 def test_a_proposal_named_twice_refuses_at_the_save_route_before_any_write(
-        tmp_path: Path) -> None:
-    from fastapi.testclient import TestClient
-
-    from tcip_web.app import app
+        tmp_path: Path, client) -> None:
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj")
     image = _image(root)
     bucket = _bucket(root, image)
-    client = TestClient(app, base_url="http://127.0.0.1")
     body = {"image_path": str(image), "user": "breeder", "annotations": [], "bucket": bucket}
 
     resp = client.post("/api/annotate/labels", json={**body, "accept": [0, 0]})
@@ -220,17 +212,13 @@ def test_a_proposal_named_twice_refuses_at_the_save_route_before_any_write(
 
 
 def test_a_bucket_document_that_will_not_read_answers_400_at_the_proposals_route(
-        tmp_path: Path) -> None:
-    from fastapi.testclient import TestClient
-
+        tmp_path: Path, client) -> None:
     from tcip_mcp.buckets import read_bucket
-    from tcip_web.app import app
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj")
     image = _image(root)
     bucket = _bucket(root, image)
-    client = TestClient(app, base_url="http://127.0.0.1")
     params = {"image_path": str(image), "bucket": bucket}
     assert client.get("/api/annotate/proposals", params=params).status_code == 200
 
@@ -260,17 +248,14 @@ def test_the_queue_refuses_a_label_document_that_will_not_read_by_name(tmp_path:
     assert error is not None and "annotations" in error["error"]
 
 
-def test_the_proposals_payload_carries_what_the_editor_reads_and_no_more(tmp_path: Path) -> None:
-    from fastapi.testclient import TestClient
-
-    from tcip_web.app import app
+def test_the_proposals_payload_carries_what_the_editor_reads_and_no_more(
+        tmp_path: Path, client) -> None:
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj")
     image = _image(root)
     bucket = _bucket(root, image)
     _save(root, image, [], gestures=Gestures(complete={"bud": True}))
-    client = TestClient(app, base_url="http://127.0.0.1")
 
     proposals = client.get("/api/annotate/proposals", params={
         "image_path": str(image), "bucket": bucket}).json()
@@ -311,14 +296,12 @@ def test_a_mark_made_with_proposals_hidden_says_so(tmp_path: Path) -> None:
     assert [m.proposals_hidden for m in marks["leaf"]] == [False]
 
 
-def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(tmp_path: Path) -> None:
+def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(
+        tmp_path: Path, client) -> None:
     """The admission that trains, the review queue and the editor's own listing each read an
     empty document as nothing until a person marks it, and as a negative once they have."""
-    from fastapi.testclient import TestClient
-
     from tcip_mcp.pipelines.data.label_queries import admit, registry_scope
     from tcip_mcp.tools.feedback_tools import _prepare_queue_sources
-    from tcip_web.app import app
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj")
@@ -326,7 +309,6 @@ def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(tmp_path: Pat
     checkpoint = root / "model.pt"
     checkpoint.write_bytes(b"only its presence is read before the queue drops finished images")
     _save(root, image, [])
-    client = TestClient(app, base_url="http://127.0.0.1")
 
     def readers() -> tuple[int, int, str]:
         counts = admit(image.parent, members=[image.stem],
@@ -344,15 +326,11 @@ def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(tmp_path: Pat
 
 
 def test_saved_provenance_is_the_requests_actor_whatever_the_browser_sends(
-        tmp_path: Path) -> None:
-    from fastapi.testclient import TestClient
-
-    from tcip_web.app import app
+        tmp_path: Path, client) -> None:
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj")
     image = _image(root)
-    client = TestClient(app, base_url="http://127.0.0.1")
 
     resp = client.post("/api/annotate/labels", json={
         "image_path": str(image), "user": "breeder", "annotations": [{"subject": "bud", "bbox": BOX, "created_by": "user:mallory",

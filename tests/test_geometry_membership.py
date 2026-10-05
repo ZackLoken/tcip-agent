@@ -30,7 +30,7 @@ from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
     auto_train_val, partition_samples,
 )
-from tests._producer_fixtures import label_image  # noqa: E402
+from tests._producer_fixtures import label_image, write_image  # noqa: E402
 from tests._verified_checkpoint_fixtures import partition_side as recorded_side  # noqa: E402
 
 IMG = 64
@@ -38,13 +38,6 @@ SUBJECT = "bud"
 GEOMETRY_TASKS = ("detection", "instance_seg")
 """The tasks the known geometry loaders cover, which is the set the producer names membership for.
 Every route below that either can take is parametrized over both."""
-
-
-def _image(path: Path) -> None:
-    from PIL import Image
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (IMG, IMG), color=(70, 90, 60)).save(path)
 
 
 def _target_geometry(task: str):
@@ -60,7 +53,7 @@ def _labeled(root: Path, stems, *, task: str = "detection") -> Path:
     geometry ``task``'s own loader reads; the image directory."""
     images_dir = root / "images" / UNDATED_BUCKET
     for stem in stems:
-        _image(images_dir / f"{stem}.png")
+        write_image(images_dir / f"{stem}.png", (IMG, IMG), (70, 90, 60))
         label_image(images_dir / f"{stem}.png",
                     [Annotation(subject=SUBJECT, geometry=_target_geometry(task))], IMG, IMG)
     return images_dir

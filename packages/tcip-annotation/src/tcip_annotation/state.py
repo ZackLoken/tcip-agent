@@ -50,9 +50,7 @@ class Point:
     """A single labeled location in pixel coordinates: a placed prompt (human- or agent-supplied,
     for a promptable method like SAM) or a keypoint/landmark.
 
-    Has no bounding box and no area; :func:`bbox_of` refuses one. Every consumer that assembles
-    training targets, computes IoU/matching, or reads a delivery-grade box filters Point geometries
-    out itself.
+    Has no bounding box and no area; :func:`bbox_of` refuses one.
     """
 
     x: float

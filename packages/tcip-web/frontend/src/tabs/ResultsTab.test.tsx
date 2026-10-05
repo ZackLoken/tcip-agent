@@ -6,6 +6,8 @@ import { StructuredRefusalError } from "@/api/http";
 import { resultsApi, type DeliveryEventRecord } from "@/api/inference";
 import { useStore } from "@/store";
 import { ResultsTab } from "@/tabs/ResultsTab";
+import { mockDatasetTree } from "@/test/datasetTree";
+import { openTestProject } from "@/test/store";
 import { TRAIT_LISTINGS } from "@/test/traitRecords";
 
 const initialStoreState = useStore.getState();
@@ -27,22 +29,9 @@ const VALIDATED = {
   require_all_dates_complete: true,
 };
 
-function setupDataset() {
-  useStore.setState((s) => ({
-    gui: {
-      ...s.gui,
-      dataset: {
-        ...s.gui.dataset,
-        dataset_root: "C:/data",
-      },
-    },
-    openProject: { id: "a1b2c3d4e5f6", path: "C:/proj" },
-  }));
-}
-
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
-  setupDataset();
+  openTestProject({ dataset_root: "C:/data" });
   // One trait whose confirmed revision declares milestone fractions, which is what the
   // curve/milestone panels render for.
   vi.spyOn(resultsApi, "traits").mockResolvedValue(TRAIT_LISTINGS.results);
@@ -58,16 +47,12 @@ afterEach(() => {
 
 describe("ResultsTab structured predictions-by-date picker", () => {
   it("delivers only the bucket the breeder picks per date, and offers none for a date with none", async () => {
-    vi.spyOn(api.dataset, "tree").mockResolvedValue({
-      dataset_root: "C:/data",
+    mockDatasetTree({
       dates_with_images: ["2026-01-01", "2026-01-08"],
-      subjects: ["subject_a"],
-      subjects_by_date: {},
       buckets_by_date: {
         "2026-01-01": ["baseline/2026-01-01", "v2/2026-01-01"],
         "2026-01-08": [],
       },
-      label_problem: null,
     });
     const measurementSpy = vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
       curves: { rows: [], n_plants: 0 },
@@ -100,12 +85,7 @@ describe("ResultsTab structured predictions-by-date picker", () => {
   });
 
   it("shows the tree's label_problem beside the date list without blocking it", async () => {
-    vi.spyOn(api.dataset, "tree").mockResolvedValue({
-      dataset_root: "C:/data",
-      dates_with_images: ["2026-01-01"],
-      subjects: ["subject_a"],
-      subjects_by_date: {},
-      buckets_by_date: { "2026-01-01": ["baseline/2026-01-01"] },
+    mockDatasetTree({
       label_problem: "label_documents['2026-01-08', 'IMG_0000'] under C:/data: is a list",
     });
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
@@ -123,14 +103,7 @@ describe("ResultsTab structured predictions-by-date picker", () => {
   });
 
   it("dropping a date to '(skip)' excludes it from the computed predictions map", async () => {
-    vi.spyOn(api.dataset, "tree").mockResolvedValue({
-      dataset_root: "C:/data",
-      dates_with_images: ["2026-01-01"],
-      subjects: ["subject_a"],
-      subjects_by_date: {},
-      buckets_by_date: { "2026-01-01": ["baseline/2026-01-01"] },
-      label_problem: null,
-    });
+    mockDatasetTree();
     const measurementSpy = vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
       curves: { rows: [], n_plants: 0 },
       milestones: { rows: [], columns: [] },
@@ -227,17 +200,6 @@ describe("ResultsTab evidence gate", () => {
     require_all_dates_complete: true,
   };
 
-  function mockTree() {
-    vi.spyOn(api.dataset, "tree").mockResolvedValue({
-      dataset_root: "C:/data",
-      dates_with_images: ["2026-01-01"],
-      subjects: [],
-      subjects_by_date: {},
-      buckets_by_date: { "2026-01-01": ["baseline/2026-01-01"] },
-      label_problem: null,
-    });
-  }
-
   async function renderAndCompute() {
     render(<ResultsTab />);
     await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
@@ -250,7 +212,7 @@ describe("ResultsTab evidence gate", () => {
   }
 
   it("hands a delivery refusal to the assessment flow, not the raw error line", async () => {
-    mockTree();
+    mockDatasetTree({ subjects: [] });
     const message = UNVALIDATED.unvalidated_reason;
     vi.spyOn(resultsApi, "phenologyMeasurement").mockRejectedValue(
       new StructuredRefusalError({ kind: "delivery", message }, 400, message),
@@ -266,7 +228,7 @@ describe("ResultsTab evidence gate", () => {
 
   it("replaces the disabled export with an acknowledge-and-export flow while unvalidated", async () => {
     useStore.setState({ user: "breeder" });
-    mockTree();
+    mockDatasetTree({ subjects: [] });
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
       curves: { rows: [CURVE_ROW], n_plants: 1 },
       milestones: { rows: [ONSET_ROW], columns: STAGE_COLUMNS },
@@ -300,7 +262,7 @@ describe("ResultsTab evidence gate", () => {
   });
 
   it("opens both CSV doors once the same rows arrive on validated evidence", async () => {
-    mockTree();
+    mockDatasetTree({ subjects: [] });
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
       curves: { rows: [CURVE_ROW], n_plants: 1 },
       milestones: { rows: [ONSET_ROW], columns: STAGE_COLUMNS },
@@ -316,7 +278,7 @@ describe("ResultsTab evidence gate", () => {
   });
 
   it("toasts the second-delivery sentence naming the saved path when the CSV export's audit line is lost", async () => {
-    mockTree();
+    mockDatasetTree({ subjects: [] });
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
       curves: { rows: [CURVE_ROW], n_plants: 1 },
       milestones: { rows: [ONSET_ROW], columns: STAGE_COLUMNS },
@@ -349,7 +311,7 @@ describe("ResultsTab evidence gate", () => {
   });
 
   it("states which delivery kinds the export controls actually cover", async () => {
-    mockTree();
+    mockDatasetTree({ subjects: [] });
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
       curves: { rows: [CURVE_ROW], n_plants: 1 },
       milestones: { rows: [ONSET_ROW], columns: STAGE_COLUMNS },
@@ -365,7 +327,7 @@ describe("ResultsTab evidence gate", () => {
   });
 
   it("renders the delivery-scoped unattributed count beside the measurement", async () => {
-    mockTree();
+    mockDatasetTree({ subjects: [] });
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
       curves: { rows: [CURVE_ROW], n_plants: 1 },
       milestones: { rows: [ONSET_ROW], columns: STAGE_COLUMNS },
@@ -387,14 +349,7 @@ describe("ResultsTab onset table validity marker", () => {
   async function computeWithOnsetRows(
     rows: Awaited<ReturnType<typeof resultsApi.phenologyMeasurement>>["milestones"]["rows"],
   ) {
-    vi.spyOn(api.dataset, "tree").mockResolvedValue({
-      dataset_root: "C:/data",
-      dates_with_images: ["2026-01-01"],
-      subjects: ["subject_a"],
-      subjects_by_date: {},
-      buckets_by_date: { "2026-01-01": ["baseline/2026-01-01"] },
-      label_problem: null,
-    });
+    mockDatasetTree();
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
       curves: {
         rows: [
@@ -510,14 +465,7 @@ describe("ResultsTab onset table validity marker", () => {
 
 describe("ResultsTab meaning refusals", () => {
   it("routes a refusal by its kind even when its text reads like the calibration one", async () => {
-    vi.spyOn(api.dataset, "tree").mockResolvedValue({
-      dataset_root: "C:/data",
-      dates_with_images: ["2026-01-01"],
-      subjects: ["subject_a"],
-      subjects_by_date: {},
-      buckets_by_date: { "2026-01-01": ["baseline/2026-01-01"] },
-      label_problem: null,
-    });
+    mockDatasetTree();
     vi.spyOn(resultsApi, "phenologyMeasurement").mockRejectedValue(
       new StructuredRefusalError(
         {
@@ -547,14 +495,7 @@ describe("ResultsTab meaning refusals", () => {
   });
 
   it("renders a structured refusal from the CSV download instead of stringifying it", async () => {
-    vi.spyOn(api.dataset, "tree").mockResolvedValue({
-      dataset_root: "C:/data",
-      dates_with_images: ["2026-01-01"],
-      subjects: ["subject_a"],
-      subjects_by_date: {},
-      buckets_by_date: { "2026-01-01": ["baseline/2026-01-01"] },
-      label_problem: null,
-    });
+    mockDatasetTree();
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
       curves: {
         rows: [
@@ -872,17 +813,6 @@ describe("ResultsTab count export", () => {
     });
   });
 
-  function mockCountTree() {
-    vi.spyOn(api.dataset, "tree").mockResolvedValue({
-      dataset_root: "C:/data",
-      dates_with_images: ["2026-01-01"],
-      subjects: [],
-      subjects_by_date: {},
-      buckets_by_date: { "2026-01-01": ["baseline/2026-01-01"] },
-      label_problem: null,
-    });
-  }
-
   // Every field in the count-export panel sits immediately after its own <label>, the DOM
   // relationship this reads rather than a positional guess at render order.
   function controlFollowing(panel: HTMLElement, labelText: string): HTMLElement {
@@ -893,7 +823,7 @@ describe("ResultsTab count export", () => {
   }
 
   async function renderCountPanel(): Promise<HTMLElement> {
-    mockCountTree();
+    mockDatasetTree({ subjects: [] });
     render(<ResultsTab />);
     await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
     await waitFor(() => expect(api.dataset.tree).toHaveBeenCalled());

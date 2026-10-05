@@ -1,29 +1,20 @@
-"""CI guardrail: agent-facing prose must not name a fabricated tool or omit a registered one.
+"""Agent-facing prose names no tool the registry does not hold and omits no registered one.
 
-Mirrors `tests/test_skill_trait_fidelity.py` for tool names: a Tools-table cell naming a tool
-the registry does not hold is a fabrication or a rename residue; a registered tool no surface
-names as `` `name` `` or `` `name( `` is an orphan, usually a rename whose new name nobody wrote
-down. Reach is stated here, not just in the script: the fabrication half only reads Tools
-tables (a table whose header's first column is literally "Tool"), so a fabricated or retired
-name sitting in ordinary running prose, outside any such table, is out of its reach; the same
-half also misses a table documenting tools under a different header, the phenology skill's
-piece inventory (headed "Piece") being the live case, since that table names real tools
-alongside internal module names and a content-based match flags the module names too. A green
-run over either shape is not coverage of it. The orphan half has no such gap, since it searches
-every surface's whole text, table or prose alike.
+A cell of a Tools table (a table whose header's first column is literally "Tool") naming an
+unregistered tool fails; a registered tool no surface names as `` `name` `` or `` `name( ``,
+anywhere in its text, fails. Tool names outside a Tools table are not checked for fabrication.
 """
 
 from __future__ import annotations
 
 import importlib.util
-from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[1]
+from tests import REPO_ROOT
 
 
 def _load_guardrail():
     spec = importlib.util.spec_from_file_location(
-        "verify_skill_tools", REPO / "tools" / "verify_skill_tools.py"
+        "verify_skill_tools", REPO_ROOT / "tools" / "verify_skill_tools.py"
     )
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)

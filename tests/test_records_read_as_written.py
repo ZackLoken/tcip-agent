@@ -41,13 +41,14 @@ def test_a_checkpoint_stating_no_task_refuses_naming_where_to_state_it(tmp_path:
 
     # Written past the producer, which builds no model for a config naming no task.
     torch = pytest.importorskip("torch")
+    from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY
     from tcip_mcp.tools.model_tools import register_model
     from tests._verified_checkpoint_fixtures import SCOPED_DATA
 
     unstated = tmp_path / "unstated.pt"
-    torch.save({"model_state_dict": {},
-                "config": {"model_source": {"builder": "tests.bespoke_models:build_bespoke_detection"},
-                           "data": dict(SCOPED_DATA)}}, str(unstated))
+    torch.save({STATE_DICT_KEY: {},
+                CONFIG_KEY: {"model_source": {"builder": "tests.bespoke_models:build_bespoke_detection"},
+                             "data": dict(SCOPED_DATA)}}, str(unstated))
     assert "error" not in register_model(name="unstated", checkpoint_path=str(unstated),
                                          config={}, project=tmp_path)
     with pytest.raises(ValueError, match="model_source.task"):
@@ -96,19 +97,20 @@ def test_a_sweep_final_status_lacking_its_state_fails_at_the_read(
     from tcip_store import encode_record
 
     def fake_search(**kw):
-        return str(Path(kw["storage_path"]) / kw["study_name"])
+        return None
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, n_trials=1, search_seed=0)
-    assert tt.monitor_training(tmp_path, sweep_id=result["study_name"])["status"] == "completed"
+    sweep_id = result["sweep"]["sweep_id"]
+    assert tt.monitor_training(tmp_path, sweep_id)["sweep"]["state"] == "completed"
 
-    final = tt.sweep_dir(result["study_name"], project=tmp_path) / FINAL_STATUS_FILE
+    final = tt.experiments.experiment_dir(sweep_id, project=tmp_path) / FINAL_STATUS_FILE
     damaged = read_record(final)
     del damaged["state"]
     final.write_bytes(encode_record(damaged))
     with pytest.raises(KeyError, match="state"):
-        tt.monitor_training(tmp_path, sweep_id=result["study_name"])
+        tt.monitor_training(tmp_path, sweep_id)
 
 
 def test_a_completion_mark_lacking_its_time_fails_at_the_read(tmp_path: Path) -> None:

@@ -7,23 +7,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from tcip_mcp.tools.project_tools import archive_project, import_project
-
-
-def _project(tmp_path: Path) -> Path:
-    """A minimal project: one image, one label, and the registry that decodes it."""
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
-    from tests._producer_fixtures import label_image, registry_over
-
-    root = tmp_path / "project"
-    (root / "images" / "2026-03-04").mkdir(parents=True)
-    (root / "images" / "2026-03-04" / "a_1.jpg").write_bytes(b"\xff\xd8\xff")
-    label_image(root / "images" / "2026-03-04" / "a_1.jpg", [], 10, 10, keep_empty=True)
-    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
-    return root
+from tests._producer_fixtures import one_labeled_capture
 
 
 def test_archive_project_refuses_a_destination_inside_the_project(tmp_path):
-    root = _project(tmp_path)
+    root = one_labeled_capture(tmp_path / "project")
 
     result = archive_project(root, output_dir=str(root / "bundle"))
 
@@ -33,7 +21,7 @@ def test_archive_project_refuses_a_destination_inside_the_project(tmp_path):
 
 
 def test_archive_project_refuses_a_non_empty_destination(tmp_path):
-    root = _project(tmp_path)
+    root = one_labeled_capture(tmp_path / "project")
     dest = tmp_path / "bundle"
     dest.mkdir()
     (dest / "already_here.txt").write_text("x", encoding="utf-8")
@@ -51,7 +39,7 @@ def test_archive_project_refuses_a_zip_destination_inside_the_project_or_already
     """The ZIP form takes the directory form's refusals: a destination inside the project would
     bundle its own truncated self, and a written archive is never written over; a relative path
     refuses rather than resolving against wherever the process runs."""
-    root = _project(tmp_path)
+    root = one_labeled_capture(tmp_path / "project")
     outside = tmp_path / "bundle.zip"
 
     inside = archive_project(root, output_path=str(root / "archive.zip"))
@@ -68,7 +56,7 @@ def test_archive_project_refuses_a_zip_destination_inside_the_project_or_already
 
 
 def test_archive_project_refuses_both_output_path_and_output_dir(tmp_path):
-    root = _project(tmp_path)
+    root = one_labeled_capture(tmp_path / "project")
 
     result = archive_project(
         root, output_path=str(tmp_path / "bundle.zip"), output_dir=str(tmp_path / "bundle"),
@@ -79,7 +67,7 @@ def test_archive_project_refuses_both_output_path_and_output_dir(tmp_path):
 
 
 def test_archive_project_refuses_neither_output_path_nor_output_dir(tmp_path):
-    root = _project(tmp_path)
+    root = one_labeled_capture(tmp_path / "project")
 
     result = archive_project(root)
 
@@ -88,7 +76,7 @@ def test_archive_project_refuses_neither_output_path_nor_output_dir(tmp_path):
 
 
 def test_archive_project_directory_mode_admits_valid_work(tmp_path):
-    root = _project(tmp_path)
+    root = one_labeled_capture(tmp_path / "project")
     dest = tmp_path / "bundle"
 
     result = archive_project(root, output_dir=str(dest))

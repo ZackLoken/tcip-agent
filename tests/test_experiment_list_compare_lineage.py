@@ -14,15 +14,15 @@ def _opened(project, experiment_id: str, builder: str = "my_models:tree_detector
 
 def test_experiment_list_compare_lineage(tmp_path):
     from tcip_mcp.experiments import (
-        compare_experiments, get_experiment_lineage, list_experiments, run_resolution,
+        compare_experiments, get_experiment_lineage, run_resolution, run_rows,
     )
     from tests._verified_checkpoint_fixtures import log_epoch
 
-    e1 = _opened(tmp_path, "e1", "my_models:tv_resnet50_det", parent_experiment="e0")
+    e1 = _opened(tmp_path, "e1", "my_models:tv_resnet50_det", relaunched_from="e0")
     log_epoch(e1, 1, {"map50": 0.6})
     _opened(tmp_path, "e2", "my_models:fcos_det")
 
-    assert {e["experiment_id"] for e in list_experiments(tmp_path)} == {"e1", "e2"}
+    assert {e.experiment_id for e in run_rows(tmp_path)} == {"e1", "e2"}
 
     cmp = compare_experiments(["e1", "e2", "missing"], project=tmp_path)
     assert cmp["count"] == 3
@@ -33,7 +33,7 @@ def test_experiment_list_compare_lineage(tmp_path):
 
     lineage = get_experiment_lineage("e1", project=tmp_path)["lineage"]
     assert lineage["data"] == run_resolution("e1", project=tmp_path)["data"]
-    assert lineage["parent_experiment"] == "e0"
+    assert lineage["relaunched_from"] == "e0"
     assert lineage["checkpoint"] is None  # no final status names a checkpoint yet
     assert "error" in get_experiment_lineage("nope", project=tmp_path)
 
@@ -49,9 +49,9 @@ def test_a_completed_runs_lineage_names_the_checkpoint_its_final_status_names(tm
     assert lineage["checkpoint"] == checkpoint
 
 
-def test_get_experiment_tool_pages_metrics_and_exposes_n_rows(tmp_path):
-    """The MCP tool accepts metrics_limit/metrics_offset under view='full'; n_rows (the row
-    count) is the paging bound, always present alongside n_epochs."""
+def test_get_experiment_tool_pages_epoch_rows_bounded_by_n_epochs(tmp_path):
+    """The MCP tool accepts metrics_limit/metrics_offset under view='full', paging the epoch
+    rows ``n_epochs`` counts."""
     from tcip_mcp.tools.experiment_tools import get_experiment
     from tests._verified_checkpoint_fixtures import log_epoch
 
@@ -60,10 +60,10 @@ def test_get_experiment_tool_pages_metrics_and_exposes_n_rows(tmp_path):
         log_epoch(run_dir, epoch, {"loss": float(epoch)})
 
     full = get_experiment(tmp_path, "exp-paged")
-    assert full["n_rows"] == 5 and full["n_epochs"] == 5
+    assert full["n_epochs"] == 5
 
     page = get_experiment(tmp_path, "exp-paged", metrics_limit=2, metrics_offset=1)
-    assert page["n_rows"] == 5
+    assert page["n_epochs"] == 5
     assert [r["epoch"] for r in page["metrics"]] == [1, 2]
 
 
@@ -77,22 +77,6 @@ def test_get_experiment_tool_lineage_view_admits_defaults_refuses_pagination(tmp
     assert "error" not in get_experiment(tmp_path, "exp-lineage", view="lineage")
     assert "error" in get_experiment(tmp_path, "exp-lineage", view="lineage", metrics_limit=3)
     assert "error" in get_experiment(tmp_path, "exp-lineage", view="lineage", metrics_offset=2)
-
-
-def test_list_experiments_launched_only_serves_the_training_runs_view(tmp_path):
-    """launched_only=True switches list_experiments to the training runs view, in the shape
-    _all_training_runs builds."""
-    from tcip_mcp.tools.experiment_tools import list_experiments
-    from tcip_mcp.tools.training_tools import _all_training_runs
-
-    _opened(tmp_path, "exp-launched-view")
-
-    default_view = list_experiments(tmp_path)
-    assert "experiments" in default_view and "runs" not in default_view
-
-    launched_view = list_experiments(tmp_path, launched_only=True)
-    assert launched_view == {"runs": _all_training_runs(tmp_path)}
-    assert [r["experiment_id"] for r in launched_view["runs"]] == ["exp-launched-view"]
 
 
 def test_compare_experiments_reports_the_last_row_and_rows_logged_after_the_end(tmp_path):
@@ -110,7 +94,7 @@ def test_compare_experiments_reports_the_last_row_and_rows_logged_after_the_end(
     assert c["state"] == "completed"
     assert c["last_logged_metrics"]["loss"] == 0.4
     assert c["rows_after_end"] == 1  # the row stamped now, after the end
-    assert c["n_epochs"] == 2 and c["n_rows"] == 2
+    assert c["n_epochs"] == 2
 
 
 def test_compare_experiments_stale_heartbeat_compares_interrupted(tmp_path, monkeypatch):

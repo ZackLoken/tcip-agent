@@ -26,22 +26,14 @@ from tcip_annotation import json_io
 from tcip_annotation.matching import pair_proposals
 from tcip_annotation.state import Annotation, BBox, Point, Polygon, bbox_of
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
-from tests._producer_fixtures import image_label_key, label_image
+from tests._producer_fixtures import (
+    blank_image, image_label_key, label_image, saved_annotations,
+)
 
 BOX = BBox(10.0, 10.0, 30.0, 30.0)
 RING = [(50.0, 50.0), (70.0, 50.0), (70.0, 70.0)]
 
 
-def _saved(image: Path) -> list[Annotation]:
-    """The annotations of ``image``'s label document."""
-    return json_io.read_label_document(image_label_key(image)).annotations
-
-
-def _img(tmp_path: Path, name: str = "IMG_0001.JPG", size: tuple[int, int] = (100, 80)) -> Path:
-    p = tmp_path / "images" / UNDATED_BUCKET / name
-    p.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", size).save(p)
-    return p
 
 
 # ── the geometry itself ──────────────────────────────────────────────────────
@@ -208,7 +200,7 @@ def test_worst_predictions_does_not_count_a_point_as_a_detection(tmp_path: Path)
     from tcip_mcp.tools.vision_tools import get_worst_predictions
     from tests._chain_fixtures import published
 
-    image = _img(tmp_path, "IMG_0001.jpg")
+    image = blank_image(tmp_path, "IMG_0001.jpg")
     label_image(image, [Annotation(subject="bud", geometry=BOX)], 100, 80)
     bucket = published(tmp_path, "pred/2026-01-01", [
         {"image": str(image), "width": 100, "height": 80,
@@ -263,7 +255,7 @@ def test_box_renderer_skips_a_point_and_discloses_the_skip() -> None:
 def test_visualize_annotations_renders_the_box_and_reports_the_point(tmp_path: Path) -> None:
     from tcip_mcp.tools.vision_tools import _viz_annotations
 
-    img = _img(tmp_path / "ds", "IMG_0001.JPG")
+    img = blank_image(tmp_path / "ds", "IMG_0001.JPG")
     label_image(img, [
         Annotation(subject="bud", geometry=BOX),
         Annotation(subject="bud", geometry=Point(60.0, 60.0)),
@@ -289,7 +281,7 @@ def test_the_client_projection_emits_the_point_key() -> None:
 def test_mcp_read_annotations_tool_returns_a_point(tmp_path: Path) -> None:
     from tcip_mcp.tools.annotation_tools import read_annotations as read_annotations_tool
 
-    img = _img(tmp_path / "ds", "IMG_0001.JPG")
+    img = blank_image(tmp_path / "ds", "IMG_0001.JPG")
     label_image(img, [Annotation(subject="bud", geometry=Point(12.0, 34.0))], 100, 80)
     res = read_annotations_tool(str(img))
     (ann,) = res["labels"]["annotations"]
@@ -312,11 +304,11 @@ def test_subject_task_names_a_point_only_frame(tmp_path: Path) -> None:
 def test_save_annotations_tool_writes_an_incoming_point(tmp_path: Path) -> None:
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    img = _img(tmp_path)
+    img = blank_image(tmp_path)
     res = save_annotations(tmp_path, tmp_path.parent, str(img),
                            annotations=[{"subject": "bud", "point": [12.0, 34.0]}])
     assert "error" not in res
-    (stored,) = _saved(img)
+    (stored,) = saved_annotations(img)
     assert isinstance(stored.geometry, Point)
     assert (stored.geometry.x, stored.geometry.y) == (12.0, 34.0)
 
@@ -326,34 +318,27 @@ def test_save_annotations_tool_keeps_points_and_point_distinct(tmp_path: Path) -
     both, or a point and a one-vertex polygon become indistinguishable on disk."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    img = _img(tmp_path)
+    img = blank_image(tmp_path)
     save_annotations(tmp_path, tmp_path.parent, str(img), annotations=[
         {"subject": "bud", "points": [[50, 50], [70, 50], [70, 70]]},
         {"subject": "bud", "point": [12.0, 34.0]},
     ])
-    kinds = [type(a.geometry) for a in _saved(img)]
+    kinds = [type(a.geometry) for a in saved_annotations(img)]
     assert kinds == [Polygon, Point]
 
 
 # ── web routes (the human's canvas) ──────────────────────────────────────────
 
 
-@pytest.fixture
-def client() -> TestClient:
-    from tcip_web.app import app
-
-    return TestClient(app, base_url="http://127.0.0.1")
-
-
 def test_annotate_route_round_trips_a_point(client: TestClient, tmp_path: Path) -> None:
-    img = _img(tmp_path)
+    img = blank_image(tmp_path)
 
     resp = client.post("/api/annotate/labels", json={
         "image_path": str(img),
         "annotations": [{"subject": "bud", "point": [12.0, 34.0]}], "user": "breeder",
     })
     assert resp.status_code == 200
-    (stored,) = _saved(img)
+    (stored,) = saved_annotations(img)
     assert isinstance(stored.geometry, Point)
 
     body = client.get("/api/annotate/labels", params={"image_path": str(img)}).json()
@@ -364,7 +349,7 @@ def test_annotate_route_round_trips_a_point(client: TestClient, tmp_path: Path) 
 def test_annotate_route_round_trips_mixed_point_and_box_geometry(
     client: TestClient, tmp_path: Path
 ) -> None:
-    img = _img(tmp_path)
+    img = blank_image(tmp_path)
     resp = client.post("/api/annotate/labels", json={
         "image_path": str(img),
         "annotations": [{"subject": "bud", "point": [12.0, 34.0]},
@@ -372,7 +357,7 @@ def test_annotate_route_round_trips_mixed_point_and_box_geometry(
         "user": "breeder",
     })
     assert resp.status_code == 200
-    kinds = [type(a.geometry) for a in _saved(img)]
+    kinds = [type(a.geometry) for a in saved_annotations(img)]
     assert kinds == [Point, BBox]
 
 
@@ -384,7 +369,7 @@ def test_the_proposals_route_pairs_no_proposal_with_a_point(
     from tests._web_fixtures import open_new_project
 
     tmp_path = open_new_project(tmp_path / "proj")
-    img = _img(tmp_path)
+    img = blank_image(tmp_path)
     label_image(img, [Annotation(subject="bud", geometry=Point(20.0, 20.0))], 100, 80)
     bucket = published(tmp_path, "baseline/2026-01-01", [
         {"image": str(img), "width": 100, "height": 80,

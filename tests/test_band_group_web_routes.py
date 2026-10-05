@@ -14,13 +14,6 @@ import tifffile
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from tcip_web.app import app
-
-
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
-
 
 def _write_group(images_dir: Path, stem: str, base=(111, 222, 333)) -> None:
     """Each band gets a distinct base level plus a horizontal gradient (never a flat fill): a
@@ -207,9 +200,8 @@ def test_serve_image_stale_group_returns_409(client: TestClient, grouped_dataset
 def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     tmp_path, monkeypatch,
 ):
-    """The web door's own real-forward-pass proof (mirrors
-    test_band_group_inference_calibration.py for the MCP door): a grouped capture in images_dir
-    must decode through the channel-aware loader, never crash on a stringified BandGroupRef."""
+    """A grouped capture in images_dir reaches the web door's predictor decoded through the
+    channel-aware loader, never as a stringified BandGroupRef."""
     pytest.importorskip("torch")
 
     from tests._verified_checkpoint_fixtures import foreign_checkpoint

@@ -20,6 +20,7 @@ from tcip_annotation.state import Annotation, BBox  # noqa: E402
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tests import _trait_fixtures as fx  # noqa: E402
+from tests._mapping_fixtures import write_plant_csv  # noqa: E402
 from tests._producer_fixtures import image_label_key, label_image  # noqa: E402
 
 TILE = 32
@@ -53,18 +54,6 @@ def _write_mosaic(path: Path, *, seed: int = 0, georeferenced: bool = False,
             (34735, "H", len(geokeys), geokeys, False),
         ],
     )
-
-
-def _write_plant_csv(path: Path) -> None:
-    import csv
-
-    # Two plants ~10m apart, independent of the mosaic's own pixel geometry: the plant path only
-    # needs the raster's real geotransform to convert this real-world spacing to pixels.
-    with path.open("w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(["plot_name", "accession_name", "WGS84_centroid_x", "WGS84_centroid_y"])
-        w.writerow(["P1", "acc-A", -93.0, 45.0])
-        w.writerow(["P2", "acc-B", -93.0001, 45.0])
 
 
 _BLOCK_MODEL_SOURCE = {"builder": "tests.bespoke_models:build_bespoke_detection",
@@ -356,8 +345,11 @@ def test_band_counts_and_spacing_count_objects_not_crowd_regions(tmp_path: Path)
 
 
 def test_the_band_scale_prefers_plant_pitch_when_the_run_names_plant_files(tmp_path: Path):
-    plant_csv = tmp_path / "plants.csv"
-    _write_plant_csv(plant_csv)
+    # Two plants ~10m apart, independent of the mosaic's own pixel geometry: the plant path only
+    # needs the raster's real geotransform to convert this real-world spacing to pixels.
+    plant_csv = write_plant_csv(tmp_path / "plants.csv", [
+        {"plot": "P1", "accession": "acc-A", "lat": 45.0, "lon": -93.0},
+        {"plot": "P2", "accession": "acc-B", "lat": 45.0, "lon": -93.0001}])
     exp = _attested(tmp_path, plant_csv_paths=[str(plant_csv)])
 
     source = _assess(exp)["criterion"]["count"]["block_scale_source"]
@@ -637,18 +629,14 @@ def test_a_recorded_scope_needs_no_registry_on_disk(tmp_path: Path):
     assert _band_total(_assess(exp)) > 0
 
 
-def test_regions_marked_through_the_editors_save_admit_the_assessment(tmp_path: Path):
+def test_regions_marked_through_the_editors_save_admit_the_assessment(tmp_path: Path, client):
     """The completeness gate reads the record the breeder's own gesture writes: each reserved
     region marked complete through the save the Annotate canvas posts to."""
-    from fastapi.testclient import TestClient
-
-    from tcip_web.app import app
     from tests._web_fixtures import open_new_project
 
     exp = _build_experiment(tmp_path)
     open_new_project(tmp_path)
     manifest = exp["spatial_manifest"]
-    client = TestClient(app, base_url="http://127.0.0.1")
     for region in (manifest["calibration_region"], manifest["holdout_region"]):
         x0, y0, x1, y1 = region[0]
         current = client.get("/api/annotate/labels", params={

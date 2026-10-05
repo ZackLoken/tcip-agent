@@ -6,15 +6,6 @@ this index only says what each does. CI and development tooling only; the operat
 breeder or an operator runs against a project are documented in `README.md` and
 `CONTRIBUTING.md` instead.
 
-- `build_module_inventory.py` - builds a module inventory and real import graph for the repo's
-  Python and TypeScript source trees, so `check_architecture_doc.py` can cross-check
-  ARCHITECTURE.md's module-ownership tables against the tree it actually describes.
-- `check_architecture_doc.py` - verifies ARCHITECTURE.md's module-ownership tables against the
-  tree, for CI: every named path exists, and, given a module-inventory JSON, the in-repo-import
-  and imported-by counts per row are cross-checked for drift.
-- `check_architecture_citations.py` - verifies ARCHITECTURE.md's `file:line` citations against
-  the code they quote, for CI; `--fix` rewrites a re-anchorable citation's stale line number in
-  place, leaving a genuinely failed citation for a human.
 - `gate_baseline.py` - runs the quality gate CI actually declares, parsed from
   `.github/workflows/ci.yml` rather than restated by hand, so a local pass predicts a CI pass.
 - `prove_test_fails_before.py` - extracts a baseline revision with `git archive`, overlays the
@@ -51,8 +42,7 @@ breeder or an operator runs against a project are documented in `README.md` and
   `tests/test_generated_frontend_types.py` fails when the checked-in module is stale.
 - `generate_trait_fixture.py` - writes `frontend/src/test/traitListings.json`, the trait
   listings the frontend tests read, by proposing and confirming traits in a scratch project and
-  serving them through the traits route. Run after changing the trait record's shape;
-  `tests/test_frontend_trait_fixture.py` fails when the checked-in file is stale.
+  serving them through the traits route. Run after changing the trait record's shape.
 - `generate_harness_discovery.py` - renders the thin `.claude/skills/<name>/SKILL.md` and
   `.agents/skills/<name>/SKILL.md` files, plus the generated block in `AGENTS.md`, from the
   canonical knowledge documents under `packages/tcip-mcp/src/tcip_mcp/knowledge/`. Run after

@@ -14,11 +14,10 @@ DATE = "2025-06-01"
 
 
 def _two_images(images_dir):
-    from PIL import Image
+    from tests._producer_fixtures import gray_frame
 
-    images_dir.mkdir(parents=True)
     for stem in ("a", "b"):
-        Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / f"{stem}.jpg")
+        gray_frame(images_dir, 100, f"{stem}.jpg")
     return images_dir
 
 
@@ -33,15 +32,11 @@ def _job(job_id, images_dir, bucket, ckpt, project):
         stated=Stated(tile=False, conf=0.25, postprocess="nms"))
 
 
-def _launch_through_the_route(dataset, bucket, ckpt, *, tile: bool):
-    """A GUI run publishing ``bucket`` launched through the route's own TestClient, joined until
+def _launch_through_the_route(client, dataset, bucket, ckpt, *, tile: bool):
+    """A GUI run publishing ``bucket`` launched through the route by ``client``, joined until
     its worker ends."""
-    from fastapi.testclient import TestClient
-
-    from tcip_web.app import app
     from tcip_web.routes.inference import _get
 
-    client = TestClient(app, base_url="http://127.0.0.1")
     resp = client.post("/api/inference/launch", json={
         "user": "tester", "checkpoint_path": str(ckpt), "dataset_root": str(dataset), "date": DATE,
         "bucket": bucket, "stated": {"tile": tile}})
@@ -97,7 +92,7 @@ def test_the_gui_worker_and_the_mcp_door_publish_the_same_bucket_record(tmp_path
 
 
 def test_a_pass_failing_after_its_first_document_publishes_nothing_on_either_door(
-    tmp_path, opened_project, monkeypatch,
+    tmp_path, opened_project, client, monkeypatch,
 ):
     """A pass that dies between images leaves no document, no record and no line, the GUI's pass
     and the MCP door's alike: a publication is one commit."""
@@ -124,7 +119,7 @@ def test_a_pass_failing_after_its_first_document_publishes_nothing_on_either_doo
 
     monkeypatch.setattr(export, "encode_predictions", failing_second_document)
 
-    job = _launch_through_the_route(dataset, f"gui/{DATE}", ckpt, tile=False)
+    job = _launch_through_the_route(client, dataset, f"gui/{DATE}", ckpt, tile=False)
     assert job.status == "failed" and job.error == "disk full"
 
     with pytest.raises(OSError, match="disk full"):
@@ -138,7 +133,7 @@ def test_a_pass_failing_after_its_first_document_publishes_nothing_on_either_doo
 
 
 def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_published(
-    tmp_path, opened_project, monkeypatch,
+    tmp_path, opened_project, client, monkeypatch,
 ):
     """A refusal the pass raises before its first write refuses a GUI run as it refuses the MCP
     door's: the same reason, no document, no record, no line."""
@@ -153,7 +148,7 @@ def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_publishe
     install(monkeypatch, StubPredictor())
     ckpt = registered_checkpoint(tmp_path)
 
-    job = _launch_through_the_route(dataset, f"run/{DATE}", ckpt, tile=True)
+    job = _launch_through_the_route(client, dataset, f"run/{DATE}", ckpt, tile=True)
     mcp = run_inference(tmp_path, ckpt, str(images_dir), bucket=f"mcp/{DATE}",
                         stated=Stated(tile=True))
 

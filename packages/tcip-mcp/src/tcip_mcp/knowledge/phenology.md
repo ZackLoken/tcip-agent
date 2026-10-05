@@ -13,7 +13,7 @@ delivered one row per plant. Compose the pieces below; do not re-script this per
 Bloom is the fraction of a plant's detected catkins that are _elongated_.
 "Elongated" is an expert-defined, visible morphological stage: a *validated* per-catkin
 elongation call learned from the imagery. It's a *state*, not a dimension: judge it from the
-object, not off a bbox's height. (See the CLAUDE.md measurement-integrity invariant.) How that
+object, not off a bbox's height. How that
 call is produced (a detector carrying a per-instance head for the state's attribute,
 detect-then-classify, …) is a pipeline-design choice; the trait definition does not fix it.
 

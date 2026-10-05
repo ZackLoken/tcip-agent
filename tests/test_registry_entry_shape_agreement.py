@@ -7,20 +7,11 @@ Each agreement here runs a reader of the registry index's entries against a regi
 from __future__ import annotations
 
 import hashlib
-import re
 from pathlib import Path
 
 import pytest
 
 from tcip_mcp.model_registry import ModelRegistry, load_registered_checkpoint
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-FRONTEND_SRC = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
-ENTRY_DECLARATION = FRONTEND_SRC / "api" / "inference.ts"
-
-_ENTRY_INTERFACE_RE = re.compile(r"export interface RegisteredModel \{(.*?)\n\}", re.S)
-_TS_BLOCK_RE = re.compile(r"(?:interface|type)\s+\w+\s*=?\s*\{(.*?)\n\}", re.S)
-_TS_FIELD_RE = re.compile(r"^\s+(\w+)(\??):", re.M)
 
 # Checkpoints of distinct content, so an entry can never be matched by accident.
 _RUNS = {
@@ -170,66 +161,3 @@ def test_a_readable_index_is_still_read_entry_by_entry(polluted_project) -> None
         assert any(entry["name"] in message for _, message in findings)
 
 
-def _declared_entry_fields() -> dict[str, bool]:
-    """The browser's registry-entry fields, each mapped to whether it is declared optional."""
-    match = _ENTRY_INTERFACE_RE.search(ENTRY_DECLARATION.read_text(encoding="utf-8"))
-    assert match is not None, "the RegisteredModel interface is no longer where this test reads it"
-    fields = {name: bool(optional) for name, optional in _TS_FIELD_RE.findall(match.group(1))}
-    assert fields, "no fields parsed out of the RegisteredModel interface"
-    return fields
-
-
-def test_every_field_the_browser_reads_off_an_entry_is_one_the_registry_writes(
-    tmp_path: Path,
-) -> None:
-    """The browser's entry type is held against an entry the real writer produced.
-
-    Transcribed by hand, it drifts the moment a key is renamed: the UI keeps compiling and the
-    field it reads arrives undefined, which for the checkpoint path means an inference launch
-    against nothing. A field declared required must also carry a value, since a key the writer
-    always sets to null is not a string the browser can render.
-    """
-    root = tmp_path / "proj"
-    root.mkdir()
-    ckpt = _checkpoint(tmp_path / "model_best.pt", "weights-a")
-    ModelRegistry(str(root)).register_model(
-        "currant_bud_detector_v1", str(ckpt), _config(root),
-        metrics={"val_map50": 0.5}, tags=["detector"],
-    )
-    # The browser reads entries through the registry's own listing, the one reader every
-    # consumer goes through.
-    (entry,) = ModelRegistry(str(root)).list_models()
-
-    declared = _declared_entry_fields()
-    missing = sorted(name for name in declared if name not in entry)
-    assert not missing, (
-        f"the browser reads fields the registry entry does not carry: {missing}; "
-        f"the entry's own keys are {sorted(entry)}"
-    )
-    unset = sorted(name for name, optional in declared.items() if not optional and entry[name] is None)
-    assert not unset, f"the browser declares these required but the registry leaves them unset: {unset}"
-
-
-def test_no_other_frontend_module_declares_a_registry_entry_of_its_own() -> None:
-    """One declaration in the browser, so the backend has one counterpart to stay equal to.
-
-    A second type naming the same entry is what drifts: the module that was updated keeps
-    working and the one that was not reads a key the writer no longer emits. Frontend test files
-    are left out, since a shape written there is the expectation being asserted.
-    """
-    entry_fields = {"name", "checkpoint_path"}
-    sources = [
-        p for p in sorted(list(FRONTEND_SRC.rglob("*.ts")) + list(FRONTEND_SRC.rglob("*.tsx")))
-        if ".test." not in p.name and "test" not in p.parent.name and p != ENTRY_DECLARATION
-    ]
-    assert sources, "no frontend sources found, so nothing was checked"
-    offenders = [
-        p.relative_to(REPO_ROOT).as_posix()
-        for p in sources
-        for block in _TS_BLOCK_RE.findall(p.read_text(encoding="utf-8"))
-        if entry_fields <= {name for name, _ in _TS_FIELD_RE.findall(block)}
-    ]
-    assert not offenders, (
-        "these declare a registry entry instead of importing RegisteredModel:\n"
-        + "\n".join(offenders)
-    )

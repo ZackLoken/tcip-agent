@@ -260,9 +260,7 @@ def parse_capture_time(raw: object):
 
 def _channels_from_shape(shape: tuple[int, ...]) -> int:
     """1 for a 2-D ``(H, W)`` shape; otherwise the channel axis of a channel-first-or-last 3-D
-    shape, by "the smaller of the two non-spatial-looking axes is the channel axis", for a caller
-    with no expected channel count to compare against.
-    """
+    shape, the smaller of its two non-spatial-looking axes."""
     if len(shape) == 2:
         return 1
     return int(shape[0]) if shape[0] < shape[-1] else int(shape[-1])
@@ -273,8 +271,7 @@ def image_dimensions(path: "str | Path | BandGroupRef", num_channels: int = 3) -
     possible.
 
     A :class:`BandGroupRef` reads its dims from one sibling band file (a group's members share one
-    spatial frame). Which decode a source routes to is ``raster_source.photographic_container``'s
-    decision, as for :func:`load_image`.
+    spatial frame).
     """
     if isinstance(path, BandGroupRef):
         one_band = next(iter(path.bands.values()))

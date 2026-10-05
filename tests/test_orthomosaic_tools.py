@@ -12,8 +12,11 @@ import tifffile
 
 from tcip_mcp.pipelines.execution import Stated
 from tests import _trait_fixtures as fx
+from tests._mapping_fixtures import GRID_COLUMNS, register_plant_registry_for, write_plant_csv
 
 torch = pytest.importorskip("torch")
+
+from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
 pytest.importorskip("torchvision")
 
 # UTM zone 15N: the same real projected CRS test_orthomosaic_mapping.py uses.
@@ -26,14 +29,7 @@ TILE = 32
 RASTER_PASS = Stated(conf=0.0, tile_size=TILE, overlap=0.2)
 """The execution values every raster pass here states."""
 SCOPE = {"subject": fx.COUNT_SUBJECT, "attributes": []}
-
-
-@pytest.fixture(autouse=True)
-def _recorded_meaning(tmp_path):
-    """Every per-plant delivery below ships under a trait whose meaning is confirmed in the
-    project these tests act on."""
-    fx.seed_delivery_traits(tmp_path)
-    fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
+pytestmark = pytest.mark.usefixtures("confirmed_count_aggregate")
 
 
 def _geokeys() -> tuple[int, ...]:
@@ -75,7 +71,7 @@ def _bespoke_detection_checkpoint(tmp_path: Path, *, in_chans: int = 3, tile_siz
               "data": {"num_channels": in_chans, "scope": dict(SCOPE)}}
     model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "model_best.pt"
-    torch.save({"config": config, "model_state_dict": model.state_dict()}, str(ckpt))
+    torch.save({CONFIG_KEY: config, STATE_DICT_KEY: model.state_dict()}, str(ckpt))
     result = register_model(tmp_path, name="test-model", checkpoint_path=str(ckpt), config={})
     assert "error" not in result, result
     return str(ckpt)
@@ -88,18 +84,7 @@ def _pixel_to_wgs84(raster_path: Path, px: float, py: float) -> tuple[float, flo
 
 
 def _plant_registry(project: Path, plant_csv: Path, *, name: str = "reg") -> str:
-    from tests._mapping_fixtures import register_plant_registry_for
-
     return register_plant_registry_for(project, [plant_csv], name=name)
-
-
-def _write_plant_csv(path: Path, rows: list[dict]) -> None:
-    fieldnames = ["plot_name", "accession_name", "plot_number", "row_number", "col_number",
-                  "WGS84_centroid_y", "WGS84_centroid_x"]
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
 
 
 def _plants_csv_at(tmp_path: Path, raster_path: Path, rows: list[tuple[str, float, float]]) -> Path:
@@ -108,13 +93,9 @@ def _plants_csv_at(tmp_path: Path, raster_path: Path, rows: list[tuple[str, floa
     entries = []
     for i, (name, px, py) in enumerate(rows):
         lat, lon = _pixel_to_wgs84(raster_path, px, py)
-        entries.append({
-            "plot_name": name, "accession_name": f"acc-{name}", "plot_number": i,
-            "row_number": 0, "col_number": i, "WGS84_centroid_y": lat, "WGS84_centroid_x": lon,
-        })
-    csv_path = tmp_path / f"plants_{len(rows)}.csv"
-    _write_plant_csv(csv_path, entries)
-    return csv_path
+        entries.append({"plot": name, "accession": f"acc-{name}", "lat": lat, "lon": lon,
+                        "plot_number": i, "row_number": 0, "col_number": i})
+    return write_plant_csv(tmp_path / f"plants_{len(rows)}.csv", entries, extra=GRID_COLUMNS)
 
 
 def _plant_grid_csv(tmp_path: Path, raster_path: Path,
@@ -339,10 +320,8 @@ def test_a_raster_whose_georeferencing_cannot_be_read_refuses_cleanly(tmp_path):
     raster_path.parent.mkdir(parents=True)
     tifffile.imwrite(str(raster_path), arr, rowsperstrip=8, extratags=extratags)
     bucket = _raster_bucket(tmp_path, raster_path, [(1.0, 1.0, 5.0, 5.0)])
-    plant_csv = tmp_path / "plants.csv"
-    _write_plant_csv(plant_csv, [{
-        "plot_name": "plot0", "accession_name": "acc0", "plot_number": 0, "row_number": 0,
-        "col_number": 0, "WGS84_centroid_y": 42.0, "WGS84_centroid_x": -93.0}])
+    plant_csv = write_plant_csv(tmp_path / "plants.csv", [
+        {"plot": "plot0", "accession": "acc0", "lat": 42.0, "lon": -93.0}])
 
     result = _deliver(tmp_path, bucket, _plant_registry(tmp_path, plant_csv), ["plot0"])
 
@@ -393,8 +372,7 @@ def test_a_registered_plant_csv_that_changed_since_registration_refuses_by_name(
     plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
     registry = _plant_registry(tmp_path, plant_csv)
     if change == "rewritten":
-        plant_csv.write_text("plot_name,accession_name,WGS84_centroid_x,WGS84_centroid_y\n"
-                             "plot0,acc0,-93.0,42.0\n", encoding="utf-8")
+        write_plant_csv(plant_csv, [{"plot": "plot0", "accession": "acc0", "lat": 42.0, "lon": -93.0}])
     else:
         plant_csv.unlink()
 

@@ -12,6 +12,7 @@ import pytest
 torch = pytest.importorskip("torch")
 from torch.utils.data import DataLoader
 
+from tcip_mcp.experiments import TENSORBOARD_DIR
 from tcip_mcp.pipelines.training.collation import task_collate
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tests.tiny_trainer_fixtures import ConstantImageDataset, trainer_run
@@ -51,19 +52,24 @@ def test_classification_training_writes_train_and_val_scalars_every_epoch(tmp_pa
     run = train(run, train_loader, val_loader=val_loader)
     assert run.status == "completed", run.error
 
-    tb_dir = out_dir / "tensorboard"
+    tb_dir = out_dir / TENSORBOARD_DIR
     assert _scalar_steps(tb_dir, "train/loss") == [1, 2, 3]
     assert _scalar_steps(tb_dir, "val/val_loss") == [1, 2, 3]
     assert _scalar_steps(tb_dir, "val/val_accuracy") == [1, 2, 3]
 
 
 def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
-    from tcip_mcp.pipelines.training.generic_trainer import resolve_objective
-    from tcip_mcp.tools.training_tools import _run_hpo_trial, sweep_dir
+    from tcip_mcp.experiments import board_of, run_dirs
+    from tcip_mcp.tools.training_tools import _run_hpo_trial
 
-    from tests._producer_fixtures import seed_leaf_detection_dataset
+    from tcip_annotation.state import Annotation, BBox
 
-    images_dir, _val_images = seed_leaf_detection_dataset(tmp_path / "ds")
+    from tests._producer_fixtures import seed_labeled_images
+    from tests._verified_checkpoint_fixtures import opened_sweep
+
+    images_dir = seed_labeled_images(
+        tmp_path / "ds" / "images" / "train",
+        [Annotation(subject="leaf", geometry=BBox(10, 10, 30, 30))], n=2, width=128, height=128)
     base_config = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 128},
@@ -72,16 +78,14 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 2}],
                      "mixed_precision": False, "device": "cpu",
     }
-    trial_dir = sweep_dir("hpo_study", project=tmp_path) / "trial_x"
-    trial_dir.parent.mkdir(parents=True)
     reported: list[float] = []
-    _run_hpo_trial({}, reported.append, base_config, trial_dir, project=tmp_path,
-                   objective=resolve_objective(base_config, has_val_loader=True, project=tmp_path))
+    _run_hpo_trial({}, reported.append, opened_sweep(tmp_path, base_config), "x")
+    (trial_dir,) = run_dirs(tmp_path)
 
     # One report per epoch's metrics row, which is the trial's whole result.
     assert len(reported) == 2
 
-    tb_dir = trial_dir / "tensorboard"
+    tb_dir = board_of(trial_dir)
     assert _scalar_steps(tb_dir, "train/loss") == [1, 2]
     assert _scalar_steps(tb_dir, "val/val_loss") == [1, 2]
 

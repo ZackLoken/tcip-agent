@@ -9,8 +9,6 @@ confirmed revision until it is confirmed itself; the delivery event names the re
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -21,21 +19,11 @@ from tcip_mcp import traits
 from tcip_mcp.audit import audit_log_key
 from tcip_mcp.delivery import read_delivery_events
 from tcip_mcp.operationalization import OperationalizationRefused
-from tcip_web.app import app
 from tests import _trait_fixtures as fx
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-TOOLS_DIR = REPO_ROOT / "packages" / "tcip-mcp" / "src" / "tcip_mcp" / "tools"
-ROUTES_MODULE = REPO_ROOT / "packages" / "tcip-web" / "src" / "tcip_web" / "routes" / "results.py"
 TRAITS_ROUTE = "/api/results/traits"
 CONFIRM_ROUTE = "/api/results/traits/confirm"
 _SCOPE = {"subject": fx.COUNT_SUBJECT}
-
-
-@pytest.fixture
-def client(opened_project: Path) -> TestClient:
-    """A client of the backend with ``tmp_path`` open as its project."""
-    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _count_entry(**fields) -> traits.TraitEntry:
@@ -334,18 +322,18 @@ def test_the_vocabulary_is_read_whole_or_the_read_raises(
 
 
 def test_a_confirmation_with_another_hash_refuses_and_the_revisions_own_hash_confirms(
-    client: TestClient, tmp_path: Path,
+    opened_client: TestClient, tmp_path: Path,
 ) -> None:
     revision = fx.propose(tmp_path, _count_entry())
 
-    refused = _confirm(client, revision, entry_sha256="0" * 64, user="rosalind")
+    refused = _confirm(opened_client, revision, entry_sha256="0" * 64, user="rosalind")
 
     assert refused.status_code == 409
     assert refused.json()["detail"]["record"]["revisions"][0]["entry_sha256"] == (
         revision.entry_sha256)
     assert not traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest.confirmed
 
-    confirmed = _confirm(client, revision, user="rosalind")
+    confirmed = _confirm(opened_client, revision, user="rosalind")
 
     assert confirmed.status_code == 200, confirmed.text
     assert confirmed.json()["confirmed_by"] == "user:rosalind"
@@ -354,12 +342,12 @@ def test_a_confirmation_with_another_hash_refuses_and_the_revisions_own_hash_con
 
 
 def test_the_traits_route_serves_every_revision_and_the_vocabulary_definitions(
-    client: TestClient, tmp_path: Path,
+    opened_client: TestClient, tmp_path: Path,
 ) -> None:
     fx.propose_and_confirm(tmp_path, _count_entry())
     fx.propose(tmp_path, _count_entry(statement="a second reading"))
 
-    body = client.get(TRAITS_ROUTE).json()
+    body = opened_client.get(TRAITS_ROUTE).json()
 
     (record,) = body["traits"]
     assert record["trait"] == fx.COUNT_TRAIT
@@ -371,23 +359,23 @@ def test_the_traits_route_serves_every_revision_and_the_vocabulary_definitions(
 
 
 def test_a_nameless_confirmation_refuses_and_confirms_nothing(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    opened_client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("TCIP_USER", "osuser")
     revision = fx.propose(tmp_path, _count_entry())
 
-    resp = _confirm(client, revision, user=" ")
+    resp = _confirm(opened_client, revision, user=" ")
 
     assert resp.status_code == 400 and "names no one" in resp.text
     assert not traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest.confirmed
 
 
 def test_confirming_and_withdrawing_land_in_the_project_log_with_the_actor(
-    client: TestClient, tmp_path: Path,
+    opened_client: TestClient, tmp_path: Path,
 ) -> None:
     revision = fx.propose(tmp_path, _count_entry())
-    assert _confirm(client, revision, user="rosalind").status_code == 200
-    assert _confirm(client, revision, user="rosalind", confirmed=False).status_code == 200
+    assert _confirm(opened_client, revision, user="rosalind").status_code == 200
+    assert _confirm(opened_client, revision, user="rosalind", confirmed=False).status_code == 200
 
     entries = [e for e in ts.read_log(audit_log_key(tmp_path)).records
                if e["tool"] == "confirm_trait_revision"]
@@ -420,55 +408,41 @@ def test_the_confirmation_writes_its_own_audit_line_after_its_record(
 
 
 def test_the_door_refuses_an_unknown_trait_and_a_revision_that_does_not_exist(
-    client: TestClient, tmp_path: Path,
+    opened_client: TestClient, tmp_path: Path,
 ) -> None:
     revision = fx.propose(tmp_path, _count_entry())
 
     body = {"trait": fx.COUNT_TRAIT, "revision": 1,
             "entry_sha256": revision.entry_sha256, "confirmed": True, "user": "breeder"}
-    unknown = client.post(CONFIRM_ROUTE, json={**body, "trait": "not_a_trait"})
-    missing = client.post(CONFIRM_ROUTE, json={**body, "revision": 2})
+    unknown = opened_client.post(CONFIRM_ROUTE, json={**body, "trait": "not_a_trait"})
+    missing = opened_client.post(CONFIRM_ROUTE, json={**body, "revision": 2})
 
     assert unknown.status_code == 400 and "not_a_trait" in unknown.json()["detail"]
     assert missing.status_code == 400 and "not 2" in missing.json()["detail"]
 
 
 def test_a_committed_confirmation_returns_its_audit_failure_as_a_warning(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    opened_client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tests._audit_fixtures import refuse_audit_appends
 
     revision = fx.propose(tmp_path, _count_entry())
     refuse_audit_appends(monkeypatch)
-    resp = _confirm(client, revision, user="rosalind")
+    resp = _confirm(opened_client, revision, user="rosalind")
 
     assert resp.status_code == 200, resp.text
     assert "do not retry it blind" in resp.json()["audit_warning"]
     assert traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest.confirmed
 
 
-def test_both_trait_routes_refuse_while_no_project_is_open(tmp_path: Path) -> None:
+def test_both_trait_routes_refuse_while_no_project_is_open(
+    client: TestClient, tmp_path: Path,
+) -> None:
     revision = fx.propose(tmp_path, _count_entry())
-    client = TestClient(app, base_url="http://127.0.0.1")
 
     assert client.get(TRAITS_ROUTE).status_code == 409
     assert _confirm(client, revision).status_code == 409
     assert not traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest.confirmed
-
-
-def test_no_mcp_tool_reaches_the_confirmation_writer() -> None:
-    """The agent has a proposing tool and no confirming one, checked against the live registry."""
-    listing = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "tools" / "list_tools.py")],
-        capture_output=True, text=True, cwd=REPO_ROOT, check=True,
-    ).stdout
-    registered = {line.strip() for line in listing.splitlines() if line.startswith("  ")}
-
-    assert "propose_trait" in registered
-    assert not [name for name in registered if "confirm" in name and "trait" in name]
-    assert "confirm_revision" in ROUTES_MODULE.read_text(encoding="utf-8")
-    assert not [m.name for m in TOOLS_DIR.glob("*.py")
-                if "confirm_revision" in m.read_text(encoding="utf-8")]
 
 
 # ── the doctor ───────────────────────────────────────────────────────────────

@@ -1,14 +1,14 @@
-"""Cooperative sweep cancel: ``cancel_hyperparameter_search``, a sweep's canceled final status,
-``_run_hpo_trial``'s entry check, and the sweep ``Stopper``'s two stop-all conditions. The cancel
-is the sweep directory's one cancellation record (``experiments.request_cancel``), which every
-trial of it polls.
+"""Cooperative sweep cancel: ``cancel_training`` over a sweep's id, a sweep's canceled final
+status, ``_run_hpo_trial``'s entry check, and the sweep ``Stopper``'s two stop-all conditions. The
+cancel is the sweep directory's one cancellation record (``experiments.request_cancel``), which
+every trial of it polls.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
+
+from tests._verified_checkpoint_fixtures import opened_sweep
 
 
 def _stub_search(monkeypatch, *, before=None, raises: Exception | None = None) -> list[dict]:
@@ -18,61 +18,46 @@ def _stub_search(monkeypatch, *, before=None, raises: Exception | None = None) -
 
     def fake_search(**kw):
         calls.append(kw)
-        sweep_root = Path(kw["storage_path"]) / kw["study_name"]
+        sweep_root = kw["sweep_dir"]
         if before is not None:
             before(sweep_root)
         if raises is not None:
             raise raises
-        return str(sweep_root)
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
     return calls
 
 
-def _opened(project: Path, base_config: dict, study_name: str):
-    """A sweep of ``project`` over ``base_config`` whose input its own writer wrote
-    (``open_sweep``), at the arguments ``run_hyperparameter_search`` defaults to, one trial and
-    search seed 0."""
-    from tcip_mcp.tools.training_tools import open_sweep
+def test_a_cancel_naming_no_run_or_sweep_refuses(project) -> None:
+    from tcip_mcp.experiments import experiment_dir
+    from tcip_mcp.tools.training_tools import cancel_training
 
-    opened = open_sweep(
-        project, base_config, None, n_trials=1, search_alg="random", scheduler="asha", grace_period=5,
-        reduction_factor=3, warm_start=False, baseline_params=None, max_concurrent=1,
-        resources_per_trial=None, study_name=study_name, split_draws=1, split_draw_seeds=None,
-        search_seed=0, trial_budget=None, relaunched_from=None, actor=None)
-    assert not isinstance(opened, dict), opened
-    return opened
-
-
-def test_cancel_hyperparameter_search_refuses_a_study_no_directory_holds(project) -> None:
-    from tcip_mcp.tools.training_tools import cancel_hyperparameter_search, sweep_dir
-
-    result = cancel_hyperparameter_search(project, "hpo_totally_unknown", actor=None)
+    result = cancel_training(project, "hpo_totally_unknown", actor=None)
     assert "error" in result
-    assert not sweep_dir("hpo_totally_unknown", project=project).exists()
+    assert not experiment_dir("hpo_totally_unknown", project=project).exists()
 
 
 def test_a_cancel_written_before_the_run_ends_the_sweep_canceled_before_its_first_trial(
     project, real_hpo_base_config, monkeypatch,
 ) -> None:
-    """A cancel the opened sweep's directory holds when its run starts (a relaunch the web route
-    canceled before its worker ran) ends the sweep canceled, its final status carrying the
-    reason, and never starts the search."""
+    """A cancel the opened sweep's directory holds when its run starts (a relaunch canceled
+    before its worker ran) ends the sweep canceled, its final status carrying the reason, and
+    never starts the search."""
     from tcip_mcp import experiments
     from tcip_mcp.tools.training_tools import (
         _CANCEL_BEFORE_START_REASON, monitor_training, run_sweep,
     )
 
     calls = _stub_search(monkeypatch)
-    opened = _opened(project, real_hpo_base_config, "hpo_precancel1")
-    experiments.request_cancel(opened.directory)
+    opened = opened_sweep(project, real_hpo_base_config)
+    experiments.request_cancel(opened)
 
-    result = run_sweep(opened, auto_tensorboard=False)
+    result = run_sweep(opened)
 
-    assert (result["status"], result["error"]) == ("canceled", _CANCEL_BEFORE_START_REASON)
+    assert (result.state, result.error) == ("canceled", _CANCEL_BEFORE_START_REASON)
     assert calls == []
-    sweep = monitor_training(project, sweep_id="hpo_precancel1")
-    assert (sweep["status"], sweep["error"]) == ("canceled", _CANCEL_BEFORE_START_REASON)
+    sweep = monitor_training(project, opened.name)["sweep"]
+    assert (sweep["state"], sweep["error"]) == ("canceled", _CANCEL_BEFORE_START_REASON)
 
 
 @pytest.mark.parametrize("raises", [None, RuntimeError("the Ray cluster was torn down mid-sweep")],
@@ -90,11 +75,12 @@ def test_a_cancel_landing_mid_search_ends_the_sweep_canceled(
     _stub_search(monkeypatch, before=experiments.request_cancel, raises=raises)
 
     result = run_hyperparameter_search(project, base_config=real_hpo_base_config, n_trials=1,
-                                       study_name="hpo_midcancel1", search_seed=0)
+                                       search_seed=0)
 
-    assert (result["status"], result["error"]) == ("canceled", _CANCEL_DURING_RUN_REASON)
-    sweep = monitor_training(project, sweep_id="hpo_midcancel1")
-    assert (sweep["status"], sweep["error"]) == ("canceled", _CANCEL_DURING_RUN_REASON)
+    assert (result["sweep"]["state"], result["sweep"]["error"]) == (
+        "canceled", _CANCEL_DURING_RUN_REASON)
+    sweep = monitor_training(project, result["sweep"]["sweep_id"])["sweep"]
+    assert (sweep["state"], sweep["error"]) == ("canceled", _CANCEL_DURING_RUN_REASON)
 
 
 def test_a_cancel_after_the_sweep_ended_refuses_and_leaves_its_final_status_as_written(
@@ -102,20 +88,20 @@ def test_a_cancel_after_the_sweep_ended_refuses_and_leaves_its_final_status_as_w
 ) -> None:
     """A cancel arriving after the sweep ended refuses by name and writes nothing: its final
     status is the one it ended with."""
-    from tcip_mcp.experiments import cancel_requested
+    from tcip_mcp.experiments import cancel_requested, experiment_dir
     from tcip_mcp.tools.training_tools import (
-        cancel_hyperparameter_search, monitor_training, run_hyperparameter_search, sweep_dir,
+        cancel_training, monitor_training, run_hyperparameter_search,
     )
 
     _stub_search(monkeypatch)
-    run_hyperparameter_search(project, base_config=real_hpo_base_config, n_trials=1,
-                              study_name="hpo_alreadydone1", search_seed=0)
+    sweep_id = run_hyperparameter_search(project, base_config=real_hpo_base_config, n_trials=1,
+                                         search_seed=0)["sweep"]["sweep_id"]
 
-    result = cancel_hyperparameter_search(project, "hpo_alreadydone1", actor=None)
+    result = cancel_training(project, sweep_id, actor=None)
 
     assert "has ended" in result["error"]
-    assert not cancel_requested(sweep_dir("hpo_alreadydone1", project=project))
-    assert monitor_training(project, sweep_id="hpo_alreadydone1")["status"] == "completed"
+    assert not cancel_requested(experiment_dir(sweep_id, project=project))
+    assert monitor_training(project, sweep_id)["sweep"]["state"] == "completed"
 
 
 def test_a_second_cancel_keeps_the_time_of_the_first(project, real_hpo_base_config) -> None:
@@ -123,47 +109,45 @@ def test_a_second_cancel_keeps_the_time_of_the_first(project, real_hpo_base_conf
     time."""
     from tcip_mcp.experiments import request_cancel
 
-    opened = _opened(project, real_hpo_base_config, "hpo_twicecancel1")
-    first = request_cancel(opened.directory)
-    second = request_cancel(opened.directory)
+    opened = opened_sweep(project, real_hpo_base_config)
+    first = request_cancel(opened)
+    second = request_cancel(opened)
 
     assert second == first
 
 
-def test_cancel_hyperparameter_search_reaches_only_a_sweep_of_the_project_it_is_handed(
+def test_a_sweep_cancel_reaches_only_a_sweep_of_the_project_it_is_handed(
     project, real_hpo_base_config, tmp_path_factory,
 ) -> None:
     """The cancel resolves the sweep under the project it is handed; another project holds no
     such sweep and refuses."""
-    from tcip_mcp.experiments import cancel_requested
-    from tcip_mcp.tools.training_tools import cancel_hyperparameter_search, sweep_dir
+    from tcip_mcp.experiments import cancel_requested, experiment_dir
+    from tcip_mcp.tools.training_tools import cancel_training
 
-    _opened(project, real_hpo_base_config, "hpo_other01")
+    sweep_id = opened_sweep(project, real_hpo_base_config).name
     elsewhere = tmp_path_factory.mktemp("elsewhere")
 
-    result = cancel_hyperparameter_search(project, "hpo_other01", actor=None)
+    result = cancel_training(project, sweep_id, actor=None)
 
     assert result["cancel_requested"] is True
-    assert cancel_requested(sweep_dir("hpo_other01", project=project))
-    assert "error" in cancel_hyperparameter_search(elsewhere, "hpo_other01", actor=None)
+    assert cancel_requested(experiment_dir(sweep_id, project=project))
+    assert "error" in cancel_training(elsewhere, sweep_id, actor=None)
 
 
 def test_run_hpo_trial_reports_nothing_and_opens_no_run_when_the_sweep_is_canceled(
     project, real_hpo_base_config,
 ) -> None:
-    from tcip_mcp.experiments import request_cancel
+    from tcip_mcp.experiments import request_cancel, run_dirs
     from tcip_mcp.tools.training_tools import _run_hpo_trial
 
-    opened = _opened(project, real_hpo_base_config, "hpo_trialcancel1")
-    request_cancel(opened.directory)
-    trial_dir = opened.directory / "trial_aaa00000"
+    opened = opened_sweep(project, real_hpo_base_config)
+    request_cancel(opened)
 
     reported: list[float] = []
-    _run_hpo_trial({}, reported.append, real_hpo_base_config, trial_dir, project=project,
-                   objective={"selection_metric": "loss", "higher_is_better": False})
+    _run_hpo_trial({}, reported.append, opened, "aaa00000")
 
     assert reported == []
-    assert not trial_dir.exists()
+    assert run_dirs(project) == []
 
 
 class _FakeTrial:
@@ -229,15 +213,16 @@ def test_run_hyperparameter_search_refuses_a_relaunched_from_naming_no_sweep_und
     """relaunched_from must name a sweep this root holds: a name that resolves to nothing is
     refused before any directory is made, rather than recorded as lineage nothing answers for;
     a launch naming none is untouched by the check."""
-    from tcip_mcp.tools.training_tools import run_hyperparameter_search, sweep_dir
+    from tcip_mcp.experiments import sweep_dirs
+    from tcip_mcp.tools.training_tools import run_hyperparameter_search
 
     _stub_search(monkeypatch)
     result = run_hyperparameter_search(
-        project, base_config=real_hpo_base_config, n_trials=1, study_name="hpo_refused_relaunch1",
+        project, base_config=real_hpo_base_config, n_trials=1,
         relaunched_from="hpo_does_not_exist", search_seed=0)
     assert "hpo_does_not_exist" in result["error"]
-    assert not sweep_dir("hpo_refused_relaunch1", project=project).exists()
+    assert sweep_dirs(project) == []
 
     admitted = run_hyperparameter_search(project, base_config=real_hpo_base_config, n_trials=1,
-                                         study_name="hpo_norelaunch1", search_seed=0)
+                                         search_seed=0)
     assert "error" not in admitted, admitted

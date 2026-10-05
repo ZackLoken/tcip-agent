@@ -39,6 +39,9 @@ criterion: the IoU-convention average precision and counts."""
 VAL_METRIC_PREFIX = "val_"
 """The prefix every validation metric key carries in a run's metrics log and registry entry."""
 
+VAL_LOSS_KEY = VAL_METRIC_PREFIX + "loss"
+"""The validation loss's key in a run's metrics log."""
+
 HIGHER_IS_BETTER_BY_METRIC: dict[str, bool] = {
     "loss": False,
     "objective": False,
@@ -92,11 +95,9 @@ def compute_composite_objective(
     """Lower-is-better selection/tuning score blending loss, F1 and mAP50, or ``None`` when
     the epoch has no useful score.
 
-    ``w["loss"]*loss + w["f1"]*(1-f1)*10 + w["map50"]*(1-map50)*10``; the ``*10`` lifts the
-    unit-interval quality terms to a typical loss magnitude. A degenerate epoch (a non-positive
-    or non-finite loss, or both quality terms at zero) has no score at all, so it answers
-    ``None`` rather than a number: a record carries ``None`` as "not measured", the selection
-    comparison treats it as never improving, and no chart plots it as if it were a value.
+    ``w["loss"]*loss + w["f1"]*(1-f1)*10 + w["map50"]*(1-map50)*10``, ``w`` the default weights
+    when ``score_weights`` is empty or ``None``. A non-positive or non-finite loss, or both quality terms
+    below 0.01, answers ``None``.
     """
     w = score_weights or DEFAULT_SCORE_WEIGHTS
     vl = float(val_loss) if (val_loss is not None and math.isfinite(val_loss)) else float("inf")
@@ -416,17 +417,8 @@ def worst_class_count_bias(entry: dict) -> float:
 
 def pick_count_unbiased(sweep: dict) -> float:
     """The conf that minimizes the worst per-class |mean per-image count bias| (tie-break: lower
-    pooled |bias|, higher F1, lower |error|, higher conf).
-
-    This is the count-trait operating point, where the model's totals match GT totals, which is
-    generally not the F1-max point (that optimizes matching, not count agreement). It targets the
-    worst class, as the gate does: with three or more classes, a conf can buy pooled balance by
-    trading one class's over-count against another's under-count. On a single-class reference the
-    two objectives are the same number.
-
-    The final ``-c["conf"]`` tie-break prefers the highest of exactly tied confs (a reference
-    filtered to a floor ties everything below it), the most conservative candidate among equals.
-    """
+    pooled |bias|, higher F1, lower |error|, higher conf): the count-trait operating point, where
+    the model's totals match GT totals."""
     best = min(sweep["curve"], key=lambda c: (worst_class_count_bias(c), abs(c["count_bias_mean"]), -c["f1"],
                                      c["abs_count_error_mean"], -c["conf"]))
     return best["conf"]

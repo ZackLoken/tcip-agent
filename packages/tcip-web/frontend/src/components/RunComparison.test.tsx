@@ -3,15 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 
 import { StructuredRefusalError } from "@/api/http";
 import type { CompareResult } from "@/api/training";
-import { openTrainingStream, trainingApi } from "@/api/training";
+import { trainingApi } from "@/api/training";
 import { RunComparison, type MarkedRun } from "@/components/RunComparison";
-
-// The overlay chart owns its own per-run WebSocket streams; only the comparison's own rendering
-// is under test here, so the transport is replaced while the rest of the module stays real.
-vi.mock("@/api/training", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/api/training")>();
-  return { ...actual, openTrainingStream: vi.fn(() => () => {}) };
-});
 
 beforeEach(() => {
   // Every render fetches the declared-direction table once on mount; a test that cares about
@@ -60,7 +53,7 @@ describe("RunComparison data lines", () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(
       baseResult({ same_dataset_fingerprint: true }),
     );
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     expect(await screen.findByText("same source images")).toBeInTheDocument();
   });
 
@@ -68,7 +61,7 @@ describe("RunComparison data lines", () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(
       baseResult({ same_dataset_fingerprint: false }),
     );
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     expect(await screen.findByText("not the same source images")).toBeInTheDocument();
   });
 
@@ -82,7 +75,7 @@ describe("RunComparison data lines", () => {
         same_dataset_fingerprint: null,
       }),
     );
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     expect(await screen.findByText(/not comparable/)).toBeInTheDocument();
     expect(screen.getByText(/exp-b carry no fingerprint/)).toBeInTheDocument();
   });
@@ -96,7 +89,7 @@ describe("RunComparison data lines", () => {
         ],
       }),
     );
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     expect(await screen.findByText(/bound to splits\/d1/)).toBeInTheDocument();
     expect(screen.getByText(/drawn again \(seed 42\)/)).toBeInTheDocument();
   });
@@ -105,11 +98,11 @@ describe("RunComparison data lines", () => {
 describe("RunComparison on a change of the marked set", () => {
   it("reads as reading, never a stale absence claim, for a newly marked column", async () => {
     const compare = vi.spyOn(trainingApi, "compare").mockResolvedValue(baseResult({}));
-    const { rerender } = render(<RunComparison marked={[MARKED[0]]} projectRoot={null} />);
+    const { rerender } = render(<RunComparison marked={[MARKED[0]]} />);
     await waitFor(() => expect(screen.getAllByText("exp-a").length).toBeGreaterThan(0));
 
     compare.mockImplementation(() => new Promise(() => {})); // never resolves for the new set
-    rerender(<RunComparison marked={MARKED} projectRoot={null} />);
+    rerender(<RunComparison marked={MARKED} />);
 
     expect(await screen.findByText("Loading comparison...")).toBeInTheDocument();
   });
@@ -139,7 +132,7 @@ describe("RunComparison rank control", () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(registeredResult());
     const compareBest = vi.spyOn(trainingApi, "compareBest");
 
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     expect(screen.queryByText("higher is better")).not.toBeInTheDocument();
 
     fireEvent.change(await screen.findByRole("combobox"), {
@@ -164,7 +157,7 @@ describe("RunComparison rank control", () => {
       ),
     );
 
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     fireEvent.change(await screen.findByRole("combobox"), {
       target: { value: "val_map99" },
     });
@@ -195,7 +188,7 @@ describe("RunComparison rank control", () => {
       ),
     );
 
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     const select = await screen.findByRole("combobox");
     fireEvent.change(select, { target: { value: "val_map99" } });
     expect(
@@ -218,12 +211,13 @@ describe("RunComparison rank control", () => {
       experiment_id: "exp-a",
       metrics: { val_map99: 0.7 },
       metrics_source: "trainer",
+      ranking_basis: "val_map99",
       higher_is_better: true,
       direction_source: "stated",
       excluded_unverified: [],
     });
 
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     const select = await screen.findByRole("combobox");
     fireEvent.change(select, { target: { value: "val_map99" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank" }));
@@ -244,7 +238,7 @@ describe("RunComparison rank exclusions", () => {
         ],
       }),
     );
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     expect(
       await screen.findByText("none of the marked experiments registered a checkpoint"),
     ).toBeInTheDocument();
@@ -262,12 +256,13 @@ describe("RunComparison rank exclusions", () => {
       experiment_id: "exp-a",
       metrics: { val_map99: 0.7 },
       metrics_source: "trainer",
+      ranking_basis: "val_map99",
       higher_is_better: true,
       direction_source: "declared",
       excluded_unverified: [],
     });
 
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     fireEvent.change(await screen.findByRole("combobox", { name: "Rank by metric" }), {
       target: { value: "val_map99" },
     });
@@ -290,12 +285,13 @@ describe("RunComparison rank answer", () => {
       experiment_id: "exp-a",
       metrics: { val_map99: 0.71234 },
       metrics_source: "trainer",
+      ranking_basis: "val_map99",
       higher_is_better: true,
       direction_source: "declared",
       excluded_unverified: [],
     });
 
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     fireEvent.change(await screen.findByRole("combobox", { name: "Rank by metric" }), {
       target: { value: "val_map99" },
     });
@@ -311,7 +307,7 @@ describe("RunComparison rank answer", () => {
       new StructuredRefusalError({ error: "boom" }, 422, ""),
     );
 
-    const { rerender } = render(<RunComparison marked={MARKED} projectRoot={null} />);
+    const { rerender } = render(<RunComparison marked={MARKED} />);
     fireEvent.change(await screen.findByRole("combobox", { name: "Rank by metric" }), {
       target: { value: "val_map99" },
     });
@@ -340,12 +336,7 @@ describe("RunComparison rank answer", () => {
         ],
       }),
     );
-    rerender(
-      <RunComparison
-        marked={[{ experimentId: "exp-c" }, { experimentId: "exp-d" }]}
-        projectRoot={null}
-      />,
-    );
+    rerender(<RunComparison marked={[{ experimentId: "exp-c" }, { experimentId: "exp-d" }]} />);
 
     await waitFor(() => {
       expect(screen.queryByText("higher is better")).not.toBeInTheDocument();
@@ -360,7 +351,7 @@ describe("RunComparison per-column absence and loading", () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(
       baseResult({ experiments: [{ experiment_id: "exp-a" }] }),
     );
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     expect((await screen.findAllByText("not in the comparison answer")).length).toBeGreaterThan(0);
     expect(screen.queryByText("reading")).not.toBeInTheDocument();
   });
@@ -369,7 +360,7 @@ describe("RunComparison per-column absence and loading", () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(
       baseResult({ same_dataset_fingerprint: true }),
     );
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     const label = await screen.findByText("Images");
     const row = label.closest("tr") as HTMLElement;
     expect(within(row).getByText("same source images")).toBeInTheDocument();
@@ -388,31 +379,11 @@ describe("RunComparison per-column absence and loading", () => {
         ],
       }),
     );
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     expect(await screen.findByText("0.712")).toBeInTheDocument();
     expect(screen.queryByText("0.7123")).not.toBeInTheDocument();
     expect((await screen.findAllByText("unrecorded")).length).toBeGreaterThan(0);
     expect(screen.queryByText("no metrics")).not.toBeInTheDocument();
-  });
-});
-
-describe("RunComparison overlay", () => {
-  it("tells the breeder to open the project instead of waiting silently with no project root", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(baseResult({}));
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
-    expect(await screen.findByText("open the project to stream metrics")).toBeInTheDocument();
-    expect(screen.queryByText("Waiting for metrics...")).not.toBeInTheDocument();
-  });
-
-  it("names both metric choosers accessibly", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
-    vi.mocked(openTrainingStream).mockImplementation((_experimentId, onMessage) => {
-      onMessage({ type: "metric", row: { epoch: 1, loss: 0.3 } } as never);
-      return () => {};
-    });
-    render(<RunComparison marked={MARKED} projectRoot="/proj" />);
-    expect(await screen.findByRole("combobox", { name: "Overlay metric" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Rank by metric" })).toBeInTheDocument();
   });
 });
 
@@ -441,7 +412,7 @@ describe("RunComparison rank metric chooser", () => {
       higher_is_better: { map50: true },
     });
 
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     const rankSelect = await screen.findByRole("combobox", { name: "Rank by metric" });
     await waitFor(() =>
       expect(
@@ -461,7 +432,7 @@ describe("RunComparison rank metric chooser", () => {
     });
     const compareBest = vi.spyOn(trainingApi, "compareBest");
 
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     const rankSelect = await screen.findByRole("combobox", { name: "Rank by metric" });
     await waitFor(() => expect(within(rankSelect).getAllByRole("option")).toHaveLength(2));
 
@@ -473,7 +444,7 @@ describe("RunComparison ranking direction control", () => {
   it("gives the direction choice the row group's own role, aria-pressed and focus-visible styling", async () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
 
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     fireEvent.change(await screen.findByRole("combobox", { name: "Rank by metric" }), {
       target: { value: "val_map99" },
     });
@@ -497,7 +468,7 @@ describe("RunComparison ranking direction control", () => {
       new StructuredRefusalError({ error: "boom" }, 422, ""),
     );
 
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     fireEvent.change(await screen.findByRole("combobox", { name: "Rank by metric" }), {
       target: { value: "val_map99" },
     });
@@ -508,25 +479,6 @@ describe("RunComparison ranking direction control", () => {
     const status = await screen.findByRole("status");
     expect(status).toHaveTextContent("boom");
     expect(document.activeElement).toBe(rankButton);
-  });
-});
-
-describe("RunComparison overlay x axis", () => {
-  it("labels the overlay's x axis the same as the single-run chart", async () => {
-    const rect = { width: 600, height: 300, top: 0, left: 0, bottom: 300, right: 600 } as DOMRect;
-    const original = HTMLElement.prototype.getBoundingClientRect;
-    HTMLElement.prototype.getBoundingClientRect = () => rect;
-    try {
-      vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
-      vi.mocked(openTrainingStream).mockImplementation((_experimentId, onMessage) => {
-        onMessage({ type: "metric", row: { epoch: 1, loss: 0.3 } } as never);
-        return () => {};
-      });
-      render(<RunComparison marked={MARKED} projectRoot="/proj" />);
-      expect(await screen.findByText("epoch/step")).toBeInTheDocument();
-    } finally {
-      HTMLElement.prototype.getBoundingClientRect = original;
-    }
   });
 });
 
@@ -550,7 +502,7 @@ describe("RunComparison rank chooser's numeric-only filter", () => {
         ],
       }),
     );
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     const rankSelect = await screen.findByRole("combobox", { name: "Rank by metric" });
     const optionTexts = within(rankSelect)
       .getAllByRole("option")
@@ -598,12 +550,13 @@ describe("RunComparison rank answer, a stamped-value exclusion", () => {
       experiment_id: "exp-b",
       metrics: { val_map99: 0.6 },
       metrics_source: "trainer",
+      ranking_basis: "val_map99",
       higher_is_better: true,
       direction_source: "declared",
       excluded_unverified: [],
     });
 
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     fireEvent.change(await screen.findByRole("combobox", { name: "Rank by metric" }), {
       target: { value: "val_map99" },
     });
@@ -635,7 +588,7 @@ describe("RunComparison disabled Rank's reason", () => {
 
   it("links the metric-not-chosen reason to the Rank control with aria-describedby", async () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(registeredResult());
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     await screen.findByRole("combobox", { name: "Rank by metric" });
 
     const rankButton = screen.getByRole("button", { name: "Rank" });
@@ -658,7 +611,7 @@ describe("RunComparison unrecorded-field wording", () => {
         ],
       }),
     );
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    render(<RunComparison marked={MARKED} />);
     const label = await screen.findByText("Builder");
     const row = label.closest("tr") as HTMLElement;
     expect(within(row).queryByText("no builder recorded")).not.toBeInTheDocument();

@@ -1,11 +1,9 @@
 """Multi-task datasets with standardized interfaces.
 
-Every loader here is built from the samples the producer named (``label_queries.admit``): each
-sample reads its own source and the ground truth that answers for it. Each dataset type returns
-(image_tensor, target_dict) where the target format is task-specific but always dict-based. A
-factory function `build_dataset` dispatches to the correct class by task type, or, for a task the
-known loaders don't cover, to a bespoke ``dataset_source`` builder the agent supplies (mirrors
-``model_source``; see `build_from_dataset_source`).
+Every loader here is built from admitted samples, each reading its own source and the ground
+truth that answers for it, and returns (image_tensor, target_dict) where the target format is
+task-specific but always dict-based. `build_dataset` dispatches to the class for a task, or to a
+bespoke ``dataset_source`` builder for a task no loader here covers.
 """
 
 from __future__ import annotations
@@ -67,12 +65,9 @@ class BaseDataset(Dataset, ABC):
 class BaseImageDataset(BaseDataset):
     """Base for image datasets, centralizes channel-aware loading + finalization.
 
-    Subclasses set ``self.transforms`` (and inherit ``expected_channels`` from build_dataset), then
-    build only the task-specific target.
-
-    Every loader here is built from a recorded sample list and indexes each sample by its location
-    (:meth:`sample_of`), so one dataset spans capture dates and keeps two dates' same-named images
-    apart.
+    Subclasses set ``self.transforms``, then build only the task-specific target. Each sample is
+    indexed by its location (:meth:`sample_of`), so one dataset spans capture dates and keeps two
+    dates' same-named images apart.
 
     ``ground_truth_shape`` is the one shape this loader reads
     (:data:`~tcip_mcp.pipelines.data.selection.GROUND_TRUTH_SHAPES`), declared by each subclass and
@@ -482,42 +477,32 @@ class TiledDetectionDataset(BaseImageDataset):
         from tcip_mcp.pipelines.raster_source import rect_contains_rect
         from tcip_mcp.pipelines.slicing import is_full_slice, slice_lattice
 
-        # This wrapper does its own channel-aware reads and its own tile index over the base's
-        # samples, so it takes the band count and the samples off the base it was handed.
         self._samples = base._samples
         self.expected_channels = base.expected_channels
         self.tile_size = tile_size
         self.overlap = overlap
         self.transforms = transforms
         self._index: list[dict] = []
-        # Per-stem frame facts this index was built against (plain values only; a RasterSource
-        # attribute would break pickling into spawned workers), asserted again at decode time.
+        # Plain values only, so the dataset pickles into spawned workers; asserted at decode time.
         self._source_frames: dict[str, dict[str, Any]] = {}
         regions = _validated_keep_regions(keep_regions)
         self.tiles_dropped_past_extent = 0
         self.tiles_dropped_outside_regions = 0
 
-        # Pass 1: read every image's upright dims + full-image-px boxes, and accumulate GT box sizes
-        # so the seam-sliver cutoff is derived from this dataset's class-average object size, not a
-        # fixed fraction (derive-don't-pin). skip_empty defaults False: empty tiles are valid
-        # negatives.
+        # Pass 1: every image's dims and boxes, and the GT box sizes the sliver cutoff derives from.
         stems_data: list[tuple[str, np.ndarray, dict[str, np.ndarray], int, int]] = []
         object_sizes: list[float] = []
         for stem in base.stems:
-            # Through the base's own resolver, the one the read path uses, so the frame this index
-            # is built against and the pixels __getitem__ later crops come from one source.
             img_source = base.image_of(stem)
             windowed = raster_source.opens_windowed(img_source, self.expected_channels)
             if windowed:
-                # Header-only open, so an unreadable layout refuses now rather than at step N of
-                # an epoch, and the dims are the served source's own.
+                # Opened now, so an unreadable layout refuses here rather than mid-epoch.
                 src = raster_source.pooled_source(img_source, self.expected_channels)
                 w, h = int(src.width), int(src.height)
                 channels = int(src.num_channels)
                 itemsize: int | None = int(np.dtype(src.dtype).itemsize)
             else:
-                # A whole-decode backend keeps the header probe (measured the way __getitem__
-                # decodes it): opening it here would hold every source's pixels resident.
+                # A header probe: opening a whole-decode source would hold its pixels resident.
                 w, h = image_dimensions(img_source, self.expected_channels)
                 channels = int(self.expected_channels)
                 itemsize = None
@@ -525,11 +510,7 @@ class TiledDetectionDataset(BaseImageDataset):
                 "width": int(w), "height": int(h), "channels": channels,
                 "dtype_itemsize": itemsize, "windowed": windowed,
             }
-            # The frame the boxes were actually drawn in, recorded in the label document. The
-            # annotation stack measures with PIL, which reports a 40x24x5 GeoTIFF as 5x40, so on a
-            # multi-band raster the authored frame and the decoded frame genuinely disagree, and
-            # every box would be cropped from somewhere it was never drawn. Comparing the two
-            # decoders instead would prove nothing: they share a branch and agree by construction.
+            # The frame the boxes were drawn in, which a multi-band raster can decode differently.
             from tcip_mcp.pipelines.data.splits import label_document_extent
 
             document = base.document(stem)
@@ -543,10 +524,8 @@ class TiledDetectionDataset(BaseImageDataset):
                     f"against the multi-band frame, or ingest this raster as {authored[0]}x"
                     f"{authored[1]}."
                 )
-            # Through the base dataset's own targeting, over this sample's own document.
             full = base.det_targets(document)
             fb = np.asarray(full["boxes"], dtype=np.float32).reshape(-1, 4)
-            # Every per-box value beside the boxes, each indexed by row with them below.
             rows_of: dict[str, np.ndarray] = {k: np.asarray(full[k], dtype=np.int64)
                                               for k in PER_BOX_KEYS if k != "boxes" and k in full}
             # A crowd region is not one object, so its extent says nothing about object size.
@@ -564,7 +543,6 @@ class TiledDetectionDataset(BaseImageDataset):
                 "tiling.sliver_frac for this run.")
         min_box_size = sliver_frac * class_avg_size
 
-        # Pass 2: slice using the derived sliver cutoff, boxes clipped in bulk per stem.
         for stem, fb, rows_of, w, h in stems_data:
             slices = slice_lattice(h, w, tile_size, overlap)
             if regions is not None:
@@ -577,7 +555,6 @@ class TiledDetectionDataset(BaseImageDataset):
                     else:
                         self.tiles_dropped_outside_regions += 1
                 slices = kept
-            # Clipped by row index, so each kept box's per-box values are read by that row.
             per_slice = clipped_boxes_per_slice(fb, np.arange(len(fb)), slices, min_box_size)
             for s, (tb, rows) in zip(slices, per_slice):
                 if len(tb) > 1:
@@ -649,13 +626,9 @@ class TiledDetectionDataset(BaseImageDataset):
         if info["windowed"]:
             region, interpretations = self._read_windowed_tile(stem, info, e["slice"])
         else:
-            # Channel-aware and EXIF-oriented (via load_image) so cropped pixels align with the
-            # slice geometry and the labels clipped in __init__.
             img = self._open_image(stem)
             w, h = frame_size(img)
             if (w, h) != (info["width"], info["height"]):
-                # If the file now decodes differently than the frame the index was built against,
-                # the tile would be cut where the boxes were never clipped. Refuse, don't reconcile.
                 raise ValueError(
                     f"tiled dataset frame changed for stem {stem!r}: indexed at "
                     f"{info['width']}x{info['height']} but now decodes as {w}x{h} at "
@@ -727,7 +700,6 @@ class SemanticSegDataset(BaseImageDataset):
         stem = self.stems[idx]
         img = self._open_image(stem)
         mask = self.read_mask(self._samples[stem])
-        # Key matches the SemanticSegHead loss contract.
         target = {"masks": torch.tensor(mask, dtype=torch.int64)}
         return self._finalize(img, target)
 
@@ -830,8 +802,7 @@ def build_from_dataset_source(
 
         {"builder": "my_module:build_ds",  # required, 'module:function' (or 'module.function')
          "builder_kwargs": {...},          # optional, the builder's own configuration
-         "source_files": [...]}            # optional, provenance (snapshot_model_source copies
-                                           # these)
+         "source_files": [...]}            # optional, provenance
     """
     if not isinstance(dataset_source, dict):
         raise ValueError("dataset_source must be a dict")
@@ -921,8 +892,7 @@ def resolve_sizes(
     resolved = stated_sizes(stated)
     cls = builtin_loader(task, dataset_source)
     if cls is not None:
-        # Asked before any ground truth is read: reading a size off a sample this loader cannot
-        # read is what the refusal exists to stop.
+        # Before any ground truth is read, so no size is read off a sample this loader cannot read.
         cls.refuse_other_shapes(samples)
     if "num_channels" not in resolved:
         resolved["num_channels"] = _band_count(samples)
@@ -1007,16 +977,13 @@ def build_dataset(
 
     cls = resolve_named(task, _DATASET_MAP, kind="task")
     declared = {"scope": scope} if cls.ground_truth_shape == DOCUMENT else {}
-    # Each loader declares its own constructor keywords, so the call is made through the class
-    # object rather than a signature this factory restates.
     construct: Any = cls
 
     tiler = run_tiling(task, tiling)
     if tiler is not None:
         base = construct(samples=samples, **declared)
         assert isinstance(base, DetectionDataset), "_DATASET_MAP's detection entry is this class"
-        # The tiler's __init__ indexes every image at this band count, reading it off the base it
-        # wraps, so the base is stamped before the wrapper is built.
+        # Stamped before the tiler indexes every image at the base's band count.
         base.expected_channels = sizes["num_channels"]
         ds: BaseDataset = TiledDetectionDataset(base, transforms=transforms, **tiler)
     else:

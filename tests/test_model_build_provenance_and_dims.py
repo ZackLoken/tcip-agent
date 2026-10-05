@@ -18,6 +18,8 @@ torch = pytest.importorskip("torch")
 from tcip_mcp import subject_registry  # noqa: E402
 from tcip_mcp.pipelines.data.label_queries import registry_scope  # noqa: E402
 from tcip_mcp.pipelines.model_build import (  # noqa: E402
+    CONFIG_KEY,
+    STATE_DICT_KEY,
     build_model,
     recorded_model_dims,
     resolve_contract_dims,
@@ -302,11 +304,11 @@ def test_a_saved_checkpoint_rebuilds_the_architecture_its_config_builds(tmp_path
     ctx = TrainContext(run=trainer_run(dict(config), tmp_path / "out", project=tmp_path, has_val_loader=True,
                                        id="auto-run-40"),
                        train_loader=None)
-    path = ctx.save_checkpoint({"model_state_dict": trained.state_dict()}, "model_best")
+    path = ctx.save_checkpoint({STATE_DICT_KEY: trained.state_dict()}, "model_best")
 
     loaded = torch.load(path, map_location="cpu", weights_only=False)
     assert "model_source" not in loaded  # the config is the one place the model source lives
-    rebuilt = build_model(loaded["config"], recorded_model_dims(loaded["config"]))
+    rebuilt = build_model(loaded[CONFIG_KEY], recorded_model_dims(loaded[CONFIG_KEY]))
     assert _param_shapes(rebuilt) == _param_shapes(trained)
 
 

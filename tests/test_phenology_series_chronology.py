@@ -12,7 +12,6 @@ agreement between the writer that produces a prediction bucket and the readers h
 
 from __future__ import annotations
 
-import csv
 from pathlib import Path
 
 import pytest
@@ -21,6 +20,7 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import subject_registry as cr
 from tcip_mcp.pipelines.postprocessing import phenology
+from tests import csv_rows
 from tests._trait_fixtures import BUD_OPENING
 
 # An attribute whose positive value sits at id 2 with no record ever carrying id 1.
@@ -222,8 +222,7 @@ def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path:
         output_csv_path=str(out_csv))
 
     assert "error" not in res, res
-    with out_csv.open(encoding="utf-8", newline="") as f:
-        rows = list(csv.DictReader(f))
+    rows = csv_rows(out_csv)
     assert len(rows) == 1
     assert rows[0]["plant_id"] == "PLANT_A"
     assert rows[0]["bud_50per_date"] == "2026-02-11"

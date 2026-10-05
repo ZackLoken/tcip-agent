@@ -12,13 +12,9 @@ the constant pushed past its margin.
 
 from __future__ import annotations
 
-import importlib.util
 import logging
 import subprocess
 import sys
-from pathlib import Path
-
-import pytest
 
 
 def test_launch_reports_the_failure_when_the_process_exits_immediately(monkeypatch, tmp_path):
@@ -37,12 +33,12 @@ def test_launch_reports_the_failure_when_the_process_exits_immediately(monkeypat
 
     monkeypatch.setattr(tb.subprocess, "Popen", dying_popen)
 
-    info = tb.launch_tensorboard(str(tmp_path), key="dead-run")
+    info = tb.launch_tensorboard(str(tmp_path))
 
     assert "url" not in info
     assert "exited during startup" in info["error"]
     assert "tensorboard is not installed" in info["output"]
-    assert tb.running_url(key="dead-run") is None
+    assert tb.running_url(str(tmp_path)) is None
 
 
 def _never_confirms_kill_popen_class(spawned: list):
@@ -92,7 +88,7 @@ def test_launch_folds_an_unconfirmed_kill_into_the_error_after_a_raising_tie_ass
     )
 
     try:
-        info = tb.launch_tensorboard(str(tmp_path), key="raising-tie-run")
+        info = tb.launch_tensorboard(str(tmp_path))
         assert "error" in info
         assert "tie assignment failed" in info["error"]
         assert "kill unconfirmed" in info["error"]
@@ -116,9 +112,9 @@ def test_stop_logs_a_kill_that_never_confirms(monkeypatch, tmp_path, caplog):
     monkeypatch.setattr(tb, "_assign_to_win_job", lambda proc: None, raising=False)
 
     try:
-        info = tb.launch_tensorboard(str(tmp_path), key="unconfirmed-run")
+        info = tb.launch_tensorboard(str(tmp_path / "unconfirmed-run"))
         with caplog.at_level(logging.WARNING, logger=tb.logger.name):
-            result = tb.stop_tensorboard(key="unconfirmed-run")
+            result = tb.stop_tensorboard(str(tmp_path / "unconfirmed-run"))
         assert result["status"] == "kill_unconfirmed"
         assert any(
             "unconfirmed-run" in r.getMessage() and str(info["pid"]) in r.getMessage()
@@ -141,7 +137,7 @@ def test_exit_sweep_logs_a_kill_that_never_confirms(monkeypatch, tmp_path, caplo
     monkeypatch.setattr(tb, "_assign_to_win_job", lambda proc: None, raising=False)
 
     try:
-        info = tb.launch_tensorboard(str(tmp_path), key="sweep-unconfirmed-run")
+        info = tb.launch_tensorboard(str(tmp_path / "sweep-unconfirmed-run"))
         with caplog.at_level(logging.WARNING, logger=tb.logger.name):
             tb._stop_all_tracked()
         assert any(
@@ -169,13 +165,13 @@ def test_launch_returns_a_url_for_a_process_that_stays_up(monkeypatch, tmp_path)
 
     from tcip_mcp.web_client import LOOPBACK_HOST
 
-    info = tb.launch_tensorboard(str(tmp_path), key="live-run")
+    info = tb.launch_tensorboard(str(tmp_path))
     try:
         assert info["url"] == f"http://{LOOPBACK_HOST}:{info['port']}"
-        assert tb.running_url(key="live-run") == info["url"]
+        assert tb.running_url(str(tmp_path)) == info["url"]
     finally:
-        tb.stop_tensorboard(key="live-run")
-    assert tb.running_url(key="live-run") is None
+        tb.stop_tensorboard(str(tmp_path))
+    assert tb.running_url(str(tmp_path)) is None
 
 
 def test_launch_reports_the_platform_lifetime_tie(monkeypatch, tmp_path):
@@ -188,62 +184,15 @@ def test_launch_reports_the_platform_lifetime_tie(monkeypatch, tmp_path):
         lambda logdir, port: [sys.executable, "-c", "import time; time.sleep(30)"],
     )
 
-    info = tb.launch_tensorboard(str(tmp_path), key="tie-run")
+    info = tb.launch_tensorboard(str(tmp_path))
     try:
         assert info["lifetime_tie"] == ("job" if sys.platform == "win32" else "guardian")
     finally:
-        tb.stop_tensorboard(key="tie-run")
+        tb.stop_tensorboard(str(tmp_path))
 
 
-def test_a_record_id_spelled_like_a_sweeps_key_runs_its_own_board_beside_it(monkeypatch, tmp_path):
-    """A run passes launch_tensorboard no key at all, so it is keyed by its own resolved log
-    directory, always path-shaped; a sweep's or a trial's key is a bare identifier with no path
-    separator (routes/tuning.py's f"sweep_{sweep_id}"). The two keyspaces cannot intersect by
-    construction, so a record id spelled exactly like a sweep's own key still runs its own board
-    beside it: coverage of that construction, not a race."""
+def test_the_guardians_grace_leaves_a_second_under_the_stop_wait():
+    """The guardian's kill lands before ``stop_tensorboard`` gives up waiting on it."""
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
-    real_popen = subprocess.Popen
-
-    def living_popen(cmd, **kwargs):
-        return real_popen([sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
-
-    monkeypatch.setattr(tb.subprocess, "Popen", living_popen)
-
-    sweep_key = "sweep_abc123"
-    sweep_info = tb.launch_tensorboard(str(tmp_path / "sweep"), key=sweep_key)
-    run_logdir = tmp_path / sweep_key / "tensorboard"
-    run_info = tb.launch_tensorboard(str(run_logdir))
-    try:
-        assert "url" in sweep_info and "url" in run_info
-        assert run_info["logdir"] != sweep_key
-        assert tb.running_url(key=sweep_key) == sweep_info["url"]
-        assert tb.running_url(logdir=str(run_logdir)) == run_info["url"]
-        assert sweep_info["pid"] != run_info["pid"]
-    finally:
-        tb.stop_tensorboard(key=sweep_key)
-        tb.stop_tensorboard(key=str(run_logdir.resolve()))
-
-
-def test_manager_refuses_to_import_when_the_grace_leaves_no_margin(tmp_path):
-    """The module-level check holds the grace-under-wait constraint in code, not only in
-    prose: a copy with the grace pushed past the margin fails at import."""
-    from tcip_mcp.pipelines.training import tensorboard_manager as tb
-
-    source = Path(tb.__file__).read_text(encoding="utf-8")
-    broken = source.replace(
-        "_GUARDIAN_TERM_GRACE_SECONDS = 2.0", "_GUARDIAN_TERM_GRACE_SECONDS = 4.5"
-    )
-    assert broken != source
-    module_path = tmp_path / "broken_tensorboard_manager.py"
-    module_path.write_text(broken, encoding="utf-8")
-
-    spec = importlib.util.spec_from_file_location("broken_tensorboard_manager", module_path)
-    module = importlib.util.module_from_spec(spec)
-    # the dataclass below needs its own module registered to resolve string annotations.
-    sys.modules[spec.name] = module
-    try:
-        with pytest.raises(RuntimeError, match="_GUARDIAN_TERM_GRACE_SECONDS"):
-            spec.loader.exec_module(module)
-    finally:
-        sys.modules.pop(spec.name, None)
+    assert tb._GUARDIAN_TERM_GRACE_SECONDS + 1.0 < tb._STOP_WAIT_SECONDS

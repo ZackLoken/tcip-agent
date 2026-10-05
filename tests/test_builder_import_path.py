@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -106,7 +105,8 @@ def test_a_packaged_builder_outside_the_path_launches_and_trains_in_the_worker(
     """The run names only the builder and its file; the launcher's preflight imports it, the
     worker process builds it, and the run completes."""
     pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import launch_training, monitor_training
+    from tcip_mcp.tools.training_tools import launch_training
+    from tests._verified_checkpoint_fixtures import run_to_end
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
     project, model = _packaged_builder(tmp_path, "agentpkg_launch")
@@ -129,14 +129,8 @@ def test_a_packaged_builder_outside_the_path_launches_and_trains_in_the_worker(
 
     assert "error" not in res, res
     assert res["pid"] != os.getpid()
-    deadline = time.monotonic() + 120
-    status: dict = {}
-    while time.monotonic() < deadline:
-        status = monitor_training(tmp_path, res["experiment_id"])
-        if status.get("status") in ("completed", "failed", "canceled"):
-            break
-        time.sleep(0.5)
-    assert status.get("status") == "completed", status
+    status = run_to_end(tmp_path, res["experiment_id"])
+    assert status["state"] == "completed", status
 
 
 def test_preflight_imports_a_builder_through_its_source_files(

@@ -13,18 +13,14 @@ pytest.importorskip("torch")
 
 
 def test_the_web_and_mcp_deliveries_agree_on_the_majority_column_and_the_revision(
-    tmp_path: Path,
+    tmp_path: Path, client,
 ) -> None:
-    from fastapi.testclient import TestClient
-
     from tcip_mcp.delivery import read_delivery_events
     from tcip_mcp.operationalization import latest_confirmed
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
-    from tcip_web.app import app
     from tests._chain_fixtures import attributed_series
 
     series = attributed_series(tmp_path)
-    client = TestClient(app, base_url="http://127.0.0.1")
     body = series.body()
     resp = client.post(
         "/api/results/export_csv",

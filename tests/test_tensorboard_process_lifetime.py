@@ -176,20 +176,8 @@ def test_child_is_gone_within_ten_seconds_of_a_normal_exit(tmp_path):
 
 @pytest.mark.skipif(sys.platform == "win32", reason="no guardian there")
 def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(monkeypatch, tmp_path):
-    """A regression guard for the guardian's grace staying under the manager's wait: without
-    it, a stand-in that ignores SIGTERM can be orphaned by a race rather than a deterministic
-    failure. The cleanup covers two ways this test itself can fail: while the guardian is
-    still alive, its descendants are enumerated by pid, the guardian itself first re-checked
-    against the create time captured at launch, and each is re-checked by create time (a pid
-    inside the stop's ten-second window can be reused) before any is signaled; once the
-    stand-in's own pid is known, captured the moment ``_standin_pid`` answers, it is
-    force-killed directly, covering a failure after ``stop_tensorboard`` has already reaped the
-    guardian and left the stand-in reparented with nothing watching it. A launch that answers
-    with no ``pid`` is beyond this cleanup: the guardian is dead by then (or never started), so
-    a stand-in it spawned inside the startup grace is already reparented away from every tree
-    this test can enumerate, unless this test process is itself the pid namespace's init or a
-    subreaper, where the orphan would land in its own tree instead.
-    """
+    """A stand-in that ignores SIGTERM is ended by the guardian before ``stop_tensorboard``
+    returns."""
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
     monkeypatch.setattr(
@@ -203,7 +191,7 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(monkeypa
     guardian_identity: tuple[int, float] | None = None
     standin_identity: tuple[int, float] | None = None
     try:
-        info = tb.launch_tensorboard(str(tmp_path), key="stubborn-run")
+        info = tb.launch_tensorboard(str(tmp_path))
         guardian_pid = info.get("pid")
         if guardian_pid is None:
             raise RuntimeError(f"launch_tensorboard did not return a pid: {info}")
@@ -211,7 +199,7 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(monkeypa
         standin_num = _standin_pid(guardian_pid, guardian_expected=True)
         standin = psutil.Process(standin_num)
         standin_identity = (standin.pid, standin.create_time())
-        result = tb.stop_tensorboard(key="stubborn-run")
+        result = tb.stop_tensorboard(str(tmp_path))
         assert result["status"] == "stopped"
         assert not _child_alive(*standin_identity)
     finally:
@@ -226,7 +214,7 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(monkeypa
                 ]
             except psutil.NoSuchProcess:
                 descendants = []
-        tb.stop_tensorboard(key="stubborn-run")
+        tb.stop_tensorboard(str(tmp_path))
         live: list[psutil.Process] = []
         for pid, create_time in descendants:
             proc = _same_process(pid, create_time)

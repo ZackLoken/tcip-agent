@@ -6,18 +6,13 @@ import { StructuredRefusalError } from "@/api/http";
 import { ATTR_TYPES } from "@/api/types.generated";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
 import { useStore } from "@/store";
+import { openTestProject } from "@/test/store";
 
 const initialStoreState = useStore.getState();
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
-  useStore.setState((s) => ({
-    gui: {
-      ...s.gui,
-      dataset: { ...s.gui.dataset, dataset_root: "C:/data", date: "undated" },
-    },
-    openProject: { id: "a1b2c3d4e5f6", path: "C:/proj" },
-  }));
+  openTestProject({ dataset_root: "C:/data", date: "undated" });
   act(() => useStore.getState().setActiveSubject("bud"));
 });
 

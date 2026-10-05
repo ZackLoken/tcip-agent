@@ -1,13 +1,10 @@
 /**
- * Retries an embedded-tool launch attempt on a timer until it settles, the one polling shape
- * the Training tab's run TensorBoard panel and the Tuning tab's sweep TensorBoard panel both
- * need instead of each keeping its own copy of the same loop.
+ * Retries an embedded-tool launch attempt on a timer until it settles.
  */
 
 import { useEffect, useRef, useState } from "react";
 
-/** The retry cadence both panels share; a run's own TensorBoard launch is idempotent, so
- * there is nothing costly about trying again on this cadence while nothing has served yet. */
+/** The retry cadence, in milliseconds. */
 export const EMBEDDED_TOOL_RETRY_MS = 3000;
 
 export interface EmbeddedToolOutcome {

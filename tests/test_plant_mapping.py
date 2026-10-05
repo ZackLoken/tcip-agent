@@ -360,29 +360,15 @@ def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
 ) -> None:
     """The write takes the database's write lock, and reports the contention rather than
     writing past a holder of it."""
-    import threading
-
     from tcip_store import StoreBusy
     from tcip_store.sqlite_backend import SqliteBackend
+
+    from tests._audit_fixtures import held_by_another_writer
 
     key = plant_mapping_key(tmp_path, "mapping")
     backend = tcip_store.bind(SqliteBackend(lock_timeout_s=0.2))
 
-    holding, release = threading.Event(), threading.Event()
-
-    def hold() -> None:
-        with tcip_store.transaction(key, timeout_s=30):
-            holding.set()
-            release.wait(30)
-
-    holder = threading.Thread(target=hold)
-    holder.start()
-    try:
-        assert holding.wait(30)
-        with pytest.raises(StoreBusy):
-            persist_mapping(_one_build(), tmp_path, actor=None)
-    finally:
-        release.set()
-        holder.join(30)
+    with held_by_another_writer(key), pytest.raises(StoreBusy):
+        persist_mapping(_one_build(), tmp_path, actor=None)
     assert not tcip_store.exists(key)
     backend.close()

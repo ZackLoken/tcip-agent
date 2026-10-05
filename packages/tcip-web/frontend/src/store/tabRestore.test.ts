@@ -61,7 +61,6 @@ describe("per-project last-used tab", () => {
   });
 
   it("restores each of the app's tabs, not just some of them", () => {
-    expect(TAB_NAMES).toHaveLength(7);
     for (const tab of TAB_NAMES) {
       const other: TabName = tab === "annotate" ? "results" : "annotate";
       recordLastTab(PROJECT.id, tab);

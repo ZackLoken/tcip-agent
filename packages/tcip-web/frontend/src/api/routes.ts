@@ -30,21 +30,12 @@ export const ROUTES = {
   getState: "/api/state",
   getSubjectsLoad: "/api/subjects/load",
   getTerminalStatus: "/api/terminal/status",
-  getTrainingConfigs: "/api/training/configs",
   getTrainingConfigsByExperimentIdSplits: (experimentId: string) =>
     `/api/training/configs/${encodeURIComponent(experimentId)}/splits`,
   getTrainingMetricDirections: "/api/training/metric-directions",
   getTrainingRuns: "/api/training/runs",
   getTrainingRunsByExperimentId: (experimentId: string) =>
     `/api/training/runs/${encodeURIComponent(experimentId)}`,
-  getTuningRayDashboard: "/api/tuning/ray-dashboard",
-  getTuningSweeps: "/api/tuning/sweeps",
-  getTuningSweepsBySweepId: (sweepId: string) =>
-    `/api/tuning/sweeps/${encodeURIComponent(sweepId)}`,
-  getTuningSweepsBySweepIdTrials: (sweepId: string) =>
-    `/api/tuning/sweeps/${encodeURIComponent(sweepId)}/trials`,
-  getTuningSweepsBySweepIdTrialsByTrialIdMetrics: (sweepId: string, trialId: string) =>
-    `/api/tuning/sweeps/${encodeURIComponent(sweepId)}/trials/${encodeURIComponent(trialId)}/metrics`,
   postAnnotateLabels: "/api/annotate/labels",
   postAnnotateQueueLaunch: "/api/annotate/queue/launch",
   postCanvasState: "/api/canvas/state",
@@ -80,15 +71,6 @@ export const ROUTES = {
     `/api/training/runs/${encodeURIComponent(experimentId)}/cancel`,
   postTrainingRunsByExperimentIdTensorboard: (experimentId: string) =>
     `/api/training/runs/${encodeURIComponent(experimentId)}/tensorboard`,
-  postTuningSweeps: "/api/tuning/sweeps",
-  postTuningSweepsBySweepIdCancel: (sweepId: string) =>
-    `/api/tuning/sweeps/${encodeURIComponent(sweepId)}/cancel`,
-  postTuningSweepsBySweepIdTensorboard: (sweepId: string) =>
-    `/api/tuning/sweeps/${encodeURIComponent(sweepId)}/tensorboard`,
-  postTuningSweepsBySweepIdTrialsByTrialIdTensorboard: (sweepId: string, trialId: string) =>
-    `/api/tuning/sweeps/${encodeURIComponent(sweepId)}/trials/${encodeURIComponent(trialId)}/tensorboard`,
-  postTuningSweepsBySweepIdTrialsByTrialIdTensorboardStop: (sweepId: string, trialId: string) =>
-    `/api/tuning/sweeps/${encodeURIComponent(sweepId)}/trials/${encodeURIComponent(trialId)}/tensorboard/stop`,
   socketInferenceJobsByJobIdStream: (jobId: string) =>
     `/api/inference/jobs/${encodeURIComponent(jobId)}/stream`,
   socketTerminalWsBySessionId: (sessionId: string) =>

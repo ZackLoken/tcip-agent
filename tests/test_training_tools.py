@@ -733,21 +733,24 @@ def _detection_base() -> dict:
     }
 
 
-def _trial_dir(project: Path, name: str) -> Path:
-    """A trial directory ``name`` of one sweep of ``project``, where a sweep opens its trials."""
-    from tcip_mcp.tools.training_tools import sweep_dir
-
-    return sweep_dir("hpo_trials", project=project) / name
-
-
-def _trial(point: dict, report, base: dict, trial_dir, *, metric: str = "loss",
-           higher_is_better: bool = False) -> None:
-    """One HPO trial run as its sweep runs it, optimizing ``metric`` in its direction."""
-    from tcip_mcp.experiments import project_of_run
+def _trial(point: dict, report, base: dict, project: Path, name: str = "t0", *,
+           metric: str = "loss", higher_is_better: bool = False) -> Path:
+    """One HPO trial ``name`` run as its sweep runs it (``_run_hpo_trial``), under one sweep of
+    ``project`` over ``base`` optimizing ``metric`` in its direction, the sweep's record written
+    by the writer its opening uses (``experiments.write_record``) on its first trial. Returns
+    the trial's run directory."""
+    from tcip_mcp import experiments
+    from tcip_mcp.audit import now_iso
     from tcip_mcp.tools.training_tools import _run_hpo_trial
 
-    _run_hpo_trial(point, report, base, Path(trial_dir), project=project_of_run(Path(trial_dir)),
-                   objective={"selection_metric": metric, "higher_is_better": higher_is_better})
+    sweep = experiments.experiment_dir("hpo_trials", project=project)
+    if not sweep.is_dir():
+        experiments.create_run_directory(sweep)
+        experiments.write_record(sweep / experiments.SWEEP_FILE, {
+            "created": now_iso(), "input": {"base_config": base, "split_draws": 1},
+            "objective": {"selection_metric": metric, "higher_is_better": higher_is_better}})
+    _run_hpo_trial(point, report, sweep, name)
+    return sweep / f"{sweep.name}_{name}"
 
 
 def _row(value: float, metric: str = "loss") -> dict:
@@ -765,13 +768,12 @@ def _complete(run):
     return run
 
 
-def _trial_value(trial_dir, *, metric: str = "loss", higher_is_better: bool = False):
-    """The trial's result as its sweep projects it (``training_tools._trial_row``)."""
-    from tcip_mcp.experiments import observe
-    from tcip_mcp.tools.training_tools import _trial_row
+def _sweep_outcome(project: Path) -> dict:
+    """What the trials of :func:`_trial`'s sweep amount to, as the project's listing reads it."""
+    from tcip_mcp.experiments import training_listing
 
-    return _trial_row(observe(Path(trial_dir)), {"selection_metric": metric,
-                                                 "higher_is_better": higher_is_better})["value"]
+    (sweep,) = training_listing(project).sweeps
+    return sweep.outcome
 
 
 def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
@@ -807,7 +809,6 @@ def _spaces_searched(monkeypatch) -> list:
 
     def fake_search(*args, **kwargs):
         seen.append(kwargs.get("param_space", args[1] if len(args) > 1 else None))
-        return str(Path(kwargs["storage_path"]) / kwargs["study_name"])
 
     monkeypatch.setattr(hpo, "tune_search", fake_search)
     return seen
@@ -834,9 +835,9 @@ def test_run_hpo_trial_reports_each_epoch_and_its_result_is_the_best_of_them(
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
     reported: list = []
-    _trial({"lr": 3e-4}, reported.append, _detection_base(), _trial_dir(tmp_path, "trial_0"))
+    _trial({"lr": 3e-4}, reported.append, _detection_base(), tmp_path)
     assert reported == [50.0, 40.0, 30.0]
-    assert _trial_value(_trial_dir(tmp_path, "trial_0")) == 30.0
+    assert _sweep_outcome(tmp_path)["best_value"] == 30.0
 
 
 def test_run_hpo_trial_that_fails_has_no_result(monkeypatch, tmp_path):
@@ -851,10 +852,10 @@ def test_run_hpo_trial_that_fails_has_no_result(monkeypatch, tmp_path):
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
     reported: list = []
-    _trial({"lr": 3e-4}, reported.append, _detection_base(), _trial_dir(tmp_path, "trial_0"))
+    trial_dir = _trial({"lr": 3e-4}, reported.append, _detection_base(), tmp_path)
     assert reported == []
-    assert observe(_trial_dir(tmp_path, "trial_0")).state == "failed"
-    assert _trial_value(_trial_dir(tmp_path, "trial_0")) is None
+    assert observe(trial_dir).state == "failed"
+    assert _sweep_outcome(tmp_path)["best_value"] is None
 
 
 def test_run_hpo_trial_result_is_the_highest_value_for_a_higher_is_better_metric(
@@ -879,10 +880,10 @@ def test_run_hpo_trial_result_is_the_highest_value_for_a_higher_is_better_metric
         "evaluation": {"selection_metric": "accuracy"},
     }
     reported: list = []
-    _trial({"lr": 3e-4}, reported.append, base, _trial_dir(tmp_path, "trial_0"), metric="accuracy",
+    _trial({"lr": 3e-4}, reported.append, base, tmp_path, metric="accuracy",
            higher_is_better=True)
     assert reported == [0.5, 0.9, 0.6]
-    assert _trial_value(_trial_dir(tmp_path, "trial_0"), metric="accuracy", higher_is_better=True) == 0.9
+    assert _sweep_outcome(tmp_path)["best_value"] == 0.9
 
 
 def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
@@ -891,7 +892,6 @@ def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
     """A trial that fails carries no result, so the sweep's outcome under a maximize direction
     is the one completed trial's, never the failed one's."""
     pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import sweep_outcome
 
     base = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
@@ -909,7 +909,7 @@ def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train_ok)
     real: list = []
-    _trial({"lr": 3e-4}, real.append, base, _trial_dir(tmp_path, "trial_real"), metric="accuracy",
+    _trial({"lr": 3e-4}, real.append, base, tmp_path, "real", metric="accuracy",
            higher_is_better=True)
 
     def fake_train_fails(run, train_loader, val_loader, task="classification",
@@ -918,17 +918,10 @@ def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train_fails)
     failed: list = []
-    _trial({"lr": 1e-2}, failed.append, base, _trial_dir(tmp_path, "trial_failed"),
-           metric="accuracy",
+    _trial({"lr": 1e-2}, failed.append, base, tmp_path, "failed", metric="accuracy",
            higher_is_better=True)
 
-    from tcip_mcp.experiments import observe
-    from tcip_mcp.tools.training_tools import _trial_row
-
-    objective = {"selection_metric": "accuracy", "higher_is_better": True}
-    trials = [_trial_row(observe(_trial_dir(tmp_path, name)), objective)
-              for name in ("trial_failed", "trial_real")]
-    outcome = sweep_outcome(trials, {"objective": objective, "input": {"split_draws": 1}})
+    outcome = _sweep_outcome(tmp_path)
     assert (outcome["best_params"], outcome["best_value"]) == ({"lr": 3e-4}, 0.7)
 
 
@@ -953,7 +946,7 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
         "batch_size": 2,
         "augmentation": {"horizontal_flip": 0.5},
     }
-    _trial({"lr": 3e-4}, [].append, base, _trial_dir(tmp_path, "trial_0"))
+    _trial({"lr": 3e-4}, [].append, base, tmp_path)
     assert captured["transforms"] is not None       # augmentation was built + passed
     assert captured["model_source"]["builder"].endswith(":build_bespoke_classifier")
 
@@ -968,7 +961,7 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_data_cfg_handed_to_auto_trai
 
     captured: dict = {}
     _patch_hpo_trial_machinery(monkeypatch, _completed_train, captured=captured)
-    _trial({"data.split.seed": 7}, [].append, _detection_base(), _trial_dir(tmp_path, "trial_0"))
+    _trial({"data.split.seed": 7}, [].append, _detection_base(), tmp_path)
     assert captured["data_cfg"]["split"]["seed"] == 7
 
 
@@ -993,8 +986,7 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_trials_own_records(monkeypat
     from tcip_mcp.pipelines.data import split_construction as sc
     monkeypatch.setattr(sc, "auto_train_val", _fake_auto_train_val_reading_seed_like_split_construction)
 
-    trial_dir = _trial_dir(tmp_path, "trial_0")
-    _trial({"data.split.seed": 7}, [].append, _detection_base(), trial_dir)
+    trial_dir = _trial({"data.split.seed": 7}, [].append, _detection_base(), tmp_path)
 
     run = read_record(trial_dir / RUN_FILE)
     assert run["config"]["data"]["split"]["seed"] == 7
@@ -1015,8 +1007,7 @@ def test_run_hpo_trial_geometry_stamp_from_a_tiled_dataset_reaches_the_resolved_
     from tcip_mcp.pipelines.data import split_construction as sc
     monkeypatch.setattr(sc, "auto_train_val", _fake_auto_train_val_reading_seed_like_split_construction)
 
-    trial_dir = _trial_dir(tmp_path, "trial_0")
-    _trial({"data.split.seed": 7}, [].append, _detection_base(), trial_dir)
+    trial_dir = _trial({"data.split.seed": 7}, [].append, _detection_base(), tmp_path)
 
     assert read_record(trial_dir / RUN_FILE)["resolved"]["data"]["tiling"]["tile_size"] == 224
 
@@ -1050,8 +1041,7 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
     monkeypatch.setattr(samplers, "build_sampler", lambda *a, **k: None)
     monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())
 
-    trial_dir = _trial_dir(tmp_path, "trial_0")
-    _trial({"data.split.seed": 3}, [].append, base, trial_dir)
+    trial_dir = _trial({"data.split.seed": 3}, [].append, base, tmp_path)
 
     resolved = read_record(trial_dir / RUN_FILE)["resolved"]
     assert resolved["partition"]["seed"] is None
@@ -1075,8 +1065,7 @@ def test_a_trials_launch_record_carries_the_seed_it_trained_under(monkeypatch, t
         return run
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
-    trial_dir = _trial_dir(tmp_path, "trial_0")
-    _trial({"lr": 3e-4}, [].append, _detection_base(), trial_dir)
+    trial_dir = _trial({"lr": 3e-4}, [].append, _detection_base(), tmp_path)
 
     recorded = read_record(trial_dir / RUN_FILE)["config"]["seed"]
     assert recorded is not None and recorded == captured["seed"]
@@ -1110,11 +1099,11 @@ def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(tmp_
         "early_stopping": {"enabled": False},
     }
     reported: list = []
-    _trial({}, reported.append, base_config, _trial_dir(tmp_path, "trial_0"), metric="loss")
+    _trial({}, reported.append, base_config, tmp_path, metric="loss")
 
     import math
     assert math.isfinite(reported[0])  # epoch 1's real score, reported before the run died
-    assert _trial_value(_trial_dir(tmp_path, "trial_0")) is None
+    assert _sweep_outcome(tmp_path)["best_value"] is None
 
 
 # --------------------------------------------------------------------------
@@ -1236,7 +1225,7 @@ def test_an_ordinary_sweep_payload_still_runs_its_search(tmp_path, monkeypatch):
     }
     result = training_tools.run_hyperparameter_search(tmp_path, base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1, search_seed=0)
 
-    assert result["status"] == "completed", result
+    assert result["sweep"]["state"] == "completed", result
     assert seen == [{"lr": [0.1, 0.01]}]
 
 
@@ -1253,7 +1242,7 @@ def test_run_hyperparameter_search_admits_an_lr_sweep_beside_a_base_config_selec
     base_config = {**real_hpo_base_config, "evaluation": {"selection_metric": "map"}}
     result = training_tools.run_hyperparameter_search(tmp_path, base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1, search_seed=0)
 
-    assert result["status"] == "completed", result
+    assert result["sweep"]["state"] == "completed", result
     assert seen == [{"lr": [0.1, 0.01]}]
 
 
@@ -1289,24 +1278,6 @@ def test_dataset_identity_tolerates_a_genuinely_unregistered_dataset(tmp_path):
     assert ds_id is None
 
 
-def test_list_launchable_configs_state_agrees_with_the_runs_list(tmp_path, monkeypatch) -> None:
-    """A run whose process stopped touching its heartbeat reads 'interrupted' here the identical
-    way the runs list beside this picker reads it, and a completed run reads 'completed' in
-    both: one derivation off the run's own directory."""
-    from tcip_mcp import experiments
-    from tcip_mcp.experiments import list_experiments
-    from tcip_mcp.tools.training_tools import list_launchable_configs
-    from tests._verified_checkpoint_fixtures import detection_config, finished_run, opened_run
-
-    opened_run(tmp_path, detection_config(tmp_path / "crashed-data"), experiment_id="exp-crashed")
-    finished_run(tmp_path, experiment_id="exp-done")
-    monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", -1.0)
-
-    picker = {r["experiment_id"]: r["state"] for r in list_launchable_configs(tmp_path)}
-    runs = {r["experiment_id"]: r["state"] for r in list_experiments(tmp_path)}
-    assert picker == runs == {"exp-crashed": "interrupted", "exp-done": "completed"}
-
-
 def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_and_no_result(
     tmp_path
 ) -> None:
@@ -1317,7 +1288,9 @@ def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_a
     pytest.importorskip("torch")
     import math
 
-    from tcip_mcp.experiments import RUN_FILE, observe, read_record, request_cancel
+    from tcip_mcp.experiments import (
+        RUN_FILE, experiment_dir, observe, read_record, request_cancel,
+    )
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
     images_dir, csv_path = write_regression_dataset(
@@ -1331,10 +1304,6 @@ def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_a
                      "mixed_precision": False, "device": "cpu",
                      "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
-    trial_dir = _trial_dir(tmp_path, "trial_cancel01")
-    sweep_root = trial_dir.parent
-    sweep_root.mkdir(parents=True)
-
     reported: list = []
 
     def report(value: float) -> None:
@@ -1342,11 +1311,11 @@ def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_a
         # already on record by the time the sweep's cancel takes effect mid-training.
         reported.append(value)
         if len(reported) == 1:
-            request_cancel(sweep_root)
+            request_cancel(experiment_dir("hpo_trials", project=tmp_path))
 
-    _trial({}, report, base_config, trial_dir, metric="loss")
+    trial_dir = _trial({}, report, base_config, tmp_path, metric="loss")
 
     assert math.isfinite(reported[0])  # epoch 1's real score, reported before the cancel
     assert observe(trial_dir).state == "canceled"
-    assert _trial_value(trial_dir) is None
+    assert _sweep_outcome(tmp_path)["best_value"] is None
     assert read_record(trial_dir / RUN_FILE)["trial_params"] == {}

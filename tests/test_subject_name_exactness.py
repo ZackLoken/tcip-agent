@@ -10,23 +10,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
-from tcip_annotation.state import Annotation, BBox
-from tcip_web.app import app
-from tests._producer_fixtures import image_label_key, label_image
+from tests._producer_fixtures import box_annotation, image_label_key, label_image
 
 DATE = "2026-03-02"
-
-
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, base_url="http://127.0.0.1")
-
-
-def _box(subject: str, x1: float, y1: float, x2: float, y2: float) -> Annotation:
-    return Annotation(subject=subject, geometry=BBox(x1, y1, x2, y2))
 
 
 def test_subject_names_differing_only_by_case_stay_distinct(
@@ -69,9 +57,9 @@ def test_registry_derived_from_labels_keeps_each_name_exactly_as_labeled(
     label_image(
         tmp_path / "images" / DATE / "IMG_A.jpg",
         [
-            _box("bud", 12, 30, 48, 140),
-            _box("Bud", 300, 44, 372, 70),
-            _box("bush", 5, 9, 640, 480),
+            box_annotation(12, 30, 48, 140),
+            box_annotation(300, 44, 372, 70, subject="Bud"),
+            box_annotation(5, 9, 640, 480, subject="bush"),
         ],
         900, 500,
     )
@@ -96,8 +84,8 @@ def test_registry_derivation_reports_a_document_it_cannot_read(
     from tests._record_damage_fixtures import damage_record
 
     images = tmp_path / "images" / DATE
-    label_image(images / "IMG_A.jpg", [_box("bud", 12, 30, 48, 140)], 900, 500)
-    label_image(images / "IMG_B.jpg", [_box("bud", 700, 100, 760, 220)], 900, 500)
+    label_image(images / "IMG_A.jpg", [box_annotation(12, 30, 48, 140)], 900, 500)
+    label_image(images / "IMG_B.jpg", [box_annotation(700, 100, 760, 220)], 900, 500)
     # No platform producer can make a record without a subject; a damaged record can carry one.
     damage_record(image_label_key(images / "IMG_B.jpg"), encode_record({
         "image": "IMG_B", "width": 900, "height": 500,

@@ -146,9 +146,6 @@ Defer annotation mechanics to the annotation skill. Chestnut-specific difficulti
 
 ## Measurement integrity
 
-Per the CLAUDE.md measurement-integrity invariant (never a geometric/pixel proxy; validate
-against a reference sized to the trait: GT annotations, or a breeder-confirmed sample of the
-model's own outputs (review-confirmation), before any result, not dense GT for every trait).
 Chestnut-specific traps:
 
 - `catkin_sex_ratio`: a size split or a made-up male/female class fabricates the ratio. The
@@ -168,7 +165,7 @@ Chestnut-specific traps:
 ## Needs expert confirmation
 
 - `plant_surface_area`: is the delivered quantity the *planimetric crown area* (achievable from a
-  validated 2D mask + in-frame scale calibration, per CLAUDE.md's measurement-integrity invariant)
+  validated 2D mask + in-frame scale calibration)
   or specifically the *3D-canopy-model derivation* crops.yml's current definition names? The two
   are not the same thing, and only the breeder can redefine their own trait's meaning.
 - Exact species/cultivar composition actually planted and bred (Chinese chestnut dominant;

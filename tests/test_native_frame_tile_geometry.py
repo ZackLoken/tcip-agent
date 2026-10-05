@@ -19,6 +19,9 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("torch")
+
+from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
+from tests._producer_fixtures import gray_frame  # noqa: E402
 pytest.importorskip("torchvision")
 import torch  # noqa: E402
 
@@ -83,14 +86,6 @@ def _stub_predictor(model, *, task: str = "detection") -> GenericPredictor:
     p.model_source = {}
     p.model = model.eval()
     return p
-
-
-def _image(tmp_path: Path, size: int = IMAGE) -> str:
-    from PIL import Image
-
-    p = tmp_path / "img.png"
-    Image.new("RGB", (size, size), (120, 120, 120)).save(p)
-    return str(p)
 
 
 def _sliced(pred, source, *, tile_resize, **kwargs) -> dict:
@@ -221,8 +216,8 @@ def test_a_checkpoint_carries_its_untiled_training_geometry_to_the_predictor(tmp
               "data": {"tiling": {"enabled": False}, "train_native_size": [TILE, TILE],
                        **_RUN_DATA},
               "augmentation": {"resize": [32, 32]}}
-    torch.save({"model_state_dict": build_model(config, recorded_model_dims(config)).state_dict(),
-                "config": config}, str(ckpt))
+    torch.save({STATE_DICT_KEY: build_model(config, recorded_model_dims(config)).state_dict(),
+                CONFIG_KEY: config}, str(ckpt))
     result = register_model(name="native-frame-carry", checkpoint_path=str(ckpt), config={},
                             project=tmp_path)
     assert "error" not in result, result
@@ -243,7 +238,7 @@ def test_tiles_at_native_size_with_no_recorded_resize(tmp_path):
     size and nothing else. Boxes land in image pixel space untouched by any rescale."""
     pred = _stub_predictor(_MiddleHalfDetector(min_size=800, max_size=1333))
 
-    r = _sliced(pred, _image(tmp_path), tile_resize=None)
+    r = _sliced(pred, gray_frame(tmp_path, IMAGE), tile_resize=None)
 
     assert {tuple(b) for b in r["boxes"]} == _expected_middle_half_boxes()
 
@@ -256,7 +251,7 @@ def test_a_recorded_resize_is_undone_per_axis_and_not_confused_with_the_detector
     one scalar factor instead of two would displace every y coordinate."""
     pred = _stub_predictor(_MiddleHalfDetector(min_size=800, max_size=1333))
 
-    r = _sliced(pred, _image(tmp_path), tile_resize=(128, 96))
+    r = _sliced(pred, gray_frame(tmp_path, IMAGE), tile_resize=(128, 96))
 
     boxes = sorted(tuple(round(v, 4) for v in b) for b in r["boxes"])
     assert boxes == sorted(_expected_middle_half_boxes())
@@ -285,15 +280,8 @@ def test_a_windowed_raster_source_is_resized_and_undone_the_same_way():
 
 
 def test_a_windowed_alpha_tagged_source_is_resized_and_undone_the_same_way(caplog):
-    """A windowed 4-band reader whose own band_interpretations declares the 4th band alpha (the
-    real signal a GDAL-served orthomosaic carries, e.g. raster_source.GdalSource) gets the
-    recorded resize applied and undone exactly like the 3-band case: the alpha-vs-spectral
-    ambiguity to_pil_if_faithful exists for must not silently disable this tier for a genuinely
-    alpha-bearing 4-band source. The fake detector is scale-invariant (always the middle 50% of
-    whatever tensor it is handed), so box equality alone cannot tell "resized" from "skipped":
-    the absence of the skip warning is the signal that actually distinguishes them, the same
-    signal test_a_windowed_undeclared_fourth_band_source_keeps_its_own_pixels checks for its
-    presence."""
+    """A windowed 4-band reader whose ``band_interpretations`` declares the 4th band alpha gets
+    the recorded resize applied and undone as the 3-band case does, logging no skip warning."""
     import logging
 
     import numpy as np
@@ -378,8 +366,8 @@ def _native_frame_checkpoint(tmp_path: Path, augmentation: dict | str | None = N
     if augmentation is not None:
         config["augmentation"] = augmentation
     ckpt = tmp_path / "model_best.pt"
-    torch.save({"model_state_dict": build_model(config, recorded_model_dims(config)).state_dict(),
-                "config": config}, str(ckpt))
+    torch.save({STATE_DICT_KEY: build_model(config, recorded_model_dims(config)).state_dict(),
+                CONFIG_KEY: config}, str(ckpt))
     return str(ckpt)
 
 
@@ -400,7 +388,7 @@ def test_a_tiled_pass_over_a_native_frame_checkpoint_says_what_it_rests_on(tmp_p
     ckpt = _registered(tmp_path, _native_frame_checkpoint(tmp_path, {"resize": [32, 32]}),
                        "native-frame-tiles")
 
-    p, results = predicted_over(tmp_path, ckpt, str(Path(_image(tmp_path)).parent),
+    p, results = predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path, IMAGE)).parent),
                                 device="cpu", tile=True, conf=0.0)
 
     assert len(results) == 1
@@ -415,7 +403,7 @@ def test_a_native_frame_checkpoint_stays_untiled_unless_asked(tmp_path):
 
     ckpt = _registered(tmp_path, _native_frame_checkpoint(tmp_path), "native-frame-untiled")
 
-    p, _results = predicted_over(tmp_path, ckpt, str(Path(_image(tmp_path)).parent),
+    p, _results = predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path, IMAGE)).parent),
                                  device="cpu", conf=0.0)
 
     assert p.execution.tile_size is None
@@ -429,7 +417,7 @@ def test_an_unreadable_recorded_augmentation_config_does_not_sink_an_untiled_run
     ckpt = _registered(tmp_path, _native_frame_checkpoint(tmp_path, {"not_a_transform": 0.5}),
                        "native-frame-unreadable-aug")
 
-    p, results = predicted_over(tmp_path, ckpt, str(Path(_image(tmp_path)).parent),
+    p, results = predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path, IMAGE)).parent),
                                 device="cpu", conf=0.0)
 
     assert p.execution.tile_size is None and len(results) == 1
@@ -641,8 +629,8 @@ def _tiled_checkpoint(tmp_path: Path, tile_size: int) -> str:
     config = {"model_source": model_source,
               "data": {"tiling": {"tile_size": tile_size, "overlap": 0.2}, **_RUN_DATA}}
     ckpt = tmp_path / "model_tiled.pt"
-    torch.save({"model_state_dict": build_model(config, recorded_model_dims(config)).state_dict(),
-                "config": config}, str(ckpt))
+    torch.save({STATE_DICT_KEY: build_model(config, recorded_model_dims(config)).state_dict(),
+                CONFIG_KEY: config}, str(ckpt))
     return str(ckpt)
 
 
@@ -656,8 +644,8 @@ def _native_frame_checkpoint_of_size(tmp_path: Path, size: int) -> str:
               "data": {"tiling": {"enabled": False}, "train_native_size": [size, size],
                        **_RUN_DATA}}
     ckpt = tmp_path / "model_native.pt"
-    torch.save({"model_state_dict": build_model(config, recorded_model_dims(config)).state_dict(),
-                "config": config}, str(ckpt))
+    torch.save({STATE_DICT_KEY: build_model(config, recorded_model_dims(config)).state_dict(),
+                CONFIG_KEY: config}, str(ckpt))
     return str(ckpt)
 
 
@@ -676,7 +664,7 @@ def test_a_stated_edge_contradicting_the_checkpoints_geometry_refuses_the_pass(
     ckpt = _registered(tmp_path, make(tmp_path), f"contradiction-{recorded}")
 
     with pytest.raises(ExecutionRefused) as exc_info:
-        predicted_over(tmp_path, ckpt, str(Path(_image(tmp_path)).parent), device="cpu",
+        predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path, IMAGE)).parent), device="cpu",
                        tile=True, tile_size=64, conf=0.0)
     assert "64" in str(exc_info.value) and recorded in str(exc_info.value)
 
@@ -687,7 +675,7 @@ def test_a_stated_edge_matching_persisted_geometry_is_admitted_as_stated(tmp_pat
 
     ckpt = _registered(tmp_path, _tiled_checkpoint(tmp_path, TILE), "tiled-native-edge-match")
 
-    p, results = predicted_over(tmp_path, ckpt, str(Path(_image(tmp_path)).parent),
+    p, results = predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path, IMAGE)).parent),
                                 device="cpu", tile=True, tile_size=TILE, conf=0.0)
 
     assert len(results) == 1
