@@ -108,7 +108,8 @@ jobs:
 
       - name: Install packages
         run: |
-          # ruff pinned: ruff.toml runs pycodestyle's preview rules, which move between releases.
+          # ruff pinned to the version environment.win.lock.yml resolves: ruff.toml runs
+          # pycodestyle's preview rules, which move between releases.
           pip install pytest-timeout pytest-xdist ruff==0.16.8
           pip install -e packages/tcip-store
           pip install -e packages/tcip-annotation
