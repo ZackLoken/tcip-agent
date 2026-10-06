@@ -173,6 +173,7 @@ export interface LaunchedProgram {
   provider: string;
   executable: string;
   version: string | null;
+  prepared: string[];
 }
 
 export interface TerminalLaunch {

@@ -38,9 +38,11 @@ def terminal_ws_url(client: Any, session_id: str) -> str:
     return urlunsplit((scheme, parts.netloc, f"/api/terminal/ws/{session_id}", "", ""))
 
 
-def main(provider: str, workspace: str | None = None) -> int:
+def main(provider: str, workspace: str | None = None,
+         answer_timeout_s: float = ANSWER_TIMEOUT_S) -> int:
     """Drive the smoke for the ``provider`` row with ``TCIP_WORKSPACE`` set to ``workspace`` (a
-    fresh temp directory when omitted) and the backend started on it. Returns 0 on a pass."""
+    fresh temp directory when omitted) and the backend started on it, waiting
+    ``answer_timeout_s`` for the answer. Returns 0 on a pass."""
     os.environ["TCIP_WORKSPACE"] = workspace or tempfile.mkdtemp(prefix="terminal-smoke-ws-")
 
     from fastapi.testclient import TestClient
@@ -76,11 +78,14 @@ def main(provider: str, workspace: str | None = None) -> int:
             ws.send_json({"type": "input", "data": "\x1b[?1;2c"})  # a terminal's DA reply
             client.post(f"/api/terminal/sessions/{sid}/submit", json={"text": PROMPT})
             print("[3] prompt submitted; waiting for the answer...")
-            deadline = time.time() + ANSWER_TIMEOUT_S
+            deadline = time.time() + answer_timeout_s
             while not answered and time.time() < deadline:
                 time.sleep(1.0)
                 answered = ANSWER in ANSI.sub("", session.scrollback_snapshot())
             if not answered:
+                launch = session._launch
+                print(f"    bracketed paste on: {launch.ready}; ritual delivered: "
+                      f"{launch.ritual_sent}; requests still queued: {len(launch.queued)}")
                 tail = ANSI.sub('', session.scrollback_snapshot())[-800:]
                 print(f"    stream tail: {ascii(tail)}")
     finally:
@@ -94,4 +99,7 @@ def main(provider: str, workspace: str | None = None) -> int:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("provider", help="the id of the provider row to launch")
-    raise SystemExit(main(parser.parse_args().provider))
+    parser.add_argument("--answer-timeout", type=float, default=ANSWER_TIMEOUT_S,
+                        help=f"seconds to wait for the answer (default {ANSWER_TIMEOUT_S})")
+    args = parser.parse_args()
+    raise SystemExit(main(args.provider, answer_timeout_s=args.answer_timeout))

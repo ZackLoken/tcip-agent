@@ -265,9 +265,10 @@ Not built yet (contributions/experiments welcome):
   georeferencing. Today per-plant identity rests on geolocated capture (`build_plant_mapping`,
   GPS EXIF plus a plant-locations CSV) or a georeferenced orthomosaic; an ungeoreferenced
   dataset has no per-plant path today.
-- Provider/LLM-agnostic support. The in-app agent terminal launches rows of a provider table that
-  ships with Claude Code's row alone; a row for another harness (Gemini, Codex, open models) is
-  future work, added once its real flags are read from the installed CLI and one live smoke passes.
+- Provider/LLM-agnostic support. The in-app agent terminal launches rows of a provider table
+  (Claude Code and Antigravity today, chosen in the rail); a row for another harness, Codex or an
+  open-model harness over Ollama among them, is added once its real flags are read from the
+  installed CLI and one live smoke passes.
 - Cloud storage for centralized data. Project state and imagery live in a local `.tcip/`
   directory and local project folders today; centralized or cloud-backed storage for multi-machine
   or multi-user access is future work.

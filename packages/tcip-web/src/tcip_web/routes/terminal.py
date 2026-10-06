@@ -58,11 +58,13 @@ def _offer(queue: asyncio.Queue, data: str) -> None:
 
 
 class LaunchedProgram(BaseModel):
-    """What a launch ran: the provider row's id, the executable, and the version it declares."""
+    """What a launch ran: the provider row's id, the executable, the version it declares, and
+    the steps the row's preparation took before the launch, empty when it has none."""
 
     provider: str
     executable: str
     version: Optional[str]
+    prepared: list[str]
 
 
 class TerminalLaunch(BaseModel):
@@ -155,9 +157,15 @@ class TerminalSession:
             command = pty_host.resolve_terminal_command(provider)
             if command is None:
                 return provider.unavailable_reason
+            prepared: list[str] = []
+            if not command[1]:
+                prepared, problem = pty_host.prepare_launch(command[0][0], provider, project)
+                if problem is not None:
+                    return problem
             argv = pty_host.render_argv(command[0], project)
             launched = LaunchedProgram(
-                provider=provider.id, **pty_host.launched_program(argv, command[1]))
+                provider=provider.id, prepared=prepared,
+                **pty_host.launched_program(argv, command[1]))
             try:
                 pty = pty_host.spawn_pty(
                     argv, pty_host.terminal_cwd(), rows, cols, pty_host.spawn_env(self.id)
@@ -270,15 +278,17 @@ class TerminalSession:
     # ── output pump (called from the reader thread) ─────────────────────
 
     def _deliver(self) -> None:
-        """Paste the current launch's ritual, then its queued requests, once its agent has
-        bracketed paste on; each leaves the launch only once written. Called under the lock."""
+        """Paste the current launch's ritual together with every request queued by then as one
+        message, then each later request on its own, once its agent has bracketed paste on; each
+        leaves the launch only once written. Called under the lock."""
         launch = self._launch
         if not launch.ready or launch.ritual is None:
             return
         if not launch.ritual_sent:
-            if not self.write(pty_host.paste(launch.ritual)):
+            if not self.write(pty_host.paste("\n\n".join([launch.ritual, *launch.queued]))):
                 return
             launch.ritual_sent = True
+            launch.queued.clear()
         while launch.queued and self.write(pty_host.paste(launch.queued[0])):
             launch.queued.pop(0)
 

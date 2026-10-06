@@ -22,6 +22,7 @@ from tests._audit_fixtures import audit_rows
 FAKE = Path(__file__).parent / "fake_terminal_app.py"
 LAUNCH = {"provider": pty_host.PROVIDERS[0].id, "user": "tester"}
 ABSENT = "definitely-not-a-real-cli-xyz"
+_PLACEHOLDERS = (pty_host.WORKSPACE_ARG, pty_host.MCP_CONFIG_ARG)
 
 if pty_host.os.name == "nt":
     pytest.importorskip("winpty")
@@ -200,10 +201,15 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
     row, client, monkeypatch, tmp_path, opened_project,
 ):
     """The fake program, standing as the row's executable, receives exactly the arguments the
-    row renders, with no placeholder left in them."""
+    row renders, with no placeholder left in them, after the row's preparation ran with it."""
+    from tcip_mcp.server import list_registered_tools
+    from tcip_web.state import store
+
     monkeypatch.setattr(pty_host, "PROVIDERS", (dataclasses.replace(
         row, executable=str(_fake_executable(tmp_path / "bin"))),))
     monkeypatch.delenv("TCIP_TERMINAL_CMD")
+    settings = tmp_path / "agy-settings.json"
+    monkeypatch.setattr(pty_host, "ANTIGRAVITY_SETTINGS", settings)
     argv_file = tmp_path / "argv.json"
     monkeypatch.setenv("FAKE_TERMINAL_ARGV_FILE", str(argv_file))
     rendered: list[list[str]] = []
@@ -215,14 +221,86 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
 
     monkeypatch.setattr(pty_host, "render_argv", _recording_render)
 
-    sid = client.post("/api/terminal/sessions",
-                      json={**LAUNCH, "provider": row.id}).json()["session_id"]
+    created = client.post("/api/terminal/sessions", json={**LAUNCH, "provider": row.id}).json()
+    sid = created["session_id"]
     with client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}") as ws:
         _read_until(ws, "FAKE_TERMINAL_READY")
 
     (launched,) = rendered
     assert json.loads(argv_file.read_text(encoding="utf-8")) == launched[1:]
-    assert not {pty_host.WORKSPACE_ARG, pty_host.MCP_CONFIG_ARG} & set(launched)
+    assert not any(placeholder in arg for arg in launched for placeholder in _PLACEHOLDERS)
+    if row.prepare is None:
+        expected_prepared: list[str] = []
+    else:
+        server = pty_host.mcp_server(store.project_root)
+        expected_prepared = [
+            pty_host.subprocess.list2cmdline(
+                [launched[0], "mcp", "add", "tcip", "--", server.command, *server.args]),
+            f"allowed {len(list_registered_tools())} tcip tools in {settings}",
+        ]
+        allowed = json.loads(settings.read_text(encoding="utf-8"))["permissions"]["allow"]
+        assert allowed == [f"mcp(tcip/{name})" for name in list_registered_tools()]
+    assert created["launched"]["prepared"] == expected_prepared
+    (line,) = audit_rows(opened_project, "agent_terminal_started")
+    assert line["arguments"]["prepared"] == expected_prepared
+
+
+def test_a_launch_preparation_that_fails_refuses_the_launch_naming_it(
+    client, monkeypatch, tmp_path, opened_project,
+):
+    """A row whose preparation step exits non-zero spawns nothing and records nothing."""
+    def prepare(executable: str, project: Path | None) -> list[str]:
+        return [pty_host.run_to_completion([executable, "fail", "tcip"], "the fake step")]
+
+    row = dataclasses.replace(pty_host.PROVIDERS[0], executable=str(_fake_executable(
+        tmp_path / "bin")), prepare=prepare)
+    monkeypatch.setattr(pty_host, "PROVIDERS", (row,))
+    monkeypatch.delenv("TCIP_TERMINAL_CMD")
+
+    resp = client.post("/api/terminal/sessions", json={**LAUNCH, "provider": row.id})
+
+    assert resp.status_code == 503
+    assert "launch preparation failed: the fake step exited 3" in resp.json()["detail"]
+    assert "FAKE_PREPARATION_FAILED" in resp.json()["detail"]
+    assert terminal_routes._SESSIONS == {}
+    assert audit_rows(opened_project, "agent_terminal_started") == []
+
+
+def test_allowing_the_tcip_tools_keeps_the_rest_of_the_settings_and_is_idempotent(tmp_path):
+    from tcip_mcp.server import list_registered_tools
+
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({
+        "model": "kept", "permissions": {"allow": ["command(git log)"], "deny": ["x"]}}),
+        encoding="utf-8")
+
+    first = pty_host.allow_tcip_tools(settings)
+    second = pty_host.allow_tcip_tools(settings)
+
+    names = list_registered_tools()
+    assert first == f"allowed {len(names)} tcip tools in {settings}"
+    assert second == f"allowed 0 tcip tools in {settings}"
+    body = json.loads(settings.read_text(encoding="utf-8"))
+    assert body["model"] == "kept"
+    assert body["permissions"]["deny"] == ["x"]
+    assert body["permissions"]["allow"] == [
+        "command(git log)", *(f"mcp(tcip/{name})" for name in names)]
+
+    settings.write_text("[]", encoding="utf-8")
+    with pytest.raises(pty_host.PreparationFailedError, match="does not hold a JSON object"):
+        pty_host.allow_tcip_tools(settings)
+
+
+def test_the_written_mcp_configuration_is_the_one_server_the_launch_states(opened_project):
+    from tcip_web.state import store
+
+    server = pty_host.mcp_server(store.project_root)
+    assert server.args == ("-m", "tcip_mcp", "--project", store.project_root.as_posix())
+
+    (config,) = pty_host.render_argv([pty_host.MCP_CONFIG_ARG], store.project_root)
+
+    written = json.loads(Path(config).read_text(encoding="utf-8"))["mcpServers"]["tcip"]
+    assert (written["command"], written["args"]) == (server.command, list(server.args))
 
 
 _RITUAL_ECHO = "echo:[TCIP session-start ritual]"
@@ -260,6 +338,37 @@ def test_the_ritual_then_a_submitted_request_reach_the_agent_once_it_turns_paste
     text = _wait_for(terminal_routes._SESSIONS[sid], "echo:first request")
     assert _echoes(text) == [_RITUAL_ECHO, "echo:first request"]
     assert "EARLY_INPUT" not in text
+
+    client.post(f"/api/terminal/sessions/{sid}/submit", json={"text": "second request"})
+    text = _wait_for(terminal_routes._SESSIONS[sid], "echo:second request")
+    assert _echoes(text) == [_RITUAL_ECHO, "echo:first request", "echo:second request"]
+
+
+def test_the_ritual_and_the_requests_staged_before_paste_is_on_go_as_one_paste():
+    """The ritual and every request queued by the time the agent turns bracketed paste on are
+    written as one paste; a request submitted afterwards is its own paste."""
+    writes: list[str] = []
+
+    class _Pty:
+        def isalive(self) -> bool:
+            return True
+
+        def write(self, data: str) -> None:
+            writes.append(data)
+
+    session = terminal_routes.TerminalSession("term_test")
+    session._pty = _Pty()
+    session._launch.ritual = "the ritual"
+    session.submit("first")
+    session.submit("second")
+    assert writes == []
+
+    session._on_output("\x1b[?2004h")
+    assert writes == [pty_host.paste("the ritual\n\nfirst\n\nsecond")]
+
+    session.submit("later")
+    assert writes[1:] == [pty_host.paste("later")]
+    assert pty_host.paste("a\nb\r\nc") == "\x1b[200~a\rb\rc\x1b[201~\r"
 
 
 def test_a_restart_delivers_its_own_ritual_then_the_request_submitted_during_it(

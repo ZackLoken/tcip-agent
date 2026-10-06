@@ -30,10 +30,18 @@ Use the `frontend-design` skill for IA/visual work.
 
 ## The in-app agent terminal launches a provider row
 
-`terminal.py` holds the provider table (`PROVIDERS`); each row's definition there is its launch.
-Session create and restart name a row by its exact id; the status route lists every row with the
-reason it cannot launch, if any. A row is added only after its harness's real flags are read from
-the installed CLI and one live smoke (`tools/smoke_terminal_e2e.py <id>`) passes.
+`terminal.py` holds the provider table (`PROVIDERS`); each row's definition there is its launch:
+its executable, its arguments, and the preparation the launch runs first when the harness takes
+its MCP server or its tool approvals only through its own configuration (the Antigravity row
+registers the server through `agy mcp add` and allows every tcip tool in agy's settings file,
+both writes to the breeder's own agy configuration, recorded on the launch). The MCP server a
+launch hands its harness has one producer, `mcp_server`, written as the JSON configuration file
+Claude's row passes and registered through `agy mcp add` for Antigravity's. The ritual is pasted
+together with every request staged by the time the harness takes input, as one message, so a
+harness that starts a turn on the ritual still reads them. Session create and restart name a row
+by its exact id; the status route lists every row with the reason it cannot launch, if any, and
+the rail lets the breeder pick one. A row is added only after its harness's real flags are read
+from the installed CLI and one live smoke (`tools/smoke_terminal_e2e.py <id>`) passes.
 
 Claude's row passes `CLAUDE_SETTINGS`: an explicit deny list over platform internals plus a narrow
 allowlist, which Claude Code's own permission system enforces, its academic WebFetch grants
@@ -45,8 +53,9 @@ therefore widens the breeder lane too. Don't extend or edit that file without ca
 explicitly.
 
 Each launch records what it ran: create and restart answer a `TerminalLaunch` (the provider id,
-the executable and the version it declares, never probed on a `TCIP_TERMINAL_CMD` override, and
-the session-start ritual `session_ritual` builds for the open project), with one
+the executable and the version it declares, never probed on a `TCIP_TERMINAL_CMD` override, the
+argv run before the launch, and the session-start ritual `session_ritual` builds for the open
+project), with one
 `agent_terminal_started` line in the open project's audit log per launch (none when no project is
 open). The rail prints the ritual; the session delivers it, then the requests the rail submits,
 to the agent under the condition `Provider` states. Which agent harness
