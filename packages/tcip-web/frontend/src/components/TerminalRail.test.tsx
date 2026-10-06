@@ -89,6 +89,7 @@ const LAUNCH = { session_id: "t1", existing: false, launched: LAUNCHED, ritual: 
 
 afterEach(cleanup);
 beforeEach(() => {
+  localStorage.clear();
   termInstances.length = 0;
   MockWebSocket.instances.length = 0;
   useStore.setState({ pendingTerminalMessages: [] });
@@ -200,6 +201,72 @@ describe("TerminalRail", () => {
     render(<TerminalRail />);
     await screen.findByTestId("terminal-host");
     expect(screen.getByLabelText("Resize agent terminal")).toBeInTheDocument();
+  });
+
+  describe("the harness picker", () => {
+    const SECOND = { id: "other", name: "Another harness", unavailable_reason: null };
+    const ABSENT = {
+      id: "absent",
+      name: "An absent harness",
+      unavailable_reason: "An absent harness is not available: no `a` executable is on PATH.",
+    };
+
+    it("lists every row, an unavailable one disabled with its reason", async () => {
+      vi.mocked(terminalApi.status).mockResolvedValue({ providers: [PROVIDER, SECOND, ABSENT] });
+      render(<TerminalRail />);
+      const picker = (await screen.findByLabelText("Agent harness")) as HTMLSelectElement;
+      const options = Array.from(picker.options);
+      expect(options.map((o) => [o.value, o.disabled])).toEqual([
+        ["harness", false],
+        ["other", false],
+        ["absent", true],
+      ]);
+      expect(options[2].title).toBe(ABSENT.unavailable_reason);
+      expect(picker.value).toBe("harness");
+    });
+
+    it("choosing another row restarts the live agent on it and remembers the choice", async () => {
+      useStore.setState({ user: "jordan" });
+      vi.mocked(terminalApi.status).mockResolvedValue({ providers: [PROVIDER, SECOND] });
+      render(<TerminalRail />);
+      await waitFor(() => expect(terminalApi.createSession).toHaveBeenCalledTimes(1));
+      fireEvent.change(await screen.findByLabelText("Agent harness"), {
+        target: { value: "other" },
+      });
+      await waitFor(() =>
+        expect(terminalApi.restart).toHaveBeenCalledWith("t1", {
+          provider: "other",
+          rows: 30,
+          cols: 100,
+          user: "jordan",
+        }),
+      );
+      expect(terminalApi.createSession).toHaveBeenCalledTimes(1);
+      expect(localStorage.getItem("tcip.terminal_provider")).toBe("other");
+    });
+
+    it("launches the remembered row when the table still lists it", async () => {
+      localStorage.setItem("tcip.terminal_provider", "other");
+      vi.mocked(terminalApi.status).mockResolvedValue({ providers: [PROVIDER, SECOND] });
+      render(<TerminalRail />);
+      await waitFor(() =>
+        expect(terminalApi.createSession).toHaveBeenCalledWith(
+          expect.objectContaining({ provider: "other" }),
+        ),
+      );
+    });
+
+    it("launches the first row that can when the remembered one cannot", async () => {
+      localStorage.setItem("tcip.terminal_provider", "absent");
+      vi.mocked(terminalApi.status).mockResolvedValue({ providers: [ABSENT, SECOND] });
+      render(<TerminalRail />);
+      await waitFor(() =>
+        expect(terminalApi.createSession).toHaveBeenCalledWith(
+          expect.objectContaining({ provider: "other" }),
+        ),
+      );
+      expect(screen.queryByText(/is not available/)).not.toBeInTheDocument();
+    });
   });
 
   it("restart calls the API with the terminal's dimensions and resets the emulator", async () => {

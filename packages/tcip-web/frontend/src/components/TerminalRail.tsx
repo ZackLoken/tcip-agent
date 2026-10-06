@@ -15,7 +15,11 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 
 import { terminalApi, terminalWsUrl } from "@/api/terminal";
-import type { TerminalInputFrame, TerminalResizeFrame } from "@/api/types.generated";
+import type {
+  ProviderStatus,
+  TerminalInputFrame,
+  TerminalResizeFrame,
+} from "@/api/types.generated";
 import { createReconnectingSocket } from "@/lib/reconnectingSocket";
 import { useStore } from "@/store";
 
@@ -24,6 +28,25 @@ type TerminalSendFrame = TerminalInputFrame | TerminalResizeFrame;
 const MIN_WIDTH = 320;
 const DEFAULT_WIDTH = 480;
 const WIDTH_KEY = "tcip.terminal_width";
+const PROVIDER_KEY = "tcip.terminal_provider";
+
+/** The provider table as the backend lists it, or the reason it could not be asked. */
+type ProviderTable = { rows: ProviderStatus[]; reason: null } | { rows: null; reason: string };
+
+/** The row the rail launches: the remembered one if the table lists it and it can launch,
+ * else the first row that can launch, else the first row. */
+function chooseRow(rows: ProviderStatus[], remembered: string | null): ProviderStatus | null {
+  const launchable = rows.filter((row) => row.unavailable_reason === null);
+  return launchable.find((row) => row.id === remembered) ?? launchable[0] ?? rows[0] ?? null;
+}
+
+function rememberedProvider(): string | null {
+  try {
+    return localStorage.getItem(PROVIDER_KEY);
+  } catch {
+    return null;
+  }
+}
 
 function clampWidth(px: number): number {
   const max = Math.max(MIN_WIDTH, Math.round(window.innerWidth * 0.7));
@@ -64,10 +87,18 @@ const FIELD_STATION_THEME = {
 export function TerminalRail() {
   const open = useStore((s) => s.terminalOpen);
   const setOpen = useStore((s) => s.setTerminalOpen);
-  // The provider row the rail launches (the table's first row) and why it cannot launch; a
-  // backend that could not be asked leaves no row and its own reason.
-  const [status, setStatus] = useState<{ provider?: string; reason: string | null } | null>(null);
-  const available = status?.reason === null;
+  // The provider table and the row the breeder chose from it; the chosen row's own reason says
+  // why it cannot launch, and a backend that could not be asked leaves no table and its reason.
+  const [table, setTable] = useState<ProviderTable | null>(null);
+  const [selected, setSelected] = useState<string | null>(rememberedProvider);
+  const row = table?.rows ? chooseRow(table.rows, selected) : null;
+  const reason = table === null ? null : (table.reason ?? row?.unavailable_reason ?? null);
+  const available = table !== null && reason === null && row !== null;
+  // The row the live session was launched on; a change of choice restarts onto the new row
+  // rather than tearing the terminal down, so the lifecycle effect reads it through a ref.
+  const providerRef = useRef<string | null>(null);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
   const [error, setError] = useState<string | null>(null);
   // Live PTY link state, surfaced as a header dot (green = attached, amber = (re)connecting).
   const [conn, setConn] = useState<"connecting" | "open" | "reconnecting">("connecting");
@@ -135,25 +166,26 @@ export function TerminalRail() {
   }
 
   useEffect(() => {
-    if (!open || status !== null) return;
+    if (!open || table !== null) return;
     terminalApi
       .status()
-      .then(({ providers: [row] }) =>
-        setStatus({ provider: row.id, reason: row.unavailable_reason }),
-      )
+      .then(({ providers }) => setTable({ rows: providers, reason: null }))
       .catch(() =>
         // Backend unreachable is not a missing harness; say so, and keep Retry viable.
-        setStatus({
+        setTable({
+          rows: null,
           reason: "Couldn't reach the TCIP backend. Is it running? Retry once it's up.",
         }),
       );
-  }, [open, status]);
+  }, [open, table]);
 
   // Terminal lifecycle: build xterm, attach the PTY WebSocket, wire input/resize. Closing the
   // rail drops the socket; the server session stays alive and reopening replays the scrollback.
   useEffect(() => {
-    const provider = status?.provider;
-    if (!open || status?.reason !== null || !provider || !hostRef.current) return;
+    if (!open || !available || !table.rows || !hostRef.current) return;
+    providerRef.current ??= chooseRow(table.rows, selectedRef.current)?.id ?? null;
+    const provider = providerRef.current;
+    if (provider === null) return;
     setConn("connecting");
 
     const term = new Terminal({
@@ -324,25 +356,27 @@ export function TerminalRail() {
       term.dispose();
       termRef.current = null;
     };
-  }, [open, status, submitStaged]);
+  }, [open, available, table, submitStaged]);
 
   useEffect(() => {
     if (pendingMessages.length) void submitStaged();
   }, [pendingMessages, submitStaged]);
 
-  async function restart() {
+  /** End the live agent and launch `provider` in its place in the same session. */
+  async function restart(provider: string) {
     const id = sessionRef.current;
     const term = termRef.current;
-    if (!id || !term || !status?.provider) return;
+    if (!id || !term) return;
     restartingRef.current = true;
     term.reset(); // the replacement process paints a fresh screen
     try {
       const restarted = await terminalApi.restart(id, {
-        provider: status.provider,
+        provider,
         rows: term.rows,
         cols: term.cols,
         user: useStore.getState().user,
       });
+      providerRef.current = provider;
       setRitual(restarted.ritual);
     } catch (e) {
       setError(String(e));
@@ -350,6 +384,18 @@ export function TerminalRail() {
       restartingRef.current = false;
       void submitStaged();
     }
+  }
+
+  /** Remember the chosen row and, while an agent is live, restart onto it. */
+  function choose(provider: string) {
+    setSelected(provider);
+    try {
+      localStorage.setItem(PROVIDER_KEY, provider);
+    } catch {
+      /* the choice just won't persist */
+    }
+    const chosen = table?.rows?.find((r) => r.id === provider);
+    if (sessionRef.current && chosen?.unavailable_reason === null) void restart(provider);
   }
 
   if (!open) return null;
@@ -372,6 +418,26 @@ export function TerminalRail() {
       <div className="h-9 shrink-0 flex items-center justify-between px-3 border-b border-tcip-border bg-tcip-panel">
         <div className="flex items-center gap-2">
           <span className="tcip-eyebrow">TCIP Agent</span>
+          {table?.rows && (
+            <select
+              aria-label="Agent harness"
+              title="The agent harness this terminal runs; changing it restarts the agent"
+              value={row?.id ?? ""}
+              onChange={(e) => choose(e.target.value)}
+              className="h-6 max-w-[11rem] rounded border border-tcip-border bg-tcip-panel px-1 text-[11px] text-tcip-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
+            >
+              {table.rows.map((r) => (
+                <option
+                  key={r.id}
+                  value={r.id}
+                  disabled={r.unavailable_reason !== null}
+                  title={r.unavailable_reason ?? undefined}
+                >
+                  {r.name}
+                </option>
+              ))}
+            </select>
+          )}
           {available && (
             <span
               className={`inline-block h-1.5 w-1.5 rounded-full ${
@@ -390,7 +456,7 @@ export function TerminalRail() {
         </div>
         <div className="flex items-center gap-1">
           <button
-            onClick={restart}
+            onClick={() => void restart(providerRef.current ?? row?.id ?? "")}
             title="Restart the agent (ends its current conversation)"
             aria-label="Restart the agent"
             className="grid h-6 w-6 place-items-center rounded text-tcip-muted transition-colors hover:bg-tcip-hover hover:text-tcip-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
@@ -424,10 +490,10 @@ export function TerminalRail() {
         </div>
       </div>
 
-      {status && status.reason !== null ? (
+      {table !== null && reason !== null ? (
         <div className="p-4 flex flex-col gap-3">
-          <p className="text-[12px] text-tcip-muted">{status.reason}</p>
-          <button className="tcip-btn self-start" onClick={() => setStatus(null)}>
+          <p className="text-[12px] text-tcip-muted">{reason}</p>
+          <button className="tcip-btn self-start" onClick={() => setTable(null)}>
             Retry
           </button>
         </div>
