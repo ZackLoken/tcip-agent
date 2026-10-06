@@ -4,13 +4,14 @@ import { subjectColor } from "@/api/subjects";
 import {
   authorshipLabel,
   dashFor,
+  FLAG_MARK,
   legendRows,
   lineStyleOf,
+  MATCH_COLORS,
+  MATCH_TYPES,
+  MATCH_WORDS,
   outlineColor,
   proposalLabel,
-  REVIEW_STATUSES,
-  STATUS_COLORS,
-  STATUS_WORDS,
   strokeWidths,
 } from "@/lib/symbology";
 
@@ -28,16 +29,17 @@ describe("line style says whose shape it is", () => {
   });
 });
 
-describe("outline color says status while reviewing and subject otherwise", () => {
-  it("answers the status color for a status and the subject color for none", () => {
-    for (const status of REVIEW_STATUSES) {
-      expect(outlineColor("fruit", status)).toBe(STATUS_COLORS[status]);
+describe("outline color says match type while reviewing and subject otherwise", () => {
+  it("answers the match color for a match type and the subject color for none", () => {
+    for (const match of MATCH_TYPES) {
+      expect(outlineColor("fruit", match)).toBe(MATCH_COLORS[match]);
     }
     expect(outlineColor("fruit", null)).toBe(subjectColor("fruit"));
   });
 
-  it("the three status colors are distinct from each other", () => {
-    expect(new Set(Object.values(STATUS_COLORS)).size).toBe(REVIEW_STATUSES.length);
+  it("the match colors and the flag mark are distinct from each other", () => {
+    const colors = [...Object.values(MATCH_COLORS), FLAG_MARK.color];
+    expect(new Set(colors).size).toBe(colors.length);
   });
 });
 
@@ -77,18 +79,23 @@ describe("the legend is drawn from the constants", () => {
       ["fruit", subjectColor("fruit"), "fruit"],
       ["leaf", subjectColor("leaf"), "leaf"],
     ]);
-    expect(rows.slice(2).map((r) => [r.style, !!r.halo])).toEqual([
-      ["solid", false],
-      ["dotted", false],
-      ["solid", true],
+    expect(rows.slice(2).map((r) => [r.style, !!r.halo, r.color])).toEqual([
+      ["solid", false, "currentColor"],
+      ["dotted", false, "currentColor"],
+      ["solid", true, "currentColor"],
+      ["solid", false, FLAG_MARK.color],
     ]);
   });
 
-  it("lists every review status in its color while reviewing, naming no subject", () => {
+  it("lists every match type in its color while reviewing, naming no subject", () => {
     const rows = legendRows(["fruit"], true);
-    expect(rows.slice(0, REVIEW_STATUSES.length).map((r) => [r.text, r.color])).toEqual(
-      REVIEW_STATUSES.map((s) => [STATUS_WORDS[s], STATUS_COLORS[s]]),
+    expect(rows.slice(0, MATCH_TYPES.length).map((r) => [r.text, r.color])).toEqual(
+      MATCH_TYPES.map((m) => [MATCH_WORDS[m], MATCH_COLORS[m]]),
     );
     expect(rows.every((r) => r.subject === undefined)).toBe(true);
+  });
+
+  it("names each match type by what each side holds, never by a verdict on the labels", () => {
+    expect(Object.values(MATCH_WORDS)).toEqual(["Matched", "Proposal only", "Annotation only"]);
   });
 });

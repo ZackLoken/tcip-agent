@@ -10,6 +10,7 @@ import type { ImageEventPayload } from "@/api/types.generated";
 import { AnnotateLegend } from "@/components/annotate/AnnotateLegend";
 import { AnnotationShapes } from "@/components/annotate/AnnotationShapes";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
+import { FlagMarks } from "@/components/annotate/FlagMarks";
 import { InProgressPolygon } from "@/components/annotate/InProgressPolygon";
 import { ProposalShapes } from "@/components/annotate/ProposalShapes";
 import { ReviewStrip } from "@/components/annotate/ReviewStrip";
@@ -29,16 +30,20 @@ import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
 import type { LoadedImage } from "@/lib/imageLoader";
 import { currentImage } from "@/lib/paths";
 import {
+  flagPlaces,
+  flagRequest,
+  imageFlags,
   keptItems,
+  matchTypes,
   nearestNeighborOrder,
   reviewItems,
-  reviewStatuses,
   sameItem,
   scopedOrder,
+  shownProposals,
   stepTarget,
   type ItemFilters,
   type ReviewItem,
-  type StatusScope,
+  type StepScope,
 } from "@/lib/reviewItems";
 import { NO_SUBJECT_DRAFT_COLOR, POINT_HIT_CANVAS, strokeWidths } from "@/lib/symbology";
 import { fitView, zoomToRect } from "@/lib/viewGeometry";
@@ -76,7 +81,7 @@ import {
 /** The gestures a save adjudicates beside the canvas content (one save door, its own fields). */
 type Gestures = Pick<
   SaveLabelsBody,
-  "bucket" | "accept" | "reject" | "complete" | "rect" | "proposals_hidden"
+  "bucket" | "accept" | "reject" | "complete" | "rect" | "proposals_hidden" | "flag" | "resolve"
 >;
 
 const SNAP_RADIUS_CANVAS = 15;
@@ -272,40 +277,67 @@ export function AnnotateTab() {
     bucket: string;
     value: number | null;
   } | null>(null);
-  const [shapeFilter, setShapeFilter] = useState<ItemFilters["shape"]>("all");
-  const [scope, setScope] = useState<StatusScope>("all");
+  const [matchFilter, setMatchFilter] = useState<ItemFilters["match"]>("all");
+  const [scope, setScope] = useState<StepScope>("all");
   const filters: ItemFilters = {
     confidence:
       confidenceEntry?.bucket === bucket ? confidenceEntry.value : (operatingPoint?.conf ?? null),
-    shape: shapeFilter,
+    match: reviewing ? matchFilter : "all",
   };
   function setFilters(next: ItemFilters) {
-    setShapeFilter(next.shape);
+    setMatchFilter(next.match);
     if (bucket) setConfidenceEntry({ bucket, value: next.confidence });
   }
-  const statuses = useMemo(
-    () => reviewStatuses(canvas, proposals, reviewing),
+  const matches = useMemo(
+    () => matchTypes(canvas, proposals, reviewing),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [canvas.boxes, canvas.polygons, canvas.points, proposals, reviewing],
   );
+  // The items are the selected tool's geometry only: a review steps boxes, polygons or points.
   const items = useMemo(
-    () => reviewItems(canvas, proposals, reviewing),
+    () =>
+      reviewItems({
+        canvas,
+        proposals,
+        reviewing,
+        mode,
+        flags: canvas.flags,
+        bucket: bucket ?? null,
+      }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canvas.boxes, canvas.polygons, canvas.points, proposals, reviewing],
+    [
+      canvas.boxes,
+      canvas.polygons,
+      canvas.points,
+      canvas.flags,
+      proposals,
+      reviewing,
+      mode,
+      bucket,
+    ],
   );
   const kept = useMemo(
     () => keptItems(items, filters),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [items, filters.confidence, filters.shape],
+    [items, filters.confidence, filters.match],
   );
   const order = useMemo(() => scopedOrder(nearestNeighborOrder(kept), scope), [kept, scope]);
-  const shownProposals = useMemo(() => {
-    const shown = new Set(kept.filter((i) => i.kind === "proposal").map((i) => i.ref));
-    return proposals.filter((p) => shown.has(p.index));
-  }, [kept, proposals]);
+  const drawnProposals = useMemo(
+    () => shownProposals(proposals, filters, mode),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [proposals, filters.confidence, filters.match, mode],
+  );
 
   const focusedProposal = useStore((s) => s.annotateUi.focusedProposal);
   const [selectedProposal, setSelectedProposal] = useState<number | null>(null);
+  // Focus belongs to the selected tool: switching tools drops it.
+  useEffect(() => {
+    setSelectedBoxIdx(null);
+    setSelectedProposal(null);
+    selectPolygon(null);
+    selectPoint(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
   // One focused item at a time: focusing a box or a proposal drops every other selection, and
   // a polygon or point selected on the canvas drops the box and the proposal.
   function selectBox(idx: number | null) {
@@ -335,18 +367,29 @@ export function AnnotateTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusedProposal, currentImageName]);
   const focused: ReviewItem | null = useMemo(() => {
-    const find = (kind: ReviewItem["kind"], shape: ReviewItem["shape"] | null, ref: number) =>
-      items.find(
-        (i) => i.kind === kind && (shape === null || i.shape === shape) && i.ref === ref,
-      ) ?? null;
-    if (selectedProposal !== null) return find("proposal", null, selectedProposal);
-    if (selectedBoxIdx !== null) return find("annotation", "box", selectedBoxIdx);
-    if (canvas.selectedPolygonIdx !== null)
-      return find("annotation", "polygon", canvas.selectedPolygonIdx);
-    if (canvas.selectedPointIdx !== null)
-      return find("annotation", "point", canvas.selectedPointIdx);
-    return null;
-  }, [items, selectedProposal, selectedBoxIdx, canvas.selectedPolygonIdx, canvas.selectedPointIdx]);
+    const find = (kind: ReviewItem["kind"], ref: number | null) =>
+      (ref === null ? undefined : items.find((i) => i.kind === kind && i.ref === ref)) ?? null;
+    // A proposal pairing with an annotation is that annotation's item, never one of its own.
+    const paired = proposals.find((p) => p.index === selectedProposal)?.paired ?? null;
+    return (
+      find("proposal", selectedProposal) ??
+      items.find((i) => i.kind === "annotation" && paired !== null && i.index === paired) ??
+      find(
+        "annotation",
+        { box: selectedBoxIdx, polygon: canvas.selectedPolygonIdx, point: canvas.selectedPointIdx }[
+          mode
+        ],
+      )
+    );
+  }, [
+    items,
+    proposals,
+    mode,
+    selectedProposal,
+    selectedBoxIdx,
+    canvas.selectedPolygonIdx,
+    canvas.selectedPointIdx,
+  ]);
 
   /** Focus one item: select it, make its subject active and zoom the view to it, padded by its
    *  own extent (a point by a fortieth of the image's longer side, since it has none). */
@@ -379,38 +422,53 @@ export function AnnotateTab() {
   }
 
   const position = order.findIndex((item) => sameItem(item, focused)) + 1;
-  const undecidedKept = kept.filter((item) => item.status === "undecided");
+  const unreviewedKept = scopedOrder(kept, "unreviewed");
 
+  /** The undecided proposal an item stands for: itself, or the one pairing with it. */
+  const proposalOf = (item: ReviewItem | null | undefined) =>
+    item?.kind === "proposal" ? item.ref : item?.pairing;
+
+  /** Accept or reject the focused item's proposal, or the first unreviewed item's when the
+   *  focused item has none. */
   function decide(action: "accept" | "reject") {
-    const target =
-      focused?.kind === "proposal" ? focused : undecidedKept.find((i) => i.kind === "proposal");
-    if (!target || !bucket) return;
-    void save({ gestures: { bucket, [action]: [target.ref] } });
+    const target = proposalOf(focused) ?? proposalOf(unreviewedKept[0]);
+    if (target === undefined || !bucket) return;
+    void save({ gestures: { bucket, [action]: [target] } });
   }
 
-  /** Edit the focused item: an annotation opens its tool mode; a proposal pairing with an
-   *  annotation focuses that annotation; an unpaired proposal is accepted first, and the
-   *  annotation the save appended (the document's last) is then focused. */
+  /** Edit the focused proposal: it is accepted, and the annotation the save appended (the
+   *  document's last) is then focused in its place. */
   async function edit() {
-    if (!focused) return;
-    if (focused.kind === "annotation") {
-      setMode(focused.shape);
-      return;
-    }
-    const proposal = proposals.find((p) => p.index === focused.ref);
-    if (!proposal || !bucket) return;
-    if (proposal.paired === null) await save({ gestures: { bucket, accept: [proposal.index] } });
-    const saved = reviewItems(useStore.getState().canvas, [], false);
-    const wanted =
-      proposal.paired !== null
-        ? saved.find((i) => i.index === proposal.paired)
-        : saved.reduce<ReviewItem | undefined>(
-            (last, i) => ((i.index ?? -1) > (last?.index ?? -1) ? i : last),
-            undefined,
-          );
-    if (!wanted) return;
-    focusItem(wanted);
-    setMode(wanted.shape);
+    if (focused?.kind !== "proposal" || !bucket) return;
+    await save({ gestures: { bucket, accept: [focused.ref] } });
+    const saved = reviewItems({
+      canvas: useStore.getState().canvas,
+      proposals: [],
+      reviewing: false,
+      mode,
+      flags: [],
+      bucket: null,
+    });
+    const last = saved.reduce<ReviewItem | undefined>(
+      (best, i) => ((i.index ?? -1) > (best?.index ?? -1) ? i : best),
+      undefined,
+    );
+    if (last) focusItem(last);
+  }
+
+  // ── Flags: a comment on the focused item, or on the image when nothing is focused ──
+  const [flagsOpen, setFlagsOpen] = useState(false);
+  const openFlags = canvas.flags.filter((f) => f.resolved_by === null);
+  const flagMarks = useMemo(
+    () => flagPlaces(openFlags, drawnProposals, bucket ?? null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [canvas.flags, drawnProposals, bucket],
+  );
+  function raiseFlag(text: string) {
+    void save({ gestures: { flag: [flagRequest(text, focused, bucket ?? null)] } });
+  }
+  function resolveFlag(id: string, reply: string) {
+    void save({ gestures: { resolve: { [id]: reply } } });
   }
 
   async function markComplete(next: boolean, rect?: [number, number, number, number]) {
@@ -500,7 +558,8 @@ export function AnnotateTab() {
         currentPolygon: canvas.currentPolygon,
         drawingBox: drawing,
         focused,
-        statuses,
+        matches,
+        flagMarks,
         mode,
         activeSubject: activeSubject ?? "",
         visible: annotateUi.visible,
@@ -509,7 +568,7 @@ export function AnnotateTab() {
           ? { point: cutStart.point, color: subjectColor(cutStart.polygon.subject) }
           : null,
         cursor,
-        proposals: shownProposals,
+        proposals: drawnProposals,
       }),
     };
   };
@@ -542,8 +601,9 @@ export function AnnotateTab() {
     annotateUi.draggingVertex,
     drawing,
     cutStart,
-    shownProposals,
-    statuses,
+    drawnProposals,
+    matches,
+    canvas.flags,
     focused,
   ]);
   useEffect(() => {
@@ -636,7 +696,7 @@ export function AnnotateTab() {
     setIoError(null);
     setConflict(false);
     if (!gestures) {
-      markClean(result.completion);
+      markClean(result.completion, result.flags);
       return;
     }
     // An adjudication writes server-side content (an accepted proposal), so the document reloads.
@@ -729,6 +789,7 @@ export function AnnotateTab() {
           points: [],
           imageAnnotations: [],
           completion: {},
+          flags: [],
         });
         loadedKeyRef.current = key;
         loadedPathsRef.current = null;
@@ -813,9 +874,10 @@ export function AnnotateTab() {
     { keys: K.redoAlias.keys, action: () => redo() },
     { keys: K.save.keys, action: () => void save() },
     { keys: K.mode.keys, action: () => setMode(nextMode(mode)) },
-    { keys: K.accept.keys, action: () => decide("accept"), when: () => undecidedKept.length > 0 },
-    { keys: K.reject.keys, action: () => decide("reject"), when: () => undecidedKept.length > 0 },
-    { keys: K.edit.keys, action: () => void edit(), when: () => focused !== null },
+    { keys: K.accept.keys, action: () => decide("accept"), when: () => unreviewedKept.length > 0 },
+    { keys: K.reject.keys, action: () => decide("reject"), when: () => unreviewedKept.length > 0 },
+    { keys: K.edit.keys, action: () => void edit(), when: () => focused?.kind === "proposal" },
+    { keys: K.flag.keys, action: () => setFlagsOpen((open) => !open) },
     { keys: K.nextItem.keys, action: () => stepItem(1), when: () => order.length > 0 },
     { keys: K.previousItem.keys, action: () => stepItem(-1), when: () => order.length > 0 },
     {
@@ -1509,7 +1571,16 @@ export function AnnotateTab() {
         onFilters={setFilters}
         scope={scope}
         onScope={setScope}
-        counts={{ items: kept.length, undecided: undecidedKept.length }}
+        counts={{
+          items: kept.length,
+          unreviewed: unreviewedKept.length,
+          flags: openFlags.length,
+        }}
+        flags={focused ? focused.flags : imageFlags(canvas.flags)}
+        flagsOpen={flagsOpen}
+        onFlagsOpen={setFlagsOpen}
+        onFlag={raiseFlag}
+        onResolve={resolveFlag}
         focused={focused}
         position={position}
         total={order.length}
@@ -1584,7 +1655,7 @@ export function AnnotateTab() {
           }
         >
           {renderLabels && (
-            <ProposalShapes proposals={shownProposals} focused={focused} widths={widths} />
+            <ProposalShapes proposals={drawnProposals} focused={focused} widths={widths} />
           )}
           {/* Committed shapes: memoized, cursor-independent (see AnnotationShapes) */}
           <AnnotationShapes
@@ -1593,13 +1664,14 @@ export function AnnotateTab() {
             points={canvas.points}
             mode={mode}
             activeSubject={activeSubject}
-            statuses={statuses}
+            matches={matches}
             focused={focused}
             hoveredIdx={hoveredIdx}
             draggingIdx={draggingIdx}
             renderLabels={renderLabels}
             widths={widths}
           />
+          {renderLabels && <FlagMarks places={flagMarks} size={widths.labelSize} />}
         </CanvasStage>
 
         {ioError && (

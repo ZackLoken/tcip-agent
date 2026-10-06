@@ -11,7 +11,7 @@ import {
   authorshipLabel,
   lineStyleOf,
   outlineColor,
-  type ReviewStatus,
+  type MatchType,
   type strokeWidths,
 } from "@/lib/symbology";
 import type { Box, Mode, PointShape, PolygonShape } from "@/store/types";
@@ -20,7 +20,7 @@ import type { Box, Mode, PointShape, PolygonShape } from "@/store/types";
  * The committed boxes, polygons and points (content layer). Memoized, and crucially, the mouse
  * cursor is not one of its props, so a mouse move (which only updates cursor-following
  * overlays) does not re-render/reconcile these hundreds to thousands of Konva nodes. It
- * re-renders only when the shapes, the focus, the active subject, the statuses or the
+ * re-renders only when the shapes, the focus, the active subject, the match types or the
  * zoom-derived sizes change.
  */
 interface AnnotationShapesProps {
@@ -29,11 +29,11 @@ interface AnnotationShapesProps {
   points: PointShape[];
   mode: Mode;
   activeSubject: string | null;
-  /** Each array's review statuses, aligned with it (`reviewStatuses`). */
-  statuses: {
-    boxes: (ReviewStatus | null)[];
-    polygons: (ReviewStatus | null)[];
-    points: (ReviewStatus | null)[];
+  /** Each array's match types, aligned with it (`matchTypes`). */
+  matches: {
+    boxes: (MatchType | null)[];
+    polygons: (MatchType | null)[];
+    points: (MatchType | null)[];
   };
   /** The one focused item; an annotation among these draws its halo, label and handles. */
   focused: ReviewItem | null;
@@ -49,7 +49,7 @@ export const AnnotationShapes = memo(function AnnotationShapes({
   points,
   mode,
   activeSubject,
-  statuses,
+  matches,
   focused,
   hoveredIdx,
   draggingIdx,
@@ -80,7 +80,7 @@ export const AnnotationShapes = memo(function AnnotationShapes({
             key={`box-${i}`}
             box={b}
             {...named(b, at)}
-            stroke={outlineColor(b.subject, statuses.boxes[i])}
+            stroke={outlineColor(b.subject, matches.boxes[i])}
             width={widths.boxStroke}
             handleR={widths.selVertR}
           />
@@ -96,7 +96,7 @@ export const AnnotationShapes = memo(function AnnotationShapes({
             key={`derived-${i}`}
             box={derivedBoxFromPolygon(p)}
             {...named(p, false)}
-            stroke={outlineColor(p.subject, statuses.polygons[i])}
+            stroke={outlineColor(p.subject, matches.polygons[i])}
             width={widths.boxStroke}
           />
         ) : null,
@@ -110,7 +110,7 @@ export const AnnotationShapes = memo(function AnnotationShapes({
             key={`poly-${i}`}
             polygon={p}
             {...named(p, at)}
-            stroke={outlineColor(p.subject, statuses.polygons[i])}
+            stroke={outlineColor(p.subject, matches.polygons[i])}
             width={widths.polyStroke}
             vertexRadius={at ? widths.selVertR : widths.vertR}
             showVertices={at || hoveredIdx === i || draggingIdx === i}
@@ -126,7 +126,7 @@ export const AnnotationShapes = memo(function AnnotationShapes({
             key={`point-${i}`}
             point={p}
             {...named(p, at)}
-            stroke={outlineColor(p.subject, statuses.points[i])}
+            stroke={outlineColor(p.subject, matches.points[i])}
             coreR={at ? widths.pointSelCoreR : widths.pointCoreR}
             tickInner={widths.pointTickInner}
             tickOuter={widths.pointTickOuter}

@@ -1,7 +1,7 @@
 /**
  * The Annotate canvas' symbology, one rule per channel, stated once for the overlays, the legend
- * and the agent's canvas mirror: line style says whose shape it is, outline color says review
- * status while proposals are shown and subject otherwise, focus is a halo under the item's own
+ * and the agent's canvas mirror: line style says whose shape it is, outline color says match
+ * type while proposals are shown and subject otherwise, focus is a halo under the item's own
  * stroke, and line widths derive from the zoom.
  */
 
@@ -20,33 +20,44 @@ export function dashFor(style: LineStyle, width: number): number[] | undefined {
   return style === "dotted" ? [width, 3 * width] : undefined;
 }
 
-/** An item's standing in the review of the shown bucket: a proposal awaiting a decision (and the
- *  annotation it pairs with), an annotation a decision confirmed, or an annotation the bucket
- *  proposes nothing for. */
-export type ReviewStatus = "undecided" | "confirmed" | "unproposed";
+/** How the labels and the shown bucket's proposals agree about one object: both hold it, only
+ *  the bucket proposes it, or only the labels hold it. The names say what is on each side and
+ *  nothing about which side is right, which is what the review decides. */
+export const MATCH_TYPES = ["matched", "proposal_only", "annotation_only"] as const;
+export type MatchType = (typeof MATCH_TYPES)[number];
 
-export const REVIEW_STATUSES: readonly ReviewStatus[] = ["undecided", "confirmed", "unproposed"];
-
-/** Status colors, set by eye against the canvas surface and apart from each other; provisional. */
-export const STATUS_COLORS: Record<ReviewStatus, string> = {
-  undecided: "#FFD54A",
-  confirmed: "#5BD17A",
-  unproposed: "#C77DFF",
+/** Match colors, set by eye against the canvas surface and apart from each other; provisional. */
+export const MATCH_COLORS: Record<MatchType, string> = {
+  matched: "#5BD17A",
+  proposal_only: "#FFD54A",
+  annotation_only: "#C77DFF",
 };
 
-export const STATUS_WORDS: Record<ReviewStatus, string> = {
-  undecided: "Awaiting a decision",
-  confirmed: "Confirmed by a decision",
-  unproposed: "Nothing proposed for it",
+export const MATCH_WORDS: Record<MatchType, string> = {
+  matched: "Matched",
+  proposal_only: "Proposal only",
+  annotation_only: "Annotation only",
+};
+
+/** What each match type holds, and the detection reading it has if the labels are complete. */
+export const MATCH_HINTS: Record<MatchType, string> = {
+  matched: "The labels and the bucket both hold it (a true positive if the labels are complete)",
+  proposal_only:
+    "The bucket proposes it and the labels do not hold it: a missed label or a false positive",
+  annotation_only:
+    "The labels hold it and the bucket does not propose it (a false negative if the label is right)",
 };
 
 /** The focus halo: a wider translucent stroke under the focused item's own; set by eye,
  *  provisional. */
 export const FOCUS_HALO = { color: "#FFFFFF", opacity: 0.55, widthFactor: 3 } as const;
 
-/** An item's outline color: its review status while proposals are shown, its subject otherwise. */
-export function outlineColor(subject: string, status: ReviewStatus | null): string {
-  return status === null ? subjectColor(subject) : STATUS_COLORS[status];
+/** The mark an open flag draws at its place; set by eye, provisional. */
+export const FLAG_MARK = { color: "#FF5C8A", glyph: "⚑" } as const;
+
+/** An item's outline color: its match type while proposals are shown, its subject otherwise. */
+export function outlineColor(subject: string, match: MatchType | null): string {
+  return match === null ? subjectColor(subject) : MATCH_COLORS[match];
 }
 
 /** The focused item's label: the subject name, with ", tool" appended for a shape a tool drew
@@ -109,14 +120,14 @@ export interface LegendRow {
   subject?: string;
 }
 
-/** The legend's rows, from the constants above: the review statuses while proposals are shown,
- *  else each subject in its color; then the line styles and the focus halo. */
+/** The legend's rows, from the constants above: the match types while proposals are shown, else
+ *  each subject in its color; then the line styles, the focus halo and the flag mark. */
 export function legendRows(subjects: string[], reviewing: boolean): LegendRow[] {
   const colors: LegendRow[] = reviewing
-    ? REVIEW_STATUSES.map((status) => ({
-        color: STATUS_COLORS[status],
+    ? MATCH_TYPES.map((match) => ({
+        color: MATCH_COLORS[match],
         style: "solid",
-        text: STATUS_WORDS[status],
+        text: MATCH_WORDS[match],
       }))
     : subjects.map((name) => ({
         color: subjectColor(name),
@@ -129,5 +140,6 @@ export function legendRows(subjects: string[], reviewing: boolean): LegendRow[] 
     { color: "currentColor", style: "solid", text: "Solid: drawn or accepted by a person" },
     { color: "currentColor", style: "dotted", text: "Dotted: drawn by a tool, not yet accepted" },
     { color: "currentColor", style: "solid", halo: true, text: "Halo: the focused item" },
+    { color: FLAG_MARK.color, style: "solid", text: `${FLAG_MARK.glyph} An open flag` },
   ];
 }

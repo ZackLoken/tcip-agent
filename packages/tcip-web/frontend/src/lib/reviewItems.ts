@@ -1,29 +1,45 @@
 /**
- * The review path over one image: the items on the canvas (its annotations and, while a
- * bucket's proposals are shown, the undecided proposals), each item's review status, the
- * filters that keep a subset, the nearest-neighbor order laid over the kept items, and the
- * status scope that steps through a subsequence of that order.
+ * The review path over one image: the items of the selected tool's geometry (its annotations
+ * and, while a bucket's proposals are shown, the undecided proposals pairing with none of them),
+ * each item's match type, whether it has been reviewed and whether it is flagged, the filters
+ * that keep a subset, the nearest-neighbor order laid over the kept items, and the scope that
+ * steps through a subsequence of that order.
  */
 
-import { ringsBbox, type Bbox } from "@/lib/polygonGeometry";
-import type { ReviewStatus } from "@/lib/symbology";
-import type { Box, Mode, PointShape, PolygonShape, Proposal } from "@/store/types";
-
-/** An item's geometry, named by the tool mode that draws and edits it. */
-export type ItemShape = Mode;
+import { pointInRings, ringsBbox, type Bbox } from "@/lib/polygonGeometry";
+import type { MatchType } from "@/lib/symbology";
+import type {
+  Box,
+  Flag,
+  FlagRequest,
+  Mode,
+  PointShape,
+  PolygonShape,
+  Proposal,
+} from "@/store/types";
 
 export interface ReviewItem {
   kind: "annotation" | "proposal";
-  shape: ItemShape;
+  /** The item's geometry, named by the tool mode that draws and edits it. */
+  shape: Mode;
   /** The index into the canvas array of its shape, or the proposal's index in its bucket. */
   ref: number;
   subject: string;
   bbox: Bbox;
   /** Null while no bucket's proposals are shown. */
-  status: ReviewStatus | null;
+  match: MatchType | null;
+  /** Whether a person has decided on it: false while a proposal of it awaits a decision, null
+   *  for an annotation no proposal pairs with, which no decision is recorded for. */
+  reviewed: boolean | null;
   score: number | null;
   /** An annotation's index in the document it was loaded from; none for one drawn since. */
   index?: number;
+  /** On a matched annotation: the index of the undecided proposal pairing with it, if any. */
+  pairing?: number;
+  /** The place a flag on this item names, inside the item. */
+  at: [number, number];
+  /** The open flags on it. */
+  flags: Flag[];
 }
 
 export interface CanvasArrays {
@@ -32,29 +48,30 @@ export interface CanvasArrays {
   points: PointShape[];
 }
 
-/** An annotation's status under the shown bucket, by the proposals pairing with its document
- *  index: confirmed when a decision accepted one, undecided while one awaits a decision, else
- *  nothing proposed. A shape drawn since the load has no index and nothing proposed. */
-export function annotationStatus(index: number | undefined, proposals: Proposal[]): ReviewStatus {
-  if (index === undefined) return "unproposed";
-  const pairing = proposals.filter((p) => p.paired === index);
-  if (pairing.some((p) => p.decision === "accepted")) return "confirmed";
-  if (pairing.some((p) => p.decision === null)) return "undecided";
-  return "unproposed";
+/** An annotation's match under the shown bucket, by the proposals pairing with its document
+ *  index. A shape drawn since the load has no index, so nothing pairs with it. */
+export function annotationMatch(index: number | undefined, proposals: Proposal[]): MatchType {
+  return index !== undefined && proposals.some((p) => p.paired === index)
+    ? "matched"
+    : "annotation_only";
 }
 
-/** Each canvas array's statuses, aligned with it; every entry null while not reviewing. */
-export function reviewStatuses(
+export function proposalMatch(p: Proposal): MatchType {
+  return p.paired !== null ? "matched" : "proposal_only";
+}
+
+/** Each canvas array's match types, aligned with it; every entry null while not reviewing. */
+export function matchTypes(
   canvas: CanvasArrays,
   proposals: Proposal[],
   reviewing: boolean,
 ): {
-  boxes: (ReviewStatus | null)[];
-  polygons: (ReviewStatus | null)[];
-  points: (ReviewStatus | null)[];
+  boxes: (MatchType | null)[];
+  polygons: (MatchType | null)[];
+  points: (MatchType | null)[];
 } {
   const of = (shape: { index?: number }) =>
-    reviewing ? annotationStatus(shape.index, proposals) : null;
+    reviewing ? annotationMatch(shape.index, proposals) : null;
   return {
     boxes: canvas.boxes.map(of),
     polygons: canvas.polygons.map(of),
@@ -62,95 +79,169 @@ export function reviewStatuses(
   };
 }
 
-export function boxBbox(b: Box): Bbox {
-  return [b.x1, b.y1, b.x2, b.y2];
+function center(bbox: Bbox): [number, number] {
+  return [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
 }
 
-function proposalItems(proposals: Proposal[]): ReviewItem[] {
-  const items: ReviewItem[] = [];
-  for (const p of proposals) {
-    if (p.decision !== null) continue;
-    const bbox: Bbox | null = p.rings?.length
-      ? ringsBbox(p.rings)
-      : p.bbox
-        ? p.bbox
-        : p.point
-          ? [p.point[0], p.point[1], p.point[0], p.point[1]]
-          : null;
-    if (!bbox) continue;
-    items.push({
-      kind: "proposal",
-      shape: p.rings?.length ? "polygon" : p.bbox ? "box" : "point",
-      ref: p.index,
-      subject: p.subject,
-      bbox,
-      status: "undecided",
-      score: p.score ?? null,
-    });
-  }
-  return items;
+function proposalGeometry(p: Proposal): { shape: Mode; bbox: Bbox } | null {
+  if (p.rings?.length) return { shape: "polygon", bbox: ringsBbox(p.rings) };
+  if (p.bbox) return { shape: "box", bbox: p.bbox };
+  if (p.point) return { shape: "point", bbox: [p.point[0], p.point[1], p.point[0], p.point[1]] };
+  return null;
 }
 
-/** Every item of the image: its boxes, polygons and points in canvas order, then, while
- *  reviewing, the shown bucket's undecided proposals. */
-export function reviewItems(
-  canvas: CanvasArrays,
-  proposals: Proposal[],
-  reviewing: boolean,
-): ReviewItem[] {
-  const statuses = reviewStatuses(canvas, proposals, reviewing);
+/** Every item of `mode`'s geometry: the annotations in canvas order, each matched one carrying
+ *  the undecided proposal pairing with it, then, while reviewing, the undecided proposals that
+ *  pair with nothing. `flags` are the image's; each item holds its open ones. */
+export function reviewItems(args: {
+  canvas: CanvasArrays;
+  proposals: Proposal[];
+  reviewing: boolean;
+  mode: Mode;
+  flags: Flag[];
+  bucket: string | null;
+}): ReviewItem[] {
+  const { canvas, proposals, reviewing, mode } = args;
+  const open = args.flags.filter((f) => f.resolved_by === null);
   const annotation = (
-    shape: ItemShape,
     ref: number,
     of: { subject: string; index?: number },
     bbox: Bbox,
-    status: ReviewStatus | null,
-  ): ReviewItem => ({
-    kind: "annotation",
-    shape,
-    ref,
-    subject: of.subject,
-    bbox,
-    status,
-    score: null,
-    index: of.index,
-  });
-  return [
-    ...canvas.boxes.map((b, i) => annotation("box", i, b, boxBbox(b), statuses.boxes[i])),
-    ...canvas.polygons.map((p, i) =>
-      annotation("polygon", i, p, ringsBbox(p.rings), statuses.polygons[i]),
-    ),
-    ...canvas.points.map((p, i) =>
-      annotation("point", i, p, [p.x, p.y, p.x, p.y], statuses.points[i]),
-    ),
-    ...(reviewing ? proposalItems(proposals) : []),
-  ];
+    at: [number, number],
+  ): ReviewItem => {
+    const match = reviewing ? annotationMatch(of.index, proposals) : null;
+    const paired = match === "matched";
+    const pairing = paired ? proposals.filter((p) => p.paired === of.index) : [];
+    return {
+      kind: "annotation",
+      shape: mode,
+      ref,
+      subject: of.subject,
+      bbox,
+      match,
+      reviewed: paired ? pairing.some((p) => p.decision !== null) : null,
+      score: null,
+      index: of.index,
+      pairing: paired ? pairing.find((p) => p.decision === null)?.index : undefined,
+      at,
+      flags: open.filter(
+        (f) =>
+          f.point !== null &&
+          f.subject === of.subject &&
+          f.point[0] >= bbox[0] &&
+          f.point[0] <= bbox[2] &&
+          f.point[1] >= bbox[1] &&
+          f.point[1] <= bbox[3],
+      ),
+    };
+  };
+  const annotations: ReviewItem[] =
+    mode === "box"
+      ? canvas.boxes.map((b, i) => {
+          const bbox: Bbox = [b.x1, b.y1, b.x2, b.y2];
+          return annotation(i, b, bbox, center(bbox));
+        })
+      : mode === "polygon"
+        ? canvas.polygons.map((p, i) => {
+            const bbox = ringsBbox(p.rings);
+            const mid = center(bbox);
+            // The bbox center of a concave shape can fall outside it; a vertex never does.
+            return annotation(i, p, bbox, pointInRings(mid, p.rings) ? mid : p.rings[0][0]);
+          })
+        : canvas.points.map((p, i) => annotation(i, p, [p.x, p.y, p.x, p.y], [p.x, p.y]));
+  if (!reviewing) return annotations;
+  const unpaired: ReviewItem[] = [];
+  for (const p of proposals) {
+    const geometry = proposalGeometry(p);
+    if (p.decision !== null || p.paired !== null || geometry?.shape !== mode) continue;
+    unpaired.push({
+      kind: "proposal",
+      shape: mode,
+      ref: p.index,
+      subject: p.subject,
+      bbox: geometry.bbox,
+      match: "proposal_only",
+      reviewed: false,
+      score: p.score ?? null,
+      at: center(geometry.bbox),
+      flags: open.filter(
+        (f) => f.proposal !== null && f.proposal[0] === args.bucket && f.proposal[1] === p.index,
+      ),
+    });
+  }
+  return [...annotations, ...unpaired];
+}
+
+/** Where each of `flags` draws its mark: at its own point, or at the center of the proposal it
+ *  names when that proposal is one of `proposals` under `bucket`; a flag on the image as a whole
+ *  has no place. */
+export function flagPlaces(
+  flags: Flag[],
+  proposals: Proposal[],
+  bucket: string | null,
+): { at: [number, number]; flag: Flag }[] {
+  const places: { at: [number, number]; flag: Flag }[] = [];
+  for (const flag of flags) {
+    if (flag.point) places.push({ at: flag.point, flag });
+    else if (flag.proposal && flag.proposal[0] === bucket) {
+      const named = proposals.find((p) => p.index === flag.proposal![1]);
+      const geometry = named ? proposalGeometry(named) : null;
+      if (geometry) places.push({ at: center(geometry.bbox), flag });
+    }
+  }
+  return places;
+}
+
+/** The open flags on the image as a whole. */
+export function imageFlags(flags: Flag[]): Flag[] {
+  return flags.filter((f) => f.resolved_by === null && f.point === null && f.proposal === null);
+}
+
+/** The flag a comment on `item` raises, or one on the image as a whole for no item. */
+export function flagRequest(
+  text: string,
+  item: ReviewItem | null,
+  bucket: string | null,
+): FlagRequest {
+  if (!item) return { text };
+  if (item.kind === "proposal" && bucket) return { text, proposal: [bucket, item.ref] };
+  return { text, point: item.at, subject: item.subject };
 }
 
 export interface ItemFilters {
   /** Proposals scoring below it are dropped; null keeps every proposal. Annotations always pass. */
   confidence: number | null;
-  shape: ItemShape | "all";
+  match: MatchType | "all";
+}
+
+function clearsFloor(score: number | null | undefined, filters: ItemFilters): boolean {
+  return filters.confidence === null || (score != null && score >= filters.confidence);
 }
 
 export function keptItems(items: ReviewItem[], filters: ItemFilters): ReviewItem[] {
-  return items.filter((item) => {
-    if (filters.shape !== "all" && item.shape !== filters.shape) return false;
-    if (item.kind === "proposal" && filters.confidence !== null) {
-      return item.score !== null && item.score >= filters.confidence;
-    }
-    return true;
-  });
+  return items.filter(
+    (item) =>
+      (filters.match === "all" || item.match === filters.match) &&
+      (item.kind !== "proposal" || clearsFloor(item.score, filters)),
+  );
 }
 
-function centroid(bbox: Bbox): [number, number] {
-  return [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
+/** The proposals the canvas draws: the undecided ones of `mode`'s geometry that clear the
+ *  confidence floor and the match filter, the ones pairing with an annotation among them. */
+export function shownProposals(proposals: Proposal[], filters: ItemFilters, mode: Mode) {
+  return proposals.filter(
+    (p) =>
+      p.decision === null &&
+      proposalGeometry(p)?.shape === mode &&
+      clearsFloor(p.score, filters) &&
+      (filters.match === "all" || proposalMatch(p) === filters.match),
+  );
 }
 
-/** The items in a greedy nearest-neighbor tour of their centroids, starting from the one nearest
+/** The items in a greedy nearest-neighbor tour of their centers, starting from the one nearest
  *  the image's top-left corner, so stepping sweeps the image without crossing it. */
 export function nearestNeighborOrder(items: ReviewItem[]): ReviewItem[] {
-  const left = items.map((item, i) => ({ item, i, c: centroid(item.bbox) }));
+  const left = items.map((item, i) => ({ item, i, c: center(item.bbox) }));
   const order: ReviewItem[] = [];
   let at: [number, number] = [0, 0];
   while (left.length) {
@@ -170,13 +261,21 @@ export function nearestNeighborOrder(items: ReviewItem[]): ReviewItem[] {
   return order;
 }
 
-/** What the stepper steps through: every kept item, or the ones awaiting a decision. */
-export const STATUS_SCOPES = ["all", "undecided"] as const;
-export type StatusScope = (typeof STATUS_SCOPES)[number];
+/** What the stepper steps through: every kept item, the unreviewed ones, or the flagged ones. */
+export const STEP_SCOPES = ["all", "unreviewed", "flagged"] as const;
+export type StepScope = (typeof STEP_SCOPES)[number];
+
+export const STEP_SCOPE_WORDS: Record<StepScope, string> = {
+  all: "every item",
+  unreviewed: "unreviewed",
+  flagged: "flagged",
+};
 
 /** The order's items the scope keeps, in the order's own sequence. */
-export function scopedOrder(order: ReviewItem[], scope: StatusScope): ReviewItem[] {
-  return scope === "all" ? order : order.filter((item) => item.status === "undecided");
+export function scopedOrder(order: ReviewItem[], scope: StepScope): ReviewItem[] {
+  if (scope === "unreviewed") return order.filter((item) => item.reviewed === false);
+  if (scope === "flagged") return order.filter((item) => item.flags.length > 0);
+  return order;
 }
 
 /** The item as the stepper names it: its subject and what it is, a proposal with its score. */

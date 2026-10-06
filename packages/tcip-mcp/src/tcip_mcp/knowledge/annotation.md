@@ -204,6 +204,18 @@ The proposals the editor serves come with the bucket's own validated operating p
 (`delivery.admitted_conf`), or the reason none is validated; the editor's confidence floor starts
 there, and the person moves it.
 
+The editor names how the labels and the bucket agree about each object without saying which side
+is right: matched (both hold it), proposal only (the bucket proposes it and the labels do not hold
+it, which is a missed label as often as a false positive) and annotation only (the labels hold it
+and the bucket does not propose it). The review decides; the names never assume the labels are
+complete.
+
+A person can flag an annotation, a proposal or the image as a whole with a comment asking for a
+second look, and anyone can resolve a flag with a reply. Flags save through the one label save
+into the image's own flags record (`tcip_annotation.flags`), are kept once resolved, and a flag on
+an annotation the save removes is resolved as removed. A flag is a note between people: it never
+changes a label, a verdict or a completion mark.
+
 ### The review channel: propose on canvas, never write GT blind
 
 The agent must never write ground truth the human hasn't seen. Stage proposals as a prediction

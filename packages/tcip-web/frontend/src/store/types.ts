@@ -119,6 +119,33 @@ export interface ImageLabels {
   imageAnnotations: Annotation[];
   // Each subject the document holds or marks, by state; a subject absent here is unannotated.
   completion: Record<string, SubjectState>;
+  // Every flag raised on the image, oldest first, resolved ones kept.
+  flags: Flag[];
+}
+
+/** One review flag as the label routes serve it (tcip_annotation.flags.Flag): a comment asking
+ *  for a second look at a `point` on an annotation of `subject`, at a `proposal` (bucket and
+ *  index), or at the image as a whole when it names neither; `resolved_by` is null while open. */
+export interface Flag {
+  id: string;
+  text: string;
+  by: string;
+  at: string;
+  point: [number, number] | null;
+  subject: string | null;
+  proposal: [string, number] | null;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  reply: string;
+  removed: boolean;
+}
+
+/** A flag a save raises (FlagPayload in annotate.py): the comment and its target. */
+export interface FlagRequest {
+  text: string;
+  point?: [number, number] | null;
+  subject?: string | null;
+  proposal?: [string, number] | null;
 }
 
 /** One proposal the chosen bucket offers for the image (GET /api/annotate/proposals): its index

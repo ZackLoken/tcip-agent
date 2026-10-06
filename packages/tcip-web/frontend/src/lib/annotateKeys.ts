@@ -9,16 +9,25 @@ export const ANNOTATE_KEYS = {
   accept: {
     keys: "a",
     label: "a",
-    desc: "Accept the focused proposal: it joins the labels, or confirms the annotation it pairs with",
+    desc: "Accept the focused item's proposal: it joins the labels, or confirms the annotation it pairs with",
   },
-  reject: { keys: "r", label: "r", desc: "Reject the focused proposal" },
+  reject: { keys: "r", label: "r", desc: "Reject the focused item's proposal" },
   edit: {
     keys: "e",
     label: "e",
-    desc: "Edit the focused item: a proposal is accepted first, then its tool mode opens",
+    desc: "Edit the focused proposal: it is accepted, then focused as an annotation to correct",
   },
-  nextItem: { keys: "n", label: "n", desc: "Focus the next item along the review path" },
-  previousItem: { keys: "p", label: "p", desc: "Focus the previous item along the review path" },
+  flag: {
+    keys: "f",
+    label: "f",
+    desc: "Flag the focused item, or the image when nothing is focused, with a comment; reply to resolve",
+  },
+  nextItem: { keys: "arrowdown", label: "↓", desc: "Focus the next item along the review path" },
+  previousItem: {
+    keys: "arrowup",
+    label: "↑",
+    desc: "Focus the previous item along the review path",
+  },
   hideProposals: {
     keys: "h",
     label: "h",
