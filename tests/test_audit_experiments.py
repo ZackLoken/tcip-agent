@@ -263,7 +263,7 @@ def test_the_same_weights_under_new_tags_change_the_entry_and_leave_one_row(tmp_
 def test_replace_raises_and_stays_committed_when_its_audit_line_fails(tmp_path, monkeypatch):
     """The transaction has already replaced the entry by the time the audit line is
     attempted, so a failed append must not be swallowed: the caller is told through
-    AuditEntryNotWritten, and the registry keeps the replace regardless."""
+    AuditEntryNotWrittenError, and the registry keeps the replace regardless."""
     import tcip_mcp.audit as audit_mod
     from tcip_mcp.model_registry import ModelRegistry
 
@@ -275,7 +275,7 @@ def test_replace_raises_and_stays_committed_when_its_audit_line_fails(tmp_path, 
 
     monkeypatch.setattr(audit_mod, "append", _refuse)
 
-    with pytest.raises(audit_mod.AuditEntryNotWritten) as caught:
+    with pytest.raises(audit_mod.AuditEntryNotWrittenError) as caught:
         reg.register_model("exp2", _ckpt(tmp_path, "a.pt", b"first"), {})
 
     assert caught.value.tool == "model_registered"

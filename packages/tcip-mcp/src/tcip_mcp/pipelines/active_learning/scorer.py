@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import torch
-import torch.nn.functional as F
+from torch.nn import functional
 
 from tcip_mcp.pipelines.active_learning import DEFAULT_SCORER
 from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 def _entropy(logits: "torch.Tensor") -> float:
     """Mean softmax entropy of a ``[B, C]`` logits tensor (classification uncertainty)."""
-    probs = F.softmax(logits, dim=-1)
+    probs = functional.softmax(logits, dim=-1)
     return -(probs * probs.clamp(min=1e-8).log()).sum(-1).mean().item()
 
 
@@ -122,7 +122,7 @@ class DiversityScorer(BaseScorer):
             tensor = predictor.model_input(path)[0].unsqueeze(0)
             feats = cast(Any, model).backbone(tensor)
             feat = list(feats.values())[-1] if isinstance(feats, dict) else feats
-            emb = F.adaptive_avg_pool2d(feat, 1).flatten(1).cpu().numpy()
+            emb = functional.adaptive_avg_pool2d(feat, 1).flatten(1).cpu().numpy()
             embeddings.append(emb[0])
 
         embeddings_arr = np.stack(embeddings)

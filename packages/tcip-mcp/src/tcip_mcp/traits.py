@@ -274,17 +274,17 @@ QUESTIONS: dict[str, str] = {
 when the field is still unauthored."""
 
 
-class UnauthoredField(ValueError):
+class UnauthoredFieldError(ValueError):
     """A measurement needs a spec field the trait's confirmed revision leaves unauthored."""
 
 
 def authored(entry: TraitEntry, names: tuple[str, ...]) -> None:
-    """Refuse (:class:`UnauthoredField`) ``entry`` when any of the spec fields ``names`` is
+    """Refuse (:class:`UnauthoredFieldError`) ``entry`` when any of the spec fields ``names`` is
     unauthored, naming each field and asking the breeder its question."""
     missing = [n for n in names if getattr(entry, n) in (None, "", ())]
     if missing:
         questions = " ".join(f"{n}: {QUESTIONS[n]}" for n in missing)
-        raise UnauthoredField(
+        raise UnauthoredFieldError(
             f"Trait {entry.name!r} leaves {missing} unauthored, so nothing states what this "
             f"measurement is held to. Ask the breeder: {questions} Propose their answer with "
             "propose_trait and have them confirm it in the Setup tab.")
@@ -476,7 +476,7 @@ def propose_trait(
     :func:`resolve_statement_registry` resolves (``dataset_root`` names the dataset, empty the
     project's own) does not declare for the measured subject, or a value that attribute does not
     list. A rationale that says nothing refuses. Returns the revision as written; an audit line
-    that cannot be written raises ``AuditEntryNotWritten`` with the revision already appended.
+    that cannot be written raises ``AuditEntryNotWrittenError`` with the revision already appended.
     """
     from tcip_mcp.audit import record_event_or_raise
     from tcip_mcp.subject_registry import positive_state_problem
@@ -511,7 +511,7 @@ def propose_trait(
     return revision
 
 
-class RevisionMoved(ValueError):
+class RevisionMovedError(ValueError):
     """Raised when a confirmation's hash is not the hash of the revision it names."""
 
 
@@ -529,9 +529,10 @@ def confirm_revision(
     (:func:`~tcip_mcp.identity.actor`'s spelling). Neither edits the entry.
 
     ``entry_sha256`` is the hash of the entry the surface showed; one that is not the revision's
-    own raises :class:`RevisionMoved`. Refuses a revision that does not exist, a confirmation of a
-    revision already confirmed or withdrawn, and a withdrawal of a revision not confirmed. Writes
-    the audit line after the record; one that cannot be written raises ``AuditEntryNotWritten``
+    own raises :class:`RevisionMovedError`. Refuses a revision that does not exist, a
+    confirmation of a revision already confirmed or withdrawn, and a withdrawal of a revision
+    not confirmed. Writes
+    the audit line after the record; one that cannot be written raises ``AuditEntryNotWrittenError``
     with the record already written. Returns the revision as written.
     """
     from tcip_mcp.audit import record_event_or_raise
@@ -543,7 +544,7 @@ def confirm_revision(
             raise ValueError(f"trait {trait!r} has revisions 1 to {len(revisions)}, not {number}")
         revision = revisions[number - 1]
         if entry_sha256 != revision.entry_sha256:
-            raise RevisionMoved(
+            raise RevisionMovedError(
                 f"revision {number} of {trait!r} holds entry {revision.entry_sha256}, not the "
                 f"{entry_sha256} that was shown; re-read it and confirm what it holds"
             )

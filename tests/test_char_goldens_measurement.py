@@ -29,7 +29,7 @@ import pytest
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
 
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
-from tcip_mcp.pipelines.postprocessing import phenology as PH  # noqa: E402
+from tcip_mcp.pipelines.postprocessing import phenology as phenology_mod  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     detection_metrics,
     gt_class_avg_size,
@@ -123,22 +123,23 @@ _PHENO_SERIES = [
 
 def test_golden_crossing_dates_interpolated():
     # The return is a Crossing record (date + evidentiary bound), not a bare string.
-    assert PH.crossing_date(_PHENO_SERIES, 0.05).date == "2026-02-15"  # midway 0.0→0.10, 10 days
-    assert PH.crossing_date(_PHENO_SERIES, 0.50).date == "2026-03-01"
-    assert PH.crossing_date(_PHENO_SERIES, 0.95).date == "2026-03-12"
+    # 0.05 lies midway 0.0 to 0.10, 10 days
+    assert phenology_mod.crossing_date(_PHENO_SERIES, 0.05).date == "2026-02-15"
+    assert phenology_mod.crossing_date(_PHENO_SERIES, 0.50).date == "2026-03-01"
+    assert phenology_mod.crossing_date(_PHENO_SERIES, 0.95).date == "2026-03-12"
     # 0.97 observed, not 0.95 exactly
-    assert PH.crossing_date(_PHENO_SERIES, 0.95).bound == "interpolated"
-    assert PH.crossing_date(_PHENO_SERIES, 0.97).bound == "exact"
+    assert phenology_mod.crossing_date(_PHENO_SERIES, 0.95).bound == "interpolated"
+    assert phenology_mod.crossing_date(_PHENO_SERIES, 0.97).bound == "exact"
     # never reached within the observed window -> right-censored at the last observed date, not a
     # bare None: distinguishable from "no observations at all".
-    c99 = PH.crossing_date(_PHENO_SERIES, 0.99)
+    c99 = phenology_mod.crossing_date(_PHENO_SERIES, 0.99)
     assert c99.date == "2026-03-12"
     assert c99.bound == "right_censored"
-    assert PH.crossing_date([], 0.99) is None  # no observations at all -> still None
+    assert phenology_mod.crossing_date([], 0.99) is None  # no observations at all -> still None
 
 
 def test_golden_plant_milestones_shape_and_values():
-    ms = PH.plant_milestones(_PHENO_SERIES, BUD_OPENING)
+    ms = phenology_mod.plant_milestones(_PHENO_SERIES, BUD_OPENING)
     assert ms["bud_05per_date"] == "2026-02-15"
     assert ms["bud_50per_date"] == "2026-03-01"
     assert ms["bud_95per_date"] == "2026-03-12"
@@ -164,8 +165,9 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     }
-    res = PH.per_plant_phenology(mapping, buckets, BUD_OPENING, ["P1"],
-                                 require_all_dates_complete=PH.REQUIRE_ALL_DATES_COMPLETE)
+    res = phenology_mod.per_plant_phenology(
+        mapping, buckets, BUD_OPENING, ["P1"],
+        require_all_dates_complete=phenology_mod.REQUIRE_ALL_DATES_COMPLETE)
 
     # Both buckets carry the state's attribute on every detection, so the fraction is delivered.
     assert res["positive_class_assessed"] is True
@@ -206,33 +208,33 @@ def test_golden_execution_record_of_an_untiled_pass_with_nothing_stated(tmp_path
 def test_golden_consolidated_operating_point_defaults(tmp_path):
     # No module but the execution record's own carries a copy of the inference operating-point
     # knobs: a second copy would let the same model and images give a different count by door.
-    from tcip_mcp.pipelines import execution as R
-    from tcip_mcp.pipelines import operating_point as OP
-    from tcip_mcp.pipelines.inference import generic_predictor as GP
+    from tcip_mcp.pipelines import execution as execution_mod
+    from tcip_mcp.pipelines import operating_point as operating_point_mod
+    from tcip_mcp.pipelines.inference import generic_predictor as generic_predictor_mod
     from tcip_mcp.pipelines.training import eval_runners as runners
-    from tcip_mcp.pipelines.training import evaluation as EV
-    from tcip_mcp.tools import training_tools as TT
+    from tcip_mcp.pipelines.training import evaluation as evaluation_mod
+    from tcip_mcp.tools import training_tools as training_tools_mod
 
     # tile_size/tiled carry no shared fallback constant at all: a caller derives or states them.
-    assert R.DEFAULT_CONF == 0.5
-    assert R.DEFAULT_NMS_IOU == 0.3
-    assert R.DEFAULT_MAX_DETS == 1000
-    assert not hasattr(R, "DEFAULT_TILE_SIZE")
-    assert not hasattr(R, "DEFAULT_TILED")
+    assert execution_mod.DEFAULT_CONF == 0.5
+    assert execution_mod.DEFAULT_NMS_IOU == 0.3
+    assert execution_mod.DEFAULT_MAX_DETS == 1000
+    assert not hasattr(execution_mod, "DEFAULT_TILE_SIZE")
+    assert not hasattr(execution_mod, "DEFAULT_TILED")
 
     for name in ("DEFAULT_CONF", "DEFAULT_MAX_DETS", "DEFAULT_NMS_IOU", "DEFAULT_OVERLAP",
                  "_DEFAULT_CROSS_TILE_NMS", "_DEFAULT_MAX_DETS", "DEFAULT_TILE_SIZE"):
-        assert not hasattr(OP, name), name
+        assert not hasattr(operating_point_mod, name), name
 
     # generic_predictor's sliced primitive defaults nothing it runs under: the caller hands it
     # the whole execution record.
-    gp_sig = inspect.signature(GP.GenericPredictor.predict_sliced)
+    gp_sig = inspect.signature(generic_predictor_mod.GenericPredictor.predict_sliced)
     for name in ("execution", "tile_batch_size", "require_masks"):
         assert gp_sig.parameters[name].default is inspect.Parameter.empty
 
     # evaluate_model's stated values are a None sentinel each regime resolves for itself; what
     # each resolves to for a no-arg caller is pinned by the two goldens below.
-    ev_sig = inspect.signature(TT.evaluate_model)
+    ev_sig = inspect.signature(training_tools_mod.evaluate_model)
     assert ev_sig.parameters["stated"].default is None
     assert ev_sig.parameters["iou_threshold"].default == 0.5
     assert not {"conf_threshold", "cross_tile_nms", "max_dets"} & set(ev_sig.parameters)
@@ -242,7 +244,7 @@ def test_golden_consolidated_operating_point_defaults(tmp_path):
     assert ff_sig.parameters["stated"].default is inspect.Parameter.empty
     assert not {"conf_threshold", "cross_tile_nms", "max_dets", "tile_size", "overlap"} & set(
         ff_sig.parameters)
-    assert EV.DEFAULT_SCORE_WEIGHTS == {"loss": 0.45, "f1": 0.35, "map50": 0.2}
+    assert evaluation_mod.DEFAULT_SCORE_WEIGHTS == {"loss": 0.45, "f1": 0.35, "map50": 0.2}
 
 
 def test_golden_evaluate_model_resolves_diagnostic_max_dets_when_unset(tmp_path, monkeypatch):
@@ -251,7 +253,7 @@ def test_golden_evaluate_model_resolves_diagnostic_max_dets_when_unset(tmp_path,
     runner the pass the one execution resolver prepared, its cap the documented default."""
     from tcip_mcp.pipelines.execution import DEFAULT_MAX_DETS
     from tcip_mcp.pipelines.training import eval_runners as runners
-    from tcip_mcp.tools import training_tools as TT
+    from tcip_mcp.tools import training_tools as training_tools_mod
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     captured: dict = {}
@@ -278,7 +280,7 @@ def test_golden_evaluate_model_resolves_diagnostic_max_dets_when_unset(tmp_path,
                     64, 64)
         ckpt = foreign_checkpoint(tmp)
 
-        TT.evaluate_model(tmp, str(ckpt), str(images_dir))
+        training_tools_mod.evaluate_model(tmp, str(ckpt), str(images_dir))
     finally:
         runners.run_test_evaluation = orig_diag
 
@@ -293,8 +295,8 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
     explicit stated value, never read back as an untouched default at the same number."""
     import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     import tcip_mcp.pipelines.training.evaluation as evaluation
-    from tcip_mcp.pipelines import execution as R
-    from tcip_mcp.tools import training_tools as TT
+    from tcip_mcp.pipelines import execution as execution_mod
+    from tcip_mcp.tools import training_tools as training_tools_mod
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     from tests._producer_fixtures import label_image
@@ -346,21 +348,22 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
 
     def _run(dataset, **kw):
         images_dir, ckpt = dataset
-        r = TT.evaluate_model(tmp_path, str(ckpt), str(images_dir), **kw)
+        r = training_tools_mod.evaluate_model(tmp_path, str(ckpt), str(images_dir), **kw)
         assert "error" not in r, r
         return r
 
     tile_level = _run(tile_ds, tiling={"tile_size": 64, "overlap": 0.0, "sliver_frac": 0.5})
-    assert tile_level["execution"]["conf"] == R.DEFAULT_CONF == 0.5
+    assert tile_level["execution"]["conf"] == execution_mod.DEFAULT_CONF == 0.5
 
     single_pass = _run(single_ds)
-    assert single_pass["execution"]["conf"] == R.DEFAULT_CONF == 0.5
+    assert single_pass["execution"]["conf"] == execution_mod.DEFAULT_CONF == 0.5
 
     full_frame_default = _run(ff_default_ds, use_tiled_inference=True)
-    assert full_frame_default["execution"]["conf"] == R.DEFAULT_CONF == 0.5
+    assert full_frame_default["execution"]["conf"] == execution_mod.DEFAULT_CONF == 0.5
     assert full_frame_default["execution"]["sources"]["conf"] == "default"
 
-    full_frame_stated = _run(ff_stated_ds, use_tiled_inference=True, stated=R.Stated(conf=0.5))
+    full_frame_stated = _run(
+        ff_stated_ds, use_tiled_inference=True, stated=execution_mod.Stated(conf=0.5))
     assert full_frame_stated["execution"]["conf"] == 0.5
     assert full_frame_stated["execution"]["sources"]["conf"] == "explicit"
 

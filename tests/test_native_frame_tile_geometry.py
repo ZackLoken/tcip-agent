@@ -553,11 +553,11 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
 
 
 def test_an_explicit_edge_contradicting_persisted_geometry_refuses():
-    from tcip_mcp.pipelines.slicing import TileEdgeContradiction, resolve_tile_geometry
+    from tcip_mcp.pipelines.slicing import TileEdgeContradictionError, resolve_tile_geometry
 
     stub = _GeometryStub(train_tile_size=128)
 
-    with pytest.raises(TileEdgeContradiction) as exc_info:
+    with pytest.raises(TileEdgeContradictionError) as exc_info:
         resolve_tile_geometry(stub, tiled=True, tile_size=64, overlap=None)
     assert str(exc_info.value) == (
         "stated tile_size 64 contradicts this checkpoint's own persisted training tile geometry "
@@ -567,11 +567,11 @@ def test_an_explicit_edge_contradicting_persisted_geometry_refuses():
 
 
 def test_an_explicit_edge_contradicting_the_native_frame_refuses():
-    from tcip_mcp.pipelines.slicing import TileEdgeContradiction, resolve_tile_geometry
+    from tcip_mcp.pipelines.slicing import TileEdgeContradictionError, resolve_tile_geometry
 
     stub = _GeometryStub(train_native_size=[512, 512])
 
-    with pytest.raises(TileEdgeContradiction) as exc_info:
+    with pytest.raises(TileEdgeContradictionError) as exc_info:
         resolve_tile_geometry(stub, tiled=True, tile_size=64, overlap=None)
     assert str(exc_info.value) == (
         "stated tile_size 64 contradicts this checkpoint's own recorded untiled training frame "
@@ -663,12 +663,12 @@ def test_a_stated_edge_contradicting_the_checkpoints_geometry_refuses_the_pass(
     """A caller-typed tile edge that differs from the checkpoint's own persisted training geometry,
     or from its recorded untiled training frame when it persists none, is a real contradiction,
     never a caller override to trust blindly."""
-    from tcip_mcp.pipelines.execution import ExecutionRefused
+    from tcip_mcp.pipelines.execution import ExecutionRefusedError
     from tests._verified_checkpoint_fixtures import predicted_over
 
     ckpt = _registered(tmp_path, make(tmp_path), f"contradiction-{recorded}")
 
-    with pytest.raises(ExecutionRefused) as exc_info:
+    with pytest.raises(ExecutionRefusedError) as exc_info:
         predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path, IMAGE)).parent), device="cpu",
                        tile=True, tile_size=64, conf=0.0)
     assert "64" in str(exc_info.value) and recorded in str(exc_info.value)

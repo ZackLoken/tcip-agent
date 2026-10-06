@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp import subject_registry as cr
-from tcip_mcp.operationalization import OperationalizationRefused, confirmed_revision
+from tcip_mcp.operationalization import OperationalizationRefusedError, confirmed_revision
 from tcip_mcp.tools.trait_tools import propose_trait
 from tcip_mcp.traits import PER_IMAGE_COUNT, STATE_CROSSING_DATES, PositiveState
 from tests._producer_fixtures import registry_over
@@ -148,7 +148,7 @@ def test_a_confirmed_crossing_whose_delivered_registry_lost_the_class_refuses_wi
 ) -> None:
     fx.propose_and_confirm(project, _CROSSING)
 
-    with pytest.raises(OperationalizationRefused) as excinfo:
+    with pytest.raises(OperationalizationRefusedError) as excinfo:
         confirmed_revision(STATE_CROSSING_DATES, project=project, trait=fx.CROSSING_TRAIT,
                            registry=_WITHOUT_OPEN)
 
@@ -160,7 +160,7 @@ def test_confirming_a_new_revision_does_not_clear_a_live_registry_problem(projec
     fx.propose_and_confirm(project, _CROSSING)
     fx.propose_and_confirm(project, fx.with_fields(_CROSSING, notes="confirmed again"))
 
-    with pytest.raises(OperationalizationRefused):
+    with pytest.raises(OperationalizationRefusedError):
         confirmed_revision(STATE_CROSSING_DATES, project=project, trait=fx.CROSSING_TRAIT,
                            registry=_WITHOUT_OPEN)
 

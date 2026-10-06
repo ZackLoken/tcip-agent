@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("torch")
 import torch  # noqa: E402
-import torch.nn.functional as F  # noqa: E402
+from torch.nn import functional  # noqa: E402
 from PIL import Image  # noqa: E402
 
 from tcip_mcp.pipelines.components.losses import (  # noqa: E402
@@ -117,7 +117,7 @@ def test_classification_head_loss_optional():
     out0 = h0(feats)
     assert torch.allclose(
         h0.compute_loss(out0, targets)["cls_loss"],
-        F.cross_entropy(out0["logits"], targets["labels"]),
+        functional.cross_entropy(out0["logits"], targets["labels"]),
     )
 
 
@@ -134,7 +134,7 @@ def test_regression_head_loss_optional():
     out0 = h0(feats)
     assert torch.allclose(
         h0.compute_loss(out0, targets)["reg_loss"],
-        F.smooth_l1_loss(out0["values"], targets["values"]),
+        functional.smooth_l1_loss(out0["values"], targets["values"]),
     )
 
 
@@ -341,18 +341,18 @@ def test_tune_search_normalizes_search_alg_case_before_deciding_grid(tmp_path, m
     pytest.importorskip("ray")
     import tcip_mcp.pipelines.training.hpo as hpo
 
-    class _StoppedAfterSpace(Exception):
+    class _StoppedAfterSpaceError(Exception):
         pass
 
     captured: dict = {}
 
     def fake_to_tune_space(param_space, grid=False, grid_keys=frozenset()):
         captured["grid"] = grid
-        raise _StoppedAfterSpace
+        raise _StoppedAfterSpaceError
 
     monkeypatch.setattr(hpo, "_to_tune_space", fake_to_tune_space)
 
-    with pytest.raises(_StoppedAfterSpace):
+    with pytest.raises(_StoppedAfterSpaceError):
         hpo.tune_search(
             objective_fn=lambda config, report: None,
             param_space={"bs": {"type": "categorical", "choices": [2, 4]}},

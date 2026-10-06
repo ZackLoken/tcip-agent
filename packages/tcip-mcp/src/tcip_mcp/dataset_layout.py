@@ -285,8 +285,8 @@ def save_label_document(
 
     Raises with nothing written: ``ValueError`` for a payload that does not parse, a proposal
     index the bucket's document does not hold or that is both accepted and rejected;
-    ``UnreadableLabelDocument`` for a stored document that does not decode; ``VersionConflict``
-    when ``expect`` is not the version the commit reads.
+    ``UnreadableLabelDocumentError`` for a stored document that does not decode;
+    ``VersionConflictError`` when ``expect`` is not the version the commit reads.
     """
     from tcip_annotation.json_io import (
         CompletionMark, LabelDocument, annotation_from_payload, document_at, document_payload,
@@ -319,7 +319,7 @@ def save_label_document(
         read = txn.read_versioned(key, default=None)
         stored = document_at(key, read)
         if expect is not None and expect != read.version:
-            raise tcip_store.VersionConflict(key, expect, read.version)
+            raise tcip_store.VersionConflictError(key, expect, read.version)
         annotations = stamped(contents, stored.annotations, author=author, now=now)
         verdicts: list[Verdict] = []
         if decides:
@@ -372,13 +372,13 @@ def capture_label_keys(dataset_root: str | Path, capture: str) -> list[Key]:
 def capture_subjects(dataset_root: str | Path, capture: str) -> tuple[list[str], list[str]]:
     """The distinct subjects the label documents of ``capture`` hold, sorted, and the stem of
     every one of them that will not read."""
-    from tcip_annotation.json_io import UnreadableLabelDocument, read_label_document
+    from tcip_annotation.json_io import UnreadableLabelDocumentError, read_label_document
 
     found: set[str] = set()
     unreadable: list[str] = []
     for key in capture_label_keys(dataset_root, capture):
         try:
             found.update(a.subject for a in read_label_document(key).annotations)
-        except UnreadableLabelDocument:
+        except UnreadableLabelDocumentError:
             unreadable.append(key.parts[-1])
     return sorted(found), unreadable

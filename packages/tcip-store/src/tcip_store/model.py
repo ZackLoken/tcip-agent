@@ -14,16 +14,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
-from tcip_store.errors import BadKey, TransactionMisuse
+from tcip_store.errors import BadKeyError, TransactionMisuseError
 
 _open_transaction = threading.local()
 
 
 def refuse_inside_transaction(operation: str) -> None:
-    """Refuse (``TransactionMisuse``) ``operation`` while this thread holds a transaction, since
-    it would commit apart from it: a record or log write, or a file write."""
+    """Refuse (``TransactionMisuseError``) ``operation`` while this thread holds a transaction,
+    since it would commit apart from it: a record or log write, or a file write."""
     if getattr(_open_transaction, "held", False):
-        raise TransactionMisuse(
+        raise TransactionMisuseError(
             f"{operation} is not allowed inside an open transaction: use the transaction's own "
             "operations on the keys it names, name every key in one transaction(a, b) rather "
             "than nesting, and write a file only once the transaction has committed"
@@ -32,8 +32,8 @@ def refuse_inside_transaction(operation: str) -> None:
 
 @contextmanager
 def held_transaction() -> Generator[None]:
-    """Mark this thread as holding a transaction for the body. Refuses (``TransactionMisuse``) a
-    second one on the same thread."""
+    """Mark this thread as holding a transaction for the body. Refuses
+    (``TransactionMisuseError``) a second one on the same thread."""
     refuse_inside_transaction("a second transaction")
     _open_transaction.held = True
     try:
@@ -47,8 +47,8 @@ class Key:
     """The identity of one record or log: which store, which root, which entry.
 
     ``root`` is the directory whose database holds the entry. ``parts`` is the identity inside the
-    store, ordered coarse to fine, so a prefix of it is a meaningful scan. Refuses (``BadKey``) a
-    key with no root, or with a store or a part that is not a non-empty string.
+    store, ordered coarse to fine, so a prefix of it is a meaningful scan. Refuses (``BadKeyError``)
+    a key with no root, or with a store or a part that is not a non-empty string.
     """
 
     store: str
@@ -57,12 +57,14 @@ class Key:
 
     def __post_init__(self) -> None:
         if not isinstance(self.store, str) or not self.store:
-            raise BadKey(f"a key's store must be a non-empty string; got {self.store!r}")
+            raise BadKeyError(f"a key's store must be a non-empty string; got {self.store!r}")
         if not self.root:
-            raise BadKey(f"{self.store!r} key carries no root: name the root the entry hangs off")
+            raise BadKeyError(
+                f"{self.store!r} key carries no root: name the root the entry hangs off")
         for part in self.parts:
             if not isinstance(part, str) or not part:
-                raise BadKey(f"{self.store!r} key part must be a non-empty string; got {part!r}")
+                raise BadKeyError(
+                    f"{self.store!r} key part must be a non-empty string; got {part!r}")
 
 
 @dataclass(frozen=True)
@@ -105,7 +107,7 @@ class _Required:
 
 
 REQUIRED: Any = _Required()
-"""Passed as ``default`` to mean the entry is required: absence raises ``NotFound``."""
+"""Passed as ``default`` to mean the entry is required: absence raises ``NotFoundError``."""
 
 
 def canonical_path(path: str | Path) -> str:

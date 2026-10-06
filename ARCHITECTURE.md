@@ -589,8 +589,8 @@ its server was started for and the web build route passes the backend's open pro
 sweep's opening (`open_sweep`, `tools/training_tools.py`), which both the tool and the GUI's
 relaunch reach.
 
-A failed append is raised on both paths: `record_event_or_raise` raises `AuditEntryNotWritten`;
-the decorator raises `MutationCommittedWithoutAuditLine`, because its append runs after the tool
+A failed append is raised on both paths: `record_event_or_raise` raises `AuditEntryNotWrittenError`;
+the decorator raises `MutationCommittedWithoutAuditLineError`, because its append runs after the tool
 body and a warning there invites a blind retry of a mutation already on disk.
 
 A log's own root is its scope, so a line names no root and a moved or imported project's log
@@ -619,7 +619,7 @@ Immutability is the files' own: `publish_once`, `experiments.py`, writes a file'
 to a staging name and publishes them under the final name without replacing anything, so a file
 under its final name is always whole. A relaunch or a resume is a new directory naming its source
 (`relaunched_from`, `resume_from`); `create_run_directory`, `experiments.py`, refuses a
-directory that already exists (`RunDirectoryExists`). A sweep is the same shape one level up,
+directory that already exists (`RunDirectoryExistsError`). A sweep is the same shape one level up,
 `.tcip/experiments/<sweep_id>/` beside the runs, so the one directory creation reserves a name for
 runs and sweeps alike, and a sweep is told from a run by its `sweep.json` input written
 once before its body starts, a heartbeat, its final status, and one `<sweep_id>_<trial id>/` run
@@ -737,7 +737,7 @@ bucket record (format 18), both in the database of the dataset root its source i
 its identity that root and its name. A bucket is published once: `publish`,
 `packages/tcip-mcp/src/tcip_mcp/buckets.py`, commits the record, every document and its
 `prediction_bucket_published` line in one transaction and refuses a name already published
-(`BucketExists`), so a new run names a new bucket and nothing rewrites a published one. A
+(`BucketExistsError`), so a new run names a new bucket and nothing rewrites a published one. A
 publication with no document refuses. A staged proposal is a bucket of its own, one per staged
 image, its record naming the engine or agent that proposed it and no execution.
 
@@ -768,7 +768,7 @@ publishes through it: `run_inference` for an image directory and a raster alike,
 inference worker.
 
 Reader: `read_bucket`, `buckets.py`, the one decoder, refusing a name with no record or a
-record that does not decode (`NotABucket`). `tools/orthomosaic_tools.py`'s
+record that does not decode (`NotABucketError`). `tools/orthomosaic_tools.py`'s
 `deliver_orthomosaic_plant_counts` reads `raster_identity` back and refuses a delivery whose
 supplied raster does not match it; `delivery.gate` reads `assessment_id`, the producer and the
 date for its checks (format 27).
@@ -787,7 +787,7 @@ Reader: `read_gui_snapshot`, `tcip_mcp/web_client.py`, run by `StateStore.open_p
 snapshot that does not decode as its whole shape raises.
 
 `StateStore.mutate` validates the merged mutation through `GuiState` before holding it, raising
-`GuiMutationInvalid` (`tcip_web/state.py`) on a field that does not validate or a key
+`GuiMutationInvalidError` (`tcip_web/state.py`) on a field that does not validate or a key
 `GuiState` does not declare; `app.py`'s `_gui_mutation_invalid_handler` answers a route that
 raises it with 400 and the validation message rather than the 500 an unhandled `ValueError` would
 produce.
@@ -1015,12 +1015,12 @@ Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py` (`def audited(`, taking a decl
 `record_event_or_raise` (`audit.py`), the emitter for code that is neither an MCP tool nor a
 script-invoked door demoted from one; both append at the one `audit_log_key`, `audit.py`, and
 differ only in what a failed append raises: `record_event_or_raise` raises
-`AuditEntryNotWritten`; the decorator refuses (`MutationCommittedWithoutAuditLine`), since its
+`AuditEntryNotWrittenError`; the decorator refuses (`MutationCommittedWithoutAuditLineError`), since its
 append runs after the tool body.
 Side B: the label save records through its library (`save_label_document`), its line committed
 with the document, so a line that cannot be written leaves the document unwritten; the registry
 write records through `replace_registry` whichever door calls it, a failed append raising
-`AuditEntryNotWritten`, which the GUI route answers as `routes/audit_gap.py`'s 409; the GUI
+`AuditEntryNotWrittenError`, which the GUI route answers as `routes/audit_gap.py`'s 409; the GUI
 inference worker writes no line of its own and publishes through the one publisher,
 `routes/inference.py` (`result = infer(`), whose line commits with the bucket. Reader:
 `pipelines/postprocessing/plant_mapping.py` (`_require_receipt`)

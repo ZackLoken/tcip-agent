@@ -565,8 +565,8 @@ def read_plant_shapefile(
     A point's own coordinate is read; a polygon's or multipolygon's centroid is read; any other
     geometry type refuses by name (naming the feature index and ``geom_type``). A feature with null
     geometry is skipped and counted in the return's ``skipped_null_geometry``. Raises
-    :class:`ShapefileCrsUnknown` when the layer's CRS cannot be resolved, and
-    :class:`ShapefileUnreadable` when fiona cannot open the shapefile at all.
+    :class:`ShapefileCrsUnknownError` when the layer's CRS cannot be resolved, and
+    :class:`ShapefileUnreadableError` when fiona cannot open the shapefile at all.
 
     Yields rows with the DBF value's own string, verbatim, never :class:`PlantRecord`, whose
     ``plot_number``, ``row_number`` and ``col_number`` narrow to ``Optional[float]``
@@ -587,7 +587,7 @@ def read_plant_shapefile(
     try:
         opened = fiona.open(str(shp_path))
     except Exception as exc:
-        raise ShapefileUnreadable(
+        raise ShapefileUnreadableError(
             f"{shp_path}: fiona could not open this shapefile ({type(exc).__name__}: {exc}); "
             "check that the .shp, .shx and .dbf parts are all present and readable beside each "
             "other, then run tcip shp-to-plant-csv again"
@@ -596,7 +596,7 @@ def read_plant_shapefile(
         # fiona reports a missing or unparseable .prj as an empty CRS (probed directly, neither
         # raises), so one falsy check catches both without a second except clause.
         if not layer.crs:
-            raise ShapefileCrsUnknown(
+            raise ShapefileCrsUnknownError(
                 f"{shp_path}: no resolvable coordinate reference system (missing or unreadable "
                 ".prj); refusing to guess a CRS, supply a .prj alongside the .shp"
             )
@@ -673,21 +673,21 @@ def registry_content_digest(plants: list[PlantRecord]) -> str:
     return hashlib.sha256(json.dumps(rows, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-class ShapefileCrsUnknown(ValueError):
+class ShapefileCrsUnknownError(ValueError):
     """A shapefile's coordinate reference system cannot be resolved: fiona reports a missing
     ``.prj``, and a ``.prj`` whose WKT does not parse, as the same falsy ``layer.crs``. No CRS is
     ever guessed.
     """
 
 
-class ShapefileUnreadable(ValueError):
+class ShapefileUnreadableError(ValueError):
     """fiona could not open a shapefile at all: a missing or unreadable ``.shx``/``.dbf`` part, a
     file that is not a shapefile, a driver or IO failure. Raised in place of whatever fiona threw.
     A ``ValueError`` subclass.
     """
 
 
-class NoGeoreferencedPlantsRefusal(Exception):
+class NoGeoreferencedPlantsError(Exception):
     """A registration names a CSV that parsed no georeferenced, named plant. ``paths`` lists
     every file that failed the parse, so the caller's refusal names them all at once."""
 
@@ -696,7 +696,7 @@ class NoGeoreferencedPlantsRefusal(Exception):
         self.paths = paths
 
 
-class PlantRegistryNameConflict(Exception):
+class PlantRegistryNameConflictError(Exception):
     """A registration's name is already taken by a different set of plants."""
 
 
@@ -728,16 +728,16 @@ def plant_registry_key(project: Path | str, name: str) -> Key:
     return Key(PLANT_REGISTRY_STORE, str(project_state_dir(project)), _named(name, NAME_SEGMENT))
 
 
-class PlantRegistryNotFound(ValueError):
+class PlantRegistryNotFoundError(ValueError):
     """A plant registry name nothing is registered under in the project."""
 
 
 def load_registry(project: Path | str, name: str) -> dict:
     """The named registry record. A name nothing is stored under (never registered, or deleted
-    since a mapping recorded it) refuses (:class:`PlantRegistryNotFound`) naming it."""
+    since a mapping recorded it) refuses (:class:`PlantRegistryNotFoundError`) naming it."""
     record = tcip_store.read(plant_registry_key(project, name), default=None)
     if record is None:
-        raise PlantRegistryNotFound(
+        raise PlantRegistryNotFoundError(
             f"plant registry not found: {name!r} under {project}; register it with "
             "register_plant_registry before naming it.")
     return record
@@ -765,7 +765,7 @@ def registry_entries_or_refusal(
         return [], None
     try:
         record = load_registry(project, registry_name)
-    except PlantRegistryNotFound as exc:
+    except PlantRegistryNotFoundError as exc:
         return [], f"mapping {build.name!r} names it: {exc}"
     stored_digest = (build.plant_registry or {}).get("digest")
     if stored_digest is not None and record.get("digest") != stored_digest:
@@ -811,7 +811,7 @@ def parse_plant_registry_csvs(
     ``path`` spelled against ``project`` by :func:`~tcip_mcp.registry_paths.stored_path`,
     the content digest over every parsed row and the total plant count, committing nothing.
 
-    Raises :class:`NoGeoreferencedPlantsRefusal`, naming every file that parsed no georeferenced,
+    Raises :class:`NoGeoreferencedPlantsError`, naming every file that parsed no georeferenced,
     named plant or is not UTF-8 text (a binary file, a shapefile's own ``.shp``/``.shx``/``.dbf``
     included).
     """
@@ -836,7 +836,7 @@ def parse_plant_registry_csvs(
             "n_plants": len(records),
         })
     if failed:
-        raise NoGeoreferencedPlantsRefusal(
+        raise NoGeoreferencedPlantsError(
             f"{failed} parsed no georeferenced, named plant, or is not UTF-8 text (need columns "
             "plot_name, WGS84_centroid_x, WGS84_centroid_y with usable values); register only "
             "files that carry at least one",
@@ -857,12 +857,12 @@ def register_plant_registry_record(
     stored record.
 
     Parses every path through :func:`parse_plant_registry_csvs`
-    (:class:`NoGeoreferencedPlantsRefusal` names the file that parsed no georeferenced, named
+    (:class:`NoGeoreferencedPlantsError` names the file that parsed no georeferenced, named
     plant); the record holds the ``{path, sha256, n_plants}`` entries plus ``crop``, ``site``,
     ``registered_at`` and the parsed content's digest. The read-then-write is
     one transaction (:func:`tcip_store.transaction`, this store's own ``concurrency="cas"``): a
     second registration under a taken name returns the existing record unchanged when the digest
-    matches, and raises :class:`PlantRegistryNameConflict` otherwise, naming the two digests.
+    matches, and raises :class:`PlantRegistryNameConflictError` otherwise, naming the two digests.
     """
     csvs_meta, digest, n_plants = parse_plant_registry_csvs(csv_paths, project)
     key = plant_registry_key(project, name)
@@ -871,7 +871,7 @@ def register_plant_registry_record(
         if existing is not None:
             if existing.get("digest") == digest:
                 return existing
-            raise PlantRegistryNameConflict(
+            raise PlantRegistryNameConflictError(
                 f"plant registry {name!r} under {project} already names different plants "
                 f"(digest {existing.get('digest')!r}, this registration would write "
                 f"{digest!r}); register under a new name")
@@ -1062,7 +1062,7 @@ def grid_pitch_m(plants: list[PlantRecord]) -> float:
     return nn[len(nn) // 2]
 
 
-class NoMatchTolerance(ValueError):
+class NoMatchToleranceError(ValueError):
     """No match tolerance is stated and the plant layout derives none."""
 
 
@@ -1072,14 +1072,14 @@ def resolve_nn_tolerance_m(plants: list[PlantRecord], stated: float | None = Non
 
     Derived as the tolerance whose loosest gate (:func:`match_gates`) reaches half a grid cell
     (:func:`grid_pitch_m`), ``"grid_pitch"``. A stated value is honored (``"stated"``) up to that
-    ceiling and capped at it (``"stated_capped"``). Raises :class:`NoMatchTolerance` naming
+    ceiling and capped at it (``"stated_capped"``). Raises :class:`NoMatchToleranceError` naming
     ``nn_tolerance_m`` when nothing is stated and the layout carries too few plants to derive a
     pitch from.
     """
     ceiling = grid_pitch_m(plants) / (2 * NEAREST_MATCH_FACTOR)
     if stated is None:
         if ceiling <= 0:
-            raise NoMatchTolerance(
+            raise NoMatchToleranceError(
                 "the plant layout carries fewer than two georeferenced plants, so no grid pitch "
                 "derives a match tolerance: state nn_tolerance_m (meters)")
         return {"value": ceiling, "source": "grid_pitch"}
@@ -1124,9 +1124,9 @@ def build_mapping(
 
     A date's captures are enumerated through ``image_utils.list_logical_images``, so a band raster
     or a band group ingested under a mapped date is a capture the identity sees; its
-    :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem` propagates.
+    :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStemError` propagates.
 
-    Raises :class:`UngeoreferencedCaptureRefusal`: naming ``images_root`` when the requested dates
+    Raises :class:`UngeoreferencedCaptureError`: naming ``images_root`` when the requested dates
     carry no capture at all, and with :func:`ungeoreferenced_capture_message` (naming any capture
     PIL could not open before the position clause) when every capture that was read carries no
     position this door reads.
@@ -1166,12 +1166,12 @@ def build_mapping(
             assignments[date] = assign_plants(stamps, plants, nn_tolerance_m=tolerance["value"])
 
     if n_stamps == 0:
-        raise UngeoreferencedCaptureRefusal(
+        raise UngeoreferencedCaptureError(
             f"no capture under {images_root} on the requested dates")
     if n_positioned == 0:
         all_unreadable = sorted(
             {name for date in dates_walked for name in unreadable.get(date, [])})
-        raise UngeoreferencedCaptureRefusal(
+        raise UngeoreferencedCaptureError(
             ungeoreferenced_capture_message(str(images_root), all_unreadable))
 
     from tcip_mcp.registry_paths import stored_path
@@ -1226,7 +1226,7 @@ def record_digest(record: object) -> str:
     return hashlib.sha256(encode_record(record)).hexdigest()
 
 
-class MappingRebuildRefusal(Exception):
+class MappingRebuildError(Exception):
     """A same-name rebuild would replace a mapping record a delivery event under this project
     still cites. ``event_ids`` names every citing event; ``status`` is the web door's HTTP status
     for it."""
@@ -1257,14 +1257,14 @@ def persist_mapping(build: MappingBuild, project: Path | str, *, supersede: bool
     to this build.
 
     The record is committed before the receipt (a log append cannot join a record transaction): a
-    receipt that cannot be written fails loudly (``AuditEntryNotWritten`` propagates) and leaves a
-    record no receipt names, which :func:`load_mapping` refuses to read until a rebuild replaces
-    it.
+    receipt that cannot be written fails loudly (``AuditEntryNotWrittenError`` propagates) and
+    leaves a record no receipt names, which :func:`load_mapping` refuses to read until a rebuild
+    replaces it.
 
     ``project`` names which log the receipt lands in.
 
     A rebuild under ``name`` whose current record is still cited by a delivery event under this
-    project raises :class:`MappingRebuildRefusal`, naming the citing events, unless
+    project raises :class:`MappingRebuildError`, naming the citing events, unless
     ``supersede=True``. In that case the current record moves unchanged to
     :func:`archived_mapping_name`, where its own receipt still answers for it, and
     ``build.supersedes`` is set to its digest before this writes the new record, whose receipt
@@ -1280,7 +1280,7 @@ def persist_mapping(build: MappingBuild, project: Path | str, *, supersede: bool
         existing_digest = record_digest(existing_raw)
         citing = _citing_delivery_event_ids(project, name, existing_digest)
         if citing and not supersede:
-            raise MappingRebuildRefusal(
+            raise MappingRebuildError(
                 f"plant mapping {name!r} under {project} is cited by delivery event(s) "
                 f"{citing}: rebuilding under this name would strand them. Pass supersede=True to "
                 "archive the current record and rebuild.",
@@ -1320,7 +1320,7 @@ def build_plant_mapping(
 
     Raises ``ValueError`` for a name the key refuses, for an ``images_root`` that is not a
     dataset's own ``images/`` directory (naming ``register_dataset``) and for a dataset with no
-    identity record; :class:`PlantRegistryNotFound`; and every refusal of the two steps.
+    identity record; :class:`PlantRegistryNotFoundError`; and every refusal of the two steps.
     """
     from tcip_mcp.dataset_layout import dataset_root_of, image_root, require_dataset_identity
     from tcip_mcp.pipelines.data.splits import same_directory
@@ -1447,8 +1447,9 @@ def verify_mapping_inputs(
     disclosed in ``captures_unverified`` as the bare date string, the same as a named date whose
     image folder is absent. A named date's folder is enumerated once
     (``image_utils.list_logical_images``, refusing by name on
-    :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem`); an enumerated stem the mapping's
-    own assignment rows for that date do not name refuses, naming the date, the file(s) and the
+    :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStemError`);
+    an enumerated stem the mapping's own assignment rows for that date do not name refuses,
+    naming the date, the file(s) and the
     rebuild remedy. A recorded stem no longer enumerated is disclosed as ``"<date>/<name>"``, using
     the recorded row's own file name; so is a recorded, still-enumerated stem this delivery's own
     prediction bucket carries no document for (:func:`stems_delivery_reads`).
@@ -1479,7 +1480,7 @@ def verify_mapping_inputs(
     """
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.image_utils import (
-        AmbiguousImageStem,
+        AmbiguousImageStemError,
         list_logical_images,
         logical_image_name,
     )
@@ -1522,7 +1523,7 @@ def verify_mapping_inputs(
 
         try:
             logical = list_logical_images(date_dir)
-        except AmbiguousImageStem as exc:
+        except AmbiguousImageStemError as exc:
             return {"refusal": str(exc)}
 
         enumerated_stems = set(logical)
@@ -1628,7 +1629,7 @@ def ungeoreferenced_capture_message(walked: str, unreadable: Sequence[str] = ())
     )
 
 
-class _StatusRefusal(Exception):
+class _StatusError(Exception):
     """A refusal whose ``str(exc)`` is the caller-facing message and ``status`` the web door's HTTP
     status for it."""
 
@@ -1637,12 +1638,12 @@ class _StatusRefusal(Exception):
         self.status = status
 
 
-class UngeoreferencedCaptureRefusal(_StatusRefusal):
+class UngeoreferencedCaptureError(_StatusError):
     """A plant mapping cannot be built or delivered from the captures at hand: none carries a
     position this door reads, or none could be read."""
 
 
-class MappingDeliveryRefusal(_StatusRefusal):
+class MappingDeliveryError(_StatusError):
     """A phenology delivery cannot proceed from a named mapping; ``str(exc)`` is the caller-facing
     message. ``status`` is the HTTP status for it (400 by default, 404 for a mapping that is not
     stored, 409 for a store-level problem reading it).
@@ -1663,7 +1664,7 @@ def resolve_delivery_mapping(
     attributed one ships, absent from every plant's series.
 
     Returns the loaded build and :func:`verify_mapping_inputs`'s disclosure; raises
-    :class:`MappingDeliveryRefusal`, naming the remedy, for every case a delivery must not proceed
+    :class:`MappingDeliveryError`, naming the remedy, for every case a delivery must not proceed
     from, a ``StoreError`` reading the mapping store included.
     """
     from tcip_store import StoreError
@@ -1674,16 +1675,16 @@ def resolve_delivery_mapping(
     try:
         mapping_build = load_mapping(project, name)
     except (StoreError, ValueError) as exc:
-        raise MappingDeliveryRefusal(
+        raise MappingDeliveryError(
             f"could not read mapping {name!r}: {exc}", status=409) from exc
     if mapping_build is None:
-        raise MappingDeliveryRefusal(
+        raise MappingDeliveryError(
             f"mapping not found: {name!r}; build one with build_plant_mapping before "
             "computing phenology", status=404)
 
     missing_dates = [d for d in buckets if d not in mapping_build.dates]
     if missing_dates:
-        raise MappingDeliveryRefusal(
+        raise MappingDeliveryError(
             f"the delivered buckets record date(s) {missing_dates} the mapping {name!r} does not "
             "cover; rebuild the mapping to cover them, or drop those buckets")
 
@@ -1691,9 +1692,9 @@ def resolve_delivery_mapping(
         delivered_root = shared_root(buckets.values())
         delivered_identity = require_dataset_identity(delivered_root)
     except ValueError as exc:
-        raise MappingDeliveryRefusal(str(exc)) from exc
+        raise MappingDeliveryError(str(exc)) from exc
     if delivered_identity.get("id") != mapping_build.dataset_id:
-        raise MappingDeliveryRefusal(
+        raise MappingDeliveryError(
             f"the predictions under {delivered_root} belong to a different dataset than the "
             f"mapping {name!r} was built over (mapping dataset_root "
             f"{mapping_build.dataset_root!r}, delivered dataset root {str(delivered_root)!r})")
@@ -1707,7 +1708,7 @@ def resolve_delivery_mapping(
         # A no-capture-at-all date is named below only inside this nothing-attributed scope.
         empty_dates = sorted(d for d in buckets if not mapping_build.assignments.get(d))
         if empty_dates:
-            raise MappingDeliveryRefusal(
+            raise MappingDeliveryError(
                 f"the mapping {name!r} recorded no capture at all for date(s) {empty_dates}: a "
                 "date with no capture cannot be delivered; rebuild the mapping, or drop the "
                 "date(s)")
@@ -1715,23 +1716,23 @@ def resolve_delivery_mapping(
         # nothing; refuse here, before verify_mapping_inputs, on the record's own evidence.
         registry_entries, registry_refusal = registry_entries_or_refusal(mapping_build, project)
         if registry_refusal:
-            raise MappingDeliveryRefusal(registry_refusal, status=409)
+            raise MappingDeliveryError(registry_refusal, status=409)
         paths = [entry["path"] for entry in registry_entries]
         n_plants = sum(entry["n_plants"] for entry in registry_entries)
         if n_plants == 0:
-            raise MappingDeliveryRefusal(
+            raise MappingDeliveryError(
                 f"the plant CSVs this mapping was built from ({paths}) parsed no plant with "
                 "usable coordinates and a name, so no capture could be assigned; check the "
                 "CSV's column headers against read_plant_csvs's and rebuild the mapping")
         if all(a.distance_m is None for a in delivered_assignments):
-            raise MappingDeliveryRefusal(
+            raise MappingDeliveryError(
                 ungeoreferenced_capture_message(
                     f"mapping {name!r} (dataset {mapping_build.dataset_root!r})"))
         gates = match_gates(mapping_build.nn_tolerance_m["value"])
         n_unpositioned = sum(1 for a in delivered_assignments if a.distance_m is None)
         unpositioned_note = (
             f", and {n_unpositioned} captures carry no position" if n_unpositioned else "")
-        raise MappingDeliveryRefusal(
+        raise MappingDeliveryError(
             "every positioned capture on the delivered dates lies beyond the accepted match "
             f"distance ({gates['max_match_distance_m']} m from tolerance "
             f"{gates['nn_tolerance_m']} m, {mapping_build.nn_tolerance_m['source']}) of every "
@@ -1740,7 +1741,7 @@ def resolve_delivery_mapping(
 
     verified = verify_mapping_inputs(mapping_build, delivered_root, buckets, project=project)
     if "refusal" in verified:
-        raise MappingDeliveryRefusal(verified["refusal"])
+        raise MappingDeliveryError(verified["refusal"])
     return mapping_build, verified
 
 
@@ -1750,12 +1751,12 @@ def plant_mapping_disclosure(project: Path | str, name: str, buckets: "Mapping[s
     when its plant ids came from mapping ``name``: the mapping resolved and verified against the
     delivered ``buckets`` by recorded date (:func:`resolve_delivery_mapping`, refusing as it does),
     and a population plant the mapping assigns on no delivered date refused
-    (:class:`MappingDeliveryRefusal`) naming each."""
+    (:class:`MappingDeliveryError`) naming each."""
     build, verified = resolve_delivery_mapping(project, name, buckets)
     assigned = {a.plot_name for d in buckets for a in build.assignments.get(d, [])
                 if assignment_is_attributed(a)}
     unmapped = sorted(set(plants) - assigned)
     if unmapped:
-        raise MappingDeliveryRefusal(f"plant(s) {unmapped} are assigned to no plot by mapping "
+        raise MappingDeliveryError(f"plant(s) {unmapped} are assigned to no plot by mapping "
                                      f"{name!r} on the delivered dates.")
     return build.delivery_disclosure(verified, list(buckets))

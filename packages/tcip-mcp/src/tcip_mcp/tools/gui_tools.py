@@ -12,7 +12,7 @@ from pathlib import Path
 from tcip_annotation import Annotation, BBox
 from tcip_annotation.state import polygonal
 from tcip_annotation.json_io import (
-    UnreadableLabelDocument, read_document_versioned, read_label_document,
+    UnreadableLabelDocumentError, read_document_versioned, read_label_document,
 )
 
 from tcip_mcp.server import tool
@@ -124,7 +124,7 @@ def focus_human_attention(
             else:
                 document = found.document_key(stem)
                 held[name] = read_label_document(document).annotations if document else []
-        except UnreadableLabelDocument as exc:
+        except UnreadableLabelDocumentError as exc:
             unreadable[name] = str(exc)
     holding = [i for i, name in enumerate(images)
                if name in held and annotations_hold_subject(held[name], subject)]

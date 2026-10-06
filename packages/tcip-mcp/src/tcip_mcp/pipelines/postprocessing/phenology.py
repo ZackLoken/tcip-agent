@@ -221,8 +221,8 @@ def count_by_class(
     detection is unclassified, a whole-bucket decision. Otherwise every record is decoded under
     the scope's attributes (:func:`~tcip_annotation.json_io.attribute_ids`): a value its attribute
     does not declare, a record of another subject and a record carrying no value under the state's
-    attribute refuse by name (:class:`~tcip_annotation.json_io.UndeclaredValue`). A record whose
-    id there is the state's counts positive.
+    attribute refuse by name (:class:`~tcip_annotation.json_io.UndeclaredValueError`). A record
+    whose id there is the state's counts positive.
     """
     from tcip_annotation import json_io
 
@@ -236,7 +236,7 @@ def count_by_class(
     for i, a in enumerate(annotations):
         ids = json_io.attribute_ids(a, cast(str, scope.subject), cast(tuple, scope.attributes))
         if ids is None or ids[column] == json_io.UNASSESSED:
-            raise json_io.UndeclaredValue(
+            raise json_io.UndeclaredValueError(
                 f"{'/'.join(document.parts)}#{i}: a record of {a.subject!r} with attributes "
                 f"{a.attributes}, "
                 f"where this bucket's every record is of {scope.subject!r} with a value under "
@@ -245,7 +245,7 @@ def count_by_class(
     return total, positive, 0
 
 
-class EmptyPopulation(ValueError):
+class EmptyPopulationError(ValueError):
     """A phenology measurement was asked for with no plants named; the population is the caller's
     explicit plant list.
     """
@@ -253,17 +253,17 @@ class EmptyPopulation(ValueError):
 
 def measurement_refusals() -> tuple[type[Exception], ...]:
     """The exceptions :func:`per_plant_phenology` refuses a measurement with, each naming why."""
-    from tcip_annotation.json_io import UndeclaredValue, UnreadableLabelDocument
+    from tcip_annotation.json_io import UndeclaredValueError, UnreadableLabelDocumentError
     from tcip_store import StoreError
 
-    return (UnreadableLabelDocument, UndeclaredValue, StoreError, EmptyPopulation)
+    return (UnreadableLabelDocumentError, UndeclaredValueError, StoreError, EmptyPopulationError)
 
 
 def population(plants: Sequence[str]) -> list[str]:
     """The delivery population as one ordered list of distinct plant ids, refusing an empty one."""
     ordered = list(dict.fromkeys(str(p) for p in plants))
     if not ordered:
-        raise EmptyPopulation(
+        raise EmptyPopulationError(
             "a delivery needs the plants it is for: pass the plant ids to deliver "
             "(plants=[...]); a mapping or registry names every plot, never the population."
         )

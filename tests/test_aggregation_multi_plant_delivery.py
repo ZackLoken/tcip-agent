@@ -215,11 +215,11 @@ def test_a_per_image_count_assessment_never_answers_for_a_per_plant_delivery(tmp
     """The per-image count the assessment measured is not the per-plant number the delivery ships:
     the gate refuses, naming both kinds, rather than lend one measurement to another."""
     pytest.importorskip("torch")
-    from tcip_mcp.delivery import DeliveryRefused
+    from tcip_mcp.delivery import DeliveryRefusedError
     from tcip_mcp.pipelines.postprocessing.aggregation import deliver_per_plant_aggregate
 
     bucket = _assessed(tmp_path, PER_IMAGE_COUNT, "exp-kind-crossed")
-    with pytest.raises(DeliveryRefused, match=f"{PER_IMAGE_COUNT} delivery, not a "
+    with pytest.raises(DeliveryRefusedError, match=f"{PER_IMAGE_COUNT} delivery, not a "
                                               f"{PER_PLANT_COUNT_AGGREGATE} one"):
         deliver_per_plant_aggregate(
             tmp_path, _ROWS, str(tmp_path / "crossed.csv"), delivered_phenotype="stem_count",

@@ -26,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 
 import tcip_store
-from tcip_store import Version, VersionConflict, encode_record
+from tcip_store import Version, VersionConflictError, encode_record
 
 MANIFEST_EXT = ".bandgroup"
 
@@ -128,7 +128,7 @@ class BandGroupRef:
     central_wavelength_nm: dict[str, float] | None = None
 
 
-class BandGroupIncomplete(FileNotFoundError):
+class BandGroupIncompleteError(FileNotFoundError):
     """A ``.bandgroup`` manifest references a sibling file that no longer exists on disk."""
 
 
@@ -335,7 +335,7 @@ def write_band_group_manifest(
     the originals never move) and return its path.
 
     ``expect`` carries the seam's own meaning: ``Version.ABSENT`` records a newly detected group
-    only while none is recorded, and raises ``VersionConflict`` rather than overwriting one a
+    only while none is recorded, and raises ``VersionConflictError`` rather than overwriting one a
     concurrent detection pass just wrote.
     """
     payload: dict = {"bands": {name: p.name for name, p in bands.items()}, "source": source}
@@ -418,7 +418,7 @@ def detect_and_write_band_groups(
                 central_wavelength_nm=group.get("central_wavelength_nm"), source=group["source"],
                 expect=Version.ABSENT,
             )
-        except VersionConflict:
+        except VersionConflictError:
             continue  # idempotent: a recorded fact is not re-inferred, whoever recorded it
         formed.append({"stem": stem, "bands": sorted(group["bands"]), "source": group["source"]})
         manifests.append(str(mp))

@@ -22,15 +22,15 @@ RETAINED_EVENTS_PER_PANEL = 64
 connects late; chosen here, so a reconnecting tab catches up on a session's recent steering."""
 
 
-class GuiMutationInvalid(ValueError):
+class GuiMutationInvalidError(ValueError):
     """A :meth:`StateStore.mutate` call whose merged result does not validate as ``GuiState``."""
 
 
-class NoProjectOpen(RuntimeError):
+class NoProjectOpenError(RuntimeError):
     """A request that acts on the open project arrived while the backend has none open."""
 
 
-class ProjectNotOpen(RuntimeError):
+class ProjectNotOpenError(RuntimeError):
     """A request built for one project arrived while the backend has another open, or none."""
 
     def __init__(self, open_project_id: Optional[str]) -> None:
@@ -85,17 +85,17 @@ class StateStore:
         return self._project_id
 
     def open_root(self) -> Path:
-        """The open project's directory; raises :class:`NoProjectOpen` when none is open."""
+        """The open project's directory; raises :class:`NoProjectOpenError` when none is open."""
         project = self.project_root
         if project is None:
-            raise NoProjectOpen("no project is open; open one from the project list first")
+            raise NoProjectOpenError("no project is open; open one from the project list first")
         return project
 
     def admit(self, project_id: str) -> Path:
         """The open project's directory, when ``project_id`` names it; raises
-        :class:`ProjectNotOpen` naming the open project's id otherwise."""
+        :class:`ProjectNotOpenError` naming the open project's id otherwise."""
         if project_id != self.project_id:
-            raise ProjectNotOpen(self.project_id)
+            raise ProjectNotOpenError(self.project_id)
         return self.open_root()
 
     async def open_project(self, project: Path) -> None:
@@ -174,8 +174,8 @@ class StateStore:
         passing a fully built model instance or a complete dict for it. The merged result is
         validated through :class:`GuiState` and :func:`~tcip_mcp.web_client.require_whole` before
         anything else: a mutation that does not validate, or states a nested field partly, raises
-        :class:`GuiMutationInvalid` naming the field. A state that cannot be persisted raises the
-        store's own error, and nothing is held.
+        :class:`GuiMutationInvalidError` naming the field. A state that cannot be persisted raises
+        the store's own error, and nothing is held.
         """
         async with self._lock:
             dumped = {
@@ -187,7 +187,7 @@ class StateStore:
                 new_state = GuiState.model_validate(merged)
                 require_whole(new_state, "the mutated state")
             except (ValidationError, ValueError) as exc:
-                raise GuiMutationInvalid(str(exc)) from exc
+                raise GuiMutationInvalidError(str(exc)) from exc
             if self._project is not None:
                 await asyncio.to_thread(write_gui_snapshot, self._project, new_state)
             await self._hold(new_state)

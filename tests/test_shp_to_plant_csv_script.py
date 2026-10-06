@@ -321,12 +321,12 @@ def test_read_plant_shapefile_non_numeric_plot_number_carried_verbatim(tmp_path:
 def test_read_plant_shapefile_refuses_a_crs_it_cannot_resolve(tmp_path: Path) -> None:
     """coverage. A shapefile with no .prj refuses by name rather than guessing a CRS."""
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        ShapefileCrsUnknown,
+        ShapefileCrsUnknownError,
         read_plant_shapefile,
     )
 
     shp = _point_shapefile(tmp_path, epsg=None)
-    with pytest.raises(ShapefileCrsUnknown, match="resolvable coordinate reference system"):
+    with pytest.raises(ShapefileCrsUnknownError, match="resolvable coordinate reference system"):
         read_plant_shapefile(shp)
 
 
@@ -345,11 +345,11 @@ def _garbage_prj_shapefile(tmp_path: Path) -> Path:
 def test_garbage_prj_refuses_through_convert_shp_to_plant_csv(tmp_path: Path) -> None:
     """coverage. A .prj holding unparseable text answers the same falsy layer CRS a missing
     one does, so the command refuses it through the same check rather than guessing."""
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import ShapefileCrsUnknown
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import ShapefileCrsUnknownError
 
     shp = _garbage_prj_shapefile(tmp_path)
     csv_path = tmp_path / "plants.csv"
-    with pytest.raises(ShapefileCrsUnknown, match="resolvable coordinate reference system"):
+    with pytest.raises(ShapefileCrsUnknownError, match="resolvable coordinate reference system"):
         convert_shp_to_plant_csv(shp, csv_path)
     assert not csv_path.exists()
 

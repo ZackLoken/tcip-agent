@@ -23,7 +23,7 @@ from tcip_annotation.viz import render_candidates, render_detections
 
 from tcip_mcp.audit import now_iso, record_event_or_raise
 from tcip_mcp.pipelines.image_utils import (
-    BandGroupIncomplete, image_dimensions, resolve_image_path,
+    BandGroupIncompleteError, image_dimensions, resolve_image_path,
 )
 from tcip_mcp.project_paths import viz_output_path
 from tcip_mcp.server import tool
@@ -170,7 +170,7 @@ def propose_annotations(
     try:
         source = resolve_image_path(img)
         proposer = resolve_proposer(engine)
-    except (FileNotFoundError, BandGroupIncomplete, ValueError, ImportError) as e:
+    except (FileNotFoundError, BandGroupIncompleteError, ValueError, ImportError) as e:
         return {"error": str(e)}
 
     # A region is cropped and offset entirely here, before the engine ever sees an image path.
@@ -310,7 +310,7 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
     longer matches the content identity it recorded."""
     try:
         source = resolve_image_path(img)
-    except (FileNotFoundError, BandGroupIncomplete, ValueError) as exc:
+    except (FileNotFoundError, BandGroupIncompleteError, ValueError) as exc:
         return {"error": str(exc)}
 
     # Load cached proposals from the same record propose_annotations staged them in.
@@ -397,7 +397,7 @@ def _stage_document(project: Path, address: ts.Key, producer: str, image: Path, 
     staging key ``address``)
     (:func:`~tcip_mcp.buckets.publish`), its record naming ``producer`` as what proposed them, and
     return the bucket's name; no annotations publishes nothing and returns ``None``. A bucket of
-    that name already published refuses (:class:`~tcip_mcp.buckets.BucketExists`)."""
+    that name already published refuses (:class:`~tcip_mcp.buckets.BucketExistsError`)."""
     from tcip_annotation import json_io
 
     from tcip_mcp.buckets import Document, publish
@@ -445,7 +445,7 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: t
 
     try:
         img_source = resolve_image_path(img)
-    except (FileNotFoundError, BandGroupIncomplete, ValueError) as exc:
+    except (FileNotFoundError, BandGroupIncompleteError, ValueError) as exc:
         return {"error": str(exc)}
     img_w, img_h = image_dimensions(img_source)
 

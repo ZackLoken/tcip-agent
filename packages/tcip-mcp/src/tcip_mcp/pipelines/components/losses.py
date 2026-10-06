@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+from torch.nn import functional
 
 from tcip_mcp.pipelines.derivations import num_classes_from_distribution
 
@@ -40,7 +40,8 @@ def corn_loss(logits: torch.Tensor, ranks: torch.Tensor, num_ranks: int) -> torc
         mask = ranks >= k
         if mask.sum() == 0:
             continue
-        loss = loss + F.binary_cross_entropy_with_logits(logits[mask, k], (ranks[mask] > k).float())
+        loss = loss + functional.binary_cross_entropy_with_logits(
+            logits[mask, k], (ranks[mask] > k).float())
         n_tasks += 1
     return loss / max(n_tasks, 1)
 
@@ -75,11 +76,12 @@ class FocalLoss(BaseLoss):
     def forward(self, predictions, targets):
         if self.weight is not None:
             # Per-class weight subsumes the scalar alpha: no double balance.
-            ce = F.cross_entropy(predictions, targets, weight=self.weight, reduction="none")
+            ce = functional.cross_entropy(
+                predictions, targets, weight=self.weight, reduction="none")
             p_t = torch.exp(-ce)
             loss = (1 - p_t) ** self.gamma * ce
         else:
-            ce = F.cross_entropy(predictions, targets, reduction="none")
+            ce = functional.cross_entropy(predictions, targets, reduction="none")
             p_t = torch.exp(-ce)
             loss = self.alpha * (1 - p_t) ** self.gamma * ce
         if self.reduction == "mean":
@@ -169,7 +171,7 @@ class CORALLoss(BaseLoss):
         levels = torch.zeros_like(predictions)
         for i in range(predictions.size(0)):
             levels[i, :targets[i]] = 1.0
-        return F.binary_cross_entropy_with_logits(predictions, levels)
+        return functional.binary_cross_entropy_with_logits(predictions, levels)
 
 
 class CombinedLoss(BaseLoss):

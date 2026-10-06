@@ -72,11 +72,11 @@ def test_create_record_answers_the_existing_record_when_offered_it_again(tmp_pat
 
 
 def test_create_record_refuses_a_different_site_naming_both(tmp_path: Path):
-    from tcip_mcp.project_record import SiteConflict, create_record, read_record
+    from tcip_mcp.project_record import SiteConflictError, create_record, read_record
 
     create_record(tmp_path, "Valley block", "north orchard")
 
-    with pytest.raises(SiteConflict) as raised:
+    with pytest.raises(SiteConflictError) as raised:
         create_record(tmp_path, "Valley block", "south orchard")
 
     assert "north orchard" in str(raised.value) and "south orchard" in str(raised.value)
@@ -95,12 +95,12 @@ def test_create_record_refuses_a_different_display_name_naming_rename(tmp_path: 
 
 
 def test_create_record_refuses_a_present_record_missing_a_field(tmp_path: Path):
-    from tcip_mcp.project_record import ProjectRecordInvalid, create_record, project_record_key
+    from tcip_mcp.project_record import ProjectRecordInvalidError, create_record, project_record_key
 
     ts.replace(project_record_key(tmp_path), {"site": "north orchard"},
                expect=ts.Version.ABSENT)
 
-    with pytest.raises(ProjectRecordInvalid, match="does not hold an id"):
+    with pytest.raises(ProjectRecordInvalidError, match="does not hold an id"):
         create_record(tmp_path, "Valley block", "north orchard")
 
 
@@ -129,9 +129,9 @@ def test_replace_site_corrects_the_site_keeping_the_id_and_display_name(tmp_path
 
 
 def test_replace_site_refuses_a_project_with_no_record(tmp_path: Path):
-    from tcip_mcp.project_record import ProjectRecordMissing, replace_site
+    from tcip_mcp.project_record import ProjectRecordMissingError, replace_site
 
-    with pytest.raises(ProjectRecordMissing):
+    with pytest.raises(ProjectRecordMissingError):
         replace_site(tmp_path, "south orchard")
 
 
@@ -144,9 +144,9 @@ def test_read_record_raises_missing_and_publishes_no_database_for_a_root_with_no
     """Names the creating door; a read of an absent record never publishes a database."""
     from tcip_store.file_backend import database_file
 
-    from tcip_mcp.project_record import ProjectRecordMissing, read_record
+    from tcip_mcp.project_record import ProjectRecordMissingError, read_record
 
-    with pytest.raises(ProjectRecordMissing, match="initialize_project"):
+    with pytest.raises(ProjectRecordMissingError, match="initialize_project"):
         read_record(tmp_path)
 
     assert not database_file(str(tmp_path.absolute())).is_file()

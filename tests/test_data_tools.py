@@ -328,7 +328,7 @@ def test_draw_splits_stats_only_answers_an_ambiguous_image_stem_as_an_error(tmp_
 
 def test_scan_dataset_answers_an_ambiguous_image_stem_as_an_error(tmp_path: Path):
     """``scan_dataset`` answers the same stem collision as an error rather than letting
-    ``AmbiguousImageStem`` escape uncaught through the tool boundary."""
+    ``AmbiguousImageStemError`` escape uncaught through the tool boundary."""
     import numpy as np
 
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest

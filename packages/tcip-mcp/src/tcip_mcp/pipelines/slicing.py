@@ -49,7 +49,7 @@ def _native_ratio_tile_size(train_native_size: Any) -> int | None:
     return width
 
 
-class TileEdgeContradiction(ValueError):
+class TileEdgeContradictionError(ValueError):
     """A caller-stated tile edge that differs from the checkpoint's own recorded tile geometry."""
 
 
@@ -82,8 +82,8 @@ def resolve_tile_geometry(
     ``None`` and the overlap ``DEFAULT_OVERLAP``.
 
     A stated edge on a tiled pass that differs from the checkpoint's recorded edge (persisted, else
-    native) raises :class:`TileEdgeContradiction` naming both. A tiled pass whose edge came from
-    the native frame runs each tile through the resize the run's recorded augmentation chain
+    native) raises :class:`TileEdgeContradictionError` naming both. A tiled pass whose edge came
+    from the native frame runs each tile through the resize the run's recorded augmentation chain
     applied (:func:`~tcip_mcp.pipelines.data.augmentations.recorded_resize`); every other pass
     runs none.
     """
@@ -100,7 +100,7 @@ def resolve_tile_geometry(
             kind = ("persisted training tile geometry" if persisted is not None
                     else "recorded untiled training frame")
             if recorded != edge:
-                raise TileEdgeContradiction(
+                raise TileEdgeContradictionError(
                     f"stated tile_size {edge} contradicts this checkpoint's own {kind} of "
                     f"{recorded}. Pass tile_size {recorded} to match the checkpoint, or leave "
                     "tile_size unset to derive it from the checkpoint.")

@@ -9,7 +9,7 @@ import zipfile
 from pathlib import Path
 
 import tcip_store
-from tcip_store import Key, VersionConflict, encode_record
+from tcip_store import Key, VersionConflictError, encode_record
 
 from tcip_mcp.server import tool
 from tcip_mcp.audit import audited
@@ -112,7 +112,7 @@ def register_dataset(project: Path, dataset_root: str, crop: str) -> dict:
         }
         try:
             tcip_store.put_blob(ident_path, encode_record(candidate), expect=stored.version)
-        except VersionConflict:
+        except VersionConflictError:
             continue
         identity = candidate
         break
@@ -452,14 +452,14 @@ def _move_staging_onto_destination(staged: Path, dest: Path, *, timeout_s: float
     def _prepare_and_rename() -> None:
         if dest.exists():
             if any(dest.iterdir()):
-                raise StoreErrorRuntime(f"destination {dest} is no longer empty; refusing the move")
+                raise StoreRuntimeError(f"destination {dest} is no longer empty; refusing the move")
             dest.rmdir()
         os.rename(str(staged), str(dest))
 
     retry_while_denied(_prepare_and_rename, timeout_s)
 
 
-class StoreErrorRuntime(RuntimeError):
+class StoreRuntimeError(RuntimeError):
     """Raised inside the retried move body; caught outside the retry as a tool refusal."""
 
 
@@ -558,7 +558,7 @@ def _run_import_into_staging(bp: Path, staging: Path, dest: Path) -> dict:
 
     try:
         _move_staging_onto_destination(staging, dest, timeout_s=DEFAULT_LOCK_TIMEOUT_S)
-    except (OSError, StoreErrorRuntime) as exc:
+    except (OSError, StoreRuntimeError) as exc:
         return {"error": f"could not move the staged import onto {dest}: {exc}"}
 
     return {

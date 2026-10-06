@@ -78,7 +78,7 @@ def _deliver(project: Path, *, trait: str, mapping_name: str, plants: list[str],
     under a breeder's acknowledgment (these rails are the mapping's, never the assessment
     gate's); a refusal answers ``{"error": ...}`` the way the tool's does."""
     from tcip_mcp.pipelines.postprocessing import phenology
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingDeliveryRefusal
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingDeliveryError
     from tests._chain_fixtures import acknowledged
 
     try:
@@ -90,7 +90,7 @@ def _deliver(project: Path, *, trait: str, mapping_name: str, plants: list[str],
             project, measurement, curves=False, output_path=Path(output_csv_path),
             acknowledgment_id=ack, door=DOOR, actor=None),
             reason="mapping rails, not the assessment")
-    except (ValueError, MappingDeliveryRefusal, *phenology.measurement_refusals()) as exc:
+    except (ValueError, MappingDeliveryError, *phenology.measurement_refusals()) as exc:
         return {"error": str(exc)}
 
 
@@ -649,7 +649,7 @@ def test_a_receipt_that_cannot_be_written_fails_persist_mapping_and_the_record_s
     contend for the same lock this test holds for the whole body). This calls
     ``plant_mapping.build_mapping`` directly rather than through ``build_plant_mapping`` so the
     tool's wrapper does not contend for that lock."""
-    from tcip_mcp.audit import AuditEntryNotWritten, audit_log_key
+    from tcip_mcp.audit import AuditEntryNotWrittenError, audit_log_key
     from tcip_store.sqlite_backend import SqliteBackend
 
     ts.bind(SqliteBackend(lock_timeout_s=0.2))
@@ -662,7 +662,7 @@ def test_a_receipt_that_cannot_be_written_fails_persist_mapping_and_the_record_s
         plant_registry={"name": "unregistered", "digest": "0" * 64})
 
     with held_by_another_writer(audit_log_key(tmp_path)), pytest.raises(
-            AuditEntryNotWritten, match="plant_mapping_built"):
+            AuditEntryNotWrittenError, match="plant_mapping_built"):
         plant_mapping.persist_mapping(build, tmp_path, actor=None)
 
     with pytest.raises(ValueError, match="receipt"):

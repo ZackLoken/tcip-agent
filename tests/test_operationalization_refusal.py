@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tcip_mcp import traits
-from tcip_mcp.operationalization import OperationalizationRefused, bind, confirmed_revision
+from tcip_mcp.operationalization import OperationalizationRefusedError, bind, confirmed_revision
 from tcip_mcp.traits import (
     PER_IMAGE_COUNT,
     PER_PLANT_COUNT_AGGREGATE,
@@ -55,7 +55,7 @@ def _confirmed_aggregate(project: Path, kind: str) -> traits.TraitRevision:
 def test_a_kind_the_confirmed_revision_does_not_state_refuses_and_names_the_proposing_tool(
     project: Path,
 ):
-    with pytest.raises(OperationalizationRefused) as excinfo:
+    with pytest.raises(OperationalizationRefusedError) as excinfo:
         confirmed_revision(STATE_CROSSING_DATES, project=project, trait=fx.CROSSING_TRAIT)
 
     message = str(excinfo.value)
@@ -68,7 +68,7 @@ def test_a_trait_with_no_confirmed_revision_refuses_and_names_who_confirms(tmp_p
     fx.propose(tmp_path, fx.with_operationalization(
         fx.COUNT_SPEC, PER_IMAGE_COUNT, measured_subject=fx.COUNT_SUBJECT))
 
-    with pytest.raises(OperationalizationRefused) as excinfo:
+    with pytest.raises(OperationalizationRefusedError) as excinfo:
         confirmed_revision(PER_IMAGE_COUNT, project=tmp_path, trait=fx.COUNT_TRAIT)
 
     assert "none of its 1 revision(s) is confirmed" in str(excinfo.value)
@@ -79,7 +79,7 @@ def test_a_trait_with_no_confirmed_revision_refuses_and_names_who_confirms(tmp_p
 def test_a_value_key_outside_the_confirmed_set_refuses(project: Path):
     _confirmed_aggregate(project, PER_PLANT_COUNT_AGGREGATE)
 
-    with pytest.raises(OperationalizationRefused, match="leaf_length"):
+    with pytest.raises(OperationalizationRefusedError, match="leaf_length"):
         confirmed_revision(PER_PLANT_COUNT_AGGREGATE, project=project, trait=fx.COUNT_TRAIT,
                            value_keys=["stem_count", "leaf_length"])
 
@@ -87,7 +87,7 @@ def test_a_value_key_outside_the_confirmed_set_refuses(project: Path):
 def test_a_row_carrying_no_value_key_refuses_and_counts_them(project: Path):
     _confirmed_aggregate(project, PER_PLANT_COUNT_AGGREGATE)
 
-    with pytest.raises(OperationalizationRefused, match="2 row"):
+    with pytest.raises(OperationalizationRefusedError, match="2 row"):
         confirmed_revision(PER_PLANT_COUNT_AGGREGATE, project=project, trait=fx.COUNT_TRAIT,
                            value_keys=["stem_count", "", None])
 
@@ -95,7 +95,7 @@ def test_a_row_carrying_no_value_key_refuses_and_counts_them(project: Path):
 def test_a_delivered_phenotype_outside_the_confirmed_set_refuses(project: Path):
     _confirmed_crossing(project)
 
-    with pytest.raises(OperationalizationRefused, match="bloom_95per_date"):
+    with pytest.raises(OperationalizationRefusedError, match="bloom_95per_date"):
         confirmed_revision(STATE_CROSSING_DATES, project=project, trait=fx.CROSSING_TRAIT,
                            delivered_phenotype="bloom_95per_date")
 
@@ -103,7 +103,7 @@ def test_a_delivered_phenotype_outside_the_confirmed_set_refuses(project: Path):
 def test_a_bucket_not_counting_the_measured_subject_refuses(project: Path):
     revision = fx.seed_confirmed_count(project)
 
-    with pytest.raises(OperationalizationRefused) as excinfo:
+    with pytest.raises(OperationalizationRefusedError) as excinfo:
         bind(revision, PER_IMAGE_COUNT, buckets={"predictions/live/2026-03-04": "leaf"})
 
     assert "stem" in str(excinfo.value) and "predictions/live/2026-03-04" in str(excinfo.value)
@@ -118,7 +118,7 @@ def test_a_registry_no_longer_declaring_the_positive_state_refuses_with_its_prob
     registry = cr.SubjectRegistry(subjects=(cr.Subject(name="flower", attributes=(
         cr.Attribute(name="state", type="categorical", values=("shed",)),)),))
 
-    with pytest.raises(OperationalizationRefused) as excinfo:
+    with pytest.raises(OperationalizationRefusedError) as excinfo:
         confirmed_revision(STATE_CROSSING_DATES, project=project, trait=fx.CROSSING_TRAIT,
                            registry=registry)
 
@@ -134,7 +134,7 @@ def test_an_unconfirmed_trait_reports_that_rather_than_a_binding(tmp_path: Path)
         fx.COUNT_SPEC, PER_PLANT_COUNT_AGGREGATE, delivered_phenotypes=("stem_count",),
         delivered_value_keys=("stem_count",)))
 
-    with pytest.raises(OperationalizationRefused) as excinfo:
+    with pytest.raises(OperationalizationRefusedError) as excinfo:
         confirmed_revision(PER_PLANT_COUNT_AGGREGATE, project=tmp_path, trait=fx.COUNT_TRAIT,
                            value_keys=["not_covered"])
 
@@ -354,7 +354,7 @@ def delivery_root(tmp_path: Path) -> Path:
 
 
 def test_a_count_under_a_revision_stating_no_count_refuses(delivery_root: Path):
-    with pytest.raises(OperationalizationRefused) as excinfo:
+    with pytest.raises(OperationalizationRefusedError) as excinfo:
         confirmed_revision(PER_IMAGE_COUNT, project=delivery_root, trait=fx.COUNT_TRAIT)
 
     assert "states no operationalization" in str(excinfo.value)
@@ -387,7 +387,7 @@ def test_a_phenotype_no_confirmed_trait_delivers_refuses_and_names_the_proposing
     refusal."""
     fx.propose(tmp_path, fx.entry("nut", ("cluster_nut_count",)))
 
-    with pytest.raises(OperationalizationRefused) as excinfo:
+    with pytest.raises(OperationalizationRefusedError) as excinfo:
         confirmed_revision(PER_PLANT_COUNT_AGGREGATE, project=tmp_path,
                            delivered_phenotype="cluster_nut_count", value_keys=["count"])
 
@@ -401,7 +401,7 @@ def test_a_phenotype_two_confirmed_traits_deliver_refuses_as_ambiguous(
 ):
     fx.propose_and_confirm(tmp_path, fx.with_fields(fx.COUNT_SPEC, name="second_deliverer"))
 
-    with pytest.raises(OperationalizationRefused) as excinfo:
+    with pytest.raises(OperationalizationRefusedError) as excinfo:
         confirmed_revision(PER_PLANT_COUNT_AGGREGATE, project=tmp_path,
                            delivered_phenotype="stem_count", value_keys=["count"])
 
@@ -420,7 +420,7 @@ def test_a_revision_states_each_aggregate_kind_it_delivers(delivery_root: Path, 
                                   value_keys=["astringency"])
 
     admits(PER_PLANT_ORDINAL_AGGREGATE)
-    with pytest.raises(OperationalizationRefused, match=PER_PLANT_COUNT_AGGREGATE):
+    with pytest.raises(OperationalizationRefusedError, match=PER_PLANT_COUNT_AGGREGATE):
         admits(PER_PLANT_COUNT_AGGREGATE)
 
     fx.seed_confirmed_aggregate(tmp_path, "astringency", value_keys=["astringency"])

@@ -201,7 +201,7 @@ def cancel_job(job_id: str, payload: PersonPayload) -> dict:
     """Request graceful cancellation by the person ``user`` names; the worker stops at the next
     image boundary and the request leaves one ``inference_canceled`` line in the job's project.
     Refuses (404) an unknown job, and answers 409 when the line cannot follow the request."""
-    from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
+    from tcip_mcp.audit import AuditEntryNotWrittenError, record_event_or_raise
     from tcip_web.routes.audit_gap import audit_gap_409
 
     person = actor(payload.user)
@@ -214,7 +214,7 @@ def cancel_job(job_id: str, payload: PersonPayload) -> dict:
         record_event_or_raise("inference_canceled",
                               {"job_id": job_id, "dataset_root": j.dataset_root,
                                "bucket": j.bucket}, actor=person, scope=j.project)
-    except AuditEntryNotWritten as exc:
+    except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(exc, answer) from exc
     return answer
 

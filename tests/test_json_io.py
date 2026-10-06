@@ -17,8 +17,8 @@ import pytest
 import tcip_store
 from tcip_annotation.json_io import (
     UNASSESSED,
-    UndeclaredValue,
-    UnreadableLabelDocument,
+    UndeclaredValueError,
+    UnreadableLabelDocumentError,
     attribute_ids,
     attribute_values,
     read_label_document,
@@ -114,7 +114,7 @@ def test_a_record_naming_no_subject_is_refused_where_an_annotation_is_made(
     raw["annotations"].append(
         {"bbox": [1, 1, 4, 4], **({} if subject is None else {"subject": subject})})
     tcip_store.replace(key, raw)
-    with pytest.raises(UnreadableLabelDocument, match=r"record 1 .*non-empty string subject"):
+    with pytest.raises(UnreadableLabelDocumentError, match=r"record 1 .*non-empty string subject"):
         _read(key)
 
 
@@ -176,7 +176,7 @@ def test_a_string_score_is_refused_by_the_reference_check(tmp_path: Path) -> Non
     truth; it now refuses where the numeric one refuses as an unadjudicated prediction."""
     key = _stored(tmp_path, {"annotations": [
         {"subject": "bud", "bbox": [1.0, 2.0, 3.0, 4.0], "score": "0.8"}]})
-    with pytest.raises(UnreadableLabelDocument, match="score"):
+    with pytest.raises(UnreadableLabelDocumentError, match="score"):
         require_reference_ground_truth(_read(key))
 
 
@@ -297,7 +297,7 @@ def test_a_bad_ring_beside_good_ones_refuses_the_document_by_record(
         }],
     })
 
-    with pytest.raises(UnreadableLabelDocument, match="record 1 (segmentation|a polygon)"):
+    with pytest.raises(UnreadableLabelDocumentError, match="record 1 (segmentation|a polygon)"):
         _read(key)
 
 
@@ -470,7 +470,7 @@ def test_a_record_that_does_not_decode_raises_the_one_unreadable_refusal(tmp_pat
     write_label_document(key, [], 10, 10, keep_empty=True)
     damage_record(key, b"not json {][")
 
-    with pytest.raises(UnreadableLabelDocument, match="does not decode"):
+    with pytest.raises(UnreadableLabelDocumentError, match="does not decode"):
         _read(key)
 
 
@@ -479,7 +479,7 @@ def test_a_record_that_does_not_decode_raises_the_one_unreadable_refusal(tmp_pat
 def test_a_record_that_is_not_an_object_raises(tmp_path: Path, payload) -> None:
     key = _stored(tmp_path, payload)
 
-    with pytest.raises(UnreadableLabelDocument):
+    with pytest.raises(UnreadableLabelDocumentError):
         _read(key)
 
 
@@ -507,7 +507,7 @@ def test_entry_without_subject_raises(tmp_path: Path) -> None:
         "annotations": [{"bbox": [5.0, 6.0, 7.0, 8.0]}],
     })
 
-    with pytest.raises(UnreadableLabelDocument):
+    with pytest.raises(UnreadableLabelDocumentError):
         _read(key)
 
 
@@ -539,7 +539,7 @@ def test_a_supplied_malformed_value_refuses_the_document_by_record(
         ],
     })
 
-    with pytest.raises(UnreadableLabelDocument, match=f"record 1 {key_name}"):
+    with pytest.raises(UnreadableLabelDocumentError, match=f"record 1 {key_name}"):
         _read(key)
 
 
@@ -549,7 +549,7 @@ def test_stored_box_with_no_positive_extent_raises(tmp_path: Path) -> None:
         "annotations": [{"subject": "bud", "bbox": [5.0, 5.0, 0.0, 0.0]}],
     })
 
-    with pytest.raises(UnreadableLabelDocument):
+    with pytest.raises(UnreadableLabelDocumentError):
         _read(key)
 
 
@@ -570,7 +570,7 @@ def test_a_bad_segmentation_refuses_rather_than_falling_back_to_the_box(
                          "bbox": [1.0, 2.0, 3.0, 4.0]}],
     })
 
-    with pytest.raises(UnreadableLabelDocument, match="record 0 (segmentation|a polygon)"):
+    with pytest.raises(UnreadableLabelDocumentError, match="record 0 (segmentation|a polygon)"):
         _read(key)
 
 
@@ -583,7 +583,7 @@ def test_a_box_with_no_extent_refuses_beside_valid_rings(tmp_path: Path, bbox) -
         {"subject": "bud", "segmentation": [[0.0, 0.0, 10.0, 0.0, 10.0, 10.0]], "bbox": bbox},
     ]})
 
-    with pytest.raises(UnreadableLabelDocument, match="record 0 .*no positive extent"):
+    with pytest.raises(UnreadableLabelDocumentError, match="record 0 .*no positive extent"):
         _read(key)
 
 
@@ -609,7 +609,7 @@ def test_an_absent_key_still_reads_as_absent(tmp_path: Path) -> None:
 def test_annotations_null_or_absent_raises(tmp_path: Path, payload) -> None:
     key = _stored(tmp_path, payload)
 
-    with pytest.raises(UnreadableLabelDocument):
+    with pytest.raises(UnreadableLabelDocumentError):
         _read(key)
 
 
@@ -640,7 +640,7 @@ def test_a_non_dict_annotation_record_raises(tmp_path: Path, junk) -> None:
     past it as if it weren't there would let a corrupt record read as a smaller label set."""
     key = _stored(tmp_path, {"annotations": [junk]})
 
-    with pytest.raises(UnreadableLabelDocument):
+    with pytest.raises(UnreadableLabelDocumentError):
         _read(key)
 
 
@@ -653,7 +653,7 @@ def test_a_null_score_reads_as_ground_truth_and_a_bad_one_refuses(tmp_path: Path
     bad = _stored(tmp_path, {"annotations": [
         {"subject": "leaf", "segmentation": [[0.0, 0.0, 9.0, 0.0, 5.0, 9.0]], "score": "high"}]},
         "bad")
-    with pytest.raises(UnreadableLabelDocument, match="record 0 score"):
+    with pytest.raises(UnreadableLabelDocumentError, match="record 0 score"):
         _read(bad)
 
 
@@ -678,7 +678,7 @@ def test_boolean_score_field_is_not_a_confidence(tmp_path: Path, flag) -> None:
     """
     key = _stored(tmp_path, {"width": 320, "height": 240, "annotations": [
         {"subject": "bud", "bbox": [10.0, 20.0, 100.0, 200.0], "score": flag}]})
-    with pytest.raises(UnreadableLabelDocument, match="record 0 score"):
+    with pytest.raises(UnreadableLabelDocumentError, match="record 0 score"):
         _read(key)
 
 
@@ -715,12 +715,12 @@ def test_absence_reads_as_no_document_and_a_stored_null_refuses(tmp_path: Path) 
 
     key = _key(tmp_path)
     assert read_document_versioned(key) == (NO_DOCUMENT, tcip_store.Version.ABSENT)
-    with pytest.raises(UnreadableLabelDocument, match="has no record"):
+    with pytest.raises(UnreadableLabelDocumentError, match="has no record"):
         read_label_document(key)
 
     _stored(tmp_path, None)
 
-    with pytest.raises(UnreadableLabelDocument, match="not the object a label document is"):
+    with pytest.raises(UnreadableLabelDocumentError, match="not the object a label document is"):
         read_document_versioned(key)
 
 
@@ -742,7 +742,7 @@ def test_attribute_ids_distinguish_unassessed_from_undeclared() -> None:
                          attributes={"opening": "closed", "grade": "low"})
 
     assert attribute_ids(unassessed, "bud", attributes) == [UNASSESSED, 1]
-    with pytest.raises(UndeclaredValue, match="opening='not-a-real-value'"):
+    with pytest.raises(UndeclaredValueError, match="opening='not-a-real-value'"):
         attribute_ids(undeclared, "bud", attributes)
     assert attribute_ids(labeled, "bud", attributes) == [1, 0]
     assert attribute_ids(labeled, "bush", attributes) is None

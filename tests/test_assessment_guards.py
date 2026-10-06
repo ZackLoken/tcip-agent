@@ -220,9 +220,9 @@ def test_compensating_classification_errors_cannot_validate_through_pooled_count
 def test_an_unauthored_tolerance_refuses_the_revision_with_the_breeders_question(tmp_path):
     """No default stands in for a tolerance the criterion compares against: a count revision that
     leaves one unauthored is refused when proposed, asking the breeder, and none is recorded."""
-    from tcip_mcp.traits import QUESTIONS, UnauthoredField, trait_names
+    from tcip_mcp.traits import QUESTIONS, UnauthoredFieldError, trait_names
 
-    with pytest.raises(UnauthoredField) as refused:
+    with pytest.raises(UnauthoredFieldError) as refused:
         confirm_count_trait(tmp_path, count_bias_tolerance_frac=None)
 
     assert "count_bias_tolerance_frac" in str(refused.value)
@@ -252,7 +252,7 @@ def test_one_producer_clears_the_gate_and_a_series_of_two_refuses(tmp_path):
     """Two checkpoints over the same capture are two measurements: a delivery naming buckets from
     both refuses outright, naming each, while either one alone clears."""
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.delivery import DeliveryRefused, Result, gate
+    from tcip_mcp.delivery import DeliveryRefusedError, Result, gate
     from tcip_mcp.operationalization import latest_confirmed
     from tcip_mcp.tools.inference_tools import run_inference
 
@@ -268,7 +268,7 @@ def test_one_producer_clears_the_gate_and_a_series_of_two_refuses(tmp_path):
 
     assert gate(tmp_path, [first], delivery_kind="per_image_count", revision=revision,
                 result=nothing).validated
-    with pytest.raises(DeliveryRefused, match="more than one checkpoint") as refused:
+    with pytest.raises(DeliveryRefusedError, match="more than one checkpoint") as refused:
         gate(tmp_path, [first, read_bucket(chain.root, second)],
              delivery_kind="per_image_count", revision=revision, result=nothing)
     assert chain.bucket in str(refused.value) and second in str(refused.value)
@@ -278,13 +278,13 @@ def test_an_assessment_whose_retained_reference_is_gone_answers_for_nothing(tmp_
     """An assessment whose retained reference copies are removed reads as a changed reference,
     so the gate refuses the bucket it validated."""
     from tcip_mcp.assessment import REFERENCE_DIR, assessment_dir
-    from tcip_mcp.delivery import DeliveryRefused, Result, gate
+    from tcip_mcp.delivery import DeliveryRefusedError, Result, gate
     from tcip_mcp.operationalization import latest_confirmed
 
     chain = run_the_chain(tmp_path, experiment_id="exp-forged")
     shutil.rmtree(assessment_dir(tmp_path, chain.assessment["assessment_id"]) / REFERENCE_DIR)
 
-    with pytest.raises(DeliveryRefused, match="changed since"):
+    with pytest.raises(DeliveryRefusedError, match="changed since"):
         gate(tmp_path, [chain.read()],
              delivery_kind="per_image_count",
              revision=latest_confirmed(fx.COUNT_TRAIT, tmp_path),
@@ -297,7 +297,7 @@ def test_a_reference_source_edited_after_the_assessment_answers_for_nothing(tmp_
     from PIL import Image
 
     from tcip_mcp.assessment import read_assessment
-    from tcip_mcp.delivery import DeliveryRefused, Result, gate
+    from tcip_mcp.delivery import DeliveryRefusedError, Result, gate
     from tcip_mcp.operationalization import latest_confirmed
 
     chain = run_the_chain(tmp_path, experiment_id="exp-edited-source")
@@ -313,7 +313,7 @@ def test_a_reference_source_edited_after_the_assessment_answers_for_nothing(tmp_
     edited.putpixel((0, 0), (255, 0, 0))
     edited.save(source)
 
-    with pytest.raises(DeliveryRefused, match="changed since") as refused:
+    with pytest.raises(DeliveryRefusedError, match="changed since") as refused:
         gate(tmp_path, [bucket], delivery_kind="per_image_count", revision=revision,
              result=nothing)
     assert source in str(refused.value)
@@ -334,7 +334,7 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(t
 
     from PIL import Image
 
-    from tcip_mcp.assessment import AssessmentRefused, _scalar
+    from tcip_mcp.assessment import AssessmentRefusedError, _scalar
     from tcip_mcp.pipelines.data.selection import ClassScope, Sample
     from tcip_mcp.pipelines.execution import Pass, untiled_execution
 
@@ -352,12 +352,12 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(t
                     group="a", side="holdout", row_key="a")
     entry = fx.COUNT_SPEC.model_copy(update={"regression_criterion": "r_squared"})
 
-    with pytest.raises(AssessmentRefused, match="_values"):
+    with pytest.raises(AssessmentRefusedError, match="_values"):
         _scalar(p, [sample], entry, {sample.location: "digest"})
     # The statistic is the revision's own: one the platform registers no scorer for refuses by
     # name before any image is predicted, whatever a caller might have preferred.
     unregistered = entry.model_copy(update={"regression_criterion": "pearson_r"})
-    with pytest.raises(AssessmentRefused, match="'pearson_r'"):
+    with pytest.raises(AssessmentRefusedError, match="'pearson_r'"):
         _scalar(p, [sample], unregistered, {sample.location: "digest"})
 
     class Short:
@@ -365,7 +365,7 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(t
             return []
 
     p.predictor = Short()
-    with pytest.raises(AssessmentRefused, match="0 predictions for 1 holdout samples"):
+    with pytest.raises(AssessmentRefusedError, match="0 predictions for 1 holdout samples"):
         _scalar(p, [sample], entry, {sample.location: "digest"})
 
 
@@ -399,7 +399,7 @@ def test_a_polygon_that_fails_to_rasterize_refuses_rather_than_training_an_empty
 def test_a_restored_record_runs_as_recorded_and_a_changed_overlap_or_merge_refuses_by_name(
         tmp_path):
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.execution import ExecutionRefused, Stated, prepare_pass
+    from tcip_mcp.pipelines.execution import ExecutionRefusedError, Stated, prepare_pass
 
     _images, _drawn, _sel, checkpoint_path = _trained(tmp_path, "exp-restore")
     checkpoint = load_registered_checkpoint(checkpoint_path, project=tmp_path)
@@ -407,9 +407,9 @@ def test_a_restored_record_runs_as_recorded_and_a_changed_overlap_or_merge_refus
     assert recorded.tiled, recorded
 
     assert prepare_pass(checkpoint, Stated(overlap=0.2), restored=recorded).execution == recorded
-    with pytest.raises(ExecutionRefused, match="overlap stated 0.5, recorded 0.2"):
+    with pytest.raises(ExecutionRefusedError, match="overlap stated 0.5, recorded 0.2"):
         prepare_pass(checkpoint, Stated(overlap=0.5), restored=recorded)
-    with pytest.raises(ExecutionRefused, match="postprocess stated 'nmm', recorded 'nms'"):
+    with pytest.raises(ExecutionRefusedError, match="postprocess stated 'nmm', recorded 'nms'"):
         prepare_pass(checkpoint, Stated(postprocess="nmm"), restored=recorded)
     # A blank merge is a name the vocabulary refuses, never the default an omitted one takes.
     with pytest.raises(ValueError, match="Unknown cross-tile merge ''.*nms"):

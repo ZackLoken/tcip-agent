@@ -20,7 +20,7 @@ from tcip_mcp.traits import (
 )
 
 
-class OperationalizationRefused(ValueError):
+class OperationalizationRefusedError(ValueError):
     """The trait has no confirmed revision, or its confirmed revision does not state or bind what
     a delivery is about to write."""
 
@@ -30,12 +30,12 @@ class OperationalizationRefused(ValueError):
 
 
 def latest_confirmed(trait: str, project: str | Path) -> TraitRevision:
-    """``trait``'s latest confirmed revision. Refuses (:class:`OperationalizationRefused`) naming
-    the trait when none of its revisions is confirmed; an unknown trait raises
-    ``TraitUnknownError``."""
+    """``trait``'s latest confirmed revision. Refuses
+    (:class:`OperationalizationRefusedError`) naming the trait when none of its revisions is
+    confirmed; an unknown trait raises ``TraitUnknownError``."""
     record = read_trait(trait, project)
     if record.latest_confirmed is None:
-        raise OperationalizationRefused(
+        raise OperationalizationRefusedError(
             f"Refused for trait {trait!r}: none of its {record.latest.number} revision(s) is "
             "confirmed by the breeder, so nothing states what its numbers mean. An entry the agent "
             "proposed and nobody confirmed is the agent's own definition. Ask the breeder to open "
@@ -58,13 +58,13 @@ def confirmed_revision(
 
     ``trait`` names the trait (:func:`latest_confirmed`); ``None`` takes the one trait whose latest
     confirmed revision delivers ``delivered_phenotype``. Refuses
-    (:class:`OperationalizationRefused`) when no trait or several qualify, when the revision states
-    no operationalization for ``delivery_kind``, and when :func:`bind` refuses.
+    (:class:`OperationalizationRefusedError`) when no trait or several qualify, when the revision
+    states no operationalization for ``delivery_kind``, and when :func:`bind` refuses.
     """
     revision = (latest_confirmed(trait, project) if trait is not None
                 else _revision_delivering(str(delivered_phenotype), project))
     if delivery_kind not in revision.entry.operationalizations:
-        raise OperationalizationRefused(_unstated_text(revision, delivery_kind))
+        raise OperationalizationRefusedError(_unstated_text(revision, delivery_kind))
     bind(revision, delivery_kind, delivered_phenotype=delivered_phenotype, value_keys=value_keys,
          registry=registry)
     return revision
@@ -79,7 +79,7 @@ def bind(
     buckets: Mapping[str, str | None] | None = None,
     registry: SubjectRegistry | None = None,
 ) -> None:
-    """Refuse (:class:`OperationalizationRefused`) a delivery ``revision``'s ``delivery_kind``
+    """Refuse (:class:`OperationalizationRefusedError`) a delivery ``revision``'s ``delivery_kind``
     operationalization does not bind: a delivered phenotype it does not cover, a row value key
     outside its set or missing, a bucket (``buckets``: name to the subject its detections are of)
     not counting its measured subject, or, with ``registry`` given, a positive state the delivered
@@ -87,8 +87,8 @@ def bind(
     entry = revision.entry
     stated = entry.operationalizations[delivery_kind]
 
-    def refuse(what: str) -> OperationalizationRefused:
-        return OperationalizationRefused(
+    def refuse(what: str) -> OperationalizationRefusedError:
+        return OperationalizationRefusedError(
             f"Delivery refused for trait {entry.name!r}: revision {revision.number}'s "
             f"{delivery_kind} operationalization {what}. Deliver what it covers, or propose a "
             "revision covering this delivery with propose_trait and have the breeder confirm it "
@@ -122,7 +122,7 @@ def bind(
 
 def _revision_delivering(delivered_phenotype: str, project: str | Path) -> TraitRevision:
     """The latest confirmed revision of the one trait whose latest confirmed revision delivers
-    ``delivered_phenotype``; refuses (:class:`OperationalizationRefused`) naming the phenotype,
+    ``delivered_phenotype``; refuses (:class:`OperationalizationRefusedError`) naming the phenotype,
     the confirmed traits delivering it and the traits proposing it when not exactly one does."""
     confirmed: list[TraitRevision] = []
     proposed: list[str] = []
@@ -135,7 +135,7 @@ def _revision_delivering(delivered_phenotype: str, project: str | Path) -> Trait
             proposed.append(name)
     if len(confirmed) == 1:
         return confirmed[0]
-    raise OperationalizationRefused(
+    raise OperationalizationRefusedError(
         f"Delivery refused for phenotype {delivered_phenotype!r}: "
         f"{len(confirmed)} traits with a confirmed revision deliver it "
         f"({[r.entry.name for r in confirmed]}), and {proposed} deliver it only in a revision "

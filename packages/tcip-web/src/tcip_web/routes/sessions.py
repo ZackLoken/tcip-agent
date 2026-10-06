@@ -24,7 +24,7 @@ Activity = Literal["new_annotation", "review", "negative_confirmation"]
 
 
 def _stats_key() -> Key:
-    """The open project's stats key; raises ``NoProjectOpen`` when none is open."""
+    """The open project's stats key; raises ``NoProjectOpenError`` when none is open."""
     from tcip_web.state import store
 
     return annotation_stats_key(str(store.open_root()))
@@ -106,13 +106,13 @@ def end_session(payload: EmptyBodyPayload) -> dict:
 
 def _record(tool: str, arguments: dict[str, Any], person: str) -> None:
     """One line in the open project's log for a session write already made, by ``person``."""
-    from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
+    from tcip_mcp.audit import AuditEntryNotWrittenError, record_event_or_raise
     from tcip_web.routes.audit_gap import audit_gap_409
     from tcip_web.state import store
 
     try:
         record_event_or_raise(tool, arguments, actor=person, scope=store.open_root())
-    except AuditEntryNotWritten as exc:
+    except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(exc, {"status": "ok"}) from exc
 
 

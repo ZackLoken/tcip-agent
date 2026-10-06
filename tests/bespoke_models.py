@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+from torch.nn import functional
 
 from tcip_mcp.pipelines.derivations import gt_aspect_ratios
 from tcip_mcp.pipelines.model_build import METRICS_KEY, STATE_DICT_KEY
@@ -58,7 +58,8 @@ class _GNBackboneFPN(nn.Module):
     def forward(self, x):
         c2 = self.c2(self.stem(x))
         c3 = self.c3(c2)
-        p2 = self.lat2(c2) + F.interpolate(self.lat3(c3), size=c2.shape[-2:], mode="nearest")
+        p2 = self.lat2(c2) + functional.interpolate(
+            self.lat3(c3), size=c2.shape[-2:], mode="nearest")
         p2 = self.act(self.fpn_norm(p2))
         return self.act(self.smooth_norm(self.smooth(p2)))
 

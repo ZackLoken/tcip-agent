@@ -228,10 +228,10 @@ class TestPortDiscovery:
     ) -> None:
         """No record means no backend serves the workspace; a requested port in the environment
         is not where one listens."""
-        from tcip_mcp.web_client import NoBackendPort, resolve_web_port
+        from tcip_mcp.web_client import NoBackendPortError, resolve_web_port
 
         monkeypatch.setenv("TCIP_WEB_PORT", "12345")
-        with pytest.raises(NoBackendPort, match="python -m tcip_web"):
+        with pytest.raises(NoBackendPortError, match="python -m tcip_web"):
             resolve_web_port(tmp_path.parent)
 
     def test_an_unreadable_recorded_port_raises_and_names_it(

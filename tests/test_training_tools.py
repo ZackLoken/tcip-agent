@@ -282,7 +282,7 @@ def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(tmp_pa
         "batch_size": 2,
     }
     r = preflight_config(tmp_path, cfg)
-    with pytest.raises(json_io.UnreadableLabelDocument, match="bad") as raised:
+    with pytest.raises(json_io.UnreadableLabelDocumentError, match="bad") as raised:
         auto_train_val(tmp_path, "detection", dict(data_cfg), None)
     assert r["valid"] is False
     assert any(str(raised.value) in i for i in r["issues"]), r["issues"]

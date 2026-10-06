@@ -227,7 +227,7 @@ def test_publishing_the_same_bucket_twice_refuses_the_second_publish(tmp_path: P
     """
     import tcip_store
 
-    from tcip_mcp.buckets import BucketExists, Document, publish, read_bucket
+    from tcip_mcp.buckets import BucketExistsError, Document, publish, read_bucket
     from tcip_mcp.dataset_layout import PREDICTION_BUCKETS, PREDICTION_DOCUMENTS
     from tcip_mcp.tools.inference_tools import run_inference
 
@@ -253,7 +253,7 @@ def test_publishing_the_same_bucket_twice_refuses_the_second_publish(tmp_path: P
     first = read_bucket(chain.root, chain.bucket)
     documents = [Document(str(chain.images_dir / f"{stem}.png"), {"annotations": []})
                  for stem in STEMS]
-    with pytest.raises(BucketExists):
+    with pytest.raises(BucketExistsError):
         publish(tmp_path, first.root, chain.bucket, documents, producer=first.producer,
                 scope=first.scope,
                 execution=first.execution, raster_path=None, raster_identity=None,

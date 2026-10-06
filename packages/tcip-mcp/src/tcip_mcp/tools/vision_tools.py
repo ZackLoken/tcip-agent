@@ -13,7 +13,7 @@ import tcip_store as ts
 from tcip_annotation import Annotation, Point, bbox_of
 from tcip_annotation.state import box_derivable, polygonal, prediction_score
 from tcip_annotation.json_io import (
-    UnreadableLabelDocument, read_document_versioned, read_predictions,
+    UnreadableLabelDocumentError, read_document_versioned, read_predictions,
 )
 from tcip_annotation.viz import (
     render_canvas_state,
@@ -274,7 +274,7 @@ def _viz_annotations(
     try:
         source = resolve_image_path(image_path)
         anns = _labels_at(label_key_of(source_path_of(source)))
-    except (UnreadableLabelDocument, ValueError, FileNotFoundError) as exc:
+    except (UnreadableLabelDocumentError, ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}
     if anns is None:
         return {"error": f"No labels found for {img.stem}"}
@@ -342,7 +342,7 @@ def _viz_predictions(
         if pred_key is None:
             return {"error": f"No predictions found for {stem} in bucket {bucket!r}"}
         preds = read_predictions(pred_key)
-    except (UnreadableLabelDocument, ValueError, FileNotFoundError) as exc:
+    except (UnreadableLabelDocumentError, ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}
     preds = [a for a in preds if prediction_score(a) >= conf_threshold]
     idx, index = _subject_indexer()
@@ -406,7 +406,7 @@ def _viz_comparison(
         found = read_bucket(parse_image_path(source_path_of(source))[0], bucket)
         (one,), _metrics = score_bucket([source], found, iou_threshold=iou_threshold,
                                         conf_threshold=conf_threshold, trait=None)
-    except (UnreadableLabelDocument, ValueError, FileNotFoundError) as exc:
+    except (UnreadableLabelDocumentError, ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}
     preds_all = one.preds or []
     gt_dicts = [_box_dict(a, index) for a in _boxable(one.gt)]
@@ -447,7 +447,7 @@ def get_worst_predictions(bucket: Bucket, top_k: int = 8) -> dict:
     names none for was not predicted, and is listed under ``not_predicted`` rather than scored. A
     bucket recording no capture refuses (``ValueError``), a ranked image naming no logical image
     (``FileNotFoundError``), and a ranked image with no label document
-    (``UnreadableLabelDocument``).
+    (``UnreadableLabelDocumentError``).
 
     Args:
         bucket: The published bucket whose recorded documents are ranked.
@@ -535,7 +535,7 @@ def render_failure_cases(
 
     try:
         worst, by_stem = _ranked(read_bucket(dataset_root, bucket), top_k)
-    except (UnreadableLabelDocument, ValueError, FileNotFoundError) as exc:
+    except (UnreadableLabelDocumentError, ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}
 
     worst_items = worst.get("worst_images", [])
@@ -586,7 +586,7 @@ def _viz_dataset_sample(
     """Render a grid of random annotated dataset samples."""
     from tcip_mcp.dataset_layout import image_dir, image_root, label_key, list_dates
     from tcip_mcp.pipelines.image_utils import (
-        BandGroupIncomplete, list_logical_images, refuse_incomplete_band_group,
+        BandGroupIncompleteError, list_logical_images, refuse_incomplete_band_group,
     )
 
     root = Path(folder_path)
@@ -606,11 +606,11 @@ def _viz_dataset_sample(
     for capture, stem, enumerated in sample:
         try:
             source = refuse_incomplete_band_group(enumerated)
-        except BandGroupIncomplete:
+        except BandGroupIncompleteError:
             continue
         try:
             anns = _labels_at(label_key(root, capture, stem))
-        except UnreadableLabelDocument as exc:
+        except UnreadableLabelDocumentError as exc:
             return {"error": str(exc)}
         read = _read_for_display(source)
         if anns is not None:

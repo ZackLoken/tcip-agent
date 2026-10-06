@@ -87,7 +87,7 @@ def test_score_predictions_over_attributed_documents_scores_the_object_class(
 def test_a_predicted_image_with_no_label_document_is_refused_as_a_reference(tmp_path: Path):
     """An image the bucket predicted and nobody labeled has no reference: scoring and the count
     triage refuse naming its document, never measuring it against an empty one."""
-    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tcip_mcp.tools.vision_tools import get_worst_predictions
 
     img = tmp_path / "images" / UNDATED_BUCKET / "IMG_0000.jpg"
@@ -97,7 +97,7 @@ def test_a_predicted_image_with_no_label_document_is_refused_as_a_reference(tmp_
     res = score_predictions(str(img), "baseline")
 
     assert "IMG_0000" in res["error"] and "has no record" in res["error"], res
-    with pytest.raises(UnreadableLabelDocument, match="IMG_0000.*has no record"):
+    with pytest.raises(UnreadableLabelDocumentError, match="IMG_0000.*has no record"):
         get_worst_predictions(bucket)
 
 

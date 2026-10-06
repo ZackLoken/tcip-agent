@@ -583,7 +583,7 @@ def test_single_tiled_source_raises_on_an_unreadable_label(tmp_path: Path, caplo
     no width/height: the run aborts rather than degrading to no validation over a document nobody
     can read."""
     import tcip_store
-    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_annotation.json_io import UnreadableLabelDocumentError
 
     from tests._producer_fixtures import image_label_key
 
@@ -597,7 +597,7 @@ def test_single_tiled_source_raises_on_an_unreadable_label(tmp_path: Path, caplo
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "seed": 1},
     }
-    with pytest.raises(UnreadableLabelDocument):
+    with pytest.raises(UnreadableLabelDocumentError):
         auto_train_val(tmp_path, "detection", data_cfg, None)
     assert "training without validation" not in caplog.text
 

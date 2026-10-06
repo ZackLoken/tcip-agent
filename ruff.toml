@@ -15,13 +15,6 @@ preview = true
 # E, W: pycodestyle, PEP 8's layout rules, line length included. N: pep8-naming, PEP 8's naming.
 # F: pyflakes. B033: a duplicate set value. D, I, UP, SIM, C4 and the formatter are later gates.
 select = ["E", "W", "N", "F", "B033"]
-ignore = [
-    # Exceptions are named for the refusal they are (`AssessmentRefused`, `NoActor`); an `Error`
-    # suffix on 53 shared names carries nothing. Provisional until the owner rules.
-    "N818",
-    # `torch.nn.functional as F` is PyTorch's own documented alias. Provisional until the owner rules.
-    "N812",
-]
 
 [lint.per-file-ignores]
 # `name = pytest.importorskip("dep")` legitimately precedes imports in dependency-gated test

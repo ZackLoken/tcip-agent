@@ -126,10 +126,10 @@ def _cmd_write_after(
     outcome = "written"
     try:
         ts.replace(key, {"who": value}, expect=expect)
-    except ts.VersionConflict:
-        outcome = "VersionConflict"
-    except ts.StoreBusy:
-        outcome = "StoreBusy"
+    except ts.VersionConflictError:
+        outcome = "VersionConflictError"
+    except ts.StoreBusyError:
+        outcome = "StoreBusyError"
     Path(result).write_text(
         json.dumps({"outcome": outcome, "waited_s": time.monotonic() - started}), encoding="utf-8"
     )
@@ -195,10 +195,10 @@ def _cmd_write_blob_after(
     outcome = "written"
     try:
         ts.put_blob(path, value.encode("utf-8"), expect=expect)
-    except ts.VersionConflict:
-        outcome = "VersionConflict"
-    except ts.StoreBusy:
-        outcome = "StoreBusy"
+    except ts.VersionConflictError:
+        outcome = "VersionConflictError"
+    except ts.StoreBusyError:
+        outcome = "StoreBusyError"
     Path(result).write_text(json.dumps({"outcome": outcome}), encoding="utf-8")
 
 

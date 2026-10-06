@@ -12,32 +12,32 @@ class StoreError(Exception):
     """Base for every refusal this layer raises."""
 
 
-class StoreNotBound(StoreError):
+class StoreNotBoundError(StoreError):
     """No backend is bound in this process."""
 
 
-class BadKey(StoreError):
+class BadKeyError(StoreError):
     """The key names no root or carries an empty part."""
 
 
-class NotFound(StoreError):
+class NotFoundError(StoreError):
     """A required read found no entry."""
 
 
 class DecodeError(StoreError):
-    """The entry exists but its bytes do not decode. Distinct from ``NotFound``."""
+    """The entry exists but its bytes do not decode. Distinct from ``NotFoundError``."""
 
 
-class BackendUnavailable(StoreError):
-    """The backend cannot provide a guarantee it would have to declare, so it refuses to exist."""
+class BackendUnavailableError(StoreError):
+    """The backend cannot provide a guarantee it must declare, so it refuses to exist."""
 
 
-class TransactionMisuse(StoreError):
+class TransactionMisuseError(StoreError):
     """A transaction was nested, named no key, spanned two roots, or was bypassed by a write
     inside it."""
 
 
-class VersionConflict(StoreError):
+class VersionConflictError(StoreError):
     """The stored version is not the one the caller expected, so nothing was written."""
 
     def __init__(self, entry: Key | str, expected: Version, actual: Version) -> None:
@@ -52,7 +52,7 @@ class VersionConflict(StoreError):
         self.actual = actual
 
 
-class StoreBusy(StoreError):
+class StoreBusyError(StoreError):
     """A lock was not acquired within the timeout, so nothing was written. ``blocked_on`` names
     the first key or file the refused call named."""
 

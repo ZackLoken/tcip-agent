@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from tcip_mcp.identity import NoActor, actor
+from tcip_mcp.identity import NoActorError, actor
 from tests._audit_fixtures import audit_rows
 
 DOORS = [
@@ -39,7 +39,7 @@ NO_ONE = ["  ", "user:", "user:   "]
 
 @pytest.mark.parametrize("name", NO_ONE)
 def test_actor_refuses_a_name_that_names_no_one(name: str) -> None:
-    with pytest.raises(NoActor):
+    with pytest.raises(NoActorError):
         actor(name)
 
 

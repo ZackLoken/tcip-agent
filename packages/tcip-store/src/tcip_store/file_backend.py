@@ -20,11 +20,11 @@ from pathlib import Path
 from typing import Any
 
 from tcip_store.errors import (
-    BackendUnavailable,
-    BadKey,
-    NotFound,
-    StoreBusy,
-    VersionConflict,
+    BackendUnavailableError,
+    BadKeyError,
+    NotFoundError,
+    StoreBusyError,
+    VersionConflictError,
 )
 from tcip_store.model import (
     REQUIRED, Key, Version, Versioned, canonical_path, refuse_inside_transaction,
@@ -48,10 +48,10 @@ def creation_temp_name(destination: str, token: str) -> str:
 
 
 def require_absolute_root(root: str) -> Path:
-    """The root as a path, or ``BadKey`` for a relative one."""
+    """The root as a path, or ``BadKeyError`` for a relative one."""
     directory = Path(root)
     if not directory.is_absolute():
-        raise BadKey(
+        raise BadKeyError(
             f"root {root!r} is not an absolute path: a relative root resolves against "
             "whatever directory the process happens to be in"
         )
@@ -68,7 +68,7 @@ def _filelock_classes() -> tuple[Any, Any]:
     try:
         from filelock import FileLock, Timeout
     except ImportError as exc:
-        raise BackendUnavailable(
+        raise BackendUnavailableError(
             "the store needs the filelock package for cross-process exclusion and will not "
             "run without it"
         ) from exc
@@ -224,33 +224,34 @@ def _read_bytes(path: Path) -> bytes | None:
 
 @contextmanager
 def _locked(path: Path) -> Generator[None]:
-    """Hold ``path``'s lock (:func:`path_lock`); ``StoreBusy`` naming it when the wait runs out."""
+    """Hold ``path``'s lock (:func:`path_lock`); ``StoreBusyError`` naming it when the wait runs
+    out."""
     _, timeout_error = _filelock_classes()
     _ensure_parent(path)
     try:
         with path_lock(path):
             yield
     except timeout_error:
-        raise StoreBusy(str(path), DEFAULT_LOCK_TIMEOUT_S) from None
+        raise StoreBusyError(str(path), DEFAULT_LOCK_TIMEOUT_S) from None
 
 
 def require_version(entry: Key | str, data: bytes | None, expect: Version) -> None:
-    """Refuse (``VersionConflict`` naming ``entry``) when the stored bytes ``data``, ``None`` for
-    an absent entry, are not the version ``expect`` names."""
+    """Refuse (``VersionConflictError`` naming ``entry``) when the stored bytes ``data``,
+    ``None`` for an absent entry, are not the version ``expect`` names."""
     current = Version.ABSENT if data is None else _version_of(data)
     if current != expect:
-        raise VersionConflict(entry, expect, current)
+        raise VersionConflictError(entry, expect, current)
 
 
 def versioned(data: bytes | None, default: Any, decode: Callable[[bytes], Any],
               absent: str) -> Versioned:
     """Stored bytes ``data`` as their decoded value (``decode``) and their version, or, for an
-    absent entry (``data`` ``None``), ``default`` paired with ``Version.ABSENT``; ``NotFound``
+    absent entry (``data`` ``None``), ``default`` paired with ``Version.ABSENT``; ``NotFoundError``
     stating ``absent`` when no default was given."""
     if data is not None:
         return Versioned(decode(data), _version_of(data))
     if default is REQUIRED:
-        raise NotFound(f"{absent}. Pass default= if absence is meaningful to this caller")
+        raise NotFoundError(f"{absent}. Pass default= if absence is meaningful to this caller")
     return Versioned(default, Version.ABSENT)
 
 
@@ -263,8 +264,8 @@ def put_blob(path: Path, data: bytes, *, expect: Version | None = None) -> Versi
     """Write a file whole, atomically, and return the version derived from its bytes.
 
     ``expect`` compares against the stored version re-read under the path's lock: a mismatch
-    raises ``VersionConflict`` with nothing written. ``Version.ABSENT`` writes only if no file
-    exists; ``None`` is an unconditional write under the lock. Refuses (``TransactionMisuse``)
+    raises ``VersionConflictError`` with nothing written. ``Version.ABSENT`` writes only if no file
+    exists; ``None`` is an unconditional write under the lock. Refuses (``TransactionMisuseError``)
     inside an open transaction.
     """
     refuse_inside_transaction("put_blob")

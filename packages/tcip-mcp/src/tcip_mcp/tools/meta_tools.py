@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import tcip_store
-from tcip_store import DecodeError, Key, Version, VersionConflict
+from tcip_store import DecodeError, Key, Version, VersionConflictError
 
 from tcip_mcp.server import tool
 from tcip_mcp.audit import audited, now_iso
@@ -44,8 +44,8 @@ def retrospective_key(project_path: str, project_id: str) -> Key:
 
 
 def read_report(project_path: str, report_id: str) -> dict:
-    """One friction report's decoded document. Raises ``NotFound`` when nothing is recorded under
-    that id and ``DecodeError`` for a report that will not read as a JSON object.
+    """One friction report's decoded document. Raises ``NotFoundError`` when nothing is recorded
+    under that id and ``DecodeError`` for a report that will not read as a JSON object.
     """
     key = friction_report_key(project_path, report_id)
     entry = tcip_store.read(key)
@@ -438,7 +438,7 @@ def write_retrospective(
             appended = True
         try:
             tcip_store.replace(key, content, expect=stored.version)
-        except VersionConflict:
+        except VersionConflictError:
             continue
         break
 

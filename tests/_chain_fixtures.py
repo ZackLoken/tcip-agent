@@ -173,9 +173,9 @@ def acknowledged(project: Path, deliver: Callable[[str | None], Any], *,
     what the second call returns. A refusal no acknowledgment can answer propagates."""
     import pytest
 
-    from tcip_mcp.delivery import DeliveryRefused, record_acknowledgment
+    from tcip_mcp.delivery import DeliveryRefusedError, record_acknowledgment
 
-    with pytest.raises(DeliveryRefused) as refused:
+    with pytest.raises(DeliveryRefusedError) as refused:
         deliver(None)
     if refused.value.result_sha256 is None:
         raise refused.value

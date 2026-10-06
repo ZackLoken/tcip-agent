@@ -239,7 +239,7 @@ def resolve_match_criterion(trait: TraitEntry | None, per_image: list[dict], *,
 
     With no trait it is IoU matching at ``iou_threshold``, the comparability convention. With one,
     its stated ``localization`` governs, an unauthored one refusing
-    (:class:`~tcip_mcp.traits.UnauthoredField`): a center match's tolerance is a
+    (:class:`~tcip_mcp.traits.UnauthoredFieldError`): a center match's tolerance is a
     fraction of the average object size (:func:`localization_frac`), scaled to ``per_image`` here
     and to another reference by :func:`scaled_to`; an IoU match's threshold is the one the ground
     truth's own box sizes derive, and a reference with no box to derive it from refuses. An IoU
@@ -596,7 +596,7 @@ def bucket_reads(images: Sequence[Any], bucket: Any) -> list[tuple[Any, list, li
     ``(source, ground truth, predictions)``, its label document's annotations and, where the
     bucket's record names a document for it, that document's (``None`` where it names none), each
     read once. An image with no label document refuses
-    (:class:`~tcip_annotation.json_io.UnreadableLabelDocument`)."""
+    (:class:`~tcip_annotation.json_io.UnreadableLabelDocumentError`)."""
     from pathlib import Path
 
     from tcip_annotation.json_io import read_label_document, read_predictions

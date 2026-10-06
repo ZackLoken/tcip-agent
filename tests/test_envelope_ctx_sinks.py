@@ -160,11 +160,11 @@ def test_a_checkpoint_tag_cannot_walk_out_of_the_run_directory(tmp_path):
     A bespoke loop names its own tags, and a checkpoint landing beside the run rather than in
     it is a weight file no provenance points at.
     """
-    from tcip_store import BadKey
+    from tcip_store import BadKeyError
 
     ctx, run_dir = _context(tmp_path)
 
-    with pytest.raises(BadKey):
+    with pytest.raises(BadKeyError):
         ctx.save_checkpoint({STATE_DICT_KEY: {}}, "../escaped")
 
     assert not (run_dir.parent / "escaped.pt").exists()
@@ -198,13 +198,13 @@ def test_record_artifact_copies_the_file_into_the_run(tmp_path):
 
 def test_an_artifact_name_cannot_walk_out_of_the_run_directory(tmp_path):
     """An artifact name is a name inside the run, so one spelled as a path copies nothing."""
-    from tcip_store import BadKey
+    from tcip_store import BadKeyError
 
     ctx, run_dir = _context(tmp_path)
     source = tmp_path / "stderr.txt"
     source.write_text("trace")
 
-    with pytest.raises(BadKey):
+    with pytest.raises(BadKeyError):
         ctx.record_artifact("../../escaped", str(source))
 
     assert not (run_dir.parent / "escaped").exists()

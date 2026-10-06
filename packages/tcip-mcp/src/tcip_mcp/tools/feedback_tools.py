@@ -15,11 +15,11 @@ def _load_or_refuse(checkpoint_path: str, project: Path):
     """The verified checkpoint either review-queue door builds its predictor from, or the door's
     own refusal dict when ``project``'s registry names no entry for it. Returns ``(checkpoint,
     refusal)``."""
-    from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
+    from tcip_mcp.model_registry import UnregisteredCheckpointError, load_registered_checkpoint
 
     try:
         return load_registered_checkpoint(checkpoint_path, project=project), None
-    except UnregisteredCheckpoint as exc:
+    except UnregisteredCheckpointError as exc:
         return None, {"error": str(exc)}
 
 
@@ -71,14 +71,14 @@ def _prepare_queue_sources(checkpoint_path: str, images_dir: str, subject: str |
     if subject is None:
         return sources, 0, None
 
-    from tcip_annotation.json_io import UnreadableLabelDocument, read_document_versioned
+    from tcip_annotation.json_io import UnreadableLabelDocumentError, read_document_versioned
 
     from tcip_mcp.dataset_layout import label_key_of
 
     try:
         kept = [s for s in sources if not read_document_versioned(
             label_key_of(source_path_of(s)))[0].finished(subject)]
-    except (ValueError, UnreadableLabelDocument) as exc:
+    except (ValueError, UnreadableLabelDocumentError) as exc:
         return None, 0, {"error": str(exc)}
     return kept, len(sources) - len(kept), None
 

@@ -59,7 +59,7 @@ it under `iscrowd`, so a `train(ctx)` of your own can act on it.
 The per-image document is read by `json_io.read_label_document`, wrapped for the agent by
 `annotation_tools.read_annotations`, a library call, not a tool of its own, and written by
 `save_annotations`. A missing label document reads as no annotations; a present one the reader
-cannot make sense of raises `json_io.UnreadableLabelDocument` naming the document or the malformed
+cannot make sense of raises `json_io.UnreadableLabelDocumentError` naming the document or the malformed
 record's index, rather than reading short: a stored value that does not decode, a non-dict
 document, a completion mark missing any of its fields, an `annotations` value that is not a list, a record
 that is not a dict,

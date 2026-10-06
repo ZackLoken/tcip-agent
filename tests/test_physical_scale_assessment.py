@@ -266,11 +266,11 @@ def test_the_reference_csv_is_read_by_column_name(tmp_path):
     ([("r1", "0", "mm")], r":2\b.*positive"),
 ], ids=["non-numeric", "duplicate-stem", "short-row", "negative", "zero"])
 def test_a_malformed_reference_csv_refuses_naming_its_line(tmp_path, rows, match):
-    from tcip_mcp.assessment import AssessmentRefused, _read_reference_csv
+    from tcip_mcp.assessment import AssessmentRefusedError, _read_reference_csv
 
     path = tmp_path / "reference.csv"
     _write_csv(path, rows)
-    with pytest.raises(AssessmentRefused, match=match):
+    with pytest.raises(AssessmentRefusedError, match=match):
         _read_reference_csv(path.read_bytes(), str(path))
 
 

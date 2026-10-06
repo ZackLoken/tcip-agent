@@ -44,7 +44,7 @@ def freeze_selection(project: Path, experiment_id: str, output_path: str | None 
     from tcip_mcp.pipelines.data.selection import (
         ClassScope, Selection, read_selection_checked, write_selection,
     )
-    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_annotation.json_io import UnreadableLabelDocumentError
 
     from tcip_mcp.pipelines.data.label_queries import acquired
     from tcip_mcp.pipelines.data.split_construction import partition_samples
@@ -68,7 +68,7 @@ def freeze_selection(project: Path, experiment_id: str, output_path: str | None 
                          "a partition no bind can use."}
     try:
         samples = acquired(samples)
-    except (UnreadableLabelDocument, ValueError) as exc:
+    except (UnreadableLabelDocumentError, ValueError) as exc:
         return {"error": f"a member's ground truth changed since {experiment_id!r} trained "
                          f"({exc}): a selection composed from it would bind a later run to "
                          "ground truth this run never saw. Freeze a run whose members have not "
@@ -112,7 +112,7 @@ def _scan_dataset(root: str) -> dict:
     (:func:`~tcip_mcp.dataset_layout.label_key_of`); ``labels``, the key of every label document
     under the root; ``predictions``, the key of every document a published bucket's record names
     (:func:`~tcip_mcp.buckets.buckets_under`). Reads no document. A stem collision within one
-    capture raises :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem`.
+    capture raises :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStemError`.
     """
     import tcip_store
 
@@ -140,11 +140,11 @@ def scan_dataset(folder_path: str) -> dict:
     if not Path(folder_path).is_dir():
         return {"error": f"Directory not found: {folder_path}"}
 
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError
 
     try:
         scan = _scan_dataset(folder_path)
-    except AmbiguousImageStem as exc:
+    except AmbiguousImageStemError as exc:
         return {"error": str(exc)}
 
     labels = set(scan["labels"])
@@ -241,7 +241,7 @@ def draw_splits(
 
     import tcip_store
 
-    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tcip_mcp.dataset_layout import LABEL_DOCUMENTS, image_dir, list_dates
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
     from tcip_mcp.pipelines.data.selection import (
@@ -251,7 +251,7 @@ def draw_splits(
         admitted_membership, check_shares, draw_sides,
     )
     from tcip_mcp.pipelines.data.splits import foreground_group_count
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, BandGroupIncomplete
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError, BandGroupIncompleteError
 
     # Each place holding ground truth: (its name, images directory, ground truth).
     places: list[tuple[str, Path, str | None]]
@@ -278,7 +278,7 @@ def draw_splits(
         drawn, counted = draw_sides(
             membership.samples, membership.scope, seed=seed, stratify=stratify_foreground,
             ratios=ratios)
-    except (UnreadableLabelDocument, AmbiguousImageStem, BandGroupIncomplete,
+    except (UnreadableLabelDocumentError, AmbiguousImageStemError, BandGroupIncompleteError,
             FileNotFoundError, ValueError, OSError) as exc:
         return {"error": str(exc)}
 

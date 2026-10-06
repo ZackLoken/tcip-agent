@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from tcip_store.errors import StoreNotBound, TransactionMisuse
+from tcip_store.errors import StoreNotBoundError, TransactionMisuseError
 from tcip_store.model import (
     REQUIRED, Key, LogPage, Version, Versioned, canonical_path, held_transaction,
     refuse_inside_transaction,
@@ -19,7 +19,7 @@ _bound: SqliteBackend | None = None
 
 def bind(backend: SqliteBackend | None = None) -> SqliteBackend:
     """Bind this process's backend and return it: ``backend``, or a new :class:`SqliteBackend`.
-    Construction refuses with ``BackendUnavailable`` when cross-process exclusion is
+    Construction refuses with ``BackendUnavailableError`` when cross-process exclusion is
     unavailable."""
     global _bound
     _bound = backend if backend is not None else SqliteBackend()
@@ -34,7 +34,7 @@ def unbind() -> None:
 
 def _backend() -> SqliteBackend:
     if _bound is None:
-        raise StoreNotBound(
+        raise StoreNotBoundError(
             "no storage backend is bound: the process entry point (the MCP server, the web "
             "backend, a training subprocess, or a test fixture) must call tcip_store.bind() "
             "before any store operation"
@@ -45,8 +45,8 @@ def _backend() -> SqliteBackend:
 def release_root(root: str | Path) -> None:
     """Close every connection the bound backend holds on ``root`` or on a root under it, on every
     thread, so the tree can be moved; every other root's connections stay open. Waits for every
-    operation using one of those connections to return. Refuses with ``TransactionMisuse`` inside
-    an open transaction."""
+    operation using one of those connections to return. Refuses with ``TransactionMisuseError``
+    inside an open transaction."""
     refuse_inside_transaction("release_root")
     _backend().release(canonical_path(root))
 
@@ -54,8 +54,8 @@ def release_root(root: str | Path) -> None:
 def read(key: Key, *, default: Any = REQUIRED) -> Any:
     """The record's decoded value.
 
-    Raises ``NotFound`` when the record is absent and no ``default`` was given, and ``DecodeError``
-    when the record exists but will not decode, whatever ``default`` says.
+    Raises ``NotFoundError`` when the record is absent and no ``default`` was given, and
+    ``DecodeError`` when the record exists but will not decode, whatever ``default`` says.
     """
     return read_versioned(key, default=default).value
 
@@ -75,8 +75,9 @@ def replace(key: Key, value: Any, *, expect: Version | None = None) -> Version:
     """Replace one record whole, atomically, and return its new version.
 
     ``expect`` compares against the stored version inside the write: a mismatch raises
-    ``VersionConflict`` with nothing written. ``Version.ABSENT`` writes only if no record exists;
-    ``None`` is an unconditional replace. Raises ``TransactionMisuse`` inside an open transaction.
+    ``VersionConflictError`` with nothing written. ``Version.ABSENT`` writes only if no record
+    exists; ``None`` is an unconditional replace. Raises ``TransactionMisuseError`` inside an open
+    transaction.
     """
     refuse_inside_transaction("replace")
     return _backend().replace(key, value, expect=expect)
@@ -95,15 +96,15 @@ def transaction(*keys: Key, timeout_s: float | None = None) -> Generator[Txn]:
 
     The body reads, writes, deletes and appends through the yielded :class:`Txn`; a clean exit
     commits every change at once and an exception commits none. Refuses with
-    ``TransactionMisuse``: no key, a second transaction of either kind on the same thread
-    (:func:`~tcip_store.model.held_transaction`), or keys under two roots. Raises ``StoreBusy``
+    ``TransactionMisuseError``: no key, a second transaction of either kind on the same thread
+    (:func:`~tcip_store.model.held_transaction`), or keys under two roots. Raises ``StoreBusyError``
     naming the first key when the write lock is not acquired in time.
     """
     if not keys:
-        raise TransactionMisuse("transaction() must name at least one key")
+        raise TransactionMisuseError("transaction() must name at least one key")
     roots = sorted({canonical_path(key.root) for key in keys})
     if len(roots) > 1:
-        raise TransactionMisuse(
+        raise TransactionMisuseError(
             f"a transaction's keys hang off one root, and these name {len(roots)}: "
             f"{', '.join(roots)}. Take one root's keys in one transaction and the other's in "
             "another"
@@ -125,7 +126,7 @@ def stores(root: str) -> list[str]:
 
 def append(key: Key, record: Mapping[str, Any]) -> None:
     """Append one entry to a log, committed before returning; concurrent appenders from any
-    process are serialized. Raises ``TransactionMisuse`` inside an open transaction."""
+    process are serialized. Raises ``TransactionMisuseError`` inside an open transaction."""
     refuse_inside_transaction("append")
     _backend().append(key, record)
 
@@ -136,7 +137,7 @@ def read_log(key: Key, *, after: str | None = None) -> LogPage:
 
 
 def clear_log(key: Key) -> int:
-    """Remove every entry from a log and report how many it held. Raises ``TransactionMisuse``
+    """Remove every entry from a log and report how many it held. Raises ``TransactionMisuseError``
     inside an open transaction."""
     refuse_inside_transaction("clear_log")
     return _backend().clear_log(key)

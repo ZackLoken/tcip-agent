@@ -280,7 +280,7 @@ def test_replace_registry_allows_removals_when_stated(tmp_path):
 
 def test_replace_registry_refuses_a_stale_expect_version(tmp_path):
     from tcip_mcp.subject_registry import replace_registry
-    from tcip_store import Version, VersionConflict
+    from tcip_store import Version, VersionConflictError
 
     replace_registry(tmp_path, SubjectRegistry(subjects=(Subject(name="bush"),)),
                      expect=Version.ABSENT, actor=None)
@@ -288,7 +288,7 @@ def test_replace_registry_refuses_a_stale_expect_version(tmp_path):
     replace_registry(
         tmp_path, SubjectRegistry(subjects=(Subject(name="bush"), Subject(name="leaf"))),
         expect=stale, actor=None)
-    with pytest.raises(VersionConflict):
+    with pytest.raises(VersionConflictError):
         replace_registry(
             tmp_path, SubjectRegistry(subjects=(Subject(name="bush"), Subject(name="tip"))),
             expect=stale, allow_removals=True, actor=None)

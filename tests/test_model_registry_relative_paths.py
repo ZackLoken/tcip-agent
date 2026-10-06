@@ -198,9 +198,9 @@ def test_a_completed_runs_registry_entry_answers_its_checkpoint_resolved_absolut
 
 @pytest.mark.parametrize("stored", ["../outside/evil.pt", r"..\..\outside\evil.pt"])
 def test_resolved_registry_path_refuses_a_traversal_in_either_grammar(tmp_path: Path, stored: str):
-    from tcip_mcp.registry_paths import RegistryPathTraversal, resolved_registry_path
+    from tcip_mcp.registry_paths import RegistryPathTraversalError, resolved_registry_path
 
-    with pytest.raises(RegistryPathTraversal):
+    with pytest.raises(RegistryPathTraversalError):
         resolved_registry_path(tmp_path, stored)
 
 
@@ -216,9 +216,9 @@ def test_resolved_registry_path_admits_a_legitimate_relative_value(tmp_path: Pat
 
 
 def test_resolved_registry_path_refuses_an_empty_value(tmp_path: Path):
-    from tcip_mcp.registry_paths import RegistryPathEmpty, resolved_registry_path
+    from tcip_mcp.registry_paths import RegistryPathEmptyError, resolved_registry_path
 
-    with pytest.raises(RegistryPathEmpty):
+    with pytest.raises(RegistryPathEmptyError):
         resolved_registry_path(tmp_path, "")
 
 
@@ -232,25 +232,31 @@ def test_resolved_registry_path_admits_a_non_empty_value(tmp_path: Path):
 
 
 def test_checkpoint_registry_path_for_refuses_a_missing_root(tmp_path: Path):
-    from tcip_mcp.registry_paths import CheckpointRegistryRootUnusable, checkpoint_registry_path_for
+    from tcip_mcp.registry_paths import (
+        CheckpointRegistryRootUnusableError,
+        checkpoint_registry_path_for,
+    )
 
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"weights")
     missing_root = tmp_path / "does_not_exist"
 
-    with pytest.raises(CheckpointRegistryRootUnusable):
+    with pytest.raises(CheckpointRegistryRootUnusableError):
         checkpoint_registry_path_for(ckpt, missing_root)
 
 
 def test_checkpoint_registry_path_for_refuses_a_file_shaped_root(tmp_path: Path):
-    from tcip_mcp.registry_paths import CheckpointRegistryRootUnusable, checkpoint_registry_path_for
+    from tcip_mcp.registry_paths import (
+        CheckpointRegistryRootUnusableError,
+        checkpoint_registry_path_for,
+    )
 
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"weights")
     file_root = tmp_path / "not_a_directory"
     file_root.write_bytes(b"not a directory")
 
-    with pytest.raises(CheckpointRegistryRootUnusable):
+    with pytest.raises(CheckpointRegistryRootUnusableError):
         checkpoint_registry_path_for(ckpt, file_root)
 
 

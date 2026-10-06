@@ -336,8 +336,9 @@ class TestVisualizeAnnotations:
         assert "error" in result
 
     def test_an_unreadable_label_returns_an_error_naming_the_document(self, viz_dataset: Path):
-        """An undecodable record is refused by the shared reader itself (UnreadableLabelDocument),
-        naming the document, never answered as an image with no labels."""
+        """An undecodable record is refused by the shared reader itself
+        (UnreadableLabelDocumentError), naming the document, never answered as an image with no
+        labels."""
         from tcip_mcp.tools.vision_tools import visualize
 
         img = viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"

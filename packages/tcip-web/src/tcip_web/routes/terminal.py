@@ -93,7 +93,7 @@ def _record_start(session_id: str, launched: LaunchedProgram, project: Path | No
                   actor: str) -> None:
     """One audit line by ``actor`` in ``project``'s log per launch for it, naming the session id
     and the provider and program it launched; a launch for no project has no log to land in and
-    records nothing. A failed append raises ``AuditEntryNotWritten``.
+    records nothing. A failed append raises ``AuditEntryNotWrittenError``.
     """
     from tcip_mcp.audit import record_event_or_raise
 
@@ -176,11 +176,11 @@ class TerminalSession:
             lambda: self._on_exit(gen),
             name=f"term-{self.id}-g{gen}",
         )
-        from tcip_mcp.audit import AuditEntryNotWritten
+        from tcip_mcp.audit import AuditEntryNotWrittenError
 
         try:
             _record_start(self.id, launched, project, actor)
-        except AuditEntryNotWritten as exc:
+        except AuditEntryNotWrittenError as exc:
             stopped = self.terminate()
             reason = str(exc)
             if not stopped:

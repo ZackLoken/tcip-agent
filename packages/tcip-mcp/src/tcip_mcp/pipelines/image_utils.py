@@ -11,7 +11,7 @@ from PIL import Image
 
 from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.data.band_groups import (
-    BandGroupIncomplete,
+    BandGroupIncompleteError,
     BandGroupRef,
     MANIFEST_EXT,
     read_band_group_manifest,
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     import torch
 
 __all__ = [
-    "AmbiguousImageStem", "BandGroupIncomplete", "BandGroupRef", "IMAGE_EXTS",
+    "AmbiguousImageStemError", "BandGroupIncompleteError", "BandGroupRef", "IMAGE_EXTS",
     "bucket_logical_identities", "capture_kind",
     "image_dimensions", "list_logical_images", "load_image", "load_multiband",
     "logical_image_name", "pil_to_tensor", "pixel_array",
@@ -32,7 +32,7 @@ __all__ = [
 ]
 
 
-class AmbiguousImageStem(ValueError):
+class AmbiguousImageStemError(ValueError):
     """A directory holds more than one logical identity under one case-folded stem
     (:func:`stem_collision_key`): two raw files (``foo.jpg``, ``foo.png``, or a same-key case
     variant such as ``Foo.jpg``), or a raw file and a ``.bandgroup`` manifest recorded under a
@@ -103,8 +103,8 @@ def list_logical_images(images_dir: str | Path) -> dict[str, "Path | BandGroupRe
     """Every logical image in ``images_dir``, by exact stem.
 
     Built from :func:`_scan_identities`: a :class:`BandGroupRef` for a manifest identity, that
-    file's own path for a raw one. Raises :class:`AmbiguousImageStem` naming every ambiguous key's
-    own paths; the returned mapping is keyed by the exact stem.
+    file's own path for a raw one. Raises :class:`AmbiguousImageStemError` naming every ambiguous
+    key's own paths; the returned mapping is keyed by the exact stem.
     """
     d = Path(images_dir)
     if not d.is_dir():
@@ -121,11 +121,11 @@ def _identity(entries: list[tuple[Path, "BandGroupRef | None"]]) -> "Path | Band
 
 
 def _refuse_ambiguous(d: Path, keys: "Iterable[list[tuple[Path, BandGroupRef | None]]]") -> None:
-    """Refuse (:class:`AmbiguousImageStem`) the :func:`_scan_identities` keys of ``d`` holding
+    """Refuse (:class:`AmbiguousImageStemError`) the :func:`_scan_identities` keys of ``d`` holding
     more than one identity, naming their paths."""
     names = sorted(str(path) for entries in keys if len(entries) > 1 for path, _ref in entries)
     if names:
-        raise AmbiguousImageStem(
+        raise AmbiguousImageStemError(
             f"{d}: {names} name more than one logical image under one case-folded stem, "
             "refusing to silently keep one. Rename so each logical image has its own stem."
         )
@@ -149,7 +149,7 @@ def refuse_incomplete_band_group(source: "Path | BandGroupRef") -> "Path | BandG
     if isinstance(source, BandGroupRef):
         missing = [name for name, p in source.bands.items() if not p.is_file()]
         if missing:
-            raise BandGroupIncomplete(
+            raise BandGroupIncompleteError(
                 f"band group {source.stem!r} ({source.manifest_path}) references missing band(s) "
                 f"{sorted(missing)}: delete the manifest to let a later detection pass re-group "
                 "the surviving siblings, or restore the missing file(s)."
@@ -163,8 +163,8 @@ def resolve_image_paths(paths: "Iterable[str | Path]") -> "list[Path | BandGroup
     file.
 
     Refuses ``FileNotFoundError`` for a path naming no logical image, naming the manifest that
-    claims it when it is a band of a grouped capture; :class:`AmbiguousImageStem` when its own
-    stem names more than one; ``BandGroupIncomplete`` for a grouped capture missing a band.
+    claims it when it is a band of a grouped capture; :class:`AmbiguousImageStemError` when its own
+    stem names more than one; ``BandGroupIncompleteError`` for a grouped capture missing a band.
     """
     named_paths = [Path(p) for p in paths]
     scanned = {d: _scan_identities(d) if d.is_dir() else {}

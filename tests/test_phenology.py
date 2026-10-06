@@ -237,7 +237,7 @@ def test_count_by_class_foreign_record_within_attributed_bucket_refuses(tmp_path
     p = _document(tmp_path, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9,
                                         attributes={"opening": "open"}),
                              Annotation(subject="bud", geometry=BBox(4, 4, 6, 6), score=0.8)])
-    with pytest.raises(json_io.UndeclaredValue, match="with a value under 'opening'"):
+    with pytest.raises(json_io.UndeclaredValueError, match="with a value under 'opening'"):
         phenology.count_by_class(p, OPENED, scope=_scope(tmp_path, OPENING))
 
 

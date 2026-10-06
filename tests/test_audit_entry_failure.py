@@ -12,13 +12,13 @@ from tcip_mcp.audit import audited
 from tests._audit_fixtures import audit_rows, refuse_audit_appends
 
 
-class _AppendRefused(RuntimeError):
+class _AppendRefusedError(RuntimeError):
     """Stands in for whatever stops a real append: a busy lock, a refused root, a bad key."""
 
 
 def _refuse_append(monkeypatch: pytest.MonkeyPatch) -> None:
     refuse_audit_appends(
-        monkeypatch, error=_AppendRefused("the audit log could not be appended to")
+        monkeypatch, error=_AppendRefusedError("the audit log could not be appended to")
     )
 
 
@@ -38,10 +38,10 @@ def test_append_failure_after_a_successful_body_refuses_and_names_the_committed_
     with pytest.raises(RuntimeError) as caught:
         stage_something(tmp_path, 3)
 
-    assert type(caught.value) is audit_module.MutationCommittedWithoutAuditLine
+    assert type(caught.value) is audit_module.MutationCommittedWithoutAuditLineError
     assert caught.value.tool == "stage_something"
     assert "do not retry it blind" in str(caught.value)
-    assert isinstance(caught.value.__cause__, _AppendRefused)
+    assert isinstance(caught.value.__cause__, _AppendRefusedError)
 
 
 def test_a_failed_body_keeps_its_own_exception_when_the_audit_of_it_cannot_be_written(
@@ -110,13 +110,13 @@ def test_record_event_or_raise_raises_audit_entry_not_written_when_the_append_fa
     """A confirmation that already committed must not be reported as silently unrecorded."""
     _refuse_append(monkeypatch)
 
-    with pytest.raises(audit_module.AuditEntryNotWritten) as caught:
+    with pytest.raises(audit_module.AuditEntryNotWrittenError) as caught:
         audit_module.record_event_or_raise("confirm_something", {"trait": "bloom"}, actor=None,
                                            scope=tmp_path)
 
     assert caught.value.tool == "confirm_something"
     assert "do not retry it blind" in str(caught.value)
-    assert isinstance(caught.value.__cause__, _AppendRefused)
+    assert isinstance(caught.value.__cause__, _AppendRefusedError)
 
 
 def test_record_event_or_raise_against_a_healthy_log_writes_one_entry_and_returns_silently(

@@ -162,35 +162,36 @@ def _band_total(record: dict) -> int:
 
 
 def test_an_assessment_refuses_while_the_reserved_regions_are_unattested(tmp_path: Path):
-    from tcip_mcp.assessment import AssessmentRefused
+    from tcip_mcp.assessment import AssessmentRefusedError
 
     exp = _build_experiment(tmp_path)
 
-    with pytest.raises(AssessmentRefused, match="not marked complete"):
+    with pytest.raises(AssessmentRefusedError, match="not marked complete"):
         _assess(exp)
 
 
 def test_a_mark_over_one_region_leaves_the_other_unattested(tmp_path: Path):
     """The check reads each mark's rect: a mark over the calibration region attests that region
     alone, so the assessment refuses naming the holdout region and only it."""
-    from tcip_mcp.assessment import AssessmentRefused
+    from tcip_mcp.assessment import AssessmentRefusedError
 
     exp = _build_experiment(tmp_path)
     _attest_regions_complete(exp["root"], exp["stem"],
                              [exp["spatial_manifest"]["calibration_region"]])
 
-    with pytest.raises(AssessmentRefused, match=r"\['holdout_region'\] are not marked complete"):
+    with pytest.raises(
+            AssessmentRefusedError, match=r"\['holdout_region'\] are not marked complete"):
         _assess(exp)
 
 
 def test_completeness_is_checked_before_feasibility(tmp_path: Path):
     """A region both incomplete and, at this band count, infeasible names the completeness gap:
     the feasibility message never gets a chance to fire."""
-    from tcip_mcp.assessment import AssessmentRefused
+    from tcip_mcp.assessment import AssessmentRefusedError
 
     exp = _build_experiment(tmp_path)
 
-    with pytest.raises(AssessmentRefused) as exc_info:
+    with pytest.raises(AssessmentRefusedError) as exc_info:
         _assess(exp, k_cal=40, k_test=40)
     assert "not marked complete" in str(exc_info.value)
     assert "leaves only" not in str(exc_info.value)
@@ -286,11 +287,11 @@ def test_an_attested_mosaic_is_assessed_and_recorded(tmp_path: Path):
 
 
 def test_a_run_with_no_reserved_region_refuses_naming_the_remedy(tmp_path: Path):
-    from tcip_mcp.assessment import AssessmentRefused
+    from tcip_mcp.assessment import AssessmentRefusedError
 
     exp = _build_experiment(tmp_path, calibration_ratio=0.0, experiment_id="exp_no_reserve")
 
-    with pytest.raises(AssessmentRefused, match="calibration_ratio"):
+    with pytest.raises(AssessmentRefusedError, match="calibration_ratio"):
         _assess(exp)
 
 
@@ -302,7 +303,7 @@ def test_a_recorded_mosaic_size_other_than_the_file_refuses_by_name(tmp_path: Pa
     from tcip_store import encode_record
 
     from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
-    from tcip_mcp.assessment import AssessmentRefused
+    from tcip_mcp.assessment import AssessmentRefusedError
 
     exp = _attested(tmp_path)
     run_dir = experiment_dir(exp["experiment_id"], project=tmp_path)
@@ -310,7 +311,7 @@ def test_a_recorded_mosaic_size_other_than_the_file_refuses_by_name(tmp_path: Pa
     run["resolved"]["data"]["split"]["spatial_manifest"]["width"] = width
     (run_dir / RUN_FILE).write_bytes(encode_record(run))
 
-    with pytest.raises(AssessmentRefused, match="now reads"):
+    with pytest.raises(AssessmentRefusedError, match="now reads"):
         _assess(exp)
 
 
@@ -546,10 +547,10 @@ def test_density_outlier_bands_are_flagged_against_their_own_siblings():
 
 
 def test_feasibility_counts_only_bands_that_carry_ground_truth():
-    from tcip_mcp.assessment import AssessmentRefused
+    from tcip_mcp.assessment import AssessmentRefusedError
     from tcip_mcp.pipelines.block_calibration import check_feasibility
 
-    with pytest.raises(AssessmentRefused, match="leaves only 1 band"):
+    with pytest.raises(AssessmentRefusedError, match="leaves only 1 band"):
         check_feasibility({"test_0": 0, "test_1": 7, "test_2": 0}, side="test")
     check_feasibility({"cal_0": 4, "cal_1": 0, "cal_2": 9}, side="cal")
 

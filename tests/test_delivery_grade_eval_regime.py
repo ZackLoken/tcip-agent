@@ -180,11 +180,11 @@ def test_gate_translates_unreadable_label_to_error_dict(tmp_path, monkeypatch):
     """A present, unreadable label document raised out of run_full_frame_evaluation is this
     tool's own {"error": ...} shape too, not a raise through the MCP boundary."""
     import tcip_mcp.pipelines.training.eval_runners as runners
-    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tcip_mcp.tools.training_tools import evaluate_model
 
     def _refuse(*a, **kw):
-        raise UnreadableLabelDocument("label document 2026-03-02/IMG_0001 does not decode")
+        raise UnreadableLabelDocumentError("label document 2026-03-02/IMG_0001 does not decode")
 
     monkeypatch.setattr(runners, "run_full_frame_evaluation", _refuse)
     images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)

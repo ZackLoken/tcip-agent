@@ -499,10 +499,11 @@ def _lenient_client() -> TestClient:
 
 def _refuse_record_start(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make every launch's audit line fail to append."""
-    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.audit import AuditEntryNotWrittenError
 
     def _refuse(session_id: str, launched: object, project: Path | None, actor: str) -> None:
-        raise AuditEntryNotWritten("agent_terminal_started", RuntimeError("audit log unwritable"))
+        raise AuditEntryNotWrittenError(
+            "agent_terminal_started", RuntimeError("audit log unwritable"))
 
     monkeypatch.setattr(terminal_routes, "_record_start", _refuse)
 

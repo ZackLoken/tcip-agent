@@ -156,7 +156,7 @@ def test_real_data_stale_manifest_recovers_by_deleting_it(dji_copy):
     """Deleting a stem's .bandgroup is the one recovery path for a manifest whose sibling was
     since deleted; the next detection pass sees the survivors as ungrouped again."""
     from tcip_mcp.pipelines.data.band_groups import (
-        BandGroupIncomplete,
+        BandGroupIncompleteError,
         detect_and_write_band_groups,
     )
     from tcip_mcp.pipelines.image_utils import resolve_image_path
@@ -166,7 +166,7 @@ def test_real_data_stale_manifest_recovers_by_deleting_it(dji_copy):
     manifest_path = dji_copy / f"{stem}.bandgroup"
     (dji_copy / f"{stem}_G.TIF").unlink()
 
-    with pytest.raises(BandGroupIncomplete):
+    with pytest.raises(BandGroupIncompleteError):
         resolve_image_path(manifest_path)
 
     manifest_path.unlink()

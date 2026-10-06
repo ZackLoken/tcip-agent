@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from tcip_mcp.delivery import DeliveryRefused, record_acknowledgment
+from tcip_mcp.delivery import DeliveryRefusedError, record_acknowledgment
 from tests import _trait_fixtures as fx, csv_rows
 
 SCOPE = {"subject": fx.COUNT_SUBJECT}
@@ -65,7 +65,7 @@ def test_an_unassessed_bucket_refuses_with_no_acknowledgment_and_writes_nothing(
 
     bucket = _bucket(tmp_path, [predicted(_image(tmp_path, "a"), [fx.COUNT_SUBJECT])])
 
-    with pytest.raises(DeliveryRefused, match="no assessment answers") as refused:
+    with pytest.raises(DeliveryRefusedError, match="no assessment answers") as refused:
         _deliver(tmp_path, bucket)
 
     assert refused.value.result_sha256 is not None
@@ -99,12 +99,12 @@ def test_an_acknowledgment_given_for_another_result_refuses(tmp_path):
 
     bucket = _bucket(tmp_path, [predicted(_image(tmp_path, "a"), [fx.COUNT_SUBJECT])])
     elsewhere = _bucket(tmp_path, [predicted(_image(tmp_path, "b"), [fx.COUNT_SUBJECT])], "n")
-    with pytest.raises(DeliveryRefused) as other:
+    with pytest.raises(DeliveryRefusedError) as other:
         _deliver(tmp_path, elsewhere)
     act = record_acknowledgment(tmp_path, acknowledged_by="user:breeder", reason="the other one",
                                 result_sha256=str(other.value.result_sha256))
 
-    with pytest.raises(DeliveryRefused, match="another result") as refused:
+    with pytest.raises(DeliveryRefusedError, match="another result") as refused:
         _deliver(tmp_path, bucket, act.acknowledgment_id)
 
     assert refused.value.result_sha256 not in (None, act.result_sha256)
@@ -123,7 +123,7 @@ def test_an_acknowledgment_binds_the_rows_and_refuses_once_a_document_changes(tm
     import tcip_store
 
     bucket = _bucket(tmp_path, [predicted(_image(tmp_path, "a"), [fx.COUNT_SUBJECT] * 6)])
-    with pytest.raises(DeliveryRefused) as six:
+    with pytest.raises(DeliveryRefusedError) as six:
         _deliver(tmp_path, bucket)
     act = record_acknowledgment(tmp_path, acknowledged_by="user:breeder", reason="six of them",
                                 result_sha256=str(six.value.result_sha256))
@@ -133,7 +133,7 @@ def test_an_acknowledgment_binds_the_rows_and_refuses_once_a_document_changes(tm
     # Twelve where six were published, as an edit in place would leave it: no head re-emits one.
     json_io.write_label_document(document, annotations * 2, 64, 64)
 
-    with pytest.raises(DeliveryRefused, match="another result"):
+    with pytest.raises(DeliveryRefusedError, match="another result"):
         _deliver(tmp_path, bucket, act.acknowledgment_id)
 
     assert not (tmp_path / "out" / "counts.csv").exists()
@@ -159,7 +159,7 @@ def test_an_mcp_door_executes_a_recorded_acknowledgment_and_never_originates_one
                                        trait=fx.COUNT_TRAIT, acknowledgment_id="invented")
 
     assert "no acknowledgment 'invented' is recorded" in refused["error"]
-    with pytest.raises(DeliveryRefused) as computed:
+    with pytest.raises(DeliveryRefusedError) as computed:
         _deliver(tmp_path, bucket)
     act = record_acknowledgment(tmp_path, acknowledged_by="user:breeder", reason="a look",
                                 result_sha256=str(computed.value.result_sha256))
@@ -242,7 +242,7 @@ def test_a_delivery_over_no_bucket_refuses_and_carries_no_result_to_acknowledge(
     from tcip_mcp.delivery import Result, gate
     from tcip_mcp.traits import PER_IMAGE_COUNT
 
-    with pytest.raises(DeliveryRefused, match="names no prediction bucket") as refused:
+    with pytest.raises(DeliveryRefusedError, match="names no prediction bucket") as refused:
         gate(tmp_path, [], delivery_kind=PER_IMAGE_COUNT, revision=fx.count_revision(tmp_path),
              result=Result((), (), population=()))
     assert refused.value.result_sha256 is None
@@ -253,7 +253,7 @@ def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(tmp_pa
     a per-image count does: a bucket of another subject refuses, one of the measured subject
     ships."""
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.operationalization import OperationalizationRefused
+    from tcip_mcp.operationalization import OperationalizationRefusedError
     from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE
     from tests._chain_fixtures import deliver_acknowledged, predicted, published
 
@@ -271,7 +271,7 @@ def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(tmp_pa
             delivery_kind=PER_PLANT_COUNT_AGGREGATE,
             buckets=[read_bucket(bucket.root, bucket.name)])
 
-    with pytest.raises(OperationalizationRefused, match=f"measures '{fx.COUNT_SUBJECT}'"):
+    with pytest.raises(OperationalizationRefusedError, match=f"measures '{fx.COUNT_SUBJECT}'"):
         deliver("leaf", "other")
     assert not (tmp_path / "other.csv").exists()
     assert deliver(fx.COUNT_SUBJECT, "measured")["validated"] is False

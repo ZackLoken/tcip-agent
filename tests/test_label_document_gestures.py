@@ -169,7 +169,7 @@ def test_a_save_from_a_stale_read_conflicts_and_writes_nothing(tmp_path: Path) -
     first, _document = _save(tmp_path, image, [{"subject": "bud", "bbox": BOX}])
     _save(tmp_path, image, [], author="user:second", expect=first)
 
-    with pytest.raises(ts.VersionConflict):
+    with pytest.raises(ts.VersionConflictError):
         _save(tmp_path, image, [{"subject": "bud", "bbox": [1.0, 1.0, 9.0, 9.0]}],
               author="user:third", expect=first)
 

@@ -215,7 +215,7 @@ def test_an_opener_arriving_beside_another_connection_still_gets_a_usable_databa
 def test_a_refusal_reports_the_wait_it_measured_rather_than_a_configured_timeout(store):
     """The elapsed value a contention refusal carries is one this layer measured."""
     key = store.key(LWW, "measured")
-    with pytest.raises(ts.StoreBusy) as caught:
+    with pytest.raises(ts.StoreBusyError) as caught:
         with store.backend._mapped((key,)):  # noqa: SLF001 - the measurement is the subject
             time.sleep(0.25)
             raise sqlite3.OperationalError("database is locked")
@@ -304,7 +304,7 @@ def test_a_stale_writer_cannot_clobber_a_committed_transaction(store):
     assert holder.wait(timeout=60) == 0
     assert writer.wait(timeout=60) == 0
     outcome = json.loads(result.read_text(encoding="utf-8"))
-    assert outcome["outcome"] == "VersionConflict"
+    assert outcome["outcome"] == "VersionConflictError"
     assert outcome["waited_s"] >= 1.0
     assert ts.read(key) == {"who": "insider"}
 
@@ -371,7 +371,7 @@ def test_two_processes_writing_from_one_version_produce_one_winner_and_one_confl
     for proc, result in contenders:
         assert proc.wait(timeout=60) == 0
         outcomes.append(json.loads(result.read_text(encoding="utf-8"))["outcome"])
-    assert sorted(outcomes) == ["VersionConflict", "written"]
+    assert sorted(outcomes) == ["VersionConflictError", "written"]
     assert ts.read(key)["who"] in ("first", "second")
 
 
@@ -379,7 +379,7 @@ def test_create_only_writes_once(store):
     key = store.key(LWW, "created-once")
     ts.replace(key, {"n": 1}, expect=ts.Version.ABSENT)
 
-    with pytest.raises(ts.VersionConflict):
+    with pytest.raises(ts.VersionConflictError):
         ts.replace(key, {"n": 2}, expect=ts.Version.ABSENT)
     assert ts.read(key) == {"n": 1}
 
@@ -398,7 +398,7 @@ def test_a_record_delete_from_a_current_token_lands_and_a_stale_one_is_refused(s
     held = ts.replace(key, {"n": 1}, expect=ts.Version.ABSENT)
     moved = ts.replace(key, {"n": 2}, expect=held)
 
-    with pytest.raises(ts.VersionConflict) as raised:
+    with pytest.raises(ts.VersionConflictError) as raised:
         ts.delete(key, expect=held)
     assert raised.value.actual == moved
     assert ts.read(key) == {"n": 2}
@@ -487,10 +487,10 @@ def test_a_module_level_write_inside_a_transaction_is_refused_and_lands_outside_
     log = store.key(LOG, "appended-to")
 
     with ts.transaction(record) as txn:
-        with pytest.raises(ts.TransactionMisuse) as raised:
+        with pytest.raises(ts.TransactionMisuseError) as raised:
             ts.append(log, {"i": "inside"})
         assert "transaction's own" in str(raised.value)
-        with pytest.raises(ts.TransactionMisuse):
+        with pytest.raises(ts.TransactionMisuseError):
             ts.clear_log(log)
         txn.write(record, {"n": 1})
 
@@ -642,10 +642,10 @@ def test_every_operation_refuses_before_a_backend_is_bound(store):
     key = store.key(LWW, "unbound")
     ts.unbind()
 
-    with pytest.raises(ts.StoreNotBound) as raised:
+    with pytest.raises(ts.StoreNotBoundError) as raised:
         ts.read(key, default=None)
     assert "entry point" in str(raised.value)
-    with pytest.raises(ts.StoreNotBound):
+    with pytest.raises(ts.StoreNotBoundError):
         ts.replace(key, {"n": 1})
 
     ts.bind(store.backend)
@@ -654,11 +654,11 @@ def test_every_operation_refuses_before_a_backend_is_bound(store):
 
 
 def test_a_key_with_no_root_or_an_empty_store_or_part_refuses_and_a_whole_one_is_admitted(store):
-    with pytest.raises(ts.BadKey):
+    with pytest.raises(ts.BadKeyError):
         ts.Key(LWW, "", ("x",))
-    with pytest.raises(ts.BadKey):
+    with pytest.raises(ts.BadKeyError):
         ts.Key("", str(store.root), ("a",))
-    with pytest.raises(ts.BadKey):
+    with pytest.raises(ts.BadKeyError):
         ts.Key(NESTED, str(store.root), ("group", ""))
 
     ts.replace(store.key(NESTED, "group", "name"), {"n": 1})
@@ -669,7 +669,7 @@ def test_absence_and_corruption_are_different_answers(store):
     """A record that will not decode raises ``DecodeError`` whatever ``default`` says; an absent
     one answers the default."""
     key = store.key(LWW, "sometimes-there")
-    with pytest.raises(ts.NotFound) as raised:
+    with pytest.raises(ts.NotFoundError) as raised:
         ts.read(key)
     assert "default=" in str(raised.value)
     assert ts.read(key, default={"fallback": True}) == {"fallback": True}
@@ -687,14 +687,14 @@ def test_a_relative_root_is_refused_before_it_resolves_against_a_working_directo
     relative_root = "not/an/absolute/root"
     relative = ts.Key(LWW, relative_root, ("x",))
 
-    with pytest.raises(ts.BadKey) as reading:
+    with pytest.raises(ts.BadKeyError) as reading:
         ts.read(relative, default=None)
     assert "absolute" in str(reading.value)
-    with pytest.raises(ts.BadKey):
+    with pytest.raises(ts.BadKeyError):
         ts.replace(relative, {"n": 1})
-    with pytest.raises(ts.BadKey):
+    with pytest.raises(ts.BadKeyError):
         ts.exists(relative)
-    with pytest.raises(ts.BadKey) as enumerating:
+    with pytest.raises(ts.BadKeyError) as enumerating:
         ts.keys(LWW, relative_root)
     assert "absolute" in str(enumerating.value)
 
@@ -762,14 +762,14 @@ def test_a_transaction_refuses_every_form_that_would_escape_it(store):
     unheld = store.key(LWW, "gamma")
 
     with ts.transaction(first, second) as txn:
-        with pytest.raises(ts.TransactionMisuse) as nested:
+        with pytest.raises(ts.TransactionMisuseError) as nested:
             with ts.transaction(first):
                 pass
         assert "transaction(a, b)" in str(nested.value)
-        with pytest.raises(ts.TransactionMisuse) as outside_write:
+        with pytest.raises(ts.TransactionMisuseError) as outside_write:
             ts.replace(first, {"n": 1})
         assert "transaction's own" in str(outside_write.value)
-        with pytest.raises(ts.TransactionMisuse):
+        with pytest.raises(ts.TransactionMisuseError):
             txn.read(unheld)
         txn.write(first, {"n": 1})
         txn.write(second, {"n": 2})
@@ -786,7 +786,7 @@ def test_a_transaction_refuses_two_roots_and_admits_two_spellings_of_one(store):
     here = store.key(LWW, "here")
     there = ts.Key(LWW, str(elsewhere), ("there",))
 
-    with pytest.raises(ts.TransactionMisuse) as raised:
+    with pytest.raises(ts.TransactionMisuseError) as raised:
         with ts.transaction(here, there):
             pass
     assert ts.canonical_path(store.root) in str(raised.value)
@@ -837,7 +837,7 @@ def test_traits_shares_the_state_database_rather_than_gaining_its_own(store):
 
 def test_a_backend_refuses_to_exist_without_cross_process_locking(store, monkeypatch):
     monkeypatch.setitem(sys.modules, "filelock", None)
-    with pytest.raises(ts.BackendUnavailable) as raised:
+    with pytest.raises(ts.BackendUnavailableError) as raised:
         SqliteBackend()
     assert "filelock" in str(raised.value)
 
@@ -851,7 +851,7 @@ def test_a_contended_key_is_named_and_released_when_its_holder_dies(store):
     holder = store.spawn("hold-lock", store.root, "orphanable", ready)
     wait_for(ready, timeout_s=60)
 
-    with pytest.raises(ts.StoreBusy) as raised:
+    with pytest.raises(ts.StoreBusyError) as raised:
         with ts.transaction(key, timeout_s=0.3):
             pass
     assert "orphanable" in str(raised.value)
@@ -875,7 +875,7 @@ def test_a_version_read_before_a_transaction_committed_is_refused_afterwards(sto
         "hold-transaction", store.root, CAS, "moved-under-us", "insider", 0.1, ready)
     assert holder.wait(timeout=60) == 0
 
-    with pytest.raises(ts.VersionConflict) as raised:
+    with pytest.raises(ts.VersionConflictError) as raised:
         ts.replace(key, {"who": "outsider"}, expect=stale)
     assert raised.value.actual == ts.read_versioned(key).version
     assert ts.read(key) == {"who": "insider"}
@@ -974,7 +974,7 @@ def test_a_file_write_inside_a_record_transaction_refuses_and_lands_outside_it(s
     path = blob_path(store.root, "beside-a-record")
     ts.replace(record, {"n": 0})
 
-    with pytest.raises(ts.TransactionMisuse):
+    with pytest.raises(ts.TransactionMisuseError):
         with ts.transaction(record) as txn:
             txn.write(record, {"n": 1})
             ts.put_blob(path, b"new")
@@ -1035,7 +1035,7 @@ def test_a_blob_read_carries_the_token_its_own_bytes_produce(store):
     stored = ts.read_blob_versioned(path)
     assert stored.value == b"first"
     assert stored.version == written
-    with pytest.raises(ts.NotFound) as absent:
+    with pytest.raises(ts.NotFoundError) as absent:
         ts.read_blob_versioned(blob_path(store.root, "never-written"))
     assert "default=" in str(absent.value)
 
@@ -1045,7 +1045,7 @@ def test_a_blob_write_from_a_current_token_lands_and_a_stale_one_is_refused(stor
     held = ts.put_blob(path, b"first", expect=ts.Version.ABSENT)
     moved = ts.put_blob(path, b"second", expect=held)
 
-    with pytest.raises(ts.VersionConflict) as raised:
+    with pytest.raises(ts.VersionConflictError) as raised:
         ts.put_blob(path, b"third", expect=held)
     assert raised.value.actual == moved
     assert path.read_bytes() == b"second"
@@ -1058,7 +1058,7 @@ def test_a_create_only_blob_write_refuses_an_existing_blob_and_keeps_its_bytes(s
     path = blob_path(store.root, "captured-once")
     ts.put_blob(path, b"pristine", expect=ts.Version.ABSENT)
 
-    with pytest.raises(ts.VersionConflict):
+    with pytest.raises(ts.VersionConflictError):
         ts.put_blob(path, b"overwritten", expect=ts.Version.ABSENT)
     assert path.read_bytes() == b"pristine"
 
@@ -1071,7 +1071,7 @@ def test_a_blob_delete_from_a_current_token_lands_and_a_stale_one_is_refused(sto
     held = ts.put_blob(path, b"first", expect=ts.Version.ABSENT)
     moved = ts.put_blob(path, b"second", expect=held)
 
-    with pytest.raises(ts.VersionConflict) as raised:
+    with pytest.raises(ts.VersionConflictError) as raised:
         ts.delete_blob(path, expect=held)
     assert raised.value.actual == moved
     assert path.read_bytes() == b"second"
@@ -1099,5 +1099,5 @@ def test_two_processes_writing_a_blob_from_one_token_produce_one_winner_and_one_
     for proc, result in contenders:
         assert proc.wait(timeout=60) == 0
         outcomes.append(json.loads(result.read_text(encoding="utf-8"))["outcome"])
-    assert sorted(outcomes) == ["VersionConflict", "written"]
+    assert sorted(outcomes) == ["VersionConflictError", "written"]
     assert path.read_bytes() in (b"first", b"second")

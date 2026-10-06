@@ -177,7 +177,7 @@ def selection_for(dataset_root: Path, subject: Optional[str], date: str,
                   bucket: Optional[str], current_image_index: int) -> DatasetSelection:
     """The selection a choice names: the image list of capture ``date`` and the name of the
     bucket under ``dataset_root`` whose proposals the canvas shows. ``current_image_index`` is
-    clamped to the list. Raises ``AmbiguousImageStem`` for a capture holding two images of one
+    clamped to the list. Raises ``AmbiguousImageStemError`` for a capture holding two images of one
     stem, and ``ValueError`` for a ``date`` that is no capture name."""
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.image_utils import logical_images_by_name
@@ -253,17 +253,17 @@ PLATFORM_PANEL_EVENTS = (
 )
 
 
-class NoBackendPort(LookupError):
+class NoBackendPortError(LookupError):
     """No backend has recorded the port it serves a workspace on."""
 
 
 def resolve_web_port(workspace: Path) -> int:
     """The port the backend serving ``workspace`` recorded under it. Refuses
-    (:class:`NoBackendPort`) when none is recorded, and (``ValueError``) a recorded port that is
-    not an integer."""
+    (:class:`NoBackendPortError`) when none is recorded, and (``ValueError``) a recorded port
+    that is not an integer."""
     recorded = tcip_store.read(backend_port_key(workspace), default=None)
     if recorded is None:
-        raise NoBackendPort(f"no backend has recorded a port under {workspace}; "
+        raise NoBackendPortError(f"no backend has recorded a port under {workspace}; "
                             "`python -m tcip_web` serving it records one")
     try:
         return int(recorded)
@@ -309,7 +309,7 @@ def post_panel_event(
 
     try:
         url = backend_url(workspace, f"/api/events/{panel}")
-    except NoBackendPort as exc:
+    except NoBackendPortError as exc:
         return {"status": "no_subscribers", "delivered": False, "url": "", "error": str(exc)}
     payload = json.dumps({"panel": panel, "event_type": event_type, "data": data,
                           "project_id": read_record(project)["id"]}).encode("utf-8")

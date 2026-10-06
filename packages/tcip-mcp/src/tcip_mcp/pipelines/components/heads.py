@@ -11,7 +11,7 @@ from typing import Any
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+from torch.nn import functional
 
 
 class BaseHead(nn.Module, abc.ABC):
@@ -71,10 +71,10 @@ class ClassificationHead(BaseHead):
     def compute_loss(self, outputs, targets):
         if self._loss is not None:
             return {"cls_loss": self._loss(outputs["logits"], targets[self.target_key])}
-        return {"cls_loss": F.cross_entropy(outputs["logits"], targets[self.target_key])}
+        return {"cls_loss": functional.cross_entropy(outputs["logits"], targets[self.target_key])}
 
     def decode(self, outputs):
-        probs = F.softmax(outputs["logits"], dim=-1)
+        probs = functional.softmax(outputs["logits"], dim=-1)
         preds = probs.argmax(dim=-1)
         confs = probs.max(dim=-1).values
         return {self.target_key: preds, "confidences": confs, "probabilities": probs}
@@ -157,7 +157,7 @@ class RegressionHead(BaseHead):
     def compute_loss(self, outputs, targets):
         if self._loss is not None:
             return {"reg_loss": self._loss(outputs["values"], targets["values"])}
-        return {"reg_loss": F.smooth_l1_loss(outputs["values"], targets["values"])}
+        return {"reg_loss": functional.smooth_l1_loss(outputs["values"], targets["values"])}
 
     def decode(self, outputs):
         return {"values": outputs["values"]}
@@ -207,16 +207,17 @@ class SemanticSegHead(BaseHead):
         mask = targets["masks"]
         # Resize logits to match target
         if logits.shape[-2:] != mask.shape[-2:]:
-            logits = F.interpolate(
+            logits = functional.interpolate(
                 logits, size=mask.shape[-2:], mode="bilinear", align_corners=False
             )
         from tcip_mcp.pipelines.components.losses import dice_loss
 
-        ce = F.cross_entropy(logits, mask.long(), weight=self.ce_weight)
-        one_hot = F.one_hot(mask.long(), self.num_classes).permute(0, 3, 1, 2).float()
+        ce = functional.cross_entropy(logits, mask.long(), weight=self.ce_weight)
+        one_hot = functional.one_hot(mask.long(), self.num_classes).permute(0, 3, 1, 2).float()
+        probs = functional.softmax(logits, dim=1)
         return {"ce_loss": ce,
-                "dice_loss": dice_loss(F.softmax(logits, dim=1).flatten(2), one_hot.flatten(2))}
+                "dice_loss": dice_loss(probs.flatten(2), one_hot.flatten(2))}
 
     def decode(self, outputs):
         logits = outputs["logits"]
-        return {"masks": logits.argmax(dim=1), "probabilities": F.softmax(logits, dim=1)}
+        return {"masks": logits.argmax(dim=1), "probabilities": functional.softmax(logits, dim=1)}

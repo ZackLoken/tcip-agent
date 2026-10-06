@@ -49,7 +49,7 @@ _PATHS: PathFields = (
 )
 
 
-class AssessmentRefused(ValueError):
+class AssessmentRefusedError(ValueError):
     """An assessment that cannot run as asked: a selection without both reference sides, a
     checkpoint whose head does not produce what the delivered kind measures, or a reference the
     criterion cannot read."""
@@ -208,16 +208,16 @@ def _reference_reads(samples: list[Sample], extra: tuple[str, ...] = ()
                      ) -> dict[Key | str, Any]:
     """What the store answered (``Versioned``) for each distinct ground truth of the admitted
     ``samples``, their admission's own read (``stored``), and for each file of ``extra``, read
-    once here; an ``extra`` file that is not there refuses (:class:`AssessmentRefused`) with the
-    store's own ``NotFound`` message."""
+    once here; an ``extra`` file that is not there refuses (:class:`AssessmentRefusedError`)
+    with the store's own ``NotFoundError`` message."""
     import tcip_store
 
     reads: dict[Key | str, Any] = {s.ground_truth: s.stored for s in samples}
     for path in extra:
         try:
             reads[path] = tcip_store.read_blob_versioned(Path(path))
-        except tcip_store.NotFound as exc:
-            raise AssessmentRefused(f"the reference cannot be read, so it cannot be assessed: "
+        except tcip_store.NotFoundError as exc:
+            raise AssessmentRefusedError(f"the reference cannot be read, so it cannot be assessed: "
                                     f"{exc}") from exc
     return reads
 
@@ -270,14 +270,14 @@ def _reference_record(selection_dir: str | None, raster_identity: dict | None,
 def _reference_sides(project: Path, selection_dir: str
                      ) -> tuple[Selection, list[Sample], list[Sample]]:
     """The selection at ``selection_dir`` and its calibration and holdout sides; a selection
-    holding either side empty refuses (:class:`AssessmentRefused`)."""
+    holding either side empty refuses (:class:`AssessmentRefusedError`)."""
     from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES, read_selection
 
     selection = read_selection(selection_dir, project=project)
     cal, hold = (selection.on(side) for side in REFERENCE_SIDES)
     empty = [side for side, samples in zip(REFERENCE_SIDES, (cal, hold)) if not samples]
     if empty:
-        raise AssessmentRefused(f"the selection at {selection_dir} holds no {empty} side: an "
+        raise AssessmentRefusedError(f"the selection at {selection_dir} holds no {empty} side: an "
                                 "assessment fits on the calibration side and checks on the "
                                 "holdout side. Draw a selection with both (draw_splits).")
     return selection, cal, hold
@@ -288,7 +288,7 @@ def _prepared(project: Path, *, checkpoint_path: str, trait: str, delivery_kind:
               tile_batch_size: int) -> tuple[TraitRevision, Pass]:
     """``trait``'s latest confirmed revision stating a ``delivery_kind`` operationalization, and the
     pass the registered checkpoint runs under ``stated``. A checkpoint whose head does not produce
-    what the kind measures refuses (:class:`AssessmentRefused`)."""
+    what the kind measures refuses (:class:`AssessmentRefusedError`)."""
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.operationalization import confirmed_revision
     from tcip_mcp.pipelines.execution import prepare_pass
@@ -301,8 +301,9 @@ def _prepared(project: Path, *, checkpoint_path: str, trait: str, delivery_kind:
                 else ("ordinal",) if delivery_kind == PER_PLANT_ORDINAL_AGGREGATE
                 else ("regression",))
     if checkpoint.task not in expected:
-        raise AssessmentRefused(f"{checkpoint_path} is a {checkpoint.task!r} checkpoint, and a "
-                                f"{delivery_kind} delivery is measured off a {expected} head.")
+        raise AssessmentRefusedError(
+            f"{checkpoint_path} is a {checkpoint.task!r} checkpoint, and a "
+            f"{delivery_kind} delivery is measured off a {expected} head.")
     return revision, prepare_pass(checkpoint, stated, device=device,
                                   tile_batch_size=tile_batch_size)
 
@@ -379,8 +380,8 @@ def assess(
 
     Refuses before any inference when the selection holds no calibration or no holdout side, when
     the checkpoint's head does not produce what the kind measures, and when a state-crossing
-    checkpoint classifies no positive state (:class:`AssessmentRefused`); and before any inference
-    over it, a reference the admission would not admit or only the model stands behind
+    checkpoint classifies no positive state (:class:`AssessmentRefusedError`); and before any
+    inference over it, a reference the admission would not admit or only the model stands behind
     (:func:`_admit_reference`).
     """
     from tcip_mcp.pipelines.data.selection import source_digests
@@ -391,7 +392,7 @@ def assess(
     _selection, cal, hold = _reference_sides(project, selection_dir)
     state = revision.entry.positive_state
     if delivery_kind == STATE_CROSSING_DATES and p.scope.state_ids(state) is None:
-        raise AssessmentRefused(
+        raise AssessmentRefusedError(
             f"{checkpoint_path} classifies no {state}: a state fraction is measured off a "
             "classifier of the trait's positive state.")
     admitted = _admit_reference(cal + hold, p.scope)
@@ -529,20 +530,20 @@ def _scalar(p: Pass, hold: list[Sample], entry: TraitEntry,
 
     ordinal = p.checkpoint.task == "ordinal"
     if not ordinal and entry.regression_criterion not in REGRESSION_CRITERIA:
-        raise AssessmentRefused(f"the revision assesses its regression delivery by "
+        raise AssessmentRefusedError(f"the revision assesses its regression delivery by "
                                 f"{entry.regression_criterion!r}, and a regression delivery is "
                                 f"assessed by one of {sorted(REGRESSION_CRITERIA)}.")
     suffix, cast_to = ("_ranks", int) if ordinal else ("_values", float)
     predictions = p.predict([s.image for s in hold])
     if len(predictions) != len(hold):
-        raise AssessmentRefused(f"the checkpoint returned {len(predictions)} predictions for "
+        raise AssessmentRefusedError(f"the checkpoint returned {len(predictions)} predictions for "
                                 f"{len(hold)} holdout samples: the reference is scored one "
                                 "prediction per sample, so it cannot be scored whole.")
     held = []
     for sample, truth, prediction in zip(hold, table_values(hold), predictions, strict=True):
         values = [v for k, v in prediction.items() if k.endswith(suffix) and isinstance(v, list)]
         if not values or not values[0]:
-            raise AssessmentRefused(
+            raise AssessmentRefusedError(
                 f"the prediction for {sample.source} carries no {suffix} output: the checkpoint "
                 "produced nothing to measure for it, so the reference cannot be scored whole.")
         held.append({"image_id": digest_of[sample.location], "true": cast_to(truth),
@@ -572,9 +573,9 @@ def assess_reserved_regions(
     tile edge the split was drawn at, the count criterion fitted as :func:`assess` fits it, every
     derived value from the calibration region alone. Each band is a reference sample of the
     mosaic, its region named. The reference's scope is the training mosaic's recorded content
-    identity. Refuses (:class:`AssessmentRefused`) a delivery that is not a count, a checkpoint no
-    run of this project produced, a run with no reserved regions, a stated tile edge other than the
-    split's, regions not attested complete, too few
+    identity. Refuses (:class:`AssessmentRefusedError`) a delivery that is not a count, a checkpoint
+    no run of this project produced, a run with no reserved regions, a stated tile edge other than
+    the split's, regions not attested complete, too few
     bands carrying ground truth, a band not held out from the run's training regions, a mosaic that
     changed since the split, and a mosaic label document only the model stands behind.
     """
@@ -595,7 +596,7 @@ def assess_reserved_regions(
     from tcip_mcp.pipelines.training.evaluation import gt_records
 
     if delivery_kind not in (PER_IMAGE_COUNT, PER_PLANT_COUNT_AGGREGATE):
-        raise AssessmentRefused(f"a mosaic's reserved regions answer for a count, not a "
+        raise AssessmentRefusedError(f"a mosaic's reserved regions answer for a count, not a "
                                 f"{delivery_kind} delivery.")
     revision, p = _prepared(project, checkpoint_path=checkpoint_path, trait=trait,
                             delivery_kind=delivery_kind,
@@ -603,19 +604,20 @@ def assess_reserved_regions(
                             tile_batch_size=tile_batch_size)
     experiment_id = p.checkpoint.experiment_id
     if experiment_id is None:
-        raise AssessmentRefused("no run of this project produced this checkpoint, so no mosaic's "
-                                "reserved regions are known to have been held out from it.")
+        raise AssessmentRefusedError(
+            "no run of this project produced this checkpoint, so no mosaic's "
+            "reserved regions are known to have been held out from it.")
     resolved = run_resolution(experiment_id, project=project)
     spatial = blocks.reserved_spatial_regions(resolved)
     if spatial is None:
-        raise AssessmentRefused(
+        raise AssessmentRefusedError(
             f"run {experiment_id!r} resolved no within-image spatial split with a reserved "
             "calibration and holdout region (train it with data.split.calibration_ratio set).")
     (mosaic,) = partition_samples(resolved["partition"])
     stem = mosaic.member
     tile_size, overlap = int(spatial["tile_size"]), float(spatial["overlap"])
     if p.execution.tile_size != tile_size:
-        raise AssessmentRefused(
+        raise AssessmentRefusedError(
             f"the run's reserved regions were tiled at {tile_size}px and this pass runs at "
             f"{p.execution.tile_size}px; the assessed pass and the published one run at one tile "
             "edge.")
@@ -649,12 +651,13 @@ def assess_reserved_regions(
                  "holdout": blocks.band_rects(test_rect, k_test, tile_size, overlap, buffer_px,
                                               "test")}
     except ValueError as exc:
-        raise AssessmentRefused(f"no feasible band layout over the reserved regions "
+        raise AssessmentRefusedError(f"no feasible band layout over the reserved regions "
                                 f"(k_cal={k_cal}, k_test={k_test}): {exc}") from exc
     leaks = spatial_disjointness(spatial, [r for b in bands.values() for r in b.values()])
     if leaks:
-        raise AssessmentRefused(f"band(s) {leaks} are not held out from run {experiment_id!r}'s "
-                                "training regions, so they cannot stand as its reference.")
+        raise AssessmentRefusedError(
+            f"band(s) {leaks} are not held out from run {experiment_id!r}'s "
+            "training regions, so they cannot stand as its reference.")
     band_counts = {side: {name: sum(object_rows(crowd_of(blocks.select_gt_for_band(gt, rect))))
                           for name, rect in side_bands.items()}
                    for side, side_bands in bands.items()}
@@ -668,7 +671,7 @@ def assess_reserved_regions(
     def collect(execution: Execution) -> tuple[list[dict], list[dict]]:
         with open_raster(source, p.predictor.in_chans) as reader:
             if (reader.width, reader.height) != (int(spatial["width"]), int(spatial["height"])):
-                raise AssessmentRefused(
+                raise AssessmentRefusedError(
                     f"the run recorded a {spatial['width']}x{spatial['height']} mosaic and "
                     f"{source} now reads {reader.width}x{reader.height}; retrain or re-split "
                     "against the current file.")
@@ -757,24 +760,27 @@ def _read_reference_csv(data: bytes, csv_path: str) -> dict[str, dict[str, Any]]
         columns = ("image_stem", "physical_extent", "unit")
         missing = [name for name in columns if name not in header]
         if missing:
-            raise AssessmentRefused(f"{csv_path} is missing column(s) {missing} in its header "
+            raise AssessmentRefusedError(f"{csv_path} is missing column(s) {missing} in its header "
                                     f"{header!r}; expected {list(columns)}.")
         index = {name: header.index(name) for name in columns}
         for line_no, row in enumerate(reader, start=2):
             if len(row) < len(header):
-                raise AssessmentRefused(f"{csv_path}:{line_no} has {len(row)} column(s), fewer "
-                                        f"than the header's {len(header)}.")
+                raise AssessmentRefusedError(
+                    f"{csv_path}:{line_no} has {len(row)} column(s), fewer "
+                    f"than the header's {len(header)}.")
             stem = row[index["image_stem"]].strip()
             try:
                 extent = float(row[index["physical_extent"]].strip())
             except ValueError:
-                raise AssessmentRefused(f"{csv_path}:{line_no} has a non-numeric "
-                                        f"physical_extent for stem {stem!r}.") from None
+                raise AssessmentRefusedError(
+                    f"{csv_path}:{line_no} has a non-numeric "
+                    f"physical_extent for stem {stem!r}.") from None
             if not extent > 0:
-                raise AssessmentRefused(f"{csv_path}:{line_no} states physical_extent {extent} "
-                                        f"for stem {stem!r}: a physical length is positive.")
+                raise AssessmentRefusedError(
+                    f"{csv_path}:{line_no} states physical_extent {extent} "
+                    f"for stem {stem!r}: a physical length is positive.")
             if stem in out:
-                raise AssessmentRefused(f"{csv_path}:{line_no} repeats stem {stem!r}.")
+                raise AssessmentRefusedError(f"{csv_path}:{line_no} repeats stem {stem!r}.")
             out[stem] = {"physical_extent": extent, "unit": row[index["unit"]].strip()}
     return out
 
@@ -813,9 +819,10 @@ def assess_physical_scale(
     revision = latest_confirmed(trait, project)
     authored(revision.entry, ("scale_tolerance_frac",))
     if unit not in crops_length_units():
-        raise AssessmentRefused(f"a per-pixel scale is a length per pixel, and {unit!r} is not a "
-                                f"linear length unit crops.yml declares "
-                                f"({sorted(crops_length_units())}).")
+        raise AssessmentRefusedError(
+            f"a per-pixel scale is a length per pixel, and {unit!r} is not a "
+            f"linear length unit crops.yml declares "
+            f"({sorted(crops_length_units())}).")
     selection, cal, hold = _reference_sides(project, selection_dir)
     admitted = _admit_reference(cal + hold, selection.scope)
     cal, hold = admitted[:len(cal)], admitted[len(cal):]
@@ -829,23 +836,24 @@ def assess_physical_scale(
     for sample in measured:
         row = rows.get(sample.member)
         if row is None:
-            raise AssessmentRefused(f"{reference_csv} names no physical extent for reference "
+            raise AssessmentRefusedError(f"{reference_csv} names no physical extent for reference "
                                     f"image {sample.member!r}.")
         if row["unit"] != unit:
-            raise AssessmentRefused(f"{reference_csv} states {sample.member!r} in "
+            raise AssessmentRefusedError(f"{reference_csv} states {sample.member!r} in "
                                     f"{row['unit']!r}, not {unit!r}; a reference is never "
                                     "converted between units.")
         found = [a for a in sample.read.annotations if a.subject == reference_subject]
         if len(found) != 1 or not polygonal(found[0].geometry):
-            raise AssessmentRefused(
+            raise AssessmentRefusedError(
                 f"{sample.member!r} carries {len(found)} {reference_subject!r} annotation(s); a "
                 "reference image carries exactly one, as a polygon or mask, since a box's long "
                 "side is its projected extent, not the object's length.")
         points = [pt for ring in cast(Any, found[0].geometry).rings for pt in ring]
         pixels = principal_axis_extent_of_points(points)
         if not pixels > 0:
-            raise AssessmentRefused(f"{sample.member!r}'s {reference_subject!r} polygon has no "
-                                    "extent, so no scale is implied by it.")
+            raise AssessmentRefusedError(
+                f"{sample.member!r}'s {reference_subject!r} polygon has no "
+                "extent, so no scale is implied by it.")
         implied[sample.side][sample.member] = row["physical_extent"] / pixels
     tolerance = cast(float, revision.entry.scale_tolerance_frac)
     failures += [f"insufficient_{side}_references" for side in ("calibration", "holdout")

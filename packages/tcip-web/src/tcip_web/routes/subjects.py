@@ -77,9 +77,9 @@ def save_subjects(payload: SaveSubjectsPayload) -> dict:
     ``allow_removals``; ``write_subject_registry`` states either. Refuses (409) a stale
     ``version``. A write whose audit line could not follow answers 409.
     """
-    from tcip_store import Version, VersionConflict
+    from tcip_store import Version, VersionConflictError
 
-    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.audit import AuditEntryNotWrittenError
     from tcip_mcp.identity import actor
     from tcip_mcp.subject_registry import RegistryError, registry_from_request, replace_registry
     from tcip_web.routes.audit_gap import audit_gap_409
@@ -95,9 +95,9 @@ def save_subjects(payload: SaveSubjectsPayload) -> dict:
         committed = replace_registry(dataset_root, registry, expect=expect, actor=person)
     except RegistryError as exc:
         raise HTTPException(400, str(exc)) from exc
-    except VersionConflict as exc:
+    except VersionConflictError as exc:
         raise HTTPException(409, str(exc)) from exc
-    except AuditEntryNotWritten as exc:
+    except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(exc, {"status": "ok", **exc.arguments}) from exc
     except OSError as exc:
         raise HTTPException(500, f"could not write {dataset_root}'s registry: {exc}") from exc

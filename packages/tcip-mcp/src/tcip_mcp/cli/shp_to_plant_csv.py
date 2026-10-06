@@ -50,7 +50,7 @@ def convert_shp_to_plant_csv(
 
     Returns ``{csv_path, n_features, n_parsed, geometry_kinds, missing_fields,
     skipped_null_geometry}``. Raises ``ValueError`` if the source has no resolvable CRS
-    (``ShapefileCrsUnknown``), a feature's geometry is neither point, polygon nor multipolygon,
+    (``ShapefileCrsUnknownError``), a feature's geometry is neither point, polygon nor multipolygon,
     has zero features with readable geometry, or if the written CSV fails to round-trip through
     ``read_plant_csvs``.
     """

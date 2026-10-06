@@ -490,7 +490,7 @@ def _read_selection_document(selection_dir: str | Path, project: str | Path) -> 
 def ground_truth_digest(ground_truth: Key | str) -> str:
     """The sha256 of one ground truth's stored bytes, the store's version token: a label document
     record's (:func:`tcip_store.read_versioned`) or a file's
-    (:func:`tcip_store.read_blob_versioned`). One that is absent raises ``tcip_store.NotFound``
+    (:func:`tcip_store.read_blob_versioned`). One that is absent raises ``tcip_store.NotFoundError``
     naming it."""
     if isinstance(ground_truth, Key):
         return tcip_store.read_versioned(ground_truth).version.token
@@ -503,7 +503,7 @@ def moved_ground_truth(recorded: Mapping[Key | str, str]) -> list[Key | str]:
     def moved(ground_truth: Key | str, digest: str) -> bool:
         try:
             return ground_truth_digest(ground_truth) != digest
-        except tcip_store.NotFound:
+        except tcip_store.NotFoundError:
             return True
 
     return [gt for gt, digest in recorded.items() if moved(gt, digest)]

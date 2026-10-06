@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from tcip_store import (
-    Key, Version, VersionConflict, canonical_path, decode_value, encode_record, store,
+    Key, Version, VersionConflictError, canonical_path, decode_value, encode_record, store,
 )
 
 from tcip_mcp.pipelines.execution import DEFAULT_TILE_BATCH_SIZE, Stated
@@ -41,8 +41,8 @@ def infer(
     from tcip_mcp.assessment import read_assessment
     from tcip_mcp.buckets import pass_documents, publish, source_root
     from tcip_mcp.dataset_layout import bucket_key, parse_capture_dir
-    from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
-    from tcip_mcp.pipelines.execution import Execution, ExecutionRefused, prepare_pass
+    from tcip_mcp.model_registry import UnregisteredCheckpointError, load_registered_checkpoint
+    from tcip_mcp.pipelines.execution import Execution, ExecutionRefusedError, prepare_pass
 
     if not bucket:
         return {"error": "bucket is required: the name the predictions are published under"}
@@ -57,7 +57,7 @@ def infer(
         root = (source_root([raster_path]) if raster_path is not None
                 else parse_capture_dir(cast(str, images_dir))[0])
         checkpoint = load_registered_checkpoint(checkpoint_path, project=project)
-    except (UnregisteredCheckpoint, FileNotFoundError, ValueError) as exc:
+    except (UnregisteredCheckpointError, FileNotFoundError, ValueError) as exc:
         return {"error": str(exc)}
 
     recorded = (store.read(_progress_key(project, root, bucket, "identity"), default=None)
@@ -74,7 +74,7 @@ def infer(
                     if assessment_id is not None else None)
         p = prepare_pass(checkpoint, stated, images_dir=images_dir, device=device,
                          tile_batch_size=tile_batch_size, restored=restored)
-    except (ExecutionRefused, ValueError) as exc:
+    except (ExecutionRefusedError, ValueError) as exc:
         return {"error": str(exc)}
 
     raster_identity = None
@@ -109,7 +109,7 @@ def infer(
             results = [_raster_pass(project, root, bucket, p, raster_path,
                                     {**pass_identity, "execution": p.execution.record()},
                                     require_masks=require_masks, resumed=recorded is not None)]
-        except VersionConflict:
+        except VersionConflictError:
             return {"error": f"a raster pass toward bucket {bucket!r} is already recorded: resume "
                              "it (resume=True), or name a bucket no pass has been recorded "
                              "toward."}
@@ -290,8 +290,8 @@ def deliver_per_image_counts(project: Path, dataset_root: str, bucket: str, outp
         trait: The trait whose confirmed per-image-count operationalization this rests on.
         acknowledgment_id: A breeder's recorded acknowledgment of this unvalidated result.
     """
-    from tcip_mcp.delivery import DeliveryRefused
-    from tcip_mcp.operationalization import OperationalizationRefused
+    from tcip_mcp.delivery import DeliveryRefusedError
+    from tcip_mcp.operationalization import OperationalizationRefusedError
     from tcip_mcp.pipelines.postprocessing.export import deliver_per_image_counts_csv
     from tcip_mcp.traits import TraitUnknownError
 
@@ -300,5 +300,6 @@ def deliver_per_image_counts(project: Path, dataset_root: str, bucket: str, outp
             project, dataset_root, bucket, str(Path(project, output_path)),
             trait=trait, acknowledgment_id=acknowledgment_id, door="deliver_per_image_counts",
             actor=None)
-    except (DeliveryRefused, OperationalizationRefused, TraitUnknownError, ValueError) as exc:
+    except (DeliveryRefusedError, OperationalizationRefusedError, TraitUnknownError,
+            ValueError) as exc:
         return {"error": str(exc)}
