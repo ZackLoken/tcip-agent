@@ -70,7 +70,8 @@ def test_n_channel_detector_builds_and_trains():
     det.train()
     losses = det(
         [torch.rand(5, 96, 96)],
-        [{"boxes": torch.tensor([[8.0, 8.0, 48.0, 48.0]]), "labels": torch.ones(1, dtype=torch.long)}],
+        [{"boxes": torch.tensor([[8.0, 8.0, 48.0, 48.0]]),
+          "labels": torch.ones(1, dtype=torch.long)}],
     )
     assert losses and all(torch.isfinite(v) for v in losses.values())
 

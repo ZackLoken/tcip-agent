@@ -182,15 +182,15 @@ def test_predict_sliced_require_masks_false_returns_boxes_only(instance_seg_ckpt
 
 
 def test_run_inference_instance_seg_unset_tile_runs_tiled_with_masks(instance_seg_ckpt, tmp_path):
-    """The fixture's own persisted training tile geometry derives an unset ``tile`` to True: instance_seg
-    behaves exactly as plain detection does (sliced inference merges masks across seams), and each
-    result's masks are the sliced (merged polygon) shape."""
+    """The fixture's own persisted training tile geometry derives an unset ``tile`` to True:
+    instance_seg behaves exactly as plain detection does (sliced inference merges masks across
+    seams), and each result's masks are the sliced (merged polygon) shape."""
     from tests._verified_checkpoint_fixtures import predicted_over
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     p, results = predicted_over(tmp_path, instance_seg_ckpt,
-                                str(Path(gray_frame(tmp_path / "images" / UNDATED_BUCKET)).parent), device="cpu",
-                                tile_size=TILE, conf=0.0)
+                                str(Path(gray_frame(tmp_path / "images" / UNDATED_BUCKET)).parent),
+                                device="cpu", tile_size=TILE, conf=0.0)
     assert p.execution.tiled
     assert len(results) == 1
     result = results[0]
@@ -199,15 +199,17 @@ def test_run_inference_instance_seg_unset_tile_runs_tiled_with_masks(instance_se
         assert set(result["masks"][0]) == {"segmentation"}
 
 
-def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(instance_seg_ckpt, tmp_path):
+def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(
+    instance_seg_ckpt, tmp_path
+):
     """An explicit tile=True is no longer refused for instance_seg: tiled inference threads masks
     through the cross-tile reconstruction/merge now, so this checkpoint tiles like any other."""
     from tests._verified_checkpoint_fixtures import predicted_over
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     p, results = predicted_over(tmp_path, instance_seg_ckpt,
-                                str(Path(gray_frame(tmp_path / "images" / UNDATED_BUCKET)).parent), device="cpu",
-                                tile=True, tile_size=TILE, conf=0.0)
+                                str(Path(gray_frame(tmp_path / "images" / UNDATED_BUCKET)).parent),
+                                device="cpu", tile=True, tile_size=TILE, conf=0.0)
     assert p.execution.tiled
     assert len(results) == 1
     assert "masks" in results[0]
@@ -422,7 +424,8 @@ def test_export_empty_mask_falls_back_to_bbox():
 
 def test_export_drops_a_mask_that_binarizes_to_a_sliver(monkeypatch):
     """A mask whose contour is real but collinear carries no real extent either: the encoder drops
-    it and reports the count, the same as a degenerate box, rather than storing a zero-area shape."""
+    it and reports the count, the same as a degenerate box, rather than storing a zero-area
+    shape."""
     from tcip_mcp.pipelines.postprocessing import export
     from tcip_annotation.state import Polygon
 

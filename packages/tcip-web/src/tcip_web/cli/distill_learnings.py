@@ -41,7 +41,8 @@ def _ranked(counts: Counter[str], top: int, floor: int) -> list[tuple[str, int]]
 
 
 def _themes(text: str, top: int = 12, min_count: int = 2) -> list[tuple[str, int]]:
-    """The ``top`` most frequent of ``text``'s terms, each mentioned at least ``min_count`` times."""
+    """The ``top`` most frequent of ``text``'s terms, each mentioned at least ``min_count``
+    times."""
     return _ranked(Counter(_terms(text)), top, min_count)
 
 
@@ -142,11 +143,15 @@ def build_worksheet(project: Path) -> str:
 
     disagreements = [r for r in reports if "malformed" not in r and r["user_disagreement"]]
     if disagreements:
-        lines.append(f"\n## Disagreements ({len(disagreements)}): the owner pushed back or disagreed")
+        lines.append(
+            f"\n## Disagreements ({len(disagreements)}): the owner pushed back or disagreed"
+        )
         lines.extend(_report_line(r, 200) for r in disagreements[:15])
 
     if reports:
-        lines.append(f"\n## Friction reports ({len(reports)}): machine-local, won't reach the repo alone")
+        lines.append(
+            f"\n## Friction reports ({len(reports)}): machine-local, won't reach the repo alone"
+        )
         lines.extend(_report_line(r, 160) for r in reports[:15])
 
     if retros:

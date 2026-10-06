@@ -45,7 +45,9 @@ def _config(builder: str, builder_kwargs: dict, *, epochs: int) -> dict:
     }
 
 
-@pytest.mark.parametrize("batch_size", [2, 6], ids=["three_batches_per_epoch", "one_batch_per_epoch"])
+@pytest.mark.parametrize(
+    "batch_size", [2, 6], ids=["three_batches_per_epoch", "one_batch_per_epoch"]
+)
 def test_a_run_whose_loss_never_recovers_stops_after_two_diverged_epochs(tmp_path, batch_size):
     """Every batch is non-finite, at two different loader shapes: the trigger is two consecutive
     full passes with no finite loss, never a batch-count-derived threshold, so both shapes stop
@@ -108,7 +110,9 @@ def test_stage_boundary_resets_the_diverged_epoch_counter(tmp_path):
     train_loader = _train_loader()  # three batches/epoch, twelve calls total across four epochs
     config = _config(STEP_COUNTED_BUILDER, {"finite_at": [1, 2, 3, 10, 11, 12]}, epochs=2)
     config["stages"] = [{"freeze_to": 0, "epochs": 2}, {"freeze_to": 0, "epochs": 2}]
-    run = trainer_run(config, tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-13")
+    run = trainer_run(
+        config, tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-13"
+    )
     run = train(run, train_loader, val_loader=None)
 
     assert run.status == "completed", run.error

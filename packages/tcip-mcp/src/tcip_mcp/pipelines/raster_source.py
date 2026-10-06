@@ -39,7 +39,8 @@ ARRAY_CONTAINER_EXTS = UNGEOREFERENCED_ARRAY_EXTS + (".tif", ".tiff")
 _PIL_MODES = {1: "L", 3: "RGB", 4: "RGBA"}
 
 # A plain, documented platform default, not derived from a measurement: the share of the host's
-# physical RAM the decoded-pixel caches here may hold, leaving the model, tile batch and OS the rest.
+# physical RAM the decoded-pixel caches here may hold, leaving the model, tile batch and OS the
+# rest.
 _RAM_BUDGET_FRACTION = 0.25
 
 # GDAL's block cache's share of that budget; the pooled registry of open sources budgets against
@@ -471,12 +472,16 @@ class _ArraySource(_ClosableSource):
 
     @property
     def resident_bytes(self) -> int:
-        assert self._array is not None, "resident_bytes read after close(): a closed source holds no array"
+        assert self._array is not None, (
+            "resident_bytes read after close(): a closed source holds no array"
+        )
         return int(self._array.nbytes)
 
     def read_region(self, rect: Rect, *,
                     target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, ReadSpec]:
-        assert self._array is not None, "read_region called after close(): a closed source holds no array"
+        assert self._array is not None, (
+            "read_region called after close(): a closed source holds no array"
+        )
         _check_region(rect, self.height, self.width)
         region = np.array(self._array[rect.y0:rect.y1, rect.x0:rect.x1])
         return _serve_region(region, rect, self._backend, target_size)
@@ -1062,7 +1067,9 @@ def raster_content_identity(
     except ValueError:
         raise
     except Exception as exc:  # noqa: BLE001, uniformly named as this function's own refusal
-        raise ValueError(f"cannot open or read raster {source!r} for a content identity: {exc}") from exc
+        raise ValueError(
+            f"cannot open or read raster {source!r} for a content identity: {exc}"
+        ) from exc
     return identity
 
 

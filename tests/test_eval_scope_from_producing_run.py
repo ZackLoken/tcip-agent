@@ -1,8 +1,9 @@
 """Evaluating by run id reads ground truth through the scope the run's checkpoint records.
 
-Labels are stored by subject name in one document per image, so which subject the evaluation reads is
-what decides the counts it scores. The checkpoint's own recorded class space, its map included,
-is the one that supplies it; a wrong scope produces a confident metric for the wrong object.
+Labels are stored by subject name in one document per image, so which subject the evaluation
+reads is what decides the counts it scores. The checkpoint's own recorded class space, its map
+included, is the one that supplies it; a wrong scope produces a confident metric for the wrong
+object.
 """
 
 from __future__ import annotations

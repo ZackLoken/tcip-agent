@@ -182,7 +182,9 @@ class CombinedLoss(BaseLoss):
         self.weights = weights or [1.0] * len(losses)
 
     def forward(self, predictions, targets):
-        total = torch.tensor(0.0, device=predictions.device if torch.is_tensor(predictions) else "cpu")
+        total = torch.tensor(
+            0.0, device=predictions.device if torch.is_tensor(predictions) else "cpu"
+        )
         for loss_fn, w in zip(self.losses, self.weights):
             total = total + w * loss_fn(predictions, targets)
         return total
@@ -247,7 +249,9 @@ def compute_class_weights(
             weights.append(total / (n_present * cnt) if n_present > 0 else 1.0)
     w = torch.tensor(weights, dtype=torch.float32)
     if normalize and n_present > 0:
-        present_mean = torch.tensor([weights[c] for c in range(num_classes) if counts[c] > 0]).mean()
+        present_mean = torch.tensor(
+            [weights[c] for c in range(num_classes) if counts[c] > 0]
+        ).mean()
         if present_mean > 0:
             w = w / present_mean
     return w

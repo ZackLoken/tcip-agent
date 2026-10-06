@@ -31,7 +31,8 @@ _ray_lifecycle = threading.Lock()
 _active_searches = 0
 # Whether the running cluster is one this module started.
 _ray_started = False
-# The PYTHONPATH this module handed ray.init() for the still-running cluster; None until it starts one.
+# The PYTHONPATH this module handed ray.init() for the still-running cluster; None until it starts
+# one.
 _ray_runtime_pythonpath: str | None = None
 _external_cluster_warned = False
 
@@ -133,7 +134,9 @@ def _to_tune_space(
             if not vals:
                 raise ValueError(f"param_space axis {name!r}: int low {spec['low']} exceeds high "
                                  f"{spec['high']}")
-            space[name] = tune.grid_search(vals) if as_grid else tune.randint(spec["low"], spec["high"] + 1)
+            space[name] = (
+                tune.grid_search(vals) if as_grid else tune.randint(spec["low"], spec["high"] + 1)
+            )
         elif ptype == "categorical":
             choices = list(spec["choices"])
             if not choices:
@@ -154,7 +157,8 @@ def build_search_alg(
     ``random_state=seed``; ``constant_grid_search`` pairs every sampled point with each value of
     the space's grid axes. A backend name constructs its own Ray wrapper class
     (:data:`_SEARCH_BACKENDS`) with the seed in that class's own keyword. ``metric``/``mode`` are
-    not passed. Raises ``ValueError`` naming the choice for a searcher not offered here, for an offered backend
+    not passed. Raises ``ValueError`` naming the choice for a searcher not offered here, for an
+    offered backend
     that is not installed, and for ``constant_grid_search`` asked of a backend; the choice is
     honored, never swapped for another algorithm.
     """
@@ -511,7 +515,8 @@ def tune_search(
         raise ValueError(
             f"tune_search: split_draws={split_draws} pairs {SPLIT_DRAW_SEED_KEY!r} as a grid "
             "axis with every sampled point, and param_space carries no such axis: pass it "
-            "explicitly, or call through run_hyperparameter_search's own split_draws, which adds it for you."
+            "explicitly, or call through run_hyperparameter_search's own split_draws, which adds "
+            "it for you."
         )
 
     import ray

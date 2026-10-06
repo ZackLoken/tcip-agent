@@ -9,7 +9,8 @@ update it *deliberately* alongside the change that moved the number.
 
 Rails pinned here (one section each):
   1. conf operating-point sweep + count-unbiased pick + the count criterion over a reference
-  2. phenology fraction curve + milestone dates (crossing_date / plant_milestones / per_plant_phenology)
+  2. phenology fraction curve + milestone dates (crossing_date / plant_milestones /
+     per_plant_phenology)
   3. the execution record a pass runs under, with no value stated
   4. the one set of inference operating-point defaults
   5. IoU-matching eval metrics at iou_threshold=0.5 (current criterion, to be replaced by a
@@ -55,10 +56,14 @@ def test_golden_sweep_curve_exact():
 
     # The full swept curve, pinned exactly (conf grid = {0.0} ∪ observed scores).
     expected = [
-        {"conf": 0.0, "tp": 3, "fp": 1, "fn": 0, "count_bias_mean": 0.5, "abs_count_error_mean": 0.5},
-        {"conf": 0.3, "tp": 3, "fp": 1, "fn": 0, "count_bias_mean": 0.5, "abs_count_error_mean": 0.5},
-        {"conf": 0.6, "tp": 2, "fp": 1, "fn": 1, "count_bias_mean": 0.0, "abs_count_error_mean": 1.0},
-        {"conf": 0.9, "tp": 2, "fp": 0, "fn": 1, "count_bias_mean": -0.5, "abs_count_error_mean": 0.5},
+        {"conf": 0.0, "tp": 3, "fp": 1, "fn": 0, "count_bias_mean": 0.5,
+         "abs_count_error_mean": 0.5},
+        {"conf": 0.3, "tp": 3, "fp": 1, "fn": 0, "count_bias_mean": 0.5,
+         "abs_count_error_mean": 0.5},
+        {"conf": 0.6, "tp": 2, "fp": 1, "fn": 1, "count_bias_mean": 0.0,
+         "abs_count_error_mean": 1.0},
+        {"conf": 0.9, "tp": 2, "fp": 0, "fn": 1, "count_bias_mean": -0.5,
+         "abs_count_error_mean": 0.5},
     ]
     curve = sweep["curve"]
     assert len(curve) == len(expected)
@@ -97,7 +102,8 @@ def test_golden_count_criterion_over_a_dense_distinct_reference():
     entry = fx.with_fields(BUD_OPENING, count_bias_tolerance_frac=0.1, count_error_tolerance=1.0)
     conf, evidence, failures = count_criterion(cal, hold, entry, staged_conf_floor=0.01,
                                                staged_conf_floor_attribute_path=None)
-    assert conf == pytest.approx(0.9)  # count-unbiased pick: bias vanishes once the low-conf FP drops
+    # count-unbiased pick: bias vanishes once the low-conf FP drops
+    assert conf == pytest.approx(0.9)
     assert evidence["conf_derived_from"] == "count-unbiased count curve"
     assert failures == []
     assert derive_max_dets_from_counts([len(gt_objects(r)) for r in cal + hold]) == 120  # ~1.5x p99
@@ -120,7 +126,8 @@ def test_golden_crossing_dates_interpolated():
     assert PH.crossing_date(_PHENO_SERIES, 0.05).date == "2026-02-15"  # midway 0.0→0.10, 10 days
     assert PH.crossing_date(_PHENO_SERIES, 0.50).date == "2026-03-01"
     assert PH.crossing_date(_PHENO_SERIES, 0.95).date == "2026-03-12"
-    assert PH.crossing_date(_PHENO_SERIES, 0.95).bound == "interpolated"  # 0.97 observed, not 0.95 exactly
+    # 0.97 observed, not 0.95 exactly
+    assert PH.crossing_date(_PHENO_SERIES, 0.95).bound == "interpolated"
     assert PH.crossing_date(_PHENO_SERIES, 0.97).bound == "exact"
     # never reached within the observed window -> right-censored at the last observed date, not a
     # bare None: distinguishable from "no observations at all".
@@ -372,7 +379,9 @@ def _iou_records():
         return gt_record([float(x), float(y), float(w), float(h)], cid, 0)
 
     def dt(x, y, w, h, score, cid=1):
-        return {"category_id": cid, "bbox": [float(x), float(y), float(w), float(h)], "score": score}
+        return {
+            "category_id": cid, "bbox": [float(x), float(y), float(w), float(h)], "score": score
+        }
 
     return [
         {"width": 100, "height": 100,

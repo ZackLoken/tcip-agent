@@ -48,7 +48,8 @@ class _GNBackboneFPN(nn.Module):
         self.c3 = _GNBlock(out_channels, out_channels, stride=2, groups=gn_groups)       # /8
         self.lat2 = nn.Conv2d(out_channels, out_channels, 1)
         self.lat3 = nn.Conv2d(out_channels, out_channels, 1)
-        self.fpn_norm = nn.GroupNorm(gn_groups, out_channels)   # GroupNorm in the FPN too, same reason
+        # GroupNorm in the FPN too, same reason
+        self.fpn_norm = nn.GroupNorm(gn_groups, out_channels)
         self.smooth = nn.Conv2d(out_channels, out_channels, 3, padding=1)
         self.smooth_norm = nn.GroupNorm(gn_groups, out_channels)
         self.act = nn.ReLU(inplace=True)
@@ -112,8 +113,8 @@ def build_bespoke_detector(*, gt_boxes_wh, num_classes: int = 1, in_chans: int =
     """Build the bespoke detector with GT-derived anchors and a GroupNorm backbone/FPN.
 
     ``gt_boxes_wh`` is a list of ``(w, h)`` in pixels: the dataset's GT box shapes that drive the
-    anchor derivation. Deterministic in its inputs, so re-importing the builder at inference rebuilds
-    the identical architecture and the trained ``state_dict`` loads cleanly.
+    anchor derivation. Deterministic in its inputs, so re-importing the builder at inference
+    rebuilds the identical architecture and the trained ``state_dict`` loads cleanly.
     """
     from torchvision.models.detection import FasterRCNN
     from torchvision.models.detection.rpn import AnchorGenerator
@@ -123,7 +124,8 @@ def build_bespoke_detector(*, gt_boxes_wh, num_classes: int = 1, in_chans: int =
     ratios = tuple(derived) if derived is not None else (0.5, 1.0, 2.0)  # underivable -> stamped
     sizes = gt_anchor_sizes(gt_boxes_wh)            # anchor scales from the GT size distribution
     backbone = _GNBackboneFPN(in_chans, out_channels, gn_groups)
-    anchor_generator = AnchorGenerator(sizes=(sizes,), aspect_ratios=(ratios,))  # single fused level
+    # single fused level
+    anchor_generator = AnchorGenerator(sizes=(sizes,), aspect_ratios=(ratios,))
     roi_pool = MultiScaleRoIAlign(featmap_names=["0"], output_size=7, sampling_ratio=2)
     detector = FasterRCNN(
         backbone, num_classes=num_classes + 1,  # +1 background
@@ -146,7 +148,9 @@ def train_bespoke(ctx) -> None:
     device = ctx.device
     model = ctx.build_model().to(device)
 
-    optimizer = ctx.build_optimizer("adamw", model, backbone_lr=1e-3, head_lr=1e-3, weight_decay=0.0)
+    optimizer = ctx.build_optimizer(
+        "adamw", model, backbone_lr=1e-3, head_lr=1e-3, weight_decay=0.0
+    )
     epochs = int(ctx.config.get("epochs", 2))
     scheduler = ctx.build_scheduler(optimizer, {"scheduler": {"type": "cosine"}}, epochs)
 
@@ -259,7 +263,8 @@ class BespokeComposed(_FreezesBackbone, nn.Module):
     def get_param_groups(self, backbone_lr: float = 1e-4, head_lr: float = 1e-3) -> list[dict]:
         head_params = [p for h in self.heads for p in h.parameters()]
         return [
-            {"params": [p for p in self.backbone.parameters() if p.requires_grad], "lr": backbone_lr},
+            {"params": [p for p in self.backbone.parameters() if p.requires_grad],
+             "lr": backbone_lr},
             {"params": [p for p in self.neck.parameters() if p.requires_grad], "lr": head_lr},
             {"params": [p for p in head_params if p.requires_grad], "lr": head_lr},
         ]
@@ -287,7 +292,9 @@ class BespokeDetection(_FreezesBackbone, _HeldDetector):
 def build_bespoke_classifier(*, num_classes: int, in_chans: int = 3, dropout: float = 0.0):
     bb = _resnet18(in_chans)
     neck = GlobalAvgPoolNeck(bb.out_channels)
-    return BespokeComposed(bb, neck, ClassificationHead(neck.out_channels, num_classes, dropout=dropout))
+    return BespokeComposed(
+        bb, neck, ClassificationHead(neck.out_channels, num_classes, dropout=dropout)
+    )
 
 
 def build_bespoke_ordinal(*, num_ranks: int, in_chans: int = 3):
@@ -314,7 +321,8 @@ def build_bespoke_instance_seg(*, num_classes: int = 1, in_chans: int = 3,
                             min_size=min_size, max_size=max_size, **det_kwargs)
 
 
-def build_bespoke_detection(*, num_classes: int = 1, in_chans: int = 3, detector: str = "faster_rcnn",
+def build_bespoke_detection(*, num_classes: int = 1, in_chans: int = 3,
+                            detector: str = "faster_rcnn",
                             min_size: int = 800, max_size: int = 1333, **det_kwargs):
     return BespokeDetection(num_classes, in_chans=in_chans, detector=detector,
                             min_size=min_size, max_size=max_size, **det_kwargs)

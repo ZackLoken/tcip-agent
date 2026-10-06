@@ -88,7 +88,8 @@ def _deliver(project: Path, *, trait: str, mapping_name: str, plants: list[str],
             require_all_dates_complete=phenology.REQUIRE_ALL_DATES_COMPLETE)
         return acknowledged(project, lambda ack: phenology.deliver_phenology(
             project, measurement, curves=False, output_path=Path(output_csv_path),
-            acknowledgment_id=ack, door=DOOR, actor=None), reason="mapping rails, not the assessment")
+            acknowledgment_id=ack, door=DOOR, actor=None),
+            reason="mapping rails, not the assessment")
     except (ValueError, MappingDeliveryRefusal, *phenology.measurement_refusals()) as exc:
         return {"error": str(exc)}
 
@@ -142,7 +143,8 @@ def test_build_plant_mapping_refuses_a_name_outside_name_segment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _init(tmp_path)
-    res = build_plant_mapping(tmp_path, name="Not Legal!", images_root=str(tmp_path), plant_registry="unregistered")
+    res = build_plant_mapping(
+        tmp_path, name="Not Legal!", images_root=str(tmp_path), plant_registry="unregistered")
     assert "error" in res
     assert "lowercase" in res["error"]
 
@@ -153,7 +155,8 @@ def test_build_plant_mapping_over_an_unregistered_images_dir_names_register_data
     _init(tmp_path)
     images_root = tmp_path / "ds" / "images"
     (images_root / DATES[0]).mkdir(parents=True)
-    res = build_plant_mapping(tmp_path, name="valley", images_root=str(images_root), plant_registry="unregistered")
+    res = build_plant_mapping(
+        tmp_path, name="valley", images_root=str(images_root), plant_registry="unregistered")
     assert "error" in res
     assert "register_dataset" in res["error"]
     assert not (tmp_path / ".tcip" / "state" / "plant_mappings").exists()
@@ -167,15 +170,21 @@ def test_build_plant_mapping_admits_the_dataset_images_root_spelled_variously(
     images_root, plant_csv, _ = _write_scene(dataset_root)
 
     trailing = str(images_root) + os.sep
-    res = build_plant_mapping(tmp_path, name="trailing-sep", images_root=trailing, plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+    res = build_plant_mapping(
+        tmp_path, name="trailing-sep", images_root=trailing,
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in res, res
 
     forward = str(images_root).replace("\\", "/")
-    res = build_plant_mapping(tmp_path, name="forward-slash", images_root=forward, plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+    res = build_plant_mapping(
+        tmp_path, name="forward-slash", images_root=forward,
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in res, res
 
     monkeypatch.chdir(dataset_root)
-    res = build_plant_mapping(tmp_path, name="relative", images_root="images", plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+    res = build_plant_mapping(
+        tmp_path, name="relative", images_root="images",
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in res, res
 
 
@@ -186,7 +195,8 @@ def test_deliver_phenology_milestones_refuses_predictions_from_a_different_datas
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root)
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -194,7 +204,8 @@ def test_deliver_phenology_milestones_refuses_predictions_from_a_different_datas
     _, _, other_preds = _write_scene(other_root)
 
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=other_root, buckets=other_preds.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=other_root, buckets=other_preds.values(),
         output_csv_path=str(tmp_path / "out.csv"))
     assert "error" in res
     assert "different dataset" in res["error"]
@@ -210,7 +221,8 @@ def test_deliver_phenology_milestones_refuses_a_date_the_mapping_does_not_cover(
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -220,7 +232,8 @@ def test_deliver_phenology_milestones_refuses_a_date_the_mapping_does_not_cover(
     preds_by_date[extra_date] = _publish(tmp_path, f"live/{extra_date}", [extra_image])
 
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(tmp_path / "out.csv"))
     assert "error" in res
     assert extra_date in res["error"]
@@ -242,7 +255,8 @@ def test_deliver_phenology_milestones_refuses_a_hand_written_record_missing_prov
     })
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="forged", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="forged", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" in res
     assert "is not a record this reader decodes" in res["error"]
@@ -270,7 +284,8 @@ def test_deliver_phenology_milestones_refuses_a_record_with_provenance_and_no_re
     ts.replace(plant_mapping.plant_mapping_key(tmp_path, "forged"), record)
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="forged", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="forged", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" in res
     assert "receipt" in res["error"]
@@ -287,7 +302,8 @@ def test_deliver_phenology_milestones_refuses_a_plant_csv_rewritten_in_place(
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -295,7 +311,8 @@ def test_deliver_phenology_milestones_refuses_a_plant_csv_rewritten_in_place(
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" in res
     assert str(plant_csv) in res["error"]
@@ -316,7 +333,8 @@ def test_an_unread_captures_bytes_going_bad_is_disclosed_never_opened(
     images_root, plant_csv, preds_by_date = _write_scene(
         dataset_root, dates=[DATES[0]], unpredicted=UNREAD_P2)
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -325,7 +343,8 @@ def test_an_unread_captures_bytes_going_bad_is_disclosed_never_opened(
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -346,7 +365,8 @@ def test_an_unread_captures_bytes_changing_in_place_does_not_refuse_delivery(
     images_root, plant_csv, preds_by_date = _write_scene(
         dataset_root, dates=[DATES[0]], unpredicted=UNREAD_P2)
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -357,7 +377,8 @@ def test_an_unread_captures_bytes_changing_in_place_does_not_refuse_delivery(
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -376,7 +397,8 @@ def test_a_non_delivered_mapping_date_is_never_walked(
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -386,7 +408,8 @@ def test_a_non_delivered_mapping_date_is_never_walked(
     delivered_preds = {DATES[0]: preds_by_date[DATES[0]]}
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=delivered_preds.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=delivered_preds.values(),
         output_csv_path=str(out_csv))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -403,7 +426,8 @@ def test_a_moved_read_capture_refuses_naming_the_file(
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -416,7 +440,8 @@ def test_a_moved_read_capture_refuses_naming_the_file(
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" in res
     assert target.name in res["error"]
@@ -434,7 +459,8 @@ def test_full_coverage_still_catches_an_in_place_exif_timestamp_change(
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -444,7 +470,8 @@ def test_full_coverage_still_catches_an_in_place_exif_timestamp_change(
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" in res
     assert "changed since this mapping was built" in res["error"]
@@ -463,7 +490,8 @@ def test_an_unmapped_raster_does_not_block_the_whole_date_digest_from_catching_a
     (images_root / DATES[0] / "orthomosaic_block.tif").write_bytes(b"")
 
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -473,7 +501,8 @@ def test_an_unmapped_raster_does_not_block_the_whole_date_digest_from_catching_a
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" in res
     assert "changed since this mapping was built" in res["error"]
@@ -492,13 +521,15 @@ def test_an_unmapped_raster_beside_a_full_mapped_read_delivers_with_nothing_disc
     (images_root / DATES[0] / "orthomosaic_block.tif").write_bytes(b"")
 
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -515,7 +546,8 @@ def test_a_partial_delivery_delivers_with_disclosures_naming_exactly_what_it_did
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, unpredicted=UNREAD_P2)
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -524,7 +556,8 @@ def test_a_partial_delivery_delivers_with_disclosures_naming_exactly_what_it_did
     delivered_preds = {DATES[0]: preds_by_date[DATES[0]]}
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=delivered_preds.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=delivered_preds.values(),
         output_csv_path=str(out_csv))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -541,7 +574,8 @@ def test_a_capture_readable_at_build_and_unreadable_at_verify_refuses(
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -551,7 +585,8 @@ def test_a_capture_readable_at_build_and_unreadable_at_verify_refuses(
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" in res
     assert target.name in res["error"]
@@ -578,7 +613,8 @@ def test_a_capture_unreadable_at_build_is_never_read_so_replacing_it_only_disclo
     target.write_bytes(b"garbage, no EXIF, unreadable at build time")
 
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     build = plant_mapping.load_mapping(tmp_path, "valley")
     assert build is not None
@@ -591,7 +627,8 @@ def test_a_capture_unreadable_at_build_is_never_read_so_replacing_it_only_disclo
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -736,7 +773,8 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
 
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     assert build_res["summary"]["totals"]["n_dates"] == len(DATES)
 
@@ -751,7 +789,8 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
     _seed_currant_bloom_trait(tmp_path)
     out_csv = tmp_path / "out" / "bloom_phenology.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -766,7 +805,8 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
     # A rebuild under the same name is cited by the delivery just recorded, so it refuses
     # without supersede; with it, the rebuild reads back and still delivers.
     blocked = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" in blocked
     build_res2 = build_plant_mapping(
         tmp_path, name="valley", images_root=str(images_root),
@@ -774,7 +814,8 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
     assert "error" not in build_res2, build_res2
     out_csv2 = tmp_path / "out2" / "bloom_phenology.csv"
     res2 = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv2))
     assert "error" not in res2, res2
 
@@ -790,7 +831,8 @@ def test_the_delivery_events_plant_mapping_block_carries_the_tolerance_dict(
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
 
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     build = plant_mapping.load_mapping(tmp_path, "valley")
     assert build is not None
@@ -798,7 +840,8 @@ def test_the_delivery_events_plant_mapping_block_carries_the_tolerance_dict(
     _seed_currant_bloom_trait(tmp_path)
     out_csv = tmp_path / "out" / "bloom_phenology.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" not in res, res
 
@@ -817,7 +860,8 @@ def test_a_moved_plant_csv_and_an_archived_date_deliver_with_disclosures(
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -827,7 +871,8 @@ def test_a_moved_plant_csv_and_an_archived_date_deliver_with_disclosures(
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -859,7 +904,8 @@ def test_a_read_capture_whose_plants_own_csv_is_missing_discloses_rather_than_re
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -900,7 +946,8 @@ def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_r
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -920,7 +967,8 @@ def test_a_moved_and_re_registered_dataset_still_delivers_through_the_earlier_ma
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -937,7 +985,8 @@ def test_a_moved_and_re_registered_dataset_still_delivers_through_the_earlier_ma
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=moved_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=moved_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -947,7 +996,8 @@ def test_a_moved_and_re_registered_dataset_still_delivers_through_the_earlier_ma
     shutil.rmtree(str(images_root))
     out_csv2 = tmp_path / "out2.csv"
     res2 = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=moved_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=moved_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv2))
     assert "error" not in res2, res2
 
@@ -966,10 +1016,12 @@ def test_plant_mapping_names_lists_legal_names_and_omits_a_stray_file(
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root)
     res_a = build_plant_mapping(
-        tmp_path, name="valley-a", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley-a", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in res_a, res_a
     res_b = build_plant_mapping(
-        tmp_path, name="valley-b", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley-b", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in res_b, res_b
 
     # A record written straight through the store under a key the key producer refuses to
@@ -1062,7 +1114,8 @@ def test_an_image_ingested_under_a_mapped_date_refuses_the_delivery_naming_the_d
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -1074,7 +1127,8 @@ def test_an_image_ingested_under_a_mapped_date_refuses_the_delivery_naming_the_d
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" in res
     assert DATES[0] in res["error"]
@@ -1101,7 +1155,8 @@ def test_a_band_group_written_under_a_mapped_date_refuses_the_delivery_the_same_
     write_geo_image(date_dir / "aux_b2.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 42))
 
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -1111,7 +1166,8 @@ def test_a_band_group_written_under_a_mapped_date_refuses_the_delivery_the_same_
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" in res
     assert DATES[0] in res["error"]
@@ -1142,7 +1198,8 @@ def test_build_mapping_persists_and_reads_back_capture_digests(
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -1173,7 +1230,8 @@ def test_build_mapping_persists_and_reads_back_capture_digests(
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -1202,7 +1260,8 @@ def test_a_band_group_manifest_rewritten_in_place_refuses_the_delivery_naming_th
     assert grouped["formed"], grouped
 
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -1213,7 +1272,8 @@ def test_a_band_group_manifest_rewritten_in_place_refuses_the_delivery_naming_th
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" in res
     assert DATES[0] in res["error"]
@@ -1256,7 +1316,8 @@ def test_a_date_with_an_unreadable_image_a_raster_and_a_band_group_builds_and_de
     assert stamps_by_stem["aux"].kind == "band_group" and stamps_by_stem["aux"].readable is None
 
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     assert build_res["unreadable"][DATES[0]] == ["bad.jpg"]
     _seed_currant_bloom_trait(tmp_path)
@@ -1270,7 +1331,8 @@ def test_a_date_with_an_unreadable_image_a_raster_and_a_band_group_builds_and_de
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION, dataset_root=dataset_root, buckets=preds_by_date.values(),
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
         output_csv_path=str(out_csv))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -1297,14 +1359,16 @@ def test_second_receipt_scan_in_one_process_reads_only_what_was_appended(
     monkeypatch.setattr(ts, "read_log", spy)
 
     res_a = build_plant_mapping(
-        tmp_path, name="valley-a", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley-a", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in res_a, res_a
     build_a = plant_mapping.load_mapping(tmp_path, "valley-a")
     assert build_a is not None
     assert calls == [None]
 
     res_b = build_plant_mapping(
-        tmp_path, name="valley-b", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+        tmp_path, name="valley-b", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in res_b, res_b
     build_b = plant_mapping.load_mapping(tmp_path, "valley-b")
     assert build_b is not None
@@ -1325,7 +1389,8 @@ def test_a_build_leaves_one_row_its_receipt(
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     before = len(ts.read_log(audit_log_key(tmp_path)).records)
 
-    res = build_plant_mapping(tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
+    res = build_plant_mapping(
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
 
     assert "error" not in res, res
     rows = ts.read_log(audit_log_key(tmp_path)).records[before:]

@@ -213,7 +213,8 @@ def test_export_import_roundtrip(tmp_path: Path):
     np.savez(npz_image, bands=np.zeros((2, 64, 64), dtype=np.uint16))
     # The subject registry decodes the labels' names: a self-contained bundle must carry it, or the
     # archived annotations are unreadable on the other end. One nested subjects.json at the root.
-    registry_over(src, SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
+    registry_over(src, SubjectRegistry(subjects=(
+        Subject(name="bud", description="a currant bud"),)))
     reg = register_dataset(src, str(src), crop="currant")  # identity travels with the data
 
     zip_path = tmp_path / "export.zip"

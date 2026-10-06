@@ -110,7 +110,9 @@ def test_one_familys_failure_leaves_the_others_results_intact(runner, tmp_path, 
     assert runner.main() != 0
 
     surviving = tmp_path / "out" / "qid" / "as-shipped" / "antigravity" / "response.md"
-    assert surviving.is_file(), "the family that answered lost its transcript to the one that failed"
+    assert surviving.is_file(), (
+        "the family that answered lost its transcript to the one that failed"
+    )
     assert surviving.read_text(encoding="utf-8").strip() == "an answer"
 
     summary = json.loads(
@@ -201,7 +203,10 @@ def test_an_oversized_raw_stream_through_main_fails_the_run(runner, tmp_path, mo
     assert runner.main() != 0
 
     meta = json.loads(
-        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(encoding="utf-8"))
+        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(
+            encoding="utf-8"
+        )
+    )
     assert meta["response_source"] == "extraction_failed"
 
 
@@ -263,7 +268,10 @@ def test_completely_empty_stdout_does_not_read_as_a_clean_run(runner, tmp_path, 
     assert runner.main() != 0
 
     meta = json.loads(
-        (tmp_path / "out" / "qid" / "as-shipped" / "antigravity" / "meta.json").read_text(encoding="utf-8"))
+        (tmp_path / "out" / "qid" / "as-shipped" / "antigravity" / "meta.json").read_text(
+            encoding="utf-8"
+        )
+    )
     assert meta["response_source"] == "raw_stdout"
     assert meta["fault"]
 
@@ -295,7 +303,10 @@ def test_a_whitespace_only_agent_message_stream_is_a_failed_run_not_a_clean_one(
     assert runner.main() != 0
 
     meta = json.loads(
-        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(encoding="utf-8"))
+        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(
+            encoding="utf-8"
+        )
+    )
     assert meta["response_source"] == "stream_agent_message"
     assert meta["response_chars"] == 0
     assert meta["fault"]
@@ -314,7 +325,10 @@ def test_a_runs_own_fault_verdict_is_recorded_in_its_meta_json(runner, tmp_path,
     assert meta["fault"] == ""
 
     on_disk = json.loads(
-        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(encoding="utf-8"))
+        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(
+            encoding="utf-8"
+        )
+    )
     assert on_disk["fault"] == ""
 
 
@@ -339,7 +353,10 @@ def test_a_small_plain_text_stdout_still_returns_as_a_raw_stdout_answer_through_
     assert runner.main() == 0
 
     meta = json.loads(
-        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(encoding="utf-8"))
+        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(
+            encoding="utf-8"
+        )
+    )
     assert meta["response_source"] == "raw_stdout"
     assert meta["response_chars"] == len("a short plain-text answer")
 
@@ -390,7 +407,9 @@ def test_a_character_outside_the_console_codepage_survives_the_trip_to_a_stdin_c
 # ── the codex model is named on every run ───────────────────────────────────
 
 
-def test_an_unnamed_codex_model_with_no_config_is_refused_before_launch(runner, tmp_path, monkeypatch):
+def test_an_unnamed_codex_model_with_no_config_is_refused_before_launch(
+    runner, tmp_path, monkeypatch
+):
     """A run on the harness's built-in default would record no model, so it is refused by name."""
     monkeypatch.setattr(runner, "CODEX_CONFIG", tmp_path / "absent" / "config.toml")
 
@@ -398,7 +417,9 @@ def test_an_unnamed_codex_model_with_no_config_is_refused_before_launch(runner, 
         runner.resolve_codex_model(None)
 
 
-def test_the_codex_model_is_read_from_the_config_and_its_source_recorded(runner, tmp_path, monkeypatch):
+def test_the_codex_model_is_read_from_the_config_and_its_source_recorded(
+    runner, tmp_path, monkeypatch
+):
     config = tmp_path / "config.toml"
     config.write_text('model = "gpt-from-config"' + chr(10), encoding="utf-8")
     monkeypatch.setattr(runner, "CODEX_CONFIG", config)
@@ -562,14 +583,20 @@ def test_a_family_prompt_override_replaces_the_shared_prompt_for_that_family_alo
     assert runner.main() == 0
 
     codex_meta = json.loads(
-        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(encoding="utf-8"))
+        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(
+            encoding="utf-8"
+        )
+    )
     assert codex_meta["prompt_source"] == str(override)
     codex_prompt = (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "prompt.txt").read_text(
         encoding="utf-8")
     assert codex_prompt == "a codex-only question"
 
     agy_meta = json.loads(
-        (tmp_path / "out" / "qid" / "as-shipped" / "antigravity" / "meta.json").read_text(encoding="utf-8"))
+        (tmp_path / "out" / "qid" / "as-shipped" / "antigravity" / "meta.json").read_text(
+            encoding="utf-8"
+        )
+    )
     assert agy_meta["prompt_source"] == str(tmp_path / "shared.txt")
     agy_prompt = (tmp_path / "out" / "qid" / "as-shipped" / "antigravity" / "prompt.txt").read_text(
         encoding="utf-8")
@@ -640,7 +667,10 @@ def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_in
     antigravity_meta_path = tmp_path / "out" / "qid" / "as-shipped" / "antigravity" / "meta.json"
     antigravity_meta_before = antigravity_meta_path.read_text(encoding="utf-8")
     codex_meta_before = json.loads(
-        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(encoding="utf-8"))
+        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(
+            encoding="utf-8"
+        )
+    )
     assert codex_meta_before["rerun"] is False
 
     monkeypatch.setattr(sys, "argv", [
@@ -654,7 +684,10 @@ def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_in
     assert antigravity_meta_path.read_text(encoding="utf-8") == antigravity_meta_before
 
     codex_meta_after = json.loads(
-        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(encoding="utf-8"))
+        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(
+            encoding="utf-8"
+        )
+    )
     assert codex_meta_after["rerun"] is True
 
     summary = json.loads(
@@ -663,7 +696,9 @@ def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_in
     assert families_in_summary == {"codex", "antigravity"}
 
 
-def test_a_malformed_prior_summary_loses_only_itself_not_the_current_run(runner, tmp_path, monkeypatch):
+def test_a_malformed_prior_summary_loses_only_itself_not_the_current_run(
+    runner, tmp_path, monkeypatch
+):
     """A summary.json a prior run left mid-write, or otherwise not valid JSON, must not crash the
     merge: the current run's own rows still land, starting from an empty prior set rather than
     raising out of the merge step."""

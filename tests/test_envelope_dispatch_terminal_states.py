@@ -49,8 +49,12 @@ def _start(tmp_path, body_name, *, deadline: float | None = None) -> tuple[Train
 
 def _train_saves_best_then_final(ctx):
     """A loop keeping a best-so-far checkpoint plus a last-epoch one, as the stock trainer does."""
-    ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.2, "epoch": 4}}, "model_best")
-    ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.8, "epoch": 9}}, "model_final")
+    ctx.save_checkpoint(
+        {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.2, "epoch": 4}}, "model_best"
+    )
+    ctx.save_checkpoint(
+        {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.8, "epoch": 9}}, "model_final"
+    )
 
 
 def test_best_checkpoint_outranks_the_last_one_as_the_deliverable(tmp_path):
@@ -67,7 +71,9 @@ def test_best_checkpoint_outranks_the_last_one_as_the_deliverable(tmp_path):
 
 def _train_declares_its_own_deliverable(ctx):
     """A loop whose shippable weights live under a tag outside the model_best/model_final pair."""
-    ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.8, "epoch": 9}}, "model_best")
+    ctx.save_checkpoint(
+        {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.8, "epoch": 9}}, "model_best"
+    )
     ctx.save_checkpoint(
         {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.2, "epoch": 4}}, "ema_weights")
     ctx.set_final_weights("ema_weights")

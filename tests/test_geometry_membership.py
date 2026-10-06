@@ -190,10 +190,11 @@ def test_one_tiled_source_still_splits_spatially_over_its_own_samples(tmp_path: 
 
 
 def test_the_train_only_and_drawn_routes_record_one_directory_the_same_way(tmp_path: Path):
-    """The same training directory is admitted twice, once by a run training on every admitted sample
-    and once by a run that drew its own split over it. The two runs partition it differently,
-    which is what each route is for; what they may not do is disagree about which members that
-    directory holds, where it is, or what each member's ground truth digests to now.
+    """The same training directory is admitted twice, once by a run training on every admitted
+    sample and once by a run that drew its own split over it. The two runs partition it
+    differently, which is what each route is for; what they may not do is disagree about which
+    members that directory holds, where it is, or what each member's ground truth digests to
+    now.
     """
     stems = ["a_0_0", "b_0_0", "c_0_0", "d_0_0"]
     images_dir = _labeled(tmp_path / "train_ds", stems)

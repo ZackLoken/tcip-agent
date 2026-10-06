@@ -46,12 +46,12 @@ def dense_records(
     fp = ``fp_pattern[i]``, hand-verifiable without re-running the sweep. ``shift`` offsets every GT
     box's center by that many px; the matching detection's center is not shifted, so it stays put at
     the original (unshifted) grid position, leaving miss/FP placement geometry unaffected, so a
-    holdout fixture carries content genuinely distinct from calibration's for a content-overlap gate.
-    A caller must not raise ``shift`` past the center-match tolerance without also shifting the
-    paired detection to match: past that point every "match" becomes a miss (the shifted GT) plus an
-    unmatched detection (the un-shifted one) instead of a true positive, silently turning a clean
-    fixture into an fp+fn pair. The default (0.0) applies no shift at all; only a caller that
-    passes a nonzero value takes on that constraint.
+    holdout fixture carries content genuinely distinct from calibration's for a content-overlap
+    gate. A caller must not raise ``shift`` past the center-match tolerance without also shifting
+    the paired detection to match: past that point every "match" becomes a miss (the shifted GT)
+    plus an unmatched detection (the un-shifted one) instead of a true positive, silently turning
+    a clean fixture into an fp+fn pair. The default (0.0) applies no shift at all; only a caller
+    that passes a nonzero value takes on that constraint.
     """
     miss_pattern = list(miss_pattern) if miss_pattern is not None else [0] * n_images
     fp_pattern = list(fp_pattern) if fp_pattern is not None else [0] * n_images
@@ -68,7 +68,8 @@ def dense_records(
         for k in range(objects_per_image):
             row, col = divmod(k, cols)
             cx, cy = 50.0 + col * spacing, 50.0 + row * spacing
-            gt.append({"category_id": 0, "bbox": _box(cx + shift, cy), "iscrowd": 0})  # only GT shifts, not the det
+            # only GT shifts, not the det
+            gt.append({"category_id": 0, "bbox": _box(cx + shift, cy), "iscrowd": 0})
             if k < miss_pattern[i]:
                 continue
             dt.append({"category_id": 0, "bbox": _box(cx, cy), "score": score})

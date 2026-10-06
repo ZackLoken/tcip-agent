@@ -21,8 +21,10 @@ if TYPE_CHECKING:
     from tcip_mcp.subject_registry import SubjectRegistry
 
 # Count objectives, each the name of one conf picker.
-COUNT_UNBIASED = "count_unbiased"  # minimize signed per-image count bias E[FP-FN]; the phenotype is a count
-DETECTION_F1 = "detection_f1"      # optimize matching quality; the phenotype is presence/localization
+# COUNT_UNBIASED minimizes signed per-image count bias E[FP-FN]; the phenotype is a count.
+COUNT_UNBIASED = "count_unbiased"
+# DETECTION_F1 optimizes matching quality; the phenotype is presence/localization.
+DETECTION_F1 = "detection_f1"
 PRESENCE = "presence"             # only whether the object is present
 
 # Localization, what counts as "finding" an object.
@@ -131,7 +133,9 @@ def crops_length_units() -> set[str]:
 
 def crops_definitions() -> dict[str, str]:
     """trait name -> crops.yml's declared definition, for every trait that carries one."""
-    return {t["name"]: t["definition"] for t in _crops_traits() if isinstance(t.get("definition"), str)}
+    return {
+        t["name"]: t["definition"] for t in _crops_traits() if isinstance(t.get("definition"), str)
+    }
 
 
 # ── the entry: the one declared schema ───────────────────────────────────────
@@ -377,7 +381,8 @@ class TraitRecord(BaseModel):
 
     @property
     def latest_confirmed(self) -> TraitRevision | None:
-        """The highest-numbered revision the breeder confirmed and has not withdrawn, or ``None``."""
+        """The highest-numbered revision the breeder confirmed and has not withdrawn, or
+        ``None``."""
         return next((r for r in reversed(self.revisions) if r.confirmed), None)
 
 

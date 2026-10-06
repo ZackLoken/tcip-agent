@@ -105,7 +105,9 @@ def _cmd_rewrite(root: str, name: str, rounds: str, padding: str) -> None:
         ts.replace(key, values[i % 2])
 
 
-def _cmd_hold_transaction(root: str, store: str, name: str, value: str, hold_s: str, ready: str) -> None:
+def _cmd_hold_transaction(
+    root: str, store: str, name: str, value: str, hold_s: str, ready: str
+) -> None:
     key = _record(store, root, name)
     with ts.transaction(key) as txn:
         txn.write(key, {"who": value})
@@ -113,7 +115,9 @@ def _cmd_hold_transaction(root: str, store: str, name: str, value: str, hold_s: 
         time.sleep(float(hold_s))
 
 
-def _cmd_write_after(root: str, store: str, name: str, mode: str, value: str, ready: str, go: str, result: str) -> None:
+def _cmd_write_after(
+    root: str, store: str, name: str, mode: str, value: str, ready: str, go: str, result: str
+) -> None:
     key = _record(store, root, name)
     expect = ts.read_versioned(key).version if mode == "cas" else None
     Path(ready).write_text("read", encoding="utf-8")
@@ -181,7 +185,9 @@ def _cmd_hold_lock(root: str, name: str, ready: str) -> None:
         time.sleep(300)
 
 
-def _cmd_write_blob_after(root: str, name: str, mode: str, value: str, ready: str, go: str, result: str) -> None:
+def _cmd_write_blob_after(
+    root: str, name: str, mode: str, value: str, ready: str, go: str, result: str
+) -> None:
     path = blob_path(root, name)
     expect = ts.read_blob_versioned(path, default=b"").version if mode == "cas" else None
     Path(ready).write_text("read", encoding="utf-8")

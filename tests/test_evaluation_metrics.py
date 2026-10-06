@@ -462,7 +462,9 @@ def test_quadratic_weighted_kappa_degenerate_single_rank_is_none():
 
 
 def test_r_squared_perfect_fit_is_one():
-    assert r_squared(torch.tensor([1.0, 2.0, 3.0]), torch.tensor([1.0, 2.0, 3.0])) == pytest.approx(1.0)
+    assert r_squared(
+        torch.tensor([1.0, 2.0, 3.0]), torch.tensor([1.0, 2.0, 3.0])
+    ) == pytest.approx(1.0)
 
 
 def test_r_squared_worse_than_mean_baseline_is_negative():
@@ -479,7 +481,9 @@ def test_r_squared_constant_gt_is_none():
 
 
 def test_concordance_correlation_coefficient_perfect_agreement_is_one():
-    ccc = concordance_correlation_coefficient(torch.tensor([1.0, 2.0, 3.0]), torch.tensor([1.0, 2.0, 3.0]))
+    ccc = concordance_correlation_coefficient(
+        torch.tensor([1.0, 2.0, 3.0]), torch.tensor([1.0, 2.0, 3.0])
+    )
     assert ccc == pytest.approx(1.0)
 
 
@@ -490,7 +494,9 @@ def test_concordance_correlation_coefficient_hand_computed():
     # covariance=mean((pred-2)*(gt-7/3))=((-1)*(-4/3)+0*(-1/3)+1*(5/3))/3=(4/3+5/3)/3=1;
     # CCC = 2*covariance / (pred_var+gt_var+(pred_mean-gt_mean)^2)
     #     = 2*1 / (2/3+14/9+1/9) = 2 / (7/3) = 6/7.
-    ccc = concordance_correlation_coefficient(torch.tensor([1.0, 2.0, 3.0]), torch.tensor([1.0, 2.0, 4.0]))
+    ccc = concordance_correlation_coefficient(
+        torch.tensor([1.0, 2.0, 3.0]), torch.tensor([1.0, 2.0, 4.0])
+    )
     assert ccc == pytest.approx(6 / 7)
 
 
@@ -508,9 +514,12 @@ def test_concordance_correlation_coefficient_zero_variance_is_none():
 
 
 def test_selection_value_prefers_objective_for_detection():
-    assert _selection_value("detection", {"val_loss": 0.1, "val_objective": 5.0}, 0.2, "objective") == 5.0
+    assert _selection_value(
+        "detection", {"val_loss": 0.1, "val_objective": 5.0}, 0.2, "objective"
+    ) == 5.0
     assert _selection_value("classification", {"val_loss": 0.1}, 0.2, "loss") == 0.1
-    # No validation loader ran (val_metrics empty): selecting on loss falls back to the training loss.
+    # No validation loader ran (val_metrics empty): selecting on loss falls back to the
+    # training loss.
     assert _selection_value("detection", {}, 0.2, "loss") == 0.2
 
 
@@ -627,7 +636,8 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(tmp_pa
             m1 = 1 - m0
             loader = [(imgs, {"masks": torch.stack([m0, m1])})]
 
-        # "bud_opening" (seeded center_match) exercises evaluate()'s center-match branch for detection.
+        # "bud_opening" (seeded center_match) exercises evaluate()'s center-match branch for
+        # detection.
         trait = fx.latest("bud_opening", tmp_path) if task == "detection" else None
         dims = {"ordinal": {"num_ranks": 3}, "regression": {}}.get(task, {"num_classes": 2})
         result = evaluate(model, loader, device, task, dims={"in_chans": 3, **dims}, trait=trait)
@@ -652,7 +662,9 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(tmp_pa
     undeclared = (ranking_returned - not_a_ranking) - declared
     assert not undeclared, f"returned but no declared direction: {sorted(undeclared)}"
     never_produced = declared - ranking_returned
-    assert not never_produced, f"declared but neither producer ever returns it: {sorted(never_produced)}"
+    assert not never_produced, (
+        f"declared but neither producer ever returns it: {sorted(never_produced)}"
+    )
     assert ranking_returned - declared == not_a_ranking
 
 
@@ -782,13 +794,14 @@ def test_validate_detection_returns_metrics_and_objective(tmp_path):
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
                     "builder_kwargs": {"min_size": IMG, "max_size": IMG * 2},
                     "task": "detection"}
-    run = trainer_run(_cfg(model_source, data), tmp_path / "out", project=tmp_path, has_val_loader=True,
-                      id="auto-run-23")
+    run = trainer_run(_cfg(model_source, data), tmp_path / "out", project=tmp_path,
+                      has_val_loader=True, id="auto-run-23")
     run = train(run, loader, val_loader=loader)  # no AttributeError on model.heads
 
     assert run.status == "completed", getattr(run, "error", run.status)
     last = run.metrics_history[-1]
-    for k in ("val_loss", "val_precision", "val_recall", "val_f1", "val_map50", "val_map", "val_objective"):
+    for k in ("val_loss", "val_precision", "val_recall", "val_f1", "val_map50", "val_map",
+              "val_objective"):
         assert k in last, f"missing {k}"
     # An untrained toy detector finds nothing on four images: the epoch has no useful score, so
     # no epoch is ever a best and the run completes on its final weights alone.
@@ -812,7 +825,9 @@ def test_train_center_match_trait_records_governing_criterion(tmp_path):
                     "task": "detection"}
     cfg = _cfg(model_source, data)
     cfg["evaluation"] = {"trait": "bud_opening"}
-    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=True, id="auto-run-24")
+    run = trainer_run(
+        cfg, tmp_path / "out", project=tmp_path, has_val_loader=True, id="auto-run-24"
+    )
     run = train(run, loader, val_loader=loader)
 
     assert run.status == "completed", getattr(run, "error", run.status)
@@ -839,8 +854,8 @@ def test_validate_classification_metrics(tmp_path):
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_classifier",
                     "task": "classification"}
-    run = trainer_run(_cfg(model_source, data), tmp_path / "out", project=tmp_path, has_val_loader=True,
-                      id="auto-run-25")
+    run = trainer_run(_cfg(model_source, data), tmp_path / "out", project=tmp_path,
+                      has_val_loader=True, id="auto-run-25")
     run = train(run, loader, val_loader=loader)
 
     assert run.status == "completed", getattr(run, "error", run.status)
@@ -855,7 +870,8 @@ def test_score_predictions_folder_counts_every_image_through_the_matcher(data_di
 
     r = score_predictions(str(data_dir / "images" / "2-11-26"), DATA_DIR_BUCKET)
     assert "map50" in r
-    # fixture: each image has 2 GT, predictions = 1 TP + 1 FP -> tp=1,fp=1,fn=1 per image (x3 images).
+    # fixture: each image has 2 GT, predictions = 1 TP + 1 FP -> tp=1,fp=1,fn=1 per image
+    # (x3 images).
     assert r["total_tp"] == 3 and r["total_fp"] == 3 and r["total_fn"] == 3
     assert r["precision"] == pytest.approx(0.5)
     assert all(p["tp"] == 1 and p["fp"] == 1 and p["fn"] == 1 for p in r["per_image"])
@@ -875,7 +891,8 @@ def _crowd_records() -> list[dict]:
     return [
         image_record(100, 100, [gt_record(_OBJECT, 1, 0), gt_record(_CROWD, 1, 1)],
                                 [{"category_id": 1, "bbox": _OBJECT, "score": 0.9},
-                                 {"category_id": 1, "bbox": [55.0, 55.0, 30.0, 30.0], "score": 0.9}]),
+                                 {"category_id": 1, "bbox": [55.0, 55.0, 30.0, 30.0],
+                                  "score": 0.9}]),
         image_record(100, 100, [gt_record(_CROWD, 1, 1)], []),
     ]
 
@@ -951,7 +968,9 @@ def test_a_ground_truth_record_is_one_shape_from_a_target_and_from_its_annotatio
     record = records_from_annotation(document.annotations, [], width=100,
                                      height=100, name_id={"bur": 1})
     # The annotation route also names each record's annotation, by its index in the document.
-    assert [{k: v for k, v in g.items() if k != "index"} for g in record["gt"]] == gt_records(listed)
+    assert [
+        {k: v for k, v in g.items() if k != "index"} for g in record["gt"]
+    ] == gt_records(listed)
     assert [g["index"] for g in record["gt"]] == [0, 1]
 
 

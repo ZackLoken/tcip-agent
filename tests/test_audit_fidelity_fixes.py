@@ -54,7 +54,8 @@ def test_encode_predictions_stamps_model_provenance(tmp_path):
 
 
 def test_draw_splits_counts_json_objects_not_lines(tmp_path):
-    """A pretty-printed negative ({annotations: []}) is several text lines; the stratifier sees 0."""
+    """A pretty-printed negative ({annotations: []}) is several text lines; the stratifier
+    sees 0."""
     from tcip_mcp.tools.data_tools import draw_splits
 
     from tests._producer_fixtures import mark_complete

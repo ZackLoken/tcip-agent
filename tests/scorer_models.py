@@ -1,4 +1,5 @@
-"""Importable builders for the active-learning scorer tests, and the predictor they are read through.
+"""Importable builders for the active-learning scorer tests, and the predictor they are read
+through.
 
 Each builder returns a small ``nn.Module`` whose outputs a scorer test asserts on. A test reaches
 it the way every scorer caller does: the module is saved as a bespoke checkpoint, registered, and

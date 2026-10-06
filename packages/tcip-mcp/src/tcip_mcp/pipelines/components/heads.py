@@ -57,7 +57,11 @@ class ClassificationHead(BaseHead):
         self._loss = None
         if loss is not None:
             from tcip_mcp.pipelines.components.losses import build_loss
-            weight = torch.tensor(class_weights, dtype=torch.float32) if class_weights is not None else None
+            weight = (
+                torch.tensor(class_weights, dtype=torch.float32)
+                if class_weights is not None
+                else None
+            )
             self._loss = build_loss(loss, weight=weight)
 
     def forward(self, features: torch.Tensor, targets: Any = None) -> dict[str, torch.Tensor]:
@@ -181,7 +185,11 @@ class SemanticSegHead(BaseHead):
         )
         # Optional per-class weight applied to the CE term (Dice term is unweighted); the
         # annotation states the buffer's real type since nn.Module's own __getattr__ stub can't.
-        weight = torch.tensor(class_weights, dtype=torch.float32) if class_weights is not None else None
+        weight = (
+            torch.tensor(class_weights, dtype=torch.float32)
+            if class_weights is not None
+            else None
+        )
         self.ce_weight: torch.Tensor | None
         self.register_buffer("ce_weight", weight)
 
@@ -199,7 +207,9 @@ class SemanticSegHead(BaseHead):
         mask = targets["masks"]
         # Resize logits to match target
         if logits.shape[-2:] != mask.shape[-2:]:
-            logits = F.interpolate(logits, size=mask.shape[-2:], mode="bilinear", align_corners=False)
+            logits = F.interpolate(
+                logits, size=mask.shape[-2:], mode="bilinear", align_corners=False
+            )
         from tcip_mcp.pipelines.components.losses import dice_loss
 
         ce = F.cross_entropy(logits, mask.long(), weight=self.ce_weight)

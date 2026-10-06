@@ -232,8 +232,9 @@ async def _stream_metrics(
     cursor (``experiments.read_rows``), so it reads only what was appended since the last tick and
     a row still being written is replayed once it is complete. Rows are read after the
     observation, so a run the observation found in a terminal state has every row sent before its
-    one status frame (``experiments.run_summary`` over the rows sent), which ends the stream. An id naming no run
-    directory under ``project`` ends the stream with one status frame naming it, and one that
+    one status frame (``experiments.run_summary`` over the rows sent), which ends the stream.
+    An id naming no run directory under ``project`` ends the stream with one status frame
+    naming it, and one that
     is not a single directory name raises ``BadKey``. Every read runs off the event loop.
     """
     from tcip_mcp.experiments import (

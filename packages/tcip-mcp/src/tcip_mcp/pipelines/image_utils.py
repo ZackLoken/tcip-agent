@@ -42,7 +42,9 @@ class AmbiguousImageStem(ValueError):
 
 # ``.npy``/``.npz`` are a multi-band raster; ``.bandgroup`` a manifest standing in for the image it
 # names.
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".heic", ".tif", ".tiff", ".npy", ".npz", MANIFEST_EXT}
+IMAGE_EXTS = {
+    ".jpg", ".jpeg", ".png", ".bmp", ".heic", ".tif", ".tiff", ".npy", ".npz", MANIFEST_EXT
+}
 
 
 def stem_collision_key(name: str) -> str:
@@ -359,7 +361,9 @@ def load_image(path: "str | Path | BandGroupRef", num_channels: int):
         if isinstance(src, raster_source.PhotographicSource):
             return src.image
         pixels = src.read_region(Rect(0, 0, src.width, src.height))[0]
-        return to_pil_if_faithful(pixels, band_interpretations=getattr(src, "band_interpretations", None))
+        return to_pil_if_faithful(
+            pixels, band_interpretations=getattr(src, "band_interpretations", None)
+        )
 
 
 def load_multiband(path: "str | Path | BandGroupRef", num_channels: int) -> np.ndarray:

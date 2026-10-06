@@ -85,8 +85,8 @@ def test_a_document_with_no_image_is_not_admitted(tmp_path):
     images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["kept"])
     _label(images, "kept", [box_annotation(10, 10, 50, 50)])
-    json_io.write_label_document(label_key(tmp_path, UNDATED_BUCKET, "orphan"), [box_annotation(10, 10, 50, 50)],
-                                 100, 100)
+    json_io.write_label_document(label_key(tmp_path, UNDATED_BUCKET, "orphan"),
+                                 [box_annotation(10, 10, 50, 50)], 100, 100)
 
     admitted = admit_over(images, subject=BUD)
     assert [r.member for r in admitted.records] == ["kept"]
@@ -383,7 +383,8 @@ def test_a_confirmation_does_not_leak_across_subjects(tmp_path):
     images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["ann", "shared"])
     # Every subject's annotation records share one per-image document; subject is a field in it.
-    _label(images, "ann", [box_annotation(4, 4, 12, 12, subject="bud"), box_annotation(4, 4, 12, 12, subject="bush")],
+    _label(images, "ann", [box_annotation(4, 4, 12, 12, subject="bud"),
+                           box_annotation(4, 4, 12, 12, subject="bush")],
            keep_empty=True)
     _label(images, "shared", [], keep_empty=True)
     # Confirmed negative for bud only; the breeder never judged it for bush.

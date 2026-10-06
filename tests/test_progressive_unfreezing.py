@@ -157,7 +157,8 @@ def _cfg(stages, **extra) -> dict:
         "device": "cpu",
         "stages": stages,
         "mixed_precision": False,
-        "optimizer": {"name": "adamw", "backbone_lr": BASE_BB_LR, "head_lr": 1e-3, "weight_decay": 0},
+        "optimizer": {"name": "adamw", "backbone_lr": BASE_BB_LR, "head_lr": 1e-3,
+                      "weight_decay": 0},
         "scheduler": {"type": "cosine"},
         "early_stopping": {"enabled": False},
     }
@@ -173,7 +174,8 @@ def test_monotonic_unfreeze_guard_fails(tmp_path: Path):
     loader = _classification_loader(tmp_path)
     # Stage 0 fully unfreezes; stage 1 re-freezes the backbone -> guard must fire.
     cfg = _cfg([{"freeze_to": 0, "epochs": 1}, {"freeze_to": -1, "epochs": 1}])
-    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-46")
+    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
+                      id="auto-run-46")
     run = train(run, loader, val_loader=None)
     assert run.status == "failed"
     assert "Non-decreasing unfreeze" in run.error
@@ -185,7 +187,8 @@ def test_warmup_lr_ramps_at_stage_boundary(tmp_path: Path):
         [{"freeze_to": -1, "epochs": 1}, {"freeze_to": 0, "epochs": 2}],
         stage_warmup_epochs=2,
     )
-    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-47")
+    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
+                      id="auto-run-47")
     run = train(run, loader, val_loader=None)
     assert run.status == "completed", getattr(run, "error", run.status)
 
@@ -202,7 +205,8 @@ def test_lr_scaling_applied(tmp_path: Path):
 
     # batch_size 2 * accum 2 -> eff_batch 4. ref 4 -> mult 1.0.
     loader_a = _classification_loader(tmp_path / "a", batch_size=2)
-    cfg_a = _cfg(stages, lr_scaling={"enabled": True, "reference_effective_batch": 4, "scale_power": 0.5})
+    cfg_a = _cfg(stages, lr_scaling={"enabled": True, "reference_effective_batch": 4,
+                                     "scale_power": 0.5})
     run_a = train(trainer_run(cfg_a, tmp_path / "a" / "out", project=tmp_path, has_val_loader=False,
                               id="auto-run-48"), loader_a)
     assert run_a.status == "completed", getattr(run_a, "error", run_a.status)
@@ -211,7 +215,8 @@ def test_lr_scaling_applied(tmp_path: Path):
 
     # ref 1 -> mult (4/1)^0.5 == 2.0.
     loader_b = _classification_loader(tmp_path / "b", batch_size=2)
-    cfg_b = _cfg(stages, lr_scaling={"enabled": True, "reference_effective_batch": 1, "scale_power": 0.5})
+    cfg_b = _cfg(stages, lr_scaling={"enabled": True, "reference_effective_batch": 1,
+                                     "scale_power": 0.5})
     run_b = train(trainer_run(cfg_b, tmp_path / "b" / "out", project=tmp_path, has_val_loader=False,
                               id="auto-run-49"), loader_b)
     assert run_b.metrics_history[0]["lr"] == pytest.approx(BASE_BB_LR * 2.0)
@@ -220,7 +225,8 @@ def test_lr_scaling_applied(tmp_path: Path):
 def test_two_stage_handoff_smoke(tmp_path: Path):
     loader = _classification_loader(tmp_path)
     cfg = _cfg([{"freeze_to": -1, "epochs": 1}, {"freeze_to": 0, "epochs": 1}])
-    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-50")
+    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
+                      id="auto-run-50")
     run = train(run, loader, val_loader=None)
     assert run.status == "completed", getattr(run, "error", run.status)
     assert all(math.isfinite(m["train_loss"]) for m in run.metrics_history)

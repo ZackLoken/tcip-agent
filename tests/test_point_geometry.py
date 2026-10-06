@@ -1,14 +1,14 @@
 """``state.Point`` is a third annotation geometry, and every consumer decides about it.
 
-A Point is a placed prompt (SAM-style) or a keypoint/landmark: a real annotation with a location, but
-never a detection/segmentation target. It has no box and no area, so ``bbox_of`` refuses one rather
-than fabricate a degenerate zero-area box that would read downstream as a real object. That refusal is
-the backstop, not the guard: these tests pin the two behaviors that widening the union demands of
-every consumer:
+A Point is a placed prompt (SAM-style) or a keypoint/landmark: a real annotation with a location,
+but never a detection/segmentation target. It has no box and no area, so ``bbox_of`` refuses one
+rather than fabricate a degenerate zero-area box that would read downstream as a real object. That
+refusal is the backstop, not the guard: these tests pin the two behaviors that widening the union
+demands of every consumer:
 
   * a training-target / IoU-matching / delivery-grade path skips a Point cleanly (never crashes on
-    ``bbox_of``, never emits a fabricated extent), while still doing its normal job for the boxes and
-    polygons alongside it; and
+    ``bbox_of``, never emits a fabricated extent), while still doing its normal job for the boxes
+    and polygons alongside it; and
   * a serializer / write path represents a Point (the ``"point": [x, y]`` key, symmetric on read and
     write) instead of silently dropping the only thing that annotation says.
 """

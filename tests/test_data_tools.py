@@ -206,8 +206,9 @@ def test_draw_splits_reports_an_unreadable_label_by_name(data_dir: Path, tmp_pat
     raise through the tool boundary."""
     _spoil(data_dir, "img_001")
 
-    result = draw_splits(data_dir, str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
-                         seed=1, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+    result = draw_splits(data_dir, str(data_dir), output_path=str(tmp_path / "manifests"),
+                         subject="bud", seed=1, val_ratio=0.25, calibration_ratio=0.125,
+                         holdout_ratio=0.125)
 
     assert "error" in result
     assert "'img_001'" in result["error"]
@@ -221,8 +222,9 @@ def test_draw_splits_reports_an_unreadable_label_sorted_last(
     answers the same error dict, never a raw raise."""
     _spoil(data_dir, "img_003")
 
-    result = draw_splits(data_dir, str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
-                         seed=1, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+    result = draw_splits(data_dir, str(data_dir), output_path=str(tmp_path / "manifests"),
+                         subject="bud", seed=1, val_ratio=0.25, calibration_ratio=0.125,
+                         holdout_ratio=0.125)
 
     assert "error" in result
     assert "'img_003'" in result["error"]
@@ -291,8 +293,9 @@ def test_draw_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(tmp_pa
     label_image(images_dir / "plotA.jpg", [Annotation(subject="leaf", geometry=BBox(1, 1, 3, 3))],
                 4, 4)
 
-    result = draw_splits(tmp_path, str(root), output_path=str(tmp_path / "manifests"), subject="leaf",
-                         seed=1, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+    result = draw_splits(tmp_path, str(root), output_path=str(tmp_path / "manifests"),
+                         subject="leaf", seed=1, val_ratio=0.25, calibration_ratio=0.125,
+                         holdout_ratio=0.125)
 
     assert "error" in result
     assert "plotA" in result["error"]
@@ -663,8 +666,9 @@ def test_draw_splits_unrecognized_group_by_refuses_without_writing(tmp_path: Pat
     ``GROUP_KEY_FNS.get(group_by, default_group_key)`` and mis-group a dataset silently."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = draw_splits(tmp_path, str(root), output_path=str(out), group_by="not_a_real_key", subject="bud",
-                         seed=1, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
+    result = draw_splits(tmp_path, str(root), output_path=str(out), group_by="not_a_real_key",
+                         subject="bud", seed=1, val_ratio=0.25, calibration_ratio=0.125,
+                         holdout_ratio=0.125)
     assert "error" in result
     assert not ts.exists(selection_key(out))
 
@@ -877,7 +881,8 @@ def _write_one_sample_selection(root: Path, out: Path) -> None:
     label document under ``root``."""
     write_selection(out, Selection(
         samples=(Sample(member="a", source=str(root / "images" / UNDATED_BUCKET / "a.jpg"),
-                        ground_truth=label_key(root, UNDATED_BUCKET, "a"), group="a", side="train"),),
+                        ground_truth=label_key(root, UNDATED_BUCKET, "a"), group="a",
+                        side="train"),),
         scope=registry_scope(root / "images", "leaf"), seed=1, group_by="stem",
     ), project=root)
 

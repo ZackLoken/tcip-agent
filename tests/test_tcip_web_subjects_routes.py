@@ -104,7 +104,8 @@ def test_save_refuses_dropping_a_declared_subject(client: TestClient, tmp_path: 
     dropped = client.post(
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path),
-              "subjects": {"bush": {"description": "b"}}, "version": first.json()["version"], "user": "tester"},
+              "subjects": {"bush": {"description": "b"}}, "version": first.json()["version"],
+              "user": "tester"},
     )
     assert dropped.status_code == 400
     assert "leaf" in dropped.text
@@ -200,7 +201,8 @@ def test_save_with_a_null_version_succeeds_over_a_still_absent_registry(
     resp = client.post(
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path),
-              "subjects": {"bush": {"description": "first write"}}, "version": None, "user": "tester"},
+              "subjects": {"bush": {"description": "first write"}}, "version": None,
+              "user": "tester"},
     )
     assert resp.status_code == 200
 
@@ -294,7 +296,8 @@ def test_load_derives_subjects_from_labels_when_registry_absent(
     client: TestClient, tmp_path: Path
 ) -> None:
     # No saved registry, but labels exist: the subjects present are discovered, sorted.
-    _label(tmp_path, "IMG_A", [box_annotation(50, 50, 60, 60), box_annotation(20, 20, 30, 30, subject="bush")])
+    _label(tmp_path, "IMG_A",
+           [box_annotation(50, 50, 60, 60), box_annotation(20, 20, 30, 30, subject="bush")])
     load = client.get(
         "/api/subjects/load",
         params={"dataset_root": str(tmp_path), "date": DATE},
@@ -353,7 +356,8 @@ def test_load_derived_subjects_follow_a_label_write(
     first = client.get("/api/subjects/load", params=params).json()
     assert first["discovered"] == ["bud"]
 
-    _label(tmp_path, "IMG_A", [box_annotation(50, 50, 60, 60), box_annotation(20, 20, 30, 30, subject="bush")])
+    _label(tmp_path, "IMG_A",
+           [box_annotation(50, 50, 60, 60), box_annotation(20, 20, 30, 30, subject="bush")])
 
     second = client.get("/api/subjects/load", params=params).json()
     assert second["discovered"] == ["bud", "bush"]
@@ -418,7 +422,8 @@ def test_a_registry_save_leaves_one_library_line_through_either_door(
     through_route.mkdir()
     through_tool.mkdir()
     resp = client.post("/api/subjects/save", json={
-        "dataset_root": str(through_route), "subjects": subjects, "version": None, "user": "tester"})
+        "dataset_root": str(through_route), "subjects": subjects, "version": None,
+        "user": "tester"})
     assert resp.status_code == 200, resp.text
     assert "error" not in write_subject_registry(opened_project, str(through_tool), subjects)
 
@@ -449,7 +454,8 @@ def test_a_registry_save_answers_and_audits_the_location_it_wrote(
     dataset_root = opened_project / "named_dataset"
     dataset_root.mkdir()
     resp = client.post("/api/subjects/save", json={
-        "dataset_root": str(dataset_root), "subjects": {"bud": {}}, "version": None, "user": "tester"})
+        "dataset_root": str(dataset_root), "subjects": {"bud": {}}, "version": None,
+        "user": "tester"})
     assert resp.status_code == 200, resp.text
 
     written = str(subjects_path(dataset_root))
@@ -525,7 +531,8 @@ def test_save_subjects_answers_409_with_the_committed_body_on_a_lost_audit_line(
     resp = client.post(
         "/api/subjects/save",
         json={"dataset_root": str(tmp_path),
-              "subjects": {"bud": {"description": "a bud"}}, "version": healthy_body["version"], "user": "tester"},
+              "subjects": {"bud": {"description": "a bud"}}, "version": healthy_body["version"],
+              "user": "tester"},
     )
     assert resp.status_code == 409
     detail = resp.json()["detail"]

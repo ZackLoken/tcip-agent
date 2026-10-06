@@ -148,7 +148,10 @@ def transition_lock(root: str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> 
 
 
 def fsync_directory(directory: Path) -> None:
-    """Flush a directory entry so a rename or a created directory survives power loss; POSIX only."""
+    """Flush a directory entry so a rename or a created directory survives power loss.
+
+    POSIX only.
+    """
     if os.name == "nt":
         return
     fd = os.open(directory, os.O_RDONLY)

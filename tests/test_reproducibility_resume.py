@@ -98,7 +98,8 @@ def test_seeded_train_reproducible(tmp_path):
     def run_once(out):
         ds = dataset_over("classification", images_dir, csv_path)
         loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
-        run = _run(tmp_path, _cfg([{"freeze_to": -1, "epochs": 1}], seed=7), str(out), id="auto-run-51")
+        run = _run(tmp_path, _cfg([{"freeze_to": -1, "epochs": 1}], seed=7), str(out),
+                   id="auto-run-51")
         run = train(run, loader)
         return run.metrics_history[0]["train_loss"]
 
@@ -159,7 +160,8 @@ def test_resume_restores_rng_state_not_just_reseeds(tmp_path):
     cfg = _cfg([{"freeze_to": -1, "epochs": 2}], seed=11)
 
     # Straight-through baseline: both epochs in one uninterrupted run.
-    straight = train(_run(tmp_path, cfg, str(tmp_path / "straight"), id="auto-run-56"), build_loader())
+    straight = train(_run(tmp_path, cfg, str(tmp_path / "straight"), id="auto-run-56"),
+                     build_loader())
     baseline_epoch2_loss = straight.metrics_history[1]["train_loss"]
 
     # Split run: epoch 1 checkpointed, global RNG deliberately corrupted, then resumed for epoch 2.

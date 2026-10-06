@@ -2,8 +2,8 @@
 
 Every mutating door leaves one line per act it made, the decorator's or its library's, and a
 refusal made none: an undecorated door refused before it acts, a decorated door returning its
-error dict, and a library refusing a write (the registry's ownership rail) alike. The admitting halves
-(one row per act when the door does act) live beside each door's own tests.
+error dict, and a library refusing a write (the registry's ownership rail) alike. The admitting
+halves (one row per act when the door does act) live beside each door's own tests.
 """
 
 from __future__ import annotations
@@ -24,7 +24,8 @@ def _rows(tmp_path: Path) -> list[dict]:
 def _register_model(tmp_path: Path):
     from tcip_mcp.tools.model_tools import register_model
 
-    return register_model(tmp_path, name="m", checkpoint_path=str(tmp_path / "absent.pt"), config={"a": 1})
+    return register_model(
+        tmp_path, name="m", checkpoint_path=str(tmp_path / "absent.pt"), config={"a": 1})
 
 
 def _deliver_per_image_counts(tmp_path: Path):

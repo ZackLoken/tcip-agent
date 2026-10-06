@@ -201,7 +201,8 @@ def test_spatial_strip_split_accounts_for_every_tile():
 
 def test_spatial_strip_split_no_tile_shared_and_buffer_respected():
     width, height = 4000, 3000
-    split = spatial_strip_split(width, height, 320, 0.2, fractions=(0.7, 0.3, 0.0), split_names=SIDES)
+    split = spatial_strip_split(
+        width, height, 320, 0.2, fractions=(0.7, 0.3, 0.0), split_names=SIDES)
     by_name = _kept_tiles(split, width, height)
     train, val = by_name["train"], by_name["val"]
     assert train and val
@@ -260,7 +261,8 @@ def test_spatial_strip_split_buffer_defaults_to_tile_size():
 
 def test_spatial_strip_split_explicit_buffer_below_tile_size_refuses():
     with pytest.raises(ValueError, match="buffer"):
-        spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.8, 0.2, 0.0), split_names=SIDES, buffer=100)
+        spatial_strip_split(
+            4000, 3000, 320, 0.2, fractions=(0.8, 0.2, 0.0), split_names=SIDES, buffer=100)
 
 
 def test_spatial_strip_split_refuses_when_no_tile_fits_extent():
@@ -289,7 +291,8 @@ def test_spatial_strip_split_three_way_populates_every_side():
 def test_spatial_strip_split_realized_fractions_stay_near_requested():
     # A generous but real tolerance: catches a regression to arbitrary quantization, not
     # merely "nonzero on every side".
-    split = spatial_strip_split(16000, 12000, 320, 0.2, fractions=(0.7, 0.2, 0.1), split_names=SIDES)
+    split = spatial_strip_split(
+        16000, 12000, 320, 0.2, fractions=(0.7, 0.2, 0.1), split_names=SIDES)
     for name, requested in zip(split.split_names, split.requested_fractions):
         assert abs(split.realized_fractions[name] - requested) < 0.05
 

@@ -27,7 +27,9 @@ def test_run_hyperparameter_search_threads_the_sweeps_directory_and_records_its_
     import tcip_mcp.tools.training_tools as tt
 
     captured = _stub_search(monkeypatch)
-    tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=1, search_seed=0)
+    tt.run_hyperparameter_search(
+        tmp_path, base_config=real_hpo_base_config, n_trials=1, search_seed=0
+    )
 
     assert captured["sweep_dir"].name.startswith("hpo_")
     assert captured["sweep_dir"].parent == tmp_path / ".tcip" / "experiments"
@@ -125,7 +127,8 @@ def test_run_hyperparameter_search_refuses_before_minting_when_the_base_config_f
 
     captured = _stub_search(monkeypatch)
     result = tt.run_hyperparameter_search(
-        tmp_path, base_config={"model_source": {"builder": "not.a:real_builder", "task": "detection"}},
+        tmp_path,
+        base_config={"model_source": {"builder": "not.a:real_builder", "task": "detection"}},
         n_trials=1, search_seed=0)
 
     assert "error" in result

@@ -88,7 +88,9 @@ def _write_band_file_with_identity(path: Path, capture_uuid: str, band_name: str
     tifffile.imwrite(
         str(path), arr,
         extratags=[(700, "B", 0,
-                   _xmp_with_identity(capture_uuid, band_name, wavelength, utc=utc, lat=lat, lon=lon),
+                   _xmp_with_identity(
+                       capture_uuid, band_name, wavelength, utc=utc, lat=lat, lon=lon
+                   ),
                    True)],
     )
 
@@ -153,7 +155,10 @@ def test_real_data_detection_is_idempotent(dji_copy):
 def test_real_data_stale_manifest_recovers_by_deleting_it(dji_copy):
     """Deleting a stem's .bandgroup is the one recovery path for a manifest whose sibling was
     since deleted; the next detection pass sees the survivors as ungrouped again."""
-    from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, detect_and_write_band_groups
+    from tcip_mcp.pipelines.data.band_groups import (
+        BandGroupIncomplete,
+        detect_and_write_band_groups,
+    )
     from tcip_mcp.pipelines.image_utils import resolve_image_path
 
     result = detect_and_write_band_groups(dji_copy)
@@ -243,7 +248,8 @@ def test_two_unrelated_captures_sharing_a_group_id_are_refused_not_spliced(tmp_p
     assert len(result["refused"]) == 1
     refusal = result["refused"][0]
     assert refusal["group_id"] == same_gid
-    assert refusal["band"] is None  # this is the identity-disagreement refusal, not the duplicate-band one
+    # this is the identity-disagreement refusal, not the duplicate-band one
+    assert refusal["band"] is None
     assert set(refusal["files"]) == {
         str(d / "A_G.tif"), str(d / "A_NIR.tif"), str(d / "B_R.tif"), str(d / "B_RE.tif"),
     }
@@ -323,7 +329,9 @@ def test_a_lone_file_with_a_group_id_forms_no_group(tmp_path):
 # ── stem-collision guard (the ownership-aware inventory) ─────────────────────────────────
 
 
-def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(tmp_path, monkeypatch):
+def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(
+    tmp_path, monkeypatch
+):
     """Through ingest_images(detect_band_groups=True): a group whose own canonical stem a raw
     file already placed in the bucket holds is refused, naming that file; an unrelated group in
     the same pass, with no such collision, still forms."""
@@ -471,7 +479,10 @@ def test_explicit_manifest_drops_a_group_missing_files(tmp_path):
 
 
 def test_manifest_round_trip(tmp_path):
-    from tcip_mcp.pipelines.data.band_groups import read_band_group_manifest, write_band_group_manifest
+    from tcip_mcp.pipelines.data.band_groups import (
+        read_band_group_manifest,
+        write_band_group_manifest,
+    )
 
     d = tmp_path / "images"
     d.mkdir()

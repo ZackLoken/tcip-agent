@@ -3,8 +3,9 @@
 Each fixture is written through the platform's own label writer and read back through the
 reader under test: the loaders and their crop, the trainer's and the validation loss's hand-off
 to the heads, the model contract's overfit probe, the completion mark's digest, the editor's
-proposal pairing, and the assessment's cap, size, spacing and merge threshold. Where a reader forms a number
-from objects, the same records with and without crowd regions must give the same number.
+proposal pairing, and the assessment's cap, size, spacing and merge threshold. Where a reader
+forms a number from objects, the same records with and without crowd regions must give the same
+number.
 """
 
 from __future__ import annotations

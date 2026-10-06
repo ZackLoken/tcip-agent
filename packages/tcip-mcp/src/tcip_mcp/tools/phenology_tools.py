@@ -169,7 +169,8 @@ def deliver_phenology_milestones(
             is for; an empty list refuses.
         require_all_dates_complete: Compute a plant's milestones only when every one of its dates
             carries the positive state's attribute on every detection and is fully observed;
-            ``False`` computes them from its complete dates alone. Defaults to ``phenology.REQUIRE_ALL_DATES_COMPLETE``; recorded on the delivery
+            ``False`` computes them from its complete dates alone. Defaults to
+            ``phenology.REQUIRE_ALL_DATES_COMPLETE``; recorded on the delivery
             event.
         acknowledgment_id: A breeder's recorded acknowledgment of this unvalidated result.
     """

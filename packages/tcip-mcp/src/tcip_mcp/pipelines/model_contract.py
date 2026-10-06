@@ -112,7 +112,8 @@ def _synth_batch(task: str, *, in_chans: int, img_size: int, device: Any,
     for _ in range(2):
         img = torch.rand(in_chans, img_size, img_size, device=device)
         if task == "ordinal":
-            # A 0-dim tensor, not a python scalar: the stacking collate rebuilds a scalar on the cpu.
+            # A 0-dim tensor, not a python scalar: the stacking collate rebuilds a scalar on the
+            # cpu.
             target = {"ranks": torch.randint(0, num_classes, (), device=device)}
         elif task == "semantic_seg":
             target = {"masks": torch.randint(0, num_classes, (img_size, img_size), device=device)}

@@ -201,7 +201,9 @@ def audited(
     def decorate(func: Callable) -> Callable:
         sig = inspect.signature(func)
         if "project" not in sig.parameters:
-            raise ValueError(f"@audited on {func.__name__} needs a project parameter to record under")
+            raise ValueError(
+                f"@audited on {func.__name__} needs a project parameter to record under"
+            )
         if scope_arg is not None and scope_arg not in sig.parameters:
             raise ValueError(
                 f"@audited(scope_arg={scope_arg!r}) on {func.__name__} names no parameter of it; "

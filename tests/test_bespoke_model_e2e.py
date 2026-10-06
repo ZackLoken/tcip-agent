@@ -2,9 +2,10 @@
 end through the audited envelope.
 
 Proves the whole CV-scientist vision at once:
-  * (a) architecture modifications take effect end to end: the ``AnchorGenerator`` uses aspect ratios
-    derived from the synthetic GT (via ``derivations.gt_aspect_ratios``) and sizes from the GT
-    size distribution (not torchvision defaults), and every norm layer is GroupNorm (no BatchNorm);
+  * (a) architecture modifications take effect end to end: the ``AnchorGenerator`` uses aspect
+    ratios derived from the synthetic GT (via ``derivations.gt_aspect_ratios``) and sizes from
+    the GT size distribution (not torchvision defaults), and every norm layer is GroupNorm (no
+    BatchNorm);
   * (b) the custom ``train(ctx)`` loop (not ``ctx.default_train``) had its metrics, checkpoint and
     audit bracket recorded by the envelope, the source and environment in the launch record, and
     the model registered by completing;
@@ -113,7 +114,8 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     anchor_gen = predictor.model.detector.rpn.anchor_generator
     assert anchor_gen.aspect_ratios == (expected_ratios,)   # anchors are the GT-derived ratios
     assert anchor_gen.sizes == (expected_sizes,)            # anchor sizes are the GT-derived scales
-    assert any(isinstance(m, torch.nn.GroupNorm) for m in predictor.model.modules())  # BN->GN present
+    # BN->GN present
+    assert any(isinstance(m, torch.nn.GroupNorm) for m in predictor.model.modules())
     assert not any(isinstance(m, torch.nn.modules.batchnorm._BatchNorm)
                    for m in predictor.model.modules())      # no BatchNorm survived the modification
 
@@ -134,7 +136,8 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     metric_rows = read_rows(out / METRICS_FILE)[0]
     assert metric_rows and all("train_loss" in r for r in metric_rows)
     events = _audit_events(tmp_path)
-    assert [e["status"] for e in events] == ["running", "completed"]  # opened + closed around the body
+    # opened + closed around the body
+    assert [e["status"] for e in events] == ["running", "completed"]
     assert events[-1]["arguments"]["experiment_id"] == "expBespoke"
 
     # ---- completion registered the bespoke model into the immutable registry ----

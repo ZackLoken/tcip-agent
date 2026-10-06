@@ -196,7 +196,8 @@ def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid() -> None:
     )
 
     mapping = {
-        "name": "valley", "dataset_id": "ds-1", "dataset_root": "data", "built_at": "2026-02-01T00:00:00+00:00",
+        "name": "valley", "dataset_id": "ds-1", "dataset_root": "data",
+        "built_at": "2026-02-01T00:00:00+00:00",
         "record_sha256": "0" * 64, "nn_tolerance_m": {"value": 3, "source": "stated"},
         "capture_identity": {}, "captures_unverified": [], "plant_csvs_unverified": [],
         "dates_delivered": [], "images_unattributed": 0,

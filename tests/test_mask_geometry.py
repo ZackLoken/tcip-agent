@@ -42,7 +42,8 @@ def test_rectangle_physical_scale_converts_px_to_mm():
     m = _rect_mask()
     g = mask_geometry(m, scale=0.5, unit="mm")
     assert g["mm_per_px"] == 0.5
-    assert g["area_mm2"] == pytest.approx(800 * 0.25)   # area scales by the square of the linear scale
+    # area scales by the square of the linear scale
+    assert g["area_mm2"] == pytest.approx(800 * 0.25)
     assert g["principal_axis_extent_mm"] == pytest.approx(20.0)
     assert g["secondary_axis_extent_mm"] == pytest.approx(10.0)
     assert g["perimeter_mm"] == pytest.approx(60.0)
@@ -68,7 +69,8 @@ def test_scale_unit_is_the_callers_fact_never_assumed_to_be_mm():
 
 
 def test_no_gsd_parameter_survives_anywhere_in_the_module():
-    """The naming trap is gone: no callable in the module still accepts a ``gsd``/``mm_per_px`` knob."""
+    """The naming trap is gone: no callable in the module still accepts a ``gsd``/``mm_per_px``
+    knob."""
     import importlib
     import inspect
 
@@ -84,14 +86,18 @@ def test_no_gsd_parameter_survives_anywhere_in_the_module():
 def test_no_length_or_width_key_survives_under_any_alias():
     """A PCA-chord extent is not an anatomical length/width, and no alias keeps that claim alive.
 
-    An alias would defeat the rename: code reading ``length_px`` would keep treating the principal-axis
-    chord as the organ's real length, which is exactly the reading the axis-named keys refuse to offer.
-    ``unit_from_value_key`` is vocabulary-driven, so a bespoke ``length_mm`` from measurement code
-    outside this module is recognized the same way this module's own fields are.
+    An alias would defeat the rename: code reading ``length_px`` would keep treating the
+    principal-axis chord as the organ's real length, which is exactly the reading the axis-named
+    keys refuse to offer. ``unit_from_value_key`` is vocabulary-driven, so a bespoke ``length_mm``
+    from measurement code outside this module is recognized the same way this module's own
+    fields are.
     """
     from tcip_mcp.pipelines.measurement.mask_geometry import unit_from_value_key
 
-    for g in (mask_geometry(_rect_mask(), unit="mm"), mask_geometry(_rect_mask(), scale=0.5, unit="mm")):
+    for g in (
+        mask_geometry(_rect_mask(), unit="mm"),
+        mask_geometry(_rect_mask(), scale=0.5, unit="mm"),
+    ):
         assert not [k for k in g if k.startswith(("length", "width"))], sorted(g)
     assert unit_from_value_key("length_mm") == ("mm", "mm")
     assert unit_from_value_key("width_cm") == ("cm", "cm")

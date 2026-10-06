@@ -65,7 +65,8 @@ def _prepare_queue_sources(checkpoint_path: str, images_dir: str, subject: str |
     logical = list_logical_images(images_path)
     if not logical:
         return None, 0, {"error": "No images found in images_dir"}
-    # Real sources, one per logical image: a band-grouped capture's sibling bands fold into one entry.
+    # Real sources, one per logical image: a band-grouped capture's sibling bands fold into one
+    # entry.
     sources = [logical[stem] for stem in sorted(logical)]
     if subject is None:
         return sources, 0, None
@@ -213,7 +214,8 @@ def triage_predictions(
     if refusal is not None:
         return refusal
     predictions = p.predict(sources)
-    # A prediction with no confidence signal at all (a regression head's point estimate) is tagged unscoreable, not dropped.
+    # A prediction with no confidence signal at all (a regression head's point estimate) is
+    # tagged unscoreable, not dropped.
     unscoreable_preds = unscoreable(predictions)
     all_review = review_queue(predictions, low=low, high=high) + unscoreable_preds
     return {

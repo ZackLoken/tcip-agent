@@ -46,7 +46,9 @@ RECORDED_BASELINE = REPO_ROOT / "docs" / "audit" / "phase0" / "gate-baseline"
 PARSED_JOBS = ("mypy", "python", "typescript")
 OUT_OF_SCOPE_JOBS = {
     "environment": "it creates the conda environment this gate's own process already runs inside",
-    "docker": "it builds the container image, which needs a Docker daemon this gate does not assume",
+    "docker": (
+        "it builds the container image, which needs a Docker daemon this gate does not assume"
+    ),
     "ray-exit-windows": (
         "it creates the conda environment this gate's own process already runs inside, and its "
         "one test file is Windows-only, so a Windows host's own suite already covers it and any "
@@ -157,7 +159,8 @@ def build_plan() -> "list[Stage]":
                 working_dir = step.get("working-directory")
                 if working_dir:
                     cwd = (REPO_ROOT / _resolve_text(working_dir, leg)).resolve()
-                step_env = {k: _resolve_text(str(v), leg) for k, v in (step.get("env") or {}).items()}
+                step_env = {k: _resolve_text(str(v), leg)
+                            for k, v in (step.get("env") or {}).items()}
                 if run_text is not None:
                     run_text = _resolve_text(run_text, leg)
                     if job_name == "python" and name == "Run tests":
@@ -239,7 +242,8 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=7200)
     parser.add_argument("--only", action="append", default=None,
                         help="a stage key to run instead of the full plan (job:name[leg]); "
-                             "repeat --only for more than one, since a key may itself carry a comma")
+                             "repeat --only for more than one, since a key may itself carry "
+                             "a comma")
     args = parser.parse_args()
 
     if args.out.resolve() == RECORDED_BASELINE.resolve():
@@ -315,7 +319,8 @@ def main() -> int:
     (args.out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     ran = sum(1 for r in results if not r["skipped"])
     skipped = sum(1 for r in results if r["skipped"])
-    print(f"\ntotal {total}s across {ran} run stage(s), {skipped} skipped -> {args.out / 'summary.json'}")
+    print(f"\ntotal {total}s across {ran} run stage(s), {skipped} skipped -> "
+          f"{args.out / 'summary.json'}")
     return 0 if all(r["skipped"] or r["exit_code"] == 0 for r in results) else 1
 
 

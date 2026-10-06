@@ -82,7 +82,9 @@ class Annotation:
 
     def __post_init__(self) -> None:
         if not isinstance(self.subject, str) or not self.subject:
-            raise ValueError(f"an annotation needs a non-empty string subject; got {self.subject!r}")
+            raise ValueError(
+                f"an annotation needs a non-empty string subject; got {self.subject!r}"
+            )
 
 
 def object_rows(iscrowd) -> list[bool]:

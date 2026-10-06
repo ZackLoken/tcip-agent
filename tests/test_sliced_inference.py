@@ -220,7 +220,8 @@ def test_masks_are_cut_at_the_platform_binarize_threshold_the_record_names(tmp_p
     _path, checkpoint = _checkpoint(tmp_path, with_masks=True)
     p = _pass(checkpoint)
     path = _png(tmp_path, _frame())
-    # The package attribute of this name is a same-named function, so the module comes from sys.modules.
+    # The package attribute of this name is a same-named function, so the module comes from
+    # sys.modules.
     mask_geometry = importlib.import_module("tcip_mcp.pipelines.measurement.mask_geometry")
     real = mask_geometry.resolve_binarize_threshold
 

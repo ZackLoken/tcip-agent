@@ -104,7 +104,8 @@ def _targets(task: str, root: Path) -> dict:
 def _person_label() -> list:
     """One leaf a person drew, stamped as the save door stamps it."""
     return [json_io.stamped([json_io.annotation_from_payload(
-        {"subject": "leaf", "bbox": [1, 1, 5, 5]})], [], author="user:breeder", now="2025-09-16")[0]]
+        {"subject": "leaf", "bbox": [1, 1, 5, 5]})], [], author="user:breeder",
+        now="2025-09-16")[0]]
 
 
 def test_an_imported_documents_images_train_with_the_boxes_it_stated(tmp_path: Path):

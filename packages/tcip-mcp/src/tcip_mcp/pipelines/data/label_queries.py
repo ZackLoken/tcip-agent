@@ -400,7 +400,8 @@ def readmitted_samples(samples: "Sequence[Sample]", scope: "ClassScope") -> list
     :func:`admit` runs under ``scope`` held to its shape (``ClassScope.admitted_for``, so a
     document read under a scope naming no subject refuses by name), each carrying the version
     that re-admission read as its ``ground_truth_digest``, what it read as its ``read`` and the
-    logical image it resolved as its ``image``. A sample the admission no longer admits refuses (``ValueError``) naming which and the tallies that refused them; membership is never
+    logical image it resolved as its ``image``. A sample the admission no longer admits refuses
+    (``ValueError``) naming which and the tallies that refused them; membership is never
     changed."""
     from dataclasses import replace
 

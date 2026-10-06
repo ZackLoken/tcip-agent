@@ -23,7 +23,8 @@ def freeze_selection(project: Path, experiment_id: str, output_path: str | None 
     Reads the run's resolution (``experiments.run_resolution``) and refuses, naming the primitive,
     when: ``experiment_id`` names no training run; the split is spatial (region identities, not
     stems); the run's val side is empty; a member's ground truth has moved since the run (it now
-    digests differently from the digest the record holds, the moved members named); a selection already exists
+    digests differently from the digest the record holds, the moved members named); a
+    selection already exists
     at the output directory; or the selection its resolved ``scope`` composes is one
     :func:`~tcip_mcp.pipelines.data.selection.write_selection` refuses.
 

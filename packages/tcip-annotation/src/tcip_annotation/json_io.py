@@ -580,12 +580,12 @@ def require_reference_ground_truth(annotations: list[Annotation]) -> None:
     scored, total, agent_authored = facts.scored, facts.total, facts.machine_authored
     if scored:
         raise ValueError(
-            f"{scored} of {total} annotations in the reference carry a prediction score, so they are "
-            "the model's own output that no human has ruled on, and a reference built from them "
-            "measures the model against itself rather than against a measurement. Annotate this "
-            "reference, accept the model's proposals in the editor so each record is a person's "
-            "call and carries their accepted_by, or validate against a breeder-confirmed sample of "
-            "the model's outputs instead."
+            f"{scored} of {total} annotations in the reference carry a prediction score, so they "
+            "are the model's own output that no human has ruled on, and a reference built from "
+            "them measures the model against itself rather than against a measurement. Annotate "
+            "this reference, accept the model's proposals in the editor so each record is a "
+            "person's call and carries their accepted_by, or validate against a "
+            "breeder-confirmed sample of the model's outputs instead."
         )
     if agent_authored:
         producers = ", ".join(sorted(set(agent_authored)))
@@ -654,7 +654,9 @@ def stored_content(a: Annotation) -> dict:
         if not geometry_extent_ok(geom):
             raise ValueError(f"{a.subject!r} annotation's polygon rounds to no positive extent at "
                              "the document's stored grid")
-        rec["segmentation"] = [[c for xy in ring for c in xy] for ring in _rounded_rings(geom.rings)]
+        rec["segmentation"] = [
+            [c for xy in ring for c in xy] for ring in _rounded_rings(geom.rings)
+        ]
     elif isinstance(geom, BBox):
         rec["bbox"] = _stored_bbox_or_raise(geom, where=f"{a.subject!r} annotation")
     elif isinstance(geom, Point):

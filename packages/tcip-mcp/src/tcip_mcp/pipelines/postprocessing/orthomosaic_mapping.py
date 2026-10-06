@@ -162,12 +162,20 @@ def pixel_to_native(transform: GeoTransform, pixel_x: float, pixel_y: float) -> 
     """The (easting, northing) in ``transform``'s native projected CRS for pixel (column, row)
     ``(pixel_x, pixel_y)``, via the tiepoint + pixel-scale GeoTIFF affine, rows increasing
     southward."""
-    native_x = transform.tiepoint_native_x + (pixel_x - transform.tiepoint_pixel_x) * transform.pixel_scale_x
-    native_y = transform.tiepoint_native_y - (pixel_y - transform.tiepoint_pixel_y) * transform.pixel_scale_y
+    native_x = (
+        transform.tiepoint_native_x
+        + (pixel_x - transform.tiepoint_pixel_x) * transform.pixel_scale_x
+    )
+    native_y = (
+        transform.tiepoint_native_y
+        - (pixel_y - transform.tiepoint_pixel_y) * transform.pixel_scale_y
+    )
     return native_x, native_y
 
 
-def native_to_pixel(transform: GeoTransform, native_x: float, native_y: float) -> tuple[float, float]:
+def native_to_pixel(
+    transform: GeoTransform, native_x: float, native_y: float
+) -> tuple[float, float]:
     """The pixel (column, row) for a native-CRS coordinate ``(native_x, native_y)``, the inverse
     of :func:`pixel_to_native`; a zero ``pixel_scale_x`` or ``pixel_scale_y`` refuses
     (``ValueError``) naming it."""
@@ -181,8 +189,14 @@ def native_to_pixel(transform: GeoTransform, native_x: float, native_y: float) -
             "native_to_pixel: transform.pixel_scale_y is zero; the tiepoint + pixel-scale affine "
             "has no inverse at a degenerate scale"
         )
-    pixel_x = transform.tiepoint_pixel_x + (native_x - transform.tiepoint_native_x) / transform.pixel_scale_x
-    pixel_y = transform.tiepoint_pixel_y - (native_y - transform.tiepoint_native_y) / transform.pixel_scale_y
+    pixel_x = (
+        transform.tiepoint_pixel_x
+        + (native_x - transform.tiepoint_native_x) / transform.pixel_scale_x
+    )
+    pixel_y = (
+        transform.tiepoint_pixel_y
+        - (native_y - transform.tiepoint_native_y) / transform.pixel_scale_y
+    )
     return pixel_x, pixel_y
 
 

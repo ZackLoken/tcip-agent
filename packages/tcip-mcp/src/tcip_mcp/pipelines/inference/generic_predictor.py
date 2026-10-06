@@ -285,7 +285,8 @@ class GenericPredictor:
             batch = pending[start:start + tile_batch_size]
             model.perform_batch_inference([read(*s) for _, s in batch])
             model.convert_original_predictions(
-                shift_amount=[[s[0], s[1]] for _, s in batch], full_shape=[[height, width]] * len(batch))
+                shift_amount=[[s[0], s[1]] for _, s in batch],
+                full_shape=[[height, width]] * len(batch))
             new = [p.get_shifted_object_prediction()
                    for per_slice in model.object_prediction_list_per_image for p in per_slice]
             predictions.extend(new)

@@ -70,7 +70,8 @@ def test_focal_loss_class_weights():
     loss = fl(preds.clone().requires_grad_(True), targets)
     assert loss.ndim == 0
     loss.backward()
-    assert not torch.allclose(fl(preds, targets), FocalLoss()(preds, targets))  # weighting changes it
+    # weighting changes it
+    assert not torch.allclose(fl(preds, targets), FocalLoss()(preds, targets))
 
 
 def test_weighted_ce_built():

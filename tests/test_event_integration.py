@@ -30,7 +30,10 @@ class TestPostPanelEventRoute:
     def test_accepts_valid_panel(self, opened_client: TestClient, project_id: str) -> None:
         resp = opened_client.post(
             "/api/events/training",
-            json={"project_id": project_id, "event_type": "metrics_update", "data": {"epoch": 5, "mAP50": 0.85}},
+            json={
+                "project_id": project_id, "event_type": "metrics_update",
+                "data": {"epoch": 5, "mAP50": 0.85},
+            },
         )
         assert resp.status_code == 200
         body = resp.json()
@@ -82,10 +85,14 @@ class TestPostPanelEventRoute:
         """A browser that connects after events landed receives them on connect, in the order
         they were posted."""
         panel = "results"
-        opened_client.post("/api/events/results",
-                    json={"project_id": project_id, "event_type": "count_ready", "data": {"count": 11}})
-        opened_client.post("/api/events/results",
-                    json={"project_id": project_id, "event_type": "count_ready", "data": {"count": 22}})
+        opened_client.post(
+            "/api/events/results",
+            json={"project_id": project_id, "event_type": "count_ready", "data": {"count": 11}},
+        )
+        opened_client.post(
+            "/api/events/results",
+            json={"project_id": project_id, "event_type": "count_ready", "data": {"count": 22}},
+        )
 
         with opened_client.websocket_connect(f"ws://127.0.0.1/ws/panel/{panel}") as ws:
             first = ws.receive_json()
@@ -109,7 +116,9 @@ class TestPostPanelEventRoute:
         open_new_project(tmp_path.parent / "other")
         assert store.retained_events("results") == []
 
-    def test_annotate_focus_persists_advisory_state(self, opened_client: TestClient, project_id: str) -> None:
+    def test_annotate_focus_persists_advisory_state(
+        self, opened_client: TestClient, project_id: str
+    ) -> None:
         """An annotate_focus event carrying a mode and an active_subject writes both into the
         advisory state, alongside the tab it lands on."""
         resp = opened_client.post(
@@ -117,7 +126,10 @@ class TestPostPanelEventRoute:
             json={
                 "project_id": project_id,
                 "event_type": "annotate_focus",
-                "data": {"subject": "bush", "date": "2-11-26", "mode": "polygon", "active_subject": "bud"},
+                "data": {
+                    "subject": "bush", "date": "2-11-26", "mode": "polygon",
+                    "active_subject": "bud",
+                },
             },
         )
         assert resp.status_code == 200
@@ -126,11 +138,16 @@ class TestPostPanelEventRoute:
         assert state["mode"] == "polygon"
         assert state["active_subject"] == "bud"
 
-    def test_annotate_focus_with_an_unknown_mode_answers_400(self, opened_client: TestClient, project_id: str) -> None:
+    def test_annotate_focus_with_an_unknown_mode_answers_400(
+        self, opened_client: TestClient, project_id: str
+    ) -> None:
         before = opened_client.get("/api/state").json()["mode"]
         resp = opened_client.post(
             "/api/events/app",
-            json={"project_id": project_id, "event_type": "annotate_focus", "data": {"mode": "lasso"}},
+            json={
+                "project_id": project_id, "event_type": "annotate_focus",
+                "data": {"mode": "lasso"},
+            },
         )
         assert resp.status_code == 400
         assert "lasso" in resp.json()["detail"]

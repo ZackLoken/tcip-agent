@@ -204,7 +204,8 @@ def test_count_by_class_bare_detector_bucket_refuses_never_full_coverage(tmp_pat
     p = _document(tmp_path, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9),
                              Annotation(subject="bud", geometry=BBox(4, 4, 6, 6), score=0.8)])
     total, positive, unclassified = phenology.count_by_class(p, OPENED, scope=_scope(tmp_path))
-    assert (total, positive, unclassified) == (2, 0, 2)  # whole bucket unclassified, not full coverage
+    # whole bucket unclassified, not full coverage
+    assert (total, positive, unclassified) == (2, 0, 2)
 
 
 def test_count_by_class_wrong_axis_bucket_refuses(tmp_path):
@@ -304,8 +305,8 @@ def test_per_plant_phenology_missing_image_is_disclosed_not_a_zero(tmp_path):
 
 
 def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(tmp_path):
-    # One date whose bucket declares no attribute excludes the whole plant's milestones, disclosed, rather than
-    # computing them from the dates that happened to be usable.
+    # One date whose bucket declares no attribute excludes the whole plant's milestones,
+    # disclosed, rather than computing them from the dates that happened to be usable.
     buckets = {"2024-05-01": _bucket(tmp_path, "2024-05-01", {"P1_a": ["open"]}),
                "2024-05-15": _bucket(tmp_path, "2024-05-15", {"P1_b": ["bud"]},
                                      attributed=False)}
@@ -387,12 +388,13 @@ _SPEC_SHAPES = [
 ]
 
 
-@pytest.mark.parametrize("spec", _SPEC_SHAPES, ids=lambda s: f"{s.name}-{s.majority_milestone or 'nomajority'}")
+@pytest.mark.parametrize(
+    "spec", _SPEC_SHAPES, ids=lambda s: f"{s.name}-{s.majority_milestone or 'nomajority'}")
 def test_phenology_csv_columns_name_no_column_without_a_producer(spec):
     """Every trait-prefixed column the schema names must be filled by a producer, or the delivered
-    CSV carries a permanently-blank column. The schema and the producer share ``_milestone_columns``,
-    so this holds by construction for any spec shape, including one whose ``majority_milestone``
-    is unset (unlike BUD_OPENING's, which is always set).
+    CSV carries a permanently-blank column. The schema and the producer share
+    ``_milestone_columns``, so this holds by construction for any spec shape, including one whose
+    ``majority_milestone`` is unset (unlike BUD_OPENING's, which is always set).
     """
     series = [("2026-02-01", 0.0), ("2026-02-10", 0.5), ("2026-02-20", 1.0)]
     produced = set(phenology.plant_milestones(series, spec))
@@ -404,9 +406,9 @@ def test_phenology_csv_columns_name_no_column_without_a_producer(spec):
 
 
 def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(tmp_path):
-    """A plant excluded from milestone computation must carry the same row shape as an included one,
-    including each milestone date's ``*_date_bound`` companion, not just ``milestone_date_columns``'s
-    bare dates.
+    """A plant excluded from milestone computation must carry the same row shape as an included
+    one, including each milestone date's ``*_date_bound`` companion, not just
+    ``milestone_date_columns``'s bare dates.
     """
     buckets = {
         "2026-02-11": _bucket(tmp_path, "2026-02-11",

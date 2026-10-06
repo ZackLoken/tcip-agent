@@ -55,7 +55,8 @@ def _bind_run(project: Path, out: Path, experiment_id: str) -> Path:
     the launcher's own producer, so no training body runs. Returns the run directory."""
     from tests._verified_checkpoint_fixtures import resolved_run
 
-    return resolved_run(project, {"split": {"selection_dir": str(out)}}, experiment_id=experiment_id)
+    return resolved_run(
+        project, {"split": {"selection_dir": str(out)}}, experiment_id=experiment_id)
 
 
 def _manifest_sha256(out: Path) -> str:

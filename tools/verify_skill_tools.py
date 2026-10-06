@@ -20,12 +20,12 @@ Reach, stated plainly, two gaps: the fabrication check only reads Tools tables, 
 or retired name in running prose outside a table is invisible to it; and a table documenting
 tools under another header is also invisible to it, since header text is how a table is
 recognized as one at all. The phenology skill's piece inventory (headed "Piece", not "Tool") is
-that second case: it names real tools (`build_plant_mapping`, `deliver_phenology_milestones`) alongside
-internal module names in the same first column, and a fabricated or retired name there would go
-unchecked. Matching by content instead of header (treating a table as a tool table once any data
-row's first cell names a registered tool) would flag that table's module-name rows as
-fabrications, rejecting valid prose rather than only catching a real problem, so it is not
-used. Widening to the call/chain position (a token followed by `(`, or
+that second case: it names real tools (`build_plant_mapping`, `deliver_phenology_milestones`)
+alongside internal module names in the same first column, and a fabricated or retired name
+there would go unchecked. Matching by content instead of header (treating a table as a tool
+table once any data row's first cell names a registered tool) would flag that table's
+module-name rows as fabrications, rejecting valid prose rather than only catching a real
+problem, so it is not used. Widening to the call/chain position (a token followed by `(`, or
 named in a `->` chain) mostly catches legitimate non-tool identifiers (`train(ctx)`,
 `grid_to_pixel`, `plant_id`, ...) rather than real fabrications, so it also stays out of scope;
 the orphan check is what catches a rename missed everywhere, table or prose alike.
@@ -119,7 +119,8 @@ def fabricated_tool_names(surfaces: list[Path] | None = None) -> dict[str, list[
     registered = set(list_registered_tools())
     result: dict[str, list[str]] = {}
     for surface in surfaces if surfaces is not None else prose_surfaces():
-        names = [extract_tool_name(c) for c in tool_table_first_cells(surface.read_text(encoding="utf-8"))]
+        cells = tool_table_first_cells(surface.read_text(encoding="utf-8"))
+        names = [extract_tool_name(c) for c in cells]
         bad = sorted({n for n in names if n and n not in registered})
         if bad:
             try:
@@ -135,7 +136,9 @@ def orphan_tool_names(surfaces: list[Path] | None = None) -> list[str]:
     from tcip_mcp.server import list_registered_tools
 
     registered = set(list_registered_tools())
-    text = "\n".join(s.read_text(encoding="utf-8") for s in (surfaces if surfaces is not None else prose_surfaces()))
+    text = "\n".join(
+        s.read_text(encoding="utf-8")
+        for s in (surfaces if surfaces is not None else prose_surfaces()))
     mentioned = {n for n in registered if f"`{n}`" in text or f"`{n}(" in text}
     return sorted(registered - mentioned - ORPHAN_ALLOW)
 

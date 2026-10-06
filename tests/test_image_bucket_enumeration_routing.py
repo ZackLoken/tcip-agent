@@ -143,7 +143,8 @@ def test_preflight_admits_a_clean_multi_image_bucket(tmp_path):
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(bucket), "scope": {"subject": SUBJECT}, "split": {"seed": 0, "val_ratio": 0.15}},
+        "data": {"images_dir": str(bucket), "scope": {"subject": SUBJECT},
+                 "split": {"seed": 0, "val_ratio": 0.15}},
     }
     r = preflight_config(tmp_path, cfg)
     assert r["issues"] == [], r["issues"]

@@ -260,16 +260,19 @@ def image_preface(family: str, images: tuple[pathlib.Path, ...]) -> str:
         return ""
     names = [str(path) for path in images]
     if family == "antigravity":
-        return "Review the attached image(s) " + " ".join(f"@{n}" for n in names) + " before answering.\n\n"
+        return ("Review the attached image(s) " + " ".join(f"@{n}" for n in names)
+                + " before answering.\n\n")
     if family == "codex":
-        return "The image(s) attached to this prompt are " + ", ".join(names) + ". Review them before answering.\n\n"
+        return ("The image(s) attached to this prompt are " + ", ".join(names)
+                + ". Review them before answering.\n\n")
     return ("Read the image(s) at " + ", ".join(names)
             + " with your image-capable file reader before answering.\n\n")
 
 
 def build_claude(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.Path,
                  condition: dict, model: str | None, effort: str | None,
-                 timeout: int, images: tuple[pathlib.Path, ...] = ()) -> tuple[list[str], pathlib.Path | None]:
+                 timeout: int,
+                 images: tuple[pathlib.Path, ...] = ()) -> tuple[list[str], pathlib.Path | None]:
     argv = [
         CLAUDE,
         "--print",
@@ -295,7 +298,8 @@ def build_claude(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.
 
 def build_codex(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.Path,
                 condition: dict, model: str | None, effort: str | None,
-                timeout: int, images: tuple[pathlib.Path, ...] = ()) -> tuple[list[str], pathlib.Path | None]:
+                timeout: int,
+                images: tuple[pathlib.Path, ...] = ()) -> tuple[list[str], pathlib.Path | None]:
     """Build a headless Codex invocation.
 
     Headless `codex exec` does not load locally spawned stdio MCP servers, verified
@@ -331,7 +335,8 @@ def build_codex(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.P
 
 def build_agy(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.Path,
               condition: dict, model: str | None, effort: str | None,
-              timeout: int, images: tuple[pathlib.Path, ...] = ()) -> tuple[list[str], pathlib.Path | None]:
+              timeout: int,
+              images: tuple[pathlib.Path, ...] = ()) -> tuple[list[str], pathlib.Path | None]:
     """Build a headless Antigravity invocation.
 
     MCP servers come from `~/.gemini/config/mcp_config.json` and are global, so the
@@ -433,7 +438,8 @@ MAX_RAW_STREAM_CHARS = 100_000
 ANSWER_KEYS = ("result", "response", "text", "content", "final_response")
 
 
-def extract_response(family: str, stdout: str, last_message: pathlib.Path | None) -> tuple[str, str]:
+def extract_response(family: str, stdout: str,
+                     last_message: pathlib.Path | None) -> tuple[str, str]:
     """Pull the final assistant text out of whatever shape the harness emitted.
 
     Returns the text and the route it came from. The route is recorded per run because an answer
@@ -465,7 +471,8 @@ def extract_response(family: str, stdout: str, last_message: pathlib.Path | None
                         return reply, "result_field"
                     empty_string_answer = True
                 else:
-                    # A non-string answer value is an unknown shape: dump it whole rather than misread it as empty.
+                    # A non-string answer value is an unknown shape: dump it whole rather
+                    # than misread it as empty.
                     non_string_answer = True
             if drafted:
                 return drafted, "denied_write_draft"
@@ -541,7 +548,8 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
             input=body if family in STDIN_FAMILIES else None,
             capture_output=True,
             text=True,
-            # Never the console codepage: cp1252 stdin kills a run on the first unencodable character.
+            # Never the console codepage: cp1252 stdin kills a run on the first
+            # unencodable character.
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
@@ -652,7 +660,8 @@ def main() -> int:
         if not sep or not name:
             parser.error(f"--family-prompt must be FAMILY=PATH, got {item!r}")
         if name not in BUILDERS:
-            parser.error(f"--family-prompt names an unknown family {name!r}. Known: {sorted(BUILDERS)}")
+            parser.error(
+                f"--family-prompt names an unknown family {name!r}. Known: {sorted(BUILDERS)}")
         path = pathlib.Path(path_text.strip())
         if not path.is_file():
             parser.error(f"--family-prompt file not found for {name}: {path}")

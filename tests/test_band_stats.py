@@ -93,7 +93,9 @@ def test_a_none_stretch_of_an_all_negative_float_band_renders_black():
     """A band with no positive data divides by a positive number (the magnitude of its own
     minimum), so every pixel is negative before the clip and the render is uniformly black."""
     band = BANDS["float32_negative"]
-    assert np.array_equal(stretch_band(band, "none", band.dtype), np.zeros_like(band, dtype=np.uint8))
+    assert np.array_equal(
+        stretch_band(band, "none", band.dtype), np.zeros_like(band, dtype=np.uint8)
+    )
 
 
 @pytest.mark.parametrize("name", sorted(BANDS))

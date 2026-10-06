@@ -33,7 +33,8 @@ def _state_changing_calls() -> list[tuple[str, str]]:
 
 
 def test_the_walk_itself_is_non_empty() -> None:
-    assert _state_changing_calls(), "no state-changing routes found; the route walk itself is broken"
+    assert _state_changing_calls(), (
+        "no state-changing routes found; the route walk itself is broken")
 
 
 def test_every_state_changing_route_refuses_a_foreign_origin(client: TestClient) -> None:

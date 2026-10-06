@@ -69,7 +69,8 @@ def test_holder_refuses_when_the_module_and_its_detectors_roi_heads_both_expose_
         "builder": "tests.bespoke_models:build_bespoke_detection",
         "builder_kwargs": {"min_size": 64, "max_size": 128},
         "task": "detection"}}, _DIMS)
-    assert hasattr(model.detector, "roi_heads") and hasattr(model.detector.roi_heads, "score_thresh")
+    assert hasattr(model.detector, "roi_heads")
+    assert hasattr(model.detector.roi_heads, "score_thresh")
     model.score_thresh = 0.5  # restated on the wrapper itself, ambiguous with .detector.roi_heads
 
     from tcip_mcp.pipelines.operating_point import detector_operating_point_holder

@@ -117,14 +117,18 @@ def registered_entries(project_path: str | Path) -> list[dict]:
     runs = sorted((entry for entry in map(run_entry, run_observations(project_path))
                    if entry is not None), key=lambda entry: entry["registered_at"])
     owners: dict[str, dict] = {}
-    for entry in [*runs, *({**e, "experiment_id": None} for e in read_registry_index(project_path))]:
+    for entry in [
+        *runs,
+        *({**e, "experiment_id": None} for e in read_registry_index(project_path)),
+    ]:
         owners.setdefault(entry["sha256"], entry)
     return list(owners.values())
 
 
 def entry_facts(entry: dict) -> dict:
     """What ``entry``'s checkpoint says of itself, read from its payload
-    (:func:`checkpoint_payload`): the ``metrics`` a ranking reads with their ``metrics_source``. A run's metrics are the ones its payload carries, sourced ``"trainer"``,
+    (:func:`checkpoint_payload`): the ``metrics`` a ranking reads with their ``metrics_source``.
+    A run's metrics are the ones its payload carries, sourced ``"trainer"``,
     or ``"training_source"`` for a bespoke loop's; a foreign entry's are the ones its registration
     stated, sourced ``"caller"``. No metrics carry no source."""
     from tcip_mcp.pipelines.model_build import METRICS_KEY, TRAINING_SOURCE_KEY
@@ -143,7 +147,9 @@ def _sha256_of_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _unregistered_checkpoint_error(checkpoint_path: Path, digest: str, root: str) -> "UnregisteredCheckpoint":
+def _unregistered_checkpoint_error(
+    checkpoint_path: Path, digest: str, root: str
+) -> "UnregisteredCheckpoint":
     return UnregisteredCheckpoint(
         f"{checkpoint_path} (sha256 {digest}) is not named by any completed run's final status or "
         f"entry in the registry at {root!r}: a completed run registers its own final weights, and "

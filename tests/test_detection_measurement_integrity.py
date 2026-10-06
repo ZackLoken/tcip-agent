@@ -530,7 +530,8 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
+                 "split": {"seed": 0, "val_ratio": 0.15},
                  # no tile_size: the effective default must be persisted
                  "tiling": {"enabled": True, "sliver_frac": 0.5}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],

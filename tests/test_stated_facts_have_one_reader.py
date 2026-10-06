@@ -52,8 +52,10 @@ def test_no_reader_stands_in_a_score_for_a_prediction_stating_none(tmp_path: Pat
 
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
 
-    gt = _read_back(tmp_path / "images" / UNDATED_BUCKET / "g.png", [Annotation(subject=SUBJECT, geometry=BOX)])
-    preds = _read_back(tmp_path / "images" / UNDATED_BUCKET / "p.png", [Annotation(subject=SUBJECT, geometry=BOX)])
+    gt = _read_back(
+        tmp_path / "images" / UNDATED_BUCKET / "g.png", [Annotation(subject=SUBJECT, geometry=BOX)])
+    preds = _read_back(
+        tmp_path / "images" / UNDATED_BUCKET / "p.png", [Annotation(subject=SUBJECT, geometry=BOX)])
 
     with pytest.raises(ValueError, match="'score'"):
         if reader == "pairing":

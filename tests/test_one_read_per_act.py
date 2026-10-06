@@ -268,7 +268,8 @@ def _published_frames(root: Path) -> list[Path]:
         label_image(frame, [Annotation(subject="leaf", geometry=BBox(8, 8, 24, 24))], 64, 48)
         frames.append(frame)
     published(root, "published", [
-        {"image": str(frame), "width": 64, "height": 48, "boxes": [[8, 8, 24, 24], [40, 30, 50, 40]],
+        {"image": str(frame), "width": 64, "height": 48,
+         "boxes": [[8, 8, 24, 24], [40, 30, 50, 40]],
          "scores": [0.9, 0.7], "labels": [1, 1]} for frame in frames], scope={"subject": "leaf"})
     return frames
 

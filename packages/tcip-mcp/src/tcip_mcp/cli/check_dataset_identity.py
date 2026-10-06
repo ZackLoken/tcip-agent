@@ -50,7 +50,8 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         status = 0
     else:
         print(f"CHANGED: {root} content differs from its recorded identity "
-              f"(recorded={recorded} current={current}); a number reproduced from it is no longer valid")
+              f"(recorded={recorded} current={current}); "
+              "a number reproduced from it is no longer valid")
         status = 2
 
     for r in read_datasets(project):

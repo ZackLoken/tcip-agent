@@ -221,7 +221,9 @@ def test_a_cluster_this_process_did_not_start_is_never_shut_down(tmp_path, monke
     assert ray.shutdown_calls == 0
 
 
-def test_ray_init_propagates_this_process_s_import_search_path_to_trial_workers(tmp_path, monkeypatch):
+def test_ray_init_propagates_this_process_s_import_search_path_to_trial_workers(
+    tmp_path, monkeypatch
+):
     """A trial worker Ray spawns starts from its own defaults, not this interpreter's
     sys.path; a bespoke model_source/training_source/dataset_source importable here must stay
     importable there, the same guarantee the launch subprocess gets."""
@@ -347,7 +349,9 @@ def test_a_console_free_exit_kills_ray_daemons_before_shutdown_signals_them(tmp_
     assert ray.shutdown_calls == 1
 
 
-def test_a_process_with_a_console_lets_ray_shutdown_signal_its_daemons_directly(tmp_path, monkeypatch):
+def test_a_process_with_a_console_lets_ray_shutdown_signal_its_daemons_directly(
+    tmp_path, monkeypatch
+):
     """Coverage of the attached-console path: asserts nothing is killed ahead of
     ``ray.shutdown()``, which signals each daemon through the terminate path, and that
     ``ray.shutdown()`` still ran."""
@@ -391,5 +395,7 @@ def test_a_cluster_this_process_starts_is_sized_to_the_sweep_s_own_request(tmp_p
     assert ray.init_kwargs["num_cpus"] == 2
 
     _run_one_search(tmp_path)
-    assert ray.init_calls == 2, "the first sweep's cluster was shut down, so this one started its own"
+    assert ray.init_calls == 2, (
+        "the first sweep's cluster was shut down, so this one started its own"
+    )
     assert ray.init_kwargs["num_cpus"] == 1

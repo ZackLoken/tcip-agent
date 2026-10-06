@@ -117,7 +117,8 @@ def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaul
     band_b.unlink()  # the manifest now references a sibling that no longer exists
 
     sample = Sample(member="cap", source=str(manifest),
-                    ground_truth=label_key(tmp_path, UNDATED_BUCKET, "cap"), group="g", side="train")
+                    ground_truth=label_key(tmp_path, UNDATED_BUCKET, "cap"), group="g",
+                    side="train")
     with pytest.raises(BandGroupIncomplete):
         _band_count([sample])
 

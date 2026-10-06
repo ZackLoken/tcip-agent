@@ -27,7 +27,8 @@ MARK = "ray_cluster"
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
-        "markers", f"{MARK}: starts a Ray cluster; one such test runs at a time across xdist workers",
+        "markers",
+        f"{MARK}: starts a Ray cluster; one such test runs at a time across xdist workers",
     )
 
 

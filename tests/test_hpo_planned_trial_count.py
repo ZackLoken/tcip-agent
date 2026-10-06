@@ -140,7 +140,9 @@ def test_planned_trial_count_raises_overflowerror_on_a_huge_int_span():
 # -- the shared derivation, and where the count lands --------------------------------
 
 
-def test_tune_search_and_planned_trial_count_share_one_search_space_derivation(tmp_path, monkeypatch):
+def test_tune_search_and_planned_trial_count_share_one_search_space_derivation(
+    tmp_path, monkeypatch
+):
     """Both tune_search and planned_trial_count call _search_space_and_points, never a second
     derivation that could disagree with the first: patched to record its own arguments and raise
     before either function does anything Ray-heavy, each call records the identical arguments."""

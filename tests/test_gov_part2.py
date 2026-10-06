@@ -128,7 +128,8 @@ def test_build_workspace_worksheet_gathers_across_projects(tmp_path):
     ws = distill.build_workspace_worksheet(workspace)
     assert "Cross-project recurring themes" in ws
     assert "proj_a" in ws and "proj_b" in ws
-    assert "Nothing here is applied" in ws  # same governance framing as the single-project worksheet
+    # same governance framing as the single-project worksheet
+    assert "Nothing here is applied" in ws
     assert "the judgment is yours" in ws
     assert "record_distillation_pass" in ws
 

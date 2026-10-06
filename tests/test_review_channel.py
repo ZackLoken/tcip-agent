@@ -185,7 +185,8 @@ def test_stage_proposals_writes_prediction_format_not_gt(tmp_path: Path) -> None
         {"subject": "bud", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1},
         {"subject": "leaf", "conf": 0.6, "cx": 0.25, "cy": 0.25, "w": 0.05, "h": 0.05},
     ]
-    res = stage_proposals(tmp_path, _img_path(root, date, "IMG_0001"), model_name="claude", boxes=boxes)
+    res = stage_proposals(
+        tmp_path, _img_path(root, date, "IMG_0001"), model_name="claude", boxes=boxes)
     assert res["staged"] == 2
 
     out = _staged(root, "claude", date, "IMG_0001")
@@ -216,7 +217,8 @@ def test_stage_proposals_rejects_unnormalized_coords(tmp_path: Path) -> None:
     _image(root, date, "IMG_0001")
     # pixel coords (>1) must be caught, not written off-canvas.
     boxes = [{"subject": "bud", "conf": 0.9, "cx": 320.0, "cy": 240.0, "w": 40.0, "h": 40.0}]
-    res = stage_proposals(tmp_path, _img_path(root, date, "IMG_0001"), model_name="agent_proposals", boxes=boxes)
+    res = stage_proposals(
+        tmp_path, _img_path(root, date, "IMG_0001"), model_name="agent_proposals", boxes=boxes)
     assert "error" in res and "normal" in res["error"].lower()
 
 
@@ -243,7 +245,8 @@ def test_focus_rejects_path_traversal(tmp_path: Path) -> None:
     _images(root, date, ["IMG_0000.JPG"])
     # The focus is read-only, but a traversal date still refuses: it becomes a path segment under
     # images/, the guard stage_proposals applies.
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud", "../evil")
+    res = focus_human_attention(
+        _project_root(tmp_path), tmp_path.parent, str(root), "bud", "../evil")
     assert "a capture must be a single safe path segment" in res["error"]
 
 
@@ -252,7 +255,8 @@ def test_stage_proposals_rejects_box_missing_subject(tmp_path: Path) -> None:
     date = "2026-02-11"
     _image(root, date, "IMG_0001")
     boxes = [{"conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]  # no subject name
-    res = stage_proposals(tmp_path, _img_path(root, date, "IMG_0001"), model_name="agent_proposals", boxes=boxes)
+    res = stage_proposals(
+        tmp_path, _img_path(root, date, "IMG_0001"), model_name="agent_proposals", boxes=boxes)
     assert "error" in res  # returns cleanly, doesn't crash the audited tool
 
 
@@ -284,9 +288,11 @@ def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
     _image(root, date, "IMG_0132", size=(640, 480))
     # A SAM-style mask staged as a prediction, with the mask-quality score carried as conf.
     polygons = [
-        {"subject": "leaf", "conf": 0.91, "points": [[0.1, 0.1], [0.3, 0.1], [0.3, 0.4], [0.1, 0.4]]},
+        {"subject": "leaf", "conf": 0.91,
+         "points": [[0.1, 0.1], [0.3, 0.1], [0.3, 0.4], [0.1, 0.4]]},
     ]
-    res = stage_proposals(tmp_path, _img_path(root, date, "IMG_0132"), model_name="sam", polygons=polygons)
+    res = stage_proposals(
+        tmp_path, _img_path(root, date, "IMG_0132"), model_name="sam", polygons=polygons)
     assert res["staged"] == 1 and res["n_segment"] == 1 and res["n_detect"] == 0
 
     out = _staged(root, "sam", date, "IMG_0132")
@@ -359,7 +365,8 @@ def test_stage_proposals_rejects_bad_polygon(tmp_path: Path) -> None:
 def test_stage_proposals_requires_a_shape(tmp_path: Path) -> None:
     """Neither input regime named: refused before ever touching the image, naming both regimes
     rather than guessing which one was meant."""
-    res = stage_proposals(tmp_path, str(tmp_path / "proj" / "images" / "2026-02-11" / "IMG_0001.jpg"))
+    res = stage_proposals(
+        tmp_path, str(tmp_path / "proj" / "images" / "2026-02-11" / "IMG_0001.jpg"))
     assert "error" in res and "boxes/polygons" in res["error"]
 
 
@@ -400,7 +407,8 @@ def test_stage_proposals_refuses_assignments_combined_with_boxes_or_polygons(
     res_boxes = stage_proposals(tmp_path, image_path, assignments=assignments, boxes=a_box)
     assert "error" in res_boxes and "assignments cannot be combined" in res_boxes["error"]
 
-    res_polygons = stage_proposals(tmp_path, image_path, assignments=assignments, polygons=a_polygon)
+    res_polygons = stage_proposals(
+        tmp_path, image_path, assignments=assignments, polygons=a_polygon)
     assert "error" in res_polygons and "assignments cannot be combined" in res_polygons["error"]
 
     # The admit case: assignments alone, the regime the combined calls above tried to pair.
@@ -467,11 +475,13 @@ class _FakeMultiRingEngine:
     def propose(self, image_path, **params):
         xs = [x for ring in self._RINGS for x, _ in ring]
         ys = [y for ring in self._RINGS for _, y in ring]
-        return [{"candidate_id": 1, "bbox": [min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)],
+        return [{"candidate_id": 1,
+                 "bbox": [min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)],
                 "area": 1900.0, "rings": self._RINGS, "score": 0.9}]
 
 
-def test_stage_proposals_admits_a_two_ring_pixel_proposal_with_pair_vertices(tmp_path: Path) -> None:
+def test_stage_proposals_admits_a_two_ring_pixel_proposal_with_pair_vertices(
+        tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0200", size=(640, 480))
@@ -507,7 +517,8 @@ def test_a_two_ring_proposal_round_trips_through_propose_and_accept(
     proposed = propose_annotations(tmp_path, accept_image_path, engine="fake_multi_ring")
     assert proposed["staged"] is True and proposed["candidate_count"] == 1
 
-    accepted = stage_proposals(tmp_path, accept_image_path, assignments=[{"candidate_id": 1, "subject": "leaf"}])
+    accepted = stage_proposals(
+        tmp_path, accept_image_path, assignments=[{"candidate_id": 1, "subject": "leaf"}])
     assert "error" not in accepted
 
     read_back = read_annotations(accept_image_path, accepted["bucket"])
@@ -633,8 +644,10 @@ def test_stage_proposals_admits_two_stems_staged_in_turn(tmp_path: Path) -> None
     _image(root, date, "IMG_0001", size=(640, 480))
     _image(root, date, "IMG_0002", size=(640, 480))
 
-    first = stage_proposals(tmp_path, _img_path(root, date, "IMG_0001"), model_name="claude", boxes=_BOX)
-    second = stage_proposals(tmp_path, _img_path(root, date, "IMG_0002"), model_name="claude", boxes=_BOX)
+    first = stage_proposals(
+        tmp_path, _img_path(root, date, "IMG_0001"), model_name="claude", boxes=_BOX)
+    second = stage_proposals(
+        tmp_path, _img_path(root, date, "IMG_0002"), model_name="claude", boxes=_BOX)
 
     assert "error" not in first and "error" not in second
     assert first["bucket"] == _staged_name("claude", date, "IMG_0001")

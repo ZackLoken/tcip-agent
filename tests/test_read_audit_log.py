@@ -38,7 +38,8 @@ def test_read_audit_log_filters_by_tool_and_status_newest_first(
     assert "error" not in ok, ok
     failed = write_subject_registry(project, str(dataset_root), subjects={})
     assert "error" in failed, failed
-    ok2 = write_subject_registry(project, str(dataset_root), subjects=_subjects(), allow_removals=True)
+    ok2 = write_subject_registry(
+        project, str(dataset_root), subjects=_subjects(), allow_removals=True)
     assert "error" not in ok2, ok2
 
     result = read_audit_log(project, scope=str(dataset_root), tool="replace_registry", status="ok")
@@ -60,7 +61,8 @@ def test_read_audit_log_limit_states_what_it_truncated(
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     for _ in range(3):
-        res = write_subject_registry(project, str(dataset_root), subjects=_subjects(), allow_removals=True)
+        res = write_subject_registry(
+            project, str(dataset_root), subjects=_subjects(), allow_removals=True)
         assert "error" not in res, res
 
     result = read_audit_log(project, scope=str(dataset_root), tool="replace_registry", limit=1)
@@ -159,7 +161,8 @@ def test_read_audit_log_accepts_a_z_suffixed_bound(
                      "timestamp": "2026-03-02T10:00:00+00:00"})
 
     result = read_audit_log(
-        project, scope=str(dataset_root), since="2026-03-02T00:00:00Z", until="2026-03-02T23:59:59Z",
+        project, scope=str(dataset_root), since="2026-03-02T00:00:00Z",
+        until="2026-03-02T23:59:59Z",
     )
 
     assert result["count"] == 1

@@ -76,7 +76,8 @@ def _two_stage():
 
 def _one_stage():
     from types import SimpleNamespace
-    return SimpleNamespace(detector=SimpleNamespace(score_thresh=0.2, nms_thresh=0.6, detections_per_img=100))
+    return SimpleNamespace(
+        detector=SimpleNamespace(score_thresh=0.2, nms_thresh=0.6, detections_per_img=100))
 
 
 def test_set_detector_operating_point_two_stage():
@@ -127,7 +128,8 @@ def test_the_merge_threshold_derives_from_the_ground_truths_neighbor_overlap_tai
 
     value = derive_cross_tile_nms(_gt_boxes(_overlap_records()), metric="IOU")
     assert value is not None and 0.2 <= value <= 0.8
-    assert value == pytest.approx(0.4286 + 0.05, abs=1e-2)  # p99 of the GT neighbor-IoU tail + margin
+    # p99 of the GT neighbor-IoU tail + margin
+    assert value == pytest.approx(0.4286 + 0.05, abs=1e-2)
 
 
 def test_no_overlapping_ground_truth_derives_no_merge_threshold():

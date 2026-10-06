@@ -211,7 +211,8 @@ class TestDetectionPipelineRealData:
         model = bespoke_models.build_bespoke_detection(num_classes=1, min_size=320, max_size=512)
         assert isinstance(model, bespoke_models.BespokeDetection)
 
-        # --- Step 2: Build dataset from the nested-schema labels (name-based, one file per image) ---
+        # --- Step 2: Build dataset from the nested-schema labels (name-based, one file per
+        # image) ---
         date = _sample_date()
         assert date is not None
         images_dir = SAMPLE_PROJECT / "images" / date

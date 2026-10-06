@@ -22,7 +22,8 @@ _DATE = "2026-02-11"
 
 
 def _dataset(root: Path) -> None:
-    """Two dated images of different sizes, each with its own label, the nested layout ingest writes."""
+    """Two dated images of different sizes, each with its own label, the nested layout ingest
+    writes."""
     (root / "images" / _DATE).mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (48, 32), color=(120, 90, 40)).save(root / "images" / _DATE / "IMG_1.png")
     Image.new("RGB", (64, 40), color=(20, 160, 70)).save(root / "images" / _DATE / "IMG_2.png")
@@ -33,8 +34,9 @@ def _dataset(root: Path) -> None:
 
 
 def test_a_dataset_whose_images_were_all_removed_reports_no_identity(tmp_path):
-    """Labels alone are not the dataset's identity: with the imagery gone the recompute must report
-    nothing at all, never a label-only value a stored fingerprint could still be compared against."""
+    """Labels alone are not the dataset's identity: with the imagery gone the recompute must
+    report nothing at all, never a label-only value a stored fingerprint could still be compared
+    against."""
     _dataset(tmp_path)
     before = dataset_fingerprint(tmp_path)
     assert before is not None

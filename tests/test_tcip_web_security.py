@@ -68,14 +68,16 @@ def test_ws_state_allows_missing_origin(client: TestClient) -> None:
 
 
 def test_ws_state_allows_local_origin(client: TestClient) -> None:
-    with client.websocket_connect("ws://127.0.0.1/ws/state", headers={"origin": "http://127.0.0.1:8765"}) as ws:
+    with client.websocket_connect(
+            "ws://127.0.0.1/ws/state", headers={"origin": "http://127.0.0.1:8765"}) as ws:
         assert ws.receive_json()["type"] == "state_snapshot"
 
 
 def test_ws_state_rejects_cross_site_origin(client: TestClient) -> None:
     # A page on another site must not be able to open a state socket and read paths.
     with pytest.raises(WebSocketDisconnect) as closed:
-        with client.websocket_connect("ws://127.0.0.1/ws/state", headers={"origin": "http://evil.example.com"}):
+        with client.websocket_connect(
+                "ws://127.0.0.1/ws/state", headers={"origin": "http://evil.example.com"}):
             pass
     assert closed.value.code == 1008
     assert closed.value.reason == "origin not allowed"

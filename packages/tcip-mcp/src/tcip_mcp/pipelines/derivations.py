@@ -157,7 +157,8 @@ def _neighbor_max_overlaps(boxes: Sequence[Sequence[float]], metric: str) -> lis
 
 
 def _neighbor_min_center_distances(boxes: Sequence[Sequence[float]]) -> list[float]:
-    """Each box's distance to its nearest same-image neighbor's center (xywh px); fewer than 2 boxes -> []."""
+    """Each box's distance to its nearest same-image neighbor's center (xywh px); fewer than 2
+    boxes -> []."""
     import numpy as np
     from tcip_annotation.matching import box_centers, xywh_corners
 
@@ -237,7 +238,9 @@ def derive_max_dets_from_counts(counts: list[int], floor: int = 100) -> int:
     return max(floor, int(math.ceil(1.5 * float(np.quantile(counts, 0.99)))))
 
 
-IOU_MATCH_DERIVATION = "achievable IoU under annotation jitter, minus margin (GT characteristic size)"
+IOU_MATCH_DERIVATION = (
+    "achievable IoU under annotation jitter, minus margin (GT characteristic size)"
+)
 """The label a criterion names a threshold :func:`derive_iou_match_threshold` derived by."""
 
 
@@ -388,7 +391,9 @@ def derive_block_scale_px(
             "image with two or more objects to measure a spacing from)"
         )
     spacing_px = statistics.median(dists)
-    return max(tile_size, round(spacing_px)), "GT object-spacing (median nearest-neighbor), floored at tile_size"
+    return max(tile_size, round(spacing_px)), (
+        "GT object-spacing (median nearest-neighbor), floored at tile_size"
+    )
 
 
 def _image_stats_label(path) -> str:
@@ -584,11 +589,17 @@ def derive_cross_tile_nms(gt_boxes_per_image: Sequence[Sequence[Sequence[float]]
 
 _STATIC_DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
     "probed bands of": "tcip_mcp.pipelines.derivations.probe_channels",  # f-string prefix
-    "max class id + 1 in the label set": "tcip_mcp.pipelines.derivations.num_classes_from_distribution",
+    "max class id + 1 in the label set": (
+        "tcip_mcp.pipelines.derivations.num_classes_from_distribution"
+    ),
     **dict.fromkeys(CROSS_TILE_NMS_DERIVATIONS.values(),
                     "tcip_mcp.pipelines.derivations.derive_cross_tile_nms"),
-    "GT nearest-neighbor spacing (p10 + margin)": "tcip_mcp.pipelines.derivations.derive_localization_tolerance_frac",
-    "GT characteristic-size spread (p10 / mean)": "tcip_mcp.pipelines.derivations.derive_sliver_frac",
+    "GT nearest-neighbor spacing (p10 + margin)": (
+        "tcip_mcp.pipelines.derivations.derive_localization_tolerance_frac"
+    ),
+    "GT characteristic-size spread (p10 / mean)": (
+        "tcip_mcp.pipelines.derivations.derive_sliver_frac"
+    ),
     IOU_MATCH_DERIVATION: "tcip_mcp.pipelines.derivations.derive_iou_match_threshold",
     MAX_DETS_DERIVATION: "tcip_mcp.pipelines.derivations.derive_max_dets_from_counts",
 }

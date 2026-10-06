@@ -74,9 +74,9 @@ def _table_dataset(root: Path) -> tuple[Path, Path]:
 
 
 def _drawn(root: Path, ground_truth: Path, out: Path, *, seed: int = 4):
-    result = draw_splits(out.parent, str(root), output_path=str(out), ground_truth=str(ground_truth),
-                         seed=seed, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125,
-                         group_by="stem")
+    result = draw_splits(out.parent, str(root), output_path=str(out),
+                         ground_truth=str(ground_truth), seed=seed, val_ratio=0.25,
+                         calibration_ratio=0.125, holdout_ratio=0.125, group_by="stem")
     assert "error" not in result, result
     return read_selection(out, project=out.parent)
 
@@ -455,7 +455,8 @@ def test_a_stated_class_count_refuses_on_the_run_path_whatever_its_value(tmp_pat
     for stated in (2, 3, 9):
         with pytest.raises(ValueError, match=r"states \['num_classes'\]"):
             auto_train_val(
-                tmp_path, "semantic_seg", {**base, "num_classes": stated, "split": dict(base["split"])},
+                tmp_path, "semantic_seg",
+                {**base, "num_classes": stated, "split": dict(base["split"])},
                 None)
 
     unstated = {**base, "split": dict(base["split"])}
@@ -471,7 +472,9 @@ def test_a_table_run_stating_a_count_refuses(tmp_path: Path):
 
     images_dir, csv_path = _table_dataset(tmp_path / "table")
     with open(csv_path, "w", newline="") as handle:
-        csv.writer(handle).writerows([("stem", "label"), *((s, i % 2) for i, s in enumerate(STEMS))])
+        csv.writer(handle).writerows(
+            [("stem", "label"), *((s, i % 2) for i, s in enumerate(STEMS))]
+        )
     with pytest.raises(ValueError, match=r"states \['num_classes'\]"):
         run_over("classification", str(images_dir), str(csv_path), stated={"num_classes": 9})
 
@@ -593,7 +596,10 @@ def test_the_bound_and_drawn_mask_routes_record_one_directory_the_same_way(tmp_p
     # The bound run holds out a calibration side the drawn one trains on, so the two agree on
     # every member they both name rather than on the union.
     assert bound and drawn and set(bound) <= set(drawn)
-    assert {member: bound[member] for member in bound} == {member: drawn[member] for member in bound}
+    assert (
+        {member: bound[member] for member in bound}
+        == {member: drawn[member] for member in bound}
+    )
 
 
 def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(tmp_path: Path):

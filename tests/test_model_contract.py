@@ -37,7 +37,8 @@ def _bespoke_builder(**kwargs):
 # --------------------------------------------------------------------------
 
 def test_build_model_from_model_source_imports_builder():
-    src = {"builder": f"{__name__}:_bespoke_builder", "builder_kwargs": {}, "task": "classification"}
+    src = {"builder": f"{__name__}:_bespoke_builder", "builder_kwargs": {},
+           "task": "classification"}
     dims = {"in_chans": 3, "num_classes": 2}
     model = build_model({"model_source": src}, dims)
     assert isinstance(model, TCIPModel)

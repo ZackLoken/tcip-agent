@@ -210,9 +210,9 @@ def test_cap_saturation_is_surfaced_but_never_fails_the_criterion():
 
 def _rotating_noise_pattern(n: int, *, low: int = 1, high: int = 5, offset: int = 13
                             ) -> tuple[list[int], list[int]]:
-    """``n`` per-image miss counts cycling through ``[low, high]``, and a false-positive pattern that
-    is a rotation of the same values at the same score, so the mean bias is exactly zero while real
-    per-image dispersion remains."""
+    """``n`` per-image miss counts cycling through ``[low, high]``, and a false-positive pattern
+    that is a rotation of the same values at the same score, so the mean bias is exactly zero while
+    real per-image dispersion remains."""
     span = high - low + 1
     miss = [low + (i * 3 + 1) % span for i in range(n)]
     fp = [miss[(i + offset) % n] for i in range(n)]

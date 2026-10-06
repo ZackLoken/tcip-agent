@@ -3,8 +3,8 @@
 Over per-stem georeferenced GeoTIFFs at known real-world offsets from two plants, the derived
 ``{stem: group_key}`` map: same physical plant -> same group key regardless of
 which "date" (source raster) the stem came from, a plant far outside tolerance -> a named refusal,
-an ungeoreferenced source -> a named refusal, and the map ``draw_splits(group_key_map=...)`` actually
-accepts, keeping every group's stems on one split side.
+an ungeoreferenced source -> a named refusal, and the map ``draw_splits(group_key_map=...)``
+actually accepts, keeping every group's stems on one split side.
 """
 
 from __future__ import annotations
@@ -185,7 +185,8 @@ def test_refuses_on_empty_plant_list(tmp_path: Path) -> None:
 SUBJECT = "leaf"
 
 
-def _write_dataset_stem(dataset_root: Path, date: str, stem: str, tiepoint: tuple[float, float]) -> None:
+def _write_dataset_stem(
+        dataset_root: Path, date: str, stem: str, tiepoint: tuple[float, float]) -> None:
     from tcip_annotation.state import Annotation, BBox
 
     from tests._producer_fixtures import label_image
@@ -224,7 +225,8 @@ def test_draw_splits_keeps_every_plants_stems_on_one_split_side(
     out_dir = tmp_path / "splits_out"
     result = draw_splits(
         tmp_path, folder_path=str(dataset_root), val_ratio=0.25, calibration_ratio=0.125,
-        holdout_ratio=0.125, seed=0, group_key_map=group_key_map, output_path=str(out_dir), subject=SUBJECT,
+        holdout_ratio=0.125, seed=0, group_key_map=group_key_map, output_path=str(out_dir),
+        subject=SUBJECT,
     )
 
     assert "error" not in result, result
@@ -259,7 +261,8 @@ def test_main_cli_end_to_end(tmp_path: Path, project: Path, four_plant_csv: Path
 
     out_dir = tmp_path / "cli_splits_out"
     rc = main([
-        str(dataset_root), "--project", str(project), "--plant-csv", str(four_plant_csv), "--subject", SUBJECT,
+        str(dataset_root), "--project", str(project), "--plant-csv", str(four_plant_csv),
+        "--subject", SUBJECT,
         "--val-ratio", "0.25", "--calibration-ratio", "0.125",
         "--holdout-ratio", "0.125", "--seed", "0", "--output-path", str(out_dir),
     ])
@@ -320,7 +323,8 @@ def test_main_cli_reports_refusal_and_nonzero_exit(tmp_path: Path, project: Path
     dataset_root = tmp_path / "dataset"
     _write_dataset_stem(dataset_root, "2026-02-01", "far_stem", FAR_TIEPOINT)
 
-    rc = main([str(dataset_root), "--project", str(project), "--plant-csv", str(two_plant_csv), "--subject", SUBJECT,
+    rc = main([str(dataset_root), "--project", str(project), "--plant-csv", str(two_plant_csv),
+              "--subject", SUBJECT,
               "--seed", "0", "--val-ratio", "0.1", "--calibration-ratio", "0.05",
               "--holdout-ratio", "0.05"])
 

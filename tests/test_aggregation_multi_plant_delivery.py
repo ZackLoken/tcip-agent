@@ -62,8 +62,8 @@ def test_each_plants_summary_describes_only_that_plants_records():
 
 def test_identity_provenance_is_summarized_per_plant_not_across_the_cohort():
     """One plant resolved from a single source, another from two, a third with no provenance at all.
-    Mixing these across the cohort would report every plant as 'mixed' and give a well-resolved plant
-    another plant's worst assignment distance."""
+    Mixing these across the cohort would report every plant as 'mixed' and give a well-resolved
+    plant another plant's worst assignment distance."""
     results = [
         {"image": "a1", "plant_id": "PLANT_A", "count": 2,
          "source": "gnss_sequence", "distance_m": 0.4},

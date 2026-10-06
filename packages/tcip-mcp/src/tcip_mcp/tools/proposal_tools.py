@@ -349,13 +349,15 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
         rings = [[(float(x), float(y)) for x, y in ring] for ring in cand["rings"]]
         try:
             proposals.append(Annotation(
-                subject=_StatedSubject.model_validate(assign).subject, geometry=Polygon(rings=rings),
+                subject=_StatedSubject.model_validate(assign).subject,
+                geometry=Polygon(rings=rings),
                 score=cand["score"], created_by=engine, created_at=staged_at))
         except ValueError as exc:
             return {"error": f"assignment {i}: {exc}"}
         n_poly += 1
 
-    # Model output for a human to accept on the Annotate canvas, never written straight to ground truth.
+    # Model output for a human to accept on the Annotate canvas, never written straight to
+    # ground truth.
     try:
         bucket = _stage_document(project, address, engine, img, annotations=proposals,
                                  img_w=w, img_h=h)
@@ -363,7 +365,12 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
         return {"error": str(exc)}
 
     # Render final result for QA
-    from tcip_mcp.tools.vision_tools import _box_dict, _name_map, _read_for_display, _subject_indexer
+    from tcip_mcp.tools.vision_tools import (
+        _box_dict,
+        _name_map,
+        _read_for_display,
+        _subject_indexer,
+    )
 
     idx, index = _subject_indexer()
     read = _read_for_display(source)
@@ -430,7 +437,10 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: t
         except (KeyError, TypeError, ValueError):
             return {"error": f"box {i} needs numeric conf, cx, cy, w, h (normalized): {b!r}"}
         if _unnormalized((cx, cy, w, h)):
-            return {"error": f"box {i} coords {(cx, cy, w, h)} look un-normalized; cx/cy/w/h must be in [0,1]"}
+            return {
+                "error": f"box {i} coords {(cx, cy, w, h)} look un-normalized; "
+                "cx/cy/w/h must be in [0,1]"
+            }
         norm_boxes.append((b, conf, cx, cy, w, h))
 
     try:

@@ -114,7 +114,9 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
         # No val_loader below: loss is the only metric coherent to select on without one.
         "evaluation": {"selection_metric": "loss"},
     }
-    run = trainer_run(cfg, tmp_path / "out", has_val_loader=False, id="auto-run-8", project=tmp_path)
+    run = trainer_run(
+        cfg, tmp_path / "out", has_val_loader=False, id="auto-run-8", project=tmp_path
+    )
     run = train(run, loader, val_loader=None)
     assert run.status == "completed", getattr(run, "error", run.status)
     assert math.isfinite(run.metrics_history[-1]["train_loss"])

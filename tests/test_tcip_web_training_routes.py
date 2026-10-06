@@ -53,7 +53,8 @@ def test_a_run_is_read_by_its_id_and_an_unknown_id_refuses_naming_it(opened_clie
 
 
 def test_relaunch_route_404s_for_an_unknown_experiment(opened_client: TestClient) -> None:
-    resp = opened_client.post("/api/training/runs", json={"relaunched_from": "nope", "user": "tester"})
+    resp = opened_client.post(
+        "/api/training/runs", json={"relaunched_from": "nope", "user": "tester"})
     assert resp.status_code == 404
 
 
@@ -68,7 +69,9 @@ def test_relaunch_route_422s_with_preflight_issues_for_a_refused_config(
     assert resp.json()["detail"]["issues"]
 
 
-def test_metrics_stream_reports_no_frames_for_a_run_no_record_claims(opened_client: TestClient) -> None:
+def test_metrics_stream_reports_no_frames_for_a_run_no_record_claims(
+    opened_client: TestClient,
+) -> None:
     with opened_client.websocket_connect("ws://127.0.0.1/api/training/runs/foo-xxx/stream") as ws:
         msg = ws.receive_json()
     assert msg["type"] == "status"
@@ -85,7 +88,9 @@ def _completed_run_with_rows(project: Path, run_id: str) -> Path:
                         rows=[{"epoch": 1, "loss": 0.9}, {"epoch": 2, "loss": 0.4}])
 
 
-def test_metrics_stream_serves_the_rows_the_run_logged(opened_client: TestClient, tmp_path: Path) -> None:
+def test_metrics_stream_serves_the_rows_the_run_logged(
+    opened_client: TestClient, tmp_path: Path
+) -> None:
     run_id = "exp-abc"
     _completed_run_with_rows(tmp_path, run_id)
 
@@ -420,7 +425,8 @@ def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
     parent_id = first["experiment_id"]
     assert run_to_end(tmp_path, parent_id)["state"] == "completed"
 
-    resp = opened_client.post("/api/training/runs", json={"relaunched_from": parent_id, "user": "tester"})
+    resp = opened_client.post(
+        "/api/training/runs", json={"relaunched_from": parent_id, "user": "tester"})
     assert resp.status_code == 200, resp.json()
     forked_id = resp.json()["experiment_id"]
     assert forked_id != parent_id
@@ -486,14 +492,16 @@ def test_a_sweep_trial_is_listed_read_canceled_and_streamed_by_its_id(
     read = opened_client.get(f"/api/training/runs/{trial.name}")
     assert (read.status_code, read.json()["run"]["sweep"]) == (200, sweep_id)
 
-    canceled = opened_client.post(f"/api/training/runs/{trial.name}/cancel", json={"user": "tester"})
+    canceled = opened_client.post(
+        f"/api/training/runs/{trial.name}/cancel", json={"user": "tester"})
     assert canceled.status_code == 200, canceled.text
     assert canceled.json()["cancel_requested"] is True
 
     from tcip_mcp.experiments import write_final_status
 
     write_final_status(trial, "canceled", "canceled by request", checkpoint=None)
-    with opened_client.websocket_connect(f"ws://127.0.0.1/api/training/runs/{trial.name}/stream") as ws:
+    with opened_client.websocket_connect(
+            f"ws://127.0.0.1/api/training/runs/{trial.name}/stream") as ws:
         frame = ws.receive_json()
     assert frame["type"] == "status"
     assert (frame["status"]["state"], frame["status"]["sweep"]) == ("canceled", sweep_id)
@@ -548,7 +556,8 @@ def test_a_recorded_sweep_relaunches_through_the_run_launch_door(
     source = opened_sweep(opened_project, real_hpo_base_config).name
     before = len(ts.read_log(audit_log_key(opened_project)).records)
 
-    resp = opened_client.post("/api/training/runs", json={"relaunched_from": source, "user": "tester"})
+    resp = opened_client.post(
+        "/api/training/runs", json={"relaunched_from": source, "user": "tester"})
 
     assert resp.status_code == 200, resp.text
     minted = find_sweep(resp.json()["sweep_id"], project=opened_project)

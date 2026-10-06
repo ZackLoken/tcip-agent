@@ -165,7 +165,8 @@ def check_provenance(root: Path, findings: list, *, census: dict | None) -> None
     for run in run_observations(root):
         source = run.record["source"]
         if source is not None and (source["missing"] or source["snapshot_errors"]):
-            findings.append(("warn", f"{run.directory.relative_to(root)}: source snapshot incomplete: "
+            findings.append(("warn",
+                            f"{run.directory.relative_to(root)}: source snapshot incomplete: "
                             f"{len(source['missing'])} missing file(s), "
                             f"{len(source['snapshot_errors'])} import error(s)"))
 

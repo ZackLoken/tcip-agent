@@ -411,7 +411,11 @@ def observe(directory: Path) -> RunObservation:
 
 def _holding(parent: Path, record_file: str) -> list[Path]:
     """Every directory under ``parent`` holding ``record_file``, in name order."""
-    return sorted(d for d in parent.iterdir() if (d / record_file).is_file()) if parent.is_dir() else []
+    return (
+        sorted(d for d in parent.iterdir() if (d / record_file).is_file())
+        if parent.is_dir()
+        else []
+    )
 
 
 def sweep_dirs(project: Path | str) -> list[Path]:
@@ -509,7 +513,8 @@ def run_summary(observation: RunObservation, rows: list[dict[str, Any]],
                 launch: dict[str, str | None] | None) -> RunRow:
     """One run's :class:`RunRow` over its metrics-log ``rows`` (:func:`read_rows` of its
     ``metrics_log``, read as :func:`epoch_rows`) and the agent identity its ``launch`` event
-    declared (:func:`launch_declarations`, ``None`` for a run no launch event names): its record's own
+    declared (:func:`launch_declarations`, ``None`` for a run no launch event names): its
+    record's own
     fields, its last logged epoch, and its best selection value under the objective its launch
     resolved (:func:`best_selection`) with that objective's metric name, both ``None`` for a run
     that resolved to nothing."""
@@ -733,7 +738,8 @@ def compare_experiments(experiment_ids: list[str], *, project: Path | str) -> di
     """Side-by-side comparison of training runs.
 
     Per run: ``state``, ``n_epochs``, ``last_logged_metrics`` (the last epoch's row,
-    :func:`epoch_rows`, not a verified result), ``rows_after_end`` (rows whose own ``timestamp`` is a later instant than
+    :func:`epoch_rows`, not a verified result), ``rows_after_end`` (rows whose own
+    ``timestamp`` is a later instant than
     the final status's ``ended``; ``None`` before a final status), the final status's ``error`` as
     ``status_error``, ``registry`` (a completed run's own registry entry,
     ``model_registry.run_entry``, with the metrics and source its checkpoint carries,

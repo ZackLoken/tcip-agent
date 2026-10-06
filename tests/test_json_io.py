@@ -280,7 +280,9 @@ def test_a_polygon_with_a_ring_that_is_no_shape_cannot_be_made(rings) -> None:
     [1, 2, 3, 4, 5, 6, 7],                # odd coord count
     {"counts": "RLE", "size": [2, 2]},    # a run-length mask: the document carries rings only
 ], ids=["short", "odd", "run_length"])
-def test_a_bad_ring_beside_good_ones_refuses_the_document_by_record(tmp_path: Path, bad_ring) -> None:
+def test_a_bad_ring_beside_good_ones_refuses_the_document_by_record(
+    tmp_path: Path, bad_ring
+) -> None:
     """A supplied ring that is not a ring is a malformed value, never a ring to drop quietly: the
     document refuses naming the record rather than reading back as fewer rings than it states."""
     key = _stored(tmp_path, {
@@ -776,7 +778,9 @@ def test_a_box_that_would_round_to_zero_extent_is_refused_at_write(tmp_path: Pat
         write_label_document(_key(tmp_path), [sliver], 10, 10)
 
 
-def test_a_polygon_that_would_round_to_a_zero_extent_box_is_refused_at_write(tmp_path: Path) -> None:
+def test_a_polygon_that_would_round_to_a_zero_extent_box_is_refused_at_write(
+    tmp_path: Path,
+) -> None:
     """The polygon branch is checked against its rounded, stored box the same as the box branch:
     a sliver whose derived box collapses to nothing at the stored grid must never be written."""
     sliver = Annotation(subject="bud", geometry=Polygon(
@@ -786,7 +790,9 @@ def test_a_polygon_that_would_round_to_a_zero_extent_box_is_refused_at_write(tmp
         write_label_document(_key(tmp_path), [sliver], 10, 10)
 
 
-def test_a_polygon_whose_vertices_all_round_to_one_point_is_refused_at_write(tmp_path: Path) -> None:
+def test_a_polygon_whose_vertices_all_round_to_one_point_is_refused_at_write(
+    tmp_path: Path,
+) -> None:
     """A polygon's box is checked against the same rounded rings the document stores, not the raw
     ones: vertices that only collapse to one point at the stored 2-decimal grid must never write a
     bbox claiming extent the stored geometry does not have."""

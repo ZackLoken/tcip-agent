@@ -224,7 +224,9 @@ def get_serving_grid(path: str = Query(..., description="Absolute path to the im
 def _parse_band_tokens(raw: str) -> list[str]:
     tokens = [t.strip() for t in raw.split(",") if t.strip()]
     if len(tokens) != 3:
-        raise HTTPException(400, f"bands must name exactly 3 bands (R,G,B), got {len(tokens)}: {raw!r}")
+        raise HTTPException(
+            400, f"bands must name exactly 3 bands (R,G,B), got {len(tokens)}: {raw!r}"
+        )
     return tokens
 
 

@@ -4,9 +4,9 @@
 ``routes/annotate.py`` the review queue's launch and ``routes/sessions.py`` the annotation timing
 entries and the sessions they amount to;
 ``tcip_mcp.experiments`` declares a run's row, a sweep's group, the listing of both and the detail
-of one; ``routes/training.py`` and ``routes/terminal.py`` declare their WebSocket frame vocabularies, and
-``routes/terminal.py`` the provider status, the session launch request and answer and the
-submitted request;
+of one; ``routes/training.py`` and ``routes/terminal.py`` declare their WebSocket frame
+vocabularies, and ``routes/terminal.py`` the provider status, the session launch request and
+answer and the submitted request;
 ``routes/projects.py`` declares the project summary and the open, removal and rename request
 shapes; ``routes/results.py`` declares
 the phenology and count export request shapes, the revision confirmation and the registered
@@ -89,14 +89,14 @@ def declared_models() -> list[type[BaseModel]]:
             ServingCell, ServingGrid, RunRow, SweepGroup, TrainingDetail, TrainingListing,
             TrainingMetricFrame, TrainingStatusFrame, TerminalInputFrame,
             TerminalResizeFrame, CreateSessionRequest, LaunchedProgram, TerminalLaunch,
-            ProviderStatus, TerminalStatus, SubmitRequest, ProjectSummary, OpenRequest, RemovalRequest, RenameRequest,
-            PhenologyPayload, RegisteredModel, RegisteredModels,
+            ProviderStatus, TerminalStatus, SubmitRequest, ProjectSummary, OpenRequest,
+            RemovalRequest, RenameRequest, PhenologyPayload, RegisteredModel, RegisteredModels,
             AcknowledgmentPayload, ExportCsvPayload, PerImageCountDelivery,
             OrthomosaicPlantCountsDelivery, ExportCountCsvPayload, MatchTolerance,
             PlantRegistryReference, PlantMappingDisclosure, PlantRegistryDisclosure,
-            CanopySegmentsDocument, SegmentTieDisclosure, CanopySegmentDisclosure, Producer, BucketFinding, Acknowledgment,
-            DeliveryEventRecord, Operationalization, PositiveState, TraitEntry, TraitRevision,
-            ConfirmRevisionPayload, Stated]
+            CanopySegmentsDocument, SegmentTieDisclosure, CanopySegmentDisclosure, Producer,
+            BucketFinding, Acknowledgment, DeliveryEventRecord, Operationalization,
+            PositiveState, TraitEntry, TraitRevision, ConfirmRevisionPayload, Stated]
 
 
 TRANSPORT_MODELS = ("GuiState", "DatasetSelection", "ViewState")
@@ -234,7 +234,8 @@ def render() -> str:
     panel_event_names = "".join(
         f"export const {name} = {json.dumps(value)};\n"
         for name, value in platform_panel_event_constants()) + "\n"
-    tuples = "".join(f"export const {name} = [{', '.join(json.dumps(m) for m in members)}] as const;\n\n"
+    tuples = "".join(f"export const {name} = "
+                     f"[{', '.join(json.dumps(m) for m in members)}] as const;\n\n"
                      for name, members in tuple_constants().items())
     aliases = "".join(f"export type {name} = {' | '.join(json.dumps(m) for m in members)};\n\n"
                       for name, members in literal_aliases().items())

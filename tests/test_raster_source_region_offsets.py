@@ -2,9 +2,10 @@
 
 A calibration/holdout block is read as an ordinary windowed source through ``_RegionView``, so the
 translation from the view's local coordinates into the parent's own space is the whole measurement
-claim: a displaced translation serves real training pixels through the offset and nothing downstream
-can tell. These fixtures give the block an origin whose row and column differ and pixel content that
-differs along the two axes, so a translation that mixes the two axes lands on different pixels.
+claim: a displaced translation serves real training pixels through the offset and nothing
+downstream can tell. These fixtures give the block an origin whose row and column differ and
+pixel content that differs along the two axes, so a translation that mixes the two axes lands on
+different pixels.
 """
 
 from __future__ import annotations

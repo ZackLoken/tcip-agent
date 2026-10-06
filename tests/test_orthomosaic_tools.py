@@ -57,7 +57,8 @@ def _write_geo_raster(path: Path, *, height: int = 64, width: int = 64, channels
     return arr
 
 
-def _bespoke_detection_checkpoint(tmp_path: Path, *, in_chans: int = 3, tile_size: int = TILE) -> str:
+def _bespoke_detection_checkpoint(
+        tmp_path: Path, *, in_chans: int = 3, tile_size: int = TILE) -> str:
     """Write a bespoke detection checkpoint under ``tmp_path`` and register it in that project's
     model registry, so a caller can hand its bare path to a door that resolves the registry
     itself."""
@@ -372,7 +373,8 @@ def test_a_registered_plant_csv_that_changed_since_registration_refuses_by_name(
     plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
     registry = _plant_registry(tmp_path, plant_csv)
     if change == "rewritten":
-        write_plant_csv(plant_csv, [{"plot": "plot0", "accession": "acc0", "lat": 42.0, "lon": -93.0}])
+        write_plant_csv(
+            plant_csv, [{"plot": "plot0", "accession": "acc0", "lat": 42.0, "lon": -93.0}])
     else:
         plant_csv.unlink()
 
@@ -470,7 +472,8 @@ def test_canopy_segments_attribute_by_containment_and_name_every_gap(tmp_path):
         (30.0, 30.0, 32.0, 32.0),  # inside no segment: outside_segments
     ])
     registry = _plant_registry(tmp_path, _plants_csv_at(tmp_path, raster_path, [
-        ("plot0", 10.0, 10.0), ("plot1", 10.0, 50.0), ("plot2", 50.0, 10.0), ("plot3", 50.0, 50.0)]))
+        ("plot0", 10.0, 10.0), ("plot1", 10.0, 50.0), ("plot2", 50.0, 10.0),
+        ("plot3", 50.0, 50.0)]))
     _write_canopy_document(raster_path, [
         (5.0, 5.0, 15.0, 15.0), (45.0, 5.0, 55.0, 15.0), (0.0, 55.0, 5.0, 60.0)])
 

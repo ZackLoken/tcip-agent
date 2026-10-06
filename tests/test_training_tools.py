@@ -232,7 +232,8 @@ def test_preflight_config_warns_when_most_candidates_wont_train(tmp_path):
     }
     r = preflight_config(tmp_path, cfg)
     assert r["valid"] is True, r  # informational only, never gating
-    assert any("3/4 candidate images (75%) will not train" in w for w in r["warnings"]), r["warnings"]
+    assert any("3/4 candidate images (75%) will not train" in w
+               for w in r["warnings"]), r["warnings"]
     assert any("{'absent': 3}" in w for w in r["warnings"])
 
 
@@ -246,7 +247,8 @@ def test_preflight_config_no_coverage_warning_when_everything_trains(tmp_path):
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "bud"},
+                 "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 2,
     }
     assert preflight_config(tmp_path, cfg)["warnings"] == []
@@ -271,7 +273,8 @@ def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(tmp_pa
     _bud_image(imgs / "bad.jpg")
     _damaged(imgs / "bad.jpg", b"{not json")
 
-    data_cfg = {"images_dir": str(imgs), "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}}
+    data_cfg = {"images_dir": str(imgs), "scope": {"subject": "bud"},
+                "split": {"seed": 0, "val_ratio": 0.15}}
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
@@ -351,7 +354,8 @@ def test_preflight_config_blocks_a_document_only_the_admission_reader_refuses(
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "bud"},
+                 "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 2,
     }
     r = preflight_config(tmp_path, cfg)
@@ -437,7 +441,8 @@ def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(tmp_p
     cfg: dict[str, object] = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "bud"},
+                 "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 2,
         "evaluation": "not_a_mapping",
     }
@@ -984,7 +989,8 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_trials_own_records(monkeypat
 
     _patch_hpo_trial_machinery(monkeypatch, _completed_train)
     from tcip_mcp.pipelines.data import split_construction as sc
-    monkeypatch.setattr(sc, "auto_train_val", _fake_auto_train_val_reading_seed_like_split_construction)
+    monkeypatch.setattr(
+        sc, "auto_train_val", _fake_auto_train_val_reading_seed_like_split_construction)
 
     trial_dir = _trial({"data.split.seed": 7}, [].append, _detection_base(), tmp_path)
 
@@ -1005,7 +1011,8 @@ def test_run_hpo_trial_geometry_stamp_from_a_tiled_dataset_reaches_the_resolved_
 
     _patch_hpo_trial_machinery(monkeypatch, _completed_train)
     from tcip_mcp.pipelines.data import split_construction as sc
-    monkeypatch.setattr(sc, "auto_train_val", _fake_auto_train_val_reading_seed_like_split_construction)
+    monkeypatch.setattr(
+        sc, "auto_train_val", _fake_auto_train_val_reading_seed_like_split_construction)
 
     trial_dir = _trial({"data.split.seed": 7}, [].append, _detection_base(), tmp_path)
 
@@ -1223,7 +1230,8 @@ def test_an_ordinary_sweep_payload_still_runs_its_search(tmp_path, monkeypatch):
                          "task": "detection"},
         "data": _labeled(tmp_path),
     }
-    result = training_tools.run_hyperparameter_search(tmp_path, base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1, search_seed=0)
+    result = training_tools.run_hyperparameter_search(
+        tmp_path, base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1, search_seed=0)
 
     assert result["sweep"]["state"] == "completed", result
     assert seen == [{"lr": [0.1, 0.01]}]
@@ -1240,13 +1248,14 @@ def test_run_hyperparameter_search_admits_an_lr_sweep_beside_a_base_config_selec
     seen = _spaces_searched(monkeypatch)
 
     base_config = {**real_hpo_base_config, "evaluation": {"selection_metric": "map"}}
-    result = training_tools.run_hyperparameter_search(tmp_path, base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1, search_seed=0)
+    result = training_tools.run_hyperparameter_search(
+        tmp_path, base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1, search_seed=0)
 
     assert result["sweep"]["state"] == "completed", result
     assert seen == [{"lr": [0.1, 0.01]}]
 
 
-def test_run_hyperparameter_search_admits_a_categorical_evaluation_axis_naming_the_same_metric_at_every_choice(
+def test_hpo_admits_a_categorical_evaluation_axis_naming_the_same_metric_at_every_choice(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     """A categorical evaluation axis is admitted: every trial records the sweep's one
@@ -1261,7 +1270,8 @@ def test_run_hyperparameter_search_admits_a_categorical_evaluation_axis_naming_t
         "type": "categorical",
         "choices": [{"selection_metric": "map"}, {"selection_metric": "map"}],
     }}
-    result = training_tools.run_hyperparameter_search(tmp_path, base_config, param_space=param_space, n_trials=1, search_seed=0)
+    result = training_tools.run_hyperparameter_search(
+        tmp_path, base_config, param_space=param_space, n_trials=1, search_seed=0)
 
     assert "error" not in result, result
     assert seen == [param_space]

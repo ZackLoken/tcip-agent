@@ -38,13 +38,15 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
         notes="Test-only, provisional: proves the delivery mechanism generalizes to a second "
               "trait. Not a domain-expert-confirmed measurement.",
     ))
-    # A second trait needs its own confirmed meaning too: nothing about the record is bud_opening-shaped.
+    # A second trait needs its own confirmed meaning too: nothing about the record is
+    # bud_opening-shaped.
     seed_confirmed_crossing(tmp_path, "currant_bloom", measured_subject="flower")
 
 
 def _currant_bloom_body(tmp_path: Path) -> dict:
     """A registered dataset of geolocated captures over two dates, one unassessed bucket per date
-    whose scope declares the positive state's attribute, the mapping over them, and ``currant_bloom`` confirmed, with ``tmp_path`` open in the
+    whose scope declares the positive state's attribute, the mapping over them,
+    and ``currant_bloom`` confirmed, with ``tmp_path`` open in the
     web backend; the request body a phenology door takes."""
     import asyncio
 
@@ -102,7 +104,8 @@ def test_currant_bloom_measurement_carries_its_own_milestone_columns(
     assert "bloom_opening_date" not in onset
 
 
-def test_currant_bloom_export_csv_delivers_its_own_schema(client: TestClient, tmp_path: Path) -> None:
+def test_currant_bloom_export_csv_delivers_its_own_schema(
+        client: TestClient, tmp_path: Path) -> None:
     body = _currant_bloom_body(tmp_path)
 
     from tests._web_fixtures import acknowledged_post

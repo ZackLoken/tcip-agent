@@ -209,7 +209,8 @@ def test_compare_best_route_422s_with_no_registered_checkpoint(opened_client: Te
     assert tcip_store.read(registry_index_key(tmp_path), default=None) is None
 
 
-def test_compare_best_route_409s_when_the_index_will_not_decode(opened_client: TestClient, monkeypatch):
+def test_compare_best_route_409s_when_the_index_will_not_decode(
+        opened_client: TestClient, monkeypatch):
     """A corrupt index is not a project with no models: the route answers 409, not the 404 an
     absent index answers."""
     import tcip_mcp.model_registry as model_registry
@@ -247,7 +248,8 @@ def test_compare_best_route_422s_when_the_marked_set_registered_nothing(opened_c
         "experiment_ids": ["exp-marked"], "metric": "val_map50",
     })
     assert resp.status_code == 422
-    assert resp.json()["detail"]["error"] == "none of the marked experiments registered a checkpoint"
+    assert resp.json()["detail"]["error"] == (
+        "none of the marked experiments registered a checkpoint")
 
 
 def test_an_empty_metric_lists_through_the_listing_route_and_refuses_through_the_ranking_one(

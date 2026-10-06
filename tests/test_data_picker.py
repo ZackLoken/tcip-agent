@@ -584,14 +584,18 @@ def test_relaunch_route_launches_the_stated_data_unchanged_when_no_partition_is_
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     drawn = _bespoke_config(root / "images" / DATES[0])
     opened_run(tmp_path, drawn, experiment_id="exp-drawn")
-    resp = client.post("/api/training/runs", json={"relaunched_from": "exp-drawn", "user": "tester"})
+    resp = client.post(
+        "/api/training/runs", json={"relaunched_from": "exp-drawn", "user": "tester"}
+    )
     assert resp.status_code == 200, resp.json()
     assert captured["data"] == drawn["data"]
 
     _draw(tmp_path, root, tmp_path / "manifest")
     bound = _bound_config(root, tmp_path / "manifest")
     opened_run(tmp_path, bound, experiment_id="exp-bound")
-    resp = client.post("/api/training/runs", json={"relaunched_from": "exp-bound", "user": "tester"})
+    resp = client.post(
+        "/api/training/runs", json={"relaunched_from": "exp-bound", "user": "tester"}
+    )
     assert resp.status_code == 200, resp.json()
     assert captured["data"] == bound["data"]
 

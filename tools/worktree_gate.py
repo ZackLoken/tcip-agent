@@ -39,7 +39,8 @@ def prove_resolution(worktree: Path, env: dict[str, str]) -> Path:
         cwd=str(worktree), env=env, capture_output=True, text=True,
     )
     if proc.returncode != 0:
-        raise SystemExit(f"could not import tcip_mcp under the worktree environment: {proc.stderr.strip()}")
+        raise SystemExit(
+            f"could not import tcip_mcp under the worktree environment: {proc.stderr.strip()}")
     resolved = Path(proc.stdout.strip()).resolve()
     if not resolved.is_relative_to(worktree.resolve()):
         raise SystemExit(

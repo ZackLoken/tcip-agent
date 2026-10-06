@@ -1,4 +1,5 @@
-"""Operating-point counting semantics: which detection is a hit, and which side of the ratio it lands on.
+"""Operating-point counting semantics: which detection is a hit, and which side of the ratio it
+lands on.
 
 Two properties the symmetric fixtures elsewhere in the suite cannot separate:
 
@@ -167,7 +168,9 @@ def test_uncontested_detections_all_match():
              {"category_id": 7, "bbox": [292, 192, 16, 16], "score": 0.50}],
         ),
     ]
-    counts = governing_counts(records, {"kind": "center_match", "tolerance": CENTER_MATCH_TOLERANCE},
-                              conf_threshold=0.25)
+    counts = governing_counts(
+        records, {"kind": "center_match", "tolerance": CENTER_MATCH_TOLERANCE},
+        conf_threshold=0.25,
+    )
     assert (counts["tp"], counts["fp"], counts["fn"]) == (2, 0, 0)
     assert counts["f1"] == pytest.approx(1.0)

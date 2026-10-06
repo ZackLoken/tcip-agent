@@ -20,7 +20,9 @@ class FPN(nn.Module):
     multi-scale features via lateral connections and top-down pathway.
     """
 
-    def __init__(self, in_channels_list: list[int], out_channels: int = 256, add_p2: bool = False) -> None:
+    def __init__(
+        self, in_channels_list: list[int], out_channels: int = 256, add_p2: bool = False
+    ) -> None:
         super().__init__()
         self.out_channels = out_channels
         self.add_p2 = add_p2
@@ -60,7 +62,9 @@ class PAN(nn.Module):
     Adds bottom-up pathway after FPN top-down for better low-level features.
     """
 
-    def __init__(self, in_channels_list: list[int], out_channels: int = 256, add_p2: bool = False) -> None:
+    def __init__(
+        self, in_channels_list: list[int], out_channels: int = 256, add_p2: bool = False
+    ) -> None:
         super().__init__()
         self.out_channels = out_channels
         self.fpn = FPN(in_channels_list, out_channels, add_p2=add_p2)

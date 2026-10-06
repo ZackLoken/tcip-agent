@@ -4,8 +4,8 @@ line.
 Wraps ``vision_tools.overlay_reference_grid``: square cells of ``--tile-size`` native pixels named
 spreadsheet-style ('A1' top-left), rendered in yellow on the cells' true boundaries. Every response
 echoes the full grid geometry (tile_size, overlap, cols, rows, width, height): pass the echoed
-tile_size/overlap to ``propose_annotations(grid_cells=...)`` so a cell name resolves against the grid
-that was actually rendered. --project is required, since the artifact and the audit line land
+tile_size/overlap to ``propose_annotations(grid_cells=...)`` so a cell name resolves against the
+grid that was actually rendered. --project is required, since the artifact and the audit line land
 under it.
 
 Usage:
@@ -37,7 +37,9 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
 
     from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
-    result = overlay_reference_grid(project, args.image, tile_size=args.tile_size, overlap=args.overlap)
+    result = overlay_reference_grid(
+        project, args.image, tile_size=args.tile_size, overlap=args.overlap
+    )
     print(json.dumps(result, indent=2))
     return 1 if "error" in result else 0
 

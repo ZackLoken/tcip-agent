@@ -79,8 +79,10 @@ def test_four_channel_converts_to_rgba_only_when_the_source_declares_alpha():
     assert to_pil_if_faithful(arr, band_interpretations=None) is arr
     # a real signal that names the 4th band something other than alpha (a genuinely spectral one,
     # or a file whose color interpretation is simply undeclared)
-    assert to_pil_if_faithful(arr, band_interpretations=("red", "green", "blue", "undefined")) is arr
-    assert to_pil_if_faithful(arr, band_interpretations=("gray", "undefined", "undefined", "undefined")) is arr
+    assert to_pil_if_faithful(
+        arr, band_interpretations=("red", "green", "blue", "undefined")) is arr
+    assert to_pil_if_faithful(
+        arr, band_interpretations=("gray", "undefined", "undefined", "undefined")) is arr
 
 
 # ── load_image's array-backend return ────────────────────────────────────
@@ -204,7 +206,8 @@ def test_a_uint8_windowed_tile_trains_augmented_through_tiling(tmp_path: Path):
     try:
         arr = _grid(96, 96, 3)
         images_dir = _detection_project(tmp_path, arr)
-        ds = dataset_over("detection", str(images_dir), subject="bud", transforms=_flip_transform(), tiling=TILING)
+        ds = dataset_over("detection", str(images_dir), subject="bud",
+                          transforms=_flip_transform(), tiling=TILING)
         got, _target = ds[0]  # tile at (0, 0)
         tile = arr[0:64, 0:64]
         flipped = torch.from_numpy(tile[:, ::-1].astype(np.float32) / 255.0).permute(2, 0, 1)

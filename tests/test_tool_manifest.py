@@ -10,7 +10,8 @@ import sys
 _BLOCK_TORCH = """
 class _BlockTorch:
     def find_spec(self, name, path=None, target=None):
-        if name == "torch" or name.startswith("torch.") or name == "torchvision" or name.startswith("torchvision."):
+        if (name == "torch" or name.startswith("torch.")
+                or name == "torchvision" or name.startswith("torchvision.")):
             raise ImportError(f"torch blocked for this check: {name}")
         return None
 """

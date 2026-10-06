@@ -110,7 +110,8 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
             f"{type(eval_cfg).__name__}"
         )
 
-    # Normalization provenance: per-band builder_kwargs statistics must carry which images produced them.
+    # Normalization provenance: per-band builder_kwargs statistics must carry which images
+    # produced them.
     sampling_record = None
     if isinstance(model_source, dict):
         bk = model_source.get("builder_kwargs")
@@ -304,7 +305,8 @@ def _structural_issues(config: dict) -> list[str]:
 
 
 def open_run(
-    run_dir: Path, config: dict, resolved: dict | None, *, relaunched_from: str | None = None, resume_from: str | None = None,
+    run_dir: Path, config: dict, resolved: dict | None, *, relaunched_from: str | None = None,
+    resume_from: str | None = None,
     max_wall_clock_seconds: float | None = None, model_contract: dict | None = None,
     trial_params: dict | None = None,
 ) -> None:
@@ -499,8 +501,9 @@ def training_detail(project: Path, experiment_id: str) -> TrainingDetail | None:
         return None
     url = running_url(str(experiments.board_of(directory)))
     if (directory / SWEEP_FILE).is_file():
-        return TrainingDetail(run=None, tensorboard_url=url,
-                              sweep=experiments.read_sweep(directory, experiments.run_rows(project)))
+        return TrainingDetail(
+            run=None, tensorboard_url=url,
+            sweep=experiments.read_sweep(directory, experiments.run_rows(project)))
     run = experiments.observe(directory)
     return TrainingDetail(sweep=None, tensorboard_url=url, run=experiments.run_summary(
         run, experiments.read_rows(run.metrics_log)[0],
@@ -827,7 +830,8 @@ def run_hyperparameter_search(
     ``selection`` rows its metrics log records.
 
     Everything one sweep writes lands in its own directory, ``.tcip/experiments/<sweep_id>/``
-    beside the project's runs, whose names it shares (:func:`open_sweep`, :func:`run_sweep`): its ``sweep.json`` written once before the first
+    beside the project's runs, whose names it shares (:func:`open_sweep`, :func:`run_sweep`):
+    its ``sweep.json`` written once before the first
     trial starts, carrying every argument this call resolved (``base_config``, the resolved
     ``param_space`` and the objective included); a heartbeat this call keeps while it runs; one
     run directory per trial, ``<sweep_id>_<ray trial id>``, a run like any other; Ray's own
@@ -901,7 +905,8 @@ def run_hyperparameter_search(
             omit for the derived default (see ``split_draws``).
     """
     opened = open_sweep(
-        project, base_config, param_space, n_trials=n_trials, search_alg=search_alg, scheduler=scheduler,
+        project, base_config, param_space, n_trials=n_trials, search_alg=search_alg,
+        scheduler=scheduler,
         grace_period=grace_period, reduction_factor=reduction_factor, warm_start=warm_start,
         baseline_params=baseline_params, max_concurrent=max_concurrent,
         resources_per_trial=resources_per_trial, split_draws=split_draws,

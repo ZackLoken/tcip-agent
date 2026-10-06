@@ -14,7 +14,10 @@ import time
 import pytest
 
 pytestmark = [
-    pytest.mark.skipif(sys.platform != "win32", reason="the console-signal exit path this test drives is Windows-only"),
+    pytest.mark.skipif(
+        sys.platform != "win32",
+        reason="the console-signal exit path this test drives is Windows-only",
+    ),
     pytest.mark.ray_cluster,
 ]
 
@@ -161,7 +164,9 @@ def test_a_detached_console_free_sweep_exits_cleanly_and_leaves_no_ray_daemon_be
         while survivors and time.monotonic() < deadline:
             time.sleep(1)
             survivors = [pid for pid in daemon_pids + descendant_pids if psutil.pid_exists(pid)]
-        assert not survivors, f"Ray process(es) {survivors} still running after the detached sweep exited"
+        assert not survivors, (
+            f"Ray process(es) {survivors} still running after the detached sweep exited"
+        )
     finally:
         if proc.poll() is None:
             with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):

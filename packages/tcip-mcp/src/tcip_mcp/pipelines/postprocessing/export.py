@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 
 
 def _clip(value: float, upper: float | None) -> float:
-    """Clamp ``value`` into ``[0, upper]``; ``upper=None`` (no known image extent) leaves it as-is."""
+    """Clamp ``value`` into ``[0, upper]``; ``upper=None`` (no known image extent) leaves it
+    as-is."""
     if upper is None:
         return value
     return max(0.0, min(float(value), float(upper)))

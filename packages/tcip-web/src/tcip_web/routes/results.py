@@ -387,7 +387,8 @@ def export_count_csv(payload: ExportCountCsvPayload, request: Request) -> Respon
 
     ``per_image_count`` is
     :func:`~tcip_mcp.pipelines.postprocessing.export.deliver_per_image_counts_csv`;
-    ``orthomosaic_plant_counts`` is :func:`~tcip_mcp.tools.orthomosaic_tools.orthomosaic_plant_counts`.
+    ``orthomosaic_plant_counts`` is
+    :func:`~tcip_mcp.tools.orthomosaic_tools.orthomosaic_plant_counts`.
     A delivery refusal answers 400 with
     ``{"kind", "message"}``, ``kind`` ``"operationalization"`` or ``"delivery"``; a delivery
     event its receipt could not follow answers 409. The response headers name the saved path,
@@ -449,7 +450,8 @@ def export_count_csv(payload: ExportCountCsvPayload, request: Request) -> Respon
 
 @router.get("/delivery-events")
 def list_delivery_events() -> dict:
-    """Every delivery event the open project holds (:func:`~tcip_mcp.delivery.read_delivery_events`):
+    """Every delivery event the open project holds
+    (:func:`~tcip_mcp.delivery.read_delivery_events`):
     what shipped, under which trait revision and kind, over which buckets and with what each
     bucket's gate finding was. A record that will not decode refuses the whole listing (400).
 

@@ -140,7 +140,8 @@ class Crossing:
       - ``"left_censored"``: the first observed point already meets the target, the true crossing
         may have happened any time before it; this date is an upper bound, not a measured crossing.
       - ``"interpolated"``: linearly interpolated between the two bracketing observed dates.
-      - ``"right_censored"``: the last observed point still hasn't met the target, the true crossing,
+      - ``"right_censored"``: the last observed point still hasn't met the target, the true
+        crossing,
         if it happens at all, is after this date; this date is a lower bound, the mirror of
         ``left_censored`` at the other end of the observed window, distinguishing "not yet reached,
         but we watched through this date" from "no information at all".
@@ -181,7 +182,8 @@ def crossing_date(series: list[tuple[str, float]], target: float) -> Optional[Cr
 
 
 def positive_onset_date(series: list[tuple[str, float]]) -> Optional[str]:
-    """First date any positive-state observation appears (fraction > 0), chronologically. ``None`` if never."""
+    """First date any positive-state observation appears (fraction > 0), chronologically.
+    ``None`` if never."""
     for d, r in _real_points(series):
         if r > 0:
             return iso(d)
@@ -336,7 +338,8 @@ def per_plant_phenology(
     positive-fraction series, the milestone dates, coverage-disclosure fields
     (``n_dates_unclassified``, ``n_dates_missing_images``, a date the mapping captured the plant on
     no image counting as missing) and ``complete``, whether every one of its dates is complete:
-    imaged, every detection carrying the positive state's attribute, and fully observed. With ``require_all_dates_complete`` a plant's
+    imaged, every detection carrying the positive state's attribute, and fully observed. With
+    ``require_all_dates_complete`` a plant's
     milestones are computed only when it is complete, and otherwise from its complete dates alone.
     ``positive_class_assessed`` is ``True`` iff at least one date, anywhere in the delivery, was
     complete.
@@ -363,9 +366,12 @@ def per_plant_phenology(
             "n_dates_missing_images": sum(1 for s in info["series"] if s[4] > 0 or s[5] == 0),
             "complete": complete,
             "series": [
-                {"date": d, "n_total": total, "n_positive": positive, "n_unclassified": unclassified,
+                {"date": d, "n_total": total, "n_positive": positive,
+                 "n_unclassified": unclassified,
                  "n_missing": missing, "n_images": n_images,
-                 "ratio": (positive / total if total and unclassified == 0 and missing == 0 else None)}
+                 "ratio": (
+                     positive / total if total and unclassified == 0 and missing == 0 else None
+                 )}
                 for (d, total, positive, unclassified, missing, n_images) in info["series"]
             ],
         }

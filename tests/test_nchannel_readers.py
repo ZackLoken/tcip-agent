@@ -11,7 +11,7 @@ from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
 
 def test_pil_to_tensor_grayscale_and_multiband():
     from tcip_mcp.pipelines.image_utils import pil_to_tensor
-    assert pil_to_tensor(np.zeros((8, 8), dtype=np.uint8)).shape == (1, 8, 8)      # [H,W] -> [1,H,W]
+    assert pil_to_tensor(np.zeros((8, 8), dtype=np.uint8)).shape == (1, 8, 8)  # [H,W] -> [1,H,W]
     assert pil_to_tensor(np.ones((8, 8, 5), dtype=np.float32)).shape == (5, 8, 8)  # 5-band
     assert pil_to_tensor(Image.new("RGB", (8, 8))).shape == (3, 8, 8)
 
@@ -64,6 +64,7 @@ def test_grayscale_classification_end_to_end(tmp_path):
     cfg = {"model_source": model_source, "data": data, "device": "cpu",
            "stages": [{"freeze_to": -1, "epochs": 1}],
            "mixed_precision": False, "early_stopping": {"enabled": False}}
-    run = train(trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-39"),
+    run = train(trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
+                            id="auto-run-39"),
                 loader)
     assert run.status == "completed"  # 1-channel data + 1-channel model trains end to end

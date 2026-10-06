@@ -48,7 +48,8 @@ def test_crossing_uses_the_bracket_that_exists_in_time():
     between them. A series whose fraction order differs from its capture order (the ordinary case
     for a noisy curve) must not be re-ordered into a bracket that never happened.
     """
-    series = [("2026-03-09", 0.30), ("2026-03-01", 0.10), ("2026-03-13", 0.90), ("2026-03-05", 0.70)]
+    series = [("2026-03-09", 0.30), ("2026-03-01", 0.10), ("2026-03-13", 0.90),
+              ("2026-03-05", 0.70)]
 
     c = phenology.crossing_date(series, 0.50)
 

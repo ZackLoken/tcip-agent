@@ -200,7 +200,8 @@ def test_the_recorded_resize_travels_only_with_a_native_frame_tile_edge():
     assert resize(native, tiled=False, tile_size=None) is None
     assert resize(persisted, tiled=True, tile_size=None) is None
     assert resize(native, tiled=True, tile_size=512) is None
-    assert resize(_GeometryStub(train_augmentation=augmentation), tiled=True, tile_size=None) is None
+    assert resize(
+        _GeometryStub(train_augmentation=augmentation), tiled=True, tile_size=None) is None
 
 
 def test_a_checkpoint_carries_its_untiled_training_geometry_to_the_predictor(tmp_path):
@@ -437,7 +438,8 @@ def _native_frame_gt(images_dir: Path) -> None:
     Image.new("RGB", (IMAGE, IMAGE), (120, 120, 120)).save(images_dir / "a.png")
     label_image(
         images_dir / "a.png",
-        [Annotation(subject="bud", geometry=BBox(*b)) for b in sorted(_expected_middle_half_boxes())],
+        [Annotation(subject="bud", geometry=BBox(*b))
+         for b in sorted(_expected_middle_half_boxes())],
         IMAGE, IMAGE)
 
 
@@ -479,10 +481,12 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
 
     monkeypatch.setattr(predictor_mod, "GenericPredictor",
                         lambda *a, **kw: _persisted_regime_predictor())
-    persisted = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir), stated=Stated())
+    persisted = run_full_frame_evaluation(
+        checkpoint, checkpoint_admission(checkpoint, images_dir), stated=Stated())
     monkeypatch.setattr(predictor_mod, "GenericPredictor",
                         lambda *a, **kw: _native_frame_regime_predictor())
-    native = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir), stated=Stated())
+    native = run_full_frame_evaluation(
+        checkpoint, checkpoint_admission(checkpoint, images_dir), stated=Stated())
     monkeypatch.undo()
 
     persisted_execution, native_execution = persisted["execution"], native["execution"]
@@ -538,7 +542,8 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
 
     checkpoint = verified_checkpoint(tmp_path)
     monkeypatch.setattr(predictor_mod, "GenericPredictor", _spy_predictor)
-    r = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir), stated=Stated())
+    r = run_full_frame_evaluation(
+        checkpoint, checkpoint_admission(checkpoint, images_dir), stated=Stated())
 
     assert "error" not in r
     assert captured["execution"].tile_resize == (TILE * 2, TILE * 2)

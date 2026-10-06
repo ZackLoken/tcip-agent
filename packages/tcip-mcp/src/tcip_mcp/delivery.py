@@ -132,8 +132,8 @@ def _bucket_reason(bucket: Bucket, assessment: Assessment | None, finding: str |
     measured the bucket's own producer under its own execution record over a reference covering
     its capture."""
     if bucket.assessment_id is None:
-        return (f"no assessment answers for bucket {bucket.name!r}: assess its checkpoint against a "
-                "held-out reference selection and publish its predictions under that "
+        return (f"no assessment answers for bucket {bucket.name!r}: assess its checkpoint "
+                "against a held-out reference selection and publish its predictions under that "
                 "assessment.")
     if assessment is None or finding is not None:
         return finding
@@ -185,7 +185,9 @@ def admitted_conf(project: Path, bucket: Bucket) -> tuple[float | None, str]:
     if reason is not None:
         return None, reason
     if bucket.execution is None or bucket.execution.conf is None:
-        return None, f"bucket {bucket.name!r} holds no detector's predictions, which no conf admits."
+        return None, (
+            f"bucket {bucket.name!r} holds no detector's predictions, which no conf admits."
+        )
     return bucket.execution.conf, ""
 
 
@@ -219,7 +221,8 @@ def gate(
 
     Refuses (:class:`DeliveryRefused`) outright no buckets at all, buckets naming more than one
     producer or proposing rather than predicting, (``ValueError``) buckets under more than one
-    dataset root (:func:`~tcip_mcp.buckets.shared_root`), a state-crossing delivery over a bucket that
+    dataset root (:func:`~tcip_mcp.buckets.shared_root`), a state-crossing delivery over a
+    bucket that
     classifies no positive state, a scale assessment named for a value in no unit, and a detector
     delivery in a unit naming none; refuses
     (:class:`~tcip_mcp.operationalization.OperationalizationRefused`) a detector delivery whose

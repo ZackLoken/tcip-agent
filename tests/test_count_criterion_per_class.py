@@ -210,7 +210,8 @@ def test_the_pick_serves_the_worst_class_and_a_sparse_reference_still_fails_it()
     at = {round(c["conf"], 2): c for c in sweep["curve"]}
     assert at[0.95]["count_bias_mean"] == pytest.approx(0.0)
     assert at[0.95]["per_class"]["3"]["count_bias_mean"] == pytest.approx(-2.0)
-    assert max(abs(s["count_bias_mean"]) for s in at[0.4]["per_class"].values()) == pytest.approx(1.0)
+    worst = max(abs(s["count_bias_mean"]) for s in at[0.4]["per_class"].values())
+    assert worst == pytest.approx(1.0)
     assert pick_count_unbiased(sweep) == pytest.approx(0.4)
 
     conf, evidence, failures = _criterion(recs, _three_class_records("h", 5000.0, background=0))

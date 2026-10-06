@@ -81,7 +81,8 @@ def main(provider: str, workspace: str | None = None) -> int:
                 time.sleep(1.0)
                 answered = ANSWER in ANSI.sub("", session.scrollback_snapshot())
             if not answered:
-                print(f"    stream tail: {ascii(ANSI.sub('', session.scrollback_snapshot())[-800:])}")
+                tail = ANSI.sub('', session.scrollback_snapshot())[-800:]
+                print(f"    stream tail: {ascii(tail)}")
     finally:
         terminal_routes.shutdown_all()
         print("[4] session terminated (shutdown_all)")
