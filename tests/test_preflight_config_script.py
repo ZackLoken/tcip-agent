@@ -44,7 +44,8 @@ def test_validates_a_fixture_config_for_the_named_project(project, tmp_path):
     cwd = tmp_path.parent / "operator_cwd"
     cwd.mkdir()
 
-    result = run_tcip("preflight-config", ["--config", str(config_path), "--project", str(project)], cwd=cwd)
+    result = run_tcip("preflight-config",
+                      ["--config", str(config_path), "--project", str(project)], cwd=cwd)
 
     assert result.returncode == 0, result.stdout
     body = json.loads(result.stdout)

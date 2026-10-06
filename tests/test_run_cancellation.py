@@ -15,7 +15,8 @@ def test_cancel_training_reaches_the_runs_own_poll(tmp_path):
     from tcip_mcp.tools.training_tools import cancel_training
     from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
-    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="cancel-run-1")
+    run_dir = opened_run(
+        tmp_path, detection_config(tmp_path / "data"), experiment_id="cancel-run-1")
     run = observed_run(observe(run_dir))
     assert not run.should_cancel()
 

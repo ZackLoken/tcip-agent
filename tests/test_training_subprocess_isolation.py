@@ -139,8 +139,9 @@ def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing
 
 def test_launch_training_child_receives_its_own_run_directory(tmp_path, monkeypatch):
     """The child is told only its run directory, whose ``run.json`` the parent wrote before
-    spawning it, under the id the launch answers. Mocks subprocess.Popen to capture argv without spawning a real child; preflight_config's smoke check
-    still runs for real in this process, so a real (tiny) bespoke model/dataset is needed."""
+    spawning it, under the id the launch answers. Mocks subprocess.Popen to capture argv without
+    spawning a real child; preflight_config's smoke check still runs for real in this process, so
+    a real (tiny) bespoke model/dataset is needed."""
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
 

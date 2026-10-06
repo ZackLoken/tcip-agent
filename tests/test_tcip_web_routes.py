@@ -158,12 +158,14 @@ def test_dataset_tree_label_problem_is_not_stale_after_an_edit(
     image = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     _write_gt(image, [(1, 1, 3, 3)])
 
-    first = opened_client.get("/api/dataset/tree", params={"dataset_root": str(dataset_root)}).json()
+    first = opened_client.get(
+        "/api/dataset/tree", params={"dataset_root": str(dataset_root)}).json()
     assert first["label_problem"] is None
 
     _unreadable(image)
 
-    second = opened_client.get("/api/dataset/tree", params={"dataset_root": str(dataset_root)}).json()
+    second = opened_client.get(
+        "/api/dataset/tree", params={"dataset_root": str(dataset_root)}).json()
     assert second["label_problem"] is not None
     assert "IMG_0000" in second["label_problem"]
 
@@ -320,7 +322,8 @@ def test_a_selection_states_its_capture(opened_client: TestClient, tmp_path: Pat
     root = tmp_path / "no_capture_named"
     (root / "images").mkdir(parents=True)
 
-    resp = opened_client.post("/api/dataset/select", json={"dataset_root": str(root), "subject": "bud"})
+    resp = opened_client.post(
+        "/api/dataset/select", json={"dataset_root": str(root), "subject": "bud"})
 
     assert resp.status_code == 422, resp.text
 
@@ -359,7 +362,8 @@ def test_dataset_nav_persists_current_index(
     assert ok.json()["current_image_index"] == 2
     assert opened_client.get("/api/state").json()["dataset"]["current_image_index"] == 2
     # Out of range (3 images → valid 0..2) is rejected, not silently clamped.
-    assert opened_client.post("/api/dataset/nav", json={"current_image_index": 9}).status_code == 400
+    assert opened_client.post(
+        "/api/dataset/nav", json={"current_image_index": 9}).status_code == 400
 
 
 # ── /api/images ──────────────────────────────────────────────────────────
@@ -410,7 +414,8 @@ def test_images_not_found(opened_client: TestClient, tmp_path: Path) -> None:
     assert resp.status_code == 404
 
 
-def test_images_serve_returns_400_for_a_stem_collision(opened_client: TestClient, dataset_root: Path) -> None:
+def test_images_serve_returns_400_for_a_stem_collision(
+        opened_client: TestClient, dataset_root: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     Image.new("RGB", (100, 80)).save(dataset_root / "images" / "2-11-26" / "IMG_0000.PNG")
 
@@ -419,7 +424,8 @@ def test_images_serve_returns_400_for_a_stem_collision(opened_client: TestClient
     assert "IMG_0000.JPG" in resp.text and "IMG_0000.PNG" in resp.text
 
 
-def test_images_bands_returns_400_for_a_stem_collision(opened_client: TestClient, dataset_root: Path) -> None:
+def test_images_bands_returns_400_for_a_stem_collision(
+        opened_client: TestClient, dataset_root: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     Image.new("RGB", (100, 80)).save(dataset_root / "images" / "2-11-26" / "IMG_0000.PNG")
 
@@ -430,7 +436,8 @@ def test_images_bands_returns_400_for_a_stem_collision(opened_client: TestClient
 # ── /api/annotate ────────────────────────────────────────────────────────
 
 
-def test_annotate_load_and_save_roundtrip(opened_client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
+def test_annotate_load_and_save_roundtrip(
+        opened_client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
 
     # Save a box annotation and a polygon annotation into the single per-image document.
@@ -731,7 +738,8 @@ def test_annotate_save_persists_polygon_as_polygon(opened_client, dataset_root, 
     assert anns[0].geometry.rings == [[(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]]
 
 
-def test_annotate_multi_ring_polygon_round_trips_through_the_route(opened_client, dataset_root, tmp_path):
+def test_annotate_multi_ring_polygon_round_trips_through_the_route(
+        opened_client, dataset_root, tmp_path):
     """An occlusion-split shape loaded onto the canvas and re-saved unedited must keep every ring.
 
     The save side accepts ``rings`` for exactly this, and the load side reports ``rings`` back, so a
@@ -756,7 +764,8 @@ def test_annotate_multi_ring_polygon_round_trips_through_the_route(opened_client
     assert ann["rings"] == rings
 
 
-def test_annotate_save_prefers_rings_over_points_when_both_are_sent(opened_client, dataset_root, tmp_path):
+def test_annotate_save_prefers_rings_over_points_when_both_are_sent(
+        opened_client, dataset_root, tmp_path):
     """`rings` is the full shape and `points` only ever one contour, so `rings` wins: otherwise a
     client that sends both (a loaded multi-ring shape plus a single-ring mirror of it) would
     persist the truncated version."""
@@ -1293,4 +1302,5 @@ def test_annotate_polygons_keep_and_stamp_provenance(opened_client, dataset_root
     assert resp.status_code == 200
     objs = _raw(img_path)
     assert objs[0]["created_by"] == "user:emily"   # round-tripped shape keeps its author
-    assert objs[1]["created_by"] == "user:breeder"    # new polygon -> stamped to the current annotator
+    # new polygon -> stamped to the current annotator
+    assert objs[1]["created_by"] == "user:breeder"

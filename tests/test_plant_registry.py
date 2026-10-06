@@ -24,7 +24,8 @@ def test_registers_a_csv_and_persists_the_frozen_record(tmp_path: Path) -> None:
     csv_path = write_plant_csv(tmp_path / "plants.csv", PLANTS)
 
     res = register_plant_registry(
-        tmp_path, name="valley-plants", csv_paths=[str(csv_path)], crop="currant", site="north orchard")
+        tmp_path, name="valley-plants", csv_paths=[str(csv_path)],
+        crop="currant", site="north orchard")
 
     assert "error" not in res, res
     assert res["name"] == "valley-plants"
@@ -78,7 +79,8 @@ def test_refuses_a_name_outside_name_segment(tmp_path: Path) -> None:
 
 def test_refuses_a_missing_file(tmp_path: Path) -> None:
     res = register_plant_registry(
-        tmp_path, name="valley", csv_paths=[str(tmp_path / "missing.csv")], crop="currant", site="orchard")
+        tmp_path, name="valley", csv_paths=[str(tmp_path / "missing.csv")],
+        crop="currant", site="orchard")
 
     assert "error" in res
     assert "plant CSV" in res["error"]

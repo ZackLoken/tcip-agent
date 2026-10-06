@@ -26,7 +26,9 @@ from tcip_mcp.pipelines.data import selection
 from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
 
 
-def _make_dataset(root: Path, *, pixel=(120, 120, 120), bud_box=(10, 10, 40, 40), ext="jpg") -> None:
+def _make_dataset(
+    root: Path, *, pixel=(120, 120, 120), bud_box=(10, 10, 40, 40), ext="jpg"
+) -> None:
     """A minimal nested-schema dataset: one dated image + its bud label + a registry."""
     date = "2026-02-11"
     (root / "images" / date).mkdir(parents=True, exist_ok=True)
@@ -71,9 +73,11 @@ def test_pixel_reencode_under_same_filename_changes_the_fingerprint(tmp_path):
     size_before = img_path.stat().st_size
     # re-encode the image with different pixels, same filename, labels untouched
     Image.new("RGB", (64, 64), color=(0, 200, 0)).save(img_path)
-    assert img_path.stat().st_size == size_before  # confirms the size channel is closed, not just JPEG luck
+    # confirms the size channel is closed, not just JPEG luck
+    assert img_path.stat().st_size == size_before
     assert fingerprint_mod._labels_term(tmp_path, {}) == before_labels  # labels-only: blind
-    assert dataset_fingerprint(tmp_path) != before_fp  # fingerprint: pixel-aware, catches it even though size didn't
+    # fingerprint: pixel-aware, catches it even though size didn't
+    assert dataset_fingerprint(tmp_path) != before_fp
 
 
 def test_an_image_rewritten_at_its_size_and_mtime_changes_the_fingerprint(tmp_path):
@@ -105,14 +109,16 @@ def test_registry_value_order_matters_but_whitespace_does_not(tmp_path):
     _make_dataset(tmp_path)  # reset registry to no-attr
     assert dataset_fingerprint(tmp_path) != with_attr
 
-    # a whitespace-only reformat of subjects.json must not change identity (canonical re-serialization)
+    # a whitespace-only reformat of subjects.json must not change identity (canonical
+    # re-serialization)
     reg2_again = SubjectRegistry(subjects=(Subject(
         name="bud", description="a currant bud",
         attributes=(Attribute(name="opening", type="categorical", values=("closed", "open")),)),))
     registry_over(tmp_path, reg2_again)
     fp_a = dataset_fingerprint(tmp_path)
     cp = tmp_path / "subjects.json"
-    cp.write_text(json.dumps(json.loads(cp.read_text()), indent=4) + "\n\n", encoding="utf-8")  # reformat
+    # reformat
+    cp.write_text(json.dumps(json.loads(cp.read_text()), indent=4) + "\n\n", encoding="utf-8")
     assert dataset_fingerprint(tmp_path) == fp_a
 
 

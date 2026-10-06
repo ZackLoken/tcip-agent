@@ -58,7 +58,8 @@ def _deliver_counts(root: Path, name: str) -> dict:
     bucket = _bucket(root)
     acknowledged(root, lambda ack: deliver_per_image_counts_csv(
         root, bucket.root, bucket.name, str(out), trait=fx.COUNT_TRAIT, acknowledgment_id=ack,
-        door="test_trait_revisions", actor=None), by="user:tester", reason="no assessment backs these counts")
+        door="test_trait_revisions", actor=None), by="user:tester",
+        reason="no assessment backs these counts")
     (event,) = [e for e in read_delivery_events(root) if e.output_path == str(out)]
     return event.model_dump(mode="json")
 
@@ -161,7 +162,8 @@ def test_a_withdrawn_later_revision_leaves_the_earlier_confirmed_one_answering(
     tmp_path: Path,
 ) -> None:
     fx.propose_and_confirm(tmp_path, _count_entry())
-    second = fx.propose_and_confirm(tmp_path, _count_entry(statement="stems per frame, tips excluded"))
+    second = fx.propose_and_confirm(
+        tmp_path, _count_entry(statement="stems per frame, tips excluded"))
     traits.confirm_revision(tmp_path, fx.COUNT_TRAIT, 2, second.entry_sha256,
                             actor="user:rosalind", confirmed=False)
 
@@ -177,7 +179,8 @@ def test_the_proposal_writes_one_audit_line_naming_the_agent(tmp_path: Path) -> 
     finally:
         agent_identity.end()
 
-    lines = [e for e in ts.read_log(audit_log_key(tmp_path)).records if e["tool"] == "propose_trait"]
+    lines = [e for e in ts.read_log(audit_log_key(tmp_path)).records
+             if e["tool"] == "propose_trait"]
     assert [line["arguments"] for line in lines] == [
         {"trait": fx.COUNT_TRAIT, "revision": 1, "entry_sha256": revision.entry_sha256}]
     assert lines[0]["agent_client_name"] == "claude-code"

@@ -35,7 +35,8 @@ _QUOTED_RE = re.compile(r'"([^"]+)"')
 
 
 def _generator():
-    """The type-module generator loaded as a module, so the test regenerates the same way CI does."""
+    """The type-module generator loaded as a module, so the test regenerates the same way CI
+    does."""
     spec = importlib.util.spec_from_file_location("tcip_frontend_type_generator", GENERATOR)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -127,7 +128,9 @@ def test_an_object_with_its_own_fixed_property_set_still_refuses() -> None:
 
 def _generated_field_sets() -> list[set[str]]:
     text = GENERATED.read_text(encoding="utf-8")
-    return [{name for name, _ in _TS_FIELD_RE.findall(block)} for block in _TS_BLOCK_RE.findall(text)]
+    return [
+        {name for name, _ in _TS_FIELD_RE.findall(block)} for block in _TS_BLOCK_RE.findall(text)
+    ]
 
 
 def test_no_other_frontend_module_declares_an_interface_with_a_generated_field_set() -> None:

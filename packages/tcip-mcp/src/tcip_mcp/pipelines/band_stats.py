@@ -133,7 +133,9 @@ def stretch_band(band, mode: str, source_dtype, bounds: tuple[float, float] | No
 
     raw = np.asarray(band).astype(np.float64)
     if mode == "none":
-        sampled_maximum, sampled_minimum = (None, None) if bounds is None else (bounds[1], bounds[0])
+        sampled_maximum, sampled_minimum = (
+            (None, None) if bounds is None else (bounds[1], bounds[0])
+        )
         out = raw / full_scale_denominator(
             raw, source_dtype, sampled_maximum=sampled_maximum,
             sampled_minimum=sampled_minimum) * 255.0

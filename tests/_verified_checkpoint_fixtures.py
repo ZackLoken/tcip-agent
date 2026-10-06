@@ -14,7 +14,9 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 torch = pytest.importorskip("torch")
 
-SCOPED_DATA = {"num_channels": 3, "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}}
+SCOPED_DATA = {
+    "num_channels": 3, "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}
+}
 """A three-band detection run's data section, stating the one subject it is scoped to and the
 seed its own draw is made at; the admission reads the attributes the registry declares for it."""
 

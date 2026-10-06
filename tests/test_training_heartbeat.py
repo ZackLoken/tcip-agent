@@ -53,7 +53,8 @@ def test_a_listed_row_carries_the_heartbeat_instant(tmp_path):
     """No process id is recorded anywhere a listed row could check, so a client showing a
     'running' row as live needs the heartbeat instant itself, not just the derived state, to
     say how stale that liveness claim already is."""
-    instant = _beat(opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="beating"), 180)
+    instant = _beat(
+        opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="beating"), 180)
 
     by_id = _listed(tmp_path)
     assert by_id["beating"]["state"] == "running"
@@ -71,7 +72,8 @@ def test_configured_stale_window_agrees_across_run_list_compare_and_status(tmp_p
     from tcip_mcp.tools.training_tools import monitor_training
 
     monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", 30.0)
-    _beat(opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="exp-window"), 300)
+    _beat(
+        opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="exp-window"), 300)
 
     assert _listed(tmp_path)["exp-window"]["state"] == "interrupted"
 

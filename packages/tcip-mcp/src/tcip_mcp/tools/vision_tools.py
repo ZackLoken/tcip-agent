@@ -305,8 +305,8 @@ def _viz_annotations(
         "summary": summary,
         # `count` is the stable key across all visualize sources; the source-specific alias stays.
         "count": len(shapes),
-        # Disclosed, not folded into `count`: these annotations are real but this renderer can't draw
-        # them, and a silently smaller count would read as "the image has fewer annotations".
+        # Disclosed, not folded into `count`: these annotations are real but this renderer can't
+        # draw them, and a silently smaller count would read as "the image has fewer annotations".
         "points_not_rendered": n_points,
     }
 
@@ -434,7 +434,8 @@ def _viz_comparison(
 
 
 def get_worst_predictions(bucket: Bucket, top_k: int = 8) -> dict:
-    """Return the ``top_k`` images ranked worst by a count-mismatch + low-confidence triage heuristic.
+    """Return the ``top_k`` images ranked worst by a count-mismatch + low-confidence triage
+    heuristic.
 
     This is a cheap triage signal, not a quality metric: it does no IoU matching and computes
     no loss. The score is ``2·|n_gt−n_pred as a shortfall| + |surplus| + (1−avg_conf)``, purely
@@ -567,7 +568,10 @@ def render_failure_cases(
     return {
         "image_path": grid_path,
         "case_images": case_paths,
-        "summary": f"Rendered {len(case_paths)} worst prediction cases (of {worst['total_evaluated']} evaluated)",
+        "summary": (
+            f"Rendered {len(case_paths)} worst prediction cases "
+            f"(of {worst['total_evaluated']} evaluated)"
+        ),
         "worst_images": worst_items,
     }
 
@@ -744,7 +748,10 @@ def capture_live_canvas(
 
     age = round((now - _received_at(state, "canvas_live")).total_seconds(), 1)
     if refreshed or age < 5.0:
-        summary = f"Rendered the live {state.get('tab')} canvas for {state.get('image')} ({len(shapes)} shapes)."
+        summary = (
+            f"Rendered the live {state.get('tab')} canvas for {state.get('image')} "
+            f"({len(shapes)} shapes)."
+        )
     else:
         summary = (
             f"Rendered the last known {state.get('tab')} canvas for {state.get('image')} "

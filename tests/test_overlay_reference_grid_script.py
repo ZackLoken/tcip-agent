@@ -34,7 +34,9 @@ def test_renders_the_overlay_and_echoes_grid_geometry_under_the_named_project(pr
     cwd = tmp_path.parent / "operator_cwd"
     cwd.mkdir()
 
-    result = run_tcip("overlay-reference-grid", ["--image", str(img), "--project", str(project), "--tile-size", "80"], cwd=cwd)
+    result = run_tcip(
+        "overlay-reference-grid",
+        ["--image", str(img), "--project", str(project), "--tile-size", "80"], cwd=cwd)
 
     assert result.returncode == 0, result.stderr
     body = json.loads(result.stdout)

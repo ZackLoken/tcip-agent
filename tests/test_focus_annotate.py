@@ -93,10 +93,8 @@ def test_a_named_bucket_sets_the_mode_from_its_own_document_not_the_label(tmp_pa
 
 
 def test_focus_annotate_scopes_annotated_to_the_requested_subject(tmp_path: Path) -> None:
-    # Name-based schema: one file per image holds every subject. IMG_0001 is labeled only for 'leaf',
-    # IMG_0002 only for 'bud'. Focusing on 'leaf' must land on IMG_0001 (its subject's frame) in
-    # polygon mode and count only leaf's frame: the tool scopes 'annotated' to the requested
-    # subject by name.
+    # IMG_0001 is labeled only for 'leaf' and IMG_0002 only for 'bud': focusing on 'leaf' lands on
+    # IMG_0001 in polygon mode and counts only leaf's frame, so 'annotated' is scoped by subject.
     root = tmp_path / "proj"
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
@@ -234,7 +232,9 @@ def test_focus_annotate_explicit_mode_and_index_override(tmp_path: Path) -> None
     _scene(root, date, imgs)
     _label(root, "bush", date, "segment", "IMG_0003", 1)
 
-    res = focus_human_attention(root, root.parent, str(root), "bush", date, mode="box", image_index=1)
+    res = focus_human_attention(
+        root, root.parent, str(root), "bush", date, mode="box", image_index=1
+    )
     assert res["image_index"] == 1  # explicit override
     assert res["mode"] == "box"  # explicit override
 

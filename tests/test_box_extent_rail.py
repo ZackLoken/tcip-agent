@@ -37,7 +37,8 @@ def test_the_encoding_keeps_only_what_has_extent_on_the_stored_grid(tmp_path):
     def result() -> dict:
         return {"image": "a.jpg", "width": 40, "height": 40, "labels": [1, 1, 1],
                 "scores": [0.9, 0.8, 0.7],
-                "boxes": [[5.0, 5.0, 30.0, 30.0], [5.0, 5.0, 30.0, 30.0], [10.0, 5.0, 10.004, 30.0]],
+                "boxes": [[5.0, 5.0, 30.0, 30.0], [5.0, 5.0, 30.0, 30.0],
+                          [10.0, 5.0, 10.004, 30.0]],
                 "masks": [past_the_edge, blob], "count": 3}
 
     written = result()

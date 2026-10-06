@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-"""Guardrail: flag every trait-like token in a crop/domain knowledge document that is not in crops.yml.
+"""Guardrail: flag every trait-like token in a crop/domain knowledge document that is not in
+crops.yml.
 
 `unknown_trait_tokens` flags backtick-quoted, multi-segment snake_case tokens that are neither a
 crops.yml trait nor an allow-listed platform token; a single-word fabrication is not detectable
@@ -50,8 +51,9 @@ def load_vocab() -> tuple[set[str], dict[str, set[str]]]:
 # gets added here; the friction is intentional, it forces a human to confirm it isn't a
 # fabricated trait.
 NON_TRAIT_ALLOW = {
-    "plant_mapping", "plant_id", "accession_name", "deliver_phenology_milestones", "build_plant_mapping",
-    "run_inference", "run_matching", "tile_size", "class_id", "positive_class_assessed",
+    "plant_mapping", "plant_id", "accession_name", "deliver_phenology_milestones",
+    "build_plant_mapping", "run_inference", "run_matching", "tile_size", "class_id",
+    "positive_class_assessed",
     "catkin_phenology", "plant_mapping.json", "load_annotations",
     "save_annotations", "in_chans", "num_channels", "num_classes",
     "det_type", "gt_type", "pred_type", "count_by_class", "per_plant_phenology",
@@ -102,7 +104,8 @@ def main() -> int:
         return 2
     print(f"== {skill_path} ==")
     if unknown:
-        print(f"UNKNOWN (not a crops.yml trait, not an allow-listed platform token): {len(unknown)}")
+        print("UNKNOWN (not a crops.yml trait, not an allow-listed platform token): "
+              f"{len(unknown)}")
         for u in unknown:
             print(f"  - {u}")
     else:

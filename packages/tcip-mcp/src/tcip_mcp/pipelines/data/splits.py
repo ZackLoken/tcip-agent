@@ -303,7 +303,8 @@ class SpatialStripSplit:
 
     ``regions`` maps each split name to its list of half-open pixel rects (already merged where two
     same-split strips landed adjacent, and buffer-shrunk on any side bordering a different-split
-    neighbor). ``realized_fractions`` is each side's kept tile count over the total kept across every side
+    neighbor). ``realized_fractions`` is each side's kept tile count over the total kept across
+    every side
     (post-buffer), not the requested fractions.
     """
 
@@ -428,7 +429,8 @@ def spatial_strip_split(
     holdout instead of a stem.
 
     The tile lattice is :func:`~tcip_mcp.pipelines.slicing.slice_lattice`'s at this
-    ``tile_size``/``overlap``. The split runs along whichever axis (width or height) offers more distinct tile positions. Piece count
+    ``tile_size``/``overlap``. The split runs along whichever axis (width or height) offers more
+    distinct tile positions. Piece count
     and order follow :class:`SpatialStripSplit` (``stripes_per_split``, capped by
     ``discard_ceiling``).
 

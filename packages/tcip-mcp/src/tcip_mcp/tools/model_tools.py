@@ -60,7 +60,9 @@ def _labeled_available_metrics(models: list[dict]) -> list[dict]:
         })
         result.append({
             "metric": k,
-            "role": "comparability_only" if bare in CENTER_MATCH_COMPARABILITY_KEYS else "unlabeled",
+            "role": (
+                "comparability_only" if bare in CENTER_MATCH_COMPARABILITY_KEYS else "unlabeled"
+            ),
             "direction": None if higher is None else ("higher" if higher else "lower"),
             "sources": sources,
         })

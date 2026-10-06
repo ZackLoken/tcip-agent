@@ -28,7 +28,8 @@ AGENTS_BLOCK_END = "<!-- tcip:harness-discovery:end -->"
 AGENTS_BLOCK_MAX_BYTES = 16 * 1024
 
 
-def _render_skill_md(name: str, description: str, document_path: Path, read_instruction: str) -> str:
+def _render_skill_md(name: str, description: str, document_path: Path,
+                     read_instruction: str) -> str:
     """One knowledge document's SKILL.md text: its own frontmatter, verbatim, plus a body that
     points at the canonical content instead of duplicating it, phrased per `read_instruction`
     for the harness the tree is generated for."""
@@ -160,7 +161,8 @@ def write_agents_block(documents=None, path: Path = AGENTS_MD_PATH) -> Path:
 
 
 RESEARCH_DOCUMENT = "cv-research"
-_SOURCE_LIST = re.compile(r"The allowed/preferred set:\s*\n\n(.*?)\n\nSearch discipline:", re.DOTALL)
+_SOURCE_LIST = re.compile(
+    r"The allowed/preferred set:\s*\n\n(.*?)\n\nSearch discipline:", re.DOTALL)
 _BACKTICK_HOST = re.compile(r"`([a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,})`")
 _WEBFETCH = "WebFetch(domain:"
 

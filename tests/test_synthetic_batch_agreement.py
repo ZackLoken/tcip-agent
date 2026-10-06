@@ -202,7 +202,8 @@ def test_synthetic_detection_batch_is_assembled_by_the_loader_collate(tmp_path):
 
     assert isinstance(real_images, list)
     assert isinstance(real_targets, list)
-    assert set(synth_target) == set(real_targets[0]), (sorted(synth_target), sorted(real_targets[0]))
+    assert set(synth_target) == set(real_targets[0]), (
+        sorted(synth_target), sorted(real_targets[0]))
     for key, real_value in real_targets[0].items():
         assert type(synth_target[key]) is type(real_value), key
 

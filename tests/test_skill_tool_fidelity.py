@@ -146,7 +146,8 @@ def test_fabricated_tool_names_admits_a_real_console_command(tmp_path):
     assert guardrail.fabricated_tool_names([fixture]) == {}
 
 
-def test_orphan_tool_names_catches_a_registered_name_missing_from_every_surface(monkeypatch, tmp_path):
+def test_orphan_tool_names_catches_a_registered_name_missing_from_every_surface(
+        monkeypatch, tmp_path):
     """A registered tool named nowhere in any surface is reported as an orphan, the condition a
     rename reaches when it clears the stale mentions without writing the new name down."""
     from tcip_mcp import server
@@ -166,5 +167,6 @@ def test_orphan_tool_names_accepts_the_call_form_too(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "list_registered_tools", lambda: ["run_inference"])
 
     fixture = tmp_path / "SKILL.md"
-    fixture.write_text("Call `run_inference(checkpoint_path=...)` to score a batch.\n", encoding="utf-8")
+    fixture.write_text(
+        "Call `run_inference(checkpoint_path=...)` to score a batch.\n", encoding="utf-8")
     assert guardrail.orphan_tool_names([fixture]) == []

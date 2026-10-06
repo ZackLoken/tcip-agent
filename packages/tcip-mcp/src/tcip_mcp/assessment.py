@@ -344,7 +344,9 @@ def _disjointness(digest_of: dict[str, str], cal: list[Sample], hold: list[Sampl
 
     evidence: dict[str, Any] = {"holdout_shares_calibration": sorted(
         {digest_of[s.location] for s in cal} & {digest_of[s.location] for s in hold})}
-    failures = ["holdout_shares_calibration_image"] if evidence["holdout_shares_calibration"] else []
+    failures = (
+        ["holdout_shares_calibration_image"] if evidence["holdout_shares_calibration"] else []
+    )
     if run is None:
         evidence["training"] = None
         return evidence, [*failures, "training_membership_unknown"]
@@ -789,7 +791,8 @@ def assess_physical_scale(
     its sides must share no source digest. Each reference image carries exactly one
     ``reference_subject`` polygon or mask, whose principal-axis extent is its pixel extent;
     ``reference_csv`` (``image_stem, physical_extent, unit``) is the breeder's physical extent of
-    the same object, read once, retained with the reference and measured as read. The scale is the mean implied scale of
+    the same object, read once, retained with the reference and measured as read. The scale is
+    the mean implied scale of
     the calibration side; it passes when the holdout's own relative dispersion and the scale's
     relative deviation from the holdout mean are both within ``scale_tolerance_frac``. Refuses an
     unauthored tolerance, a unit that is not a linear length unit crops.yml declares, a selection

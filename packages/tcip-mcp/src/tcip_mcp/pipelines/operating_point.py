@@ -78,7 +78,8 @@ def detector_operating_point_holder(model: Any) -> tuple[Any, str | None]:
     candidates = ((model, "self"), (getattr(det, "roi_heads", None), "detector.roi_heads"),
                   (det, "detector"))
     matches = [(holder, path) for holder, path in candidates
-               if holder is not None and any(hasattr(holder, attr) for attr in OPERATING_POINT_ATTRS)]
+               if holder is not None
+               and any(hasattr(holder, attr) for attr in OPERATING_POINT_ATTRS)]
     if len(matches) > 1:
         raise ValueError(
             "this model exposes an operating-point knob at more than one location "

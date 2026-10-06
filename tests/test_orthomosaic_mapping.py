@@ -154,7 +154,8 @@ def test_pixel_to_wgs84_central_meridian_known_reference(tmp_path: Path) -> None
 # ── WGS84 -> pixel: the exact inverse of pixel -> WGS84 ─────────────────
 
 
-def test_wgs84_to_pixel_matches_independent_pyproj_inverse_at_asymmetric_pixel(tmp_path: Path) -> None:
+def test_wgs84_to_pixel_matches_independent_pyproj_inverse_at_asymmetric_pixel(
+        tmp_path: Path) -> None:
     """An asymmetric pixel (distinct nonzero x and y, off the tiepoint): the round-trip and an
     independently-built pyproj inverse transform must both land back on it."""
     import pyproj
@@ -177,7 +178,8 @@ def test_wgs84_to_pixel_matches_independent_pyproj_inverse_at_asymmetric_pixel(t
     assert result_py == pytest.approx(py, abs=1e-6)
 
 
-def test_native_to_pixel_round_trips_with_pixel_to_native_at_asymmetric_pixel(tmp_path: Path) -> None:
+def test_native_to_pixel_round_trips_with_pixel_to_native_at_asymmetric_pixel(
+        tmp_path: Path) -> None:
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path)
     transform = read_geotransform(path)
@@ -232,7 +234,8 @@ def test_plants_in_frame_partitions_by_the_rasters_own_recorded_dimensions(tmp_p
 
 def test_plants_in_frame_edge_pixel_at_width_or_height_is_outside(tmp_path: Path) -> None:
     """The half-open test: a plant projecting to exactly the raster's own width or height row or
-    column is outside, since a valid pixel index runs only 0..width-1 / 0..height-1, on both axes."""
+    column is outside, since a valid pixel index runs only 0..width-1 / 0..height-1, on both
+    axes."""
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
 
     path = tmp_path / "mosaic.tif"
@@ -375,7 +378,8 @@ def test_predict_sliced_windowed_source_matches_full_array_predict_sliced(tmp_pa
     assert win_result["labels"] == full_result["labels"]
 
 
-def _bespoke_instance_seg_checkpoint(tmp_path: Path, *, in_chans: int = 3, tile_size: int = TILE) -> str:
+def _bespoke_instance_seg_checkpoint(
+        tmp_path: Path, *, in_chans: int = 3, tile_size: int = TILE) -> str:
     """A real bespoke Mask R-CNN checkpoint (RGB only, no multispectral norm derivation needed
     for this end-to-end mask-shape test)."""
     import torch
@@ -394,7 +398,8 @@ def _bespoke_instance_seg_checkpoint(tmp_path: Path, *, in_chans: int = 3, tile_
     return str(ckpt)
 
 
-def test_predict_sliced_windowed_and_full_array_sources_produce_matching_masks(tmp_path: Path) -> None:
+def test_predict_sliced_windowed_and_full_array_sources_produce_matching_masks(
+        tmp_path: Path) -> None:
     """Both source kinds carry masks for a multi-slice instance_seg case, in the merged-polygon
     shape documented on ``predict_sliced``, and the windowed path agrees with the full-array path
     detection-for-detection, masks included."""
@@ -426,7 +431,8 @@ def test_predict_sliced_windowed_and_full_array_sources_produce_matching_masks(t
         m["segmentation"] for m in win_result["masks"]]
 
 
-def test_predict_sliced_windowed_source_require_masks_false_carries_no_masks_key(tmp_path: Path) -> None:
+def test_predict_sliced_windowed_source_require_masks_false_carries_no_masks_key(
+        tmp_path: Path) -> None:
     """The boxes-only opt-out still works on the windowed path: no ``masks`` key at all, not an
     empty one, mirroring ``predict_sliced``'s own opt-out contract."""
     pytest.importorskip("torch")
@@ -500,7 +506,8 @@ def test_predict_sliced_windowed_source_channel_mismatch_refuses() -> None:
         _sliced(p, _bare_execution(), _FakeReader())
 
 
-def test_predict_sliced_windowed_source_reaches_real_slicing_for_instance_seg_with_and_without_masks() -> None:
+def test_windowed_predict_sliced_reaches_real_slicing_for_instance_seg_with_and_without_masks(
+) -> None:
     """instance_seg masks thread through the windowed-read path the same as the full-array
     ``predict_sliced`` path: neither ``require_masks=True`` (masks collected) nor
     ``require_masks=False`` (the boxes-only opt-out) refuses outright, both reach the real slice

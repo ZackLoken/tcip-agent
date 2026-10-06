@@ -17,7 +17,9 @@ class _AppendRefused(RuntimeError):
 
 
 def _refuse_append(monkeypatch: pytest.MonkeyPatch) -> None:
-    refuse_audit_appends(monkeypatch, error=_AppendRefused("the audit log could not be appended to"))
+    refuse_audit_appends(
+        monkeypatch, error=_AppendRefused("the audit log could not be appended to")
+    )
 
 
 def test_append_failure_after_a_successful_body_refuses_and_names_the_committed_call(

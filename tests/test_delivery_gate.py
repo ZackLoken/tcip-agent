@@ -164,7 +164,8 @@ def test_an_mcp_door_executes_a_recorded_acknowledgment_and_never_originates_one
     act = record_acknowledgment(tmp_path, acknowledged_by="user:breeder", reason="a look",
                                 result_sha256=str(computed.value.result_sha256))
     shipped = deliver_per_image_counts(tmp_path, str(tmp_path / "ds"), bucket, "out/counts.csv",
-                                       trait=fx.COUNT_TRAIT, acknowledgment_id=act.acknowledgment_id)
+                                       trait=fx.COUNT_TRAIT,
+                                       acknowledgment_id=act.acknowledgment_id)
     assert shipped["validated"] is False and shipped["acknowledged_by"] == "user:breeder"
 
 
@@ -267,7 +268,8 @@ def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(tmp_pa
                            scope={"subject": subject})
         return deliver_acknowledged(
             tmp_path, rows, tmp_path / f"{name}.csv", "stem_count",
-            delivery_kind=PER_PLANT_COUNT_AGGREGATE, buckets=[read_bucket(bucket.root, bucket.name)])
+            delivery_kind=PER_PLANT_COUNT_AGGREGATE,
+            buckets=[read_bucket(bucket.root, bucket.name)])
 
     with pytest.raises(OperationalizationRefused, match=f"measures '{fx.COUNT_SUBJECT}'"):
         deliver("leaf", "other")

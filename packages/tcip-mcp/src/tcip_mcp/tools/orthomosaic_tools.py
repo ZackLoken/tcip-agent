@@ -41,7 +41,8 @@ def orthomosaic_plant_counts(
     """Per-plant detection counts from the whole-raster prediction bucket ``bucket`` published under
     ``dataset_root``, for exactly the
     plants ``plants`` names, delivered as a ``per_plant_count_aggregate`` CSV under ``project`` by
-    ``actor`` through the door ``door`` names, over the registered plant registry ``registry_record``
+    ``actor`` through the door ``door`` names, over the registered plant registry
+    ``registry_record``
     (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.load_registry`).
 
     The raster is the one the bucket's record names; it must still be the raster its recorded
@@ -57,7 +58,8 @@ def orthomosaic_plant_counts(
     the frame; in the segment regime, inside no segment or in one whose detection is ambiguous)
     refuses, naming it and why. The registry's files must still hash to the bytes it registered.
 
-    Delivered through :func:`~tcip_mcp.pipelines.postprocessing.aggregation.deliver_per_plant_aggregate`
+    Delivered through
+    :func:`~tcip_mcp.pipelines.postprocessing.aggregation.deliver_per_plant_aggregate`
     under the bucket's gate, the recorded acknowledgment ``acknowledgment_id`` shipping it
     unvalidated. The delivery event carries a
     ``PlantRegistryDisclosure`` or, under ``canopy_subject``, a ``CanopySegmentDisclosure``.

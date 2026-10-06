@@ -49,7 +49,8 @@ def _to_numpy(mask: Any):
 
 
 def _perimeter_px(binary) -> float:
-    """4-connected boundary length: sum over foreground pixels of edges facing background/outside."""
+    """4-connected boundary length: sum over foreground pixels of edges facing
+    background/outside."""
     import numpy as np
 
     b = binary.astype(np.int64)
@@ -148,7 +149,8 @@ def _known_units() -> set[str]:
 
 
 def is_pixel_space_key(key: str) -> bool:
-    """Whether ``key`` explicitly names pixel space: a trailing ``_px``, or the bare key ``"px"``."""
+    """Whether ``key`` explicitly names pixel space: a trailing ``_px``, or the bare key
+    ``"px"``."""
     return key.rpartition("_")[2] == "px"
 
 
@@ -238,7 +240,8 @@ def mask_geometry(mask: Any, *, scale: float | None = None, unit: str,
 
 def instance_geometries(masks: Any, *, scale: float | None = None, unit: str,
                         threshold: float = DEFAULT_MASK_BINARIZE_THRESHOLD) -> list[dict]:
-    """Per-instance :func:`mask_geometry` over an ``[N, H, W]`` mask stack (or a single ``[H, W]``)."""
+    """Per-instance :func:`mask_geometry` over an ``[N, H, W]`` mask stack (or a single
+    ``[H, W]``)."""
     arr = _to_numpy(masks)
     if arr.ndim == 2:
         arr = arr[None]

@@ -301,8 +301,8 @@ def test_a_saved_checkpoint_rebuilds_the_architecture_its_config_builds(tmp_path
     assert _param_shapes(trained)["head.weight"] == (7, 6, 1, 1)  # the recorded count took effect
 
     (tmp_path / "out").mkdir()
-    ctx = TrainContext(run=trainer_run(dict(config), tmp_path / "out", project=tmp_path, has_val_loader=True,
-                                       id="auto-run-40"),
+    ctx = TrainContext(run=trainer_run(dict(config), tmp_path / "out", project=tmp_path,
+                                       has_val_loader=True, id="auto-run-40"),
                        train_loader=None)
     path = ctx.save_checkpoint({STATE_DICT_KEY: trained.state_dict()}, "model_best")
 

@@ -50,7 +50,9 @@ def project_dir(tmp_path: Path) -> Path:
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
     from tests._producer_fixtures import label_image, registry_over
 
-    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
+    registry_over(
+        root, SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),))
+    )
 
     # 5 synthetic images (640x480 gray) with GT labels and predictions
     results = []

@@ -143,7 +143,8 @@ def _base_config(tiling, project: Path):
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(project / "imgs"), "tiling": tiling, "split": {"seed": 0, "val_ratio": 0.15}},
+        "data": {"images_dir": str(project / "imgs"), "tiling": tiling,
+                 "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 2, "evaluation": {"selection_metric": "loss"},
     }
 

@@ -87,7 +87,9 @@ class ClassBalancedSampler(Sampler):
 class OverSampler(Sampler):
     """Duplicate minority-class samples so all classes have >= min_count."""
 
-    def __init__(self, dataset: BaseDataset, min_count: int = 50, class_key: str | None = None) -> None:
+    def __init__(
+        self, dataset: BaseDataset, min_count: int = 50, class_key: str | None = None
+    ) -> None:
         dist = dataset.class_distribution
         self._indices: list[int] = list(range(len(dataset)))
         if not dist:

@@ -51,8 +51,8 @@ def dataset_entry_path(project: str | Path, entry: dict) -> Path:
 
 
 def upsert_dataset(project: str | Path, entry: dict) -> None:
-    """Add or refresh a dataset in the project's registry, matched by ``id``: a moved dataset updates
-    the ``path`` of its existing id rather than duplicating, so identity survives a move.
+    """Add or refresh a dataset in the project's registry, matched by ``id``: a moved dataset
+    updates the ``path`` of its existing id rather than duplicating, so identity survives a move.
 
     The read and the write are one transaction, so two registrations running at once cannot
     each write a list assembled from the state before the other's entry landed.

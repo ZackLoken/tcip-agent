@@ -62,7 +62,8 @@ def _reference(project: Path, *, n: int = 8, extents_mm: list[float] | None = No
         stem = f"r{i}"
         Image.new("RGB", (120, 120), color=(20 + i, 20, 20)).save(images / f"{stem}.png")
         label_image(images / f"{stem}.png", [Annotation(
-            subject=SUBJECT, geometry=Polygon(rings=[_rect(100.0, angle_deg=(angles or {}).get(i, 0.0))]))],
+            subject=SUBJECT,
+            geometry=Polygon(rings=[_rect(100.0, angle_deg=(angles or {}).get(i, 0.0))]))],
             120, 120)
         extent = extents_mm[i] if extents_mm else 100.0 / PX_PER_MM
         rows.append((stem, extent, unit))
@@ -253,7 +254,8 @@ def test_the_reference_csv_is_read_by_column_name(tmp_path):
                header=("unit", "image_stem", "physical_extent"))
 
     assert _read_reference_csv(path.read_bytes(), str(path)) == {
-        "r1": {"physical_extent": 10.0, "unit": "mm"}, "r2": {"physical_extent": 12.5, "unit": "mm"}}
+        "r1": {"physical_extent": 10.0, "unit": "mm"},
+        "r2": {"physical_extent": 12.5, "unit": "mm"}}
 
 
 @pytest.mark.parametrize(("rows", "match"), [

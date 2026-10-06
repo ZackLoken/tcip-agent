@@ -26,7 +26,8 @@ def _make_images(images_dir, stems, size):
 
 
 def _write(images_dir, stem, boxes, size):
-    label_image(images_dir / f"{stem}.jpg", [Annotation(subject=BUD, geometry=BBox(*b)) for b in boxes],
+    label_image(images_dir / f"{stem}.jpg",
+                [Annotation(subject=BUD, geometry=BBox(*b)) for b in boxes],
                 size[0], size[1])
 
 

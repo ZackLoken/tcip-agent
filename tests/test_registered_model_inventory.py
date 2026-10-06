@@ -1,8 +1,9 @@
 """What the registry holds, and where it holds it.
 
-The registered-model inventory of a project is its registry index record: registration records a checkpoint where it already lives instead of copying it under the registry
-directory, and a checkpoint registered again supersedes its earlier entry rather than adding a
-second one. Both facts decide what any reader counting a project's models can honestly report.
+The registered-model inventory of a project is its registry index record: registration records a
+checkpoint where it already lives instead of copying it under the registry directory, and a
+checkpoint registered again supersedes its earlier entry rather than adding a second one. Both
+facts decide what any reader counting a project's models can honestly report.
 """
 
 from __future__ import annotations
@@ -41,7 +42,8 @@ def test_registered_models_are_recorded_in_the_index_not_copied_into_the_registr
         run_dir = root / ".tcip" / "experiments" / name / "artifacts"
         run_dir.mkdir(parents=True)
         ckpt = checkpoint_file(run_dir / "model_best.pt", content)
-        reg.register_model(name, str(ckpt), {"data": {"scope": asdict(registry_scope(root, "bud"))}},
+        reg.register_model(name, str(ckpt),
+                           {"data": {"scope": asdict(registry_scope(root, "bud"))}},
                            metrics={"val_map50": 0.42})
 
     models_dir = root / ".tcip" / "models"

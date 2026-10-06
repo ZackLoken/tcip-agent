@@ -307,7 +307,9 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(tm
     for stem in ("a", "b"):
         Image.new("RGB", (64, 64), (90, 110, 70)).save(images / f"{stem}.png")
 
-    r = prioritize_review_queue(tmp_path, checkpoint_path=ckpt, images_dir=str(images), method="combined")
+    r = prioritize_review_queue(
+        tmp_path, checkpoint_path=ckpt, images_dir=str(images), method="combined"
+    )
 
     assert "error" not in r, r
     assert len(r["queue"]) == 2, r

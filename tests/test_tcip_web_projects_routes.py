@@ -49,7 +49,8 @@ def _listed(client: TestClient) -> dict[str, dict]:
 
 
 def test_list_projects_lists_workspace_projects(client, workspace_dir):
-    _make_project(workspace_dir, "currant_bud_valley-farm", dates=["2026-02-11"], subjects=["bud", "bush"])
+    _make_project(workspace_dir, "currant_bud_valley-farm", dates=["2026-02-11"],
+                  subjects=["bud", "bush"])
     _make_project(workspace_dir, "chestnut_burr_site-b", dates=["2026-03-01"])
 
     resp = client.get("/api/projects")

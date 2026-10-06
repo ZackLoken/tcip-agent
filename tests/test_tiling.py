@@ -23,17 +23,21 @@ SLIVER = 0.5
 def test_clip_boxes_to_tile_sliver_drop_and_remap():
     # min_box_size=12: a clipped box counts unless its visible part is a sliver (< 12px char-size).
     # Fully-inside box -> always kept, remapped to tile-local (minus origin 200,200).
-    tb, tl = clip_boxes_to_tile(np.array([[210., 210., 230., 230.]]), np.array([1]), 200, 200, 64, 64, 12.0)
+    tb, tl = clip_boxes_to_tile(
+        np.array([[210., 210., 230., 230.]]), np.array([1]), 200, 200, 64, 64, 12.0)
     assert tb.shape == (1, 4)
     assert np.allclose(tb[0], [10, 10, 30, 30])
     # Straddling box whose visible part is substantial (clipped to 14x14, char 14 >= 12) -> kept.
-    tb2, _ = clip_boxes_to_tile(np.array([[250., 250., 290., 290.]]), np.array([1]), 200, 200, 64, 64, 12.0)
+    tb2, _ = clip_boxes_to_tile(
+        np.array([[250., 250., 290., 290.]]), np.array([1]), 200, 200, 64, 64, 12.0)
     assert len(tb2) == 1
     # Straddling box whose visible part is a sliver (clipped to 9x9, char 9 < 12) -> dropped.
-    tb3, _ = clip_boxes_to_tile(np.array([[255., 255., 265., 265.]]), np.array([1]), 200, 200, 64, 64, 12.0)
+    tb3, _ = clip_boxes_to_tile(
+        np.array([[255., 255., 265., 265.]]), np.array([1]), 200, 200, 64, 64, 12.0)
     assert len(tb3) == 0
     # Non-overlapping box -> no output.
-    tb4, _ = clip_boxes_to_tile(np.array([[0., 0., 10., 10.]]), np.array([1]), 200, 200, 64, 64, 12.0)
+    tb4, _ = clip_boxes_to_tile(
+        np.array([[0., 0., 10., 10.]]), np.array([1]), 200, 200, 64, 64, 12.0)
     assert len(tb4) == 0
 
 
@@ -79,7 +83,9 @@ def test_tiled_detection_dataset_wrapper(tmp_path):
     torch = pytest.importorskip("torch")
 
     images_dir = _det_dataset(tmp_path)
-    ds = dataset_over("detection", str(images_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2, "sliver_frac": SLIVER})
+    ds = dataset_over("detection", str(images_dir), subject="bud",
+                      tiling={"enabled": True, "tile_size": 64, "overlap": 0.2,
+                              "sliver_frac": SLIVER})
     assert len(ds) >= 1  # 128px image -> multiple tiles
     img, target = ds[0]
     assert tuple(img.shape) == (3, 64, 64)
@@ -102,7 +108,9 @@ def test_tiled_dataset_keeps_empty_tiles(tmp_path):
     label_image(images_dir / "a.jpg",
                 [Annotation(subject="bud", geometry=BBox(12.8, 12.8, 38.4, 38.4))],
                 256, 256, keep_empty=True)
-    ds = dataset_over("detection", str(images_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2, "sliver_frac": SLIVER})
+    ds = dataset_over("detection", str(images_dir), subject="bud",
+                      tiling={"enabled": True, "tile_size": 64, "overlap": 0.2,
+                              "sliver_frac": SLIVER})
     # Tiles far from the object are kept as valid negatives.
     empties = sum(1 for i in range(len(ds)) if ds[i][1]["boxes"].shape[0] == 0)
     assert empties > 0
@@ -115,7 +123,9 @@ def test_tiled_dataset_collate_roundtrip(tmp_path):
     from tcip_mcp.pipelines.training.collation import task_collate
 
     images_dir = _det_dataset(tmp_path)
-    ds = dataset_over("detection", str(images_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2, "sliver_frac": SLIVER})
+    ds = dataset_over("detection", str(images_dir), subject="bud",
+                      tiling={"enabled": True, "tile_size": 64, "overlap": 0.2,
+                              "sliver_frac": SLIVER})
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
     imgs, targets = next(iter(loader))
     assert isinstance(imgs, list) and isinstance(targets, list)
@@ -162,7 +172,8 @@ def test_keep_regions_none_indexes_every_slice(tmp_path):
     images_dir = _det_dataset(tmp_path, n=1, size=256)
     base = dataset_over('detection', str(images_dir), subject="bud")
     plain = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=SLIVER)
-    explicit_none = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, keep_regions=None)
+    explicit_none = TiledDetectionDataset(
+        base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, keep_regions=None)
     from tcip_mcp.pipelines.slicing import slice_lattice
 
     assert plain.tile_entries == explicit_none.tile_entries
@@ -178,7 +189,8 @@ def test_keep_regions_restricts_to_fully_inside_tiles(tmp_path):
     images_dir = _det_dataset(tmp_path, n=1, size=256)
     base = dataset_over('detection', str(images_dir), subject="bud")
     full = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=SLIVER)
-    left_half = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, keep_regions=[(0, 0, 128, 256)])
+    left_half = TiledDetectionDataset(
+        base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, keep_regions=[(0, 0, 128, 256)])
 
     assert 0 < left_half.num_samples < full.num_samples
     for _stem, box in left_half.tile_entries:
@@ -195,8 +207,10 @@ def test_keep_regions_two_views_share_one_base_and_partition_disjointly(tmp_path
 
     images_dir = _det_dataset(tmp_path, n=1, size=256)
     base = dataset_over('detection', str(images_dir), subject="bud")
-    left = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, keep_regions=[(0, 0, 128, 256)])
-    right = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, keep_regions=[(128, 0, 256, 256)])
+    left = TiledDetectionDataset(
+        base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, keep_regions=[(0, 0, 128, 256)])
+    right = TiledDetectionDataset(
+        base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, keep_regions=[(128, 0, 256, 256)])
 
     assert left.num_samples > 0 and right.num_samples > 0
     assert set(left.tile_entries).isdisjoint(set(right.tile_entries))

@@ -25,7 +25,8 @@ def entry(name: str, delivers: Sequence[str], **fields: Any) -> TraitEntry:
         "localization_tolerance_frac": 0.5, "count_bias_tolerance_frac": None,
         "count_error_tolerance": None, "classifier_agreement_floor": None,
         "ordinal_agreement_floor": None, "regression_skill_floor": None,
-        "regression_criterion": "", "scale_tolerance_frac": None, "holdout_match_quality_floor": None, "notes": "",
+        "regression_criterion": "", "scale_tolerance_frac": None,
+        "holdout_match_quality_floor": None, "notes": "",
         "operationalizations": {}, **fields,
     })
 
@@ -39,7 +40,8 @@ BUD_OPENING = entry(
     "bud_opening", ("leaf_out_05per_date", "leaf_out_50per_date"),
     count_objective=COUNT_UNBIASED,
     localization=CENTER_MATCH,
-    holdout_match_quality_floor=0.5,  # fixture value: loose enough for the synthetic dense references to clear
+    # fixture value: loose enough for the synthetic dense references to clear
+    holdout_match_quality_floor=0.5,
     positive_state={"attribute": "opening", "value": "open"},
     milestone_fractions=(0.05, 0.50, 0.95),
     milestone_on="positive_fraction",

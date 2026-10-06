@@ -319,7 +319,8 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = tmp_path / "whole_frame.jpg"
         Image.new("RGB", (64, 64), color=(50, 50, 50)).save(img_path)
 
-        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
+        result = proposal_tools.propose_annotations(
+            tmp_path, image_path=str(img_path), engine="stub")
         assert "error" not in result, result
         assert called == []
         assert result["candidates"][0]["bbox"] == [10.0, 10.0, 30.0, 30.0]
@@ -335,7 +336,8 @@ class TestWholeFrameDefaultIsUnaffected:
             def propose(self, image_path, **params):
                 return [{
                     "candidate_id": 0, "bbox": [1.0, 1.0, 2.0, 2.0], "area": 1,
-                    "score": 0.5, "engine": "stub", "engine_meta": {}, "rings": [[(1, 1), (2, 1), (2, 2)]],
+                    "score": 0.5, "engine": "stub", "engine_meta": {},
+                    "rings": [[(1, 1), (2, 1), (2, 2)]],
                 }]
 
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: OneBoxProposer())
@@ -345,7 +347,8 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = images_dir / "no_region.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
-        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
+        result = proposal_tools.propose_annotations(
+            tmp_path, image_path=str(img_path), engine="stub")
         assert "error" not in result, result
 
         envelope = ts.read(proposal_tools._staging_key_for(str(img_path)))
@@ -379,7 +382,8 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = images_dir / "unstorable.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
-        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
+        result = proposal_tools.propose_annotations(
+            tmp_path, image_path=str(img_path), engine="stub")
 
         assert "candidates[0].bbox" in result["error"]
         assert ts.read(proposal_tools._staging_key_for(str(img_path)), default=None) is None
@@ -405,7 +409,8 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = images_dir / "short_ring.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
-        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
+        result = proposal_tools.propose_annotations(
+            tmp_path, image_path=str(img_path), engine="stub")
 
         assert "three or more points" in result.get("error", ""), result
         assert ts.read(proposal_tools._staging_key_for(str(img_path)), default=None) is None
@@ -433,7 +438,8 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = images_dir / "storable.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
-        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
+        result = proposal_tools.propose_annotations(
+            tmp_path, image_path=str(img_path), engine="stub")
 
         assert "error" not in result, result
         envelope = ts.read(proposal_tools._staging_key_for(str(img_path)))
@@ -460,7 +466,8 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = images_dir / "unscored.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
-        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path), engine="unscored")
+        result = proposal_tools.propose_annotations(
+            tmp_path, image_path=str(img_path), engine="unscored")
 
         assert "'score'" in result.get("error", ""), result
         assert ts.read(proposal_tools._staging_key_for(str(img_path)), default=None) is None

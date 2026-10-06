@@ -68,8 +68,12 @@ def iou_matrix(a, b, *, over: str = "union") -> np.ndarray:
     a pair whose denominator has no area is ``0``."""
     a = np.asarray(a, dtype=np.float64).reshape(-1, 4)
     b = np.asarray(b, dtype=np.float64).reshape(-1, 4)
-    iw = np.maximum(0.0, np.minimum(a[:, 2:3], b[None, :, 2]) - np.maximum(a[:, 0:1], b[None, :, 0]))
-    ih = np.maximum(0.0, np.minimum(a[:, 3:4], b[None, :, 3]) - np.maximum(a[:, 1:2], b[None, :, 1]))
+    iw = np.maximum(
+        0.0, np.minimum(a[:, 2:3], b[None, :, 2]) - np.maximum(a[:, 0:1], b[None, :, 0])
+    )
+    ih = np.maximum(
+        0.0, np.minimum(a[:, 3:4], b[None, :, 3]) - np.maximum(a[:, 1:2], b[None, :, 1])
+    )
     inter = iw * ih
     area_a, area_b = box_areas(a)[:, None], box_areas(b)[None, :]
     denominator = area_a + area_b - inter if over == "union" else np.minimum(area_a, area_b)

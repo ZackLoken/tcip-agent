@@ -211,7 +211,9 @@ class TrustBoundaryMiddleware:
             return
         if scope["type"] == "websocket" or scope.get("method") in STATE_CHANGING_METHODS:
             if not self._origin_ok(scope):
-                detail = _ORIGIN_REFUSAL_WS if scope["type"] == "websocket" else _ORIGIN_REFUSAL_HTTP
+                detail = (
+                    _ORIGIN_REFUSAL_WS if scope["type"] == "websocket" else _ORIGIN_REFUSAL_HTTP
+                )
                 await _refuse(scope, send, 403, detail)
                 return
         await self.app(scope, receive, send)

@@ -69,7 +69,9 @@ class TrainContext:
     def device(self) -> Any:
         import torch
 
-        return torch.device(self.config.get("device", "cuda" if torch.cuda.is_available() else "cpu"))
+        return torch.device(
+            self.config.get("device", "cuda" if torch.cuda.is_available() else "cpu")
+        )
 
     def set_seed(self, seed: int | None = None, deterministic: bool = False) -> None:
         from tcip_mcp.pipelines.training.generic_trainer import set_seed
@@ -105,14 +107,18 @@ class TrainContext:
         resolved dims, so a hand-rolled ``train(ctx)`` can self-prove before the full loop."""
         from tcip_mcp.pipelines.model_contract import check_model_contract
 
-        return check_model_contract(model or self.build_model(), self.task, **self._contract_args(**overrides))
+        return check_model_contract(
+            model or self.build_model(), self.task, **self._contract_args(**overrides)
+        )
 
     def overfit_check(self, model: Any = None, **overrides: Any) -> dict:
         """Voluntary diagnostic: drive a few steps on one tiny batch and confirm the loss falls,
         the cheap proof a from-scratch model actually learns. Non-gating."""
         from tcip_mcp.pipelines.model_contract import overfit_check
 
-        return overfit_check(model or self.build_model(), self.task, **self._contract_args(**overrides))
+        return overfit_check(
+            model or self.build_model(), self.task, **self._contract_args(**overrides)
+        )
 
     # ---- the default trainer: one optional convenience ----
     def default_train(self) -> Any:
@@ -126,9 +132,9 @@ class TrainContext:
     # ---- craft library passthroughs (compose, don't reinvent) ----
     def build_dataset(self, task: str | None = None, *, samples: Any,
                       sizes: "Mapping[str, int] | None" = None, **kwargs: Any) -> Any:
-        """The factory, over the samples you were handed. ``sizes`` and ``scope`` unstated are the
-        ones this run's data config records, so a loader you build here reads at its width and
-        count whichever subset of samples it holds."""
+        """The factory, over the samples you were handed. ``sizes`` and ``scope`` unstated are
+        the ones this run's data config records, so a loader you build here reads at its width
+        and count whichever subset of samples it holds."""
         from tcip_mcp.pipelines.data.datasets import build_dataset, stated_sizes
         from tcip_mcp.pipelines.data.selection import ClassScope
 
@@ -140,8 +146,9 @@ class TrainContext:
         return build_dataset(resolved_task, samples=samples, sizes=sizes, **kwargs)
 
     def tiled_dataset(self, base: Any, **kwargs: Any) -> Any:
-        """Wrap a detection dataset in the native-resolution tiler (same derived sliver cutoff the
-        default path uses); ``kwargs``: tile_size / overlap / sliver_frac / dedup_iou / skip_empty."""
+        """Wrap a detection dataset in the native-resolution tiler (same derived sliver cutoff
+        the default path uses); ``kwargs``: tile_size / overlap / sliver_frac / dedup_iou /
+        skip_empty."""
         from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
         return TiledDetectionDataset(base, **kwargs)

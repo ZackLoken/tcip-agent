@@ -58,7 +58,8 @@ def viz_bucket(viz_dataset: Path) -> Path:
     from tests._chain_fixtures import published
 
     published(viz_dataset, PUBLISHED, [
-        {"image": str(viz_dataset / "images" / UNDATED_BUCKET / f"{name}.jpg"), "width": 640, "height": 480,
+        {"image": str(viz_dataset / "images" / UNDATED_BUCKET / f"{name}.jpg"),
+         "width": 640, "height": 480,
          "boxes": [[288, 216, 352, 264], [496, 372, 528, 396]], "scores": [0.95, 0.6],
          "labels": [1, 1]} for name in ("img_001", "img_002", "img_003", "img_004")],
         scope={"subject": "bud"})
@@ -274,7 +275,8 @@ class TestRenderGrid:
     def test_grid(self, viz_dataset: Path):
         from tcip_annotation.viz import render_grid
 
-        paths = [str(viz_dataset / "images" / UNDATED_BUCKET / f"img_{i:03d}.jpg") for i in range(1, 5)]
+        paths = [str(viz_dataset / "images" / UNDATED_BUCKET / f"img_{i:03d}.jpg")
+                 for i in range(1, 5)]
         out = str(viz_dataset / "test_grid.png")
         result = render_grid(paths, titles=["a", "b", "c", "d"], output_path=out)
         assert Path(result).is_file()
@@ -368,7 +370,9 @@ class TestVisualizePredictions:
     def test_no_bucket_named_refuses_naming_the_parameter(self, viz_dataset: Path):
         from tcip_mcp.tools.vision_tools import visualize
 
-        result = visualize(viz_dataset, "predictions", str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"))
+        result = visualize(
+            viz_dataset, "predictions",
+            str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"))
         assert "requires bucket" in result["error"]
 
     def test_an_unreadable_prediction_returns_an_error_naming_the_document(self, viz_bucket: Path):
@@ -385,8 +389,9 @@ class TestVisualizePredictions:
 
         _damage_record(viz_bucket)
 
-        result = visualize(viz_bucket, "predictions", str(viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg"),
-                           bucket=PUBLISHED)
+        result = visualize(
+            viz_bucket, "predictions", str(viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg"),
+            bucket=PUBLISHED)
         assert "error" in result
 
 
@@ -477,8 +482,9 @@ class TestVisualizeComparison:
 
         _damage_record(viz_bucket)
 
-        result = visualize(viz_bucket, "comparison", str(viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg"),
-                           bucket=PUBLISHED)
+        result = visualize(
+            viz_bucket, "comparison", str(viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg"),
+            bucket=PUBLISHED)
         assert "error" in result
 
 
@@ -559,7 +565,8 @@ class TestVisualizeDatasetSample:
 
         Image.new("RGB", (64, 48)).save(viz_dataset / "images" / "loose.jpg")
         (viz_dataset / "images" / UNDATED_BUCKET / "nested").mkdir()
-        Image.new("RGB", (64, 48)).save(viz_dataset / "images" / UNDATED_BUCKET / "nested" / "deep.jpg")
+        Image.new("RGB", (64, 48)).save(
+            viz_dataset / "images" / UNDATED_BUCKET / "nested" / "deep.jpg")
 
         result = visualize(viz_dataset, "dataset", str(viz_dataset), n=16)
 
@@ -842,7 +849,8 @@ class TestVisualizeGridOverlayTool:
         from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
         result = overlay_reference_grid(
-            viz_dataset, image_path=str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"), tile_size=80,
+            viz_dataset,
+            image_path=str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"), tile_size=80,
         )
         assert "error" not in result
         assert result["tile_size"] == 80
@@ -859,7 +867,8 @@ class TestVisualizeGridOverlayTool:
         from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
         result = overlay_reference_grid(
-            viz_dataset, image_path=str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"), tile_size=0,
+            viz_dataset,
+            image_path=str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"), tile_size=0,
         )
         assert "error" in result
         assert "tile_size" in result["error"]
@@ -868,7 +877,8 @@ class TestVisualizeGridOverlayTool:
         from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
         result = overlay_reference_grid(
-            viz_dataset, image_path=str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"), tile_size=20,
+            viz_dataset,
+            image_path=str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"), tile_size=20,
         )
         assert "error" not in result
         assert result["cols"] == 32
@@ -939,7 +949,8 @@ class TestAcceptProposalsTool:
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: StubProposer())
 
         propose_result = propose_annotations(
-            viz_dataset, image_path=str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"), engine="stub")
+            viz_dataset,
+            image_path=str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"), engine="stub")
         assert "error" not in propose_result, propose_result
         assert propose_result["staged"] is True
 
@@ -956,7 +967,8 @@ class TestAcceptProposalsTool:
 
         # Masks are staged as the engine's predictions, not GT: one per-image document holding
         # both accepted objects by subject name.
-        anns, objs = _staged(viz_dataset, viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg", result)
+        anns, objs = _staged(
+            viz_dataset, viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg", result)
         assert len(anns) == 2
         assert {a.subject for a in anns} == {"bud", "nut"}
 

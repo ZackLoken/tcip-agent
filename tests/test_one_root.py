@@ -46,7 +46,7 @@ def test_the_server_acts_on_the_project_it_was_started_for_while_the_backend_ope
     assert _friction_rows(opened) == []
 
 
-def test_a_server_started_for_no_project_refuses_a_project_tool_naming_project_and_serves_knowledge():
+def test_a_server_for_no_project_refuses_project_tools_naming_project_and_serves_knowledge():
     refused, knowledge = results_through_handshake(
         [_FRICTION, ("serve_domain_knowledge", {})], project=None)
 

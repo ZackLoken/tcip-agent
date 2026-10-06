@@ -248,9 +248,11 @@ def read_audit_log(
     status.
 
     ``scope`` resolves through ``tcip_mcp.audit.dataset_scope_of``: a path under a dataset's
-    ``images/`` tree resolves up to its dataset root, and a bare directory counts as a root only when it carries its own ``.tcip``
+    ``images/`` tree resolves up to its dataset root, and a bare directory counts as a root only
+    when it carries its own ``.tcip``
     directory or a ``subjects.json``, which a project root does too. ``scope=None`` reads the
-    project's own log. A ``scope`` that resolves to none of these refuses by name. The whole log is read
+    project's own log. A ``scope`` that resolves to none of these refuses by name. The whole log
+    is read
     through ``tcip_mcp.audit.audit_entries``, filtered in memory on each entry's own ``tool`` name,
     ``status``, and ``timestamp``, then returned newest first by each entry's own stated timestamp.
     ``skipped`` states how many entries this call is not returning, whether filtered out or

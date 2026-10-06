@@ -18,7 +18,8 @@ def get_experiment(
     record, the final status (``None`` until written), the derived state, and the run's metrics
     as one row per epoch, oldest first; the last row is only the last one logged, not a verified
     result. ``n_epochs`` is the number of epoch rows and the bound
-    ``metrics_limit``/``metrics_offset`` page against. With ``view='lineage'`` returns only the data-to-model chain
+    ``metrics_limit``/``metrics_offset`` page against. With ``view='lineage'`` returns only the
+    data-to-model chain
     (``experiments.get_experiment_lineage``); ``metrics_limit``/``metrics_offset`` are refused with
     a non-default value under ``view='lineage'``.
 

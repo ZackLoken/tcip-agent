@@ -192,7 +192,9 @@ def _build_mask_rcnn(
 
     anchor_generator, box_roi_pool = _rcnn_anchors_and_box_pool(
         featmap_names, num_levels, anchor_base_size, aspect_ratios)
-    mask_roi_pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=14, sampling_ratio=2)
+    mask_roi_pool = MultiScaleRoIAlign(
+        featmap_names=featmap_names, output_size=14, sampling_ratio=2
+    )
     return MaskRCNN(
         adapter, num_classes=num_classes + 1,  # +1 for background
         rpn_anchor_generator=anchor_generator,

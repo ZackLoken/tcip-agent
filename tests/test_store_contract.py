@@ -296,7 +296,8 @@ def test_a_stale_writer_cannot_clobber_a_committed_transaction(store):
         ready_reader, go, result,
     )
     wait_for(ready_reader)
-    holder = store.spawn("hold-transaction", store.root, CAS, "contended", "insider", 1.5, ready_holder)
+    holder = store.spawn(
+        "hold-transaction", store.root, CAS, "contended", "insider", 1.5, ready_holder)
     wait_for(ready_holder)
     go.write_text("go", encoding="utf-8")
 
@@ -322,7 +323,8 @@ def test_an_unconditional_writer_waits_for_a_transaction_and_then_wins(store):
         ready_writer, go, result,
     )
     wait_for(ready_writer)
-    holder = store.spawn("hold-transaction", store.root, LWW, "contended", "insider", 1.5, ready_holder)
+    holder = store.spawn(
+        "hold-transaction", store.root, LWW, "contended", "insider", 1.5, ready_holder)
     wait_for(ready_holder)
     go.write_text("go", encoding="utf-8")
 
@@ -869,7 +871,8 @@ def test_a_version_read_before_a_transaction_committed_is_refused_afterwards(sto
     stale = ts.read_versioned(key).version
     ready = store.root / "holder.ready"
 
-    holder = store.spawn("hold-transaction", store.root, CAS, "moved-under-us", "insider", 0.1, ready)
+    holder = store.spawn(
+        "hold-transaction", store.root, CAS, "moved-under-us", "insider", 0.1, ready)
     assert holder.wait(timeout=60) == 0
 
     with pytest.raises(ts.VersionConflict) as raised:

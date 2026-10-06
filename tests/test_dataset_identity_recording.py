@@ -64,7 +64,8 @@ def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(tmp_path
     opened_run(tmp_path, {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_classifier",
                          "task": "classification"},
-        "data": {**table_images(tmp_path / "loose"), "split": {"seed": 0, "val_ratio": 0.15}}}, experiment_id="b")
+        "data": {**table_images(tmp_path / "loose"), "split": {"seed": 0, "val_ratio": 0.15}}},
+        experiment_id="b")
     assert compare_experiments(["a", "b"], project=tmp_path)["same_dataset_fingerprint"] is None
 
 

@@ -11,7 +11,8 @@ A trait's phenology milestones (percentile-crossing dates of its positive-state 
 
 Usage:
     results = aggregate_per_plant(image_results, strategy="count")
-    deliver_per_plant_aggregate(project, results, "output.csv", delivered_phenotype="stem_count", ...)
+    deliver_per_plant_aggregate(
+        project, results, "output.csv", delivered_phenotype="stem_count", ...)
 
 ``delivered_phenotype`` is a crop-vocabulary delivered-phenotype name (``stem_count`` is one, as an
 example rather than as the shape), which is what the CSV column and the unit cross-check are about.
@@ -47,7 +48,8 @@ def aggregate_per_plant(
 
     When a record carries an assignment's ``source``/``distance_m`` (as ``build_plant_mapping``'s
     ``Assignment`` rows do), they are summarized per plant as ``plant_id_source`` (``"mixed"``
-    where the plant's images disagree) and ``plant_id_distance_m_max``. A record's ``plant_attribution`` (the
+    where the plant's images disagree) and ``plant_id_distance_m_max``. A record's
+    ``plant_attribution`` (the
     granularity objects were attributed to plants at, e.g. ``plant_mapping.MappingBuild``'s
     ``"image"`` or ``orthomosaic_mapping.DetectionAssignment``'s ``"detection"``) is carried onto
     the summary; a plant whose own images disagree on it refuses (see :func:`_agreed`).
@@ -122,7 +124,10 @@ def _agreed(items: list[dict], key: str, where: str, *, required: bool = False) 
 
 
 def _agg_count(values: list, n_missing: int) -> dict:
-    """Median count across images. A missing value_key is a missing observation, not a measured 0."""
+    """Median count across images.
+
+    A missing value_key is a missing observation, not a measured 0.
+    """
     return {
         "value": statistics.median(values) if values else None,
         "min_count": min(values) if values else None,

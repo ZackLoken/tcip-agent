@@ -124,8 +124,8 @@ def _attest_regions_complete(root: Path, stem: str, regions: list[list[tuple[int
     from tests._producer_fixtures import mark_complete
 
     for x0, y0, x1, y1 in (r for region in regions for r in region):
-        mark_complete(root / "images" / UNDATED_BUCKET / f"{stem}.tif", subject, project=root.parent,
-                      rect=(x0, y0, x1 - x0, y1 - y0))
+        mark_complete(root / "images" / UNDATED_BUCKET / f"{stem}.tif", subject,
+                      project=root.parent, rect=(x0, y0, x1 - x0, y1 - y0))
 
 
 def _attested(tmp_path: Path, **kwargs) -> dict:

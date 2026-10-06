@@ -249,7 +249,9 @@ def tie_segments_to_plants(
         else:
             untied.append(UntiedSegment(segment_index=s.segment_index, polygon=s.polygon))
 
-    plants_without_segment = sorted(p.plot_name for p in in_frame if not plant_segments[p.plot_name])
+    plants_without_segment = sorted(
+        p.plot_name for p in in_frame if not plant_segments[p.plot_name]
+    )
     plants_outside_raster = sorted(p.plot_name for p in outside)
 
     return SegmentTie(
@@ -299,7 +301,9 @@ def assign_detections_to_segments(boxes: Sequence[Sequence[float]],
     out: list[SegmentAssignment] = []
     for i, box in enumerate(boxes):
         cx, cy = detection_location(box)
-        hits = [(idx, tied) for idx, polygon, tied in candidates if point_in_polygon(cx, cy, polygon)]
+        hits = [
+            (idx, tied) for idx, polygon, tied in candidates if point_in_polygon(cx, cy, polygon)
+        ]
         tied = hits[0][1] if len(hits) == 1 else None
         source: SegmentSource = ("outside_segments" if not hits
                                  else "overlapping_segments" if len(hits) > 1

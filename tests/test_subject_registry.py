@@ -103,9 +103,11 @@ def test_a_subject_with_no_attributes_reads_none_and_an_absent_subject_refuses(t
 
 
 @pytest.mark.parametrize("bad", [
-    {"bud": {"attributes": {"opening": {"type": "numeric", "values": ["1"]}}}},  # numeric not allowed
+    # numeric not allowed
+    {"bud": {"attributes": {"opening": {"type": "numeric", "values": ["1"]}}}},
     {"bud": {"attributes": {"opening": {"type": "categorical", "values": []}}}},  # empty values
-    {"bud": {"attributes": {"opening": {"type": "categorical", "values": ["a", "a"]}}}},  # dup values
+    # dup values
+    {"bud": {"attributes": {"opening": {"type": "categorical", "values": ["a", "a"]}}}},
     {"bud": {"attributes": {"opening": {"values": ["closed"]}}}},  # missing type
 ])
 def test_malformed_registry_refuses(bad):
@@ -244,7 +246,8 @@ def test_replace_registry_admits_growing_the_registry(tmp_path):
     from tcip_store import Version
 
     # admits valid work: adding a subject/attribute/value never drops a declared name.
-    replace_registry(tmp_path, SubjectRegistry(subjects=(Subject(name="bush"),)), expect=Version.ABSENT, actor=None)
+    replace_registry(tmp_path, SubjectRegistry(subjects=(Subject(name="bush"),)),
+                     expect=Version.ABSENT, actor=None)
     grown = SubjectRegistry(subjects=(
         Subject(name="bush"),
         Subject(name="leaf", attributes=(
@@ -279,7 +282,8 @@ def test_replace_registry_refuses_a_stale_expect_version(tmp_path):
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version, VersionConflict
 
-    replace_registry(tmp_path, SubjectRegistry(subjects=(Subject(name="bush"),)), expect=Version.ABSENT, actor=None)
+    replace_registry(tmp_path, SubjectRegistry(subjects=(Subject(name="bush"),)),
+                     expect=Version.ABSENT, actor=None)
     stale = _version(tmp_path)
     replace_registry(
         tmp_path, SubjectRegistry(subjects=(Subject(name="bush"), Subject(name="leaf"))),
@@ -296,7 +300,8 @@ def test_replace_registry_refuses_undecodable_bytes_without_allow_removals(tmp_p
     path = tmp_path / "subjects.json"
     path.write_bytes(b'{"leaf": {"description": "one leaf"')  # truncated mid-object
     with pytest.raises(RegistryError):
-        replace_registry(tmp_path, SubjectRegistry(subjects=(Subject(name="bush"),)), expect=None, actor=None)
+        replace_registry(tmp_path, SubjectRegistry(subjects=(Subject(name="bush"),)),
+                         expect=None, actor=None)
     assert path.read_bytes() == b'{"leaf": {"description": "one leaf"'
 
 
@@ -352,7 +357,8 @@ def test_replace_registry_allow_removals_alone_does_not_admit_a_type_flip(tmp_pa
         Attribute(name="opening", type="ordinal", values=("closed", "open")),)),))
 
     with pytest.raises(RegistryError, match="bud.opening"):
-        replace_registry(tmp_path, ordinal, expect=_version(tmp_path), allow_removals=True, actor=None)
+        replace_registry(tmp_path, ordinal, expect=_version(tmp_path), allow_removals=True,
+                         actor=None)
 
 
 def test_replace_registry_admits_a_type_flip_with_allow_type_changes(tmp_path):
@@ -426,10 +432,12 @@ def test_write_subject_registry_admits_a_type_flip_with_allow_type_changes(tmp_p
         "ordinal"
 
 
-def test_write_subject_registry_refuses_dropping_a_declared_subject_without_allow_removals(tmp_path):
+def test_write_subject_registry_refuses_dropping_a_declared_subject_without_allow_removals(
+        tmp_path):
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
-    write_subject_registry(tmp_path, str(tmp_path), {"leaf": {"description": "one leaf"}, "bush": {}})
+    write_subject_registry(
+        tmp_path, str(tmp_path), {"leaf": {"description": "one leaf"}, "bush": {}})
     result = write_subject_registry(tmp_path, str(tmp_path), {"bush": {}})  # drops leaf
 
     assert "error" in result and "leaf" in result["error"]
@@ -439,7 +447,8 @@ def test_write_subject_registry_refuses_dropping_a_declared_subject_without_allo
 def test_write_subject_registry_admits_a_removal_stated_as_deliberate(tmp_path):
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
-    write_subject_registry(tmp_path, str(tmp_path), {"leaf": {"description": "one leaf"}, "bush": {}})
+    write_subject_registry(
+        tmp_path, str(tmp_path), {"leaf": {"description": "one leaf"}, "bush": {}})
     result = write_subject_registry(tmp_path, str(tmp_path), {"bush": {}}, allow_removals=True)
 
     assert "error" not in result

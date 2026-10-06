@@ -316,7 +316,8 @@ def spatial_single_source_split(
 ) -> None:
     """Derive the run's requested ``shares`` (:func:`run_shares`: ``train``, ``val``, ``holdout``
     and, when stated, ``calibration``) over one detection source's own tile lattice,
-    by disjoint pixel strips (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`), and record it as
+    by disjoint pixel strips (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`), and
+    record it as
     ``split_cfg["spatial_manifest"]``; the reserved regions record only their geometry and
     kept-tile count.
 

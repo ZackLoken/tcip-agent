@@ -74,7 +74,8 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "scope": {"subject": "leaf"}, "split": {"seed": 0, "val_ratio": 0.15}},
+        "data": {"images_dir": str(images_dir), "scope": {"subject": "leaf"},
+                 "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 2}],
                      "mixed_precision": False, "device": "cpu",
     }
@@ -113,7 +114,8 @@ def test_the_epoch_console_line_carries_validation_metrics_beyond_loss(tmp_path,
         "checkpoint_every_n_epochs": 0,
         "early_stopping": {"enabled": False},
     }
-    run = trainer_run(config, tmp_path / "out", project=tmp_path, has_val_loader=True, id="auto-run-43")
+    run = trainer_run(config, tmp_path / "out", project=tmp_path, has_val_loader=True,
+                      id="auto-run-43")
     with caplog.at_level(logging.INFO, logger="tcip_mcp.pipelines.training.generic_trainer"):
         run = train(run, train_loader, val_loader=val_loader)
     assert run.status == "completed", run.error

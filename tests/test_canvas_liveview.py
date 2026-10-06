@@ -261,7 +261,8 @@ def test_render_two_pass_fill_does_not_erase_outlines(tmp_path):
     img = _make_image(tmp_path)
     shapes = [
         {"kind": "box", "xyxy": [20, 20, 80, 80], "color": "#00FF00"},          # green outline
-        {"kind": "box", "xyxy": [10, 10, 90, 90], "color": "#FF0000", "fill": True},  # later red fill over it
+        # later red fill over it
+        {"kind": "box", "xyxy": [10, 10, 90, 90], "color": "#FF0000", "fill": True},
     ]
     out = render_canvas_state(_pixels(img), shapes, origin=(0, 0), scale=1.0,
                               output_path=str(tmp_path / "overlap.png"))
@@ -288,7 +289,8 @@ def test_render_draws_a_point_shape_and_never_widens_it_to_a_box(tmp_path):
 
 
 @pytest.mark.parametrize("bad", [
-    {"kind": "box", "color": "#FF0000"}, {"kind": "polygon", "points": [[1, 1]], "color": "#FF0000"},
+    {"kind": "box", "color": "#FF0000"},
+    {"kind": "polygon", "points": [[1, 1]], "color": "#FF0000"},
     "junk", {"kind": "box", "xyxy": [10, 10, 40, 40], "color": "not-a-color"},
     {"kind": "box", "xyxy": [10, 10, 40, 40]}],
     ids=["box_without_corners", "one_point_polygon", "not_a_shape", "unparsable_color", "no_color"])
@@ -388,7 +390,9 @@ def test_capture_live_canvas_full_frame_downscales_to_max_edge(project):
     _write_state(project, img)
 
     from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(project, project.parent, refresh=False, crop_to_viewport=False, max_edge=100)
+    res = capture_live_canvas(
+        project, project.parent, refresh=False, crop_to_viewport=False, max_edge=100
+    )
     assert res["cropped_to_viewport"] is False
     assert Image.open(res["image_path"]).size == (100, 50)
 

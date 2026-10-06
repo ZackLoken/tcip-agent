@@ -308,13 +308,22 @@ def _save_checkpoint(
 def _build_scheduler(optimizer, config: dict, epochs: int):
     name = config.get("type", "cosine")
     if name == "cosine":
-        return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=config.get("eta_min", 0))
+        return torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=epochs, eta_min=config.get("eta_min", 0)
+        )
     elif name == "plateau":
-        return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=config.get("factor", 0.5), patience=config.get("patience", 3))
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="min", factor=config.get("factor", 0.5),
+            patience=config.get("patience", 3)
+        )
     elif name == "onecycle":
-        return torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=config.get("max_lr", optimizer.defaults["lr"]), total_steps=epochs)
+        return torch.optim.lr_scheduler.OneCycleLR(
+            optimizer, max_lr=config.get("max_lr", optimizer.defaults["lr"]), total_steps=epochs
+        )
     elif name == "step":
-        return torch.optim.lr_scheduler.StepLR(optimizer, step_size=config.get("step_size", 10), gamma=config.get("gamma", 0.1))
+        return torch.optim.lr_scheduler.StepLR(
+            optimizer, step_size=config.get("step_size", 10), gamma=config.get("gamma", 0.1)
+        )
     else:
         return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
@@ -740,7 +749,9 @@ def train(
                 if in_warmup:
                     alpha = (epoch + 1) / warmup_n
                     for gi, group in enumerate(optimizer.param_groups):
-                        start = prev_end_lrs[gi] if (prev_end_lrs and gi < len(prev_end_lrs)) else 0.0
+                        start = (
+                            prev_end_lrs[gi] if (prev_end_lrs and gi < len(prev_end_lrs)) else 0.0
+                        )
                         group["lr"] = start + alpha * (target_lrs[gi] - start)
 
                 for batch_idx, batch in enumerate(train_loader):
@@ -749,21 +760,35 @@ def train(
                     if task in DETECTION_TASKS:
                         images, targets = batch
                         images = [img.to(device) for img in images]
-                        targets = instance_targets([{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets])
+                        targets = instance_targets([
+                            {k: v.to(device) if isinstance(v, torch.Tensor) else v
+                             for k, v in t.items()}
+                            for t in targets
+                        ])
                     else:
                         images, targets = batch
                         images = images.to(device)
-                        targets = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in targets.items()}
+                        targets = {
+                            k: v.to(device) if isinstance(v, torch.Tensor) else v
+                            for k, v in targets.items()
+                        }
 
                     loss: Any
                     if use_amp:
                         assert scaler is not None  # use_amp implies scaler was built above
                         with torch.amp.autocast(device.type):
                             loss_dict = model(images, targets)
-                            loss = sum(loss_dict.values()) if isinstance(loss_dict, dict) else loss_dict
+                            loss = (
+                                sum(loss_dict.values())
+                                if isinstance(loss_dict, dict)
+                                else loss_dict
+                            )
                         scaled = loss / stage_accum
                         scaler.scale(scaled).backward()
-                        if (batch_idx + 1) % stage_accum == 0 or (batch_idx + 1) == len(train_loader):
+                        if (
+                            (batch_idx + 1) % stage_accum == 0
+                            or (batch_idx + 1) == len(train_loader)
+                        ):
                             scaler.step(optimizer)
                             scaler.update()
                             optimizer.zero_grad()
@@ -772,7 +797,10 @@ def train(
                         loss = sum(loss_dict.values()) if isinstance(loss_dict, dict) else loss_dict
                         scaled = loss / stage_accum
                         scaled.backward()
-                        if (batch_idx + 1) % stage_accum == 0 or (batch_idx + 1) == len(train_loader):
+                        if (
+                            (batch_idx + 1) % stage_accum == 0
+                            or (batch_idx + 1) == len(train_loader)
+                        ):
                             optimizer.step()
                             optimizer.zero_grad()
 
@@ -787,7 +815,9 @@ def train(
                     if math.isfinite(loss_value):
                         epoch_had_finite_loss = True
 
-                diverged_epochs = diverged_epochs + 1 if n_batches and not epoch_had_finite_loss else 0
+                diverged_epochs = (
+                    diverged_epochs + 1 if n_batches and not epoch_had_finite_loss else 0
+                )
                 if diverged_epochs >= 2:
                     run.status = "failed"
                     run.error = (

@@ -147,7 +147,9 @@ class ColorJitter:
 class RandomResizedCrop:
     """Crop a random region and resize to target size. Adjusts boxes and masks accordingly."""
 
-    def __init__(self, size: tuple[int, int] = (640, 640), min_scale: float = 0.5, max_scale: float = 1.0) -> None:
+    def __init__(
+        self, size: tuple[int, int] = (640, 640), min_scale: float = 0.5, max_scale: float = 1.0
+    ) -> None:
         self.size = size
         self.min_scale = min_scale
         self.max_scale = max_scale

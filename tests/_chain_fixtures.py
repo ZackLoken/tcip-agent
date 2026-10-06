@@ -395,7 +395,8 @@ def attributed_series(
                 [VALUES[(index + 1) % 2]] if index % 3 else []))
         for stem, (index, frame_values) in labeled.items():
             write_geo_image(capture / f"{stem}.jpg", *REFERENCE_SITE,
-                            when + timedelta(hours=2, minutes=index), blob_frame(frame_values, index))
+                            when + timedelta(hours=2, minutes=index),
+                            blob_frame(frame_values, index))
         ingested = ingest_images(root, source=str(capture), date_from=date)
         assert "error" not in ingested, ingested
         for stem, (index, frame_values) in labeled.items():

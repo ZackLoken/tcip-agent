@@ -76,7 +76,9 @@ def test_a_phenology_look_on_screen_leaves_no_line(tmp_path: Path, client) -> No
     assert _rows(tmp_path) == before
 
 
-def test_ranking_a_review_queue_leaves_no_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ranking_a_review_queue_leaves_no_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Ranking candidates for review reads a checkpoint and a manifest and writes nothing, so a
     successful ranking through a registered run leaves the project's log as it found it."""
     from tcip_mcp.tools.feedback_tools import prioritize_review_queue

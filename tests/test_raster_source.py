@@ -93,7 +93,10 @@ def _npz(tmp_path: Path):
 
 
 def _band_group(tmp_path: Path):
-    from tcip_mcp.pipelines.data.band_groups import read_band_group_manifest, write_band_group_manifest
+    from tcip_mcp.pipelines.data.band_groups import (
+        read_band_group_manifest,
+        write_band_group_manifest,
+    )
 
     d = tmp_path / "grouped"
     d.mkdir()
@@ -468,7 +471,8 @@ def test_a_forked_worker_starts_with_an_empty_pool(tmp_path: Path, monkeypatch) 
     parent_source.close()
 
 
-def test_the_pool_evicts_the_least_recently_used_source_over_budget(tmp_path: Path, monkeypatch) -> None:
+def test_the_pool_evicts_the_least_recently_used_source_over_budget(
+        tmp_path: Path, monkeypatch) -> None:
     first_path, num_channels = _npy(tmp_path)
     second_path = tmp_path / "other.npy"
     np.save(str(second_path), _distinctive_array(18, 11, channels=5))
@@ -524,7 +528,8 @@ def test_opens_windowed_answers_false_for_an_unopenable_tiff(tmp_path: Path) -> 
 # ── Reads that were always valid and must stay so ────────────────────────
 
 
-def test_a_five_band_geotiff_opened_at_three_channels_still_reads_five_bands(tmp_path: Path) -> None:
+def test_a_five_band_geotiff_opened_at_three_channels_still_reads_five_bands(
+        tmp_path: Path) -> None:
     """The channel count routes; it never asserts anything about the file. A 5-band raster read at
     3 is still 5 bands, and the caller is the one who compares."""
     from tcip_mcp.pipelines.image_utils import load_image
@@ -549,7 +554,10 @@ def test_image_dimensions_of_a_two_band_group_at_the_default_channel_count(tmp_p
 def test_a_band_group_whose_members_disagree_on_the_frame_refuses(tmp_path: Path) -> None:
     """A member larger than the group's frame must refuse like a smaller one always has, never be
     silently cropped down to fit: stacking bands that disagree on the frame is not a raster."""
-    from tcip_mcp.pipelines.data.band_groups import read_band_group_manifest, write_band_group_manifest
+    from tcip_mcp.pipelines.data.band_groups import (
+        read_band_group_manifest,
+        write_band_group_manifest,
+    )
     from tcip_mcp.pipelines.image_utils import load_multiband
 
     d = tmp_path / "grouped"
@@ -558,7 +566,8 @@ def test_a_band_group_whose_members_disagree_on_the_frame_refuses(tmp_path: Path
     red = d / "cap_R.tif"
     tifffile.imwrite(str(green), np.full((8, 8), 111, dtype=np.uint16))
     tifffile.imwrite(str(red), np.zeros((12, 12), dtype=np.uint16))
-    ref = read_band_group_manifest(write_band_group_manifest(d, "cap", {"Green": green, "Red": red}))
+    ref = read_band_group_manifest(
+        write_band_group_manifest(d, "cap", {"Green": green, "Red": red}))
 
     with pytest.raises(ValueError, match="disagree on the frame"):
         raster_source.open_raster(ref, 2)

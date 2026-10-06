@@ -144,7 +144,8 @@ def test_a_mosaic_reference_band_is_held_out_only_inside_a_non_training_region()
     from tcip_mcp.pipelines.operating_point import spatial_disjointness
 
     spatial = {"train_region": [[0, 0, 500, 1000]], "val_region": [[500, 0, 650, 1000]],
-               "calibration_region": [[650, 0, 800, 1000]], "holdout_region": [[800, 0, 1000, 1000]]}
+               "calibration_region": [[650, 0, 800, 1000]],
+               "holdout_region": [[800, 0, 1000, 1000]]}
 
     assert spatial_disjointness(spatial, [(550, 100, 600, 300), (680, 100, 780, 300),
                                           (850, 100, 950, 300)]) == []
@@ -305,7 +306,8 @@ def test_a_reference_source_edited_after_the_assessment_answers_for_nothing(tmp_
     bucket = chain.read()
     assert gate(tmp_path, [bucket], delivery_kind="per_image_count", revision=revision,
                 result=nothing).validated
-    source = read_assessment(tmp_path, chain.assessment["assessment_id"]).reference.samples[0].source
+    assessment = read_assessment(tmp_path, chain.assessment["assessment_id"])
+    source = assessment.reference.samples[0].source
     with Image.open(source) as frame:
         edited = frame.copy()
     edited.putpixel((0, 0), (255, 0, 0))
@@ -345,7 +347,8 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(t
              execution=untiled_execution(checkpoint, conf=None, max_dets=None), tile_batch_size=1)
     Image.new("RGB", (8, 8)).save(tmp_path / "a.png")
     (tmp_path / "t.csv").write_text("image,value\na,1.0\n", encoding="utf-8")
-    sample = Sample(member="a", source=str(tmp_path / "a.png"), ground_truth=str(tmp_path / "t.csv"),
+    sample = Sample(member="a", source=str(tmp_path / "a.png"),
+                    ground_truth=str(tmp_path / "t.csv"),
                     group="a", side="holdout", row_key="a")
     entry = fx.COUNT_SPEC.model_copy(update={"regression_criterion": "r_squared"})
 
@@ -377,7 +380,8 @@ def test_a_polygon_that_fails_to_rasterize_refuses_rather_than_training_an_empty
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     write_image(images_dir / "a.png", (IMG, IMG))
     label_image(images_dir / "a.png",
-                [Annotation(subject=SUBJECT, geometry=Polygon(rings=[[(2, 2), (20, 2), (20, 20)]]))],
+                [Annotation(subject=SUBJECT,
+                            geometry=Polygon(rings=[[(2, 2), (20, 2), (20, 20)]]))],
                 IMG, IMG)
     dataset = dataset_over("instance_seg", images_dir, subject=SUBJECT)
 

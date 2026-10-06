@@ -180,7 +180,8 @@ def test_preflight_smoke_blocks_broken_builder(tmp_path, monkeypatch):
     imgs = _admitted_tree(tmp_path)
     cfg = {
         "model_source": {"builder": f"{__name__}:_broken_builder", "task": "detection"},
-        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"}, "split": {"seed": 0, "val_ratio": 0.15}},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"},
+                 "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
     # Fast path (no smoke) is structurally valid: the builder imports fine.
@@ -201,7 +202,8 @@ def test_preflight_smoke_passes_valid_builder(tmp_path, monkeypatch):
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"}, "split": {"seed": 0, "val_ratio": 0.15}},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"},
+                 "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
     r = preflight_config(tmp_path, cfg, smoke=True, overfit=True)
@@ -253,7 +255,9 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(tmp_path, monk
     masks_dir.mkdir(parents=True)
     for stem in ("a", "b", "c", "d"):
         Image.new("RGB", (32, 32), (80, 90, 100)).save(images_dir / f"{stem}.png")
-        Image.fromarray(np.zeros((32, 32), dtype=np.uint8), mode="L").save(masks_dir / f"{stem}.png")
+        Image.fromarray(np.zeros((32, 32), dtype=np.uint8), mode="L").save(
+            masks_dir / f"{stem}.png"
+        )
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_semantic_seg",
                          "task": "semantic_seg"},
@@ -288,8 +292,10 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
 
     imgs = _admitted_tree(tmp_path)
     cfg = {
-        "model_source": {"builder": f"{__name__}:_bespoke_task_model", "task": "bunch_compactness"},
-        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"}, "split": {"seed": 0, "val_ratio": 0.15},
+        "model_source": {"builder": f"{__name__}:_bespoke_task_model",
+                         "task": "bunch_compactness"},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"},
+                 "split": {"seed": 0, "val_ratio": 0.15},
                  "dataset_source": {"builder": f"{__name__}:_bespoke_task_dataset",
                                     "task": "bunch_compactness"}},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
@@ -315,10 +321,13 @@ def test_preflight_smoke_batch_matches_what_the_run_will_build(tmp_path, monkeyp
     from tcip_mcp.tools.training_tools import _one_real_batch
 
     imgs = _admitted_tree(tmp_path)
-    data = {"images_dir": str(imgs), "scope": {"subject": "leaf"}, "split": {"seed": 0, "val_ratio": 0.15},
+    data = {"images_dir": str(imgs), "scope": {"subject": "leaf"},
+            "split": {"seed": 0, "val_ratio": 0.15},
             "dataset_source": {"builder": f"{__name__}:_strict_bespoke_dataset",
                                "task": "bunch_compactness"}}
-    resolution = resolve_run({"model_source": {"task": "bunch_compactness"}, "data": data}, project=tmp_path)
+    resolution = resolve_run(
+        {"model_source": {"task": "bunch_compactness"}, "data": data}, project=tmp_path
+    )
 
     batch, why = _one_real_batch("bunch_compactness", resolution.train_ds)
     assert why is None, why
@@ -333,8 +342,10 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
 
     imgs = _admitted_tree(tmp_path)
     cfg = {  # structurally valid, but the dataset cannot produce an item
-        "model_source": {"builder": f"{__name__}:_bespoke_task_model", "task": "bunch_compactness"},
-        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"}, "split": {"seed": 0, "val_ratio": 0.15},
+        "model_source": {"builder": f"{__name__}:_bespoke_task_model",
+                         "task": "bunch_compactness"},
+        "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"},
+                 "split": {"seed": 0, "val_ratio": 0.15},
                  "dataset_source": {"builder": f"{__name__}:_unbuildable_dataset",
                                     "task": "bunch_compactness"}},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],

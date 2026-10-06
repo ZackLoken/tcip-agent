@@ -377,7 +377,9 @@ class SqliteBackend:
             if contended and keys:
                 raise StoreBusy(keys[0], time.monotonic() - started) from exc
             root = keys[0].root if keys else "?"
-            raise StoreError(f"the store database under {root} refused the operation: {exc}") from exc
+            raise StoreError(
+                f"the store database under {root} refused the operation: {exc}"
+            ) from exc
 
     # ── writes ──────────────────────────────────────────────────────────────────
 

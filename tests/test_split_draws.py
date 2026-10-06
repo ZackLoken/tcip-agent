@@ -216,7 +216,8 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_wo
     assert tt.experiments.sweep_dirs(tmp_path) == []
 
 
-def test_run_hyperparameter_search_refuses_split_draws_when_auto_val_is_off(tmp_path, real_hpo_base_config, monkeypatch):
+def test_run_hyperparameter_search_refuses_split_draws_when_auto_val_is_off(
+        tmp_path, real_hpo_base_config, monkeypatch):
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -331,8 +332,9 @@ def test_run_hyperparameter_search_refuses_split_draws_when_param_space_sweeps_a
 
 
 def test_tune_search_refuses_split_draws_without_the_axis_in_param_space(tmp_path):
-    """tune_search itself, called directly (not through run_hyperparameter_search's own axis-adding), raises
-    rather than pairing nothing: a caller building the space by hand must include the axis."""
+    """tune_search itself, called directly (not through run_hyperparameter_search's own
+    axis-adding), raises rather than pairing nothing: a caller building the space by hand must
+    include the axis."""
     from tcip_mcp.pipelines.training.hpo import tune_search
 
     with pytest.raises(ValueError, match="data.split.seed"):
@@ -612,7 +614,8 @@ def test_a_bound_sweep_reads_and_redraws_its_selection_once_on_opening(tmp_path,
     assert calls == {"read": 1, "redraw": 1}
 
 
-def test_run_hyperparameter_search_admits_split_draws_bound_with_auto_val_false(tmp_path, monkeypatch):
+def test_run_hyperparameter_search_admits_split_draws_bound_with_auto_val_false(
+        tmp_path, monkeypatch):
     """A bound base_config does not read auto_val (the selection branch binds ahead of it), so
     auto_val=False no longer refuses it the way it refuses a drawn config."""
     import tcip_mcp.tools.training_tools as tt
@@ -660,13 +663,15 @@ def test_run_hyperparameter_search_admits_split_draws_and_derives_seeds_from_the
     assert "data.split.seed" not in manifest["param_space"]  # the caller's own axes, unaugmented
 
 
-def test_run_hyperparameter_search_admits_split_draws_with_explicit_seeds(tmp_path, real_hpo_base_config, monkeypatch):
+def test_run_hyperparameter_search_admits_split_draws_with_explicit_seeds(
+        tmp_path, real_hpo_base_config, monkeypatch):
     import tcip_mcp.tools.training_tools as tt
 
     captured = _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=1,
-                        scheduler="none", split_draws=2, split_draw_seeds=[7, 99], trial_budget=2, search_seed=0)
+                        scheduler="none", split_draws=2, split_draw_seeds=[7, 99],
+                        trial_budget=2, search_seed=0)
 
     assert "error" not in result, result
     assert captured["param_space"]["data.split.seed"]["choices"] == [7, 99]
@@ -685,13 +690,15 @@ def test_run_hyperparameter_search_admits_split_draws_with_a_native_search_alg(
     captured = _search(monkeypatch)
 
     result = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=1,
-                        search_alg=search_alg, scheduler="none", split_draws=2, trial_budget=budget, search_seed=0)
+                        search_alg=search_alg, scheduler="none", split_draws=2,
+                        trial_budget=budget, search_seed=0)
 
     assert "error" not in result, result
     assert captured["search_alg"] == search_alg
 
 
-def test_run_hyperparameter_search_admits_split_draws_for_instance_seg(tmp_path, real_hpo_base_config, monkeypatch):
+def test_run_hyperparameter_search_admits_split_draws_for_instance_seg(
+        tmp_path, real_hpo_base_config, monkeypatch):
     """instance_seg over polygon ground truth is admitted to split_draws the way detection is."""
     import tcip_mcp.tools.training_tools as tt
     from tests._verified_checkpoint_fixtures import detection_images
@@ -1231,7 +1238,8 @@ def test_group_split_draws_ineligible_when_a_repeated_point_never_completes_ever
 
 
 @pytest.mark.ray_cluster
-def test_tune_search_split_draws_end_to_end_pairs_every_point_with_every_seed(tmp_path, monkeypatch):
+def test_tune_search_split_draws_end_to_end_pairs_every_point_with_every_seed(
+        tmp_path, monkeypatch):
     """A real Ray sweep over a trivial objective: split_draws=2 pairs the seed grid with every
     sampled point, so each of the two sampled lr points trains once per seed, each trial marking
     the point it was handed in a file of its own."""

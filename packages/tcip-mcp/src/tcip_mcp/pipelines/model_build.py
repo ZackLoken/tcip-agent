@@ -364,7 +364,8 @@ def snapshot_model_source(config: dict, run_dir: Path) -> dict | None:
         dataset_builder = dataset_source.get("builder")
         files.extend(dataset_source.get("source_files") or [])
     snapshot_errors: list[str] = []
-    # Snapshot the agent's training-loop + dataset modules too (best-effort, resolve mod:fn -> file).
+    # Snapshot the agent's training-loop + dataset modules too (best-effort, resolve mod:fn ->
+    # file).
     for dotted in (builder, training_source, dataset_builder):
         if isinstance(dotted, str) and dotted:
             mod_name, _ = _split_dotted(dotted)

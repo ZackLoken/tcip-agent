@@ -243,7 +243,8 @@ def test_delivery_refuses_naming_the_plant_csvs_when_none_parsed_a_plant(
         tmp_path, dataset_root, "valley", plant_csvs=[],
         assignments={DATE: [_unmapped_row("P1_20260211", None)]})
 
-    _assert_all_doors_refuse(client, tmp_path, dataset_root, preds_by_date, "valley", "parsed no plant")
+    _assert_all_doors_refuse(
+        client, tmp_path, dataset_root, preds_by_date, "valley", "parsed no plant")
 
 
 def test_delivery_refuses_with_the_ungeoreferenced_sentence_when_every_distance_is_none(
@@ -459,6 +460,7 @@ def test_a_capture_at_the_origin_is_admitted_as_positioned(
 
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry=registry, nn_tolerance_m=10.0)
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=registry,
+        nn_tolerance_m=10.0)
     assert "error" not in res, res
     assert res["summary"]["totals"]["n_mapped"] == 1

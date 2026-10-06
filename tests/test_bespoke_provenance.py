@@ -105,7 +105,8 @@ def test_snapshot_model_source_dedups_same_file_reached_two_ways(tmp_path):
 
     expected_sha = hashlib.sha256(real.read_bytes()).hexdigest()
     matches = [e for e in manifest["files"] if e["sha256"] == expected_sha]
-    assert len(matches) == 1  # one physical file, one entry, regardless of how many ways it was named
+    # one physical file, one entry, regardless of how many ways it was named
+    assert len(matches) == 1
 
 
 def test_snapshot_model_source_basename_collision_does_not_clobber(tmp_path):

@@ -95,7 +95,9 @@ def test_each_optimizer_step_sees_only_its_own_batch_gradient(tmp_path, monkeypa
 
     steps: list = []
     _record_step_gradients(monkeypatch, steps)
-    run = trainer_run(_config(), tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-34")
+    run = trainer_run(
+        _config(), tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-34"
+    )
     run = train(run, loader)
 
     assert run.status == "completed", run.error
@@ -111,7 +113,9 @@ def test_no_accumulated_gradient_survives_the_run(tmp_path, monkeypatch):
     models: list = []
     capture_model(monkeypatch, models)
 
-    run = trainer_run(_config(), tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-35")
+    run = trainer_run(
+        _config(), tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-35"
+    )
     run = train(run, loader)
 
     assert run.status == "completed", run.error
@@ -132,8 +136,8 @@ def test_gradient_accumulation_combines_only_its_own_window(tmp_path, monkeypatc
 
     steps: list = []
     _record_step_gradients(monkeypatch, steps)
-    run = trainer_run(_config(accumulation=2), tmp_path / "out", project=tmp_path, has_val_loader=False,
-                      id="auto-run-36")
+    run = trainer_run(_config(accumulation=2), tmp_path / "out", project=tmp_path,
+                      has_val_loader=False, id="auto-run-36")
     run = train(run, loader)
 
     assert run.status == "completed", run.error

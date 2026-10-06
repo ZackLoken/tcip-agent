@@ -84,7 +84,9 @@ def test_plant_id_fn_returning_none_raises_not_groups_under_none():
         {"image": "unmapped_img", "count": 2},
     ]
     with pytest.raises(ValueError, match="plant_id_fn|build_plant_mapping"):
-        aggregate_per_plant(results, strategy="count", value_key="count", plant_id_fn=sometimes_none)
+        aggregate_per_plant(
+            results, strategy="count", value_key="count", plant_id_fn=sometimes_none
+        )
 
 
 def test_empty_string_plant_id_value_raises():
@@ -372,9 +374,9 @@ def test_unit_from_value_key_is_vocabulary_driven_not_a_field_name_whitelist():
 
 def test_unit_from_value_key_refuses_an_area_key_missing_its_squared_suffix():
     """A value_key that names 'area' but whose trailing unit isn't squared (area_mm instead of
-    area_mm2) is a real dimensional-mismatch bug in the producing code, not a case to guess through.
-    An area is length^2, and silently labeling it with a bare linear unit is exactly the kind of wrong
-    number this function exists to prevent from shipping quietly."""
+    area_mm2) is a real dimensional-mismatch bug in the producing code, not a case to guess
+    through. An area is length^2, and silently labeling it with a bare linear unit is exactly the
+    kind of wrong number this function exists to prevent from shipping quietly."""
     from tcip_mcp.pipelines.measurement.mask_geometry import unit_from_value_key
 
     with pytest.raises(ValueError, match="area.*squared|squared.*area"):
@@ -410,8 +412,9 @@ def test_resolve_units_squares_area_but_cross_checks_the_linear_declared_unit():
 
 def test_resolve_units_recognizes_a_bespoke_non_mask_geometry_value_key():
     """The generalized vocabulary win end to end: a trait the agent measured with its own bespoke
-    code (a caliper-style diameter, never mask_geometry's field names) still gets a real units column
-    instead of shipping blank, as long as it names itself '{name}_{unit}' in a crops.yml-real unit."""
+    code (a caliper-style diameter, never mask_geometry's field names) still gets a real units
+    column instead of shipping blank, as long as it names itself '{name}_{unit}' in a
+    crops.yml-real unit."""
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
 
     results = [{"plant_id": "P1", "value": 14.2, "observations": 1, "value_key": "nut_diameter_mm"}]
@@ -429,7 +432,8 @@ def test_resolve_units_propagates_the_area_squared_mismatch_refusal():
 
 
 def test_delivery_skill_documents_the_real_csv_schema(tmp_path):
-    """The delivery skill's Per-Plant CSV Schema table must be the schema the writer actually writes.
+    """The delivery skill's Per-Plant CSV Schema table must be the schema the writer actually
+    writes.
 
     The table is what the agent reads before building a deliverable; a stale one (it listed seven of
     the columns for a while) teaches a schema the breeder's file does not have. Compared against the

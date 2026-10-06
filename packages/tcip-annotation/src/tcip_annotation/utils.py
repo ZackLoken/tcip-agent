@@ -52,7 +52,10 @@ def auto_orient_image(img: Image.Image) -> Image.Image:
 
 
 def get_image_dimensions(path: str) -> tuple[int, int]:
-    """Return (width, height) of an image, applying EXIF orientation; header-only, no pixel decode."""
+    """Return (width, height) of an image, applying EXIF orientation.
+
+    Header-only, no pixel decode.
+    """
     with Image.open(path) as img:
         w, h = img.size
         orientation = _read_orientation_tag(img) or 1

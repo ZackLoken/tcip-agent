@@ -47,7 +47,8 @@ def test_a_checkpoint_stating_no_task_refuses_naming_where_to_state_it(tmp_path:
 
     unstated = tmp_path / "unstated.pt"
     torch.save({STATE_DICT_KEY: {},
-                CONFIG_KEY: {"model_source": {"builder": "tests.bespoke_models:build_bespoke_detection"},
+                CONFIG_KEY: {"model_source": {
+                                 "builder": "tests.bespoke_models:build_bespoke_detection"},
                              "data": dict(SCOPED_DATA)}}, str(unstated))
     assert "error" not in register_model(name="unstated", checkpoint_path=str(unstated),
                                          config={}, project=tmp_path)

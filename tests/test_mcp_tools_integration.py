@@ -244,7 +244,8 @@ class TestReadAnnotationsUnknownFormat:
         (tmp_path / "images" / UNDATED_BUCKET).mkdir(parents=True)
         Image.new("RGB", (32, 32)).save(tmp_path / "images" / UNDATED_BUCKET / "a.jpg")
         # A record of a schema this platform does not read, stored past the writer.
-        tcip_store.replace(image_label_key(tmp_path / "images" / UNDATED_BUCKET / "a.jpg"), {"regions": []})
+        tcip_store.replace(
+            image_label_key(tmp_path / "images" / UNDATED_BUCKET / "a.jpg"), {"regions": []})
 
         result = read_annotations(str(tmp_path / "images" / UNDATED_BUCKET / "a.jpg"))
         assert "error" in result

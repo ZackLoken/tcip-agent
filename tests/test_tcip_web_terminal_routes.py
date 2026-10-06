@@ -616,7 +616,8 @@ def test_concurrent_creates_spawn_single_session():
     from concurrent.futures import ThreadPoolExecutor
 
     def create(_):
-        return TestClient(app, base_url="http://127.0.0.1").post("/api/terminal/sessions", json=LAUNCH).json()["session_id"]
+        return TestClient(app, base_url="http://127.0.0.1").post(
+            "/api/terminal/sessions", json=LAUNCH).json()["session_id"]
 
     try:
         with ThreadPoolExecutor(max_workers=8) as ex:

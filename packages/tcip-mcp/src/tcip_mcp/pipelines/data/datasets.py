@@ -663,7 +663,8 @@ class InstanceSegDataset(DocumentDataset):
 
         masks = []
         for polygon in target["geometry"]:
-            # Every ring fills one instance mask: a multi-ring instance is one occlusion-split object.
+            # Every ring fills one instance mask: a multi-ring instance is one occlusion-split
+            # object.
             poly_img = Image.new("L", (w, h), 0)
             draw = ImageDraw.Draw(poly_img)
             for ring in polygon.rings:
@@ -672,7 +673,9 @@ class InstanceSegDataset(DocumentDataset):
 
         return self._finalize(img, {
             **target_tensors(target),
-            "masks": torch.tensor(np.stack(masks) if masks else np.zeros((0, h, w)), dtype=torch.uint8),
+            "masks": torch.tensor(
+                np.stack(masks) if masks else np.zeros((0, h, w)), dtype=torch.uint8
+            ),
             "image_id": idx,
         })
 
@@ -989,7 +992,9 @@ def build_dataset(
         ds: BaseDataset = TiledDetectionDataset(base, transforms=transforms, **tiler)
     else:
         if stated_tiling(tiling) is not None:
-            logger.warning("tiling is only supported for task='detection'; ignoring for task=%r", task)
+            logger.warning(
+                "tiling is only supported for task='detection'; ignoring for task=%r", task
+            )
         ds = construct(samples=samples, transforms=transforms, **declared)
 
     ds.expected_channels = sizes["num_channels"]

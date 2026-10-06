@@ -91,7 +91,8 @@ def test_load_image_frame_matches_get_image_dimensions(tmp_path: Path) -> None:
 
     images_dir, _ = _make_orient6_dataset(tmp_path)
     p = str(images_dir / "m.jpg")
-    assert load_image(p, 3).size == get_image_dimensions(p) == (UP_W, UP_H)  # upright, not (UP_H, UP_W)
+    # upright, not (UP_H, UP_W)
+    assert load_image(p, 3).size == get_image_dimensions(p) == (UP_W, UP_H)
 
 
 # --------------------------------------------------------------------------
@@ -109,7 +110,9 @@ def test_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
     x1, y1, x2, y2 = (int(v) for v in box.tolist())
     # The denormalized box must bound the red marker in the frame the model actually sees.
     inside = _red_fraction(img_t[0, y1:y2, x1:x2], img_t[1, y1:y2, x1:x2])
-    assert inside > 0.5, f"box ({x1},{y1},{x2},{y2}) does not cover the marker (red_frac={inside:.2f})"
+    assert inside > 0.5, (
+        f"box ({x1},{y1},{x2},{y2}) does not cover the marker (red_frac={inside:.2f})"
+    )
     # And the box is where the upright marker is (±2px for JPEG/int rounding).
     assert abs(x1 - MARKER[0]) <= 2 and abs(y1 - MARKER[1]) <= 2
     assert abs(x2 - MARKER[2]) <= 2 and abs(y2 - MARKER[3]) <= 2

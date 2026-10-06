@@ -1,4 +1,5 @@
-"""An external dataset-level COCO document, converted into the dataset's per-image label documents."""
+"""An external dataset-level COCO document, converted into the dataset's per-image label
+documents."""
 
 from __future__ import annotations
 

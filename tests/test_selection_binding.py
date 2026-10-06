@@ -369,7 +369,8 @@ def test_a_selected_label_a_human_confirmed_negative_still_trains(tmp_path: Path
     json_io.write_label_document(emptied.ground_truth, [], 64, 64, keep_empty=True)
     mark_complete(emptied.source, SUBJECT, project=root)
 
-    train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", _run_data_cfg(root, out), None)
+    train_ds, val_ds, partition = auto_train_val(
+        tmp_path, "detection", _run_data_cfg(root, out), None)
 
     assert len(train_ds) == len(drawn.on("train"))
     assert len(val_ds) == len(drawn.on("val"))
@@ -395,7 +396,8 @@ def test_a_bound_run_admits_when_an_unselected_images_stem_turns_ambiguous(tmp_p
     # The same logical image now resolves to two files: the directory can no longer be listed.
     Image.new("RGB", (64, 64), (20, 20, 20)).save(images_dir / "spare.png")
 
-    train_ds, val_ds, _partition = auto_train_val(tmp_path, "detection", _run_data_cfg(root, out), None)
+    train_ds, val_ds, _partition = auto_train_val(
+        tmp_path, "detection", _run_data_cfg(root, out), None)
 
     assert len(train_ds) == len(drawn.on("train"))
     assert len(val_ds) == len(drawn.on("val"))
@@ -559,11 +561,11 @@ def test_a_bound_run_threads_a_bespoke_dataset_source(tmp_path: Path):
 
 @pytest.mark.parametrize("task", ["detection", "canopy_extent"])
 def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(tmp_path: Path, task):
-    """The same tree is trained twice through a bespoke builder, once bound to a selection drawn over
-    it and once unbound over the same directory; the builder records what it was handed each time.
-    The two runs partition the tree differently, which is what each route is for; what they may
-    not do is disagree about which samples that tree holds, where each one's ground truth is, or
-    what class map they were admitted under. Neither is handed a directory to go looking in.
+    """The same tree is trained twice through a bespoke builder, once bound to a selection drawn
+    over it and once unbound over the same directory; the builder records what it was handed each
+    time. The two runs partition the tree differently, which is what each route is for; what they
+    may not do is disagree about which samples that tree holds, where each one's ground truth is,
+    or what class map they were admitted under. Neither is handed a directory to go looking in.
 
     Run for a task with a built-in loader and for one without: a task with no built-in loader is
     not a task with no producer, so both routes name its samples the same way too.
@@ -779,7 +781,8 @@ def test_two_redraw_seeds_differ_and_the_same_seed_repeats(tmp_path: Path):
     _draw(tmp_path, root, out)
 
     def _train(seed: int) -> list[str]:
-        train_ds, _val, _ = auto_train_val(tmp_path, "detection", _redraw_cfg(root, out, seed), None)
+        train_ds, _val, _ = auto_train_val(
+            tmp_path, "detection", _redraw_cfg(root, out, seed), None)
         return sorted(train_ds.stems)
 
     first = _train(1)

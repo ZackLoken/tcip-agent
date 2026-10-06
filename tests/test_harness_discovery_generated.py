@@ -162,7 +162,9 @@ def test_write_agents_block_refuses_an_oversized_block(tmp_path):
 def test_write_agents_block_refuses_a_lone_marker(tmp_path):
     generator = _generator()
     fixture = tmp_path / "AGENTS.md"
-    fixture.write_text(generator.AGENTS_BLOCK_START + "\nstray text, no end marker\n", encoding="utf-8")
+    fixture.write_text(
+        generator.AGENTS_BLOCK_START + "\nstray text, no end marker\n", encoding="utf-8"
+    )
     with pytest.raises(ValueError, match="start marker or an end marker but not both"):
         generator.write_agents_block(_documents(), path=fixture)
 

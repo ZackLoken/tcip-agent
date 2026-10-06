@@ -1,8 +1,8 @@
 """tcip score-predictions: the demoted door's own command-line entry point.
 
 A plain score (no --trait) needs no project at all, since it only reads the image and its
-label and prediction documents under its dataset root; --trait requires --project, since resolving a trait's derived
-localization criterion reads that project's own confirmed revision.
+label and prediction documents under its dataset root; --trait requires --project, since
+resolving a trait's derived localization criterion reads that project's own confirmed revision.
 """
 
 from __future__ import annotations

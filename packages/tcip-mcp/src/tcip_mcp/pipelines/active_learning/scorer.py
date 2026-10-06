@@ -197,7 +197,8 @@ SCORER_REGISTRY: dict[str, Callable[[str], BaseScorer]] = {
 
 
 def register_scorer(name: str, factory: Callable[[str], BaseScorer]) -> None:
-    """Register an acquisition-function scorer under ``name`` so ``method=<name>`` resolves to it."""
+    """Register an acquisition-function scorer under ``name`` so ``method=<name>`` resolves to
+    it."""
     SCORER_REGISTRY[name] = factory
 
 

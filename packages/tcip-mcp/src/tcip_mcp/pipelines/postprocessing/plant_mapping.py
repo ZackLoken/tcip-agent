@@ -225,8 +225,10 @@ class MappingBuild:
     def rows(self) -> dict[str, list[dict]]:
         """The assignments as plain per-date dict rows, each a fresh dict carrying this build's
         own ``plant_attribution``."""
-        return {date: [{**a.__dict__, "plant_attribution": self.plant_attribution} for a in assignments]
-                for date, assignments in self.assignments.items()}
+        return {
+            date: [{**a.__dict__, "plant_attribution": self.plant_attribution} for a in assignments]
+            for date, assignments in self.assignments.items()
+        }
 
     def unattributed(self, dates: Optional[Iterable[str]] = None) -> int:
         """The number of assignments over ``dates`` (every date this mapping holds, when ``None``)
@@ -327,7 +329,9 @@ def _exif_dms_to_decimal(dms, ref, *, axis: str, negative: str, positive: str,
     try:
         d, m, s = (float(x) for x in dms)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{path}'s GPS {axis} {dms!r} is not degrees, minutes and seconds") from exc
+        raise ValueError(
+            f"{path}'s GPS {axis} {dms!r} is not degrees, minutes and seconds"
+        ) from exc
     if ref not in (negative, positive):
         raise ValueError(f"{path}'s GPS {axis} reference {ref!r} is neither {negative!r} nor "
                          f"{positive!r}, so its hemisphere is not stated")
@@ -382,7 +386,9 @@ def read_image_stamp(path: Path, date_folder: str) -> ImageStamp:
     return stamp
 
 
-def _read_date_stamps(logical: dict[str, "Path | BandGroupRef"], date_folder: str) -> list[ImageStamp]:
+def _read_date_stamps(
+    logical: dict[str, "Path | BandGroupRef"], date_folder: str
+) -> list[ImageStamp]:
     """A date's stamps for every logical capture ``list_logical_images`` enumerated: EXIF for an
     ``image``, the manifest's own digest and member names for a ``band_group``, bare identity for
     a ``raster`` (no EXIF to read for either)."""
@@ -1108,7 +1114,8 @@ def build_mapping(
     the record to the inputs it was built from.
 
     ``name``/``dataset_root``/``dataset_id`` are the caller's own resolved facts, and
-    ``project`` the project the mapping belongs to. ``plant_csv_paths`` are the files this build reads the plants from (resolved by
+    ``project`` the project the mapping belongs to. ``plant_csv_paths`` are the files this build
+    reads the plants from (resolved by
     the caller from ``plant_registry``'s own ``name``); ``plant_registry`` is the ``{"name": ...,
     "digest": ...}`` reference stored on the record in their place.
 
@@ -1480,7 +1487,7 @@ def verify_mapping_inputs(
     remedy = "rebuild with build_plant_mapping"
 
     # Plant CSVs first: the per-capture moved-position check below trusts only verified bytes.
-    # A registry that no longer loads or whose digest has moved refuses rather than verifying nothing.
+    # A registry that no longer loads or whose digest moved refuses rather than verifying nothing.
     registry_entries, registry_refusal = registry_entries_or_refusal(build, project)
     if registry_refusal:
         return {"refusal": registry_refusal}
@@ -1587,12 +1594,17 @@ def verify_mapping_inputs(
                     for stem in set(new_digests) | set(recorded_digests)
                     if new_digests.get(stem) != recorded_digests.get(stem)
                 )
-                detail = ", ".join(moved) if moved else "a capture whose identity does not decompose"
+                detail = (
+                    ", ".join(moved) if moved else "a capture whose identity does not decompose"
+                )
                 return {"refusal": (
                     f"date {date}: {detail} changed since this mapping was built; "
                     "rebuild to cover the images actually on disk")}
 
-    return {"captures_unverified": captures_unverified, "plant_csvs_unverified": plant_csvs_unverified}
+    return {
+        "captures_unverified": captures_unverified,
+        "plant_csvs_unverified": plant_csvs_unverified,
+    }
 
 
 def ungeoreferenced_capture_message(walked: str, unreadable: Sequence[str] = ()) -> str:
@@ -1603,7 +1615,9 @@ def ungeoreferenced_capture_message(walked: str, unreadable: Sequence[str] = ())
     """
     prefix = ""
     if unreadable:
-        prefix = f"{', '.join(unreadable)} could not be opened, so their position could not be read; "
+        prefix = (
+            f"{', '.join(unreadable)} could not be opened, so their position could not be read; "
+        )
     return (
         f"{prefix}no capture under {walked} on the requested dates carries a position this door "
         "reads (a photograph with no GPS position, or a raster or band-group capture, which never "

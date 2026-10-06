@@ -75,7 +75,9 @@ def test_no_frontend_module_writes_a_backend_path_of_its_own() -> None:
                     offenders.append(
                         f"{source.relative_to(REPO_ROOT).as_posix()}:{line_no} {literal}"
                     )
-    assert not offenders, "these write a backend path instead of using ROUTES:\n" + "\n".join(offenders)
+    assert not offenders, (
+        "these write a backend path instead of using ROUTES:\n" + "\n".join(offenders)
+    )
 
 
 def test_the_generated_proxy_module_is_what_the_registered_routes_produce() -> None:
@@ -104,7 +106,9 @@ def test_vite_config_builds_its_real_proxy_from_the_generated_module() -> None:
         "vite.config.ts no longer imports the generated proxy module"
     )
     proxy_block = re.search(r"proxy:\s*(.*?),\n\s*\},", vite_text, re.S)
-    assert proxy_block is not None, "the Vite server.proxy assignment is no longer where this test reads it"
+    assert proxy_block is not None, (
+        "the Vite server.proxy assignment is no longer where this test reads it"
+    )
     assert _PROXY_BUILD_RE.search(proxy_block.group(1)), (
         "vite.config.ts's real server.proxy is not built from each DEV_PROXY entry's own "
         "path/ws fields: " + proxy_block.group(1)

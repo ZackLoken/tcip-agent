@@ -72,7 +72,9 @@ def test_annotate_labels_route_measures_a_grouped_captures_real_frame(
 # ── routes/images.py: serve_image bands/stretch + /api/images/bands ─────────────────────
 
 
-def test_serve_image_plain_photo_unaffected_by_new_params(client: TestClient, grouped_dataset: Path):
+def test_serve_image_plain_photo_unaffected_by_new_params(
+    client: TestClient, grouped_dataset: Path
+):
     plain = grouped_dataset / "images" / "2026-05-01" / "plain_002.jpg"
     baseline = client.get("/api/images", params={"path": str(plain)})
     with_defaults = client.get("/api/images", params={"path": str(plain)})
@@ -155,7 +157,9 @@ def test_get_bands_endpoint_reports_the_group(client: TestClient, grouped_datase
     assert by_name["NIR"]["max"] == 833.0
 
 
-def test_get_bands_endpoint_reports_3_for_a_plain_rgb_photo(client: TestClient, grouped_dataset: Path):
+def test_get_bands_endpoint_reports_3_for_a_plain_rgb_photo(
+    client: TestClient, grouped_dataset: Path
+):
     plain = grouped_dataset / "images" / "2026-05-01" / "plain_002.jpg"
     resp = client.get("/api/images/bands", params={"path": str(plain)})
     assert resp.status_code == 200

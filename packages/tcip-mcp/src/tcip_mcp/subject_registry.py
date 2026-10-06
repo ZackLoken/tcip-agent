@@ -27,7 +27,8 @@ if TYPE_CHECKING:
 
     from tcip_mcp.traits import PositiveState
 
-#: The attribute kinds a subject may carry. Numeric is deliberately absent, see the module docstring.
+#: The attribute kinds a subject may carry. Numeric is deliberately absent, see the module
+#: docstring.
 ATTR_TYPES = ("categorical", "ordinal")
 
 
@@ -66,7 +67,10 @@ def named(records: Iterable[_N], name: str) -> _N | None:
 
 @dataclass(frozen=True)
 class Subject:
-    """The object a label set is about. ``attributes`` may be empty, such a subject is only detected."""
+    """The object a label set is about.
+
+    ``attributes`` may be empty, such a subject is only detected.
+    """
 
     name: str
     description: str = ""
@@ -89,7 +93,8 @@ class SubjectRegistry:
 
 
 class RegistryError(ValueError):
-    """A registry that cannot be read as a valid subject registry, or a scope it does not contain."""
+    """A registry that cannot be read as a valid subject registry, or a scope it does not
+    contain."""
 
 
 def registry_from_dict(data: object) -> SubjectRegistry:
@@ -100,7 +105,9 @@ def registry_from_dict(data: object) -> SubjectRegistry:
     absent/empty/non-string/duplicated.
     """
     if not isinstance(data, dict):
-        raise RegistryError(f"registry must be a JSON object of subjects, got {type(data).__name__}")
+        raise RegistryError(
+            f"registry must be a JSON object of subjects, got {type(data).__name__}"
+        )
     subjects: list[Subject] = []
     for sname, sbody in data.items():
         if not isinstance(sbody, dict):
@@ -109,7 +116,8 @@ def registry_from_dict(data: object) -> SubjectRegistry:
         raw_attrs = sbody.get("attributes")
         if raw_attrs is None:  # absent/null attributes -> a detection-only subject (valid)
             raw_attrs = {}
-        if not isinstance(raw_attrs, dict):  # a falsy non-object (false/0/""/[]) is malformed, not "none"
+        # a falsy non-object (false/0/""/[]) is malformed, not "none"
+        if not isinstance(raw_attrs, dict):
             raise RegistryError(
                 f"subject {sname!r} 'attributes' must be an object, got {type(raw_attrs).__name__}")
         for aname, abody in raw_attrs.items():
@@ -121,8 +129,7 @@ def registry_from_dict(data: object) -> SubjectRegistry:
             # The value invariant (known type, non-empty, distinct) lives on Attribute, one guard,
             # shared by the parser and any code that constructs an Attribute directly.
             try:
-                # abody is arbitrary decoded JSON; Attribute.__post_init__ is the real type gate
-                # (raises on a missing/invalid type), so the value is cast rather than validated here.
+                # Attribute.__post_init__ is the type gate, so the type is cast here, not checked.
                 attrs.append(
                     Attribute(name=aname, type=cast(str, abody.get("type")), values=tuple(values)))
             except ValueError as exc:
@@ -234,7 +241,8 @@ def replace_registry(
     read, or ``Version.ABSENT`` for a caller asserting no registry exists yet. ``None`` checks
     against the version this call read.
 
-    The write's one audit line by ``actor`` follows it in the dataset's log (``AuditEntryNotWritten`` when it
+    The write's one audit line by ``actor`` follows it in the dataset's log
+    (``AuditEntryNotWritten`` when it
     cannot be appended, carrying that line's arguments). Returns the committed save as its audit
     line records it: ``{"subjects_path", "n_subjects", "version"}`` (the new token).
     """
@@ -335,8 +343,8 @@ def positive_state_problem(registry: SubjectRegistry, subject_name: str,
 
 
 def registry_for_dataset_root(dataset_root: str | Path) -> SubjectRegistry | None:
-    """The registry at ``dataset_root``, or ``None`` when no ``subjects.json`` has been written there
-    yet (a dataset with no registry is not corrupt, only unregistered so far)."""
+    """The registry at ``dataset_root``, or ``None`` when no ``subjects.json`` has been written
+    there yet (a dataset with no registry is not corrupt, only unregistered so far)."""
     try:
         return read_registry(dataset_root)
     except FileNotFoundError:

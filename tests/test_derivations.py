@@ -36,7 +36,8 @@ def test_num_classes_from_distribution():
 
 
 def test_gt_aspect_ratios_covers_open():
-    # tall boxes (h/w ~ 4) -> the derived ratio set must include a tall ratio the default (0.5,1,2) lacks
+    # tall boxes (h/w ~ 4) -> the derived ratio set must include a tall ratio the default
+    # (0.5,1,2) lacks
     boxes = [(10.0, 40.0)] * 20
     ratios = gt_aspect_ratios(boxes)
     assert max(ratios) >= 3.0
@@ -52,11 +53,13 @@ def test_derive_cross_tile_nms_dense_cluster_exceeds_sparse():
     assert t_dense is not None and t_sparse is not None
     assert t_dense > t_sparse
     assert 0.2 <= t_sparse <= 0.8 and 0.2 <= t_dense <= 0.8
-    assert t_dense == pytest.approx(0.6667 + 0.05, abs=1e-2)  # p99 of the neighbor-IoU tail + margin
+    # p99 of the neighbor-IoU tail + margin
+    assert t_dense == pytest.approx(0.6667 + 0.05, abs=1e-2)
 
 
 def test_derive_cross_tile_nms_no_overlap_returns_none():
-    # No genuine neighbor overlap anywhere -> underivable -> caller must fall back to an honest default.
+    # No genuine neighbor overlap anywhere -> underivable -> caller must fall back to an honest
+    # default.
     boxes = [[(0, 0, 20, 20), (100, 100, 20, 20)], [(0, 0, 20, 20)]]
     assert derive_cross_tile_nms(boxes, metric="IOU") is None
     assert derive_cross_tile_nms([], metric="IOS") is None

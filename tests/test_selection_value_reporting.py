@@ -124,8 +124,8 @@ def test_epoch_record_follows_a_configured_selection_metric(tmp_path):
     reported ``selection``, so the two still name the same number."""
     train_loader, val_loader = opposed_regression_loaders(TRAIN_INTENSITIES, VAL_INTENSITIES)
     out_dir = tmp_path / "out"
-    run = trainer_run(_config({"selection_metric": "mae"}), out_dir, project=tmp_path, has_val_loader=True,
-                      id="auto-run-64")
+    run = trainer_run(_config({"selection_metric": "mae"}), out_dir, project=tmp_path,
+                      has_val_loader=True, id="auto-run-64")
     run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "completed", run.error
@@ -163,7 +163,8 @@ def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(tmp_path):
         "early_stopping": {"enabled": False},
         "evaluation": {"selection_metric": "f1"},
     }
-    run = trainer_run(config, tmp_path / "out", project=tmp_path, has_val_loader=True, id="auto-run-65")
+    run = trainer_run(config, tmp_path / "out", project=tmp_path, has_val_loader=True,
+                      id="auto-run-65")
     run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "completed", run.error
@@ -184,8 +185,8 @@ def test_a_run_selecting_on_a_metric_its_task_does_not_produce_fails_naming_both
     never produces it; the run must fail naming the requested metric and the keys validation did
     produce, not silently fall back to the training loss under a name nobody chose."""
     train_loader, val_loader = opposed_regression_loaders(TRAIN_INTENSITIES, VAL_INTENSITIES)
-    run = trainer_run(_config({"selection_metric": "f1"}), tmp_path / "out", project=tmp_path, has_val_loader=True,
-                      id="auto-run-66")
+    run = trainer_run(_config({"selection_metric": "f1"}), tmp_path / "out", project=tmp_path,
+                      has_val_loader=True, id="auto-run-66")
     run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "failed"
@@ -200,7 +201,8 @@ def test_a_loss_selected_run_with_no_validation_loader_still_completes_and_selec
     """No validation loader means no metric but the training loss exists; a run selecting on the
     default (loss) metric must still complete and choose the lowest-loss epoch."""
     train_loader, _ = opposed_regression_loaders(TRAIN_INTENSITIES, VAL_INTENSITIES)
-    run = trainer_run(_config(), tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-67")
+    run = trainer_run(_config(), tmp_path / "out", project=tmp_path, has_val_loader=False,
+                      id="auto-run-67")
     run = train(run, train_loader, val_loader=None)
 
     assert run.status == "completed", run.error

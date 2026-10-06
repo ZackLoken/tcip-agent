@@ -180,7 +180,8 @@ def test_a_caller_cannot_supply_an_identity_key_the_handshake_left_absent(
     assert "terminal_session" not in row
 
 
-def test_the_declaration_is_taken_on_the_first_message_that_carries_it_whatever_its_method() -> None:
+def test_the_declaration_is_taken_on_the_first_message_that_carries_it_whatever_its_method(
+) -> None:
     """A client that sends a request before notifications/initialized (the SDK serves one) still
     gets its declaration recorded on that first request."""
     import types

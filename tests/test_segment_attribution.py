@@ -209,7 +209,8 @@ def test_load_canopy_segments_admits_a_proposed_polygon_accepted_through_the_sav
 # ── tie_segments_to_plants ────────────────────────────────────────────────
 
 
-def test_tie_segments_to_plants_ties_two_disjoint_segments_each_to_one_plant(tmp_path: Path) -> None:
+def test_tie_segments_to_plants_ties_two_disjoint_segments_each_to_one_plant(
+        tmp_path: Path) -> None:
     _, raster_path, georef, _identity = _setup(tmp_path)
     segments_data = _write_document(raster_path, [
         Annotation(subject="canopy", geometry=_square(0, 0, 20, 20), created_by="user:breeder"),

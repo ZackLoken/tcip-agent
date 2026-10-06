@@ -31,7 +31,8 @@ def test_a_render_command_leaves_no_audit_line_anywhere(tmp_path):
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
-    result = run_tcip("overlay-reference-grid", ["--image", str(image), "--project", str(project)], cwd=cwd)
+    result = run_tcip("overlay-reference-grid",
+                      ["--image", str(image), "--project", str(project)], cwd=cwd)
 
     assert result.returncode == 0, result.stderr
     rows = ts.read_log(audit_log_key(project)).records
@@ -45,7 +46,8 @@ def test_a_command_naming_no_project_refuses_and_writes_nothing(tmp_path):
     not_a_project.mkdir()
     image = _image(tmp_path)
 
-    result = run_tcip("overlay-reference-grid", ["--image", str(image), "--project", str(not_a_project)], cwd=tmp_path)
+    result = run_tcip("overlay-reference-grid",
+                      ["--image", str(image), "--project", str(not_a_project)], cwd=tmp_path)
 
     assert result.returncode != 0, result.stdout
     assert "names no readable project" in result.stderr

@@ -333,7 +333,8 @@ def test_saved_provenance_is_the_requests_actor_whatever_the_browser_sends(
     image = _image(root)
 
     resp = client.post("/api/annotate/labels", json={
-        "image_path": str(image), "user": "breeder", "annotations": [{"subject": "bud", "bbox": BOX, "created_by": "user:mallory",
+        "image_path": str(image), "user": "breeder",
+        "annotations": [{"subject": "bud", "bbox": BOX, "created_by": "user:mallory",
                          "created_at": "2020-01-01T00:00:00+00:00",
                          "accepted_by": "user:mallory"}]})
     assert resp.status_code == 200, resp.text

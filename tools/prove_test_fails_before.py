@@ -9,7 +9,8 @@ imported, and pytest's per-test outcome is read rather than its exit code.
     python tools/prove_test_fails_before.py tests/test_foo.py -k "new_behavior"
     python tools/prove_test_fails_before.py tests/test_foo.py --baseline 196eedf1~1
     python tools/prove_test_fails_before.py tests/test_foo.py --json out.json
-    python tools/prove_test_fails_before.py tests/test_foo.py --test-rev 8b09bd17 --baseline ae3dbbb8
+    python tools/prove_test_fails_before.py tests/test_foo.py --test-rev 8b09bd17
+        --baseline ae3dbbb8
     python tools/prove_test_fails_before.py tests/test_foo.py --per-test-timeout 30
 
 Four verdicts, each its own exit code:
@@ -210,7 +211,8 @@ def git_output(*args: str) -> str:
 
 
 def _is_test_side(path: str) -> bool:
-    """Paths the tool overlays from the current tree, so a diff in them is not the change under test."""
+    """Paths the tool overlays from the current tree, so a diff in them is not the change
+    under test."""
     return path.replace("\\", "/").startswith(f"{TEST_TREE}/")
 
 
@@ -256,7 +258,8 @@ def _resolve_baseline(named: str | None, integration: str) -> tuple[str | None, 
     return base, f"merge-base of HEAD and {integration}", ""
 
 
-def _changed_source_files(baseline: str, declared: list[str], test_rev: str | None) -> tuple[list[str], str]:
+def _changed_source_files(baseline: str, declared: list[str],
+                          test_rev: str | None) -> tuple[list[str], str]:
     """The source-side files that differ between the baseline and the tree the test comes from,
     and how they were found; a ``declared`` path counts only when it differs too."""
     if test_rev:
@@ -267,14 +270,16 @@ def _changed_source_files(baseline: str, declared: list[str], test_rev: str | No
         tracked = git_output("diff", "--name-only", baseline, "--").splitlines()
         untracked = git_output("ls-files", "--others", "--exclude-standard").splitlines()
         how = f"git diff against {baseline[:8]} plus untracked files, test tree excluded"
-    changed = sorted({p.strip() for p in [*tracked, *untracked] if p.strip() and not _is_test_side(p.strip())})
+    changed = sorted({p.strip() for p in [*tracked, *untracked]
+                      if p.strip() and not _is_test_side(p.strip())})
     if declared:
         wanted = {p.replace("\\", "/") for p in declared}
         kept = sorted(wanted & set(changed))
         ignored = sorted(wanted - set(changed))
         note = f"declared with --change and confirmed to differ ({how})"
         if ignored:
-            note += f"; declared but identical at the baseline, so not counted: {', '.join(ignored)}"
+            note += ("; declared but identical at the baseline, so not counted: "
+                     f"{', '.join(ignored)}")
         return kept, note
     return changed, how
 
@@ -282,7 +287,8 @@ def _changed_source_files(baseline: str, declared: list[str], test_rev: str | No
 def _snapshot_via_temporary_index(head: str, index_path: Path) -> str | None:
     """Build the snapshot commit through a scratch index; ``None`` if this form fails here."""
     env = {**os.environ, "GIT_INDEX_FILE": str(index_path)}
-    read = subprocess.run(["git", "read-tree", head], cwd=REPO, env=env, capture_output=True, text=True)
+    read = subprocess.run(["git", "read-tree", head], cwd=REPO, env=env,
+                          capture_output=True, text=True)
     if read.returncode != 0:
         return None
     added = subprocess.run(["git", "add", "-A"], cwd=REPO, env=env, capture_output=True, text=True)
@@ -408,19 +414,22 @@ def prove_tree_imports(tree: Path, env: dict[str, str]) -> tuple[bool, dict[str,
     except json.JSONDecodeError:
         return False, {"probe": f"probe produced no JSON: {proc.stdout!r} {proc.stderr[-500:]!r}"}
     root = str(tree.resolve()).lower()
-    ok = all(str(Path(p).resolve()).lower().startswith(root) for p in resolved.values() if p and "IMPORT FAILED" not in p)
+    ok = all(str(Path(p).resolve()).lower().startswith(root)
+             for p in resolved.values() if p and "IMPORT FAILED" not in p)
     ok = ok and not any("IMPORT FAILED" in p for p in resolved.values())
     return ok, resolved
 
 
 def install_outcome_plugin(tree: Path) -> None:
-    """Drop the outcome-recording plugin into a materialized tree, on the path pytest will import."""
+    """Drop the outcome-recording plugin into a materialized tree, on the path pytest will
+    import."""
     (tree / f"{PLUGIN_MODULE}.py").write_text(PLUGIN_SOURCE, encoding="utf-8")
 
 
 def run_capturing_outcome(tree: Path, targets: list[str], expr: str, env: dict[str, str],
                           outcome_json: Path, timeout: int, per_test_timeout: float | None = None):
-    """Run pytest in `tree` and return its process plus what it observed, or None if it reported none."""
+    """Run pytest in `tree` and return its process plus what it observed, or None if it
+    reported none."""
     # The child session keeps its temporary root inside this run's own tree: pytest deletes all
     # but the last few roots under the shared one, including another session's, at every start.
     cmd = [
@@ -507,7 +516,8 @@ def _is_call_signature_mismatch(headline: str) -> bool:
 
 
 def _failure_kind(entry: dict, tree: Path) -> str:
-    """One of ``unreached``, ``timeout``, ``behavioral``, ``fixture``, for one failed or errored test.
+    """One of ``unreached``, ``timeout``, ``behavioral``, ``fixture``, for one failed or
+    errored test.
 
     ``unreached``: the import never resolved, always; or a needed file was missing and the crash
     frame sits outside ``tests/`` (:func:`_is_unreached`). A missing file whose crash frame sits
@@ -601,13 +611,15 @@ def _classify(observed: dict, baseline_precedes: bool, tree: Path) -> tuple[str,
     if behavioral:
         discount_parts = []
         if unreached:
-            discount_parts.append(f"{len(unreached)} further failure(s) rest on a missing import or file")
+            discount_parts.append(
+                f"{len(unreached)} further failure(s) rest on a missing import or file")
         if fixture:
             discount_parts.append(f"{len(fixture)} further failure(s) are fixture-shaped")
-        discount = f" {' and '.join(discount_parts)}, not evidence either way." if discount_parts else ""
+        discount = (f" {' and '.join(discount_parts)}, not evidence either way."
+                    if discount_parts else "")
         caveat = "" if baseline_precedes else (
-            " No source file differs between the baseline and the tree this test comes from, so this "
-            "is a fact about the baseline rather than proof that a change here is guarded."
+            " No source file differs between the baseline and the tree this test comes from, "
+            "so this is a fact about the baseline rather than proof that a change here is guarded."
         )
         return GUARDS, (
             f"{len(behavioral)} of {observed['collected']} selected tests failed on the behavior "
@@ -644,7 +656,8 @@ def main() -> int:
     ap.add_argument("--change", action="append", default=[],
                     help="a source file the change touches; repeatable. Overrides the computed set")
     ap.add_argument("--json", dest="json_out", default=None, help="write the full record here")
-    ap.add_argument("--timeout", type=int, default=900, help="seconds to allow pytest (default 900)")
+    ap.add_argument("--timeout", type=int, default=900,
+                    help="seconds to allow pytest (default 900)")
     ap.add_argument("--per-test-timeout", type=float, default=None,
                     help="seconds pytest-timeout allows one test (passed through as --timeout); "
                          "a test that does not finish within it scores INDETERMINATE by name, "
@@ -653,7 +666,8 @@ def main() -> int:
 
     if args.baseline_from_working_tree:
         if args.baseline:
-            ap.error("--baseline-from-working-tree and --baseline name the baseline two ways at once")
+            ap.error(
+                "--baseline-from-working-tree and --baseline name the baseline two ways at once")
         commit, method = snapshot_working_tree()
         expr_flag = f"-k {args.expr!r} " if args.expr else ""
         print(f"snapshot {commit} ({method})")
@@ -679,8 +693,8 @@ def main() -> int:
 
     if args.test_rev and not args.baseline:
         record.update(verdict=REFUSED, why=(
-            "--test-rev needs an explicit --baseline. The commit before a test is inside the change "
-            "in a one-file-per-commit history, so guessing one would decide the verdict."
+            "--test-rev needs an explicit --baseline. The commit before a test is inside the "
+            "change in a one-file-per-commit history, so guessing one would decide the verdict."
         ))
         return _report(record, args.json_out)
 
@@ -735,7 +749,8 @@ def main() -> int:
             record.update(verdict=REFUSED, why=f"pytest did not finish within {args.timeout}s.")
             return _report(record, args.json_out)
 
-        record["pytest"] = {"exit_code": proc.returncode, "tail": proc.stdout.strip().splitlines()[-15:]}
+        record["pytest"] = {"exit_code": proc.returncode,
+                            "tail": proc.stdout.strip().splitlines()[-15:]}
         if observed is None:
             timed_out_nodeid = (
                 current_test_path.read_text(encoding="utf-8").strip()

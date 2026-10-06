@@ -96,7 +96,8 @@ def compute_composite_objective(
     the epoch has no useful score.
 
     ``w["loss"]*loss + w["f1"]*(1-f1)*10 + w["map50"]*(1-map50)*10``, ``w`` the default weights
-    when ``score_weights`` is empty or ``None``. A non-positive or non-finite loss, or both quality terms
+    when ``score_weights`` is empty or ``None``. A non-positive or non-finite loss, or both
+    quality terms
     below 0.01, answers ``None``.
     """
     w = score_weights or DEFAULT_SCORE_WEIGHTS
@@ -419,8 +420,9 @@ def pick_count_unbiased(sweep: dict) -> float:
     """The conf that minimizes the worst per-class |mean per-image count bias| (tie-break: lower
     pooled |bias|, higher F1, lower |error|, higher conf): the count-trait operating point, where
     the model's totals match GT totals."""
-    best = min(sweep["curve"], key=lambda c: (worst_class_count_bias(c), abs(c["count_bias_mean"]), -c["f1"],
-                                     c["abs_count_error_mean"], -c["conf"]))
+    best = min(sweep["curve"],
+               key=lambda c: (worst_class_count_bias(c), abs(c["count_bias_mean"]), -c["f1"],
+                              c["abs_count_error_mean"], -c["conf"]))
     return best["conf"]
 
 
@@ -638,8 +640,12 @@ def score_bucket(images: Sequence[Any], bucket: Any, *, iou_threshold: float,
 
     from tcip_mcp.pipelines.image_utils import image_dimensions
 
-    read = [(src, gt, preds, *image_dimensions(src)) for src, gt, preds in bucket_reads(images, bucket)]
-    name_id = subject_category_ids([a for _s, gt, preds, _w, _h in read for a in (*gt, *(preds or ()))])
+    read = [
+        (src, gt, preds, *image_dimensions(src)) for src, gt, preds in bucket_reads(images, bucket)
+    ]
+    name_id = subject_category_ids(
+        [a for _s, gt, preds, _w, _h in read for a in (*gt, *(preds or ()))]
+    )
     records = [records_from_annotation(gt, preds or [], width=w, height=h, name_id=name_id)
                for _s, gt, preds, w, h in read]
     predicted = [k for k, (_s, _gt, preds, _w, _h) in enumerate(read) if preds is not None]
@@ -664,7 +670,9 @@ def score_bucket(images: Sequence[Any], bucket: Any, *, iou_threshold: float,
             for k, (src, gt, preds, w, h) in enumerate(read)], metrics
 
 
-def classification_metrics(pred_labels: torch.Tensor, targets: torch.Tensor, num_classes: int) -> dict:
+def classification_metrics(
+    pred_labels: torch.Tensor, targets: torch.Tensor, num_classes: int
+) -> dict:
     """Accuracy + macro-F1 + per-class precision/recall/f1/support/count_bias, each per-class
     mapping keyed by the class index as a string (a JSON object's key).
 
@@ -747,7 +755,9 @@ def r_squared(pred_values: torch.Tensor, gt_values: torch.Tensor) -> float | Non
     return 1.0 - ss_res / ss_tot
 
 
-def concordance_correlation_coefficient(pred_values: torch.Tensor, gt_values: torch.Tensor) -> float | None:
+def concordance_correlation_coefficient(
+    pred_values: torch.Tensor, gt_values: torch.Tensor
+) -> float | None:
     """Lin's concordance correlation coefficient: agreement between ``pred_values`` and
     ``gt_values`` as precision (Pearson correlation) times an accuracy/bias penalty. A prediction
     perfectly correlated with GT but systematically offset (a constant bias, or a scale != 1)
@@ -912,7 +922,10 @@ def evaluate(
         if is_detection:
             images, targets = batch
             images = [img.to(device) for img in images]
-            targets = [{k: (v.to(device) if isinstance(v, torch.Tensor) else v) for k, v in t.items()} for t in targets]
+            targets = [
+                {k: (v.to(device) if isinstance(v, torch.Tensor) else v) for k, v in t.items()}
+                for t in targets
+            ]
             # Loss pass over the full batch, all-negative (empty-box) images contribute their
             # background/objectness loss, so val_loss penalizes false positives on empty frames and
             # matches the train loop's distribution. BN stays eval via the train()+BN.eval() trick.
@@ -950,7 +963,10 @@ def evaluate(
         else:
             images, targets = batch
             images = images.to(device)
-            targets = {k: (v.to(device) if isinstance(v, torch.Tensor) else v) for k, v in targets.items()}
+            targets = {
+                k: (v.to(device) if isinstance(v, torch.Tensor) else v)
+                for k, v in targets.items()
+            }
             # Loss pass (BN stays in eval via the top-level training flag trick).
             model.training = True
             ld = model(images, targets)
@@ -980,7 +996,8 @@ def evaluate(
                 # to the GT frame so metrics compare per-pixel at the annotation resolution.
                 if pm.shape[-2:] != gm.shape[-2:]:
                     pm = torch.nn.functional.interpolate(
-                        pm.unsqueeze(1).float(), size=gm.shape[-2:], mode="nearest").squeeze(1).long()
+                        pm.unsqueeze(1).float(), size=gm.shape[-2:], mode="nearest"
+                    ).squeeze(1).long()
                 seg_p.append(pm.reshape(-1))
                 seg_g.append(gm.reshape(-1))
 

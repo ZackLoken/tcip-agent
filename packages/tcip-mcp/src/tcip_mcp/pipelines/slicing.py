@@ -222,7 +222,8 @@ class TcipDetectionModel(DetectionModel):
     """
 
     def __init__(
-        self, predictor: GenericPredictor, *, conf: float | None, tile_resize: tuple[int, int] | None,
+        self, predictor: GenericPredictor, *, conf: float | None,
+        tile_resize: tuple[int, int] | None,
         band_interpretations: tuple[str, ...] | None, collect_masks: bool, mask_binarize: dict,
     ) -> None:
         self._predictor = predictor

@@ -23,8 +23,10 @@ def _sample_coco_detect():
             {"id": 1, "file_name": "IMG_0001.jpg", "width": 640, "height": 480}
         ],
         "annotations": [
-            {"id": 1, "image_id": 1, "category_id": 0, "bbox": [100, 200, 50, 60], "area": 3000, "iscrowd": 0},
-            {"id": 2, "image_id": 1, "category_id": 1, "bbox": [300, 100, 80, 40], "area": 3200, "iscrowd": 0},
+            {"id": 1, "image_id": 1, "category_id": 0, "bbox": [100, 200, 50, 60],
+             "area": 3000, "iscrowd": 0},
+            {"id": 2, "image_id": 1, "category_id": 1, "bbox": [300, 100, 80, 40],
+             "area": 3200, "iscrowd": 0},
         ],
         "categories": [{"id": 0, "name": "tree"}, {"id": 1, "name": "nut"}],
     }

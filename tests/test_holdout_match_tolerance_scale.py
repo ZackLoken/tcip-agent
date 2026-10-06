@@ -70,7 +70,8 @@ def test_a_holdout_of_smaller_objects_is_judged_at_its_own_object_scale():
     _conf, evidence, failures = _criterion(cal, hold)
     hb = evidence["holdout_at_conf"]
 
-    # Calibration's own tolerance is twice the offset, so the same 30 px displacement is a hit there.
+    # Calibration's own tolerance is twice the offset, so the same 30 px displacement is a hit
+    # there.
     assert evidence["calibration_curve"]["criterion"]["tolerance"] == pytest.approx(60.0)
     assert evidence["calibration_at_conf"]["tp"] == TOTAL_OBJECTS
 

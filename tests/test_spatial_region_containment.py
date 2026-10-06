@@ -2,9 +2,9 @@
 
 A mosaic reference band has no image identity of its own, so the only proof it was held out is its
 geometry: the rect has to sit fully inside a region the run's partition actually recorded as
-non-train (``val_region``/``holdout_region``/``calibration_region``) and clear of every recorded train
-region. Missing the containment obligation admits a rect that lies in no attested region at all: a
-gap between regions, or coordinates the persisted geometry never covered.
+non-train (``val_region``/``holdout_region``/``calibration_region``) and clear of every recorded
+train region. Missing the containment obligation admits a rect that lies in no attested region at
+all: a gap between regions, or coordinates the persisted geometry never covered.
 """
 
 from __future__ import annotations

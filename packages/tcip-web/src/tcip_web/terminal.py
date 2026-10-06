@@ -142,8 +142,8 @@ def paste(text: str) -> str:
 
 
 _RITUAL_HEADER = "[TCIP session-start ritual] "
-_RITUAL_FRICTION = ("If any mandated action is blocked or errors, that itself is a report_friction, "
-                    "never a silent skip.")
+_RITUAL_FRICTION = ("If any mandated action is blocked or errors, that itself is a "
+                    "report_friction, never a silent skip.")
 
 
 def session_ritual(project: Optional[Path]) -> str:
@@ -384,7 +384,9 @@ def spawn_pty(argv: list[str], cwd: str, rows: int, cols: int, env: dict[str, st
 # ── The reader pump ─────────────────────────────────────────────────────
 
 
-def start_reader(pty, on_output: Callable[[str], None], on_exit: Callable[[], None], name: str) -> threading.Thread:
+def start_reader(
+    pty, on_output: Callable[[str], None], on_exit: Callable[[], None], name: str
+) -> threading.Thread:
     """Pump PTY output on a daemon thread until the process exits.
 
     Any read failure ends the pump. The reader owns closing the PTY's OS resources

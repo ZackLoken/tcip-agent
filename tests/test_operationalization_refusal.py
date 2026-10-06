@@ -72,7 +72,8 @@ def test_a_trait_with_no_confirmed_revision_refuses_and_names_who_confirms(tmp_p
         confirmed_revision(PER_IMAGE_COUNT, project=tmp_path, trait=fx.COUNT_TRAIT)
 
     assert "none of its 1 revision(s) is confirmed" in str(excinfo.value)
-    assert excinfo.value.as_detail() == {"kind": "operationalization", "message": str(excinfo.value)}
+    assert excinfo.value.as_detail() == {
+        "kind": "operationalization", "message": str(excinfo.value)}
 
 
 def test_a_value_key_outside_the_confirmed_set_refuses(project: Path):
@@ -321,7 +322,8 @@ def test_the_screen_door_still_honors_show_unvalidated_for_the_evidence_gate(
     """A confirmed meaning plus unassessed buckets still reaches the screen, marked provisional."""
     body = _series(tmp_path, assessed=False)
 
-    resp = client.post("/api/results/phenology_measurement", json={**body, "show_unvalidated": True})
+    resp = client.post("/api/results/phenology_measurement",
+                       json={**body, "show_unvalidated": True})
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["validated"] is False

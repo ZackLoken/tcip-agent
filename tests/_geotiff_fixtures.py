@@ -15,7 +15,9 @@ TIEPOINT_NATIVE_Y = 4_800_000.0
 PIXEL_SCALE = 0.5  # native-CRS units (m) per pixel
 
 
-def build_geokeys(*, model_type: int = 1, projected_epsg: int | None = UTM_15N_EPSG) -> tuple[int, ...]:
+def build_geokeys(
+    *, model_type: int = 1, projected_epsg: int | None = UTM_15N_EPSG
+) -> tuple[int, ...]:
     """A ``GeoKeyDirectoryTag``'s flat uint16 array naming ``model_type`` (1 == Projected) and,
     when given, a projected CRS by EPSG code."""
     entries: list[int] = [1024, 0, 1, model_type]

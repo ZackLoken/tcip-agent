@@ -417,7 +417,8 @@ def test_a_runs_band_count_is_read_over_every_source_and_a_disagreement_refuses(
     split = {"group_by": "stem", "val_ratio": 0.5, "seed": 1}
     base_cfg = {"images_dir": str(images_dir), "scope": {"subject": "bud"}}
 
-    train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", {**base_cfg, "split": dict(split)}, None)
+    train_ds, val_ds, _ = auto_train_val(
+        tmp_path, "detection", {**base_cfg, "split": dict(split)}, None)
     assert val_ds is not None
     assert train_ds.expected_channels == val_ds.expected_channels == 5
 
@@ -683,8 +684,8 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
         "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
         "early_stopping": {"enabled": False},
     }
-    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=val_loader is not None,
-                      id="auto-run-77")
+    run = trainer_run(cfg, tmp_path / "out", project=tmp_path,
+                      has_val_loader=val_loader is not None, id="auto-run-77")
     run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "completed", getattr(run, "error", run.status)

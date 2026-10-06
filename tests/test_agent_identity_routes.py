@@ -65,7 +65,8 @@ def test_a_push_without_the_headers_is_replayed_with_the_fields_empty(
 
 def test_a_partial_declaration_records_only_what_was_sent(opened_client: TestClient) -> None:
     _, event = _post_and_capture_broadcast(
-        opened_client, "identity_partial", {}, headers={"X-TCIP-Agent-Client-Name": "reviewing-harness"}
+        opened_client, "identity_partial", {},
+        headers={"X-TCIP-Agent-Client-Name": "reviewing-harness"},
     )
     assert event["agent_client_name"] == "reviewing-harness"
     assert event["agent_client_version"] is None

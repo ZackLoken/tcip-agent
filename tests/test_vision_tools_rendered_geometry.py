@@ -69,8 +69,9 @@ def test_every_region_of_a_split_annotation_is_drawn_on_the_mask_render(
     """
     from tcip_mcp.tools.vision_tools import visualize
 
-    result = visualize(split_instance_dataset, "annotations",
-                       str(split_instance_dataset / "images" / UNDATED_BUCKET / "split.png"), task="segment")
+    result = visualize(
+        split_instance_dataset, "annotations",
+        str(split_instance_dataset / "images" / UNDATED_BUCKET / "split.png"), task="segment")
     assert "error" not in result, result
     assert result["count"] == 1                     # one instance, drawn as its several regions
 
