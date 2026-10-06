@@ -32,6 +32,7 @@ _gpu_round_robin = itertools.count()
 # Serializes the overfit diagnostic's reseed-run-restore, since the RNG streams are process-global.
 _OVERFIT_CHECK_LOCK = threading.Lock()
 
+
 def candidate_config_with_selection(config: dict, selection_dir: str) -> dict:
     """The launch config choosing ``selection_dir`` over ``config``'s own data section would
     build: ``data.split`` replaced wholesale by ``{"selection_dir": selection_dir}``, and the

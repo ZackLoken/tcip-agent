@@ -34,7 +34,6 @@ def test_tiled_detection_reads_multiband_and_keeps_boxes_on_their_pixels(tmp_pat
     """
     import torch
 
-
     images_dir = _multiband_detection_fixture(tmp_path)
     ds = dataset_over("detection", str(images_dir), subject="bud",
                       stated={"num_channels": 5},
@@ -66,7 +65,6 @@ def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(tmp_path):
     import tifffile
     from tcip_annotation.state import Annotation, BBox
     from tcip_annotation.utils import get_image_dimensions
-
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
@@ -118,7 +116,6 @@ def test_tiled_detection_handles_channel_first_rasters(tmp_path):
     import tifffile
     from tcip_annotation.state import Annotation, BBox
 
-
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
     arr = np.zeros((24, 40, 5), dtype=np.uint8)
@@ -130,7 +127,7 @@ def test_tiled_detection_handles_channel_first_rasters(tmp_path):
     ds = dataset_over("detection", str(images_dir), subject="bud",
                       stated={"num_channels": 5},
                       tiling={"enabled": True, "tile_size": 16, "overlap": 0.0, "sliver_frac": 0.5})
-    with_boxes =[(t, tgt) for t, tgt in (ds[i] for i in range(len(ds))) if len(tgt["boxes"])]
+    with_boxes = [(t, tgt) for t, tgt in (ds[i] for i in range(len(ds))) if len(tgt["boxes"])]
     assert with_boxes, "the GT box did not survive tiling on a channel-first raster"
     for tile, target in with_boxes:
         assert tile.shape == (5, 16, 16)

@@ -39,9 +39,11 @@ class AmbiguousImageStem(ValueError):
     different exact stem than its own.
     """
 
+
 # ``.npy``/``.npz`` are a multi-band raster; ``.bandgroup`` a manifest standing in for the image it
 # names.
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".heic", ".tif", ".tiff", ".npy", ".npz", MANIFEST_EXT}
+
 
 def stem_collision_key(name: str) -> str:
     """The fold that decides whether two stems name one logical identity: ``str.lower()``, so a

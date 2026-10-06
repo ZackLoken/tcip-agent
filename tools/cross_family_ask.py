@@ -58,6 +58,7 @@ CODEX = resolve_harness(
 AGY = resolve_harness("agy", "TCIP_AGY_BIN", LOCAL_APP_DATA / "agy/bin/agy.exe")
 CLAUDE = resolve_harness("claude", "TCIP_CLAUDE_BIN")
 
+
 def load_tcip_mcp_config() -> dict:
     """The ``tcip`` MCP server block, read from the repo's own ``.mcp.json`` rather than
     restated here, so a change to that launch config is what a run actually sees.
@@ -74,6 +75,7 @@ def load_tcip_mcp_config() -> dict:
     if server is None:
         raise SystemExit(f"{mcp_path} has no mcpServers.tcip block for the tcip condition to use")
     return {"mcpServers": {"tcip": server}}
+
 
 CONDITIONS = {
     "as-shipped": {

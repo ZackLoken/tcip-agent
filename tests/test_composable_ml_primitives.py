@@ -73,8 +73,10 @@ class TestSamplers:
             num_classes = 3
             num_samples = 6
             class_distribution = {0: 3, 1: 2, 2: 1}
+
             def __len__(self):
                 return self.num_samples
+
             def __getitem__(self, idx):
                 labels = [0, 0, 0, 1, 1, 2]
                 return torch.zeros(3, 32, 32), {"label": labels[idx]}
@@ -116,8 +118,6 @@ class TestOptimizerFactory:
         model = nn.Linear(10, 5)
         with pytest.raises(ImportError, match="torch_optimizer"):
             build_optimizer("lamb", model, head_lr=1e-3)
-
-
 
 
 # ====================================================================

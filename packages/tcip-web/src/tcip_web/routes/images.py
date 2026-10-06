@@ -80,6 +80,7 @@ def _cache_byte_budget(cache_dir: Path) -> int:
         _cache_budget_bytes = shutil.disk_usage(cache_dir).free // _CACHE_BUDGET_DIVISOR
     return _cache_budget_bytes
 
+
 _STATS_SEED = 0
 """The seed every sampled read of a raster's display bounds uses.
 

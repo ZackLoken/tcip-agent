@@ -148,5 +148,3 @@ def _freeze_sequential_fraction(
         if i < n_freeze:
             for p in module.parameters():
                 p.requires_grad = False
-
-

@@ -58,7 +58,7 @@ def test_dict_and_file_roundtrip_preserve_the_registry(tmp_path):
     assert registry_from_dict(registry_to_dict(reg)) == reg
 
     path = tmp_path / "subjects.json"
-    registry_over(tmp_path,reg)
+    registry_over(tmp_path, reg)
     assert read_registry(tmp_path) == reg
     # bush carries no attributes -> no 'attributes' key rather than an empty one
     on_disk = json.loads(path.read_text(encoding="utf-8"))
@@ -164,7 +164,7 @@ def test_a_present_but_undecodable_registry_refuses_and_an_absent_one_says_so(tm
         read_registry(tmp_path / "absent")
 
     # a registry that does decode still reads, so the refusal has not swallowed valid work.
-    registry_over(tmp_path,SubjectRegistry(subjects=(Subject(name="bud"),)))
+    registry_over(tmp_path, SubjectRegistry(subjects=(Subject(name="bud"),)))
     assert read_registry(tmp_path).subject("bud") is not None
 
 
@@ -177,7 +177,7 @@ def test_a_copied_registry_declares_the_same_document_in_the_same_order(tmp_path
     source, destination = tmp_path / "source", tmp_path / "destination"
     source.mkdir()
     destination.mkdir()
-    registry_over(source,SubjectRegistry(subjects=(
+    registry_over(source, SubjectRegistry(subjects=(
         Subject(name="bud", description="a description with an ümlaut"),
         Subject(name="bush"),
     )))
@@ -197,8 +197,8 @@ def test_copy_registry_refuses_when_the_destination_already_holds_one(tmp_path):
     source, destination = tmp_path / "source", tmp_path / "destination"
     source.mkdir()
     destination.mkdir()
-    registry_over(source,SubjectRegistry(subjects=(Subject(name="bud"),)))
-    registry_over(destination,SubjectRegistry(subjects=(Subject(name="bush"),)))
+    registry_over(source, SubjectRegistry(subjects=(Subject(name="bud"),)))
+    registry_over(destination, SubjectRegistry(subjects=(Subject(name="bush"),)))
 
     with pytest.raises(RegistryError):
         copy_registry(source, destination)

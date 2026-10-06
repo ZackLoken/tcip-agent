@@ -121,5 +121,3 @@ class TestMcpBridge:
         tool_names = {t["name"] for t in tools}
         assert "inspect_project" in tool_names
         assert len(tool_names) >= 10  # we have 40+ tools
-
-

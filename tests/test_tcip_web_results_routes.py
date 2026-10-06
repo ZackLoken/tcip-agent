@@ -573,7 +573,6 @@ def _per_plant(bucket, registry: str, *, filename: str = "plant_counts.csv",
             "filename": filename, "user": "breeder", **extra}
 
 
-
 def test_an_unassessed_raster_bucket_refuses_with_no_acknowledgment(
     client: TestClient, tmp_path: Path,
 ) -> None:

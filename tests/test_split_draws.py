@@ -1374,7 +1374,7 @@ def test_split_draws_over_one_bespoke_source_refuse_the_validation_they_cannot_d
 
     images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     cfg = _one_source_tiled_cfg(images_dir)
-    untiled ={k: v for k, v in cfg["data"].items() if k != "tiling"}
+    untiled = {k: v for k, v in cfg["data"].items() if k != "tiling"}
     cfg["data"] = {**untiled, "dataset_source": {
         "builder": "tests.test_dataset_source_seam:build_bespoke_ds"}}
     # One source holds nothing out, so the run selects on its training loss.

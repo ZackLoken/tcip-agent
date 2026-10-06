@@ -36,6 +36,7 @@ def _document_text(name: str) -> str:
     assert skill.exists(), f"missing document: {skill}"
     return skill.read_text(encoding="utf-8")
 
+
 # knowledge document name -> crops.yml crop key (None = domain document, global check)
 CROP_SKILLS = {
     "hazelnut": "hazelnut",

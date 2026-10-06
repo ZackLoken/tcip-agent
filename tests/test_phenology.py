@@ -212,7 +212,7 @@ def test_count_by_class_wrong_axis_bucket_refuses(tmp_path):
     # never called the positive state's attribute, so it must refuse, not be miscounted.
     p = _document(tmp_path, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9,
                                         attributes={"damage": "mild"})])
-    scope =_scope(tmp_path, cr.Attribute("damage", "ordinal", ("none", "mild", "severe")))
+    scope = _scope(tmp_path, cr.Attribute("damage", "ordinal", ("none", "mild", "severe")))
     total, positive, unclassified = phenology.count_by_class(p, OPENED, scope=scope)
     assert (total, positive, unclassified) == (1, 0, 1)
 

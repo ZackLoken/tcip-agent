@@ -33,6 +33,7 @@ from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
 
 logger = logging.getLogger(__name__)
 
+
 class WindowedRasterReader(Protocol):
     """A source read window by window: full-raster pixel dimensions, band count, and a windowed
     decode."""
