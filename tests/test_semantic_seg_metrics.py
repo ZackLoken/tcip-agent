@@ -103,16 +103,16 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
     from tcip_mcp.pipelines.training.collation import task_collate
     from tests import bespoke_models
 
-    IMG = 64
+    side = 64
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     masks_dir = tmp_path / "masks"
     images_dir.mkdir(parents=True, exist_ok=True)
     masks_dir.mkdir(parents=True, exist_ok=True)
     for i in range(4):
-        arr = (np.random.rand(IMG, IMG, 3) * 255).astype(np.uint8)
+        arr = (np.random.rand(side, side, 3) * 255).astype(np.uint8)
         Image.fromarray(arr).save(images_dir / f"img{i}.png")
-        m = np.zeros((IMG, IMG), dtype=np.uint8)
-        m[IMG // 4:IMG // 2, IMG // 4:IMG // 2] = 1  # a foreground block
+        m = np.zeros((side, side), dtype=np.uint8)
+        m[side // 4:side // 2, side // 4:side // 2] = 1  # a foreground block
         Image.fromarray(m, mode="L").save(masks_dir / f"img{i}.png")
 
     dataset = dataset_over("semantic_seg", str(images_dir), str(masks_dir))

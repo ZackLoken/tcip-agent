@@ -441,15 +441,15 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: t
 
     # A rounding-slop margin in pixels, not a fraction of the image size: a fractional margin
     # admits a normalized [0,1] ring at every real image size, the bug this check exists to refuse.
-    _PIXEL_MARGIN = 1.0
+    pixel_margin = 1.0
 
     def _spans_a_pixel(ring: list[tuple[float, float]]) -> bool:
         b = bbox_of(Polygon(rings=[ring]))
         return b.x2 - b.x1 >= 1.0 and b.y2 - b.y1 >= 1.0
 
     def _out_of_pixel_bounds(ring: list[tuple[float, float]]) -> bool:
-        return (any(x < -_PIXEL_MARGIN or x > img_w + _PIXEL_MARGIN for x, _ in ring)
-                or any(y < -_PIXEL_MARGIN or y > img_h + _PIXEL_MARGIN for _, y in ring))
+        return (any(x < -pixel_margin or x > img_w + pixel_margin for x, _ in ring)
+                or any(y < -pixel_margin or y > img_h + pixel_margin for _, y in ring))
 
     created_at = now_iso()
 
