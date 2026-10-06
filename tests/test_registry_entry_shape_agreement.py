@@ -159,5 +159,3 @@ def test_a_readable_index_is_still_read_entry_by_entry(polluted_project) -> None
     assert not any("decode" in message for _, message in findings)
     for entry in reg.list_models():
         assert any(entry["name"] in message for _, message in findings)
-
-

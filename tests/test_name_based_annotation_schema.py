@@ -145,7 +145,7 @@ def test_decode_inverts_the_recorded_scope(tmp_path):
 def test_save_annotations_refuses_missing_subject(tmp_path):
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    image = _write_image(tmp_path / "images" / UNDATED_BUCKET,"img_001")
+    image = _write_image(tmp_path / "images" / UNDATED_BUCKET, "img_001")
 
     res = save_annotations(tmp_path, tmp_path.parent, str(image),
                            annotations=[{"bbox": [10, 10, 40, 40]}])
@@ -163,7 +163,7 @@ def test_save_annotations_prefers_points_over_bbox(tmp_path):
     carrying both geometries writes the polygon, never collapsing it to a box-only record."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    image = _write_image(tmp_path / "images" / UNDATED_BUCKET,"img_001")
+    image = _write_image(tmp_path / "images" / UNDATED_BUCKET, "img_001")
 
     res = save_annotations(
         tmp_path, tmp_path.parent, str(image),
@@ -192,7 +192,7 @@ def test_save_annotations_refuses_a_polygon_that_is_no_shape(tmp_path, geometry)
     anything is written, never read as no geometry nor saved and then dropped on write."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    image = _write_image(tmp_path / "images" / UNDATED_BUCKET,"img_001")
+    image = _write_image(tmp_path / "images" / UNDATED_BUCKET, "img_001")
 
     res = save_annotations(tmp_path, tmp_path.parent, str(image),
                            annotations=[{"subject": "bud", **geometry}])
@@ -206,7 +206,7 @@ def test_save_annotations_accepts_rings(tmp_path):
     pairs) saves with its geometry through the write door."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    image = _write_image(tmp_path / "images" / UNDATED_BUCKET,"img_001")
+    image = _write_image(tmp_path / "images" / UNDATED_BUCKET, "img_001")
 
     res = save_annotations(
         tmp_path, tmp_path.parent, str(image),

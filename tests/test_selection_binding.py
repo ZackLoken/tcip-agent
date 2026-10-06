@@ -40,7 +40,7 @@ def _two_subject_two_date_dataset(root: Path) -> Path:
     clearing a leaf-scoped draw's floor), and four of the six also carry the unrelated ``bud``
     (eight foreground groups, clearing a bud-scoped draw's floor too), so a selection drawn for
     either subject binds to a real, differently-sized draw over the identical tree."""
-    registry_over(root,SubjectRegistry(subjects=(
+    registry_over(root, SubjectRegistry(subjects=(
         Subject(name=SUBJECT), Subject(name=OTHER_SUBJECT),
     )))
     for date in DATES:
@@ -77,7 +77,7 @@ def test_every_sample_groups_each_member_the_way_the_stem_policy_records_it(tmp_
 def _attribute_scoped_dataset(root: Path) -> Path:
     """One date, five stems of a subject declaring ``condition``: four have their instance
     assessed for it, the fifth carries an instance never assessed for it."""
-    registry_over(root,SubjectRegistry(subjects=(
+    registry_over(root, SubjectRegistry(subjects=(
         Subject(name=SUBJECT, attributes=(
             Attribute(name="condition", type="categorical", values=("healthy", "damaged")),
         )),
@@ -98,7 +98,7 @@ def _attribute_scoped_dataset(root: Path) -> Path:
 def _dataset_with_a_confirmed_negative(root: Path) -> Path:
     """One date, four annotated stems (clearing a draw's foreground floor) plus a fifth stem
     whose label document is empty, for a caller to confirm negative."""
-    registry_over(root,SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    registry_over(root, SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
     images_dir = root / "images" / DATES[0]
     for stem in ("a", "b", "c", "d"):
         _write_stem(images_dir, stem, [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))])
@@ -109,7 +109,7 @@ def _dataset_with_a_confirmed_negative(root: Path) -> Path:
 def _tiled_dataset(root: Path) -> Path:
     """Four parents, three crops each, named ``<parent>_<x>_<y>`` so the default tile-prefix
     grouping puts every crop of one parent in one group."""
-    registry_over(root,SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    registry_over(root, SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
     images_dir = root / "images" / DATES[0]
     for parent in ("srcA", "srcB", "srcC", "srcD"):
         for x in range(3):
@@ -272,7 +272,7 @@ def test_a_bound_run_keeps_its_selections_attributes_when_the_registry_is_reorde
 
     # The same attribute, its values declared the other way round: an order re-read here would
     # give each value the other's id, a different class space than the samples were admitted in.
-    registry_over(root,SubjectRegistry(subjects=(
+    registry_over(root, SubjectRegistry(subjects=(
         Subject(name=SUBJECT, attributes=(
             Attribute(name="condition", type="categorical", values=("damaged", "healthy")),
         )),
@@ -423,7 +423,7 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
     images_dir = root / "images" / DATES[0]
     images_dir.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (64, 64), (100, 120, 90)).save(images_dir / "a.jpg")
-    registry_over(root,SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    registry_over(root, SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
     label_image(images_dir / "a.jpg", [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))],
                 64, 64, keep_empty=True)
     table = root / "values.csv"
@@ -872,7 +872,7 @@ def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
     from tests._producer_fixtures import image_label_key, mark_complete
 
     root = tmp_path / "ds"
-    registry_over(root,SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    registry_over(root, SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
     images_dir = root / "images" / DATES[0]
     for stem in ("fg", "neg", "held_a", "held_b"):
         _write_stem(images_dir, stem, [] if stem == "neg" else

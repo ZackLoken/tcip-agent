@@ -99,6 +99,7 @@ def test_a_form_encoded_body_is_refused(client: TestClient) -> None:
     }
     assert reached == dict.fromkeys(EMPTY_BODY_ROUTES, 422)
 
+
 def test_a_headerless_json_shaped_body_is_refused(client: TestClient) -> None:
     """Pins a dependency property this rail leans on rather than a version number: a request
     carrying a non-empty, JSON-shaped body with no ``Content-Type`` header at all must not be

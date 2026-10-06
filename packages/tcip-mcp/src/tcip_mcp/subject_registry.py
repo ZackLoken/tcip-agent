@@ -341,5 +341,3 @@ def registry_for_dataset_root(dataset_root: str | Path) -> SubjectRegistry | Non
         return read_registry(dataset_root)
     except FileNotFoundError:
         return None
-
-

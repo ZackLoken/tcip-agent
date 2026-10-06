@@ -783,6 +783,7 @@ def builtin_loader(task: str, dataset_source: dict | None = None) -> type[BaseIm
     ``dataset_source`` and for a task no built-in loader reads."""
     return None if dataset_source else _DATASET_MAP.get(task)
 
+
 def build_from_dataset_source(
     dataset_source: dict, *, task: str, samples: Sequence[Sample],
     scope: ClassScope, transforms: Any,

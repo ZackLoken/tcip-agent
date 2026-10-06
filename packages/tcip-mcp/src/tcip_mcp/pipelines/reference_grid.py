@@ -18,6 +18,7 @@ clearly with most of the cell visible, measured by rendering ``render_grid_overl
 artifact bound over cell edges 32 to 128: at 32 two-letter, two-digit labels collide, at 40 they
 cover most of the cell."""
 
+
 @dataclass(frozen=True)
 class Cell:
     """One grid cell: its name plus its half-open native-pixel rect (``x0 <= x < x1``,

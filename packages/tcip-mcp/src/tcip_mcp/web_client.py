@@ -34,6 +34,7 @@ def free_port(requested: int) -> int:
             continue
     raise OSError(f"no port could be bound on {LOOPBACK_HOST}")
 
+
 BACKEND_PORT_STORE = "backend_port"
 _PORT_PARTS = ("web_port",)
 
@@ -233,6 +234,7 @@ def read_gui_snapshot(project: Path) -> Optional[GuiState]:
         resolved_registry_path(project, choice.dataset_root), choice.subject, choice.date,
         choice.bucket, choice.current_image_index)
     return GuiState(**{**persisted.model_dump(exclude={"dataset"}), "dataset": dataset})
+
 
 # One panel per GUI tab, plus "app" for steering the GUI itself (open a project, focus a tab).
 # The pusher and the receiver both validate against this one set, so neither drifts apart.

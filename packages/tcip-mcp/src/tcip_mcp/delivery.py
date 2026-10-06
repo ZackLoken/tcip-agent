@@ -237,7 +237,7 @@ def gate(
         raise DeliveryRefused("a delivery names no prediction bucket, so nothing states what its "
                               "numbers were measured from; name the published buckets it ships.")
     shared_root(buckets)
-    proposed =[b.name for b in buckets if "checkpoint_sha256" not in b.producer]
+    proposed = [b.name for b in buckets if "checkpoint_sha256" not in b.producer]
     if proposed:
         raise DeliveryRefused(f"{proposed} hold staged proposals, which no model predicted and "
                               "no assessment measures: a delivery ships a model's predictions.")

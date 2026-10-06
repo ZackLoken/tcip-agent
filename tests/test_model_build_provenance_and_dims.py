@@ -70,7 +70,7 @@ def _write_registry(dataset_root: Path) -> None:
         subject_registry.Subject(name="bud"),
     ))
     dataset_root.mkdir(parents=True, exist_ok=True)
-    registry_over(dataset_root,registry)
+    registry_over(dataset_root, registry)
 
 
 def _agent_package(root: Path, name: str, modules: dict) -> Path:
@@ -102,7 +102,7 @@ def test_contract_dims_take_the_admitted_attributes_without_the_loader_backgroun
     dataset_root = tmp_path / "currant_2026"
     images_dir = dataset_root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
-    registry_over(dataset_root,subject_registry.SubjectRegistry(
+    registry_over(dataset_root, subject_registry.SubjectRegistry(
         subjects=(subject_registry.Subject(
             name="leaf", attributes=(subject_registry.Attribute(
                 name="condition", type="ordinal", values=("healthy", "mild")),)),)))

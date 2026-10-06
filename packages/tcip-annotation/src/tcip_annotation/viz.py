@@ -42,6 +42,7 @@ COLOR_PALETTE: list[tuple[int, int, int]] = [
     (255, 128, 255),   # pink
 ]
 
+
 def _rgb_frame(image: "Image.Image | np.ndarray") -> Image.Image:
     """The caller's display pixels as an RGB frame this module can draw on.
 
@@ -225,7 +226,7 @@ def render_comparison(
 
     gt_color = (0, 255, 0)      # green for ground truth
     pred_color = (255, 0, 0)    # red for predictions
-    match_color = (255, 255, 0) # yellow for match lines
+    match_color = (255, 255, 0)  # yellow for match lines
 
     # Draw GT boxes
     for box in gt_boxes:

@@ -135,7 +135,7 @@ class TestE2EPipeline:
         assert len(doc.annotations) == 3  # we wrote 3 boxes
 
         # ── Step 7: Evaluate single image detections ─────────────────
-        eval_result = score_predictions(img_path, BUCKET,iou_threshold=0.5, conf_threshold=0.25)
+        eval_result = score_predictions(img_path, BUCKET, iou_threshold=0.5, conf_threshold=0.25)
         assert "error" not in eval_result
         # Should have precision, recall, f1 keys
         assert "precision" in eval_result
@@ -144,7 +144,7 @@ class TestE2EPipeline:
         assert isinstance(eval_result["precision"], float)
 
         # ── Step 8: Detailed per-detection breakdown (score_predictions detail=True) ─
-        match_result = score_predictions(img_path, BUCKET,iou_threshold=0.5, conf_threshold=0.25,
+        match_result = score_predictions(img_path, BUCKET, iou_threshold=0.5, conf_threshold=0.25,
                                          detail=True)
         assert "error" not in match_result
         assert "detections" in match_result

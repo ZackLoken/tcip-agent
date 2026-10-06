@@ -67,7 +67,7 @@ def test_registering_a_checkpoint_again_supersedes_its_earlier_entry(tmp_path: P
     root.mkdir()
     reg = ModelRegistry(str(root))
 
-    ckpt_v1 =checkpoint_file(tmp_path / "model_epoch8.pt", "epoch-8-weights")
+    ckpt_v1 = checkpoint_file(tmp_path / "model_epoch8.pt", "epoch-8-weights")
     ckpt_v2 = checkpoint_file(tmp_path / "model_epoch19.pt", "epoch-19-weights-after-resume")
     companion = checkpoint_file(tmp_path / "leaf_model.pt", "a separate run")
 

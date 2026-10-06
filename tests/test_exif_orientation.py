@@ -74,7 +74,7 @@ def _red_fraction(rchan: "np.ndarray | torch.Tensor", g: "np.ndarray | torch.Ten
 
 def test_orientation6_fixture_is_real(tmp_path: Path) -> None:
     images_dir, _ = _make_orient6_dataset(tmp_path)
-    reop =Image.open(images_dir / "m.jpg")
+    reop = Image.open(images_dir / "m.jpg")
     assert reop.size == (UP_H, UP_W)  # stored landscape (raw), differs from upright
     assert (reop._getexif() or {}).get(274) == 6  # the orientation the code must honor
 

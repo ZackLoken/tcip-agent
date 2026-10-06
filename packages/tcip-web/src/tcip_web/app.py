@@ -212,6 +212,7 @@ async def _broadcast_to_panel(panel: str, event: dict[str, Any]) -> None:
     for ws in dead:
         _panel_subscribers[panel].discard(ws)
 
+
 def _static_dir_candidates() -> list[Path]:
     """The built frontend's install-layout candidates, in preference order: the packaged copy
     inside an installed wheel, then the src-layout checkout.

@@ -135,7 +135,6 @@ def _write_scene(
 # ── rail 6: no project record ────────────────────────────────────────────
 
 
-
 # ── rail 4: dataset identity, NAME_SEGMENT, variously-spelled roots, dataset mismatch ────
 
 
@@ -689,7 +688,7 @@ def test_a_supersede_whose_receipt_fails_answers_409_and_the_archive_still_loads
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     asyncio.run(store.open_project(tmp_path.resolve()))
 
-    first =client.post("/api/results/plant_mapping/build", json={
+    first = client.post("/api/results/plant_mapping/build", json={
         "name": "valley", "images_root": str(images_root), "plant_registry": registry,
         "user": "tester",
     })

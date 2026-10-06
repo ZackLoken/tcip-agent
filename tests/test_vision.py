@@ -1304,4 +1304,3 @@ class TestEnginePredictionStaging:
         assert objs
         assert all(o["created_by"] == "stub" for o in objs)
         assert all(isinstance(o["score"], float) for o in objs)
-

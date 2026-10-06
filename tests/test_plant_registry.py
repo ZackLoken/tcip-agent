@@ -256,4 +256,3 @@ def test_a_registry_digest_mismatch_refuses_at_delivery(
     assert "error" in res
     assert registry_name in res["error"]
     assert not out_csv.exists()
-

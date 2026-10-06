@@ -119,6 +119,7 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(tmp_pa
     bucket = read_bucket(published_bucket.root, published_bucket.name)
     rows = [{"plant_id": "p1", "value": 12.5, "observations": 1, "value_key": "area_mm2",
              "plant_attribution": "image"}]
+
     def deliver(out: Path, **kw):
         return acknowledged(tmp_path, lambda ack: deliver_per_plant_aggregate(
             tmp_path, rows, str(out), delivered_phenotype="plant_surface_area",

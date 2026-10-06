@@ -85,6 +85,7 @@ def _add_extra_bud_groups(data_dir: Path, count: int) -> None:
         label_image(images_dir / f"{stem}.jpg",
                     [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))], 640, 480)
 
+
 def test_draw_splits_basic(data_dir: Path, tmp_path: Path):
     _add_extra_bud_groups(data_dir, 1)
     out = tmp_path / "manifests"
@@ -485,7 +486,7 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
     date = "2-11-26"
     images_dir = root / "images" / date
     images_dir.mkdir(parents=True)
-    registry_over(root,SubjectRegistry(subjects=(
+    registry_over(root, SubjectRegistry(subjects=(
         Subject(name="leaf"), Subject(name="bud"),
     )))
     for stem in ("p1", "p2", "p3"):
@@ -545,6 +546,7 @@ def test_draw_splits_calibration_side_holds_real_foreground_regardless_of_strati
                              holdout_ratio=0.05, stratify_foreground=False)
         assert "error" not in result, (seed, result)
         assert result["calibration_foreground_groups"] >= 2, (seed, result)
+
 
 def _multi_source_dataset(root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"), tiles=3) -> Path:
     from PIL import Image
@@ -733,7 +735,7 @@ def _two_subject_dataset(root: Path) -> Path:
     date = "2-11-26"
     images_dir = root / "images" / date
     images_dir.mkdir(parents=True)
-    registry_over(root,SubjectRegistry(subjects=(
+    registry_over(root, SubjectRegistry(subjects=(
         Subject(name="leaf"), Subject(name="bud"),
     )))
     for stem, subject in (
@@ -767,7 +769,7 @@ def _attribute_scoped_dataset(root: Path) -> Path:
     date = "2-11-26"
     images_dir = root / "images" / date
     images_dir.mkdir(parents=True)
-    registry_over(root,SubjectRegistry(subjects=(
+    registry_over(root, SubjectRegistry(subjects=(
         Subject(name="leaf", attributes=(
             Attribute(name="condition", type="categorical", values=("healthy", "damaged")),
         )),

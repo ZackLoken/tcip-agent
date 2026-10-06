@@ -344,4 +344,3 @@ def test_count_label_lines_counts_every_instance_of_the_subject_assessed_or_not(
     stored = json_io.read_label_document(image_label_key(images_dir / "a.png"))
 
     assert count_label_lines(stored, registry_scope(images_dir, "leaf")) == 2
-
