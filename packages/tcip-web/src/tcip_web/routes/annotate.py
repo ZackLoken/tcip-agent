@@ -111,13 +111,15 @@ def _read(key: Key) -> tuple[LabelDocument, Version]:
 
 @router.get("/labels")
 def load_labels(image_path: str) -> dict:
-    """An image's label document in pixel coords: its annotations, each subject's completion
+    """An image's label document in pixel coords: its annotations, each with its ``index`` in the
+    document (the index a proposal's ``paired`` names), each subject's completion
     (:func:`_completion`) and the version token a save echoes back, the empty token for an image
     with no document yet."""
     key, w, h = _admitted(image_path)
     doc, version = _read(key)
     return {"image_path": image_path, "img_width": w, "img_height": h,
-            "annotations": [annotation_dict(a) for a in doc.annotations],
+            "annotations": [{**annotation_dict(a), "index": i}
+                            for i, a in enumerate(doc.annotations)],
             "completion": _completion(doc), "base_mtime": version.token}
 
 
@@ -157,11 +159,13 @@ def save_labels(payload: SavePayload) -> dict:
 @router.get("/proposals")
 def load_proposals(image_path: str, bucket: str) -> dict:
     """The proposals the bucket named ``bucket`` under the image's dataset root offers for
-    ``image_path``, in document order: each with its ``index``, the annotation of the image's
-    label document it pairs with (``paired``, :func:`~tcip_mcp.dataset_layout.proposal_pairs`),
-    the last ``decision`` its verdict shard records, and whether the bucket's assessment admits it
-    (``admitted``, :func:`~tcip_mcp.delivery.admitted_conf`). A bucket that names no document for
-    the image, or one that will not read, answers 400."""
+    ``image_path``, in document order: each with its ``index``, the index of the annotation of
+    the image's label document it pairs with (``paired``,
+    :func:`~tcip_mcp.dataset_layout.proposal_pairs`) and the last ``decision`` its verdict shard
+    records; beside them the bucket's ``operating_point``, the ``conf`` a review may accept at on
+    its assessment's authority or ``None`` with the ``reason``
+    (:func:`~tcip_mcp.delivery.admitted_conf`). A bucket that names no document for the image, or
+    one that will not read, answers 400."""
     from tcip_annotation.verdicts import read_verdicts
 
     from tcip_mcp.delivery import admitted_conf
@@ -175,11 +179,12 @@ def load_proposals(image_path: str, bucket: str) -> dict:
         paired = proposal_pairs(store.project_root, published, annotations, proposals)
     except (ValueError, UnreadableLabelDocumentError) as exc:
         raise HTTPException(400, str(exc)) from exc
-    conf, _reason = admitted_conf(store.open_root(), published)
-    return {"bucket": published.name, "proposals": [
-        {**annotation_dict(p), "index": i, "paired": paired.get(i), "decision": decisions.get(i),
-         "admitted": conf is not None and p.score is not None and p.score >= conf}
-        for i, p in enumerate(proposals)]}
+    conf, reason = admitted_conf(store.open_root(), published)
+    return {"bucket": published.name, "operating_point": {"conf": conf, "reason": reason},
+            "proposals": [
+                {**annotation_dict(p), "index": i, "paired": paired.get(i),
+                 "decision": decisions.get(i)}
+                for i, p in enumerate(proposals)]}
 
 
 @dataclass

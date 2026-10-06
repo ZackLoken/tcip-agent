@@ -2,33 +2,32 @@ import { memo } from "react";
 import { Circle, Line } from "react-konva";
 
 import { HaloLabel } from "@/components/HaloLabel";
-import { dashPattern } from "@/lib/authorshipSymbology";
+import { dashFor, FOCUS_HALO, type LineStyle } from "@/lib/symbology";
 import type { PolygonShape } from "@/store/types";
 
 export const PolygonOverlay = memo(function PolygonOverlay({
   polygon,
   stroke,
   width,
+  style,
   vertexRadius,
   showVertices,
   labelSize,
   label,
   showLabel,
-  dashed,
-  strokeOpacity,
+  focused,
 }: {
   polygon: PolygonShape;
   stroke: string;
   width: number;
+  style: LineStyle;
   vertexRadius: number;
   showVertices: boolean;
   labelSize: number;
   label: string;
   showLabel?: boolean;
-  /** A tool's own polygon that no person has accepted draws dotted; every other polygon is solid. */
-  dashed?: "tool";
-  /** The outline's opacity; full when omitted. */
-  strokeOpacity?: number;
+  /** The focused item draws the halo under every ring's own stroke. */
+  focused?: boolean;
 }) {
   /** Every ring of the annotation draws, in the instance's own stroke: the shape a reviewer
    *  confirms is all of it, not the first contour. Selection/hover styling is shared, so touching
@@ -37,9 +36,20 @@ export const PolygonOverlay = memo(function PolygonOverlay({
   const rings = polygon.rings.filter((ring) => ring.length >= 2);
   if (!rings.length) return null;
   const [x0, y0] = rings[0][0];
-  const dash = dashed ? dashPattern(dashed, width) : undefined;
+  const dash = dashFor(style, width);
   return (
     <>
+      {focused &&
+        rings.map((ring, ri) => (
+          <Line
+            key={`halo-${ri}`}
+            points={ring.flat()}
+            closed
+            stroke={FOCUS_HALO.color}
+            strokeWidth={width * FOCUS_HALO.widthFactor}
+            opacity={FOCUS_HALO.opacity}
+          />
+        ))}
       {rings.map((ring, ri) => (
         <Line
           key={`r-${ri}`}
@@ -48,7 +58,6 @@ export const PolygonOverlay = memo(function PolygonOverlay({
           stroke={stroke}
           strokeWidth={width}
           dash={dash}
-          opacity={strokeOpacity}
         />
       ))}
       {showVertices &&

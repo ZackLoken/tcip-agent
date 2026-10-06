@@ -5,20 +5,19 @@ import { ATTR_TYPES } from "@/api/types.generated";
 import { AttributeEditors } from "@/components/annotate/AttributeEditors";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { saveRegistry } from "@/lib/registrySave";
+import type { ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
 
 /** Per-instance attribute editing + a geometry-less (image/plant-level) rating entry, plus
  *  authoring new attributes and values onto the active subject: the selected shape's
  *  attributes, the image-level ratings that ride in the same label document with no box, and the
  *  registry-growing controls a breeder otherwise has no way to reach without a shell. */
-export function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | null }) {
+export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
   const activeSubject = useStore((s) => s.gui.active_subject);
   const registry = useStore((s) => s.registry.subjects);
   const boxes = useStore((s) => s.canvas.boxes);
   const polygons = useStore((s) => s.canvas.polygons);
   const points = useStore((s) => s.canvas.points);
-  const selectedPolygonIdx = useStore((s) => s.canvas.selectedPolygonIdx);
-  const selectedPointIdx = useStore((s) => s.canvas.selectedPointIdx);
   const imageAnnotations = useStore((s) => s.canvas.imageAnnotations);
   const updateBox = useStore((s) => s.updateBox);
   const updatePolygon = useStore((s) => s.updatePolygon);
@@ -27,18 +26,13 @@ export function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | nu
   const updateImageAnnotation = useStore((s) => s.updateImageAnnotation);
   const deleteImageAnnotation = useStore((s) => s.deleteImageAnnotation);
 
+  // The focused annotation's own shape; a focused proposal has no attributes to set.
+  const focusedShape =
+    focused?.kind !== "annotation"
+      ? undefined
+      : { box: boxes, polygon: polygons, point: points }[focused.shape][focused.ref];
   const selected =
-    selectedBoxIdx != null && boxes[selectedBoxIdx]
-      ? ({ kind: "box", idx: selectedBoxIdx, shape: boxes[selectedBoxIdx] } as const)
-      : selectedPolygonIdx != null && polygons[selectedPolygonIdx]
-        ? ({
-            kind: "polygon",
-            idx: selectedPolygonIdx,
-            shape: polygons[selectedPolygonIdx],
-          } as const)
-        : selectedPointIdx != null && points[selectedPointIdx]
-          ? ({ kind: "point", idx: selectedPointIdx, shape: points[selectedPointIdx] } as const)
-          : null;
+    focused && focusedShape ? { kind: focused.shape, idx: focused.ref, shape: focusedShape } : null;
 
   const withAttr = (attrs: Record<string, string>, attr: string, value: string) => {
     const next = { ...attrs };

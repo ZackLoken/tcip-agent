@@ -1268,7 +1268,8 @@ def test_annotate_save_reads_the_crowd_flag_through_the_decoders_check(
 def test_the_mcp_read_and_the_web_load_project_an_annotation_alike(
         opened_client, dataset_root, tmp_path) -> None:
     """Both read doors hand a writer-produced crowd annotation to their client through the one
-    projection: the MCP read's dict and the web load's are the same but for ``authorship``."""
+    projection: the MCP read's dict and the web load's are the same but for the editor's two
+    load-time facts, ``authorship`` and the document ``index``."""
     from tcip_mcp.tools.annotation_tools import read_annotations as mcp_read
 
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
@@ -1282,8 +1283,10 @@ def test_the_mcp_read_and_the_web_load_project_an_annotation_alike(
         "image_path": str(img_path)}).json()["annotations"]
     mcp = mcp_read(str(img_path))["labels"]["annotations"]
 
-    assert [{k: v for k, v in a.items() if k != "authorship"} for a in web] == mcp
+    editor_only = {"authorship", "index"}
+    assert [{k: v for k, v in a.items() if k not in editor_only} for a in web] == mcp
     assert [a["authorship"] for a in web] == ["person", "unattributed"]
+    assert [a["index"] for a in web] == [0, 1]
     assert mcp[0]["iscrowd"] is True and mcp[1]["iscrowd"] is False
 
 

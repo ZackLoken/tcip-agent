@@ -1,21 +1,21 @@
 /**
  * Annotate-tab context toolbar. Two rows:
- *   Row 1: tool mode (Point/Box/Polygon), the subject picker pill, an Editor toggle, then image
- *          navigation, the hide-proposals toggle and the Complete checkbox.
+ *   Row 1: tool mode (Point/Box/Polygon), the subject picker pill, an Editor toggle, then the
+ *          image stepper and the Complete checkbox.
  *   Editor: a second toolbar (collapsed by default, remembered) holding the tools you
  *           flip constantly (Snap / Stream / Show labels) plus Undo / Redo / Save.
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 
 import type { ImageBandsResponse } from "@/api/client";
 import { subjectColor } from "@/api/subjects";
 import { BandPicker } from "@/components/BandPicker";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
+import { Stepper } from "@/components/Stepper";
 import { useDisclosure } from "@/hooks/useDisclosure";
 import { useImageNav } from "@/hooks/useImageNav";
 import { showsBandPicker, type BandSelection } from "@/lib/bandSelection";
-import { UNSET_GLYPH } from "@/lib/glyphs";
 import { saveRegistry } from "@/lib/registrySave";
 import { useSubjectColors } from "@/lib/subjectColors";
 import { useStore } from "@/store";
@@ -68,8 +68,6 @@ export function AnnotateToolbar({
   subjectState,
   onComplete,
   onCompleteView,
-  hideProposals,
-  onHideProposals,
 }: {
   onSave: () => void;
   saveDisabled: boolean;
@@ -84,8 +82,6 @@ export function AnnotateToolbar({
   onComplete: (next: boolean) => void;
   // Mark the dataset subject complete over the region in view; omitted when the view holds it all.
   onCompleteView?: () => void;
-  hideProposals: boolean;
-  onHideProposals: (next: boolean) => void;
 }) {
   const dataset = useStore((s) => s.gui.dataset);
   const projectRoot = useStore(selectProjectRoot);
@@ -114,8 +110,6 @@ export function AnnotateToolbar({
   const { open: editorOpen, toggle: toggleEditor } = useDisclosure("tcip.annotate.editorOpen");
 
   const [subjectMenuOpen, setSubjectMenuOpen] = useState(false);
-  const [counterDraft, setCounterDraft] = useState<string | null>(null);
-  const counterRef = useRef<HTMLInputElement | null>(null);
 
   // Counts per subject across everything on the current canvas (boxes + polygons + points + ratings).
   const subjectCounts = useMemo(() => {
@@ -314,68 +308,17 @@ export function AnnotateToolbar({
 
         <div className="flex-1" />
 
-        {/* Image navigation */}
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-bold uppercase tracking-wide text-tcip-muted">
-            Image
-          </span>
-          <span
-            className="max-w-[150px] truncate font-mono text-[11px] text-tcip-fg"
-            title={currentImage ?? UNSET_GLYPH}
-          >
-            {currentImage ?? UNSET_GLYPH}
-          </span>
-          <button
-            className="tcip-btn text-[11px]"
-            onClick={() => nav.stepImage(-1)}
-            disabled={!nav.canPrev}
-            aria-label="Previous image"
-          >
-            ◀
-          </button>
-          <input
-            ref={counterRef}
-            aria-label="Image position"
-            title="Image position: type a number and press Enter to jump"
-            className="tcip-input w-10 text-center font-mono text-[11px]"
-            value={counterDraft ?? (nav.position > 0 ? String(nav.position) : "")}
-            onChange={(e) => setCounterDraft(e.target.value.replace(/[^0-9]/g, ""))}
-            onFocus={() => setCounterDraft(String(nav.position || 1))}
-            onBlur={() => setCounterDraft(null)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                const num = parseInt(counterDraft ?? "", 10);
-                if (!Number.isNaN(num)) nav.jumpToPosition(num);
-                setCounterDraft(null);
-                counterRef.current?.blur();
-              } else if (e.key === "Escape") {
-                setCounterDraft(null);
-                counterRef.current?.blur();
-              }
-            }}
-          />
-          <span className="font-mono text-[11px] tabular-nums text-tcip-muted">/ {nav.total}</span>
-          <button
-            className="tcip-btn text-[11px]"
-            onClick={() => nav.stepImage(1)}
-            disabled={!nav.canNext}
-            aria-label="Next image"
-          >
-            ▶
-          </button>
-        </div>
-
-        <label
-          className="flex items-center gap-1.5 text-[12px]"
-          title="Hide the bucket's proposals while you annotate; a mark made meanwhile records it (h)"
-        >
-          <input
-            type="checkbox"
-            checked={hideProposals}
-            onChange={(e) => onHideProposals(e.target.checked)}
-          />
-          Hide proposals
-        </label>
+        <Stepper
+          label="Image"
+          noun="image"
+          name={currentImage}
+          position={nav.position}
+          total={nav.total}
+          canPrev={nav.canPrev}
+          canNext={nav.canNext}
+          onStep={nav.stepImage}
+          onJump={nav.jumpToPosition}
+        />
 
         {onCompleteView && (
           <button

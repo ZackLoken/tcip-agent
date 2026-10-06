@@ -2,7 +2,7 @@ import { memo } from "react";
 import { Rect } from "react-konva";
 
 import { HaloLabel } from "@/components/HaloLabel";
-import { dashPattern, type DashKind } from "@/lib/authorshipSymbology";
+import { dashFor, FOCUS_HALO, type LineStyle } from "@/lib/symbology";
 import type { Box } from "@/store/types";
 
 /** Per-shape memo: dragVertex/dragBox replace the whole polygons/boxes array on each RAF tick
@@ -12,26 +12,23 @@ export const BoxOverlay = memo(function BoxOverlay({
   box,
   stroke,
   width,
+  style,
   labelSize,
   label,
   showLabel,
-  selected,
+  focused,
   handleR,
-  dashed,
-  strokeOpacity,
 }: {
   box: Box;
   stroke: string;
   width: number;
+  style: LineStyle;
   labelSize: number;
   label: string;
-  /** Labels are hover/selection-only; the legend is the standing symbology reference. */
   showLabel?: boolean;
-  selected?: boolean;
+  /** The focused item draws the halo under its own stroke; with `handleR`, its corner handles. */
+  focused?: boolean;
   handleR?: number;
-  dashed?: DashKind;
-  /** The outline's opacity; full when omitted. */
-  strokeOpacity?: number;
 }) {
   const corners: [number, number][] = [
     [box.x1, box.y1],
@@ -39,19 +36,24 @@ export const BoxOverlay = memo(function BoxOverlay({
     [box.x2, box.y2],
     [box.x1, box.y2],
   ];
+  const geometry = {
+    x: box.x1,
+    y: box.y1,
+    width: box.x2 - box.x1,
+    height: box.y2 - box.y1,
+  };
   return (
     <>
-      <Rect
-        x={box.x1}
-        y={box.y1}
-        width={box.x2 - box.x1}
-        height={box.y2 - box.y1}
-        stroke={stroke}
-        strokeWidth={width}
-        dash={dashed ? dashPattern(dashed, width) : undefined}
-        opacity={strokeOpacity}
-      />
-      {selected &&
+      {focused && (
+        <Rect
+          {...geometry}
+          stroke={FOCUS_HALO.color}
+          strokeWidth={width * FOCUS_HALO.widthFactor}
+          opacity={FOCUS_HALO.opacity}
+        />
+      )}
+      <Rect {...geometry} stroke={stroke} strokeWidth={width} dash={dashFor(style, width)} />
+      {focused &&
         handleR &&
         corners.map(([cx, cy], i) => (
           <Rect

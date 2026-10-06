@@ -1,21 +1,27 @@
 import { memo } from "react";
 
-import { subjectColor } from "@/api/subjects";
 import { BoxOverlay } from "@/components/annotate/BoxOverlay";
 import { PointOverlay } from "@/components/annotate/PointOverlay";
 import { PolygonOverlay } from "@/components/annotate/PolygonOverlay";
-import { authorshipLabel } from "@/lib/authorshipSymbology";
-import { pointShapeVisible } from "@/lib/canvasSync";
+import { shapeVisible } from "@/lib/canvasSync";
 import { derivedBoxFromPolygon } from "@/lib/polygonGeometry";
+import type { ReviewItem } from "@/lib/reviewItems";
 import { useSubjectColors } from "@/lib/subjectColors";
+import {
+  authorshipLabel,
+  lineStyleOf,
+  outlineColor,
+  type ReviewStatus,
+  type strokeWidths,
+} from "@/lib/symbology";
 import type { Box, Mode, PointShape, PolygonShape } from "@/store/types";
 
 /**
- * The committed boxes + polygons (content layer). Memoized, and crucially, the mouse
+ * The committed boxes, polygons and points (content layer). Memoized, and crucially, the mouse
  * cursor is not one of its props, so a mouse move (which only updates cursor-following
- * overlays) does not re-render/reconcile these hundreds–thousands of Konva nodes. It
- * re-renders only when the shapes, selection/hover, active subject, or zoom-derived stroke
- * sizes actually change.
+ * overlays) does not re-render/reconcile these hundreds to thousands of Konva nodes. It
+ * re-renders only when the shapes, the focus, the active subject, the statuses or the
+ * zoom-derived sizes change.
  */
 interface AnnotationShapesProps {
   boxes: Box[];
@@ -23,25 +29,18 @@ interface AnnotationShapesProps {
   points: PointShape[];
   mode: Mode;
   activeSubject: string | null;
-  selectedPolygonIdx: number | null;
-  selectedBoxIdx: number | null;
-  selectedPointIdx: number | null;
+  /** Each array's review statuses, aligned with it (`reviewStatuses`). */
+  statuses: {
+    boxes: (ReviewStatus | null)[];
+    polygons: (ReviewStatus | null)[];
+    points: (ReviewStatus | null)[];
+  };
+  /** The one focused item; an annotation among these draws its halo, label and handles. */
+  focused: ReviewItem | null;
   hoveredIdx: number | null;
-  hoveredBoxIdx: number | null;
-  hoveredDerivedIdx: number | null;
-  hoveredPointIdx: number | null;
   draggingIdx: number | undefined;
   renderLabels: boolean;
-  boxStroke: number;
-  polyStroke: number;
-  vertR: number;
-  selVertR: number;
-  labelSize: number;
-  pointCoreR: number;
-  pointSelCoreR: number;
-  pointTickInner: number;
-  pointTickOuter: number;
-  scaleLineW: number;
+  widths: ReturnType<typeof strokeWidths>;
 }
 
 export const AnnotationShapes = memo(function AnnotationShapes({
@@ -50,123 +49,88 @@ export const AnnotationShapes = memo(function AnnotationShapes({
   points,
   mode,
   activeSubject,
-  selectedPolygonIdx,
-  selectedBoxIdx,
-  selectedPointIdx,
+  statuses,
+  focused,
   hoveredIdx,
-  hoveredBoxIdx,
-  hoveredDerivedIdx,
-  hoveredPointIdx,
   draggingIdx,
   renderLabels,
-  boxStroke,
-  polyStroke,
-  vertR,
-  selVertR,
-  labelSize,
-  pointCoreR,
-  pointSelCoreR,
-  pointTickInner,
-  pointTickOuter,
-  scaleLineW,
+  widths,
 }: AnnotationShapesProps) {
-  useSubjectColors(); // re-render on a recolor: subjectColor() below is called fresh each render
+  useSubjectColors(); // re-render on a recolor: outlineColor() below reads subjectColor fresh
   if (!renderLabels) return null;
+  const isFocused = (shape: ReviewItem["shape"], i: number) =>
+    focused?.kind === "annotation" && focused.shape === shape && focused.ref === i;
+  const visible = (kind: "box" | "derived" | "polygon" | "point", subject: string, at: boolean) =>
+    shapeVisible({ kind, mode, subject, activeSubject: activeSubject ?? "", focused: at });
+  // The legend carries the standing symbology; a shape is named on the canvas only while focused.
+  const named = (shape: { subject: string; authorship?: string | null }, at: boolean) => ({
+    style: lineStyleOf(shape.authorship),
+    labelSize: widths.labelSize,
+    label: authorshipLabel(shape.subject, shape.authorship),
+    showLabel: at,
+    focused: at,
+  });
   return (
     <>
-      {/* Boxes (only the active subject in box mode). The legend carries the standing
-          symbology; a shape is named on the canvas only while selected or hovered. A tool's own
-          box that no person has accepted draws dotted, distinct from the derived box's dash. */}
-      {mode === "box" &&
-        boxes.map((b, i) =>
-          b.subject === activeSubject ? (
-            <BoxOverlay
-              key={`box-${i}`}
-              box={b}
-              stroke={i === selectedBoxIdx ? "#00BFFF" : subjectColor(b.subject)}
-              width={boxStroke}
-              labelSize={labelSize}
-              label={authorshipLabel(b.subject, b.authorship)}
-              showLabel={i === selectedBoxIdx || i === hoveredBoxIdx}
-              selected={i === selectedBoxIdx}
-              handleR={selVertR}
-              dashed={b.authorship === "tool" ? "tool" : undefined}
-            />
-          ) : null,
-        )}
-
-      {/* Read-only derived boxes: each active-subject polygon's bounding box, shown in box mode so a
-          polygon's detection footprint is visible while boxing. Render-only, derived from
-          polygonBbox here and never added to canvas.boxes, so it can't be selected/edited/deleted or
-          saved (handle-less). Dashed marks it as read-only, distinct from a real editable box
-          (solid) and from a tool-authored shape's dotted stroke. */}
-      {mode === "box" &&
-        polygons.map((p, i) =>
-          p.subject === activeSubject ? (
-            <BoxOverlay
-              key={`derived-${i}`}
-              box={derivedBoxFromPolygon(p)}
-              stroke={subjectColor(p.subject)}
-              width={boxStroke}
-              labelSize={labelSize}
-              label={authorshipLabel(p.subject, p.authorship)}
-              showLabel={i === hoveredDerivedIdx}
-              dashed="derived"
-            />
-          ) : null,
-        )}
-
-      {/* Polygons */}
-      {polygons.map((p, i) => {
-        const selected = selectedPolygonIdx === i;
-        const hovered = hoveredIdx === i;
-        const dragging = draggingIdx === i;
-        // Outside polygon mode only the selected polygon shows (the shape being inspected)
-        if (mode !== "polygon" && !selected) return null;
-        // In polygon mode filter to the active subject unless selected
-        if (mode === "polygon" && !selected && p.subject !== activeSubject) return null;
-        const showVerts = selected || hovered || dragging;
+      {boxes.map((b, i) => {
+        const at = isFocused("box", i);
+        if (!visible("box", b.subject, at)) return null;
         return (
-          <PolygonOverlay
-            key={`poly-${i}`}
-            polygon={p}
-            stroke={selected ? "#00BFFF" : subjectColor(p.subject)}
-            width={polyStroke}
-            vertexRadius={selected ? selVertR : vertR}
-            showVertices={showVerts}
-            labelSize={labelSize}
-            label={authorshipLabel(p.subject, p.authorship)}
-            showLabel={selected || hovered}
-            dashed={p.authorship === "tool" ? "tool" : undefined}
+          <BoxOverlay
+            key={`box-${i}`}
+            box={b}
+            {...named(b, at)}
+            stroke={outlineColor(b.subject, statuses.boxes[i])}
+            width={widths.boxStroke}
+            handleR={widths.selVertR}
           />
         );
       })}
 
-      {/* Points: the same visibility rule the agent's mirror uses (pointShapeVisible) */}
+      {/* Read-only derived boxes: a polygon's bounding box, shown while boxing so its detection
+          footprint is visible. Derived from the rings here and never added to canvas.boxes, so
+          it can't be focused, edited, deleted or saved; it draws in the polygon's own style. */}
+      {polygons.map((p, i) =>
+        visible("derived", p.subject, false) ? (
+          <BoxOverlay
+            key={`derived-${i}`}
+            box={derivedBoxFromPolygon(p)}
+            {...named(p, false)}
+            stroke={outlineColor(p.subject, statuses.polygons[i])}
+            width={widths.boxStroke}
+          />
+        ) : null,
+      )}
+
+      {polygons.map((p, i) => {
+        const at = isFocused("polygon", i);
+        if (!visible("polygon", p.subject, at)) return null;
+        return (
+          <PolygonOverlay
+            key={`poly-${i}`}
+            polygon={p}
+            {...named(p, at)}
+            stroke={outlineColor(p.subject, statuses.polygons[i])}
+            width={widths.polyStroke}
+            vertexRadius={at ? widths.selVertR : widths.vertR}
+            showVertices={at || hoveredIdx === i || draggingIdx === i}
+          />
+        );
+      })}
+
       {points.map((p, i) => {
-        const selected = selectedPointIdx === i;
-        if (
-          !pointShapeVisible({
-            mode,
-            subject: p.subject,
-            activeSubject: activeSubject ?? "",
-            selected,
-          })
-        )
-          return null;
+        const at = isFocused("point", i);
+        if (!visible("point", p.subject, at)) return null;
         return (
           <PointOverlay
             key={`point-${i}`}
             point={p}
-            stroke={selected ? "#00BFFF" : subjectColor(p.subject)}
-            coreR={selected ? pointSelCoreR : pointCoreR}
-            tickInner={pointTickInner}
-            tickOuter={pointTickOuter}
-            lineW={scaleLineW * 1.6}
-            labelSize={labelSize}
-            label={authorshipLabel(p.subject, p.authorship)}
-            showLabel={selected || i === hoveredPointIdx}
-            dashed={p.authorship === "tool" ? "tool" : undefined}
+            {...named(p, at)}
+            stroke={outlineColor(p.subject, statuses.points[i])}
+            coreR={at ? widths.pointSelCoreR : widths.pointCoreR}
+            tickInner={widths.pointTickInner}
+            tickOuter={widths.pointTickOuter}
+            lineW={widths.scaleLineW * 1.6}
           />
         );
       })}

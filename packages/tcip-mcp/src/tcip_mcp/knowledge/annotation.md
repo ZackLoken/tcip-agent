@@ -200,8 +200,9 @@ Grid cell system:
    `tcip_annotation.verdicts.VerdictAction` (accepted, rejected), to the image's verdict shard
    under that bucket
 
-Each proposal the editor serves carries `admitted`: whether the bucket's own validated operating
-point admits it (`delivery.admitted_conf`), the reason riding beside them when none is validated.
+The proposals the editor serves come with the bucket's own validated operating point
+(`delivery.admitted_conf`), or the reason none is validated; the editor's confidence floor starts
+there, and the person moves it.
 
 ### The review channel: propose on canvas, never write GT blind
 

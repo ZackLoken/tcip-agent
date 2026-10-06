@@ -329,14 +329,26 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
       const polys = s.canvas.polygons.slice();
       polys.splice(idx, 1, ...pieces);
       return {
-        canvas: withContentDirty({ ...s.canvas, polygons: polys, selectedPolygonIdx: idx }),
+        canvas: withContentDirty({
+          ...s.canvas,
+          polygons: polys,
+          selectedPolygonIdx: idx,
+          selectedPointIdx: null,
+        }),
         annotateUi: { ...s.annotateUi, hoveredPolygonIdx: null },
       };
     });
   },
 
+  // One focused item at a time: selecting a polygon drops a selected point and vice versa.
   selectPolygon: (selectedPolygonIdx) =>
-    set((s) => ({ canvas: { ...s.canvas, selectedPolygonIdx } })),
+    set((s) => ({
+      canvas: {
+        ...s.canvas,
+        selectedPolygonIdx,
+        selectedPointIdx: selectedPolygonIdx === null ? s.canvas.selectedPointIdx : null,
+      },
+    })),
 
   addPoint: (point) => {
     get().pushUndo();
@@ -374,7 +386,14 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
     });
   },
 
-  selectPoint: (selectedPointIdx) => set((s) => ({ canvas: { ...s.canvas, selectedPointIdx } })),
+  selectPoint: (selectedPointIdx) =>
+    set((s) => ({
+      canvas: {
+        ...s.canvas,
+        selectedPointIdx,
+        selectedPolygonIdx: selectedPointIdx === null ? s.canvas.selectedPolygonIdx : null,
+      },
+    })),
 
   setCurrentPolygon: (pts) => set((s) => ({ canvas: { ...s.canvas, currentPolygon: pts } })),
 

@@ -9,10 +9,16 @@ export const ANNOTATE_KEYS = {
   accept: {
     keys: "a",
     label: "a",
-    desc: "Accept the selected proposal: it joins the labels, or confirms the annotation it pairs with",
+    desc: "Accept the focused proposal: it joins the labels, or confirms the annotation it pairs with",
   },
-  reject: { keys: "r", label: "r", desc: "Reject the selected proposal" },
-  nextProposal: { keys: "p", label: "p", desc: "Select the next undecided proposal" },
+  reject: { keys: "r", label: "r", desc: "Reject the focused proposal" },
+  edit: {
+    keys: "e",
+    label: "e",
+    desc: "Edit the focused item: a proposal is accepted first, then its tool mode opens",
+  },
+  nextItem: { keys: "n", label: "n", desc: "Focus the next item along the review path" },
+  previousItem: { keys: "p", label: "p", desc: "Focus the previous item along the review path" },
   hideProposals: {
     keys: "h",
     label: "h",

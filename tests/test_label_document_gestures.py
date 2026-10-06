@@ -261,8 +261,49 @@ def test_the_proposals_payload_carries_what_the_editor_reads_and_no_more(
         "image_path": str(image), "bucket": bucket}).json()
     loaded = client.get("/api/annotate/labels", params={"image_path": str(image)}).json()
 
-    assert set(proposals) == {"bucket", "proposals"}
+    assert set(proposals) == {"bucket", "operating_point", "proposals"}
+    assert set(proposals["operating_point"]) == {"conf", "reason"}
+    assert set(proposals["proposals"][0]) >= {"index", "paired", "decision"}
+    assert "admitted" not in proposals["proposals"][0]
     assert loaded["completion"] == {"bud": "negative"}
+
+
+def test_a_staged_bucket_serves_no_operating_point_and_says_why(
+        tmp_path: Path, client) -> None:
+    """A bucket staged under no assessment has no conf a review may accept at: the route says
+    so beside the proposals rather than deciding admission for each of them."""
+    from tests._web_fixtures import open_new_project
+
+    root = open_new_project(tmp_path / "proj")
+    image = _image(root)
+    bucket = _bucket(root, image)
+
+    served = client.get("/api/annotate/proposals", params={
+        "image_path": str(image), "bucket": bucket}).json()
+
+    assert served["operating_point"]["conf"] is None
+    assert served["operating_point"]["reason"]
+
+
+def test_the_loaded_annotations_carry_the_index_a_pairing_names(tmp_path: Path, client) -> None:
+    """Each loaded annotation states its document index, the index a proposal's ``paired``
+    refers to, so the editor pairs by the server's enumeration and never by position in a
+    list it re-split by geometry."""
+    from tests._web_fixtures import open_new_project
+
+    root = open_new_project(tmp_path / "proj")
+    image = _image(root)
+    bucket = _bucket(root, image)
+    _save(root, image, [{"subject": "leaf", "points": RING}, {"subject": "bud", "bbox": BOX}])
+
+    loaded = client.get("/api/annotate/labels", params={"image_path": str(image)}).json()
+    served = client.get("/api/annotate/proposals", params={
+        "image_path": str(image), "bucket": bucket}).json()
+
+    assert [a["index"] for a in loaded["annotations"]] == [0, 1]
+    (proposal,) = served["proposals"]
+    assert proposal["paired"] == 1
+    assert loaded["annotations"][proposal["paired"]]["subject"] == "bud"
 
 
 # ── completion marks ───────────────────────────────────────────────────────

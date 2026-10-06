@@ -45,8 +45,6 @@ function renderToolbar(
     subjectState?: SubjectState | null;
     onComplete?: (next: boolean) => void;
     onCompleteView?: () => void;
-    hideProposals?: boolean;
-    onHideProposals?: (next: boolean) => void;
   },
 ) {
   render(
@@ -60,8 +58,6 @@ function renderToolbar(
       subjectState={extra?.subjectState ?? null}
       onComplete={extra?.onComplete ?? (() => {})}
       onCompleteView={extra?.onCompleteView}
-      hideProposals={extra?.hideProposals ?? false}
-      onHideProposals={extra?.onHideProposals ?? (() => {})}
     />,
   );
 }
@@ -476,12 +472,5 @@ describe("AnnotateToolbar Complete toggle", () => {
     cleanup();
     renderToolbar(null, null, { subjectState: "partial" });
     expect(screen.queryByRole("button", { name: "Complete view" })).not.toBeInTheDocument();
-  });
-
-  it("toggles hiding proposals through the tab", () => {
-    const onHideProposals = vi.fn();
-    renderToolbar(null, null, { onHideProposals });
-    fireEvent.click(screen.getByRole("checkbox", { name: /Hide proposals/ }));
-    expect(onHideProposals).toHaveBeenCalledWith(true);
   });
 });

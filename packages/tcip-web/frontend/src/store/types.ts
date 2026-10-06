@@ -44,6 +44,9 @@ export interface Annotation extends CarriedFields {
   // One of "person" | "tool" | "tool_accepted" | "unattributed", from the load route's
   // authorship_of. A load-response fact, never sent back on save (AnnotationPayload carries none).
   authorship?: string | null;
+  // Its position in the document it was loaded from, which a proposal's `paired` names. A
+  // load-response fact; a shape drawn since the load has none.
+  index?: number;
 }
 
 /** The fact an annotation carries through the canvas unchanged and back on save: its crowd flag
@@ -75,6 +78,7 @@ interface CanvasShape extends CarriedFields {
   subject: string;
   attributes: Record<string, string>;
   authorship?: string | null;
+  index?: number;
 }
 
 export interface Box extends CanvasShape {
@@ -118,11 +122,18 @@ export interface ImageLabels {
 }
 
 /** One proposal the chosen bucket offers for the image (GET /api/annotate/proposals): its index
- *  in the bucket's document, the annotation it pairs with, the last decision on it, and whether
- *  the bucket's assessment admits it. */
+ *  in the bucket's document, the index of the annotation it pairs with, and the last decision on
+ *  it. */
 export interface Proposal extends Annotation {
   index: number;
   paired: number | null;
   decision: VerdictAction | null;
-  admitted: boolean;
+}
+
+/** What the proposals route serves: the bucket, its validated operating point (the conf a
+ *  review may accept at, or null with the reason) and the proposals in document order. */
+export interface ServedProposals {
+  bucket: string;
+  operating_point: { conf: number | null; reason: string };
+  proposals: Proposal[];
 }
