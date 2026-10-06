@@ -1,15 +1,15 @@
 """TCIP's storage seam: a root's records and logs in one database, and files written by path."""
 
 from tcip_store.errors import (
-    BackendUnavailable,
-    BadKey,
+    BackendUnavailableError,
+    BadKeyError,
     DecodeError,
-    NotFound,
-    StoreBusy,
+    NotFoundError,
+    StoreBusyError,
     StoreError,
-    StoreNotBound,
-    TransactionMisuse,
-    VersionConflict,
+    StoreNotBoundError,
+    TransactionMisuseError,
+    VersionConflictError,
 )
 from tcip_store.file_backend import delete_blob, put_blob, read_blob_versioned
 from tcip_store.model import REQUIRED, Key, LogPage, Version, Versioned, canonical_path
@@ -45,19 +45,19 @@ from tcip_store.values import (
 
 __all__ = [
     "REQUIRED",
-    "BackendUnavailable",
-    "BadKey",
+    "BackendUnavailableError",
+    "BadKeyError",
     "DecodeError",
     "Key",
     "LogPage",
-    "NotFound",
-    "StoreBusy",
+    "NotFoundError",
+    "StoreBusyError",
     "StoreError",
-    "StoreNotBound",
-    "TransactionMisuse",
+    "StoreNotBoundError",
+    "TransactionMisuseError",
     "Txn",
     "Version",
-    "VersionConflict",
+    "VersionConflictError",
     "Versioned",
     "append",
     "bind",

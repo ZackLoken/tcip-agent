@@ -118,7 +118,7 @@ def test_a_completion_mark_lacking_its_time_fails_at_the_read(tmp_path: Path) ->
     import pytest
 
     import tcip_store
-    from tcip_annotation.json_io import UnreadableLabelDocument, read_label_document
+    from tcip_annotation.json_io import UnreadableLabelDocumentError, read_label_document
     from tests._producer_fixtures import image_label_key, mark_complete
 
     image = tmp_path / "images" / UNDATED_BUCKET / "IMG_1.png"
@@ -132,5 +132,5 @@ def test_a_completion_mark_lacking_its_time_fails_at_the_read(tmp_path: Path) ->
     del stored["complete"]["bud"][0]["at"]
     tcip_store.replace(label, stored)
 
-    with pytest.raises(UnreadableLabelDocument, match=r"KeyError\('at'\)"):
+    with pytest.raises(UnreadableLabelDocumentError, match=r"KeyError\('at'\)"):
         read_label_document(label)

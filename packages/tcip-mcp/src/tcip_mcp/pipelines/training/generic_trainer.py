@@ -236,7 +236,7 @@ def _uniform_native_size(train_ds: Any) -> tuple[int, int] | None:
 def checkpoint_path(run_dir: Path | str, name: str) -> Path:
     """One checkpoint of the run whose directory is ``run_dir``: ``<run_dir>/<name>.pt``, ``name``
     being ``model_best``, ``model_final``, an epoch checkpoint or a bespoke loop's own tag. A name
-    that is not one file name refuses with ``BadKey`` (``experiments.run_name``)."""
+    that is not one file name refuses with ``BadKeyError`` (``experiments.run_name``)."""
     from tcip_mcp.experiments import run_name
 
     return Path(run_dir) / f"{run_name(name)}.pt"

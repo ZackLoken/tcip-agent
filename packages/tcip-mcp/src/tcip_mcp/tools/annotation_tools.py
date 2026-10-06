@@ -9,7 +9,7 @@ import tcip_store
 
 from tcip_annotation import Annotation
 from tcip_annotation.json_io import (
-    UnreadableLabelDocument, client_annotation, read_document_versioned, read_predictions,
+    UnreadableLabelDocumentError, client_annotation, read_document_versioned, read_predictions,
 )
 
 from tcip_annotation.matching import REVIEW_CONF_FLOOR, Matching
@@ -54,7 +54,7 @@ def read_annotations(image_path: str, bucket: str | None = None) -> dict:
         document = read_bucket(key.root, bucket).document_key(img.stem) if bucket else None
         if document is not None:
             result["predictions"] = _summary(read_predictions(document))
-    except (UnreadableLabelDocument, ValueError) as exc:
+    except (UnreadableLabelDocumentError, ValueError) as exc:
         return {"error": str(exc)}
     return result
 
@@ -230,7 +230,7 @@ def score_predictions(
         if p.is_file():
             return _evaluate_image(p, found, iou_threshold, conf_threshold, detail, trait)
         return _evaluate_folder(path, found, iou_threshold, conf_threshold, trait)
-    except (UnreadableLabelDocument, ValueError) as exc:
+    except (UnreadableLabelDocumentError, ValueError) as exc:
         return {"error": str(exc)}
 
 
@@ -254,10 +254,10 @@ def write_subject_registry(
         allow_type_changes: State a same-values attribute type flip (categorical to ordinal or
             back) as deliberate.
     """
-    from tcip_store import VersionConflict
+    from tcip_store import VersionConflictError
 
     from tcip_mcp import subject_registry
-    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.audit import AuditEntryNotWrittenError
 
     try:
         registry = subject_registry.registry_from_request(subjects)
@@ -268,7 +268,7 @@ def write_subject_registry(
         result = subject_registry.replace_registry(
             dataset_root, registry, expect=None, allow_removals=allow_removals,
             allow_type_changes=allow_type_changes, actor=None)
-    except (subject_registry.RegistryError, VersionConflict, AuditEntryNotWritten) as exc:
+    except (subject_registry.RegistryError, VersionConflictError, AuditEntryNotWrittenError) as exc:
         return {"error": str(exc)}
     return {"subjects_path": result["subjects_path"],
             "subjects": [s.name for s in registry.subjects]}

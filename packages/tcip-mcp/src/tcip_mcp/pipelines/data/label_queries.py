@@ -193,11 +193,11 @@ def _acquire(shape: str, ground_truth: "Key | str", row_key: str | None, tables:
     nothing for a mask; ``(None, None)`` for ground truth that is not there. Each table is read
     once per ``tables``. With ``version``, the token a record carries, ground truth that is not
     there or is at any other version refuses naming both, a document as
-    :class:`~tcip_annotation.json_io.UnreadableLabelDocument` and anything else as
+    :class:`~tcip_annotation.json_io.UnreadableLabelDocumentError` and anything else as
     ``ValueError``."""
     import tcip_store
 
-    from tcip_annotation.json_io import UnreadableLabelDocument, document_at, read_stored
+    from tcip_annotation.json_io import UnreadableLabelDocumentError, document_at, read_stored
     from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK
 
     stored: Any = None
@@ -217,7 +217,7 @@ def _acquire(shape: str, ground_truth: "Key | str", row_key: str | None, tables:
             stored, decoded = table, rows[cast(str, row_key)]
     if version is not None and (stored is None or stored.version.token != version):
         at = "is not there" if stored is None else f"is at version {stored.version.token}"
-        refusal = UnreadableLabelDocument if shape == DOCUMENT else ValueError
+        refusal = UnreadableLabelDocumentError if shape == DOCUMENT else ValueError
         raise refusal(f"{ground_truth}{f' row {row_key!r}' if row_key else ''} {at}, not "
                       f"{version}, the version recorded")
     return stored, decoded

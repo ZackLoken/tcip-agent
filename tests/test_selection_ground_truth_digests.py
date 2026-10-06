@@ -88,9 +88,9 @@ def test_a_withdrawn_ground_truth_refuses_its_digest_by_name(tmp_path: Path) -> 
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
     from tcip_mcp.pipelines.data.selection import ground_truth_digest
 
-    with pytest.raises(tcip_store.NotFound, match="absent"):
+    with pytest.raises(tcip_store.NotFoundError, match="absent"):
         ground_truth_digest(label_key(tmp_path, UNDATED_BUCKET, "absent"))
-    with pytest.raises(tcip_store.NotFound, match="absent.csv"):
+    with pytest.raises(tcip_store.NotFoundError, match="absent.csv"):
         ground_truth_digest(str(tmp_path / "absent.csv"))
 
 

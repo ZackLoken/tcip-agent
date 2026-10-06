@@ -135,8 +135,8 @@ def _raster_bucket(project: Path, raster_path: Path,
 def _deliver(project: Path, bucket, registry: str, plants: list[str], **kwargs) -> dict:
     """``orthomosaic_plant_counts`` shipped under a breeder's acknowledgment (these buckets are
     unassessed), a refusal answering ``{"error": ...}``."""
-    from tcip_mcp.delivery import DeliveryRefused
-    from tcip_mcp.operationalization import OperationalizationRefused
+    from tcip_mcp.delivery import DeliveryRefusedError
+    from tcip_mcp.operationalization import OperationalizationRefusedError
     from tcip_mcp.pipelines.postprocessing.plant_mapping import load_registry
     from tcip_mcp.tools.orthomosaic_tools import orthomosaic_plant_counts
     from tests._chain_fixtures import acknowledged
@@ -147,7 +147,7 @@ def _deliver(project: Path, bucket, registry: str, plants: list[str], **kwargs) 
             str(project / "counts.csv"), "stem_count", plants, acknowledgment_id=ack,
             door="test_orthomosaic", actor=None, **kwargs),
             reason="an unassessed bucket")
-    except (DeliveryRefused, OperationalizationRefused, ValueError) as exc:
+    except (DeliveryRefusedError, OperationalizationRefusedError, ValueError) as exc:
         return {"error": str(exc)}
 
 

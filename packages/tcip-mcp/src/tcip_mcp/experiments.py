@@ -32,7 +32,7 @@ from typing import Any, BinaryIO, cast
 from pydantic import BaseModel
 
 from tcip_store import (
-    BadKey, DecodeError, decode_value, encode_log_line, encode_record, finite_number,
+    BadKeyError, DecodeError, decode_value, encode_log_line, encode_record, finite_number,
     stored_number,
 )
 from tcip_store.values import NOT_FINITE_SUFFIX
@@ -113,9 +113,9 @@ def project_of_run(run_dir: Path) -> Path:
 
 def run_name(name: str) -> str:
     """``name`` once it is known to be one directory name. A separator, a drive, an empty name or
-    a dot name refuses with ``BadKey``."""
+    a dot name refuses with ``BadKeyError``."""
     if not name or name in (".", "..") or PureWindowsPath(name).name != name:
-        raise BadKey(
+        raise BadKeyError(
             f"{name!r} is not a single directory name: a name carrying a separator, a drive or a "
             "parent reference would address a directory outside the one it names."
         )
@@ -158,17 +158,17 @@ def mint_experiment_id(prefix: str = "run") -> str:
 # ── the files ────────────────────────────────────────────────────────────────
 
 
-class RunDirectoryExists(FileExistsError):
+class RunDirectoryExistsError(FileExistsError):
     """A launch named a run or sweep directory that already exists."""
 
 
 def create_run_directory(directory: Path) -> Path:
-    """Create ``directory`` and its parents, refusing with :class:`RunDirectoryExists` one that
+    """Create ``directory`` and its parents, refusing with :class:`RunDirectoryExistsError` one that
     already exists: runs and sweeps share one parent, so this creation is the name's reservation."""
     try:
         directory.mkdir(parents=True, exist_ok=False)
     except FileExistsError:
-        raise RunDirectoryExists(
+        raise RunDirectoryExistsError(
             f"{directory} already exists: runs, trials and sweeps share one namespace, so a new "
             "one takes a new name."
         ) from None
@@ -306,16 +306,17 @@ def last_alive(directory: Path, record_file: str = RUN_FILE) -> float:
     return (heartbeat if heartbeat.exists() else directory / record_file).stat().st_mtime
 
 
-class RunEnded(ValueError):
+class RunEndedError(ValueError):
     """A write addressed a run or sweep whose final status is written."""
 
 
 def require_open(directory: Path) -> None:
-    """Refuse (:class:`RunEnded`) the run or sweep at ``directory`` once its final status is
+    """Refuse (:class:`RunEndedError`) the run or sweep at ``directory`` once its final status is
     written: from then on it takes no write."""
     if (directory / FINAL_STATUS_FILE).exists():
-        raise RunEnded(f"{directory.name} has ended: its final status is written, so it takes no "
-                       "more writes.")
+        raise RunEndedError(
+            f"{directory.name} has ended: its final status is written, so it takes no "
+            "more writes.")
 
 
 def request_cancel(directory: Path) -> str:

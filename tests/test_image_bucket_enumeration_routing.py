@@ -1,5 +1,5 @@
 """Every walk over one bucket of ``images/`` routes through ``list_logical_images``' own
-stem-collision refusal, raising ``AmbiguousImageStem`` the way every other reader of a bucket
+stem-collision refusal, raising ``AmbiguousImageStemError`` the way every other reader of a bucket
 does, never picking one member of a stem-collided pair silently.
 
 ``ingest_images`` itself refuses to create a stem-collided pair, so the pair a test needs here
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
+from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError
 from tests._cli_fixtures import run_tcip
 
 
@@ -98,7 +98,7 @@ def test_scan_dataset_image_census_refuses_a_stem_collision(tmp_path):
     _collide(bucket)
     project_root = bucket.parent.parent
 
-    with pytest.raises(AmbiguousImageStem):
+    with pytest.raises(AmbiguousImageStemError):
         _scan_dataset(str(project_root))
 
 

@@ -26,7 +26,7 @@ _AUDIT_PARTS = ("audit",)
 _REDACTED_FIELDS = {"api_key", "token", "password", "secret"}
 
 
-class MutationCommittedWithoutAuditLine(RuntimeError):
+class MutationCommittedWithoutAuditLineError(RuntimeError):
     """A tool body ran to completion and the audit entry that follows it did not land."""
 
     def __init__(self, tool: str, cause: BaseException) -> None:
@@ -38,7 +38,7 @@ class MutationCommittedWithoutAuditLine(RuntimeError):
         self.tool = tool
 
 
-class AuditEntryNotWritten(RuntimeError):
+class AuditEntryNotWrittenError(RuntimeError):
     """A call outside ``@audited`` recorded a mutation that already committed, and the append for
     it failed.
 
@@ -143,14 +143,14 @@ def record_event_or_raise(
 ) -> None:
     """Emit one audit line, performed by ``actor``, for a mutation already made by a caller that
     is not an ``@audited`` door, in the log of the root ``scope`` names (:func:`audit_log_key`). A
-    failed append is raised as :class:`AuditEntryNotWritten`, naming the mutation that committed
-    unrecorded.
+    failed append is raised as :class:`AuditEntryNotWrittenError`, naming the mutation that
+    committed unrecorded.
     """
     entry = audit_entry(tool, arguments, actor, status, extra)
     try:
         append(audit_log_key(scope), entry)
     except Exception as exc:
-        raise AuditEntryNotWritten(tool, exc, arguments=arguments) from exc
+        raise AuditEntryNotWrittenError(tool, exc, arguments=arguments) from exc
 
 
 def dataset_scope_of(value: Any) -> Path | None:
@@ -195,8 +195,9 @@ def audited(
     to at call time (:func:`dataset_scope_of`; no root means the project's). ``project`` and
     ``workspace`` are not recorded as arguments; an ``actor`` parameter is recorded as the entry's
     actor. A failed append after a return raises
-    :class:`MutationCommittedWithoutAuditLine`; after a raise the body's exception propagates and
-    the failed append is logged. A declared scope that cannot be resolved refuses the call.
+    :class:`MutationCommittedWithoutAuditLineError`; after a raise the body's exception
+    propagates and the failed append is logged. A declared scope that cannot be resolved refuses
+    the call.
     """
     def decorate(func: Callable) -> Callable:
         sig = inspect.signature(func)
@@ -252,7 +253,7 @@ def audited(
                 record()
             except Exception as exc:
                 logger.warning("Failed to write the audit entry for %s", tool_name, exc_info=True)
-                raise MutationCommittedWithoutAuditLine(tool_name, exc) from exc
+                raise MutationCommittedWithoutAuditLineError(tool_name, exc) from exc
             return result
 
         return wrapper

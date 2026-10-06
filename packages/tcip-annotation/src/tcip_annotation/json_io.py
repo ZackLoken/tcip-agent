@@ -19,7 +19,7 @@ Schema::
 
 A stored value that is not this object (``null`` included), an ``annotations`` that is not a
 list, a record :func:`annotation_of_record` refuses or a completion mark :func:`completion_marks`
-refuses raises :class:`UnreadableLabelDocument` naming its key.
+refuses raises :class:`UnreadableLabelDocumentError` naming its key.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ ANNOTATIONS_KEY = "annotations"  # the one top-level list key
 _PROV_KEYS = ("created_by", "created_at", "accepted_by", "accepted_at")
 
 
-class UnreadableLabelDocument(Exception):
+class UnreadableLabelDocumentError(Exception):
     """A present label document this platform's readers cannot make sense of; not a
     :class:`ValueError` subclass.
     """
@@ -238,16 +238,16 @@ def annotation_of_record(o) -> Annotation:
 def _annotations_of(data: Any) -> list[Annotation]:
     """Parse a stored per-image document into :class:`Annotation` records.
 
-    Raises :class:`UnreadableLabelDocument` for a document that is not an object (``null``
+    Raises :class:`UnreadableLabelDocumentError` for a document that is not an object (``null``
     included), one whose ``annotations`` is not a list (covers it being absent or ``null`` too),
     and for any record :func:`annotation_of_record` refuses, naming the record's index.
     """
     if not isinstance(data, dict):
-        raise UnreadableLabelDocument(f"is a {type(data).__name__}, not the object a label "
+        raise UnreadableLabelDocumentError(f"is a {type(data).__name__}, not the object a label "
                                       "document is")
     raw = data.get(ANNOTATIONS_KEY)
     if not isinstance(raw, list):
-        raise UnreadableLabelDocument(
+        raise UnreadableLabelDocumentError(
             f"{ANNOTATIONS_KEY!r} is {raw!r}, not the list a label document holds"
         )
     out: list[Annotation] = []
@@ -255,7 +255,7 @@ def _annotations_of(data: Any) -> list[Annotation]:
         try:
             out.append(annotation_of_record(o))
         except ValueError as exc:
-            raise UnreadableLabelDocument(f"record {i} {exc}") from exc
+            raise UnreadableLabelDocumentError(f"record {i} {exc}") from exc
     return out
 
 
@@ -320,16 +320,17 @@ def _live(marks: Mapping[str, list[CompletionMark]],
 def completion_marks(data: dict,
                      annotations: list[Annotation]) -> dict[str, list[CompletionMark]]:
     """The live completion marks a parsed document holds, by subject: the ones whose digest still
-    names that subject's ``annotations``. Raises :class:`UnreadableLabelDocument` naming the
+    names that subject's ``annotations``. Raises :class:`UnreadableLabelDocumentError` naming the
     subject and index of a mark that is not a rect of four numbers, a person, a time, a digest and
     a ``proposals_hidden`` flag."""
     raw = data.get(COMPLETION_KEY) or {}
     if not isinstance(raw, dict):
-        raise UnreadableLabelDocument(f"{COMPLETION_KEY!r} is {raw!r}, not marks by subject")
+        raise UnreadableLabelDocumentError(f"{COMPLETION_KEY!r} is {raw!r}, not marks by subject")
     marks: dict[str, list[CompletionMark]] = {}
     for subject, held in raw.items():
         if not isinstance(held, list):
-            raise UnreadableLabelDocument(f"{subject!r} completion marks are {held!r}, not a list")
+            raise UnreadableLabelDocumentError(
+                f"{subject!r} completion marks are {held!r}, not a list")
         for i, m in enumerate(held):
             try:
                 marks.setdefault(subject, []).append(CompletionMark(
@@ -338,7 +339,7 @@ def completion_marks(data: dict,
                     digest=_text(m["digest"], "digest"),
                     proposals_hidden=_flag(m["proposals_hidden"])))
             except (KeyError, TypeError, ValueError) as exc:
-                raise UnreadableLabelDocument(
+                raise UnreadableLabelDocumentError(
                     f"{subject!r} completion mark {i} is not a mark: {exc!r}") from exc
     return _live(marks, annotations)
 
@@ -415,30 +416,31 @@ NO_DOCUMENT = LabelDocument(annotations=[], width=None, height=None, marks={})
 def document_at(key: Key, stored: tcip_store.Versioned) -> LabelDocument:
     """``stored``, what the store answered for ``key``, as a :class:`LabelDocument`:
     :data:`NO_DOCUMENT` at ``Version.ABSENT``, else its value decoded, a value
-    :func:`label_document` refuses raising :class:`UnreadableLabelDocument` naming ``key``."""
+    :func:`label_document` refuses raising :class:`UnreadableLabelDocumentError` naming ``key``."""
     if stored.version == Version.ABSENT:
         return NO_DOCUMENT
     try:
         return label_document(stored.value)
-    except UnreadableLabelDocument as exc:
-        raise UnreadableLabelDocument(
+    except UnreadableLabelDocumentError as exc:
+        raise UnreadableLabelDocumentError(
             f"{key.store}{list(key.parts)} under {key.root}: {exc}") from exc
 
 
 def read_stored(key: Key, **default: Any) -> tcip_store.Versioned:
     """The store's read of ``key`` (:func:`tcip_store.read_versioned`, ``default`` passed
     through); a record that does not decode, and an absent one read with no default
-    (``NotFound``), raise :class:`UnreadableLabelDocument` with the store's own message."""
+    (``NotFoundError``), raise :class:`UnreadableLabelDocumentError` with the store's own
+    message."""
     try:
         return tcip_store.read_versioned(key, **default)
-    except (tcip_store.DecodeError, tcip_store.NotFound) as exc:
-        raise UnreadableLabelDocument(str(exc)) from exc
+    except (tcip_store.DecodeError, tcip_store.NotFoundError) as exc:
+        raise UnreadableLabelDocumentError(str(exc)) from exc
 
 
 def read_document_versioned(key: Key) -> tuple[LabelDocument, Version]:
     """The editor's read: the document ``key`` names (:func:`document_at`, :data:`NO_DOCUMENT`
     where the store holds none) and the version it was read at. A record that does not decode
-    raises :class:`UnreadableLabelDocument` naming it."""
+    raises :class:`UnreadableLabelDocumentError` naming it."""
     stored = read_stored(key, default=None)
     return document_at(key, stored), stored.version
 
@@ -446,10 +448,10 @@ def read_document_versioned(key: Key) -> tuple[LabelDocument, Version]:
 def read_label_document(key: Key, version: str | None = None) -> LabelDocument:
     """The document ``key`` names, read through the store's required read, at ``version`` (a
     version token) when one is given. No record, another version, or a record that does not
-    decode raises :class:`UnreadableLabelDocument` naming it."""
+    decode raises :class:`UnreadableLabelDocumentError` naming it."""
     stored = read_stored(key)
     if version is not None and stored.version.token != version:
-        raise UnreadableLabelDocument(f"{key.store}{list(key.parts)} under {key.root} is at "
+        raise UnreadableLabelDocumentError(f"{key.store}{list(key.parts)} under {key.root} is at "
                                       f"version {stored.version.token}, not {version}, the one "
                                       "measured")
     return document_at(key, stored)
@@ -457,14 +459,15 @@ def read_label_document(key: Key, version: str | None = None) -> LabelDocument:
 
 def read_predictions(key: Key) -> list[Annotation]:
     """A prediction document's records, each stating its ``score``: a record stating none raises
-    :class:`UnreadableLabelDocument` naming it (:func:`~tcip_annotation.state.prediction_score`).
+    :class:`UnreadableLabelDocumentError` naming it
+    (:func:`~tcip_annotation.state.prediction_score`).
     """
     annotations = read_label_document(key).annotations
     for i, a in enumerate(annotations):
         try:
             prediction_score(a)
         except ValueError as exc:
-            raise UnreadableLabelDocument(f"record {i} {exc}") from exc
+            raise UnreadableLabelDocumentError(f"record {i} {exc}") from exc
     return annotations
 
 
@@ -727,7 +730,7 @@ def write_label_document(key: Key, annotations, width: int, height: int, *,
     (:func:`document_payload`), as the document ``key`` names. An empty list writes an empty
     document under ``keep_empty``, else removes the document. ``expect`` (a version
     :func:`read_document_versioned` answered) makes the write a compare-and-set raising
-    ``VersionConflict`` with nothing written. Returns the new version, or ``None`` when the
+    ``VersionConflictError`` with nothing written. Returns the new version, or ``None`` when the
     document was removed.
     """
     payload = document_payload(annotations, width, height, keep_empty=keep_empty, marks=marks)
@@ -755,7 +758,7 @@ class AttributeRecord(Protocol):
     def values(self) -> tuple[str, ...]: ...
 
 
-class UndeclaredValue(ValueError):
+class UndeclaredValueError(ValueError):
     """A record carries a value its attribute does not declare."""
 
 
@@ -763,15 +766,15 @@ def attribute_ids(a: Annotation, subject: str,
                   attributes: Iterable[AttributeRecord]) -> list[int] | None:
     """The id of ``a``'s value under each of ``attributes``, in their order, :data:`UNASSESSED`
     where ``a`` carries no value for one; ``None`` for a record of a subject other than
-    ``subject``. Refuses (:class:`UndeclaredValue`) a value its attribute does not declare, naming
-    both."""
+    ``subject``. Refuses (:class:`UndeclaredValueError`) a value its attribute does not declare,
+    naming both."""
     if a.subject != subject:
         return None
     row = []
     for attribute in attributes:
         value = a.attributes.get(attribute.name)
         if value is not None and value not in attribute.values:
-            raise UndeclaredValue(
+            raise UndeclaredValueError(
                 f"a record of {subject!r} carries {attribute.name}={value!r}, which that "
                 f"attribute does not declare (it declares {list(attribute.values)}).")
         row.append(UNASSESSED if value is None else attribute.values.index(value))

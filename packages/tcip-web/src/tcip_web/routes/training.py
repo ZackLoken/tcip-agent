@@ -10,7 +10,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from tcip_store.errors import BadKey
+from tcip_store.errors import BadKeyError
 
 from tcip_mcp.experiments import RunRow, TrainingDetail, TrainingListing, training_listing
 from tcip_mcp.identity import actor
@@ -54,7 +54,7 @@ def relaunch_route(payload: RelaunchPayload) -> dict:
     by ``{"selection_dir": chosen}``. A source naming nothing answers 404, a sweep source with a
     ``selection_dir`` 422, a refusal 422, and a launch whose audit line could not be written 409.
     """
-    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.audit import AuditEntryNotWrittenError
     from tcip_mcp.experiments import SWEEP_FILE, named_directory, observe
     from tcip_mcp.tools.training_tools import (
         candidate_config_with_selection, launch_sweep, launch_training,
@@ -76,7 +76,7 @@ def relaunch_route(payload: RelaunchPayload) -> dict:
             if payload.selection_dir:
                 config = candidate_config_with_selection(config, payload.selection_dir)
             result = launch_training(project, config, relaunched_from=source.name, actor=person)
-    except AuditEntryNotWritten as exc:
+    except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(exc, exc.arguments) from exc
     if result.get("error"):
         raise HTTPException(422, detail=result)
@@ -235,7 +235,7 @@ async def _stream_metrics(
     one status frame (``experiments.run_summary`` over the rows sent), which ends the stream.
     An id naming no run directory under ``project`` ends the stream with one status frame
     naming it, and one that
-    is not a single directory name raises ``BadKey``. Every read runs off the event loop.
+    is not a single directory name raises ``BadKeyError``. Every read runs off the event loop.
     """
     from tcip_mcp.experiments import (
         EPOCH_KEY, TERMINAL_STATES, epoch_rows, find_observation, launch_declarations, observe,
@@ -283,7 +283,7 @@ async def training_stream_ws(websocket: WebSocket, experiment_id: str) -> None:
     await websocket.accept()
     try:
         await _stream_metrics(websocket, project, experiment_id)
-    except BadKey as exc:
+    except BadKeyError as exc:
         await websocket.close(code=1008, reason=str(exc))
     except WebSocketDisconnect:
         pass

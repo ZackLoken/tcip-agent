@@ -22,8 +22,8 @@ from tcip_store import Key, finite_number
 
 from tcip_mcp.audit import now_iso
 from tcip_mcp.registry_paths import (
-    RegistryPathEmpty,
-    RegistryPathTraversal,
+    RegistryPathEmptyError,
+    RegistryPathTraversalError,
     checkpoint_registry_path_for,
     is_external_form,
     resolved_registry_path,
@@ -56,7 +56,7 @@ def _checkpoint_entry_file(project_path: Path, raw: str) -> Path | None:
     one that does not resolve at all."""
     try:
         resolved = resolved_registry_path(project_path, raw).resolve()
-    except (RegistryPathEmpty, RegistryPathTraversal):
+    except (RegistryPathEmptyError, RegistryPathTraversalError):
         return None
     return resolved if resolved.is_file() and resolved.is_relative_to(project_path) else None
 
@@ -149,8 +149,8 @@ def _sha256_of_bytes(data: bytes) -> str:
 
 def _unregistered_checkpoint_error(
     checkpoint_path: Path, digest: str, root: str
-) -> "UnregisteredCheckpoint":
-    return UnregisteredCheckpoint(
+) -> "UnregisteredCheckpointError":
+    return UnregisteredCheckpointError(
         f"{checkpoint_path} (sha256 {digest}) is not named by any completed run's final status or "
         f"entry in the registry at {root!r}: a completed run registers its own final weights, and "
         "a foreign checkpoint, or a second checkpoint of a run (model_final beside a model_best, "
@@ -208,7 +208,7 @@ class VerifiedCheckpoint:
         return run_task(self.config)
 
 
-class UnregisteredCheckpoint(ValueError):
+class UnregisteredCheckpointError(ValueError):
     """A checkpoint no completed run and no registry entry names, or one whose payload cannot be
     trusted to unpickle under ``weights_only=True``."""
 
@@ -217,7 +217,7 @@ def _load_verified_payload(data: bytes, *, source: str) -> dict:
     """Unpickle already identity-verified checkpoint bytes with ``weights_only=True``. ``source``
     names the checkpoint (path and digest) in every raised message.
 
-    Raises :class:`UnregisteredCheckpoint` for a payload that will not unpickle under
+    Raises :class:`UnregisteredCheckpointError` for a payload that will not unpickle under
     ``weights_only=True``, and a bare ``ValueError`` for a payload that does not unpickle to a
     dict or carries no weights under ``model_build``'s ``STATE_DICT_KEY``.
     """
@@ -228,7 +228,7 @@ def _load_verified_payload(data: bytes, *, source: str) -> dict:
     try:
         payload = torch.load(io.BytesIO(data), map_location="cpu", weights_only=True)
     except Exception as exc:
-        raise UnregisteredCheckpoint(
+        raise UnregisteredCheckpointError(
             f"{source} could not be loaded with weights_only=True ({exc}): this payload carries "
             "something outside a platform-written deliverable checkpoint's contract (a resume "
             "checkpoint's RNG/optimizer state is the trainer's own resume path to read; a bespoke "
@@ -257,11 +257,11 @@ def admitted_digest(checkpoint_path: str | Path) -> str:
 def checkpoint_payload(checkpoint_path: str | Path, sha256: str) -> dict:
     """The payload of the checkpoint at ``checkpoint_path`` (:func:`_load_verified_payload`), read
     only once its bytes are the ones ``sha256`` names. Bytes hashing otherwise raise
-    :class:`UnregisteredCheckpoint` naming both digests."""
+    :class:`UnregisteredCheckpointError` naming both digests."""
     data = Path(checkpoint_path).read_bytes()
     digest = _sha256_of_bytes(data)
     if digest != sha256:
-        raise UnregisteredCheckpoint(
+        raise UnregisteredCheckpointError(
             f"{checkpoint_path} now hashes to {digest}, not the {sha256} its record names: the "
             "file was replaced after it was recorded.")
     return _load_verified_payload(data, source=f"{checkpoint_path} (sha256 {digest})")
@@ -271,8 +271,8 @@ def load_registered_checkpoint(checkpoint_path: str | Path, *, project: Path) ->
     """The checkpoint at ``checkpoint_path``, read once and unpickled from the same bytes its
     digest is taken over, when ``project``'s :func:`registered_entries` name that digest.
 
-    Raises :class:`UnregisteredCheckpoint` naming the path, the digest and the root searched when
-    none does, and ``FileNotFoundError`` for a missing file.
+    Raises :class:`UnregisteredCheckpointError` naming the path, the digest and the root searched
+    when none does, and ``FileNotFoundError`` for a missing file.
     """
     ckpt = Path(checkpoint_path)
     root = str(project)
@@ -311,7 +311,7 @@ def _write_registry_entry(txn: tcip_store.Txn, key: Key,
 
 def _audit_entry_write(project_path: str, superseded: dict | None, entry: dict) -> None:
     """Emit ``model_registered`` in the project's log for a written ``entry``, naming the entry of
-    the same sha256 it superseded. A failed append raises ``AuditEntryNotWritten``."""
+    the same sha256 it superseded. A failed append raises ``AuditEntryNotWrittenError``."""
     from tcip_mcp.audit import record_event_or_raise
 
     replaced = {} if superseded is None else {
@@ -332,7 +332,7 @@ def _resolve_entry_checkpoint(project_path: str, entry: dict) -> dict:
     stored = entry["checkpoint_path"]
     try:
         copy["checkpoint_path"] = str(resolved_registry_path(project_path, stored))
-    except (RegistryPathEmpty, RegistryPathTraversal) as exc:
+    except (RegistryPathEmptyError, RegistryPathTraversalError) as exc:
         copy["checkpoint_path_error"] = str(exc)
     return copy
 
@@ -371,7 +371,8 @@ class ModelRegistry:
             StoreError: ``config`` or ``metrics`` holds something JSON cannot carry, named
                 before anything is stored.
             ValueError: the checkpoint's payload is one the verified reader refuses.
-            AuditEntryNotWritten: the write committed but its own audit line could not be appended.
+            AuditEntryNotWrittenError: the write committed but its own audit line could not be
+                appended.
         """
         ckpt = Path(checkpoint_path)
         if not ckpt.is_file():

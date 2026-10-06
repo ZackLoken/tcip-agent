@@ -181,7 +181,7 @@ def test_progress_logged_after_the_final_status_never_reopens_the_run(launch, tm
     log and the final status as they were; the completed run's summary is the best selection over
     its own rows under its recorded objective."""
     from tcip_mcp.experiments import (
-        FINAL_STATUS_FILE, METRICS_FILE, RunEnded, best_selection, observe, read_rows,
+        FINAL_STATUS_FILE, METRICS_FILE, RunEndedError, best_selection, observe, read_rows,
     )
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.run_registry import observed_run
@@ -194,7 +194,7 @@ def test_progress_logged_after_the_final_status_never_reopens_the_run(launch, tm
     observation = observe(run_dir)
     run = observed_run(observation)
 
-    with pytest.raises(RunEnded):
+    with pytest.raises(RunEndedError):
         TrainContext(run=run, train_loader=None).log_metrics(
             99, {"loss": 1e-9, "selection_metric": "loss", "selection": 1e-9})
 
@@ -271,20 +271,20 @@ def test_a_name_is_reserved_by_the_directory_that_takes_it_first(
     creation under it refuses, and a run under a sweep's name refuses naming its directory. A
     run, a sweep and one of its trials are each found once by name."""
     from tcip_mcp.experiments import (
-        RunDirectoryExists, create_run_directory, experiment_dir, find_run, find_sweep,
+        RunDirectoryExistsError, create_run_directory, experiment_dir, find_run, find_sweep,
         named_directory,
     )
     from tcip_mcp.tools.training_tools import open_trial
     from tests._verified_checkpoint_fixtures import detection_config, opened_run, opened_sweep
 
     composing = create_run_directory(experiment_dir("composing", project=tmp_path))
-    with pytest.raises(RunDirectoryExists, match=re.escape(str(composing))):
+    with pytest.raises(RunDirectoryExistsError, match=re.escape(str(composing))):
         create_run_directory(composing)
 
     sweep = opened_sweep(tmp_path, real_hpo_base_config)
     trial = open_trial(sweep, "a", {"lr": 0.01})
     config = detection_config(tmp_path.parent / "run-data")
-    with pytest.raises(RunDirectoryExists, match=re.escape(str(sweep))):
+    with pytest.raises(RunDirectoryExistsError, match=re.escape(str(sweep))):
         opened_run(tmp_path, config, experiment_id=sweep.name)
     run = opened_run(tmp_path, config, experiment_id="a-free-name")
 
@@ -427,17 +427,17 @@ def test_a_context_for_an_ended_run_is_refused_and_writes_nothing(tmp_path, monk
     """A run whose final status is written takes no more writes: running it again refuses before
     anything is written, and a context built from its record refuses a save, leaving its
     directory byte-identical."""
-    from tcip_mcp.experiments import RunEnded, observe
+    from tcip_mcp.experiments import RunEndedError, observe
     from tcip_mcp.pipelines.training.subprocess_worker import prepare_run_context, run_directory
     from tests._verified_checkpoint_fixtures import finished_run
 
     run_dir = finished_run(tmp_path, experiment_id="exp-ended")
     before = _contents(run_dir)
 
-    with pytest.raises(RunEnded):
+    with pytest.raises(RunEndedError):
         run_directory(run_dir)
     ctx = prepare_run_context(observe(run_dir))
-    with pytest.raises(RunEnded):
+    with pytest.raises(RunEndedError):
         ctx.save_checkpoint({STATE_DICT_KEY: {}}, "after_terminal")
 
     assert _contents(run_dir) == before

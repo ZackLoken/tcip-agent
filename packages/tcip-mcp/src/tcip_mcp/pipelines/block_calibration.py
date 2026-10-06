@@ -93,18 +93,18 @@ def check_completeness(
     document: "LabelDocument", where: str, subject: str,
     rects: dict[str, tuple[int, int, int, int]],
 ) -> None:
-    """Refuse by name (:class:`~tcip_mcp.assessment.AssessmentRefused`, naming the regions, the
+    """Refuse by name (:class:`~tcip_mcp.assessment.AssessmentRefusedError`, naming the regions, the
     subject and ``where``) unless the live completion marks the label ``document`` holds for
     ``subject`` cover every half-open rect in ``rects``.
     """
     from tcip_annotation.json_io import covers
 
-    from tcip_mcp.assessment import AssessmentRefused
+    from tcip_mcp.assessment import AssessmentRefusedError
 
     marks = document.marks.get(subject, [])
     uncovered = sorted(name for name, rect in rects.items() if not covers(marks, rect))
     if uncovered:
-        raise AssessmentRefused(
+        raise AssessmentRefusedError(
             f"the reserved region(s) {uncovered} are not marked complete for subject {subject!r} "
             f"in {where}: mark each region complete in the Annotate tab before its ground truth "
             "can be assessed against."
@@ -112,13 +112,13 @@ def check_completeness(
 
 
 def check_feasibility(gt_counts: dict[str, int], *, side: str, min_present: int = 2) -> None:
-    """Refuse by name (:class:`~tcip_mcp.assessment.AssessmentRefused`) when fewer than
+    """Refuse by name (:class:`~tcip_mcp.assessment.AssessmentRefusedError`) when fewer than
     ``min_present`` bands on this side carry any GT at all."""
-    from tcip_mcp.assessment import AssessmentRefused
+    from tcip_mcp.assessment import AssessmentRefusedError
 
     n_present = sum(1 for c in gt_counts.values() if c > 0)
     if n_present < min_present:
-        raise AssessmentRefused(
+        raise AssessmentRefusedError(
             f"the resolved {side} band layout "
             f"({len(gt_counts)} band(s)) leaves only {n_present} band(s) with any GT, fewer than "
             f"the {min_present} an equivalence check needs; reduce k_{side}, widen the reserved "

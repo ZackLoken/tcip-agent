@@ -10,7 +10,7 @@ from typing import Any
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+from torch.nn import functional
 
 
 class FPN(nn.Module):
@@ -45,13 +45,15 @@ class FPN(nn.Module):
 
         # Top-down pathway
         for i in range(len(laterals) - 2, -1, -1):
-            up = F.interpolate(laterals[i + 1], size=laterals[i].shape[-2:], mode="nearest")
+            up = functional.interpolate(
+                laterals[i + 1], size=laterals[i].shape[-2:], mode="nearest")
             laterals[i] = laterals[i] + up
 
         # 3x3 convs to remove aliasing, finest -> coarsest.
         outs = [conv(laterals[i]) for i, conv in enumerate(self.output_convs)]
         if self.add_p2:
-            extra = self.p2_conv(F.interpolate(laterals[0], scale_factor=2, mode="nearest"))
+            extra = self.p2_conv(
+                functional.interpolate(laterals[0], scale_factor=2, mode="nearest"))
             outs.insert(0, extra)  # new finest level at index 0
         return {f"p{i}": f for i, f in enumerate(outs)}
 
@@ -116,4 +118,4 @@ class GlobalAvgPoolNeck(nn.Module):
         # Take highest-level features
         keys = sorted(features.keys())
         x = features[keys[-1]]
-        return F.adaptive_avg_pool2d(x, 1).flatten(1)
+        return functional.adaptive_avg_pool2d(x, 1).flatten(1)

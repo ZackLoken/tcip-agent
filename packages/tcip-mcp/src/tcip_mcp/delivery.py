@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from tcip_mcp.traits import TraitRevision
 
 
-class DeliveryRefused(ValueError):
+class DeliveryRefusedError(ValueError):
     """A delivery the gate refused, one sentence per reason. ``result_sha256`` is the digest of
     the result an acknowledgment would ship (:func:`result_digest`), ``None`` for a delivery no
     acknowledgment can ship."""
@@ -219,13 +219,13 @@ def gate(
     ``unit``, under ``revision``, over a reference that has not changed, covering every bucket's
     capture.
 
-    Refuses (:class:`DeliveryRefused`) outright no buckets at all, buckets naming more than one
+    Refuses (:class:`DeliveryRefusedError`) outright no buckets at all, buckets naming more than one
     producer or proposing rather than predicting, (``ValueError``) buckets under more than one
     dataset root (:func:`~tcip_mcp.buckets.shared_root`), a state-crossing delivery over a
     bucket that
     classifies no positive state, a scale assessment named for a value in no unit, and a detector
     delivery in a unit naming none; refuses
-    (:class:`~tcip_mcp.operationalization.OperationalizationRefused`) a detector delivery whose
+    (:class:`~tcip_mcp.operationalization.OperationalizationRefusedError`) a detector delivery whose
     buckets do not count the operationalization's measured subject. A delivery with any
     unvalidated finding ships only under ``acknowledgment_id``, a recorded acknowledgment
     (:func:`read_acknowledgment`) of exactly ``result``, the rows and disclosure about to be
@@ -237,16 +237,18 @@ def gate(
     from tcip_mcp.traits import DETECTOR_KINDS, STATE_CROSSING_DATES
 
     if not buckets:
-        raise DeliveryRefused("a delivery names no prediction bucket, so nothing states what its "
-                              "numbers were measured from; name the published buckets it ships.")
+        raise DeliveryRefusedError(
+            "a delivery names no prediction bucket, so nothing states what its "
+            "numbers were measured from; name the published buckets it ships.")
     shared_root(buckets)
     proposed = [b.name for b in buckets if "checkpoint_sha256" not in b.producer]
     if proposed:
-        raise DeliveryRefused(f"{proposed} hold staged proposals, which no model predicted and "
-                              "no assessment measures: a delivery ships a model's predictions.")
+        raise DeliveryRefusedError(
+            f"{proposed} hold staged proposals, which no model predicted and "
+            "no assessment measures: a delivery ships a model's predictions.")
     producers = {Producer.model_validate(b.producer) for b in buckets}
     if len(producers) > 1:
-        raise DeliveryRefused(
+        raise DeliveryRefusedError(
             "the delivered buckets were produced by more than one checkpoint or run ("
             + "; ".join(f"{b.name}: {b.producer['checkpoint_sha256']} / "
                         f"{b.producer['experiment_id']}" for b in buckets)
@@ -258,15 +260,15 @@ def gate(
         state = revision.entry.positive_state
         unclassified = [b.name for b in buckets if b.scope.state_ids(state) is None]
         if unclassified:
-            raise DeliveryRefused(
+            raise DeliveryRefusedError(
                 f"{unclassified} classify no {state}: the classifier that produced them never "
                 "assessed this trait's positive state, so a positive fraction over them is not a "
                 "measurement.")
     if scale_assessment_id is not None and unit is None:
-        raise DeliveryRefused("a physical scale answers for a dimensional value, and the "
+        raise DeliveryRefusedError("a physical scale answers for a dimensional value, and the "
                               "delivered values are in no physical unit.")
     if delivery_kind in DETECTOR_KINDS and unit is not None and scale_assessment_id is None:
-        raise DeliveryRefused(f"the delivered values are in {unit!r} from a detection or "
+        raise DeliveryRefusedError(f"the delivered values are in {unit!r} from a detection or "
                               "segmentation bucket, and nothing answers for that unit: name the "
                               "physical-scale assessment (calibrate_physical_scale) they were "
                               "scaled under.")
@@ -299,10 +301,10 @@ def gate(
         digest = result_digest(result, delivery_kind=delivery_kind, revision=revision,
                                producer=producer, buckets=rows, scale_finding=scale_finding)
         if acknowledgment_id is None:
-            raise DeliveryRefused(" ".join(unvalidated), result_sha256=digest)
+            raise DeliveryRefusedError(" ".join(unvalidated), result_sha256=digest)
         acknowledgment = read_acknowledgment(project, acknowledgment_id)
         if acknowledgment.result_sha256 != digest:
-            raise DeliveryRefused(
+            raise DeliveryRefusedError(
                 f"acknowledgment {acknowledgment_id} was given for another result than the one "
                 f"this delivery computed: {' '.join(unvalidated)}", result_sha256=digest)
     return Clearance(validated=not unvalidated, buckets=rows, producer=producer,
@@ -339,11 +341,12 @@ def record_acknowledgment(project: Path, *, acknowledged_by: str, reason: str,
 
 def read_acknowledgment(project: Path, acknowledgment_id: str) -> Acknowledgment:
     """The acknowledgment ``acknowledgment_id`` names; one recorded under no such id refuses
-    (:class:`DeliveryRefused`)."""
+    (:class:`DeliveryRefusedError`)."""
     raw = tcip_store.read(_acknowledgment_key(project, acknowledgment_id), default=None)
     if raw is None:
-        raise DeliveryRefused(f"no acknowledgment {acknowledgment_id!r} is recorded: a breeder "
-                              "acknowledges shipping an unvalidated result in the Results tab.")
+        raise DeliveryRefusedError(
+            f"no acknowledgment {acknowledgment_id!r} is recorded: a breeder "
+            "acknowledges shipping an unvalidated result in the Results tab.")
     return Acknowledgment.model_validate(raw)
 
 

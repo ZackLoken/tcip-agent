@@ -35,7 +35,7 @@ def test_a_prediction_document_stating_no_score_is_refused_where_it_is_read(tmp_
         Annotation(subject=SUBJECT, geometry=BOX, score=0.8),
         Annotation(subject=SUBJECT, geometry=BOX)])
 
-    with pytest.raises(json_io.UnreadableLabelDocument, match="record 1 .*'score'"):
+    with pytest.raises(json_io.UnreadableLabelDocumentError, match="record 1 .*'score'"):
         json_io.read_predictions(key)
 
 

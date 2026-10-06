@@ -24,22 +24,22 @@ def _named(key) -> str:
 
 def _census(root: Path, findings: list) -> dict | None:
     """The dataset census (``data_tools._scan_dataset``) with ``label_reads``, each label key's
-    document or the ``UnreadableLabelDocument`` it raised; ``None`` with an error finding for an
-    ``images/`` stem collision or an unreadable ``.bandgroup`` manifest."""
-    from tcip_annotation.json_io import UnreadableLabelDocument, read_label_document
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
+    document or the ``UnreadableLabelDocumentError`` it raised; ``None`` with an error finding for
+    an ``images/`` stem collision or an unreadable ``.bandgroup`` manifest."""
+    from tcip_annotation.json_io import UnreadableLabelDocumentError, read_label_document
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError
     from tcip_mcp.tools.data_tools import _scan_dataset
 
     try:
         scan = _scan_dataset(str(root))
-    except AmbiguousImageStem as exc:
+    except AmbiguousImageStemError as exc:
         findings.append(("error", str(exc)))
         return None
     label_reads: dict = {}
     for key in scan["labels"]:
         try:
             label_reads[key] = read_label_document(key)
-        except UnreadableLabelDocument as exc:
+        except UnreadableLabelDocumentError as exc:
             label_reads[key] = exc
     return {**scan, "label_reads": label_reads}
 
@@ -103,7 +103,7 @@ def check_registry(root: Path, findings: list) -> None:
     from tcip_mcp.dataset_layout import PREDICTION_BUCKETS
     from tcip_mcp.model_registry import registered_entries
     from tcip_mcp.registry_paths import (
-        RegistryPathEmpty, RegistryPathTraversal, resolved_registry_path,
+        RegistryPathEmptyError, RegistryPathTraversalError, resolved_registry_path,
     )
 
     try:
@@ -117,7 +117,7 @@ def check_registry(root: Path, findings: list) -> None:
         # Existence resolves first; the temp-tree marker scan runs over the resolved string.
         try:
             resolved = resolved_registry_path(root, m["checkpoint_path"])
-        except (RegistryPathEmpty, RegistryPathTraversal) as exc:
+        except (RegistryPathEmptyError, RegistryPathTraversalError) as exc:
             findings.append(("error", f"registry entry {m['name']!r} checkpoint_path "
                             f"could not be resolved: {exc}"))
             continue

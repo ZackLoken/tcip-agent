@@ -18,7 +18,7 @@ import tcip_store as ts
 from tcip_mcp import traits
 from tcip_mcp.audit import audit_log_key
 from tcip_mcp.delivery import read_delivery_events
-from tcip_mcp.operationalization import OperationalizationRefused
+from tcip_mcp.operationalization import OperationalizationRefusedError
 from tests import _trait_fixtures as fx
 
 TRAITS_ROUTE = "/api/results/traits"
@@ -81,7 +81,7 @@ def test_a_proposal_appends_an_unconfirmed_revision_and_a_delivery_refuses_by_na
 
     assert revision.number == 1
     assert not revision.confirmed
-    with pytest.raises(OperationalizationRefused) as excinfo:
+    with pytest.raises(OperationalizationRefusedError) as excinfo:
         _deliver_counts(tmp_path, "unconfirmed")
     assert "none of its 1 revision(s) is confirmed" in str(excinfo.value)
     assert "Setup tab" in str(excinfo.value)
@@ -152,7 +152,7 @@ def test_a_withdrawn_confirmation_marks_the_revision_and_leaves_the_entry(tmp_pa
 
     assert withdrawn.withdrawn_by == "user:rosalind" and not withdrawn.confirmed
     assert withdrawn.entry == revision.entry and withdrawn.confirmed_by == revision.confirmed_by
-    with pytest.raises(OperationalizationRefused):
+    with pytest.raises(OperationalizationRefusedError):
         _deliver_counts(tmp_path, "after_withdrawal")
     with pytest.raises(ValueError, match="already confirmed"):
         fx.confirm(tmp_path, withdrawn)

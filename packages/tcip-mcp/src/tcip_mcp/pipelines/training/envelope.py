@@ -319,8 +319,8 @@ class TrainContext:
 
     def record_artifact(self, name: str, path: str) -> None:
         """Copy the file at ``path`` into the run's ``artifacts/`` directory under ``name``,
-        refusing (``FileExistsError``) a name already recorded and (``BadKey``) one that is not a
-        single file name.
+        refusing (``FileExistsError``) a name already recorded and (``BadKeyError``) one that is not
+        a single file name.
         """
         from tcip_mcp.experiments import require_open, run_name
 
@@ -410,13 +410,13 @@ def close_run(run_dir: Path, project: Path, state: str, error: str | None, *,
     """Append the run's closing ``training_run`` line under ``project``, then write its final
     status once and return the state and error it names. A refused append ends the run
     ``failed`` with no checkpoint, its reason named after ``error`` when there is one."""
-    from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
+    from tcip_mcp.audit import AuditEntryNotWrittenError, record_event_or_raise
     from tcip_mcp.experiments import write_final_status
 
     try:
         record_event_or_raise("training_run", arguments, actor=None, status=state, scope=project,
                               **extra)
-    except AuditEntryNotWritten as exc:
+    except AuditEntryNotWrittenError as exc:
         state, checkpoint = "failed", None
         error = f"{error}; {exc}" if error else str(exc)
     write_final_status(run_dir, state, error, checkpoint=checkpoint)

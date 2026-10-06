@@ -102,7 +102,7 @@ def test_a_noncanonical_labelme_record_refuses_rather_than_reading_as_empty(tmp_
         "shapes": [{"label": BUD, "shape_type": "rectangle", "points": [[10, 10], [50, 50]]}],
     })
 
-    with pytest.raises(json_io.UnreadableLabelDocument):
+    with pytest.raises(json_io.UnreadableLabelDocumentError):
         admit_over(images, subject=BUD)
 
 
@@ -292,7 +292,7 @@ def test_a_corrupt_confirmed_negative_refuses_the_admission(tmp_path):
     images = _rail_fixture(tmp_path)
     ts.replace(image_label_key(images / "neg.jpg"), ["not", "a", "document"])
 
-    with pytest.raises(json_io.UnreadableLabelDocument):
+    with pytest.raises(json_io.UnreadableLabelDocumentError):
         admit_over(images, subject=BUD)
 
 
@@ -434,7 +434,7 @@ def test_json_det_targets_marks_an_unassessed_row_and_refuses_an_undeclared_valu
         Annotation(subject="bud", geometry=BBox(10, 10, 30, 30),
                    attributes={"opening": "not-a-real-value"}),
     ])
-    with pytest.raises(json_io.UndeclaredValue):
+    with pytest.raises(json_io.UndeclaredValueError):
         json_det_targets(
             json_io.read_label_document(image_label_key(images / "IMG_B.jpg")).annotations,
             scope)

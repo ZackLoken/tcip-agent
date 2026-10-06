@@ -502,12 +502,12 @@ def test_a_registry_load_answers_content_and_version_from_one_read(
 # ── A committed write whose audit line could not be appended answers 409, not 200 ─────────
 
 
-class _AppendRefused(RuntimeError):
+class _AppendRefusedError(RuntimeError):
     """Stands in for whatever stops a real append: a busy lock, a refused root, a bad key."""
 
 
 def _refuse_append(*args: object, **kwargs: object) -> None:
-    raise _AppendRefused("the audit log could not be appended to")
+    raise _AppendRefusedError("the audit log could not be appended to")
 
 
 def test_save_subjects_answers_409_with_the_committed_body_on_a_lost_audit_line(

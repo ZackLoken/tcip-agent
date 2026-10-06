@@ -87,10 +87,10 @@ def test_resolve_image_path_unknown_path_raises_file_not_found(grouped_dir):
 
 
 def test_resolve_image_path_stale_group_raises_band_group_incomplete(grouped_dir):
-    from tcip_mcp.pipelines.image_utils import BandGroupIncomplete, resolve_image_path
+    from tcip_mcp.pipelines.image_utils import BandGroupIncompleteError, resolve_image_path
 
     (grouped_dir / "cap_R.tif").unlink()
-    with pytest.raises(BandGroupIncomplete):
+    with pytest.raises(BandGroupIncompleteError):
         resolve_image_path(grouped_dir / "cap.bandgroup")
 
 
@@ -117,7 +117,7 @@ def test_list_logical_images_refuses_a_stem_collision_between_a_group_and_a_stan
     never gets added; every listing (training, splits, review, gallery) would otherwise lose it
     with no error."""
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, list_logical_images
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError, list_logical_images
 
     d = tmp_path / "images"
     d.mkdir()
@@ -130,7 +130,7 @@ def test_list_logical_images_refuses_a_stem_collision_between_a_group_and_a_stan
     # An unrelated standalone file that happens to share that exact stem.
     tifffile.imwrite(str(d / "cap_a.tif"), np.full((8, 8), 3, dtype=np.uint16))
 
-    with pytest.raises(AmbiguousImageStem):
+    with pytest.raises(AmbiguousImageStemError):
         list_logical_images(d)
 
 
@@ -151,28 +151,28 @@ def test_bucket_logical_identities_on_missing_dir_returns_empty(tmp_path):
 
 
 def test_list_logical_images_refuses_two_raw_files_sharing_one_stem(tmp_path):
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, list_logical_images
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError, list_logical_images
 
     d = tmp_path / "images"
     d.mkdir()
     (d / "foo.jpg").write_bytes(b"a")
     (d / "foo.png").write_bytes(b"b")
 
-    with pytest.raises(AmbiguousImageStem) as raised:
+    with pytest.raises(AmbiguousImageStemError) as raised:
         list_logical_images(d)
     message = str(raised.value)
     assert "foo.jpg" in message and "foo.png" in message
 
 
 def test_list_logical_images_refuses_a_case_variant_stem_pair(tmp_path):
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, list_logical_images
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError, list_logical_images
 
     d = tmp_path / "images"
     d.mkdir()
     (d / "Foo.jpg").write_bytes(b"a")
     (d / "foo.png").write_bytes(b"b")
 
-    with pytest.raises(AmbiguousImageStem) as raised:
+    with pytest.raises(AmbiguousImageStemError) as raised:
         list_logical_images(d)
     message = str(raised.value)
     assert "Foo.jpg" in message and "foo.png" in message

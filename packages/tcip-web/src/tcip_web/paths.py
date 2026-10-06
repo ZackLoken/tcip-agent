@@ -169,15 +169,15 @@ def _resolving(read: Any, path: str) -> tuple[Path, Any]:
     capture missing a band 409, and an ambiguous stem 400."""
     from fastapi import HTTPException
 
-    from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
+    from tcip_mcp.pipelines.data.band_groups import BandGroupIncompleteError
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError
 
     p = allowed_file(path)
     try:
         return p, read(p)
-    except BandGroupIncomplete as exc:
+    except BandGroupIncompleteError as exc:
         raise HTTPException(409, str(exc)) from exc
-    except AmbiguousImageStem as exc:
+    except AmbiguousImageStemError as exc:
         raise HTTPException(400, str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc

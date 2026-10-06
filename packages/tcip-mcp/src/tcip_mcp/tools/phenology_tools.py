@@ -70,7 +70,7 @@ def register_plant_registry(project: Path, name: str, csv_paths: list[str], *, c
     try:
         return plant_mapping.register_plant_registry_record(
             project, name, [Path(p) for p in csv_paths], crop=crop, site=site)
-    except (plant_mapping.NoGeoreferencedPlantsRefusal, plant_mapping.PlantRegistryNameConflict,
+    except (plant_mapping.NoGeoreferencedPlantsError, plant_mapping.PlantRegistryNameConflictError,
             ValueError) as exc:
         return {"error": str(exc)}
 
@@ -120,16 +120,16 @@ def build_plant_mapping(
     Returns the build as ``MappingBuild.served`` states it, never the full per-image mapping (that
     lives in the persisted record).
     """
-    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.audit import AuditEntryNotWrittenError
     from tcip_mcp.pipelines.postprocessing import plant_mapping
 
     try:
         return plant_mapping.build_plant_mapping(
             project, name, images_root, plant_registry, dates=dates,
             nn_tolerance_m=nn_tolerance_m, supersede=supersede, actor=None).served()
-    except plant_mapping.MappingRebuildRefusal as exc:
+    except plant_mapping.MappingRebuildError as exc:
         return {"error": str(exc), "citing_events": exc.event_ids}
-    except (plant_mapping.UngeoreferencedCaptureRefusal, AuditEntryNotWritten,
+    except (plant_mapping.UngeoreferencedCaptureError, AuditEntryNotWrittenError,
             ValueError) as exc:
         return {"error": str(exc)}
 
@@ -174,9 +174,9 @@ def deliver_phenology_milestones(
             event.
         acknowledgment_id: A breeder's recorded acknowledgment of this unvalidated result.
     """
-    from tcip_mcp.delivery import DeliveryRefused
-    from tcip_mcp.operationalization import OperationalizationRefused
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingDeliveryRefusal
+    from tcip_mcp.delivery import DeliveryRefusedError
+    from tcip_mcp.operationalization import OperationalizationRefusedError
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingDeliveryError
     from tcip_mcp.subject_registry import RegistryError
     from tcip_mcp.traits import TraitUnknownError
 
@@ -190,8 +190,8 @@ def deliver_phenology_milestones(
             acknowledgment_id=acknowledgment_id, door="deliver_phenology_milestones", actor=None)
     except phenology.measurement_refusals() as exc:
         return {"error": str(exc)}
-    except (DeliveryRefused, OperationalizationRefused, TraitUnknownError, RegistryError,
-            MappingDeliveryRefusal, ValueError) as exc:
+    except (DeliveryRefusedError, OperationalizationRefusedError, TraitUnknownError, RegistryError,
+            MappingDeliveryError, ValueError) as exc:
         return {"error": str(exc)}
     disclosure = measurement.plant_mapping
     return {**delivered, "n_plants": len(measurement.rows),

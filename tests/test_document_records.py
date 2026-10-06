@@ -66,7 +66,7 @@ def test_a_save_commits_its_verdicts_and_its_document_together_or_neither(
     _save(tmp_path, image, [], expect=first)
     saves = _audit_tools(tmp_path).count("save_label_document")
 
-    with pytest.raises(ts.VersionConflict):
+    with pytest.raises(ts.VersionConflictError):
         _save(tmp_path, image, [], expect=first,
               gestures=Gestures(bucket=bucket, accept=frozenset({0})))
 
@@ -150,7 +150,7 @@ def test_a_document_its_bucket_names_is_required(tmp_path: Path) -> None:
     counted, never reads as an image with no detections; a bucket record holding ``null`` is a
     published bucket."""
     pytest.importorskip("torch")
-    from tcip_mcp.buckets import BucketExists, Document, detection_rows, publish
+    from tcip_mcp.buckets import BucketExistsError, Document, detection_rows, publish
     from tcip_mcp.dataset_layout import bucket_key
     from tests._chain_fixtures import predicted, published
 
@@ -160,11 +160,11 @@ def test_a_document_its_bucket_names_is_required(tmp_path: Path) -> None:
                        scope={"subject": BUD})
     ts.delete(prediction_key(root, bucket.name, "b"))
 
-    with pytest.raises(json_io.UnreadableLabelDocument, match="has no record"):
+    with pytest.raises(json_io.UnreadableLabelDocumentError, match="has no record"):
         detection_rows(bucket)
 
     ts.replace(bucket_key(root, f"n/{DATE}"), None)
-    with pytest.raises(BucketExists):
+    with pytest.raises(BucketExistsError):
         publish(tmp_path, root, f"n/{DATE}", [Document(str(images[2]), {"annotations": []})],
                 producer=bucket.producer, scope=bucket.scope, execution=bucket.execution,
                 raster_path=None, raster_identity=None, assessment_id=None, actor=None)
@@ -173,7 +173,7 @@ def test_a_document_its_bucket_names_is_required(tmp_path: Path) -> None:
 def test_a_publication_commits_whole_and_a_second_of_one_name_writes_nothing(
         tmp_path: Path) -> None:
     pytest.importorskip("torch")
-    from tcip_mcp.buckets import BucketExists, Document, publish, read_bucket
+    from tcip_mcp.buckets import BucketExistsError, Document, publish, read_bucket
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
     from tests._chain_fixtures import predicted, published
 
@@ -189,7 +189,7 @@ def test_a_publication_commits_whole_and_a_second_of_one_name_writes_nothing(
                 execution=first.execution, raster_path=None, raster_identity=raster_identity,
                 assessment_id=None, actor=None)
 
-    with pytest.raises(BucketExists):
+    with pytest.raises(BucketExistsError):
         again(first.name, None)
     with pytest.raises(ts.StoreError, match="raster_identity.width is nan"):
         again(f"n/{DATE}", {"width": float("nan")})

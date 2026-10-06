@@ -21,8 +21,8 @@ from pydantic import BaseModel
 from tcip_store import bind
 
 from tcip_mcp.audit import now_iso
-from tcip_mcp.buckets import NotABucket
-from tcip_mcp.identity import NoActor
+from tcip_mcp.buckets import NotABucketError
+from tcip_mcp.identity import NoActorError
 from tcip_mcp.web_client import PANEL_EVENT_ANNOTATE_FOCUS, VALID_PANELS
 from tcip_web.trust_boundary import TrustBoundaryMiddleware
 
@@ -83,7 +83,7 @@ _register_routes(app)
 
 # ── State snapshot + WS ──
 from tcip_web.state import (  # noqa: E402  (needs `app`)
-    GuiMutationInvalid, NoProjectOpen, ProjectNotOpen, store as _gui_store,
+    GuiMutationInvalidError, NoProjectOpenError, ProjectNotOpenError, store as _gui_store,
 )
 _state_watchers: set[WebSocket] = set()
 
@@ -94,19 +94,19 @@ async def _bad_request_handler(_request: Request, exc: Exception) -> JSONRespons
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
-app.add_exception_handler(GuiMutationInvalid, _bad_request_handler)
-app.add_exception_handler(NotABucket, _bad_request_handler)
-app.add_exception_handler(NoActor, _bad_request_handler)
+app.add_exception_handler(GuiMutationInvalidError, _bad_request_handler)
+app.add_exception_handler(NotABucketError, _bad_request_handler)
+app.add_exception_handler(NoActorError, _bad_request_handler)
 
 
-@app.exception_handler(NoProjectOpen)
-async def _no_project_open_handler(_request: Request, exc: NoProjectOpen) -> JSONResponse:
+@app.exception_handler(NoProjectOpenError)
+async def _no_project_open_handler(_request: Request, exc: NoProjectOpenError) -> JSONResponse:
     """Every route that acts on the open project answers 409 while none is open."""
     return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
-@app.exception_handler(ProjectNotOpen)
-async def _project_not_open_handler(_request: Request, exc: ProjectNotOpen) -> JSONResponse:
+@app.exception_handler(ProjectNotOpenError)
+async def _project_not_open_handler(_request: Request, exc: ProjectNotOpenError) -> JSONResponse:
     """A request built for a project the backend does not have open answers 409 naming the one it
     has open."""
     return JSONResponse(status_code=409, content={"detail": {

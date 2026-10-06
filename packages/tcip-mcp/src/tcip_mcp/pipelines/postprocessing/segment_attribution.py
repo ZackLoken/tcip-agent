@@ -36,7 +36,7 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
 )
 
 
-class CanopySegmentRefusal(ValueError):
+class CanopySegmentError(ValueError):
     """A canopy-segment document, or one of its own annotations, cannot stand behind a segment
     tie: a document/raster identity mismatch, an absent subject, a ``Point`` naming no region, or
     a record not positively a person's."""
@@ -82,7 +82,7 @@ def load_canopy_segments(
     """
     if (int(document.width or -1), int(document.height or -1)) != (
             int(raster_identity["width"]), int(raster_identity["height"])):
-        raise CanopySegmentRefusal(
+        raise CanopySegmentError(
             f"the canopy segment document of raster stem {raster_stem!r} is "
             f"{document.width}x{document.height}, the raster is "
             f"{raster_identity['width']}x{raster_identity['height']}; the document does not "
@@ -91,7 +91,7 @@ def load_canopy_segments(
 
     annotations = [a for a in document.annotations if a.subject == subject]
     if not annotations:
-        raise CanopySegmentRefusal(
+        raise CanopySegmentError(
             f"no annotation of subject {subject!r} exists in the canopy segment document for "
             f"raster stem {raster_stem!r}; canopy_subject names a claim the data must positively "
             "carry"
@@ -99,7 +99,7 @@ def load_canopy_segments(
 
     for i, a in enumerate(annotations):
         if is_unadjudicated_prediction(a):
-            raise CanopySegmentRefusal(
+            raise CanopySegmentError(
                 f"canopy segment {i} of subject {subject!r} carries a prediction score, the "
                 "model's own unreviewed output, and cannot stand behind a boundary a person has "
                 "not accepted"
@@ -107,7 +107,7 @@ def load_canopy_segments(
     for i, a in enumerate(annotations):
         if not box_derivable(a.geometry):
             named = "an image-level label" if a.geometry is None else type(a.geometry).__name__
-            raise CanopySegmentRefusal(
+            raise CanopySegmentError(
                 f"canopy segment {i} of subject {subject!r} carries {named}, which names no "
                 "region; delete this record or replace it with a boundary (a box or a traced "
                 "polygon)"
@@ -116,13 +116,13 @@ def load_canopy_segments(
     facts = provenance_facts(annotations)
     if facts.no_created_by:
         i = facts.no_created_by[0]
-        raise CanopySegmentRefusal(
+        raise CanopySegmentError(
             f"canopy segment {i} of subject {subject!r} carries no created_by at all; a canopy "
             "boundary must positively carry a person's authorship or acceptance"
         )
     if facts.not_positively_a_persons:
         i = facts.not_positively_a_persons[0]
-        raise CanopySegmentRefusal(
+        raise CanopySegmentError(
             f"canopy segment {i} of subject {subject!r} is authored by "
             f"{annotations[i].created_by!r}, which names no person under this platform's "
             "user:<name> convention, and its own accepted_by is not a person's either; a canopy "

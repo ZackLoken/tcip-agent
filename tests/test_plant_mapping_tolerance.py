@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-    NoMatchTolerance,
+    NoMatchToleranceError,
     build_mapping,
     grid_pitch_m,
     read_plant_csvs,
@@ -57,7 +57,7 @@ def test_derives_from_grid_pitch_when_unstated(tmp_path: Path) -> None:
 def test_refuses_naming_the_parameter_when_fewer_than_two_plants_have_positions(
     tmp_path: Path,
 ) -> None:
-    with pytest.raises(NoMatchTolerance, match="nn_tolerance_m"):
+    with pytest.raises(NoMatchToleranceError, match="nn_tolerance_m"):
         _build(tmp_path, PLANTS[:1], None)
 
 

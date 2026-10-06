@@ -83,8 +83,8 @@ doc or comment.
   `record_event_or_raise`; the record is `audit_log`, one log addressed by `audit.audit_log_key`
   under two kinds of root (a dataset's own, a project's own), held in that root's store database,
   that other code (including scripts) must not write around. `audit.py` decides where an entry
-  goes and what a failed append means: the decorator raises `MutationCommittedWithoutAuditLine`.
+  goes and what a failed append means: the decorator raises `MutationCommittedWithoutAuditLineError`.
   A library write holding its records and its line in one transaction appends the line inside it
   through `audit_entry`, so neither lands without the other; a door whose line follows a
-  committed write emits through `record_event_or_raise`, which raises `AuditEntryNotWritten` on
+  committed write emits through `record_event_or_raise`, which raises `AuditEntryNotWrittenError` on
   a failed append.

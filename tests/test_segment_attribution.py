@@ -17,7 +17,7 @@ from tcip_annotation.state import Annotation, BBox, Point, Polygon
 from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import OrthomosaicGeoreference
 from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
 from tcip_mcp.pipelines.postprocessing.segment_attribution import (
-    CanopySegmentRefusal,
+    CanopySegmentError,
     assign_detections_to_segments,
     load_canopy_segments,
     tie_segments_to_plants,
@@ -102,7 +102,7 @@ def test_load_canopy_segments_refuses_a_document_whose_size_differs(tmp_path: Pa
         Annotation(subject="canopy", geometry=_square(5, 5, 20, 20), created_by="user:breeder"),
     ], width=999)
 
-    with pytest.raises(CanopySegmentRefusal, match="999"):
+    with pytest.raises(CanopySegmentError, match="999"):
         load_canopy_segments(
             data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
 
@@ -113,7 +113,7 @@ def test_load_canopy_segments_refuses_when_no_annotation_of_subject_exists(tmp_p
         Annotation(subject="other", geometry=_square(5, 5, 20, 20), created_by="user:breeder"),
     ])
 
-    with pytest.raises(CanopySegmentRefusal, match="canopy"):
+    with pytest.raises(CanopySegmentError, match="canopy"):
         load_canopy_segments(
             data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
 
@@ -124,7 +124,7 @@ def test_load_canopy_segments_refuses_a_point_naming_the_record(tmp_path: Path) 
         Annotation(subject="canopy", geometry=Point(10.0, 10.0), created_by="user:breeder"),
     ])
 
-    with pytest.raises(CanopySegmentRefusal, match="Point"):
+    with pytest.raises(CanopySegmentError, match="Point"):
         load_canopy_segments(
             data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
 
@@ -137,7 +137,7 @@ def test_load_canopy_segments_refuses_a_geometry_less_annotation(tmp_path: Path)
         Annotation(subject="canopy", geometry=None, created_by="user:breeder"),
     ])
 
-    with pytest.raises(CanopySegmentRefusal, match="image-level label, which names no region"):
+    with pytest.raises(CanopySegmentError, match="image-level label, which names no region"):
         load_canopy_segments(
             data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
 
@@ -148,7 +148,7 @@ def test_load_canopy_segments_refuses_a_scored_polygon(tmp_path: Path) -> None:
         Annotation(subject="canopy", geometry=_square(5, 5, 20, 20), score=0.9, created_by="sam"),
     ])
 
-    with pytest.raises(CanopySegmentRefusal, match="prediction score"):
+    with pytest.raises(CanopySegmentError, match="prediction score"):
         load_canopy_segments(
             data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
 
@@ -159,7 +159,7 @@ def test_load_canopy_segments_refuses_a_polygon_with_no_created_by(tmp_path: Pat
         Annotation(subject="canopy", geometry=_square(5, 5, 20, 20)),
     ])
 
-    with pytest.raises(CanopySegmentRefusal, match="no created_by"):
+    with pytest.raises(CanopySegmentError, match="no created_by"):
         load_canopy_segments(
             data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
 
@@ -172,7 +172,7 @@ def test_load_canopy_segments_refuses_a_machine_authored_polygon_with_no_persons
         Annotation(subject="canopy", geometry=_square(5, 5, 20, 20), created_by="sam"),
     ])
 
-    with pytest.raises(CanopySegmentRefusal, match="no person"):
+    with pytest.raises(CanopySegmentError, match="no person"):
         load_canopy_segments(
             data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
 

@@ -33,7 +33,7 @@ def _read_coco(document: Path) -> tuple[dict, str]:
     try:
         stored = tcip_store.read_blob_versioned(document)
         coco = json.loads(stored.value.decode("utf-8-sig"))
-    except (tcip_store.NotFound, OSError, ValueError) as exc:
+    except (tcip_store.NotFoundError, OSError, ValueError) as exc:
         raise ValueError(f"{document} does not read as a JSON document: {exc}") from exc
     if not isinstance(coco, dict):
         raise ValueError(f"{document} decodes to a {type(coco).__name__}, not the object a COCO "

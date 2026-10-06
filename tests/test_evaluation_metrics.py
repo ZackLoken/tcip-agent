@@ -307,10 +307,10 @@ def test_dt_score_refuses_a_record_without_a_score_or_with_none_by_name():
 def test_resolve_match_criterion_refuses_an_unauthored_localization_asking_the_breeder():
     """No localization is derived from the boxes in hand: a revision that states none refuses,
     naming the field and the breeder's question, whatever the ground truth would suggest."""
-    from tcip_mcp.traits import UnauthoredField
+    from tcip_mcp.traits import UnauthoredFieldError
 
     small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
-    with pytest.raises(UnauthoredField, match="localization"):
+    with pytest.raises(UnauthoredFieldError, match="localization"):
         resolve_match_criterion(fx.entry("leaf", ("leaf_length",)), gt_only(small_boxes))
 
 

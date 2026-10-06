@@ -212,7 +212,7 @@ def test_a_scope_resolution_that_raises_refuses_rather_than_filing_the_event_in_
     with pytest.raises(RuntimeError) as caught:
         curate_something(tmp_path, "anywhere")
 
-    assert type(caught.value) is audit_module.MutationCommittedWithoutAuditLine
+    assert type(caught.value) is audit_module.MutationCommittedWithoutAuditLineError
     assert isinstance(caught.value.__cause__, RuntimeError)
     assert _rows_for(tmp_path, "curate_something") == []
 

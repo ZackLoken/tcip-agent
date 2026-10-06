@@ -320,7 +320,7 @@ def test_build_mapping_empty_dir_refuses_naming_no_capture(tmp_path: Path) -> No
             dataset_id="ds-1", project=tmp_path,
             plant_registry={"name": "unregistered", "digest": "0" * 64}, nn_tolerance_m=10.0,
         )
-    assert type(exc.value).__name__ == "UngeoreferencedCaptureRefusal"
+    assert type(exc.value).__name__ == "UngeoreferencedCaptureError"
 
 
 def _one_build() -> MappingBuild:
@@ -360,7 +360,7 @@ def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
 ) -> None:
     """The write takes the database's write lock, and reports the contention rather than
     writing past a holder of it."""
-    from tcip_store import StoreBusy
+    from tcip_store import StoreBusyError
     from tcip_store.sqlite_backend import SqliteBackend
 
     from tests._audit_fixtures import held_by_another_writer
@@ -368,7 +368,7 @@ def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
     key = plant_mapping_key(tmp_path, "mapping")
     backend = tcip_store.bind(SqliteBackend(lock_timeout_s=0.2))
 
-    with held_by_another_writer(key), pytest.raises(StoreBusy):
+    with held_by_another_writer(key), pytest.raises(StoreBusyError):
         persist_mapping(_one_build(), tmp_path, actor=None)
     assert not tcip_store.exists(key)
     backend.close()

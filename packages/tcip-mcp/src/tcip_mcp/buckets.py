@@ -38,11 +38,11 @@ class Document(NamedTuple):
     dropped: int = 0
 
 
-class BucketExists(ValueError):
+class BucketExistsError(ValueError):
     """A publication named a bucket whose record already exists under its dataset root."""
 
 
-class NotABucket(ValueError):
+class NotABucketError(ValueError):
     """A bucket name names no published bucket under a dataset root, or one whose record does not
     decode."""
 
@@ -96,15 +96,15 @@ class Bucket:
 
 def read_bucket(dataset_root: str | Path, name: str) -> Bucket:
     """The bucket named ``name`` under ``dataset_root``, as its record states it. No record, or one
-    that does not decode, refuses (:class:`NotABucket`) naming it."""
+    that does not decode, refuses (:class:`NotABucketError`) naming it."""
     from tcip_mcp.dataset_layout import bucket_key
 
     try:
         record = tcip_store.read(bucket_key(dataset_root, name), default=None)
     except tcip_store.DecodeError as exc:
-        raise NotABucket(str(exc)) from exc
+        raise NotABucketError(str(exc)) from exc
     if record is None:
-        raise NotABucket(
+        raise NotABucketError(
             f"no bucket {name!r} is published under {dataset_root}, so nothing states who "
             "produced its documents or how. Publish predictions through run_inference, or stage "
             "proposals through stage_proposals.")
@@ -212,7 +212,7 @@ def publish(
     given, and the capture of the raster, else of the first document's source image
     (:func:`~tcip_mcp.dataset_layout.capture_of`). Refuses with nothing written (``ValueError``):
     no document, two documents of one stem, and a bucket of that name already published under
-    the root (:class:`BucketExists`).
+    the root (:class:`BucketExistsError`).
     """
     from tcip_mcp.audit import audit_entry, audit_log_key
     from tcip_mcp.dataset_layout import bucket_key, capture_of, prediction_key
@@ -239,7 +239,7 @@ def publish(
     held, audit = bucket_key(root, name), audit_log_key(root)
     with tcip_store.transaction(held, audit, *keys.values()) as txn:
         if txn.read_versioned(held, default=None).version != tcip_store.Version.ABSENT:
-            raise BucketExists(
+            raise BucketExistsError(
                 f"bucket {name!r} is already published under {root}: a bucket is published "
                 "once, so a new publication, a resumed raster pass included, names a bucket that "
                 "does not exist yet.")

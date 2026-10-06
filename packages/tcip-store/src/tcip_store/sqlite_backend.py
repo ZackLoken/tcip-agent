@@ -22,11 +22,11 @@ from pathlib import Path
 from typing import Any
 
 from tcip_store.errors import (
-    BackendUnavailable,
+    BackendUnavailableError,
     DecodeError,
-    StoreBusy,
+    StoreBusyError,
     StoreError,
-    TransactionMisuse,
+    TransactionMisuseError,
 )
 from tcip_store.file_backend import (
     DEFAULT_LOCK_TIMEOUT_S,
@@ -162,7 +162,7 @@ def _set_wal(conn: sqlite3.Connection) -> str:
 
 def _refuse_rollback_journal(db_path: Path, mode: str) -> None:
     if mode != "wal":
-        raise BackendUnavailable(
+        raise BackendUnavailableError(
             f"{db_path} would not take WAL journal mode and reported {mode!r}: a "
             "rollback-journal database blocks every reader behind the writer"
         )
@@ -183,7 +183,7 @@ def open_verified(db_path: Path, root: str,
         conn.execute("pragma synchronous = FULL")
         level = conn.execute("pragma synchronous").fetchone()[0]
         if level != _FULL:
-            raise BackendUnavailable(
+            raise BackendUnavailableError(
                 f"{db_path} reports synchronous={level} after it was set to FULL, so a "
                 "committed write's durability is not what this store declares"
             )
@@ -324,7 +324,7 @@ class SqliteBackend:
             held = transition_lock(root, timeout_s=timeout)
             held.__enter__()
         except self._timeout_error:
-            raise StoreBusy(keys[0], time.monotonic() - started) from None
+            raise StoreBusyError(keys[0], time.monotonic() - started) from None
         try:
             if db_path.is_file():
                 return
@@ -352,7 +352,7 @@ class SqliteBackend:
         try:
             mode = conn.execute("pragma journal_mode = delete").fetchone()[0]
             if str(mode).lower() != "delete":
-                raise BackendUnavailable(
+                raise BackendUnavailableError(
                     f"a database being created would not take rollback-journal mode and "
                     f"reported {mode!r}, so the file installed could not hold its own commits"
                 )
@@ -375,7 +375,7 @@ class SqliteBackend:
                 "locked" in text or "busy" in text
             )
             if contended and keys:
-                raise StoreBusy(keys[0], time.monotonic() - started) from exc
+                raise StoreBusyError(keys[0], time.monotonic() - started) from exc
             root = keys[0].root if keys else "?"
             raise StoreError(
                 f"the store database under {root} refused the operation: {exc}"
@@ -540,14 +540,14 @@ class Txn:
 
     def _held(self, key: Key) -> None:
         if key not in self._keys:
-            raise TransactionMisuse(
+            raise TransactionMisuseError(
                 f"{key.store}{list(key.parts)} is not held by this transaction: name every key "
                 "the body touches in transaction(...)"
             )
 
     def read_versioned(self, key: Key, *, default: Any = REQUIRED) -> Versioned:
         """One of the transaction's records and its version; absence answers ``default`` at
-        ``Version.ABSENT`` or raises ``NotFound``."""
+        ``Version.ABSENT`` or raises ``NotFoundError``."""
         self._held(key)
         return _versioned(key, self._backend._stored(self._conn, key), default)
 

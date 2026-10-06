@@ -157,7 +157,7 @@ def _segment_counts(
     canopy segment contains its centroid. Returns the counts, the ``CanopySegmentDisclosure`` and
     each registry plant that regime leaves uncounted, with why. The canopy document is the
     raster's own label document (:func:`~tcip_mcp.dataset_layout.label_key_of`)."""
-    from tcip_annotation.json_io import UnreadableLabelDocument, document_at, read_stored
+    from tcip_annotation.json_io import UnreadableLabelDocumentError, document_at, read_stored
 
     from tcip_mcp.dataset_layout import label_key_of
     from tcip_mcp.pipelines.postprocessing.plant_mapping import UNATTRIBUTED_SEGMENT_SOURCES
@@ -170,7 +170,7 @@ def _segment_counts(
     key = label_key_of(raster_path)
     try:
         stored = read_stored(key)
-    except UnreadableLabelDocument as exc:
+    except UnreadableLabelDocumentError as exc:
         raise ValueError(f"canopy_subject delivery refused: the canopy boundaries for "
                          f"{canopy_subject!r} on the raster {stem!r} do not read (author the "
                          f"canopy boundaries where none exist): {exc}") from exc

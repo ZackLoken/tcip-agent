@@ -44,7 +44,7 @@ CROSS_TILE_MERGES: dict[str, tuple[str, str]] = {
 metric that type compares over (intersection over union, or over the smaller box)."""
 
 
-class ExecutionRefused(ValueError):
+class ExecutionRefusedError(ValueError):
     """A pass that cannot run as stated: a tile edge the checkpoint contradicts, a tiled pass with
     no basis for its scale, or a stated value that differs from the record being restored."""
 
@@ -170,8 +170,9 @@ def prepare_pass(
     """The pass ``checkpoint`` runs, over ``images_dir``'s logical images (none for a raster pass).
 
     With ``restored`` the pass runs exactly that record, and a value ``stated`` states differently
-    refuses (:class:`ExecutionRefused`) naming each. Otherwise each value is the stated one, else
-    the checkpoint's own recorded geometry, else a documented default, its source recorded; a
+    refuses (:class:`ExecutionRefusedError`) naming each. Otherwise each value is the stated
+    one, else the checkpoint's own recorded geometry, else a documented default, its source
+    recorded; a
     stated tile edge the checkpoint's geometry contradicts, and a tiled pass with no basis for its
     edge, refuse.
     """
@@ -180,7 +181,7 @@ def prepare_pass(
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.image_utils import list_logical_images
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
-    from tcip_mcp.pipelines.slicing import TileEdgeContradiction, resolve_tile_geometry
+    from tcip_mcp.pipelines.slicing import TileEdgeContradictionError, resolve_tile_geometry
 
     logical = list_logical_images(images_dir) if images_dir is not None else {}
     paths = [logical[stem] for stem in sorted(logical)]
@@ -190,7 +191,7 @@ def prepare_pass(
         if restored.tiled and restored.sahi_version != sahi.__version__:
             differing.append(f"sahi {sahi.__version__} installed, {restored.sahi_version} recorded")
         if differing:
-            raise ExecutionRefused(
+            raise ExecutionRefusedError(
                 f"the recorded execution differs from this call: {'; '.join(differing)}. A pass "
                 "restored from a record runs exactly that record; drop the differing argument "
                 "or start a new pass.")
@@ -204,10 +205,10 @@ def prepare_pass(
         try:
             geometry = resolve_tile_geometry(predictor, tiled=True, tile_size=stated.tile_size,
                                              overlap=stated.overlap)
-        except TileEdgeContradiction as exc:
-            raise ExecutionRefused(str(exc)) from exc
+        except TileEdgeContradictionError as exc:
+            raise ExecutionRefusedError(str(exc)) from exc
         if geometry.tile_size is None:
-            raise ExecutionRefused(
+            raise ExecutionRefusedError(
                 f"tile_size could not be resolved for {checkpoint.path}: this checkpoint carries "
                 "no persisted training tile geometry, no tile_size was given explicitly, and its "
                 "untiled training frame yields no square tile edge, so tiled inference has no "
@@ -246,7 +247,7 @@ def untiled_execution(checkpoint: VerifiedCheckpoint, *, conf: float | None,
                       max_dets: int | None) -> Execution:
     """The untiled record a fresh pass of ``checkpoint`` starts from: for a detector the stated
     conf and cap, else the documented defaults, each with its source; for any other head neither,
-    and a stated conf or cap refuses (:class:`ExecutionRefused`)."""
+    and a stated conf or cap refuses (:class:`ExecutionRefusedError`)."""
     from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
 
     sources: dict[str, str] = {}
@@ -256,7 +257,7 @@ def untiled_execution(checkpoint: VerifiedCheckpoint, *, conf: float | None,
         conf = float(conf) if conf is not None else DEFAULT_CONF
         max_dets = int(max_dets) if max_dets is not None else DEFAULT_MAX_DETS
     elif conf is not None or max_dets is not None:
-        raise ExecutionRefused(
+        raise ExecutionRefusedError(
             f"{checkpoint.path} is a {checkpoint.task!r} checkpoint: a confidence threshold and a "
             "detection cap govern a detector's boxes and nothing this head produces.")
     return Execution(conf=conf, max_dets=max_dets, tile_size=None, overlap=None, tile_resize=None,

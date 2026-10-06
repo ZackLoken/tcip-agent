@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 import tcip_store
 from tcip_mcp.web_client import DatasetSelection, GuiState, gui_snapshot_key
-from tcip_web.state import GuiMutationInvalid, ProjectNotOpen, StateStore
+from tcip_web.state import GuiMutationInvalidError, ProjectNotOpenError, StateStore
 
 from tests._web_fixtures import new_project
 
@@ -128,7 +128,7 @@ def test_a_persisted_snapshot_stating_a_nested_field_partly_is_reported_not_defa
 
 def test_mutate_refuses_a_partial_nested_object_and_holds_nothing() -> None:
     store = StateStore()
-    with pytest.raises(GuiMutationInvalid, match="view"):
+    with pytest.raises(GuiMutationInvalidError, match="view"):
         asyncio.run(store.mutate({"view": {"scale": 2.0}}))
     assert store.version == 0
     assert store.state.view.scale == 1.0
@@ -136,7 +136,7 @@ def test_mutate_refuses_a_partial_nested_object_and_holds_nothing() -> None:
 
 def test_mutate_refuses_an_unknown_tab_and_holds_nothing() -> None:
     store = StateStore()
-    with pytest.raises(GuiMutationInvalid):
+    with pytest.raises(GuiMutationInvalidError):
         asyncio.run(store.mutate({"active_tab": "nonexistent"}))
     assert store.version == 0
     assert store.state.active_tab == "annotate"
@@ -147,7 +147,7 @@ def test_mutate_refuses_a_built_model_with_a_wrongly_typed_field_and_holds_nothi
     mutate must dump it and validate the merged result rather than trust it as already valid."""
     store = StateStore()
     bad_dataset = DatasetSelection.model_construct(current_image_index="banana")
-    with pytest.raises(GuiMutationInvalid):
+    with pytest.raises(GuiMutationInvalidError):
         asyncio.run(store.mutate({"dataset": bad_dataset}))
     assert store.version == 0
     assert store.state.dataset.current_image_index == 0
@@ -157,7 +157,7 @@ def test_mutate_refuses_an_unknown_top_level_key_and_holds_nothing() -> None:
     """A misspelled top-level key (``activ_tab`` for ``active_tab``) must not be silently
     dropped."""
     store = StateStore()
-    with pytest.raises(GuiMutationInvalid):
+    with pytest.raises(GuiMutationInvalidError):
         asyncio.run(store.mutate({"activ_tab": "results"}))
     assert store.version == 0
     assert store.state.active_tab == "annotate"
@@ -182,12 +182,12 @@ def test_admission_answers_the_open_project_and_refuses_any_other(tmp_path: Path
 
     store = StateStore()
     project = new_project(tmp_path / "A")
-    with pytest.raises(ProjectNotOpen) as none_open:
+    with pytest.raises(ProjectNotOpenError) as none_open:
         store.admit(read_record(project)["id"])
     assert none_open.value.open_project_id is None
 
     asyncio.run(store.open_project(project))
     assert store.admit(read_record(project)["id"]) == project
-    with pytest.raises(ProjectNotOpen) as other:
+    with pytest.raises(ProjectNotOpenError) as other:
         store.admit("0" * 12)
     assert other.value.open_project_id == read_record(project)["id"]

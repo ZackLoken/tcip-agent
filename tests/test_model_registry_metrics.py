@@ -125,13 +125,13 @@ def test_register_model_refuses_a_nonexistent_checkpoint(tmp_path):
 def test_register_model_refuses_bytes_the_verified_reader_refuses(tmp_path):
     """A registration names a checkpoint every later reader can load: bytes the verified reader
     refuses are refused at the door and nothing is stored, and a readable checkpoint registers."""
-    from tcip_mcp.model_registry import ModelRegistry, UnregisteredCheckpoint
+    from tcip_mcp.model_registry import ModelRegistry, UnregisteredCheckpointError
 
     reg = ModelRegistry(str(tmp_path))
     garbage = tmp_path / "garbage.pt"
     garbage.write_bytes(b"not a checkpoint")
 
-    with pytest.raises(UnregisteredCheckpoint):
+    with pytest.raises(UnregisteredCheckpointError):
         reg.register_model("garbage", str(garbage), {})
     assert reg.list_models() == []
 

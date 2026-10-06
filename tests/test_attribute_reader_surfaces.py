@@ -72,7 +72,7 @@ def test_count_by_class_reads_the_states_own_attribute_among_several(tmp_path: P
                                     scope=scope) == (2, 1, 0)
     json_io.write_label_document(p, [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 3, 3),
                                                 score=0.9, attributes={"color": "red"})], 8, 8)
-    with pytest.raises(json_io.UndeclaredValue, match="'grade'"):
+    with pytest.raises(json_io.UndeclaredValueError, match="'grade'"):
         phenology.count_by_class(p, PositiveState(attribute="grade", value="high"), scope=scope)
 
 
@@ -86,7 +86,7 @@ def test_an_undecodable_bucket_record_refuses_by_name_rather_than_reading_as_unc
 
     from tcip_store.file_backend import database_file
 
-    from tcip_mcp.buckets import NotABucket, read_bucket
+    from tcip_mcp.buckets import NotABucketError, read_bucket
     from tests._chain_fixtures import predicted, published
 
     image = tmp_path / "ds" / "images" / "2026-05-02" / "s1.png"
@@ -98,7 +98,7 @@ def test_an_undecodable_bucket_record_refuses_by_name_rather_than_reading_as_unc
         db.execute("update records set value = ? where store = 'prediction_buckets'",
                    (b"{not json",))
 
-    with pytest.raises(NotABucket, match=r"prediction_buckets\['classifier/2026-05-02'\]"):
+    with pytest.raises(NotABucketError, match=r"prediction_buckets\['classifier/2026-05-02'\]"):
         read_bucket(bucket.root, bucket.name)
 
 

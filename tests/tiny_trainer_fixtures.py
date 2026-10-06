@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+from torch.nn import functional
 from torch.utils.data import Dataset
 
 
@@ -114,7 +114,7 @@ class MeanIntensityClassifier(nn.Module):
         logit1 = self.weight * images.mean(dim=(1, 2, 3))
         logits = torch.stack([torch.zeros_like(logit1), logit1], dim=1)
         if self.training and targets is not None:
-            return {"ce": F.cross_entropy(logits, targets["labels"])}
+            return {"ce": functional.cross_entropy(logits, targets["labels"])}
         return {"head0_labels": logits.argmax(dim=1)}
 
 

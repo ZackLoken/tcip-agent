@@ -189,7 +189,7 @@ def read_versioned_registry(dataset_root: str | Path) -> tuple[SubjectRegistry, 
     path = subjects_path(dataset_root)
     try:
         versioned = tcip_store.read_blob_versioned(path)
-    except tcip_store.NotFound as exc:
+    except tcip_store.NotFoundError as exc:
         raise FileNotFoundError(f"no subject registry at {path}") from exc
     document = _checked_registry_document(versioned.value, path=path)
     return registry_from_dict(document), versioned.version
@@ -237,12 +237,13 @@ def replace_registry(
     set.
 
     ``expect`` is compare-and-set against the blob's actual version at write time
-    (``tcip_store.VersionConflict`` on a mismatch, nothing written): pass the version the caller
-    read, or ``Version.ABSENT`` for a caller asserting no registry exists yet. ``None`` checks
+    (``tcip_store.VersionConflictError`` on a mismatch, nothing written): pass the version the
+    caller read, or ``Version.ABSENT`` for a caller asserting no registry exists yet.
+    ``None`` checks
     against the version this call read.
 
     The write's one audit line by ``actor`` follows it in the dataset's log
-    (``AuditEntryNotWritten`` when it
+    (``AuditEntryNotWrittenError`` when it
     cannot be appended, carrying that line's arguments). Returns the committed save as its audit
     line records it: ``{"subjects_path", "n_subjects", "version"}`` (the new token).
     """
@@ -317,7 +318,7 @@ def copy_registry(source: str | Path, destination: str | Path) -> None:
             tcip_store.read_blob_versioned(subjects_path(source)).value,
             expect=tcip_store.Version.ABSENT,
         )
-    except tcip_store.VersionConflict as exc:
+    except tcip_store.VersionConflictError as exc:
         raise RegistryError(
             f"a subject registry already exists at {destination}; copy_registry places a first "
             "copy only and never replaces one"

@@ -252,16 +252,16 @@ def test_a_windowed_pass_resumed_mid_raster_matches_an_uninterrupted_one(tmp_pat
     np.save(npy, _frame())
     recorded: list[dict] = []
 
-    class Interrupted(Exception):
+    class PassInterruptedError(Exception):
         pass
 
     def record_then_stop(_start, _end, batch):
         recorded.append(batch)
-        raise Interrupted
+        raise PassInterruptedError
 
     with open_raster(str(npy), 3) as reader:
         uninterrupted = _sliced(p, reader)
-        with pytest.raises(Interrupted):
+        with pytest.raises(PassInterruptedError):
             _sliced(p, reader, progress=record_then_stop)
         prior = {field: [v for b in recorded for v in b[field]]
                  for field in ("slices", "predictions")}

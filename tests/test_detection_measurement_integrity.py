@@ -447,9 +447,9 @@ def test_a_tiled_pass_derives_its_tile_edge_from_the_checkpoint(tmp_path, monkey
 def test_a_tiled_pass_with_no_basis_for_its_edge_refuses_naming_it(tmp_path, monkeypatch):
     """A checkpoint with no persisted training tile geometry has no real basis to tile at: a tiled
     pass with no stated edge refuses, naming the missing basis, never fabricating a scale."""
-    from tcip_mcp.pipelines.execution import ExecutionRefused
+    from tcip_mcp.pipelines.execution import ExecutionRefusedError
 
-    with pytest.raises(ExecutionRefused, match="tile_size"):
+    with pytest.raises(ExecutionRefusedError, match="tile_size"):
         _pass_over(tmp_path, monkeypatch, _geometry_stub(), tile=True)
 
 
@@ -461,9 +461,9 @@ def test_a_stated_edge_agreeing_with_the_checkpoint_is_recorded_as_stated(tmp_pa
 
 
 def test_a_stated_edge_contradicting_the_checkpoint_refuses_naming_both(tmp_path, monkeypatch):
-    from tcip_mcp.pipelines.execution import ExecutionRefused
+    from tcip_mcp.pipelines.execution import ExecutionRefusedError
 
-    with pytest.raises(ExecutionRefused) as exc_info:
+    with pytest.raises(ExecutionRefusedError) as exc_info:
         _pass_over(tmp_path, monkeypatch, _geometry_stub(train_tile_size=224), tile=True,
                    tile_size=512)
     assert "512" in str(exc_info.value) and "224" in str(exc_info.value)
@@ -474,9 +474,9 @@ def test_a_stated_edge_contradicting_the_checkpoint_refuses_naming_both(tmp_path
 def test_the_evaluation_refuses_an_unresolvable_tile_geometry(tmp_path, monkeypatch):
     """A checkpoint with no persisted tiling and no stated edge refuses the delivery-grade
     evaluation rather than silently scoring it at an ungrounded scale."""
-    from tcip_mcp.pipelines.execution import ExecutionRefused
+    from tcip_mcp.pipelines.execution import ExecutionRefusedError
 
-    with pytest.raises(ExecutionRefused, match="tile_size"):
+    with pytest.raises(ExecutionRefusedError, match="tile_size"):
         _full_frame(tmp_path, monkeypatch, _sliced_stub([]), [])
 
 

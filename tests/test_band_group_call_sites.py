@@ -98,12 +98,15 @@ def test_the_channel_probe_derives_2_for_the_grouped_sample(grouped_dataset):
 
 
 def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaulting(tmp_path):
-    """A broad ``except Exception: return default`` must not swallow ``BandGroupIncomplete``
+    """A broad ``except Exception: return default`` must not swallow ``BandGroupIncompleteError``
     along with genuinely unexpected errors and silently default to 3 channels: a
     confidently-wrong value on exactly the parameter 'derive, don't pin' exists to guard
     against."""
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
-    from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, write_band_group_manifest
+    from tcip_mcp.pipelines.data.band_groups import (
+        BandGroupIncompleteError,
+        write_band_group_manifest,
+    )
     from tcip_mcp.pipelines.data.datasets import _band_count
     from tcip_mcp.pipelines.data.selection import Sample
 
@@ -119,7 +122,7 @@ def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaul
     sample = Sample(member="cap", source=str(manifest),
                     ground_truth=label_key(tmp_path, UNDATED_BUCKET, "cap"), group="g",
                     side="train")
-    with pytest.raises(BandGroupIncomplete):
+    with pytest.raises(BandGroupIncompleteError):
         _band_count([sample])
 
 

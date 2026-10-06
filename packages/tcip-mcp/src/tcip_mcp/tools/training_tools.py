@@ -318,7 +318,7 @@ def open_run(
     sources copied into the directory, the run it was relaunched from and the checkpoint it
     resumes from, its wall clock, the model contract preflight proved, and an HPO
     trial's sampled point. A seed is drawn onto ``config`` when it states none. Refuses an
-    existing directory (``experiments.RunDirectoryExists``)."""
+    existing directory (``experiments.RunDirectoryExistsError``)."""
     from tcip_mcp.pipelines.data.split_construction import dataset_identity, partition_samples
     from tcip_mcp.pipelines.model_build import capture_env, snapshot_model_source
     from tcip_mcp.pipelines.training.run_registry import draw_seed_if_unset
@@ -355,7 +355,7 @@ def launch_training(
     its only automatic stop.
 
     Writes the run's ``run.json`` once, then the act's one audit line naming the minted
-    ``experiment_id`` (``AuditEntryNotWritten`` when it cannot be appended, and no subprocess
+    ``experiment_id`` (``AuditEntryNotWrittenError`` when it cannot be appended, and no subprocess
     starts), then starts the subprocess.
 
     Args:
@@ -937,7 +937,7 @@ def open_sweep(
     directory under ``project``, named by ``experiments.mint_experiment_id("hpo")``, with its
     ``sweep.json`` written once, carrying the objective and
     every argument resolved as its ``input``, then the act's one audit line by ``actor`` naming
-    the sweep (``AuditEntryNotWritten`` when it cannot be appended). Returns the opened sweep's
+    the sweep (``AuditEntryNotWrittenError`` when it cannot be appended). Returns the opened sweep's
     directory, or the refusal ``{"error", "issues"}`` with nothing created."""
     from tcip_mcp.pipelines.training.hpo import get_default_space, split_draw_search_space
 
@@ -1509,12 +1509,12 @@ def evaluate_model(
     from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
     from tcip_mcp.pipelines.execution import prepare_pass
 
-    from tcip_mcp.operationalization import OperationalizationRefused, latest_confirmed
+    from tcip_mcp.operationalization import OperationalizationRefusedError, latest_confirmed
     from tcip_mcp.traits import TraitUnknownError
 
     try:
         trait_entry = latest_confirmed(trait, project).entry if trait else None
-    except (TraitUnknownError, OperationalizationRefused) as exc:
+    except (TraitUnknownError, OperationalizationRefusedError) as exc:
         return {"error": str(exc)}
 
     ckpt = experiment_id_or_ckpt
@@ -1529,7 +1529,7 @@ def evaluate_model(
     if not Path(ckpt).is_file():
         return {"error": f"Checkpoint not found: {ckpt}"}
 
-    from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
+    from tcip_mcp.model_registry import UnregisteredCheckpointError, load_registered_checkpoint
 
     from tcip_mcp.pipelines.data.selection import ClassScope
 
@@ -1537,18 +1537,18 @@ def evaluate_model(
         checkpoint = load_registered_checkpoint(ckpt, project=project)
         task = checkpoint.task
         scope = ClassScope.of(checkpoint.data_config)
-    except (UnregisteredCheckpoint, ValueError) as exc:
+    except (UnregisteredCheckpointError, ValueError) as exc:
         return {"error": str(exc)}
     run_tiling = checkpoint.data_config.get("tiling")
     stated = stated or Stated()
 
-    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tcip_mcp.pipelines.data.label_queries import admit, require_admitted
 
     try:
         admitted = admit(images_dir, labels_dir, scope=scope)
         require_admitted(admitted)
-    except (ValueError, UnreadableLabelDocument) as exc:
+    except (ValueError, UnreadableLabelDocumentError) as exc:
         return {"error": f"the ground truth of images_dir={images_dir!r} with "
                          f"labels_dir={labels_dir!r} admits nothing to evaluate: {exc}"}
 
@@ -1557,7 +1557,7 @@ def evaluate_model(
             return run_full_frame_evaluation(
                 checkpoint, admitted, stated=stated, iou_threshold=iou_threshold,
                 trait=trait_entry)
-        except (ValueError, UnreadableLabelDocument) as exc:
+        except (ValueError, UnreadableLabelDocumentError) as exc:
             return {"error": str(exc)}
 
     # Tile-level diagnostic (or untiled). Only detection tiles; a run id reuses its training tiling.

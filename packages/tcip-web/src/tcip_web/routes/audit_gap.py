@@ -9,13 +9,13 @@ from typing import Any
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
 
-from tcip_mcp.audit import AuditEntryNotWritten
+from tcip_mcp.audit import AuditEntryNotWrittenError
 
 AUDIT_ENTRY_NOT_WRITTEN = "audit_entry_not_written"
 
 
 def audit_gap_409(
-    exc: AuditEntryNotWritten, committed: Any, *, message: str | None = None,
+    exc: AuditEntryNotWrittenError, committed: Any, *, message: str | None = None,
 ) -> HTTPException:
     """The 409 a route answers with when a mutation it already committed could not be recorded.
 

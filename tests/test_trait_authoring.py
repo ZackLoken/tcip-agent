@@ -84,7 +84,7 @@ def test_an_unset_count_objective_refuses_the_proposal_asking_the_breeder(tmp_pa
         entry("decided", ("leaf_length",), count_objective="detection_f1", **floors),
         traits.PER_IMAGE_COUNT)
 
-    with pytest.raises(traits.UnauthoredField, match="count_objective"):
+    with pytest.raises(traits.UnauthoredFieldError, match="count_objective"):
         propose(tmp_path, undecided)
     assert "undecided" not in trait_names(tmp_path)
     assert propose(tmp_path, decided).entry.count_objective == "detection_f1"
@@ -118,10 +118,10 @@ def test_an_unknown_trait_hard_fails(tmp_path: Path):
 def test_a_measurement_reader_refuses_a_trait_with_no_confirmed_revision_by_name(tmp_path: Path):
     """A measurement reads the latest confirmed revision: an entry proposed and never confirmed
     refuses by name, and a later unconfirmed proposal never changes what the confirmed one says."""
-    from tcip_mcp.operationalization import OperationalizationRefused
+    from tcip_mcp.operationalization import OperationalizationRefusedError
 
     propose(tmp_path, entry("pending", ("leaf_length",), count_objective="detection_f1"))
-    with pytest.raises(OperationalizationRefused, match="'pending'"):
+    with pytest.raises(OperationalizationRefusedError, match="'pending'"):
         latest_confirmed("pending", tmp_path)
 
     propose_and_confirm(tmp_path, entry("leaf", ("leaf_length",), count_objective="detection_f1"))

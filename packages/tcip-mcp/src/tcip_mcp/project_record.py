@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 
 import tcip_store
-from tcip_store import Key, StoreError, Version, VersionConflict
+from tcip_store import Key, StoreError, Version, VersionConflictError
 
 PROJECT_RECORD_STORE = "project_record"
 _PROJECT_RECORD_PARTS = ("project",)
@@ -23,15 +23,15 @@ _MAX_TEXT_LENGTH = 200
 """The most characters a site or display name holds; tentative, stated by no source."""
 
 
-class ProjectRecordMissing(Exception):
+class ProjectRecordMissingError(Exception):
     """A project has no record yet."""
 
 
-class ProjectRecordInvalid(ValueError):
+class ProjectRecordInvalidError(ValueError):
     """A project's record decodes but does not hold an id, a display name and a site."""
 
 
-class SiteConflict(ValueError):
+class SiteConflictError(ValueError):
     """A project already records a different site than the one just offered."""
 
 
@@ -76,8 +76,8 @@ def validate_text(label: str, value: object) -> str:
 def read_record(project_path: str | Path) -> dict:
     """The project's record: ``{"id", "display_name", "site"}``, each a non-empty string.
 
-    Raises :class:`ProjectRecordMissing` for a project with no record yet, and
-    :class:`ProjectRecordInvalid` for a document that decodes but does not hold all three. A
+    Raises :class:`ProjectRecordMissingError` for a project with no record yet, and
+    :class:`ProjectRecordInvalidError` for a document that decodes but does not hold all three. A
     document that does not decode raises the store's own ``DecodeError``, and a root the store
     refuses raises its ``StoreError``. Never creates a store.
     """
@@ -97,10 +97,10 @@ def existing_project(value: str | Path) -> Path:
 def _checked(project_path: str | Path, raw: object) -> dict:
     """``raw``, a record read from ``project_path``, when it holds a non-empty id and a display
     name and a site each as :func:`validate_text` would store it. Raises
-    ``ProjectRecordMissing`` for an absent record and ``ProjectRecordInvalid`` naming what the
-    record lacks otherwise."""
+    ``ProjectRecordMissingError`` for an absent record and ``ProjectRecordInvalidError`` naming
+    what the record lacks otherwise."""
     if raw is None:
-        raise ProjectRecordMissing(
+        raise ProjectRecordMissingError(
             f"{project_path} is not a project yet: create it with initialize_project"
         )
     try:
@@ -110,7 +110,7 @@ def _checked(project_path: str | Path, raw: object) -> dict:
             if validate_text(label, raw.get(field)) != raw[field]:
                 raise ValueError(f"the {label} is not stored as its text")
     except ValueError as exc:
-        raise ProjectRecordInvalid(
+        raise ProjectRecordInvalidError(
             f"{project_path}'s record does not hold an id, a display name and a site ({exc}; "
             f"found {raw!r})"
         ) from exc
@@ -121,7 +121,7 @@ def create_record(project_path: str | Path, display_name: str, site: str) -> dic
     """Write a new project's record with a freshly minted id, its one creator, and return it.
 
     A project already recording the same display name and site is returned as it stands, its id
-    kept. A present record with a different site raises :class:`SiteConflict`, and one with a
+    kept. A present record with a different site raises :class:`SiteConflictError`, and one with a
     different display name raises ``ValueError`` naming both; an unreadable one raises what
     :func:`read_record` raises.
     """
@@ -131,10 +131,10 @@ def create_record(project_path: str | Path, display_name: str, site: str) -> dic
     try:
         tcip_store.replace(project_record_key(project_path), document, expect=Version.ABSENT)
         return document
-    except VersionConflict:
+    except VersionConflictError:
         existing = read_record(project_path)
     if existing["site"] != text:
-        raise SiteConflict(
+        raise SiteConflictError(
             f"{project_path} already records site {existing['site']!r}; the offered site "
             f"{text!r} does not match, so nothing was written. Run tcip write-project-site to "
             "correct it deliberately."
@@ -157,7 +157,7 @@ def _update(project_path: str | Path, field: str, value: str) -> tuple[dict, str
         updated = {**current, field: value}
         try:
             tcip_store.replace(key, updated, expect=stored.version)
-        except VersionConflict:
+        except VersionConflictError:
             continue
         return updated, current[field]
 
@@ -192,6 +192,6 @@ def record_fields(project_path: str | Path) -> dict:
     or three ``None`` beside the text of why the record would not read. Never raises."""
     try:
         record = read_record(project_path)
-    except (ProjectRecordMissing, ProjectRecordInvalid, StoreError, OSError) as exc:
+    except (ProjectRecordMissingError, ProjectRecordInvalidError, StoreError, OSError) as exc:
         return {**dict.fromkeys(_RECORD_FIELDS), "record_problem": str(exc)}
     return {**{field: record[field] for field in _RECORD_FIELDS}, "record_problem": None}

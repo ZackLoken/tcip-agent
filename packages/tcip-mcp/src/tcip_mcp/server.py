@@ -23,7 +23,7 @@ _TOOLS: list[tuple[Callable[..., Any], dict[str, Any]]] = []
 """Every function a tool module declared with :func:`tool`, with its registration options."""
 
 
-class NoProject(ToolError):
+class NoProjectError(ToolError):
     """A tool that acts on a project was called on a server started for none; the server hands
     the agent its message."""
 
@@ -66,7 +66,7 @@ def _bound(fn: Callable[..., Any], binding: tuple[Path, Path] | None) -> Callabl
     without it, every call passing the server's own ``binding``, and an ``actor`` parameter is
     registered without it, every call passing ``None``, since no person makes an act an MCP client
     calls. With no binding, a call to a function taking a project or workspace raises
-    :class:`NoProject` naming ``--project``."""
+    :class:`NoProjectError` naming ``--project``."""
     sig = inspect.signature(fn, eval_str=True)
     bound = {"project", "workspace", "actor"} & sig.parameters.keys()
     if not bound:
@@ -75,8 +75,9 @@ def _bound(fn: Callable[..., Any], binding: tuple[Path, Path] | None) -> Callabl
     @functools.wraps(fn)
     def entry(*args: Any, **kwargs: Any) -> Any:
         if binding is None:
-            raise NoProject("this MCP server was started for no project, so no tool that acts on "
-                            "one can run; restart it with --project <path> naming the project")
+            raise NoProjectError(
+                "this MCP server was started for no project, so no tool that acts on "
+                "one can run; restart it with --project <path> naming the project")
         values = {**dict(zip(("project", "workspace"), binding)), "actor": None}
         return fn(*args, **{name: values[name] for name in bound}, **kwargs)
 

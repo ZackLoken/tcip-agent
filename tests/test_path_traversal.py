@@ -21,7 +21,7 @@ def test_assert_path_allowed_admits_the_workspace_and_refuses_a_sibling(
 
 
 def test_training_stream_closes_on_run_id_traversal(opened_project, client):
-    """A run_id carrying a path separator (BadKey) closes the stream rather than resolving to a
+    """A run_id carrying a path separator (BadKeyError) closes the stream rather than resolving to a
     path component. A backslash, not a ``..`` segment, since a URL client normalizes dot segments
     before the request is even sent. The socket is accepted once a project is open, so the
     disconnect surfaces on the first read."""

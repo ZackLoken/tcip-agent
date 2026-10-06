@@ -20,13 +20,13 @@ from pydantic import BaseModel
 
 from tcip_annotation.json_io import (
     LabelDocument,
-    UnreadableLabelDocument,
+    UnreadableLabelDocumentError,
     authorship_of,
     client_annotation,
     read_document_versioned,
 )
 from tcip_annotation.state import Annotation
-from tcip_store import Key, Version, VersionConflict
+from tcip_store import Key, Version, VersionConflictError
 from tcip_mcp.pipelines.active_learning import DEFAULT_REVIEW_BUDGET, DEFAULT_SCORER
 from tcip_web import jobstore
 from tcip_web.paths import allowed_image, allowed_path
@@ -105,7 +105,7 @@ def _read(key: Key) -> tuple[LabelDocument, Version]:
     """The label document ``key`` names and its version; one that will not read answers 400."""
     try:
         return read_document_versioned(key)
-    except UnreadableLabelDocument as exc:
+    except UnreadableLabelDocumentError as exc:
         raise HTTPException(400, str(exc)) from exc
 
 
@@ -145,9 +145,9 @@ def save_labels(payload: SavePayload) -> dict:
         version, doc = save_label_document(
             store.project_root, key, [ap.model_dump() for ap in payload.annotations],
             width=w, height=h, author=person, actor=person, expect=expect, gestures=gestures)
-    except VersionConflict as exc:
+    except VersionConflictError as exc:
         raise HTTPException(409, {"error": "label document changed since it was loaded"}) from exc
-    except (ValueError, UnreadableLabelDocument) as exc:
+    except (ValueError, UnreadableLabelDocumentError) as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"status": "ok", "image_path": payload.image_path,
             "n_annotations": len(doc.annotations), "base_mtime": version.token,
@@ -173,7 +173,7 @@ def load_proposals(image_path: str, bucket: str) -> dict:
         published, proposals = image_proposals(bucket, key)
         decisions = {v.proposal: v.action for v in read_verdicts(verdict_key_of(key, bucket))}
         paired = proposal_pairs(store.project_root, published, annotations, proposals)
-    except (ValueError, UnreadableLabelDocument) as exc:
+    except (ValueError, UnreadableLabelDocumentError) as exc:
         raise HTTPException(400, str(exc)) from exc
     conf, _reason = admitted_conf(store.open_root(), published)
     return {"bucket": published.name, "proposals": [
