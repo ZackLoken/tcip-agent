@@ -16,6 +16,7 @@ function loadPolygon(rings: [number, number][][]): void {
     points: [],
     imageAnnotations: [],
     completion: {},
+    flags: [],
   };
   s().loadLabelsIntoCanvas(labels);
 }
@@ -133,6 +134,7 @@ describe("canvas store", () => {
       points: [],
       imageAnnotations: [],
       completion: {},
+      flags: [],
     });
     useStore.setState((st) => ({ gui: { ...st.gui, active_subject: "subject_a" } }));
     s().setCurrentPolygon([
@@ -186,6 +188,7 @@ describe("splitPolygon", () => {
       points: [],
       imageAnnotations: [],
       completion: {},
+      flags: [],
     });
     // A second polygon after it, so the split's own effect on later indices is checked too.
     s().addPolygon({ rings: [RING_B], subject: "subject_a", attributes: {} });
@@ -296,6 +299,7 @@ describe("canvas store points", () => {
       points: [pt(5, 6, "tip")],
       imageAnnotations: [],
       completion: {},
+      flags: [],
     });
     expect(s().canvas.points).toEqual([pt(5, 6, "tip")]);
     expect(s().canvas.selectedPointIdx).toBeNull();
@@ -351,7 +355,7 @@ describe("content-based dirty tracking", () => {
 
   it("a save re-baselines: deleting a saved shape then undoing it is clean again", () => {
     s().addBox(box);
-    s().markClean({});
+    s().markClean({}, []);
     s().deleteBox(0);
     expect(s().canvas.dirty).toBe(true);
     s().undo();

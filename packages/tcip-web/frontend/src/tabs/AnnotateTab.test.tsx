@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 // Auto-cleanup needs vitest globals (not enabled here), so clean up explicitly.
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { api } from "@/api/client";
 import type { SaveResult } from "@/api/client";
-import { FOCUS_HALO, REVIEW_STATUSES, STATUS_COLORS, STATUS_WORDS } from "@/lib/symbology";
-import type { ServedProposals } from "@/store/types";
+import { FLAG_MARK, FOCUS_HALO, MATCH_COLORS, MATCH_TYPES, MATCH_WORDS } from "@/lib/symbology";
+import type { Flag, ServedProposals } from "@/store/types";
 import { subjectsApi, subjectColor } from "@/api/subjects";
 import * as canvasSync from "@/lib/canvasSync";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
@@ -127,11 +127,17 @@ function labelsFor(imagePath: string) {
     points: [],
     imageAnnotations: [],
     completion: {},
+    flags: [] as Flag[],
     base_mtime: String(LOAD_MTIME[name] ?? 1),
   };
 }
 
-const saved = (base_mtime: string): SaveResult => ({ status: "ok", base_mtime, completion: {} });
+const saved = (base_mtime: string): SaveResult => ({
+  status: "ok",
+  base_mtime,
+  completion: {},
+  flags: [],
+});
 
 function setupDataset() {
   openTestProject(
@@ -1062,7 +1068,7 @@ describe("AnnotateTab labels-written conflict sentence", () => {
 });
 
 describe("AnnotateTab legend", () => {
-  it("lists the subjects until proposals are shown, then the review statuses", async () => {
+  it("lists the subjects until proposals are shown, then the match types", async () => {
     useStore.getState().setRegistry({ subject_a: {} });
     const proposalsSpy = withBucket();
     render(<AnnotateTab />);
@@ -1072,15 +1078,16 @@ describe("AnnotateTab legend", () => {
     await flush();
 
     // The legend button is hover-revealed, so query its content directly.
-    for (const status of REVIEW_STATUSES) {
-      expect(screen.getByText(STATUS_WORDS[status])).toBeInTheDocument();
+    const legend = within(document.getElementById("annotate-legend-panel")!);
+    for (const match of MATCH_TYPES) {
+      expect(legend.getByText(MATCH_WORDS[match])).toBeInTheDocument();
     }
-    expect(screen.queryByRole("button", { name: "subject_a" })).not.toBeInTheDocument();
+    expect(legend.queryByRole("button", { name: "subject_a" })).not.toBeInTheDocument();
 
     toggleProposals();
     await flush();
-    expect(screen.getByRole("button", { name: "subject_a" })).toBeInTheDocument();
-    expect(screen.queryByText(STATUS_WORDS.undecided)).not.toBeInTheDocument();
+    expect(legend.getByRole("button", { name: "subject_a" })).toBeInTheDocument();
+    expect(legend.queryByText(MATCH_WORDS.matched)).not.toBeInTheDocument();
   });
 
   it("a recolored subject's box stroke and the pushed canvas_meta swatch both follow", async () => {
@@ -1187,6 +1194,7 @@ function seedPolygons(polygons: (typeof POLY_A)[]) {
     points: [],
     imageAnnotations: [],
     completion: {},
+    flags: [],
   });
 }
 
@@ -1893,34 +1901,62 @@ describe("AnnotateTab proposals", () => {
 });
 
 describe("AnnotateTab review symbology", () => {
-  const twoBoxes = () => [
+  // Box 0 pairs with an accepted proposal, box 1 with an undecided one, box 2 with none.
+  const boxes = () => [
     { x1: 10, y1: 10, x2: 50, y2: 50, subject: "subject_a", attributes: {}, index: 0 },
     { x1: 300, y1: 300, x2: 340, y2: 340, subject: "subject_a", attributes: {}, index: 1 },
+    { x1: 500, y1: 50, x2: 540, y2: 90, subject: "subject_a", attributes: {}, index: 2 },
   ];
+  const polygon = () => ({
+    rings: [
+      [
+        [800, 600],
+        [900, 600],
+        [900, 700],
+      ],
+    ] as [number, number][][],
+    subject: "subject_a",
+    attributes: {},
+    index: 3,
+  });
+  const at = (x: number, y: number, score: number) => ({
+    ...PROPOSALS.proposals[0],
+    bbox: [x, y, x + 40, y + 40] as [number, number, number, number],
+    score,
+  });
   const served = (): ServedProposals => ({
     bucket: BUCKET,
     operating_point: { conf: 0.5, reason: "" },
     proposals: [
-      { ...PROPOSALS.proposals[0], index: 0, paired: 0, decision: "accepted" },
-      {
-        ...PROPOSALS.proposals[0],
-        index: 1,
-        bbox: [600, 600, 640, 640] as [number, number, number, number],
-        score: 0.9,
-      },
-      {
-        ...PROPOSALS.proposals[0],
-        index: 2,
-        bbox: [700, 100, 740, 140] as [number, number, number, number],
-        score: 0.2,
-      },
+      { ...at(10, 10, 0.9), index: 0, paired: 0, decision: "accepted" },
+      { ...at(600, 600, 0.9), index: 1 },
+      { ...at(700, 100, 0.2), index: 2 },
+      { ...at(300, 300, 0.8), index: 3, paired: 1 },
     ],
   });
+  const onBoxZero: Flag = {
+    id: "f1",
+    text: "open?",
+    by: "user:first",
+    at: "2026-01-01T00:00:00+00:00",
+    point: [30, 30],
+    subject: "subject_a",
+    proposal: null,
+    resolved_by: null,
+    resolved_at: null,
+    reply: "",
+    removed: false,
+  };
   const strokes = () => screen.getAllByTestId("k-rect").map((r) => r.getAttribute("data-stroke"));
+  const position = () => screen.getByRole("textbox", { name: "Item position" });
+  const down = async () => {
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    await flush();
+  };
 
-  async function mountReviewing() {
+  async function mountReviewing(flags: Flag[] = []) {
     loadSpy.mockImplementation((imagePath) =>
-      Promise.resolve({ ...labelsFor(imagePath), boxes: twoBoxes() }),
+      Promise.resolve({ ...labelsFor(imagePath), boxes: boxes(), polygons: [polygon()], flags }),
     );
     useStore.setState((s) => ({
       gui: { ...s.gui, dataset: { ...s.gui.dataset, bucket: BUCKET } },
@@ -1932,30 +1968,68 @@ describe("AnnotateTab review symbology", () => {
     return proposalsSpy;
   }
 
-  it("outline color says review status while proposals are shown and subject otherwise", async () => {
+  it("outline color says match type while proposals are shown and subject otherwise", async () => {
     await mountReviewing();
-    // Box 0 is confirmed, box 1 nothing pairs with; the undecided proposal above the floor shows.
+    // The two undecided proposals above the floor draw first, then the three boxes, then the
+    // polygon's derived box, which nothing proposes.
     expect(strokes()).toEqual([
-      STATUS_COLORS.undecided,
-      STATUS_COLORS.confirmed,
-      STATUS_COLORS.unproposed,
+      MATCH_COLORS.proposal_only,
+      MATCH_COLORS.matched,
+      MATCH_COLORS.matched,
+      MATCH_COLORS.matched,
+      MATCH_COLORS.annotation_only,
+      MATCH_COLORS.annotation_only,
     ]);
 
     toggleProposals();
     await flush();
-    expect(strokes()).toEqual([subjectColor("subject_a"), subjectColor("subject_a")]);
+    expect(strokes()).toEqual(Array(4).fill(subjectColor("subject_a")));
   });
 
   it("the confidence floor starts at the operating point and the person moves it", async () => {
     await mountReviewing();
     const floor = screen.getByRole("spinbutton", { name: "Confidence floor" });
     expect(floor).toHaveValue(0.5);
-    expect(screen.getByText("3 items, 1 awaiting a decision")).toBeInTheDocument();
+    // Three boxes and one unpaired proposal; box 1 and that proposal await a decision.
+    expect(screen.getByText("4 items, 2 unreviewed")).toBeInTheDocument();
 
     fireEvent.change(floor, { target: { value: "0.1" } });
     await flush();
-    expect(screen.getByText("4 items, 2 awaiting a decision")).toBeInTheDocument();
-    expect(dottedRects()).toHaveLength(2);
+    expect(screen.getByText("5 items, 3 unreviewed")).toBeInTheDocument();
+    expect(dottedRects()).toHaveLength(3);
+  });
+
+  it("the match filter keeps one match type on the canvas and in the path", async () => {
+    await mountReviewing();
+    const filter = screen.getByRole("combobox", { name: "Match type" });
+
+    fireEvent.change(filter, { target: { value: "annotation_only" } });
+    await flush();
+    expect(screen.getByText("1 item, 0 unreviewed")).toBeInTheDocument();
+    expect(dottedRects()).toHaveLength(0);
+
+    fireEvent.change(filter, { target: { value: "proposal_only" } });
+    await flush();
+    expect(screen.getByText("1 item, 1 unreviewed")).toBeInTheDocument();
+    expect(dottedRects()).toHaveLength(1);
+  });
+
+  it("the items are the selected tool's geometry, and switching tools drops the focus", async () => {
+    await mountReviewing();
+    await down();
+    expect(position()).toHaveValue("1");
+    expect(strokes()).toContain(FOCUS_HALO.color);
+
+    act(() => useStore.getState().setMode("polygon"));
+    await flush();
+    // One polygon and no polygon proposal: the boxes and the box proposals left the path.
+    expect(screen.getByText("1 item, 0 unreviewed")).toBeInTheDocument();
+    expect(position()).toHaveValue("");
+    expect(screen.queryAllByTestId("k-rect")).toHaveLength(0);
+
+    await down();
+    expect(screen.getByText("subject_a polygon")).toBeInTheDocument();
+    expect(useStore.getState().gui.mode).toBe("polygon");
   });
 
   it("focus is a halo under the item's own stroke, never a recolor", async () => {
@@ -1970,49 +2044,72 @@ describe("AnnotateTab review symbology", () => {
     const halo = rects.find((r) => r.getAttribute("data-stroke") === FOCUS_HALO.color)!;
     expect(halo).toBeDefined();
     expect(Number(halo.getAttribute("data-opacity"))).toBe(FOCUS_HALO.opacity);
-    // The focused box keeps its status color on its own stroke and its corner handles.
-    expect(strokes()).toContain(STATUS_COLORS.confirmed);
+    // The focused box keeps its match color on its own stroke and its corner handles.
+    expect(strokes()).toContain(MATCH_COLORS.matched);
     expect(strokes()).not.toContain("#00BFFF");
   });
 
-  it("stepping follows the nearest-neighbor path, sets the subject and zooms to the item", async () => {
+  it("the down and up arrows step the nearest-neighbor path, set the subject and zoom", async () => {
     await mountReviewing();
     useStore.getState().setActiveSubject(null);
     const before = useStore.getState().gui.view;
 
-    fireEvent.keyDown(window, { key: "n" });
-    await flush();
     // The path starts nearest the top-left: box 0. Its subject becomes active and the view lands
     // on it (zoomed in past the fitted view).
-    expect(screen.getByRole("textbox", { name: "Item position" })).toHaveValue("1");
+    await down();
+    expect(position()).toHaveValue("1");
     expect(screen.getByText("subject_a box")).toBeInTheDocument();
     expect(useStore.getState().gui.active_subject).toBe("subject_a");
     expect(useStore.getState().gui.view.scale).toBeGreaterThan(before.scale);
 
-    fireEvent.keyDown(window, { key: "n" });
-    await flush();
-    expect(screen.getByRole("textbox", { name: "Item position" })).toHaveValue("2");
-    expect(screen.getByText("subject_a box")).toBeInTheDocument();
-
-    fireEvent.keyDown(window, { key: "n" });
-    await flush();
-    expect(screen.getByRole("textbox", { name: "Item position" })).toHaveValue("3");
+    await down();
+    await down();
+    expect(position()).toHaveValue("3");
+    await down();
+    expect(position()).toHaveValue("4");
     expect(screen.getByText("subject_a proposal 0.90")).toBeInTheDocument();
 
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    await flush();
+    expect(position()).toHaveValue("3");
+    // The left and right arrows still step images, never items.
+    expect(useStore.getState().gui.dataset.current_image_index).toBe(0);
+
     fireEvent.change(screen.getByRole("combobox", { name: "Step through" }), {
-      target: { value: "undecided" },
+      target: { value: "unreviewed" },
     });
     await flush();
-    expect(screen.getByText("/ 1")).toBeInTheDocument();
+    expect(screen.getByText("/ 2")).toBeInTheDocument();
+  });
+
+  it("a decides the focused matched annotation's own proposal", async () => {
+    await mountReviewing();
+    await down();
+    await down();
+    expect(position()).toHaveValue("2");
+
+    fireEvent.keyDown(window, { key: "a" });
+    await flush();
+    expect(saveSpy.mock.calls[0][0]).toMatchObject({ bucket: BUCKET, accept: [3] });
+  });
+
+  it("e accepts the focused unpaired proposal so it can be corrected as an annotation", async () => {
+    await mountReviewing();
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    await flush();
+    expect(screen.getByText("subject_a proposal 0.90")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "e" });
+    await flush();
+    expect(saveSpy.mock.calls[0][0]).toMatchObject({ bucket: BUCKET, accept: [1] });
   });
 
   it("the agent's mirror and the canvas state the same colors and the same focus", async () => {
     const pushSpy = vi
       .spyOn(api.canvas, "pushState")
       .mockResolvedValue({ status: "ok", shapes_written: true });
-    await mountReviewing();
-    fireEvent.keyDown(window, { key: "n" });
-    await flush();
+    await mountReviewing([onBoxZero]);
+    await down();
     act(() => notifyCanvasStateRequest());
     await flush();
 
@@ -2020,23 +2117,120 @@ describe("AnnotateTab review symbology", () => {
     const pushed = pushSpy.mock.calls.at(-1)?.[0].shapes ?? [];
     // The canvas also draws the halo and the focused box's handles; the colors it uses for items
     // are the colors the mirror states, and so are the labels.
-    expect(distinct(pushed.map((s) => s.color))).toEqual(
+    expect(distinct(pushed.filter((s) => s.tag !== "flag").map((s) => s.color))).toEqual(
       distinct(strokes().filter((s) => s !== FOCUS_HALO.color)),
     );
     expect(pushed.filter((s) => s.halo)).toHaveLength(1);
-    expect(distinct(pushed.filter((s) => s.label).map((s) => s.label))).toEqual(
-      distinct(screen.getAllByTestId("k-text").map((t) => t.getAttribute("data-text"))),
+    // The flag is one mark on each side: the glyph on the canvas, the glyph and comment mirrored.
+    const flagged = pushed.filter((s) => s.tag === "flag");
+    expect(flagged).toHaveLength(1);
+    expect(flagged[0]).toMatchObject({ color: FLAG_MARK.color, points: [[30, 30]] });
+    const canvasLabels = screen.getAllByTestId("k-text").map((t) => t.getAttribute("data-text"));
+    expect(canvasLabels).toContain(FLAG_MARK.glyph);
+    expect(distinct(pushed.filter((s) => s.label && s.tag !== "flag").map((s) => s.label))).toEqual(
+      distinct(canvasLabels.filter((t) => t !== FLAG_MARK.glyph)),
     );
   });
+});
 
-  it("e opens the focused annotation's tool mode", async () => {
-    await mountReviewing();
-    act(() => useStore.getState().setMode("polygon"));
-    fireEvent.keyDown(window, { key: "n" });
+describe("AnnotateTab flags", () => {
+  const box = { x1: 10, y1: 10, x2: 50, y2: 50, subject: "subject_a", attributes: {}, index: 0 };
+  const flag = (over: Partial<Flag>): Flag => ({
+    id: "f1",
+    text: "open?",
+    by: "user:first",
+    at: "2026-01-01T00:00:00+00:00",
+    point: [30, 30],
+    subject: "subject_a",
+    proposal: null,
+    resolved_by: null,
+    resolved_at: null,
+    reply: "",
+    removed: false,
+    ...over,
+  });
+
+  async function mountWith(flags: Flag[]) {
+    loadSpy.mockImplementation((imagePath) =>
+      Promise.resolve({ ...labelsFor(imagePath), boxes: [box], flags }),
+    );
+    await mountTab();
+  }
+  const comment = () => screen.getByRole("textbox", { name: "New flag comment" });
+
+  it("f flags the image as a whole when nothing is focused", async () => {
+    await mountWith([]);
+    fireEvent.keyDown(window, { key: "f" });
     await flush();
-    fireEvent.keyDown(window, { key: "e" });
+    expect(screen.getByRole("dialog", { name: "Flags on this image" })).toBeInTheDocument();
+
+    fireEvent.change(comment(), { target: { value: "glare" } });
+    fireEvent.keyDown(comment(), { key: "Enter" });
     await flush();
-    expect(useStore.getState().gui.mode).toBe("box");
+    expect(saveSpy.mock.calls[0][0].flag).toEqual([{ text: "glare" }]);
+  });
+
+  it("flags the focused annotation at a place inside it, through the save door", async () => {
+    await mountWith([]);
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: /Flag/ }));
+    expect(screen.getByRole("dialog", { name: "Flags on subject_a box" })).toBeInTheDocument();
+
+    fireEvent.change(comment(), { target: { value: "open or closed?" } });
+    fireEvent.keyDown(comment(), { key: "Enter" });
+    await flush();
+    expect(saveSpy.mock.calls[0][0]).toMatchObject({
+      image_path: "C:/data/images/2026-01-01/img1.jpg",
+      flag: [{ text: "open or closed?", point: [30, 30], subject: "subject_a" }],
+    });
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+  });
+
+  it("counts open flags, marks them on the canvas and steps to the flagged items", async () => {
+    await mountWith([flag({}), flag({ id: "f2", resolved_by: "user:second" })]);
+    expect(screen.getByRole("button", { name: /Flag \(1\)/ })).toBeInTheDocument();
+    expect(
+      screen
+        .getAllByTestId("k-text")
+        .filter((t) => t.getAttribute("data-text") === FLAG_MARK.glyph),
+    ).not.toHaveLength(0);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Step through" }), {
+      target: { value: "flagged" },
+    });
+    await flush();
+    expect(screen.getByText("/ 1")).toBeInTheDocument();
+  });
+
+  it("resolves the focused item's flag with a reply, through the save door", async () => {
+    await mountWith([flag({})]);
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    await flush();
+    fireEvent.keyDown(window, { key: "f" });
+    await flush();
+    expect(screen.getByText("open?")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: 'Reply to "open?"' }), {
+      target: { value: "open" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Resolve" }));
+    await flush();
+    expect(saveSpy.mock.calls[0][0].resolve).toEqual({ f1: "open" });
+  });
+
+  it("adopts the flags a plain save answers, so a removal's resolution shows at once", async () => {
+    await mountWith([flag({})]);
+    saveSpy.mockResolvedValue({
+      status: "ok",
+      base_mtime: "2",
+      completion: {},
+      flags: [flag({ resolved_by: "user:second", removed: true })],
+    });
+    act(() => useStore.getState().deleteBox(0));
+    pressSave();
+    await flush();
+    expect(screen.getByRole("button", { name: /^.?Flag$/ })).toBeInTheDocument();
   });
 });
 

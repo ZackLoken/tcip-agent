@@ -5,6 +5,7 @@ import type { AppState } from "@/store/appState";
 import type {
   Annotation,
   Box,
+  Flag,
   ImageLabels,
   PointShape,
   PolygonShape,
@@ -38,6 +39,8 @@ export interface CanvasState {
   loadedImagePath: string | null;
   /** Each subject's state as the backend last served it for the loaded image. */
   completion: Record<string, SubjectState>;
+  /** The image's flags as the backend last served them. */
+  flags: Flag[];
 }
 
 /** The saved-content fields only: selection, undo stacks and draft state don't make a save. */
@@ -80,6 +83,7 @@ const EMPTY_CANVAS: CanvasState = {
   savedSignature: contentSignature({ boxes: [], polygons: [], points: [], imageAnnotations: [] }),
   loadedImagePath: null,
   completion: {},
+  flags: [],
 };
 
 /** Whether the loaded canvas belongs to the open dataset's own image directory: nothing clears
@@ -145,8 +149,8 @@ export interface CanvasSlice {
   addImageAnnotation: (subject: string) => void;
   updateImageAnnotation: (idx: number, ann: Annotation) => void;
   deleteImageAnnotation: (idx: number) => void;
-  /** Re-baseline after a save, adopting the completion the save answered with. */
-  markClean: (completion: Record<string, SubjectState>) => void;
+  /** Re-baseline after a save, adopting the completion and the flags the save answered with. */
+  markClean: (completion: Record<string, SubjectState>, flags: Flag[]) => void;
   /** Settle dirty from content after a drag (drags flag it per tick without comparing). */
   recomputeDirty: () => void;
 }
@@ -176,6 +180,7 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
           savedSignature: contentSignature(content),
           loadedImagePath: labels.image_path || null,
           completion: labels.completion,
+          flags: labels.flags,
         },
       };
     }),
@@ -459,13 +464,14 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
   },
 
   // A save re-baselines: the just-saved content is what future edits compare against.
-  markClean: (completion) =>
+  markClean: (completion, flags) =>
     set((s) => ({
       canvas: {
         ...s.canvas,
         dirty: false,
         savedSignature: contentSignature(s.canvas),
         completion,
+        flags,
       },
     })),
 

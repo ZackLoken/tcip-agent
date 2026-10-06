@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 
 import { ProposalShapes } from "@/components/annotate/ProposalShapes";
 import type { ReviewItem } from "@/lib/reviewItems";
-import { FOCUS_HALO, STATUS_COLORS, strokeWidths } from "@/lib/symbology";
+import { FOCUS_HALO, MATCH_COLORS, strokeWidths } from "@/lib/symbology";
 import type { Proposal } from "@/store/types";
 
 // Konva needs a real 2D canvas; render its shapes as inspectable divs.
@@ -44,8 +44,11 @@ const focusedOn = (index: number): ReviewItem => ({
   ref: index,
   subject: "subject_a",
   bbox: [10, 10, 50, 50],
-  status: "undecided",
+  match: "proposal_only",
+  reviewed: false,
   score: 0.9,
+  at: [30, 30],
+  flags: [],
 });
 
 function drawn(proposals: Proposal[], focused: ReviewItem | null) {
@@ -57,12 +60,12 @@ function drawn(proposals: Proposal[], focused: ReviewItem | null) {
 }
 
 describe("ProposalShapes", () => {
-  it("draws every proposal dotted in the undecided status color", () => {
+  it("draws every proposal dotted, in the color of its match type", () => {
     const { rects } = drawn([proposal(0, null), proposal(1, 3)], null);
-    expect(rects).toHaveLength(2);
-    expect(rects.every((r) => r.getAttribute("data-stroke") === STATUS_COLORS.undecided)).toBe(
-      true,
-    );
+    expect(rects.map((r) => r.getAttribute("data-stroke"))).toEqual([
+      MATCH_COLORS.proposal_only,
+      MATCH_COLORS.matched,
+    ]);
     expect(rects.every((r) => r.dataset.dash === "true")).toBe(true);
   });
 
@@ -80,6 +83,6 @@ describe("ProposalShapes", () => {
     expect(rects).toHaveLength(2);
     expect(rects[0]).toHaveAttribute("data-stroke", FOCUS_HALO.color);
     expect(Number(rects[0].getAttribute("data-opacity"))).toBe(FOCUS_HALO.opacity);
-    expect(rects[1]).toHaveAttribute("data-stroke", STATUS_COLORS.undecided);
+    expect(rects[1]).toHaveAttribute("data-stroke", MATCH_COLORS.proposal_only);
   });
 });

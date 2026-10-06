@@ -3,12 +3,12 @@ import { memo } from "react";
 import { BoxOverlay } from "@/components/annotate/BoxOverlay";
 import { PolygonOverlay } from "@/components/annotate/PolygonOverlay";
 import { annotationsToCanvas } from "@/lib/labelSerde";
-import type { ReviewItem } from "@/lib/reviewItems";
+import { proposalMatch, type ReviewItem } from "@/lib/reviewItems";
 import { outlineColor, proposalLabel, type strokeWidths } from "@/lib/symbology";
 import type { Proposal } from "@/store/types";
 
-/** The proposals the canvas shows, drawn in the tool's dotted stroke and the undecided status
- *  color; the focused one draws its halo, and it and every unpaired proposal carry a label. */
+/** The proposals the canvas shows, drawn in the tool's dotted stroke and their match color; the
+ *  focused one draws its halo, and it and every unpaired proposal carry a label. */
 export const ProposalShapes = memo(function ProposalShapes({
   proposals,
   focused,
@@ -24,7 +24,7 @@ export const ProposalShapes = memo(function ProposalShapes({
         const isFocused = focused?.kind === "proposal" && focused.ref === p.index;
         const label = proposalLabel(p, isFocused);
         const shared = {
-          stroke: outlineColor(p.subject, "undecided"),
+          stroke: outlineColor(p.subject, proposalMatch(p)),
           style: "dotted" as const,
           labelSize: widths.labelSize,
           label: label ?? "",

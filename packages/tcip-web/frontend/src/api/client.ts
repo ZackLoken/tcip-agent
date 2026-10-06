@@ -21,6 +21,8 @@ import type {
   Annotation,
   AnnotationPayload,
   DatasetSelection,
+  Flag,
+  FlagRequest,
   ImageLabels,
   ServedProposals,
   SubjectState,
@@ -76,12 +78,18 @@ export interface SaveLabelsBody {
   /** The pixel ``[x, y, w, h]`` a mark covers; the whole image when absent. */
   rect?: [number, number, number, number] | null;
   proposals_hidden?: boolean;
+  /** Each flag the save raises. */
+  flag?: FlagRequest[];
+  /** Each open flag the save resolves, by id, with the reply given. */
+  resolve?: Record<string, string>;
 }
 
-/** What a landed save answers: the new version token and the completion it left. */
+/** What a landed save answers: the new version token, the completion it left and the image's
+ *  flags. */
 interface Saved {
   base_mtime: string | null;
   completion: Record<string, SubjectState>;
+  flags: Flag[];
 }
 
 export type SaveResult = ({ status: "ok" } & Saved) | { status: "conflict" };
@@ -266,6 +274,7 @@ export const api = {
         img_height: number;
         annotations: Annotation[];
         completion: Record<string, SubjectState>;
+        flags: Flag[];
         base_mtime: string | null;
       }>(`${ROUTES.getAnnotateLabels}?${q({ image_path })}`);
       const { boxes, polygons, points, imageAnnotations } = annotationsToCanvas(
@@ -280,6 +289,7 @@ export const api = {
         points,
         imageAnnotations,
         completion: raw.completion,
+        flags: raw.flags,
         base_mtime: raw.base_mtime,
       };
     },
@@ -294,7 +304,12 @@ export const api = {
     save: async (body: SaveLabelsBody): Promise<SaveResult> => {
       try {
         const data = await postJson<Saved>(ROUTES.postAnnotateLabels, body);
-        return { status: "ok", base_mtime: data.base_mtime, completion: data.completion };
+        return {
+          status: "ok",
+          base_mtime: data.base_mtime,
+          completion: data.completion,
+          flags: data.flags,
+        };
       } catch (e) {
         if (!isConflict(e)) throw e;
         return { status: "conflict" };

@@ -13,7 +13,7 @@ import {
 } from "@/lib/canvasSync";
 import { ringsBbox } from "@/lib/polygonGeometry";
 import type { ReviewItem } from "@/lib/reviewItems";
-import { FOCUS_HALO, STATUS_COLORS } from "@/lib/symbology";
+import { FLAG_MARK, FOCUS_HALO, MATCH_COLORS } from "@/lib/symbology";
 import type { Proposal } from "@/store/types";
 
 const RED = subjectColor("subject_a");
@@ -25,8 +25,11 @@ const focusOn = (shape: ReviewItem["shape"], ref: number): ReviewItem => ({
   ref,
   subject: "",
   bbox: [0, 0, 0, 0],
-  status: null,
+  match: null,
+  reviewed: null,
   score: null,
+  at: [0, 0],
+  flags: [],
 });
 
 const HALO = {
@@ -335,7 +338,7 @@ describe("buildAnnotateShapes", () => {
     expect(shapes[0].xyxy).toBeUndefined();
   });
 
-  it("the focused point is pushed haloed in its own color, and follows the focus out of point mode", () => {
+  it("the focused point is pushed haloed in its own color, and no point draws outside point mode", () => {
     const points = [{ x: 5, y: 7, subject: "other", attributes: {} }];
     const focused = buildAnnotateShapes({
       ...base,
@@ -347,7 +350,7 @@ describe("buildAnnotateShapes", () => {
     expect(focused).toHaveLength(1); // included despite the subject filter, like a focused polygon
     expect(focused[0]).toMatchObject({ color: OTHER, halo: HALO, label: "other" });
 
-    // Box mode: only the focus survives, the shape being inspected stays on screen.
+    // Focus belongs to the tool: in box mode no point draws, focused or not.
     const inBoxMode = buildAnnotateShapes({
       ...base,
       mode: "box",
@@ -356,8 +359,7 @@ describe("buildAnnotateShapes", () => {
       points: [...points, { x: 9, y: 9, subject: "subject_a", attributes: {} }],
       focused: focusOn("point", 0),
     });
-    expect(inBoxMode.filter((s) => s.kind === "point")).toHaveLength(1);
-    expect(inBoxMode.filter((s) => s.kind === "point")[0].halo).toEqual(HALO);
+    expect(inBoxMode.filter((s) => s.kind === "point")).toHaveLength(0);
   });
 
   it("point mode draws no boxes and no derived boxes (nothing but its own points)", () => {
@@ -439,20 +441,50 @@ describe("buildAnnotateShapes", () => {
     expect(derived.label).toBeUndefined();
   });
 
-  it("box mode includes the focused polygon and the rubber-band box", () => {
+  it("box mode draws no polygon outline, and the rubber-band box rides along", () => {
     const shapes = buildAnnotateShapes({
       ...base,
       mode: "box",
       boxes: [],
-      focused: focusOn("polygon", 1),
       drawingBox: { x1: 50, y1: 50, x2: 40, y2: 60 },
     });
-    expect(shapes.some((s) => s.kind === "polygon" && s.halo && s.color === OTHER)).toBe(true);
+    expect(shapes.some((s) => s.kind === "polygon")).toBe(false);
     const rubber = shapes.find((s) => s.tag === "in_progress")!;
     expect(rubber).toMatchObject({ kind: "box", xyxy: [40, 50, 50, 60], dashed: true });
   });
 
-  it("colors every shape by its review status while reviewing, the subject color otherwise", () => {
+  it("pushes each placed flag as a mark carrying its comment", () => {
+    const shapes = buildAnnotateShapes({
+      ...base,
+      flagMarks: [
+        {
+          at: [12.04, 30],
+          flag: {
+            id: "f1",
+            text: "open?",
+            by: "user:a",
+            at: "2026-01-01T00:00:00+00:00",
+            point: [12.04, 30],
+            subject: "subject_a",
+            proposal: null,
+            resolved_by: null,
+            resolved_at: null,
+            reply: "",
+            removed: false,
+          },
+        },
+      ],
+    });
+    expect(shapes.at(-1)).toMatchObject({
+      kind: "point",
+      points: [[12, 30]],
+      color: FLAG_MARK.color,
+      tag: "flag",
+    });
+    expect(shapes.at(-1)?.label).toContain("open?");
+  });
+
+  it("colors every shape by its match type while reviewing, the subject color otherwise", () => {
     const boxes = [
       { x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {}, index: 0 },
       { x1: 10, y1: 10, x2: 15, y2: 15, subject: "subject_a", attributes: {}, index: 1 },
@@ -462,11 +494,11 @@ describe("buildAnnotateShapes", () => {
       mode: "box",
       polygons: [],
       boxes,
-      statuses: { boxes: ["confirmed", "unproposed"], polygons: [], points: [] },
+      matches: { boxes: ["matched", "annotation_only"], polygons: [], points: [] },
     });
     expect(reviewing.map((s) => s.color)).toEqual([
-      STATUS_COLORS.confirmed,
-      STATUS_COLORS.unproposed,
+      MATCH_COLORS.matched,
+      MATCH_COLORS.annotation_only,
     ]);
     const plain = buildAnnotateShapes({ ...base, mode: "box", polygons: [], boxes });
     expect(plain.every((s) => s.color === RED)).toBe(true);
@@ -494,7 +526,7 @@ describe("buildAnnotateShapes proposals", () => {
     ...over,
   });
 
-  it("mirrors the shown proposals dotted in the undecided color, every ring, the focused one haloed", () => {
+  it("mirrors the shown proposals dotted in their match color, every ring, the focused one haloed", () => {
     const shapes = buildAnnotateShapes({
       ...base,
       proposals: [
@@ -522,14 +554,22 @@ describe("buildAnnotateShapes proposals", () => {
         ref: 1,
         subject: "subject_a",
         bbox: [0, 0, 60, 60],
-        status: "undecided",
+        match: "proposal_only",
+        reviewed: false,
         score: 0.9,
+        at: [30, 30],
+        flags: [],
       },
     });
     const shown = shapes.filter((s) => s.tag === "proposal");
     expect(shown).toHaveLength(3);
     expect(shown[0]).toMatchObject({ kind: "box", xyxy: [1, 2, 11, 12] });
-    expect(shown.every((s) => s.dashed && s.color === STATUS_COLORS.undecided)).toBe(true);
+    expect(shown.every((s) => s.dashed)).toBe(true);
+    expect(shown.map((s) => s.color)).toEqual([
+      MATCH_COLORS.proposal_only,
+      MATCH_COLORS.matched,
+      MATCH_COLORS.matched,
+    ]);
     expect(shown.slice(1).every((s) => s.kind === "polygon" && s.halo)).toBe(true);
     // One label per proposal: the unpaired one at rest, the paired one because it is focused.
     expect(shown.filter((s) => s.label)).toHaveLength(2);
@@ -576,12 +616,12 @@ describe("shapeVisible", () => {
     expect(at("derived", "box", "other")).toBe(false);
   });
 
-  it("always shows the focused shape, whatever the mode or subject", () => {
+  it("shows the focused shape whatever its subject, and only in its own tool mode", () => {
     for (const kind of ["box", "polygon", "point"] as const) {
       for (const mode of ["box", "polygon", "point"]) {
         expect(
           shapeVisible({ kind, mode, subject: "other", activeSubject: "subject_a", focused: true }),
-        ).toBe(true);
+        ).toBe(kind === mode);
       }
     }
   });

@@ -18,17 +18,18 @@
 
 import { annotationsToCanvas } from "@/lib/labelSerde";
 import { ringsBbox } from "@/lib/polygonGeometry";
-import type { ReviewItem } from "@/lib/reviewItems";
+import { proposalMatch, type ReviewItem } from "@/lib/reviewItems";
 import {
   authorshipLabel,
+  FLAG_MARK,
   FOCUS_HALO,
   lineStyleOf,
+  type MatchType,
   NO_SUBJECT_DRAFT_COLOR,
   outlineColor,
   proposalLabel,
-  type ReviewStatus,
 } from "@/lib/symbology";
-import type { Box, PointShape, PolygonShape, Proposal, TabName } from "@/store/types";
+import type { Box, Flag, PointShape, PolygonShape, Proposal, TabName } from "@/store/types";
 
 export interface CanvasViewport {
   x: number;
@@ -52,7 +53,7 @@ export interface CanvasShape {
   // On the focused item: the halo the render draws under its stroke (symbology's FOCUS_HALO).
   halo?: { color: string; opacity: number; width_factor: number };
   label?: string;
-  tag?: string; // gt | proposal | in_progress
+  tag?: string; // gt | proposal | in_progress | flag
 }
 
 export interface CanvasStateBody {
@@ -112,11 +113,10 @@ export function measureCanvasHost(): { w: number; h: number } | null {
   return r.width > 1 && r.height > 1 ? { w: r.width, h: r.height } : null;
 }
 
-/** Whether a committed shape draws: one of the active subject in its own tool mode, and the
- *  focused one in any mode (a focus survives a mode switch and a step across tools, so the shape
- *  being inspected stays on screen). A `derived` box is a polygon's read-only bounds, drawn with
- *  the boxes. The Annotate canvas and the agent's mirror both ask here, so they cannot disagree
- *  about what is on screen. */
+/** Whether a committed shape draws: only in its own tool mode, and there when it is of the active
+ *  subject or is the focused item (a step can land on another subject's shape). A `derived` box
+ *  is a polygon's read-only bounds, drawn with the boxes. The Annotate canvas and the agent's
+ *  mirror both ask here, so they cannot disagree about what is on screen. */
 export function shapeVisible(args: {
   kind: "box" | "derived" | "polygon" | "point";
   mode: string;
@@ -124,12 +124,11 @@ export function shapeVisible(args: {
   activeSubject: string;
   focused: boolean;
 }): boolean {
-  if (args.focused) return true;
   const ownMode = args.kind === "derived" ? "box" : args.kind;
-  return args.mode === ownMode && args.subject === args.activeSubject;
+  return args.mode === ownMode && (args.focused || args.subject === args.activeSubject);
 }
 
-const NO_STATUSES = { boxes: [], polygons: [], points: [] };
+const NO_MATCHES = { boxes: [], polygons: [], points: [] };
 
 /** The line style and focus halo a mirrored shape carries, from the symbology's own rules. */
 function strokeOf(authorship: string | null | undefined, focused: boolean) {
@@ -159,12 +158,14 @@ export function buildAnnotateShapes(args: {
   drawingBox?: { x1: number; y1: number; x2: number; y2: number } | null;
   /** The one focused item (an annotation or a shown proposal), or none. */
   focused?: ReviewItem | null;
-  /** Each array's review statuses (`reviewStatuses`); every entry null while not reviewing. */
-  statuses?: {
-    boxes: (ReviewStatus | null)[];
-    polygons: (ReviewStatus | null)[];
-    points: (ReviewStatus | null)[];
+  /** Each array's match types (`matchTypes`); every entry null while not reviewing. */
+  matches?: {
+    boxes: (MatchType | null)[];
+    polygons: (MatchType | null)[];
+    points: (MatchType | null)[];
   };
+  /** Each open flag that has a place on the image, with that place (`flagPlaces`). */
+  flagMarks?: { at: [number, number]; flag: Flag }[];
   mode: string;
   activeSubject: string;
   visible: boolean;
@@ -179,7 +180,7 @@ export function buildAnnotateShapes(args: {
 }): CanvasShape[] {
   if (!args.visible) return []; // the GUI's labels toggle hides every committed shape
 
-  const statuses = args.statuses ?? NO_STATUSES;
+  const statuses = args.matches ?? NO_MATCHES;
   const focused = args.focused ?? null;
   const isFocused = (shape: ReviewItem["shape"], i: number) =>
     focused?.kind === "annotation" && focused.shape === shape && focused.ref === i;
@@ -286,7 +287,7 @@ export function buildAnnotateShapes(args: {
   (args.proposals ?? []).forEach((p) => {
     const proposalFocused = focused?.kind === "proposal" && focused.ref === p.index;
     const base = {
-      color: outlineColor(p.subject, "undecided"),
+      color: outlineColor(p.subject, proposalMatch(p)),
       ...strokeOf("tool", proposalFocused),
       tag: "proposal",
     };
@@ -307,6 +308,15 @@ export function buildAnnotateShapes(args: {
       ),
     );
   });
+  (args.flagMarks ?? []).forEach(({ at, flag }) =>
+    shapes.push({
+      kind: "point",
+      points: [[r1(at[0]), r1(at[1])]],
+      color: FLAG_MARK.color,
+      label: `${FLAG_MARK.glyph} ${flag.text}`,
+      tag: "flag",
+    }),
+  );
   return shapes;
 }
 
