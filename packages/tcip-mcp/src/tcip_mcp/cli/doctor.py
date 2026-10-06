@@ -173,15 +173,23 @@ def check_provenance(root: Path, findings: list, *, census: dict | None) -> None
 
 def check_state(root: Path, findings: list) -> None:
     """Warn of every verdict shard that will not read through the one decoder
-    (:func:`~tcip_annotation.verdicts.read_verdicts`) and every one naming an image its bucket's
-    record names no document for (:func:`~tcip_mcp.buckets.read_bucket`)."""
+    (:func:`~tcip_annotation.verdicts.read_verdicts`), every one naming an image its bucket's
+    record names no document for (:func:`~tcip_mcp.buckets.read_bucket`), and every flags record
+    that will not read (:func:`~tcip_annotation.flags.read_flags`), which the editor refuses to
+    load its image over."""
     import tcip_store
+    from tcip_annotation.flags import REVIEW_FLAGS_STORE, read_flags
     from tcip_annotation.verdicts import REVIEW_VERDICTS_STORE, read_verdicts
     from tcip_store import StoreError
 
     from tcip_mcp.buckets import read_bucket
 
     resolved = Path(root).resolve()
+    for key in tcip_store.keys(REVIEW_FLAGS_STORE, str(resolved)):
+        try:
+            read_flags(key)
+        except (ValueError, StoreError) as exc:
+            findings.append(("warn", f"flags record {'/'.join(key.parts)} will not read: {exc}"))
     for key in tcip_store.keys(REVIEW_VERDICTS_STORE, str(resolved)):
         bucket, stem = key.parts
         try:

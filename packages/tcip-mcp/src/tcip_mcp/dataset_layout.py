@@ -13,6 +13,7 @@ import tcip_store
 from tcip_store import Key, decode_value
 
 if TYPE_CHECKING:
+    from tcip_annotation.flags import FlagRequest
     from tcip_annotation.json_io import LabelDocument
 
     from tcip_mcp.buckets import Bucket
@@ -200,8 +201,10 @@ class Gestures:
     ``bucket``, under the image's own dataset root, it accepts and rejects, each by its index in
     that bucket's document for the image;
     each subject of ``complete`` marked complete over ``rect`` (pixel ``[x, y, w, h]``, the whole
-    image when ``None``) or, mapped to ``False``, its marks withdrawn; and whether proposals were
-    hidden while the person annotated."""
+    image when ``None``) or, mapped to ``False``, its marks withdrawn; whether proposals were
+    hidden while the person annotated; each flag it raises
+    (:class:`~tcip_annotation.flags.FlagRequest`); and each open flag it resolves, by id, with
+    the reply given."""
 
     bucket: Optional[str] = None
     accept: frozenset[int] = frozenset()
@@ -209,6 +212,8 @@ class Gestures:
     complete: Mapping[str, bool] = field(default_factory=dict)
     rect: Optional[tuple[float, float, float, float]] = None
     proposals_hidden: bool = False
+    flag: tuple["FlagRequest", ...] = ()
+    resolve: Mapping[str, str] = field(default_factory=dict)
 
 
 def label_key_of(image_path: str | Path) -> Key:
@@ -281,13 +286,20 @@ def save_label_document(
     ``author``; one that pairs confirms that annotation and adds nothing.
     The document's completion marks still live over the new annotations stay, beside the marks
     ``gestures`` makes; a subject mapped to ``False`` loses its marks. Each accepted and rejected
-    proposal appends one entry to the image's verdict shard under that bucket.
+    proposal appends one entry to the image's verdict shard under that bucket. The image's flags
+    record gains each flag ``gestures`` raises, by ``author``, and marks each it resolves; an
+    open flag on an annotation the save removes is resolved as removed
+    (:func:`~tcip_annotation.flags.resolved_by_removal`).
 
     Raises with nothing written: ``ValueError`` for a payload that does not parse, a proposal
-    index the bucket's document does not hold or that is both accepted and rejected;
+    index the bucket's document does not hold or that is both accepted and rejected, a flag with
+    no comment or on a proposal its bucket does not hold, or a resolved flag that is not open;
     ``UnreadableLabelDocumentError`` for a stored document that does not decode;
     ``VersionConflictError`` when ``expect`` is not the version the commit reads.
     """
+    from tcip_annotation.flags import (
+        flag_key, flags_of, flags_record, raised, resolved_by_removal,
+    )
     from tcip_annotation.json_io import (
         CompletionMark, LabelDocument, annotation_from_payload, document_at, document_payload,
         stamped, subject_digest,
@@ -315,12 +327,28 @@ def save_label_document(
                              "each once")
         bucket, proposals = image_proposals(gestures.bucket, key)
         verdict = verdict_key_of(key, gestures.bucket)
-    with tcip_store.transaction(key, audit, *([verdict] if decides else [])) as txn:
+    new_flags = [raised(request, by=author, at=now) for request in gestures.flag]
+    for flag in new_flags:
+        if flag.proposal is not None:
+            named, index = flag.proposal
+            held = len(image_proposals(named, key)[1])
+            if index >= held:
+                raise ValueError(f"bucket {named!r} holds {held} proposals for {stem}, not one "
+                                 f"at index {index} to flag")
+    flags_key = flag_key(key)
+    with tcip_store.transaction(key, audit, flags_key, *([verdict] if decides else [])) as txn:
         read = txn.read_versioned(key, default=None)
         stored = document_at(key, read)
         if expect is not None and expect != read.version:
             raise tcip_store.VersionConflictError(key, expect, read.version)
         annotations = stamped(contents, stored.annotations, author=author, now=now)
+        held_flags = flags_of(txn.read(flags_key, default=None))
+        open_ids = {flag.id for flag in held_flags if flag.open}
+        unknown = sorted(set(gestures.resolve) - open_ids)
+        if unknown:
+            raise ValueError(f"flag(s) {unknown} are not open on {stem}; resolve an open flag")
+        flags = [flag.resolved(by=author, at=now, reply=gestures.resolve[flag.id])
+                 if flag.id in gestures.resolve else flag for flag in held_flags] + new_flags
         verdicts: list[Verdict] = []
         if decides:
             paired = proposal_pairs(project, bucket, annotations, proposals)
@@ -344,10 +372,16 @@ def save_label_document(
                 proposals_hidden=gestures.proposals_hidden))
         version = txn.write(key, document_payload(annotations, width, height, keep_empty=True,
                                                   marks=marks))
+        flags = resolved_by_removal(flags, stored.annotations, annotations, by=author, at=now)
+        if flags != held_flags:
+            txn.write(flags_key, flags_record(flags))
         txn.append(audit, audit_entry("save_label_document", {
             "capture": capture, "stem": stem, "n_annotations": len(annotations),
             "version": version.token, "accepted": sorted(gestures.accept),
             "rejected": sorted(gestures.reject), "complete": dict(gestures.complete),
+            "flagged": [flag.id for flag in new_flags],
+            "resolved": sorted(flag.id for flag in flags
+                               if not flag.open and flag.id in open_ids),
         }, actor, "ok"))
     return version, LabelDocument(annotations, width, height, marks)
 
