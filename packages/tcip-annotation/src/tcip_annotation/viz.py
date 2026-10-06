@@ -494,8 +494,10 @@ def render_canvas_state(
 
     ``shapes`` come from the canvas-state push, each already carrying the exact symbology the GUI
     rendered: ``{kind: box|polygon|polyline|point, xyxy|points (pixel), color '#hex', fill?,
-    dashed?, label?}``. A ``point`` carries one coordinate in ``points`` and draws as the GUI's
-    mark (a core with radial ticks), never widened into a box.
+    dashed?, halo?, label?}``. A ``point`` carries one coordinate in ``points`` and draws as
+    the GUI's mark (a core with radial ticks), never widened into a box; a shape carrying ``halo``
+    (``{color, opacity, width_factor}``, the GUI's focus) draws that wider translucent stroke
+    under its own.
 
     ``image`` is whatever region of the raster the caller read (the human's viewport, or the whole
     frame), ``origin`` is that region's top-left corner in the raster's own full-resolution grid
@@ -548,7 +550,23 @@ def render_canvas_state(
     for s, pts, color, closed in parsed:  # pass 1: fills
         if s.get("fill") and closed and len(pts) >= 3:
             draw.polygon(pts, fill=color + (38,))
-    for s, pts, color, closed in parsed:  # pass 2: outlines + vertices
+    for i, (s, pts, color, closed) in enumerate(parsed):  # pass 2: halos, under every outline
+        if not s.get("halo"):
+            continue
+        try:
+            halo = _hex_rgb(s["halo"]["color"]) + (round(255 * float(s["halo"]["opacity"])),)
+            halo_w = max(1, round(lw * float(s["halo"]["width_factor"])))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"canvas shape {i} carries a halo the canvas does not draw: "
+                             f"{exc!r}") from exc
+        if s["kind"] == "point":
+            px, py = pts[0]
+            reach = dot_r * 1.6 * 3.2
+            draw.ellipse([px - reach, py - reach, px + reach, py + reach],
+                         outline=halo, width=halo_w)
+        else:
+            _draw_path(draw, pts, halo, halo_w, dashed=False, closed=closed)
+    for s, pts, color, closed in parsed:  # pass 3: outlines + vertices
         if s["kind"] == "point":
             # The GUI's reticle: a core plus four radial ticks converging on the coordinate, the
             # mark that distinguishes a location from a very small box on the same canvas.

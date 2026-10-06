@@ -22,7 +22,7 @@ import type {
   AnnotationPayload,
   DatasetSelection,
   ImageLabels,
-  Proposal,
+  ServedProposals,
   SubjectState,
   TabName,
 } from "@/store/types";
@@ -284,11 +284,10 @@ export const api = {
       };
     },
 
-    // The chosen bucket's proposals for the image, each paired, decided and admitted server-side.
+    // The chosen bucket's proposals for the image, each paired and decided server-side, with the
+    // bucket's validated operating point.
     proposals: (image_path: string, bucket: string) =>
-      getJson<{ bucket: string; proposals: Proposal[] }>(
-        `${ROUTES.getAnnotateProposals}?${q({ image_path, bucket })}`,
-      ),
+      getJson<ServedProposals>(`${ROUTES.getAnnotateProposals}?${q({ image_path, bucket })}`),
 
     // A 409 (the label document changed underneath the client) is an expected outcome the
     // caller resolves, not an error.

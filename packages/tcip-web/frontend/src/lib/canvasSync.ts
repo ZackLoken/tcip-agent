@@ -10,14 +10,24 @@
  *     answers with an immediate full push (see onCanvasStateRequest).
  *
  * Shapes are display-resolved and display-filtered: each carries the exact hex color / dash /
- * label the GUI renders, and the builders reproduce the canvas's own visibility rules (mode
- * filters, active-class filter, derived detect boxes, the labels toggle, the undecided
- * proposals), so the server-side render (capture_live_canvas) is faithful by construction.
+ * label the GUI renders, read from the one symbology module the overlays draw with, and the
+ * builders reproduce the canvas's own visibility rules (mode filters, active-class filter, derived
+ * detect boxes, the labels toggle, the shown proposals), so the server-side render
+ * (capture_live_canvas) is faithful by construction.
  */
 
-import { authorshipLabel } from "@/lib/authorshipSymbology";
 import { annotationsToCanvas } from "@/lib/labelSerde";
 import { ringsBbox } from "@/lib/polygonGeometry";
+import type { ReviewItem } from "@/lib/reviewItems";
+import {
+  authorshipLabel,
+  FOCUS_HALO,
+  lineStyleOf,
+  NO_SUBJECT_DRAFT_COLOR,
+  outlineColor,
+  proposalLabel,
+  type ReviewStatus,
+} from "@/lib/symbology";
 import type { Box, PointShape, PolygonShape, Proposal, TabName } from "@/store/types";
 
 export interface CanvasViewport {
@@ -39,14 +49,10 @@ export interface CanvasShape {
   color: string;
   fill?: boolean;
   dashed?: boolean;
-  // Which pattern a dashed shape draws (a tool's own unaccepted shape vs. a derived box).
-  dash_kind?: "tool" | "derived";
-  // On a proposal: whether the bucket's validated count operating point admits it.
-  admitted?: boolean;
+  // On the focused item: the halo the render draws under its stroke (symbology's FOCUS_HALO).
+  halo?: { color: string; opacity: number; width_factor: number };
   label?: string;
   tag?: string; // gt | proposal | in_progress
-  // The load route's authorship classification (person | tool | tool_accepted | unattributed).
-  authorship?: string | null;
 }
 
 export interface CanvasStateBody {
@@ -106,187 +112,148 @@ export function measureCanvasHost(): { w: number; h: number } | null {
   return r.width > 1 && r.height > 1 ? { w: r.width, h: r.height } : null;
 }
 
-/** Whether a placed point draws in the current mode: in point mode, every point of the active
- *  subject; in any mode, the selected one (a selection survives a mode switch, so the shape being
- *  inspected stays on screen, the same rule box mode applies to the selected polygon). The
- *  Annotate canvas imports this rather than restating it, so the agent's mirror and the GUI cannot
- *  disagree about which points are on screen. */
-export function pointShapeVisible(args: {
+/** Whether a committed shape draws: one of the active subject in its own tool mode, and the
+ *  focused one in any mode (a focus survives a mode switch and a step across tools, so the shape
+ *  being inspected stays on screen). A `derived` box is a polygon's read-only bounds, drawn with
+ *  the boxes. The Annotate canvas and the agent's mirror both ask here, so they cannot disagree
+ *  about what is on screen. */
+export function shapeVisible(args: {
+  kind: "box" | "derived" | "polygon" | "point";
   mode: string;
   subject: string;
   activeSubject: string;
-  selected: boolean;
+  focused: boolean;
 }): boolean {
-  if (args.selected) return true;
-  return args.mode === "point" && args.subject === args.activeSubject;
+  if (args.focused) return true;
+  const ownMode = args.kind === "derived" ? "box" : args.kind;
+  return args.mode === ownMode && args.subject === args.activeSubject;
 }
 
-/** Annotate-tab shapes, mirroring the canvas render rules exactly: the labels toggle hides
- *  everything; polygon mode shows polygons of the active subject plus the selection (outline
- *  only, like the GUI); box mode shows the active-subject boxes plus the selected polygon and the
- *  in-flight rubber-band box; points follow pointShapeVisible. Each shape's label is its subject
- *  name; its color is GUI-local. */
+const NO_STATUSES = { boxes: [], polygons: [], points: [] };
+
+/** The line style and focus halo a mirrored shape carries, from the symbology's own rules. */
+function strokeOf(authorship: string | null | undefined, focused: boolean) {
+  return {
+    ...(lineStyleOf(authorship) === "dotted" ? { dashed: true } : {}),
+    ...(focused
+      ? {
+          halo: {
+            color: FOCUS_HALO.color,
+            opacity: FOCUS_HALO.opacity,
+            width_factor: FOCUS_HALO.widthFactor,
+          },
+        }
+      : {}),
+  };
+}
+
+/** Annotate-tab shapes, mirroring the canvas: the labels toggle hides everything, each committed
+ *  shape draws by `shapeVisible`, and polygon mode adds the drawing in progress and the pending
+ *  cut. Colors, line styles, the halo and labels come from the symbology module: the focused item
+ *  and the unpaired proposals are the labeled ones. */
 export function buildAnnotateShapes(args: {
   boxes: Box[];
   polygons: PolygonShape[];
   points?: PointShape[];
   currentPolygon: [number, number][];
   drawingBox?: { x1: number; y1: number; x2: number; y2: number } | null;
-  selectedPolygonIdx: number | null;
-  selectedBoxIdx?: number | null;
-  selectedPointIdx?: number | null;
+  /** The one focused item (an annotation or a shown proposal), or none. */
+  focused?: ReviewItem | null;
+  /** Each array's review statuses (`reviewStatuses`); every entry null while not reviewing. */
+  statuses?: {
+    boxes: (ReviewStatus | null)[];
+    polygons: (ReviewStatus | null)[];
+    points: (ReviewStatus | null)[];
+  };
   mode: string;
   activeSubject: string;
   visible: boolean;
+  /** The active subject's color for the in-progress drawing and the rubber-band box. */
   colorFor: (subject: string) => string;
   // The cut tool's pending first click, in the selected polygon's own color, and the cursor for
   // its dashed tail (or none, once the start is placed but the pointer hasn't moved yet).
   cutStart?: { point: [number, number]; color: string } | null;
   cursor?: [number, number] | null;
+  /** The proposals the canvas shows. */
   proposals?: Proposal[];
-  selectedProposal?: number | null;
 }): CanvasShape[] {
   if (!args.visible) return []; // the GUI's labels toggle hides every committed shape
 
+  const statuses = args.statuses ?? NO_STATUSES;
+  const focused = args.focused ?? null;
+  const isFocused = (shape: ReviewItem["shape"], i: number) =>
+    focused?.kind === "annotation" && focused.shape === shape && focused.ref === i;
   const shapes: CanvasShape[] = [];
-  const pushPolygon = (p: PolygonShape, selected: boolean) => {
-    const isTool = p.authorship === "tool";
-    p.rings.forEach((ring, i) => {
-      shapes.push({
-        kind: "polygon",
-        points: rPts(ring),
-        color: selected ? "#00BFFF" : args.colorFor(p.subject),
-        ...(isTool ? { dashed: true, dash_kind: "tool" as const } : {}),
-        label: i === 0 ? authorshipLabel(p.subject, p.authorship) : undefined,
-        tag: "gt",
-        authorship: p.authorship ?? null,
-      });
+  const visible = (kind: "box" | "derived" | "polygon" | "point", subject: string, at: boolean) =>
+    shapeVisible({
+      kind,
+      mode: args.mode,
+      subject,
+      activeSubject: args.activeSubject,
+      focused: at,
     });
-  };
-  // A point is one mark at one coordinate: one shape entry carrying a single position, never a
-  // path and never a derived box (a fabricated box would read downstream as a real detection).
-  const pushPoints = () => {
-    (args.points ?? []).forEach((p, i) => {
-      const selected = i === (args.selectedPointIdx ?? null);
-      if (
-        !pointShapeVisible({
-          mode: args.mode,
-          subject: p.subject,
-          activeSubject: args.activeSubject,
-          selected,
-        })
-      )
-        return;
-      const isTool = p.authorship === "tool";
-      shapes.push({
-        kind: "point",
-        points: [[r1(p.x), r1(p.y)]],
-        color: selected ? "#00BFFF" : args.colorFor(p.subject),
-        ...(isTool ? { dashed: true, dash_kind: "tool" as const } : {}),
-        label: authorshipLabel(p.subject, p.authorship),
-        tag: "gt",
-        authorship: p.authorship ?? null,
-      });
-    });
-  };
-  // The proposals the canvas shows, its dotted tool stroke; the selected one in the selection color.
-  const pushProposals = () => {
-    (args.proposals ?? []).forEach((p) => {
-      const color = p.index === args.selectedProposal ? "#00BFFF" : args.colorFor(p.subject);
-      const base = { color, dashed: true, dash_kind: "tool" as const, tag: "proposal" };
-      const extra = { label: `${p.subject} proposal`, admitted: p.admitted };
-      const { boxes, polygons } = annotationsToCanvas([p]);
-      boxes.forEach((b) =>
-        shapes.push({
-          kind: "box",
-          xyxy: [r1(b.x1), r1(b.y1), r1(b.x2), r1(b.y2)],
-          ...base,
-          ...extra,
-        }),
-      );
-      polygons.forEach((poly) =>
-        poly.rings.forEach((ring, i) =>
-          shapes.push({ kind: "polygon", points: rPts(ring), ...base, ...(i === 0 ? extra : {}) }),
-        ),
-      );
-    });
-  };
 
-  if (args.mode === "polygon") {
-    args.polygons.forEach((p, i) => {
-      const selected = i === args.selectedPolygonIdx;
-      if (!selected && p.subject !== args.activeSubject) return;
-      pushPolygon(p, selected);
-    });
-    if (args.currentPolygon.length > 0) {
-      shapes.push({
-        kind: "polyline",
-        points: rPts(args.currentPolygon),
-        // Mirrors the canvas's own InProgressPolygon stroke exactly: the active subject's color,
-        // amber only in the edge case where nothing is selected (drawing is otherwise blocked).
-        color: args.activeSubject ? args.colorFor(args.activeSubject) : "#FFE7B1",
-        dashed: true,
-        label: "drawing",
-        tag: "in_progress",
-      });
-    }
-    if (args.cutStart) {
-      const pts: [number, number][] = args.cursor
-        ? [args.cutStart.point, args.cursor]
-        : [args.cutStart.point];
-      shapes.push({
-        kind: "polyline",
-        points: rPts(pts),
-        color: args.cutStart.color,
-        dashed: true,
-        label: "cut",
-        tag: "in_progress",
-      });
-    }
-    pushPoints();
-    pushProposals();
-    return shapes;
-  }
-
-  // Box mode: the active subject's editable boxes render solid. Point mode draws no box or
-  // derived box, only its own points and the selection carried in from another mode.
-  const boxMode = args.mode === "box";
   args.boxes.forEach((b, i) => {
-    if (!boxMode || b.subject !== args.activeSubject) return;
-    const selected = i === (args.selectedBoxIdx ?? null);
-    const isTool = b.authorship === "tool";
+    const boxFocused = isFocused("box", i);
+    if (!visible("box", b.subject, boxFocused)) return;
     shapes.push({
       kind: "box",
       xyxy: [r1(b.x1), r1(b.y1), r1(b.x2), r1(b.y2)],
-      color: selected ? "#00BFFF" : args.colorFor(b.subject),
-      ...(isTool ? { dashed: true, dash_kind: "tool" as const } : {}),
-      label: authorshipLabel(b.subject, b.authorship),
+      color: outlineColor(b.subject, statuses.boxes[i] ?? null),
+      ...strokeOf(b.authorship, boxFocused),
+      label: boxFocused ? authorshipLabel(b.subject, b.authorship) : undefined,
       tag: "gt",
-      authorship: b.authorship ?? null,
     });
   });
-  // ...plus each active-subject polygon's read-only derived box, mirroring the canvas so the capture
-  // stays faithful. Derived from ringsBbox here (the same min/max the loader
-  // re-derives, over every ring), never a stored box, so it can't be double-counted as its own
-  // annotation. Dashed distinguishes it from a real editable box (solid), the same convention the
-  // in-progress/under-review shapes already use for "not a committed, directly-editable annotation."
-  args.polygons.forEach((p) => {
-    if (!boxMode || p.subject !== args.activeSubject) return;
+  // A polygon's read-only derived box: ringsBbox, never a stored box, never focused or labeled.
+  args.polygons.forEach((p, i) => {
+    if (!visible("derived", p.subject, false)) return;
     const [x1, y1, x2, y2] = ringsBbox(p.rings);
     shapes.push({
       kind: "box",
       xyxy: [r1(x1), r1(y1), r1(x2), r1(y2)],
-      color: args.colorFor(p.subject),
-      dashed: true,
-      dash_kind: "derived",
-      label: authorshipLabel(p.subject, p.authorship),
+      color: outlineColor(p.subject, statuses.polygons[i] ?? null),
+      ...strokeOf(p.authorship, false),
       tag: "gt",
-      authorship: p.authorship ?? null,
     });
   });
-  // The other modes still show the selected polygon (the shape being inspected).
-  const sel = args.selectedPolygonIdx;
-  if (sel !== null && args.polygons[sel]) pushPolygon(args.polygons[sel], true);
+  args.polygons.forEach((p, i) => {
+    const polygonFocused = isFocused("polygon", i);
+    if (!visible("polygon", p.subject, polygonFocused)) return;
+    p.rings.forEach((ring, ri) => {
+      shapes.push({
+        kind: "polygon",
+        points: rPts(ring),
+        color: outlineColor(p.subject, statuses.polygons[i] ?? null),
+        ...strokeOf(p.authorship, polygonFocused),
+        label: ri === 0 && polygonFocused ? authorshipLabel(p.subject, p.authorship) : undefined,
+        tag: "gt",
+      });
+    });
+  });
+  if (args.mode === "polygon" && args.currentPolygon.length > 0) {
+    shapes.push({
+      kind: "polyline",
+      points: rPts(args.currentPolygon),
+      color: args.activeSubject ? args.colorFor(args.activeSubject) : NO_SUBJECT_DRAFT_COLOR,
+      dashed: true,
+      label: "drawing",
+      tag: "in_progress",
+    });
+  }
+  if (args.mode === "polygon" && args.cutStart) {
+    const pts: [number, number][] = args.cursor
+      ? [args.cutStart.point, args.cursor]
+      : [args.cutStart.point];
+    shapes.push({
+      kind: "polyline",
+      points: rPts(pts),
+      color: args.cutStart.color,
+      dashed: true,
+      label: "cut",
+      tag: "in_progress",
+    });
+  }
   if (args.drawingBox) {
     const d = args.drawingBox;
     shapes.push({
@@ -302,8 +269,44 @@ export function buildAnnotateShapes(args: {
       tag: "in_progress",
     });
   }
-  pushPoints();
-  pushProposals();
+  // A point is one mark at one coordinate: one shape entry carrying a single position, never a
+  // path and never a derived box (a fabricated box would read downstream as a real detection).
+  (args.points ?? []).forEach((p, i) => {
+    const pointFocused = isFocused("point", i);
+    if (!visible("point", p.subject, pointFocused)) return;
+    shapes.push({
+      kind: "point",
+      points: [[r1(p.x), r1(p.y)]],
+      color: outlineColor(p.subject, statuses.points[i] ?? null),
+      ...strokeOf(p.authorship, pointFocused),
+      label: pointFocused ? authorshipLabel(p.subject, p.authorship) : undefined,
+      tag: "gt",
+    });
+  });
+  (args.proposals ?? []).forEach((p) => {
+    const proposalFocused = focused?.kind === "proposal" && focused.ref === p.index;
+    const base = {
+      color: outlineColor(p.subject, "undecided"),
+      ...strokeOf("tool", proposalFocused),
+      tag: "proposal",
+    };
+    const label = proposalLabel(p, proposalFocused);
+    const extra = label !== null ? { label } : {};
+    const { boxes, polygons } = annotationsToCanvas([p]);
+    boxes.forEach((b) =>
+      shapes.push({
+        kind: "box",
+        xyxy: [r1(b.x1), r1(b.y1), r1(b.x2), r1(b.y2)],
+        ...base,
+        ...extra,
+      }),
+    );
+    polygons.forEach((poly) =>
+      poly.rings.forEach((ring, i) =>
+        shapes.push({ kind: "polygon", points: rPts(ring), ...base, ...(i === 0 ? extra : {}) }),
+      ),
+    );
+  });
   return shapes;
 }
 

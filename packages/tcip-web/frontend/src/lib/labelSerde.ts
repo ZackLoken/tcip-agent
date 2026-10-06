@@ -19,6 +19,11 @@ function carried(a: CarriedFields): CarriedFields {
   return { iscrowd: a.iscrowd };
 }
 
+/** The load route's facts about an annotation that travel onto its canvas shape and never back. */
+function loaded(a: Annotation): { authorship: string | null; index?: number } {
+  return { authorship: a.authorship ?? null, index: a.index };
+}
+
 export interface CanvasLabels {
   boxes: Box[];
   polygons: PolygonShape[];
@@ -43,7 +48,7 @@ export function annotationsToCanvas(annotations: Annotation[]): CanvasLabels {
         subject: a.subject,
         attributes,
         ...carried(a),
-        authorship: a.authorship ?? null,
+        ...loaded(a),
       });
     } else if (a.bbox) {
       const [x1, y1, x2, y2] = a.bbox;
@@ -55,7 +60,7 @@ export function annotationsToCanvas(annotations: Annotation[]): CanvasLabels {
         subject: a.subject,
         attributes,
         ...carried(a),
-        authorship: a.authorship ?? null,
+        ...loaded(a),
       });
     } else if (a.point) {
       const [x, y] = a.point;
@@ -65,7 +70,7 @@ export function annotationsToCanvas(annotations: Annotation[]): CanvasLabels {
         subject: a.subject,
         attributes,
         ...carried(a),
-        authorship: a.authorship ?? null,
+        ...loaded(a),
       });
     } else {
       imageAnnotations.push({ ...a, attributes });

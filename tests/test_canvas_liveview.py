@@ -288,6 +288,28 @@ def test_render_draws_a_point_shape_and_never_widens_it_to_a_box(tmp_path):
     assert _red_over_green(px, (140, 50)) < 10     # nothing 40px away: no box, fill or outline
 
 
+def test_render_draws_the_focused_shape_with_a_halo_under_its_own_stroke(tmp_path):
+    """The GUI's focus is a halo, never a recolor: a focused shape reaches the agent's view with a
+    wider white stroke beneath its own color, and an unfocused one with nothing around it."""
+    from tcip_annotation.viz import render_canvas_state
+    img = _make_image(tmp_path)
+
+    def rendered(focused: bool) -> Image.Image:
+        halo = {"color": "#FFFFFF", "opacity": 0.55, "width_factor": 3}
+        shapes = [{"kind": "box", "xyxy": [40, 20, 160, 80], "color": "#FF0000",
+                   **({"halo": halo} if focused else {})}]
+        out = render_canvas_state(_pixels(img), shapes, origin=(0, 0), scale=1.0,
+                                  output_path=str(tmp_path / f"focus-{focused}.png"))
+        return Image.open(out).convert("RGB")
+
+    plain, haloed = rendered(False), rendered(True)
+    # One pixel outside the stroke the halo brightens every channel; the plain render does not.
+    beside = (100, 19)
+    assert min(haloed.getpixel(beside)) > min(plain.getpixel(beside)) + 40
+    # The shape's own color still sits on the stroke itself.
+    assert _red_over_green(haloed, (100, 20)) > 40
+
+
 @pytest.mark.parametrize("bad", [
     {"kind": "box", "color": "#FF0000"},
     {"kind": "polygon", "points": [[1, 1]], "color": "#FF0000"},

@@ -7,21 +7,37 @@ import {
   setSubjectColorOverride,
   useSubjectColors,
 } from "@/lib/subjectColors";
+import { FOCUS_HALO, legendRows, type LegendRow } from "@/lib/symbology";
 import { useStore } from "@/store";
 
+/** One row's swatch, drawn with the row's own color and line style, haloed for the focus row. */
+function Swatch({ row }: { row: LegendRow }) {
+  return (
+    <span
+      className={`inline-block h-[13px] w-[18px] shrink-0 rounded-[2px] border-[2.5px] ${
+        row.style === "dotted" ? "border-dotted" : ""
+      }`}
+      style={{
+        borderColor: row.color,
+        boxShadow: row.halo
+          ? `0 0 0 ${FOCUS_HALO.widthFactor}px color-mix(in srgb, ${FOCUS_HALO.color} ${FOCUS_HALO.opacity * 100}%, transparent)`
+          : undefined,
+      }}
+    />
+  );
+}
+
 /** Legend, anchored lower-left of the canvas: reveals on hover, on keyboard focus within it, or
- *  by toggling the Legend button (click, Enter, Space). Lists the dataset's subjects (outline
- *  color = subject, GUI-local) plus the selected-shape blue. In box
- *  mode, an extra row explains the dashed boxes: a polygon's own read-only bounds, not a second
- *  editable annotation. A subject row opens this browser's color picker. */
-export function AnnotateLegend() {
+ *  by toggling the Legend button (click, Enter, Space). Its rows come from the symbology's own
+ *  constants: the review statuses while proposals are shown, else the dataset's subjects (a
+ *  subject row opens this browser's color picker), then the line styles and the focus halo. */
+export function AnnotateLegend({ reviewing }: { reviewing: boolean }) {
   const registry = useStore((s) => s.registry.subjects);
-  const mode = useStore((s) => s.gui.mode);
-  const names = Object.keys(registry);
   useSubjectColors(); // re-render on a recolor so the swatches below never show a stale color
   const [pickerSubject, setPickerSubject] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const panelId = "annotate-legend-panel";
+  const rows = legendRows(Object.keys(registry), reviewing);
   return (
     <div className="group absolute bottom-3 left-3 z-20">
       <button
@@ -53,45 +69,28 @@ export function AnnotateLegend() {
           Annotate Legend
         </h4>
         <ul className="space-y-1.5">
-          {names.map((name) => (
-            <li key={name}>
-              <button
-                type="button"
-                onClick={() => setPickerSubject(name)}
-                title={`Change ${name}'s color (this browser only)`}
-                className="flex w-full items-center gap-2.5 rounded text-[12px] hover:bg-tcip-hover"
-              >
-                <span
-                  className="inline-block h-[13px] w-[18px] shrink-0 rounded-[2px] border-[2.5px]"
-                  style={{ borderColor: subjectColor(name) }}
-                />
-                <span className="text-tcip-fg">{name}</span>
-              </button>
-            </li>
-          ))}
-          <li className="flex items-center gap-2.5 text-[12px]">
-            <span
-              className="inline-block h-[13px] w-[18px] shrink-0 rounded-[2px] border-[2.5px]"
-              style={{ borderColor: "#00BFFF" }}
-            />
-            <span className="text-tcip-fg">Selected</span>
-          </li>
-          {mode === "box" && (
-            <li className="flex items-center gap-2.5 text-[12px]">
-              <span
-                className="inline-block h-[13px] w-[18px] shrink-0 rounded-[2px] border-[2.5px] border-dashed"
-                style={{ borderColor: "currentColor" }}
-              />
-              <span className="text-tcip-muted">Dashed = polygon&apos;s box (read-only)</span>
-            </li>
+          {rows.map((row) =>
+            row.subject ? (
+              <li key={row.text}>
+                <button
+                  type="button"
+                  onClick={() => setPickerSubject(row.subject!)}
+                  title={`Change ${row.subject}'s color (this browser only)`}
+                  className="flex w-full items-center gap-2.5 rounded text-[12px] hover:bg-tcip-hover"
+                >
+                  <Swatch row={row} />
+                  <span className="text-tcip-fg">{row.text}</span>
+                </button>
+              </li>
+            ) : (
+              <li key={row.text} className="flex items-center gap-2.5 text-[12px]">
+                <Swatch row={row} />
+                <span className={row.color === "currentColor" ? "text-tcip-muted" : "text-tcip-fg"}>
+                  {row.text}
+                </span>
+              </li>
+            ),
           )}
-          <li className="flex items-center gap-2.5 text-[12px]">
-            <span
-              className="inline-block h-[13px] w-[18px] shrink-0 rounded-[2px] border-[2.5px] border-dotted"
-              style={{ borderColor: "currentColor" }}
-            />
-            <span className="text-tcip-muted">Dotted = drawn by a tool, not yet accepted</span>
-          </li>
         </ul>
       </div>
       {pickerSubject && (

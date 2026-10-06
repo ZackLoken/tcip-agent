@@ -12,6 +12,7 @@ import { AnnotationShapes } from "@/components/annotate/AnnotationShapes";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
 import { InProgressPolygon } from "@/components/annotate/InProgressPolygon";
 import { ProposalShapes } from "@/components/annotate/ProposalShapes";
+import { ReviewStrip } from "@/components/annotate/ReviewStrip";
 import { SnapIndicator } from "@/components/annotate/SnapIndicator";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
@@ -27,7 +28,20 @@ import { compositeParams } from "@/lib/bandSelection";
 import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
 import type { LoadedImage } from "@/lib/imageLoader";
 import { currentImage } from "@/lib/paths";
-import { fitView } from "@/lib/viewGeometry";
+import {
+  keptItems,
+  nearestNeighborOrder,
+  reviewItems,
+  reviewStatuses,
+  sameItem,
+  scopedOrder,
+  stepTarget,
+  type ItemFilters,
+  type ReviewItem,
+  type StatusScope,
+} from "@/lib/reviewItems";
+import { NO_SUBJECT_DRAFT_COLOR, POINT_HIT_CANVAS, strokeWidths } from "@/lib/symbology";
+import { fitView, zoomToRect } from "@/lib/viewGeometry";
 import {
   buildAnnotateShapes,
   computeViewport,
@@ -55,7 +69,7 @@ import {
   isFinished,
   type Box,
   type PolygonShape,
-  type Proposal,
+  type ServedProposals,
   type SubjectState,
 } from "@/store/types";
 
@@ -66,12 +80,8 @@ type Gestures = Pick<
 >;
 
 const SNAP_RADIUS_CANVAS = 15;
-const VERTEX_HANDLE_RADIUS = 4;
 const EDGE_INSERT_THRESHOLD = 6;
 const STREAM_MIN_DIST_CANVAS = 6; // screen px between vertices laid down in Stream (freehand) mode
-// Screen-px grab radius for a placed point: the whole mark is its own handle, so this matches the
-// mark's outer reach (see the tick geometry in PointOverlay) rather than a hidden smaller target.
-const POINT_HIT_CANVAS = 11;
 
 const contributionsInFlight = new Set<ImageEventPayload>();
 
@@ -103,6 +113,7 @@ export function AnnotateTab() {
   const dataset = useStore((s) => s.gui.dataset);
   const view = useStore((s) => s.gui.view);
   const setView = useStore((s) => s.setView);
+  const setMode = useStore((s) => s.setMode);
   const mode = useStore((s) => s.gui.mode);
   const activeSubject = useStore((s) => s.gui.active_subject);
   // The subject registry (subject -> {description?, attributes?}); drives colors (name-derived,
@@ -153,11 +164,6 @@ export function AnnotateTab() {
   // Box editing (mirrors polygon vertex editing): a selected box shows handles; a press on
   // one starts a corner-resize / move drag. selectedBoxIdx is cleared on image change below.
   const [selectedBoxIdx, setSelectedBoxIdx] = useState<number | null>(null);
-  // Hover indices for hover-only labels, one per shape kind the canvas draws; each is written
-  // only on a transition (see processMoveRef), so a plain move re-renders nothing.
-  const [hoveredBoxIdx, setHoveredBoxIdx] = useState<number | null>(null);
-  const [hoveredDerivedIdx, setHoveredDerivedIdx] = useState<number | null>(null);
-  const [hoveredPointIdx, setHoveredPointIdx] = useState<number | null>(null);
   const boxDragRef = useRef<{ idx: number; drag: EditDrag } | null>(null);
   // Index of the point being dragged. A point has no vertices, so repositioning it is the whole
   // edit: one undo snapshot is taken when the drag starts (see onDown), like a box/vertex drag.
@@ -233,14 +239,14 @@ export function AnnotateTab() {
   // Per image: hiding proposals while annotating is recorded on the mark the person then makes.
   const [hideProposals, setHideProposals] = useState(false);
   const [proposalTick, setProposalTick] = useState(0);
-  const [served, setServed] = useState<{ key: string; proposals: Proposal[] } | null>(null);
+  const [served, setServed] = useState<{ key: string; served: ServedProposals } | null>(null);
   const proposalKey = `${imgPath ?? ""}\0${bucket ?? ""}`;
   useEffect(() => {
     if (!imgPath || !currentImageName || !bucket || hideProposals) return;
     let canceled = false;
     api.annotate.proposals(imgPath, bucket).then(
       (r) => {
-        if (!canceled) setServed({ key: proposalKey, proposals: r.proposals });
+        if (!canceled) setServed({ key: proposalKey, served: r });
       },
       (e: unknown) => {
         if (!canceled)
@@ -254,19 +260,157 @@ export function AnnotateTab() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proposalKey, hideProposals, proposalTick]);
-  const proposals = !hideProposals && served?.key === proposalKey ? served.proposals : [];
+  const reviewing = !!bucket && !hideProposals && served?.key === proposalKey;
+  const proposals = useMemo(() => (reviewing ? served.served.proposals : []), [reviewing, served]);
+  const operatingPoint = reviewing ? served.served.operating_point : null;
+
+  // ── The review path: items, filters, order and focus ───────────────────────
+
+  // The confidence floor starts at the bucket's validated operating point and is the person's
+  // to move, kept per bucket so another bucket starts at its own.
+  const [confidenceEntry, setConfidenceEntry] = useState<{
+    bucket: string;
+    value: number | null;
+  } | null>(null);
+  const [shapeFilter, setShapeFilter] = useState<ItemFilters["shape"]>("all");
+  const [scope, setScope] = useState<StatusScope>("all");
+  const filters: ItemFilters = {
+    confidence:
+      confidenceEntry?.bucket === bucket ? confidenceEntry.value : (operatingPoint?.conf ?? null),
+    shape: shapeFilter,
+  };
+  function setFilters(next: ItemFilters) {
+    setShapeFilter(next.shape);
+    if (bucket) setConfidenceEntry({ bucket, value: next.confidence });
+  }
+  const statuses = useMemo(
+    () => reviewStatuses(canvas, proposals, reviewing),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [canvas.boxes, canvas.polygons, canvas.points, proposals, reviewing],
+  );
+  const items = useMemo(
+    () => reviewItems(canvas, proposals, reviewing),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [canvas.boxes, canvas.polygons, canvas.points, proposals, reviewing],
+  );
+  const kept = useMemo(
+    () => keptItems(items, filters),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, filters.confidence, filters.shape],
+  );
+  const order = useMemo(() => scopedOrder(nearestNeighborOrder(kept), scope), [kept, scope]);
+  const shownProposals = useMemo(() => {
+    const shown = new Set(kept.filter((i) => i.kind === "proposal").map((i) => i.ref));
+    return proposals.filter((p) => shown.has(p.index));
+  }, [kept, proposals]);
+
   const focusedProposal = useStore((s) => s.annotateUi.focusedProposal);
   const [selectedProposal, setSelectedProposal] = useState<number | null>(null);
+  // One focused item at a time: focusing a box or a proposal drops every other selection, and
+  // a polygon or point selected on the canvas drops the box and the proposal.
+  function selectBox(idx: number | null) {
+    setSelectedBoxIdx(idx);
+    if (idx !== null) {
+      selectPolygon(null);
+      selectPoint(null);
+      setSelectedProposal(null);
+    }
+  }
+  function selectProposal(index: number | null) {
+    setSelectedProposal(index);
+    if (index !== null) {
+      setSelectedBoxIdx(null);
+      selectPolygon(null);
+      selectPoint(null);
+    }
+  }
   useEffect(() => {
-    setSelectedProposal(focusedProposal);
+    if (canvas.selectedPolygonIdx !== null || canvas.selectedPointIdx !== null) {
+      setSelectedBoxIdx(null);
+      setSelectedProposal(null);
+    }
+  }, [canvas.selectedPolygonIdx, canvas.selectedPointIdx]);
+  useEffect(() => {
+    selectProposal(focusedProposal);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusedProposal, currentImageName]);
-  const pending = proposals.filter((p) => p.decision === null);
+  const focused: ReviewItem | null = useMemo(() => {
+    const find = (kind: ReviewItem["kind"], shape: ReviewItem["shape"] | null, ref: number) =>
+      items.find(
+        (i) => i.kind === kind && (shape === null || i.shape === shape) && i.ref === ref,
+      ) ?? null;
+    if (selectedProposal !== null) return find("proposal", null, selectedProposal);
+    if (selectedBoxIdx !== null) return find("annotation", "box", selectedBoxIdx);
+    if (canvas.selectedPolygonIdx !== null)
+      return find("annotation", "polygon", canvas.selectedPolygonIdx);
+    if (canvas.selectedPointIdx !== null)
+      return find("annotation", "point", canvas.selectedPointIdx);
+    return null;
+  }, [items, selectedProposal, selectedBoxIdx, canvas.selectedPolygonIdx, canvas.selectedPointIdx]);
+
+  /** Focus one item: select it, make its subject active and zoom the view to it, padded by its
+   *  own extent (a point by a fortieth of the image's longer side, since it has none). */
+  function focusItem(item: ReviewItem) {
+    if (item.kind === "proposal") selectProposal(item.ref);
+    else if (item.shape === "box") selectBox(item.ref);
+    else if (item.shape === "polygon") selectPolygon(item.ref);
+    else selectPoint(item.ref);
+    setActiveSubject(item.subject);
+    const host = measureCanvasHost();
+    if (!host || canvas.imgWidth <= 0 || canvas.imgHeight <= 0) return;
+    const [x0, y0, x1, y1] = item.bbox;
+    const pad = Math.max(x1 - x0, y1 - y0, Math.max(canvas.imgWidth, canvas.imgHeight) / 40);
+    setView(
+      zoomToRect(
+        { x0, y0, x1, y1 },
+        { host, imgW: canvas.imgWidth, imgH: canvas.imgHeight, padX: pad, padY: pad },
+      ),
+    );
+  }
+
+  function stepItem(delta: number) {
+    const next = stepTarget(order, focused, delta);
+    if (next) focusItem(next);
+  }
+
+  function jumpToItem(oneBased: number) {
+    const target = order[Math.max(1, Math.min(order.length, oneBased)) - 1];
+    if (target) focusItem(target);
+  }
+
+  const position = order.findIndex((item) => sameItem(item, focused)) + 1;
+  const undecidedKept = kept.filter((item) => item.status === "undecided");
 
   function decide(action: "accept" | "reject") {
     const target =
-      proposals.find((p) => p.index === selectedProposal && p.decision === null) ?? pending[0];
+      focused?.kind === "proposal" ? focused : undecidedKept.find((i) => i.kind === "proposal");
     if (!target || !bucket) return;
-    void save({ gestures: { bucket, [action]: [target.index] } });
+    void save({ gestures: { bucket, [action]: [target.ref] } });
+  }
+
+  /** Edit the focused item: an annotation opens its tool mode; a proposal pairing with an
+   *  annotation focuses that annotation; an unpaired proposal is accepted first, and the
+   *  annotation the save appended (the document's last) is then focused. */
+  async function edit() {
+    if (!focused) return;
+    if (focused.kind === "annotation") {
+      setMode(focused.shape);
+      return;
+    }
+    const proposal = proposals.find((p) => p.index === focused.ref);
+    if (!proposal || !bucket) return;
+    if (proposal.paired === null) await save({ gestures: { bucket, accept: [proposal.index] } });
+    const saved = reviewItems(useStore.getState().canvas, [], false);
+    const wanted =
+      proposal.paired !== null
+        ? saved.find((i) => i.index === proposal.paired)
+        : saved.reduce<ReviewItem | undefined>(
+            (last, i) => ((i.index ?? -1) > (last?.index ?? -1) ? i : last),
+            undefined,
+          );
+    if (!wanted) return;
+    focusItem(wanted);
+    setMode(wanted.shape);
   }
 
   async function markComplete(next: boolean, rect?: [number, number, number, number]) {
@@ -291,9 +435,6 @@ export function AnnotateTab() {
   useEffect(() => {
     setHideProposals(false);
     setSelectedBoxIdx(null);
-    setHoveredBoxIdx(null);
-    setHoveredDerivedIdx(null);
-    setHoveredPointIdx(null);
     boxDragRef.current = null;
     pointDragRef.current = null;
     streamingRef.current = false;
@@ -358,9 +499,8 @@ export function AnnotateTab() {
         points: canvas.points,
         currentPolygon: canvas.currentPolygon,
         drawingBox: drawing,
-        selectedPolygonIdx: canvas.selectedPolygonIdx,
-        selectedBoxIdx,
-        selectedPointIdx: canvas.selectedPointIdx,
+        focused,
+        statuses,
         mode,
         activeSubject: activeSubject ?? "",
         visible: annotateUi.visible,
@@ -369,8 +509,7 @@ export function AnnotateTab() {
           ? { point: cutStart.point, color: subjectColor(cutStart.polygon.subject) }
           : null,
         cursor,
-        proposals: pending,
-        selectedProposal,
+        proposals: shownProposals,
       }),
     };
   };
@@ -403,9 +542,9 @@ export function AnnotateTab() {
     annotateUi.draggingVertex,
     drawing,
     cutStart,
-    served,
-    hideProposals,
-    selectedProposal,
+    shownProposals,
+    statuses,
+    focused,
   ]);
   useEffect(() => {
     canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), false);
@@ -673,23 +812,18 @@ export function AnnotateTab() {
     { keys: K.redo.keys, action: () => redo() },
     { keys: K.redoAlias.keys, action: () => redo() },
     { keys: K.save.keys, action: () => void save() },
-    { keys: K.mode.keys, action: () => useStore.getState().setMode(nextMode(mode)) },
-    { keys: K.accept.keys, action: () => decide("accept"), when: () => pending.length > 0 },
-    { keys: K.reject.keys, action: () => decide("reject"), when: () => pending.length > 0 },
+    { keys: K.mode.keys, action: () => setMode(nextMode(mode)) },
+    { keys: K.accept.keys, action: () => decide("accept"), when: () => undecidedKept.length > 0 },
+    { keys: K.reject.keys, action: () => decide("reject"), when: () => undecidedKept.length > 0 },
+    { keys: K.edit.keys, action: () => void edit(), when: () => focused !== null },
+    { keys: K.nextItem.keys, action: () => stepItem(1), when: () => order.length > 0 },
+    { keys: K.previousItem.keys, action: () => stepItem(-1), when: () => order.length > 0 },
     {
       keys: K.complete.keys,
       action: () => markComplete(!subjectFinished),
       when: () => !!dataset.subject && subjectState !== null,
     },
     { keys: K.hideProposals.keys, action: () => setHideProposals((h) => !h), when: () => !!bucket },
-    {
-      keys: K.nextProposal.keys,
-      action: () => {
-        const at = pending.findIndex((p) => p.index === selectedProposal);
-        setSelectedProposal(pending[(at + 1) % pending.length].index);
-      },
-      when: () => pending.length > 0,
-    },
     {
       keys: K.stream.keys,
       action: () => useStore.getState().setStream(!annotateUi.stream),
@@ -708,11 +842,13 @@ export function AnnotateTab() {
     {
       keys: K.delete.keys,
       action: () => {
-        if (canvas.selectedPolygonIdx !== null) deletePolygon(canvas.selectedPolygonIdx);
-        else if (selectedBoxIdx !== null) {
-          deleteBox(selectedBoxIdx);
-          setSelectedBoxIdx(null);
-        } else if (canvas.selectedPointIdx !== null) deletePoint(canvas.selectedPointIdx);
+        if (focused?.kind !== "annotation") return;
+        if (focused.shape === "polygon") deletePolygon(focused.ref);
+        else if (focused.shape === "point") deletePoint(focused.ref);
+        else {
+          deleteBox(focused.ref);
+          selectBox(null);
+        }
       },
     },
     {
@@ -721,8 +857,9 @@ export function AnnotateTab() {
         setCurrentPolygon([]);
         setDrawing(null);
         selectPolygon(null);
-        setSelectedBoxIdx(null);
+        selectBox(null);
         selectPoint(null);
+        selectProposal(null);
         setCutStart(null);
         useStore.getState().setCut(false);
       },
@@ -837,11 +974,11 @@ export function AnnotateTab() {
       for (let i = canvas.boxes.length - 1; i >= 0; i--) {
         const b = canvas.boxes[i];
         if (b.subject === activeSubject && ix >= b.x1 && ix <= b.x2 && iy >= b.y1 && iy <= b.y2) {
-          setSelectedBoxIdx(i);
+          selectBox(i);
           return;
         }
       }
-      setSelectedBoxIdx(null);
+      selectBox(null);
       if (!requireSubject()) return;
       const cx = Math.max(0, Math.min(canvas.imgWidth || ix, ix));
       const cy = Math.max(0, Math.min(canvas.imgHeight || iy, iy));
@@ -999,38 +1136,6 @@ export function AnnotateTab() {
     if (mode === "polygon" && canvas.currentPolygon.length === 0) {
       const hover = findHoveredPolygon([ix, iy], canvas.polygons, polygonBboxes);
       if (hover !== annotateUi.hoveredPolygonIdx) setHoveredPolygon(hover);
-    }
-
-    // Box and derived-box hover join the same pass, with the box itself as the prefilter;
-    // state writes only on transitions, so a plain move re-renders nothing.
-    if (mode === "box") {
-      let hoverBox: number | null = null;
-      for (let i = canvas.boxes.length - 1; i >= 0; i--) {
-        const b = canvas.boxes[i];
-        if (b.subject === activeSubject && ix >= b.x1 && ix <= b.x2 && iy >= b.y1 && iy <= b.y2) {
-          hoverBox = i;
-          break;
-        }
-      }
-      let hoverDerived: number | null = null;
-      if (hoverBox === null) {
-        for (let i = canvas.polygons.length - 1; i >= 0; i--) {
-          if (canvas.polygons[i].subject !== activeSubject) continue;
-          const bb = polygonBboxes[i];
-          if (bb && ix >= bb[0] && iy >= bb[1] && ix <= bb[2] && iy <= bb[3]) {
-            hoverDerived = i;
-            break;
-          }
-        }
-      }
-      if (hoverBox !== hoveredBoxIdx) setHoveredBoxIdx(hoverBox);
-      if (hoverDerived !== hoveredDerivedIdx) setHoveredDerivedIdx(hoverDerived);
-    }
-
-    // Point hover: the proximity check is the whole hit test, same radius as the grab target.
-    if (mode === "point") {
-      const hover = findHitPoint([ix, iy], canvas.points, POINT_HIT_CANVAS / (view.scale || 1));
-      if (hover !== hoveredPointIdx) setHoveredPointIdx(hover);
     }
   };
 
@@ -1349,23 +1454,8 @@ export function AnnotateTab() {
   // ── Symbology (scale-dependent) ─────────────────────────────────────
 
   const s = view.scale || 1;
-  const scaleLineW = 1 / s;
-  const boxStroke = Math.max(1, Math.min(2 + s * 0.5, 6)) * scaleLineW;
-  const polyStroke = Math.max(1, Math.min(2.5 + s * 0.5, 7)) * scaleLineW;
-  // Both radii resolve in screen px, then compensate by 1/s exactly once: mixing the
-  // spaces here once made selected handles grow 1/s² and blanket the frame at fit zoom.
-  const vertScreen = Math.max(3, Math.min(VERTEX_HANDLE_RADIUS * (1.6 - s * 0.2), 12));
-  const selScreen = Math.max(vertScreen + 1, Math.min(VERTEX_HANDLE_RADIUS * (2.2 - s * 0.2), 16));
-  const vertR = vertScreen * scaleLineW;
-  const selVertR = selScreen * scaleLineW;
-  const labelSize = Math.max(8, Math.min(Math.round(9 * (0.6 + s * 0.4)), 18)) * scaleLineW;
-  // A point's mark is fixed in screen px (resolved once, then 1/s like every other radius here): the
-  // annotation asserts a location and no extent, so its glyph must not grow with the image and imply
-  // one. The ticks reach past the core to POINT_HIT_CANVAS: the mark is the grab target.
-  const pointCoreR = 3.5 * scaleLineW;
-  const pointSelCoreR = 5 * scaleLineW;
-  const pointTickInner = 6.5 * scaleLineW;
-  const pointTickOuter = POINT_HIT_CANVAS * scaleLineW;
+  const widths = strokeWidths(s);
+  const { scaleLineW, boxStroke, polyStroke, vertR } = widths;
 
   if (!imgPath || !currentImageName) {
     return (
@@ -1376,8 +1466,6 @@ export function AnnotateTab() {
           dirty={canvas.dirty}
           subjectState={null}
           onComplete={markComplete}
-          hideProposals={hideProposals}
-          onHideProposals={setHideProposals}
         />
         <div className="flex-1 flex items-center justify-center bg-tcip-canvas px-4">
           <div className="max-w-lg rounded-lg border border-tcip-border bg-tcip-panel px-5 py-4 text-center">
@@ -1410,8 +1498,26 @@ export function AnnotateTab() {
         subjectState={subjectState}
         onComplete={markComplete}
         onCompleteView={viewIsRegion && viewRect ? () => markComplete(true, viewRect) : undefined}
-        hideProposals={hideProposals}
-        onHideProposals={setHideProposals}
+      />
+      <ReviewStrip
+        bucket={bucket ?? null}
+        proposalsShown={!hideProposals}
+        reviewing={reviewing}
+        onProposalsShown={(shown) => setHideProposals(!shown)}
+        operatingPoint={operatingPoint}
+        filters={filters}
+        onFilters={setFilters}
+        scope={scope}
+        onScope={setScope}
+        counts={{ items: kept.length, undecided: undecidedKept.length }}
+        focused={focused}
+        position={position}
+        total={order.length}
+        onStep={stepItem}
+        onJump={jumpToItem}
+        onAccept={() => decide("accept")}
+        onEdit={() => void edit()}
+        onReject={() => decide("reject")}
       />
       <div className="relative flex-1 flex flex-col min-h-0">
         <CanvasStage
@@ -1435,7 +1541,7 @@ export function AnnotateTab() {
                 <InProgressPolygon
                   points={canvas.currentPolygon}
                   cursor={cursor}
-                  stroke={activeSubject ? subjectColor(activeSubject) : "#FFE7B1"}
+                  stroke={activeSubject ? subjectColor(activeSubject) : NO_SUBJECT_DRAFT_COLOR}
                   strokeW={polyStroke}
                   vertR={vertR}
                 />
@@ -1478,12 +1584,7 @@ export function AnnotateTab() {
           }
         >
           {renderLabels && (
-            <ProposalShapes
-              proposals={pending}
-              selected={selectedProposal}
-              strokeW={boxStroke}
-              scaleLineW={scaleLineW}
-            />
+            <ProposalShapes proposals={shownProposals} focused={focused} widths={widths} />
           )}
           {/* Committed shapes: memoized, cursor-independent (see AnnotationShapes) */}
           <AnnotationShapes
@@ -1492,25 +1593,12 @@ export function AnnotateTab() {
             points={canvas.points}
             mode={mode}
             activeSubject={activeSubject}
-            selectedPolygonIdx={canvas.selectedPolygonIdx}
-            selectedBoxIdx={selectedBoxIdx}
-            selectedPointIdx={canvas.selectedPointIdx}
+            statuses={statuses}
+            focused={focused}
             hoveredIdx={hoveredIdx}
-            hoveredBoxIdx={hoveredBoxIdx}
-            hoveredDerivedIdx={hoveredDerivedIdx}
-            hoveredPointIdx={hoveredPointIdx}
             draggingIdx={draggingIdx}
             renderLabels={renderLabels}
-            boxStroke={boxStroke}
-            polyStroke={polyStroke}
-            vertR={vertR}
-            selVertR={selVertR}
-            labelSize={labelSize}
-            pointCoreR={pointCoreR}
-            pointSelCoreR={pointSelCoreR}
-            pointTickInner={pointTickInner}
-            pointTickOuter={pointTickOuter}
-            scaleLineW={scaleLineW}
+            widths={widths}
           />
         </CanvasStage>
 
@@ -1548,21 +1636,9 @@ export function AnnotateTab() {
           Overview
         </button>
 
-        <AttributePanel selectedBoxIdx={mode === "box" ? selectedBoxIdx : null} />
+        <AttributePanel focused={focused} />
 
-        <AnnotateLegend />
-
-        {pending.length > 0 && (
-          <div className="absolute bottom-3 right-3 z-20 flex items-center gap-2 rounded-md border border-tcip-border bg-tcip-panel/95 px-3 py-1.5 text-[11px] text-tcip-fg">
-            <span className="font-mono text-tcip-muted">{pending.length} proposals to decide</span>
-            <button type="button" className="tcip-btn text-[11px]" onClick={() => decide("accept")}>
-              Accept (a)
-            </button>
-            <button type="button" className="tcip-btn text-[11px]" onClick={() => decide("reject")}>
-              Reject (r)
-            </button>
-          </div>
-        )}
+        <AnnotateLegend reviewing={reviewing} />
       </div>
     </div>
   );

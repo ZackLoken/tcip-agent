@@ -4,6 +4,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 
 import { api } from "@/api/client";
 import type { SaveResult } from "@/api/client";
+import { FOCUS_HALO, REVIEW_STATUSES, STATUS_COLORS, STATUS_WORDS } from "@/lib/symbology";
+import type { ServedProposals } from "@/store/types";
 import { subjectsApi, subjectColor } from "@/api/subjects";
 import * as canvasSync from "@/lib/canvasSync";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
@@ -20,16 +22,22 @@ import { openTestProject } from "@/test/store";
 vi.mock("konva", () => ({ default: {} }));
 vi.mock("react-konva", () => ({
   Group: (props: { children?: React.ReactNode }) => <>{props.children}</>,
-  Rect: (props: { stroke?: string; dash?: number[]; fill?: string }) => (
+  Rect: (props: { stroke?: string; dash?: number[]; fill?: string; opacity?: number }) => (
     <div
       data-testid="k-rect"
       data-stroke={props.stroke}
       data-dash={props.dash ? "true" : undefined}
       data-fill={props.fill}
+      data-opacity={props.opacity}
     />
   ),
-  Line: (props: { stroke?: string; points?: number[] }) => (
-    <div data-testid="k-line" data-stroke={props.stroke} data-points={props.points?.join(",")} />
+  Line: (props: { stroke?: string; points?: number[]; opacity?: number }) => (
+    <div
+      data-testid="k-line"
+      data-stroke={props.stroke}
+      data-points={props.points?.join(",")}
+      data-opacity={props.opacity}
+    />
   ),
   Circle: (props: { x?: number; y?: number; fill?: string; radius?: number }) => (
     <div
@@ -88,8 +96,6 @@ vi.mock("@/components/AnnotateToolbar", () => ({
     bandsInfo?: { band_count: number } | null;
     subjectState: string | null;
     onComplete: (next: boolean) => void;
-    hideProposals: boolean;
-    onHideProposals: (next: boolean) => void;
   }) => (
     <div
       data-testid="toolbar"
@@ -97,10 +103,12 @@ vi.mock("@/components/AnnotateToolbar", () => ({
       data-subject-state={props.subjectState ?? ""}
     >
       <button onClick={() => props.onComplete(true)}>toolbar-complete</button>
-      <button onClick={() => props.onHideProposals(!props.hideProposals)}>toolbar-hide</button>
     </div>
   ),
 }));
+
+// The review strip's proposals toggle, the one place proposals are shown or hidden.
+const toggleProposals = () => fireEvent.click(screen.getByRole("checkbox", { name: "Proposals" }));
 
 const initialStoreState = useStore.getState();
 
@@ -403,7 +411,7 @@ describe("AnnotateTab subject rendering", () => {
     expect(screen.getAllByTestId("k-text")[0]).toHaveAttribute("data-text", "tip");
   });
 
-  it("box mode draws an active-subject polygon's read-only derived box (dashed, no handles), never a stored box", async () => {
+  it("box mode draws an active-subject polygon's read-only derived box (no handles), never a stored box", async () => {
     useStore.getState().setRegistry({ subject_a: {} });
     const poly = {
       rings: [
@@ -424,18 +432,16 @@ describe("AnnotateTab subject rendering", () => {
     await flush();
 
     // Box mode (setupDataset). The polygon shows only its derived box: a single Rect with no corner
-    // handles (handles are extra Rects), and it never entered canvas.boxes, so unsaveable. Dashed
-    // distinguishes it from a real editable box (solid), the same convention in-progress/
-    // under-review shapes already use, not read-only enforcement (that's structural).
+    // handles (handles are extra Rects), never in canvas.boxes, so unsaveable; read-only is structural.
     const rects = screen.getAllByTestId("k-rect");
     expect(rects).toHaveLength(1);
-    expect(rects[0]).toHaveAttribute("data-dash", "true");
+    expect(rects[0]).not.toHaveAttribute("data-dash");
     expect(rects[0]).toHaveAttribute("data-stroke", subjectColor("subject_a"));
     expect(useStore.getState().canvas.boxes).toHaveLength(0);
     expect(useStore.getState().canvas.polygons).toHaveLength(1);
   });
 
-  it("a tool-authored polygon's derived box in box mode still names itself by authorship", async () => {
+  it("a tool-authored polygon's derived box draws in the polygon's own line style, unlabeled", async () => {
     useStore.getState().setRegistry({ subject_a: {} });
     const poly = {
       rings: [
@@ -456,21 +462,15 @@ describe("AnnotateTab subject rendering", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
-    // Still the derived dash, never the tool's own pattern (one channel can't carry both), but
-    // the hover label still names the polygon's own authorship, like every other shape's does.
+    // Line style says whose shape it is: the derived box is the tool's polygon's, so it draws
+    // dotted like the polygon; it is no item of its own, so nothing labels it.
     const rects = screen.getAllByTestId("k-rect");
     expect(rects).toHaveLength(1);
     expect(rects[0]).toHaveAttribute("data-dash", "true");
-    fireEvent.mouseMove(screen.getByTestId("canvas-stage"), { clientX: 3, clientY: 3 });
-    await act(async () => void (await new Promise((r) => setTimeout(r, 25))));
-    expect(
-      screen
-        .getAllByTestId("k-text")
-        .some((t) => t.getAttribute("data-text") === "subject_a, tool"),
-    ).toBe(true);
+    expect(screen.queryAllByTestId("k-text")).toHaveLength(0);
   });
 
-  it("box mode still draws a real editable box solid, distinct from a derived one", async () => {
+  it("box mode draws a person's editable box solid and a person's polygon's derived box solid too", async () => {
     useStore.getState().setRegistry({ subject_a: {} });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -556,7 +556,7 @@ describe("AnnotateTab subject rendering", () => {
 });
 
 describe("AnnotateTab authorship symbology", () => {
-  it("a tool's own box draws dotted and names itself on hover; the other three stay solid", async () => {
+  it("a tool's own box draws dotted and names itself when focused; the other three stay solid", async () => {
     useStore.getState().setRegistry({ subject_a: {} });
     loadSpy.mockImplementation((imagePath) =>
       Promise.resolve({
@@ -612,10 +612,13 @@ describe("AnnotateTab authorship symbology", () => {
     expect(rects[2]).not.toHaveAttribute("data-dash"); // tool_accepted: solid
     expect(rects[3]).not.toHaveAttribute("data-dash"); // unattributed: solid
 
-    // Hovering the tool box names it with the authorship it draws with (the move handler is
-    // rAF-throttled, so a real timer tick must land before the hover state updates).
-    fireEvent.mouseMove(screen.getByTestId("canvas-stage"), { clientX: 30, clientY: 30 });
-    await act(async () => void (await new Promise((r) => setTimeout(r, 25))));
+    // Focusing the tool box (a press inside it) names it with the authorship it draws with.
+    fireEvent.mouseDown(screen.getByTestId("canvas-stage"), {
+      clientX: 30,
+      clientY: 30,
+      button: 0,
+    });
+    await flush();
     expect(
       screen
         .getAllByTestId("k-text")
@@ -629,7 +632,7 @@ describe("AnnotateTab authorship symbology", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
-    expect(screen.getByText("Dotted = drawn by a tool, not yet accepted")).toBeInTheDocument();
+    expect(screen.getByText("Dotted: drawn by a tool, not yet accepted")).toBeInTheDocument();
   });
 });
 
@@ -1059,18 +1062,25 @@ describe("AnnotateTab labels-written conflict sentence", () => {
 });
 
 describe("AnnotateTab legend", () => {
-  it("explains the dashed derived box only in box mode", async () => {
+  it("lists the subjects until proposals are shown, then the review statuses", async () => {
     useStore.getState().setRegistry({ subject_a: {} });
+    const proposalsSpy = withBucket();
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
+    await waitFor(() => expect(proposalsSpy).toHaveBeenCalled());
+    await flush();
 
-    // Box mode (setupDataset default): the legend button is hover-revealed, so query its content
-    // directly rather than simulating hover.
-    expect(screen.getByText("Dashed = polygon's box (read-only)")).toBeInTheDocument();
+    // The legend button is hover-revealed, so query its content directly.
+    for (const status of REVIEW_STATUSES) {
+      expect(screen.getByText(STATUS_WORDS[status])).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("button", { name: "subject_a" })).not.toBeInTheDocument();
 
-    act(() => useStore.getState().setMode("polygon"));
-    expect(screen.queryByText("Dashed = polygon's box (read-only)")).not.toBeInTheDocument();
+    toggleProposals();
+    await flush();
+    expect(screen.getByRole("button", { name: "subject_a" })).toBeInTheDocument();
+    expect(screen.queryByText(STATUS_WORDS.undecided)).not.toBeInTheDocument();
   });
 
   it("a recolored subject's box stroke and the pushed canvas_meta swatch both follow", async () => {
@@ -1083,7 +1093,7 @@ describe("AnnotateTab legend", () => {
     expect(screen.getByTestId("k-rect")).toHaveAttribute("data-stroke", subjectColor("subject_a"));
 
     fireEvent.click(screen.getByRole("button", { name: "subject_a" }));
-    const hexInput = screen.getByRole("textbox");
+    const hexInput = screen.getByRole("textbox", { name: "hex color" });
     fireEvent.change(hexInput, { target: { value: "#123456" } });
     fireEvent.keyDown(hexInput, { key: "Enter" });
     fireEvent.click(screen.getByRole("button", { name: "OK" }));
@@ -1647,9 +1657,9 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
   });
 });
 
-describe("AnnotateTab labels show on selection or hover only", () => {
+describe("AnnotateTab labels show on the focused item only", () => {
   // The legend is the standing symbology reference; a committed shape is named on the canvas
-  // only while it is selected or hovered, for every shape kind.
+  // only while it is the focused item, never on hover, for every shape kind.
   const stage = () => screen.getByTestId("canvas-stage");
   const frame = () => act(async () => void (await new Promise((r) => setTimeout(r, 25))));
   const labelsNamed = (name: string) =>
@@ -1660,7 +1670,7 @@ describe("AnnotateTab labels show on selection or hover only", () => {
     useStore.setState((s) => ({ gui: { ...s.gui, mode, active_subject: "tip" } }));
   }
 
-  it("a box is unlabeled at rest, labeled while hovered, labeled while selected", async () => {
+  it("a box is unlabeled at rest and under the cursor, labeled while focused", async () => {
     setupSubject("box");
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -1675,18 +1685,14 @@ describe("AnnotateTab labels show on selection or hover only", () => {
 
     fireEvent.mouseMove(stage(), { clientX: 30, clientY: 30 });
     await frame();
-    expect(labelsNamed("tip").length).toBeGreaterThan(0);
-
-    fireEvent.mouseMove(stage(), { clientX: 500, clientY: 500 });
-    await frame();
     expect(labelsNamed("tip")).toHaveLength(0);
 
-    fireEvent.mouseDown(stage(), { clientX: 30, clientY: 30, button: 0 }); // press inside selects
+    fireEvent.mouseDown(stage(), { clientX: 30, clientY: 30, button: 0 }); // press inside focuses
     await flush();
     expect(labelsNamed("tip").length).toBeGreaterThan(0);
   });
 
-  it("a polygon is unlabeled at rest, labeled while hovered, labeled while selected", async () => {
+  it("a polygon is unlabeled at rest and under the cursor, labeled while focused", async () => {
     setupSubject("polygon");
     loadSpy.mockImplementation((imagePath) =>
       Promise.resolve({
@@ -1715,18 +1721,14 @@ describe("AnnotateTab labels show on selection or hover only", () => {
 
     fireEvent.mouseMove(stage(), { clientX: 200, clientY: 200 });
     await frame();
-    expect(labelsNamed("tip").length).toBeGreaterThan(0);
-
-    fireEvent.mouseMove(stage(), { clientX: 500, clientY: 500 });
-    await frame();
     expect(labelsNamed("tip")).toHaveLength(0);
 
-    fireEvent.click(stage(), { clientX: 200, clientY: 200 }); // click inside selects
+    fireEvent.click(stage(), { clientX: 200, clientY: 200 }); // click inside focuses
     await flush();
     expect(labelsNamed("tip").length).toBeGreaterThan(0);
   });
 
-  it("a point is unlabeled at rest, labeled while hovered, labeled while selected", async () => {
+  it("a point is unlabeled at rest and under the cursor, labeled while focused", async () => {
     setupSubject("point");
     loadSpy.mockImplementation((imagePath) =>
       Promise.resolve({
@@ -1742,13 +1744,9 @@ describe("AnnotateTab labels show on selection or hover only", () => {
 
     fireEvent.mouseMove(stage(), { clientX: 102, clientY: 101 });
     await frame();
-    expect(labelsNamed("tip").length).toBeGreaterThan(0);
-
-    fireEvent.mouseMove(stage(), { clientX: 500, clientY: 500 });
-    await frame();
     expect(labelsNamed("tip")).toHaveLength(0);
 
-    fireEvent.mouseDown(stage(), { clientX: 100, clientY: 100, button: 0 }); // press selects
+    fireEvent.mouseDown(stage(), { clientX: 100, clientY: 100, button: 0 }); // press focuses
     fireEvent.mouseUp(stage(), { clientX: 100, clientY: 100 });
     await flush();
     expect(labelsNamed("tip").length).toBeGreaterThan(0);
@@ -1788,8 +1786,9 @@ describe("AnnotateTab canvas push names its project", () => {
 });
 
 const BUCKET = "m1/2026-01-01";
-const PROPOSALS = {
+const PROPOSALS: ServedProposals = {
   bucket: BUCKET,
+  operating_point: { conf: 0.5, reason: "" },
   proposals: [
     {
       subject: "subject_a",
@@ -1800,7 +1799,6 @@ const PROPOSALS = {
       index: 0,
       paired: null,
       decision: null,
-      admitted: false,
     },
   ],
 };
@@ -1848,7 +1846,7 @@ describe("AnnotateTab completion marks", () => {
     withBucket();
     await mountTab();
 
-    fireEvent.click(screen.getByText("toolbar-hide"));
+    toggleProposals();
     await flush();
     fireEvent.click(screen.getByText("toolbar-complete"));
     await flush();
@@ -1864,7 +1862,7 @@ describe("AnnotateTab proposals", () => {
     await waitFor(() => expect(dottedRects()).toHaveLength(1));
     expect(proposalsSpy).toHaveBeenCalledWith("C:/data/images/2026-01-01/img1.jpg", BUCKET);
 
-    fireEvent.click(screen.getByText("toolbar-hide"));
+    toggleProposals();
     await flush();
     expect(dottedRects()).toHaveLength(0);
     act(() => {
@@ -1892,6 +1890,154 @@ describe("AnnotateTab proposals", () => {
       await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
     },
   );
+});
+
+describe("AnnotateTab review symbology", () => {
+  const twoBoxes = () => [
+    { x1: 10, y1: 10, x2: 50, y2: 50, subject: "subject_a", attributes: {}, index: 0 },
+    { x1: 300, y1: 300, x2: 340, y2: 340, subject: "subject_a", attributes: {}, index: 1 },
+  ];
+  const served = (): ServedProposals => ({
+    bucket: BUCKET,
+    operating_point: { conf: 0.5, reason: "" },
+    proposals: [
+      { ...PROPOSALS.proposals[0], index: 0, paired: 0, decision: "accepted" },
+      {
+        ...PROPOSALS.proposals[0],
+        index: 1,
+        bbox: [600, 600, 640, 640] as [number, number, number, number],
+        score: 0.9,
+      },
+      {
+        ...PROPOSALS.proposals[0],
+        index: 2,
+        bbox: [700, 100, 740, 140] as [number, number, number, number],
+        score: 0.2,
+      },
+    ],
+  });
+  const strokes = () => screen.getAllByTestId("k-rect").map((r) => r.getAttribute("data-stroke"));
+
+  async function mountReviewing() {
+    loadSpy.mockImplementation((imagePath) =>
+      Promise.resolve({ ...labelsFor(imagePath), boxes: twoBoxes() }),
+    );
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, bucket: BUCKET } },
+    }));
+    const proposalsSpy = vi.spyOn(api.annotate, "proposals").mockResolvedValue(served());
+    await mountTab();
+    await waitFor(() => expect(proposalsSpy).toHaveBeenCalled());
+    await flush();
+    return proposalsSpy;
+  }
+
+  it("outline color says review status while proposals are shown and subject otherwise", async () => {
+    await mountReviewing();
+    // Box 0 is confirmed, box 1 nothing pairs with; the undecided proposal above the floor shows.
+    expect(strokes()).toEqual([
+      STATUS_COLORS.undecided,
+      STATUS_COLORS.confirmed,
+      STATUS_COLORS.unproposed,
+    ]);
+
+    toggleProposals();
+    await flush();
+    expect(strokes()).toEqual([subjectColor("subject_a"), subjectColor("subject_a")]);
+  });
+
+  it("the confidence floor starts at the operating point and the person moves it", async () => {
+    await mountReviewing();
+    const floor = screen.getByRole("spinbutton", { name: "Confidence floor" });
+    expect(floor).toHaveValue(0.5);
+    expect(screen.getByText("3 items, 1 awaiting a decision")).toBeInTheDocument();
+
+    fireEvent.change(floor, { target: { value: "0.1" } });
+    await flush();
+    expect(screen.getByText("4 items, 2 awaiting a decision")).toBeInTheDocument();
+    expect(dottedRects()).toHaveLength(2);
+  });
+
+  it("focus is a halo under the item's own stroke, never a recolor", async () => {
+    await mountReviewing();
+    fireEvent.mouseDown(screen.getByTestId("canvas-stage"), {
+      clientX: 30,
+      clientY: 30,
+      button: 0,
+    });
+    await flush();
+    const rects = screen.getAllByTestId("k-rect");
+    const halo = rects.find((r) => r.getAttribute("data-stroke") === FOCUS_HALO.color)!;
+    expect(halo).toBeDefined();
+    expect(Number(halo.getAttribute("data-opacity"))).toBe(FOCUS_HALO.opacity);
+    // The focused box keeps its status color on its own stroke and its corner handles.
+    expect(strokes()).toContain(STATUS_COLORS.confirmed);
+    expect(strokes()).not.toContain("#00BFFF");
+  });
+
+  it("stepping follows the nearest-neighbor path, sets the subject and zooms to the item", async () => {
+    await mountReviewing();
+    useStore.getState().setActiveSubject(null);
+    const before = useStore.getState().gui.view;
+
+    fireEvent.keyDown(window, { key: "n" });
+    await flush();
+    // The path starts nearest the top-left: box 0. Its subject becomes active and the view lands
+    // on it (zoomed in past the fitted view).
+    expect(screen.getByRole("textbox", { name: "Item position" })).toHaveValue("1");
+    expect(screen.getByText("subject_a box")).toBeInTheDocument();
+    expect(useStore.getState().gui.active_subject).toBe("subject_a");
+    expect(useStore.getState().gui.view.scale).toBeGreaterThan(before.scale);
+
+    fireEvent.keyDown(window, { key: "n" });
+    await flush();
+    expect(screen.getByRole("textbox", { name: "Item position" })).toHaveValue("2");
+    expect(screen.getByText("subject_a box")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "n" });
+    await flush();
+    expect(screen.getByRole("textbox", { name: "Item position" })).toHaveValue("3");
+    expect(screen.getByText("subject_a proposal 0.90")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Step through" }), {
+      target: { value: "undecided" },
+    });
+    await flush();
+    expect(screen.getByText("/ 1")).toBeInTheDocument();
+  });
+
+  it("the agent's mirror and the canvas state the same colors and the same focus", async () => {
+    const pushSpy = vi
+      .spyOn(api.canvas, "pushState")
+      .mockResolvedValue({ status: "ok", shapes_written: true });
+    await mountReviewing();
+    fireEvent.keyDown(window, { key: "n" });
+    await flush();
+    act(() => notifyCanvasStateRequest());
+    await flush();
+
+    const distinct = (values: (string | null | undefined)[]) => [...new Set(values)].sort();
+    const pushed = pushSpy.mock.calls.at(-1)?.[0].shapes ?? [];
+    // The canvas also draws the halo and the focused box's handles; the colors it uses for items
+    // are the colors the mirror states, and so are the labels.
+    expect(distinct(pushed.map((s) => s.color))).toEqual(
+      distinct(strokes().filter((s) => s !== FOCUS_HALO.color)),
+    );
+    expect(pushed.filter((s) => s.halo)).toHaveLength(1);
+    expect(distinct(pushed.filter((s) => s.label).map((s) => s.label))).toEqual(
+      distinct(screen.getAllByTestId("k-text").map((t) => t.getAttribute("data-text"))),
+    );
+  });
+
+  it("e opens the focused annotation's tool mode", async () => {
+    await mountReviewing();
+    act(() => useStore.getState().setMode("polygon"));
+    fireEvent.keyDown(window, { key: "n" });
+    await flush();
+    fireEvent.keyDown(window, { key: "e" });
+    await flush();
+    expect(useStore.getState().gui.mode).toBe("box");
+  });
 });
 
 describe("AnnotateTab heading", () => {

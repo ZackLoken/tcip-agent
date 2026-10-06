@@ -33,7 +33,7 @@ function fillAttributeDraft(name: string, values: string) {
 
 describe("AttributePanel attribute kinds", () => {
   it("offers exactly the kinds the backend's registry declares", () => {
-    render(<AttributePanel selectedBoxIdx={null} />);
+    render(<AttributePanel focused={null} />);
     fireEvent.click(screen.getByText("+ Attribute"));
     const options = screen.getByLabelText("attribute type").querySelectorAll("option");
     expect(Array.from(options, (o) => o.value)).toEqual([...ATTR_TYPES]);
@@ -57,7 +57,7 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
       ),
     );
 
-    render(<AttributePanel selectedBoxIdx={null} />);
+    render(<AttributePanel focused={null} />);
     fillAttributeDraft("opening", "closed\nopen");
     await act(async () => {
       fireEvent.click(screen.getByText("Add"));
@@ -78,7 +78,7 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
       unreadable: [],
     });
 
-    render(<AttributePanel selectedBoxIdx={null} />);
+    render(<AttributePanel focused={null} />);
     fillAttributeDraft("opening", "closed\nopen");
     await act(async () => {
       fireEvent.click(screen.getByText("Add"));
