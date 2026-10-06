@@ -55,6 +55,17 @@ class AnnotationPayload(BaseModel):
     iscrowd: Any = None
 
 
+class FlagPayload(BaseModel):
+    """One flag a save raises: its comment and its target, a ``point`` with the ``subject``
+    flagged there, a ``proposal`` (bucket and index), or neither for the image as a whole
+    (:class:`~tcip_annotation.flags.FlagRequest`)."""
+
+    text: str
+    point: Optional[tuple[float, float]] = None
+    subject: Optional[str] = None
+    proposal: Optional[tuple[str, int]] = None
+
+
 class SavePayload(BaseModel):
     """One save: the image's annotations and the gestures it adjudicates beside them
     (:class:`~tcip_mcp.dataset_layout.Gestures`), by the person ``user`` names."""
@@ -71,6 +82,20 @@ class SavePayload(BaseModel):
     complete: dict[str, bool] = {}
     rect: Optional[tuple[float, float, float, float]] = None
     proposals_hidden: bool = False
+    flag: list[FlagPayload] = []
+    # Each open flag resolved, by id, with the reply given.
+    resolve: dict[str, str] = {}
+
+
+def _flags(key: Key) -> list[dict]:
+    """The image's flags as the editor reads them, oldest first
+    (:func:`~tcip_annotation.flags.read_flags`); a record that will not read answers 400."""
+    from tcip_annotation.flags import encode_flag, flag_key, read_flags
+
+    try:
+        return [encode_flag(flag) for flag in read_flags(flag_key(key))]
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 def annotation_dict(a: Annotation) -> dict:
@@ -113,14 +138,15 @@ def _read(key: Key) -> tuple[LabelDocument, Version]:
 def load_labels(image_path: str) -> dict:
     """An image's label document in pixel coords: its annotations, each with its ``index`` in the
     document (the index a proposal's ``paired`` names), each subject's completion
-    (:func:`_completion`) and the version token a save echoes back, the empty token for an image
-    with no document yet."""
+    (:func:`_completion`), the image's flags (:func:`_flags`) and the version token a save
+    echoes back, the empty token for an image with no document yet."""
     key, w, h = _admitted(image_path)
     doc, version = _read(key)
     return {"image_path": image_path, "img_width": w, "img_height": h,
             "annotations": [{**annotation_dict(a), "index": i}
                             for i, a in enumerate(doc.annotations)],
-            "completion": _completion(doc), "base_mtime": version.token}
+            "completion": _completion(doc), "flags": _flags(key),
+            "base_mtime": version.token}
 
 
 @router.post("/labels")
@@ -128,8 +154,11 @@ def save_labels(payload: SavePayload) -> dict:
     """Save an image's label document through
     :func:`~tcip_mcp.dataset_layout.save_label_document`, by the person
     :func:`~tcip_mcp.identity.actor` makes of ``user``, and answer the saved document's version
-    and completion. A stale ``base_mtime`` answers 409 and a refusal 400, nothing written.
+    and completion and the image's flags. A stale ``base_mtime`` answers 409 and a refusal 400,
+    nothing written.
     """
+    from tcip_annotation.flags import FlagRequest
+
     from tcip_mcp.dataset_layout import Gestures, save_label_document
     from tcip_mcp.identity import actor
 
@@ -141,7 +170,9 @@ def save_labels(payload: SavePayload) -> dict:
     gestures = Gestures(
         bucket=payload.bucket, accept=frozenset(payload.accept),
         reject=frozenset(payload.reject), complete=payload.complete, rect=payload.rect,
-        proposals_hidden=payload.proposals_hidden)
+        proposals_hidden=payload.proposals_hidden,
+        flag=tuple(FlagRequest(**f.model_dump()) for f in payload.flag),
+        resolve=payload.resolve)
     person = actor(payload.user)
     try:
         version, doc = save_label_document(
@@ -153,7 +184,7 @@ def save_labels(payload: SavePayload) -> dict:
         raise HTTPException(400, str(exc)) from exc
     return {"status": "ok", "image_path": payload.image_path,
             "n_annotations": len(doc.annotations), "base_mtime": version.token,
-            "completion": _completion(doc)}
+            "completion": _completion(doc), "flags": _flags(key)}
 
 
 @router.get("/proposals")
