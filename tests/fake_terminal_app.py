@@ -4,7 +4,8 @@ Prints a banner naming the terminal session id it inherited, echoes each input l
 ``echo:<line>`` with any bracketed-paste markers removed, and exits on ``exit``. With
 ``FAKE_TERMINAL_ARGV_FILE`` set it first writes its arguments there as JSON. With
 ``FAKE_TERMINAL_PASTE_AFTER_S`` set it waits that many seconds, prints ``EARLY_INPUT`` if input
-arrived meanwhile, then turns bracketed paste on.
+arrived meanwhile, then turns bracketed paste on. Run with ``fail`` as its first argument it
+exits 3 at once, standing as a launch preparation that failed.
 """
 
 from __future__ import annotations
@@ -36,6 +37,9 @@ def main() -> None:
     argv_file = os.environ.get("FAKE_TERMINAL_ARGV_FILE")
     if argv_file:
         Path(argv_file).write_text(json.dumps(sys.argv[1:]), encoding="utf-8")
+    if sys.argv[1:2] == ["fail"]:
+        print("FAKE_PREPARATION_FAILED", file=sys.stderr, flush=True)
+        sys.exit(3)
     print("FAKE_TERMINAL_READY", flush=True)
     print(f"[session:{os.environ.get('TCIP_TERMINAL_SESSION', '')}]", flush=True)
     paste_after = os.environ.get("FAKE_TERMINAL_PASTE_AFTER_S")

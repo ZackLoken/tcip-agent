@@ -37,18 +37,38 @@ DEFAULT_COLS = 100
 TERMINATE_WAIT_S = 5
 
 WORKSPACE_ARG = "{workspace}"
+"""A whole argument: the backend's workspace."""
 MCP_CONFIG_ARG = "{mcp_config}"
+"""A whole argument: the path of the JSON MCP configuration :func:`write_mcp_config` writes."""
 
 CLAUDE_SETTINGS = Path(__file__).resolve().parent / "agent_terminal.settings.json"
 """The settings file Claude Code's row passes: its permission lists."""
+
+PREPARATION_TIMEOUT_S = 60
+
+ANTIGRAVITY_SETTINGS = Path.home() / ".gemini" / "antigravity-cli" / "settings.json"
+"""Antigravity's own settings file, whose ``permissions.allow`` list its tool approvals persist
+to as ``mcp(<server>/<tool>)`` entries."""
+
+
+class PreparationFailedError(Exception):
+    """A row's launch preparation did not complete; the message names the step and why."""
+
+
+PrepareFn = Callable[[str, Optional[Path]], list[str]]
+"""A row's launch preparation: given the resolved executable and the session's project, it
+runs to completion and returns one line per step it took, or raises
+:class:`PreparationFailedError`."""
 
 
 @dataclass(frozen=True)
 class Provider:
     """One agent harness the terminal launches: the id a session names it by, its display name,
-    the executable looked up on ``PATH``, and the arguments after it, in which an argument equal
-    to :data:`WORKSPACE_ARG` or :data:`MCP_CONFIG_ARG` stands for the backend's workspace or the
-    path of the MCP configuration :func:`write_mcp_config` writes for the session's project.
+    the executable looked up on ``PATH``, the arguments after it, in which an argument equal to
+    :data:`WORKSPACE_ARG` or :data:`MCP_CONFIG_ARG` is rendered by :func:`render_argv`, and the
+    preparation the launch
+    runs first when the harness takes its MCP server or its tool approvals only through its own
+    configuration, ``None`` for a harness that takes them on the command line.
 
     A row is listed only for a harness that turns bracketed paste on, since the session-start
     ritual and staged requests reach the agent only as a :func:`paste` once it has."""
@@ -57,12 +77,74 @@ class Provider:
     name: str
     executable: str
     args: tuple[str, ...]
+    prepare: Optional[PrepareFn] = None
 
     @property
     def unavailable_reason(self) -> str:
         """Why this row cannot launch when its executable is not on ``PATH``."""
         return (f"{self.name} is not available: no `{self.executable}` executable is on PATH. "
                 "Install it and sign in to enable the agent terminal.")
+
+
+@dataclass(frozen=True)
+class McpServer:
+    """The stdio MCP server a launch hands its harness: a command and its arguments."""
+
+    command: str
+    args: tuple[str, ...]
+
+
+def mcp_server(project: Optional[Path]) -> McpServer:
+    """This interpreter running ``tcip_mcp`` for ``project``, for no project when ``None``."""
+    args = ("-m", "tcip_mcp", *(("--project", project.as_posix()) if project else ()))
+    return McpServer(Path(sys.executable).as_posix(), args)
+
+
+def run_to_completion(argv: list[str], step: str) -> str:
+    """Run ``argv`` to completion, stdin closed and time bounded, and return it as one command
+    line; raises :class:`PreparationFailedError` naming ``step`` when it cannot start, times
+    out or exits non-zero, with the tail of what it printed."""
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                              timeout=PREPARATION_TIMEOUT_S, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise PreparationFailedError(f"{step} did not run: {exc}") from exc
+    if done.returncode != 0:
+        detail = (done.stderr or done.stdout).strip()[-400:]
+        raise PreparationFailedError(f"{step} exited {done.returncode}: {detail}")
+    return subprocess.list2cmdline(argv)
+
+
+def allow_tcip_tools(settings: Path) -> str:
+    """Add an ``mcp(tcip/<tool>)`` entry for every registered tool to the ``permissions.allow``
+    list of the Antigravity settings file ``settings``, keeping everything else in it, and
+    return one line saying how many were added; raises :class:`PreparationFailedError` when the
+    file does not parse as a JSON object."""
+    from tcip_mcp.server import list_registered_tools
+
+    try:
+        body = json.loads(settings.read_text(encoding="utf-8")) if settings.is_file() else {}
+    except (OSError, json.JSONDecodeError) as exc:
+        raise PreparationFailedError(f"reading {settings} failed: {exc}") from exc
+    if not isinstance(body, dict):
+        raise PreparationFailedError(f"{settings} does not hold a JSON object")
+    allow = body.setdefault("permissions", {}).setdefault("allow", [])
+    missing = [entry for entry in (f"mcp(tcip/{name})" for name in list_registered_tools())
+               if entry not in allow]
+    if missing:
+        allow.extend(missing)
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text(json.dumps(body, indent=2) + "\n", encoding="utf-8")
+    return f"allowed {len(missing)} tcip tools in {settings}"
+
+
+def prepare_antigravity(executable: str, project: Optional[Path]) -> list[str]:
+    """Antigravity's launch preparation: register :func:`mcp_server` for ``project`` as its
+    ``tcip`` server through ``agy mcp add``, and allow every tcip tool in its settings file."""
+    server = mcp_server(project)
+    add = run_to_completion([executable, "mcp", "add", "tcip", "--", server.command, *server.args],
+                            step="`agy mcp add`")
+    return [add, allow_tcip_tools(ANTIGRAVITY_SETTINGS)]
 
 
 PROVIDERS: tuple[Provider, ...] = (
@@ -76,6 +158,13 @@ PROVIDERS: tuple[Provider, ...] = (
             "--permission-mode", "default",
             "--mcp-config", MCP_CONFIG_ARG, "--strict-mcp-config",
         ),
+    ),
+    Provider(
+        id="antigravity",
+        name="Antigravity",
+        executable="agy",
+        args=("--add-dir", WORKSPACE_ARG, "--sandbox"),
+        prepare=prepare_antigravity,
     ),
 )
 
@@ -105,10 +194,10 @@ def resolve_terminal_command(provider: Provider) -> Optional[tuple[list[str], bo
 
 
 def write_mcp_config(project: Optional[Path]) -> Path:
-    """Write a spawn-time MCP configuration that starts this interpreter's ``tcip_mcp`` for
-    ``project`` (for no project when ``None``) and return its path."""
-    args = ["-m", "tcip_mcp", *(["--project", project.as_posix()] if project else [])]
-    config = {"mcpServers": {"tcip": {"command": Path(sys.executable).as_posix(), "args": args}}}
+    """Write :func:`mcp_server` for ``project`` as a JSON MCP configuration and return its
+    path."""
+    server = mcp_server(project)
+    config = {"mcpServers": {"tcip": {"command": server.command, "args": list(server.args)}}}
     dest = Path(tempfile.mkdtemp(prefix="tcip_mcp_")) / "tcip.mcp.json"
     dest.write_text(json.dumps(config, indent=2), encoding="utf-8")
     return dest
@@ -124,6 +213,19 @@ def render_argv(argv: list[str], project: Optional[Path]) -> list[str]:
     return [values[arg]() if arg in values else arg for arg in argv]
 
 
+def prepare_launch(executable: str, provider: Provider,
+                   project: Optional[Path]) -> tuple[list[str], Optional[str]]:
+    """Run ``provider.prepare`` with the resolved ``executable`` for ``project``: the steps it
+    took (empty for a row with no preparation) and the reason it failed, ``None`` when it
+    succeeded, prefixed with the row's name."""
+    if provider.prepare is None:
+        return [], None
+    try:
+        return provider.prepare(executable, project), None
+    except PreparationFailedError as exc:
+        return [], f"{provider.name}'s launch preparation failed: {exc}"
+
+
 _PRIVATE_MODE = re.compile(r"\x1b\[\?([0-9;]*)([hl])")
 _BRACKETED_PASTE = "2004"
 
@@ -137,8 +239,9 @@ def bracketed_paste(output: str, enabled: bool) -> bool:
 
 
 def paste(text: str) -> str:
-    """``text`` as the agent's input: a bracketed paste followed by Enter."""
-    return f"\x1b[200~{text}\x1b[201~\r"
+    """``text`` as the agent's input: a bracketed paste followed by Enter, each line break inside
+    it sent as the carriage return a terminal sends for a pasted newline."""
+    return f"\x1b[200~{text.replace('\r\n', '\n').replace('\n', '\r')}\x1b[201~\r"
 
 
 _RITUAL_HEADER = "[TCIP session-start ritual] "
