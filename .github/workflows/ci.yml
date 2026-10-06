@@ -108,7 +108,8 @@ jobs:
 
       - name: Install packages
         run: |
-          pip install pytest-timeout pytest-xdist ruff
+          # ruff pinned: ruff.toml runs pycodestyle's preview rules, which move between releases.
+          pip install pytest-timeout pytest-xdist ruff==0.16.8
           pip install -e packages/tcip-store
           pip install -e packages/tcip-annotation
           pip install -e "packages/tcip-mcp[dev,hpo]"
