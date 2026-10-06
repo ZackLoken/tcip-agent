@@ -11,6 +11,7 @@ Usage (from the repo root, tcip-agent env):
 from __future__ import annotations
 
 import argparse
+import getpass
 import os
 import re
 import sys
@@ -59,8 +60,12 @@ def main(provider: str, workspace: str | None = None) -> int:
         print(f"FAIL: provider {provider!r} cannot launch here: {reasons.get(provider, reasons)}")
         return 1
 
-    created = client.post(
-        "/api/terminal/sessions", json={"provider": provider, "rows": 35, "cols": 120}).json()
+    resp = client.post("/api/terminal/sessions", json={
+        "provider": provider, "rows": 35, "cols": 120, "user": getpass.getuser()})
+    if resp.status_code != 200:
+        print(f"FAIL: the launch was refused ({resp.status_code}): {resp.text}")
+        return 1
+    created = resp.json()
     sid = created["session_id"]
     print(f"[2] session spawned: {sid} {created['launched']}")
     session = terminal_routes._SESSIONS[sid]
