@@ -173,6 +173,8 @@ export interface LaunchedProgram {
   provider: string;
   executable: string;
   version: string | null;
+  confinement: string | null;
+  delivery_unverified: string | null;
   prepared: string[];
 }
 

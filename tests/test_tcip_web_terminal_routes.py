@@ -22,7 +22,7 @@ from tests._audit_fixtures import audit_rows
 FAKE = Path(__file__).parent / "fake_terminal_app.py"
 LAUNCH = {"provider": pty_host.PROVIDERS[0].id, "user": "tester"}
 ABSENT = "definitely-not-a-real-cli-xyz"
-_PLACEHOLDERS = (pty_host.WORKSPACE_ARG, pty_host.MCP_CONFIG_ARG)
+_PLACEHOLDERS = (pty_host.WORKSPACE_ARG, pty_host.MCP_CONFIG_ARG, pty_host.CODEX_MCP_ARG)
 
 if pty_host.os.name == "nt":
     pytest.importorskip("winpty")
@@ -121,7 +121,8 @@ def test_rendering_replaces_each_placeholder_and_leaves_every_other_argument(ope
     from tcip_web.state import store
 
     literal, workspace, config = pty_host.render_argv(
-        ["--literal", pty_host.WORKSPACE_ARG, pty_host.MCP_CONFIG_ARG], store.project_root)
+        ["--literal", pty_host.WORKSPACE_ARG, pty_host.MCP_CONFIG_ARG], store.project_root,
+        pty_host.spawn_env("term_test"))
 
     assert (literal, workspace) == ("--literal", str(store.workspace))
     server = json.loads(Path(config).read_text(encoding="utf-8"))["mcpServers"]["tcip"]
@@ -215,8 +216,9 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
     rendered: list[list[str]] = []
     render = pty_host.render_argv
 
-    def _recording_render(argv: list[str], project: Path | None) -> list[str]:
-        rendered.append(render(argv, project))
+    def _recording_render(argv: list[str], project: Path | None,
+                          env: dict[str, str]) -> list[str]:
+        rendered.append(render(argv, project, env))
         return rendered[-1]
 
     monkeypatch.setattr(pty_host, "render_argv", _recording_render)
@@ -241,8 +243,12 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
         allowed = json.loads(settings.read_text(encoding="utf-8"))["permissions"]["allow"]
         assert allowed == [f"mcp(tcip/{name})" for name in list_registered_tools()]
     assert created["launched"]["prepared"] == expected_prepared
+    assert created["launched"]["confinement"] == row.confinement
+    assert created["launched"]["delivery_unverified"] == row.delivery_unverified(
+        created["launched"]["version"])
     (line,) = audit_rows(opened_project, "agent_terminal_started")
     assert line["arguments"]["prepared"] == expected_prepared
+    assert line["arguments"]["confinement"] == row.confinement
 
 
 def test_a_launch_preparation_that_fails_refuses_the_launch_naming_it(
@@ -297,10 +303,36 @@ def test_the_written_mcp_configuration_is_the_one_server_the_launch_states(opene
     server = pty_host.mcp_server(store.project_root)
     assert server.args == ("-m", "tcip_mcp", "--project", store.project_root.as_posix())
 
-    (config,) = pty_host.render_argv([pty_host.MCP_CONFIG_ARG], store.project_root)
+    (config,) = pty_host.render_argv([pty_host.MCP_CONFIG_ARG], store.project_root,
+                                     pty_host.spawn_env("term_test"))
 
     written = json.loads(Path(config).read_text(encoding="utf-8"))["mcpServers"]["tcip"]
     assert (written["command"], written["args"]) == (server.command, list(server.args))
+
+
+def test_the_codex_overrides_name_the_one_server_and_forward_the_spawn_environment(
+    opened_project,
+):
+    """Each rendered ``-c`` override parses as TOML, and together they state the server
+    :func:`mcp_server` produces, every variable of the launch's environment forwarded to it."""
+    import tomllib
+
+    from tcip_web.state import store
+
+    env = pty_host.spawn_env("term_test")
+    rendered = pty_host.render_argv(["--literal", pty_host.CODEX_MCP_ARG], store.project_root, env)
+
+    assert rendered[0] == "--literal"
+    flags, overrides = rendered[1::2], rendered[2::2]
+    assert set(flags) == {"-c"}
+    parsed: dict = {}
+    for override in overrides:
+        parsed.update(tomllib.loads(override)["mcp_servers"]["tcip"])
+    server = pty_host.mcp_server(store.project_root)
+    assert (parsed["command"], parsed["args"]) == (server.command, list(server.args))
+    assert set(parsed["env_vars"]) == set(env)
+    assert pty_host.TERMINAL_SESSION_ENV in parsed["env_vars"]
+    assert parsed["default_tools_approval_mode"] == "approve"
 
 
 _RITUAL_ECHO = "echo:[TCIP session-start ritual]"
@@ -325,8 +357,10 @@ def _echoes(scrollback: str) -> list[str]:
 
 @pytest.fixture
 def pastes_after(monkeypatch):
-    """The fake agent turns bracketed paste on one second after it starts."""
+    """The fake agent turns bracketed paste on one second after it starts and writes the composer
+    sequence of the row it stands in for."""
     monkeypatch.setenv("FAKE_TERMINAL_PASTE_AFTER_S", "1")
+    monkeypatch.setenv("FAKE_TERMINAL_COMPOSER_READY", pty_host.PROVIDERS[0].composer_ready)
 
 
 def test_the_ritual_then_a_submitted_request_reach_the_agent_once_it_turns_paste_on(
@@ -359,11 +393,12 @@ def test_the_ritual_and_the_requests_staged_before_paste_is_on_go_as_one_paste()
     session = terminal_routes.TerminalSession("term_test")
     session._pty = _Pty()
     session._launch.ritual = "the ritual"
+    session._launch.composer_ready = "\x1b[?1049h"
     session.submit("first")
     session.submit("second")
     assert writes == []
 
-    session._on_output("\x1b[?2004h")
+    session._on_output("\x1b[?2004h\x1b[?1049h")
     assert writes == [pty_host.paste("the ritual\n\nfirst\n\nsecond")]
 
     session.submit("later")
@@ -401,6 +436,89 @@ def test_overlapping_creates_deliver_one_ritual_before_the_request(client, paste
 
     text = _wait_for(terminal_routes._SESSIONS[sid], "echo:tab request")
     assert _echoes(text) == [_RITUAL_ECHO, "echo:tab request"]
+
+
+class _RecordingPty:
+    """A live PTY that keeps what the session writes to it."""
+
+    def __init__(self) -> None:
+        self.writes: list[str] = []
+
+    def isalive(self) -> bool:
+        return True
+
+    def write(self, data: str) -> None:
+        self.writes.append(data)
+
+
+_COMPOSER_LIVE_AT = {"claude": 15, "antigravity": 7, "codex": 10}
+"""For each recorded harness, the index of the startup read at which its composer was observed
+live, from the PTY logs and never from a row's marker: Claude Code drew its input prompt in read 15,
+and a paste at read 5 was lost; agy left its loading splash and drew its prompt in read 7, and a
+paste at read 3 was lost; Codex wrote its first window title in read 10, its session footer
+followed, and an Enter before it was held as "Waiting for startup" while a paste at it was
+submitted."""
+
+_STARTUP_READS = {
+    "claude": [
+        "\x1b[1t", "\x1b[c\x1b[?1004h\x1b[?9001h", "\x1b]0;claude\x1b\\",
+        "\x1b7\x1b[r\x1b8\x1b[?25h", "\x1b[?25l", "\x1b[?2004h\x1b[?2031h\x1b[?1004h",
+        "\x1b[?9001l\x1b[?9001h", "\x1b[>0q", "\x1b[?u", "\x1b[c",
+        "\x1b[>4m\x1b[<u\x1b[?1004l\x1b[?1004h\x1b[?2031l\x1b[?2004l", "\x1b[1;1H",
+        "\r\n\x1b[1;1H", "\x1b[?2004h\x1b[?2031h\x1b[?1004h\x1b[?9001l\x1b[?9001h",
+        "\x1b]0;✳ Claude Code\x1b\\",
+        "\x1b[?1049h\x1b[2J\x1b[H\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?25l",
+    ],
+    "antigravity": [
+        "\x1b[1t", "\x1b[c\x1b[?1004h\x1b[?9001h", "\x1b[?2026$p\x1b[?2027$p\x1b]11;?\x07",
+        "\x1b[>4m\x1b[?1049h\x1b[?25l\x1b[?5W\x1b[?2004h\x1b[>4;2m\x1b[>1u\x1b[?u\x1b[H\x1b[2J",
+        "\x1b[H\x1b[2J\n", "\r ⣯ ", "\r ⣟ ",
+        "\x1b[>4m\x1b[<1u\x1b[?1049l\x1b[>4;2m\x1b[>1u\x1b[?u\x1b[0 q\r\x1b[J\n",
+    ],
+    "codex": [
+        "\x1b[1t", "\x1b[c\x1b[?1004h\x1b[?9001h", "\x1b[?2004h", "\x1b[?1004l\x1b[?1004h",
+        "\x1b[?2026h\x1b[?25l", "\x1b[?1049h", "\x1b[?1007l", "\x1b[?1003;1006h",
+        "\x1b[2;3H\x1b[38;5;75;49m>_ ", "\x1b[?2026l", "\x1b]0;tcip-agent\x07",
+        "\x1b]10;?\x1b\\\x1b]11;?\x1b\\",
+    ],
+}
+"""The PTY reads each installed harness wrote while starting in the terminal's PTY (Claude Code
+2.1.292 and agy 1.3.0 under ``tools/smoke_terminal_e2e.py``, Codex 0.160.1 launched with its row's
+arguments and sent no input), long screen draws cut after their opening sequences and spinner frames
+thinned. The first two dropped a paste written at their first bracketed-paste-on; Codex, under the
+smoke, held one in its composer without submitting it, since its session had not started."""
+
+
+@pytest.mark.parametrize("row", pty_host.PROVIDERS, ids=lambda row: row.id)
+def test_the_ritual_is_pasted_at_the_read_where_the_harness_composer_goes_live(row):
+    """Fed the reads its harness wrote at startup, a launch of ``row`` pastes nothing before the
+    read at which that harness's composer was observed live and pastes the ritual at that read,
+    even though bracketed paste turned on earlier."""
+    reads = _STARTUP_READS[row.id]
+    live_at = _COMPOSER_LIVE_AT[row.id]
+    first_paste_on = next(i for i, data in enumerate(reads) if "\x1b[?2004h" in data)
+    assert first_paste_on < live_at
+
+    pty = _RecordingPty()
+    session = terminal_routes.TerminalSession("term_test")
+    session._pty = pty
+    session._launch.ritual = "the ritual"
+    session._launch.composer_ready = row.composer_ready
+    session.submit("the request")
+    for index, data in enumerate(reads):
+        session._on_output(data)
+        assert pty.writes == ([pty_host.paste("the ritual\n\nthe request")]
+                              if index >= live_at else [])
+
+
+@pytest.mark.parametrize("row", pty_host.PROVIDERS, ids=lambda row: row.id)
+def test_a_launch_names_the_versions_when_its_harness_is_not_the_recorded_one(row):
+    """Delivery rests on the recorded sequence without a note for the recorded version, and a
+    note naming both versions for any other version or none."""
+    assert row.delivery_unverified(row.composer_ready_version) is None
+    note = row.delivery_unverified("9.9.9")
+    assert note is not None and row.composer_ready_version in note and "9.9.9" in note
+    assert row.delivery_unverified(None) is not None
 
 
 def test_bracketed_paste_follows_the_last_mode_change_the_agent_wrote():
@@ -743,12 +861,14 @@ def test_concurrent_creates_spawn_single_session():
 
 
 def test_create_answers_the_launched_executable_and_no_version_for_an_override(client):
-    """An override's launch records its executable and no version."""
+    """An override's launch records its executable, no version and no row's confinement."""
     body = client.post("/api/terminal/sessions", json=LAUNCH).json()
 
     launched = body["launched"]
     assert Path(launched["executable"]).name == Path(sys.executable).name
     assert launched["version"] is None
+    assert launched["confinement"] is None
+    assert launched["delivery_unverified"] is None
 
 
 def test_the_resolved_cli_is_probed_for_the_version_it_declares(monkeypatch):
@@ -768,6 +888,53 @@ def test_the_resolved_command_decides_whether_its_version_is_probed(monkeypatch)
     monkeypatch.delenv("TCIP_TERMINAL_CMD")
 
     assert pty_host.launched_program(*command)["version"] is None
+
+
+def _versioned_executable(directory: Path, version_file: Path) -> Path:
+    """An executable that prints ``version_file``'s text for ``--version`` and otherwise runs the
+    fake program, standing as a harness whose installed version can change in place."""
+    directory.mkdir()
+    if pty_host.os.name == "nt":
+        wrapper = directory / "versioned_agent.cmd"
+        wrapper.write_text(
+            f'@if "%1"=="--version" (type "{version_file}" & exit /b 0)\r\n'
+            f'@"{sys.executable}" -u "{FAKE}" %*\r\n', encoding="utf-8")
+    else:
+        wrapper = directory / "versioned_agent"
+        wrapper.write_text(
+            f'#!/bin/sh\nif [ "$1" = "--version" ]; then cat "{version_file}"; exit 0; fi\n'
+            f'exec "{sys.executable}" -u "{FAKE}" "$@"\n', encoding="utf-8")
+        wrapper.chmod(0o755)
+    return wrapper
+
+
+def test_a_harness_updated_in_place_is_seen_at_its_next_launch_without_a_backend_restart(
+    client, monkeypatch, tmp_path, opened_project,
+):
+    """The second launch of the same executable reports the version it declares then, and the
+    launch and its audit line carry why delivery to that version is unverified."""
+    version_file = tmp_path / "version.txt"
+    row = pty_host.PROVIDERS[0]
+    version_file.write_text(row.composer_ready_version + "\n", encoding="utf-8")
+    monkeypatch.setattr(pty_host, "PROVIDERS", (dataclasses.replace(
+        row, executable=str(_versioned_executable(tmp_path / "bin", version_file))),))
+    monkeypatch.delenv("TCIP_TERMINAL_CMD")
+
+    created = client.post("/api/terminal/sessions", json=LAUNCH).json()
+    assert created["launched"]["version"] == row.composer_ready_version
+    assert created["launched"]["delivery_unverified"] is None
+
+    version_file.write_text("9.9.9 (updated)\n", encoding="utf-8")
+    restarted = client.post(f"/api/terminal/sessions/{created['session_id']}/restart",
+                            json=LAUNCH).json()
+
+    assert restarted["launched"]["version"] == "9.9.9 (updated)"
+    note = row.delivery_unverified("9.9.9 (updated)")
+    assert note is not None
+    assert restarted["launched"]["delivery_unverified"] == note
+    first, second = audit_rows(opened_project, "agent_terminal_started")
+    assert first["arguments"]["delivery_unverified"] is None
+    assert second["arguments"]["delivery_unverified"] == note
 
 
 def test_the_spawned_process_inherits_the_terminal_session_id(client):
