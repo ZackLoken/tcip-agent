@@ -9,7 +9,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Any, NamedTuple, Sized
+from typing import TYPE_CHECKING, Any, NamedTuple, Sized
 
 from tcip_store import StoreError, canonical_path, check_json_value
 
@@ -22,6 +22,9 @@ from tcip_mcp.pipelines.data.split_construction import (
 )
 from tcip_mcp.pipelines.execution import Stated
 from tcip_mcp.pipelines.model_build import run_task
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.schemas import TrainConfigSchema
 
 logger = logging.getLogger(__name__)
 
@@ -87,13 +90,10 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
             rendered (``model_contract.render_overfit_report``), with non-finite losses rendered.
     """
     from tcip_mcp.pipelines.data.label_queries import admits
-    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
-    issues = _structural_issues(config)
+    spec, issues = _structural_issues(config)
     warnings: list[str] = []
-    model_source = config.get(MODEL_SOURCE_KEY)
-    data_cfg = config.get("data")
-    data_cfg_dict: dict = data_cfg if isinstance(data_cfg, dict) else {}
+    data_cfg_dict: dict = (spec.data if spec is not None else None) or {}
     split_cfg_raw = data_cfg_dict.get("split")
     split_cfg_dict: dict = split_cfg_raw if isinstance(split_cfg_raw, dict) else {}
     if split_cfg_dict.get("selection_dir") and split_cfg_dict.get("redraw_within_selection"):
@@ -103,30 +103,14 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
             "stays untouched."
         )
 
-    eval_cfg = config.get("evaluation") or {}
-    if not isinstance(eval_cfg, dict):
-        issues.append(
-            f"'evaluation' must be a mapping (trait/selection_metric/... keys), got "
-            f"{type(eval_cfg).__name__}"
-        )
-
     # Normalization provenance: per-band builder_kwargs statistics must carry which images
     # produced them.
     sampling_record = None
-    if isinstance(model_source, dict):
-        bk = model_source.get("builder_kwargs")
-        bk = bk if isinstance(bk, dict) else {}
+    source = spec.model_source if spec is not None else None
+    if source is not None:
+        bk = source.builder_kwargs or {}
         if bk.get("image_mean") is not None or bk.get("image_std") is not None:
-            from pydantic import ValidationError
-
-            from tcip_mcp.pipelines.schemas import ImageStatsSampling
-
-            raw_sampling = model_source.get("image_stats_sampling")
-            if isinstance(raw_sampling, dict):
-                try:
-                    sampling_record = ImageStatsSampling.model_validate(raw_sampling)
-                except ValidationError:
-                    sampling_record = None
+            sampling_record = source.image_stats_sampling
             if sampling_record is None or not sampling_record.windows:
                 issues.append(
                     "model_source.builder_kwargs carries image_mean/image_std with no "
@@ -140,7 +124,8 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
     if not issues:
         counts: dict[str, int] = {}
         try:
-            resolution = resolve_run(config, project=project, tallies_out=counts)
+            assert spec is not None, "a config with no structural issue validated"
+            resolution = resolve_run(config, spec, project=project, tallies_out=counts)
         except Exception as exc:  # noqa: BLE001, whatever stops the resolution stops the launch
             issues.append(str(exc))
         # Trainable-sample coverage, never gating: a run admitting a fraction of its annotated
@@ -188,10 +173,10 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
     # config can't build and the contract would just re-report the same failure. Overfit stays a
     # voluntary, non-gating diagnostic (a valid model can fail 20 steps on noise).
     if smoke and not issues:
-        assert resolution is not None, "a config with no issue resolved"
+        assert resolution is not None and spec is not None, "a config with no issue resolved"
         try:
             from tcip_mcp.pipelines.model_build import (
-                build_model, recorded_model_dims, resolve_contract_dims,
+                build_from_model_source, recorded_model_dims, resolve_contract_dims,
             )
             from tcip_mcp.pipelines.model_contract import (
                 check_model_contract, overfit_check, render_overfit_report,
@@ -201,7 +186,7 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
             resolved_config = {**config, "data": resolution.record["data"]}
             built_at = recorded_model_dims(resolved_config)
             dims = resolve_contract_dims(resolved_config, task, built_at)
-            model = build_model(resolved_config, built_at)
+            model = build_from_model_source(spec.model_source, built_at)
             report = check_model_contract(model, task, dims=dims)
             batch, why_no_batch = None, None
             if report.get("not_smokeable"):
@@ -230,7 +215,7 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
                 # Same batch the contract used, otherwise this re-synthesizes and reports a false
                 # "does not learn" for exactly the bespoke tasks the real-batch path exists for.
                 with _OVERFIT_CHECK_LOCK:
-                    rng_state = capture_rng_state()
+                    rng_state = capture_rng_state(None)
                     try:
                         raw_report = overfit_check(model, task, sample_batch=batch, dims=dims)
                     except Exception as exc:  # noqa: BLE001, becomes the report's issue only
@@ -239,7 +224,7 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
                             "issue": f"overfit check failed: {exc}",
                         }
                     finally:
-                        restore_rng_state(rng_state)
+                        restore_rng_state(rng_state, None)
                 # Rendered before storage: this tool answers over JSON-RPC, which a raw non-finite
                 # loss cannot cross, so a diverging model's report is sanitized here, once.
                 result["overfit_check"] = render_overfit_report(raw_report)
@@ -250,27 +235,29 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
     return result, resolution
 
 
-def _structural_issues(config: dict) -> list[str]:
-    """What stops ``config`` before anything reads its data: its schema
-    (``schemas.validate_train_config_schema``), a ``model_source``, ``training_source`` or
-    ``data.dataset_source`` builder that is missing or does not import, and a ``data`` section
-    that is missing or names no locations (``split_construction.data_dir_issues``)."""
-    from tcip_mcp.pipelines.schemas import validate_train_config_schema
+def _structural_issues(config: dict) -> tuple[TrainConfigSchema | None, list[str]]:
+    """``config`` validated once (``schemas.checked_train_config``) and what stops it before
+    anything reads its data: its schema's issues, reported alone with no validated config when
+    it refuses; then a ``model_source`` builder (read from the validated config), a
+    ``training_source`` (an untyped key, read as stated) or a ``data.dataset_source`` builder that
+    is missing or does not import, and a ``data`` section that is missing or names no locations
+    (``split_construction.data_dir_issues``)."""
+    from tcip_mcp.pipelines.schemas import checked_train_config
     from tcip_mcp.pipelines.model_build import (
-        DATASET_SOURCE_KEY, MODEL_SOURCE_KEY, TRAINING_SOURCE_KEY, _import_dotted,
-        import_source_builder,
+        DATASET_SOURCE_KEY, TRAINING_SOURCE_KEY, _import_dotted, import_source_builder,
     )
 
-    issues: list[str] = list(validate_train_config_schema(config))
+    spec, issues = checked_train_config(config)
+    if spec is None:
+        return None, issues
 
-    model_source = config.get(MODEL_SOURCE_KEY)
-    if not model_source:
+    if spec.model_source is None:
         issues.append("Missing 'model_source' section")
-    elif not isinstance(model_source, dict) or not model_source.get("builder"):
-        issues.append("model_source must be a dict with a 'builder' (module:function)")
+    elif not spec.model_source.builder:
+        issues.append("model_source must carry a 'builder' (module:function)")
     else:
         try:
-            import_source_builder(model_source)
+            import_source_builder(spec.model_source.builder, spec.model_source.source_files)
         except Exception as exc:
             issues.append(f"model_source.builder not importable: {exc}")
 
@@ -284,11 +271,9 @@ def _structural_issues(config: dict) -> list[str]:
             except Exception as exc:
                 issues.append(f"training_source not importable: {exc}")
 
-    data_cfg = config.get("data")
+    data_cfg = spec.data
     if not data_cfg:
         issues.append("Missing 'data' section")
-    elif not isinstance(data_cfg, dict):
-        issues.append("'data' must be a dict")
     else:
         if data_cfg.get(DATASET_SOURCE_KEY) is not None:
             dataset_source = data_cfg[DATASET_SOURCE_KEY]
@@ -297,11 +282,12 @@ def _structural_issues(config: dict) -> list[str]:
                     "data.dataset_source must be a dict with a 'builder' (module:function)")
             else:
                 try:
-                    import_source_builder(dataset_source)
+                    import_source_builder(dataset_source["builder"],
+                                          dataset_source.get("source_files"))
                 except Exception as exc:
                     issues.append(f"data.dataset_source.builder not importable: {exc}")
         issues.extend(data_dir_issues(data_cfg))
-    return issues
+    return spec, issues
 
 
 def open_run(
@@ -419,7 +405,7 @@ def launch_training(
         "experiment_id": experiment_id, "relaunched_from": relaunched_from,
         "resume_from": resume_from or None}, actor=actor, scope=project)
 
-    proc = _start_worker(run_dir, _child_env_for_launch(config))
+    proc = _start_worker(run_dir, _child_env_for_launch(resolution.spec))
 
     if max_wall_clock_seconds is not None:
         _watch_wall_clock(proc, max_wall_clock_seconds)
@@ -449,12 +435,13 @@ def _worker_env() -> dict[str, str]:
     return {**os.environ, "PYTHONPATH": child_pythonpath()}
 
 
-def _child_env_for_launch(config: dict) -> dict[str, str]:
+def _child_env_for_launch(spec: TrainConfigSchema) -> dict[str, str]:
     """Subprocess env for a run's launch (:func:`_worker_env`): round-robin GPU pinning
-    (``CUDA_VISIBLE_DEVICES``) when the config names no device, untouched when it does.
+    (``CUDA_VISIBLE_DEVICES``) when the validated config ``spec`` names no device, untouched when
+    it does.
     """
     env = _worker_env()
-    if config.get("device"):
+    if spec.device:
         return env
 
     try:
@@ -585,7 +572,7 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
                 as_recorded["reason"] = "; ".join(own_issues)
     elif own.resolution is None:
         as_recorded = {"case": "drawn", "line": "resolved to nothing at its launch",
-                       "compatible": False, "reason": own.error}
+                       "compatible": False, "reason": own.status_error}
     else:
         seed = own.resolution["partition"]["seed"]
         as_recorded = {
@@ -758,14 +745,17 @@ def open_trial(sweep: Path, trial_id: str, point: dict) -> Path:
     record = experiments.observe(sweep).record
     config = _apply_hpo_params(record["input"]["base_config"], point)
     trial_dir = sweep / f"{sweep.name}_{trial_id}"
+    from tcip_mcp.pipelines.schemas import train_config
+
     try:
-        resolved, error = resolve_run(config, project=experiments.project_of_run(sweep),
-                                      objective=record["objective"]).record, None
+        resolved, status_error = resolve_run(config, train_config(config),
+                                             project=experiments.project_of_run(sweep),
+                                             objective=record["objective"]).record, None
     except Exception as exc:  # noqa: BLE001, whatever stops the resolution fails the trial
-        resolved, error = None, str(exc)
+        resolved, status_error = None, str(exc)
     open_run(trial_dir, config, resolved, trial_params=point)
-    if error is not None:
-        experiments.write_final_status(trial_dir, "failed", error, checkpoint=None)
+    if status_error is not None:
+        experiments.write_final_status(trial_dir, "failed", status_error, checkpoint=None)
     return trial_dir
 
 
@@ -985,7 +975,7 @@ def open_sweep(
                 "issues": preflight["issues"]}
     for label, point in rest:
         try:
-            issues = _structural_issues(_apply_hpo_params(base_config, point))
+            _spec, issues = _structural_issues(_apply_hpo_params(base_config, point))
         except ValueError as exc:
             issues = [str(exc)]
         if issues:
@@ -1057,8 +1047,8 @@ def run_sweep(directory: Path) -> SweepGroup:
     record = experiments.observe(directory).record
     given = record["input"]
 
-    def end(state: str, error: str | None) -> SweepGroup:
-        experiments.write_final_status(directory, state, error)
+    def end(state: str, status_error: str | None) -> SweepGroup:
+        experiments.write_final_status(directory, state, status_error)
         return experiments.read_sweep(directory, experiments.run_rows(project))
 
     if experiments.cancel_requested(directory):
@@ -1112,7 +1102,8 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
     schedule left untouched:
 
       - ``lr``           -> ``optimizer["head_lr"]``, plus ``optimizer["backbone_lr"]`` scaled by
-                            whatever backbone/head ratio ``base_config`` already expressed
+                            the backbone/head ratio ``base_config`` trains at
+                            (``schemas.OptimizerSpec``'s effective rates)
       - ``weight_decay`` -> ``optimizer["weight_decay"]``
       - anything else    -> the top level of ``cfg`` (``batch_size`` included)
     """
@@ -1120,18 +1111,14 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
 
     cfg = copy.deepcopy(base_config)
 
-    # The ratio the agent already configured, read from base_config's own optimizer block
-    # before this loop overwrites head_lr. Default to 1.0 (not a frozen 0.1) only when the agent
-    # expressed no explicit backbone/head split at all.
-    base_optimizer = base_config.get("optimizer") or {}
-    base_backbone_lr = base_optimizer.get("backbone_lr")
-    base_head_lr = base_optimizer.get("head_lr")
-    backbone_head_ratio = (
-        base_backbone_lr / base_head_lr if (base_head_lr and base_backbone_lr) else 1.0
-    )
+    from tcip_mcp.pipelines.schemas import OptimizerSpec
 
     for key, value in params.items():
         if key == "lr":
+            # The backbone/head ratio base_config trains at: its validated optimizer block's
+            # effective rates, the platform's defaults for any it leaves unstated.
+            base_optimizer = OptimizerSpec.model_validate(base_config.get("optimizer") or {})
+            backbone_head_ratio = base_optimizer.backbone_lr / base_optimizer.head_lr
             lr = float(value)
             optimizer = cfg.setdefault("optimizer", {})
             optimizer["head_lr"] = lr

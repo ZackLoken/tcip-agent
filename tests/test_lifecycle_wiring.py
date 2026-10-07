@@ -86,7 +86,7 @@ def test_a_diverged_stock_run_ends_failed_and_registers_nothing(tmp_path):
 
     final = observe(run_dir).final
     assert final["state"] == "failed"
-    assert "2 consecutive full training passes" in final["error"]
+    assert "2 consecutive full training passes" in final["status_error"]
     assert final["checkpoint"] is None
     assert not (run_dir / "model_best.pt").exists()
     assert not (run_dir / "model_final.pt").exists()

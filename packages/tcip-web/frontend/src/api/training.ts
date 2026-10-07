@@ -5,7 +5,7 @@ import { ROUTES } from "@/api/routes";
 import type {
   TrainingDetail,
   TrainingListing,
-  TrainingMetricFrame,
+  TrainingRowFrame,
   TrainingStatusFrame,
 } from "@/api/types.generated";
 import { createReconnectingSocket, jsonFrameHandlers } from "@/lib/reconnectingSocket";
@@ -119,7 +119,7 @@ export interface CompareBestResult {
 
 export const trainingApi = {
   listSplitChoices: (experiment_id: string) =>
-    getJson<SplitChoices>(ROUTES.getTrainingConfigsByExperimentIdSplits(experiment_id)),
+    getJson<SplitChoices>(ROUTES.getTrainingRunsByExperimentIdSplits(experiment_id)),
 
   /** Start a new run or sweep from the recorded one ``relaunched_from`` names; the answer names
    * a run by ``experiment_id`` and a sweep by ``sweep_id``. */
@@ -162,13 +162,14 @@ export const trainingApi = {
     getJson<{ higher_is_better: Record<string, boolean> }>(ROUTES.getTrainingMetricDirections),
 };
 
-export type TrainingStreamMsg = TrainingMetricFrame | TrainingStatusFrame;
+export type TrainingStreamMsg = TrainingRowFrame | TrainingStatusFrame;
 
 /**
  * Open a live metrics stream for a training run or trial of the open project, auto-reconnecting
  * with capped backoff.
  * The server replays all rows from the start on each (re)connect, so the consumer must
- * dedupe by epoch. A ``status`` frame carrying a report is terminal; one carrying only
+ * dedupe by epoch. A ``batch`` frame carries the latest per-batch row a read found, for a run
+ * that logs them. A ``status`` frame carrying a report is terminal; one carrying only
  * ``error`` names an id no record claims (selected at its launch moment, before the record
  * exists, or simply unknown), and the socket keeps reconnecting under backoff until a report
  * arrives. That error-only frame never resets the backoff, so the reconnect delay grows to the
@@ -184,7 +185,10 @@ export function openTrainingStream(
     ...jsonFrameHandlers<TrainingStreamMsg>(
       onMessage,
       (frame) => frame.type === "status" && frame.status != null,
-      (frame) => frame.type === "metric" || (frame.type === "status" && frame.status != null),
+      (frame) =>
+        frame.type === "metric" ||
+        frame.type === "batch" ||
+        (frame.type === "status" && frame.status != null),
     ),
   });
   socket.start();

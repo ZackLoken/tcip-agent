@@ -118,6 +118,6 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
         cfg, tmp_path / "out", has_val_loader=False, id="auto-run-8", project=tmp_path
     )
     run = train(run, loader, val_loader=None)
-    assert run.status == "completed", getattr(run, "error", run.status)
+    assert run.status == "completed", run.status_error
     assert math.isfinite(run.metrics_history[-1]["train_loss"])
     assert (tmp_path / "out" / "model_best.pt").is_file()

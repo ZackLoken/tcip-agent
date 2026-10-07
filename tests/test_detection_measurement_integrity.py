@@ -536,6 +536,8 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
                  "tiling": {"enabled": True, "sliver_frac": 0.5}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
         "mixed_precision": False, "device": "cpu",
+        # An untrained toy detector scores no objective; its validation loss is what ranks.
+        "evaluation": {"selection_metric": "loss"},
     }
     res = training_tools.launch_training(tmp_path, cfg, actor=None)
     assert res["pid"] != os.getpid()  # a different OS process, not this one

@@ -23,10 +23,25 @@ Illustrative shape: the stage count, freeze depths, and epoch counts above are o
 a template; derive them per dataset (backbone size, object difficulty, data volume) rather than
 pinning this shape.
 
-Each stage has its own epoch count and freeze depth. Learning rate is not per-stage: the
-top-level `optimizer` block's `backbone_lr`/`head_lr` apply uniformly across every stage (a
-per-stage `lr` key is refused by name). The
-optimizer is rebuilt between stages.
+Each stage has its own epoch count, freeze depth and, optionally, its own
+`gradient_accumulation_steps`. Learning rate is not per-stage: the top-level `optimizer` block's
+`backbone_lr`/`head_lr` are stated for the first stage's target effective batch (a per-stage `lr`
+key is refused by name). The physical batch is the loader's `batch_size` and stays fixed for the
+run, so a later stage grows its effective batch through accumulation alone; an epoch's last
+accumulation window may hold fewer batches, and its loss is averaged over the batches it holds.
+Each epoch row records the stage's `target_eff_batch` (loader batch size times
+accumulation) and the `optimizer_steps` the epoch actually took. An `lr_scaling: {scale_power,
+max_lr}` block scales each stage's learning rates by its target effective batch over the first
+stage's, raised to `scale_power`, which has no default.
+
+The optimizer is rebuilt between stages, and each stage after the first starts from its
+predecessor's best epoch whole: the weights, buffers and optimizer state of that one epoch, not
+the last epoch's weights, with every parameter the predecessor's optimizer held carried over by
+name (a stage's optimizer that drops one is refused). A
+stage that ends with no selectable epoch (its selection value never ranked, for example a
+non-finite validation metric every epoch) fails the run naming the stage rather than continuing
+from its last weights. `model_best.pt` is the run's best epoch across every stage;
+`model_final.pt` is the last epoch's weights.
 
 ## Early Stopping
 
@@ -37,8 +52,15 @@ early_stopping:
   min_delta: 0.0001  # Minimum change to count as improvement
 ```
 
-Illustrative shape: the `patience` and `min_delta` values above are one example; derive or tune
-them per dataset's own convergence noise, never pinned.
+Early stopping runs by default whenever the run has a validation loader, at `patience: 7` and
+`min_delta: 0.0001` when the block states neither (provisional defaults the owner ruled; derive
+or tune them per dataset's own convergence noise rather than relying on them). `enabled: false`
+opts out. It reads the validation pass, so a run with no validation loader is never stopped
+early.
+
+Early stopping ends a stage, not the run: a stage whose selection value has not improved by
+`min_delta` for `patience` epochs ends, and the next stage starts from that stage's best epoch.
+The run ends when its last stage plateaus or runs its epochs.
 
 Early stopping and `model_best.pt` share the same selection criterion; there is no separate
 `metric`/`mode` key on `early_stopping`. Both are driven by `evaluation.selection_metric`
@@ -66,7 +88,7 @@ The example below is representative, not exhaustive; the config is an open dict,
 `generic_trainer.train()`'s own docstring is the canonical, always-current list of every key it
 reads (device/seed/deterministic/mixed_precision/stages/optimizer/scheduler/lr_scaling/
 stage_warmup_epochs/enforce_monotonic_unfreeze/gradient_accumulation_steps/
-checkpoint_every_n_epochs/early_stopping). Read that docstring rather than assuming this
+checkpoint_every_n_epochs/log_every_n_batches/early_stopping). Read that docstring rather than assuming this
 example is complete. Every one of those keys, `evaluation` included, sits at the top level of
 the config beside `model_source` and `data`. There is no `training` section: a config that
 nests keys under one is refused by `preflight_config` by name, since nothing would read them.
@@ -142,14 +164,22 @@ directory, so a new one takes a name neither holds. A run directory is written a
 `run.json`, written by the launcher before the run starts (the config as
 launched, its seed, environment, dataset identity, the run it was relaunched from,
 and what the launch resolved: the data section, the partition it trains on and the objective it
-selects by), `metrics.jsonl`, a heartbeat, and `final_status.json` once it ends (its state, error,
+selects by), `metrics.jsonl`, a heartbeat, and `final_status.json` once it ends (its state, its
+`status_error`,
 and the path and sha256 of the checkpoint its completion registers). Every checkpoint is written
 once under its own name. A relaunch is a new directory naming its parent.
 
 ## TensorBoard
 
 - `launch_training` automatically starts a TensorBoard process and returns the URL
-- Scalars logged: `train/loss`, `train/lr`, `val/*` per epoch
+- Scalars logged: every numeric key of each epoch row (`train_loss`, `lr`, `val_loss` and the
+  other `val_` metrics, `selection`, ...) at its epoch, tagged by the key, through the run's one
+  writer (`ctx.log_metrics`, which the default trainer uses too); and `batch_loss` ten
+  times an epoch, at batch ends spaced evenly over that epoch's own batch count, and after
+  every batch of an epoch with fewer than ten (a provisional cadence the owner ruled), or every
+  `log_every_n_batches` training batches counted across the run when the config states that override
+- The same per-batch emission (`ctx.log_batch`) writes a per-batch row to the run's
+  `metrics.jsonl`, which the Training tab shows as the in-progress epoch's line
 - `monitor_training` includes `tensorboard_url` if TB is still running; a sweep's board is its
   own directory, every trial's events beneath it
 - The Training tab shows a run's epoch rows as a table beside the TensorBoard it embeds

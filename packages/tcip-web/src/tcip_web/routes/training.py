@@ -22,11 +22,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/training", tags=["training"])
 
 
-@router.get("/configs/{experiment_id}/splits")
+@router.get("/runs/{experiment_id}/splits")
 def list_split_choices_route(experiment_id: str) -> dict:
-    """Every choice this config's own "Data" control offers a relaunch: the data section its
-    launch stated, and every selection directory this project's own bound runs or the dataset's
-    own splits directory hold, compatibility-checked as the launch itself would check them."""
+    """Every choice the "Data" control offers a relaunch of the run ``experiment_id`` names: the
+    data section its launch stated, and every selection directory this project's own bound runs
+    or the dataset's own splits directory hold, compatibility-checked as the launch itself would
+    check them."""
     from tcip_mcp.tools.training_tools import list_split_choices
 
     result = list_split_choices(store.open_root(), experiment_id)
@@ -117,7 +118,7 @@ def launch_run_tensorboard(experiment_id: str, payload: EmptyBodyPayload) -> dic
     if directory is None:
         raise HTTPException(404, f"Run not found: {experiment_id}")
     board = board_of(directory)
-    error = observe(directory).error
+    error = observe(directory).status_error
     if not any(board.rglob("events.out.tfevents*")):
         raise HTTPException(
             404, {"error": error or f"run produced no logs: {experiment_id}", "no_logs": True})
@@ -203,11 +204,12 @@ def metric_directions_route() -> dict:
 # ── WebSocket live metrics ──────────────────────────────────────────────
 
 
-class TrainingMetricFrame(BaseModel):
-    """One epoch's whole row (``experiments.epoch_rows``), pushed each time a row of that epoch
-    is appended."""
+class TrainingRowFrame(BaseModel):
+    """One metrics row, by its kind (``experiments.partition_rows``): ``metric`` an epoch's whole
+    row (``experiments.epoch_rows``), pushed each time a row of that epoch is appended, ``batch``
+    the latest per-batch row a read of the run's log found."""
 
-    type: Literal["metric"]
+    type: Literal["metric", "batch"]
     experiment_id: str
     row: dict
 
@@ -226,7 +228,8 @@ async def _stream_metrics(
     ws: WebSocket, project: Path, experiment_id: str, poll_seconds: float = 1.0
 ) -> None:
     """Push a run's metrics, a sweep's trial included, to the browser as they are appended: each
-    epoch a new row touches is sent again whole (``experiments.epoch_rows`` over every row read).
+    epoch a new epoch row touches is sent again whole (``experiments.epoch_rows`` over every row
+    read), then the latest per-batch row the read found, if any (``experiments.partition_rows``).
 
     Each tick observes the run once (``experiments.observe``) and reads its log from a byte-offset
     cursor (``experiments.read_rows``), so it reads only what was appended since the last tick and
@@ -239,7 +242,7 @@ async def _stream_metrics(
     """
     from tcip_mcp.experiments import (
         EPOCH_KEY, TERMINAL_STATES, epoch_rows, find_observation, launch_declarations, observe,
-        read_rows, run_name, run_summary,
+        partition_rows, read_rows, run_name, run_summary,
     )
 
     observation = await asyncio.to_thread(find_observation, run_name(experiment_id),
@@ -254,12 +257,16 @@ async def _stream_metrics(
 
     while True:
         rows, cursor = await asyncio.to_thread(read_rows, observation.metrics_log, after=cursor)
-        sent += rows
-        touched = [row.get(EPOCH_KEY) for row in rows]
+        epochs, batches = partition_rows(rows)
+        sent += epochs
+        touched = [row.get(EPOCH_KEY) for row in epochs]
         for row in epoch_rows(sent):
             if row.get(EPOCH_KEY) in touched:
-                frame = TrainingMetricFrame(type="metric", experiment_id=experiment_id, row=row)
+                frame = TrainingRowFrame(type="metric", experiment_id=experiment_id, row=row)
                 await ws.send_json(frame.model_dump())
+        if batches:
+            await ws.send_json(TrainingRowFrame(
+                type="batch", experiment_id=experiment_id, row=batches[-1]).model_dump())
         if observation.state in TERMINAL_STATES:
             launches = await asyncio.to_thread(launch_declarations, project)
             status = await asyncio.to_thread(run_summary, observation, sent,

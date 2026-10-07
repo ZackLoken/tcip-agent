@@ -20,19 +20,23 @@ def _rows(project: Path) -> list[dict]:
     return list(ts.read_log(audit_module.audit_log_key(project)).records)
 
 
-def test_a_successful_monitor_result_with_a_null_error_audits_nothing(tmp_path: Path) -> None:
-    """The stream's own read: a run whose status carries ``error: None`` polled through
-    ``monitor_training`` leaves the log exactly as it found it."""
+def test_a_successful_monitor_result_audits_nothing_and_carries_no_refusal_key(
+        tmp_path: Path) -> None:
+    """The stream's own read: a run whose status carries ``status_error: None`` polled through
+    ``monitor_training`` leaves the log exactly as it found it, and its row carries no ``error``
+    key a refusal check could misread."""
     from tcip_mcp.tools.training_tools import monitor_training
     from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
     opened_run(tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-polled")
     before = len(_rows(tmp_path))
 
-    status = monitor_training(tmp_path, "exp-polled")["run"]
+    result = monitor_training(tmp_path, "exp-polled")
+    status = result["run"]
 
     assert status["state"] == "running"
-    assert status["error"] is None
+    assert status["status_error"] is None
+    assert "error" not in result and "error" not in status
     assert len(_rows(tmp_path)) == before
 
 

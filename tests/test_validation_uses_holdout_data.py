@@ -51,7 +51,7 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
     models: list = []
     capture_model(monkeypatch, models)
 
-    from tcip_mcp.experiments import METRICS_FILE, observe, read_rows
+    from tcip_mcp.experiments import METRICS_FILE, observe, partition_rows, read_rows
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._verified_checkpoint_fixtures import opened_run
@@ -68,7 +68,7 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader)
     run = ctx.default_train()
 
-    assert run.status == "completed", run.error
+    assert run.status == "completed", run.status_error
     assert len(models) == 1
     model = models[0]
 
@@ -86,7 +86,7 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
     # A regression run selects by val_loss, so the checkpoint objective is the holdout number too.
     assert run.best_metric == pytest.approx(on_holdout["loss"], abs=1e-6)
 
-    persisted = read_rows(out_dir / METRICS_FILE)[0]
+    persisted = partition_rows(read_rows(out_dir / METRICS_FILE)[0])[0]
     assert len(persisted) == 1
     assert persisted[0]["val_loss"] == pytest.approx(on_holdout["loss"], abs=1e-6)
 
@@ -104,7 +104,7 @@ def test_best_checkpoint_and_early_stopping_follow_the_holdout_loader(tmp_path, 
     run = trainer_run(config, out_dir, project=tmp_path, has_val_loader=True, id="auto-run-76")
     run = train(run, train_loader, val_loader=val_loader)
 
-    assert run.status == "completed", run.error
+    assert run.status == "completed", run.status_error
     history = run.metrics_history
     assert len(history) == 2, history
     # The two directions disagree: training improves epoch over epoch while holdout degrades.

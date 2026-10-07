@@ -9,6 +9,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.data.selection import ClassScope
+from tcip_mcp.pipelines.schemas import train_config
 
 
 # ── persist the training run's class space ───────────────────────────
@@ -174,9 +175,8 @@ def test_ctx_should_cancel_and_dispatch_classification_honor_the_cancellation(tm
     from tcip_mcp.pipelines.training.envelope import TrainContext, dispatch_train_body
     from tcip_mcp.pipelines.training.run_registry import TrainRun
 
-    run = TrainRun(id="run_ctx_cancel",
-                   config={"training_source":
-                           "tests.test_training_subprocess_isolation:_bespoke_loop"},
+    config = {"training_source": "tests.test_training_subprocess_isolation:_bespoke_loop"}
+    run = TrainRun(id="run_ctx_cancel", config=config, spec=train_config(config),
                    objective={"selection_metric": "loss", "higher_is_better": False},
                    project=tmp_path, output_dir=str(tmp_path))
     request_cancel(tmp_path)
@@ -255,7 +255,7 @@ def test_run_summary_surfaces_the_wall_clock_failure_the_child_wrote(tmp_path):
 
     result = run_summary(observe(run_dir), [], None).model_dump()
     assert result["state"] == "failed"
-    assert result["error"] == "exceeded max_wall_clock_seconds"
+    assert result["status_error"] == "exceeded max_wall_clock_seconds"
 
 
 def test_a_canceled_run_reads_canceled_whatever_its_heartbeat(tmp_path, monkeypatch):
@@ -325,7 +325,7 @@ def test_gpu_device_pinning_round_robins(monkeypatch):
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
     seen = set()
     for _ in range(4):
-        env = training_tools._child_env_for_launch({})
+        env = training_tools._child_env_for_launch(train_config({}))
         seen.add(env["CUDA_VISIBLE_DEVICES"])
     assert seen == {"0", "1"}
 
@@ -347,7 +347,7 @@ def test_gpu_pinning_skipped_when_device_explicit(monkeypatch):
 
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
 
-    env = training_tools._child_env_for_launch({"device": "cuda:1"})
+    env = training_tools._child_env_for_launch(train_config({"device": "cuda:1"}))
     assert "CUDA_VISIBLE_DEVICES" not in env
 
 
@@ -364,7 +364,7 @@ def test_gpu_pinning_noop_with_single_gpu(monkeypatch):
             return 1
 
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
-    env = training_tools._child_env_for_launch({})
+    env = training_tools._child_env_for_launch(train_config({}))
     assert "CUDA_VISIBLE_DEVICES" not in env
 
 

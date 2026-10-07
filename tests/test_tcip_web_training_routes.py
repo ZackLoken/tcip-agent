@@ -162,6 +162,38 @@ def test_a_finite_value_logged_after_a_non_finite_one_at_one_epoch_streams_alone
     assert row["loss"] == 0.1 and f"loss{NOT_FINITE_SUFFIX}" not in row
 
 
+def test_the_stream_sends_epoch_rows_as_epochs_and_the_latest_batch_row_as_its_own_frame(
+    tmp_path: Path,
+) -> None:
+    import asyncio
+
+    from tcip_mcp.experiments import STEP_KEY, observe, write_final_status
+    from tcip_mcp.pipelines.training.envelope import TrainContext
+    from tcip_mcp.pipelines.training.run_registry import observed_run
+    from tcip_web.routes.training import _stream_metrics
+
+    run_dir = _opened("exp-batches", tmp_path)
+    ctx = TrainContext(run=observed_run(observe(run_dir)), train_loader=None)
+    ctx.log_batch(1, 1, {"batch_loss": 0.8})
+    ctx.log_batch(2, 1, {"batch_loss": 0.7})
+    ctx.log_metrics(1, {"train_loss": 0.75})
+    ctx.log_batch(3, 2, {"batch_loss": 0.6})
+    write_final_status(run_dir, "failed", "stopped mid-epoch", checkpoint=None)
+    sent: list[dict] = []
+
+    class _Socket:
+        async def send_json(self, payload: dict) -> None:
+            sent.append(payload)
+
+    asyncio.run(_stream_metrics(_Socket(), tmp_path, "exp-batches", poll_seconds=0.0))
+
+    (epoch,) = [msg["row"] for msg in sent if msg["type"] == "metric"]
+    assert (epoch["epoch"], epoch["train_loss"]) == (1, 0.75) and STEP_KEY not in epoch
+    (batch,) = [msg["row"] for msg in sent if msg["type"] == "batch"]
+    assert (batch[STEP_KEY], batch["epoch"], batch["batch_loss"]) == (3, 2, 0.6)
+    assert sent[-1]["type"] == "status" and sent[-1]["status"]["current_epoch"] == 1
+
+
 def test_metrics_stream_pushes_complete_entries_and_defers_a_partial_one(tmp_path: Path) -> None:
     """An entry still being appended is held back, never pushed half-formed.
 

@@ -30,12 +30,12 @@ export const ROUTES = {
   getState: "/api/state",
   getSubjectsLoad: "/api/subjects/load",
   getTerminalStatus: "/api/terminal/status",
-  getTrainingConfigsByExperimentIdSplits: (experimentId: string) =>
-    `/api/training/configs/${encodeURIComponent(experimentId)}/splits`,
   getTrainingMetricDirections: "/api/training/metric-directions",
   getTrainingRuns: "/api/training/runs",
   getTrainingRunsByExperimentId: (experimentId: string) =>
     `/api/training/runs/${encodeURIComponent(experimentId)}`,
+  getTrainingRunsByExperimentIdSplits: (experimentId: string) =>
+    `/api/training/runs/${encodeURIComponent(experimentId)}/splits`,
   postAnnotateLabels: "/api/annotate/labels",
   postAnnotateQueueLaunch: "/api/annotate/queue/launch",
   postCanvasState: "/api/canvas/state",

@@ -184,7 +184,7 @@ def test_a_completed_runs_metrics_come_from_its_best_checkpoint_not_its_last_epo
     """A run the default trainer completes names its best checkpoint, whose metrics are that
     epoch's own, sourced ``trainer``; the registry lists it under the run's id."""
     torch = pytest.importorskip("torch")
-    from tcip_mcp.experiments import METRICS_FILE, read_rows
+    from tcip_mcp.experiments import METRICS_FILE, partition_rows, read_rows
     from tcip_mcp.model_registry import ModelRegistry
     from tests._verified_checkpoint_fixtures import worker_run
     from tests.tiny_trainer_fixtures import write_regression_dataset
@@ -203,7 +203,8 @@ def test_a_completed_runs_metrics_come_from_its_best_checkpoint_not_its_last_epo
     entry = _named(ModelRegistry(str(tmp_path)), "exp-best")
     assert entry["metrics_source"] == "trainer"
     best = torch.load(run_dir / "model_best.pt", weights_only=False)
-    (row,) = [r for r in read_rows(run_dir / METRICS_FILE)[0] if r["epoch"] == best["epoch"]]
+    (row,) = [r for r in partition_rows(read_rows(run_dir / METRICS_FILE)[0])[0]
+              if r["epoch"] == best["epoch"]]
     assert entry["metrics"]["selection"] == row["selection"]
 
 

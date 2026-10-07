@@ -100,7 +100,7 @@ def test_each_optimizer_step_sees_only_its_own_batch_gradient(tmp_path, monkeypa
     )
     run = train(run, loader)
 
-    assert run.status == "completed", run.error
+    assert run.status == "completed", run.status_error
     assert len(steps) == len(expected)
     for seen, own in zip(steps, expected):
         assert seen.tolist() == pytest.approx(own.tolist(), rel=1e-6)
@@ -118,7 +118,7 @@ def test_no_accumulated_gradient_survives_the_run(tmp_path, monkeypatch):
     )
     run = train(run, loader)
 
-    assert run.status == "completed", run.error
+    assert run.status == "completed", run.status_error
     assert len(models) == 1
     trainable = [p for p in models[0].parameters() if p.requires_grad]
     assert trainable
@@ -140,8 +140,28 @@ def test_gradient_accumulation_combines_only_its_own_window(tmp_path, monkeypatc
                       has_val_loader=False, id="auto-run-36")
     run = train(run, loader)
 
-    assert run.status == "completed", run.error
+    assert run.status == "completed", run.status_error
     assert len(steps) == 2
     windows = [(expected[0] + expected[1]) / 2, (expected[2] + expected[3]) / 2]
     for seen, window in zip(steps, windows):
         assert seen.tolist() == pytest.approx(window.tolist(), rel=1e-6)
+
+
+def test_an_epoch_last_shorter_window_averages_over_the_batches_it_holds(tmp_path, monkeypatch):
+    """Three batches at accumulation two: the second window holds one batch, and its step carries
+    that batch's own gradient, not half of it."""
+    loader = _loader(SKEWED_VALUES, SKEWED_INTENSITIES)
+    expected = _per_batch_gradients(loader)
+
+    steps: list = []
+    _record_step_gradients(monkeypatch, steps)
+    run = trainer_run(_config(accumulation=2), tmp_path / "out", project=tmp_path,
+                      has_val_loader=False, id="auto-run-37")
+    run = train(run, loader)
+
+    assert run.status == "completed", run.status_error
+    assert len(steps) == 2
+    windows = [(expected[0] + expected[1]) / 2, expected[2]]
+    for seen, window in zip(steps, windows):
+        assert seen.tolist() == pytest.approx(window.tolist(), rel=1e-6)
+    assert run.metrics_history[0]["optimizer_steps"] == 2

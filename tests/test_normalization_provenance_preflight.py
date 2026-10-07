@@ -267,7 +267,24 @@ def test_preflight_refuses_a_hand_written_dict_naming_the_record_keys(tmp_path):
 
     r = preflight_config(tmp_path, cfg)
     assert r["valid"] is False
-    assert any("'windows'" in i and "'pixel_fraction'" in i for i in r["issues"]), r["issues"]
+    for key in ("windows", "pixel_fraction"):
+        assert any(f"image_stats_sampling.{key}" in i for i in r["issues"]), r["issues"]
+
+
+def test_preflight_refuses_a_record_naming_no_window(tmp_path):
+    """A record the schema admits but naming no window says no image produced the statistics,
+    so it is refused as missing provenance."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    imgs = tmp_path / "images" / UNDATED_BUCKET
+    imgs.mkdir(parents=True)
+    cfg = _cfg(imgs, builder_kwargs={"image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]},
+               image_stats_sampling={"windows": [], "pixel_fraction": 1.0})
+
+    r = preflight_config(tmp_path, cfg)
+    assert r["valid"] is False
+    assert any("non-empty 'windows'" in i for i in r["issues"]), r["issues"]
 
 
 def test_preflight_reads_the_band_count_over_every_source_the_run_admits(tmp_path):

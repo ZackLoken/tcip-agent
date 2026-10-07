@@ -44,7 +44,8 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "scope": {"subject": "leaf"},
                  "split": {"seed": 0, "val_ratio": 0.15}},
-        "evaluation": {"trait": "leaf"},
+        # An untrained toy detector scores no objective; its validation loss is what ranks.
+        "evaluation": {"trait": "leaf", "selection_metric": "loss"},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
     }

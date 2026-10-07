@@ -370,11 +370,11 @@ def test_a_trial_whose_resolution_fails_is_a_directory_whose_final_status_names_
     trial_dir, reported = _trial(tmp_path, {"data.labels_dir": str(tmp_path / "gone")})
 
     final = observe(trial_dir).final
-    assert final["state"] == "failed" and final["error"]
+    assert final["state"] == "failed" and final["status_error"]
     assert reported == []
     row = _trial_row(tmp_path, trial_dir)
-    assert (row["state"], row["error"], row["best_metric"], row["best_metric_name"]) == (
-        "failed", final["error"], None, None)
+    assert (row["state"], row["status_error"], row["best_metric"], row["best_metric_name"]) == (
+        "failed", final["status_error"], None, None)
 
 
 def _reports_only(ctx):

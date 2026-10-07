@@ -37,6 +37,8 @@ def test_launch_training_defaults_into_the_projects_experiment_store(
                  "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
+        # An untrained toy detector scores no objective; its validation loss is what ranks.
+        "evaluation": {"selection_metric": "loss"},
     }
     res = training_tools.launch_training(tmp_path, cfg, actor=None)
     assert "error" not in res, res

@@ -230,6 +230,8 @@ def test_a_multi_date_selection_trains_without_copying_anything(tmp_path: Path):
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
         "mixed_precision": False, "device": "cpu",
         "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
+        # An untrained toy detector scores no objective; its validation loss is what ranks.
+        "evaluation": {"selection_metric": "loss"},
     }
     run_dir = opened_run(tmp_path, config, experiment_id="exp-multi-date")
 
@@ -289,6 +291,7 @@ def test_a_bound_run_keeps_its_selections_attributes_when_the_registry_is_reorde
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
         "mixed_precision": False, "device": "cpu",
         "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
+        "evaluation": {"selection_metric": "loss"},
     }
     run_dir = opened_run(tmp_path, config, experiment_id="exp-reordered")
 
@@ -626,6 +629,7 @@ def test_the_preflight_smoke_batch_is_the_batch_the_bound_run_trains(tmp_path: P
     here would smoke a batch holding the validation and calibration members the run never trains
     on, which is not the batch whose measurement boundary the contract proves."""
     from tcip_mcp.pipelines.data.split_construction import resolve_run
+    from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.tools.training_tools import _one_real_batch
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -637,7 +641,8 @@ def test_the_preflight_smoke_batch_is_the_batch_the_bound_run_trains(tmp_path: P
     }
 
     before = len(_RECORDED_BUILDS)
-    batch, why = _one_real_batch("detection", resolve_run(config, project=tmp_path).train_ds)
+    batch, why = _one_real_batch(
+        "detection", resolve_run(config, train_config(config), project=tmp_path).train_ds)
 
     assert why is None and batch is not None
     smoked = _RECORDED_BUILDS[before]  # the training side, built first

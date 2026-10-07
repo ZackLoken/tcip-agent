@@ -1,7 +1,8 @@
 """Tiny deterministic models, their ``model_source`` builders, and datasets.
 
-Every model here holds a single parameter initialized from a constant, so a run's trajectory is
-decided by the data it is fed and never by random init. Each builder accepts the width
+Every model here holds parameters initialized from constants (one, except
+:class:`TwoRateRegressor`), so a run's trajectory is decided by the data it is fed and never by
+random init. Each builder accepts the width
 (``in_chans``) and, for the classifier, the class count a builder is handed; a model reads a
 frame's mean intensity whatever its width.
 """
@@ -76,6 +77,31 @@ def build_mean_intensity_regressor(
 ) -> MeanIntensityRegressor:
     """``model_source`` builder for :class:`MeanIntensityRegressor`."""
     return MeanIntensityRegressor(init_weight=init_weight)
+
+
+class TwoRateRegressor(MeanIntensityRegressor):
+    """Predicts ``weight * mean(image) + bias``, its weight in a param group at the backbone rate
+    and its bias in one at the head rate (``get_param_groups``), the two groups in reverse order
+    when ``reverse_groups``."""
+
+    def __init__(self, reverse_groups: bool = False) -> None:
+        super().__init__()
+        self.bias = nn.Parameter(torch.zeros(1))
+        self.reverse_groups = reverse_groups
+
+    def predict(self, images):
+        return self.weight * images.mean(dim=(1, 2, 3)) + self.bias
+
+    def get_param_groups(self, backbone_lr, head_lr):
+        groups = [{"params": [self.weight], "lr": backbone_lr},
+                  {"params": [self.bias], "lr": head_lr}]
+        return groups[::-1] if self.reverse_groups else groups
+
+
+def build_two_rate_regressor(*, in_chans: int = 1, reverse_groups: bool = False
+                             ) -> TwoRateRegressor:
+    """``model_source`` builder for :class:`TwoRateRegressor`."""
+    return TwoRateRegressor(reverse_groups=reverse_groups)
 
 
 class NanEvalRegressor(MeanIntensityRegressor):
@@ -194,18 +220,42 @@ def trainer_run(config: dict, output_dir, *, project, has_val_loader: bool, id: 
     the launcher's own producer resolves for it (``generic_trainer.resolve_objective``)."""
     from pathlib import Path
 
+    from tcip_mcp.pipelines.model_build import run_task
+    from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.pipelines.training.generic_trainer import resolve_objective
     from tcip_mcp.pipelines.training.run_registry import TrainRun
 
-    return TrainRun(id=id, config=config,
-                    objective=resolve_objective(config, project=Path(project),
+    spec = train_config(config)
+    return TrainRun(id=id, config=config, spec=spec,
+                    objective=resolve_objective(spec, run_task(config),
+                                                project=Path(project),
                                                 has_val_loader=has_val_loader),
                     project=Path(project), output_dir=str(output_dir))
 
 
-def opposed_regression_loaders(train_intensities, val_intensities):
+def count_validations(monkeypatch) -> list[str]:
+    """A list each explicit ``model_validate`` of a whole training config
+    (``schemas.TrainConfigSchema``) or of a model source alone (``schemas.ModelSourceSchema``)
+    appends its class name to from here on."""
+    from tcip_mcp.pipelines.schemas import ModelSourceSchema, TrainConfigSchema
+
+    seen: list[str] = []
+    for schema in (TrainConfigSchema, ModelSourceSchema):
+        real = schema.model_validate.__func__
+
+        def counted(cls, obj, *args, _real=real, **kwargs):
+            seen.append(cls.__name__)
+            return _real(cls, obj, *args, **kwargs)
+
+        monkeypatch.setattr(schema, "model_validate", classmethod(counted))
+    return seen
+
+
+def opposed_regression_loaders(train_intensities, val_intensities, *, shuffle_seed=None):
     """A regression training loader over ``train_intensities`` fit by weight +2 and a holdout
-    loader over ``val_intensities`` fit by weight -5, batches of two."""
+    loader over ``val_intensities`` fit by weight -5, batches of two. ``shuffle_seed`` makes the
+    training loader shuffle from a generator of its own seeded with it; ``None`` keeps its order
+    fixed."""
     from torch.utils.data import DataLoader
 
     from tcip_mcp.pipelines.training.collation import task_collate
@@ -214,22 +264,26 @@ def opposed_regression_loaders(train_intensities, val_intensities):
     val_ds = ConstantImageDataset(
         val_intensities, [-5.0 * c for c in val_intensities], height=8, width=12)
     collate = task_collate("regression")
-    return (DataLoader(train_ds, batch_size=2, collate_fn=collate),
+    shuffling: dict = {}
+    if shuffle_seed is not None:
+        shuffling = {"shuffle": True, "generator": torch.Generator().manual_seed(shuffle_seed)}
+    return (DataLoader(train_ds, batch_size=2, collate_fn=collate, **shuffling),
             DataLoader(val_ds, batch_size=2, collate_fn=collate))
 
 
 def capture_model(monkeypatch, sink: list) -> None:
-    """Every model ``generic_trainer.build_model`` builds appended to ``sink`` as it is built."""
+    """Every model ``generic_trainer.build_from_model_source`` builds appended to ``sink`` as it
+    is built."""
     from tcip_mcp.pipelines.training import generic_trainer as gt
 
-    real_build_model = gt.build_model
+    real_build = gt.build_from_model_source
 
-    def build(config, dims):
-        model = real_build_model(config, dims)
+    def build(source, dims):
+        model = real_build(source, dims)
         sink.append(model)
         return model
 
-    monkeypatch.setattr(gt, "build_model", build)
+    monkeypatch.setattr(gt, "build_from_model_source", build)
 
 
 class _CallScheduledModel(MeanIntensityRegressor):

@@ -4,7 +4,8 @@ Each file in it has one writer:
 
 - ``run.json``: the launcher's record of the run, its input and what that input resolved to,
   written once before the child starts.
-- ``metrics.jsonl``: the child's epoch rows, created empty with the directory and appended.
+- ``metrics.jsonl``: the child's epoch rows and per-batch rows (:func:`partition_rows`), created
+  empty with the directory and appended.
 - ``heartbeat``: touched by the child while it lives.
 - ``cancel_requested.json``: the first cancellation request (:func:`request_cancel`).
 - ``final_status.json``: the outcome, written once at exit (:func:`write_final_status`).
@@ -57,6 +58,9 @@ TENSORBOARD_DIR = "tensorboard"
 EPOCH_KEY = "epoch"
 TIMESTAMP_KEY = "timestamp"
 """The keys every metrics row carries beside its metrics: its epoch and the instant it landed."""
+STEP_KEY = "step"
+"""The key a per-batch metrics row carries, the training step it was logged at; an epoch row
+never carries it, so it is the row's kind (:func:`partition_rows`)."""
 
 DATA_PATHS: PathFields = (
     ("images_dir",), ("labels_dir",), ("plant_csv_paths", "[]"), ("split", "selection_dir"))
@@ -225,16 +229,17 @@ def write_once(path: Path, value: Any) -> None:
     publish_once(path, lambda handle: handle.write(data))
 
 
-def write_final_status(directory: Path, state: str, error: str | None, **outcome: Any) -> None:
+def write_final_status(directory: Path, state: str, status_error: str | None,
+                       **outcome: Any) -> None:
     """Write the final status of the run or sweep at ``directory`` once: ``state``, the instant,
-    the error behind it, and ``outcome``, what it produced (a run's ``checkpoint``). Refuses
-    (``ValueError``) a state outside :data:`FINAL_STATES`, and a status already written with
-    ``FileExistsError``."""
+    ``status_error``, the error behind it, and ``outcome``, what it produced (a run's
+    ``checkpoint``). Refuses (``ValueError``) a state outside :data:`FINAL_STATES`, and a status
+    already written with ``FileExistsError``."""
     if state not in FINAL_STATES:
         raise ValueError(f"{state!r} is not a final state; a final status names one of "
                          f"{list(FINAL_STATES)}.")
     write_record(directory / FINAL_STATUS_FILE,
-                 {"state": state, "ended": now_iso(), "error": error, **outcome})
+                 {"state": state, "ended": now_iso(), "status_error": status_error, **outcome})
 
 
 def append_row(path: Path, row: dict) -> None:
@@ -370,9 +375,9 @@ class RunObservation:
         return datetime.fromtimestamp(self.alive, timezone.utc).isoformat()
 
     @property
-    def error(self) -> str | None:
+    def status_error(self) -> str | None:
         """The error the final status names, ``None`` while it has not ended."""
-        return self.final["error"] if self.final is not None else None
+        return self.final["status_error"] if self.final is not None else None
 
     @property
     def resolution(self) -> dict | None:
@@ -466,12 +471,22 @@ def run_resolution(experiment_id: str, *, project: Path | str) -> dict:
     return observation.resolution
 
 
+def partition_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """A run's metrics-log ``rows`` split by kind, each in logged order: its epoch rows, then its
+    per-batch rows, those carrying :data:`STEP_KEY`. The one place a row's kind is read."""
+    epochs: list[dict[str, Any]] = []
+    batches: list[dict[str, Any]] = []
+    for row in rows:
+        (batches if STEP_KEY in row else epochs).append(row)
+    return epochs, batches
+
+
 def epoch_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """A run's metrics-log ``rows`` as one row per epoch, in the order each epoch was first
-    logged: the rows of one epoch merged, a later row's keys laid over the earlier's, a metric and
-    its non-finite state companion as one value."""
+    logged: the epoch rows (:func:`partition_rows`) of one epoch merged, a later row's keys laid
+    over the earlier's, a metric and its non-finite state companion as one value."""
     merged: dict[str, dict[str, Any]] = {}
-    for row in rows:
+    for row in partition_rows(rows)[0]:
         epoch = json.dumps(row.get(EPOCH_KEY), sort_keys=True, default=str)
         restated = {f"{key}{NOT_FINITE_SUFFIX}" for key in row}
         earlier = {k: v for k, v in merged.get(epoch, {}).items() if k not in restated}
@@ -480,10 +495,11 @@ def epoch_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def best_selection(rows: list[dict[str, Any]], objective: dict) -> float | None:
-    """The best finite ``selection`` among a run's metrics-log ``rows`` in the direction of
-    ``objective``, the run's recorded ``{"selection_metric", "higher_is_better"}``; ``None`` when
-    no row carries one."""
-    values = [float(row["selection"]) for row in rows if finite_number(row.get("selection"))]
+    """The best finite ``selection`` among a run's metrics-log epoch rows
+    (:func:`partition_rows`) in the direction of ``objective``, the run's recorded
+    ``{"selection_metric", "higher_is_better"}``; ``None`` when no row carries one."""
+    values = [float(row["selection"]) for row in partition_rows(rows)[0]
+              if finite_number(row.get("selection"))]
     if not values:
         return None
     return max(values) if objective["higher_is_better"] else min(values)
@@ -505,7 +521,7 @@ class RunRow(BaseModel):
     best_metric: float | None
     best_metric_name: str | None
     output_dir: str
-    error: str | None
+    status_error: str | None
     heartbeat: str
     launch: dict[str, str | None] | None
 
@@ -533,7 +549,7 @@ def run_summary(observation: RunObservation, rows: list[dict[str, Any]],
         current_epoch=rows[-1].get(EPOCH_KEY) if rows else None,
         best_metric=best_selection(rows, objective) if objective is not None else None,
         best_metric_name=objective["selection_metric"] if objective is not None else None,
-        output_dir=str(observation.directory), error=observation.error,
+        output_dir=str(observation.directory), status_error=observation.status_error,
         heartbeat=observation.heartbeat, launch=launch,
     )
 
@@ -627,7 +643,7 @@ class SweepGroup(BaseModel):
 
     sweep_id: str
     state: str
-    error: str | None
+    status_error: str | None
     input: dict[str, Any]
     objective: dict[str, Any]
     cancel_requested: bool
@@ -642,7 +658,7 @@ def read_sweep(directory: Path, rows: list[RunRow]) -> SweepGroup:
     sweep = observe(directory)
     trials = [row for row in rows if row.sweep == directory.name]
     return SweepGroup(
-        sweep_id=directory.name, state=sweep.state, error=sweep.error,
+        sweep_id=directory.name, state=sweep.state, status_error=sweep.status_error,
         input=sweep.record["input"], objective=sweep.record["objective"],
         cancel_requested=cancel_requested(directory), heartbeat=sweep.heartbeat,
         trials=trials, outcome=sweep_outcome(trials, sweep.record),
@@ -741,7 +757,7 @@ def compare_experiments(experiment_ids: list[str], *, project: Path | str) -> di
     Per run: ``state``, ``n_epochs``, ``last_logged_metrics`` (the last epoch's row,
     :func:`epoch_rows`, not a verified result), ``rows_after_end`` (rows whose own
     ``timestamp`` is a later instant than
-    the final status's ``ended``; ``None`` before a final status), the final status's ``error`` as
+    the final status's ``ended``; ``None`` before a final status), the final status's
     ``status_error``, ``registry`` (a completed run's own registry entry,
     ``model_registry.run_entry``, with the metrics and source its checkpoint carries,
     ``model_registry.entry_facts``, as a one-entry list, empty otherwise), ``split``
@@ -776,7 +792,7 @@ def compare_experiments(experiment_ids: list[str], *, project: Path | str) -> di
         rows_after_end = None if final is None else sum(
             1 for at in instants if at > datetime.fromisoformat(final["ended"]))
         summary["rows_after_end"] = rows_after_end
-        summary["status_error"] = observation.error
+        summary["status_error"] = observation.status_error
         entry = run_entry(observation)
         summary["registry"] = [] if entry is None else [{
             "name": entry["name"], "registered_at": entry["registered_at"],

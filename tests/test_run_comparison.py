@@ -122,7 +122,7 @@ def test_status_error_names_a_diverged_run_reason(tmp_path):
     run_dir = _stock_run(
         tmp_path, {"builder": "tests.tiny_trainer_fixtures:build_always_diverged_model"}, 3,
         "exp-diverged-cmp")
-    assert "2 consecutive full training passes" in observe(run_dir).final["error"]
+    assert "2 consecutive full training passes" in observe(run_dir).final["status_error"]
     _opened(tmp_path, "exp-healthy-cmp")
 
     diverged, healthy = _compared(tmp_path, "exp-diverged-cmp", "exp-healthy-cmp")

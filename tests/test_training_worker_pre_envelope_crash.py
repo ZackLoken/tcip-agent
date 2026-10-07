@@ -39,7 +39,7 @@ def test_a_pre_envelope_crash_marks_the_run_failed_and_opens_a_training_run_even
     observation = exp.observe(run_dir)
     final = observation.final
     assert final["state"] == "failed"
-    assert final["error"] == "dataset build exploded"
+    assert final["status_error"] == "dataset build exploded"
     assert final["checkpoint"] is None
     assert observation.state == "failed"
 
@@ -71,5 +71,5 @@ def test_a_pre_envelope_crash_whose_audit_line_is_refused_names_both_causes(
 
     final = exp.observe(run_dir).final
     assert final["state"] == "failed"
-    assert "dataset build exploded" in final["error"]
-    assert "audit entry could not be written" in final["error"]
+    assert "dataset build exploded" in final["status_error"]
+    assert "audit entry could not be written" in final["status_error"]

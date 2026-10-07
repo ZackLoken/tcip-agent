@@ -151,7 +151,8 @@ Three seams support bespoke work; the platform guarantees integrity around it:
   `ctx.build_optimizer` / `ctx.build_scheduler` / `ctx.evaluate` / `ctx.set_seed`, the
   progressive-unfreeze primitive `ctx.apply_stage_freeze`, `ctx.tiled_dataset`, `ctx.calibrate`,
   and the correctness checks `ctx.check_contract` / `ctx.overfit_check`, plus the envelope-owned
-  sinks `ctx.log_metrics`, `ctx.save_checkpoint`, `ctx.record_artifact`, `ctx.should_cancel`. Route
+  sinks `ctx.log_metrics`, `ctx.log_batch`, `ctx.save_checkpoint`, `ctx.record_artifact`,
+  `ctx.should_cancel`. Route
   your loop's metrics and checkpoints through those sinks and the run stays audited, immutably
   versioned, and provenance-snapshotted no matter what your loop does. Each sink writes into the
   run's own directory, each checkpoint tag and artifact name once, and refuses once the run has

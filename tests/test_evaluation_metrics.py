@@ -798,17 +798,18 @@ def test_validate_detection_returns_metrics_and_objective(tmp_path):
                       has_val_loader=True, id="auto-run-23")
     run = train(run, loader, val_loader=loader)  # no AttributeError on model.heads
 
-    assert run.status == "completed", getattr(run, "error", run.status)
     last = run.metrics_history[-1]
     for k in ("val_loss", "val_precision", "val_recall", "val_f1", "val_map50", "val_map",
               "val_objective"):
         assert k in last, f"missing {k}"
     # An untrained toy detector finds nothing on four images: the epoch has no useful score, so
-    # no epoch is ever a best and the run completes on its final weights alone.
+    # no epoch is selectable and the run fails naming the stage rather than delivering weights.
     assert last["val_objective"] is None
     assert math.isnan(last["selection"])
+    assert run.status == "failed"
+    assert "stage 0 produced no selectable epoch" in run.status_error
     assert not (tmp_path / "out" / "model_best.pt").is_file()
-    assert (tmp_path / "out" / "model_final.pt").is_file()
+    assert not (tmp_path / "out" / "model_final.pt").is_file()
     assert run.best_metric == math.inf
 
 
@@ -816,7 +817,11 @@ def test_validate_detection_returns_metrics_and_objective(tmp_path):
 def test_train_center_match_trait_records_governing_criterion(tmp_path):
     """Threading `trait` into _validate surfaces val_governing_criterion (a dict) and
     val_map50_role (a str) in val_metrics; the TensorBoard scalar loop must skip these
-    non-numeric values rather than crash `add_scalar` on them."""
+    non-numeric values rather than crash `add_scalar` on them. The untrained toy detector never
+    scores, so the run then fails as having no selectable epoch, after the row is logged."""
+    from tcip_mcp.experiments import METRICS_FILE
+    from tcip_mcp.pipelines.training.envelope import TrainContext
+
     ds, data = run_over("detection", str(_four_bud_images(tmp_path)), subject="bud")
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
@@ -825,12 +830,15 @@ def test_train_center_match_trait_records_governing_criterion(tmp_path):
                     "task": "detection"}
     cfg = _cfg(model_source, data)
     cfg["evaluation"] = {"trait": "bud_opening"}
-    run = trainer_run(
-        cfg, tmp_path / "out", project=tmp_path, has_val_loader=True, id="auto-run-24"
-    )
-    run = train(run, loader, val_loader=loader)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / METRICS_FILE).touch()
+    run = trainer_run(cfg, out_dir, project=tmp_path, has_val_loader=True, id="auto-run-24")
+    ctx = TrainContext(run=run, train_loader=loader, val_loader=loader)
+    run = ctx.default_train()
+    ctx.tb.close()
 
-    assert run.status == "completed", getattr(run, "error", run.status)
+    assert "no selectable epoch" in run.status_error
     last = run.metrics_history[-1]
     assert "val_governing_criterion" in last
     assert last["val_map50_role"] == "comparability_only"
@@ -858,7 +866,7 @@ def test_validate_classification_metrics(tmp_path):
                       has_val_loader=True, id="auto-run-25")
     run = train(run, loader, val_loader=loader)
 
-    assert run.status == "completed", getattr(run, "error", run.status)
+    assert run.status == "completed", run.status_error
     last = run.metrics_history[-1]
     assert "val_accuracy" in last and "val_f1" in last
     assert run.best_metric == pytest.approx(last["val_loss"])  # selection falls back to val_loss

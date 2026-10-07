@@ -1,6 +1,6 @@
 """Coverage: TensorBoard event files carry train and validation loss (and accuracy where the
-task defines one) at every epoch step, on both the direct training path and the sweep-trial
-body an HPO run executes each trial through.
+task defines one) at every epoch step, through the run's one writer, on both the default
+trainer's path and the sweep-trial body an HPO run executes each trial through.
 """
 
 from __future__ import annotations
@@ -47,15 +47,22 @@ def test_classification_training_writes_train_and_val_scalars_every_epoch(tmp_pa
         "checkpoint_every_n_epochs": 0,
         "early_stopping": {"enabled": False},
     }
+    from tcip_mcp.experiments import METRICS_FILE
+    from tcip_mcp.pipelines.training.envelope import TrainContext
+
     out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / METRICS_FILE).touch()
     run = trainer_run(config, out_dir, project=tmp_path, has_val_loader=True, id="auto-run-42")
-    run = train(run, train_loader, val_loader=val_loader)
-    assert run.status == "completed", run.error
+    ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader)
+    run = ctx.default_train()
+    ctx.tb.close()
+    assert run.status == "completed", run.status_error
 
     tb_dir = out_dir / TENSORBOARD_DIR
-    assert _scalar_steps(tb_dir, "train/loss") == [1, 2, 3]
-    assert _scalar_steps(tb_dir, "val/val_loss") == [1, 2, 3]
-    assert _scalar_steps(tb_dir, "val/val_accuracy") == [1, 2, 3]
+    assert _scalar_steps(tb_dir, "train_loss") == [1, 2, 3]
+    assert _scalar_steps(tb_dir, "val_loss") == [1, 2, 3]
+    assert _scalar_steps(tb_dir, "val_accuracy") == [1, 2, 3]
 
 
 def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
@@ -87,8 +94,8 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
     assert len(reported) == 2
 
     tb_dir = board_of(trial_dir)
-    assert _scalar_steps(tb_dir, "train/loss") == [1, 2]
-    assert _scalar_steps(tb_dir, "val/val_loss") == [1, 2]
+    assert _scalar_steps(tb_dir, "train_loss") == [1, 2]
+    assert _scalar_steps(tb_dir, "val_loss") == [1, 2]
 
 
 def test_the_epoch_console_line_carries_validation_metrics_beyond_loss(tmp_path, caplog):
@@ -118,7 +125,7 @@ def test_the_epoch_console_line_carries_validation_metrics_beyond_loss(tmp_path,
                       id="auto-run-43")
     with caplog.at_level(logging.INFO, logger="tcip_mcp.pipelines.training.generic_trainer"):
         run = train(run, train_loader, val_loader=val_loader)
-    assert run.status == "completed", run.error
+    assert run.status == "completed", run.status_error
 
     epoch_lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Epoch")]
     assert len(epoch_lines) == 2
