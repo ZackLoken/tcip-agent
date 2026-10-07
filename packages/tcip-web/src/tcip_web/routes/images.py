@@ -14,7 +14,6 @@ from __future__ import annotations
 import hashlib
 import io
 import json
-import math
 import tempfile
 import threading
 import uuid
@@ -22,38 +21,93 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE, DISPLAY_MAX_PIXELS
+from tcip_mcp.pipelines.display_bounds import (
+    level_dims,
+    plan_read,
+    planned_read,
+    within_cap,
+)
 from tcip_web import jobstore
-from tcip_web.paths import allowed_file, allowed_image, resolved_image
+from tcip_web.paths import allowed_file, resolved_image
 
 router = APIRouter(prefix="/api/images", tags=["images"])
 
 
 class ServingCell(BaseModel):
-    """One region-serving cell: its name and its half-open native-pixel rect."""
+    """One read of a view: its name, the level it is read off (0 native, ``i`` the ``i``-th
+    overview level), its half-open rect in that level's own pixel grid, and the native-pixel
+    rect it covers (``nx0``..``ny1``), where a viewer places it."""
 
     name: str
+    level: int
     x0: int
     y0: int
     x1: int
     y1: int
+    nx0: float
+    ny0: float
+    nx1: float
+    ny1: float
 
 
-class ServingGrid(BaseModel):
-    """The region-serving grid over one raster: square cells of ``tile_size`` native pixels, each
-    one display-bounded serve at native resolution, clipped to the raster's extent."""
+class ViewReads(BaseModel):
+    """The reads one view of a raster is served by: the native region-serving cells it intersects,
+    the tiles of the overview level its display read is planned off, or one display read of the
+    view where the raster has no level to tile."""
 
-    tile_size: int
-    cells: list[ServingCell]
+    reads: list[ServingCell]
 
 
-RENDER_CACHE_VERSION = 3
+RENDER_CACHE_VERSION = 6
 """The render cache's shape version, part of every cache key and every image URL: bumped whenever
 the cache key's inputs or the served headers' shape changes."""
+
+
+@dataclass(frozen=True)
+class _Encoding:
+    """How one kind of serve is encoded: a PIL format, its save options, and the longest edge the
+    codec accepts (``None`` where none was found). The cache-file suffix and the media type are
+    the format's own name."""
+
+    pil_format: str
+    options: dict
+    max_edge: "int | None"
+
+    @property
+    def suffix(self) -> str:
+        return f".{self.pil_format.lower()}"
+
+    @property
+    def media_type(self) -> str:
+        return f"image/{self.pil_format.lower()}"
+
+
+_DISPLAY_ENCODING = _Encoding("JPEG", {"quality": 95, "subsampling": 0}, 65_500)
+"""A display read, the whole frame, a region served scaled or a tile of an overview level: JPEG
+at quality 95 with chroma subsampling off. Provisional, from one RGB orthomosaic (239921x141130,
+one sensor, one site) read off its overviews at 4:4:4, as bytes and median encode time of three
+runs taken under load: 1,006,644 bytes in 65 ms at quality 95 against 675,889 in 83 ms at 90 for a
+1877x1104 view, 1,737,251 in 207 ms against 1,169,458 in 107 ms at 2503x1472, and 3,543,213 in
+200 ms against 2,423,054 in 453 ms at 3754x2208. The edge limit is the widest single row PIL's JPEG
+encoder accepted here: 65,500 encoded, 65,501 did not."""
+
+_NATIVE_ENCODING = _Encoding("PNG", {"compress_level": 1}, None)
+"""A region served at native resolution: lossless PNG at its fastest compression level, the
+pixels a judgment is made on. Provisional, from three 2880x2880 native windows of that same
+orthomosaic: level 1 took 775 to 986 ms and 25.8 to 26.0 MB, level 6 took 1902 to 1978 ms and
+19.7 to 19.8 MB. PNG encoded a 10,000,000 pixel row here; no edge limit was found."""
+
+
+def display_cap(display_pixels: int = Query(
+        ..., ge=1, description="The requesting display's device-pixel count")) -> int:
+    """The area cap one display-bound read for the requesting display is held to: that display's
+    own device-pixel count."""
+    return display_pixels
+
 
 IMAGE_ERROR_HEADER = "X-TCIP-Image-Error"
 """The response header a refusal here names its condition through."""
@@ -89,26 +143,19 @@ reproducible across requests and processes.
 """
 
 _STATS_WINDOW_SIZE = 256
-"""Pixel window edge the stats sample reads in: ``sample_windows``' own grid-cell size."""
+"""Pixel window edge the stats sample reads in, passed to ``sample_windows`` as the edge of the
+grid it draws windows from."""
 
-_STATS_MAX_WINDOWS = DISPLAY_MAX_PIXELS // (_STATS_WINDOW_SIZE**2)
-"""Windows the stats sample may read, so its pixel budget is at most :data:`DISPLAY_MAX_PIXELS`.
-
-That ties what describing a raster costs to the same bound that caps what is served from it.
-"""
+_STATS_MAX_WINDOWS = 256
+"""Windows the stats sample may read natively, about 16.8 million pixels at
+:data:`_STATS_WINDOW_SIZE`. A raster with more pixels than these windows hold has its statistics
+read off its overview pyramid instead. Provisional: a documented bound on one native read's cost,
+not a measurement."""
 
 _STATS_RESERVOIR_SIZE = 1 << 20
 """Pixels the percentile pass keeps, bounding what it holds to that many values per band in the
 raster's own dtype (8 MB for a 4-band uint16 raster). A documented cap: a memory bound, not a
 measured precision."""
-
-_STATS_SAMPLE_BUDGET = _STATS_MAX_WINDOWS * _STATS_WINDOW_SIZE**2
-"""Full-resolution pixels a raster may hold before its display stats are read from an overview
-level instead of from native windows."""
-
-_STATS_OVERVIEW_MAX_EDGE = 1024
-"""Longest output edge the display stats of an oversized raster are read at, below the deepest
-overview level any pyramid built here carries so the read comes off that level."""
 
 _STATS_CACHE_MAX = 64
 """Rasters the per-raster stats cache describes at once. An entry is a few hundred bytes, so this
@@ -123,9 +170,9 @@ class _RasterStats:
     ``ranges`` and ``clip_bounds`` are per band, in band order. They come from one of two reads,
     and exactly one of these describes which: ``pixel_fraction`` is the share of the raster's
     pixels a seeded window sample covered (1.0 when the budget covered all of them, where the
-    bounds are that raster's own exact bounds), and ``overview_scale`` is the served/native
-    resolution ratio a single reduced read of the whole frame was taken at. Overview bounds are
-    narrower than the raster's own and describe display scale only.
+    bounds are that raster's own exact bounds), and ``overview_size`` is the ``(width, height)`` a
+    single reduced read of the whole frame was served at. Overview bounds are narrower than the
+    raster's own and describe display scale only.
 
     ``interpretations`` names what each band holds where the backend knows (a GDAL raster's color
     interpretations: ``red``, ``alpha`` and the rest), and is ``None`` where nothing does, which is
@@ -138,7 +185,7 @@ class _RasterStats:
     clip_bounds: list
     seed: "int | None" = None
     pixel_fraction: "float | None" = None
-    overview_scale: "float | None" = None
+    overview_size: "tuple[int, int] | None" = None
     interpretations: "tuple | None" = None
 
     @property
@@ -183,7 +230,8 @@ def _evict_lru(cache_dir: Path) -> None:
         entries: list[tuple[float, Path, int]] = []
         total = 0
         for p in cache_dir.iterdir():
-            if not (p.is_file() and p.suffix == ".jpg"):
+            if not (p.is_file()
+                    and p.suffix in (_DISPLAY_ENCODING.suffix, _NATIVE_ENCODING.suffix)):
                 continue
             st = p.stat()
             size = st.st_size
@@ -206,19 +254,68 @@ def _evict_lru(cache_dir: Path) -> None:
         pass
 
 
-@router.get("/serving_grid")
-def get_serving_grid(path: str = Query(..., description="Absolute path to the image file")
-                     ) -> ServingGrid:
-    """The region-serving grid over the raster at ``path``: cells sized to one display-bounded
-    serve (:func:`~tcip_mcp.pipelines.reference_grid.derive_serving_tile_size`), measured off the
-    raster's header, never a decode."""
+@router.get("/view")
+def get_view_reads(
+    path: str = Query(..., description="Absolute path to the image file"),
+    x0: int = Query(..., ge=0, description="View left edge, full-resolution pixels"),
+    y0: int = Query(..., ge=0, description="View top edge, full-resolution pixels"),
+    x1: int = Query(..., ge=0, description="View right edge, exclusive"),
+    y1: int = Query(..., ge=0, description="View bottom edge, exclusive"),
+    area_cap: int = Depends(display_cap),
+) -> ViewReads:
+    """The reads that serve the view ``[x0, x1) x [y0, y1)`` of the raster at ``path``, clipped
+    to its extent and measured off headers, never a decode.
+
+    A view of at most the display's area cap is served by the native region-serving cells it
+    intersects. A larger view is planned as one display read (``display_bounds.plan_read``); when
+    the plan comes off an overview level, the view is served by that level's own region-serving
+    cells its window on the level intersects, each a read of one tile of that level at the
+    level's resolution, so a pan fetches only the tiles that entered the view. A raster with no
+    level to read off is served by one display read of the view itself, named ``view``. Cells
+    are sized by :func:`~tcip_mcp.pipelines.reference_grid.derive_serving_tile_size` under the
+    same cap and the edge limit of the encoding each is served in. The frame and the levels are
+    the ones the image route's own plain read opens the raster at
+    (``image_utils.display_frame``, ``display_bounds.level_dims``). Refuses a view with no pixels
+    inside the raster.
+    """
+    from tcip_mcp.pipelines.image_utils import display_frame
+    from tcip_mcp.pipelines.raster_source import (
+        Rect,
+        image_route_channel_count,
+        level_window,
+        rects_overlap,
+    )
     from tcip_mcp.pipelines.reference_grid import derive_serving_tile_size, reference_cells
 
-    _path, width, height = allowed_image(path)
-    edge = derive_serving_tile_size(width, height)
-    return ServingGrid(tile_size=edge, cells=[
-        ServingCell(name=c.name, x0=c.x0, y0=c.y0, x1=c.x1, y1=c.y1)
-        for c in reference_cells(width, height, edge, 0.0, clamp=True)])
+    source = resolved_image(path)[1]
+    width, height = display_frame(source)
+    x1, y1 = min(x1, width), min(y1, height)
+    if not (x0 < x1 and y0 < y1):
+        raise HTTPException(400, f"view [{y0}:{y1}, {x0}:{x1}] holds no pixel of this "
+                                 f"{width}x{height} raster")
+    view = Rect(x0, y0, x1, y1)
+
+    def cells(level: int, level_w: int, level_h: int, window: Rect) -> ViewReads:
+        sx, sy = width / level_w, height / level_h
+        encoding = _DISPLAY_ENCODING if level else _NATIVE_ENCODING
+        edge = derive_serving_tile_size(level_w, level_h, area_cap, encoding.max_edge)
+        return ViewReads(reads=[
+            ServingCell(name=c.name, level=level, x0=c.x0, y0=c.y0, x1=c.x1, y1=c.y1,
+                        nx0=c.x0 * sx, ny0=c.y0 * sy, nx1=c.x1 * sx, ny1=c.y1 * sy)
+            for c in reference_cells(level_w, level_h, edge, 0.0, clamp=True)
+            if rects_overlap((c.x0, c.y0, c.x1, c.y1),
+                             (window.x0, window.y0, window.x1, window.y1))])
+
+    if within_cap(view.width, view.height, area_cap):
+        return cells(0, width, height, view)
+    dims = level_dims(source, image_route_channel_count(source))
+    plan = plan_read(view, width, height, dims, area_cap)
+    if plan.level == 0:
+        return ViewReads(reads=[ServingCell(name="view", level=0, x0=x0, y0=y0, x1=x1, y1=y1,
+                                            nx0=x0, ny0=y0, nx1=x1, ny1=y1)])
+    level_w, level_h = dims[plan.level - 1]
+    return cells(plan.level, level_w, level_h,
+                 level_window(view, width, height, level_w, level_h))
 
 
 def _parse_band_tokens(raw: str) -> list[str]:
@@ -265,49 +362,33 @@ def _sidecar_identity(source) -> "tuple[int, int] | None":
     return int(st.st_mtime_ns), int(st.st_size)
 
 
-def _overviews_required(path: str, detail: str) -> HTTPException:
+def _overviews_required(path: str, reason: str) -> HTTPException:
     """The one refusal for a read that needs a raster's overview pyramid and has none, carrying the
-    condition as a header and naming the endpoint that builds the pyramid in the detail.
+    condition as a header and, after ``reason``, the request that builds the pyramid.
     """
-    return HTTPException(400, detail, headers={IMAGE_ERROR_HEADER: OVERVIEWS_REQUIRED})
+    return HTTPException(
+        400,
+        f"{reason} Reading it needs its reduced-resolution overviews: build them with POST "
+        f'/api/images/overviews {{"path": "{path}"}}, then ask again.',
+        headers={IMAGE_ERROR_HEADER: OVERVIEWS_REQUIRED})
 
 
-def _reduced_reads_available(raster) -> bool:
-    """Whether ``raster`` can serve a reduced-resolution read off an overview level instead of by
-    decoding native pixels.
-
-    Read from headers, never by reading pixels: an overview level counts once it is reported on
-    open (``overviews.has_overviews``) and, for an external sidecar, ``overviews.sidecar_valid``
-    has confirmed it. Only a GDAL-backed raster has such levels.
-    """
-    from tcip_mcp.pipelines.overviews import has_overviews, overview_sidecar, sidecar_valid
-    from tcip_mcp.pipelines.raster_source import GdalSource
-
-    if not isinstance(raster, GdalSource):
-        return False
-    if not has_overviews(raster.path):
-        return False
-    return not overview_sidecar(raster.path).is_file() or sidecar_valid(raster.path)
-
-
-def _overview_stats_target(width: int, height: int) -> tuple[int, int]:
-    """The aspect-preserving output size a raster's display stats are read at."""
-    out_w = max(1, round(width * _STATS_OVERVIEW_MAX_EDGE / max(width, height)))
-    return out_w, max(1, round(height * out_w / width))
-
-
-def _overview_stats(raster):
-    """Per-band ranges, clip cut points, and the read's own spec, from one reduced read of
-    ``raster``'s whole frame: the same display primitives the sampled path reads, over pixels an
-    overview level served instead of over native windows."""
+def _overview_stats(raster, dims: list[tuple[int, int]]):
+    """Per-band ranges, clip cut points, and the planned ``(width, height)`` they were read at,
+    from one reduced read of ``raster``'s whole frame, planned within
+    ``overviews.PYRAMID_FLOOR_EDGE`` on each edge over the overview levels ``dims``: the same
+    display primitives the sampled path reads, over pixels an overview level served instead of
+    over native windows."""
     from tcip_mcp.pipelines.band_stats import band_ranges, clip_bounds
+    from tcip_mcp.pipelines.overviews import PYRAMID_FLOOR_EDGE
     from tcip_mcp.pipelines.raster_source import Rect
 
-    pixels, spec = raster.read_region(
-        Rect(0, 0, raster.width, raster.height),
-        target_size=_overview_stats_target(raster.width, raster.height))
+    whole = Rect(0, 0, raster.width, raster.height)
+    plan = plan_read(whole, raster.width, raster.height, dims, PYRAMID_FLOOR_EDGE**2,
+                     PYRAMID_FLOOR_EDGE)
+    pixels, _spec = planned_read(raster, whole, plan)
     clips = [clip_bounds(pixels[:, :, i]) for i in range(pixels.shape[-1])]
-    return band_ranges(pixels), clips, spec
+    return band_ranges(pixels), clips, (plan.width, plan.height)
 
 
 def _source_identity(source, num_channels: int) -> tuple:
@@ -319,17 +400,19 @@ def _source_identity(source, num_channels: int) -> tuple:
     return (raster_source.source_pool_key(source, num_channels), _sidecar_identity(source))
 
 
-def _raster_stats(source, num_channels: int, key: tuple) -> _RasterStats:
-    """``source``'s per-band display bounds, cached under ``key``: the bounds a region stretch uses
+def _raster_stats(source, num_channels: int) -> _RasterStats:
+    """``source``'s per-band display bounds, one set per raster: the bounds a region stretch uses
     and ``/api/images/bands`` reports.
 
-    At or under :data:`_STATS_SAMPLE_BUDGET` the seeded window sample reads native pixels (covering
-    all of them, and so exact, for anything the budget's grid fits), and past it a single reduced
-    read of the whole frame comes off an overview level. A GDAL-backed raster over the budget with
-    no overview levels is refused; every other backend keeps reading native windows.
+    A raster the :data:`_STATS_MAX_WINDOWS` windows can hold is read from native pixels by the
+    seeded window sample (covering all of them, and so exact, when its grid fits), and past it a
+    single reduced read of the whole frame comes off an overview level. A GDAL-backed raster past
+    it with no overview levels is refused; every other backend keeps reading native windows.
 
     A concurrent miss on the same raster computes twice and stores the same numbers.
     """
+    key = _source_identity(source, num_channels)
+    sample_budget = _STATS_MAX_WINDOWS * _STATS_WINDOW_SIZE**2
     with _stats_lock:
         hit = _stats_cache.get(key)
         if hit is not None:
@@ -345,20 +428,18 @@ def _raster_stats(source, num_channels: int, key: tuple) -> _RasterStats:
         channels = int(raster.num_channels)
         # Only a backend that reads them from the file exposes these; nothing here infers them.
         interpretations = getattr(raster, "band_interpretations", None)
-        oversized = raster.width * raster.height > _STATS_SAMPLE_BUDGET
+        oversized = raster.width * raster.height > sample_budget
         if oversized and isinstance(raster, raster_source.GdalSource):
-            if not _reduced_reads_available(raster):
+            dims = level_dims(source, num_channels)
+            if not dims:
                 raise _overviews_required(
                     str(raster.path),
                     f"this {raster.width}x{raster.height} raster holds "
-                    f"{raster.width * raster.height} pixels, over the "
-                    f"{_STATS_SAMPLE_BUDGET} its display statistics can be read from native "
-                    f"pixels for. Reading them needs its reduced-resolution overviews: build "
-                    f'them with POST /api/images/overviews {{"path": "{raster.path}"}}, then '
-                    "ask again.")
-            ranges, clips, spec = _overview_stats(raster)
+                    f"{raster.width * raster.height} pixels, over the {sample_budget} its "
+                    "display statistics can be read from native pixels for.")
+            ranges, clips, served = _overview_stats(raster, dims)
             stats = _RasterStats(dtype=dtype, num_channels=channels, ranges=ranges,
-                                 clip_bounds=clips, overview_scale=spec.scale,
+                                 clip_bounds=clips, overview_size=served,
                                  interpretations=interpretations)
     if stats is None:
         sampled = sampled_band_ranges(
@@ -392,33 +473,6 @@ def _sampled_bounds(stats: _RasterStats, idxs: "list[int]", stretch: str
     return [(stats.ranges[i].minimum, stats.ranges[i].maximum) for i in idxs]
 
 
-def _fit_output(rect_w: int, rect_h: int, max_width: int, whole_view: bool) -> tuple[int, int]:
-    """The ``(width, height)`` a region is served at: ``max_width`` wide at most, never upscaled,
-    and never more than :data:`DISPLAY_MAX_PIXELS` of output.
-
-    A whole-view request scales to fit that area whatever it asked for. An explicit region over the
-    cap is refused.
-    """
-    out_w = min(rect_w, max_width)
-    out_h = max(1, round(rect_h * out_w / rect_w))
-    if out_w * out_h <= DISPLAY_MAX_PIXELS:
-        return out_w, out_h
-    if not whole_view:
-        raise HTTPException(
-            400,
-            f"a {rect_w}x{rect_h} region served at {out_w}x{out_h} is {out_w * out_h} output "
-            f"pixels, over the display cap of {DISPLAY_MAX_PIXELS}. Ask for a smaller max_width, "
-            "or a smaller region.",
-        )
-    out_w = max(1, int(out_w * math.sqrt(DISPLAY_MAX_PIXELS / (out_w * out_h))))
-    out_h = max(1, round(rect_h * out_w / rect_w))
-    # Rounding the height back onto the aspect ratio can put the area a hair over the cap.
-    while out_w > 1 and out_w * out_h > DISPLAY_MAX_PIXELS:
-        out_w -= 1
-        out_h = max(1, round(rect_h * out_w / rect_w))
-    return out_w, out_h
-
-
 def _plain_rgb(pixels, dtype, bounds: "tuple[float, float] | None"):
     """A 1/3/4-band array as the plain ``uint8`` RGB the file's own pixels read as: a single band
     replicated, a fourth band dropped, and no data-range stretch applied.
@@ -449,9 +503,7 @@ def _plain_rgb(pixels, dtype, bounds: "tuple[float, float] | None"):
 def serve_image(
     request: Request,
     path: str = Query(..., description="Absolute path to the image file"),
-    max_width: int | None = Query(
-        None, ge=1, description="Serve at this width at most; defaults to the display edge bound"),
-    quality: int = Query(90, ge=1, le=100),
+    area_cap: int = Depends(display_cap),
     bands: str | None = Query(
         None, description="3 comma-separated band names or 0-based indices, e.g. "
                           "'NIR,Red,Green' or '3,2,1'; selects a live composite instead of the "
@@ -463,14 +515,19 @@ def serve_image(
     y0: int | None = Query(None, ge=0, description="Region top edge, full-resolution pixels"),
     x1: int | None = Query(None, ge=0, description="Region right edge, exclusive"),
     y1: int | None = Query(None, ge=0, description="Region bottom edge, exclusive"),
+    level: int = Query(0, ge=0, description="The overview level the region is a tile of (0 "
+                                            "native), its corners in that level's pixel grid"),
 ) -> Response:
-    """Serve a JPEG of a raster, whole or of one region of it.
+    """Serve a raster, whole or one region of it, within the requesting display's area cap.
 
     ``x0/y0/x1/y1`` (all four or none) name a half-open region in the raster's own full-resolution
-    pixel grid; omitting them serves the whole frame. ``max_width`` is the width the result is
-    served at, at most, and defaults to the platform's display edge bound: a request is never
-    upscaled, and the output is never more than the display area bound (a whole-view request scales
-    to fit it, an explicit region over it is refused, naming the cap).
+    pixel grid; omitting them serves the whole frame. A region of at most the cap's pixels is
+    served at native resolution, losslessly (:data:`_NATIVE_ENCODING`). The whole frame, and a
+    region past the cap, is a display read (:data:`_DISPLAY_ENCODING`) as
+    ``display_bounds.plan_read`` plans it, within the codec's edge limit. With ``level`` above 0
+    the region is one tile of that overview level, in its own pixel grid and at most the cap's
+    pixels, served at the level's resolution as a display read; a raster with no such level
+    refuses it.
 
     With no ``bands`` selection a 1/3/4-band raster serves as its own plain RGB, with no data-range
     stretch: a single band replicated, a fourth band dropped. A ``bands`` selection, a
@@ -479,9 +536,10 @@ def serve_image(
     themselves; a region's come from the raster's seeded per-band sample, so two regions of one
     raster render alike. The size served is reported in ``X-TCIP-Served-Size``.
 
-    A scaled read of a raster larger than the display area bound needs the reduced-resolution
-    overviews GDAL serves it from; without them the request is refused, naming ``POST
-    /api/images/overviews`` (``X-TCIP-Image-Error: overviews_required``).
+    A display read of a GDAL raster whose window is larger than the cap, with no overview levels,
+    is refused naming ``POST /api/images/overviews`` (``X-TCIP-Image-Error: overviews_required``)
+    when a pyramid can be built for it (``overviews.overview_levels``); a raster within the
+    pyramid floor, which can have none, is read natively and resampled.
 
     An ETag keyed on the file's identity and every requested render param lets the browser
     revalidate with a cheap 304.
@@ -497,6 +555,7 @@ def serve_image(
     )
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.derivations import probe_channels
+    from tcip_mcp.pipelines.overviews import overview_levels
 
     if stretch not in STRETCH_MODES:
         raise HTTPException(400, f"stretch must be one of {sorted(STRETCH_MODES)}, got {stretch!r}")
@@ -506,12 +565,20 @@ def serve_image(
     if any(c is None for c in corners) and any(c is not None for c in corners):
         raise HTTPException(400, "a region needs all four of x0, y0, x1, y1, or none of them")
     whole_view = corners[0] is None
+    native = False
     if not whole_view:
         # the all-or-none guard above already requires every corner set when not whole_view
         assert x0 is not None and y0 is not None and x1 is not None and y1 is not None
         if not (x0 < x1 and y0 < y1):
             raise HTTPException(
                 400, f"region [{y0}:{y1}, {x0}:{x1}] is empty; x0 < x1 and y0 < y1 are required")
+        native = within_cap(x1 - x0, y1 - y0, area_cap)
+    if level and not (native and x0 is not None and y0 is not None and x1 is not None
+                      and y1 is not None and _DISPLAY_ENCODING.max_edge is not None
+                      and max(x1 - x0, y1 - y0) <= _DISPLAY_ENCODING.max_edge):
+        raise HTTPException(
+            400, f"a tile of overview level {level} is a region of at most this display's cap "
+                 f"of {area_cap} pixels and no edge past {_DISPLAY_ENCODING.max_edge}")
 
     band_tokens = _parse_band_tokens(bands) if bands is not None else None
     composite_requested = bands is not None or isinstance(source, BandGroupRef)
@@ -525,13 +592,14 @@ def serve_image(
         probed if composite_requested
         else raster_source.image_route_channel_count(source, probed)
     )
-    target_width = DISPLAY_MAX_EDGE if max_width is None else max_width
+    encoding = _NATIVE_ENCODING if native and not level else _DISPLAY_ENCODING
 
     # Requested params only: the scale a read is served at depends on the raster's own size and on
     # whether an overview level exists, neither known at lookup time, so it returns as a header.
     key = hashlib.md5(
-        f"{RENDER_CACHE_VERSION}:{_source_identity(source, open_channels)}:"
-        f"{target_width}:{quality}:{bands}:{stretch}:{corners}".encode()
+        f"{RENDER_CACHE_VERSION}:{_source_identity(source, open_channels)}:{area_cap}:"
+        f"{encoding.pil_format}:{sorted(encoding.options.items())}:{bands}:{stretch}:{corners}:"
+        f"{level}".encode()
     ).hexdigest()
     etag = f'W/"{key}"'
     cache_headers = {"ETag": etag, "Cache-Control": "private, max-age=3600"}
@@ -539,13 +607,13 @@ def serve_image(
         return Response(status_code=304, headers=cache_headers)
 
     cache_dir = _render_cache_dir()
-    cached = cache_dir / f"{key}.jpg"
+    cached = cache_dir / f"{key}{encoding.suffix}"
     cached_headers = cache_dir / f"{key}.json"
     if cached.is_file() and cached_headers.is_file():
         try:
             extra = json.loads(cached_headers.read_text(encoding="utf-8"))
             cached.touch()  # refresh mtime so LRU eviction keeps the working set
-            return FileResponse(cached, media_type="image/jpeg",
+            return FileResponse(cached, media_type=encoding.media_type,
                                 headers={**cache_headers, **extra})
         except (OSError, ValueError):
             pass  # an unreadable cache entry is rendered again, never served as-is
@@ -554,32 +622,43 @@ def serve_image(
     try:
         with raster_source.open_raster(source, open_channels) as raster:
             opening = False
+            dims = level_dims(source, open_channels)
+            grid_w, grid_h = dims[level - 1] if 0 < level <= len(dims) else (
+                raster.width, raster.height)
+            if level and (grid_w, grid_h) == (raster.width, raster.height):
+                raise HTTPException(400, f"this raster has no overview level {level}")
             if whole_view:
                 rect = raster_source.Rect(0, 0, raster.width, raster.height)
             else:
                 # the all-or-none guard above already requires every corner set when not whole_view
                 assert x0 is not None and y0 is not None and x1 is not None and y1 is not None
                 rect = raster_source.Rect(x0, y0, x1, y1)
-            if not whole_view and (rect.x1 > raster.width or rect.y1 > raster.height):
+            if not whole_view and (rect.x1 > grid_w or rect.y1 > grid_h):
                 raise HTTPException(
                     400,
                     f"region [{rect.y0}:{rect.y1}, {rect.x0}:{rect.x1}] is outside this "
-                    f"{raster.width}x{raster.height} raster",
+                    f"{grid_w}x{grid_h} raster",
                 )
-            out_w, out_h = _fit_output(rect.width, rect.height, target_width, whole_view)
-            scaled = out_w < rect.width
-            if (scaled and rect.width * rect.height > DISPLAY_MAX_PIXELS
-                    and isinstance(raster, raster_source.GdalSource)
-                    and not _reduced_reads_available(raster)):
-                raise _overviews_required(
-                    path,
-                    f"serving this {rect.width}x{rect.height} region at {out_w}x{out_h} needs "
-                    f"reduced-resolution overviews: reading it natively would decode "
-                    f"{rect.width * rect.height} pixels, over the display cap of "
-                    f"{DISPLAY_MAX_PIXELS}. Build them with POST /api/images/overviews "
-                    f'{{"path": "{path}"}}, then request this view again.')
-            pixels, _spec = raster.read_region(
-                rect, target_size=(out_w, out_h) if scaled else None)
+            if level:
+                # only a GDAL raster reports overview levels, so a level read has one
+                assert isinstance(raster, raster_source.GdalSource)
+                pixels, _spec = raster.read_level_region(level, rect)
+                served_size = (rect.width, rect.height)
+            else:
+                plan = plan_read(rect, raster.width, raster.height, dims, area_cap,
+                                 encoding.max_edge)
+                # A raster no pyramid can be built for is at most the floor edge square: read
+                # natively.
+                if (not plan.fits and plan.level == 0
+                        and isinstance(raster, raster_source.GdalSource)
+                        and overview_levels(raster.width, raster.height)):
+                    raise _overviews_required(
+                        path,
+                        f"serving this {rect.width}x{rect.height} read at {plan.width}x"
+                        f"{plan.height} would decode {rect.width * rect.height} pixels natively, "
+                        f"over this display's cap of {area_cap}.")
+                pixels, _spec = planned_read(raster, rect, plan)
+                served_size = (plan.width, plan.height)
             channels = int(raster.num_channels)
             dtype = raster.dtype
 
@@ -594,7 +673,7 @@ def serve_image(
         # served; a scale that reads no pixel statistic (a dtype ceiling) asks for neither.
         integer = np.issubdtype(dtype, np.integer)
         wants_bounds = (not (stretch == "none" and integer)) if composite else not integer
-        sampled = (_raster_stats(source, open_channels, _source_identity(source, open_channels))
+        sampled = (_raster_stats(source, open_channels)
                    if wants_bounds and not whole_view else None)
 
         if composite and stretch == "none" and integer:
@@ -613,8 +692,9 @@ def serve_image(
             rgb = _plain_rgb(pixels, dtype, band_bounds)
 
         buf = io.BytesIO()
-        Image.fromarray(np.ascontiguousarray(rgb), mode="RGB").save(buf, "JPEG", quality=quality)
-        data = buf.getvalue()  # no optimize=True: ~0.4 s for ~5% size
+        Image.fromarray(np.ascontiguousarray(rgb), mode="RGB").save(
+            buf, encoding.pil_format, **encoding.options)
+        data = buf.getvalue()
     except HTTPException:
         raise
     except ValueError as exc:
@@ -624,7 +704,7 @@ def serve_image(
     except Exception as exc:
         raise HTTPException(500, f"could not process image: {exc}") from exc
 
-    extra = {"X-TCIP-Served-Size": f"{out_w}x{out_h}"}
+    extra = {"X-TCIP-Served-Size": f"{served_size[0]}x{served_size[1]}"}
 
     try:
         tmp = cache_dir / f"{key}.{threading.get_ident()}.tmp"
@@ -636,7 +716,7 @@ def serve_image(
     except OSError:
         pass  # cache is best-effort; the response below is already rendered
 
-    return Response(content=data, media_type="image/jpeg",
+    return Response(content=data, media_type=encoding.media_type,
                     headers={**cache_headers, **extra})
 
 
@@ -654,8 +734,8 @@ def get_bands(path: str = Query(...)) -> dict:
     raster whose pixels fit the native-sampling budget carries ``sampled``, ``pixel_fraction`` and
     ``seed``: ``sampled`` is false exactly when the sample covered every pixel (``pixel_fraction``
     1.0), where the numbers are the raster's own exact bounds. A larger one is read once off an
-    overview level instead and carries ``sampled`` false with ``overview_scale``, the served/native
-    resolution ratio it was read at; those bounds describe display scale only. Either way they are
+    overview level instead and carries ``sampled`` false with ``overview_size``, the ``[width,
+    height]`` it was read at; those bounds describe display scale only. Either way they are
     the same numbers this raster's region renders stretch through.
 
     A band carries ``interpretation`` (``red``, ``alpha``, and the rest) where the backend reads it
@@ -669,7 +749,7 @@ def get_bands(path: str = Query(...)) -> dict:
     if n <= 3 and not isinstance(source, BandGroupRef):
         return {"band_count": n, "bands": []}
 
-    stats = _raster_stats(source, n, _source_identity(source, n))
+    stats = _raster_stats(source, n)
     if isinstance(source, BandGroupRef):
         names = list(source.bands)
         wavelengths = source.central_wavelength_nm or {}
@@ -689,9 +769,9 @@ def get_bands(path: str = Query(...)) -> dict:
         if stats.interpretations is not None and i < len(stats.interpretations):
             band["interpretation"] = stats.interpretations[i]
         bands.append(band)
-    if stats.overview_scale is not None:
+    if stats.overview_size is not None:
         return {"band_count": len(names), "bands": bands, "sampled": False,
-                "overview_scale": stats.overview_scale}
+                "overview_size": list(stats.overview_size)}
     return {
         "band_count": len(names),
         "bands": bands,
@@ -735,7 +815,7 @@ def _overview_worker(job: OverviewJob) -> None:
     that stops the build is a failure. A raster GDAL cannot open at all answers that there is no
     pyramid.
     """
-    from tcip_mcp.pipelines.overviews import build_overviews, has_overviews
+    from tcip_mcp.pipelines.overviews import build_overviews, overview_dims
 
     def record(fraction: float) -> None:
         job.progress = float(fraction)
@@ -745,7 +825,7 @@ def _overview_worker(job: OverviewJob) -> None:
         build_overviews(job.path, progress_cb=record)
     except Exception as exc:  # noqa: BLE001, the job records what stopped it
         try:
-            built = has_overviews(job.path)
+            built = bool(overview_dims(job.path))
         except Exception:  # noqa: BLE001, a raster that will not open carries no pyramid
             built = False
         if not built:

@@ -188,7 +188,7 @@ beforeEach(() => {
   });
   // jsdom's own getBoundingClientRect is always zero; the viewport math needs a real host.
   vi.spyOn(canvasSync, "measureCanvasHost").mockReturnValue({ w: 1000, h: 800 });
-  vi.spyOn(api.images, "servingGrid").mockResolvedValue({ tile_size: 1000, cells: [] });
+  vi.spyOn(api.images, "viewReads").mockResolvedValue({ reads: [] });
   // One jsdom instance per file, not per test: a recolor left by an earlier test must not leak
   // into a later one's derived-color assertions.
   try {

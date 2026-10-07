@@ -51,8 +51,8 @@ def _multiband(path: Path, *, channels: int = 4, height: int = 24, width: int = 
 
 
 def _wide_raster(path: Path, *, width: int = 5000, height: int = 64) -> np.ndarray:
-    """A raster whose longest edge is past the display edge bound, small enough to build in
-    tests: an overview level exists for it."""
+    """A raster whose longest edge is past the pyramid floor, small enough to build in tests: an
+    overview level exists for it."""
     arr = (np.arange(height * width) % 251).astype(np.uint8).reshape(height, width)
     tifffile.imwrite(str(path), arr, rowsperstrip=8)
     return arr
@@ -60,8 +60,8 @@ def _wide_raster(path: Path, *, width: int = 5000, height: int = 64) -> np.ndarr
 
 def _wide_multiband(path: Path, *, width: int = 5000, height: int = 64,
                     channels: int = 4) -> np.ndarray:
-    """A multi-band raster past the display edge bound, so a pyramid can be built for it, with a
-    band count that reaches the per-band stats rather than the plain-RGB early return."""
+    """A multi-band raster past the pyramid floor, so a pyramid can be built for it, with a band
+    count that reaches the per-band stats rather than the plain-RGB early return."""
     rng = np.random.default_rng(11)
     arr = rng.integers(0, 256, size=(height, width, channels)).astype(np.uint8)
     tifffile.imwrite(str(path), arr, rowsperstrip=8)
@@ -73,15 +73,30 @@ def _served(resp) -> np.ndarray:
     return np.asarray(Image.open(io.BytesIO(resp.content)))
 
 
-QUALITY = 90
-"""The JPEG quality these renders are requested and re-encoded at, so bytes compare exactly."""
+DISPLAY = 3840 * 2160
+"""The display pixel count most requests here report: a fixture 3840x2160 screen at device pixel
+ratio 1, larger than every raster built here, unless a test reports a smaller display."""
+
+SMALL_DISPLAY = 100_000
+"""A fixture display pixel count under the 5000x64 wide rasters' 320,000 pixels, so a whole view
+of one is a display read."""
+
+
+ENCODINGS = {
+    "image/jpeg": ("JPEG", {"quality": 95, "subsampling": 0}),
+    "image/png": ("PNG", {"compress_level": 1}),
+}
+"""The encoding policy each media type is served under, stated here rather than read from the
+route, so a change to the route's policy fails these renders instead of moving both sides."""
 
 
 def _renders_as(resp, owed: np.ndarray) -> None:
-    """The served JPEG is ``owed``'s pixels, encoded at :data:`QUALITY`, byte for byte."""
+    """The served image is ``owed``'s pixels, encoded byte for byte under the policy
+    :data:`ENCODINGS` states for the response's media type."""
     assert resp.status_code == 200, resp.text
+    pil_format, options = ENCODINGS[resp.headers["content-type"]]
     buf = io.BytesIO()
-    Image.fromarray(owed, mode="RGB").save(buf, "JPEG", quality=QUALITY)
+    Image.fromarray(owed, mode="RGB").save(buf, pil_format, **options)
     assert resp.content == buf.getvalue()
 
 
@@ -100,9 +115,9 @@ def test_a_region_serves_that_regions_own_pixels(client: TestClient, tmp_path: P
     path = tmp_path / "quads.tif"
     _quadrant_rgb(path)
     top_right = _served(client.get("/api/images", params={
-        "path": str(path), "x0": 200, "y0": 0, "x1": 400, "y1": 150}))
+        "path": str(path), "display_pixels": DISPLAY, "x0": 200, "y0": 0, "x1": 400, "y1": 150}))
     bottom_left = _served(client.get("/api/images", params={
-        "path": str(path), "x0": 0, "y0": 150, "x1": 200, "y1": 300}))
+        "path": str(path), "display_pixels": DISPLAY, "x0": 0, "y0": 150, "x1": 200, "y1": 300}))
     assert top_right.shape == (150, 200, 3)
     assert bottom_left.shape == (150, 200, 3)
     assert np.allclose(top_right.mean(axis=(0, 1)), (20, 200, 20), atol=6)
@@ -113,7 +128,7 @@ def test_a_region_outside_the_raster_is_refused(client: TestClient, tmp_path: Pa
     path = tmp_path / "quads.tif"
     _quadrant_rgb(path)
     resp = client.get("/api/images", params={
-        "path": str(path), "x0": 0, "y0": 0, "x1": 401, "y1": 300})
+        "path": str(path), "display_pixels": DISPLAY, "x0": 0, "y0": 0, "x1": 401, "y1": 300})
     assert resp.status_code == 400
     assert "outside" in resp.json()["detail"]
 
@@ -129,7 +144,8 @@ def test_an_empty_region_is_refused_rather_than_raising(client: TestClient, tmp_
     own out-of-bounds error."""
     path = tmp_path / "quads.tif"
     _quadrant_rgb(path)
-    resp = client.get("/api/images", params={"path": str(path), **corners})
+    resp = client.get("/api/images",
+                      params={"path": str(path), "display_pixels": DISPLAY, **corners})
     assert resp.status_code == 400
     assert "x0 < x1" in resp.json()["detail"]
 
@@ -137,17 +153,18 @@ def test_an_empty_region_is_refused_rather_than_raising(client: TestClient, tmp_
 def test_a_partial_region_is_refused(client: TestClient, tmp_path: Path):
     path = tmp_path / "quads.tif"
     _quadrant_rgb(path)
-    resp = client.get("/api/images", params={"path": str(path), "x0": 0, "y0": 0, "x1": 100})
+    resp = client.get("/api/images", params={
+        "path": str(path), "display_pixels": DISPLAY, "x0": 0, "y0": 0, "x1": 100})
     assert resp.status_code == 400
     assert "all four" in resp.json()["detail"]
 
 
-def test_the_serving_grid_tiles_an_ingested_raster_and_refuses_a_missing_one(
+def test_a_view_of_an_ingested_raster_reads_its_cells_or_one_display_read(
     client: TestClient, tmp_path: Path,
 ):
-    """The grid over an image ``ingest_images`` brought in covers its whole extent in cells of
-    the derived serving edge; a path naming no image refuses by name."""
-    from tcip_mcp.pipelines.reference_grid import derive_serving_tile_size
+    """A view within the display's cap is served by the native cells it intersects, a larger one
+    by one display read of itself; a path naming no image refuses by name."""
+    from tcip_mcp.pipelines.reference_grid import derive_serving_tile_size, reference_cells
     from tcip_mcp.tools.ingest_tools import ingest_images
 
     source = tmp_path / "source"
@@ -158,14 +175,23 @@ def test_the_serving_grid_tiles_an_ingested_raster_and_refuses_a_missing_one(
     (image,) = (p for p in (Path(ingested["image_root"]) / "undated").iterdir()
                 if p.stem == "strip_01")
 
-    grid = client.get("/api/images/serving_grid", params={"path": str(image)})
-    assert grid.status_code == 200, grid.text
-    body = grid.json()
-    assert body["tile_size"] == derive_serving_tile_size(5000, 64)
-    assert sum((c["x1"] - c["x0"]) * (c["y1"] - c["y0"]) for c in body["cells"]) == 5000 * 64
+    def view(x1: int) -> dict:
+        resp = client.get("/api/images/view", params={
+            "path": str(image), "display_pixels": SMALL_DISPLAY, "x0": 0, "y0": 0, "x1": x1,
+            "y1": 64})
+        assert resp.status_code == 200, resp.text
+        return resp.json()
 
-    missing = client.get("/api/images/serving_grid",
-                         params={"path": str(image.with_name("absent_01.tif"))})
+    edge = derive_serving_tile_size(5000, 64, SMALL_DISPLAY)
+    cells = reference_cells(5000, 64, edge, clamp=True)
+    assert [(r["name"], r["level"]) for r in view(300)["reads"]] == [
+        (c.name, 0) for c in cells if c.x0 < 300]
+    assert view(5000)["reads"] == [{"name": "view", "level": 0, "x0": 0, "y0": 0, "x1": 5000,
+                                    "y1": 64, "nx0": 0, "ny0": 0, "nx1": 5000, "ny1": 64}]
+
+    missing = client.get("/api/images/view", params={
+        "path": str(image.with_name("absent_01.tif")), "display_pixels": SMALL_DISPLAY,
+        "x0": 0, "y0": 0, "x1": 10, "y1": 10})
     assert missing.status_code == 404
     assert "absent_01" in missing.json()["detail"]
 
@@ -173,51 +199,401 @@ def test_the_serving_grid_tiles_an_ingested_raster_and_refuses_a_missing_one(
 # ── Display caps ─────────────────────────────────────────────────────────────────────────
 
 
-def test_max_width_defaults_to_the_display_edge_bound(client: TestClient, tmp_path: Path):
-    """A client that names no width gets the platform's own bound applied at the route, so the
-    number lives in one place instead of in every caller."""
-    from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE
-
-    path = tmp_path / "wide.tif"
-    _wide_raster(path)
-    served = _served(client.get("/api/images", params={"path": str(path)}))
-    assert served.shape[1] == DISPLAY_MAX_EDGE
-
-
-def test_a_whole_view_over_the_area_cap_scales_to_fit_instead_of_refusing(
-    client: TestClient, tmp_path: Path, monkeypatch,
+@pytest.mark.parametrize("size", [(400, 300), (1, 100_000), (100_000, 1)])
+def test_a_whole_view_over_the_area_cap_scales_to_fit_whichever_axis_limits(
+    client: TestClient, tmp_path: Path, size,
 ):
-    """Whatever an image's shape, asking for the whole of it renders it: the area bound scales the
-    result down rather than refusing the request."""
-    monkeypatch.setattr(images_route, "DISPLAY_MAX_PIXELS", 20_000)
-    path = tmp_path / "frame.jpg"
-    Image.new("RGB", (400, 300), (30, 60, 90)).save(path)
-    served = _served(client.get("/api/images", params={"path": str(path)}))
-    assert served.shape[0] * served.shape[1] <= 20_000
-    assert served.shape[1] / served.shape[0] == pytest.approx(400 / 300, abs=0.02)
+    """Whatever an image's shape, asking for the whole of it renders it within the display's
+    area cap, a one-pixel-wide frame included, and the served size header says what was served."""
+    path = tmp_path / "frame.png"
+    Image.new("RGB", size, (30, 60, 90)).save(path)
+    resp = client.get("/api/images", params={"path": str(path), "display_pixels": 20_000})
+    served = _served(resp)
+    assert 0 < served.shape[0] * served.shape[1] <= 20_000
+    assert resp.headers["x-tcip-served-size"] == f"{served.shape[1]}x{served.shape[0]}"
+    if min(size) > 1:
+        assert served.shape[1] / served.shape[0] == pytest.approx(size[0] / size[1], abs=0.02)
 
 
-def test_a_region_over_the_area_cap_is_refused_with_the_cap_named(
-    client: TestClient, tmp_path: Path, monkeypatch,
+def test_a_region_over_the_area_cap_is_a_display_read_within_it(
+    client: TestClient, tmp_path: Path,
 ):
-    monkeypatch.setattr(images_route, "DISPLAY_MAX_PIXELS", 20_000)
     path = tmp_path / "quads.tif"
     _quadrant_rgb(path)
     resp = client.get("/api/images", params={
-        "path": str(path), "x0": 0, "y0": 0, "x1": 400, "y1": 300})
-    assert resp.status_code == 400
-    detail = resp.json()["detail"]
-    assert "20000" in detail and "max_width" in detail
+        "path": str(path), "display_pixels": 20_000, "x0": 0, "y0": 0, "x1": 400, "y1": 300})
+    served = _served(resp)
+    assert resp.headers["content-type"] == images_route._DISPLAY_ENCODING.media_type
+    assert served.shape[0] * served.shape[1] <= 20_000
 
 
-def test_a_region_within_the_area_cap_is_served(client: TestClient, tmp_path: Path, monkeypatch):
-    """The refusal above must not close the door on the regions it was written to admit."""
-    monkeypatch.setattr(images_route, "DISPLAY_MAX_PIXELS", 20_000)
+def test_a_region_within_the_area_cap_is_served_natively(client: TestClient, tmp_path: Path):
     path = tmp_path / "quads.tif"
     _quadrant_rgb(path)
+    resp = client.get("/api/images", params={
+        "path": str(path), "display_pixels": 20_000, "x0": 0, "y0": 0, "x1": 100, "y1": 100})
+    assert _served(resp).shape == (100, 100, 3)
+    assert resp.headers["content-type"] == images_route._NATIVE_ENCODING.media_type
+
+
+@pytest.mark.parametrize("shape", [(70, 100), (1, 16_384), (1, 70_000)])
+def test_a_native_region_decodes_to_exactly_the_source_pixels(
+    client: TestClient, tmp_path: Path, shape,
+):
+    """A region is the pixels a judgment is made on, so it is served losslessly: noise, which any
+    lossy encoding visibly alters, comes back value for value, at edges past the limits WebP
+    (16,383) and JPEG (65,500) accept."""
+    height, width = shape
+    path = tmp_path / "noise.tif"
+    arr = np.random.default_rng(2).integers(
+        0, 256, size=(height + 20, width + 30, 3)).astype(np.uint8)
+    tifffile.imwrite(str(path), arr)
     served = _served(client.get("/api/images", params={
-        "path": str(path), "x0": 0, "y0": 0, "x1": 100, "y1": 100}))
-    assert served.shape == (100, 100, 3)
+        "path": str(path), "display_pixels": DISPLAY, "x0": 30, "y0": 20, "x1": 30 + width,
+        "y1": 20 + height}))
+    assert np.array_equal(served, arr[20:, 30:])
+
+
+@pytest.mark.parametrize("raster_shape,display,rows", [
+    ((300, 400), 10_000, 100),
+    ((300, 400), 15_000, 100),
+    ((1, 100_000), 20_000, 1),
+])
+def test_the_view_routes_cells_and_the_image_routes_cap_are_one_derivation(
+    client: TestClient, tmp_path: Path, raster_shape, display, rows,
+):
+    """For one display, a view the view route serves by native cells is one the image route
+    serves natively, and a view one column past the cap is a display read on both routes; each
+    cell the view route names serves natively at its own size. The caps are a square, a
+    non-square area, and one a single-row raster reaches."""
+    from tcip_mcp.pipelines.overviews import build_overviews, overview_levels
+
+    path = tmp_path / "raster.tif"
+    tifffile.imwrite(str(path), np.full(raster_shape, 90, dtype=np.uint8))
+    if overview_levels(raster_shape[1], raster_shape[0]):
+        build_overviews(path)
+    for width, native in ((display // rows, True), (display // rows + 1, False)):
+        rect = {"x0": 0, "y0": 0, "x1": width, "y1": rows}
+        reads = client.get("/api/images/view", params={
+            "path": str(path), "display_pixels": display, **rect}).json()["reads"]
+        assert all(r["level"] == 0 and r["name"] != "view" for r in reads) is native
+        served = client.get("/api/images", params={
+            "path": str(path), "display_pixels": display, **rect})
+        assert served.status_code == 200, served.text
+        assert (served.headers["content-type"]
+                == images_route._NATIVE_ENCODING.media_type) is native
+        if native:
+            for read in reads:
+                cell = {k: read[k] for k in ("x0", "y0", "x1", "y1")}
+                resp = client.get("/api/images", params={
+                    "path": str(path), "display_pixels": display, **cell})
+                assert resp.headers["content-type"] == images_route._NATIVE_ENCODING.media_type
+                assert _served(resp).shape[:2] == (cell["y1"] - cell["y0"],
+                                                   cell["x1"] - cell["x0"])
+
+
+def test_the_view_and_labels_routes_measure_the_frame_the_image_routes_reader_opens(
+    client: TestClient, tmp_path: Path,
+):
+    """An RGB TIFF whose channel count the header probe and a fixed hint of three answer
+    differently is measured by the view route and the annotation route at the count the image
+    route's plain read opens it at: the canvas frame the labels route answers is the view route's
+    advertised extent, and every read the view route advertises lies inside the reader's frame
+    and serves."""
+    from tcip_mcp.pipelines.raster_source import image_route_channel_count, open_raster
+
+    images = tmp_path / "rgb_ds" / "images" / "2026-01-01"
+    images.mkdir(parents=True)
+    path = images / "rgb_row.tif"
+    tifffile.imwrite(str(path), np.tile(np.array([20, 100, 220], dtype=np.uint8), (1, 200_000, 1)),
+                     photometric="rgb")
+    with open_raster(path, image_route_channel_count(path)) as raster:
+        frame = (raster.width, raster.height)
+    reads = client.get("/api/images/view", params={
+        "path": str(path), "display_pixels": 1_000_000, "x0": 0, "y0": 0, "x1": 200_000,
+        "y1": 200_000}).json()["reads"]
+    assert (max(r["nx1"] for r in reads), max(r["ny1"] for r in reads)) == frame
+    labels = client.get("/api/annotate/labels", params={"image_path": str(path)})
+    assert labels.status_code == 200, labels.text
+    assert (labels.json()["img_width"], labels.json()["img_height"]) == frame
+    for read in reads:
+        resp = client.get("/api/images", params={
+            "path": str(path), "display_pixels": 1_000_000, "level": read["level"],
+            **{k: read[k] for k in ("x0", "y0", "x1", "y1")}})
+        assert resp.status_code == 200, resp.text
+        assert resp.headers["x-tcip-served-size"] == (
+            f"{read['x1'] - read['x0']}x{read['y1'] - read['y0']}")
+
+
+def test_a_display_read_comes_off_the_overview_level_it_planned(
+    client: TestClient, tmp_path: Path,
+):
+    """A whole view too large for the cap is read from the finest overview level whose window
+    fits, never resampled from native pixels: with the native pixels zeroed after the build, the
+    served view still carries the original content the pyramid holds."""
+    from tcip_mcp.pipelines.overviews import build_overviews
+
+    path = tmp_path / "pyramid.tif"
+    tifffile.imwrite(str(path), np.full((2048, 2048), 200, dtype=np.uint8), rowsperstrip=64)
+    build_overviews(path)
+    tifffile.imwrite(str(path), np.zeros((2048, 2048), dtype=np.uint8), rowsperstrip=64)
+    served = _served(client.get("/api/images",
+                                params={"path": str(path), "display_pixels": 1500 * 1500}))
+    assert served.mean() == pytest.approx(200, abs=1)
+
+    coarsest = client.get("/api/images", params={"path": str(path), "display_pixels": 10_000})
+    assert _served(coarsest).mean() == pytest.approx(200, abs=1)
+    assert coarsest.headers["x-tcip-served-size"] == "100x100"
+
+
+@pytest.mark.parametrize("size,display,served_size", [
+    ((4000, 3006), 2_073_600, "1000x751"),
+    ((1920, 1086), 300_000, "728x411"),
+])
+def test_a_planned_display_read_is_one_the_raster_reader_admits(
+    client: TestClient, tmp_path: Path, size, display, served_size,
+):
+    """The plan's whole-pixel output size is one the raster reader's own geometry admits, for
+    rasters whose aspect ratio a quarter or a fitted scale does not divide evenly."""
+    from tcip_mcp.pipelines.overviews import build_overviews
+
+    path = tmp_path / "odd.tif"
+    tifffile.imwrite(str(path), np.full((size[1], size[0]), 120, dtype=np.uint8),
+                     rowsperstrip=64)
+    build_overviews(path)
+    resp = client.get("/api/images", params={"path": str(path), "display_pixels": display})
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["x-tcip-served-size"] == served_size
+
+
+def test_a_one_pixel_wide_raster_reads_off_its_pyramid(client: TestClient, tmp_path: Path):
+    """Each level's own dimensions plan the read, so a raster one pixel wide, whose levels all
+    report a horizontal factor of one, still comes off the level that fits the cap."""
+    from tcip_mcp.pipelines.overviews import build_overviews
+
+    path = tmp_path / "tall.tif"
+    tifffile.imwrite(str(path), np.full((100_000, 1), 200, dtype=np.uint8))
+    build_overviews(path)
+    tifffile.imwrite(str(path), np.zeros((100_000, 1), dtype=np.uint8))
+    resp = client.get("/api/images", params={"path": str(path), "display_pixels": 20_000})
+    assert _served(resp).mean() == pytest.approx(200, abs=1)
+    assert resp.headers["x-tcip-served-size"] == "1x12500"
+
+
+def test_a_palette_raster_reads_its_colors_off_its_pyramid(client: TestClient, tmp_path: Path):
+    """A palette raster's pyramid samples indices rather than averaging them, and a display read
+    expands the planned level's own indices: with the native indices zeroed after the build, the
+    served view keeps the color the pyramid holds."""
+    from tcip_mcp.pipelines.overviews import build_overviews
+
+    colormap = np.zeros((3, 256), dtype=np.uint16)
+    colormap[:, 5] = (200 * 256, 50 * 256, 100 * 256)
+    colormap[:, 7] = (110 * 256, 115 * 256, 80 * 256)
+    colormap[:, 9] = (20 * 256, 180 * 256, 60 * 256)
+    # Columns alternate 5 and 9; index 7 is their mean in both index and color, so a pyramid that
+    # averaged either way would hold 7.
+    indices = np.tile(np.array([5, 9], dtype=np.uint8), (2048, 1024))
+    path = tmp_path / "palette.tif"
+    tifffile.imwrite(str(path), indices, photometric="palette", colormap=colormap,
+                     rowsperstrip=64)
+    build_overviews(path)
+    tifffile.imwrite(str(path), np.zeros((2048, 2048), dtype=np.uint8), photometric="palette",
+                     colormap=colormap, rowsperstrip=64)
+    served = _served(client.get("/api/images",
+                                params={"path": str(path), "display_pixels": 1500 * 1500}))
+    mean = served.mean(axis=(0, 1))
+    assert (np.allclose(mean, (200, 50, 100), atol=3)
+            or np.allclose(mean, (20, 180, 60), atol=3)), mean
+
+
+def test_region_statistics_do_not_depend_on_the_display_that_asked(
+    client: TestClient, tmp_path: Path, monkeypatch,
+):
+    """Two displays asking for one region of one raster get the same stretch, the one the bands
+    route reports, even where the native sample covers only part of the raster."""
+    monkeypatch.setattr(images_route, "_STATS_WINDOW_SIZE", 64)
+    monkeypatch.setattr(images_route, "_STATS_MAX_WINDOWS", 4)
+    path = tmp_path / "ramp.npy"
+    rng = np.random.default_rng(9)
+    ramp = np.arange(1024, dtype=np.uint16)[None, :, None] * 40
+    np.save(str(path), (rng.integers(0, 1000, size=(1024, 1024, 4)) + ramp).astype(np.uint16))
+
+    def region(display: int) -> dict:
+        return {"path": str(path), "bands": "0,1,2", "x0": 0, "y0": 0, "x1": 64, "y1": 64,
+                "display_pixels": display}
+
+    small = client.get("/api/images", params=region(65_536))
+    images_route._stats_cache.clear()  # each display computes its statistics cold
+    large = client.get("/api/images", params=region(262_144))
+    assert _served(small).tolist() == _served(large).tolist()
+    body = client.get("/api/images/bands", params={"path": str(path)}).json()
+    assert body["sampled"] is True
+    bounds = [(b["min"], b["max"]) for b in body["bands"][:3]]
+    arr = np.load(str(path))
+    _renders_as(small, _composite(arr[:64, :64], "minmax", bounds))
+
+
+def _poisoned_pyramid(path: Path) -> None:
+    """A 4096-pixel square raster of 200 with its 2048 and 1024 levels built, then its native
+    pixels zeroed, so a served 200 proves a read came off the pyramid and a 0 proves it did not."""
+    from tcip_mcp.pipelines.overviews import build_overviews
+
+    tifffile.imwrite(str(path), np.full((4096, 4096), 200, dtype=np.uint8), rowsperstrip=64)
+    build_overviews(path)
+    tifffile.imwrite(str(path), np.zeros((4096, 4096), dtype=np.uint8), rowsperstrip=64)
+
+
+def _paint_levels(path: Path, values: tuple[int, ...]) -> None:
+    """Overwrite each level of ``path``'s uncompressed sidecar, finest first, with one value
+    apiece in place, so a served value names the physical level the pixels came off."""
+    from tcip_mcp.pipelines.overviews import overview_sidecar
+
+    sidecar = overview_sidecar(path)
+    with tifffile.TiffFile(str(sidecar)) as tif:
+        pages = [(page.compression, list(zip(page.dataoffsets, page.databytecounts)))
+                 for page in tif.pages]
+    assert len(pages) == len(values)
+    with open(sidecar, "r+b") as fh:
+        for (compression, strips), value in zip(pages, values):
+            assert compression == 1, "the fixture paints only an uncompressed sidecar"
+            for offset, count in strips:
+                fh.seek(offset)
+                fh.write(bytes([value]) * count)
+
+
+@pytest.mark.parametrize("crop,display,served_size", [
+    ((0, 0, 1, 4096), 100, "1x100"),
+    ((0, 0, 1, 4096), 600, "1x600"),
+    ((1, 1, 1025, 1025), 512 * 512, "257x257"),
+])
+def test_a_crop_is_planned_on_the_window_the_reader_opens(
+    client: TestClient, tmp_path: Path, crop, display, served_size,
+):
+    """A one-pixel-wide crop comes off the pyramid rather than being refused or read natively,
+    and an offset crop whose window on a finer level would pass the cap is read off the level
+    whose window, origin rounded down and end up, fits it."""
+    path = tmp_path / "pyramid.tif"
+    _poisoned_pyramid(path)
+    x0, y0, x1, y1 = crop
+    resp = client.get("/api/images", params={
+        "path": str(path), "display_pixels": display, "x0": x0, "y0": y0, "x1": x1, "y1": y1})
+    assert _served(resp).mean() == pytest.approx(200, abs=1)
+    assert resp.headers["x-tcip-served-size"] == served_size
+
+
+def test_a_scaled_view_is_served_by_tiles_of_its_planned_level(
+    client: TestClient, tmp_path: Path,
+):
+    """A view past the cap is answered with tiles of the overview level its read is planned off,
+    each served at that level's resolution off that physical level (native 0, level 1 50,
+    level 2 200), and a pan answers the tiles it still covers with the same records and the same
+    responses, so only the tiles that entered the view are new."""
+    path = tmp_path / "pyramid.tif"
+    _poisoned_pyramid(path)
+    _paint_levels(path, (50, 200))
+    display = 512 * 512
+
+    def tiles(x0: int, x1: int) -> list[dict]:
+        resp = client.get("/api/images/view", params={
+            "path": str(path), "display_pixels": display, "x0": x0, "y0": 0, "x1": x1,
+            "y1": 2048})
+        assert resp.status_code == 200, resp.text
+        return resp.json()["reads"]
+
+    def fetch(tile: dict):
+        return client.get("/api/images", params={
+            "path": str(path), "display_pixels": display, "level": tile["level"],
+            **{k: tile[k] for k in ("x0", "y0", "x1", "y1")}})
+
+    first = tiles(0, 2048)
+    assert first and {t["level"] for t in first} == {2}
+    tile = first[0]
+    served = fetch(tile)
+    assert served.headers["content-type"] == "image/jpeg"
+    assert _served(served).mean() == pytest.approx(200, abs=1)
+    assert served.headers["x-tcip-served-size"] == (
+        f"{tile['x1'] - tile['x0']}x{tile['y1'] - tile['y0']}")
+    assert (tile["nx1"] - tile["nx0"]) == (tile["x1"] - tile["x0"]) * 4
+
+    panned = tiles(512, 2560)
+    before = {(t["level"], t["name"]): t for t in first}
+    after = {(t["level"], t["name"]): t for t in panned}
+    shared = before.keys() & after.keys()
+    assert shared and after.keys() - before.keys()
+    for key in shared:
+        assert after[key] == before[key]
+        assert fetch(after[key]).headers["etag"] == fetch(before[key]).headers["etag"]
+
+
+@pytest.mark.parametrize("shape", [(200_000, 1), (1, 200_000)])
+def test_every_advertised_tile_of_a_skinny_raster_is_one_its_encoding_admits(
+    client: TestClient, tmp_path: Path, shape,
+):
+    """A one-pixel level longer than the JPEG edge limit is tiled within that limit, at the
+    level's own resolution, and every tile the view route names serves; a hand-built tile of the
+    whole level, within the area cap but past the edge limit, is refused naming the limit."""
+    from tcip_mcp.pipelines.overviews import build_overviews
+
+    path = tmp_path / "skinny.tif"
+    tifffile.imwrite(str(path), np.full(shape, 120, dtype=np.uint8))
+    build_overviews(path)
+    height, width = shape
+    reads = client.get("/api/images/view", params={
+        "path": str(path), "display_pixels": 100_000, "x0": 0, "y0": 0, "x1": width,
+        "y1": height}).json()["reads"]
+    assert reads and {r["level"] for r in reads} == {1}
+    for read in reads:
+        resp = client.get("/api/images", params={
+            "path": str(path), "display_pixels": 100_000, "level": 1,
+            **{k: read[k] for k in ("x0", "y0", "x1", "y1")}})
+        assert resp.status_code == 200, resp.text
+        assert resp.headers["x-tcip-served-size"] == (
+            f"{read['x1'] - read['x0']}x{read['y1'] - read['y0']}")
+        assert max(read["x1"] - read["x0"], read["y1"] - read["y0"]) <= 65_500
+
+    whole_level = client.get("/api/images", params={
+        "path": str(path), "display_pixels": 100_000, "level": 1, "x0": 0, "y0": 0,
+        "x1": max(1, width // 2), "y1": max(1, height // 2)})
+    assert whole_level.status_code == 400
+    assert "65500" in whole_level.json()["detail"]
+
+
+def test_a_stacked_tiff_the_reader_decodes_whole_is_offered_no_overview_tiles(
+    client: TestClient, tmp_path: Path,
+):
+    """A three-page stack whose first page carries GDAL overviews is decoded whole by the image
+    route's reader, which serves no level, so the view route answers with one display read of
+    the view, and that read serves."""
+    from tcip_mcp.pipelines.overviews import build_overviews, overview_dims
+
+    path = tmp_path / "stack.tif"
+    tifffile.imwrite(str(path), np.full((3, 2048, 2048), 90, dtype=np.uint8),
+                     photometric="minisblack")
+    build_overviews(path)
+    assert overview_dims(path), "the fixture's first page must carry overviews"
+    reads = client.get("/api/images/view", params={
+        "path": str(path), "display_pixels": 65_536, "x0": 0, "y0": 0, "x1": 2048,
+        "y1": 2048}).json()["reads"]
+    assert [(r["name"], r["level"]) for r in reads] == [("view", 0)]
+    resp = client.get("/api/images", params={
+        "path": str(path), "display_pixels": 65_536,
+        **{k: reads[0][k] for k in ("x0", "y0", "x1", "y1")}})
+    assert resp.status_code == 200, resp.text
+
+
+def test_a_tile_request_is_refused_where_the_raster_has_no_such_level(
+    client: TestClient, tmp_path: Path,
+):
+    path = tmp_path / "quads.tif"
+    _quadrant_rgb(path)
+    resp = client.get("/api/images", params={
+        "path": str(path), "display_pixels": DISPLAY, "level": 1, "x0": 0, "y0": 0, "x1": 10,
+        "y1": 10})
+    assert resp.status_code == 400
+    assert "no overview level 1" in resp.json()["detail"]
+    native = client.get("/api/images", params={
+        "path": str(path), "display_pixels": DISPLAY, "x0": 0, "y0": 0, "x1": 10, "y1": 10})
+    assert native.status_code == 200
 
 
 # ── Cache keys ───────────────────────────────────────────────────────────────────────────
@@ -226,11 +602,11 @@ def test_a_region_within_the_area_cap_is_served(client: TestClient, tmp_path: Pa
 def test_the_etag_varies_with_the_region(client: TestClient, tmp_path: Path):
     path = tmp_path / "quads.tif"
     _quadrant_rgb(path)
-    whole = client.get("/api/images", params={"path": str(path)})
+    whole = client.get("/api/images", params={"path": str(path), "display_pixels": DISPLAY})
     left = client.get("/api/images", params={
-        "path": str(path), "x0": 0, "y0": 0, "x1": 200, "y1": 300})
+        "path": str(path), "display_pixels": DISPLAY, "x0": 0, "y0": 0, "x1": 200, "y1": 300})
     right = client.get("/api/images", params={
-        "path": str(path), "x0": 200, "y0": 0, "x1": 400, "y1": 300})
+        "path": str(path), "display_pixels": DISPLAY, "x0": 200, "y0": 0, "x1": 400, "y1": 300})
     tags = {whole.headers["etag"], left.headers["etag"], right.headers["etag"]}
     assert len(tags) == 3
 
@@ -242,10 +618,10 @@ def test_the_etag_changes_when_an_overview_sidecar_appears(client: TestClient, t
 
     path = tmp_path / "wide.tif"
     _wide_raster(path)
-    before = client.get("/api/images", params={"path": str(path)})
+    before = client.get("/api/images", params={"path": str(path), "display_pixels": DISPLAY})
     assert before.status_code == 200
     build_overviews(path)
-    after = client.get("/api/images", params={"path": str(path)})
+    after = client.get("/api/images", params={"path": str(path), "display_pixels": DISPLAY})
     assert after.status_code == 200
     assert after.headers["etag"] != before.headers["etag"]
 
@@ -258,7 +634,7 @@ def test_a_uint8_raster_serves_its_own_pixels_with_no_stretch(client: TestClient
     and comes back at its own levels instead."""
     path = tmp_path / "flat.tif"
     tifffile.imwrite(str(path), np.full((32, 40, 3), (100, 120, 140), dtype=np.uint8))
-    resp = client.get("/api/images", params={"path": str(path)})
+    resp = client.get("/api/images", params={"path": str(path), "display_pixels": DISPLAY})
     served = _served(resp)
     assert np.allclose(served.mean(axis=(0, 1)), (100, 120, 140), atol=3)
     assert "x-tcip-stats-source" not in resp.headers
@@ -271,7 +647,7 @@ def test_a_uint16_raster_serves_on_its_dtypes_full_scale(client: TestClient, tmp
     instead, which renders the same raster white."""
     path = tmp_path / "half.tif"
     tifffile.imwrite(str(path), np.full((32, 40), 32768, dtype=np.uint16))
-    resp = client.get("/api/images", params={"path": str(path)})
+    resp = client.get("/api/images", params={"path": str(path), "display_pixels": DISPLAY})
     served = _served(resp)
     assert np.allclose(served.mean(axis=(0, 1)), 127.5, atol=3)
 
@@ -279,7 +655,8 @@ def test_a_uint16_raster_serves_on_its_dtypes_full_scale(client: TestClient, tmp
 def test_a_multi_band_uint16_raster_serves_on_that_same_scale(client: TestClient, tmp_path: Path):
     path = tmp_path / "half_rgb.tif"
     tifffile.imwrite(str(path), np.full((32, 40, 3), 32768, dtype=np.uint16))
-    served = _served(client.get("/api/images", params={"path": str(path)}))
+    served = _served(client.get("/api/images",
+                                params={"path": str(path), "display_pixels": DISPLAY}))
     assert np.allclose(served.mean(axis=(0, 1)), 127.5, atol=3)
 
 
@@ -293,7 +670,7 @@ def test_a_float_regions_full_scale_is_the_rasters_own_maximum(client: TestClien
     arr[:, 20:] = 1000.0
     tifffile.imwrite(str(path), arr)
     resp = client.get("/api/images", params={
-        "path": str(path), "x0": 0, "y0": 0, "x1": 20, "y1": 32})
+        "path": str(path), "display_pixels": DISPLAY, "x0": 0, "y0": 0, "x1": 20, "y1": 32})
     served = _served(resp)
     assert np.allclose(served.mean(axis=(0, 1)), 100.0 / 1000.0 * 255.0, atol=3)
 
@@ -304,7 +681,7 @@ def test_a_non_positive_float_band_renders_black(client: TestClient, tmp_path: P
     path = tmp_path / "negative.tif"
     arr = (-np.abs(np.random.default_rng(0).standard_normal((32, 40))) - 1.0).astype(np.float32)
     tifffile.imwrite(str(path), arr)
-    resp = client.get("/api/images", params={"path": str(path)})
+    resp = client.get("/api/images", params={"path": str(path), "display_pixels": DISPLAY})
     served = _served(resp)
     assert np.allclose(served, 0, atol=2)
 
@@ -312,7 +689,8 @@ def test_a_non_positive_float_band_renders_black(client: TestClient, tmp_path: P
 def test_a_single_band_raster_serves_as_replicated_gray(client: TestClient, tmp_path: Path):
     path = tmp_path / "gray.tif"
     tifffile.imwrite(str(path), np.full((32, 40), 90, dtype=np.uint8))
-    served = _served(client.get("/api/images", params={"path": str(path)}))
+    served = _served(client.get("/api/images",
+                                params={"path": str(path), "display_pixels": DISPLAY}))
     assert served.shape == (32, 40, 3)
     assert np.allclose(served.mean(axis=(0, 1)), 90, atol=3)
 
@@ -327,7 +705,7 @@ def test_a_four_band_raster_serves_as_plain_rgb_with_the_fourth_band_dropped(
     arr[..., :3] = (100, 120, 140)
     arr[..., 3] = 255
     tifffile.imwrite(str(path), arr)
-    resp = client.get("/api/images", params={"path": str(path)})
+    resp = client.get("/api/images", params={"path": str(path), "display_pixels": DISPLAY})
     served = _served(resp)
     assert served.shape == (32, 40, 3)
     assert np.allclose(served.mean(axis=(0, 1)), (100, 120, 140), atol=3)
@@ -338,7 +716,7 @@ def test_a_five_band_raster_composites_its_first_three_bands(client: TestClient,
     render of the first three bands between the served array's own bounds."""
     path = tmp_path / "five.tif"
     arr = _multiband(path, channels=5)
-    resp = client.get("/api/images", params={"path": str(path), "quality": QUALITY})
+    resp = client.get("/api/images", params={"path": str(path), "display_pixels": DISPLAY})
     _renders_as(resp, _composite(arr, "minmax"))
 
 
@@ -386,11 +764,8 @@ def test_the_served_composite_is_the_shared_display_primitives_own_pixels(
     assert composed.tolist() == owed.tolist()
 
     resp = client.get("/api/images", params={
-        "path": str(path), "bands": "3,0,1", "stretch": "minmax", "quality": 90})
-    assert resp.status_code == 200
-    buf = io.BytesIO()
-    Image.fromarray(composed, mode="RGB").save(buf, "JPEG", quality=90)
-    assert resp.content == buf.getvalue()
+        "path": str(path), "display_pixels": DISPLAY, "bands": "3,0,1", "stretch": "minmax"})
+    _renders_as(resp, composed)
 
 
 # ── Stretch bounds ───────────────────────────────────────────────────────────────────────
@@ -407,11 +782,11 @@ def test_two_regions_of_one_raster_stretch_against_the_same_bounds(
     arr = _multiband(path)
     raster_bounds = [(float(arr[:, :, i].min()), float(arr[:, :, i].max())) for i in range(3)]
     left = client.get("/api/images", params={
-        "path": str(path), "bands": "0,1,2", "x0": 0, "y0": 0, "x1": 20, "y1": 24,
-        "quality": QUALITY})
+        "path": str(path), "display_pixels": DISPLAY, "bands": "0,1,2",
+        "x0": 0, "y0": 0, "x1": 20, "y1": 24})
     right = client.get("/api/images", params={
-        "path": str(path), "bands": "0,1,2", "x0": 20, "y0": 0, "x1": 40, "y1": 24,
-        "quality": QUALITY})
+        "path": str(path), "display_pixels": DISPLAY, "bands": "0,1,2",
+        "x0": 20, "y0": 0, "x1": 40, "y1": 24})
     _renders_as(left, _composite(arr[:, :20], "minmax", raster_bounds))
     _renders_as(right, _composite(arr[:, 20:], "minmax", raster_bounds))
 
@@ -421,7 +796,7 @@ def test_a_whole_view_renders_between_the_bounds_of_the_array_it_served(
     path = tmp_path / "capture.tif"
     arr = _multiband(path)
     resp = client.get("/api/images", params={
-        "path": str(path), "bands": "0,1,2", "quality": QUALITY})
+        "path": str(path), "display_pixels": DISPLAY, "bands": "0,1,2"})
     _renders_as(resp, _composite(arr, "minmax"))
 
 
@@ -439,20 +814,18 @@ def test_a_composited_non_positive_float_band_renders_black_beside_its_lit_bands
     assert (owed[:, :, 0] == 0).all()
     assert owed[:, :, 1].mean() > 50 and owed[:, :, 2].mean() > 50
     _renders_as(client.get("/api/images", params={
-        "path": str(path), "bands": "0,1,2", "stretch": "none", "quality": QUALITY}), owed)
+        "path": str(path), "display_pixels": DISPLAY, "bands": "0,1,2", "stretch": "none"}), owed)
 
 
 def test_a_percent_clip_region_stretches_between_the_cached_cut_points(
     client: TestClient, tmp_path: Path,
 ):
-    from tcip_mcp.pipelines import raster_source
-
     path = tmp_path / "capture.tif"
     arr = _multiband(path)
     resp = client.get("/api/images", params={
-        "path": str(path), "bands": "0,1,2", "stretch": "percent_clip",
-        "x0": 0, "y0": 0, "x1": 20, "y1": 24, "quality": QUALITY})
-    stats = images_route._raster_stats(path, 4, raster_source.source_pool_key(path, 4))
+        "path": str(path), "display_pixels": DISPLAY, "bands": "0,1,2", "stretch": "percent_clip",
+        "x0": 0, "y0": 0, "x1": 20, "y1": 24})
+    stats = images_route._raster_stats(path, 4)
     _renders_as(resp, _composite(arr[:, :20], "percent_clip", stats.clip_bounds[:3]))
 
 
@@ -471,7 +844,8 @@ def test_a_nan_pixel_still_serves_the_raster(client: TestClient, tmp_path: Path)
     """A NaN pixel poisons its band's bounds, and the route still serves the raster it rendered."""
     path = tmp_path / "nan.tif"
     _five_band_float_with_one_nan(path)
-    resp = client.get("/api/images", params={"path": str(path), "bands": "0,1,2"})
+    resp = client.get("/api/images",
+                      params={"path": str(path), "display_pixels": DISPLAY, "bands": "0,1,2"})
     assert _served(resp).shape == (24, 40, 3)
 
 
@@ -501,11 +875,12 @@ def test_get_bands_says_so_when_it_read_only_part_of_the_raster(
     client: TestClient, tmp_path: Path, monkeypatch,
 ):
     """With a window budget below the raster's own grid, the reported bounds describe a sample and
-    the response says which one."""
+    the response says which one. The raster is a numpy stack, so past that budget it is sampled
+    natively rather than read off overviews."""
     monkeypatch.setattr(images_route, "_STATS_WINDOW_SIZE", 4)
     monkeypatch.setattr(images_route, "_STATS_MAX_WINDOWS", 2)
-    path = tmp_path / "capture.tif"
-    _multiband(path)
+    path = tmp_path / "capture.npy"
+    np.save(str(path), np.random.default_rng(3).integers(0, 1000, size=(24, 40, 4)))
     body = client.get("/api/images/bands", params={"path": str(path)}).json()
     assert body["sampled"] is True
     assert 0.0 < body["pixel_fraction"] < 1.0
@@ -527,7 +902,8 @@ def test_get_bands_reads_no_whole_decode(client: TestClient, tmp_path: Path, mon
     monkeypatch.setattr(image_utils, "load_image", counted)
     path = tmp_path / "capture.tif"
     _multiband(path)
-    assert client.get("/api/images/bands", params={"path": str(path)}).status_code == 200
+    resp = client.get("/api/images/bands", params={"path": str(path)})
+    assert resp.status_code == 200
     assert calls == []
 
 
@@ -535,20 +911,23 @@ def test_get_bands_reads_an_oversized_rasters_stats_off_its_overviews(
     client: TestClient, tmp_path: Path, monkeypatch,
 ):
     """Past the native-sampling budget the stats come from one reduced read of the whole frame,
-    and the response says at what scale rather than presenting them as the raster's own bounds."""
+    and the response says at what size rather than presenting them as the raster's own bounds:
+    the 5000x64 frame fitted within the 1024 pyramid floor edge is 1024 wide and 13 tall."""
     from tcip_mcp.pipelines.overviews import build_overviews
 
-    monkeypatch.setattr(images_route, "_STATS_SAMPLE_BUDGET", 100_000)
+    monkeypatch.setattr(images_route, "_STATS_MAX_WINDOWS", 1)
     path = tmp_path / "wide_ms.tif"
-    _wide_multiband(path)
+    arr = _wide_multiband(path)
     build_overviews(path)
+    tifffile.imwrite(str(path), np.zeros_like(arr), rowsperstrip=8)
 
     body = client.get("/api/images/bands", params={"path": str(path)}).json()
     assert body["band_count"] == 4
     assert body["sampled"] is False
-    assert body["overview_scale"] == pytest.approx(1024 / 5000)
+    assert body["overview_size"] == [1024, 13]
     assert "pixel_fraction" not in body and "seed" not in body
     assert all(0 <= b["min"] <= b["max"] <= 255 for b in body["bands"])
+    assert all(b["max"] > 0 for b in body["bands"]), "the native pixels, zeroed, were read"
 
 
 def test_an_oversized_raster_without_overviews_names_the_build_endpoint_for_its_stats(
@@ -556,7 +935,7 @@ def test_an_oversized_raster_without_overviews_names_the_build_endpoint_for_its_
 ):
     """Describing it from native windows would decode most of the file to read a fraction of it,
     so the same refusal a whole view gets applies, in the same words."""
-    monkeypatch.setattr(images_route, "_STATS_SAMPLE_BUDGET", 100_000)
+    monkeypatch.setattr(images_route, "_STATS_MAX_WINDOWS", 1)
     path = tmp_path / "wide_ms.tif"
     _wide_multiband(path)
 
@@ -571,32 +950,31 @@ def test_a_raster_within_the_sampling_budget_keeps_reading_native_pixels(
 ):
     """The threshold admits everything under it unchanged: same exact bounds, same reported
     sampling facts, no overview needed."""
-    monkeypatch.setattr(images_route, "_STATS_SAMPLE_BUDGET", 100_000)
+    monkeypatch.setattr(images_route, "_STATS_MAX_WINDOWS", 1)
     path = tmp_path / "capture.tif"
     arr = _multiband(path)
     body = client.get("/api/images/bands", params={"path": str(path)}).json()
     assert body["sampled"] is False
     assert body["pixel_fraction"] == 1.0 and body["seed"] == 0
-    assert "overview_scale" not in body
+    assert "overview_size" not in body
     assert [b["max"] for b in body["bands"]] == [float(arr[:, :, i].max()) for i in range(4)]
 
 
 def test_a_region_of_an_oversized_raster_stretches_by_its_overview_bounds(
     client: TestClient, tmp_path: Path, monkeypatch,
 ):
-    from tcip_mcp.pipelines import raster_source
     from tcip_mcp.pipelines.overviews import build_overviews
 
-    monkeypatch.setattr(images_route, "_STATS_SAMPLE_BUDGET", 100_000)
+    monkeypatch.setattr(images_route, "_STATS_MAX_WINDOWS", 1)
     path = tmp_path / "wide_ms.tif"
     arr = _wide_multiband(path)
     build_overviews(path)
 
     resp = client.get("/api/images", params={
-        "path": str(path), "bands": "0,1,2", "x0": 0, "y0": 0, "x1": 256, "y1": 64,
-        "quality": QUALITY})
-    stats = images_route._raster_stats(path, 4, raster_source.source_pool_key(path, 4))
-    assert stats.overview_scale == pytest.approx(1024 / 5000, rel=1e-5)
+        "path": str(path), "display_pixels": SMALL_DISPLAY, "bands": "0,1,2",
+        "x0": 0, "y0": 0, "x1": 256, "y1": 64})
+    stats = images_route._raster_stats(path, 4)
+    assert stats.overview_size == (1024, 13)
     bounds = [(r.minimum, r.maximum) for r in stats.ranges[:3]]
     _renders_as(resp, _composite(arr[:, :256], "minmax", bounds))
 
@@ -642,28 +1020,27 @@ def _await_job(client: TestClient, job_id: str, timeout: float = 120.0) -> dict:
 
 
 def test_a_scaled_read_of_an_oversized_raster_without_overviews_names_the_build_endpoint(
-    client: TestClient, tmp_path: Path, monkeypatch,
+    client: TestClient, tmp_path: Path,
 ):
     """Reading the whole of an oversized raster natively is what the display bound exists to
     prevent, so the request is refused, naming the endpoint that makes it servable."""
-    monkeypatch.setattr(images_route, "DISPLAY_MAX_PIXELS", 100_000)
     path = tmp_path / "wide.tif"
     _wide_raster(path)
-    resp = client.get("/api/images", params={"path": str(path)})
+    resp = client.get("/api/images", params={"path": str(path), "display_pixels": SMALL_DISPLAY})
     assert resp.status_code == 400
     assert resp.headers[images_route.IMAGE_ERROR_HEADER] == images_route.OVERVIEWS_REQUIRED
     assert "POST /api/images/overviews" in resp.json()["detail"]
 
 
 def test_the_overview_job_makes_that_same_request_servable(
-    client: TestClient, tmp_path: Path, monkeypatch,
+    client: TestClient, tmp_path: Path,
 ):
     """The refusal admits the work it asked for: build the pyramid it named and the same view
     serves."""
-    monkeypatch.setattr(images_route, "DISPLAY_MAX_PIXELS", 100_000)
     path = tmp_path / "wide.tif"
     _wide_raster(path)
-    assert client.get("/api/images", params={"path": str(path)}).status_code == 400
+    view = {"path": str(path), "display_pixels": SMALL_DISPLAY}
+    assert client.get("/api/images", params=view).status_code == 400
 
     started = client.post("/api/images/overviews", json={"path": str(path)})
     assert started.status_code == 200
@@ -674,8 +1051,8 @@ def test_the_overview_job_makes_that_same_request_servable(
     from tcip_mcp.pipelines.overviews import sidecar_valid
 
     assert sidecar_valid(path)
-    served = _served(client.get("/api/images", params={"path": str(path)}))
-    assert served.shape[1] <= 5000
+    served = _served(client.get("/api/images", params=view))
+    assert served.shape[0] * served.shape[1] <= SMALL_DISPLAY
 
 
 def test_a_build_request_joins_the_one_already_running_for_that_raster(
@@ -714,14 +1091,13 @@ def test_an_overview_job_id_that_does_not_exist_is_a_404(client: TestClient):
 
 
 def test_a_deep_zoom_region_within_the_cap_is_served_without_overviews(
-    client: TestClient, tmp_path: Path, monkeypatch,
+    client: TestClient, tmp_path: Path,
 ):
     """A region small enough to read natively needs no pyramid, however large the raster is."""
-    monkeypatch.setattr(images_route, "DISPLAY_MAX_PIXELS", 100_000)
     path = tmp_path / "wide.tif"
     _wide_raster(path)
     served = _served(client.get("/api/images", params={
-        "path": str(path), "x0": 0, "y0": 0, "x1": 256, "y1": 64}))
+        "path": str(path), "display_pixels": SMALL_DISPLAY, "x0": 0, "y0": 0, "x1": 256, "y1": 64}))
     assert served.shape == (64, 256, 3)
 
 
@@ -742,34 +1118,42 @@ def test_a_render_cached_under_an_older_version_key_is_not_reused(
     path = tmp_path / "flat.tif"
     tifffile.imwrite(str(path), np.full((32, 40, 3), (10, 20, 30), dtype=np.uint8))
 
-    first = client.get("/api/images", params={"path": str(path)})
+    whole = f"*{images_route._DISPLAY_ENCODING.suffix}"
+    first = client.get("/api/images", params={"path": str(path), "display_pixels": DISPLAY})
     assert first.status_code == 200
-    assert len(list(cache_dir.glob("*.jpg"))) == 1
+    assert len(list(cache_dir.glob(whole))) == 1
 
     monkeypatch.setattr(images_route, "RENDER_CACHE_VERSION", 2)
-    second = client.get("/api/images", params={"path": str(path)})
+    second = client.get("/api/images", params={"path": str(path), "display_pixels": DISPLAY})
     assert second.status_code == 200
     assert second.headers["etag"] != first.headers["etag"]
-    assert len(list(cache_dir.glob("*.jpg"))) == 2
+    assert len(list(cache_dir.glob(whole))) == 2
 
 
 # ── Rendered-variant cache: byte-budget LRU ──────────────────────────────────────────────
 
+_SUFFIXES = (images_route._DISPLAY_ENCODING.suffix, images_route._NATIVE_ENCODING.suffix)
+
 
 def _cache_entry(cache_dir: Path, name: str, size: int, mtime: float) -> Path:
-    """One rendered variant on disk: the JPEG plus its header sidecar, backdated."""
-    jpg = cache_dir / f"{name}.jpg"
-    jpg.write_bytes(b"\xff" * size)
+    """One rendered variant on disk, a display read or a native region by turns, plus its header
+    sidecar, backdated."""
+    image = cache_dir / f"{name}{_SUFFIXES[int(name[-1]) % 2]}"
+    image.write_bytes(b"\xff" * size)
     (cache_dir / f"{name}.json").write_text("{}", encoding="utf-8")
     import os
 
-    os.utime(jpg, (mtime, mtime))
-    return jpg
+    os.utime(image, (mtime, mtime))
+    return image
+
+
+def _cached_images(cache_dir: Path) -> list[str]:
+    return sorted(p.stem for p in cache_dir.iterdir() if p.suffix in _SUFFIXES)
 
 
 def test_eviction_respects_the_byte_budget_and_keeps_the_newest(tmp_path: Path, monkeypatch):
-    """Least recently used entries go first, each with its sidecar, until the cache's
-    total bytes fit the budget."""
+    """Least recently used entries go first, whichever encoding they hold, each with its sidecar,
+    until the cache's total bytes fit the budget."""
     sidecar = len("{}")
     monkeypatch.setattr(images_route, "_cache_budget_bytes", 2 * (1000 + sidecar))
     for i, mtime in enumerate([100.0, 200.0, 300.0, 400.0]):
@@ -777,8 +1161,7 @@ def test_eviction_respects_the_byte_budget_and_keeps_the_newest(tmp_path: Path, 
 
     images_route._evict_lru(tmp_path)
 
-    kept = sorted(p.name for p in tmp_path.glob("*.jpg"))
-    assert kept == ["entry2.jpg", "entry3.jpg"]
+    assert _cached_images(tmp_path) == ["entry2", "entry3"]
     assert sorted(p.stem for p in tmp_path.glob("*.json")) == ["entry2", "entry3"]
 
 
@@ -787,7 +1170,7 @@ def test_a_cache_within_budget_is_left_alone(tmp_path: Path, monkeypatch):
     for i in range(3):
         _cache_entry(tmp_path, f"entry{i}", 1000, 100.0 + i)
     images_route._evict_lru(tmp_path)
-    assert len(list(tmp_path.glob("*.jpg"))) == 3
+    assert len(_cached_images(tmp_path)) == 3
 
 
 def test_the_budget_derives_once_per_process_from_free_space(tmp_path: Path, monkeypatch):
@@ -815,10 +1198,12 @@ def test_a_file_that_fails_its_header_probe_answers_400_and_a_readable_one_still
     truncated = tmp_path / "truncated.jpg"
     truncated.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01")
 
-    refused = client.get("/api/images", params={"path": str(truncated)})
+    refused = client.get("/api/images",
+                         params={"path": str(truncated), "display_pixels": DISPLAY})
     assert refused.status_code == 400, refused.text
     assert "could not open this image" in refused.json()["detail"]
 
     readable = tmp_path / "readable.jpg"
     Image.fromarray(np.full((16, 20, 3), 90, dtype=np.uint8)).save(readable)
-    assert client.get("/api/images", params={"path": str(readable)}).status_code == 200
+    assert client.get("/api/images", params={
+        "path": str(readable), "display_pixels": DISPLAY}).status_code == 200

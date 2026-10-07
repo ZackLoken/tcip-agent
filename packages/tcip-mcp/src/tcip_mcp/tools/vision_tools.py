@@ -40,26 +40,15 @@ if TYPE_CHECKING:
 class DisplayRead(NamedTuple):
     """Display pixels for a renderer, with the frame facts that place annotations on them.
 
-    ``pixels`` is uint8 RGB; ``rect`` is the region of the raster they were read from and ``scale``
-    the served resolution as a fraction of native, the pair a renderer drawing a crop needs;
-    ``native_size`` is the raster's own ``(width, height)``, the frame annotation coordinates are
-    measured in.
+    ``pixels`` is uint8 RGB; ``rect`` is the region of the raster they were read from, so the
+    pixels' own size against it is the served resolution on each axis, what a renderer drawing a
+    crop needs; ``native_size`` is the raster's own ``(width, height)``, the frame annotation
+    coordinates are measured in.
     """
 
     pixels: np.ndarray
     rect: Rect
-    scale: float
     native_size: tuple[int, int]
-
-
-def _bounded_target(rect: Rect, max_edge: int) -> tuple[int, int] | None:
-    """The aspect-preserving output size that holds ``rect``'s longest edge to ``max_edge``;
-    ``None`` when the region already fits and reads at native resolution."""
-    edge = max(rect.width, rect.height)
-    if edge <= max_edge:
-        return None
-    k = max_edge / edge
-    return max(1, round(rect.width * k)), max(1, round(rect.height * k))
 
 
 def _clamped_rect(region: tuple[float, float, float, float], width: int, height: int) -> Rect:
@@ -83,7 +72,8 @@ def _read_for_display(source: "str | Path | BandGroupRef", *,
     """Read ``source`` as display pixels a renderer can draw on.
 
     The raster layer serves the region (an ``(x, y, w, h)`` rectangle in the raster's own grid, or
-    the whole frame) at or under ``max_edge``, and nothing is ever materialized to a temp file.
+    the whole frame) at or under ``max_edge`` through ``display_bounds.plan_read``, off the
+    overview level the plan names, and nothing is ever materialized to a temp file.
 
     An 8-bit raster at 1/3/4 bands already holds display values, so it keeps its own pixels
     (grayscale repeated, alpha dropped) with no stretch. Every other raster has its first three
@@ -91,18 +81,22 @@ def _read_for_display(source: "str | Path | BandGroupRef", *,
     """
     from tcip_mcp.pipelines.band_stats import composite_display_rgb
     from tcip_mcp.pipelines.derivations import probe_channels
+    from tcip_mcp.pipelines.display_bounds import level_dims, plan_read, planned_read
     from tcip_mcp.pipelines.raster_source import Rect, open_raster
 
-    with open_raster(source, probe_channels(source)) as raster:
+    channels = probe_channels(source)
+    with open_raster(source, channels) as raster:
         native = (int(raster.width), int(raster.height))
         rect = (Rect(0, 0, raster.width, raster.height) if region is None
                 else _clamped_rect(region, raster.width, raster.height))
-        pixels, spec = raster.read_region(rect, target_size=_bounded_target(rect, max_edge))
+        plan = plan_read(rect, raster.width, raster.height, level_dims(source, channels),
+                         rect.width * rect.height, max_edge)
+        pixels, _spec = planned_read(raster, rect, plan)
     bands = int(pixels.shape[-1])
     idxs = [0, 1, 2] if bands >= 3 else [0, 0, 0]
     plain = bands in (1, 3, 4) and pixels.dtype == "uint8"
     return DisplayRead(composite_display_rgb(pixels, idxs, "none" if plain else "minmax"),
-                       rect, spec.scale, native)
+                       rect, native)
 
 
 def _display_for_path(image_path: str | Path, *, max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
@@ -734,7 +728,7 @@ def capture_live_canvas(
     read = _display_for_path(src_image, max_edge=max_edge, region=region)
     try:
         out = render_canvas_state(read.pixels, shapes,
-                                  origin=(read.rect.x0, read.rect.y0), scale=read.scale,
+                                  region=(read.rect.x0, read.rect.y0, read.rect.x1, read.rect.y1),
                                   output_path=viz_output_path(project, "canvas", suffix=".jpg"))
     except ValueError as exc:
         return {"error": f"the pushed canvas state for {src_image} will not render: {exc}"}

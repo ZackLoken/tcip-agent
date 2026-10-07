@@ -197,7 +197,11 @@ def test_heartbeat_for_new_image_invalidates_geometry_by_identity(client, opened
     assert _meta(opened_project)["image_path"] == B_STORED
 
 
-# ── renderer: origin/scale placement + two-pass draw + tolerance ────────────
+# ── renderer: region placement + two-pass draw + tolerance ────────────
+
+_WHOLE = (0, 0, 200, 100)
+"""The whole frame of the image :func:`_make_image` writes, as a native region."""
+
 
 def _make_image(tmp_path: Path) -> str:
     from tests._producer_fixtures import write_image
@@ -236,7 +240,7 @@ def test_render_places_a_shape_at_its_offset_inside_a_cropped_region(tmp_path):
     img = _make_image(tmp_path)
     shapes = [{"kind": "point", "points": [[100, 50]], "color": "#FF0000"}]
     out = render_canvas_state(_pixels(img, region=(50, 0, 150, 100)), shapes,
-                              origin=(50, 0), scale=1.0,
+                              region=(50, 0, 150, 100),
                               output_path=str(tmp_path / "crop.png"))
     px = Image.open(out).convert("RGB")
     assert px.size == (100, 100)                        # exactly the region handed in
@@ -248,7 +252,7 @@ def test_render_scales_a_shape_with_the_pixels_it_is_drawn_on(tmp_path):
     from tcip_annotation.viz import render_canvas_state
     img = _make_image(tmp_path)
     shapes = [{"kind": "point", "points": [[100, 50]], "color": "#FF0000"}]
-    out = render_canvas_state(_pixels(img, scale=0.5), shapes, origin=(0, 0), scale=0.5,
+    out = render_canvas_state(_pixels(img, scale=0.5), shapes, region=_WHOLE,
                               output_path=str(tmp_path / "half.png"))
     px = Image.open(out).convert("RGB")
     assert px.size == (100, 50)
@@ -264,7 +268,7 @@ def test_render_two_pass_fill_does_not_erase_outlines(tmp_path):
         # later red fill over it
         {"kind": "box", "xyxy": [10, 10, 90, 90], "color": "#FF0000", "fill": True},
     ]
-    out = render_canvas_state(_pixels(img), shapes, origin=(0, 0), scale=1.0,
+    out = render_canvas_state(_pixels(img), shapes, region=_WHOLE,
                               output_path=str(tmp_path / "overlap.png"))
     px = Image.open(out).convert("RGB").getpixel((50, 20))  # a point on the green outline
     assert px[1] > px[0]  # outline survives the later overlapping fill (green-dominant)
@@ -280,7 +284,7 @@ def test_render_draws_a_point_shape_and_never_widens_it_to_a_box(tmp_path):
     from tcip_annotation.viz import render_canvas_state
     img = _make_image(tmp_path)
     shapes = [{"kind": "point", "points": [[100, 50]], "color": "#FF0000", "label": "tip"}]
-    out = render_canvas_state(_pixels(img), shapes, origin=(0, 0), scale=1.0,
+    out = render_canvas_state(_pixels(img), shapes, region=_WHOLE,
                               output_path=str(tmp_path / "point.png"))
     px = Image.open(out).convert("RGB")
     assert _red_over_green(px, (100, 50)) > 40     # the core sits on the coordinate
@@ -298,7 +302,7 @@ def test_render_draws_the_focused_shape_with_a_halo_under_its_own_stroke(tmp_pat
         halo = {"color": "#FFFFFF", "opacity": 0.55, "width_factor": 3}
         shapes = [{"kind": "box", "xyxy": [40, 20, 160, 80], "color": "#FF0000",
                    **({"halo": halo} if focused else {})}]
-        out = render_canvas_state(_pixels(img), shapes, origin=(0, 0), scale=1.0,
+        out = render_canvas_state(_pixels(img), shapes, region=_WHOLE,
                                   output_path=str(tmp_path / f"focus-{focused}.png"))
         return Image.open(out).convert("RGB")
 
@@ -322,10 +326,10 @@ def test_render_refuses_a_malformed_shape_naming_it(tmp_path, bad):
     from tcip_annotation.viz import render_canvas_state
     img = _make_image(tmp_path)
     good = {"kind": "box", "xyxy": [10, 10, 40, 40], "color": "#0f0"}
-    assert Path(render_canvas_state(_pixels(img), [good], origin=(0, 0), scale=1.0,
+    assert Path(render_canvas_state(_pixels(img), [good], region=_WHOLE,
                                     output_path=str(tmp_path / "good.jpg"))).is_file()
     with pytest.raises(ValueError, match="canvas shape 1 "):
-        render_canvas_state(_pixels(img), [good, bad], origin=(0, 0), scale=1.0,
+        render_canvas_state(_pixels(img), [good, bad], region=_WHOLE,
                             output_path=str(tmp_path / "bad.jpg"))
 
 

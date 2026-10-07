@@ -70,7 +70,7 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
     from tcip_mcp import dataset_layout
     from tcip_mcp.audit import audit_entry, audit_log_key
     from tcip_mcp.pipelines.image_utils import (
-        BandGroupRef, image_dimensions, list_logical_images, refuse_incomplete_band_group,
+        BandGroupRef, display_frame, list_logical_images, refuse_incomplete_band_group,
     )
     from tcip_mcp.subject_registry import registry_for_dataset_root
 
@@ -122,7 +122,7 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
         if stem in stems:
             problems.append(f"image {name!r} is the capture {stem!r} another record already names")
         stems.add(stem)
-        width, height = image_dimensions(refuse_incomplete_band_group(found))
+        width, height = display_frame(refuse_incomplete_band_group(found))
         stated = (record.get("width"), record.get("height"))
         if stated != (None, None) and stated != (width, height):
             problems.append(f"image {name!r} is stated as {stated}, but decodes to "

@@ -4,7 +4,7 @@ GDAL serves a reduced-resolution read from the nearest overview level at or abov
 resolution, so a display-scale read of a huge raster costs the overview's pixels instead of the
 native ones. :func:`build_overviews` writes the GDAL-standard external ``.ovr`` next to the raster
 (a read-only open forces the sidecar form; the raster itself is never rewritten);
-:func:`has_overviews` and :func:`sidecar_valid` are the checks a caller gates on first.
+:func:`overview_dims` and :func:`sidecar_valid` are the checks a caller gates on first.
 """
 
 from __future__ import annotations
@@ -17,8 +17,12 @@ from typing import Callable
 
 import numpy as np
 
-from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE
 from tcip_mcp.pipelines.raster_source import open_gdal_dataset
+
+PYRAMID_FLOOR_EDGE = 1024
+"""Longest edge of a pyramid's deepest level, and the edge a raster too large to sample natively
+has its display statistics read at, so that read always has a level to come off. Provisional: a
+documented choice, not a measurement."""
 
 # How often the parent samples the growing sidecar to report progress and honor a cancel.
 _BUILD_POLL_SECONDS = 0.2
@@ -26,12 +30,13 @@ _BUILD_POLL_SECONDS = 0.2
 _BUILD_CHILD = """
 import sys
 import rasterio
-from rasterio.enums import Resampling
+from rasterio.enums import ColorInterp, Resampling
 
 path, levels = sys.argv[1], [int(v) for v in sys.argv[2].split(",")]
 with rasterio.Env(TIFF_USE_OVR=True):
     with rasterio.open(path, "r+") as ds:
-        ds.build_overviews(levels, Resampling.average)
+        palette = ds.colorinterp[0] == ColorInterp.palette
+        ds.build_overviews(levels, Resampling.nearest if palette else Resampling.average)
 """
 
 
@@ -40,14 +45,25 @@ def overview_sidecar(path: str | Path) -> Path:
     return Path(str(path) + ".ovr")
 
 
-def has_overviews(path: str | Path) -> bool:
-    """Whether GDAL can serve any reduced-resolution level for ``path``: internal overviews or a
-    readable external sidecar, both visible as band overview levels on open."""
+def overview_dims(path: str | Path) -> list[tuple[int, int]]:
+    """The ``(width, height)`` of each reduced-resolution level GDAL can serve for ``path``, finest
+    first: internal overviews or an external sidecar :func:`sidecar_valid` confirms, each read off
+    the level's own dataset rather than inferred from a factor. Empty when there are none."""
+    if overview_sidecar(path).is_file() and not sidecar_valid(path):
+        return []
     ds = open_gdal_dataset(path)
     try:
-        return bool(ds.overviews(1))
+        count = len(ds.overviews(1))
     finally:
         ds.close()
+    dims = []
+    for overview in range(count):
+        level = open_gdal_dataset(path, overview)
+        try:
+            dims.append((int(level.width), int(level.height)))
+        finally:
+            level.close()
+    return dims
 
 
 def _predicted_sidecar_bytes(width: int, height: int, count: int,
@@ -57,7 +73,7 @@ def _predicted_sidecar_bytes(width: int, height: int, count: int,
     A compressed sidecar lands under this, so the reported fraction is a floor on real progress
     rather than a measurement of it; the caller is told 1.0 only once the build actually returns.
     """
-    per_level = sum((width // lvl) * (height // lvl) for lvl in levels)
+    per_level = sum(-(-width // lvl) * -(-height // lvl) for lvl in levels)
     return max(int(per_level * count * itemsize), 1)
 
 
@@ -84,30 +100,30 @@ def sidecar_valid(path: str | Path) -> bool:
     return True
 
 
-def overview_levels(width: int, height: int, *, max_edge: int = DISPLAY_MAX_EDGE) -> list[int]:
-    """Power-of-2 decimation levels down to the first whose longest edge fits ``max_edge``.
+def overview_levels(width: int, height: int) -> list[int]:
+    """Power-of-2 decimation levels down to the first whose longest edge, in the whole pixels
+    GDAL sizes a level with (the edge over the factor, rounded up), is at most
+    :data:`PYRAMID_FLOOR_EDGE`.
 
-    Empty when the raster already fits: there is no display-scale resolution an overview level
-    would serve.
+    Empty when the raster's own longest edge already is.
     """
     levels: list[int] = []
-    factor = 2
-    while max(width, height) > max_edge:
-        levels.append(factor)
-        if max(width, height) / factor <= max_edge:
-            break
+    factor = 1
+    while max(-(-width // factor), -(-height // factor)) > PYRAMID_FLOOR_EDGE:
         factor *= 2
+        levels.append(factor)
     return levels
 
 
 def build_overviews(path: str | Path,
                     *, progress_cb: "Callable[[float], object] | None" = None) -> Path:
-    """Build ``path``'s external ``.ovr`` pyramid (AVERAGE resampling, power-of-2 levels down to
-    the display bound) and return the sidecar's path.
+    """Build ``path``'s external ``.ovr`` pyramid (the power-of-2 levels :func:`overview_levels`
+    derives from the raster's own size, AVERAGE resampling, or NEAREST for a palette raster whose
+    indices must never be averaged) and return the sidecar's path.
 
     Refuses when a valid sidecar or internal overviews already exist (rebuilding a good pyramid
-    is minutes of wasted decode) and when the raster already fits the display bound (an empty
-    level list would clear existing overviews instead of building any). An invalid sidecar (see
+    is minutes of wasted decode) and when the raster has no level to build (an empty level list
+    would clear existing overviews instead of building any). An invalid sidecar (see
     :func:`sidecar_valid`) is deleted and rebuilt. On any build failure or cancellation the
     sidecar is deleted: an interrupted build otherwise leaves a valid-looking file whose unwritten
     tiles read back as silent zeros.
@@ -128,7 +144,7 @@ def build_overviews(path: str | Path,
             raise ValueError(
                 f"{sidecar} already holds a valid overview pyramid; refusing to rebuild over it")
         sidecar.unlink()
-    if has_overviews(path):
+    if overview_dims(path):
         raise ValueError(f"{path} already carries internal overviews; nothing to build")
     ds = open_gdal_dataset(path)
     try:
@@ -140,8 +156,8 @@ def build_overviews(path: str | Path,
         ds.close()
     if not levels:
         raise ValueError(
-            f"{path} already fits the display bound ({DISPLAY_MAX_EDGE}px longest edge); there "
-            "is no overview level to build")
+            f"{path}'s longest edge is within {PYRAMID_FLOOR_EDGE} pixels; there is no overview "
+            "level to build")
 
     def canceled(fraction: float) -> bool:
         return progress_cb is not None and progress_cb(fraction) is False

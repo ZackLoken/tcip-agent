@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from tcip_annotation.grid import column_label
 
-from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE, VIZ_ARTIFACT_MAX_EDGE
+from tcip_mcp.pipelines.display_bounds import VIZ_ARTIFACT_MAX_EDGE, within_cap
 
 POINTING_LEGIBLE_EDGE = 46
 """Smallest rendered cell edge, in artifact pixels, at which the overlay's cell labels read
@@ -70,17 +70,25 @@ def reference_cells(
     return cells
 
 
-def derive_serving_tile_size(width: int, height: int) -> int:
-    """Cell edge for region serving: the coarsest near-uniform square grid whose every cell, served
-    at native resolution, fits one display-bounded serve.
+def derive_serving_tile_size(width: int, height: int, max_pixels: int,
+                             max_edge: int | None = None) -> int:
+    """Cell edge for region serving: a near-uniform square grid whose every cell, served at its
+    grid's own resolution and clipped to the extent (``reference_cells(..., clamp=True)``), is at
+    most ``max_pixels`` pixels and, when ``max_edge`` is given (the edge limit of the encoding the
+    cells are served in), no edge longer than it. This grid is not claimed to be the coarsest.
 
-    ``n = ceil(long_edge / DISPLAY_MAX_EDGE)`` cells along the long edge, so the returned edge is
-    ``ceil(long_edge / n) <= DISPLAY_MAX_EDGE``; an image inside the display bound derives one cell
-    spanning it. Deterministic in the image dims and the platform display bound
-    (``display_bounds.DISPLAY_MAX_EDGE``).
+    The edge bound is the long edge for an image of at most ``max_pixels``, ``isqrt(max_pixels)``
+    for any other, and never past ``max_edge``. The grid has ``n = ceil(long_edge / bound)``
+    cells along the long edge, an edge of ``ceil(long_edge / n) <= bound``. Under the
+    ``isqrt(max_pixels)`` bound even an unclipped cell is within the cap; under the long-edge
+    bound an unclipped square can exceed it, and the clipped cell lies inside the extent, which is
+    within the cap. An image within both bounds is one cell spanning it.
     """
     long_edge = max(width, height)
-    n = math.ceil(long_edge / DISPLAY_MAX_EDGE)
+    bound = long_edge if within_cap(width, height, max_pixels) else math.isqrt(max_pixels)
+    if max_edge is not None:
+        bound = min(bound, max_edge)
+    n = math.ceil(long_edge / bound)
     return math.ceil(long_edge / n)
 
 

@@ -19,12 +19,12 @@ import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { TabHeading } from "@/components/TabHeading";
 import { useBandSelection } from "@/hooks/useBandSelection";
+import { useDisplayPixels } from "@/hooks/useDisplayPixels";
 import { useImageBands } from "@/hooks/useImageBands";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
 import { useRegionServes } from "@/hooks/useRegionServes";
-import { useServingGrid } from "@/hooks/useServingGrid";
 import { compositeParams } from "@/lib/bandSelection";
 import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
 import type { LoadedImage } from "@/lib/imageLoader";
@@ -204,16 +204,16 @@ export function AnnotateTab() {
   const composite = compositeParams(bandsInfo, bandSelection);
 
   const nav = useImageNav();
-  usePrefetchAdjacentImages(composite.bands, composite.stretch);
+  const displayPixels = useDisplayPixels();
+  usePrefetchAdjacentImages(displayPixels, composite.bands, composite.stretch);
 
   const [baseFacts, setBaseFacts] = useState<LoadedImage | null>(null);
-  const serving = useServingGrid(imgPath);
   const regions = useRegionServes({
     imagePath: imgPath,
     imgW: canvas.imgWidth,
     imgH: canvas.imgHeight,
     view,
-    serving,
+    displayPixels,
     baseFacts,
     composite,
   });
@@ -1541,7 +1541,7 @@ export function AnnotateTab() {
     );
   }
 
-  const imageUrl = imgPath ? api.images.url(imgPath, composite) : null;
+  const imageUrl = imgPath ? api.images.url(imgPath, displayPixels, composite) : null;
 
   const renderLabels = annotateUi.visible;
   const hoveredIdx = annotateUi.hoveredPolygonIdx;

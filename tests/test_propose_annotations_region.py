@@ -287,6 +287,35 @@ class TestRegionFrameIsTheResolvedImageSources:
                                      grid_cells=["B1"], tile_size=TILE_SIZE)
         assert "2 band(s) of uint16" in result.get("error", "")
 
+    def test_a_crop_is_read_in_the_frame_its_cells_were_measured_in(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An RGB TIFF whose channel count the header probe and a fixed hint of three answer
+        differently: the crop is read at the count its cells were measured at, so the named cell
+        lies inside the frame the reader opens and the read reaches the RGB check, rather than
+        failing as a region outside a frame read another way."""
+        import tifffile
+
+        from tcip_mcp.pipelines import proposal
+        from tcip_mcp.tools.proposal_tools import propose_annotations
+
+        images_dir = tmp_path / "images" / UNDATED_BUCKET
+        images_dir.mkdir(parents=True)
+        path = images_dir / "rgb_row.tif"
+        tifffile.imwrite(str(path), np.tile(np.array([20, 100, 220], dtype=np.uint8),
+                                            (1, 200_000, 1)), photometric="rgb")
+
+        class NeverProposer:
+            def propose(self, image_path, **params):
+                raise AssertionError("the engine ran on a crop that is not RGB")
+
+        monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: NeverProposer())
+
+        result = propose_annotations(tmp_path, image_path=str(path), engine="patch",
+                                     grid_cells=["A1"], tile_size=1024)
+        assert "out of bounds" not in result.get("error", ""), result
+        assert "1 band(s) of uint8" in result.get("error", ""), result
+
 
 class TestWholeFrameDefaultIsUnaffected:
     """``grid_cells=None`` (the default) takes the whole-frame path: the offset step never

@@ -401,7 +401,7 @@ export function AnnotateToolbar({
                   onChange={onBandSelectionChange}
                   sampled={bandsInfo.sampled}
                   pixelFraction={bandsInfo.pixel_fraction}
-                  overviewScale={bandsInfo.overview_scale}
+                  overviewSize={bandsInfo.overview_size}
                 />
               </>
             )}

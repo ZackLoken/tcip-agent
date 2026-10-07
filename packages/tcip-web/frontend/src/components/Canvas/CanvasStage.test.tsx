@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
+import { api } from "@/api/client";
 import { CanvasStage, type CanvasRegion } from "@/components/Canvas/CanvasStage";
 import type { LoadedImage } from "@/lib/imageLoader";
 import { useStore } from "@/store";
@@ -94,16 +95,19 @@ async function resolveLoad(url: string, result: LoadedImage) {
   });
 }
 
+/** The display pixel count of the 1920x1080 screen src/test/setup.ts installs. */
+const DISPLAY = 1920 * 1080;
+
 const REGION: CanvasRegion = {
   key: "B3",
-  url: "/api/images?path=m.tif&x0=100&y0=200&x1=150&y1=240&max_width=50",
+  url: api.images.url("m.tif", DISPLAY, { x0: 100, y0: 200, x1: 150, y1: 240 }),
   x: 100,
   y: 200,
   width: 50,
   height: 40,
 };
 
-const BASE_URL = "/api/images?path=orchard.tif&max_width=800";
+const BASE_URL = api.images.url("orchard.tif", DISPLAY);
 
 function stageProps(regions: CanvasRegion[]) {
   return { imageUrl: null, imgWidth: 1000, imgHeight: 800, regions };
@@ -142,12 +146,15 @@ describe("CanvasStage regions", () => {
     expect(screen.queryAllByTestId("k-image")).toHaveLength(0);
   });
 
-  it("keeps the last-loaded bitmap on screen while the same cell refetches at a new tier", async () => {
+  it("keeps the last-loaded bitmap on screen while the same cell refetches for a new display", async () => {
     const { rerender } = render(<CanvasStage {...stageProps([REGION])} />);
     await resolveLoad(REGION.url, makeLoaded());
     expect(screen.queryAllByTestId("k-image")).toHaveLength(1);
 
-    const sharper = { ...REGION, url: `${REGION.url}&tier=native` };
+    const sharper = {
+      ...REGION,
+      url: api.images.url("m.tif", 2 * DISPLAY, { x0: 100, y0: 200, x1: 150, y1: 240 }),
+    };
     rerender(<CanvasStage {...stageProps([sharper])} />);
     // The replacement is still in flight: the previous bitmap stays, never a blank cell.
     expect(screen.queryAllByTestId("k-image")).toHaveLength(1);

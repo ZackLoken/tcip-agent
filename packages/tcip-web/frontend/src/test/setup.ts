@@ -13,6 +13,11 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   };
 }
 
+// jsdom reports a 0x0 screen, which makes every display-pixel count the client sends zero, a
+// request the server refuses. A 1920x1080 screen stands in so producer-built URLs are valid.
+Object.defineProperty(window.screen, "width", { value: 1920, configurable: true });
+Object.defineProperty(window.screen, "height", { value: 1080, configurable: true });
+
 // Node 22+ defines experimental localStorage/sessionStorage globals that are undefined without
 // --localstorage-file and shadow jsdom's; back the missing ones with an in-memory stand-in.
 function memoryStorage(): Storage {

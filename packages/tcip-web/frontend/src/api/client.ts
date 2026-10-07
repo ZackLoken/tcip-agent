@@ -13,10 +13,11 @@ import {
   type ProjectSummary,
   type RemovalRequest,
   type RenameRequest,
-  type ServingGrid,
+  type ViewReads,
 } from "@/api/types.generated";
 import type { CanvasStateBody } from "@/lib/canvasSync";
 import { annotationsToCanvas } from "@/lib/labelSerde";
+import type { PixelRect } from "@/lib/viewGeometry";
 import type {
   Annotation,
   AnnotationPayload,
@@ -118,12 +119,12 @@ export interface ImageBandsResponse {
   /** The seed that chose the sample, so the same numbers can be reproduced. */
   seed?: number;
   /** Present when the ranges were read off an overview level instead of native pixels: the
-   *  served/native resolution ratio they were read at. Those bounds describe display scale. */
-  overview_scale?: number;
+   *  [width, height] they were read at. Those bounds describe display scale. */
+  overview_size?: [number, number];
 }
 
-/** A raster's overview build, as the build/status endpoints report it. Without the pyramid, a
- *  raster past the server's display bound has no resolution a whole view can be served at. */
+/** A raster's overview build, as the build/status endpoints report it: the build the server names
+ *  (X-TCIP-Image-Error) when a read of a raster that can have a pyramid needs one. */
 export interface OverviewJob {
   job_id: string;
   path: string;
@@ -223,24 +224,26 @@ export const api = {
   },
 
   images: {
-    /** An image serve URL. The served width is the server's own display bound unless a caller
-     *  names a narrower max_width; x0/y0/x1/y1 (all four or none) request a half-open
-     *  native-pixel region of the raster. Every URL carries the render cache's own version, so a
-     *  browser cache entry from before a version bump is never the response to a request built
-     *  after it. */
+    /** An image serve URL for the display `displayPixels` names (`useDisplayPixels`), and no size
+     *  or encoding: the server derives what it serves from that count. x0/y0/x1/y1 (all four or
+     *  none) request a half-open region of the raster, in the pixel grid of the overview `level`
+     *  the server's view answer named (native when omitted). Every URL carries the render
+     *  cache's own version, so a browser cache entry from before a version bump is never the
+     *  response to a request built after it. */
     url: (
       path: string,
+      displayPixels: number,
       opts: {
-        max_width?: number;
-        quality?: number;
         bands?: string;
         stretch?: string;
         x0?: number;
         y0?: number;
         x1?: number;
         y1?: number;
+        level?: number;
       } = {},
-    ) => `${ROUTES.getImages}?${q({ path, ...opts, v: RENDER_CACHE_VERSION })}`,
+    ) =>
+      `${ROUTES.getImages}?${q({ path, ...opts, display_pixels: displayPixels, v: RENDER_CACHE_VERSION })}`,
 
     // Per-band symbology plus the one fact that gates the band picker's visibility
     // (band_count > 3), never shown for a standard RGB dataset.
@@ -253,9 +256,11 @@ export const api = {
     overviewJob: (job_id: string) =>
       getJson<OverviewJob>(`${ROUTES.getImagesOverviewsStatus}?${q({ job_id })}`),
 
-    // The region-serving grid over a raster: index its cells, never re-derive them.
-    servingGrid: (path: string) =>
-      getJson<ServingGrid>(`${ROUTES.getImagesServingGrid}?${q({ path })}`),
+    // The reads the server serves a native-pixel view of a raster by, for one display.
+    viewReads: (path: string, displayPixels: number, view: PixelRect) =>
+      getJson<ViewReads>(
+        `${ROUTES.getImagesView}?${q({ path, display_pixels: displayPixels, ...view })}`,
+      ),
   },
 
   state: {

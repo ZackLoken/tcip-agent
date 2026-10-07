@@ -1,8 +1,15 @@
+import { renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RENDER_CACHE_VERSION } from "@/api/types.generated";
 import { api } from "@/api/client";
 import { stateSocket } from "@/api/ws";
+import { useDisplayPixels } from "@/hooks/useDisplayPixels";
+
+/** The display pixel count the client's own producer reads off the test screen. */
+function display(): number {
+  return renderHook(() => useDisplayPixels()).result.current;
+}
 
 function stubFetch(status: number, body: unknown = {}) {
   vi.stubGlobal(
@@ -159,8 +166,8 @@ describe("query string assembly", () => {
     stubFetch(200, {});
     await api.images.bands("mosaic.tif");
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/images/bands?path=mosaic.tif");
-    expect(api.images.url("mosaic.tif", { x0: 0, y0: 4067 })).toBe(
-      `/api/images?path=mosaic.tif&x0=0&y0=4067&v=${RENDER_CACHE_VERSION}`,
+    expect(api.images.url("mosaic.tif", display(), { x0: 0, y0: 4067 })).toBe(
+      `/api/images?path=mosaic.tif&x0=0&y0=4067&display_pixels=${display()}&v=${RENDER_CACHE_VERSION}`,
     );
   });
 });
@@ -186,20 +193,32 @@ function parseQuery(url: string): URLSearchParams {
 
 describe("images.url", () => {
   it("omits bands/stretch when not given, so a plain RGB request is unaffected", () => {
-    const params = parseQuery(api.images.url("C:/data/images/2026-01-01/img1.jpg"));
+    const params = parseQuery(api.images.url("C:/data/images/2026-01-01/img1.jpg", display()));
     expect(params.get("path")).toBe("C:/data/images/2026-01-01/img1.jpg");
     expect(params.has("bands")).toBe(false);
     expect(params.has("stretch")).toBe(false);
   });
 
-  it("names no width, leaving the server's own display bound to apply", () => {
-    const params = parseQuery(api.images.url("C:/data/images/2026-01-01/img1.jpg"));
-    expect(params.has("max_width")).toBe(false);
+  it("names this display's pixel count and no size or encoding, whole or region", () => {
+    vi.stubGlobal("devicePixelRatio", 2);
+    try {
+      const pixels = display();
+      expect(pixels).toBe(3840 * 2160);
+      for (const opts of [{}, { x0: 0, y0: 0, x1: 512, y1: 512 }]) {
+        const params = parseQuery(
+          api.images.url("C:/data/images/2026-01-01/img1.jpg", pixels, opts),
+        );
+        expect(params.get("display_pixels")).toBe(String(pixels));
+        for (const key of ["max_width", "width", "quality"]) expect(params.has(key)).toBe(false);
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("carries bands/stretch through to the query string when given", () => {
     const params = parseQuery(
-      api.images.url("C:/data/images/2026-01-01/img1.bandgroup", {
+      api.images.url("C:/data/images/2026-01-01/img1.bandgroup", display(), {
         bands: "Red,Green,Blue",
         stretch: "minmax",
       }),
@@ -210,25 +229,23 @@ describe("images.url", () => {
 });
 
 describe("images.url region params", () => {
-  it("carries the native-pixel rect corners and max_width through to the query string", () => {
+  it("carries the native-pixel rect corners through to the query string", () => {
     const params = parseQuery(
-      api.images.url("C:/data/images/2026-01-01/mosaic.tif", {
+      api.images.url("C:/data/images/2026-01-01/mosaic.tif", display(), {
         x0: 0,
         y0: 4067,
         x1: 4067,
         y1: 8134,
-        max_width: 2034,
       }),
     );
     expect(params.get("x0")).toBe("0");
     expect(params.get("y0")).toBe("4067");
     expect(params.get("x1")).toBe("4067");
     expect(params.get("y1")).toBe("8134");
-    expect(params.get("max_width")).toBe("2034");
   });
 
   it("omits every rect param when no region is requested", () => {
-    const params = parseQuery(api.images.url("C:/data/images/2026-01-01/img1.jpg"));
+    const params = parseQuery(api.images.url("C:/data/images/2026-01-01/img1.jpg", display()));
     for (const key of ["x0", "y0", "x1", "y1"]) expect(params.has(key)).toBe(false);
   });
 });

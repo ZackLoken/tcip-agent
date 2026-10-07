@@ -16,7 +16,7 @@ export const ROUTES = {
   getImages: "/api/images",
   getImagesBands: "/api/images/bands",
   getImagesOverviewsStatus: "/api/images/overviews/status",
-  getImagesServingGrid: "/api/images/serving_grid",
+  getImagesView: "/api/images/view",
   getInferenceJobs: "/api/inference/jobs",
   getMetaReports: "/api/meta/reports",
   getMetaRetrospectives: "/api/meta/retrospectives",

@@ -1,6 +1,6 @@
 """Generate the browser's backend-declared types from the pydantic models that declare them.
 
-``routes/images.py`` declares a served image's stats source and the region-serving grid;
+``routes/images.py`` declares a served image's stats source and the reads a view is served by;
 ``routes/annotate.py`` the review queue's launch and ``routes/sessions.py`` the annotation timing
 entries and the sessions they amount to;
 ``tcip_mcp.experiments`` declares a run's row, a sweep's group, the listing of both and the detail
@@ -62,7 +62,7 @@ _PRIMITIVE = {"string": "string", "number": "number", "integer": "number", "bool
 
 def declared_models() -> list[type[BaseModel]]:
     """The models this script renders, in the order their interfaces are emitted."""
-    from tcip_web.routes.images import ServingCell, ServingGrid
+    from tcip_web.routes.images import ServingCell, ViewReads
     from tcip_web.routes.projects import OpenRequest, ProjectSummary, RemovalRequest, RenameRequest
     from tcip_web.routes.results import (
         AcknowledgmentPayload, ConfirmRevisionPayload, ExportCountCsvPayload, ExportCsvPayload,
@@ -86,7 +86,7 @@ def declared_models() -> list[type[BaseModel]]:
     from tcip_web.routes.training import TrainingRowFrame, TrainingStatusFrame
 
     return [LaunchPriorityQueuePayload, ImageEntry, ImageEventPayload, SessionSummary,
-            ServingCell, ServingGrid, RunRow, SweepGroup, TrainingDetail, TrainingListing,
+            ServingCell, ViewReads, RunRow, SweepGroup, TrainingDetail, TrainingListing,
             TrainingRowFrame, TrainingStatusFrame, TerminalInputFrame,
             TerminalResizeFrame, CreateSessionRequest, LaunchedProgram, TerminalLaunch,
             ProviderStatus, TerminalStatus, SubmitRequest, ProjectSummary, OpenRequest,

@@ -23,7 +23,7 @@ from tcip_annotation.viz import render_candidates, render_detections
 
 from tcip_mcp.audit import now_iso, record_event_or_raise
 from tcip_mcp.pipelines.image_utils import (
-    BandGroupIncompleteError, image_dimensions, resolve_image_path,
+    BandGroupIncompleteError, display_frame, resolve_image_path,
 )
 from tcip_mcp.project_paths import viz_output_path
 from tcip_mcp.server import tool
@@ -187,14 +187,14 @@ def propose_annotations(
                              "cells were read off (overlay_reference_grid echoes it back, with "
                              "overlap). Without it a cell name resolves against a grid nobody "
                              "rendered."}
-        from tcip_mcp.pipelines.raster_source import open_raster
+        from tcip_mcp.pipelines.raster_source import image_route_channel_count, open_raster
         from tcip_mcp.pipelines.reference_grid import reference_cells
 
         try:
-            w, h = image_dimensions(source)
+            w, h = display_frame(source)
             cells = reference_cells(w, h, tile_size, overlap, clamp=True)
             rect = _region_rect_from_cells(cells, grid_cells)
-            with open_raster(source, 3) as src:
+            with open_raster(source, image_route_channel_count(source)) as src:
                 pixels, _spec = src.read_region(rect)
         except ValueError as e:
             return {"error": str(e)}
@@ -334,7 +334,7 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
     candidates = envelope["candidates"]
     cand_map = {c["candidate_id"]: c for c in candidates}
 
-    w, h = image_dimensions(source)
+    w, h = display_frame(source)
 
     # Build name-based predictions (created_by=<engine>, score = the proposal score); each keeps
     # every ring, so an occlusion-split object stays split rather than its largest fragment.
@@ -447,7 +447,7 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: t
         img_source = resolve_image_path(img)
     except (FileNotFoundError, BandGroupIncompleteError, ValueError) as exc:
         return {"error": str(exc)}
-    img_w, img_h = image_dimensions(img_source)
+    img_w, img_h = display_frame(img_source)
 
     # A rounding-slop margin in pixels, not a fraction of the image size: a fractional margin
     # admits a normalized [0,1] ring at every real image size, the bug this check exists to refuse.
