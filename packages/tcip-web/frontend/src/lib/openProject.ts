@@ -4,11 +4,12 @@
  */
 
 import { api, type ProjectSummary } from "@/api/client";
+import { StructuredRefusalError } from "@/api/http";
 import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
 import { toastLabelProblem } from "@/lib/labelProblemToast";
 import { recordRecentProject } from "@/lib/recentProjects";
 import { useStore } from "@/store";
-import type { DatasetSelection } from "@/store/types";
+import type { OpenHold } from "@/store/slices/projectOpen";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -19,20 +20,76 @@ export function defaultDate(dates: string[]): string {
   return dates[dates.length - 1] ?? "";
 }
 
-/** Open ``p`` (a listed project whose record reads, so it carries an id) on a capture, subject
- *  and bucket name (one ``bucketsForDate`` serves); the backend points the workspace's
- *  last-opened pointer at it. A project holding no capture (``date`` empty) opens with no
- *  dataset selected. */
-export async function openWorkspaceProject(
+/** A listed project whose record reads, so it carries an id and a display name. */
+export type OpenableProject = ProjectSummary & { id: string; display_name: string };
+
+export const openable = (p: ProjectSummary): p is OpenableProject =>
+  p.id !== null && p.display_name !== null;
+
+/** The backend refused the committed name when opening a project. */
+export class NameRefusedError extends Error {}
+
+let lastRequestId = 0;
+
+/** The held open when it is the one with ``requestId``, else null: nothing has superseded it. */
+export function heldOpen(requestId: number | null): OpenHold | null {
+  const { opening } = useStore.getState();
+  return opening !== null && opening.requestId === requestId ? opening : null;
+}
+
+/** Take the one open hold for ``projectId`` (null while the project is not yet known), before
+ *  any step of the open that waits; null when an open already holds it. */
+export function takeOpenHold(projectId: string | null): number | null {
+  const state = useStore.getState();
+  if (state.opening !== null) return null;
+  const requestId = ++lastRequestId;
+  state.patchOpenStatus({
+    opening: { requestId, projectId, accepted: null },
+    openError: null,
+    nameRefusal: null,
+  });
+  return requestId;
+}
+
+/** Whether the initial open held as ``requestId`` still stands for ``listedId``, the project the
+ *  listing names as open: no snapshot was accepted since the hold was taken and none is open
+ *  now, or the latest accepted state is that project. An accepted state of no project open
+ *  cancels it. */
+export function initialOpenWanted(requestId: number, listedId: string): boolean {
+  const hold = heldOpen(requestId);
+  if (!hold) return false;
+  const seen = hold.accepted
+    ? hold.accepted.projectId
+    : (useStore.getState().openProject?.id ?? null);
+  return seen === listedId || (hold.accepted === null && seen === null);
+}
+
+/** Give up the hold ``requestId`` took, unless it was already released or superseded. */
+export function releaseOpenHold(requestId: number): void {
+  if (heldOpen(requestId)) useStore.getState().patchOpenStatus({ opening: null });
+}
+
+/** The open itself, as the committed person. It stops, with nothing applied, as soon as its
+ *  request is no longer the held one, before selecting a dataset and again before adopting. */
+async function performOpen(
+  requestId: number,
   p: ProjectSummary & { id: string },
   date: string,
-  subject: string | null,
-  bucket: string | null,
-): Promise<DatasetSelection> {
+  subject: string,
+  bucket: string,
+): Promise<void> {
   // Snapshot the outgoing dataset's UI state before the open's broadcast can move it; the
   // restore for the new selection is defined once, below.
   useStore.getState().saveCurrentDatasetUi();
-  const opened = await api.projects.open(p.id);
+  let opened;
+  try {
+    opened = await api.projects.open({ id: p.id, user: useStore.getState().user });
+  } catch (e) {
+    if (e instanceof StructuredRefusalError && e.status === 400)
+      throw new NameRefusedError(e.message);
+    throw e;
+  }
+  if (!heldOpen(requestId)) return;
   const res = date
     ? await api.dataset.select({
         dataset_root: opened.path,
@@ -41,6 +98,7 @@ export async function openWorkspaceProject(
         bucket: bucket || null,
       })
     : { selection: GUI_STATE_DEFAULTS.dataset, label_problem: null };
+  if (!heldOpen(requestId)) return;
   try {
     recordRecentProject(opened.id);
   } catch (e) {
@@ -52,7 +110,45 @@ export async function openWorkspaceProject(
   }
   useStore.getState().applyRestoredDataset(res.selection, { id: opened.id, path: opened.path });
   toastLabelProblem(res.label_problem);
-  return res.selection;
+}
+
+/** The one transition owner for opening ``p`` (a listed project whose record reads, so it
+ *  carries an id) on a capture, subject and bucket name (one ``bucketsForDate`` serves), as the
+ *  committed person; the backend points the workspace's last-opened pointer at it. A project
+ *  holding no capture (``date`` empty) opens with no dataset selected, and an open already in
+ *  flight leaves this one unstarted. The open holds a request id in the store, taken by this call
+ *  or, as ``held``, by a caller that took it before its own lookup; a second choice of project or
+ *  a snapshot adopting another project releases it, and a result from a request no longer held,
+ *  success or failure, is dropped. A held failure is recorded for ``p`` and toasted so a tab that
+ *  replaced the picker does not hide it; a refused name is recorded with the name it refused, for
+ *  the Annotator field. */
+export async function startOpen(
+  p: ProjectSummary & { id: string },
+  date: string,
+  subject: string,
+  bucket: string,
+  held?: number,
+): Promise<void> {
+  const hold = heldOpen(held ?? takeOpenHold(p.id));
+  if (!hold) return;
+  const { requestId } = hold;
+  const sentName = useStore.getState().user;
+  useStore.getState().patchOpenStatus({ opening: { ...hold, projectId: p.id } });
+  try {
+    await performOpen(requestId, p, date, subject, bucket);
+  } catch (e) {
+    const now = useStore.getState();
+    if (!heldOpen(requestId)) return;
+    if (e instanceof NameRefusedError) {
+      now.patchOpenStatus({ nameRefusal: { name: sentName, message: e.message } });
+      now.pushToast(e.message);
+    } else {
+      now.patchOpenStatus({ openError: { projectId: p.id, message: String(e) } });
+      now.pushToast(String(e));
+    }
+  } finally {
+    releaseOpenHold(requestId);
+  }
 }
 
 /** The subjects with labels on date ``d``; empty when nothing is labeled there, so a selector
@@ -70,16 +166,13 @@ function newestLabeledDate(p: ProjectSummary): string | null {
   return labeled.length ? defaultDate(labeled) : null;
 }
 
-/** Open the listed project with ``id`` on sensible defaults, preferring the newest date that
- *  actually has labels; null when the workspace lists no project with it. */
-export async function openProjectById(id: string): Promise<DatasetSelection | null> {
-  const { projects } = await api.projects.list();
-  const p = projects.find((x) => x.id === id);
-  if (!p || p.id === null) return null;
+/** Start opening the listed project ``p`` on sensible defaults, preferring the newest date that
+ *  actually has labels. */
+export function openWithDefaults(p: ProjectSummary & { id: string }): Promise<void> {
   // Prefers a labeled date: an agent ingesting a still-unlabeled newer date would
   // otherwise land the human on a blank canvas with no date selector to recover.
   const date = newestLabeledDate(p) ?? defaultDate(p.dates);
-  const subject = subjectsForDate(p, date)[0] ?? null;
-  const bucket = bucketsForDate(p, date)[0] ?? null;
-  return openWorkspaceProject({ ...p, id: p.id }, date, subject, bucket);
+  const subject = subjectsForDate(p, date)[0] ?? "";
+  const bucket = bucketsForDate(p, date)[0] ?? "";
+  return startOpen(p, date, subject, bucket);
 }

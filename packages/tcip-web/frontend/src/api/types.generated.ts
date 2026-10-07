@@ -57,6 +57,24 @@ export interface LaunchPriorityQueuePayload {
   budget?: number;
 }
 
+export interface CanvasStatePayload {
+  project_id: string;
+  tab: "setup" | "annotate" | "training" | "inference" | "results" | "meta";
+  image_path: string;
+  image: string;
+  img_width?: number;
+  img_height?: number;
+  viewport?: Record<string, unknown> | null;
+  mode?: string | null;
+  active_subject?: string | null;
+  cut_armed?: boolean | null;
+  dirty?: boolean | null;
+  user: string;
+  classes?: Record<string, unknown>[];
+  counts?: Record<string, unknown> | null;
+  shapes?: Record<string, unknown>[] | null;
+}
+
 export interface ImageEntry {
   image_name: string;
   seconds: number;
@@ -218,12 +236,12 @@ export interface ProjectSummary {
   subjects_by_date: Record<string, string[]>;
   buckets_by_date: Record<string, string[]>;
   image_count: number;
-  is_open: boolean;
   label_problem: string | null;
 }
 
 export interface OpenRequest {
   id: string;
+  user: string;
 }
 
 export interface RemovalRequest {

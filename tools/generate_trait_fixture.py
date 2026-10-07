@@ -71,7 +71,7 @@ def listings(workspace: Path) -> dict[str, dict]:
 
     def opened(name: str) -> Path:
         created = initialize_project(str(workspace / name), name, "fixture orchard")
-        response = client.post("/api/projects/open", json={"id": created["id"]})
+        response = client.post("/api/projects/open", json={"id": created["id"], "user": "grower"})
         response.raise_for_status()
         return Path(created["project_path"])
 

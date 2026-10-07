@@ -4,6 +4,7 @@ import type { BannerSlice } from "@/store/slices/banners";
 import type { CanvasSlice } from "@/store/slices/canvas";
 import type { GuiSlice } from "@/store/slices/gui";
 import type { PendingTerminalMessageSlice } from "@/store/slices/pendingTerminalMessage";
+import type { ProjectOpenSlice } from "@/store/slices/projectOpen";
 import type { RegistryStatusSlice } from "@/store/slices/registryStatus";
 import type { TerminalOpenSlice } from "@/store/slices/terminalOpen";
 import type { ToastSlice } from "@/store/slices/toasts";
@@ -25,4 +26,5 @@ export interface AppState
     BannerSlice,
     TerminalOpenSlice,
     PendingTerminalMessageSlice,
-    UserSlice {}
+    UserSlice,
+    ProjectOpenSlice {}

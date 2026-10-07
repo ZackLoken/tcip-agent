@@ -118,13 +118,30 @@ def test_a_push_while_no_project_is_open_is_answered_as_a_mismatch(client, proje
 
 
 def test_a_push_naming_no_one_is_refused_before_anything_is_written(client, opened_project):
-    """A push may state no person, but one stating a person must name one: a blank name is
-    refused before the geometry or the meta document is written."""
+    """A push must name its person: a blank name is refused before the geometry or the meta
+    document is written."""
     r = client.post("/api/canvas/state",
                     json={**_payload(opened_project, A_IMG, shapes=SHAPES), "user": "  "})
 
     assert r.status_code == 400
     assert _shapes_doc(opened_project) is None and _meta(opened_project) is None
+
+
+def test_a_push_stating_no_person_is_refused_before_anything_is_written(client, opened_project):
+    body = _payload(opened_project, A_IMG, shapes=SHAPES)
+    del body["user"]
+
+    r = client.post("/api/canvas/state", json=body)
+
+    assert r.status_code == 422
+    assert _shapes_doc(opened_project) is None and _meta(opened_project) is None
+
+
+def test_a_push_naming_a_person_is_stored_under_that_person(client, opened_project):
+    r = client.post("/api/canvas/state", json=_payload(opened_project, A_IMG, shapes=SHAPES))
+
+    assert r.status_code == 200
+    assert _meta(opened_project)["user"] == "user:breeder"
 
 
 def test_a_push_naming_a_project_root_refuses_as_an_unknown_field(client, opened_project):

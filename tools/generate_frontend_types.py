@@ -77,6 +77,7 @@ def declared_models() -> list[type[BaseModel]]:
         PlantRegistryReference, Producer, SegmentTieDisclosure,
     )
     from tcip_web.routes.annotate import LaunchPriorityQueuePayload
+    from tcip_web.routes.canvas import CanvasStatePayload
     from tcip_web.routes.sessions import ImageEntry, ImageEventPayload, SessionSummary
     from tcip_web.routes.terminal import (
         CreateSessionRequest, LaunchedProgram, ProviderStatus, SubmitRequest, TerminalInputFrame,
@@ -85,9 +86,9 @@ def declared_models() -> list[type[BaseModel]]:
     from tcip_mcp.experiments import RunRow, SweepGroup, TrainingDetail, TrainingListing
     from tcip_web.routes.training import TrainingRowFrame, TrainingStatusFrame
 
-    return [LaunchPriorityQueuePayload, ImageEntry, ImageEventPayload, SessionSummary,
-            ServingCell, ViewReads, RunRow, SweepGroup, TrainingDetail, TrainingListing,
-            TrainingRowFrame, TrainingStatusFrame, TerminalInputFrame,
+    return [LaunchPriorityQueuePayload, CanvasStatePayload, ImageEntry, ImageEventPayload,
+            SessionSummary, ServingCell, ViewReads, RunRow, SweepGroup, TrainingDetail,
+            TrainingListing, TrainingRowFrame, TrainingStatusFrame, TerminalInputFrame,
             TerminalResizeFrame, CreateSessionRequest, LaunchedProgram, TerminalLaunch,
             ProviderStatus, TerminalStatus, SubmitRequest, ProjectSummary, OpenRequest,
             RemovalRequest, RenameRequest, PhenologyPayload, RegisteredModel, RegisteredModels,

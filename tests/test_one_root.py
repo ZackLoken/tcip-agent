@@ -100,8 +100,9 @@ def test_opening_two_projects_leaves_the_environment_as_it_was(tmp_path, client)
     _, second = named_project(ws / "hill_block", "Hill block")
     before = dict(os.environ)
 
-    assert client.post("/api/projects/open", json={"id": first}).status_code == 200
-    assert client.post("/api/projects/open", json={"id": second}).status_code == 200
+    for project_id in (first, second):
+        opened = client.post("/api/projects/open", json={"id": project_id, "user": "grower"})
+        assert opened.status_code == 200
 
     assert dict(os.environ) == before
     assert store.project_id == second
@@ -116,7 +117,8 @@ def test_the_last_opened_pointer_holds_the_id_and_the_list_names_each_project_by
     _, valley = named_project(ws / "valley_block", "Valley block")
     _, hill = named_project(ws / "hill_block", "Hill block")
 
-    assert client.post("/api/projects/open", json={"id": valley}).status_code == 200
+    opened = client.post("/api/projects/open", json={"id": valley, "user": "grower"})
+    assert opened.status_code == 200
 
     assert workspace.read_last_opened(ws) == valley
     listing = client.get("/api/projects").json()

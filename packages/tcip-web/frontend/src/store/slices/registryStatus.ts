@@ -45,8 +45,7 @@ interface SessionTrackingState {
   annotationsAddedDelta: number;
   /** Whether a save during this image visit left the dataset subject a confirmed negative. */
   negativeMarked: boolean;
-  /** The person and the project the visit was opened under, which it keeps. */
-  user: string;
+  /** The project the visit was opened under, which it keeps. */
   projectId: string | null;
 }
 
@@ -55,7 +54,6 @@ const EMPTY_SESSION_TRACKING: SessionTrackingState = {
   imageEnterTimeMs: null,
   annotationsAddedDelta: 0,
   negativeMarked: false,
-  user: "",
   projectId: null,
 };
 
@@ -84,8 +82,7 @@ export interface RegistryStatusSlice {
   setDraggingVertex: (v: [number, number, number] | null) => void;
 
   /** Per-image session telemetry helpers. A visit opens under the current person and project;
-   *  closing it holds its contribution when a person and a project were named, and drops it
-   *  otherwise. */
+   *  closing it holds its contribution when a project was named, and drops it otherwise. */
   startImageSessionTracking: (imageName: string, imageEnterTimeMs?: number) => void;
   incrementAnnotationsAdded: (delta?: number) => void;
   markNegativeConfirmed: () => void;
@@ -137,7 +134,6 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
         imageEnterTimeMs: imageEnterTimeMs ?? Date.now(),
         annotationsAddedDelta: 0,
         negativeMarked: false,
-        user: s.user,
         projectId: s.openProject?.id ?? null,
       },
     })),
@@ -164,7 +160,7 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
     set((s) => {
       const t = s.sessionTracking;
       if (t.currentImageName === null || t.imageEnterTimeMs === null) return s;
-      if (!t.user.trim() || t.projectId === null) {
+      if (t.projectId === null) {
         return { sessionTracking: EMPTY_SESSION_TRACKING };
       }
       const contribution: ImageEventPayload = {
@@ -177,7 +173,7 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
             : t.negativeMarked
               ? "negative_confirmation"
               : "review",
-        user: t.user,
+        user: s.user,
         project_id: t.projectId,
       };
       return {

@@ -148,22 +148,35 @@ def test_opening_a_project_by_id_marks_it_open_in_the_list(client, workspace_dir
     _make_project(workspace_dir, "currant_bud_valley-farm", dates=["2026-02-11"])
     listed = _listed(client)["currant_bud_valley-farm"]
     assert client.get("/api/projects").json()["open_id"] is None
-    assert listed["is_open"] is False
+    assert "is_open" not in listed
 
-    resp = client.post("/api/projects/open", json={"id": listed["id"]})
+    resp = client.post("/api/projects/open", json={"id": listed["id"], "user": "grower"})
     assert resp.status_code == 200
     assert resp.json() == {"id": listed["id"], "display_name": "currant_bud_valley-farm",
                            "path": str((workspace_dir / "currant_bud_valley-farm").resolve())}
 
     assert client.get("/api/projects").json()["open_id"] == listed["id"]
-    assert _listed(client)["currant_bud_valley-farm"]["is_open"] is True
 
 
 def test_opening_an_id_no_project_holds_is_404(client, workspace_dir):
     _make_project(workspace_dir, "currant_bud_valley-farm")
-    resp = client.post("/api/projects/open", json={"id": "000000000000"})
+    resp = client.post("/api/projects/open", json={"id": "000000000000", "user": "grower"})
     assert resp.status_code == 404
     assert "000000000000" in resp.json()["detail"]
+    assert client.get("/api/projects").json()["open_id"] is None
+
+
+def test_opening_a_project_naming_no_one_is_refused_and_opens_nothing(client, workspace_dir):
+    _make_project(workspace_dir, "currant_bud_valley-farm", dates=["2026-02-11"])
+    listed = _listed(client)["currant_bud_valley-farm"]
+
+    for stated in ("user:", "  ", ""):
+        resp = client.post("/api/projects/open", json={"id": listed["id"], "user": stated})
+        assert resp.status_code == 400
+        assert client.get("/api/projects").json()["open_id"] is None
+
+    resp = client.post("/api/projects/open", json={"id": listed["id"]})
+    assert resp.status_code == 422
     assert client.get("/api/projects").json()["open_id"] is None
 
 

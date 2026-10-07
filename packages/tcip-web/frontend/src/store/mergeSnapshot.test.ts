@@ -48,6 +48,7 @@ describe("mergeSnapshot ownership model", () => {
       openProject: PROJECT,
       wsVersion: 5,
       wsEpoch: null,
+      heldContributions: [],
     });
   });
 
@@ -107,6 +108,29 @@ describe("mergeSnapshot ownership model", () => {
   it("drops a stale (older-version) replay", () => {
     s().mergeSnapshot(snapshot({ dataset: dataset({ date: "9-9-99" }) }), 3, PROJECT, null); // 3 < wsVersion 5
     expect(s().gui.dataset.date).toBe("2-11-26"); // unchanged
+  });
+
+  it("leaves an image visit open when a stale snapshot of another project is rejected", () => {
+    s().setUser("grower");
+    s().startImageSessionTracking("a.jpg");
+
+    s().mergeSnapshot(snapshot(), 3, OTHER, null); // 3 < wsVersion 5
+
+    expect(s().openProject).toEqual(PROJECT);
+    expect(s().sessionTracking.currentImageName).toBe("a.jpg");
+    expect(s().heldContributions).toEqual([]);
+  });
+
+  it("closes the image visit, holding its contribution, when another project is adopted", () => {
+    s().setUser("grower");
+    s().startImageSessionTracking("a.jpg");
+
+    s().mergeSnapshot(snapshot(), 6, OTHER, null);
+
+    expect(s().sessionTracking.currentImageName).toBeNull();
+    expect(s().heldContributions).toEqual([
+      expect.objectContaining({ image_name: "a.jpg", user: "grower", project_id: PROJECT.id }),
+    ]);
   });
 
   it("applies a snapshot carrying the version already recorded", () => {

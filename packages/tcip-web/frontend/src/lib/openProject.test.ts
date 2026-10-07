@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { openProjectById, openWorkspaceProject } from "@/lib/openProject";
+import { openWithDefaults, startOpen } from "@/lib/openProject";
 import { useStore } from "@/store";
 
 vi.mock("@/api/client", () => ({
@@ -28,19 +28,9 @@ function project(overrides: Partial<ProjectSummary> & { id: string }): ProjectSu
     subjects_by_date: {},
     buckets_by_date: {},
     image_count: 0,
-    is_open: false,
     label_problem: null,
     ...overrides,
   };
-}
-
-function listed(projects: ProjectSummary[]) {
-  vi.mocked(api.projects.list).mockResolvedValue({
-    workspace: "/ws",
-    open_id: null,
-    last_opened_problem: null,
-    projects,
-  });
 }
 
 beforeEach(() => {
@@ -49,7 +39,8 @@ beforeEach(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     selection: { image_list: [], current_image_index: 0 } as any,
   });
-  vi.mocked(api.projects.open).mockImplementation(async (id: string) => ({
+  useStore.getState().setUser("grower");
+  vi.mocked(api.projects.open).mockImplementation(async ({ id }) => ({
     id,
     display_name: `Project ${id}`,
     path: `/ws/${id}`,
@@ -57,9 +48,9 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
-describe("openProjectById", () => {
+describe("openWithDefaults", () => {
   it("opens on the newest LABELED date, not the newest date (which would be blank)", async () => {
-    listed([
+    await openWithDefaults(
       project({
         id: "hz",
         // Agent just ingested a still-unlabeled 2026-03-24; labels live on 2026-02-11.
@@ -68,9 +59,7 @@ describe("openProjectById", () => {
         subjects_by_date: { "2026-02-11": ["subject_a"], "2026-03-24": [] },
         buckets_by_date: { "2026-02-11": ["baseline"], "2026-03-24": [] },
       }),
-    ]);
-
-    await openProjectById("hz");
+    );
 
     const arg = vi.mocked(api.dataset.select).mock.calls[0][0];
     // Lands on 2026-02-11 (newest date with labels) + its subject, not the empty newest date.
@@ -80,16 +69,14 @@ describe("openProjectById", () => {
   });
 
   it("falls back to the newest date when nothing is labeled yet (empty project)", async () => {
-    listed([
+    await openWithDefaults(
       project({
         id: "fresh",
         dates: ["2026-02-11", "2026-03-24"],
         subjects_by_date: { "2026-02-11": [], "2026-03-24": [] },
         buckets_by_date: { "2026-02-11": [], "2026-03-24": [] },
       }),
-    ]);
-
-    await openProjectById("fresh");
+    );
 
     const arg = vi.mocked(api.dataset.select).mock.calls[0][0];
     expect(arg.date).toBe("2026-03-24"); // newest overall (nothing labeled to prefer)
@@ -97,35 +84,24 @@ describe("openProjectById", () => {
   });
 
   it("opens the project by its id and selects inside the directory the open answered", async () => {
-    listed([project({ id: "site-a", dates: ["2026-02-11"] })]);
+    await openWithDefaults(project({ id: "site-a", dates: ["2026-02-11"] }));
 
-    await openProjectById("site-a");
-
-    expect(api.projects.open).toHaveBeenCalledWith("site-a");
+    expect(api.projects.open).toHaveBeenCalledWith({ id: "site-a", user: "grower" });
     expect(vi.mocked(api.dataset.select).mock.calls[0][0].dataset_root).toBe("/ws/site-a");
     expect(useStore.getState().openProject).toEqual({ id: "site-a", path: "/ws/site-a" });
   });
 
   it("opens a project holding no capture with no dataset selected", async () => {
-    listed([project({ id: "empty" })]);
+    await openWithDefaults(project({ id: "empty" }));
 
-    await openProjectById("empty");
-
-    expect(api.projects.open).toHaveBeenCalledWith("empty");
+    expect(api.projects.open).toHaveBeenCalledWith({ id: "empty", user: "grower" });
     expect(api.dataset.select).not.toHaveBeenCalled();
     expect(useStore.getState().gui.dataset.dataset_root).toBeNull();
     expect(useStore.getState().openProject).toEqual({ id: "empty", path: "/ws/empty" });
   });
-
-  it("returns null for an id the workspace does not list", async () => {
-    listed([]);
-    expect(await openProjectById("nope")).toBeNull();
-    expect(api.projects.open).not.toHaveBeenCalled();
-    expect(api.dataset.select).not.toHaveBeenCalled();
-  });
 });
 
-describe("openWorkspaceProject", () => {
+describe("startOpen", () => {
   it("pushes a toast naming the label document when the selection carries a label_problem", async () => {
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
@@ -135,7 +111,7 @@ describe("openWorkspaceProject", () => {
     });
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
 
-    await openWorkspaceProject(
+    await startOpen(
       project({ id: "hz", dates: ["2026-02-11"] }),
       "2026-02-11",
       "subject_a",

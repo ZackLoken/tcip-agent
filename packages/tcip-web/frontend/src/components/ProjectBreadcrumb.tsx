@@ -12,8 +12,10 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, type ProjectSummary } from "@/api/client";
 import {
   bucketsForDate,
-  openProjectById,
-  openWorkspaceProject,
+  openable,
+  type OpenableProject,
+  openWithDefaults,
+  startOpen,
   subjectsForDate,
 } from "@/lib/openProject";
 import { loadRecentProjectIds } from "@/lib/recentProjects";
@@ -33,7 +35,7 @@ export function ProjectBreadcrumb() {
 
   const [menu, setMenu] = useState<null | "project" | "date">(null);
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
-  const [busy, setBusy] = useState(false);
+  const busy = useStore((s) => s.opening !== null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   // Load the project list once per open project: names it, and powers the date switcher. Never
@@ -71,41 +73,22 @@ export function ProjectBreadcrumb() {
     if (!DATASET_TABS.has(activeTab)) setActiveTab("annotate");
   }
 
-  async function openRecent(id: string) {
+  async function openRecent(project: OpenableProject) {
     setMenu(null);
-    setBusy(true);
-    try {
-      // openProjectById saves the outgoing UI state and restores this project's saved
-      // position/filters; no patchGui here.
-      const sel = await openProjectById(id);
-      if (!sel) pushToast("That project is no longer in the workspace.");
-    } catch (e) {
-      pushToast(`Could not open project: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setBusy(false);
-    }
+    // The one opening transition saves the outgoing UI state and restores this project's saved
+    // position/filters, and reports its own failure.
+    await openWithDefaults(project);
   }
 
   async function switchDate(newDate: string, current: ProjectSummary & { id: string }) {
     setMenu(null);
     if (newDate === dataset.date) return;
-    setBusy(true);
-    try {
-      // Keep the current subject when the new date has it, else fall to that date's first; a
-      // bucket states one capture date, so the new date opens on its own first bucket.
-      const subjects = subjectsForDate(current, newDate);
-      const subject =
-        dataset.subject && subjects.includes(dataset.subject)
-          ? dataset.subject
-          : (subjects[0] ?? null);
-      const bucket = bucketsForDate(current, newDate)[0] ?? null;
-      // openWorkspaceProject saves the outgoing date's UI state and restores the new date's.
-      await openWorkspaceProject(current, newDate, subject, bucket);
-    } catch (e) {
-      pushToast(`Could not switch date: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setBusy(false);
-    }
+    // Keep the current subject when the new date has it, else fall to that date's first; a
+    // bucket states one capture date, so the new date opens on its own first bucket.
+    const subjects = subjectsForDate(current, newDate);
+    const subject =
+      dataset.subject && subjects.includes(dataset.subject) ? dataset.subject : (subjects[0] ?? "");
+    await startOpen(current, newDate, subject, bucketsForDate(current, newDate)[0] ?? "");
   }
 
   if (!openProject) {
@@ -118,12 +101,12 @@ export function ProjectBreadcrumb() {
   // Every recent project still in the listing, named by it, the open one marked as current and
   // inert (hiding it would read as broken in a one-project workspace).
   const isCurrent = (r: { id: string }) => r.id === openProject.id;
-  let recent: { id: string; display_name: string }[] = [];
+  let recent: OpenableProject[] = [];
   let recentProblem: string | null = null;
   try {
     recent = loadRecentProjectIds().flatMap((id) => {
       const project = projects?.find((p) => p.id === id);
-      return project?.display_name ? [{ id, display_name: project.display_name }] : [];
+      return project && openable(project) ? [project] : [];
     });
   } catch (e) {
     recentProblem = e instanceof Error ? e.message : String(e);
@@ -132,14 +115,10 @@ export function ProjectBreadcrumb() {
   return (
     <div ref={rootRef} className="relative flex items-center">
       <span
-        title={
-          user
-            ? `Annotator: ${user}, set on the workspace page; stamped as the author of your labels`
-            : "No annotator set; open the workspace page to set who you are"
-        }
+        title={`Annotator: ${user}, set on the workspace page; stamped as the author of your labels`}
         className="font-mono"
       >
-        {user || "no annotator"}
+        {user}
       </span>
       <span className="mx-1.5 text-tcip-border">|</span>
       <button
@@ -192,7 +171,7 @@ export function ProjectBreadcrumb() {
             recent.map((r) => (
               <MenuButton
                 key={r.id}
-                onClick={() => (isCurrent(r) ? setMenu(null) : void openRecent(r.id))}
+                onClick={() => (isCurrent(r) ? setMenu(null) : void openRecent(r))}
                 label={r.display_name}
                 active={isCurrent(r)}
               />

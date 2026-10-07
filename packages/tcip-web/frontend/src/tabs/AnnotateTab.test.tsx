@@ -178,6 +178,7 @@ let saveSpy: MockInstance<typeof api.annotate.save>;
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
+  useStore.getState().setUser("grower");
   setupDataset();
   loadSpy = vi
     .spyOn(api.annotate, "load")
@@ -240,31 +241,6 @@ describe("AnnotateTab session contributions", () => {
     await leaveFirstImage();
 
     expect(useStore.getState().heldContributions).toHaveLength(1);
-  });
-
-  it("posts nothing for a viewer no one has named", async () => {
-    useStore.setState({ user: "" });
-    await leaveFirstImage();
-
-    expect(sessionsApi.imageEvent).not.toHaveBeenCalled();
-    expect(useStore.getState().heldContributions).toEqual([]);
-  });
-
-  it("attributes a visit to the person it was opened under when the person changes", async () => {
-    useStore.setState({ user: "jordan" });
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-
-    act(() => useStore.getState().setUser("casey"));
-    await flush();
-
-    expect(vi.mocked(sessionsApi.imageEvent).mock.calls[0][0]).toMatchObject({
-      image_name: "img1.jpg",
-      user: "jordan",
-      project_id: "a1b2c3d4e5f6",
-    });
-    expect(useStore.getState().sessionTracking.user).toBe("casey");
   });
 
   it("never posts a held visit into a project other than its own", async () => {

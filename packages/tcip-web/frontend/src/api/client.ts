@@ -10,6 +10,7 @@ import {
   RENDER_CACHE_VERSION,
   type JobStatus,
   type LaunchPriorityQueuePayload,
+  type OpenRequest,
   type ProjectSummary,
   type RemovalRequest,
   type RenameRequest,
@@ -178,10 +179,8 @@ export const api = {
         last_opened_problem: string | null;
         projects: ProjectSummary[];
       }>(ROUTES.getProjects),
-    open: (id: string) =>
-      postJson<{ id: string; display_name: string; path: string }>(ROUTES.postProjectsOpen, {
-        id,
-      }),
+    open: (body: OpenRequest) =>
+      postJson<{ id: string; display_name: string; path: string }>(ROUTES.postProjectsOpen, body),
     remove: (body: RemovalRequest) =>
       postJson<{ archive_path: string; moved_to: string }>(ROUTES.postProjectsRemove, body),
     rename: (body: RenameRequest) =>
