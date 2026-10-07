@@ -3,7 +3,7 @@ import { memo } from "react";
 import { BoxOverlay } from "@/components/annotate/BoxOverlay";
 import { PolygonOverlay } from "@/components/annotate/PolygonOverlay";
 import { annotationsToCanvas } from "@/lib/labelSerde";
-import { proposalMatch, type ReviewItem } from "@/lib/reviewItems";
+import { focusesProposal, proposalMatch, type ReviewItem } from "@/lib/reviewItems";
 import { outlineColor, proposalLabel, type strokeWidths } from "@/lib/symbology";
 import type { Proposal } from "@/store/types";
 
@@ -21,7 +21,7 @@ export const ProposalShapes = memo(function ProposalShapes({
   return (
     <>
       {proposals.map((p) => {
-        const isFocused = focused?.kind === "proposal" && focused.ref === p.index;
+        const isFocused = focusesProposal(focused, p.index);
         const label = proposalLabel(p, isFocused);
         const shared = {
           stroke: outlineColor(p.subject, proposalMatch(p)),

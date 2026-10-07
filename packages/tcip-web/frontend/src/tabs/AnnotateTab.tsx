@@ -12,6 +12,7 @@ import { AnnotationShapes } from "@/components/annotate/AnnotationShapes";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
 import { FlagMarks } from "@/components/annotate/FlagMarks";
 import { InProgressPolygon } from "@/components/annotate/InProgressPolygon";
+import { boxBounds, boxDraft, draftStrokes } from "@/lib/draftStrokes";
 import { ProposalShapes } from "@/components/annotate/ProposalShapes";
 import { ReviewStrip } from "@/components/annotate/ReviewStrip";
 import { SnapIndicator } from "@/components/annotate/SnapIndicator";
@@ -30,10 +31,12 @@ import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
 import type { LoadedImage } from "@/lib/imageLoader";
 import { currentImage } from "@/lib/paths";
 import {
+  decisionTarget,
   flagPlaces,
   flagRequest,
   imageFlags,
   keptItems,
+  focusedItem,
   matchTypes,
   nearestNeighborOrder,
   reviewItems,
@@ -45,7 +48,7 @@ import {
   type ReviewItem,
   type StepScope,
 } from "@/lib/reviewItems";
-import { NO_SUBJECT_DRAFT_COLOR, POINT_HIT_CANVAS, strokeWidths } from "@/lib/symbology";
+import { dashAt, DRAFT_DASH, POINT_HIT_CANVAS, strokeWidths } from "@/lib/symbology";
 import { fitView, zoomToRect } from "@/lib/viewGeometry";
 import {
   buildAnnotateShapes,
@@ -55,15 +58,17 @@ import {
   onCanvasStateRequest,
   type CanvasStateBody,
 } from "@/lib/canvasSync";
-import { canvasToAnnotations } from "@/lib/labelSerde";
+import type { SaveResult } from "@/api/client";
+import { holdsCanvas } from "@/store/slices/canvas";
+import { serializeCanvas } from "@/lib/labelSerde";
 import {
   computePolygonBboxes,
   cutRing,
   findHitPoint,
-  findHoveredPolygon,
-  MIN_BOX_SIDE,
+  belowMinSide,
   pointInRings,
   pointToSegmentDist,
+  polygonAt,
   withRing,
 } from "@/lib/polygonGeometry";
 import { applyEditDrag, hitTestEdit, type EditDrag } from "@/lib/editGeometry";
@@ -77,6 +82,8 @@ import {
   type ServedProposals,
   type SubjectState,
 } from "@/store/types";
+
+type OkSave = Extract<SaveResult, { status: "ok" }>;
 
 /** The gestures a save adjudicates beside the canvas content (one save door, its own fields). */
 type Gestures = Pick<
@@ -137,13 +144,15 @@ export function AnnotateTab() {
   const addPoint = useStore((s) => s.addPoint);
   const dragPoint = useStore((s) => s.dragPoint);
   const deletePoint = useStore((s) => s.deletePoint);
-  const selectPoint = useStore((s) => s.selectPoint);
+  const setFocus = useStore((s) => s.setFocus);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
   const setCurrentPolygon = useStore((s) => s.setCurrentPolygon);
   const commitCurrentPolygon = useStore((s) => s.commitCurrentPolygon);
-  const selectPolygon = useStore((s) => s.selectPolygon);
-  const markClean = useStore((s) => s.markClean);
+  const holdForSave = useStore((s) => s.holdForSave);
+  const releaseSave = useStore((s) => s.releaseSave);
+  const cancelSave = useStore((s) => s.cancelSave);
+  const rollbackLast = useStore((s) => s.rollbackLast);
   const pushUndo = useStore((s) => s.pushUndo);
   const setActiveSubject = useStore((s) => s.setActiveSubject);
 
@@ -162,17 +171,17 @@ export function AnnotateTab() {
   // the stream/vertex-placement branches all read as an open polygon in progress.
   const [cutStart, setCutStart] = useState<{
     point: [number, number];
-    polygonIdx: number;
-    polygon: PolygonShape;
+    rings: PolygonShape["rings"];
+    subject: string;
   } | null>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
-  // Box editing (mirrors polygon vertex editing): a selected box shows handles; a press on
-  // one starts a corner-resize / move drag. selectedBoxIdx is cleared on image change below.
-  const [selectedBoxIdx, setSelectedBoxIdx] = useState<number | null>(null);
+  // Box editing (mirrors polygon vertex editing): a focused box shows handles; a press on
+  // one starts a corner-resize / move drag.
   const boxDragRef = useRef<{ idx: number; drag: EditDrag } | null>(null);
   // Index of the point being dragged. A point has no vertices, so repositioning it is the whole
   // edit: one undo snapshot is taken when the drag starts (see onDown), like a box/vertex drag.
   const pointDragRef = useRef<number | null>(null);
+  const mountedRef = useRef(true);
 
   // I/O safety. The canvas belongs to exactly the image last loaded from disk:
   //  - loadedPathsRef: the image the current shapes came from. save() writes its labels, never
@@ -185,6 +194,8 @@ export function AnnotateTab() {
     image: string;
     mtime: string | null;
   } | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
+  const loadedTickRef = useRef(0);
   const [ioError, setIoError] = useState<string | null>(null);
   const [saveBlocked, setSaveBlocked] = useState(false);
   // True when a save/reload conflict is showing (file changed underneath us);
@@ -245,6 +256,11 @@ export function AnnotateTab() {
   const [hideProposals, setHideProposals] = useState(false);
   const [proposalTick, setProposalTick] = useState(0);
   const [served, setServed] = useState<{ key: string; served: ServedProposals } | null>(null);
+  // Proposals pair by document index, so a new document drops them until they are served again.
+  const refreshProposals = () => {
+    setServed(null);
+    setProposalTick((t) => t + 1);
+  };
   const proposalKey = `${imgPath ?? ""}\0${bucket ?? ""}`;
   useEffect(() => {
     if (!imgPath || !currentImageName || !bucket || hideProposals) return;
@@ -299,6 +315,7 @@ export function AnnotateTab() {
       reviewItems({
         canvas,
         proposals,
+        matches,
         reviewing,
         mode,
         flags: canvas.flags,
@@ -311,6 +328,7 @@ export function AnnotateTab() {
       canvas.points,
       canvas.flags,
       proposals,
+      matches,
       reviewing,
       mode,
       bucket,
@@ -328,76 +346,18 @@ export function AnnotateTab() {
     [proposals, filters.confidence, filters.match, mode],
   );
 
-  const focusedProposal = useStore((s) => s.annotateUi.focusedProposal);
-  const [selectedProposal, setSelectedProposal] = useState<number | null>(null);
-  // Focus belongs to the selected tool: switching tools drops it.
-  useEffect(() => {
-    setSelectedBoxIdx(null);
-    setSelectedProposal(null);
-    selectPolygon(null);
-    selectPoint(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
-  // One focused item at a time: focusing a box or a proposal drops every other selection, and
-  // a polygon or point selected on the canvas drops the box and the proposal.
-  function selectBox(idx: number | null) {
-    setSelectedBoxIdx(idx);
-    if (idx !== null) {
-      selectPolygon(null);
-      selectPoint(null);
-      setSelectedProposal(null);
-    }
-  }
-  function selectProposal(index: number | null) {
-    setSelectedProposal(index);
-    if (index !== null) {
-      setSelectedBoxIdx(null);
-      selectPolygon(null);
-      selectPoint(null);
-    }
-  }
-  useEffect(() => {
-    if (canvas.selectedPolygonIdx !== null || canvas.selectedPointIdx !== null) {
-      setSelectedBoxIdx(null);
-      setSelectedProposal(null);
-    }
-  }, [canvas.selectedPolygonIdx, canvas.selectedPointIdx]);
-  useEffect(() => {
-    selectProposal(focusedProposal);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusedProposal, currentImageName]);
-  const focused: ReviewItem | null = useMemo(() => {
-    const find = (kind: ReviewItem["kind"], ref: number | null) =>
-      (ref === null ? undefined : items.find((i) => i.kind === kind && i.ref === ref)) ?? null;
-    // A proposal pairing with an annotation is that annotation's item, never one of its own.
-    const paired = proposals.find((p) => p.index === selectedProposal)?.paired ?? null;
-    return (
-      find("proposal", selectedProposal) ??
-      items.find((i) => i.kind === "annotation" && paired !== null && i.index === paired) ??
-      find(
-        "annotation",
-        { box: selectedBoxIdx, polygon: canvas.selectedPolygonIdx, point: canvas.selectedPointIdx }[
-          mode
-        ],
-      )
-    );
-  }, [
-    items,
-    proposals,
-    mode,
-    selectedProposal,
-    selectedBoxIdx,
-    canvas.selectedPolygonIdx,
-    canvas.selectedPointIdx,
-  ]);
+  const focused: ReviewItem | null = useMemo(
+    () => focusedItem(items, proposals, canvas.focus),
+    [items, proposals, canvas.focus],
+  );
+  // The pointer handlers read the focus as the item the canvas draws handles on, so a proposal
+  // pairing with an annotation focuses that annotation for them too; items are the tool's own.
+  const focusedIdx = focused?.kind === "annotation" ? focused.ref : null;
 
-  /** Focus one item: select it, make its subject active and zoom the view to it, padded by its
-   *  own extent (a point by a fortieth of the image's longer side, since it has none). */
+  /** Focus one item: make its subject active and zoom the view to it, padded by its own extent
+   *  (a point by a fortieth of the image's longer side, since it has none). */
   function focusItem(item: ReviewItem) {
-    if (item.kind === "proposal") selectProposal(item.ref);
-    else if (item.shape === "box") selectBox(item.ref);
-    else if (item.shape === "polygon") selectPolygon(item.ref);
-    else selectPoint(item.ref);
+    setFocus({ kind: item.kind === "proposal" ? "proposal" : item.shape, index: item.ref });
     setActiveSubject(item.subject);
     const host = measureCanvasHost();
     if (!host || canvas.imgWidth <= 0 || canvas.imgHeight <= 0) return;
@@ -424,36 +384,48 @@ export function AnnotateTab() {
   const position = order.findIndex((item) => sameItem(item, focused)) + 1;
   const unreviewedKept = scopedOrder(kept, "unreviewed");
 
-  /** The undecided proposal an item stands for: itself, or the one pairing with it. */
-  const proposalOf = (item: ReviewItem | null | undefined) =>
-    item?.kind === "proposal" ? item.ref : item?.pairing;
+  // What each action acts on is resolved once per render, for availability and for execution.
+  const acceptTarget = decisionTarget("accept", focused, unreviewedKept);
+  const rejectTarget = decisionTarget("reject", focused, unreviewedKept);
 
-  /** Accept or reject the focused item's proposal, or the first unreviewed item's when the
-   *  focused item has none. */
   function decide(action: "accept" | "reject") {
-    const target = proposalOf(focused) ?? proposalOf(unreviewedKept[0]);
-    if (target === undefined || !bucket) return;
-    void save({ gestures: { bucket, [action]: [target] } });
+    const target = action === "accept" ? acceptTarget : rejectTarget;
+    if (target?.kind === "proposal" && bucket) {
+      void save({ gestures: { bucket, [action]: [target.index] } });
+    } else if (target?.kind === "confirm") {
+      void save({ gestures: {}, confirm: [target.item] });
+    }
   }
 
-  /** Edit the focused proposal: it is accepted, and the annotation the save appended (the
-   *  document's last) is then focused in its place. */
+  /** Edit the focused proposal: it is accepted, and the annotation the answer says it resolved
+   *  to, a new one or one already drawn, is focused in its place. A save the canvas did not adopt
+   *  focuses nothing. */
   async function edit() {
     if (focused?.kind !== "proposal" || !bucket) return;
-    await save({ gestures: { bucket, accept: [focused.ref] } });
-    const saved = reviewItems({
-      canvas: useStore.getState().canvas,
-      proposals: [],
-      reviewing: false,
-      mode,
-      flags: [],
-      bucket: null,
-    });
-    const last = saved.reduce<ReviewItem | undefined>(
-      (best, i) => ((i.index ?? -1) > (best?.index ?? -1) ? i : best),
-      undefined,
-    );
-    if (last) focusItem(last);
+    await save({ gestures: { bucket, accept: [focused.ref] }, focusAccepted: focused.ref });
+  }
+
+  /** Focus the annotation of the adopted canvas that `proposal` resolved to, from the answer's
+   *  mapping; part of the adoption itself, so a later context change clears it as any focus. */
+  function focusAccepted(answer: OkSave, proposal: number) {
+    const target = answer.accepted[String(proposal)];
+    if (target === undefined) return;
+    const adopted = useStore.getState().canvas;
+    for (const shape of ["box", "polygon", "point"] as const) {
+      const item = reviewItems({
+        canvas: adopted,
+        proposals: [],
+        matches: matchTypes(adopted, [], false),
+        reviewing: false,
+        mode: shape,
+        flags: adopted.flags,
+        bucket: null,
+      }).find((i) => i.index === target);
+      if (!item) continue;
+      if (useStore.getState().gui.mode !== shape) setMode(shape);
+      focusItem(item);
+      return;
+    }
   }
 
   // ── Flags: a comment on the focused item, or on the image when nothing is focused ──
@@ -464,8 +436,9 @@ export function AnnotateTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [canvas.flags, drawnProposals, bucket],
   );
-  function raiseFlag(text: string) {
-    void save({ gestures: { flag: [flagRequest(text, focused, bucket ?? null)] } });
+  async function raiseFlag(text: string): Promise<boolean> {
+    const answer = await save({ gestures: { flag: [flagRequest(text, focused, bucket ?? null)] } });
+    return answer !== null;
   }
   function resolveFlag(id: string, reply: string) {
     void save({ gestures: { resolve: { [id]: reply } } });
@@ -488,16 +461,14 @@ export function AnnotateTab() {
     }
   }
 
-  // A box selection belongs to one image; leaving it drops the selection + any drag (and ends a
-  // live freehand stream so it can't bleed vertices onto the next image).
+  // Leaving an image drops any drag (and ends a live freehand stream so it can't bleed vertices
+  // onto the next image).
   useEffect(() => {
     setHideProposals(false);
-    setSelectedBoxIdx(null);
-    boxDragRef.current = null;
-    pointDragRef.current = null;
-    streamingRef.current = false;
+    settleGestures();
     setCutStart(null);
     useStore.getState().setCut(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentImageName]);
 
   // Leaving polygon mode clears a pending cut and its flag: the gesture and the flag are only
@@ -522,6 +493,14 @@ export function AnnotateTab() {
     void colorTick; // read only to force recompute; subjectColor() itself needs no argument for it
     return Object.keys(registry).map((name) => ({ name, color: subjectColor(name) }));
   }, [registry, colorTick]);
+  const draft = () =>
+    draftStrokes({
+      mode,
+      currentPolygon: canvas.currentPolygon,
+      polygonColor: activeSubject ? subjectColor(activeSubject) : null,
+      cutStart: cutStart ? { point: cutStart.point, color: subjectColor(cutStart.subject) } : null,
+      cursor,
+    });
   const buildCanvasBodyRef = useRef<() => CanvasStateBody | null>(() => null);
   buildCanvasBodyRef.current = () => {
     const project = useStore.getState().openProject;
@@ -555,7 +534,7 @@ export function AnnotateTab() {
         boxes: canvas.boxes,
         polygons: canvas.polygons,
         points: canvas.points,
-        currentPolygon: canvas.currentPolygon,
+        draft: draft(),
         drawingBox: drawing,
         focused,
         matches,
@@ -564,10 +543,6 @@ export function AnnotateTab() {
         activeSubject: activeSubject ?? "",
         visible: annotateUi.visible,
         colorFor: subjectColor,
-        cutStart: cutStart
-          ? { point: cutStart.point, color: subjectColor(cutStart.polygon.subject) }
-          : null,
-        cursor,
         proposals: drawnProposals,
       }),
     };
@@ -590,12 +565,9 @@ export function AnnotateTab() {
     canvas.polygons,
     canvas.points,
     canvas.currentPolygon,
-    canvas.selectedPolygonIdx,
-    canvas.selectedPointIdx,
     imgPath,
     mode,
     activeSubject,
-    selectedBoxIdx,
     annotateUi.visible,
     annotateUi.cut,
     annotateUi.draggingVertex,
@@ -625,33 +597,86 @@ export function AnnotateTab() {
 
   // ── Label load + save ───────────────────────────────────────────────
 
+  /** End a box resize in progress as its release would: one below the minimum side is undone.
+   *  Returns whether the resize was kept. */
+  function settleBoxResize(): boolean {
+    const drag = boxDragRef.current;
+    if (!drag) return true;
+    boxDragRef.current = null;
+    didDragRef.current = false;
+    const resized = useStore.getState().canvas.boxes[drag.idx];
+    if (resized && belowMinSide(resized.x1, resized.y1, resized.x2, resized.y2)) {
+      rollbackLast();
+      useStore.getState().pushToast("Box too small to keep; the resize was undone.");
+      return false;
+    }
+    return true;
+  }
+
+  /** End the pointer gesture in progress before a save holds the canvas: a resize is settled by
+   *  its release rule and a draft or other drag is dropped, so none is released into the hold. */
+  function settleGestures() {
+    settleBoxResize();
+    setDrawing(null);
+    pointDragRef.current = null;
+    didDragRef.current = false;
+    streamingRef.current = false;
+    useStore.getState().setDraggingVertex(null);
+  }
+
   /** Save the current canvas, with any gestures it adjudicates, to the path it was loaded from,
    *  reading the live store and refs so a call mid-transition writes the right image. With
-   *  `interactive` false (the auto-flush on navigate/unmount) a dropped save is a toast. */
-  async function save(opts?: { interactive?: boolean; gestures?: Gestures }) {
+   *  `interactive` false (the auto-flush on navigate/unmount) a dropped save is a toast. The
+   *  items of `confirm` are named by their position in the very list this save serializes.
+   *  Resolves the answer the canvas adopted, or null when it adopted none. */
+  async function save(opts?: {
+    interactive?: boolean;
+    gestures?: Gestures;
+    confirm?: ReviewItem[];
+    /** A proposal this save accepts, whose annotation the adoption focuses. */
+    focusAccepted?: number;
+  }): Promise<OkSave | null> {
     const interactive = opts?.interactive ?? true;
     const gestures = opts?.gestures;
     const paths = loadedPathsRef.current;
-    if (!paths) return; // no confirmed load → refuse to overwrite the stored labels
+    if (!paths) return null; // no confirmed load → refuse to overwrite the stored labels
+    if (useStore.getState().canvas.saving) return null;
+    if (!useStore.getState().canvas.dirty && !gestures) return null;
+    settleGestures();
     const c = useStore.getState().canvas;
-    if (!c.dirty && !gestures) return;
+    if (!c.dirty && !gestures) return null;
     const imgFileName = paths.image.split(/[/\\]/).pop() ?? "image";
 
+    const { annotations, positions } = serializeCanvas({
+      boxes: c.boxes,
+      polygons: c.polygons,
+      points: c.points,
+      imageAnnotations: c.imageAnnotations,
+    });
     let result;
+    const hold = holdForSave(paths.image);
+    let owned = false;
     try {
-      result = await api.annotate.save({
-        image_path: paths.image,
-        annotations: canvasToAnnotations({
-          boxes: c.boxes,
-          polygons: c.polygons,
-          points: c.points,
-          imageAnnotations: c.imageAnnotations,
-        }),
-        base_mtime: paths.mtime,
-        user: useStore.getState().user,
-        ...gestures,
-      });
+      result = await api.annotate.save(
+        {
+          image_path: paths.image,
+          annotations,
+          base_mtime: paths.mtime,
+          user: useStore.getState().user,
+          ...gestures,
+          ...(opts?.confirm ? { confirm: opts.confirm.map((i) => positions[i.shape][i.ref]) } : {}),
+        },
+        hold.controller.signal,
+      );
     } catch (e) {
+      if (hold.controller.signal.aborted) {
+        if (interactive && loadedPathsRef.current === paths) {
+          setIoError(
+            "Save canceled. If the server had already written it, saving again reports a conflict, and Reload shows what it wrote.",
+          );
+        }
+        return null;
+      }
       const detail = e instanceof Error ? e.message : String(e);
       // Identity check: a stale failure for a since-left image must not raise a
       // banner over the image now on screen.
@@ -662,7 +687,10 @@ export function AnnotateTab() {
       } else {
         useStore.getState().pushToast(`Save failed: ${imgFileName}'s edits were not written.`);
       }
-      return;
+      return null;
+    } finally {
+      owned = holdsCanvas(useStore.getState().canvas, hold);
+      releaseSave(hold);
     }
 
     if (result.status === "conflict") {
@@ -681,44 +709,29 @@ export function AnnotateTab() {
             `Save failed: ${imgFileName}'s labels changed elsewhere (agent or another tab) first.`,
           );
       }
-      return;
+      return null;
     }
 
-    // Staleness guard: flushLeaving() fires this save without awaiting it, so by
-    // the time the POST resolves the load effect may already have loaded the next
-    // image and repointed loadedPathsRef. Rewinding the ref here would make every
-    // later save write the new image's shapes onto the old image's label document
-    // (with an echoed mtime that matches it, so the backend's 409 guard can't catch
-    // it), and markClean() would silently drop edits already made on the new image.
-    if (loadedPathsRef.current !== paths) return;
+    // Dropped: an answer without its hold (loaded over or canceled), for an unmounted editor, or
+    // for an image no longer owning the canvas or selected.
+    if (!owned || !mountedRef.current || loadedPathsRef.current !== paths) return null;
+    if (currentImage(useStore.getState().gui.dataset).path !== paths.image) return null;
 
-    loadedPathsRef.current = { ...paths, mtime: result.base_mtime };
+    // The canvas was locked in flight, so the answer replaces the content it was built from:
+    // document, token, authorship and indices adopted together, as a load adopts them.
+    loadedPathsRef.current = { ...paths, mtime: result.labels.base_mtime };
     setIoError(null);
     setConflict(false);
-    if (!gestures) {
-      markClean(result.completion, result.flags);
-      return;
-    }
-    // An adjudication writes server-side content (an accepted proposal), so the document reloads.
-    await reloadCurrent();
-    if (gestures.bucket) setProposalTick((t) => t + 1);
+    refreshProposals();
+    loadLabels(result.labels);
+    if (opts?.focusAccepted !== undefined) focusAccepted(result, opts.focusAccepted);
+    return result;
   }
 
-  // Re-fetch the current image's labels from disk, discarding local edits. Used to
-  // resolve a conflict (409) or to pick up an agent write on a clean canvas.
-  async function reloadCurrent() {
-    const paths = loadedPathsRef.current;
-    if (!paths) return;
-    try {
-      const labels = await api.annotate.load(paths.image);
-      loadLabels(labels);
-      loadedPathsRef.current = { ...paths, mtime: labels.base_mtime };
-      setIoError(null);
-      setConflict(false);
-      setSaveBlocked(false);
-    } catch {
-      setIoError("Reload failed. Check the connection and try again.");
-    }
+  /** Re-read the current image's labels, discarding local edits, through the one load effect,
+   *  which a navigation cancels. */
+  function requestReload() {
+    if (loadedPathsRef.current) setReloadTick((t) => t + 1);
   }
 
   // Flush telemetry + any unsaved edits for the image being left, using the path
@@ -748,22 +761,26 @@ export function AnnotateTab() {
         `${client} just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.`,
       );
     } else {
-      void reloadCurrent();
+      requestReload();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentActivity?.seq]);
 
+  // The one load: an image the canvas does not hold yet, or a reload of the one it holds that
+  // `requestReload` asked for.
   useEffect(() => {
     if (!imgPath || !currentImageName) return;
     const key = imgPath;
+    const reload = loadedKeyRef.current === key;
 
-    // Already displaying this image: an unrelated store change (a WS snapshot, a mode or
-    // subject toggle) must not re-read the labels and discard unsaved canvas edits.
-    if (loadedKeyRef.current === key) return;
+    // Already displaying this image and no reload asked for: an unrelated store change (a WS
+    // snapshot, a mode or subject toggle) must not re-read the labels and discard unsaved edits.
+    if (reload && reloadTick === loadedTickRef.current) return;
+    loadedTickRef.current = reloadTick;
 
     // Switching images: flush the previous image's work first (to the path it
     // belongs to), then load the new one.
-    flushLeaving();
+    if (!reload) flushLeaving();
 
     let canceled = false;
     void (async () => {
@@ -776,9 +793,14 @@ export function AnnotateTab() {
         setSaveBlocked(false);
         setIoError(null);
         setConflict(false);
-        startImageSessionTracking(currentImageName);
+        if (reload) refreshProposals();
+        else startImageSessionTracking(currentImageName);
       } catch {
         if (canceled) return;
+        if (reload) {
+          setIoError("Reload failed. Check the connection and try again.");
+          return;
+        }
         // A blank canvas with saving blocked: a transient load failure never overwrites the labels.
         loadLabels({
           image_path: "",
@@ -804,9 +826,20 @@ export function AnnotateTab() {
     return () => {
       canceled = true;
     };
-    // Keyed on image identity only (see loadedKeyRef); the actions it calls are ref-based.
+    // Keyed on image identity and reload requests; the actions it calls are ref-based.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imgPath, currentImageName]);
+  }, [imgPath, currentImageName, reloadTick]);
+
+  /** Run a canvas action that adds a shape and count it as added only if the store took it. */
+  function counted(add: () => void) {
+    const total = () => {
+      const c = useStore.getState().canvas;
+      return c.boxes.length + c.polygons.length + c.points.length;
+    };
+    const before = total();
+    add();
+    if (total() > before) incrementAnnotationsAdded(1);
+  }
 
   function commitPolygonAndTrack() {
     // Closing always ends a live stream: a double-click's leading clicks re-arm streaming,
@@ -820,8 +853,10 @@ export function AnnotateTab() {
   // Flush telemetry + any unsaved edits when the tab unmounts (e.g. switching to
   // another tab). Image-to-image flushing is handled by the load effect above.
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       flushLeaving();
+      mountedRef.current = false; // the departing save may still land, but adopts nothing
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -874,8 +909,8 @@ export function AnnotateTab() {
     { keys: K.redoAlias.keys, action: () => redo() },
     { keys: K.save.keys, action: () => void save() },
     { keys: K.mode.keys, action: () => setMode(nextMode(mode)) },
-    { keys: K.accept.keys, action: () => decide("accept"), when: () => unreviewedKept.length > 0 },
-    { keys: K.reject.keys, action: () => decide("reject"), when: () => unreviewedKept.length > 0 },
+    { keys: K.accept.keys, action: () => decide("accept"), when: () => acceptTarget !== null },
+    { keys: K.reject.keys, action: () => decide("reject"), when: () => rejectTarget !== null },
     { keys: K.edit.keys, action: () => void edit(), when: () => focused?.kind === "proposal" },
     { keys: K.flag.keys, action: () => setFlagsOpen((open) => !open) },
     { keys: K.nextItem.keys, action: () => stepItem(1), when: () => order.length > 0 },
@@ -907,21 +942,15 @@ export function AnnotateTab() {
         if (focused?.kind !== "annotation") return;
         if (focused.shape === "polygon") deletePolygon(focused.ref);
         else if (focused.shape === "point") deletePoint(focused.ref);
-        else {
-          deleteBox(focused.ref);
-          selectBox(null);
-        }
+        else deleteBox(focused.ref);
       },
     },
     {
       keys: K.cancel.keys,
       action: () => {
         setCurrentPolygon([]);
-        setDrawing(null);
-        selectPolygon(null);
-        selectBox(null);
-        selectPoint(null);
-        selectProposal(null);
+        settleGestures();
+        setFocus(null);
         setCutStart(null);
         useStore.getState().setCut(false);
       },
@@ -999,7 +1028,7 @@ export function AnnotateTab() {
     (ix < 0 || iy < 0 || ix > canvas.imgWidth || iy > canvas.imgHeight);
 
   const onDown = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
-    if (ev.evt.button !== 0) return; // right-button drags must not fabricate boxes
+    if (ev.evt.button !== 0 || canvas.saving) return; // right-button drags must not fabricate boxes
     // A fresh press starts a new gesture: clear the drag flag first. A completed vertex drag
     // fires no trailing click, so without this the stale flag would swallow the next click
     // (e.g. an outside click meant to deselect), forcing a second click.
@@ -1011,7 +1040,7 @@ export function AnnotateTab() {
       // single click both authors and a press-drag repositions without a mode or modifier.
       const hit = findHitPoint([ix, iy], canvas.points, POINT_HIT_CANVAS / (view.scale || 1));
       if (hit !== null) {
-        selectPoint(hit);
+        setFocus({ kind: "point", index: hit });
         pushUndo(); // one snapshot per drag; dragPoint itself pushes none
         pointDragRef.current = hit;
         didDragRef.current = true;
@@ -1021,12 +1050,12 @@ export function AnnotateTab() {
     if (mode === "box") {
       const sc = view.scale || 1;
       // Grab a handle / body of the already-selected box to resize or move it.
-      if (selectedBoxIdx !== null && canvas.boxes[selectedBoxIdx]) {
-        const b = canvas.boxes[selectedBoxIdx];
+      if (focusedIdx !== null && canvas.boxes[focusedIdx]) {
+        const b = canvas.boxes[focusedIdx];
         const drag = hitTestEdit({ kind: "box", box: [b.x1, b.y1, b.x2, b.y2] }, ix, iy, 8 / sc);
         if (drag) {
           pushUndo(); // one snapshot per drag; the moves themselves don't push
-          boxDragRef.current = { idx: selectedBoxIdx, drag };
+          boxDragRef.current = { idx: focusedIdx, drag };
           didDragRef.current = true;
           return;
         }
@@ -1036,11 +1065,11 @@ export function AnnotateTab() {
       for (let i = canvas.boxes.length - 1; i >= 0; i--) {
         const b = canvas.boxes[i];
         if (b.subject === activeSubject && ix >= b.x1 && ix <= b.x2 && iy >= b.y1 && iy <= b.y2) {
-          selectBox(i);
+          setFocus({ kind: "box", index: i });
           return;
         }
       }
-      selectBox(null);
+      setFocus(null);
       if (!requireSubject()) return;
       const cx = Math.max(0, Math.min(canvas.imgWidth || ix, ix));
       const cy = Math.max(0, Math.min(canvas.imgHeight || iy, iy));
@@ -1050,9 +1079,9 @@ export function AnnotateTab() {
     // Polygon: button press starts either a vertex drag (if clicked within
     // handle radius of a vertex on the selected polygon), an edge insert,
     // or a new vertex add.
-    if (canvas.currentPolygon.length === 0 && canvas.selectedPolygonIdx !== null) {
+    if (canvas.currentPolygon.length === 0 && focusedIdx !== null) {
       if (annotateUi.cut) return; // a cut click is never a vertex grab or an edge insert
-      const pi = canvas.selectedPolygonIdx;
+      const pi = focusedIdx;
       const poly = canvas.polygons[pi];
       if (!poly) return;
       const sc = view.scale || 1;
@@ -1196,7 +1225,7 @@ export function AnnotateTab() {
 
     // Polygon hover detection (bbox-prefiltered)
     if (mode === "polygon" && canvas.currentPolygon.length === 0) {
-      const hover = findHoveredPolygon([ix, iy], canvas.polygons, polygonBboxes);
+      const hover = polygonAt(canvas.polygons, [ix, iy], polygonBboxes);
       if (hover !== annotateUi.hoveredPolygonIdx) setHoveredPolygon(hover);
     }
   };
@@ -1207,7 +1236,7 @@ export function AnnotateTab() {
     moveRafRef.current = requestAnimationFrame(() => {
       moveRafRef.current = null;
       const p = pendingMoveRef.current;
-      if (p) processMoveRef.current(p[0], p[1]);
+      if (p && !useStore.getState().canvas.saving) processMoveRef.current(p[0], p[1]);
     });
   };
 
@@ -1218,6 +1247,7 @@ export function AnnotateTab() {
   }, []);
 
   const onUp = (ix: number, iy: number) => {
+    if (useStore.getState().canvas.saving) return;
     if (pointDragRef.current !== null) {
       pointDragRef.current = null;
       // didDragRef stays set: the trailing click of this release must not place a second point
@@ -1227,21 +1257,11 @@ export function AnnotateTab() {
       return;
     }
     if (boxDragRef.current) {
-      const draggedIdx = boxDragRef.current.idx;
-      boxDragRef.current = null;
-      didDragRef.current = false;
-      const resized = useStore.getState().canvas.boxes[draggedIdx];
-      if (
-        resized &&
-        (resized.x2 - resized.x1 < MIN_BOX_SIDE || resized.y2 - resized.y1 < MIN_BOX_SIDE)
-      ) {
-        undo();
-        useStore.getState().pushToast("Box too small to keep; the resize was undone.");
-        return;
+      if (settleBoxResize()) {
+        useStore.getState().recomputeDirty();
+        // The drag suppressed full pushes; the settled geometry ships now.
+        canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), true);
       }
-      useStore.getState().recomputeDirty();
-      // The drag suppressed full pushes; the settled geometry ships now.
-      canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), true);
       return;
     }
     if (annotateUi.draggingVertex) {
@@ -1252,26 +1272,19 @@ export function AnnotateTab() {
     if (mode === "box" && drawing) {
       const cx = Math.max(0, Math.min(canvas.imgWidth || ix, ix));
       const cy = Math.max(0, Math.min(canvas.imgHeight || iy, iy));
-      const box: Box = {
-        x1: Math.min(drawing.x1, cx),
-        y1: Math.min(drawing.y1, cy),
-        x2: Math.max(drawing.x1, cx),
-        y2: Math.max(drawing.y1, cy),
-        subject: drawing.subject,
-        attributes: {},
-      };
-      if (box.x2 - box.x1 < MIN_BOX_SIDE || box.y2 - box.y1 < MIN_BOX_SIDE) {
+      const [x1, y1, x2, y2] = boxBounds({ x1: drawing.x1, y1: drawing.y1, x2: cx, y2: cy });
+      const box: Box = { x1, y1, x2, y2, subject: drawing.subject, attributes: {} };
+      if (belowMinSide(x1, y1, x2, y2)) {
         useStore.getState().pushToast("Box too small to keep. Drag out a bigger area.");
       } else {
-        addBox(box);
-        incrementAnnotationsAdded(1);
+        counted(() => addBox(box));
       }
       setDrawing(null);
     }
   };
 
   const onClick = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
-    if (ev.evt.button !== 0) return;
+    if (ev.evt.button !== 0 || canvas.saving) return;
     if (outsideImage(ix, iy)) return;
     if (mode === "point") {
       if (didDragRef.current) {
@@ -1280,19 +1293,20 @@ export function AnnotateTab() {
       }
       // One click = one action: an existing selection is dropped first, so a click never both
       // deselects and authors a point (the same rule polygon mode follows).
-      if (canvas.selectedPointIdx !== null) {
-        selectPoint(null);
+      if (focusedIdx !== null) {
+        setFocus(null);
         return;
       }
       if (!requireSubject()) return;
       // One click commits it: a point has nothing to drag out and no second vertex to wait for.
-      addPoint({
-        x: Math.max(0, Math.min(canvas.imgWidth || ix, ix)),
-        y: Math.max(0, Math.min(canvas.imgHeight || iy, iy)),
-        subject: activeSubject!,
-        attributes: {},
-      });
-      incrementAnnotationsAdded(1);
+      counted(() =>
+        addPoint({
+          x: Math.max(0, Math.min(canvas.imgWidth || ix, ix)),
+          y: Math.max(0, Math.min(canvas.imgHeight || iy, iy)),
+          subject: activeSubject!,
+          attributes: {},
+        }),
+      );
       return;
     }
     if (mode !== "polygon") return;
@@ -1308,35 +1322,24 @@ export function AnnotateTab() {
       if (!cutStart) {
         // No start pending: a click inside any polygon (re)selects it (an endpoint must fall
         // outside the ring); only a click outside every polygon places the start.
-        let hitIdx: number | null = null;
-        for (let pi = 0; pi < canvas.polygons.length; pi++) {
-          if (pointInRings([ix, iy], canvas.polygons[pi].rings)) {
-            hitIdx = pi;
-            break;
-          }
-        }
+        const hitIdx = polygonAt(canvas.polygons, [ix, iy]);
         if (hitIdx !== null) {
-          selectPolygon(hitIdx);
+          setFocus({ kind: "polygon", index: hitIdx });
           return;
         }
-        if (canvas.selectedPolygonIdx === null) {
+        if (focusedIdx === null) {
           requireCutSelection();
           return;
         }
-        const polygonIdx = canvas.selectedPolygonIdx;
-        setCutStart({ point: [ix, iy], polygonIdx, polygon: canvas.polygons[polygonIdx] });
+        const { rings, subject } = canvas.polygons[focusedIdx];
+        setCutStart({ point: [ix, iy], rings, subject });
         return;
       }
-      // Compared by index and rings reference, not object identity: an attribute edit keeps the
-      // same rings array and must not cancel the cut; a geometry edit replaces it and must.
-      const idx = canvas.selectedPolygonIdx;
+      // Compared by rings reference: an attribute edit keeps it and must not cancel the cut; a
+      // geometry edit replaces it and a focus on another polygon names other rings.
+      const idx = focusedIdx;
       const current = idx !== null ? canvas.polygons[idx] : null;
-      if (
-        idx === null ||
-        idx !== cutStart.polygonIdx ||
-        !current ||
-        current.rings !== cutStart.polygon.rings
-      ) {
+      if (idx === null || !current || current.rings !== cutStart.rings) {
         setCutStart(null);
         useStore
           .getState()
@@ -1359,8 +1362,7 @@ export function AnnotateTab() {
         useStore.getState().pushToast(result.reason, "error", "cut");
         return;
       }
-      splitPolygon(idx, result.rings);
-      incrementAnnotationsAdded(1);
+      counted(() => splitPolygon(idx, result.rings));
       setCutStart(null);
       return;
     }
@@ -1376,14 +1378,13 @@ export function AnnotateTab() {
       // Selection parity with Stream off: when no polygon is in progress, a click on an
       // existing polygon selects it, and empty space deselects before anything streams.
       if (canvas.currentPolygon.length === 0) {
-        for (let pi = 0; pi < canvas.polygons.length; pi++) {
-          if (pointInRings([ix, iy], canvas.polygons[pi].rings)) {
-            selectPolygon(pi);
-            return;
-          }
+        const hit = polygonAt(canvas.polygons, [ix, iy]);
+        if (hit !== null) {
+          setFocus({ kind: "polygon", index: hit });
+          return;
         }
-        if (canvas.selectedPolygonIdx !== null) {
-          selectPolygon(null); // one click = one action: deselect first, stream on the next click
+        if (focusedIdx !== null) {
+          setFocus(null); // one click = one action: deselect first, stream on the next click
           return;
         }
       }
@@ -1407,25 +1408,24 @@ export function AnnotateTab() {
     }
 
     // Not currently drawing: clicking on any part of a polygon selects the whole annotation
-    for (let pi = 0; pi < canvas.polygons.length; pi++) {
-      if (pointInRings([ix, iy], canvas.polygons[pi].rings)) {
-        selectPolygon(pi);
-        return;
-      }
+    const hit = polygonAt(canvas.polygons, [ix, iy]);
+    if (hit !== null) {
+      setFocus({ kind: "polygon", index: hit });
+      return;
     }
     // Clicked empty space with nothing selected: start a new polygon
-    if (canvas.selectedPolygonIdx === null) {
+    if (focusedIdx === null) {
       if (!requireSubject()) return;
       const [sx, sy] = snapImagePoint(ix, iy);
       setCurrentPolygon([[sx, sy]]);
     } else {
       // Already had a selection and click didn't land on a polygon → deselect
-      selectPolygon(null);
+      setFocus(null);
     }
   };
 
   const onDoubleClick = (ix: number, iy: number) => {
-    if (outsideImage(ix, iy)) return;
+    if (canvas.saving || outsideImage(ix, iy)) return;
     if (mode !== "polygon") return;
     streamingRef.current = false; // a double-click ends laying even when too short to close
     if (canvas.currentPolygon.length >= 3) {
@@ -1435,13 +1435,13 @@ export function AnnotateTab() {
 
   const onContextMenu = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
     ev.evt.preventDefault();
-    if (outsideImage(ix, iy)) return;
+    if (canvas.saving || outsideImage(ix, iy)) return;
     // Point mode: right-click deletes the point under the cursor (a box's right-click delete,
     // scoped to one coordinate). Nothing under the cursor just clears the selection.
     if (mode === "point") {
       const hit = findHitPoint([ix, iy], canvas.points, POINT_HIT_CANVAS / (view.scale || 1));
       if (hit !== null) deletePoint(hit);
-      else selectPoint(null);
+      else setFocus(null);
       return;
     }
     // A pending cut has no open polygon, so without this branch a right-click inside the
@@ -1457,8 +1457,8 @@ export function AnnotateTab() {
       return;
     }
     // Polygon mode + selected polygon: try vertex delete, then polygon delete
-    if (mode === "polygon" && canvas.selectedPolygonIdx !== null) {
-      const pi = canvas.selectedPolygonIdx;
+    if (mode === "polygon" && focusedIdx !== null) {
+      const pi = focusedIdx;
       const poly = canvas.polygons[pi];
       if (poly) {
         const sc = view.scale || 1;
@@ -1489,7 +1489,7 @@ export function AnnotateTab() {
           return;
         }
       }
-      selectPolygon(null);
+      setFocus(null);
       return;
     }
     // Box right-click delete, box mode only.
@@ -1504,12 +1504,8 @@ export function AnnotateTab() {
     }
     // Non-selected polygon right-click delete (polygon mode)
     if (mode === "polygon") {
-      for (let pi = 0; pi < canvas.polygons.length; pi++) {
-        if (pointInRings([ix, iy], canvas.polygons[pi].rings)) {
-          deletePolygon(pi);
-          return;
-        }
-      }
+      const hit = polygonAt(canvas.polygons, [ix, iy]);
+      if (hit !== null) deletePolygon(hit);
     }
   };
 
@@ -1517,13 +1513,14 @@ export function AnnotateTab() {
 
   const s = view.scale || 1;
   const widths = strokeWidths(s);
-  const { scaleLineW, boxStroke, polyStroke, vertR } = widths;
+  const { boxStroke, polyStroke, vertR } = widths;
 
   if (!imgPath || !currentImageName) {
     return (
       <div className="flex-1 flex flex-col min-h-0">
         <AnnotateToolbar
           onSave={() => void save()}
+          onCancelSave={cancelSave}
           saveDisabled={saveDisabled}
           dirty={canvas.dirty}
           subjectState={null}
@@ -1546,12 +1543,14 @@ export function AnnotateTab() {
   const renderLabels = annotateUi.visible;
   const hoveredIdx = annotateUi.hoveredPolygonIdx;
   const draggingIdx = annotateUi.draggingVertex?.[0];
+  const boxDraftScene = drawing ? boxDraft(drawing, subjectColor) : null;
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <TabHeading tab="annotate" />
       <AnnotateToolbar
         onSave={() => void save()}
+        onCancelSave={cancelSave}
         saveDisabled={saveDisabled}
         dirty={canvas.dirty}
         bandsInfo={bandsInfo}
@@ -1571,6 +1570,8 @@ export function AnnotateTab() {
         onFilters={setFilters}
         scope={scope}
         onScope={setScope}
+        canAccept={acceptTarget !== null}
+        canReject={rejectTarget !== null}
         counts={{
           items: kept.length,
           unreviewed: unreviewedKept.length,
@@ -1607,38 +1608,19 @@ export function AnnotateTab() {
           onPixelContextMenu={onContextMenu}
           overlay={
             <>
-              {/* In-progress polygon (rubber-bands to the cursor) */}
-              {mode === "polygon" && canvas.currentPolygon.length > 0 && (
-                <InProgressPolygon
-                  points={canvas.currentPolygon}
-                  cursor={cursor}
-                  stroke={activeSubject ? subjectColor(activeSubject) : NO_SUBJECT_DRAFT_COLOR}
-                  strokeW={polyStroke}
-                  vertR={vertR}
-                />
-              )}
-
-              {/* Pending cut: its start plus a dashed segment to the cursor */}
-              {mode === "polygon" && cutStart && (
-                <InProgressPolygon
-                  points={[cutStart.point]}
-                  cursor={cursor}
-                  stroke={subjectColor(cutStart.polygon.subject)}
-                  strokeW={polyStroke}
-                  vertR={vertR}
-                />
-              )}
+              {/* In-progress polygon and pending cut, each rubber-banding to the cursor */}
+              <InProgressPolygon strokes={draft()} strokeW={polyStroke} vertR={vertR} />
 
               {/* Box draft */}
-              {drawing && (
+              {boxDraftScene && (
                 <Rect
-                  x={Math.min(drawing.x1, drawing.x2)}
-                  y={Math.min(drawing.y1, drawing.y2)}
-                  width={Math.abs(drawing.x2 - drawing.x1)}
-                  height={Math.abs(drawing.y2 - drawing.y1)}
-                  stroke={subjectColor(drawing.subject)}
+                  x={boxDraftScene.bounds[0]}
+                  y={boxDraftScene.bounds[1]}
+                  width={boxDraftScene.bounds[2] - boxDraftScene.bounds[0]}
+                  height={boxDraftScene.bounds[3] - boxDraftScene.bounds[1]}
+                  stroke={boxDraftScene.color}
                   strokeWidth={boxStroke}
-                  dash={[6 * scaleLineW, 4 * scaleLineW]}
+                  dash={dashAt(DRAFT_DASH, boxStroke)}
                 />
               )}
 
@@ -1678,7 +1660,7 @@ export function AnnotateTab() {
           <div className="absolute top-12 left-3 right-3 z-30 flex items-center gap-2 rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-3 py-1.5 text-[11px] text-tcip-fp">
             <span className="flex-1">{ioError}</span>
             {conflict && (
-              <button className="tcip-btn text-[11px]" onClick={() => void reloadCurrent()}>
+              <button className="tcip-btn text-[11px]" onClick={requestReload}>
                 Reload
               </button>
             )}

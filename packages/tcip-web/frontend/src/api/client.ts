@@ -74,6 +74,8 @@ export interface SaveLabelsBody {
   bucket?: string | null;
   accept?: number[];
   reject?: number[];
+  /** Each annotation the person confirms as their own call, by its position in ``annotations``. */
+  confirm?: number[];
   /** Each subject marked complete (true) or its marks withdrawn (false). */
   complete?: Record<string, boolean>;
   /** The pixel ``[x, y, w, h]`` a mark covers; the whole image when absent. */
@@ -85,15 +87,45 @@ export interface SaveLabelsBody {
   resolve?: Record<string, string>;
 }
 
-/** What a landed save answers: the new version token, the completion it left and the image's
- *  flags. */
-interface Saved {
-  base_mtime: string | null;
+/** The image's label document as the load and the save routes answer it, with the version token
+ *  that names it. */
+interface LabelsBody {
+  image_path: string;
+  img_width: number;
+  img_height: number;
+  annotations: Annotation[];
   completion: Record<string, SubjectState>;
   flags: Flag[];
+  base_mtime: string | null;
 }
 
-export type SaveResult = ({ status: "ok" } & Saved) | { status: "conflict" };
+/** The document split into the canvas' buckets (shared with save via labelSerde). */
+function loadedLabels(raw: LabelsBody): LoadedLabels {
+  const { boxes, polygons, points, imageAnnotations } = annotationsToCanvas(raw.annotations ?? []);
+  return {
+    image_path: raw.image_path,
+    img_width: raw.img_width,
+    img_height: raw.img_height,
+    boxes,
+    polygons,
+    points,
+    imageAnnotations,
+    completion: raw.completion,
+    flags: raw.flags,
+    base_mtime: raw.base_mtime,
+  };
+}
+
+/** A landed save answers the document it wrote, whole, so the editor adopts content and token
+ *  together. */
+export type SaveResult =
+  | {
+      status: "ok";
+      labels: LoadedLabels;
+      /** Each accepted proposal's index, as a string key, to its annotation's document index. */
+      accepted: Record<string, number>;
+    }
+  | { status: "conflict" };
 
 /** One band's symbology, as `GET /api/images/bands` reports it: a declared name where the
  *  source has one (else its 0-index as a string), the sensor's own wavelength when known. */
@@ -272,32 +304,8 @@ export const api = {
   annotate: {
     // Read the image's one label document, splitting the annotation list into the canvas'
     // box / polygon / point / geometry-less buckets (shared with save via labelSerde).
-    load: async (image_path: string): Promise<LoadedLabels> => {
-      const raw = await getJson<{
-        image_path: string;
-        img_width: number;
-        img_height: number;
-        annotations: Annotation[];
-        completion: Record<string, SubjectState>;
-        flags: Flag[];
-        base_mtime: string | null;
-      }>(`${ROUTES.getAnnotateLabels}?${q({ image_path })}`);
-      const { boxes, polygons, points, imageAnnotations } = annotationsToCanvas(
-        raw.annotations ?? [],
-      );
-      return {
-        image_path: raw.image_path,
-        img_width: raw.img_width,
-        img_height: raw.img_height,
-        boxes,
-        polygons,
-        points,
-        imageAnnotations,
-        completion: raw.completion,
-        flags: raw.flags,
-        base_mtime: raw.base_mtime,
-      };
-    },
+    load: async (image_path: string): Promise<LoadedLabels> =>
+      loadedLabels(await getJson<LabelsBody>(`${ROUTES.getAnnotateLabels}?${q({ image_path })}`)),
 
     // The chosen bucket's proposals for the image, each paired and decided server-side, with the
     // bucket's validated operating point.
@@ -306,15 +314,14 @@ export const api = {
 
     // A 409 (the label document changed underneath the client) is an expected outcome the
     // caller resolves, not an error.
-    save: async (body: SaveLabelsBody): Promise<SaveResult> => {
+    save: async (body: SaveLabelsBody, signal?: AbortSignal): Promise<SaveResult> => {
       try {
-        const data = await postJson<Saved>(ROUTES.postAnnotateLabels, body);
-        return {
-          status: "ok",
-          base_mtime: data.base_mtime,
-          completion: data.completion,
-          flags: data.flags,
-        };
+        const answer = await postJson<LabelsBody & { accepted: Record<string, number> }>(
+          ROUTES.postAnnotateLabels,
+          body,
+          signal,
+        );
+        return { status: "ok", labels: loadedLabels(answer), accepted: answer.accepted };
       } catch (e) {
         if (!isConflict(e)) throw e;
         return { status: "conflict" };

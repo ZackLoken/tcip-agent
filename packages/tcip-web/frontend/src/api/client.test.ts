@@ -31,14 +31,28 @@ describe("annotate.save lost-update handling", () => {
   it("returns ok + a fresh mtime token on a 200, preserved exactly at real ns magnitude", async () => {
     // A 2026 st_mtime_ns (~1.78e18) exceeds 2**53: as a JSON number it would be rounded
     // by JSON.parse and every echo would 409. String tokens must survive byte-for-byte.
-    stubFetch(200, { base_mtime: "1783702599549301100" });
+    stubFetch(200, {
+      status: "ok",
+      image_path: "x",
+      img_width: 10,
+      img_height: 10,
+      annotations: [{ subject: "tip", iscrowd: false, point: [1, 2], attributes: {}, index: 0 }],
+      completion: {},
+      flags: [],
+      base_mtime: "1783702599549301100",
+      accepted: { "2": 0 },
+    });
     const res = await api.annotate.save({
       image_path: "x",
       annotations: [],
       user: "breeder",
     });
     expect(res.status).toBe("ok");
-    if (res.status === "ok") expect(res.base_mtime).toBe("1783702599549301100");
+    if (res.status === "ok") {
+      expect(res.labels.base_mtime).toBe("1783702599549301100");
+      expect(res.labels.points).toHaveLength(1);
+      expect(res.accepted).toEqual({ "2": 0 });
+    }
   });
 
   it("returns a conflict (not a thrown error) on a 409", async () => {

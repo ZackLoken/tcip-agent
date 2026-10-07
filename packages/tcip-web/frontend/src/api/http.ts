@@ -76,12 +76,13 @@ export function getJson<T>(url: string): Promise<T> {
   return fetch(url).then((r) => asJson<T>(r));
 }
 
-function postBody(url: string, body: unknown): Promise<Response> {
-  return fetch(url, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body) });
+function postBody(url: string, body: unknown, signal?: AbortSignal): Promise<Response> {
+  return fetch(url, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body), signal });
 }
 
-export function postJson<T>(url: string, body: unknown): Promise<T> {
-  return postBody(url, body).then((r) => asJson<T>(r));
+/** POST a JSON body; `signal` abandons the request, which then rejects with an AbortError. */
+export function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  return postBody(url, body, signal).then((r) => asJson<T>(r));
 }
 
 /** POST a JSON body and read the answer as a file, with the headers it came with; a refusal

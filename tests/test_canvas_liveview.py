@@ -9,6 +9,7 @@ pushed, identity-stale shapes, ages, tag/creator counts).
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -58,7 +59,7 @@ SHAPES = [
     {"kind": "box", "xyxy": [80, 20, 140, 70], "color": "#FF0000", "tag": "gt",
      "created_by": "derived:user:breeder"},
     {"kind": "polyline", "points": [[5, 90], [30, 85], [55, 92]], "color": "#FFE7B1",
-     "dashed": True, "tag": "in_progress", "label": "drawing"},
+     "dash": [4, 4], "tag": "in_progress", "label": "drawing"},
 ]
 
 
@@ -312,6 +313,95 @@ def test_render_draws_the_focused_shape_with_a_halo_under_its_own_stroke(tmp_pat
     assert min(haloed.getpixel(beside)) > min(plain.getpixel(beside)) + 40
     # The shape's own color still sits on the stroke itself.
     assert _red_over_green(haloed, (100, 20)) > 40
+
+
+_MIRROR = json.loads((Path(__file__).parent / "fixtures" / "canvas_mirror_shapes.json")
+                     .read_text(encoding="utf-8"))
+"""The shapes the frontend's ``buildAnnotateShapes`` produced for a tool-authored polygon, a
+tool-authored point and the first vertex of a polygon in progress; ``canvasSync.test.ts`` asserts
+the producer still emits exactly this file."""
+(TOOL_POLYGON,) = _MIRROR["tool_polygon"]
+(TOOL_POINT,) = _MIRROR["tool_point"]
+(FIRST_VERTEX,) = _MIRROR["first_vertex"]
+
+
+def _wide_render(tmp_path: Path, shape: dict, *, dashed: bool) -> Image.Image:
+    """``shape`` rendered on a 1400-pixel frame, where the render's stroke is two pixels wide."""
+    from tcip_annotation.viz import render_canvas_state
+    from tests._producer_fixtures import write_image
+
+    img = str(write_image(tmp_path / "wide.jpg", (1400, 200), (90, 110, 90)))
+    shape = {k: v for k, v in shape.items() if dashed or k != "dash"}
+    out = render_canvas_state(_pixels(img), [shape], region=(0, 0, 1400, 200),
+                              output_path=str(tmp_path / f"wide-{dashed}.png"))
+    return Image.open(out).convert("RGB")
+
+
+def _ink(rendered: Image.Image, xy: tuple[int, int]) -> int:
+    """How far pixel ``xy`` differs from the frame's untouched corner."""
+    return max(abs(a - b) for a, b in zip(rendered.getpixel(xy), rendered.getpixel((2, 197))))
+
+
+def _red_in_rows(rendered: Image.Image, x: int, rows) -> int:
+    """The most ink the pixels of column ``x`` in ``rows`` carry."""
+    return max(_ink(rendered, (x, y)) for y in rows)
+
+
+def test_render_lays_a_dash_down_in_stroke_widths_at_the_renders_own_stroke(tmp_path):
+    """The two-pixel stroke of a 1400-pixel frame makes [1, 3] two pixels on, six off: a render
+    that left the pattern unscaled would be one on, three off and light the gap's pixels."""
+    dashed = _wide_render(tmp_path, TOOL_POLYGON, dashed=True)
+    solid = _wide_render(tmp_path, TOOL_POLYGON, dashed=False)
+    rows = range(49, 52)
+    assert _red_in_rows(dashed, 301, rows) > 40      # inside a dash
+    assert _red_in_rows(dashed, 304, rows) < 10      # inside the gap after it
+    assert _red_in_rows(dashed, 309, rows) > 40      # the next dash
+    assert _red_in_rows(solid, 304, rows) > 40       # the gap's pixel on a solid outline
+
+
+def test_render_dashes_a_points_ticks_as_it_does_any_outline(tmp_path):
+    """A tool's point reaches the agent dotted, as the browser draws it: the tick above the core
+    has its one dash near the core and a gap beyond, where a solid tick would still be drawn."""
+    dashed = _wide_render(tmp_path, TOOL_POINT, dashed=True)
+    solid = _wide_render(tmp_path, TOOL_POINT, dashed=False)
+    assert _red_in_rows(dashed, 700, range(90, 91)) > 40
+    assert _red_in_rows(dashed, 700, range(86, 87)) < 10
+    assert _red_in_rows(solid, 700, range(86, 87)) > 40
+
+
+def test_render_admits_the_one_vertex_polyline_a_drawing_in_progress_pushes(tmp_path):
+    from tcip_annotation.viz import render_canvas_state
+    img = _make_image(tmp_path)
+    out = render_canvas_state(_pixels(img), [FIRST_VERTEX], region=_WHOLE,
+                              output_path=str(tmp_path / "one-vertex.png"))
+    drawn = Image.open(out).convert("RGB")
+    assert max(abs(a - b) for a, b in zip(drawn.getpixel((60, 40)), drawn.getpixel((10, 90)))) > 40
+
+
+def test_render_dots_a_polylines_vertices_unless_it_says_it_is_a_tail(tmp_path):
+    """A draft's laid stroke dots each vertex; its tail to the cursor, which says so, dots none."""
+    def stroke(**over) -> dict:
+        return {"kind": "polyline", "points": [[300, 100], [500, 100]], "color": "#00CED1",
+                "tag": "in_progress", **over}
+
+    laid = _wide_render(tmp_path, stroke(), dashed=True)
+    tail = _wide_render(tmp_path, stroke(vertices=False), dashed=True)
+    assert _ink(laid, (500, 96)) > 40
+    assert _ink(tail, (500, 96)) < 10
+
+
+@pytest.mark.parametrize("dash", [[0, 4], [4], "xx", [4, -1], [], 0, False, "", ["1", "3"], "13",
+                                  [True, False], [1, 3, 5], [float("nan"), 3], [1, float("inf")]],
+                         ids=["zero_on", "one_length", "text", "negative_off", "empty", "zero",
+                              "false", "empty_text", "numeric_strings", "digit_string",
+                              "booleans", "three_lengths", "nan_on", "infinite_off"])
+def test_render_refuses_a_dash_that_is_not_a_pattern_naming_the_shape(tmp_path, dash):
+    from tcip_annotation.viz import render_canvas_state
+    img = _make_image(tmp_path)
+    shape = {"kind": "box", "xyxy": [10, 10, 40, 40], "color": "#FF0000", "dash": dash}
+    with pytest.raises(ValueError, match="canvas shape 0 carries a dash"):
+        render_canvas_state(_pixels(img), [shape], region=_WHOLE,
+                            output_path=str(tmp_path / "bad-dash.jpg"))
 
 
 @pytest.mark.parametrize("bad", [

@@ -8,16 +8,44 @@
 import { subjectColor } from "@/api/subjects";
 
 /** Whose shape it is: a person's (or one a person accepted) draws solid, a tool's unaccepted
- *  shape and every proposal draw dotted. */
+ *  shape, one with no recorded producer and every proposal draw dotted. */
 export type LineStyle = "solid" | "dotted";
 
+/** Whether a person stands behind a shape: the backend classifies it a person's own or a tool's
+ *  that a person signed off, or it was drawn in this editor and has no classification yet. The
+ *  one reading the line style and the review status share. */
+export function personBacked(authorship: string | null | undefined): boolean {
+  return authorship == null || authorship === "person" || authorship === "tool_accepted";
+}
+
 export function lineStyleOf(authorship: string | null | undefined): LineStyle {
-  return authorship === "tool" ? "dotted" : "solid";
+  return personBacked(authorship) ? "solid" : "dotted";
+}
+
+/** A dash pattern as (on, off) lengths in stroke widths, so it scales with the stroke on the
+ *  canvas and in the agent's render alike; set by eye, provisional. */
+export type DashUnits = readonly [number, number];
+
+/** The pattern of a dotted stroke. */
+export const DOTTED_DASH: DashUnits = [1, 3];
+
+/** The pattern of a shape still being drawn: its rubber band and the box dragged out. */
+export const DRAFT_DASH: DashUnits = [4, 4];
+
+/** A dash pattern in the canvas's own length unit at a stroke width. */
+export function dashAt(units: DashUnits, width: number): number[] {
+  return units.map((u) => u * width);
+}
+
+/** The dash pattern of a style in stroke widths; none for a solid stroke. */
+export function dashUnitsFor(style: LineStyle): DashUnits | undefined {
+  return style === "dotted" ? DOTTED_DASH : undefined;
 }
 
 /** The dash array for a style at a stroke width; none for a solid stroke. */
 export function dashFor(style: LineStyle, width: number): number[] | undefined {
-  return style === "dotted" ? [width, 3 * width] : undefined;
+  const units = dashUnitsFor(style);
+  return units && dashAt(units, width);
 }
 
 /** How the labels and the shown bucket's proposals agree about one object: both hold it, only
@@ -60,12 +88,12 @@ export function outlineColor(subject: string, match: MatchType | null): string {
   return match === null ? subjectColor(subject) : MATCH_COLORS[match];
 }
 
-/** The focused item's label: the subject name, with ", tool" appended for a shape a tool drew
- *  and no person has accepted and ", accepted tool" for one a person has since accepted. */
+/** The focused item's label: the subject name, with the authorship appended for a shape no person
+ *  stands behind (", tool", ", unattributed") and ", accepted tool" for one a person has since
+ *  accepted. */
 export function authorshipLabel(subject: string, authorship?: string | null): string {
-  if (authorship === "tool") return `${subject}, tool`;
   if (authorship === "tool_accepted") return `${subject}, accepted tool`;
-  return subject;
+  return personBacked(authorship) ? subject : `${subject}, ${authorship}`;
 }
 
 /** The label a proposal carries, or none: the focused proposal and every unpaired one are
@@ -138,7 +166,7 @@ export function legendRows(subjects: string[], reviewing: boolean): LegendRow[] 
   return [
     ...colors,
     { color: "currentColor", style: "solid", text: "Solid: drawn or accepted by a person" },
-    { color: "currentColor", style: "dotted", text: "Dotted: drawn by a tool, not yet accepted" },
+    { color: "currentColor", style: "dotted", text: "Dotted: no person has stood behind it yet" },
     { color: "currentColor", style: "solid", halo: true, text: "Halo: the focused item" },
     { color: FLAG_MARK.color, style: "solid", text: `${FLAG_MARK.glyph} An open flag` },
   ];

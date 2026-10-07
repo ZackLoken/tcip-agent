@@ -5,15 +5,9 @@ import { PointOverlay } from "@/components/annotate/PointOverlay";
 import { PolygonOverlay } from "@/components/annotate/PolygonOverlay";
 import { shapeVisible } from "@/lib/canvasSync";
 import { derivedBoxFromPolygon } from "@/lib/polygonGeometry";
-import type { ReviewItem } from "@/lib/reviewItems";
+import { focusesAnnotation, type MatchTypes, type ReviewItem } from "@/lib/reviewItems";
 import { useSubjectColors } from "@/lib/subjectColors";
-import {
-  authorshipLabel,
-  lineStyleOf,
-  outlineColor,
-  type MatchType,
-  type strokeWidths,
-} from "@/lib/symbology";
+import { authorshipLabel, lineStyleOf, outlineColor, type strokeWidths } from "@/lib/symbology";
 import type { Box, Mode, PointShape, PolygonShape } from "@/store/types";
 
 /**
@@ -30,11 +24,7 @@ interface AnnotationShapesProps {
   mode: Mode;
   activeSubject: string | null;
   /** Each array's match types, aligned with it (`matchTypes`). */
-  matches: {
-    boxes: (MatchType | null)[];
-    polygons: (MatchType | null)[];
-    points: (MatchType | null)[];
-  };
+  matches: MatchTypes;
   /** The one focused item; an annotation among these draws its halo, label and handles. */
   focused: ReviewItem | null;
   hoveredIdx: number | null;
@@ -58,8 +48,7 @@ export const AnnotationShapes = memo(function AnnotationShapes({
 }: AnnotationShapesProps) {
   useSubjectColors(); // re-render on a recolor: outlineColor() below reads subjectColor fresh
   if (!renderLabels) return null;
-  const isFocused = (shape: ReviewItem["shape"], i: number) =>
-    focused?.kind === "annotation" && focused.shape === shape && focused.ref === i;
+  const isFocused = (shape: ReviewItem["shape"], i: number) => focusesAnnotation(focused, shape, i);
   const visible = (kind: "box" | "derived" | "polygon" | "point", subject: string, at: boolean) =>
     shapeVisible({ kind, mode, subject, activeSubject: activeSubject ?? "", focused: at });
   // The legend carries the standing symbology; a shape is named on the canvas only while focused.

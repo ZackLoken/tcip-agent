@@ -194,11 +194,16 @@ Grid cell system:
    image's annotations: accept a proposal, correct a value or a geometry, add a missed object,
    reject a proposal, and mark the image (or, on an orthomosaic, the region in view) complete. A
    proposal that overlaps an annotation of its subject is shown paired with it, through the one
-   matcher the assessment counts with, so accepting it confirms that annotation rather than
-   adding a second. Every gesture saves through the one label save; an accept or reject also
-   appends one entry, `{proposal, action, by, at}` with `action` one of
-   `tcip_annotation.verdicts.VerdictAction` (accepted, rejected), to the image's verdict shard
-   under that bucket
+   matcher the assessment counts with, so accepting it signs that annotation off, stamping the
+   person's `accepted_by` and `accepted_at` on it, rather than adding a second; rejecting it
+   records the rejection and leaves the annotation as it was. Every gesture saves through the one
+   label save; an accept or reject also appends one entry, `{proposal, action, by, at}` with
+   `action` one of `tcip_annotation.verdicts.VerdictAction` (accepted, rejected), to the image's
+   verdict shard under that bucket. An annotation no person has made or signed
+   off (authorship `tool`, a producer that is no person, or `unattributed`, no producer
+   recorded) awaits review whether or not a bucket is shown; the
+   save's `confirm` gesture, by position among the annotations the save writes, signs it off the
+   same way and writes no verdict entry
 
 The proposals the editor serves come with the bucket's own validated operating point
 (`delivery.admitted_conf`), or the reason none is validated; the editor's confidence floor starts

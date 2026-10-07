@@ -58,6 +58,24 @@ export function pointInRings(pt: [number, number], rings: [number, number][][]):
   return rings.some((ring) => pointInPolygon(pt, ring));
 }
 
+/** The index of the first polygon whose rings contain `pt`, or null when none does. With
+ *  `bboxes` (`computePolygonBboxes`, aligned with `polygons`) a polygon whose box misses `pt` is
+ *  rejected by four comparisons before the O(vertices) ray-cast, which keeps hover responsive
+ *  over thousands of polygons. */
+export function polygonAt(
+  polygons: { rings: [number, number][][] }[],
+  pt: [number, number],
+  bboxes?: Bbox[],
+): number | null {
+  const [px, py] = pt;
+  const hit = polygons.findIndex((p, i) => {
+    const bb = bboxes?.[i];
+    if (bboxes && (!bb || px < bb[0] || px > bb[2] || py < bb[1] || py > bb[3])) return false;
+    return pointInRings(pt, p.rings);
+  });
+  return hit < 0 ? null : hit;
+}
+
 /** Precompute one bbox per polygon (memoize on the polygon list; O(vertices) once). */
 export function computePolygonBboxes(polygons: { rings: [number, number][][] }[]): Bbox[] {
   return polygons.map((p) => ringsBbox(p.rings));
@@ -126,26 +144,6 @@ export function findHitPoint(
   return best;
 }
 
-/**
- * Index of the first polygon (in list order) containing `pt`, or null. The bbox
- * pre-filter rejects most polygons with four comparisons before the O(vertices) ray-cast
- * runs: the win that keeps hover responsive when hundreds–thousands of polygons are on
- * screen. `bboxes[i]` must correspond to `polygons[i]` (see computePolygonBboxes).
- */
-export function findHoveredPolygon(
-  pt: [number, number],
-  polygons: { rings: [number, number][][] }[],
-  bboxes: Bbox[],
-): number | null {
-  const [px, py] = pt;
-  for (let i = 0; i < polygons.length; i++) {
-    const bb = bboxes[i];
-    if (!bb || px < bb[0] || px > bb[2] || py < bb[1] || py > bb[3]) continue;
-    if (pointInRings(pt, polygons[i].rings)) return i;
-  }
-  return null;
-}
-
 /** One ring's boundary: a closed loop of vertices, the first not repeated at the end. */
 export type Ring = [number, number][];
 
@@ -155,6 +153,10 @@ export type CutRingResult = { rings: [Ring, Ring] } | { reason: string };
 /** The smallest side, in image pixels, a drawn shape may keep: below it, a commit is refused
  *  rather than writing a sliver; the box tool's floor and the cut tool's piece floor share it. */
 export const MIN_BOX_SIDE = 3;
+
+/** Whether the box `[x1, y1, x2, y2]` has a side below `MIN_BOX_SIDE`. */
+export const belowMinSide = (x1: number, y1: number, x2: number, y2: number): boolean =>
+  x2 - x1 < MIN_BOX_SIDE || y2 - y1 < MIN_BOX_SIDE;
 
 export const CUT_MISSES_REFUSAL =
   "The cut segment does not cross the selected outline. Draw it so it passes through the shape, " +
@@ -343,7 +345,7 @@ export function cutRing(ring: Ring, a: [number, number], b: [number, number]): C
 
   const tooSmall = (piece: Ring): boolean => {
     const [minX, minY, maxX, maxY] = polygonBbox(piece);
-    return maxX - minX < MIN_BOX_SIDE || maxY - minY < MIN_BOX_SIDE;
+    return belowMinSide(minX, minY, maxX, maxY);
   };
   if (tooSmall(pieceA) || tooSmall(pieceB)) return { reason: CUT_PIECE_TOO_SMALL_REFUSAL };
 

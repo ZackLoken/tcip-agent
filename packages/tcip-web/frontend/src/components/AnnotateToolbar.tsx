@@ -60,6 +60,7 @@ function Etool({
 
 export function AnnotateToolbar({
   onSave,
+  onCancelSave,
   saveDisabled,
   dirty,
   bandsInfo,
@@ -70,6 +71,8 @@ export function AnnotateToolbar({
   onCompleteView,
 }: {
   onSave: () => void;
+  /** Abandon the save in flight, which the Save button offers while one is. */
+  onCancelSave: () => void;
   saveDisabled: boolean;
   dirty: boolean;
   // Band-composite picker (multispectral only): omitted/null for a standard RGB dataset.
@@ -95,6 +98,7 @@ export function AnnotateToolbar({
   const canvasPolygons = useStore((s) => s.canvas.polygons);
   const canvasPoints = useStore((s) => s.canvas.points);
   const canvasImageAnnotations = useStore((s) => s.canvas.imageAnnotations);
+  const saving = useStore((s) => s.canvas.saving !== null);
   const annotateUi = useStore((s) => s.annotateUi);
   const setVisible = useStore((s) => s.setVisible);
   const setSnap = useStore((s) => s.setSnap);
@@ -419,11 +423,15 @@ export function AnnotateToolbar({
             </button>
             <button
               className={dirty ? "tcip-btn-primary text-[12px]" : "tcip-btn text-[12px]"}
-              onClick={onSave}
-              disabled={saveDisabled}
-              title="Save (Ctrl+S), also auto-saves on image change"
+              onClick={saving ? onCancelSave : onSave}
+              disabled={saveDisabled && !saving}
+              title={
+                saving
+                  ? "Saving; click to cancel this save and keep editing"
+                  : "Save (Ctrl+S), also auto-saves on image change"
+              }
             >
-              {dirty ? "Save" : "Saved"}
+              {saving ? "Saving" : dirty ? "Save" : "Saved"}
             </button>
           </div>
         </div>

@@ -17,8 +17,8 @@ from shapely.ops import nearest_points
 
 from tcip_annotation.json_io import (
     LabelDocument,
+    authorship_of,
     is_unadjudicated_prediction,
-    provenance_facts,
 )
 from tcip_annotation.matching import box_ring, point_in_polygon, shapely_geometry
 from tcip_annotation.state import (
@@ -76,9 +76,10 @@ def load_canopy_segments(
     ``subject`` exists; when an annotation of ``subject`` carries no geometry at all (an
     image-level label) or is a :class:`~tcip_annotation.state.Point`, naming the record; and when
     any annotation of ``subject`` is not positively a person's: a scored record (the model's own
-    unreviewed output), a record with no ``created_by`` at all, or a record whose ``created_by``
-    is not a person's unless its ``accepted_by`` is a person's, each refused naming the record. A
-    person's own hand trace, and a machine-authored proposal a reviewer has accepted, both admit.
+    unreviewed output), or a record whose authorship
+    (:func:`~tcip_annotation.json_io.authorship_of`) is neither a person's nor a tool's accepted by
+    a person, each refused naming the record. A person's own hand trace, and a proposal or an
+    unattributed record a reviewer has accepted, all admit.
     """
     if (int(document.width or -1), int(document.height or -1)) != (
             int(raster_identity["width"]), int(raster_identity["height"])):
@@ -113,19 +114,13 @@ def load_canopy_segments(
                 "polygon)"
             )
 
-    facts = provenance_facts(annotations)
-    if facts.no_created_by:
-        i = facts.no_created_by[0]
+    for i, a in enumerate(annotations):
+        if authorship_of(a) in ("person", "tool_accepted"):
+            continue
+        by = (f"is authored by {a.created_by!r}, which names no person under this platform's "
+              "user:<name> convention," if a.created_by else "carries no created_by at all,")
         raise CanopySegmentError(
-            f"canopy segment {i} of subject {subject!r} carries no created_by at all; a canopy "
-            "boundary must positively carry a person's authorship or acceptance"
-        )
-    if facts.not_positively_a_persons:
-        i = facts.not_positively_a_persons[0]
-        raise CanopySegmentError(
-            f"canopy segment {i} of subject {subject!r} is authored by "
-            f"{annotations[i].created_by!r}, which names no person under this platform's "
-            "user:<name> convention, and its own accepted_by is not a person's either; a canopy "
+            f"canopy segment {i} of subject {subject!r} {by} and no person accepted it; a canopy "
             "boundary must be positively a person's, a reviewer's acceptance included"
         )
 

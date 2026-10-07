@@ -94,7 +94,7 @@ def save_annotations(
     try:
         key = label_key_of(image_path)
         save_label_document(project, key, annotations, width=w, height=h,
-                            author="save_annotations", actor=None)
+                            author="save_annotations", actor=None)  # the answer is for the editor
     except ValueError as exc:
         return {"error": str(exc)}
 

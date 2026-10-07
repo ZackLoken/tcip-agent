@@ -8,8 +8,9 @@ coordinates are in. ``render_grid`` tiles already-rendered artifacts and so take
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from PIL import Image, ImageDraw, ImageFont
 from tcip_annotation.utils import auto_orient_image
@@ -473,11 +474,44 @@ def _dashed_segment(draw, p1, p2, fill, width: int, dash: float, gap: float) -> 
         pos = end + gap
 
 
-def _draw_path(draw, pts, color, width: int, dashed: bool, closed: bool) -> None:
+def _dash_pixels(dash, stroke: int) -> tuple[float, float] | None:
+    """A shape's ``[on, off]`` dash, given in stroke widths, as pixel lengths at ``stroke`` pixels;
+    None for a solid stroke (no pattern given). A pattern that is not two numbers with a positive
+    ``on`` and a non-negative ``off`` refuses (``ValueError``), an empty one included."""
+    if dash is None:
+        return None
+    if (not isinstance(dash, (list, tuple)) or len(dash) != 2
+            or not all(isinstance(u, (int, float)) and not isinstance(u, bool)
+                       and math.isfinite(u) for u in dash)):
+        raise ValueError(f"dash {dash!r} is not an [on, off] pair of finite numbers")
+    on, off = (float(u) * stroke for u in dash)
+    if on <= 0 or off < 0:
+        raise ValueError(f"dash {list(dash)!r} needs a positive on length and a non-negative off")
+    return on, off
+
+
+# A polyline is a drawing in progress, which shows its first laid vertex alone.
+_MIN_VERTICES = {"polygon": 2, "polyline": 1}
+
+
+class _CanvasShape(NamedTuple):
+    """One pushed canvas shape as decoded: its record, its points in output pixels, its color,
+    whether its outline closes and its dash as pixel lengths (None for a solid stroke)."""
+
+    spec: dict
+    pts: list[tuple[float, float]]
+    color: tuple[int, int, int]
+    closed: bool
+    dash: tuple[float, float] | None
+
+
+def _draw_path(draw, pts, color, width: int, dash: tuple[float, float] | None,
+               closed: bool) -> None:
+    """Draw ``pts`` as one path, solid or as ``dash`` (on, off) lengths in pixels."""
     seg_pts = list(pts) + ([pts[0]] if closed and len(pts) > 2 else [])
-    if dashed:
+    if dash is not None:
         for a, b in zip(seg_pts, seg_pts[1:]):
-            _dashed_segment(draw, a, b, color, width, dash=8.0, gap=4.0)
+            _dashed_segment(draw, a, b, color, width, dash=dash[0], gap=dash[1])
     elif len(seg_pts) > 1:
         draw.line(seg_pts, fill=color, width=width, joint="curve")
 
@@ -493,10 +527,11 @@ def render_canvas_state(
 
     ``shapes`` come from the canvas-state push, each already carrying the exact symbology the GUI
     rendered: ``{kind: box|polygon|polyline|point, xyxy|points (pixel), color '#hex', fill?,
-    dashed?, halo?, label?}``. A ``point`` carries one coordinate in ``points`` and draws as
+    dash?, halo?, label?}``. A ``point`` carries one coordinate in ``points`` and draws as
     the GUI's mark (a core with radial ticks), never widened into a box; a shape carrying ``halo``
     (``{color, opacity, width_factor}``, the GUI's focus) draws that wider translucent stroke
-    under its own.
+    under its own, and one carrying ``dash`` (``[on, off]`` in stroke widths) draws its outline
+    dashed to that pattern. A polyline dots each vertex unless it carries ``vertices: false``.
 
     ``image`` is whatever region of the raster the caller read (the human's viewport, or the whole
     frame), and ``region`` is that region's half-open ``(x0, y0, x1, y1)`` in the raster's own
@@ -523,7 +558,7 @@ def render_canvas_state(
     # Two passes over one overlay: all fills first, then all outlines/vertices. ImageDraw
     # replaces pixels (it does not composite), so a later shape's translucent fill would
     # otherwise punch its silhouette out of earlier shapes' opaque outlines.
-    parsed: list[tuple[dict, list[tuple[float, float]], tuple[int, int, int], bool]] = []
+    parsed: list[_CanvasShape] = []
     labels: list[tuple[tuple[float, float], str, tuple[int, int, int]]] = []
     for i, s in enumerate(shapes):
         try:
@@ -534,23 +569,29 @@ def render_canvas_state(
                 pts = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
             elif kind == "point":
                 pts = [tx(s["points"][0])]
-            elif kind in ("polygon", "polyline") and len(s["points"]) >= 2:
+            elif kind in ("polygon", "polyline") and len(s["points"]) >= _MIN_VERTICES[kind]:
                 pts = [tx(p) for p in s["points"]]
             else:
                 raise ValueError(f"kind {kind!r} with {s.get('points')!r}")
         except (KeyError, TypeError, ValueError, IndexError) as exc:
             raise ValueError(f"canvas shape {i} is not a box, point, polygon or polyline the "
                              f"canvas draws: {exc!r}") from exc
+        try:
+            dash = _dash_pixels(s.get("dash"), lw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"canvas shape {i} carries a dash the canvas does not draw: "
+                             f"{exc!r}") from exc
         closed = kind in ("box", "polygon")
-        parsed.append((s, pts, color, closed))
+        parsed.append(_CanvasShape(s, pts, color, closed, dash))
         label = s.get("label")
         if label:
             labels.append((pts[0], str(label), color))
 
-    for s, pts, color, closed in parsed:  # pass 1: fills
-        if s.get("fill") and closed and len(pts) >= 3:
-            draw.polygon(pts, fill=color + (38,))
-    for i, (s, pts, color, closed) in enumerate(parsed):  # pass 2: halos, under every outline
+    for shape in parsed:  # pass 1: fills
+        if shape.spec.get("fill") and shape.closed and len(shape.pts) >= 3:
+            draw.polygon(shape.pts, fill=shape.color + (38,))
+    for i, shape in enumerate(parsed):  # pass 2: halos, under every outline
+        s, pts, closed = shape.spec, shape.pts, shape.closed
         if not s.get("halo"):
             continue
         try:
@@ -565,8 +606,9 @@ def render_canvas_state(
             draw.ellipse([px - reach, py - reach, px + reach, py + reach],
                          outline=halo, width=halo_w)
         else:
-            _draw_path(draw, pts, halo, halo_w, dashed=False, closed=closed)
-    for s, pts, color, closed in parsed:  # pass 3: outlines + vertices
+            _draw_path(draw, pts, halo, halo_w, None, closed=closed)
+    for shape in parsed:  # pass 3: outlines + vertices
+        s, pts, color, closed, dash = shape
         if s["kind"] == "point":
             # The GUI's reticle: a core plus four radial ticks converging on the coordinate, the
             # mark that distinguishes a location from a very small box on the same canvas.
@@ -575,13 +617,12 @@ def render_canvas_state(
             inner, outer = core * 1.9, core * 3.2
             draw.ellipse([px - core, py - core, px + core, py + core], fill=color + (255,))
             for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
-                draw.line(
-                    [(px + dx * inner, py + dy * inner), (px + dx * outer, py + dy * outer)],
-                    fill=color + (255,), width=lw,
-                )
+                _draw_path(draw, [(px + dx * inner, py + dy * inner),
+                                  (px + dx * outer, py + dy * outer)],
+                           color + (255,), lw, dash, closed=False)
             continue
-        _draw_path(draw, pts, color + (255,), lw, bool(s.get("dashed")), closed=closed)
-        if s["kind"] == "polyline":  # in-progress drawing: show the laid vertices
+        _draw_path(draw, pts, color + (255,), lw, dash, closed=closed)
+        if s["kind"] == "polyline" and s.get("vertices", True):  # a drawing's laid vertices
             for px, py in pts:
                 draw.ellipse([px - dot_r, py - dot_r, px + dot_r, py + dot_r],
                              fill=color + (255,))
