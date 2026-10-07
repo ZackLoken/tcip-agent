@@ -34,8 +34,6 @@ interface AnnotateUiState {
   /** Active vertex drag: [polygonIdx, ringIdx, vertexIdx]; a vertex belongs to one ring of one
    *  polygon, so a multi-ring shape's second ring is addressable rather than uneditable. */
   draggingVertex: [number, number, number] | null;
-  /** The proposal the agent pointed the person at, by its index in the bucket's document. */
-  focusedProposal: number | null;
 }
 
 interface SessionTrackingState {
@@ -84,7 +82,6 @@ export interface RegistryStatusSlice {
   setCut: (v: boolean) => void;
   setHoveredPolygon: (idx: number | null) => void;
   setDraggingVertex: (v: [number, number, number] | null) => void;
-  setFocusedProposal: (index: number | null) => void;
 
   /** Per-image session telemetry helpers. A visit opens under the current person and project;
    *  closing it holds its contribution when a person and a project were named, and drops it
@@ -108,7 +105,6 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
     cut: false,
     hoveredPolygonIdx: null,
     draggingVertex: null,
-    focusedProposal: null,
   },
   sessionTracking: EMPTY_SESSION_TRACKING,
   heldContributions: [],
@@ -133,8 +129,6 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
     set((s) => ({ annotateUi: { ...s.annotateUi, hoveredPolygonIdx } })),
   setDraggingVertex: (draggingVertex) =>
     set((s) => ({ annotateUi: { ...s.annotateUi, draggingVertex } })),
-  setFocusedProposal: (focusedProposal) =>
-    set((s) => ({ annotateUi: { ...s.annotateUi, focusedProposal } })),
 
   startImageSessionTracking: (imageName, imageEnterTimeMs) =>
     set((s) => ({

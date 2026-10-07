@@ -504,71 +504,47 @@ def is_unadjudicated_prediction(a: Annotation) -> bool:
 
 
 def is_unadjudicated_agent_authorship(a: Annotation) -> bool:
-    """True when ``a`` names a producer that is not a person and no reviewer has signed off on it.
-
-    A person's recorded identity is :func:`is_person`'s, while a tool producer stays bare
-    (``sam``, an agent's own name) or carries a ``model:<checkpoint>`` stamp. An annotation
-    carrying no ``created_by`` at all is not claimed by this rule. A set ``accepted_by`` is a
-    reviewer taking responsibility for the record.
-    """
-    if not a.created_by or is_person(a.created_by):
-        return False
-    return not a.accepted_by
+    """True when ``a`` names a producer that is not a person and no reviewer has signed off on it:
+    its :func:`authorship_of` is ``"tool"``."""
+    return authorship_of(a) == "tool"
 
 
 def authorship_of(a: Annotation) -> str:
-    """``a``'s authorship, one of ``"person"``, ``"tool"``, ``"tool_accepted"`` or
-    ``"unattributed"``; ``"tool"`` is :func:`is_unadjudicated_agent_authorship`.
+    """``a``'s authorship, one of ``"person"`` (a person created it, :func:`is_person`),
+    ``"tool_accepted"`` (a person signed it off, :func:`is_person_signoff`), ``"tool"`` (a
+    producer that is no person, such as a bare name or a ``model:<checkpoint>`` stamp, with no
+    person's sign-off) or ``"unattributed"`` (no producer and no person's sign-off).
     """
-    if not a.created_by:
-        return "unattributed"
-    if is_unadjudicated_agent_authorship(a):
-        return "tool"
     if is_person(a.created_by):
         return "person"
-    return "tool_accepted"
+    if is_person_signoff(a):
+        return "tool_accepted"
+    return "tool" if a.created_by else "unattributed"
 
 
 @dataclass
 class ProvenanceFacts:
     """The provenance classification over one list of annotations: ``scored``
     (:func:`is_unadjudicated_prediction`) and ``machine_authored``
-    (:func:`is_unadjudicated_agent_authorship`), plus ``no_created_by`` and
-    ``not_positively_a_persons``, index lists into the annotations passed in.
+    (:func:`is_unadjudicated_agent_authorship`), the latter an index list into the annotations
+    passed in.
     """
 
     total: int
     scored: int
-    machine_authored: list[str]
-    no_created_by: list[int]
-    not_positively_a_persons: list[int]
-    """Index of every record whose ``created_by`` is not a person's and whose ``accepted_by`` is
-    not a person's either (present or not): the canopy rule's own stricter test, which checks
-    ``accepted_by``'s identity rather than merely its presence the way
-    :func:`is_unadjudicated_agent_authorship` does. Never includes a record already counted under
-    ``no_created_by``: that record's ``created_by`` names nobody to test as a person or not."""
+    machine_authored: list[int]
 
 
 def provenance_facts(annotations: list[Annotation]) -> ProvenanceFacts:
     """The :class:`ProvenanceFacts` classification over ``annotations``."""
     scored = 0
-    machine_authored: list[str] = []
-    no_created_by: list[int] = []
-    not_positively_a_persons: list[int] = []
+    machine_authored: list[int] = []
     for i, a in enumerate(annotations):
         if is_unadjudicated_prediction(a):
             scored += 1
         if is_unadjudicated_agent_authorship(a):
-            machine_authored.append(str(a.created_by))
-        if not a.created_by:
-            no_created_by.append(i)
-        elif not is_person(a.created_by):
-            if not is_person_signoff(a):
-                not_positively_a_persons.append(i)
-    return ProvenanceFacts(
-        total=len(annotations), scored=scored, machine_authored=machine_authored,
-        no_created_by=no_created_by, not_positively_a_persons=not_positively_a_persons,
-    )
+            machine_authored.append(i)
+    return ProvenanceFacts(total=len(annotations), scored=scored, machine_authored=machine_authored)
 
 
 def require_reference_ground_truth(annotations: list[Annotation]) -> None:
@@ -591,7 +567,7 @@ def require_reference_ground_truth(annotations: list[Annotation]) -> None:
             "breeder-confirmed sample of the model's outputs instead."
         )
     if agent_authored:
-        producers = ", ".join(sorted(set(agent_authored)))
+        producers = ", ".join(sorted({str(annotations[i].created_by) for i in agent_authored}))
         raise ValueError(
             f"{len(agent_authored)} of {total} annotations in the reference are authored by "
             f"{producers}, which names no person under this platform's {PERSON_IDENTITY_PREFIX}"

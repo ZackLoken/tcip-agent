@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import { subjectColor } from "@/api/subjects";
 import {
   authorshipLabel,
+  dashAt,
   dashFor,
+  DOTTED_DASH,
+  DRAFT_DASH,
   FLAG_MARK,
   legendRows,
   lineStyleOf,
@@ -11,21 +14,32 @@ import {
   MATCH_TYPES,
   MATCH_WORDS,
   outlineColor,
+  personBacked,
   proposalLabel,
   strokeWidths,
 } from "@/lib/symbology";
 
 describe("line style says whose shape it is", () => {
-  it("a tool's unaccepted shape is dotted; a person's, an accepted tool's and an unattributed one are solid", () => {
-    expect(lineStyleOf("tool")).toBe("dotted");
-    for (const authorship of ["person", "tool_accepted", "unattributed", null, undefined]) {
+  it("a shape no person stands behind is dotted; a person's, an accepted tool's and one drawn here are solid", () => {
+    for (const authorship of ["tool", "unattributed"]) {
+      expect(lineStyleOf(authorship)).toBe("dotted");
+      expect(personBacked(authorship)).toBe(false);
+    }
+    for (const authorship of ["person", "tool_accepted", null, undefined]) {
       expect(lineStyleOf(authorship)).toBe("solid");
+      expect(personBacked(authorship)).toBe(true);
     }
   });
 
   it("a dotted stroke's dash scales with the width and a solid stroke has none", () => {
     expect(dashFor("dotted", 2)).toEqual([2, 6]);
     expect(dashFor("solid", 2)).toBeUndefined();
+  });
+
+  it("a dash pattern is stated in stroke widths and resolved at the stroke it is drawn on", () => {
+    expect(dashAt(DRAFT_DASH, 0.5)).toEqual([2, 2]);
+    expect(dashFor("dotted", 3)).toEqual([3, 9]);
+    expect(DOTTED_DASH).toEqual([1, 3]);
   });
 });
 
@@ -48,7 +62,7 @@ describe("labels", () => {
     expect(authorshipLabel("fruit", "person")).toBe("fruit");
     expect(authorshipLabel("fruit", "tool")).toBe("fruit, tool");
     expect(authorshipLabel("fruit", "tool_accepted")).toBe("fruit, accepted tool");
-    expect(authorshipLabel("fruit", "unattributed")).toBe("fruit");
+    expect(authorshipLabel("fruit", "unattributed")).toBe("fruit, unattributed");
   });
 
   it("labels an unpaired proposal always and a paired one only while focused", () => {

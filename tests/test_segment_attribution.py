@@ -164,6 +164,23 @@ def test_load_canopy_segments_refuses_a_polygon_with_no_created_by(tmp_path: Pat
             data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
 
 
+def test_load_canopy_segments_admits_a_polygon_with_no_created_by_a_person_signed_off(
+    tmp_path: Path,
+) -> None:
+    from tcip_mcp.dataset_layout import signed_off
+
+    _, raster_path, _georef, identity = _setup(tmp_path)
+    unattributed = Annotation(subject="canopy", geometry=_square(5, 5, 20, 20))
+    data = _write_document(raster_path, [
+        signed_off(unattributed, "user:breeder", "2026-01-01T00:00:00+00:00"),
+    ])
+
+    segments = load_canopy_segments(
+        data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
+
+    assert len(segments) == 1
+
+
 def test_load_canopy_segments_refuses_a_machine_authored_polygon_with_no_persons_acceptance(
     tmp_path: Path,
 ) -> None:

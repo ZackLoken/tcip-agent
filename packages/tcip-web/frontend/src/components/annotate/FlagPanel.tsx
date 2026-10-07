@@ -15,16 +15,17 @@ export function FlagPanel({
   target: string;
   /** The open flags on that target. */
   flags: Flag[];
-  onRaise: (text: string) => void;
+  /** Raises the flag; resolves whether it was saved, so the comment stays until it is. */
+  onRaise: (text: string) => Promise<boolean>;
   onResolve: (id: string, reply: string) => void;
   onClose: () => void;
 }) {
   const [text, setText] = useState("");
   const [replies, setReplies] = useState<Record<string, string>>({});
-  const raise = () => {
+  const raise = async () => {
     if (!text.trim()) return;
-    onRaise(text.trim());
-    setText("");
+    const submitted = text;
+    if (await onRaise(submitted.trim())) setText((now) => (now === submitted ? "" : now));
   };
   return (
     <div
@@ -85,14 +86,14 @@ export function FlagPanel({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") raise();
+            if (e.key === "Enter") void raise();
           }}
         />
         <button
           type="button"
           className="tcip-btn-primary h-7 text-[11px]"
           disabled={!text.trim()}
-          onClick={raise}
+          onClick={() => void raise()}
         >
           Flag
         </button>

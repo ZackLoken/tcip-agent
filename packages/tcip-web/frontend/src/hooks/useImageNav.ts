@@ -37,7 +37,6 @@ export function useImageNav() {
   const currentIndex = useStore((s) => s.gui.dataset.current_image_index);
   const patchGui = useStore((s) => s.patchGui);
 
-  // Leaving an image clears what was selected or focused on it, whichever control navigated.
   const goTo = useCallback(
     (index: number | null) => {
       if (index === null || index === currentIndex) return;
@@ -45,8 +44,6 @@ export function useImageNav() {
       // other dataset fields with a stale render closure.
       const state = useStore.getState();
       patchGui({ dataset: { ...state.gui.dataset, current_image_index: index } });
-      state.selectPolygon(null);
-      state.setFocusedProposal(null);
       syncNavIndex(index);
     },
     [currentIndex, patchGui],

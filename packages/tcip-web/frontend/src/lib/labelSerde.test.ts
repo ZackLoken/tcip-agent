@@ -1,7 +1,39 @@
 import { describe, expect, it } from "vitest";
 
-import { annotationsToCanvas, canvasToAnnotations } from "@/lib/labelSerde";
+import { annotationsToCanvas, serializeCanvas, type CanvasLabels } from "@/lib/labelSerde";
 import type { Annotation, AnnotationPayload } from "@/store/types";
+
+const canvasToAnnotations = (labels: CanvasLabels) => serializeCanvas(labels).annotations;
+
+describe("serializeCanvas positions", () => {
+  it("name where each canvas shape lands in the saved list", () => {
+    const labels = {
+      boxes: [
+        { x1: 0, y1: 0, x2: 5, y2: 5, subject: "box0", attributes: {} },
+        { x1: 0, y1: 0, x2: 5, y2: 5, subject: "box1", attributes: {} },
+      ],
+      polygons: [
+        {
+          rings: [
+            [
+              [0, 0],
+              [9, 0],
+              [9, 9],
+            ] as [number, number][],
+          ],
+          subject: "poly0",
+          attributes: {},
+        },
+      ],
+      points: [{ x: 1, y: 1, subject: "point0", attributes: {} }],
+      imageAnnotations: [],
+    };
+    const { annotations, positions } = serializeCanvas(labels);
+    expect(annotations[positions.box[1]].subject).toBe("box1");
+    expect(annotations[positions.polygon[0]].subject).toBe("poly0");
+    expect(annotations[positions.point[0]].subject).toBe("point0");
+  });
+});
 
 /** What the load routes hand back for a payload just saved: the save/load asymmetry made explicit,
  *  `annotation_from_payload` builds one Polygon from `rings` or `points`, and `annotation_dict` always emits

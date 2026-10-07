@@ -56,6 +56,8 @@ function renderStrip(over: Partial<Parameters<typeof ReviewStrip>[0]> = {}) {
       operatingPoint={{ conf: 0.42, reason: "" }}
       filters={{ confidence: 0.42, match: "all" }}
       scope="all"
+      canAccept
+      canReject
       counts={{ items: 7, unreviewed: 3, flags: 0 }}
       focused={focusedProposal}
       position={2}
@@ -127,13 +129,29 @@ describe("ReviewStrip", () => {
     );
   });
 
+  it("accept and reject are each enabled by their own target", () => {
+    renderStrip({ canAccept: true, canReject: false });
+    expect(screen.getByRole("button", { name: "Accept" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
+    cleanup();
+    renderStrip({ canAccept: false, canReject: true });
+    expect(screen.getByRole("button", { name: "Accept" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled();
+  });
+
   it("offers Edit for a focused proposal only", () => {
     renderStrip({ focused: { ...focusedProposal, kind: "annotation", score: null } });
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
   });
 
   it("with no bucket the proposal controls are disabled and say why, the stepper still works", () => {
-    const h = renderStrip({ bucket: null, reviewing: false, operatingPoint: null });
+    const h = renderStrip({
+      bucket: null,
+      reviewing: false,
+      operatingPoint: null,
+      canAccept: false,
+      canReject: false,
+    });
     expect(screen.getByRole("checkbox", { name: "Proposals" })).toBeDisabled();
     expect(screen.getByRole("checkbox", { name: "Proposals" }).closest("label")).toHaveAttribute(
       "title",

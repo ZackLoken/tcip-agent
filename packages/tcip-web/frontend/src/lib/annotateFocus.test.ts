@@ -140,7 +140,7 @@ describe("applyAnnotateFocus", () => {
     expect(vi.mocked(api.dataset.select).mock.calls[0][0]).toMatchObject({
       bucket: "m1/2026-03-02",
     });
-    expect(useStore.getState().annotateUi.focusedProposal).toBe(3);
+    expect(useStore.getState().canvas.focus).toEqual({ kind: "proposal", index: 3 });
   });
 
   it("toasts a label_problem the selection carries", async () => {

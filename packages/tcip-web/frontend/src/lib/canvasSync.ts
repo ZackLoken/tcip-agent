@@ -11,21 +11,30 @@
  *
  * Shapes are display-resolved and display-filtered: each carries the exact hex color / dash /
  * label the GUI renders, read from the one symbology module the overlays draw with, and the
- * builders reproduce the canvas's own visibility rules (mode filters, active-class filter, derived
- * detect boxes, the labels toggle, the shown proposals), so the server-side render
- * (capture_live_canvas) is faithful by construction.
+ * builders ask the canvas's own visibility and focus rules (mode filters, active-class filter,
+ * derived detect boxes, the labels toggle, the shown proposals), so the server-side render
+ * (capture_live_canvas) draws what the canvas shows; the render's line widths, tick marks and
+ * vertex dots are its own, scaled to the frame it draws on.
  */
 
 import { annotationsToCanvas } from "@/lib/labelSerde";
 import { ringsBbox } from "@/lib/polygonGeometry";
-import { proposalMatch, type ReviewItem } from "@/lib/reviewItems";
+import { boxDraft, type DraftStroke } from "@/lib/draftStrokes";
+import {
+  focusesAnnotation,
+  focusesProposal,
+  type MatchTypes,
+  proposalMatch,
+  type ReviewItem,
+} from "@/lib/reviewItems";
 import {
   authorshipLabel,
+  type DashUnits,
+  dashUnitsFor,
+  DRAFT_DASH,
   FLAG_MARK,
   FOCUS_HALO,
   lineStyleOf,
-  type MatchType,
-  NO_SUBJECT_DRAFT_COLOR,
   outlineColor,
   proposalLabel,
 } from "@/lib/symbology";
@@ -49,10 +58,13 @@ export interface CanvasShape {
   points?: [number, number][];
   color: string;
   fill?: boolean;
-  dashed?: boolean;
+  // The stroke's (on, off) dash in stroke widths: symbology's DOTTED_DASH or DRAFT_DASH.
+  dash?: DashUnits;
   // On the focused item: the halo the render draws under its stroke (symbology's FOCUS_HALO).
   halo?: { color: string; opacity: number; width_factor: number };
   label?: string;
+  // False on a draft's tail, which draws no dot at its ends; a polyline dots its vertices otherwise.
+  vertices?: boolean;
   tag?: string; // gt | proposal | in_progress | flag
 }
 
@@ -76,7 +88,6 @@ export interface CanvasStateBody {
   // The dataset's subjects with their GUI-local colors (the registry stores no color). Sent
   // under the backend's ``classes`` key, which stores the list verbatim for capture_live_canvas.
   classes: { name: string; color: string }[];
-  legend?: Record<string, string> | null;
   counts?: Record<string, number>;
   /** null = heartbeat (backend keeps the last pushed geometry for this image). */
   shapes: CanvasShape[] | null;
@@ -132,8 +143,9 @@ const NO_MATCHES = { boxes: [], polygons: [], points: [] };
 
 /** The line style and focus halo a mirrored shape carries, from the symbology's own rules. */
 function strokeOf(authorship: string | null | undefined, focused: boolean) {
+  const dash = dashUnitsFor(lineStyleOf(authorship));
   return {
-    ...(lineStyleOf(authorship) === "dotted" ? { dashed: true } : {}),
+    ...(dash ? { dash } : {}),
     ...(focused
       ? {
           halo: {
@@ -146,44 +158,60 @@ function strokeOf(authorship: string | null | undefined, focused: boolean) {
   };
 }
 
-/** Annotate-tab shapes, mirroring the canvas: the labels toggle hides everything, each committed
- *  shape draws by `shapeVisible`, and polygon mode adds the drawing in progress and the pending
- *  cut. Colors, line styles, the halo and labels come from the symbology module: the focused item
+/** Annotate-tab shapes, mirroring the canvas: the labels toggle hides every committed shape and
+ *  never a draft, each committed shape draws by `shapeVisible`, and polygon mode adds the drawing
+ *  in progress and the pending cut. Colors, line styles, the halo and labels come from the symbology module: the focused item
  *  and the unpaired proposals are the labeled ones. */
 export function buildAnnotateShapes(args: {
   boxes: Box[];
   polygons: PolygonShape[];
   points?: PointShape[];
-  currentPolygon: [number, number][];
-  drawingBox?: { x1: number; y1: number; x2: number; y2: number } | null;
+  /** The strokes of the polygon in progress and the pending cut (`draftStrokes`). */
+  draft?: DraftStroke[];
+  /** The box being dragged out, in its own subject's color as on the canvas. */
+  drawingBox?: { x1: number; y1: number; x2: number; y2: number; subject: string } | null;
   /** The one focused item (an annotation or a shown proposal), or none. */
   focused?: ReviewItem | null;
   /** Each array's match types (`matchTypes`); every entry null while not reviewing. */
-  matches?: {
-    boxes: (MatchType | null)[];
-    polygons: (MatchType | null)[];
-    points: (MatchType | null)[];
-  };
+  matches?: MatchTypes;
   /** Each open flag that has a place on the image, with that place (`flagPlaces`). */
   flagMarks?: { at: [number, number]; flag: Flag }[];
   mode: string;
   activeSubject: string;
   visible: boolean;
-  /** The active subject's color for the in-progress drawing and the rubber-band box. */
+  /** A subject's color, for the box being dragged out. */
   colorFor: (subject: string) => string;
-  // The cut tool's pending first click, in the selected polygon's own color, and the cursor for
-  // its dashed tail (or none, once the start is placed but the pointer hasn't moved yet).
-  cutStart?: { point: [number, number]; color: string } | null;
-  cursor?: [number, number] | null;
   /** The proposals the canvas shows. */
   proposals?: Proposal[];
 }): CanvasShape[] {
-  if (!args.visible) return []; // the GUI's labels toggle hides every committed shape
+  const d = args.drawingBox ? boxDraft(args.drawingBox, args.colorFor) : null;
+  const drafts: CanvasShape[] = [
+    ...(args.draft ?? []).map(({ points, color, vertices, label }) => ({
+      kind: "polyline" as const,
+      points: rPts(points),
+      color,
+      dash: DRAFT_DASH,
+      ...(vertices ? { label } : { vertices: false }),
+      tag: "in_progress",
+    })),
+    ...(d
+      ? [
+          {
+            kind: "box" as const,
+            xyxy: d.bounds.map(r1) as [number, number, number, number],
+            color: d.color,
+            dash: DRAFT_DASH,
+            tag: "in_progress",
+          },
+        ]
+      : []),
+  ];
+  // The labels toggle hides every committed shape; a draft is never gated by it, as on the canvas.
+  if (!args.visible) return drafts;
 
   const statuses = args.matches ?? NO_MATCHES;
   const focused = args.focused ?? null;
-  const isFocused = (shape: ReviewItem["shape"], i: number) =>
-    focused?.kind === "annotation" && focused.shape === shape && focused.ref === i;
+  const isFocused = (shape: ReviewItem["shape"], i: number) => focusesAnnotation(focused, shape, i);
   const shapes: CanvasShape[] = [];
   const visible = (kind: "box" | "derived" | "polygon" | "point", subject: string, at: boolean) =>
     shapeVisible({
@@ -232,44 +260,6 @@ export function buildAnnotateShapes(args: {
       });
     });
   });
-  if (args.mode === "polygon" && args.currentPolygon.length > 0) {
-    shapes.push({
-      kind: "polyline",
-      points: rPts(args.currentPolygon),
-      color: args.activeSubject ? args.colorFor(args.activeSubject) : NO_SUBJECT_DRAFT_COLOR,
-      dashed: true,
-      label: "drawing",
-      tag: "in_progress",
-    });
-  }
-  if (args.mode === "polygon" && args.cutStart) {
-    const pts: [number, number][] = args.cursor
-      ? [args.cutStart.point, args.cursor]
-      : [args.cutStart.point];
-    shapes.push({
-      kind: "polyline",
-      points: rPts(pts),
-      color: args.cutStart.color,
-      dashed: true,
-      label: "cut",
-      tag: "in_progress",
-    });
-  }
-  if (args.drawingBox) {
-    const d = args.drawingBox;
-    shapes.push({
-      kind: "box",
-      xyxy: [
-        r1(Math.min(d.x1, d.x2)),
-        r1(Math.min(d.y1, d.y2)),
-        r1(Math.max(d.x1, d.x2)),
-        r1(Math.max(d.y1, d.y2)),
-      ],
-      color: args.colorFor(args.activeSubject),
-      dashed: true,
-      tag: "in_progress",
-    });
-  }
   // A point is one mark at one coordinate: one shape entry carrying a single position, never a
   // path and never a derived box (a fabricated box would read downstream as a real detection).
   (args.points ?? []).forEach((p, i) => {
@@ -285,7 +275,7 @@ export function buildAnnotateShapes(args: {
     });
   });
   (args.proposals ?? []).forEach((p) => {
-    const proposalFocused = focused?.kind === "proposal" && focused.ref === p.index;
+    const proposalFocused = focusesProposal(focused, p.index);
     const base = {
       color: outlineColor(p.subject, proposalMatch(p)),
       ...strokeOf("tool", proposalFocused),
@@ -317,7 +307,7 @@ export function buildAnnotateShapes(args: {
       tag: "flag",
     }),
   );
-  return shapes;
+  return [...shapes, ...drafts];
 }
 
 /* ── agent "push now" request (capture_live_canvas refresh ping) ─────────────── */

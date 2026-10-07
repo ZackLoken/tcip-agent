@@ -14,6 +14,8 @@ from tcip_annotation.verdicts import Verdict, read_verdicts
 from tcip_mcp.dataset_layout import Gestures, image_dir, save_label_document, verdict_key_of
 from tests._producer_fixtures import image_label_key, write_image
 
+ANSWER_ONLY = {"status", "accepted"}
+"""What a save answers beside the document a load answers."""
 DATE = "2026-02-11"
 WIDTH, HEIGHT = 100, 80
 BOX = [40.0, 30.0, 60.0, 50.0]
@@ -161,12 +163,187 @@ def test_the_shard_records_each_decision_once_and_refuses_an_entry_it_cannot_rea
         read_verdicts(key)
 
 
+def test_rejecting_a_paired_proposal_records_the_rejection_and_keeps_the_annotation(
+        tmp_path: Path, client) -> None:
+    from tests._web_fixtures import open_new_project
+
+    root = open_new_project(tmp_path / "proj")
+    image = _image(root)
+    bucket = _bucket(root, image)
+    _save(root, image, [{"subject": "bud", "bbox": BOX}])
+    body = {"image_path": str(image), "user": "breeder", "annotations": _as_loaded(root, image),
+            "bucket": bucket, "reject": [0]}
+
+    resp = client.post("/api/annotate/labels", json=body)
+
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()["annotations"]) == 1
+    (decided,) = read_verdicts(verdict_key_of(image_label_key(image), bucket))
+    assert (decided.proposal, decided.action) == (0, "rejected")
+    served = client.get("/api/annotate/proposals", params={
+        "image_path": str(image), "bucket": bucket}).json()
+    (proposal,) = served["proposals"]
+    assert (proposal["paired"], proposal["decision"]) == (0, "rejected")
+
+
+def test_accepting_a_paired_proposal_signs_the_tools_annotation_off(tmp_path: Path) -> None:
+    image = _image(tmp_path)
+    bucket = _bucket(tmp_path, image)
+    _save(tmp_path, image, [{"subject": "bud", "bbox": BOX}], author="detector")
+
+    _save(tmp_path, image, _as_loaded(tmp_path, image),
+          gestures=Gestures(bucket=bucket, accept=frozenset({0})))
+
+    (after,) = _stored(tmp_path, image).annotations
+    assert (after.created_by, after.accepted_by) == ("detector", "user:breeder")
+    assert json_io.authorship_of(after) == "tool_accepted"
+    (decided,) = read_verdicts(verdict_key_of(image_label_key(image), bucket))
+    assert (decided.proposal, decided.action) == (0, "accepted")
+
+
+def test_rejecting_a_paired_proposal_signs_nothing_off(tmp_path: Path) -> None:
+    image = _image(tmp_path)
+    bucket = _bucket(tmp_path, image)
+    _save(tmp_path, image, [{"subject": "bud", "bbox": BOX}], author="detector")
+
+    _save(tmp_path, image, _as_loaded(tmp_path, image),
+          gestures=Gestures(bucket=bucket, reject=frozenset({0})))
+
+    (after,) = _stored(tmp_path, image).annotations
+    assert after.accepted_by is None and json_io.authorship_of(after) == "tool"
+
+
+def test_authorship_counts_only_a_persons_hand_as_standing_behind_a_record() -> None:
+    from tcip_annotation.state import Annotation
+
+    def of(**provenance) -> str:
+        return json_io.authorship_of(Annotation("bud", **provenance))
+
+    assert of(created_by="user:breeder") == "person"
+    assert of(created_by="detector") == "tool"
+    assert of(created_by="detector", accepted_by="user:breeder") == "tool_accepted"
+    assert of(created_by="detector", accepted_by="other-tool") == "tool"
+    assert of() == "unattributed"
+    assert of(accepted_by="user:breeder") == "tool_accepted"
+
+
+# ── an annotation is confirmed as the person's own call ────────────────────
+
+
+def test_confirming_a_tools_annotation_signs_it_off_without_changing_it(tmp_path: Path) -> None:
+    image = _image(tmp_path)
+    _save(tmp_path, image, [{"subject": "bud", "bbox": BOX}], author="detector")
+    (before,) = _stored(tmp_path, image).annotations
+    assert json_io.authorship_of(before) == "tool"
+
+    _save(tmp_path, image, _as_loaded(tmp_path, image), gestures=Gestures(confirm=frozenset({0})))
+
+    (after,) = _stored(tmp_path, image).annotations
+    assert (after.accepted_by, after.created_by) == ("user:breeder", "detector")
+    assert json_io.authorship_of(after) == "tool_accepted"
+    assert after.geometry == before.geometry
+
+
+def test_confirming_a_position_the_save_writes_nothing_at_refuses_before_any_write(
+        tmp_path: Path) -> None:
+    image = _image(tmp_path)
+
+    with pytest.raises(ValueError, match="none at position 1 to confirm"):
+        _save(tmp_path, image, [{"subject": "bud", "bbox": BOX}],
+              gestures=Gestures(confirm=frozenset({1})))
+
+    assert ts.read(image_label_key(image), default=None) is None
+
+
+def test_the_save_route_confirms_an_annotation_once_and_refuses_it_named_twice(
+        tmp_path: Path, client) -> None:
+    from tests._web_fixtures import open_new_project
+
+    root = open_new_project(tmp_path / "proj")
+    image = _image(root)
+    _save(root, image, [{"subject": "bud", "bbox": BOX}], author="detector")
+    body = {"image_path": str(image), "user": "breeder", "annotations": _as_loaded(root, image)}
+
+    twice = client.post("/api/annotate/labels", json={**body, "confirm": [0, 0]})
+    assert twice.status_code == 400 and "more than once" in twice.text
+    assert _stored(root, image).annotations[0].accepted_by is None
+
+    once = client.post("/api/annotate/labels", json={**body, "confirm": [0]})
+    assert once.status_code == 200, once.text
+    assert _stored(root, image).annotations[0].accepted_by == "user:breeder"
+    # The save answers the document it wrote with the token that names it, as a load does.
+    loaded = client.get("/api/annotate/labels", params={"image_path": str(image)}).json()
+    assert {k: v for k, v in once.json().items() if k not in ANSWER_ONLY} == loaded
+    assert loaded["annotations"][0]["authorship"] == "tool_accepted"
+
+
+def test_an_accepted_proposal_answers_the_annotation_it_resolved_to(tmp_path: Path) -> None:
+    """An accepted proposal that pairs with a submitted annotation signs that annotation off and
+    appends nothing; one that pairs with none is appended. The answer names each one's annotation,
+    whatever else the save carries."""
+    image = _image(tmp_path)
+    bucket = _bucket(tmp_path, image)
+    drawn = {"subject": "leaf", "bbox": [5.0, 5.0, 15.0, 15.0]}
+    boxed = {"subject": "bud", "bbox": BOX}
+
+    later = {"subject": "leaf", "bbox": [60.0, 60.0, 70.0, 70.0]}
+    _, paired_doc, paired = _save(tmp_path, image, [drawn, boxed, later],
+                                  gestures=Gestures(bucket=bucket, accept=frozenset({0})))
+    assert paired == {0: 1} and len(paired_doc.annotations) == 3
+
+    other = _image(tmp_path, "b")
+    other_bucket = _bucket(tmp_path, other)
+    _, appended_doc, appended = _save(tmp_path, other, [drawn],
+                                      gestures=Gestures(bucket=other_bucket,
+                                                        accept=frozenset({0})))
+    assert appended == {0: 1} and len(appended_doc.annotations) == 2
+
+
+def test_the_save_route_answers_the_annotation_an_accepted_proposal_resolved_to(
+        tmp_path: Path, client) -> None:
+    from tests._web_fixtures import open_new_project
+
+    root = open_new_project(tmp_path / "proj")
+    image = _image(root)
+    bucket = _bucket(root, image)
+    resp = client.post("/api/annotate/labels", json={
+        "image_path": str(image), "user": "breeder", "bucket": bucket, "accept": [0],
+        "annotations": [{"subject": "leaf", "bbox": [60.0, 60.0, 70.0, 70.0]}]})
+
+    assert resp.status_code == 200, resp.text
+    answer = resp.json()
+    assert answer["accepted"] == {"0": 1}
+    assert len(answer["annotations"]) == 2
+
+
+def test_the_save_answers_the_document_it_stored(tmp_path: Path, client) -> None:
+    """What the save writes is what it answers: rounded geometry and only the completion marks
+    that still name the subject's annotations, the same answer a load gives."""
+    from tests._web_fixtures import open_new_project
+
+    root = open_new_project(tmp_path / "proj")
+    image = _image(root)
+    body = {"image_path": str(image), "user": "breeder"}
+    first = client.post("/api/annotate/labels", json={
+        **body, "annotations": [{"subject": "bud", "point": [1.0, 2.0]}],
+        "complete": {"bud": True}})
+    assert first.json()["completion"] == {"bud": "complete"}
+
+    edited = client.post("/api/annotate/labels", json={
+        **body, "annotations": [{"subject": "bud", "point": [1.23456, 2.34567]}]})
+
+    loaded = client.get("/api/annotate/labels", params={"image_path": str(image)}).json()
+    assert {k: v for k, v in edited.json().items() if k not in ANSWER_ONLY} == loaded
+    assert loaded["completion"] == {"bud": "partial"}
+    assert loaded["annotations"][0]["point"] == [1.23, 2.35]
+
+
 # ── a save from a stale read never lands ───────────────────────────────────
 
 
 def test_a_save_from_a_stale_read_conflicts_and_writes_nothing(tmp_path: Path) -> None:
     image = _image(tmp_path)
-    first, _document = _save(tmp_path, image, [{"subject": "bud", "bbox": BOX}])
+    first, _document, _accepted = _save(tmp_path, image, [{"subject": "bud", "bbox": BOX}])
     _save(tmp_path, image, [], author="user:second", expect=first)
 
     with pytest.raises(ts.VersionConflictError):

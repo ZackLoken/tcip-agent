@@ -7,7 +7,8 @@
  */
 
 import { pointInRings, ringsBbox, type Bbox } from "@/lib/polygonGeometry";
-import type { MatchType } from "@/lib/symbology";
+import { personBacked, type MatchType } from "@/lib/symbology";
+import type { Focus } from "@/store/slices/canvas";
 import type {
   Box,
   Flag,
@@ -28,9 +29,10 @@ export interface ReviewItem {
   bbox: Bbox;
   /** Null while no bucket's proposals are shown. */
   match: MatchType | null;
-  /** Whether a person has decided on it: false while a proposal of it awaits a decision, null
-   *  for an annotation no proposal pairs with, which no decision is recorded for. */
-  reviewed: boolean | null;
+  /** Whether a person stands behind it: for an annotation, the backend's authorship says a
+   *  person made it or signed it off (`personBacked`), with or without a bucket shown; a proposal
+   *  shown is always awaiting a decision. */
+  reviewed: boolean;
   score: number | null;
   /** An annotation's index in the document it was loaded from; none for one drawn since. */
   index?: number;
@@ -51,9 +53,13 @@ export interface CanvasArrays {
 /** An annotation's match under the shown bucket, by the proposals pairing with its document
  *  index. A shape drawn since the load has no index, so nothing pairs with it. */
 export function annotationMatch(index: number | undefined, proposals: Proposal[]): MatchType {
-  return index !== undefined && proposals.some((p) => p.paired === index)
-    ? "matched"
-    : "annotation_only";
+  return pairOf(index, proposals) ? "matched" : "annotation_only";
+}
+
+/** The proposal pairing with the annotation of document `index`: the matcher pairs one to one,
+ *  so there is at most one. */
+function pairOf(index: number | undefined, proposals: Proposal[]): Proposal | undefined {
+  return index === undefined ? undefined : proposals.find((p) => p.paired === index);
 }
 
 export function proposalMatch(p: Proposal): MatchType {
@@ -61,15 +67,17 @@ export function proposalMatch(p: Proposal): MatchType {
 }
 
 /** Each canvas array's match types, aligned with it; every entry null while not reviewing. */
+export interface MatchTypes {
+  boxes: (MatchType | null)[];
+  polygons: (MatchType | null)[];
+  points: (MatchType | null)[];
+}
+
 export function matchTypes(
   canvas: CanvasArrays,
   proposals: Proposal[],
   reviewing: boolean,
-): {
-  boxes: (MatchType | null)[];
-  polygons: (MatchType | null)[];
-  points: (MatchType | null)[];
-} {
+): MatchTypes {
   const of = (shape: { index?: number }) =>
     reviewing ? annotationMatch(shape.index, proposals) : null;
   return {
@@ -96,22 +104,28 @@ function proposalGeometry(p: Proposal): { shape: Mode; bbox: Bbox } | null {
 export function reviewItems(args: {
   canvas: CanvasArrays;
   proposals: Proposal[];
+  /** The canvas's match types (`matchTypes`), resolved once for every consumer. */
+  matches: MatchTypes;
   reviewing: boolean;
   mode: Mode;
   flags: Flag[];
   bucket: string | null;
 }): ReviewItem[] {
   const { canvas, proposals, reviewing, mode } = args;
+  const matchOf = {
+    box: args.matches.boxes,
+    polygon: args.matches.polygons,
+    point: args.matches.points,
+  }[mode];
   const open = args.flags.filter((f) => f.resolved_by === null);
   const annotation = (
     ref: number,
-    of: { subject: string; index?: number },
+    of: { subject: string; index?: number; authorship?: string | null },
     bbox: Bbox,
     at: [number, number],
   ): ReviewItem => {
-    const match = reviewing ? annotationMatch(of.index, proposals) : null;
-    const paired = match === "matched";
-    const pairing = paired ? proposals.filter((p) => p.paired === of.index) : [];
+    const match = matchOf[ref] ?? null;
+    const pair = match === "matched" ? pairOf(of.index, proposals) : undefined;
     return {
       kind: "annotation",
       shape: mode,
@@ -119,10 +133,10 @@ export function reviewItems(args: {
       subject: of.subject,
       bbox,
       match,
-      reviewed: paired ? pairing.some((p) => p.decision !== null) : null,
+      reviewed: personBacked(of.authorship),
       score: null,
       index: of.index,
-      pairing: paired ? pairing.find((p) => p.decision === null)?.index : undefined,
+      pairing: pair?.decision === null ? pair.index : undefined,
       at,
       flags: open.filter(
         (f) =>
@@ -261,6 +275,12 @@ export function nearestNeighborOrder(items: ReviewItem[]): ReviewItem[] {
   return order;
 }
 
+/** Whether the item awaits a decision: an undecided proposal, paired or not, or an annotation no
+ *  person stands behind. A person's own annotation carries no verdict on a bucket's proposal. */
+export function awaitsDecision(item: ReviewItem): boolean {
+  return item.kind === "proposal" || item.pairing !== undefined || !item.reviewed;
+}
+
 /** What the stepper steps through: every kept item, the unreviewed ones, or the flagged ones. */
 export const STEP_SCOPES = ["all", "unreviewed", "flagged"] as const;
 export type StepScope = (typeof STEP_SCOPES)[number];
@@ -273,7 +293,7 @@ export const STEP_SCOPE_WORDS: Record<StepScope, string> = {
 
 /** The order's items the scope keeps, in the order's own sequence. */
 export function scopedOrder(order: ReviewItem[], scope: StepScope): ReviewItem[] {
-  if (scope === "unreviewed") return order.filter((item) => item.reviewed === false);
+  if (scope === "unreviewed") return order.filter(awaitsDecision);
   if (scope === "flagged") return order.filter((item) => item.flags.length > 0);
   return order;
 }
@@ -288,6 +308,54 @@ export function itemName(item: ReviewItem | null): string | null {
 
 export function sameItem(a: ReviewItem | null, b: ReviewItem | null): boolean {
   return !!a && !!b && a.kind === b.kind && a.shape === b.shape && a.ref === b.ref;
+}
+
+/** What an accept or a reject acts on: the focused item, or the first unreviewed one when nothing
+ *  is focused; never another item than the focused one. An item's proposal is itself or the
+ *  undecided one pairing with it. An accept on an annotation with no proposal to decide confirms
+ *  it when no person stands behind it; a reject acts on proposals only, since removing an
+ *  annotation is the delete key's act. */
+export function decisionTarget(
+  action: "accept" | "reject",
+  focused: ReviewItem | null,
+  unreviewed: ReviewItem[],
+): { kind: "proposal"; index: number } | { kind: "confirm"; item: ReviewItem } | null {
+  const item = focused ?? unreviewed[0];
+  if (!item) return null;
+  const proposal = item.kind === "proposal" ? item.ref : item.pairing;
+  if (proposal !== undefined) return { kind: "proposal", index: proposal };
+  if (action === "accept" && !item.reviewed) {
+    return { kind: "confirm", item };
+  }
+  return null;
+}
+
+/** Whether the focused item is the annotation of the tool `shape` at canvas index `ref`. */
+export function focusesAnnotation(focused: ReviewItem | null, shape: Mode, ref: number): boolean {
+  return focused?.kind === "annotation" && focused.shape === shape && focused.ref === ref;
+}
+
+/** Whether the focused item is the proposal at `index` in its bucket's document. */
+export function focusesProposal(focused: ReviewItem | null, index: number): boolean {
+  return focused?.kind === "proposal" && focused.ref === index;
+}
+
+/** The item `focus` names, or null when none of `items` is it. A proposal pairing with an
+ *  annotation is that annotation's item, never one of its own. */
+export function focusedItem(
+  items: ReviewItem[],
+  proposals: Proposal[],
+  focus: Focus | null,
+): ReviewItem | null {
+  if (!focus) return null;
+  const { kind, index } = focus;
+  if (kind !== "proposal") return items.find((i) => focusesAnnotation(i, kind, index)) ?? null;
+  const paired = proposals.find((p) => p.index === focus.index)?.paired ?? null;
+  return (
+    items.find((i) => focusesProposal(i, focus.index)) ??
+    items.find((i) => i.kind === "annotation" && paired !== null && i.index === paired) ??
+    null
+  );
 }
 
 /** The item `delta` steps from `focused` along `order`, wrapping; the first item when nothing is

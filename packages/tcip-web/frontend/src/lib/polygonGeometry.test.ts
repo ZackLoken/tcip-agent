@@ -12,16 +12,38 @@ import {
   cutRing,
   derivedBoxFromPolygon,
   findHitPoint,
-  findHoveredPolygon,
+  belowMinSide,
   MIN_BOX_SIDE,
   pointInPolygon,
   pointInRings,
   pointToSegmentDist,
+  polygonAt,
   polygonBbox,
   ringsBbox,
   withRing,
 } from "@/lib/polygonGeometry";
 import type { PolygonShape } from "@/store/types";
+
+describe("polygonAt", () => {
+  const square = (x: number): { rings: [number, number][][] } => ({
+    rings: [
+      [
+        [x, 0],
+        [x + 10, 0],
+        [x + 10, 10],
+        [x, 10],
+      ],
+    ],
+  });
+
+  it("names the first polygon containing the point, or none", () => {
+    const polygons = [square(0), square(5), square(40)];
+    expect(polygonAt(polygons, [7, 5])).toBe(0);
+    expect(polygonAt(polygons, [12, 5])).toBe(1);
+    expect(polygonAt(polygons, [45, 5])).toBe(2);
+    expect(polygonAt(polygons, [30, 5])).toBeNull();
+  });
+});
 
 const SQUARE: [number, number][] = [
   [0, 0],
@@ -132,7 +154,15 @@ describe("findHitPoint (point selection, zoom-aware)", () => {
   });
 });
 
-describe("findHoveredPolygon (bbox-prefiltered hover scan)", () => {
+describe("belowMinSide", () => {
+  it("refuses a box with a side under the floor and keeps one exactly at it", () => {
+    expect(belowMinSide(0, 0, MIN_BOX_SIDE, MIN_BOX_SIDE)).toBe(false);
+    expect(belowMinSide(0, 0, MIN_BOX_SIDE - 1, 50)).toBe(true);
+    expect(belowMinSide(0, 0, 50, MIN_BOX_SIDE - 1)).toBe(true);
+  });
+});
+
+describe("polygonAt with bounding boxes (the prefiltered hover scan)", () => {
   const polys = [
     { rings: [SQUARE] }, // 0: covers (0,0)-(10,10)
     { rings: [FAR_SQUARE] }, // 1: far away
@@ -140,11 +170,15 @@ describe("findHoveredPolygon (bbox-prefiltered hover scan)", () => {
   const bboxes = computePolygonBboxes(polys);
 
   it("returns the containing polygon's index", () => {
-    expect(findHoveredPolygon([5, 5], polys, bboxes)).toBe(0);
-    expect(findHoveredPolygon([105, 105], polys, bboxes)).toBe(1);
+    expect(polygonAt(polys, [5, 5], bboxes)).toBe(0);
+    expect(polygonAt(polys, [105, 105], bboxes)).toBe(1);
   });
   it("returns null when the point is in no polygon", () => {
-    expect(findHoveredPolygon([50, 50], polys, bboxes)).toBeNull();
+    expect(polygonAt(polys, [50, 50], bboxes)).toBeNull();
+  });
+  it("rejects by box before it casts a ray", () => {
+    expect(polygonAt(polys, [5, 5], [[100, 100, 110, 110], bboxes[1]])).toBeNull();
+    expect(polygonAt(polys, [5, 5])).toBe(0);
   });
   it("matches a brute-force ray-cast over every polygon (bbox pre-filter is sound)", () => {
     const pts: [number, number][] = [
@@ -162,7 +196,7 @@ describe("findHoveredPolygon (bbox-prefiltered hover scan)", () => {
           break;
         }
       }
-      expect(findHoveredPolygon(pt, polys, bboxes)).toBe(brute);
+      expect(polygonAt(polys, pt, bboxes)).toBe(brute);
     }
   });
 
@@ -171,9 +205,9 @@ describe("findHoveredPolygon (bbox-prefiltered hover scan)", () => {
     // shape, never read as empty canvas.
     const multi = [{ rings: [SQUARE, FAR_SQUARE] }];
     const bb = computePolygonBboxes(multi);
-    expect(findHoveredPolygon([5, 5], multi, bb)).toBe(0);
-    expect(findHoveredPolygon([105, 105], multi, bb)).toBe(0);
-    expect(findHoveredPolygon([50, 50], multi, bb)).toBeNull(); // between the parts, inside the bbox
+    expect(polygonAt(multi, [5, 5], bb)).toBe(0);
+    expect(polygonAt(multi, [105, 105], bb)).toBe(0);
+    expect(polygonAt(multi, [50, 50], bb)).toBeNull(); // between the parts, inside the bbox
   });
 });
 

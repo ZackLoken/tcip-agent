@@ -5,7 +5,7 @@ import type { AppState } from "@/store/appState";
 import { createAgentActivitySlice } from "@/store/slices/agentActivity";
 import { createBandSelectionSlice } from "@/store/slices/bandSelection";
 import { createBannerSlice } from "@/store/slices/banners";
-import { createCanvasSlice } from "@/store/slices/canvas";
+import { createCanvasSlice, focusContext } from "@/store/slices/canvas";
 import { createGuiSlice } from "@/store/slices/gui";
 import { createPendingTerminalMessageSlice } from "@/store/slices/pendingTerminalMessage";
 import { createRegistryStatusSlice } from "@/store/slices/registryStatus";
@@ -35,6 +35,16 @@ export const useStore = create<AppState>()((...a) => ({
   ...createPendingTerminalMessageSlice(...a),
   ...createUserSlice(...a),
 }));
+
+/** Focus clears when its context (`focusContext`) changes. */
+let context = focusContext(useStore.getState());
+
+useStore.subscribe((s) => {
+  const next = focusContext(s);
+  if (next === context) return;
+  context = next;
+  if (s.canvas.focus) useStore.setState({ canvas: { ...s.canvas, focus: null } });
+});
 
 // Re-export so callers derive a subject's color from one source (GUI-local, name-hashed).
 export { subjectColor };

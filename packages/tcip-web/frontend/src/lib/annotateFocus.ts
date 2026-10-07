@@ -55,6 +55,6 @@ export async function applyAnnotateFocus(d: AnnotateFocusData): Promise<void> {
   // focused frame, otherwise a frame labeled for another subject shows a blank canvas even in
   // the right mode.
   if (d.active_subject) store.setActiveSubject(d.active_subject);
-  store.setFocusedProposal(d.proposal ?? null);
+  store.setFocus(typeof d.proposal === "number" ? { kind: "proposal", index: d.proposal } : null);
   store.setActiveTab("annotate");
 }

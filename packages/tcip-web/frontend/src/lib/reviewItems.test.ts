@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   annotationMatch,
+  awaitsDecision,
+  decisionTarget,
   flagPlaces,
   flagRequest,
+  focusedItem,
   imageFlags,
   keptItems,
   matchTypes,
@@ -93,7 +96,15 @@ const proposals = [
 ];
 
 const items = (mode: Mode, reviewing = true, flags: Flag[] = []) =>
-  reviewItems({ canvas, proposals, reviewing, mode, flags, bucket: BUCKET });
+  reviewItems({
+    canvas,
+    proposals,
+    matches: matchTypes(canvas, proposals, reviewing),
+    reviewing,
+    mode,
+    flags,
+    bucket: BUCKET,
+  });
 
 describe("match types", () => {
   it("an annotation is matched when a proposal pairs with it and annotation-only otherwise", () => {
@@ -116,8 +127,8 @@ describe("reviewItems", () => {
   it("lists the selected tool's geometry only: its annotations, then its unpaired proposals", () => {
     expect(items("box").map((i) => [i.kind, i.ref, i.match, i.reviewed])).toEqual([
       ["annotation", 0, "matched", true],
-      ["annotation", 1, "matched", false],
-      ["annotation", 2, "annotation_only", null],
+      ["annotation", 1, "matched", true],
+      ["annotation", 2, "annotation_only", true],
       ["proposal", 2, "proposal_only", false],
     ]);
     expect(items("polygon").map((i) => [i.kind, i.ref, i.match])).toEqual([
@@ -133,10 +144,57 @@ describe("reviewItems", () => {
     expect(pending.pairing).toBe(1);
   });
 
+  it("an annotation awaits review until a person stands behind it, with or without a bucket", () => {
+    const reviewedWith = (authorship: string | null | undefined, reviewing: boolean) =>
+      reviewItems({
+        canvas: { ...canvas, boxes: [{ ...box(80, 0), authorship }] },
+        proposals: [],
+        matches: matchTypes({ ...canvas, boxes: [{ ...box(80, 0), authorship }] }, [], reviewing),
+        reviewing,
+        mode: "box",
+        flags: [],
+        bucket: reviewing ? BUCKET : null,
+      })[0].reviewed;
+    for (const reviewing of [true, false]) {
+      expect(reviewedWith("tool", reviewing)).toBe(false);
+      expect(reviewedWith("unattributed", reviewing)).toBe(false);
+      expect(reviewedWith("tool_accepted", reviewing)).toBe(true);
+      expect(reviewedWith("person", reviewing)).toBe(true);
+      expect(reviewedWith(undefined, reviewing)).toBe(true);
+    }
+  });
+
+  it("a matched annotation reads the same fact as any other, whatever its proposals' decisions", () => {
+    const tools = { ...canvas, boxes: [{ ...box(0, 0, 0), authorship: "tool" }] };
+    const decided = [proposal({ index: 0, paired: 0, decision: "accepted" })];
+    const listed = reviewItems({
+      canvas: tools,
+      proposals: decided,
+      matches: matchTypes(tools, decided, true),
+      reviewing: true,
+      mode: "box",
+      flags: [],
+      bucket: BUCKET,
+    });
+    expect(listed[0].reviewed).toBe(false);
+  });
+
+  it("a person's annotation with an undecided proposal pairing it still awaits that decision", () => {
+    const listed = items("box");
+    const personsWithUndecided = listed[1];
+    expect(personsWithUndecided).toMatchObject({ reviewed: true, pairing: 1 });
+    expect(scopedOrder(listed, "unreviewed").map((i) => [i.kind, i.ref])).toEqual([
+      ["annotation", 1],
+      ["proposal", 2],
+    ]);
+    expect(awaitsDecision(listed[0])).toBe(false);
+    expect(awaitsDecision(listed[2])).toBe(false);
+  });
+
   it("lists the annotations alone, with no match, while not reviewing", () => {
     const listed = items("box", false);
     expect(listed).toHaveLength(3);
-    expect(listed.every((i) => i.match === null && i.reviewed === null)).toBe(true);
+    expect(listed.every((i) => i.match === null)).toBe(true);
   });
 
   it("the match filter keeps one match type and the floor drops proposals under it", () => {
@@ -163,6 +221,63 @@ describe("reviewItems", () => {
   });
 });
 
+describe("focusedItem", () => {
+  const focusOn = (focus: Parameters<typeof focusedItem>[2]) =>
+    focusedItem(items("box"), proposals, focus);
+
+  it("names an annotation by its tool and canvas index, and a proposal by its own index", () => {
+    expect(focusOn({ kind: "box", index: 2 })).toMatchObject({ kind: "annotation", ref: 2 });
+    expect(focusOn({ kind: "proposal", index: 2 })).toMatchObject({ kind: "proposal", ref: 2 });
+  });
+
+  it("a proposal pairing with an annotation is that annotation's item", () => {
+    expect(focusOn({ kind: "proposal", index: 1 })).toMatchObject({ kind: "annotation", ref: 1 });
+  });
+
+  it("names nothing for no focus, another tool's shape or a decided unpaired proposal", () => {
+    expect(focusOn(null)).toBeNull();
+    expect(focusOn({ kind: "polygon", index: 0 })).toBeNull();
+    expect(focusOn({ kind: "proposal", index: 3 })).toBeNull();
+  });
+});
+
+describe("decisionTarget", () => {
+  const unconfirmed: ReviewItem = {
+    ...items("box")[2],
+    reviewed: false,
+  };
+  const pairedProposalOf = (reviewed: boolean): ReviewItem => ({
+    ...items("box")[1],
+    reviewed,
+  });
+  const unpaired = items("box")[3];
+
+  it("acts on the focused item's proposal, whichever way it pairs", () => {
+    expect(decisionTarget("accept", pairedProposalOf(true), [])).toEqual({
+      kind: "proposal",
+      index: 1,
+    });
+    expect(decisionTarget("reject", unpaired, [])).toEqual({ kind: "proposal", index: 2 });
+  });
+
+  it("with nothing focused acts on the first unreviewed item", () => {
+    expect(decisionTarget("accept", null, [unpaired])).toEqual({ kind: "proposal", index: 2 });
+    expect(decisionTarget("accept", null, [])).toBeNull();
+  });
+
+  it("an accept confirms an annotation no person stands behind; a reject never acts on it", () => {
+    expect(decisionTarget("accept", unconfirmed, [unpaired])).toEqual({
+      kind: "confirm",
+      item: unconfirmed,
+    });
+    expect(decisionTarget("reject", unconfirmed, [unpaired])).toBeNull();
+  });
+
+  it("an annotation a person stands behind has nothing to accept", () => {
+    expect(decisionTarget("accept", items("box")[2], [unpaired])).toBeNull();
+  });
+});
+
 describe("flags on items", () => {
   const flags = [
     flag({ id: "on-box", point: [5, 5], subject: "fruit" }),
@@ -171,6 +286,11 @@ describe("flags on items", () => {
     flag({ id: "done", point: [45, 5], subject: "fruit", resolved_by: "user:b" }),
     flag({ id: "other-bucket", proposal: ["m2/2026-01-01", 2] }),
   ];
+
+  it("a flag at an item's place on another subject's mark is not that item's", () => {
+    const listed = items("box", true, [flag({ id: "other", point: [5, 5], subject: "leaf" })]);
+    expect(listed.flatMap((i) => i.flags)).toEqual([]);
+  });
 
   it("each item holds its open flags: by place and subject, or by bucket and index", () => {
     const listed = items("box", true, flags);
@@ -218,6 +338,7 @@ describe("flags on items", () => {
     const [item] = reviewItems({
       canvas: concave,
       proposals: [],
+      matches: matchTypes(concave, [], false),
       reviewing: false,
       mode: "polygon",
       flags: [],
@@ -243,7 +364,7 @@ describe("the review path", () => {
     subject: "fruit",
     bbox: [x, y, x + 2, y + 2],
     match: null,
-    reviewed: null,
+    reviewed: true,
     score: null,
     at: [x + 1, y + 1],
     flags: [],
@@ -258,6 +379,16 @@ describe("the review path", () => {
       item(3, 80, 90),
     ]);
     expect(order.map((i) => i.ref)).toEqual([1, 2, 3, 0]);
+  });
+
+  it("each step goes to the item nearest the one just left, not nearest the corner", () => {
+    const order = nearestNeighborOrder([
+      item(0, 0, 0),
+      item(1, 100, 0),
+      item(2, 100, 10),
+      item(3, 0, 60),
+    ]);
+    expect(order.map((i) => i.ref)).toEqual([0, 3, 2, 1]);
   });
 
   it("a scope takes a subsequence of the order without re-touring it", () => {

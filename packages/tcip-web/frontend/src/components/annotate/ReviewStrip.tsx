@@ -25,6 +25,8 @@ export function ReviewStrip({
   onFilters,
   scope,
   onScope,
+  canAccept,
+  canReject,
   counts,
   focused,
   position,
@@ -53,6 +55,9 @@ export function ReviewStrip({
   onFilters: (next: ItemFilters) => void;
   scope: StepScope;
   onScope: (next: StepScope) => void;
+  /** Whether an accept, or a reject, has an item to act on. */
+  canAccept: boolean;
+  canReject: boolean;
   /** The items the filters leave, those among them unreviewed, and the image's open flags. */
   counts: { items: number; unreviewed: number; flags: number };
   focused: ReviewItem | null;
@@ -67,10 +72,9 @@ export function ReviewStrip({
   flags: Flag[];
   flagsOpen: boolean;
   onFlagsOpen: (open: boolean) => void;
-  onFlag: (text: string) => void;
+  onFlag: (text: string) => Promise<boolean>;
   onResolve: (id: string, reply: string) => void;
 }) {
-  const canDecide = reviewing && counts.unreviewed > 0;
   const K = ANNOTATE_KEYS;
   return (
     <div className="flex h-9 shrink-0 items-center gap-3 border-b border-tcip-border bg-tcip-panel px-3 text-[12px]">
@@ -152,7 +156,7 @@ export function ReviewStrip({
         <button
           type="button"
           className="tcip-btn h-7 text-[11px]"
-          disabled={!canDecide}
+          disabled={!canAccept}
           onClick={onAccept}
           title={`${K.accept.desc} (${K.accept.label})`}
         >
@@ -170,7 +174,7 @@ export function ReviewStrip({
         <button
           type="button"
           className="tcip-btn h-7 text-[11px]"
-          disabled={!canDecide}
+          disabled={!canReject}
           onClick={onReject}
           title={`${K.reject.desc} (${K.reject.label})`}
         >

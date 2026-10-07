@@ -45,11 +45,13 @@ function renderToolbar(
     subjectState?: SubjectState | null;
     onComplete?: (next: boolean) => void;
     onCompleteView?: () => void;
+    onCancelSave?: () => void;
   },
 ) {
   render(
     <AnnotateToolbar
       onSave={() => {}}
+      onCancelSave={extra?.onCancelSave ?? (() => {})}
       saveDisabled={false}
       dirty={false}
       bandsInfo={bandsInfo}
@@ -83,6 +85,20 @@ const THREE_BANDS: ImageBandsResponse = {
     { name: "Blue", wavelength_nm: null, dtype: "uint8", min: 0, max: 255 },
   ],
 };
+
+describe("AnnotateToolbar save state", () => {
+  it("shows a save in flight, and the button then cancels it rather than saving again", () => {
+    const onCancelSave = vi.fn();
+    renderToolbar(null, null, { onCancelSave });
+    fireEvent.click(screen.getByRole("button", { name: "Editor" }));
+    const save = () => screen.getByRole("button", { name: /^Saved$|^Saving$/ });
+    expect(save()).toHaveTextContent("Saved");
+    act(() => void useStore.getState().holdForSave("x"));
+    expect(save()).toHaveTextContent("Saving");
+    fireEvent.click(save());
+    expect(onCancelSave).toHaveBeenCalledOnce();
+  });
+});
 
 describe("AnnotateToolbar draw mode", () => {
   it("offers all three geometry kinds, with the active one pressed", () => {
@@ -423,22 +439,21 @@ function seedSubject(subject: string) {
 }
 
 describe("AnnotateToolbar image stepping", () => {
-  it("leaves the focused proposal and the selected polygon behind on the image it left", () => {
+  it("leaves the focused item behind on the image it left", () => {
     useStore.setState((s) => ({
       gui: {
         ...s.gui,
         dataset: { ...s.gui.dataset, image_list: ["img1.jpg", "img2.jpg"], current_image_index: 0 },
       },
-      annotateUi: { ...s.annotateUi, focusedProposal: 3 },
-      canvas: { ...s.canvas, selectedPolygonIdx: 0 },
     }));
+    useStore.getState().setFocus({ kind: "proposal", index: 3 });
+    expect(useStore.getState().canvas.focus).not.toBeNull();
     renderToolbar();
 
     fireEvent.click(screen.getByRole("button", { name: "Next image" }));
 
     expect(useStore.getState().gui.dataset.current_image_index).toBe(1);
-    expect(useStore.getState().annotateUi.focusedProposal).toBeNull();
-    expect(useStore.getState().canvas.selectedPolygonIdx).toBeNull();
+    expect(useStore.getState().canvas.focus).toBeNull();
   });
 });
 

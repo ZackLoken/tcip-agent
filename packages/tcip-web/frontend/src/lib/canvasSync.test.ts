@@ -11,9 +11,10 @@ import {
   shapeVisible,
   type CanvasStateBody,
 } from "@/lib/canvasSync";
+import { draftStrokes } from "@/lib/draftStrokes";
 import { ringsBbox } from "@/lib/polygonGeometry";
 import type { ReviewItem } from "@/lib/reviewItems";
-import { FLAG_MARK, FOCUS_HALO, MATCH_COLORS } from "@/lib/symbology";
+import { DOTTED_DASH, DRAFT_DASH, FLAG_MARK, FOCUS_HALO, MATCH_COLORS } from "@/lib/symbology";
 import type { Proposal } from "@/store/types";
 
 const RED = subjectColor("subject_a");
@@ -26,7 +27,7 @@ const focusOn = (shape: ReviewItem["shape"], ref: number): ReviewItem => ({
   subject: "",
   bbox: [0, 0, 0, 0],
   match: null,
-  reviewed: null,
+  reviewed: true,
   score: null,
   at: [0, 0],
   flags: [],
@@ -133,7 +134,6 @@ describe("buildAnnotateShapes", () => {
         attributes: {},
       },
     ],
-    currentPolygon: [] as [number, number][],
     mode: "polygon",
     activeSubject: "subject_a",
     visible: true,
@@ -157,68 +157,63 @@ describe("buildAnnotateShapes", () => {
   it("an in-progress drawing rides along as a dashed polyline in the active subject's color", () => {
     // The mirror must match the real canvas's InProgressPolygon stroke, the active subject's color:
     // a divergence here is what capture_live_canvas would show that the breeder's own screen does not.
-    const shapes = buildAnnotateShapes({
-      ...base,
+    const draft = draftStrokes({
+      mode: "polygon",
       currentPolygon: [
         [1, 1],
         [2, 2],
       ],
+      polygonColor: RED,
+      cutStart: null,
+      cursor: null,
     });
-    expect(shapes.at(-1)).toMatchObject({
+    expect(buildAnnotateShapes({ ...base, draft }).at(-1)).toMatchObject({
       kind: "polyline",
       tag: "in_progress",
-      dashed: true,
+      dash: DRAFT_DASH,
       color: RED,
+      label: "drawing",
     });
   });
 
-  it("falls back to amber only when nothing is selected (drawing is otherwise blocked)", () => {
-    const shapes = buildAnnotateShapes({
-      ...base,
-      activeSubject: "",
-      currentPolygon: [
-        [1, 1],
-        [2, 2],
-      ],
-    });
-    expect(shapes.at(-1)).toMatchObject({ kind: "polyline", color: "#FFE7B1" });
-  });
-
-  it("a pending cut start rides as an in_progress polyline labeled cut, start and cursor", () => {
-    const shapes = buildAnnotateShapes({
-      ...base,
+  it("a pending cut and the cursor ride as the laid start and a tail that draws no vertex dot", () => {
+    const draft = draftStrokes({
+      mode: "polygon",
+      currentPolygon: [],
+      polygonColor: null,
       cutStart: { point: [3, 4], color: "#123456" },
       cursor: [5, 6],
     });
-    expect(shapes.at(-1)).toMatchObject({
-      kind: "polyline",
-      tag: "in_progress",
-      label: "cut",
-      dashed: true,
-      color: "#123456",
+    const [start, tail] = buildAnnotateShapes({ ...base, draft }).slice(-2);
+    expect(start).toMatchObject({ label: "cut", points: [[3, 4]], color: "#123456" });
+    expect(start.vertices).toBeUndefined();
+    expect(tail).toMatchObject({
       points: [
         [3, 4],
         [5, 6],
       ],
+      vertices: false,
     });
   });
 
-  it("a pending cut start with no cursor yet rides as the start point alone", () => {
-    const shapes = buildAnnotateShapes({
-      ...base,
-      cutStart: { point: [3, 4], color: "#123456" },
+  it("the labels toggle hides every committed shape and no draft, exactly like the canvas", () => {
+    const draft = draftStrokes({
+      mode: "polygon",
+      currentPolygon: [[1, 1]],
+      polygonColor: RED,
+      cutStart: null,
       cursor: null,
     });
-    expect(shapes.at(-1)).toMatchObject({ kind: "polyline", label: "cut", points: [[3, 4]] });
-  });
-
-  it("no cut polyline rides when no start is pending", () => {
-    const shapes = buildAnnotateShapes({ ...base, cutStart: null, cursor: [5, 6] });
-    expect(shapes.some((s) => s.label === "cut")).toBe(false);
-  });
-
-  it("the labels toggle hides everything, exactly like the canvas", () => {
     expect(buildAnnotateShapes({ ...base, visible: false })).toEqual([]);
+    expect(buildAnnotateShapes({ ...base, visible: false, draft })).toHaveLength(1);
+    expect(
+      buildAnnotateShapes({
+        ...base,
+        visible: false,
+        mode: "box",
+        drawingBox: { x1: 1, y1: 2, x2: 3, y2: 4, subject: "subject_a" },
+      }),
+    ).toHaveLength(1);
   });
 
   it("box mode renders the active-subject editable boxes solid (the 'other' subject filtered out)", () => {
@@ -234,7 +229,7 @@ describe("buildAnnotateShapes", () => {
     // Only the active subject's real box renders, solid (editable).
     expect(shapes).toHaveLength(1);
     expect(shapes[0]).toMatchObject({ kind: "box", xyxy: [12, 7, 41, 23] });
-    expect(shapes[0].dashed).toBeFalsy();
+    expect(shapes[0].dash).toBeUndefined();
   });
 
   it("an editable box keeps x before y in the wire tuple its renderer reads", () => {
@@ -259,7 +254,7 @@ describe("buildAnnotateShapes", () => {
     expect(derived).toHaveLength(1); // only the active "subject_a" polygon; "other" is filtered out
     expect(derived[0].xyxy).toEqual(ringsBbox(base.polygons[0].rings));
     expect(derived[0].label).toBeUndefined();
-    expect(derived[0].dashed).toBeFalsy();
+    expect(derived[0].dash).toBeUndefined();
   });
 
   it("pushes every ring of a multi-ring polygon, sharing its color, labeled once when focused", () => {
@@ -390,7 +385,7 @@ describe("buildAnnotateShapes", () => {
     ];
     const atRest = buildAnnotateShapes({ ...base, mode: "box", polygons: [], boxes });
     expect(atRest).toHaveLength(1);
-    expect(atRest[0]).toMatchObject({ dashed: true });
+    expect(atRest[0]).toMatchObject({ dash: DOTTED_DASH });
     expect(atRest[0].label).toBeUndefined();
     const focused = buildAnnotateShapes({
       ...base,
@@ -399,7 +394,7 @@ describe("buildAnnotateShapes", () => {
       boxes,
       focused: focusOn("box", 0),
     });
-    expect(focused[0]).toMatchObject({ dashed: true, halo: HALO, label: "subject_a, tool" });
+    expect(focused[0]).toMatchObject({ dash: DOTTED_DASH, halo: HALO, label: "subject_a, tool" });
   });
 
   it("a person's box pushes solid", () => {
@@ -411,7 +406,7 @@ describe("buildAnnotateShapes", () => {
         { x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {}, authorship: "person" },
       ],
     });
-    expect(shapes[0].dashed).toBeFalsy();
+    expect(shapes[0].dash).toBeUndefined();
   });
 
   it("a tool's polygon and a tool's point push dashed", () => {
@@ -419,14 +414,14 @@ describe("buildAnnotateShapes", () => {
       ...base,
       polygons: [{ ...base.polygons[0], authorship: "tool" }],
     });
-    expect(polygon[0].dashed).toBe(true);
+    expect(polygon[0].dash).toEqual(DOTTED_DASH);
     const point = buildAnnotateShapes({
       ...base,
       mode: "point",
       polygons: [],
       points: [{ x: 1, y: 1, subject: "subject_a", attributes: {}, authorship: "tool" }],
     });
-    expect(point[0].dashed).toBe(true);
+    expect(point[0].dash).toEqual(DOTTED_DASH);
   });
 
   it("a tool's polygon's derived box draws dashed like the polygon it belongs to", () => {
@@ -437,7 +432,7 @@ describe("buildAnnotateShapes", () => {
       polygons: [{ ...base.polygons[0], authorship: "tool" }],
     });
     const derived = shapes.find((s) => s.kind === "box")!;
-    expect(derived.dashed).toBe(true);
+    expect(derived.dash).toEqual(DOTTED_DASH);
     expect(derived.label).toBeUndefined();
   });
 
@@ -446,11 +441,22 @@ describe("buildAnnotateShapes", () => {
       ...base,
       mode: "box",
       boxes: [],
-      drawingBox: { x1: 50, y1: 50, x2: 40, y2: 60 },
+      drawingBox: { x1: 50, y1: 50, x2: 40, y2: 60, subject: "other" },
     });
     expect(shapes.some((s) => s.kind === "polygon")).toBe(false);
     const rubber = shapes.find((s) => s.tag === "in_progress")!;
-    expect(rubber).toMatchObject({ kind: "box", xyxy: [40, 50, 50, 60], dashed: true });
+    expect(rubber).toMatchObject({ kind: "box", xyxy: [40, 50, 50, 60], dash: DRAFT_DASH });
+  });
+
+  it("the rubber-band box takes its own subject's color, not the active subject's", () => {
+    const shapes = buildAnnotateShapes({
+      ...base,
+      mode: "box",
+      boxes: [],
+      drawingBox: { x1: 1, y1: 2, x2: 3, y2: 4, subject: "other" },
+    });
+    expect(shapes.find((s) => s.tag === "in_progress")?.color).toBe(OTHER);
+    expect(OTHER).not.toBe(RED);
   });
 
   it("pushes each placed flag as a mark carrying its comment", () => {
@@ -505,11 +511,57 @@ describe("buildAnnotateShapes", () => {
   });
 });
 
+describe("the shapes the server render is fed", () => {
+  const args = { boxes: [], activeSubject: "subject_a", visible: true, colorFor: subjectColor };
+
+  it("are what buildAnnotateShapes produces, the records the renderer's own tests read", async () => {
+    const polygon = buildAnnotateShapes({
+      ...args,
+      mode: "polygon",
+      polygons: [
+        {
+          rings: [
+            [
+              [100, 50],
+              [500, 50],
+              [500, 150],
+            ],
+          ],
+          subject: "subject_a",
+          attributes: {},
+          authorship: "tool",
+        },
+      ],
+    });
+    const point = buildAnnotateShapes({
+      ...args,
+      mode: "point",
+      polygons: [],
+      points: [{ x: 700, y: 100, subject: "subject_a", attributes: {}, authorship: "tool" }],
+    });
+    const firstVertex = buildAnnotateShapes({
+      ...args,
+      mode: "polygon",
+      polygons: [],
+      draft: draftStrokes({
+        mode: "polygon",
+        currentPolygon: [[60, 40]],
+        polygonColor: subjectColor("subject_a"),
+        cutStart: null,
+        cursor: null,
+      }),
+    });
+    const record = { tool_polygon: polygon, tool_point: point, first_vertex: firstVertex };
+    await expect(`${JSON.stringify(record, null, 2)}\n`).toMatchFileSnapshot(
+      "../../../../../tests/fixtures/canvas_mirror_shapes.json",
+    );
+  });
+});
+
 describe("buildAnnotateShapes proposals", () => {
   const base = {
     boxes: [],
     polygons: [],
-    currentPolygon: [] as [number, number][],
     mode: "polygon",
     activeSubject: "subject_a",
     visible: true,
@@ -564,7 +616,7 @@ describe("buildAnnotateShapes proposals", () => {
     const shown = shapes.filter((s) => s.tag === "proposal");
     expect(shown).toHaveLength(3);
     expect(shown[0]).toMatchObject({ kind: "box", xyxy: [1, 2, 11, 12] });
-    expect(shown.every((s) => s.dashed)).toBe(true);
+    expect(shown.every((s) => s.dash === DOTTED_DASH)).toBe(true);
     expect(shown.map((s) => s.color)).toEqual([
       MATCH_COLORS.proposal_only,
       MATCH_COLORS.matched,

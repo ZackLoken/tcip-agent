@@ -10,6 +10,7 @@ import type {
   AnnotationPayload,
   Box,
   CarriedFields,
+  Mode,
   PointShape,
   PolygonShape,
 } from "@/store/types";
@@ -79,11 +80,21 @@ export function annotationsToCanvas(annotations: Annotation[]): CanvasLabels {
   return { boxes, polygons, points, imageAnnotations };
 }
 
-/** Reassemble the canvas' four buckets into one unified annotation list for save. */
-export function canvasToAnnotations(labels: CanvasLabels): AnnotationPayload[] {
+/** The canvas' four buckets reassembled into one unified annotation list for save, and where each
+ *  shape of a tool landed in it: `positions[tool][i]` is the list position of the tool's ith
+ *  shape. */
+export function serializeCanvas(labels: CanvasLabels): {
+  annotations: AnnotationPayload[];
+  positions: Record<Mode, number[]>;
+} {
   const out: AnnotationPayload[] = [];
+  const positions: Record<Mode, number[]> = { box: [], polygon: [], point: [] };
+  const push = (tool: Mode, payload: AnnotationPayload) => {
+    positions[tool].push(out.length);
+    out.push(payload);
+  };
   for (const b of labels.boxes) {
-    out.push({
+    push("box", {
       subject: b.subject,
       bbox: [b.x1, b.y1, b.x2, b.y2],
       attributes: b.attributes ?? {},
@@ -96,7 +107,7 @@ export function canvasToAnnotations(labels: CanvasLabels): AnnotationPayload[] {
       p.rings.length === 1
         ? { points: p.rings[0].map(([x, y]) => [x, y]) }
         : { rings: p.rings.map((ring) => ring.map(([x, y]) => [x, y])) };
-    out.push({
+    push("polygon", {
       subject: p.subject,
       ...geometry,
       attributes: p.attributes ?? {},
@@ -105,7 +116,7 @@ export function canvasToAnnotations(labels: CanvasLabels): AnnotationPayload[] {
   }
   for (const p of labels.points) {
     // One coordinate pair, always: a point has no contour, so neither `points` nor `rings` applies.
-    out.push({
+    push("point", {
       subject: p.subject,
       point: [p.x, p.y],
       attributes: p.attributes ?? {},
@@ -115,5 +126,5 @@ export function canvasToAnnotations(labels: CanvasLabels): AnnotationPayload[] {
   for (const a of labels.imageAnnotations) {
     out.push({ subject: a.subject, attributes: a.attributes ?? {}, ...carried(a) });
   }
-  return out;
+  return { annotations: out, positions };
 }

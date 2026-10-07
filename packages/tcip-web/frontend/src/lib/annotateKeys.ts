@@ -9,7 +9,7 @@ export const ANNOTATE_KEYS = {
   accept: {
     keys: "a",
     label: "a",
-    desc: "Accept the focused item's proposal: it joins the labels, or confirms the annotation it pairs with",
+    desc: "Accept the focused item's proposal: it joins the labels, or signs off the annotation it pairs with; on an annotation no person stands behind, sign it off",
   },
   reject: { keys: "r", label: "r", desc: "Reject the focused item's proposal" },
   edit: {

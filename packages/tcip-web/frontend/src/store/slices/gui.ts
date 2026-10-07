@@ -206,6 +206,10 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
       return { gui: { ...s.gui, active_tab } };
     }),
   setView: (view) => set((s) => ({ gui: { ...s.gui, view } })),
-  setMode: (mode) => set((s) => ({ gui: { ...s.gui, mode } })),
+  // Focus belongs to the selected tool: switching tools drops it.
+  setMode: (mode) =>
+    set((s) =>
+      mode === s.gui.mode ? s : { gui: { ...s.gui, mode }, canvas: { ...s.canvas, focus: null } },
+    ),
   setActiveSubject: (active_subject) => set((s) => ({ gui: { ...s.gui, active_subject } })),
 });

@@ -1,10 +1,25 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { canvasToAnnotations } from "@/lib/labelSerde";
+import { serializeCanvas, type CanvasLabels } from "@/lib/labelSerde";
 import { useStore } from "@/store";
-import type { ImageLabels } from "@/store/types";
+import type { Box, ImageLabels } from "@/store/types";
+
+const canvasToAnnotations = (labels: CanvasLabels) => serializeCanvas(labels).annotations;
 
 const s = () => useStore.getState();
+
+/** A save's answer holding `boxes` and nothing else. */
+const answered = (boxes: Box[]): ImageLabels => ({
+  image_path: "x",
+  img_width: 100,
+  img_height: 100,
+  boxes,
+  polygons: [],
+  points: [],
+  imageAnnotations: [],
+  completion: {},
+  flags: [],
+});
 
 function loadPolygon(rings: [number, number][][]): void {
   const labels: ImageLabels = {
@@ -206,7 +221,7 @@ describe("splitPolygon", () => {
       // Each piece is new content the save door stamps; the parent's authorship is not its own.
       expect(piece.authorship).toBeUndefined();
     }
-    expect(s().canvas.selectedPolygonIdx).toBe(0); // the first piece
+    expect(s().canvas.focus).toEqual({ kind: "polygon", index: 0 }); // the first piece
     expect(s().annotateUi.hoveredPolygonIdx).toBeNull();
     expect(s().canvas.dirty).toBe(true);
 
@@ -221,14 +236,32 @@ describe("splitPolygon", () => {
 
   it("one undo restores the parent and its selection", () => {
     loadOnePolygon();
-    s().selectPolygon(0);
+    s().addPoint({ x: 1, y: 1, subject: "tip", attributes: {} });
+    s().setFocus({ kind: "point", index: 0 });
     s().splitPolygon(0, [PIECE_A, PIECE_B]);
     expect(s().canvas.polygons).toHaveLength(2);
+    expect(s().canvas.focus).toEqual({ kind: "polygon", index: 0 });
 
     s().undo();
     expect(s().canvas.polygons).toHaveLength(1);
     expect(s().canvas.polygons[0].rings).toEqual([RING_A]);
-    expect(s().canvas.selectedPolygonIdx).toBe(0);
+    expect(s().canvas.focus).toEqual({ kind: "point", index: 0 });
+  });
+
+  it("undo restores an annotation focus and never a proposal's, whose bucket may have changed", () => {
+    const point = { x: 1, y: 1, subject: "tip", attributes: {} };
+    s().addPoint(point);
+    s().setFocus({ kind: "point", index: 0 });
+    s().addPoint(point);
+    s().setFocus({ kind: "proposal", index: 4 });
+    s().addPoint(point);
+
+    s().undo();
+    expect(s().canvas.focus).toBeNull();
+    s().undo();
+    expect(s().canvas.focus).toEqual({ kind: "point", index: 0 });
+    s().redo();
+    expect(s().canvas.focus).toBeNull();
   });
 });
 
@@ -271,12 +304,31 @@ describe("canvas store points", () => {
     s().addPoint(pt(1, 1, "a"));
     s().addPoint(pt(2, 2, "b"));
     s().addPoint(pt(3, 3, "c"));
-    s().selectPoint(2);
+    s().setFocus({ kind: "point", index: 2 });
     s().deletePoint(0); // an earlier point goes: the selection shifts down with it
     expect(s().canvas.points.map((p) => p.subject)).toEqual(["b", "c"]);
-    expect(s().canvas.selectedPointIdx).toBe(1);
+    expect(s().canvas.focus).toEqual({ kind: "point", index: 1 });
     s().deletePoint(1); // the selected point itself goes
-    expect(s().canvas.selectedPointIdx).toBeNull();
+    expect(s().canvas.focus).toBeNull();
+  });
+
+  it("deleting a shape of another kind leaves the focus alone", () => {
+    s().addPoint(pt(1, 1, "a"));
+    s().addBox({ x1: 0, y1: 0, x2: 5, y2: 5, subject: "a", attributes: {} });
+    s().setFocus({ kind: "box", index: 0 });
+    s().deletePoint(0);
+    expect(s().canvas.focus).toEqual({ kind: "box", index: 0 });
+    s().deleteBox(0);
+    expect(s().canvas.focus).toBeNull();
+  });
+
+  it("setMode to another tool drops the focus; the same tool keeps it", () => {
+    s().setMode("point");
+    s().setFocus({ kind: "point", index: 0 });
+    s().setMode("point");
+    expect(s().canvas.focus).toEqual({ kind: "point", index: 0 });
+    s().setMode("box");
+    expect(s().canvas.focus).toBeNull();
   });
 
   it("updatePoint edits attributes in place (undoable), leaving the position alone", () => {
@@ -287,9 +339,9 @@ describe("canvas store points", () => {
     expect(s().canvas.points[0].attributes).toEqual({});
   });
 
-  it("loadLabelsIntoCanvas adopts loaded points and clears any point selection", () => {
+  it("loadLabelsIntoCanvas adopts loaded points and leaves the focus to the context rule", () => {
     s().addPoint(pt(1, 1));
-    s().selectPoint(0);
+    s().setFocus({ kind: "point", index: 0 });
     s().loadLabelsIntoCanvas({
       image_path: "x",
       img_width: 100,
@@ -302,8 +354,109 @@ describe("canvas store points", () => {
       flags: [],
     });
     expect(s().canvas.points).toEqual([pt(5, 6, "tip")]);
-    expect(s().canvas.selectedPointIdx).toBeNull();
+    expect(s().canvas.focus).toEqual({ kind: "point", index: 0 });
     expect(s().canvas.dirty).toBe(false);
+  });
+});
+
+describe("focus follows the image and the bucket", () => {
+  const select = (over: Partial<ReturnType<typeof s>["gui"]["dataset"]>) =>
+    useStore.setState((st) => ({
+      gui: { ...st.gui, dataset: { ...st.gui.dataset, ...over } },
+    }));
+
+  beforeEach(() => {
+    s().clearCanvas();
+    select({
+      images_dir: "/d/a",
+      image_list: ["1.jpg", "2.jpg"],
+      current_image_index: 0,
+      bucket: "b1",
+    });
+  });
+
+  it("clears when the image changes, by index or by directory", () => {
+    s().setFocus({ kind: "proposal", index: 2 });
+    select({ current_image_index: 1 });
+    expect(s().canvas.focus).toBeNull();
+
+    s().setFocus({ kind: "box", index: 0 });
+    select({ images_dir: "/d/b" });
+    expect(s().canvas.focus).toBeNull();
+  });
+
+  it("clears when the bucket changes, so an index never names another bucket's proposal", () => {
+    s().setFocus({ kind: "proposal", index: 2 });
+    select({ bucket: "b2" });
+    expect(s().canvas.focus).toBeNull();
+  });
+
+  it("survives a refresh of the same image and an unrelated change to the selection", () => {
+    s().setFocus({ kind: "proposal", index: 2 });
+    select({ subject: "other" });
+    s().loadLabelsIntoCanvas({
+      image_path: "/d/a/1.jpg",
+      img_width: 10,
+      img_height: 10,
+      boxes: [],
+      polygons: [],
+      points: [],
+      imageAnnotations: [],
+      completion: {},
+      flags: [],
+    });
+    expect(s().canvas.focus).toEqual({ kind: "proposal", index: 2 });
+  });
+
+  it("holds a focus set after the change that selected its image, as the agent's is", () => {
+    select({ current_image_index: 1 });
+    s().setFocus({ kind: "proposal", index: 4 });
+    expect(s().canvas.focus).toEqual({ kind: "proposal", index: 4 });
+  });
+
+  describe("history restoration after the image changed", () => {
+    const loaded = (name: string, boxes: Box[]): ImageLabels => ({
+      image_path: `/d/a/${name}`,
+      img_width: 100,
+      img_height: 100,
+      boxes,
+      polygons: [],
+      points: [],
+      imageAnnotations: [],
+      completion: {},
+      flags: [],
+    });
+    const first = { x1: 10, y1: 10, x2: 50, y2: 50, subject: "subject_a", attributes: {} };
+
+    function focusedBoxWithSnapshot() {
+      s().loadLabelsIntoCanvas(loaded("1.jpg", [first]));
+      s().setFocus({ kind: "box", index: 0 });
+      s().pushUndo();
+      s().dragBox(0, { ...first, x2: 11, y2: 11 });
+    }
+
+    it("a rollback leaves the focus the image change cleared, so the next image does not inherit it", () => {
+      focusedBoxWithSnapshot();
+      select({ current_image_index: 1 });
+      s().rollbackLast();
+      expect(s().canvas.boxes[0]).toEqual(first);
+      s().loadLabelsIntoCanvas(loaded("2.jpg", [{ ...first, subject: "other" }]));
+      expect(s().canvas.focus).toBeNull();
+    });
+
+    it("an undo does the same", () => {
+      focusedBoxWithSnapshot();
+      select({ current_image_index: 1 });
+      s().undo();
+      expect(s().canvas.focus).toBeNull();
+    });
+
+    it("a rollback within the same image restores the focus the snapshot held", () => {
+      focusedBoxWithSnapshot();
+      s().setFocus(null);
+      s().rollbackLast();
+      expect(s().canvas.focus).toEqual({ kind: "box", index: 0 });
+    });
   });
 });
 
@@ -353,13 +506,78 @@ describe("content-based dirty tracking", () => {
     expect(s().canvas.dirty).toBe(true);
   });
 
-  it("a save re-baselines: deleting a saved shape then undoing it is clean again", () => {
+  it("a loaded document re-baselines: deleting a loaded shape then undoing it is clean again", () => {
     s().addBox(box);
-    s().markClean({}, []);
+    s().loadLabelsIntoCanvas(answered([{ ...box, index: 0, authorship: "person" }]));
+    expect(s().canvas.undoStack).toHaveLength(0);
     s().deleteBox(0);
     expect(s().canvas.dirty).toBe(true);
     s().undo();
     expect(s().canvas.dirty).toBe(false);
+  });
+
+  describe("while a save is in flight", () => {
+    const withDocumentOneBox = () => {
+      s().loadLabelsIntoCanvas(answered([{ ...box, index: 0, authorship: "person" }]));
+      return s().holdForSave("/d/a/1.jpg");
+    };
+
+    it("refuses every content edit and leaves the canvas as it was", () => {
+      withDocumentOneBox();
+      const before = s().canvas;
+      s().addBox({ ...box, x2: 9 });
+      s().deleteBox(0);
+      s().updateBox(0, { ...box, x2: 8 });
+      s().undo();
+      s().redo();
+      expect(s().canvas.boxes).toBe(before.boxes);
+      expect(s().canvas.undoStack).toHaveLength(0);
+      expect(s().canvas.dirty).toBe(false);
+    });
+
+    const heldWithHistory = () => {
+      s().loadLabelsIntoCanvas(answered([]));
+      s().addBox(box);
+      s().addBox({ ...box, x2: 9 });
+      s().undo();
+      s().holdForSave("/d/a/1.jpg");
+      return s().canvas;
+    };
+
+    it("refuses undo over a history the canvas already has", () => {
+      const held = heldWithHistory();
+      s().undo();
+      expect(s().canvas.boxes).toBe(held.boxes);
+      expect(s().canvas.undoStack).toBe(held.undoStack);
+    });
+
+    it("refuses redo over a history the canvas already has", () => {
+      const held = heldWithHistory();
+      s().redo();
+      expect(s().canvas.boxes).toBe(held.boxes);
+      expect(s().canvas.redoStack).toBe(held.redoStack);
+    });
+
+    it("accepts edits again once the answer is adopted, which also ends the save", () => {
+      withDocumentOneBox();
+      s().loadLabelsIntoCanvas(answered([{ ...box, index: 3, authorship: "person" }]));
+      expect(s().canvas.saving).toBeNull();
+      s().addBox({ ...box, x2: 9 });
+      expect(s().canvas.boxes).toHaveLength(2);
+    });
+
+    it("is released by the save that holds it and by no other", () => {
+      const first = withDocumentOneBox();
+      s().loadLabelsIntoCanvas(answered([])); // a load of another image drops the hold
+      const second = s().holdForSave("/d/a/2.jpg");
+      expect(second.id).not.toBe(first.id);
+      s().releaseSave(first);
+      expect(s().canvas.saving).toEqual(second);
+      s().releaseSave({ ...second, image: "/d/a/1.jpg" });
+      expect(s().canvas.saving).toEqual(second);
+      s().releaseSave(second);
+      expect(s().canvas.saving).toBeNull();
+    });
   });
 
   it("a genuine change stays dirty", () => {
@@ -378,6 +596,76 @@ describe("content-based dirty tracking", () => {
     s().dragVertex(0, 0, 1, [ox, oy]);
     s().recomputeDirty();
     expect(s().canvas.dirty).toBe(false);
+  });
+});
+
+describe("the hold on the canvas covers every content edit", () => {
+  const polygon = { rings: [RING_A], subject: "subject_a", attributes: {} };
+  const box = { x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {} };
+  const rating = { subject: "subject_a", attributes: {}, iscrowd: false };
+
+  /** A canvas on which every action changes state: content of each kind, a history to undo and
+   *  to redo, a polygon being drawn, and a subject to commit it under. */
+  function arrange() {
+    s().clearCanvas();
+    s().loadLabelsIntoCanvas({
+      image_path: "x",
+      img_width: 100,
+      img_height: 100,
+      boxes: [box],
+      polygons: [polygon],
+      points: [{ x: 1, y: 1, subject: "subject_a", attributes: {} }],
+      imageAnnotations: [rating],
+      completion: {},
+      flags: [],
+    });
+    s().addBox({ ...box, x2: 9 });
+    s().addBox({ ...box, x2: 8 });
+    s().undo();
+    s().setCurrentPolygon(RING_B);
+    useStore.setState((st) => ({ gui: { ...st.gui, active_subject: "subject_a" } }));
+  }
+
+  const ACTIONS: [string, () => unknown][] = [
+    ["pushUndo", () => s().pushUndo()],
+    ["undo", () => s().undo()],
+    ["rollbackLast", () => s().rollbackLast()],
+    ["redo", () => s().redo()],
+    ["addBox", () => s().addBox({ ...box, x2: 7 })],
+    ["updateBox", () => s().updateBox(0, { ...box, x2: 6 })],
+    ["dragBox", () => s().dragBox(0, { ...box, x2: 6 })],
+    ["deleteBox", () => s().deleteBox(0)],
+    ["addPolygon", () => s().addPolygon({ ...polygon, rings: [RING_B] })],
+    ["updatePolygon", () => s().updatePolygon(0, { ...polygon, rings: [RING_B] })],
+    ["dragVertex", () => s().dragVertex(0, 0, 0, [3, 3])],
+    ["deletePolygon", () => s().deletePolygon(0)],
+    ["splitPolygon", () => s().splitPolygon(0, [RING_A, RING_B])],
+    ["addPoint", () => s().addPoint({ x: 2, y: 2, subject: "subject_a", attributes: {} })],
+    ["updatePoint", () => s().updatePoint(0, { x: 3, y: 3, subject: "subject_a", attributes: {} })],
+    ["dragPoint", () => s().dragPoint(0, 9, 9)],
+    ["deletePoint", () => s().deletePoint(0)],
+    ["setCurrentPolygon", () => s().setCurrentPolygon(RING_A)],
+    ["commitCurrentPolygon", () => s().commitCurrentPolygon()],
+    ["addImageAnnotation", () => s().addImageAnnotation("subject_a")],
+    ["updateImageAnnotation", () => s().updateImageAnnotation(0, { ...rating, iscrowd: true })],
+    ["deleteImageAnnotation", () => s().deleteImageAnnotation(0)],
+  ];
+
+  it("lists every action it checks, so a new one is a decision", () => {
+    expect(ACTIONS).toHaveLength(22);
+  });
+
+  it.each(ACTIONS)("%s changes the canvas unheld and does nothing held", (_name, run) => {
+    arrange();
+    const unheld = s().canvas;
+    run();
+    expect(s().canvas).not.toBe(unheld);
+
+    arrange();
+    s().holdForSave("x");
+    const held = s().canvas;
+    run();
+    expect(s().canvas).toBe(held);
   });
 });
 

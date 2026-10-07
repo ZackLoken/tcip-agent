@@ -823,7 +823,7 @@ def test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote(
     assert [{k: v for k, v in line["arguments"].items() if k != "version"}
             for line in lines] == [
         {"capture": "2-11-26", "stem": "IMG_0000", "n_annotations": 1, "accepted": [],
-         "rejected": [], "complete": {}, "flagged": [], "resolved": []}] * 2
+         "rejected": [], "confirmed": [], "complete": {}, "flagged": [], "resolved": []}] * 2
     assert not any(e.get("tool") == "save_label_document" for e in audit_rows(tmp_path))
 
 

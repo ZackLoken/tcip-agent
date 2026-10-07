@@ -1,0 +1,62 @@
+{
+  "tool_polygon": [
+    {
+      "kind": "polygon",
+      "points": [
+        [
+          100,
+          50
+        ],
+        [
+          500,
+          50
+        ],
+        [
+          500,
+          150
+        ]
+      ],
+      "color": "#00CED1",
+      "dash": [
+        1,
+        3
+      ],
+      "tag": "gt"
+    }
+  ],
+  "tool_point": [
+    {
+      "kind": "point",
+      "points": [
+        [
+          700,
+          100
+        ]
+      ],
+      "color": "#00CED1",
+      "dash": [
+        1,
+        3
+      ],
+      "tag": "gt"
+    }
+  ],
+  "first_vertex": [
+    {
+      "kind": "polyline",
+      "points": [
+        [
+          60,
+          40
+        ]
+      ],
+      "color": "#00CED1",
+      "dash": [
+        4,
+        4
+      ],
+      "label": "drawing",
+      "tag": "in_progress"
+    }
+  ]
+}

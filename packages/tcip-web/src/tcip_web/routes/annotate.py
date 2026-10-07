@@ -79,6 +79,8 @@ class SavePayload(BaseModel):
     bucket: Optional[str] = None
     accept: list[int] = []
     reject: list[int] = []
+    # Each annotation the person signs off as their own call, by its position in ``annotations``.
+    confirm: list[int] = []
     complete: dict[str, bool] = {}
     rect: Optional[tuple[float, float, float, float]] = None
     proposals_hidden: bool = False
@@ -142,6 +144,14 @@ def load_labels(image_path: str) -> dict:
     echoes back, the empty token for an image with no document yet."""
     key, w, h = _admitted(image_path)
     doc, version = _read(key)
+    return _labels_body(image_path, key, w, h, doc, version)
+
+
+def _labels_body(image_path: str, key: Key, w: int, h: int, doc: LabelDocument,
+                 version: Version) -> dict:
+    """The label document as the editor adopts it, with the version token that goes with it: what
+    a load answers and what a save answers, so the editor takes a save's token only together
+    with the document it names."""
     return {"image_path": image_path, "img_width": w, "img_height": h,
             "annotations": [{**annotation_dict(a), "index": i}
                             for i, a in enumerate(doc.annotations)],
@@ -153,9 +163,10 @@ def load_labels(image_path: str) -> dict:
 def save_labels(payload: SavePayload) -> dict:
     """Save an image's label document through
     :func:`~tcip_mcp.dataset_layout.save_label_document`, by the person
-    :func:`~tcip_mcp.identity.actor` makes of ``user``, and answer the saved document's version
-    and completion and the image's flags. A stale ``base_mtime`` answers 409 and a refusal 400,
-    nothing written.
+    :func:`~tcip_mcp.identity.actor` makes of ``user``, and answer the saved document with its
+    version, as a load answers it (:func:`_labels_body`), and ``accepted``, each accepted
+    proposal's index mapped to the index of the annotation it resolved to. A stale
+    ``base_mtime`` answers 409 and a refusal 400, nothing written.
     """
     from tcip_annotation.flags import FlagRequest
 
@@ -164,27 +175,29 @@ def save_labels(payload: SavePayload) -> dict:
 
     key, w, h = _admitted(payload.image_path)
     expect = Version(payload.base_mtime) if payload.base_mtime is not None else None
-    for name, indices in (("accept", payload.accept), ("reject", payload.reject)):
+    for name, noun, indices in (("accept", "a proposal", payload.accept),
+                                ("reject", "a proposal", payload.reject),
+                                ("confirm", "an annotation position", payload.confirm)):
         if len(set(indices)) != len(indices):
-            raise HTTPException(400, f"{name} names a proposal more than once: {indices}")
+            raise HTTPException(400, f"{name} names {noun} more than once: {indices}")
     gestures = Gestures(
         bucket=payload.bucket, accept=frozenset(payload.accept),
-        reject=frozenset(payload.reject), complete=payload.complete, rect=payload.rect,
+        reject=frozenset(payload.reject), confirm=frozenset(payload.confirm),
+        complete=payload.complete, rect=payload.rect,
         proposals_hidden=payload.proposals_hidden,
         flag=tuple(FlagRequest(**f.model_dump()) for f in payload.flag),
         resolve=payload.resolve)
     person = actor(payload.user)
     try:
-        version, doc = save_label_document(
+        version, doc, accepted = save_label_document(
             store.project_root, key, [ap.model_dump() for ap in payload.annotations],
             width=w, height=h, author=person, actor=person, expect=expect, gestures=gestures)
     except VersionConflictError as exc:
         raise HTTPException(409, {"error": "label document changed since it was loaded"}) from exc
     except (ValueError, UnreadableLabelDocumentError) as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {"status": "ok", "image_path": payload.image_path,
-            "n_annotations": len(doc.annotations), "base_mtime": version.token,
-            "completion": _completion(doc), "flags": _flags(key)}
+    return {"status": "ok", **_labels_body(payload.image_path, key, w, h, doc, version),
+            "accepted": accepted}
 
 
 @router.get("/proposals")
