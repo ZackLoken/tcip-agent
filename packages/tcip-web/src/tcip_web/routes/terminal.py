@@ -58,12 +58,18 @@ def _offer(queue: asyncio.Queue, data: str) -> None:
 
 
 class LaunchedProgram(BaseModel):
-    """What a launch ran: the provider row's id, the executable, the version it declares, and
-    the steps the row's preparation took before the launch, empty when it has none."""
+    """What a launch ran: the provider row's id, the executable, the version it declares, what
+    the row states its harness's own enforcement restricts and leaves open (``None`` for a
+    ``TCIP_TERMINAL_CMD`` override, which runs no row's arguments), why delivery to it rests on a
+    composer sequence recorded on another version (``None`` when the versions agree, and for an
+    override), and the steps the row's preparation took before the launch, empty when it has
+    none."""
 
     provider: str
     executable: str
     version: Optional[str]
+    confinement: Optional[str]
+    delivery_unverified: Optional[str]
     prepared: list[str]
 
 
@@ -109,13 +115,17 @@ def _record_start(session_id: str, launched: LaunchedProgram, project: Path | No
 class _Launch:
     """One launch of a session's agent: its generation (a stale reader's output carries an older
     one and is dropped), its session-start ritual once known, whether that ritual was delivered,
-    whether the agent has bracketed paste on, the requests waiting behind the ritual, and the
-    output tail an escape sequence split across reads continues from."""
+    whether the agent has bracketed paste on, the sequence one version of its row's harness was
+    recorded writing when its composer appeared and whether the agent has written it, the
+    requests waiting behind the ritual, and the output tail an escape sequence split across reads
+    continues from."""
 
     gen: int
     ritual: Optional[str] = None
     ritual_sent: bool = False
     ready: bool = False
+    composer_ready: Optional[str] = None
+    composer_live: bool = False
     queued: list[str] = field(default_factory=list)
     tail: str = ""
 
@@ -162,14 +172,18 @@ class TerminalSession:
                 prepared, problem = pty_host.prepare_launch(command[0][0], provider, project)
                 if problem is not None:
                     return problem
-            argv = pty_host.render_argv(command[0], project)
+            env = pty_host.spawn_env(self.id)
+            argv = pty_host.render_argv(command[0], project, env)
+            program = pty_host.launched_program(argv, command[1])
             launched = LaunchedProgram(
                 provider=provider.id, prepared=prepared,
-                **pty_host.launched_program(argv, command[1]))
+                confinement=None if command[1] else provider.confinement,
+                delivery_unverified=(None if command[1]
+                                     else provider.delivery_unverified(program["version"])),
+                **program)
+            self._launch.composer_ready = provider.composer_ready
             try:
-                pty = pty_host.spawn_pty(
-                    argv, pty_host.terminal_cwd(), rows, cols, pty_host.spawn_env(self.id)
-                )
+                pty = pty_host.spawn_pty(argv, pty_host.terminal_cwd(), rows, cols, env)
             except OSError as exc:
                 self._pty = None
                 return f"could not start the agent terminal: {exc}"
@@ -279,10 +293,11 @@ class TerminalSession:
 
     def _deliver(self) -> None:
         """Paste the current launch's ritual together with every request queued by then as one
-        message, then each later request on its own, once its agent has bracketed paste on; each
-        leaves the launch only once written. Called under the lock."""
+        message, then each later request on its own, once its agent has bracketed paste on and
+        has written its row's ``composer_ready``; each leaves the launch only once written. Called
+        under the lock."""
         launch = self._launch
-        if not launch.ready or launch.ritual is None:
+        if not (launch.ready and launch.composer_live) or launch.ritual is None:
             return
         if not launch.ritual_sent:
             if not self.write(pty_host.paste("\n\n".join([launch.ritual, *launch.queued]))):
@@ -299,6 +314,8 @@ class TerminalSession:
                 return  # stale reader from a restarted PTY: drop, don't pollute
             seen = launch.tail + data
             launch.ready = pty_host.bracketed_paste(seen, launch.ready)
+            launch.composer_live = launch.composer_live or (
+                launch.composer_ready is not None and launch.composer_ready in seen)
             launch.tail = seen[-_TAIL_CHARS:]
             self._deliver()
             self._scrollback.append(data)

@@ -19,7 +19,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Iterable, Optional
 
 from tcip_mcp.agent_identity import TERMINAL_SESSION_ENV
 from tcip_mcp.project_paths import repo_root_from_here
@@ -40,6 +40,9 @@ WORKSPACE_ARG = "{workspace}"
 """A whole argument: the backend's workspace."""
 MCP_CONFIG_ARG = "{mcp_config}"
 """A whole argument: the path of the JSON MCP configuration :func:`write_mcp_config` writes."""
+CODEX_MCP_ARG = "{codex_mcp}"
+"""A whole argument: the Codex configuration overrides :func:`codex_mcp_overrides` renders, as
+several arguments."""
 
 CLAUDE_SETTINGS = Path(__file__).resolve().parent / "agent_terminal.settings.json"
 """The settings file Claude Code's row passes: its permission lists."""
@@ -65,18 +68,26 @@ runs to completion and returns one line per step it took, or raises
 class Provider:
     """One agent harness the terminal launches: the id a session names it by, its display name,
     the executable looked up on ``PATH``, the arguments after it, in which an argument equal to
-    :data:`WORKSPACE_ARG` or :data:`MCP_CONFIG_ARG` is rendered by :func:`render_argv`, and the
-    preparation the launch
+    :data:`WORKSPACE_ARG`, :data:`MCP_CONFIG_ARG` or :data:`CODEX_MCP_ARG` is rendered by
+    :func:`render_argv`, the output sequence the harness version ``composer_ready_version``
+    names (its ``--version`` line) was recorded writing when its composer appeared, which no
+    harness promises, what the harness's own enforcement restricts under those arguments and what
+    it leaves open, recorded on every launch, and the preparation the launch
     runs first when the harness takes its MCP server or its tool approvals only through its own
     configuration, ``None`` for a harness that takes them on the command line.
 
     A row is listed only for a harness that turns bracketed paste on, since the session-start
-    ritual and staged requests reach the agent only as a :func:`paste` once it has."""
+    ritual and staged requests reach the agent only as a :func:`paste`, written once the agent
+    has bracketed paste on and has written ``composer_ready`` since it started: a harness can turn
+    bracketed paste on while a loading screen still discards input."""
 
     id: str
     name: str
     executable: str
     args: tuple[str, ...]
+    composer_ready: str
+    composer_ready_version: str
+    confinement: str
     prepare: Optional[PrepareFn] = None
 
     @property
@@ -84,6 +95,17 @@ class Provider:
         """Why this row cannot launch when its executable is not on ``PATH``."""
         return (f"{self.name} is not available: no `{self.executable}` executable is on PATH. "
                 "Install it and sign in to enable the agent terminal.")
+
+    def delivery_unverified(self, version: Optional[str]) -> Optional[str]:
+        """Why delivery to a launch declaring ``version`` rests on an unrecorded sequence, naming
+        both versions, or ``None`` when ``version`` is the one ``composer_ready`` was recorded
+        on."""
+        if version == self.composer_ready_version:
+            return None
+        return (f"{self.name}'s composer sequence was recorded on {self.composer_ready_version}, "
+                f"and this launch runs {version or 'a version it does not declare'}: the ritual "
+                "and requests may never reach it, or reach its loading screen and be lost. If "
+                "nothing arrives, type the request in the terminal yourself.")
 
 
 @dataclass(frozen=True)
@@ -98,6 +120,17 @@ def mcp_server(project: Optional[Path]) -> McpServer:
     """This interpreter running ``tcip_mcp`` for ``project``, for no project when ``None``."""
     args = ("-m", "tcip_mcp", *(("--project", project.as_posix()) if project else ()))
     return McpServer(Path(sys.executable).as_posix(), args)
+
+
+def codex_mcp_overrides(project: Optional[Path], env_names: Iterable[str]) -> list[str]:
+    """:func:`mcp_server` for ``project`` as Codex's ``tcip`` server in ``-c key=value``
+    overrides, each value TOML (a JSON string or array of strings is valid TOML), forwarding the
+    variables ``env_names`` names to the server and approving its tools without asking."""
+    server = mcp_server(project)
+    settings = {"command": server.command, "args": list(server.args),
+                "env_vars": sorted(env_names), "default_tools_approval_mode": "approve"}
+    return [arg for key, value in settings.items()
+            for arg in ("-c", f"mcp_servers.tcip.{key}={json.dumps(value)}")]
 
 
 def run_to_completion(argv: list[str], step: str) -> str:
@@ -158,13 +191,34 @@ PROVIDERS: tuple[Provider, ...] = (
             "--permission-mode", "default",
             "--mcp-config", MCP_CONFIG_ARG, "--strict-mcp-config",
         ),
+        composer_ready="\x1b[?1049h",
+        composer_ready_version="2.1.292 (Claude Code)",
+        confinement=("Claude Code enforces the deny and allow lists of "
+                     "agent_terminal.settings.json, merged with the user's own Claude Code "
+                     "settings; a tool call neither list decides asks first."),
     ),
     Provider(
         id="antigravity",
         name="Antigravity",
         executable="agy",
         args=("--add-dir", WORKSPACE_ARG, "--sandbox"),
+        composer_ready="\x1b[?1049l",
+        composer_ready_version="1.3.0",
+        confinement=("agy's --sandbox turns on its terminal restrictions, whose extent agy "
+                     "defines; every tcip tool is allowed in agy's own settings file."),
         prepare=prepare_antigravity,
+    ),
+    Provider(
+        id="codex",
+        name="Codex",
+        executable="codex",
+        args=("--sandbox", "read-only", "--ask-for-approval", "never",
+              "-c", "disable_paste_burst=true", CODEX_MCP_ARG),
+        composer_ready="\x1b]0;",
+        composer_ready_version="codex-cli 0.160.1",
+        confinement=("Codex's read-only sandbox holds the shell commands the model runs, which "
+                     "write nothing and never ask to leave it; the tcip server is not one of "
+                     "them, so its tools run, without a prompt, and write the project's records."),
     ),
 )
 
@@ -203,14 +257,17 @@ def write_mcp_config(project: Optional[Path]) -> Path:
     return dest
 
 
-def render_argv(argv: list[str], project: Optional[Path]) -> list[str]:
-    """``argv`` with each :data:`WORKSPACE_ARG` replaced by the backend's workspace and each
-    :data:`MCP_CONFIG_ARG` by a configuration :func:`write_mcp_config` writes for ``project``."""
+def render_argv(argv: list[str], project: Optional[Path], env: dict[str, str]) -> list[str]:
+    """``argv`` with each :data:`WORKSPACE_ARG` replaced by the backend's workspace, each
+    :data:`MCP_CONFIG_ARG` by a configuration :func:`write_mcp_config` writes for ``project``,
+    and each :data:`CODEX_MCP_ARG` by :func:`codex_mcp_overrides` for ``project`` forwarding
+    every variable of ``env``, the environment the launch spawns with."""
     from tcip_web.state import store
 
-    values = {WORKSPACE_ARG: lambda: str(store.workspace),
-              MCP_CONFIG_ARG: lambda: str(write_mcp_config(project))}
-    return [values[arg]() if arg in values else arg for arg in argv]
+    values = {WORKSPACE_ARG: lambda: [str(store.workspace)],
+              MCP_CONFIG_ARG: lambda: [str(write_mcp_config(project))],
+              CODEX_MCP_ARG: lambda: codex_mcp_overrides(project, env)}
+    return [rendered for arg in argv for rendered in (values[arg]() if arg in values else [arg])]
 
 
 def prepare_launch(executable: str, provider: Provider,
@@ -270,35 +327,33 @@ def session_ritual(project: Optional[Path]) -> str:
             f"inspect_project, then tcip doctor {project}. {_RITUAL_FRICTION}")
 
 
-_CLI_VERSIONS: dict[str, Optional[str]] = {}
 VERSION_PROBE_TIMEOUT_S = 15
 
 
 def launched_program(argv: list[str], override: bool) -> dict:
     """``{"executable", "version"}`` for ``argv``: its first element, and what that executable
-    declares to ``--version`` (probed once per executable per process, stdin closed, time
-    bounded), ``None`` for an ``override`` or an executable that does not answer cleanly."""
+    declares to ``--version`` (probed at every call, so a harness updated in place is seen at its
+    next launch; stdin closed, time bounded), ``None`` for an ``override`` or an executable that
+    does not answer cleanly."""
     executable = argv[0]
     if override:
         return {"executable": executable, "version": None}
-    if executable not in _CLI_VERSIONS:
-        version: Optional[str] = None
-        try:
-            probe = subprocess.run(
-                [executable, "--version"],
-                capture_output=True,
-                text=True,
-                stdin=subprocess.DEVNULL,
-                timeout=VERSION_PROBE_TIMEOUT_S,
-                check=False,
-            )
-            first_line = probe.stdout.strip().splitlines()
-            if probe.returncode == 0 and first_line:
-                version = first_line[0].strip()
-        except (OSError, subprocess.TimeoutExpired):
-            logger.debug("version probe of %s did not answer", executable, exc_info=True)
-        _CLI_VERSIONS[executable] = version
-    return {"executable": executable, "version": _CLI_VERSIONS[executable]}
+    version: Optional[str] = None
+    try:
+        probe = subprocess.run(
+            [executable, "--version"],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=VERSION_PROBE_TIMEOUT_S,
+            check=False,
+        )
+        first_line = probe.stdout.strip().splitlines()
+        if probe.returncode == 0 and first_line:
+            version = first_line[0].strip()
+    except (OSError, subprocess.TimeoutExpired):
+        logger.debug("version probe of %s did not answer", executable, exc_info=True)
+    return {"executable": executable, "version": version}
 
 
 def spawn_env(session_id: str) -> dict[str, str]:

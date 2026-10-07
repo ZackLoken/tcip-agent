@@ -132,6 +132,8 @@ export function TerminalRail() {
 
   // The launch's session-start ritual, shown until the breeder types.
   const [ritual, setRitual] = useState<string | null>(null);
+  // Why the launch's delivery rests on a composer sequence recorded on another version.
+  const [deliveryUnverified, setDeliveryUnverified] = useState<string | null>(null);
 
   const [width, setWidth] = useState<number>(() => {
     try {
@@ -303,6 +305,7 @@ export function TerminalRail() {
             if (closedByClient) throw new Error("terminal rail unmounted mid-connect");
             sessionRef.current = created.session_id;
             setRitual(created.ritual);
+            setDeliveryUnverified(created.launched.delivery_unverified);
             void submitStaged();
           }
         } catch (e) {
@@ -378,6 +381,7 @@ export function TerminalRail() {
       });
       providerRef.current = provider;
       setRitual(restarted.ritual);
+      setDeliveryUnverified(restarted.launched.delivery_unverified);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -499,6 +503,15 @@ export function TerminalRail() {
         </div>
       ) : (
         <>
+          {deliveryUnverified && (
+            <div
+              data-testid="terminal-delivery-unverified"
+              role="alert"
+              className="shrink-0 px-3 py-2 border-b border-tcip-border bg-tcip-panel text-[11px] text-tcip-fp"
+            >
+              {deliveryUnverified}
+            </div>
+          )}
           {ritual && (
             <div
               data-testid="terminal-ritual"

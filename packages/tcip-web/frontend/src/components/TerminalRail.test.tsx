@@ -88,6 +88,8 @@ const LAUNCHED = {
   provider: "harness",
   executable: "/bin/harness",
   version: null,
+  confinement: null,
+  delivery_unverified: null as string | null,
   prepared: [],
 };
 const LAUNCH = { session_id: "t1", existing: false, launched: LAUNCHED, ritual: RITUAL };
@@ -167,6 +169,41 @@ describe("TerminalRail", () => {
     expect(MockWebSocket.instances[0].url).toContain("/api/terminal/ws/t1");
     // The emulator was mounted into the host.
     expect(termInstances[0].open).toHaveBeenCalled();
+  });
+
+  it("alerts why a launch's delivery is unverified, and nothing when the versions agree", async () => {
+    const warning = "A harness's composer sequence was recorded on 1.0, and this launch runs 2.0.";
+    vi.mocked(terminalApi.createSession).mockResolvedValue({
+      ...LAUNCH,
+      launched: { ...LAUNCHED, delivery_unverified: warning },
+    });
+    render(<TerminalRail />);
+    const alert = await screen.findByTestId("terminal-delivery-unverified");
+    expect(alert).toHaveTextContent(warning);
+    expect(alert).toHaveAttribute("role", "alert");
+
+    cleanup();
+    vi.mocked(terminalApi.createSession).mockResolvedValue(LAUNCH);
+    render(<TerminalRail />);
+    expect(await screen.findByTestId("terminal-ritual")).toBeInTheDocument();
+    expect(screen.queryByTestId("terminal-delivery-unverified")).toBeNull();
+  });
+
+  it("a restart onto an updated harness raises the alert, and one back onto the recorded version clears it", async () => {
+    const warning = "A harness's composer sequence was recorded on 1.0, and this launch runs 2.0.";
+    render(<TerminalRail />);
+    await screen.findByTestId("terminal-ritual");
+    expect(screen.queryByTestId("terminal-delivery-unverified")).toBeNull();
+
+    vi.mocked(terminalApi.restart).mockResolvedValueOnce({
+      ...LAUNCH,
+      launched: { ...LAUNCHED, delivery_unverified: warning },
+    });
+    fireEvent.click(screen.getByLabelText("Restart the agent"));
+    expect(await screen.findByTestId("terminal-delivery-unverified")).toHaveTextContent(warning);
+
+    fireEvent.click(screen.getByLabelText("Restart the agent"));
+    await waitFor(() => expect(screen.queryByTestId("terminal-delivery-unverified")).toBeNull());
   });
 
   it("minimize hides the rail (session survives server-side)", async () => {

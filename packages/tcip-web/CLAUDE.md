@@ -31,21 +31,38 @@ Use the `frontend-design` skill for IA/visual work.
 ## The in-app agent terminal launches a provider row
 
 `terminal.py` holds the provider table (`PROVIDERS`); each row's definition there is its launch:
-its executable, its arguments, and the preparation the launch runs first when the harness takes
-its MCP server or its tool approvals only through its own configuration (the Antigravity row
-registers the server through `agy mcp add` and allows every tcip tool in agy's settings file,
-both writes to the breeder's own agy configuration, recorded on the launch). The MCP server a
-launch hands its harness has one producer, `mcp_server`, written as the JSON configuration file
-Claude's row passes and registered through `agy mcp add` for Antigravity's. The ritual is pasted
-together with every request staged by the time the harness takes input, as one message, so a
-harness that starts a turn on the ritual still reads them. Session create and restart name a row
-by its exact id; the status route lists every row with the reason it cannot launch, if any, and
-the rail lets the breeder pick one. A row is added only after its harness's real flags are read
-from the installed CLI and one live smoke (`tools/smoke_terminal_e2e.py <id>`) passes.
+its executable, its arguments, the output sequence one installed version of its harness was
+recorded writing when its composer appeared (`composer_ready`, with that version's `--version`
+line as `composer_ready_version`; no harness promises it), what the harness's own enforcement
+restricts and leaves open (`confinement`, recorded on every launch), and the preparation the
+launch runs first when the
+harness takes its MCP server or its tool approvals only through its own configuration (the
+Antigravity row registers the server through `agy mcp add` and allows every tcip tool in agy's
+settings file, both writes to the breeder's own agy configuration, recorded on the launch). The
+MCP server a launch hands its harness has one producer, `mcp_server`, written as the JSON
+configuration file Claude's row passes, registered through `agy mcp add` for Antigravity's and
+rendered as `-c` overrides for Codex's. The ritual is pasted together with every request staged by
+the time the harness takes input, as one message, so a harness that starts a turn on the ritual
+still reads them; the paste waits until the harness has bracketed paste on and has written its
+row's `composer_ready`, since a harness can turn bracketed paste on while a loading screen still
+discards input. Each launch probes the version its harness declares, so a harness updated in
+place is seen at its next launch; one declaring another version than `composer_ready_version`
+records why its delivery is unverified (`delivery_unverified`), and the rail shows it. A matching
+version proves nothing about delivery: no timer-free signal tells a launch whose sequence never
+arrives from one still starting, and a sequence that moved earlier still pastes early. Session
+create and restart name a row by its exact id; the status route lists
+every row with the reason it cannot launch, if any, and the rail lets the breeder pick one. A row
+is added only after its harness's real flags are read from the installed CLI and one live smoke
+(`tools/smoke_terminal_e2e.py <id>`) passes: the smoke opens a scratch project, then asks for one
+`report_friction` call carrying a token only that request names, and passes when the project's
+friction reports hold exactly one report carrying it, of the requested category, at the poll
+that first sees one. The Antigravity row does not pass it: agy asks before running the ritual's
+`tcip doctor`, which its preparation does not allow, and whether to allow it is the owner's
+decision.
 
-Claude's row passes `CLAUDE_SETTINGS`: an explicit deny list over platform internals plus a narrow
-allowlist, which Claude Code's own permission system enforces, its academic WebFetch grants
-generated from the `cv-research` document by `tools/generate_harness_discovery.py`. Those
+Claude's row passes `CLAUDE_SETTINGS`, `agent_terminal.settings.json`; its `confinement` sentence
+states what that file enforces, and its academic WebFetch grants are generated from the
+`cv-research` document by `tools/generate_harness_discovery.py`. Those
 permission lists merge (union) with the repo root's own, gitignored, developer-local `.claude/settings.json` and
 the user's own settings rather than replacing them: list-valued settings keys merge across sources
 (code.claude.com/docs/en/configuration). A broad allow entry in the developer's own user settings

@@ -4,8 +4,9 @@ Prints a banner naming the terminal session id it inherited, echoes each input l
 ``echo:<line>`` with any bracketed-paste markers removed, and exits on ``exit``. With
 ``FAKE_TERMINAL_ARGV_FILE`` set it first writes its arguments there as JSON. With
 ``FAKE_TERMINAL_PASTE_AFTER_S`` set it waits that many seconds, prints ``EARLY_INPUT`` if input
-arrived meanwhile, then turns bracketed paste on. Run with ``fail`` as its first argument it
-exits 3 at once, standing as a launch preparation that failed.
+arrived meanwhile, then turns bracketed paste on and writes ``FAKE_TERMINAL_COMPOSER_READY``, the
+marker configured for its stand-in row. Run with ``fail`` as its
+first argument it exits 3 at once, standing as a launch preparation that failed.
 """
 
 from __future__ import annotations
@@ -46,7 +47,7 @@ def main() -> None:
     if paste_after is not None:
         if _input_arrives_within(float(paste_after)):
             print("EARLY_INPUT", flush=True)
-        print("\x1b[?2004h", end="", flush=True)
+        print("\x1b[?2004h" + os.environ["FAKE_TERMINAL_COMPOSER_READY"], end="", flush=True)
     for line in sys.stdin:
         text = line.replace("\x1b[200~", "").replace("\x1b[201~", "").strip()
         if text == "exit":

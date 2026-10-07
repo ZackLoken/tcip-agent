@@ -28,8 +28,8 @@ def _load():
 def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
         tmp_path, monkeypatch):
     """A live workspace whose last-opened pointer names a real project must not decide what this
-    run touches: the run sees the workspace it was given, opens nothing, and leaves the live
-    project's log as it was."""
+    run touches: the run sees the workspace it was given, opens nothing for a row that cannot
+    launch, and leaves the live project's log as it was."""
     import tcip_store
 
     from tcip_mcp import workspace
@@ -54,6 +54,30 @@ def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
     assert store.workspace == scratch_ws.resolve()
     assert store.project_id is None
     assert len(tcip_store.read_log(audit_log_key(live_project)).records) == live_lines
+
+
+def test_the_signal_is_a_friction_report_of_the_open_project_carrying_the_token(
+        opened_project, opened_client):
+    """``reported`` answers only while ``report_friction`` has recorded, in the open project,
+    exactly one report whose detail carries the token, of the requested category: the token
+    anywhere else, a report of another category, or a second call is not it."""
+    from tcip_mcp.tools.meta_tools import report_friction
+
+    mod = _load()
+    token = "ack-0123456789ab"
+    report_friction(opened_project, mod.REQUESTED_CATEGORY, "an unrelated report",
+                    context={"note": token})
+    assert not mod.reported(opened_client, token)
+
+    report_friction(opened_project, mod.REQUESTED_CATEGORY, f"smoke {token}")
+    assert mod.reported(opened_client, token)
+
+    report_friction(opened_project, mod.REQUESTED_CATEGORY, f"again {token}")
+    assert not mod.reported(opened_client, token)
+
+    other = "ack-ba9876543210"
+    report_friction(opened_project, "missing_tool", other)
+    assert not mod.reported(opened_client, other)
 
 
 def test_the_websocket_url_is_absolute_and_carries_the_served_host(tmp_path, client):
