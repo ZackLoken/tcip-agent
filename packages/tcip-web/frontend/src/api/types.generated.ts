@@ -21,6 +21,8 @@ export const VAL_METRIC_PREFIX = "val_";
 
 export const EPOCH_KEY = "epoch";
 
+export const STEP_KEY = "step";
+
 export const TIMESTAMP_KEY = "timestamp";
 
 export const PANEL_EVENT_LABELS_WRITTEN = "labels_written";
@@ -110,7 +112,7 @@ export interface RunRow {
   best_metric: number | null;
   best_metric_name: string | null;
   output_dir: string;
-  error: string | null;
+  status_error: string | null;
   heartbeat: string;
   launch: Record<string, string | null> | null;
 }
@@ -118,7 +120,7 @@ export interface RunRow {
 export interface SweepGroup {
   sweep_id: string;
   state: string;
-  error: string | null;
+  status_error: string | null;
   input: Record<string, unknown>;
   objective: Record<string, unknown>;
   cancel_requested: boolean;
@@ -138,8 +140,8 @@ export interface TrainingListing {
   sweeps: SweepGroup[];
 }
 
-export interface TrainingMetricFrame {
-  type: "metric";
+export interface TrainingRowFrame {
+  type: "metric" | "batch";
   experiment_id: string;
   row: Record<string, unknown>;
 }

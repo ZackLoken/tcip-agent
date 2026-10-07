@@ -275,9 +275,11 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(tmp_path, monk
     from tcip_mcp.pipelines.data.split_construction import resolve_run
     from tcip_mcp.pipelines.model_build import build_model
     from tcip_mcp.pipelines.model_contract import check_model_contract
+    from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.tools.training_tools import _one_real_batch
 
-    batch, why = _one_real_batch("semantic_seg", resolve_run(cfg, project=tmp_path).train_ds)
+    batch, why = _one_real_batch(
+        "semantic_seg", resolve_run(cfg, train_config(cfg), project=tmp_path).train_ds)
     assert batch is not None, why
     smoked = synthetic["smoke"]["dims"]
     model = build_model(cfg, {"in_chans": smoked["in_chans"], "num_classes": smoked["num_classes"]})
@@ -318,6 +320,7 @@ def test_preflight_smoke_batch_matches_what_the_run_will_build(tmp_path, monkeyp
     accepting only the producer's own four names builds fine."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.pipelines.data.split_construction import resolve_run
+    from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.tools.training_tools import _one_real_batch
 
     imgs = _admitted_tree(tmp_path)
@@ -325,9 +328,8 @@ def test_preflight_smoke_batch_matches_what_the_run_will_build(tmp_path, monkeyp
             "split": {"seed": 0, "val_ratio": 0.15},
             "dataset_source": {"builder": f"{__name__}:_strict_bespoke_dataset",
                                "task": "bunch_compactness"}}
-    resolution = resolve_run(
-        {"model_source": {"task": "bunch_compactness"}, "data": data}, project=tmp_path
-    )
+    config = {"model_source": {"task": "bunch_compactness"}, "data": data}
+    resolution = resolve_run(config, train_config(config), project=tmp_path)
 
     batch, why = _one_real_batch("bunch_compactness", resolution.train_ds)
     assert why is None, why

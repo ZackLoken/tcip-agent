@@ -51,7 +51,7 @@ def _config(evaluation: dict | None = None) -> dict:
 def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(tmp_path):
     """The chosen epoch's recorded ``selection``, the copy embedded in ``model_best.pt``, the
     ``metrics.jsonl`` line and the callback payload all carry ``run.best_metric``."""
-    from tcip_mcp.experiments import METRICS_FILE, observe, read_rows
+    from tcip_mcp.experiments import METRICS_FILE, observe, partition_rows, read_rows
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._verified_checkpoint_fixtures import opened_run
@@ -71,7 +71,7 @@ def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(tmp_pa
                        epoch_hook=lambda epoch, metrics: callbacks.append(dict(metrics)))
     run = ctx.default_train()
 
-    assert run.status == "completed", run.error
+    assert run.status == "completed", run.status_error
     history = run.metrics_history
     assert len(history) == 3
 
@@ -85,7 +85,7 @@ def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(tmp_pa
     assert chosen_record["selection"] == pytest.approx(chosen_record["val_loss"], abs=1e-6)
     assert chosen_record["selection"] != pytest.approx(chosen_record["train_loss"], rel=0.2)
 
-    persisted = read_rows(out_dir / METRICS_FILE)[0]
+    persisted = partition_rows(read_rows(out_dir / METRICS_FILE)[0])[0]
     assert [r["selection"] for r in persisted] == [r["selection"] for r in history]
     assert [r["selection"] for r in callbacks] == [r["selection"] for r in history]
     assert run.best_metric == pytest.approx(min(r["selection"] for r in history), abs=1e-6)
@@ -115,7 +115,7 @@ def test_the_plateau_scheduler_steps_on_the_validation_loss_under_its_declared_k
                       id="auto-run-plateau")
     run = train(run, train_loader, val_loader=val_loader)
 
-    assert run.status == "completed", run.error
+    assert run.status == "completed", run.status_error
     assert stepped == pytest.approx([r["heldout_loss"] for r in run.metrics_history])
 
 
@@ -128,7 +128,7 @@ def test_epoch_record_follows_a_configured_selection_metric(tmp_path):
                       has_val_loader=True, id="auto-run-64")
     run = train(run, train_loader, val_loader=val_loader)
 
-    assert run.status == "completed", run.error
+    assert run.status == "completed", run.status_error
     history = run.metrics_history
     assert len(history) == 3
     for record in history:
@@ -167,7 +167,7 @@ def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(tmp_path):
                       id="auto-run-65")
     run = train(run, train_loader, val_loader=val_loader)
 
-    assert run.status == "completed", run.error
+    assert run.status == "completed", run.status_error
     history = run.metrics_history
     f1_by_epoch = {epoch: r["val_f1"] for epoch, r in enumerate(history, start=1)}
     best_epoch = max(f1_by_epoch, key=lambda e: f1_by_epoch[e])
@@ -190,9 +190,9 @@ def test_a_run_selecting_on_a_metric_its_task_does_not_produce_fails_naming_both
     run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "failed"
-    assert "'f1'" in run.error
-    assert "'val_f1'" in run.error
-    assert "val_loss" in run.error and "val_mae" in run.error
+    assert "'f1'" in run.status_error
+    assert "'val_f1'" in run.status_error
+    assert "val_loss" in run.status_error and "val_mae" in run.status_error
 
 
 def test_a_loss_selected_run_with_no_validation_loader_still_completes_and_selects_its_lowest_loss(
@@ -205,7 +205,7 @@ def test_a_loss_selected_run_with_no_validation_loader_still_completes_and_selec
                       id="auto-run-67")
     run = train(run, train_loader, val_loader=None)
 
-    assert run.status == "completed", run.error
+    assert run.status == "completed", run.status_error
     history = run.metrics_history
     assert len(history) == 3
     for record in history:

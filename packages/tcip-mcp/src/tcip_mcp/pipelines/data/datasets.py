@@ -812,7 +812,7 @@ def build_from_dataset_source(
         raise ValueError("dataset_source must be a dict")
     from tcip_mcp.pipelines.model_build import import_source_builder
 
-    fn = import_source_builder(dataset_source)
+    fn = import_source_builder(dataset_source.get("builder"), dataset_source.get("source_files"))
     builder_kwargs = dataset_source.get("builder_kwargs") or {}
     if not isinstance(builder_kwargs, dict):
         raise ValueError("dataset_source.builder_kwargs must be a dict")

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.schemas import ModelSourceSchema
 
 MODEL_SOURCE_KEY = "model_source"
 TRAINING_SOURCE_KEY = "training_source"
@@ -112,9 +113,9 @@ def _import_root(file: Path, module: str) -> Path | None:
     return module_path.parents[len(parts) - 1]
 
 
-def _make_source_files_importable(source: dict) -> None:
-    """Put the import root of the builder's own module on ``sys.path``, ahead of everything else,
-    when that module is one of ``source``'s ``source_files``.
+def _make_source_files_importable(builder: str | None, source_files: list[str] | None) -> None:
+    """Put the import root of ``builder``'s own module on ``sys.path``, ahead of everything else,
+    when that module is one of ``source_files``.
 
     The root is resolved from the dotted ``builder`` and the file's path (:func:`_import_root`), so
     a packaged builder (``mypkg.model:build`` at ``project/mypkg/model.py``) imports from
@@ -124,26 +125,22 @@ def _make_source_files_importable(source: dict) -> None:
     """
     import sys
 
-    builder = source.get("builder")
     if not isinstance(builder, str) or not builder:
         return
     module, _attr = _split_dotted(builder)
     if not module:
         return
-    for file in source.get("source_files") or []:
+    for file in source_files or []:
         root = _import_root(Path(file).resolve(), module)
         if root is not None and str(root) not in sys.path:
             sys.path.insert(0, str(root))
 
 
-def import_source_builder(source: dict) -> Any:
-    """Resolve a ``model_source`` or ``dataset_source`` mapping's ``builder`` to the callable,
-    making its own ``source_files`` importable first.
-    """
-    if not isinstance(source, dict):
-        raise ValueError("a builder source must be a dict carrying 'builder'")
-    _make_source_files_importable(source)
-    return _import_dotted(source.get("builder"))
+def import_source_builder(builder: str | None, source_files: list[str] | None) -> Any:
+    """Resolve a ``model_source``'s or ``dataset_source``'s ``builder`` to the callable, making
+    its own ``source_files`` importable first."""
+    _make_source_files_importable(builder, source_files)
+    return _import_dotted(builder)
 
 
 def child_pythonpath() -> str:
@@ -234,19 +231,18 @@ def run_task(config: "Mapping[str, Any]") -> str:
     return task
 
 
-def build_from_model_source(model_source: dict, dims: "Mapping[str, Any]") -> Any:
-    """Import the agent's builder and call it with its ``builder_kwargs`` and ``dims``
-    (:func:`model_dims`). Only ``builder`` is required to construct the model.
-
-    ``model_source`` is held to :class:`~tcip_mcp.pipelines.schemas.ModelSourceSchema`, so a key
-    outside it (an ``in_chans`` among them) refuses by name. A ``builder_kwargs`` naming a
-    dimension (:data:`RESERVED_DIMS`) refuses by name, whether or not this run resolved it.
+def build_from_model_source(source: "ModelSourceSchema | None",
+                            dims: "Mapping[str, Any]") -> Any:
+    """Import the builder a validated ``model_source`` (``schemas.TrainConfigSchema``'s) names
+    and call it with its ``builder_kwargs`` and ``dims`` (:func:`model_dims`). Only ``builder``
+    is required to construct the model. Refuses (``ValueError``) a config with no
+    ``model_source``, and by name a ``builder_kwargs`` naming a dimension
+    (:data:`RESERVED_DIMS`), whether or not this run resolved it.
     """
-    from tcip_mcp.pipelines.schemas import ModelSourceSchema
-
-    ModelSourceSchema.model_validate(model_source)
-    fn = import_source_builder(model_source)
-    kwargs = model_source.get("builder_kwargs") or {}
+    if source is None:
+        raise ValueError("Config has no 'model_source'.")
+    fn = import_source_builder(source.builder, source.source_files)
+    kwargs = source.builder_kwargs or {}
     restated = sorted(set(RESERVED_DIMS) & set(kwargs))
     if restated:
         raise ValueError(
@@ -258,13 +254,13 @@ def build_from_model_source(model_source: dict, dims: "Mapping[str, Any]") -> An
     return fn(**kwargs, **dims)
 
 
-def build_model(config: "Mapping[str, Any]", dims: "Mapping[str, Any]") -> Any:
-    """Build a model from a run config (a checkpoint's own ``config`` included) via its
-    ``model_source`` builder, at ``dims`` (:func:`model_dims`)."""
-    model_source = config.get(MODEL_SOURCE_KEY)
-    if model_source:
-        return build_from_model_source(model_source, dims)
-    raise ValueError("Config has no 'model_source'.")
+def build_model(config: dict, dims: "Mapping[str, Any]") -> Any:
+    """Build a model from a raw run config (a checkpoint's own ``config`` included), validated
+    once (``schemas.train_config``), via its ``model_source`` builder
+    (:func:`build_from_model_source`), at ``dims`` (:func:`model_dims`)."""
+    from tcip_mcp.pipelines.schemas import train_config
+
+    return build_from_model_source(train_config(config).model_source, dims)
 
 
 def resolve_contract_dims(config: dict, task: str, dims: "Mapping[str, Any]") -> dict:

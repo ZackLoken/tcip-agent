@@ -198,7 +198,7 @@ def test_resume_from_a_checkpoint_missing_a_resume_key_refuses_naming_it(tmp_pat
     run2 = train(_run(tmp_path, cfg, str(tmp_path / "out2"), id="auto-run-60"), loader,
                  resume_from=str(ckpt_path))
     assert run2.status == "failed"
-    assert "torch_rng_state" in run2.error
+    assert "torch_rng_state" in run2.status_error
 
 
 def test_resume_from_a_checkpoint_missing_its_scheduler_state_refuses_naming_it(tmp_path):
@@ -216,7 +216,7 @@ def test_resume_from_a_checkpoint_missing_its_scheduler_state_refuses_naming_it(
     run2 = train(_run(tmp_path, cfg, str(tmp_path / "out2"), id="auto-run-62"), loader,
                  resume_from=str(ckpt_path))
     assert run2.status == "failed"
-    assert "scheduler_state_dict" in run2.error
+    assert "scheduler_state_dict" in run2.status_error
 
 
 def test_a_resume_whose_optimizer_restore_raises_fails_the_run(tmp_path, monkeypatch):
@@ -227,14 +227,16 @@ def test_a_resume_whose_optimizer_restore_raises_fails_the_run(tmp_path, monkeyp
 
     train(_run(tmp_path, cfg, str(tmp_path / "out"), id="auto-run-63"), loader)
 
-    def _refuse(self, state_dict):
+    import tcip_mcp.pipelines.training.generic_trainer as trainer
+
+    def _refuse(model, optimizer, state, *, group_settings):
         raise ValueError("optimizer state does not fit")
 
-    monkeypatch.setattr(torch.optim.AdamW, "load_state_dict", _refuse)
+    monkeypatch.setattr(trainer, "restore_training_state", _refuse)
     run2 = train(_run(tmp_path, cfg, str(tmp_path / "out2"), id="auto-run-64"), loader,
                  resume_from=str(tmp_path / "out" / "checkpoint_epoch_1.pt"))
     assert run2.status == "failed"
-    assert "optimizer state does not fit" in run2.error
+    assert "optimizer state does not fit" in run2.status_error
 
 
 def _draws() -> tuple:
@@ -264,15 +266,16 @@ def test_a_cuda_resume_restores_the_rng_streams(tmp_path, monkeypatch):
     real_restore = trainer.restore_rng_state
     after_restore: list = []
 
-    def _observing_restore(state):
-        real_restore(state)
+    def _observing_restore(state, loader_generator):
+        real_restore(state, loader_generator)
         after_restore.append(_draws())
-        real_restore(state)  # the run continues from the restored streams, not the drawn ones
+        # The run continues from the restored streams, not the drawn ones.
+        real_restore(state, loader_generator)
 
     monkeypatch.setattr(trainer, "restore_rng_state", _observing_restore)
     run2 = train(_run(tmp_path, cfg, str(tmp_path / "out2"), id="auto-run-66"), loader,
                  resume_from=str(ckpt_path))
-    assert run2.status == "completed", run2.error
+    assert run2.status == "completed", run2.status_error
     assert run2.current_epoch == 2
 
     import random
@@ -351,5 +354,5 @@ def test_resume_from_non_resumable_checkpoint_fails_loudly(tmp_path):
     run2 = _run(tmp_path, cfg, str(tmp_path / "out2"), id="auto-run-62")
     run2 = train(run2, loader, resume_from=str(best))
     assert run2.status == "failed"
-    assert "resume" in (run2.error or "").lower()
+    assert "resume" in (run2.status_error or "").lower()
     assert not (tmp_path / "out2" / "model_final.pt").is_file()  # did not silently train

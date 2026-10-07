@@ -54,10 +54,10 @@ def test_a_cancel_written_before_the_run_ends_the_sweep_canceled_before_its_firs
 
     result = run_sweep(opened)
 
-    assert (result.state, result.error) == ("canceled", _CANCEL_BEFORE_START_REASON)
+    assert (result.state, result.status_error) == ("canceled", _CANCEL_BEFORE_START_REASON)
     assert calls == []
     sweep = monitor_training(project, opened.name)["sweep"]
-    assert (sweep["state"], sweep["error"]) == ("canceled", _CANCEL_BEFORE_START_REASON)
+    assert (sweep["state"], sweep["status_error"]) == ("canceled", _CANCEL_BEFORE_START_REASON)
 
 
 @pytest.mark.parametrize("raises", [None, RuntimeError("the Ray cluster was torn down mid-sweep")],
@@ -77,10 +77,10 @@ def test_a_cancel_landing_mid_search_ends_the_sweep_canceled(
     result = run_hyperparameter_search(project, base_config=real_hpo_base_config, n_trials=1,
                                        search_seed=0)
 
-    assert (result["sweep"]["state"], result["sweep"]["error"]) == (
+    assert (result["sweep"]["state"], result["sweep"]["status_error"]) == (
         "canceled", _CANCEL_DURING_RUN_REASON)
     sweep = monitor_training(project, result["sweep"]["sweep_id"])["sweep"]
-    assert (sweep["state"], sweep["error"]) == ("canceled", _CANCEL_DURING_RUN_REASON)
+    assert (sweep["state"], sweep["status_error"]) == ("canceled", _CANCEL_DURING_RUN_REASON)
 
 
 def test_a_cancel_after_the_sweep_ended_refuses_and_leaves_its_final_status_as_written(

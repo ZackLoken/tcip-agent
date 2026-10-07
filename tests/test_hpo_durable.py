@@ -115,7 +115,7 @@ def test_a_sweep_whose_search_raises_ends_failed_naming_the_error(
 
     sweep = tt.monitor_training(tmp_path, captured["sweep_id"])["sweep"]
     assert sweep["state"] == "failed"
-    assert "no ray here" in sweep["error"]
+    assert "no ray here" in sweep["status_error"]
 
 
 def test_run_hyperparameter_search_refuses_before_minting_when_the_base_config_fails_preflight(

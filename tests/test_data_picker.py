@@ -195,12 +195,13 @@ def test_list_split_choices_route_404s_for_an_unknown_experiment(
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     opened_run(tmp_path, _bespoke_config(root / "images" / DATES[0]), experiment_id="exp-known")
 
-    known = client.get("/api/training/configs/exp-known/splits")
+    known = client.get("/api/training/runs/exp-known/splits")
     assert known.status_code == 200
     assert known.json()["as_recorded"]["case"] == "drawn"
 
-    resp = client.get("/api/training/configs/nope/splits")
+    resp = client.get("/api/training/runs/nope/splits")
     assert resp.status_code == 404
+    assert client.get("/api/training/configs/exp-known/splits").status_code == 404
 
 
 def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_own_counts(

@@ -7,6 +7,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from tcip_mcp.pipelines.schemas import train_config
 from tcip_mcp.pipelines.training import generic_trainer as gt
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.run_registry import TrainRun, draw_seed_if_unset
@@ -81,8 +82,8 @@ def test_train_applies_the_drawn_seed(tmp_path, monkeypatch):
     monkeypatch.setattr(gt, "set_seed", fake_set_seed)
     config = {"model_source": {}}
     draw_seed_if_unset(config)
-    run = TrainRun(id="auto-run-seed-applied", config=config, objective=LOSS_OBJECTIVE,
-                   project=tmp_path, output_dir=str(tmp_path / "out"))
+    run = TrainRun(id="auto-run-seed-applied", config=config, spec=train_config(config),
+                   objective=LOSS_OBJECTIVE, project=tmp_path, output_dir=str(tmp_path / "out"))
     train(run, train_loader=None)  # fails at build, after seeding
 
     assert captured["seed"] == run.config["seed"]
@@ -99,11 +100,12 @@ def test_train_with_unwritable_output_dir_marks_run_failed(tmp_path):
 
     # output_dir nests under an existing *file*, so out_dir.mkdir() raises.
     run = TrainRun(id="auto-run-unwritable", config={"model_source": {}},
-                   objective=LOSS_OBJECTIVE, project=tmp_path, output_dir=str(blocker / "out"))
+                   spec=train_config({"model_source": {}}), objective=LOSS_OBJECTIVE,
+                   project=tmp_path, output_dir=str(blocker / "out"))
     run = train(run, train_loader=None)
 
     assert run.status == "failed"  # not stuck at "running"
-    assert run.error
+    assert run.status_error
     assert run.end_time >= run.start_time > 0
 
 
@@ -153,13 +155,13 @@ def test_capture_and_restore_rng_state_roundtrip():
     import numpy as np
 
     gt.set_seed(0)
-    state = gt.capture_rng_state()
+    state = gt.capture_rng_state(None)
     expected_next = (random.random(), np.random.rand(), torch.rand(1))
 
     # Advance every stream further, simulating a diagnostic that draws from them.
     random.random(), np.random.rand(), torch.rand(1)
 
-    gt.restore_rng_state(state)
+    gt.restore_rng_state(state, None)
     got_next = (random.random(), np.random.rand(), torch.rand(1))
 
     assert got_next[0] == expected_next[0]

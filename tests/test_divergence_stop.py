@@ -58,8 +58,8 @@ def test_a_run_whose_loss_never_recovers_stops_after_two_diverged_epochs(tmp_pat
     run = train(run, train_loader, val_loader=None)
 
     assert run.status == "failed"
-    assert DIVERGED_PASSES_PHRASE in run.error
-    assert "diverged" in run.error
+    assert DIVERGED_PASSES_PHRASE in run.status_error
+    assert "diverged" in run.status_error
     assert run.current_epoch == 2
 
 
@@ -71,8 +71,8 @@ def test_a_healthy_run_never_trips_the_divergence_check(tmp_path):
                       project=tmp_path, has_val_loader=False, id="auto-run-10")
     run = train(run, train_loader, val_loader=None)
 
-    assert run.status == "completed", run.error
-    assert "diverged" not in run.error
+    assert run.status == "completed", run.status_error
+    assert "diverged" not in run.status_error
     assert len(run.metrics_history) == 3
 
 
@@ -85,22 +85,25 @@ def test_one_fully_diverged_epoch_followed_by_recovery_completes(tmp_path):
         tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-11")
     run = train(run, train_loader, val_loader=None)
 
-    assert run.status == "completed", run.error
-    assert "diverged" not in run.error
+    assert run.status == "completed", run.status_error
+    assert "diverged" not in run.status_error
     assert len(run.metrics_history) == 3
 
 
 def test_a_single_finite_loss_among_bad_batches_does_not_count_the_epoch_as_diverged(tmp_path):
     """One finite loss inside an otherwise-nan epoch must keep that epoch off the two-pass
     count: a second, fully diverged epoch right after would only stop the run if the first
-    (wrongly) counted too."""
+    (wrongly) counted too. Neither epoch's mean loss is finite, so the run then ends as having
+    no selectable epoch, not as diverged."""
     train_loader = _train_loader()  # three batches/epoch
     run = trainer_run(
         _config(STEP_COUNTED_BUILDER, {"finite_at": [2]}, epochs=2),  # epoch 1's middle batch only
         tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-12")
     run = train(run, train_loader, val_loader=None)
 
-    assert run.status == "completed", run.error
+    assert run.status == "failed"
+    assert "no selectable epoch" in run.status_error
+    assert DIVERGED_PASSES_PHRASE not in run.status_error
     assert len(run.metrics_history) == 2
 
 
@@ -115,7 +118,7 @@ def test_stage_boundary_resets_the_diverged_epoch_counter(tmp_path):
     )
     run = train(run, train_loader, val_loader=None)
 
-    assert run.status == "completed", run.error
+    assert run.status == "completed", run.status_error
     assert run.current_epoch == 4
 
 
@@ -132,7 +135,7 @@ def test_cancel_requested_during_the_second_diverged_epoch_still_ends_failed(tmp
     run = train(run, train_loader, val_loader=None)
 
     assert run.status == "failed"
-    assert DIVERGED_PASSES_PHRASE in run.error
+    assert DIVERGED_PASSES_PHRASE in run.status_error
     assert run.current_epoch == 2
 
 
@@ -168,5 +171,5 @@ def test_launch_training_real_subprocess_reports_the_diverged_stop(tmp_path, mon
     status = run_to_end(tmp_path, experiment_id, seconds=60)
 
     assert status.get("state") == "failed", status
-    assert status.get("error") is not None
-    assert DIVERGED_PASSES_PHRASE in status["error"]
+    assert status["status_error"] is not None
+    assert DIVERGED_PASSES_PHRASE in status["status_error"]

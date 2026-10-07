@@ -683,11 +683,13 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
         "mixed_precision": False,
         "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
         "early_stopping": {"enabled": False},
+        # An untrained toy detector scores no objective; its validation loss is what ranks.
+        "evaluation": {"selection_metric": "loss"},
     }
     run = trainer_run(cfg, tmp_path / "out", project=tmp_path,
                       has_val_loader=val_loader is not None, id="auto-run-77")
     run = train(run, train_loader, val_loader=val_loader)
 
-    assert run.status == "completed", getattr(run, "error", run.status)
+    assert run.status == "completed", run.status_error
     assert "val_loss" in run.metrics_history[-1]
     assert run.metrics_history[-1]["val_loss"] >= 0.0

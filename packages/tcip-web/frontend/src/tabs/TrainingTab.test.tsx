@@ -12,7 +12,7 @@ import {
   NOT_FINITE_SUFFIX,
   type RunRow,
   type SweepGroup,
-  type TrainingMetricFrame,
+  type TrainingRowFrame,
   type TrainingStatusFrame,
 } from "@/api/types.generated";
 import { UNSET_GLYPH } from "@/lib/glyphs";
@@ -44,7 +44,7 @@ function run(overrides: Partial<RunRow> & { experiment_id: string }): RunRow {
     best_metric: null,
     best_metric_name: null,
     output_dir: `/proj/.tcip/experiments/${overrides.experiment_id}`,
-    error: null,
+    status_error: null,
     heartbeat: "",
     launch: null,
     ...overrides,
@@ -54,7 +54,7 @@ function run(overrides: Partial<RunRow> & { experiment_id: string }): RunRow {
 function sweep(overrides: Partial<SweepGroup> & { sweep_id: string }): SweepGroup {
   return {
     state: "running",
-    error: null,
+    status_error: null,
     input: { n_trials: 2, search_alg: "random" },
     objective: { selection_metric: "map50", higher_is_better: true },
     cancel_requested: false,
@@ -79,8 +79,7 @@ function detailOf(row: RunRow) {
   });
 }
 
-type Frame =
-  Omit<TrainingMetricFrame, "experiment_id"> | Omit<TrainingStatusFrame, "experiment_id">;
+type Frame = Omit<TrainingRowFrame, "experiment_id"> | Omit<TrainingStatusFrame, "experiment_id">;
 
 /** Every stream the tab opens delivers ``frames`` at once, each under the id it was opened for. */
 function streamFrames(...frames: Frame[]) {
@@ -471,7 +470,11 @@ describe("TrainingTab tensorboard panel", () => {
   it("keeps the run's own recorded crash reason for a no-logs run that failed with one", async () => {
     const crash =
       "[WinError 183] Cannot create a file when that file already exists: 'tensorboard'";
-    const row = run({ experiment_id: "train-nologs-crashed", state: "failed", error: crash });
+    const row = run({
+      experiment_id: "train-nologs-crashed",
+      state: "failed",
+      status_error: crash,
+    });
     listing([row]);
     detailOf(row);
     vi.spyOn(trainingApi, "launchTensorboard").mockRejectedValue(
@@ -591,6 +594,54 @@ describe("TrainingTab epoch table", () => {
       .getAllByRole("columnheader")
       .map((h) => h.textContent);
     expect(headers).toEqual(["epoch", "loss"]);
+  });
+
+  it("shows the latest batch row as the in-progress epoch's line, with no column of its own", async () => {
+    listing([run({ experiment_id: "train-batches" })]);
+    streamFrames(metricFrame({ epoch: 1, loss: 0.5 }), {
+      type: "batch",
+      row: { epoch: 2, step: 7, batch_loss: 0.25 },
+    });
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-batches"));
+
+    const table = await screen.findByRole("table", { name: "train-batches metrics by epoch" });
+    const rows = within(table).getAllByRole("row");
+    expect(rows).toHaveLength(3);
+    expect(within(rows[2]).getByText("in progress · step 7 · batch_loss 0.25")).toBeInTheDocument();
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((h) => h.textContent),
+    ).toEqual(["epoch", "loss"]);
+  });
+
+  it("drops the in-progress line once its epoch's own row arrives", async () => {
+    listing([run({ experiment_id: "train-batch-done" })]);
+    streamFrames(
+      { type: "batch", row: { epoch: 1, step: 3, batch_loss: 0.25 } },
+      metricFrame({ epoch: 1, loss: 0.5 }),
+    );
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-batch-done"));
+
+    const table = await screen.findByRole("table");
+    expect(within(table).getAllByRole("row")).toHaveLength(2);
+    expect(within(table).queryByText(/in progress/)).not.toBeInTheDocument();
+  });
+
+  it("names the last batch line of a run that ended mid-epoch as where it stopped", async () => {
+    listing([run({ experiment_id: "train-batch-failed", state: "failed" })]);
+    streamFrames({ type: "batch", row: { epoch: 2, step: 5, batch_loss: 0.25 } });
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-batch-failed"));
+
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText("stopped at step 5 · batch_loss 0.25")).toBeInTheDocument();
+    expect(within(table).queryByText(/in progress/)).not.toBeInTheDocument();
   });
 });
 

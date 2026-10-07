@@ -82,7 +82,7 @@ def _run(model_source: dict, data: dict, tmp_path: Path, run_id: str):
 
 
 def _assert_trained(run, output_dir: Path) -> None:
-    assert run.status == "completed", getattr(run, "error", run.status)
+    assert run.status == "completed", run.status_error
     assert run.current_epoch == 1
     assert run.metrics_history
     train_loss = run.metrics_history[-1]["train_loss"]

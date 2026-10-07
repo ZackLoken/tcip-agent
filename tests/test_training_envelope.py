@@ -112,7 +112,7 @@ def test_a_run_whose_closing_audit_line_is_refused_ends_failed_naming_it(tmp_pat
 
     final = observe(run_dir).final
     assert final["state"] == "failed"
-    assert "audit entry could not be written" in final["error"]
+    assert "audit entry could not be written" in final["status_error"]
     assert completed_checkpoint(run_dir) is None
     assert [e["status"] for e in _audit_events(tmp_path)] == ["running"]
 
@@ -133,8 +133,8 @@ def test_a_failed_run_whose_closing_audit_line_is_refused_names_both_causes(
 
     final = observe(run_dir).final
     assert final["state"] == "failed"
-    assert "the body exploded" in final["error"]
-    assert "audit entry could not be written" in final["error"]
+    assert "the body exploded" in final["status_error"]
+    assert "audit entry could not be written" in final["status_error"]
 
 
 def _agent_train_default_tag_no_override(ctx):
@@ -150,7 +150,7 @@ def test_envelope_default_tag_with_no_override_fails_run_and_completes_nothing(t
     run_training_envelope(ctx)
 
     assert ctx.run.status == "failed"
-    assert "final weights" in observe(run_dir).final["error"]
+    assert "final weights" in observe(run_dir).final["status_error"]
     assert completed_checkpoint(run_dir) is None
     events = _audit_events(tmp_path)
     assert [e["status"] for e in events] == ["running", "failed"]
@@ -171,7 +171,7 @@ def test_envelope_declared_deliverable_never_written_fails_run_and_completes_not
     run_training_envelope(ctx)
 
     assert ctx.run.status == "failed"
-    assert "'never_written'" in observe(run_dir).final["error"]
+    assert "'never_written'" in observe(run_dir).final["status_error"]
     assert completed_checkpoint(run_dir) is None
     events = _audit_events(tmp_path)
     assert [e["status"] for e in events] == ["running", "failed"]
@@ -276,8 +276,9 @@ def test_envelope_default_path_runs_default_train_and_audits(tmp_path, monkeypat
     from tests._verified_checkpoint_fixtures import checkpoint_file
 
     def _stub_train(run, train_loader, val_loader=None,
-                    epoch_callback=None, resume_from=""):
+                    epoch_callback=None, batch_callback=None, resume_from=""):
         captured["epoch_callback"] = epoch_callback
+        captured["batch_callback"] = batch_callback
         captured["called"] = True
         run.saved["model_final"] = checkpoint_file(Path(run.output_dir) / "model_final.pt", "stub")
         run.status = "completed"
@@ -289,6 +290,9 @@ def test_envelope_default_path_runs_default_train_and_audits(tmp_path, monkeypat
     run_training_envelope(ctx)
 
     assert captured.get("called") is True                     # dispatched to default_train
-    assert captured["epoch_callback"] == ctx._epoch_sink       # the run's metrics log wired in
+    # The run's metrics log and its one TensorBoard writer, wired in through the same sinks a
+    # custom loop uses.
+    assert captured["epoch_callback"] == ctx.log_metrics
+    assert captured["batch_callback"] == ctx.log_batch
     events = _audit_events(tmp_path)
     assert [e["status"] for e in events] == ["running", "completed"]

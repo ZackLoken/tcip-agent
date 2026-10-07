@@ -93,12 +93,14 @@ def opened_run(root: str | Path, config: dict, *, experiment_id: str | None = No
     keywords. Returns the directory."""
     from tcip_mcp import experiments
     from tcip_mcp.pipelines.data.split_construction import resolve_run
+    from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.tools.training_tools import open_run
 
     run_dir = experiments.experiment_dir(experiment_id or experiments.mint_experiment_id(),
                                          project=root)
     config = dict(config)
-    open_run(run_dir, config, resolve_run(config, project=Path(root)).record, **facts)
+    open_run(run_dir, config,
+             resolve_run(config, train_config(config), project=Path(root)).record, **facts)
     return run_dir
 
 

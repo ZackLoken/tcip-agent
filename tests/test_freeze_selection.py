@@ -21,6 +21,7 @@ from tcip_mcp.experiments import (  # noqa: E402
 )
 from tcip_mcp.pipelines.data.selection import read_selection  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import partition_samples, resolve_run  # noqa: E402
+from tcip_mcp.pipelines.schemas import train_config  # noqa: E402
 
 from tests._verified_checkpoint_fixtures import opened_run, resolved_run  # noqa: E402
 from tests.test_selection_binding import DATES, SUBJECT, _two_subject_two_date_dataset  # noqa: E402
@@ -87,7 +88,7 @@ def test_freeze_selection_round_trips_through_a_real_bind(tmp_path: Path):
     }
     assert selection_compatibility(second_cfg["data"], frozen, selection_dir) == []
 
-    resolution = resolve_run(second_cfg, project=tmp_path)
+    resolution = resolve_run(second_cfg, train_config(second_cfg), project=tmp_path)
     assert len(resolution.train_ds) > 0 and len(resolution.val_ds) > 0
 
 

@@ -2,8 +2,8 @@
 ``train(ctx)``, and ``TrainContext``.
 
 ``TrainContext`` hands the training code the craft library (data / model / optim / eval utils) plus
-the envelope-owned sinks (``log_metrics`` / ``save_checkpoint`` / ``record_artifact`` /
-``should_cancel`` / ``tb`` / ``set_final_weights`` / ``report_objective``).
+the envelope-owned sinks (``log_metrics`` / ``log_batch`` / ``save_checkpoint`` /
+``record_artifact`` / ``should_cancel`` / ``tb`` / ``set_final_weights`` / ``report_objective``).
 
 When no ``training_source`` is set, ``ctx.default_train()`` runs ``generic_trainer.train()``.
 Every sink writes into the run's own directory, ``run.output_dir``, and refuses a run whose final
@@ -40,7 +40,7 @@ class TrainContext:
     train_loader: Any
     val_loader: Any | None = None
     resume_from: str = ""
-    epoch_hook: Any = None        # (epoch, metrics) -> None, fired for every metrics row
+    epoch_hook: Any = None        # (epoch, metrics) -> None, fired for every epoch row
     _epoch: int = 0
     _tb: Any = None
 
@@ -62,16 +62,21 @@ class TrainContext:
         return run_task(self.config)
 
     @property
+    def spec(self) -> Any:
+        """The run's validated config (``TrainRun.spec``), the typed form of :attr:`config`."""
+        return self.run.spec
+
+    @property
     def seed(self) -> Any:
-        return self.config.get("seed")
+        """The validated config's ``seed``."""
+        return self.spec.seed
 
     @property
     def device(self) -> Any:
-        import torch
+        """The device the validated config trains on (``generic_trainer.run_device``)."""
+        from tcip_mcp.pipelines.training.generic_trainer import run_device
 
-        return torch.device(
-            self.config.get("device", "cuda" if torch.cuda.is_available() else "cpu")
-        )
+        return run_device(self.spec)
 
     def set_seed(self, seed: int | None = None, deterministic: bool = False) -> None:
         from tcip_mcp.pipelines.training.generic_trainer import set_seed
@@ -82,11 +87,12 @@ class TrainContext:
 
     # ---- model ----
     def build_model(self) -> Any:
-        """This run's model, at the width and count its config records
-        (:func:`~tcip_mcp.pipelines.model_build.recorded_model_dims`)."""
-        from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
+        """This run's model, built from its validated ``model_source``
+        (:func:`~tcip_mcp.pipelines.model_build.build_from_model_source`) at the width and count
+        its config records (:func:`~tcip_mcp.pipelines.model_build.recorded_model_dims`)."""
+        from tcip_mcp.pipelines.model_build import build_from_model_source, recorded_model_dims
 
-        return build_model(self.config, recorded_model_dims(self.config))
+        return build_from_model_source(self.spec.model_source, recorded_model_dims(self.config))
 
     def _contract_args(self, **overrides: Any) -> dict:
         """What the smoke runs against: the dims this run resolved, or one batch off its own train
@@ -127,7 +133,8 @@ class TrainContext:
         from tcip_mcp.pipelines.training.generic_trainer import train
 
         return train(self.run, self.train_loader, self.val_loader,
-                     epoch_callback=self._epoch_sink, resume_from=self.resume_from)
+                     epoch_callback=self.log_metrics, batch_callback=self.log_batch,
+                     resume_from=self.resume_from)
 
     # ---- craft library passthroughs (compose, don't reinvent) ----
     def build_dataset(self, task: str | None = None, *, samples: Any,
@@ -180,9 +187,12 @@ class TrainContext:
         return build_optimizer(*args, **kwargs)
 
     def build_scheduler(self, optimizer: Any, config: dict, epochs: int) -> Any:
+        """The scheduler a ``scheduler`` block ``config`` names (``schemas.SchedulerSpec``,
+        which refuses an invalid one) over ``epochs`` epochs."""
+        from tcip_mcp.pipelines.schemas import SchedulerSpec
         from tcip_mcp.pipelines.training.generic_trainer import _build_scheduler
 
-        return _build_scheduler(optimizer, config, epochs)
+        return _build_scheduler(optimizer, SchedulerSpec.model_validate(config), epochs)
 
     def apply_stage_freeze(self, model: Any, freeze_to: int, *, prev_trainable: int | None = None,
                            enforce_monotonic: bool = True) -> int:
@@ -198,15 +208,15 @@ class TrainContext:
 
         return compute_lr_scale(*args, **kwargs)
 
-    def snapshot_optimizer_state(self, *args: Any, **kwargs: Any) -> Any:
-        from tcip_mcp.pipelines.training.optimizer_factory import snapshot_optimizer_state
+    def capture_training_state(self, *args: Any, **kwargs: Any) -> Any:
+        from tcip_mcp.pipelines.training.optimizer_factory import capture_training_state
 
-        return snapshot_optimizer_state(*args, **kwargs)
+        return capture_training_state(*args, **kwargs)
 
-    def restore_optimizer_state(self, *args: Any, **kwargs: Any) -> Any:
-        from tcip_mcp.pipelines.training.optimizer_factory import restore_optimizer_state
+    def restore_training_state(self, *args: Any, **kwargs: Any) -> Any:
+        from tcip_mcp.pipelines.training.optimizer_factory import restore_training_state
 
-        return restore_optimizer_state(*args, **kwargs)
+        return restore_training_state(*args, **kwargs)
 
     def evaluate(self, model: Any, loader: Any = None, **kwargs: Any) -> Any:
         from tcip_mcp.pipelines.model_build import recorded_model_dims
@@ -227,30 +237,34 @@ class TrainContext:
         return instance_geometries(*args, **kwargs)
 
     # ---- envelope-owned sinks ----
-    def _epoch_sink(self, epoch: int, metrics: dict) -> None:
-        """Append one epoch's metrics to the run's ``metrics.jsonl`` in their stored form, stamped
-        with ``epoch`` and the instant, after firing ``epoch_hook`` if attached with the metrics
-        the body produced, so a diverged loss keeps comparing as the worst one. Refuses
-        (``ValueError``) metrics carrying either stamp's key; a row JSON cannot hold raises,
-        naming the field.
-        """
+    def _metrics_row(self, metrics: dict, stamps: dict) -> dict:
+        """``metrics`` in their stored form with ``stamps`` and the instant laid over them, the
+        run checked open (``experiments.require_open``). Refuses (``ValueError``) metrics carrying
+        a key the log stamps (``experiments.EPOCH_KEY``, ``STEP_KEY``, ``TIMESTAMP_KEY``)."""
         from tcip_mcp.audit import now_iso
-        from tcip_mcp.experiments import (
-            EPOCH_KEY, METRICS_FILE, TIMESTAMP_KEY, append_row, require_open,
-        )
+        from tcip_mcp.experiments import EPOCH_KEY, STEP_KEY, TIMESTAMP_KEY, require_open
         from tcip_mcp.pipelines.training.generic_trainer import _checkpoint_metrics
 
-        stamped = sorted({EPOCH_KEY, TIMESTAMP_KEY} & metrics.keys())
+        stamped = sorted({EPOCH_KEY, STEP_KEY, TIMESTAMP_KEY} & metrics.keys())
         if stamped:
             raise ValueError(
                 f"the metrics carry {stamped}, which the metrics log stamps on each row itself; "
-                "pass the epoch as the sink's own argument.")
+                "pass the epoch and step as the sink's own arguments.")
         require_open(self.run_dir)
+        return {**_checkpoint_metrics(metrics), **stamps, TIMESTAMP_KEY: now_iso()}
+
+    def _epoch_sink(self, epoch: int, metrics: dict) -> None:
+        """Append one epoch's row (:meth:`_metrics_row`, stamped with ``epoch``) to the run's
+        ``metrics.jsonl``, after firing ``epoch_hook`` if attached with the metrics the body
+        produced, so a diverged loss keeps comparing as the worst one. A row JSON cannot hold
+        raises, naming the field."""
+        from tcip_mcp.experiments import EPOCH_KEY, METRICS_FILE, append_row
+
+        row = self._metrics_row(metrics, {EPOCH_KEY: epoch})
         self._epoch = epoch
         if self.epoch_hook is not None:
             self.epoch_hook(epoch, metrics)
-        append_row(self.run_dir / METRICS_FILE,
-                   {**_checkpoint_metrics(metrics), EPOCH_KEY: epoch, TIMESTAMP_KEY: now_iso()})
+        append_row(self.run_dir / METRICS_FILE, row)
 
     def set_final_weights(self, tag: str) -> None:
         """Declare the checkpoint this body saved under ``tag`` (:meth:`save_checkpoint`) the
@@ -270,16 +284,32 @@ class TrainContext:
         self._epoch_sink(self._epoch, {"selection": float(value),
                                        "selection_metric": self.run.objective["selection_metric"]})
 
-    def log_metrics(self, epoch: int, metrics: dict) -> None:
-        """Custom-loop metric sink: the run's own metrics log plus TensorBoard."""
+    def _write_scalars(self, metrics: dict, step: int) -> None:
+        """Each scalar of ``metrics`` at ``step`` in the run's TensorBoard (:attr:`tb`), tagged by
+        its key."""
         from tcip_store import scalar_number
 
+        for k, v in metrics.items():
+            if scalar_number(v):
+                self.tb.add_scalar(k, v, step)
+        self.tb.flush()
+
+    def log_metrics(self, epoch: int, metrics: dict) -> None:
+        """Epoch metric sink, the default trainer's and a custom loop's: one epoch row in the run's
+        own metrics log plus each scalar at ``epoch`` in TensorBoard."""
         self._epoch_sink(epoch, metrics)
-        if self.tb is not None:
-            for k, v in metrics.items():
-                if scalar_number(v):
-                    self.tb.add_scalar(k, v, epoch)
-            self.tb.flush()
+        self._write_scalars(metrics, epoch)
+
+    def log_batch(self, step: int, epoch: int, metrics: dict) -> None:
+        """Per-batch sink, the default trainer's and a custom loop's: one per-batch row at
+        ``step`` within ``epoch`` in the run's own metrics log (:meth:`_metrics_row`), the
+        Training tab's progress and never an epoch row, so ``epoch_hook`` does not fire; plus each
+        scalar at ``step`` in TensorBoard. The caller chooses the cadence."""
+        from tcip_mcp.experiments import EPOCH_KEY, METRICS_FILE, STEP_KEY, append_row
+
+        append_row(self.run_dir / METRICS_FILE,
+                   self._metrics_row(metrics, {EPOCH_KEY: epoch, STEP_KEY: step}))
+        self._write_scalars(metrics, step)
 
     def save_checkpoint(self, state: dict, tag: str = "checkpoint") -> str:
         """Write ``state`` once under ``tag``, stamped with this run's ``config``
@@ -337,38 +367,43 @@ class TrainContext:
 
     @property
     def tb(self) -> Any:
+        """The run's one TensorBoard writer, over its ``tensorboard`` directory, opened on first
+        use and closed by the envelope once the body returns."""
         if self._tb is None:
-            try:
-                from torch.utils.tensorboard import SummaryWriter
+            from torch.utils.tensorboard import SummaryWriter
 
-                from tcip_mcp.experiments import TENSORBOARD_DIR
+            from tcip_mcp.experiments import TENSORBOARD_DIR
 
-                self._tb = SummaryWriter(log_dir=str(self.run_dir / TENSORBOARD_DIR))
-            except Exception:  # noqa: BLE001
-                self._tb = None
+            self._tb = SummaryWriter(log_dir=str(self.run_dir / TENSORBOARD_DIR))
         return self._tb
 
 
 def dispatch_train_body(ctx: TrainContext) -> None:
     """Run the training body, an agent's ``training_source`` if set, else ``ctx.default_train()``,
     then declare the checkpoint the body saved under ``model_best``, else ``model_final``
-    (``run.saved``), the deliverable when the body declared none.
+    (``run.saved``), the deliverable when the body declared none. The run's TensorBoard writer
+    (``ctx.tb``) is closed once the body returns or raises.
     """
     run = ctx.run
     from tcip_mcp.experiments import FINAL_STATES
     from tcip_mcp.pipelines.model_build import TRAINING_SOURCE_KEY
 
     training_source = run.config.get(TRAINING_SOURCE_KEY)
-    if training_source:
-        from tcip_mcp.pipelines.model_build import _import_dotted
+    try:
+        if training_source:
+            from tcip_mcp.pipelines.model_build import _import_dotted
 
-        agent_train = _import_dotted(training_source)
-        agent_train(ctx)  # the agent's custom loop drives training through ctx
-        if run.status not in FINAL_STATES:
-            # A custom loop that never set a final status returned without canceling or raising.
-            run.status = "canceled" if run.should_cancel() else "completed"
-    else:
-        ctx.default_train()  # the default trainer
+            agent_train = _import_dotted(training_source)
+            agent_train(ctx)  # the agent's custom loop drives training through ctx
+            if run.status not in FINAL_STATES:
+                # A custom loop that never set a final status returned without canceling or
+                # raising.
+                run.status = "canceled" if run.should_cancel() else "completed"
+        else:
+            ctx.default_train()  # the default trainer
+    finally:
+        if ctx._tb is not None:
+            ctx._tb.close()
 
     if run.deliverable is None:
         run.deliverable = run.saved.get("model_best") or run.saved.get("model_final")
@@ -393,23 +428,24 @@ def run_training_envelope(ctx: TrainContext) -> None:
     except Exception as exc:  # noqa: BLE001
         if run.status not in ("failed", "canceled"):
             run.status = "failed"
-        run.error = run.error or str(exc)
+        run.status_error = run.status_error or str(exc)
         logger.exception("Training body failed for %s: %s", run.id, exc)
 
     checkpoint = _settle_run(ctx)
-    run.status, run.error = close_run(
-        ctx.run_dir, run.project, run.status or "failed", run.error or None,
+    run.status, run.status_error = close_run(
+        ctx.run_dir, run.project, run.status or "failed", run.status_error or None,
         checkpoint=checkpoint,
         arguments={**audit_args, **stored_number("best_metric", run.best_metric)},
         duration_ms=round((time.monotonic() - t0) * 1000, 1))
 
 
-def close_run(run_dir: Path, project: Path, state: str, error: str | None, *,
+def close_run(run_dir: Path, project: Path, state: str, status_error: str | None, *,
               checkpoint: dict | None, arguments: dict[str, Any],
               **extra: Any) -> tuple[str, str | None]:
     """Append the run's closing ``training_run`` line under ``project``, then write its final
-    status once and return the state and error it names. A refused append ends the run
-    ``failed`` with no checkpoint, its reason named after ``error`` when there is one."""
+    status once and return the state and ``status_error`` it names. A refused append ends the
+    run ``failed`` with no checkpoint, its reason named after ``status_error`` when there is
+    one."""
     from tcip_mcp.audit import AuditEntryNotWrittenError, record_event_or_raise
     from tcip_mcp.experiments import write_final_status
 
@@ -418,9 +454,9 @@ def close_run(run_dir: Path, project: Path, state: str, error: str | None, *,
                               **extra)
     except AuditEntryNotWrittenError as exc:
         state, checkpoint = "failed", None
-        error = f"{error}; {exc}" if error else str(exc)
-    write_final_status(run_dir, state, error, checkpoint=checkpoint)
-    return state, error
+        status_error = f"{status_error}; {exc}" if status_error else str(exc)
+    write_final_status(run_dir, state, status_error, checkpoint=checkpoint)
+    return state, status_error
 
 
 def _settle_run(ctx: TrainContext) -> dict | None:
@@ -434,15 +470,16 @@ def _settle_run(ctx: TrainContext) -> dict | None:
 
     run = ctx.run
     if run.wall_clock_exceeded and run.status != "failed":
-        run.status, run.error = "failed", "exceeded max_wall_clock_seconds"
+        run.status, run.status_error = "failed", "exceeded max_wall_clock_seconds"
     checkpoint = None
     if run.status == "completed" and run.deliverable is None:
         run.status = "failed"
-        run.error = "training completed but saved no final weights"
+        run.status_error = "training completed but saved no final weights"
     elif run.status == "completed":
         try:
             checkpoint = {"path": str(run.deliverable),
                           "sha256": admitted_digest(run.deliverable)}
         except (OSError, ValueError) as exc:
-            run.status, run.error = "failed", f"final weights could not be admitted: {exc}"
+            run.status, run.status_error = (
+                "failed", f"final weights could not be admitted: {exc}")
     return checkpoint

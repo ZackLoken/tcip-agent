@@ -96,12 +96,34 @@ def test_preflight_config_refuses_a_nested_training_section_by_name(tmp_path):
     assert preflight_config(tmp_path, {**cfg, **nested_keys})["valid"] is True
 
 
+def test_a_smoke_preflight_validates_its_config_once(tmp_path, monkeypatch):
+    """A preflight that admits a config, from its structural check through its resolution and
+    its smoke build, reads it off one validation and never validates its model source again."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import preflight_config
+    from tests.tiny_trainer_fixtures import count_validations, write_regression_dataset
+
+    intensities = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path / "ds", intensities, [2.0 * c for c in intensities])
+    config = {"model_source": {"builder": "tests.tiny_trainer_fixtures:build_two_rate_regressor",
+                               "task": "regression"},
+              "data": {"num_channels": 1, "scope": {}, "images_dir": str(images_dir),
+                       "labels_dir": str(csv_path), "split": {"seed": 1, "val_ratio": 0.15}},
+              "device": "cpu", "mixed_precision": False}
+
+    validations = count_validations(monkeypatch)
+    report = preflight_config(tmp_path, config, smoke=True)
+    assert report["valid"] is True, report["issues"]
+    assert validations == ["TrainConfigSchema"]
+
+
 def test_preflight_config_types_a_non_dict_data_section_instead_of_raising(tmp_path):
     from tcip_mcp.tools.training_tools import preflight_config
 
     r = preflight_config(tmp_path, {"data": "x"})
     assert r["valid"] is False
-    assert any("'data' must be a dict" in i for i in r["issues"]), r["issues"]
+    assert any(i.startswith("data:") and "dictionary" in i for i in r["issues"]), r["issues"]
 
 
 # preflight_config's overfit branch: reseed-run-restore, never gating
@@ -447,7 +469,7 @@ def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(tmp_p
         "evaluation": "not_a_mapping",
     }
     r = preflight_config(tmp_path, cfg)
-    assert any("evaluation" in i and "mapping" in i for i in r["issues"])
+    assert any(i.startswith("evaluation:") for i in r["issues"]), r["issues"]
 
 
 # preflight_config's reserved-region feasibility check: a training-launch-time refusal through
@@ -589,29 +611,33 @@ def test_preflight_reserved_regions_admit_a_feasible_layout(tmp_path):
 # _apply_hpo_params: lr/weight_decay reach what the trainer actually reads
 # --------------------------------------------------------------------------
 
-def test_apply_hpo_params_lr_reaches_optimizer_param_groups():
-    """Suggested lr/weight_decay must survive the trainer's exact config reads
-    (top-level optimizer) all the way into optimizer.param_groups."""
-    torch = pytest.importorskip("torch")
+def _built_groups(config: dict) -> list[tuple[float, float]]:
+    """``(lr, weight_decay)`` of each param group the trainer's optimizer read of ``config``
+    (``schemas.train_config``'s ``optimizer`` into ``optimizer_factory.build_optimizer``)
+    builds over a backbone-and-head model, the backbone group first."""
+    pytest.importorskip("torch")
+    from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
+    from tests.tiny_trainer_fixtures import build_two_rate_regressor
+
+    spec = train_config(config).optimizer
+    optimizer = build_optimizer(spec.name, build_two_rate_regressor(),
+                                backbone_lr=spec.backbone_lr, head_lr=spec.head_lr,
+                                weight_decay=spec.weight_decay)
+    return [(g["lr"], g["weight_decay"]) for g in optimizer.param_groups]
+
+
+def test_apply_hpo_params_lr_reaches_optimizer_param_groups():
+    """Suggested lr/weight_decay survive the trainer's own optimizer read into the head group's
+    rate and every group's weight decay."""
     from tcip_mcp.tools.training_tools import _apply_hpo_params
 
     base = {"model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                              "task": "detection"}}
-    out = _apply_hpo_params(base, {"lr": 3e-3, "weight_decay": 2e-4})
-
-    # Mirror generic_trainer.train()'s reads exactly (top-level keys + defaults).
-    opt_cfg = out.get("optimizer", {"name": "adamw", "backbone_lr": 1e-4,
-                                    "head_lr": 1e-3, "weight_decay": 1e-4})
-    model = torch.nn.Linear(4, 2)
-    optimizer = build_optimizer(
-        opt_cfg.get("name", "adamw"), model,
-        backbone_lr=opt_cfg.get("backbone_lr", 1e-4),
-        head_lr=opt_cfg.get("head_lr", 1e-3),
-        weight_decay=opt_cfg.get("weight_decay", 1e-4),
-    )
-    assert optimizer.param_groups[0]["lr"] == pytest.approx(3e-3)
-    assert optimizer.param_groups[0]["weight_decay"] == pytest.approx(2e-4)
+    (_, backbone_decay), (head_lr, head_decay) = _built_groups(
+        _apply_hpo_params(base, {"lr": 3e-3, "weight_decay": 2e-4}))
+    assert head_lr == pytest.approx(3e-3)
+    assert backbone_decay == head_decay == pytest.approx(2e-4)
 
 
 def test_apply_hpo_params_preserves_base_config_stages():
@@ -632,21 +658,20 @@ def test_apply_hpo_params_preserves_base_config_stages():
     assert "stages" not in out2
 
 
-def test_apply_hpo_params_derives_backbone_ratio_not_frozen():
-    """backbone_lr must scale by whatever ratio the agent's own base_config expressed, never a
-    multiplier pinned in the tool."""
+@pytest.mark.parametrize("optimizer", [
+    {}, {"head_lr": 0.002}, {"backbone_lr": 0.0002}, {"backbone_lr": 2e-5, "head_lr": 1e-4},
+])
+def test_apply_hpo_params_keeps_the_backbone_ratio_the_base_config_trains_at(optimizer):
+    """The swept ``lr`` sets the head group's rate, and the backbone group keeps the ratio to
+    it that the base config's own optimizer, built the way the trainer builds it, trains at,
+    defaults standing for any rate left unstated."""
     from tcip_mcp.tools.training_tools import _apply_hpo_params
 
-    base = {"model_source": {"builder": "x:y", "task": "detection"},
-            "optimizer": {"backbone_lr": 2e-5, "head_lr": 1e-4}}  # ratio 0.2, not 0.1
-    out = _apply_hpo_params(base, {"lr": 0.02})
-    assert out["optimizer"]["head_lr"] == pytest.approx(0.02)
-    assert out["optimizer"]["backbone_lr"] == pytest.approx(0.004)  # 0.02 * 0.2, not 0.002
-
-    # No explicit ratio in base_config -> the ratio is 1.0, so head_lr and backbone_lr agree.
-    base_no_ratio = {"model_source": {"builder": "x:y", "task": "detection"}}
-    out2 = _apply_hpo_params(base_no_ratio, {"lr": 0.02})
-    assert out2["optimizer"]["backbone_lr"] == pytest.approx(0.02)
+    base = {"model_source": {"builder": "x:y", "task": "detection"}, "optimizer": optimizer}
+    (base_backbone, _), (base_head, _) = _built_groups(base)
+    (swept_backbone, _), (swept_head, _) = _built_groups(_apply_hpo_params(base, {"lr": 0.02}))
+    assert swept_head == pytest.approx(0.02)
+    assert swept_backbone / swept_head == pytest.approx(base_backbone / base_head)
 
 
 def test_apply_hpo_params_unrecognized_key_reaches_top_level():
@@ -819,7 +844,8 @@ def _spaces_searched(monkeypatch) -> list:
     return seen
 
 
-def _completed_train(run, train_loader, val_loader, epoch_callback=None, resume_from=""):
+def _completed_train(run, train_loader, val_loader, epoch_callback=None, batch_callback=None,
+                     resume_from=""):
     """A training call that completes the run at once, reporting no epoch."""
     run.status = "completed"
     return run
@@ -832,7 +858,7 @@ def test_run_hpo_trial_reports_each_epoch_and_its_result_is_the_best_of_them(
     pytest.importorskip("torch")
 
     def fake_train(run, train_loader, val_loader,
-                   epoch_callback=None, resume_from=""):
+                   epoch_callback=None, batch_callback=None, resume_from=""):
         for epoch, value in enumerate([50.0, 40.0, 30.0]):
             if epoch_callback:
                 epoch_callback(epoch, _row(value))
@@ -852,7 +878,7 @@ def test_run_hpo_trial_that_fails_has_no_result(monkeypatch, tmp_path):
     from tcip_mcp.experiments import observe
 
     def fake_train(run, train_loader, val_loader,
-                   epoch_callback=None, resume_from=""):
+                   epoch_callback=None, batch_callback=None, resume_from=""):
         raise RuntimeError("CUDA out of memory")
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
@@ -870,7 +896,7 @@ def test_run_hpo_trial_result_is_the_highest_value_for_a_higher_is_better_metric
     pytest.importorskip("torch")
 
     def fake_train(run, train_loader, val_loader,
-                   epoch_callback=None, resume_from=""):
+                   epoch_callback=None, batch_callback=None, resume_from=""):
         for epoch, value in enumerate([0.5, 0.9, 0.6]):
             if epoch_callback:
                 epoch_callback(epoch, _row(value, metric="accuracy"))
@@ -907,7 +933,7 @@ def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
     }
 
     def fake_train_ok(run, train_loader, val_loader, task="classification",
-                      epoch_callback=None, resume_from=""):
+                      epoch_callback=None, batch_callback=None, resume_from=""):
         if epoch_callback:
             epoch_callback(0, _row(0.7, metric="accuracy"))
         return _complete(run)
@@ -918,7 +944,7 @@ def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
            higher_is_better=True)
 
     def fake_train_fails(run, train_loader, val_loader, task="classification",
-                         epoch_callback=None, resume_from=""):
+                         epoch_callback=None, batch_callback=None, resume_from=""):
         raise RuntimeError("boom")
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train_fails)
@@ -938,7 +964,7 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
     captured: dict = {}
 
     def fake_train(run, train_loader, val_loader,
-                   epoch_callback=None, resume_from=""):
+                   epoch_callback=None, batch_callback=None, resume_from=""):
         captured["model_source"] = run.config["model_source"]
         run.status = "completed"
         return run
@@ -1066,7 +1092,7 @@ def test_a_trials_launch_record_carries_the_seed_it_trained_under(monkeypatch, t
     captured: dict = {}
 
     def fake_train(run, train_loader, val_loader,
-                   epoch_callback=None, resume_from=""):
+                   epoch_callback=None, batch_callback=None, resume_from=""):
         captured["seed"] = run.config.get("seed")
         run.status = "completed"
         return run

@@ -68,7 +68,7 @@ def test_a_builder_outside_the_interpreters_path_launches_in_a_fresh_subprocess(
     assert before.returncode != 0
     assert "ModuleNotFoundError" in before.stderr
 
-    fn = import_source_builder(model_source)
+    fn = import_source_builder(model_source["builder"], model_source["source_files"])
     assert fn(width=4) == {"built": True, "kwargs": {"width": 4}}
     assert str(src) in sys.path
 
@@ -88,8 +88,7 @@ def test_a_packaged_builder_imports_from_its_project_root(
     monkeypatch.setattr(sys, "path", list(sys.path))
     monkeypatch.delenv("PYTHONPATH", raising=False)
 
-    build = import_source_builder({"builder": "agentpkg_import.model:build",
-                                   "source_files": [str(model)]})
+    build = import_source_builder("agentpkg_import.model:build", [str(model)])
 
     assert build().num_classes == 2
     assert str(project) in sys.path

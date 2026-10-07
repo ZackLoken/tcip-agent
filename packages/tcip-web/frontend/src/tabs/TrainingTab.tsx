@@ -5,6 +5,7 @@ import { openTrainingStream, trainingApi } from "@/api/training";
 import type { MetricRow, SplitChoices } from "@/api/training";
 import {
   EPOCH_KEY,
+  STEP_KEY,
   type RunRow,
   type SweepGroup,
   type TrainingListing,
@@ -22,7 +23,13 @@ import { declaredClient } from "@/store/slices/agentActivity";
 import { selectProjectRoot } from "@/store/slices/gui";
 import { defaultTrainingRequest } from "@/tabs/agentPrompts";
 import { RunMonitorEmpty, RunMonitorLayout } from "@/tabs/RunMonitorLayout";
-import { mergeMetric, RUN_REFRESH_MS, unionMetricKeys } from "@/tabs/trainingMetrics";
+import {
+  inProgressBatch,
+  mergeMetric,
+  numericMetricKeys,
+  RUN_REFRESH_MS,
+  unionMetricKeys,
+} from "@/tabs/trainingMetrics";
 
 const NO_LISTING: TrainingListing = { runs: [], sweeps: [] };
 
@@ -302,9 +309,10 @@ export function TrainingTab() {
   const [runsError, setRunsError] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<MetricRow[]>([]);
+  const [latestBatch, setLatestBatch] = useState<MetricRow | null>(null);
   // Non-null once the run's own TensorBoard refusal names no_logs; its error is the run's own
-  // recorded status.error, null when the run produced no logs but recorded no reason either.
-  const [tbNoLogs, setTbNoLogs] = useState<{ error: string | null } | null>(null);
+  // recorded status_error, null when the run produced no logs but recorded no reason either.
+  const [tbNoLogs, setTbNoLogs] = useState<{ statusError: string | null } | null>(null);
   const [tbAttempt, setTbAttempt] = useState(0);
   const [markedExperimentIds, setMarkedExperimentIds] = useState<Set<string>>(new Set());
   // Cancel in flight, by run or sweep id: disables that row's own Cancel button with a pending
@@ -436,6 +444,7 @@ export function TrainingTab() {
     // The stream replays this run from the start, so a seed GET would just double-load the
     // same rows. The WS is the single source.
     setMetrics([]);
+    setLatestBatch(null);
     streamRef.current?.();
     // A run already terminal when this stream opened is a rediscovery, not a transition the
     // breeder is watching; only a run still live at open time toasts on its own terminal frame.
@@ -447,6 +456,8 @@ export function TrainingTab() {
     streamRef.current = openTrainingStream(selectedRun, (msg) => {
       if (msg.type === "metric" && msg.row) {
         setMetrics((prev) => mergeMetric(prev, msg.row as MetricRow));
+      } else if (msg.type === "batch" && msg.row) {
+        setLatestBatch(msg.row as MetricRow);
       } else if (msg.type === "status") {
         // A known run carries its row and no error; an unknown run carries error and no row,
         // is not terminal, and the socket keeps reconnecting behind it.
@@ -511,7 +522,7 @@ export function TrainingTab() {
     const status = (detail.run ?? detail.sweep)!;
     if (!TERMINAL_STATES.has(status.state)) return { url: null, error: null, done: false };
     if (noLogs) {
-      setTbNoLogs({ error: status.error });
+      setTbNoLogs({ statusError: status.status_error });
       return { url: null, error: null, done: true };
     }
     return { url: null, error: failure ?? "No TensorBoard is serving this run.", done: true };
@@ -550,12 +561,13 @@ export function TrainingTab() {
   const selectedTerminal = TERMINAL_STATES.has(selectedRow?.state ?? "");
 
   const noLogsMessage = tbNoLogs
-    ? tbNoLogs.error
-      ? `This run failed: ${tbNoLogs.error}. It produced no logs.`
+    ? tbNoLogs.statusError
+      ? `This run failed: ${tbNoLogs.statusError}. It produced no logs.`
       : "This run produced no logs."
     : null;
 
   const metricKeys = useMemo(() => unionMetricKeys(metrics), [metrics]);
+  const batch = inProgressBatch(metrics, latestBatch);
 
   function runItem(run: RunRow) {
     const id = run.experiment_id;
@@ -627,7 +639,7 @@ export function TrainingTab() {
           ) : (
             <div className="flex flex-col gap-4">
               {streaming &&
-                (metrics.length > 0 ? (
+                (metrics.length > 0 || batch ? (
                   <div className="overflow-auto max-h-64 shrink-0">
                     <table className="w-full text-[11px]">
                       <caption className="sr-only">{`${selectedRun} metrics by epoch`}</caption>
@@ -654,6 +666,24 @@ export function TrainingTab() {
                             ))}
                           </tr>
                         ))}
+                        {batch && (
+                          <tr className="border-t border-tcip-border text-tcip-muted">
+                            <td className="py-1 pr-3 tabular-nums">
+                              {typeof batch[EPOCH_KEY] === "number"
+                                ? batch[EPOCH_KEY]
+                                : UNSET_GLYPH}
+                            </td>
+                            <td
+                              colSpan={Math.max(1, metricKeys.length)}
+                              className="pr-3 tabular-nums"
+                            >
+                              {`${selectedTerminal ? "stopped at" : "in progress ·"} step ${String(batch[STEP_KEY])}`}
+                              {numericMetricKeys(batch).map(
+                                (key) => ` · ${key} ${String(batch[key])}`,
+                              )}
+                            </td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -752,7 +782,9 @@ export function TrainingTab() {
                     <CancelError id={sweep.sweep_id} cancelError={cancelErrors[sweep.sweep_id]} />
                   </div>
                 </div>
-                {sweep.error && <div className="text-[10px] text-tcip-fp">{sweep.error}</div>}
+                {sweep.status_error && (
+                  <div className="text-[10px] text-tcip-fp">{sweep.status_error}</div>
+                )}
                 <ul className="mt-1 pl-3 space-y-1">{sweep.trials.map(runItem)}</ul>
               </div>
             </li>

@@ -4,6 +4,7 @@ import type { MetricRow } from "@/api/training";
 import {
   EPOCH_KEY,
   NOT_FINITE_SUFFIX,
+  STEP_KEY,
   TIMESTAMP_KEY,
   VAL_METRIC_PREFIX,
 } from "@/api/types.generated";
@@ -11,10 +12,10 @@ import {
 /** The poll cadence of a run listing, in milliseconds. */
 export const RUN_REFRESH_MS = 4000;
 
-const NON_METRIC_KEYS = new Set([EPOCH_KEY, TIMESTAMP_KEY]);
+const NON_METRIC_KEYS = new Set([EPOCH_KEY, STEP_KEY, TIMESTAMP_KEY]);
 
-/** The keys of ``metrics`` holding a number, other than a row's epoch and instant stamps and a
- * key's non-finite state companion. */
+/** The keys of ``metrics`` holding a number, other than a row's epoch, step and instant stamps
+ * and a key's non-finite state companion. */
 export function numericMetricKeys(metrics: Record<string, unknown> | null | undefined): string[] {
   if (!metrics) return [];
   return Object.keys(metrics).filter(
@@ -45,4 +46,11 @@ export function mergeMetric(prev: MetricRow[], row: MetricRow): MetricRow[] {
   const next = prev.slice();
   next[idx] = row;
   return next;
+}
+
+/** The streamed per-batch row ``batch`` while its epoch is still in progress, that is while
+ * ``epochs`` holds no row of its epoch; null otherwise. */
+export function inProgressBatch(epochs: MetricRow[], batch: MetricRow | null): MetricRow | null {
+  if (!batch) return null;
+  return epochs.some((r) => r[EPOCH_KEY] === batch[EPOCH_KEY]) ? null : batch;
 }

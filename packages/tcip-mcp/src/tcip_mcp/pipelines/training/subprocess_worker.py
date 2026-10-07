@@ -47,15 +47,15 @@ def prepare_run_context(
     if run_record["max_wall_clock_seconds"] is not None:
         run_obj.deadline = time.time() + run_record["max_wall_clock_seconds"]
 
-    task = run_task(config)
+    task, spec = run_task(config), run_obj.spec
     train_ds, val_ds = recorded_datasets(task, resolved["data"],
                                          partition_samples(resolved["partition"]),
-                                         run_transforms(config))
-    train_loader, val_loader = run_loaders(config, task, train_ds, val_ds, config.get("seed"))
+                                         run_transforms(spec))
+    train_loader, val_loader = run_loaders(spec, task, train_ds, val_ds)
     if val_loader is None and task in DETECTION_TASKS:
         logger.warning(
-            "No validation loader for %s run %s: best-model selection and early stopping will "
-            "fall back to training loss. Bind a selection through data.split.selection_dir, or "
+            "No validation loader for %s run %s: best-model selection reads the training loss "
+            "and early stopping is inert. Bind a selection through data.split.selection_dir, or "
             "enable auto_val.", task, run_dir.name,
         )
     return TrainContext(

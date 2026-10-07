@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
     from tcip_mcp.pipelines.data.selection import ClassScope, Sample, Selection
     from tcip_mcp.pipelines.image_utils import BandGroupRef
+    from tcip_mcp.pipelines.schemas import TrainConfigSchema
 
 logger = logging.getLogger(__name__)
 
@@ -659,16 +660,20 @@ def auto_train_val(project: Path, task: str, data_cfg: dict, transforms, *,
 
 class ResolvedRun(NamedTuple):
     """A run resolved once, at launch: the ``record`` its ``run.json`` holds (its resolved
-    ``data`` section, its ``partition`` and its ``objective``) and the datasets built at it."""
+    ``data`` section, its ``partition`` and its ``objective``), the datasets built at it, and
+    ``spec``, the validated config it was resolved from."""
 
     record: dict
     train_ds: Any
     val_ds: Any
+    spec: TrainConfigSchema
 
 
-def resolve_run(config: dict, *, project: Path, objective: dict | None = None,
+def resolve_run(config: dict, spec: TrainConfigSchema, *, project: Path,
+                objective: dict | None = None,
                 tallies_out: dict[str, int] | None = None) -> ResolvedRun:
-    """Resolve ``config`` once for a run of ``project``: a copy of its data section through
+    """Resolve ``config``, validated as ``spec`` (``schemas.train_config``), once for a run of
+    ``project``: a copy of its data section through
     :func:`auto_train_val`, the geometry its train dataset serves stamped on it
     (:func:`~tcip_mcp.pipelines.training.generic_trainer.stamp_effective_data_geometry`), and its
     objective (:func:`~tcip_mcp.pipelines.training.generic_trainer.resolve_objective` for a run
@@ -679,14 +684,16 @@ def resolve_run(config: dict, *, project: Path, objective: dict | None = None,
         resolve_objective, run_transforms, stamp_effective_data_geometry,
     )
 
+    task = run_task(config)
     data = copy.deepcopy(config.get("data") or {})
     train_ds, val_ds, partition = auto_train_val(
-        project, run_task(config), data, run_transforms(config), tallies_out=tallies_out)
+        project, task, data, run_transforms(spec), tallies_out=tallies_out)
     stamp_effective_data_geometry(data, train_ds)
     if objective is None:
-        objective = resolve_objective(config, project=project, has_val_loader=val_ds is not None)
+        objective = resolve_objective(spec, task, project=project,
+                                      has_val_loader=val_ds is not None)
     return ResolvedRun({"data": data, "partition": partition, "objective": objective},
-                       train_ds, val_ds)
+                       train_ds, val_ds, spec)
 
 
 def recorded_datasets(task: str, data: dict, samples: "Sequence[Sample]",

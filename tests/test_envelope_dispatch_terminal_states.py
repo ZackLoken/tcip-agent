@@ -119,7 +119,7 @@ def test_a_deliverable_the_verified_reader_refuses_ends_the_run_failed(tmp_path)
 
     final = observe(run_dir).final
     assert ctx.run.status == "failed"
-    assert final["state"] == "failed" and final["error"]
+    assert final["state"] == "failed" and final["status_error"]
     assert final["checkpoint"] is None
     assert _completed(run_dir) is None
     assert _audit_statuses(tmp_path) == ["running", "failed"]
@@ -147,7 +147,7 @@ def _train_records_its_own_failure(ctx):
     """A loop that detects a bad run itself and marks it failed rather than raising."""
     ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.4}}, "model_best")
     ctx.run.status = "failed"
-    ctx.run.error = "loss diverged at stage 2"
+    ctx.run.status_error = "loss diverged at stage 2"
 
 
 def test_a_body_that_marks_itself_failed_is_not_promoted_to_completed(tmp_path):
@@ -155,7 +155,7 @@ def test_a_body_that_marks_itself_failed_is_not_promoted_to_completed(tmp_path):
 
     assert ctx.run.status == "failed"
     final = observe(run_dir).final
-    assert (final["state"], final["error"]) == ("failed", "loss diverged at stage 2")
+    assert (final["state"], final["status_error"]) == ("failed", "loss diverged at stage 2")
     assert (run_dir / "model_best.pt").is_file()
     assert _completed(run_dir) is None
     assert _audit_statuses(tmp_path) == ["running", "failed"]
@@ -172,7 +172,7 @@ def test_a_raised_failure_closes_the_run_failed_and_completes_nothing(tmp_path):
     ctx, run_dir = _start(tmp_path, "_train_raises_after_checkpointing")
 
     assert ctx.run.status == "failed"
-    assert "out of memory" in observe(run_dir).final["error"]
+    assert "out of memory" in observe(run_dir).final["status_error"]
     assert (run_dir / "model_best.pt").is_file()
     assert _completed(run_dir) is None
     assert _audit_statuses(tmp_path) == ["running", "failed"]
@@ -191,7 +191,7 @@ def test_a_run_past_its_wall_clock_ends_failed_naming_it_with_no_checkpoint(tmp_
                           deadline=time.time() - 1)
 
     assert ctx.run.status == "failed"
-    assert observe(run_dir).final["error"] == "exceeded max_wall_clock_seconds"
+    assert observe(run_dir).final["status_error"] == "exceeded max_wall_clock_seconds"
     assert (run_dir / "model_best.pt").is_file()
     assert _completed(run_dir) is None
     assert _audit_statuses(tmp_path) == ["running", "failed"]

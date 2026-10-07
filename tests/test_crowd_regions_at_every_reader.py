@@ -158,6 +158,8 @@ def _train_config(root: Path) -> dict:
         "batch_size": 2, "stages": [{"freeze_to": -1, "epochs": 1}],
         "mixed_precision": False, "device": "cpu", "checkpoint_every_n_epochs": 1,
         "early_stopping": {"enabled": False},
+        # An untrained toy detector scores no objective; its validation loss is what ranks.
+        "evaluation": {"selection_metric": "loss"},
         "optimizer": {"name": "sgd", "backbone_lr": 1e-3, "head_lr": 1e-2, "weight_decay": 0},
         "scheduler": {"type": "cosine"}, "gradient_accumulation_steps": 1,
     }
