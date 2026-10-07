@@ -36,7 +36,7 @@ export function BandPicker({
   onChange,
   sampled,
   pixelFraction,
-  overviewScale,
+  overviewSize,
 }: {
   bandCount: number;
   bands: ImageBandInfo[];
@@ -44,7 +44,7 @@ export function BandPicker({
   onChange: (next: BandSelection) => void;
   sampled?: boolean;
   pixelFraction?: number;
-  overviewScale?: number;
+  overviewSize?: [number, number];
 }) {
   const single = bandCount === 1;
   const channels = single ? (["r"] as const) : (["r", "g", "b"] as const);
@@ -95,12 +95,12 @@ export function BandPicker({
             : `stats from a ${samplePercent(pixelFraction)}% pixel sample`}
         </span>
       )}
-      {!sampled && overviewScale != null && (
+      {!sampled && overviewSize != null && (
         <span
           className="text-[10px] text-tcip-muted"
           title="These band ranges were read from a reduced-resolution overview of this raster, not from its native pixels; averaged overview values sit inside the native range, so the true extremes can lie outside these numbers."
         >
-          {`stats from a 1/${Math.round(1 / overviewScale)} overview`}
+          {`stats from a ${overviewSize[0]}x${overviewSize[1]} overview`}
         </span>
       )}
     </div>

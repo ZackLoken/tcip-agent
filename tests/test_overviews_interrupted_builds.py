@@ -18,7 +18,7 @@ from tcip_mcp.pipelines import overviews as overviews_module
 from tcip_mcp.pipelines.overviews import (
     _predicted_sidecar_bytes,
     build_overviews,
-    has_overviews,
+    overview_dims,
     overview_levels,
     overview_sidecar,
     sidecar_valid,
@@ -174,18 +174,18 @@ def test_canceling_a_build_that_has_started_writing_deletes_the_sidecar(
 
     assert canceled_at, "the build was never canceled while its sidecar held written tiles"
     assert not sidecar.exists()
-    assert not has_overviews(path)
+    assert not overview_dims(path)
 
 
 def test_a_deep_pyramid_carries_one_level_per_decimation_step(tmp_path: Path) -> None:
-    """A raster far above the display bound gets a level per power-of-2 step down to it, and the
-    sidecar holds a page for each, halving in both dimensions as it goes."""
+    """A raster far above the pyramid floor gets a level per power-of-2 step down to it, and the
+    sidecar holds a page for each, halving in both dimensions, rounded up, as it goes."""
     path = _deep_pyramid_raster(tmp_path)
     levels = overview_levels(32768, 8)
-    assert levels == [2, 4, 8]
+    assert levels == [2, 4, 8, 16, 32]
 
     sidecar = build_overviews(path)
     with tifffile.TiffFile(str(sidecar)) as tif:
         shapes = [tuple(page.shape) for page in tif.pages]
-    assert shapes == [(4, 16384), (2, 8192), (1, 4096)]
+    assert shapes == [(4, 16384), (2, 8192), (1, 4096), (1, 2048), (1, 1024)]
     assert sidecar_valid(path)

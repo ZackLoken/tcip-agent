@@ -11,7 +11,7 @@ import tifffile
 
 from tcip_mcp.pipelines.overviews import (
     build_overviews,
-    has_overviews,
+    overview_dims,
     overview_levels,
     overview_sidecar,
     sidecar_valid,
@@ -20,22 +20,26 @@ from tcip_mcp.pipelines.raster_source import Rect, open_raster
 
 
 def _wide_raster(tmp_path: Path, *, width: int = 8192, height: int = 8) -> tuple[Path, np.ndarray]:
-    """A raster whose longest edge exceeds the display bound, small enough to build in tests."""
+    """A raster whose longest edge is past the pyramid floor, small enough to build in tests."""
     path = tmp_path / "wide.tif"
     arr = (np.arange(height * width) % 251).astype(np.uint8).reshape(height, width)
     tifffile.imwrite(str(path), arr, rowsperstrip=4)
     return path, arr
 
 
-def test_overview_levels_are_powers_of_two_down_to_the_display_bound() -> None:
-    assert overview_levels(239921, 141130, max_edge=4096) == [2, 4, 8, 16, 32, 64]
-    assert overview_levels(8192, 8, max_edge=4096) == [2]
-    assert overview_levels(4096, 100, max_edge=4096) == []
+def test_overview_levels_are_powers_of_two_down_to_the_pyramid_floor() -> None:
+    """The deepest level is the first whose longest edge, in GDAL's rounded-up whole pixels, is at
+    most the floor: 1025 pixels halve to 513, not 512.5."""
+    assert overview_levels(239921, 141130) == [2, 4, 8, 16, 32, 64, 128, 256]
+    assert overview_levels(8192, 8) == [2, 4, 8]
+    assert overview_levels(1025, 3) == [2]
+    assert overview_levels(2049, 3) == [2, 4]
+    assert overview_levels(1024, 100) == []
 
 
 def test_build_overviews_writes_a_sidecar_gdal_serves_reduced_reads_from(tmp_path: Path) -> None:
     path, arr = _wide_raster(tmp_path)
-    assert not has_overviews(path)
+    assert not overview_dims(path)
     assert not sidecar_valid(path)
 
     fractions: list[float] = []
@@ -44,13 +48,13 @@ def test_build_overviews_writes_a_sidecar_gdal_serves_reduced_reads_from(tmp_pat
     assert sidecar == overview_sidecar(path)
     assert sidecar.is_file()
     assert sidecar_valid(path)
-    assert has_overviews(path)
+    assert overview_dims(path) == [(4096, 4), (2048, 2), (1024, 1)]
     assert fractions and fractions[-1] == pytest.approx(1.0)
 
     with open_raster(path, 1) as src:
         region, spec = src.read_region(Rect(0, 0, 8192, 8), target_size=(4096, 4))
     assert region.shape == (4, 4096, 1)
-    assert (spec.scale, spec.resample) == (0.5, "average")
+    assert spec.resample == "average"
     blocks = arr.reshape(4, 2, 4096, 2).mean(axis=(1, 3))
     assert np.allclose(np.squeeze(region, -1), blocks, atol=1.0)
 
@@ -67,13 +71,14 @@ def test_a_decimated_read_is_served_from_the_pyramid_not_by_decoding_the_base(
 
     tifffile.imwrite(str(path), np.zeros_like(arr), rowsperstrip=4)
     assert sidecar_valid(path)
-    assert has_overviews(path)
+    assert overview_dims(path)
 
     with open_raster(path, 1) as src:
         native, _ = src.read_region(Rect(0, 0, 8192, 8))
         reduced, spec = src.read_region(Rect(0, 0, 8192, 8), target_size=(4096, 4))
     assert not native.any()
-    assert (spec.scale, spec.resample) == (0.5, "average")
+    assert reduced.shape == (4, 4096, 1)
+    assert spec.resample == "average"
     blocks = arr.reshape(4, 2, 4096, 2).mean(axis=(1, 3))
     assert np.allclose(np.squeeze(reduced, -1), blocks, atol=1.0)
 
@@ -97,7 +102,7 @@ def test_a_canceled_build_deletes_the_sidecar(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError):
         build_overviews(path, progress_cb=lambda _fraction: False)
     assert not overview_sidecar(path).exists()
-    assert not has_overviews(path)
+    assert not overview_dims(path)
 
 
 def test_a_partial_sidecar_is_invalid_and_is_rebuilt(tmp_path: Path) -> None:
@@ -126,10 +131,10 @@ def test_a_partial_sidecar_is_invalid_and_is_rebuilt(tmp_path: Path) -> None:
     assert sidecar == partial
 
 
-def test_building_overviews_for_a_raster_within_the_display_bound_refuses(tmp_path: Path) -> None:
+def test_building_overviews_for_a_raster_within_the_pyramid_floor_refuses(tmp_path: Path) -> None:
     """An empty level list would clear existing overviews instead of building any, so a raster
-    already at display scale is refused with the bound named."""
+    already within the floor is refused, saying there is no level to build."""
     path = tmp_path / "small.tif"
     tifffile.imwrite(str(path), np.zeros((32, 32), dtype=np.uint8))
-    with pytest.raises(ValueError, match="display bound"):
+    with pytest.raises(ValueError, match="no overview level"):
         build_overviews(path)

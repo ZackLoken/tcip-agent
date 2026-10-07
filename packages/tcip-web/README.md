@@ -19,7 +19,7 @@ packages/tcip-web/
       canvas.py         # live canvas capture for the agent's own image-capable read tool
       dataset.py        # tree + select + nav position
       fs.py             # filesystem browsing for path pickers
-      images.py         # EXIF-oriented JPEG serving (+ downsample, region-serving grid)
+      images.py         # EXIF-oriented serving: display reads, native regions, a view's reads
       inference.py      # SAHI-tiled background jobs + progress WS
       meta.py           # crop/project metadata
       projects.py       # project open/create/list

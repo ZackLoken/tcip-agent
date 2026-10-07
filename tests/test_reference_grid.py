@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE, VIZ_ARTIFACT_MAX_EDGE
+from tcip_mcp.pipelines.display_bounds import VIZ_ARTIFACT_MAX_EDGE
 from tcip_mcp.pipelines.reference_grid import (
     derive_pointing_tile_size,
     derive_serving_tile_size,
@@ -74,28 +74,37 @@ class TestReferenceCells:
             reference_cells(0, 100, 10)
 
 
-class TestDerivations:
-    def test_serving_tile_fits_one_display_serve(self):
-        for dims in [(141130, 239921), (4000, 3000), (5000, 64), (640, 480)]:
-            tile = derive_serving_tile_size(*dims)
-            assert 1 <= tile <= DISPLAY_MAX_EDGE
+CAP = 2560 * 1440
+"""The area cap of a fixture 2560x1440 display at device pixel ratio 1, its own pixel count: its
+square edge is 1920 pixels."""
 
-    def test_image_inside_display_bound_is_one_cell(self):
-        tile = derive_serving_tile_size(4096, 3000)
-        assert tile == 4096
-        assert len(reference_cells(4096, 3000, tile, clamp=True)) == 1
+
+class TestDerivations:
+    @pytest.mark.parametrize("width,height", [(141130, 239921), (4000, 3000), (5000, 64),
+                                              (640, 480), (1, 100_000), (100_000, 1)])
+    def test_every_serving_cell_fits_the_cap(self, width, height):
+        tile = derive_serving_tile_size(width, height, CAP)
+        cells = reference_cells(width, height, tile, clamp=True)
+        assert all((c.x1 - c.x0) * (c.y1 - c.y0) <= CAP for c in cells)
+        assert len(cells) == 1 or width * height > CAP
+
+    def test_image_inside_the_cap_is_one_cell(self):
+        for width, height in [(1920, 1000), (5000, 64)]:
+            tile = derive_serving_tile_size(width, height, CAP)
+            assert len(reference_cells(width, height, tile, clamp=True)) == 1
 
     def test_mosaic_scale_geometry(self):
-        """The real-mosaic numeric case: 141130 x 239921 derives tile 4067, a 35 x 59
-        serving grid."""
-        tile = derive_serving_tile_size(141130, 239921)
-        assert tile == 4067
+        """The orthomosaic-sized numeric case: 141130 x 239921 under that display derives tile
+        1920, a 74 x 125 serving grid."""
+        tile = derive_serving_tile_size(141130, 239921, CAP)
+        assert tile == 1920
         geometry = grid_geometry(141130, 239921, tile)
-        assert geometry["cols"] == 35
-        assert geometry["rows"] == 59
+        assert geometry["cols"] == 74
+        assert geometry["rows"] == 125
 
     def test_derivations_are_deterministic(self):
-        assert derive_serving_tile_size(7000, 5000) == derive_serving_tile_size(7000, 5000)
+        assert (derive_serving_tile_size(7000, 5000, CAP)
+                == derive_serving_tile_size(7000, 5000, CAP))
         assert derive_pointing_tile_size(7000, 5000) == derive_pointing_tile_size(7000, 5000)
 
     def test_pointing_grain_is_fixed_in_render_space(self):
@@ -120,11 +129,18 @@ class TestDerivations:
     def test_serving_tile_is_a_fixed_derivation_of_the_extent(self):
         """Hardcoded expected values, not a self-comparison, so a shared-code-path regression
         would actually be caught."""
-        assert derive_serving_tile_size(141130, 239921) == 4067
-        assert derive_serving_tile_size(4000, 3000) == 4000
-        assert derive_serving_tile_size(5000, 64) == 2500
-        assert derive_serving_tile_size(640, 480) == 640
-        assert derive_serving_tile_size(4096, 3000) == 4096
+        assert derive_serving_tile_size(141130, 239921, CAP) == 1920
+        assert derive_serving_tile_size(4000, 3000, CAP) == 1334
+        assert derive_serving_tile_size(5000, 64, CAP) == 5000
+        assert derive_serving_tile_size(640, 480, CAP) == 640
+        assert derive_serving_tile_size(1920, 1000, CAP) == 1920
+
+    def test_an_encodings_edge_limit_bounds_the_tile_edge(self):
+        """A one-pixel level within the cap but longer than the encoding's edge limit splits
+        into cells that limit admits; the same level with no limit stays one cell."""
+        assert derive_serving_tile_size(1, 100_000, 100_000, 65_500) == 50_000
+        assert derive_serving_tile_size(100_000, 1, 100_000, 65_500) == 50_000
+        assert derive_serving_tile_size(1, 100_000, 100_000) == 100_000
 
 
 class TestGridGeometry:

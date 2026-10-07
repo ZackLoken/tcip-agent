@@ -259,11 +259,11 @@ def test_probe_channels_of_a_plain_tif_does_not_decode_pixels(grouped_dir, monke
 # ── BandGroupRef-accepting decode overloads (synthetic) ────────────────────────────────
 
 
-def test_image_dimensions_of_a_band_group(grouped_dir):
-    from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_path
+def test_display_frame_of_a_band_group(grouped_dir):
+    from tcip_mcp.pipelines.image_utils import display_frame, resolve_image_path
 
     ref = resolve_image_path(grouped_dir / "cap.bandgroup")
-    assert image_dimensions(ref) == (8, 8)
+    assert display_frame(ref) == (8, 8)
 
 
 def test_load_multiband_stacks_siblings_in_declared_order(grouped_dir):
@@ -302,7 +302,7 @@ def test_real_dji_capture_decodes_as_a_4_band_stack(tmp_path):
     from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
     from tcip_mcp.pipelines.derivations import probe_channels
     from tcip_mcp.pipelines.image_utils import (
-        image_dimensions, load_image, resolve_image_path,
+        display_frame, load_image, resolve_image_path,
     )
 
     d = tmp_path / "images"
@@ -314,7 +314,7 @@ def test_real_dji_capture_decodes_as_a_4_band_stack(tmp_path):
     logical_stem = sorted(p.stem for p in d.glob("*.bandgroup"))[0]
     ref = resolve_image_path(d / f"{logical_stem}.bandgroup")
     assert probe_channels(ref) == 4
-    assert image_dimensions(ref) == (2592, 1944)  # the real DJI M3M frame size
+    assert display_frame(ref) == (2592, 1944)  # the real DJI M3M frame size
 
     arr = load_image(ref, 4)
     assert isinstance(arr, np.ndarray)

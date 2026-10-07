@@ -11,7 +11,7 @@ export interface HostSize {
   h: number;
 }
 
-/** A half-open image-pixel rect, the same convention the serving grid's cells use. */
+/** A half-open image-pixel rect, the same convention the server's view reads use. */
 export interface PixelRect {
   x0: number;
   y0: number;

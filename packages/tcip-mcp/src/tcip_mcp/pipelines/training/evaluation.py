@@ -638,10 +638,10 @@ def score_bucket(images: Sequence[Any], bucket: Any, *, iou_threshold: float,
     from tcip_annotation.matching import Matching, merged
     from tcip_annotation.state import polygonal
 
-    from tcip_mcp.pipelines.image_utils import image_dimensions
+    from tcip_mcp.pipelines.image_utils import display_frame
 
     read = [
-        (src, gt, preds, *image_dimensions(src)) for src, gt, preds in bucket_reads(images, bucket)
+        (src, gt, preds, *display_frame(src)) for src, gt, preds in bucket_reads(images, bucket)
     ]
     name_id = subject_category_ids(
         [a for _s, gt, preds, _w, _h in read for a in (*gt, *(preds or ()))]

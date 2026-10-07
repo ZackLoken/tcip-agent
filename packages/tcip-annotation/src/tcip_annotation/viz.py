@@ -486,8 +486,7 @@ def render_canvas_state(
     image: "Image.Image | np.ndarray",
     shapes: list[dict],
     *,
-    origin: tuple[float, float],
-    scale: float,
+    region: tuple[int, int, int, int],
     output_path: str,
 ) -> str:
     """Render the live GUI canvas: display-resolved shapes over the pixels the human is viewing.
@@ -500,15 +499,16 @@ def render_canvas_state(
     under its own.
 
     ``image`` is whatever region of the raster the caller read (the human's viewport, or the whole
-    frame), ``origin`` is that region's top-left corner in the raster's own full-resolution grid
-    and ``scale`` is the served resolution as a fraction of native. Shape coordinates arrive in the
-    native grid and are placed by those two. The render is written to ``output_path`` as JPEG. A
+    frame), and ``region`` is that region's half-open ``(x0, y0, x1, y1)`` in the raster's own
+    full-resolution grid. Shape coordinates arrive in the native grid and are placed by the
+    region's origin and the image's size against the region's, one scale per axis. The render is
+    written to ``output_path`` as JPEG. A
     shape that is none of those kinds, lacks its coordinates, or names a color that is not
     ``#RGB`` or ``#RRGGBB`` refuses (``ValueError``) naming its index.
     """
     img = _rgb_frame(image)
-    ox, oy = float(origin[0]), float(origin[1])
-    k = float(scale)
+    ox, oy = region[0], region[1]
+    sx, sy = _get_scale(region[2] - ox, region[3] - oy, img.size[0], img.size[1])
 
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
@@ -518,7 +518,7 @@ def render_canvas_state(
     dot_r = max(2.0, out_w / 450)
 
     def tx(p) -> tuple[float, float]:
-        return ((float(p[0]) - ox) * k, (float(p[1]) - oy) * k)
+        return ((float(p[0]) - ox) * sx, (float(p[1]) - oy) * sy)
 
     # Two passes over one overlay: all fills first, then all outlines/vertices. ImageDraw
     # replaces pixels (it does not composite), so a later shape's translucent fill would

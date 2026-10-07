@@ -368,10 +368,14 @@ def test_dataset_nav_persists_current_index(
 
 # ── /api/images ──────────────────────────────────────────────────────────
 
+def _view(path: Path) -> dict:
+    """An image request for ``path`` from a display every image here fits whole: a fixture value."""
+    return {"path": str(path), "display_pixels": 3840 * 2160}
+
 
 def test_images_serve(opened_client: TestClient, dataset_root: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    resp = opened_client.get("/api/images", params={"path": str(img_path)})
+    resp = opened_client.get("/api/images", params=_view(img_path))
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "image/jpeg"
     im = Image.open(io.BytesIO(resp.content))
@@ -380,29 +384,29 @@ def test_images_serve(opened_client: TestClient, dataset_root: Path) -> None:
 
 def test_images_downsample(opened_client: TestClient, dataset_root: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    resp = opened_client.get("/api/images", params={"path": str(img_path), "max_width": 50})
+    resp = opened_client.get("/api/images", params={"path": str(img_path), "display_pixels": 2000})
     im = Image.open(io.BytesIO(resp.content))
-    assert im.size[0] == 50
+    assert im.size == (50, 40)
 
 
 def test_images_etag_revalidation(opened_client: TestClient, dataset_root: Path) -> None:
     # First fetch carries an ETag + Cache-Control; re-requesting with If-None-Match gets a
     # cheap 304 (no re-decode/re-encode), and the ETag varies with the render params.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    first = opened_client.get("/api/images", params={"path": str(img_path)})
+    first = opened_client.get("/api/images", params=_view(img_path))
     etag = first.headers.get("etag")
     assert etag and "cache-control" in first.headers
 
     again = opened_client.get(
-        "/api/images", params={"path": str(img_path)}, headers={"If-None-Match": etag}
+        "/api/images", params=_view(img_path), headers={"If-None-Match": etag}
     )
     assert again.status_code == 304
     assert again.content == b""
 
-    # A different max_width is a different variant -> different ETag -> full 200.
+    # A smaller display is a different variant -> different ETag -> full 200.
     variant = opened_client.get(
         "/api/images",
-        params={"path": str(img_path), "max_width": 50},
+        params={"path": str(img_path), "display_pixels": 2000},
         headers={"If-None-Match": etag},
     )
     assert variant.status_code == 200
@@ -410,7 +414,7 @@ def test_images_etag_revalidation(opened_client: TestClient, dataset_root: Path)
 
 
 def test_images_not_found(opened_client: TestClient, tmp_path: Path) -> None:
-    resp = opened_client.get("/api/images", params={"path": str(tmp_path / "does_not_exist.jpg")})
+    resp = opened_client.get("/api/images", params=_view(tmp_path / "does_not_exist.jpg"))
     assert resp.status_code == 404
 
 
@@ -419,7 +423,7 @@ def test_images_serve_returns_400_for_a_stem_collision(
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     Image.new("RGB", (100, 80)).save(dataset_root / "images" / "2-11-26" / "IMG_0000.PNG")
 
-    resp = opened_client.get("/api/images", params={"path": str(img_path)})
+    resp = opened_client.get("/api/images", params=_view(img_path))
     assert resp.status_code == 400
     assert "IMG_0000.JPG" in resp.text and "IMG_0000.PNG" in resp.text
 

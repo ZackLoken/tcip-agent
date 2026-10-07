@@ -506,14 +506,42 @@ class TestDisplayRead:
         read = _display_for_path(str(path))
         assert read.pixels.shape[:2] == (VIZ_ARTIFACT_MAX_EDGE // 2, VIZ_ARTIFACT_MAX_EDGE)
         assert read.native_size == (VIZ_ARTIFACT_MAX_EDGE * 2, VIZ_ARTIFACT_MAX_EDGE)
-        assert read.scale == 0.5
+        assert (read.rect.width, read.rect.height) == read.native_size
 
     def test_a_source_within_the_bound_is_read_at_native_resolution(self, viz_dataset: Path):
         from tcip_mcp.tools.vision_tools import _display_for_path
 
         read = _display_for_path(str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"))
         assert read.pixels.shape[:2] == (480, 640)
-        assert read.scale == 1.0
+        assert (read.rect.width, read.rect.height) == (640, 480)
+
+    @pytest.mark.parametrize("shape,native_point,served_point", [
+        ((200_000, 1), (0, 100_000), (0, 800)),
+        ((1, 200_000), (100_000, 0), (800, 0)),
+    ], ids=["tall", "wide"])
+    def test_a_skinny_raster_places_annotations_by_each_axis_own_scale(
+            self, tmp_path: Path, shape, native_point, served_point):
+        """A one-pixel-wide raster read down to the artifact edge is reduced along its long axis
+        only, so a point the renderer places by one scale for both axes lands off the image."""
+        import numpy as np
+        import tifffile
+
+        from tcip_annotation.viz import render_canvas_state
+        from tcip_mcp.tools.vision_tools import _read_for_display
+
+        path = tmp_path / "skinny.tif"
+        tifffile.imwrite(str(path), np.full(shape, 100, dtype=np.uint8))
+        read = _read_for_display(path, max_edge=1600)
+        assert read.native_size == (shape[1], shape[0])
+        assert read.pixels.shape[:2] == tuple(1600 if n > 1 else 1 for n in shape)
+
+        out = render_canvas_state(
+            read.pixels, [{"kind": "point", "points": [list(native_point)], "color": "#FF0000"}],
+            region=(read.rect.x0, read.rect.y0, read.rect.x1, read.rect.y1),
+            output_path=str(tmp_path / "skinny.png"))
+        rendered = Image.open(out).convert("RGB")
+        red, green, _ = rendered.getpixel(served_point)
+        assert red - green > 40
 
     def test_a_three_band_raster_that_is_not_8_bit_is_stretched_to_be_visible(self,
                                                                              tmp_path: Path):

@@ -10,10 +10,15 @@ import { useStore } from "@/store";
  * prefetching hides that behind the time spent reviewing the current frame, and also
  * populates the server's disk cache for later sessions.
  *
- * `bands`/`stretch` are the canvas' own request params (see `compositeParams`): warming any
- * other render of the image warms a cache entry the canvas will never ask for.
+ * `displayPixels`, `bands` and `stretch` are the canvas' own request params (see
+ * `compositeParams`): warming any other render of the image warms a cache entry the canvas will
+ * never ask for.
  */
-export function usePrefetchAdjacentImages(bands?: string, stretch?: string): void {
+export function usePrefetchAdjacentImages(
+  displayPixels: number,
+  bands?: string,
+  stretch?: string,
+): void {
   const imagesDir = useStore((s) => s.gui.dataset.images_dir);
   const imageList = useStore((s) => s.gui.dataset.image_list);
   const currentIndex = useStore((s) => s.gui.dataset.current_image_index);
@@ -27,9 +32,9 @@ export function usePrefetchAdjacentImages(bands?: string, stretch?: string): voi
     const t = setTimeout(() => {
       for (const name of targets) {
         const img = new Image();
-        img.src = api.images.url(inImagesDir(imagesDir, name), { bands, stretch });
+        img.src = api.images.url(inImagesDir(imagesDir, name), displayPixels, { bands, stretch });
       }
     }, 600);
     return () => clearTimeout(t);
-  }, [imagesDir, imageList, currentIndex, bands, stretch]);
+  }, [imagesDir, imageList, currentIndex, displayPixels, bands, stretch]);
 }

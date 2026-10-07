@@ -15,18 +15,17 @@ exactly as it sits on disk, and checking that is the caller's own job.
 from __future__ import annotations
 
 import hashlib
-import logging
+import math
 import os
 from collections import OrderedDict
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Protocol
 
 import numpy as np
 
 from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-
-logger = logging.getLogger(__name__)
 
 # The array containers that carry no georeferencing tags at all, whatever is inside them: a door
 # that needs meters refuses these by name rather than opening one and reporting a read failure.
@@ -46,10 +45,6 @@ _RAM_BUDGET_FRACTION = 0.25
 # GDAL's block cache's share of that budget; the pooled registry of open sources budgets against
 # the remainder. An even split: no measurement yet favors either consumer over the other.
 _GDAL_CACHE_SHARE = 0.5
-
-# Used only when psutil cannot be imported: a deliberately low assumed host size, so a host whose
-# real memory can't be read is under-budgeted rather than over.
-_ASSUMED_TOTAL_RAM_BYTES = 8 * 1024 ** 3
 
 # raster_content_identity()'s default sampling budget, a plain, documented default (not
 # measured against a real false-match rate).
@@ -89,9 +84,10 @@ def gdal_cache_bytes() -> int:
     return int(configured)
 
 
-def open_gdal_dataset(path: str | Path):
-    """A read-only GDAL dataset for ``path``, with GDAL's own failure wrapped in this layer's
-    error naming the file.
+def open_gdal_dataset(path: str | Path, overview: int | None = None):
+    """A read-only GDAL dataset for ``path``, or for its ``overview``-th reduced-resolution level
+    (0 the finest) when one is named, with GDAL's own failure wrapped in this layer's error naming
+    the file.
 
     Served through rasterio, which bundles its own GDAL, so no separate ``osgeo`` binding is
     needed. The returned object is a rasterio dataset, not an ``osgeo.gdal.Dataset``.
@@ -99,6 +95,8 @@ def open_gdal_dataset(path: str | Path):
     import rasterio
 
     try:
+        if overview is not None:
+            return rasterio.open(str(path), overview_level=overview)
         return rasterio.open(str(path))
     except Exception as exc:  # noqa: BLE001, rasterio raises driver-specific errors
         raise ValueError(f"GDAL cannot open raster '{path}': {exc}") from exc
@@ -190,17 +188,14 @@ def sample_windows(width: int, height: int, *, seed: int, window_size: int,
 
 @dataclass(frozen=True)
 class ReadSpec:
-    """How a read was served: which backend decoded it, the served resolution as a fraction of the
-    raster's native resolution, and the resampling that produced it.
+    """How a read was served: which backend decoded it and the resampling that produced it.
 
-    A plain read serves full resolution: ``scale`` 1.0, ``resample`` ``None``. A read with a
-    ``target_size`` records the requested output/region ratio and the resampling algorithm that
-    was requested; which overview level GDAL satisfied a reduced read from is not observable
-    through RasterIO and is not claimed here.
+    A plain read serves full resolution with ``resample`` ``None``; a read with a ``target_size``
+    records the resampling algorithm that was requested. The served resolution is the returned
+    pixels' own size against the rect read, one ratio per axis.
     """
 
     backend: str
-    scale: float = 1.0
     resample: str | None = None
 
 
@@ -214,10 +209,10 @@ class RasterSource(Protocol):
     returns.
 
     ``target_size`` (output ``(width, height)``) serves the same rectangle resampled to that size;
-    it must preserve the rectangle's aspect ratio to within the rounding of fitting either edge
-    (``ValueError`` otherwise), and the returned :class:`ReadSpec` records the requested scale and
-    resampling. :meth:`read_window` is the same read in the row-first argument order the tiled
-    inference loop uses.
+    it must be the rectangle's :func:`scaled_size` under one scale (``ValueError`` otherwise), and
+    the returned :class:`ReadSpec` records the resampling.
+    :meth:`read_window` is the same read in the row-first argument order the tiled inference loop
+    uses.
     """
 
     width: int
@@ -319,18 +314,34 @@ class _RegionView:
         return self._parent.read_window(oy + y0, oy + y1, ox + x0, ox + x1)
 
 
+def scaled_size(width: int, height: int, scale: Fraction) -> tuple[int, int]:
+    """The ``(width, height)`` a ``width`` x ``height`` rect is read at under one ``scale``: each
+    edge times the scale, rounded down, and at least one pixel. The one integer geometry a
+    resampled read's size is admitted by."""
+    return max(1, math.floor(width * scale)), max(1, math.floor(height * scale))
+
+
+def level_window(rect: Rect, width: int, height: int, level_w: int, level_h: int) -> Rect:
+    """``rect`` of a ``width`` x ``height`` raster mapped onto a level of ``level_w`` x
+    ``level_h`` pixels: its origin rounded down and its exclusive end rounded up, so the window
+    covers every level pixel the rect touches. The one window geometry a level read opens and a
+    read plan is decided on."""
+    return Rect(rect.x0 * level_w // width, rect.y0 * level_h // height,
+                -(-rect.x1 * level_w // width), -(-rect.y1 * level_h // height))
+
+
 def _check_target_size(rect: Rect, target_size: tuple[int, int]) -> tuple[int, int]:
     """Validate a ``(width, height)`` output size against ``rect`` and return it as ints.
 
-    The target must preserve the region's aspect ratio to within the rounding of fitting either
-    edge; a distorting target raises ``ValueError``.
+    The target must be :func:`scaled_size` of the rect under some one scale, tried at the smallest
+    scale either edge admits; a distorting target raises ``ValueError``.
     """
     out_w, out_h = int(target_size[0]), int(target_size[1])
     if out_w <= 0 or out_h <= 0:
         raise ValueError(f"target_size must be positive, got {out_w}x{out_h}")
-    fit_h = max(1, round(rect.height * out_w / rect.width))
-    fit_w = max(1, round(rect.width * out_h / rect.height))
-    if out_h != fit_h and out_w != fit_w:
+    scale = max(Fraction(out_w, rect.width) if out_w > 1 else Fraction(0),
+                Fraction(out_h, rect.height) if out_h > 1 else Fraction(0))
+    if scaled_size(rect.width, rect.height, scale) != (out_w, out_h):
         raise ValueError(
             f"target_size {out_w}x{out_h} does not preserve the aspect ratio of the "
             f"{rect.width}x{rect.height} region it resamples"
@@ -349,13 +360,11 @@ def _area_downsample(region: np.ndarray, out_w: int, out_h: int) -> np.ndarray:
 def _serve_region(region: np.ndarray, rect: Rect, backend: str,
                   target_size: tuple[int, int] | None) -> tuple[np.ndarray, ReadSpec]:
     """The read tail every in-memory backend shares: the native copy as-is, or area-downsampled to
-    an aspect-preserving ``target_size`` with the :class:`ReadSpec` recording the requested
-    scale."""
+    an aspect-preserving ``target_size``."""
     if target_size is None:
         return region, ReadSpec(backend)
     out_w, out_h = _check_target_size(rect, target_size)
-    return (_area_downsample(region, out_w, out_h),
-            ReadSpec(backend, scale=out_w / rect.width, resample="area"))
+    return _area_downsample(region, out_w, out_h), ReadSpec(backend, resample="area")
 
 
 def channel_first_reinterpreted(shape: tuple[int, ...], num_channels: int) -> bool:
@@ -586,7 +595,7 @@ class BandGroupSource(_ClosableSource):
     Each member is opened on its own through :func:`open_array_source` and decodes exactly as it
     would alone; a region is every member's own region concatenated on the channel axis, in the
     manifest's declared band order, and a ``target_size`` read is each member's own resampled read
-    (the returned spec carries the members' scale and resampling). The group's frame is its first
+    (the returned spec carries the members' resampling). The group's frame is its first
     band's; a member covering a different extent is refused at open.
     """
 
@@ -617,7 +626,7 @@ class BandGroupSource(_ClosableSource):
         reads = [m.read_region(rect, target_size=target_size) for m in self._members]
         member_spec = reads[0][1]
         return (np.concatenate([pixels for pixels, _spec in reads], axis=-1),
-                ReadSpec("band_group", scale=member_spec.scale, resample=member_spec.resample))
+                ReadSpec("band_group", resample=member_spec.resample))
 
     def _release(self) -> None:
         for member in self._members:
@@ -630,13 +639,15 @@ class GdalSource(_ClosableSource):
     Regions decode through GDAL's own block cache (budgeted per process by
     :func:`configure_gdal_cache`), so repeated windows over a raster far too large to decode whole
     cost only the blocks they touch. A ``target_size`` read asks RasterIO for the reduced buffer
-    directly (``resample_alg=Average``), which GDAL serves from the nearest overview level at or
-    above the requested resolution when the raster carries one (see ``pipelines.overviews``).
+    directly (``resample_alg=Average``). ``level`` names the overview level the read comes off
+    (0 native, ``i`` the ``i``-th of :func:`~tcip_mcp.pipelines.overviews.overview_dims`), its
+    window the rect mapped onto that level's own dimensions (see ``pipelines.overviews``).
 
     A single-band palette-color raster (``GCI_PaletteIndex``) is expanded through its own color
     table to uint8 RGB, the same pixels PIL's palette decode produced, and reports three
-    channels; a ``target_size`` read of one expands at native resolution first and
-    area-downsamples the RGB, since palette indices must never be resampled.
+    channels; a ``target_size`` read of one expands the named level's indices at that level's
+    resolution first and area-downsamples the RGB, since palette indices must never be averaged
+    (its pyramid is built by nearest sampling).
 
     ``band_interpretations`` names each served channel's GDAL color interpretation (lowercase,
     e.g. ``("red", "green", "blue", "alpha")``; ``"undefined"`` when the file declares none), so
@@ -654,6 +665,7 @@ class GdalSource(_ClosableSource):
 
         self.path = Path(path)
         self._ds = open_gdal_dataset(self.path)
+        self._levels: dict[int, Any] = {}
         self.width = int(self._ds.width)
         self.height = int(self._ds.height)
         self.num_channels = int(self._ds.count)
@@ -713,29 +725,57 @@ class GdalSource(_ClosableSource):
         # share of the budget), not in this process's pooled accounting.
         return 0
 
-    def read_region(self, rect: Rect, *,
-                    target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, ReadSpec]:
+    def read_region(self, rect: Rect, *, target_size: tuple[int, int] | None = None,
+                    level: int = 0) -> tuple[np.ndarray, ReadSpec]:
+        _check_region(rect, self.height, self.width)
+        if level and target_size is None:
+            raise ValueError("a read off an overview level is always resampled: name target_size")
+        ds = self._ds if level == 0 else self._level_dataset(level - 1)
+        window = level_window(rect, self.width, self.height, int(ds.width), int(ds.height))
+        out = None if target_size is None else _check_target_size(rect, target_size)
+        pixels, resample = self._read_window(ds, window, out)
+        if out is None:
+            return pixels, ReadSpec(self._backend)
+        return pixels, ReadSpec(self._backend, resample=resample)
+
+    def read_level_region(self, level: int, rect: Rect) -> tuple[np.ndarray, ReadSpec]:
+        """``rect`` in the pixel grid of overview level ``level`` (1 the finest), read at that
+        level's own resolution."""
+        ds = self._level_dataset(level - 1)
+        _check_region(rect, int(ds.height), int(ds.width))
+        pixels, _resample = self._read_window(ds, rect, None)
+        return pixels, ReadSpec(self._backend)
+
+    def _read_window(self, ds, window: Rect, out: "tuple[int, int] | None"
+                     ) -> tuple[np.ndarray, "str | None"]:
+        """``window`` of dataset ``ds`` as ``[H, W, C]``, area-averaged to ``out`` when given (a
+        palette raster's indices expanded first, never averaged), and the resampling used."""
         from rasterio.enums import Resampling
         from rasterio.windows import Window
 
-        _check_region(rect, self.height, self.width)
-        window = Window(rect.x0, rect.y0, rect.width, rect.height)
+        win = Window(window.x0, window.y0, window.width, window.height)
         if self._palette_lut is not None:
-            indices = self._ds.read(1, window=window)
-            return _serve_region(self._palette_lut[indices], rect, self._backend, target_size)
-        kwargs = {}
-        scale, resample = 1.0, None
-        if target_size is not None:
-            out_w, out_h = _check_target_size(rect, target_size)
-            kwargs = {"out_shape": (self.num_channels, out_h, out_w),
-                      "resampling": Resampling.average}
-            scale, resample = out_w / rect.width, "average"
-        arr = self._ds.read(window=window, **kwargs)
+            rgb = self._palette_lut[ds.read(1, window=win)]
+            return (rgb, None) if out is None else (_area_downsample(rgb, *out), "area")
+        if out is None:
+            arr = ds.read(window=win)
+        else:
+            arr = ds.read(window=win, out_shape=(self.num_channels, out[1], out[0]),
+                          resampling=Resampling.average)
         # GDAL returns [C, H, W]; contiguous copy in the platform's [H, W, C] order.
-        arr = np.ascontiguousarray(np.transpose(arr, (1, 2, 0)))
-        return arr, ReadSpec(self._backend, scale=scale, resample=resample)
+        return (np.ascontiguousarray(np.transpose(arr, (1, 2, 0))),
+                None if out is None else "average")
+
+    def _level_dataset(self, overview: int):
+        """The ``overview``-th reduced-resolution level, opened once and held until close."""
+        if overview not in self._levels:
+            self._levels[overview] = open_gdal_dataset(self.path, overview)
+        return self._levels[overview]
 
     def _release(self) -> None:
+        for level in self._levels.values():
+            level.close()
+        self._levels.clear()
         if self._ds is not None:
             self._ds.close()
         self._ds = None
@@ -746,16 +786,9 @@ def _memory_budget_bytes() -> int:
     physical RAM, read once per process."""
     global _total_ram_bytes
     if _total_ram_bytes is None:
-        try:
-            import psutil
+        import psutil
 
-            _total_ram_bytes = int(psutil.virtual_memory().total)
-        except ImportError:
-            _total_ram_bytes = _ASSUMED_TOTAL_RAM_BYTES
-            logger.info(
-                "psutil unavailable; budgeting raster caches against an assumed %.1f GiB host",
-                _ASSUMED_TOTAL_RAM_BYTES / 1024 ** 3,
-            )
+        _total_ram_bytes = int(psutil.virtual_memory().total)
     return int(_total_ram_bytes * _RAM_BUDGET_FRACTION)
 
 

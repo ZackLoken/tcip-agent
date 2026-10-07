@@ -9,7 +9,7 @@
  * tcip_web.jobstore). Do not edit by hand.
  */
 
-export const RENDER_CACHE_VERSION = 3;
+export const RENDER_CACHE_VERSION = 6;
 
 export const IMAGE_ERROR_HEADER = "X-TCIP-Image-Error";
 
@@ -87,15 +87,19 @@ export interface SessionSummary {
 
 export interface ServingCell {
   name: string;
+  level: number;
   x0: number;
   y0: number;
   x1: number;
   y1: number;
+  nx0: number;
+  ny0: number;
+  nx1: number;
+  ny1: number;
 }
 
-export interface ServingGrid {
-  tile_size: number;
-  cells: ServingCell[];
+export interface ViewReads {
+  reads: ServingCell[];
 }
 
 export interface RunRow {

@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AmbiguousImageStemError", "BandGroupIncompleteError", "BandGroupRef", "IMAGE_EXTS",
-    "bucket_logical_identities", "capture_kind",
+    "bucket_logical_identities", "capture_kind", "display_frame",
     "image_dimensions", "list_logical_images", "load_image", "load_multiband",
     "logical_image_name", "pil_to_tensor", "pixel_array",
     "refuse_incomplete_band_group", "resolve_image_path", "resolve_image_paths",
@@ -192,10 +192,17 @@ def resolve_image_path(image_path: str | Path) -> "Path | BandGroupRef":
 
 
 def image_path_dimensions(image_path: str | Path) -> tuple[int, int]:
-    """``(width, height)`` of the logical image ``image_path`` names
-    (:func:`resolve_image_path`, a grouped capture folded into its one frame), as
-    :func:`image_dimensions` measures it. Its refusals propagate."""
-    return image_dimensions(resolve_image_path(image_path))
+    """:func:`display_frame` of the logical image ``image_path`` names
+    (:func:`resolve_image_path`, a grouped capture folded into its one frame). Its refusals
+    propagate."""
+    return display_frame(resolve_image_path(image_path))
+
+
+def display_frame(source: "str | Path | BandGroupRef") -> tuple[int, int]:
+    """``(width, height)`` of ``source`` as the image route's plain read opens it, at
+    :func:`~tcip_mcp.pipelines.raster_source.image_route_channel_count`: the frame a viewer draws
+    the raster in and annotation coordinates are measured in."""
+    return image_dimensions(source, raster_source.image_route_channel_count(source))
 
 
 def source_path_of(source: "str | Path | BandGroupRef") -> str:
@@ -270,9 +277,9 @@ def _channels_from_shape(shape: tuple[int, ...]) -> int:
     return int(shape[0]) if shape[0] < shape[-1] else int(shape[-1])
 
 
-def image_dimensions(path: "str | Path | BandGroupRef", num_channels: int = 3) -> tuple[int, int]:
-    """``(width, height)`` as ``load_image`` will decode it, without decoding pixels where
-    possible.
+def image_dimensions(path: "str | Path | BandGroupRef", num_channels: int) -> tuple[int, int]:
+    """``(width, height)`` as ``load_image`` will decode it at ``num_channels``, without decoding
+    pixels where possible. :func:`display_frame` is the frame a viewer and annotations use.
 
     A :class:`BandGroupRef` reads its dims from one sibling band file (a group's members share one
     spatial frame).

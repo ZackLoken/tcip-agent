@@ -156,7 +156,7 @@ def test_single_dataset_tiff_layouts_are_served_windowed(tmp_path: Path, layout:
         assert isinstance(src, raster_source.GdalSource)
         region, spec = src.read_region(Rect(0, 0, src.width, src.height))
     assert np.array_equal(region, arr)
-    assert (spec.backend, spec.scale, spec.resample) == ("gdal", 1.0, None)
+    assert (spec.backend, spec.resample) == ("gdal", None)
 
 
 def test_a_planar_raster_read_at_a_mismatched_count_still_reads_as_stored(tmp_path: Path) -> None:
@@ -216,11 +216,12 @@ def test_an_unreadable_tiff_fails_naming_the_file(tmp_path: Path) -> None:
 
 
 def test_a_plain_read_serves_full_resolution(tmp_path: Path) -> None:
-    """Without a ``target_size`` every read is native resolution and the ``ReadSpec`` says so."""
+    """Without a ``target_size`` every read is native resolution, resampled by nothing."""
     source, num_channels = _gdal_tiff(tmp_path)
     with open_raster(source, num_channels) as src:
-        _region, spec = src.read_region(Rect(0, 0, 4, 4))
-    assert (spec.backend, spec.scale, spec.resample) == ("gdal", 1.0, None)
+        region, spec = src.read_region(Rect(0, 0, 4, 4))
+    assert region.shape[:2] == (4, 4)
+    assert (spec.backend, spec.resample) == ("gdal", None)
 
 
 # ── The contracts every backend shares ───────────────────────────────────
@@ -403,29 +404,29 @@ def test_a_raster_serves_its_own_dtype(tmp_path: Path) -> None:
 
 def test_a_target_size_read_downsamples_through_gdal(tmp_path: Path) -> None:
     """A GDAL-served ``target_size`` read returns the reduced buffer directly, with the
-    ``ReadSpec`` recording the requested scale and average resampling; at an exact 2x decimation
-    every output pixel is its 2x2 block's mean."""
+    ``ReadSpec`` recording average resampling; at an exact 2x decimation every output pixel is its
+    2x2 block's mean."""
     arr = _distinctive_array(32, 40)
     path = tmp_path / "down.tif"
     _write_striped_tiff(path, arr, rowsperstrip=8)
     with open_raster(path, 3) as src:
         region, spec = src.read_region(Rect(0, 0, 40, 32), target_size=(20, 16))
     assert region.shape == (16, 20, 3)
-    assert (spec.backend, spec.scale, spec.resample) == ("gdal", 0.5, "average")
+    assert (spec.backend, spec.resample) == ("gdal", "average")
     blocks = arr.reshape(16, 2, 20, 2, 3).mean(axis=(1, 3))
     assert np.allclose(region, blocks, atol=1.0)
 
 
 def test_a_target_size_read_downsamples_an_array_backend_by_area(tmp_path: Path) -> None:
     """A backend with no overview machinery slices native and area-downsamples, recording the
-    same requested scale with its own resampling name."""
+    requested size with its own resampling name."""
     arr = _distinctive_array(32, 40, channels=5)
     path = tmp_path / "bands.npy"
     np.save(str(path), arr)
     with open_raster(path, 5) as src:
         region, spec = src.read_region(Rect(0, 0, 40, 32), target_size=(20, 16))
     assert region.shape == (16, 20, 5)
-    assert (spec.backend, spec.scale, spec.resample) == ("npy", 0.5, "area")
+    assert (spec.backend, spec.resample) == ("npy", "area")
     blocks = arr.reshape(16, 2, 20, 2, 5).mean(axis=(1, 3))
     assert np.allclose(region, blocks, atol=1.0)
 
@@ -542,13 +543,13 @@ def test_a_five_band_geotiff_opened_at_three_channels_still_reads_five_bands(
     assert got.shape == (24, 40, 5)
 
 
-def test_image_dimensions_of_a_two_band_group_at_the_default_channel_count(tmp_path: Path) -> None:
-    """A group's frame comes from its bands, so the default count (3) never has to match the two
-    bands it actually holds."""
+def test_image_dimensions_of_a_two_band_group_at_any_channel_count(tmp_path: Path) -> None:
+    """A group's frame comes from its bands, so a count of 3 never has to match the two bands it
+    actually holds."""
     from tcip_mcp.pipelines.image_utils import image_dimensions
 
     ref, _num_channels = _band_group(tmp_path)
-    assert image_dimensions(ref) == (8, 8)
+    assert image_dimensions(ref, 3) == (8, 8)
 
 
 def test_a_band_group_whose_members_disagree_on_the_frame_refuses(tmp_path: Path) -> None:
