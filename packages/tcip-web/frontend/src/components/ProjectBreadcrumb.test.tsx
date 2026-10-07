@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
 import { ProjectBreadcrumb } from "@/components/ProjectBreadcrumb";
+import { openWithDefaults } from "@/lib/openProject";
 import { useStore } from "@/store";
 
 vi.mock("@/api/client", () => {
@@ -39,7 +41,6 @@ function summary(id: string, displayName: string): ProjectSummary {
     subjects_by_date: { "2026-01-01": ["subject_a"] },
     buckets_by_date: { "2026-01-01": [] },
     image_count: 1,
-    is_open: false,
     label_problem: null,
   };
 }
@@ -80,6 +81,8 @@ function openOn(id: string, date: string | null = "2026-01-01") {
 afterEach(cleanup);
 beforeEach(() => {
   localStorage.removeItem("tcip.recent_projects");
+  useStore.getState().setUser("grower");
+  useStore.getState().patchOpenStatus({ opening: null, openError: null, nameRefusal: null });
   vi.mocked(api.projects.list).mockReset();
   vi.mocked(api.projects.open).mockReset();
   vi.mocked(api.dataset.select).mockReset();
@@ -122,8 +125,85 @@ describe("recent-projects menu", () => {
     fireEvent.click(screen.getByTitle("Recent projects"));
     fireEvent.click(await screen.findByText("Beta block"));
     await waitFor(() => expect(api.dataset.select).toHaveBeenCalledTimes(1));
-    expect(api.projects.open).toHaveBeenCalledWith("b2");
+    expect(api.projects.open).toHaveBeenCalledWith({ id: "b2", user: "grower" });
     expect(vi.mocked(api.dataset.select).mock.calls[0][0].dataset_root).toBe("/w/b2");
+    expect(useStore.getState().openProject).toEqual({ id: "b2", path: "/w/b2" });
+  });
+});
+
+describe("recent-projects menu through the one opening transition", () => {
+  it("starts no open while another open is in flight, and disables the menu", async () => {
+    useStore
+      .getState()
+      .patchOpenStatus({ opening: { requestId: 99, projectId: "zz", accepted: null } });
+    render(<ProjectBreadcrumb />);
+
+    expect(screen.getByTitle("Recent projects")).toBeDisabled();
+    await openWithDefaults({ ...summary("b2", "Beta block"), id: "b2" });
+    expect(api.projects.open).not.toHaveBeenCalled();
+  });
+
+  it("opens a recent project from the listing it already holds, without listing again", async () => {
+    localStorage.setItem("tcip.recent_projects", JSON.stringify(["a1", "b2"]));
+    let listingsBeforeOpen = -1;
+    vi.mocked(api.projects.open).mockImplementation(async () => {
+      listingsBeforeOpen = vi.mocked(api.projects.list).mock.calls.length;
+      return { id: "b2", display_name: "Beta block", path: "/w/b2" };
+    });
+    vi.mocked(api.dataset.select).mockResolvedValue(selection("/w/b2"));
+    render(<ProjectBreadcrumb />);
+    await waitFor(() => expect(api.projects.list).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByTitle("Recent projects"));
+    fireEvent.click(await screen.findByText("Beta block"));
+
+    await waitFor(() =>
+      expect(useStore.getState().openProject).toEqual({ id: "b2", path: "/w/b2" }),
+    );
+    expect(listingsBeforeOpen).toBe(1);
+  });
+
+  it("records and toasts a failed open for the project it was started for", async () => {
+    localStorage.setItem("tcip.recent_projects", JSON.stringify(["a1", "b2"]));
+    vi.mocked(api.projects.open).mockRejectedValue(new Error("beta refused"));
+    render(<ProjectBreadcrumb />);
+    fireEvent.click(screen.getByTitle("Recent projects"));
+    fireEvent.click(await screen.findByText("Beta block"));
+
+    await waitFor(() =>
+      expect(useStore.getState().openError).toEqual({
+        projectId: "b2",
+        message: expect.stringContaining("beta refused"),
+      }),
+    );
+    expect(useStore.getState().toasts.map((t) => t.message)).toContainEqual(
+      expect.stringContaining("beta refused"),
+    );
+  });
+
+  it("drops a date switch's result once a snapshot adopted another project", async () => {
+    let answer!: () => void;
+    vi.mocked(api.projects.open).mockReturnValue(
+      new Promise((resolve) => {
+        answer = () => resolve({ id: "a1", display_name: "Alpha block", path: "/w/a1" });
+      }),
+    );
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/w",
+      open_id: "a1",
+      last_opened_problem: null,
+      projects: [{ ...summary("a1", "Alpha block"), dates: ["2026-01-01", "2026-02-02"] }],
+    });
+    render(<ProjectBreadcrumb />);
+    fireEvent.click(screen.getByTitle("Switch date"));
+    fireEvent.click(await screen.findByText("2026-02-02"));
+    await waitFor(() => expect(api.projects.open).toHaveBeenCalled());
+    act(() =>
+      useStore.getState().mergeSnapshot(GUI_STATE_DEFAULTS, 1, { id: "b2", path: "/w/b2" }, "e1"),
+    );
+
+    await act(async () => answer());
+
+    expect(api.dataset.select).not.toHaveBeenCalled();
     expect(useStore.getState().openProject).toEqual({ id: "b2", path: "/w/b2" });
   });
 });
@@ -175,7 +255,7 @@ describe("switching date", () => {
     fireEvent.click(screen.getByTitle("Switch date"));
     fireEvent.click(await screen.findByText("2026-02-02"));
     await waitFor(() => expect(api.dataset.select).toHaveBeenCalledTimes(1));
-    expect(api.projects.open).toHaveBeenCalledWith("a1");
+    expect(api.projects.open).toHaveBeenCalledWith({ id: "a1", user: "grower" });
     expect(vi.mocked(api.dataset.select).mock.calls[0][0].date).toBe("2026-02-02");
   });
 });

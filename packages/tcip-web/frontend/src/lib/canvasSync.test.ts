@@ -691,6 +691,7 @@ describe("createCanvasPusher", () => {
     img_width: 100,
     img_height: 80,
     viewport: null,
+    user: "grower",
     classes: [],
     shapes: [{ kind: "box", xyxy: [0, 0, 1, 1], color: "#fff" }],
   });

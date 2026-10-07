@@ -34,6 +34,15 @@ function landingTab(project: OpenProject | null): TabName {
   return (project && loadLastTab(project.id)) ?? GUI_STATE_DEFAULTS.active_tab;
 }
 
+/** The incoming snapshot's GUI state, on ``project``'s landing tab, with no subject unless named. */
+function adoptedGui(incoming: GuiState, project: OpenProject | null): GuiState {
+  return {
+    ...incoming,
+    active_tab: landingTab(project),
+    active_subject: incoming.active_subject ?? null,
+  };
+}
+
 /** The open project's directory, or null when the backend has none open. */
 export const selectProjectRoot = (s: Pick<AppState, "openProject">): string | null =>
   s.openProject?.path ?? null;
@@ -119,12 +128,14 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
   },
 
   mergeSnapshot: (incoming, version, project, epoch) => {
-    if (project?.id !== get().openProject?.id) get().closeSessionInterval();
+    let accepted = false;
+    let adoptedOther = false;
     set((s) => {
       // A moved epoch is a restarted backend's own replay: accepted regardless of version, since
       // its lower-numbered first snapshot would otherwise drop as a stale one.
       const epochChanged = epoch != null && epoch !== s.wsEpoch;
       if (!epochChanged && version != null && version < s.wsVersion) return s;
+      accepted = true;
       const nextVersion = epochChanged
         ? (version ?? 0)
         : version != null
@@ -137,14 +148,9 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
       // The backend names which project is open; a different one (or none) leaves nothing of
       // the previous project's dataset in the browser.
       if (project?.id !== s.openProject?.id) {
+        adoptedOther = true;
         return {
-          gui: project
-            ? {
-                ...incoming,
-                active_tab: landingTab(project),
-                active_subject: incoming.active_subject ?? null,
-              }
-            : { ...local, dataset: DEFAULT_DATASET },
+          gui: project ? adoptedGui(incoming, project) : { ...local, dataset: DEFAULT_DATASET },
           openProject: project,
           wsVersion: nextVersion,
           wsEpoch: nextEpoch,
@@ -159,11 +165,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
       // the tab is the client's per-project record (backend active_tab only moves on agent focus).
       if (!local.dataset.dataset_root) {
         return {
-          gui: {
-            ...incoming,
-            active_tab: landingTab(project),
-            active_subject: incoming.active_subject ?? null,
-          },
+          gui: adoptedGui(incoming, project),
           wsVersion: nextVersion,
           wsEpoch: nextEpoch,
         };
@@ -196,6 +198,11 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
         wsEpoch: nextEpoch,
       };
     });
+    if (accepted) get().recordAcceptedProject(project?.id ?? null);
+    if (adoptedOther) {
+      get().closeSessionInterval();
+      get().supersedeOpen(project?.id ?? null);
+    }
   },
 
   setWsStatus: (wsStatus) => set({ wsStatus }),

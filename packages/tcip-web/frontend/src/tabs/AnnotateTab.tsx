@@ -521,7 +521,7 @@ export function AnnotateTab() {
       active_subject: activeSubject ?? undefined,
       cut_armed: annotateUi.cut,
       dirty: canvas.dirty,
-      user: useStore.getState().user || undefined,
+      user: useStore.getState().user,
       classes: subjectSwatches,
       counts: {
         boxes: canvas.boxes.length,

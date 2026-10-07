@@ -76,7 +76,8 @@ def test_an_archive_that_refuses_leaves_the_project_where_it_was_and_still_open(
 
     ws = tmp_path.parent
     project, project_id = _project(ws, "valley_block", "Valley block")
-    assert client.post("/api/projects/open", json={"id": project_id}).status_code == 200
+    opened = client.post("/api/projects/open", json={"id": project_id, "user": "grower"})
+    assert opened.status_code == 200
     before = audit_rows(project)
     monkeypatch.setattr(project_tools, "write_archive",
                         lambda *a, **k: {"error": "the store under the project is unreadable"})
@@ -164,7 +165,8 @@ def test_an_id_no_project_holds_answers_404(client, tmp_path):
 def test_removing_the_open_project_closes_it_first(client, tmp_path):
     ws = tmp_path.parent
     _, project_id = _project(ws, "valley_block", "Valley block")
-    assert client.post("/api/projects/open", json={"id": project_id}).status_code == 200
+    opened = client.post("/api/projects/open", json={"id": project_id, "user": "grower"})
+    assert opened.status_code == 200
 
     resp = client.post("/api/projects/remove", json={
         "id": project_id, "confirm_name": "Valley block", "user": "tester"})

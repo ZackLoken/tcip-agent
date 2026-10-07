@@ -17,6 +17,7 @@
  * vertex dots are its own, scaled to the frame it draws on.
  */
 
+import type { CanvasStatePayload } from "@/api/types.generated";
 import { annotationsToCanvas } from "@/lib/labelSerde";
 import { ringsBbox } from "@/lib/polygonGeometry";
 import { boxDraft, type DraftStroke } from "@/lib/draftStrokes";
@@ -68,30 +69,19 @@ export interface CanvasShape {
   tag?: string; // gt | proposal | in_progress | flag
 }
 
-export interface CanvasStateBody {
-  /** The id of the project this body was built for; the backend writes it only while that
-   *  project is the one it has open. */
-  project_id: string;
+/** The push body: the backend's own model, with the display geometry it stores uninterpreted typed
+ *  here. ``classes`` carries the subjects with their GUI-local colors (the registry stores none);
+ *  ``shapes`` is null for a heartbeat, where the backend keeps the last pushed geometry. */
+export type CanvasStateBody = Omit<
+  CanvasStatePayload,
+  "tab" | "viewport" | "classes" | "counts" | "shapes"
+> & {
   tab: Extract<TabName, "annotate">;
-  image_path: string;
-  image: string;
-  img_width: number;
-  img_height: number;
   viewport: CanvasViewport | null;
-  mode?: string;
-  active_subject?: string;
-  // Stays true across a completed cut and a refusal alike (the flag is sticky), unlike the
-  // pending-segment polyline, which clears on both.
-  cut_armed?: boolean;
-  dirty?: boolean;
-  user?: string;
-  // The dataset's subjects with their GUI-local colors (the registry stores no color). Sent
-  // under the backend's ``classes`` key, which stores the list verbatim for capture_live_canvas.
   classes: { name: string; color: string }[];
   counts?: Record<string, number>;
-  /** null = heartbeat (backend keeps the last pushed geometry for this image). */
   shapes: CanvasShape[] | null;
-}
+};
 
 /** 0.1-px precision is beyond what any render needs; rounding cuts dense payloads ~2-3×. */
 const r1 = (n: number): number => Math.round(n * 10) / 10;

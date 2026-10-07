@@ -45,7 +45,6 @@ class ProjectSummary(BaseModel):
     subjects_by_date: dict[str, list[str]]
     buckets_by_date: dict[str, list[str]]
     image_count: int
-    is_open: bool
     # The first date's labels that would not read, naming the documents; the project still lists.
     label_problem: str | None
 
@@ -73,7 +72,6 @@ def _summarize(project_dir: Path) -> ProjectSummary:
         subjects_by_date=subjects_by_date,
         buckets_by_date=buckets_by_date(project_dir, dates),
         image_count=image_count,
-        is_open=record["id"] is not None and record["id"] == store.project_id,
         label_problem=label_problem,
     )
 
@@ -131,15 +129,17 @@ async def open_last_opened() -> None:
 
 class OpenRequest(BaseModel):
     id: str
+    user: str
 
 
 @router.post("/open")
 async def open_project(req: OpenRequest) -> dict:
-    """Open the project ``req.id`` names; 404 when the workspace holds no single project with it,
-    409 naming why when its record or its persisted GUI state will not read. Returns ``{id,
-    display_name, path}``."""
+    """Open the project ``req.id`` names; 400 for a request naming no one, 404 when the workspace
+    holds no single project with it, 409 naming why when its record or its persisted GUI state
+    will not read. Returns ``{id, display_name, path}``."""
     from tcip_store import StoreError
 
+    actor(req.user)
     try:
         project = await open_project_by_id(req.id)
     except LookupError as exc:

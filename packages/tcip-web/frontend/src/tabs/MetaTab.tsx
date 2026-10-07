@@ -204,7 +204,7 @@ export function MetaTab() {
                   className="border-t border-tcip-border first:border-t-0"
                 >
                   <td className="py-1.5 pr-3 font-mono">{s.started}</td>
-                  <td className="pr-3">{s.user || UNSET_GLYPH}</td>
+                  <td className="pr-3">{s.user}</td>
                   <td className="pr-3 tabular-nums">{s.images_annotated}</td>
                   <td className="pr-3 tabular-nums">{s.total_annotations}</td>
                   <td

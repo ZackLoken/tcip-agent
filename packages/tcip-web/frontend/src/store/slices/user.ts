@@ -4,13 +4,17 @@ import type { AppState } from "@/store/appState";
 
 export interface UserSlice {
   /** Current annotator/reviewer identity (persisted), stamped as created_by/accepted_by on
-   *  everything this person authors. Changing it closes the open image visit under the person
-   *  it was opened by and reopens it under the new one. */
+   *  everything this person authors. */
   user: string;
   setUser: (user: string) => void;
 }
 
-export const createUserSlice: StateCreator<AppState, [], [], UserSlice> = (set, get) => ({
+/** Whether ``name`` names a person; whitespace is no name. */
+export const isAnnotatorName = (name: string): boolean => name.trim().length > 0;
+
+export const selectAnnotatorNamed = (s: AppState): boolean => isAnnotatorName(s.user);
+
+export const createUserSlice: StateCreator<AppState, [], [], UserSlice> = (set) => ({
   user: (() => {
     try {
       return localStorage.getItem("tcip.user") ?? "";
@@ -24,9 +28,6 @@ export const createUserSlice: StateCreator<AppState, [], [], UserSlice> = (set, 
     } catch {
       /* preference just won't persist */
     }
-    const visiting = get().sessionTracking.currentImageName;
-    get().closeSessionInterval();
     set({ user });
-    if (visiting !== null) get().startImageSessionTracking(visiting);
   },
 });

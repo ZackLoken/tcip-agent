@@ -8,6 +8,7 @@ import { createBannerSlice } from "@/store/slices/banners";
 import { createCanvasSlice, focusContext } from "@/store/slices/canvas";
 import { createGuiSlice } from "@/store/slices/gui";
 import { createPendingTerminalMessageSlice } from "@/store/slices/pendingTerminalMessage";
+import { createProjectOpenSlice } from "@/store/slices/projectOpen";
 import { createRegistryStatusSlice } from "@/store/slices/registryStatus";
 import { createTerminalOpenSlice } from "@/store/slices/terminalOpen";
 import { createToastSlice } from "@/store/slices/toasts";
@@ -34,6 +35,7 @@ export const useStore = create<AppState>()((...a) => ({
   ...createTerminalOpenSlice(...a),
   ...createPendingTerminalMessageSlice(...a),
   ...createUserSlice(...a),
+  ...createProjectOpenSlice(...a),
 }));
 
 /** Focus clears when its context (`focusContext`) changes. */

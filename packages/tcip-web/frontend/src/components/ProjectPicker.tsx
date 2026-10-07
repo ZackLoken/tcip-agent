@@ -1,9 +1,13 @@
 /**
  * The front door. Lists the workspace's projects by their own records (display name, site) and
  * opens one: the human never browses the filesystem for two roots. Opening a project makes it the
- * backend's open project; a date/subject/model can be picked per project. The project the backend
- * opened at start (the workspace's last-opened one) auto-opens on first load. Project creation is
- * agent-driven; the user hands the agent data paths rather than hand-structuring a folder here.
+ * backend's open project; a date/subject/model can be picked per project. The chosen project and
+ * an open in flight live in the store, so they survive the picker being replaced when the
+ * Annotator field's draft is committed (Enter or Open). The first picker mounted with a committed
+ * name opens the project the backend already holds open (the workspace's last-opened one) when
+ * its default date has labeled subjects, else preselects its card, unless a project is already
+ * chosen. Project creation is agent-driven; the user hands the agent data paths rather than
+ * hand-structuring a folder here.
  */
 
 import { useEffect, useId, useRef, useState } from "react";
@@ -13,24 +17,31 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SeasonRail } from "@/components/SeasonRail";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import {
-  defaultDate,
   bucketsForDate,
-  openProjectById,
-  openWorkspaceProject,
+  defaultDate,
+  initialOpenWanted,
+  openable,
+  type OpenableProject,
+  releaseOpenHold,
+  startOpen,
   subjectsForDate,
+  takeOpenHold,
 } from "@/lib/openProject";
 import { forgetRecentProject } from "@/lib/recentProjects";
 import { useStore } from "@/store";
+import { isAnnotatorName, selectAnnotatorNamed } from "@/store/slices/user";
 
-/** A listed project whose record reads, so it carries an id and a display name. */
-type OpenableProject = ProjectSummary & { id: string; display_name: string };
-
-const openable = (p: ProjectSummary): p is OpenableProject =>
-  p.id !== null && p.display_name !== null;
-
-// Session-scoped: auto-open the backend's open project only on the app's first load, so a later
-// "Switch project" (which returns here) doesn't immediately re-open the same project.
-let autoOpenAttempted = false;
+function selectCard(p: OpenableProject) {
+  const { patchOpenChoice, patchOpenStatus } = useStore.getState();
+  const d = defaultDate(p.dates);
+  patchOpenChoice({
+    projectId: p.id,
+    date: d,
+    subject: subjectsForDate(p, d)[0] ?? "",
+    bucket: bucketsForDate(p, d)[0] ?? "",
+  });
+  patchOpenStatus({ openError: null });
+}
 
 function RemovalDialog({
   project,
@@ -207,72 +218,51 @@ function relativeTime(epochSeconds: number): string {
 export function ProjectPicker() {
   const user = useStore((s) => s.user);
   const setUser = useStore((s) => s.setUser);
+  const annotatorNamed = useStore(selectAnnotatorNamed);
+  const annotatorHintId = useId();
+  // The field is a draft: only a committed name (Enter, or Open) reaches the store.
+  const [draft, setDraft] = useState(user);
+  const draftNamed = isAnnotatorName(draft);
+  const [openId, setOpenId] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [lastOpenedProblem, setLastOpenedProblem] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [date, setDate] = useState("");
-  const [subject, setSubject] = useState("");
-  const [bucket, setBucket] = useState("");
-  const [opening, setOpening] = useState(false);
-  const [openError, setOpenError] = useState<string | null>(null);
+  const { projectId: selected, date, subject, bucket } = useStore((s) => s.openChoice);
+  const opening = useStore((s) => s.opening !== null);
+  const openError = useStore((s) => s.openError);
+  const refusal = useStore((s) => s.nameRefusal);
+  const nameRefusal = refusal?.name === draft.trim() ? refusal.message : null;
+  const patchOpenChoice = useStore((s) => s.patchOpenChoice);
   const [removalTarget, setRemovalTarget] = useState<OpenableProject | null>(null);
   const [renameTarget, setRenameTarget] = useState<OpenableProject | null>(null);
-  const openedRef = useRef(false);
   const annotatorFieldRef = useRef<HTMLInputElement | null>(null);
 
-  function selectCard(p: OpenableProject) {
-    setSelected(p.id);
-    const d = defaultDate(p.dates);
-    setDate(d);
-    setSubject(subjectsForDate(p, d)[0] ?? "");
-    setBucket(bucketsForDate(p, d)[0] ?? "");
-    setOpenError(null);
+  function commitName() {
+    setUser(draft.trim());
   }
 
   // Changing date re-scopes the subject/bucket choices to that date's data: keep the current
   // pick if it's still valid there, else fall to the first available (or none).
   function chooseDate(p: ProjectSummary, newDate: string) {
-    setDate(newDate);
     const subjects = subjectsForDate(p, newDate);
     const buckets = bucketsForDate(p, newDate);
-    setSubject((prev) => (subjects.includes(prev) ? prev : (subjects[0] ?? "")));
-    setBucket((prev) => (buckets.includes(prev) ? prev : (buckets[0] ?? "")));
+    patchOpenChoice({
+      date: newDate,
+      subject: subjects.includes(subject) ? subject : (subjects[0] ?? ""),
+      bucket: buckets.includes(bucket) ? bucket : (buckets[0] ?? ""),
+    });
   }
 
-  async function openProject(
-    p: OpenableProject,
-    chosenDate: string,
-    chosenSubject: string,
-    chosenBucket: string,
-  ) {
-    if (openedRef.current) return;
-    if (!chosenDate) {
-      // Opening with no date can't satisfy datasetReady, so it would leave the picker on
-      // screen with a dead button. Tell the human instead of silently latching.
-      setOpenError("This project has no dated images yet, ingest images first.");
-      return;
-    }
-    openedRef.current = true;
-    setOpening(true);
-    setOpenError(null);
-    try {
-      await openWorkspaceProject(p, chosenDate, chosenSubject, chosenBucket);
-    } catch (e) {
-      openedRef.current = false;
-      setOpenError(String(e));
-    } finally {
-      setOpening(false);
-    }
+  function showListing(res: Awaited<ReturnType<typeof api.projects.list>>) {
+    setProjects(res.projects);
+    setOpenId(res.open_id);
+    setLastOpenedProblem(res.last_opened_problem);
   }
 
   function refetch(): Promise<void> {
     return api.projects
       .list()
-      .then((res) => {
-        setProjects(res.projects);
-        setLastOpenedProblem(res.last_opened_problem);
-      })
+      .then(showListing)
       .catch((e) => {
         setLoadError(e instanceof Error ? e.message : String(e));
       });
@@ -280,32 +270,47 @@ export function ProjectPicker() {
 
   useEffect(() => {
     let canceled = false;
-    // Claim the attempt now, before the fetch: a picker that unmounts mid-fetch (every load
-    // where the app opens the project itself) must still count as having tried.
-    const alreadyAttempted = autoOpenAttempted;
-    autoOpenAttempted = true;
+    // The attempt is consumed when a listing decides it, so an effect replayed before its
+    // listing returns takes the hold again.
+    const state = useStore.getState();
+    const initial = selectAnnotatorNamed(state) && !state.initialOpenAttempted;
+    const held = initial ? takeOpenHold(null) : null;
+    let handedOver = false;
+    const settle = () => {
+      if (held !== null && !handedOver) releaseOpenHold(held);
+    };
     api.projects
       .list()
       .then((res) => {
         if (canceled) return;
-        setProjects(res.projects);
-        setLastOpenedProblem(res.last_opened_problem);
-        if (alreadyAttempted) return;
-        // Auto-open the backend's open project on first app load, only when its default date
-        // has labeled subjects; else preselect its card.
+        showListing(res);
+        if (held !== null) useStore.getState().consumeInitialOpen();
+        // Open the backend's open project when its default date has labeled subjects, else
+        // preselect its card; nothing happens once the person has chosen a project.
         const open = res.projects.filter(openable).find((p) => p.id === res.open_id);
-        if (!open) return;
-        selectCard(open);
-        const d = defaultDate(open.dates);
-        if (d && subjectsForDate(open, d).length > 0) {
-          void openProjectById(open.id).catch((e) => setOpenError(String(e)));
+        if (
+          held === null ||
+          !open ||
+          useStore.getState().openChoice.projectId ||
+          !initialOpenWanted(held, open.id)
+        ) {
+          settle();
+          return;
         }
+        selectCard(open);
+        const chosen = useStore.getState().openChoice;
+        if (chosen.date && subjectsForDate(open, chosen.date).length > 0) {
+          handedOver = true;
+          void startOpen(open, chosen.date, chosen.subject, chosen.bucket, held);
+        } else settle();
       })
       .catch((e) => {
+        settle();
         if (!canceled) setLoadError(String(e));
       });
     return () => {
       canceled = true;
+      settle();
     };
     // Run once on mount.
   }, []);
@@ -318,19 +323,37 @@ export function ProjectPicker() {
           <h1 className="text-xl font-semibold text-tcip-fg mt-2">Open a project</h1>
         </div>
 
-        <label className="flex flex-col gap-1 animate-tcip-rise">
-          <span className="tcip-label">Annotator</span>
-          <input
-            ref={annotatorFieldRef}
-            type="text"
-            className="tcip-input max-w-xs"
-            placeholder="your name (e.g. jordan)"
-            value={user}
-            onChange={(e) => setUser(e.target.value)}
-            spellCheck={false}
-            autoComplete="off"
-          />
-        </label>
+        <div className="flex flex-col gap-1 animate-tcip-rise">
+          <label className="flex flex-col gap-1">
+            <span className="tcip-label">Annotator</span>
+            <input
+              ref={annotatorFieldRef}
+              type="text"
+              className="tcip-input max-w-xs"
+              placeholder="your name (e.g. jordan)"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && draftNamed) commitName();
+              }}
+              spellCheck={false}
+              autoComplete="off"
+              aria-invalid={!annotatorNamed || nameRefusal !== null}
+              aria-describedby={annotatorNamed && !nameRefusal ? undefined : annotatorHintId}
+            />
+          </label>
+          {nameRefusal && (
+            <span id={annotatorHintId} role="alert" className="text-[11px] text-tcip-fp">
+              {nameRefusal}
+            </span>
+          )}
+          {!annotatorNamed && !nameRefusal && (
+            <span id={annotatorHintId} className="text-[11px] text-tcip-warn">
+              Enter your name and press Enter, or open a project. It is recorded on the labels,
+              decisions and runs you make.
+            </span>
+          )}
+        </div>
 
         {loadError && (
           <div className="tcip-panel p-4 text-[12px] text-tcip-fp">
@@ -391,7 +414,7 @@ export function ProjectPicker() {
                       {p.display_name}
                     </span>
                     <div id={`project-desc-${index}`} className="contents">
-                      {p.is_open && (
+                      {p.id === openId && (
                         <span className="tcip-badge bg-tcip-accent/20 text-tcip-accent self-start">
                           open
                         </span>
@@ -452,7 +475,7 @@ export function ProjectPicker() {
                           <select
                             className="tcip-select"
                             value={subject}
-                            onChange={(e) => setSubject(e.target.value)}
+                            onChange={(e) => patchOpenChoice({ subject: e.target.value })}
                           >
                             <option
                               value=""
@@ -474,7 +497,7 @@ export function ProjectPicker() {
                           <select
                             className="tcip-select"
                             value={bucket}
-                            onChange={(e) => setBucket(e.target.value)}
+                            onChange={(e) => patchOpenChoice({ bucket: e.target.value })}
                           >
                             <option
                               value=""
@@ -492,12 +515,17 @@ export function ProjectPicker() {
                           </select>
                         </label>
                       </div>
-                      {openError && <span className="text-[11px] text-tcip-fp">{openError}</span>}
+                      {openError?.projectId === p.id && (
+                        <span className="text-[11px] text-tcip-fp">{openError.message}</span>
+                      )}
                       <div className="flex items-center gap-2 flex-wrap">
                         <button
                           className="tcip-btn-primary flex-1"
-                          disabled={opening || !date}
-                          onClick={() => openProject(p, date, subject, bucket)}
+                          disabled={opening || !date || !draftNamed}
+                          onClick={() => {
+                            commitName();
+                            void startOpen(p, date, subject, bucket);
+                          }}
                         >
                           {opening
                             ? "Opening…"
@@ -505,20 +533,22 @@ export function ProjectPicker() {
                               ? "This project has no dated images"
                               : "Open project"}
                         </button>
-                        <button
-                          type="button"
-                          className="tcip-btn"
-                          onClick={() => setRenameTarget(p)}
-                        >
-                          Rename…
-                        </button>
-                        <button
-                          type="button"
-                          className="tcip-btn"
-                          onClick={() => setRemovalTarget(p)}
-                        >
-                          Remove…
-                        </button>
+                        <fieldset disabled={!annotatorNamed} className="contents">
+                          <button
+                            type="button"
+                            className="tcip-btn"
+                            onClick={() => setRenameTarget(p)}
+                          >
+                            Rename…
+                          </button>
+                          <button
+                            type="button"
+                            className="tcip-btn"
+                            onClick={() => setRemovalTarget(p)}
+                          >
+                            Remove…
+                          </button>
+                        </fieldset>
                       </div>
                     </div>
                   )}

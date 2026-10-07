@@ -45,8 +45,7 @@ class CanvasStatePayload(BaseModel):
     # Whether the Annotate cut tool is armed (sticky across a completed cut or a refusal alike).
     cut_armed: Optional[bool] = None
     dirty: Optional[bool] = None
-    # The person the GUI names, if any: a fresh GUI shows its canvas before anyone is named.
-    user: Optional[str] = None
+    user: str
     classes: list[dict] = []  # [{name, color}]
     counts: Optional[dict] = None
     # None = heartbeat (geometry file untouched); a list = full geometry push.
@@ -57,7 +56,7 @@ class CanvasStatePayload(BaseModel):
 def push_canvas_state(payload: CanvasStatePayload) -> dict:
     """Store the pushed canvas for the open project, stamped with the instant it arrived; a push
     stating a ``user`` that names no one is refused before anything is written."""
-    person = None if payload.user is None else actor(payload.user)
+    person = actor(payload.user)
     project = store.admit(payload.project_id)
     root = str(project)
     image_path = stored_path(payload.image_path, project)
