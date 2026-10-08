@@ -182,6 +182,7 @@ async def remove_project(req: RemovalRequest) -> dict:
     project, 400 for a confirm name that is not its display name, 409 while a job or run of it is
     live or the archive refuses, 400 for a request naming no one. Returns ``{archive_path,
     moved_to}``."""
+    person = actor(req.user)
     try:
         project = workspace.project_by_id(store.workspace, req.id)
     except LookupError as exc:
@@ -189,7 +190,6 @@ async def remove_project(req: RemovalRequest) -> dict:
     display_name = record_fields(project)["display_name"]
     if req.confirm_name != display_name:
         raise HTTPException(400, f"type the project's name {display_name!r} to remove it")
-    person = actor(req.user)
     conflict = _job_conflict(project)
     if conflict is not None:
         raise HTTPException(409, conflict)
@@ -216,11 +216,12 @@ def rename_project_route(req: RenameRequest) -> dict:
     """Change the display name of the project ``req.id`` names; its directory is left as it is.
     404 for no such project, 400 for a display name the record refuses or a request naming no
     one. Returns ``{id, display_name, previous_display_name}``."""
+    person = actor(req.user)
     try:
         project = workspace.project_by_id(store.workspace, req.id)
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
     try:
-        return rename_project(project, req.display_name, actor=actor(req.user))
+        return rename_project(project, req.display_name, actor=person)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

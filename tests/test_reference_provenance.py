@@ -17,6 +17,7 @@ import pytest
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
+from tests import REFUSED_NAMES
 
 IMG = 32
 PRODUCER = "model:m_best@c9f632ba98b2"  # the shape a publication stamps on every prediction
@@ -87,7 +88,8 @@ def test_a_bare_tool_name_reads_as_a_machine_author(tmp_path):
         json_io.require_reference_ground_truth(documents)
 
 
-@pytest.mark.parametrize("producer", ["user:", "user:   "])
+@pytest.mark.parametrize("producer", [
+    n for n in REFUSED_NAMES if n.startswith(json_io.PERSON_IDENTITY_PREFIX)])
 def test_the_prefix_naming_no_one_is_no_persons_authorship(tmp_path, producer):
     documents = _documents(tmp_path, ["a"], lambda s: [_hand(created_by=producer)])
 

@@ -1,5 +1,6 @@
 import type { StateCreator } from "zustand";
 
+import { PERSON_NAME_RULE } from "@/api/types.generated";
 import type { AppState } from "@/store/appState";
 
 export interface UserSlice {
@@ -9,8 +10,12 @@ export interface UserSlice {
   setUser: (user: string) => void;
 }
 
-/** Whether ``name`` names a person; whitespace is no name. */
-export const isAnnotatorName = (name: string): boolean => name.trim().length > 0;
+const personName = new RegExp(PERSON_NAME_RULE);
+
+/** Whether ``name`` names a person: the backend's one rule (``PERSON_NAME_RULE``), the rule the
+ *  open door refuses on, so a name the field admits is one the door admits and the door's own
+ *  refusal of a name is unreachable from here. */
+export const isAnnotatorName = (name: string): boolean => personName.test(name);
 
 export const selectAnnotatorNamed = (s: AppState): boolean => isAnnotatorName(s.user);
 

@@ -173,6 +173,7 @@ def save_labels(payload: SavePayload) -> dict:
     from tcip_mcp.dataset_layout import Gestures, save_label_document
     from tcip_mcp.identity import actor
 
+    person = actor(payload.user)
     key, w, h = _admitted(payload.image_path)
     expect = Version(payload.base_mtime) if payload.base_mtime is not None else None
     for name, noun, indices in (("accept", "a proposal", payload.accept),
@@ -187,7 +188,6 @@ def save_labels(payload: SavePayload) -> dict:
         proposals_hidden=payload.proposals_hidden,
         flag=tuple(FlagRequest(**f.model_dump()) for f in payload.flag),
         resolve=payload.resolve)
-    person = actor(payload.user)
     try:
         version, doc, accepted = save_label_document(
             store.project_root, key, [ap.model_dump() for ap in payload.annotations],

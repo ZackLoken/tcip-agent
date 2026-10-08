@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any, Literal, Protocol, cast
@@ -171,10 +172,7 @@ def stamped(contents: Iterable[Annotation], stored: Iterable[Annotation], *, aut
             now: str) -> list[Annotation]:
     """``contents`` with their provenance: each one whose stored content (:func:`stored_content`)
     equals a not yet claimed record of ``stored`` takes that record's provenance, and every other
-    one is authored by ``author`` at ``now`` with no sign-off. Refuses (``ValueError``) a blank
-    ``author``."""
-    if not author.strip():
-        raise ValueError("a saved annotation records its producer; name who or what wrote it")
+    one is authored by ``author`` at ``now`` with no sign-off."""
     unclaimed: dict[str, list[Annotation]] = {}
     for record in stored:
         unclaimed.setdefault(_content_key(record), []).append(record)
@@ -321,8 +319,8 @@ def completion_marks(data: dict,
                      annotations: list[Annotation]) -> dict[str, list[CompletionMark]]:
     """The live completion marks a parsed document holds, by subject: the ones whose digest still
     names that subject's ``annotations``. Raises :class:`UnreadableLabelDocumentError` naming the
-    subject and index of a mark that is not a rect of four numbers, a person, a time, a digest and
-    a ``proposals_hidden`` flag."""
+    subject and index of a mark that is not a rect of four numbers, a person (:func:`is_person`), a
+    time, a digest and a ``proposals_hidden`` flag."""
     raw = data.get(COMPLETION_KEY) or {}
     if not isinstance(raw, dict):
         raise UnreadableLabelDocumentError(f"{COMPLETION_KEY!r} is {raw!r}, not marks by subject")
@@ -333,9 +331,11 @@ def completion_marks(data: dict,
                 f"{subject!r} completion marks are {held!r}, not a list")
         for i, m in enumerate(held):
             try:
+                if not is_person(m["by"]):
+                    raise ValueError(f"by {m['by']!r} is not a person's recorded identity")
                 marks.setdefault(subject, []).append(CompletionMark(
                     rect=cast(tuple, tuple(_numbers(m["rect"], "rect", 4))),
-                    by=_text(m["by"], "by"), at=_text(m["at"], "at"),
+                    by=m["by"], at=_text(m["at"], "at"),
                     digest=_text(m["digest"], "digest"),
                     proposals_hidden=_flag(m["proposals_hidden"])))
             except (KeyError, TypeError, ValueError) as exc:
@@ -482,12 +482,34 @@ def detection_annotations(annotations: Iterable[Annotation]) -> list[Annotation]
 
 PERSON_IDENTITY_PREFIX = "user:"
 
+_BLANKS = r" \t\n\v\f\r\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+PERSON_NAME_RULE = (f"^(?![{_BLANKS}]*{PERSON_IDENTITY_PREFIX}[{_BLANKS}]*$)[{_BLANKS}]*"
+                    f"(?:{PERSON_IDENTITY_PREFIX})?[{_BLANKS}]*"
+                    rf"([^{_BLANKS}](?:[\d\D]*[^{_BLANKS}])?)[{_BLANKS}]*$")
+"""The one rule for a string that names a person, with or without :data:`PERSON_IDENTITY_PREFIX`
+in front: the name is what stands between the optional prefix and the end once blanks (the
+whitespace JavaScript's ``trim`` cuts, the byte-order mark included) are cut from both sides, and
+it must hold something; a line break inside it is part of the name. Its one group captures the
+name. Spelled with explicit character classes and escapes so it reads the same under Python's
+``re`` and JavaScript's ``RegExp``, and the browser's name field tests the rule the backend's
+doors refuse on."""
 
-def is_person(identity: str | None) -> bool:
-    """Whether ``identity`` names a person: :data:`PERSON_IDENTITY_PREFIX` followed by a
-    non-blank name."""
-    return (identity is not None and identity.startswith(PERSON_IDENTITY_PREFIX)
-            and bool(identity.removeprefix(PERSON_IDENTITY_PREFIX).strip()))
+
+def person_name(text: str) -> str | None:
+    """The name ``text`` states under :data:`PERSON_NAME_RULE`, without the prefix; ``None`` when
+    it names no one."""
+    match = re.match(PERSON_NAME_RULE, text)
+    return None if match is None else match.group(1)
+
+
+def is_person(identity: object) -> bool:
+    """Whether ``identity`` is a person's recorded identity: a string holding
+    :data:`PERSON_IDENTITY_PREFIX` followed by the name :data:`PERSON_NAME_RULE` captures from it,
+    with nothing else around them."""
+    if not isinstance(identity, str):
+        return False
+    name = person_name(identity)
+    return name is not None and identity == PERSON_IDENTITY_PREFIX + name
 
 
 def is_person_signoff(a: Annotation) -> bool:

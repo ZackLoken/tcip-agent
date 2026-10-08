@@ -301,11 +301,13 @@ def save_label_document(
     ``gestures`` makes; a subject mapped to ``False`` loses its marks. Each accepted and rejected
     proposal appends one entry to the image's verdict shard under that bucket. The image's flags
     record gains each flag ``gestures`` raises, by ``author``, and marks each it resolves; an
-    open flag on an annotation the save removes is resolved as removed
-    (:func:`~tcip_annotation.flags.resolved_by_removal`).
+    open flag on an annotation the save removes is resolved as removed by ``author``
+    (:func:`~tcip_annotation.flags.resolved_by_removal`), so a save whose ``author`` names no
+    person (a tool's) cannot remove a flagged annotation.
 
     Raises with nothing written: ``ValueError`` for a payload that does not parse, a confirmed
-    position the save writes no annotation at, a proposal
+    position the save writes no annotation at, a removed annotation an open flag sits on when
+    ``author`` names no person, a proposal
     index the bucket's document does not hold or that is both accepted and rejected, a flag with
     no comment or on a proposal its bucket does not hold, or a resolved flag that is not open;
     ``UnreadableLabelDocumentError`` for a stored document that does not decode;

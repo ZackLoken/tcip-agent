@@ -20,6 +20,7 @@ pytest.importorskip("fastapi")
 import tcip_store  # noqa: E402
 from tcip_mcp.project_record import read_record  # noqa: E402
 from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key  # noqa: E402
+from tests import REFUSED_NAMES  # noqa: E402
 
 
 def _payload(project: Path, image_path: str, shapes=None, **over) -> dict:
@@ -118,12 +119,12 @@ def test_a_push_while_no_project_is_open_is_answered_as_a_mismatch(client, proje
 
 
 def test_a_push_naming_no_one_is_refused_before_anything_is_written(client, opened_project):
-    """A push must name its person: a blank name is refused before the geometry or the meta
-    document is written."""
-    r = client.post("/api/canvas/state",
-                    json={**_payload(opened_project, A_IMG, shapes=SHAPES), "user": "  "})
-
-    assert r.status_code == 400
+    """A push must name its person: a name naming no one is refused before the geometry or the
+    meta document is written."""
+    for name in REFUSED_NAMES:
+        r = client.post("/api/canvas/state",
+                        json={**_payload(opened_project, A_IMG, shapes=SHAPES), "user": name})
+        assert r.status_code == 400, (name, r.text)
     assert _shapes_doc(opened_project) is None and _meta(opened_project) is None
 
 

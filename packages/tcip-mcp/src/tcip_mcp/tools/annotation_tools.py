@@ -68,8 +68,12 @@ def save_annotations(
 ) -> dict:
     """Write an image's annotations as its single per-image label document (all subjects, one
     document), keyed by the image's dataset root, capture and stem
-    (:func:`~tcip_mcp.dataset_layout.label_key`), each written annotation stamped as this tool's
-    own. Each annotation is a dict carrying a ``subject`` (required, refused when absent), an
+    (:func:`~tcip_mcp.dataset_layout.label_key`), through the one label save
+    (:func:`~tcip_mcp.dataset_layout.save_label_document`) as the author ``save_annotations``:
+    each annotation takes the provenance of one stored record of the same content not yet
+    claimed by another (:func:`~tcip_annotation.json_io.stamped`), and every other one is this
+    tool's own. Each annotation is a dict carrying a ``subject`` (required, refused when
+    absent), an
     optional geometry (``bbox`` = [x1,y1,x2,y2], ``points`` = [[x,y],...] for a single-ring
     polygon contour, ``rings`` = [[[x,y],...], ...] for a multi-ring polygon, whose ring vertices
     may be ``{x,y}`` dicts or ``[x,y]`` pairs, ``point`` = [x,y] for a single prompt/keypoint
@@ -81,7 +85,11 @@ def save_annotations(
         annotations: List of ``{subject, bbox?/points?/rings?/point?, attributes?}`` dicts (pixel
             coords); an empty list writes an empty document.
 
-    Returns ``{capture, written, count}``, ``written`` the stem of the document written.
+    Returns ``{capture, written, count}``, ``written`` the one-element list of the stem
+    written, or ``{error}`` with nothing written for a ``ValueError`` the save raises (a
+    payload that does not parse; a removed annotation an open flag sits on, since a tool names
+    no person and the person resolves the flag first). A stored document that does not decode
+    raises ``UnreadableLabelDocumentError`` through this door.
     """
     from tcip_mcp.dataset_layout import save_label_document
     from tcip_mcp.web_client import PANEL_EVENT_LABELS_WRITTEN, post_panel_event

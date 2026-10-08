@@ -82,7 +82,7 @@ afterEach(cleanup);
 beforeEach(() => {
   localStorage.removeItem("tcip.recent_projects");
   useStore.getState().setUser("grower");
-  useStore.getState().patchOpenStatus({ opening: null, openError: null, nameRefusal: null });
+  useStore.getState().patchOpenStatus({ opening: null, openError: null });
   vi.mocked(api.projects.list).mockReset();
   vi.mocked(api.projects.open).mockReset();
   vi.mocked(api.dataset.select).mockReset();

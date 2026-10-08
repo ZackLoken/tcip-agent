@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, replace
 
 from tcip_store import Key
 
+from tcip_annotation.json_io import PERSON_IDENTITY_PREFIX, is_person
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
 
 REVIEW_FLAGS_STORE = "review_flags"
@@ -41,8 +42,10 @@ class Flag:
         return self.resolved_by is None
 
     def resolved(self, *, by: str, at: str, reply: str = "", removed: bool = False) -> "Flag":
-        """This flag resolved by ``by`` at ``at``."""
-        return replace(self, resolved_by=by, resolved_at=at, reply=reply, removed=removed)
+        """This flag resolved by ``by`` at ``at``; a resolution :func:`decode_flag` would not read
+        back refuses (``ValueError``)."""
+        return decode_flag(encode_flag(replace(self, resolved_by=by, resolved_at=at, reply=reply,
+                                               removed=removed)))
 
 
 @dataclass(frozen=True)
@@ -83,9 +86,11 @@ def _is_text(value) -> bool:
 
 def decode_flag(entry: Mapping) -> Flag:
     """One stored entry as a :class:`Flag`, or ``ValueError`` naming the entry when a key is
-    missing, the id, comment, person or time is not a non-empty string, the point is not two
+    missing, the id, comment or time is not a non-empty string, the point is not two
     numbers, the proposal is not a bucket name and an index, a point comes without a subject or
-    beside a proposal, or the resolution states a person without a time."""
+    beside a proposal, the raiser or the resolver is not a person's recorded identity
+    (:func:`~tcip_annotation.json_io.is_person`), or the resolution states a person without a
+    time."""
     try:
         point, proposal = entry["point"], entry["proposal"]
         flag = Flag(
@@ -98,7 +103,8 @@ def decode_flag(entry: Mapping) -> Flag:
     except (KeyError, TypeError, ValueError, IndexError) as exc:
         raise ValueError(f"flag entry {dict(entry)!r} does not read: {exc!r}") from exc
     well_formed = (
-        all(_is_text(v) for v in (flag.id, flag.text, flag.by, flag.at))
+        all(_is_text(v) for v in (flag.id, flag.text, flag.at))
+        and is_person(flag.by)
         and (flag.point is None) == (flag.subject is None)
         and (flag.subject is None or _is_text(flag.subject))
         and not (flag.point is not None and flag.proposal is not None)
@@ -107,11 +113,12 @@ def decode_flag(entry: Mapping) -> Flag:
                                        and not isinstance(flag.proposal[1], bool)
                                        and flag.proposal[1] >= 0))
         and (flag.resolved_by is None) == (flag.resolved_at is None)
-        and (flag.resolved_by is None or _is_text(flag.resolved_by))
+        and (flag.resolved_by is None or is_person(flag.resolved_by))
         and isinstance(flag.reply, str) and isinstance(flag.removed, bool))
     if not well_formed:
-        raise ValueError(f"flag entry {dict(entry)!r} is not a comment by a person at a time on "
-                         "a point with its subject, a proposal or the image")
+        raise ValueError(f"flag entry {dict(entry)!r} is not a comment by a person "
+                         f"({PERSON_IDENTITY_PREFIX}<name>) at a time on a point with its "
+                         "subject, a proposal or the image, resolved by a person if at all")
     return flag
 
 

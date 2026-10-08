@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 
 from tcip_annotation.flags import FlagRequest, decode_flag, encode_flag, flag_key, read_flags
+from tcip_annotation.json_io import read_label_document
 from tcip_mcp.dataset_layout import Gestures, image_dir, save_label_document
+from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import image_label_key, write_image
 
 DATE = "2026-02-11"
@@ -84,6 +86,26 @@ def test_a_malformed_flag_refuses_before_any_write(
 
     assert ts.read(image_label_key(image), default=None) is None
     assert _flags(image) == []
+
+
+def test_a_flag_or_a_resolution_by_no_person_refuses_before_any_write(tmp_path: Path) -> None:
+    """A flag's ``by`` and ``resolved_by`` name a person; a producer that names none, as an
+    agent's save names itself, neither raises a flag nor resolves one by removing its annotation."""
+    image = _image(tmp_path)
+    box = [{"subject": "bud", "bbox": BOX}]
+    with pytest.raises(ValueError, match="by a person"):
+        _save(tmp_path, image, box, author="save_annotations",
+              gestures=Gestures(flag=(FlagRequest(text="open?"),)))
+    assert _flags(image) == []
+
+    _save(tmp_path, image, box, gestures=Gestures(
+        flag=(FlagRequest(text="open?", point=INSIDE, subject="bud"),)))
+    held, logged = read_label_document(image_label_key(image)), audit_rows(tmp_path)
+    with pytest.raises(ValueError, match="by a person"):
+        _save(tmp_path, image, [], author="save_annotations")
+    assert _flags(image)[0].open
+    assert read_label_document(image_label_key(image)) == held
+    assert audit_rows(tmp_path) == logged
 
 
 def test_a_flag_on_a_proposal_the_bucket_does_not_hold_refuses(tmp_path: Path) -> None:

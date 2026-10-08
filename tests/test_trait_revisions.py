@@ -19,6 +19,7 @@ from tcip_mcp import traits
 from tcip_mcp.audit import audit_log_key
 from tcip_mcp.delivery import read_delivery_events
 from tcip_mcp.operationalization import OperationalizationRefusedError
+from tests import REFUSED_NAMES
 from tests import _trait_fixtures as fx
 
 TRAITS_ROUTE = "/api/results/traits"
@@ -281,7 +282,7 @@ def test_the_entry_hash_covers_every_field_and_ignores_sequence_type() -> None:
 
 
 def test_an_entry_cannot_carry_a_confirmation_and_a_confirmation_needs_a_name(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     from pydantic import ValidationError
 
@@ -289,9 +290,9 @@ def test_an_entry_cannot_carry_a_confirmation_and_a_confirmation_needs_a_name(
         traits.TraitEntry.model_validate({**fx.COUNT_SPEC.model_dump(), "confirmed_by": "user:x"})
 
     revision = fx.propose(tmp_path, _count_entry())
-    monkeypatch.setenv("TCIP_USER", "rosalind")
-    with pytest.raises(ValueError, match="names no one"):
-        fx.confirm(tmp_path, revision, user="  ")
+    for name in REFUSED_NAMES:
+        with pytest.raises(ValueError, match="names no one"):
+            fx.confirm(tmp_path, revision, user=name)
     assert not traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest.confirmed
     confirmed = fx.confirm(tmp_path, revision)
     assert confirmed.confirmed_by == "user:grüne" and confirmed.confirmed_at.endswith("+00:00")
@@ -361,15 +362,14 @@ def test_the_traits_route_serves_every_revision_and_the_vocabulary_definitions(
     assert body["unreadable"] == []
 
 
-def test_a_nameless_confirmation_refuses_and_confirms_nothing(
-    opened_client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_a_nameless_confirmation_confirms_nothing(
+    opened_client: TestClient, tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("TCIP_USER", "osuser")
     revision = fx.propose(tmp_path, _count_entry())
 
-    resp = _confirm(opened_client, revision, user=" ")
-
-    assert resp.status_code == 400 and "names no one" in resp.text
+    for name in REFUSED_NAMES:
+        resp = _confirm(opened_client, revision, user=name)
+        assert resp.status_code == 400, (name, resp.text)
     assert not traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest.confirmed
 
 

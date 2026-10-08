@@ -1,0 +1,28 @@
+{
+  "_": "Names the person rule admits and refuses, run through the backend's actor and the browser's field alike; the name each admitted one records follows it.",
+  "admitted": [
+    ["Alice", "Alice"],
+    [" Alice ", "Alice"],
+    ["user:Alice", "Alice"],
+    ["user: Alice", "Alice"],
+    ["  user:  Alice Smith  ", "Alice Smith"],
+    ["user:user:", "user:"],
+    ["x", "x"],
+    ["\tAlice\n", "Alice"],
+    ["\u00a0Alice\u00a0", "Alice"],
+    ["Alice\nSmith", "Alice\nSmith"]
+  ],
+  "refused": [
+    "",
+    " ",
+    "  ",
+    "\t",
+    "\n",
+    "user:",
+    "user:   ",
+    " user: ",
+    "\tuser:\n",
+    "\u00a0",
+    "user:\u00a0"
+  ]
+}
