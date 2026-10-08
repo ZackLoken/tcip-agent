@@ -12,7 +12,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Iterable, NamedTuple, Optional
 
 import tcip_store
 from tcip_store import Key
@@ -41,6 +41,16 @@ def workspace_from_environment() -> Path:
     root = root.resolve()
     logger.info("TCIP workspace: %s", root)
     return root
+
+
+class BoundProject(NamedTuple):
+    """The project a process was started for: its directory, the id its record held at start
+    (:func:`~tcip_mcp.project_record.existing_project`), and the workspace naming the backend
+    that serves it."""
+
+    root: Path
+    id: str
+    workspace: Path
 
 
 def is_valid_name(name: str) -> bool:
@@ -80,26 +90,32 @@ def project_dirs(workspace: Path) -> list[Path]:
     return sorted(p for p in workspace.iterdir() if p.is_dir() and (p / ".tcip").is_dir())
 
 
-def project_by_id(workspace: Path, project_id: str) -> Path:
-    """The workspace project whose record holds ``project_id``. Raises ``LookupError`` naming the
-    id when no project holds it, with every project whose record would not read and why; and
-    naming both directories when two hold it (a copied project)."""
+def project_records(workspace: Path) -> list[tuple[Path, dict]]:
+    """Every workspace project (:func:`project_dirs`) with its record's fields as
+    :func:`tcip_mcp.project_record.record_fields` reads them."""
     from tcip_mcp.project_record import record_fields
 
-    found: list[Path] = []
+    return [(project, record_fields(project)) for project in project_dirs(workspace)]
+
+
+def project_by_id(records: Iterable[tuple[Path, dict]], project_id: str) -> tuple[Path, dict]:
+    """The project among ``records`` (:func:`project_records`) whose record holds ``project_id``,
+    with its fields. Raises ``LookupError`` naming the id when no project holds it, with every
+    project whose record would not read and why; and naming both directories when two hold it (a
+    copied project)."""
+    found: list[tuple[Path, dict]] = []
     unreadable: list[str] = []
-    for project in project_dirs(workspace):
-        fields = record_fields(project)
+    for project, fields in records:
         if fields["record_problem"] is not None:
             unreadable.append(f"{project}: {fields['record_problem']}")
         elif fields["id"] == project_id:
-            found.append(project)
+            found.append((project, fields))
     if not found:
         detail = f"; these projects' records would not read: {'; '.join(unreadable)}" if (
             unreadable) else ""
-        raise LookupError(f"no project in the workspace {workspace} has id {project_id!r}{detail}")
+        raise LookupError(f"no project in the workspace has id {project_id!r}{detail}")
     if len(found) > 1:
-        raise LookupError(f"projects {', '.join(str(p) for p in found)} all have id "
+        raise LookupError(f"projects {', '.join(str(p) for p, _ in found)} all have id "
                           f"{project_id!r}; one is a copy, so neither is opened by it")
     return found[0]
 

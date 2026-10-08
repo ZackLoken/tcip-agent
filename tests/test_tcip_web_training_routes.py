@@ -358,7 +358,7 @@ def test_tensorboard_route_404s_with_no_logs_carrying_the_recorded_error(
     assert resp.status_code == 404
     detail = resp.json()["detail"]
     assert detail["no_logs"] is True
-    assert detail["error"] == "could not open the dataset's images_dir"
+    assert detail["message"] == "could not open the dataset's images_dir"
 
 
 def _fails_at_data_load(ctx) -> None:

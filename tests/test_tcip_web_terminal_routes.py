@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from tcip_web import terminal as pty_host
 from tcip_web.app import app
 from tcip_web.routes import terminal as terminal_routes
+from tcip_web.state import OpenProject
 from tests._audit_fixtures import audit_rows
 
 FAKE = Path(__file__).parent / "fake_terminal_app.py"
@@ -117,28 +118,22 @@ def test_a_create_naming_an_unlisted_provider_refuses_by_name_and_a_listed_one_l
     assert resp.json()["launched"]["provider"] == LAUNCH["provider"]
 
 
-def test_rendering_replaces_each_placeholder_and_leaves_every_other_argument(opened_project):
+def test_rendering_replaces_each_placeholder_and_leaves_every_other_argument(opened):
     from tcip_web.state import store
 
     literal, workspace, config = pty_host.render_argv(
-        ["--literal", pty_host.WORKSPACE_ARG, pty_host.MCP_CONFIG_ARG], store.project_root,
+        ["--literal", pty_host.WORKSPACE_ARG, pty_host.MCP_CONFIG_ARG], opened,
         pty_host.spawn_env("term_test"))
 
     assert (literal, workspace) == ("--literal", str(store.workspace))
     server = json.loads(Path(config).read_text(encoding="utf-8"))["mcpServers"]["tcip"]
-    assert server["args"] == ["-m", "tcip_mcp", "--project", store.project_root.as_posix()]
+    assert server["args"] == ["-m", "tcip_mcp", "--project", opened.root.as_posix()]
 
 
 def test_the_ritual_for_no_project_says_the_session_has_none():
     ritual = pty_host.session_ritual(None)
     assert "has no project" in ritual
     assert "initialize_project" in ritual
-
-
-def test_the_ritual_names_why_a_project_record_does_not_read(tmp_path):
-    ritual = pty_host.session_ritual(tmp_path)
-    assert "has no readable record" in ritual
-    assert "report_friction" in ritual
 
 
 def test_prewarm_runs_without_raising():
@@ -199,12 +194,11 @@ def test_create_session_spawns_and_streams_banner(client):
 
 @pytest.mark.parametrize("row", pty_host.PROVIDERS, ids=lambda row: row.id)
 def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
-    row, client, monkeypatch, tmp_path, opened_project,
+    row, client, monkeypatch, tmp_path, opened, opened_project,
 ):
     """The fake program, standing as the row's executable, receives exactly the arguments the
     row renders, with no placeholder left in them, after the row's preparation ran with it."""
     from tcip_mcp.server import list_registered_tools
-    from tcip_web.state import store
 
     monkeypatch.setattr(pty_host, "PROVIDERS", (dataclasses.replace(
         row, executable=str(_fake_executable(tmp_path / "bin"))),))
@@ -216,7 +210,7 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
     rendered: list[list[str]] = []
     render = pty_host.render_argv
 
-    def _recording_render(argv: list[str], project: Path | None,
+    def _recording_render(argv: list[str], project: OpenProject | None,
                           env: dict[str, str]) -> list[str]:
         rendered.append(render(argv, project, env))
         return rendered[-1]
@@ -234,7 +228,7 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
     if row.prepare is None:
         expected_prepared: list[str] = []
     else:
-        server = pty_host.mcp_server(store.project_root)
+        server = pty_host.mcp_server(opened)
         expected_prepared = [
             pty_host.subprocess.list2cmdline(
                 [launched[0], "mcp", "add", "tcip", "--", server.command, *server.args]),
@@ -255,7 +249,7 @@ def test_a_launch_preparation_that_fails_refuses_the_launch_naming_it(
     client, monkeypatch, tmp_path, opened_project,
 ):
     """A row whose preparation step exits non-zero spawns nothing and records nothing."""
-    def prepare(executable: str, project: Path | None) -> list[str]:
+    def prepare(executable: str, project: OpenProject | None) -> list[str]:
         return [pty_host.run_to_completion([executable, "fail", "tcip"], "the fake step")]
 
     row = dataclasses.replace(pty_host.PROVIDERS[0], executable=str(_fake_executable(
@@ -297,30 +291,24 @@ def test_allowing_the_tcip_tools_keeps_the_rest_of_the_settings_and_is_idempoten
         pty_host.allow_tcip_tools(settings)
 
 
-def test_the_written_mcp_configuration_is_the_one_server_the_launch_states(opened_project):
-    from tcip_web.state import store
+def test_the_written_mcp_configuration_is_the_one_server_the_launch_states(opened):
+    server = pty_host.mcp_server(opened)
+    assert server.args == ("-m", "tcip_mcp", "--project", opened.root.as_posix())
 
-    server = pty_host.mcp_server(store.project_root)
-    assert server.args == ("-m", "tcip_mcp", "--project", store.project_root.as_posix())
-
-    (config,) = pty_host.render_argv([pty_host.MCP_CONFIG_ARG], store.project_root,
+    (config,) = pty_host.render_argv([pty_host.MCP_CONFIG_ARG], opened,
                                      pty_host.spawn_env("term_test"))
 
     written = json.loads(Path(config).read_text(encoding="utf-8"))["mcpServers"]["tcip"]
     assert (written["command"], written["args"]) == (server.command, list(server.args))
 
 
-def test_the_codex_overrides_name_the_one_server_and_forward_the_spawn_environment(
-    opened_project,
-):
+def test_the_codex_overrides_name_the_one_server_and_forward_the_spawn_environment(opened):
     """Each rendered ``-c`` override parses as TOML, and together they state the server
     :func:`mcp_server` produces, every variable of the launch's environment forwarded to it."""
     import tomllib
 
-    from tcip_web.state import store
-
     env = pty_host.spawn_env("term_test")
-    rendered = pty_host.render_argv(["--literal", pty_host.CODEX_MCP_ARG], store.project_root, env)
+    rendered = pty_host.render_argv(["--literal", pty_host.CODEX_MCP_ARG], opened, env)
 
     assert rendered[0] == "--literal"
     flags, overrides = rendered[1::2], rendered[2::2]
@@ -328,7 +316,7 @@ def test_the_codex_overrides_name_the_one_server_and_forward_the_spawn_environme
     parsed: dict = {}
     for override in overrides:
         parsed.update(tomllib.loads(override)["mcp_servers"]["tcip"])
-    server = pty_host.mcp_server(store.project_root)
+    server = pty_host.mcp_server(opened)
     assert (parsed["command"], parsed["args"]) == (server.command, list(server.args))
     assert set(parsed["env_vars"]) == set(env)
     assert pty_host.TERMINAL_SESSION_ENV in parsed["env_vars"]
@@ -993,12 +981,10 @@ def test_the_create_and_restart_responses_answer_the_launched_provider_and_progr
 
 
 def test_create_and_restart_answer_the_ritual_the_library_builds_for_the_open_project(
-    client, opened_project,
+    client, opened,
 ):
-    from tcip_web.state import store
-
     created = client.post("/api/terminal/sessions", json=LAUNCH).json()
-    assert created["ritual"] == pty_host.session_ritual(store.project_root)
+    assert created["ritual"] == pty_host.session_ritual(opened)
     assert "Test project" in created["ritual"]
     for step in ("load_project_memory", "inspect_project", "tcip doctor"):
         assert step in created["ritual"]
@@ -1010,3 +996,31 @@ def test_create_and_restart_answer_the_ritual_the_library_builds_for_the_open_pr
     restarted = client.post(
         f"/api/terminal/sessions/{created['session_id']}/restart", json=LAUNCH).json()
     assert restarted["ritual"] == created["ritual"]
+
+
+def test_a_launch_after_a_rename_of_the_open_project_names_its_new_name(client, opened):
+    """The ritual reads the project's record when the launch prepares, so a rename made while
+    the project is open is the name the next launch states."""
+    renamed = client.post("/api/projects/rename", json={
+        "id": opened.id, "display_name": "Ridge block", "user": "tester"})
+    assert renamed.status_code == 200, renamed.text
+
+    created = client.post("/api/terminal/sessions", json=LAUNCH)
+
+    assert created.status_code == 200, created.text
+    assert "Project: Ridge block" in created.json()["ritual"]
+
+
+def test_a_launch_for_an_open_project_whose_record_will_not_read_refuses_naming_why(
+    client, opened,
+):
+    from tcip_mcp.project_record import project_record_key
+    from tests._record_damage_fixtures import damage_record
+
+    damage_record(project_record_key(str(opened.root)), b"{not valid json")
+
+    created = client.post("/api/terminal/sessions", json=LAUNCH)
+
+    assert created.status_code == 503
+    assert "names no readable project" in created.json()["detail"]
+    assert terminal_routes._SESSIONS == {}

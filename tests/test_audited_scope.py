@@ -58,14 +58,14 @@ def test_registry_write_records_in_the_dataset_named_by_its_root_argument(
 
 
 def test_label_write_records_in_the_dataset_holding_the_image_it_names(
-    project: Path, dataset_root: Path
+    project: Path, bound, dataset_root: Path
 ) -> None:
     """The label path lies inside the dataset, not at its root."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     image = dataset_root / "images" / CAPTURE_DATE / "IMG_0001.JPG"
     result = save_annotations(
-        project, project.parent, str(image),
+        bound, str(image),
         annotations=[{"subject": "bud", "bbox": [10, 10, 40, 40]}]
     )
     assert "error" not in result
@@ -133,7 +133,7 @@ def test_unscoped_mutating_tool_records_in_the_project_log_with_the_entry_shape(
 
 
 def test_a_label_write_of_an_image_under_no_dataset_refuses_and_records_nothing(
-    project: Path, tmp_path: Path
+    project: Path, bound, tmp_path: Path
 ) -> None:
     """An image under no dataset image tree has no label document to write: the save refuses
     rather than guessing a dataset for it, and no log receives a line."""
@@ -145,7 +145,7 @@ def test_a_label_write_of_an_image_under_no_dataset_refuses_and_records_nothing(
     Image.new("RGB", (100, 80)).save(image)
 
     result = save_annotations(
-        project, project.parent, str(image),
+        bound, str(image),
         annotations=[{"subject": "bud", "bbox": [10, 10, 40, 40]}],
     )
     assert "is not a capture" in result["error"]

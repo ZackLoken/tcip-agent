@@ -331,7 +331,7 @@ def test_only_the_unreadable_trait_record_is_reported(tmp_path):
 
 
 def _leaf_project(tmp_path: Path) -> Path:
-    return new_project(_layout_project(tmp_path, "2026-03-04"))
+    return new_project(_layout_project(tmp_path, "2026-03-04")).root
 
 
 def test_doctor_is_silent_on_a_confirmed_latest_revision(tmp_path: Path):
@@ -378,7 +378,7 @@ def test_doctor_errors_on_a_project_whose_record_does_not_decode(tmp_path):
     from tcip_mcp.project_record import project_record_key
     from tests._record_damage_fixtures import damage_record
 
-    root = new_project(_layout_project(tmp_path, "2026-03-04"))
+    root = new_project(_layout_project(tmp_path, "2026-03-04")).root
     key = project_record_key(str(root))
     # A genuinely undecodable byte string, written under the record's own key, so the finding
     # is the store's own decode error rather than "not a site record".

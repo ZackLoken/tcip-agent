@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -19,6 +20,10 @@ import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_mcp.dataset_layout import capture_label_keys, label_key
 from tests._audit_fixtures import audit_rows
+from tests._web_fixtures import bound_to
+
+if TYPE_CHECKING:
+    from tcip_web.state import OpenProject
 
 DATE = "2025-09-14"
 IMG = 64
@@ -28,27 +33,27 @@ BOX = [8.0, 10.0, 20.0, 16.0]
 RING = [30.0, 30.0, 50.0, 30.0, 50.0, 54.0, 30.0, 54.0]
 
 
-def _dataset(tmp_path: Path, stems=STEMS) -> Path:
-    """Images brought in through ``ingest_images`` under one capture bucket, and a registry
-    declaring the subject, written through its own door."""
+def _dataset(tmp_path: Path, stems=STEMS) -> OpenProject:
+    """A project (``tests._web_fixtures.named_project``) holding images brought in through
+    ``ingest_images`` under one capture bucket, and a registry declaring the subject, written
+    through its own door."""
     from PIL import Image
 
     from tcip_mcp.tools.annotation_tools import write_subject_registry
     from tcip_mcp.tools.ingest_tools import ingest_images
-    from tcip_mcp.tools.project_tools import initialize_project
+    from tests._web_fixtures import named_project
 
     raw = tmp_path / "raw"
     raw.mkdir()
     for index, stem in enumerate(stems):
         Image.new("RGB", (IMG, IMG), color=(40 + index, 60, 50)).save(raw / f"{stem}.png")
-    root = tmp_path / "fruit_count"
-    assert "error" not in initialize_project(str(root), "Fruit count", "the import test's block")
-    ingested = ingest_images(root, source=str(raw), date_from=DATE)
+    made = named_project(tmp_path / "fruit_count", "Fruit count")
+    ingested = ingest_images(made.root, source=str(raw), date_from=DATE)
     assert "error" not in ingested, ingested
-    registered = write_subject_registry(root, str(root), subjects={
+    registered = write_subject_registry(made.root, str(made.root), subjects={
         SUBJECT: {"description": "one fruit"}, "leaf": {"description": "one leaf"}})
     assert "error" not in registered, registered
-    return root
+    return made
 
 
 def _document(path: Path, *, images=None, annotations=None, categories=None) -> Path:
@@ -114,7 +119,7 @@ def test_an_imported_documents_images_train_with_the_boxes_it_stated(tmp_path: P
     not admitted as a negative."""
     pytest.importorskip("torch")
 
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     result = _import(_document(tmp_path / "external.json"), root)
     assert "error" not in result, result
     assert result["written"] == ["tree_01", "tree_02"]
@@ -159,7 +164,7 @@ def test_an_imported_documents_images_train_with_the_polygons_it_stated(tmp_path
     from PIL import Image, ImageDraw
 
     shifted = [c - 20.0 for c in RING]
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     annotations = [{"id": 1, "image_id": 1, "category_id": 7, "segmentation": [shifted]},
                    {"id": 2, "image_id": 2, "category_id": 7, "segmentation": [RING]}]
     result = _import(_document(tmp_path / "external.json", annotations=annotations), root)
@@ -179,7 +184,7 @@ def test_an_imported_documents_images_train_with_the_polygons_it_stated(tmp_path
 def test_an_imported_record_keeps_the_provenance_the_document_carried_and_gains_none(
     tmp_path: Path,
 ):
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     assert "error" not in _import(_document(tmp_path / "external.json"), root)
 
     (authored,) = json_io.read_label_document(_label(root, "tree_01")).annotations
@@ -195,7 +200,7 @@ def test_the_import_leaves_one_row_with_the_documents_path_and_digest(tmp_path: 
     convention, ``sha256(bytes)``, never through the code under test."""
     import hashlib
 
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     document = _document(tmp_path / "external.json")
     before = len(audit_rows(root))
 
@@ -216,7 +221,7 @@ def test_the_digest_names_the_bytes_the_labels_came_from(tmp_path: Path, monkeyp
     the one of the bytes the labels were decoded from, never of a second read."""
     import hashlib
 
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     document = _document(tmp_path / "external.json")
     read_bytes = document.read_bytes()
     real_transaction = ts.transaction
@@ -236,7 +241,7 @@ def test_the_digest_names_the_bytes_the_labels_came_from(tmp_path: Path, monkeyp
 def test_every_declared_category_must_be_registered(tmp_path: Path):
     """A category the document declares but no record uses is still a declaration the registry
     must be able to name, and the import refuses on it by name, writing nothing."""
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     document = _document(tmp_path / "external.json",
                          categories=[{"id": 7, "name": SUBJECT}, {"id": 9, "name": "husk"}])
 
@@ -251,7 +256,7 @@ def test_every_declared_category_must_be_registered(tmp_path: Path):
 def test_a_category_name_no_subject_can_carry_is_refused_by_the_registry(tmp_path: Path, name):
     """A declared name is the subject its records take, so the registry answers for it: one no
     subject can carry is named in the import's refusal, whatever its shape."""
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     document = _document(tmp_path / "external.json",
                          categories=[{"id": 7, "name": SUBJECT}, {"id": 9, "name": name}])
 
@@ -262,7 +267,7 @@ def test_a_category_name_no_subject_can_carry_is_refused_by_the_registry(tmp_pat
 
 
 def test_an_image_not_under_the_dataset_refuses_the_whole_import(tmp_path: Path):
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     images = [{"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
               {"id": 2, "file_name": "tree_99.png", "width": IMG, "height": IMG}]
 
@@ -277,7 +282,7 @@ def test_an_image_not_under_the_dataset_refuses_the_whole_import(tmp_path: Path)
 def test_an_ordinary_image_is_named_by_its_own_file_name(tmp_path: Path, file_name: str):
     """Only a ``.bandgroup`` capture is tied by stem; an ordinary image the document names by
     another file name is not the dataset's image of that stem."""
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     images = [{"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
               {"id": 2, "file_name": file_name, "width": IMG, "height": IMG}]
 
@@ -291,10 +296,12 @@ def test_an_existing_per_image_document_refuses_the_whole_import(tmp_path: Path)
     """A label a person may have edited is never replaced by an import."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    root = _dataset(tmp_path)
+    made = _dataset(tmp_path)
+    root = made.root
     image = root / "images" / DATE / "tree_02.png"
     assert "error" not in save_annotations(
-        root, root.parent, str(image), annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}])
+        bound_to(made), str(image),
+        annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}])
     before = ts.read_versioned(_label(root, "tree_02")).version
 
     result = _import(_document(tmp_path / "external.json"), root)
@@ -309,10 +316,12 @@ def test_an_unannotated_images_faults_still_refuse_the_import(tmp_path: Path):
     image's wrong frame refuses by name, and the document a person saved on it is kept."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    root = _dataset(tmp_path)
+    made = _dataset(tmp_path)
+    root = made.root
     image = root / "images" / DATE / "tree_03.png"
     assert "error" not in save_annotations(
-        root, root.parent, str(image), annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}])
+        bound_to(made), str(image),
+        annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}])
     images = [{"id": index + 1, "file_name": f"{stem}.png", "width": IMG, "height": IMG}
               for index, stem in enumerate(STEMS)]
     images[2]["width"] = IMG * 2
@@ -329,10 +338,12 @@ def test_an_unannotated_images_existing_document_is_kept_and_admits_the_import(t
     stands beside the import's own documents."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    root = _dataset(tmp_path)
+    made = _dataset(tmp_path)
+    root = made.root
     image = root / "images" / DATE / "tree_03.png"
     assert "error" not in save_annotations(
-        root, root.parent, str(image), annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}])
+        bound_to(made), str(image),
+        annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}])
     before = ts.read_versioned(_label(root, "tree_03")).version
 
     result = _import(_document(tmp_path / "external.json"), root)
@@ -343,7 +354,7 @@ def test_an_unannotated_images_existing_document_is_kept_and_admits_the_import(t
 
 def test_a_frame_the_image_does_not_have_refuses_the_whole_import(tmp_path: Path):
     """A document stating another size for an image drew its geometry in another pixel frame."""
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     images = [{"id": 1, "file_name": "tree_01.png", "width": IMG * 2, "height": IMG * 2},
               {"id": 2, "file_name": "tree_02.png", "width": IMG, "height": IMG}]
 
@@ -356,7 +367,7 @@ def test_a_frame_the_image_does_not_have_refuses_the_whole_import(tmp_path: Path
 def test_a_repeated_image_reports_every_fault_it_carries(tmp_path: Path):
     """A second record naming the same capture, stated at another frame, is reported as both
     faults: naming one does not stop the pass from asking the rest."""
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     images = [{"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
               {"id": 2, "file_name": "tree_01.png", "width": IMG * 2, "height": IMG}]
 
@@ -369,7 +380,7 @@ def test_a_repeated_image_reports_every_fault_it_carries(tmp_path: Path):
 
 
 def test_image_and_category_ids_listed_twice_refuse_by_name(tmp_path: Path):
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     images = [{"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
               {"id": 1, "file_name": "tree_02.png", "width": IMG, "height": IMG}]
     annotations = [{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX}]
@@ -390,7 +401,7 @@ def test_image_and_category_ids_listed_twice_refuse_by_name(tmp_path: Path):
 def test_a_record_the_writer_refuses_writes_nothing(tmp_path: Path):
     """Every image is encoded by the writer's one encoder before the first write, so a box the
     stored grid collapses on the second image leaves the first image unwritten too."""
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     annotations = [{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX},
                    {"id": 2, "image_id": 2, "category_id": 7, "bbox": [10.0, 10.0, 0.004, 5.0]}]
 
@@ -421,7 +432,7 @@ def test_an_import_whose_second_document_conflicts_leaves_no_document_written(
     first document is never written, and no event is left."""
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
 
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     document = _document(tmp_path / "external.json")
     _label_placed_before_the_writes(monkeypatch, _label(root, "tree_02"), _person_label())
 
@@ -445,7 +456,7 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(tmp_path: Path,
     from tests._predictor_fixtures import StubPredictor, install
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     install(monkeypatch, StubPredictor(width=IMG, height=IMG, boxes=(BOX,)))
     real_encode = export.encode_predictions
     calls: list[str] = []
@@ -474,7 +485,7 @@ def test_an_import_that_committed_no_document_leaves_no_event(tmp_path: Path, mo
     either."""
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
 
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     assert _import(_document(tmp_path / "empty.json", annotations=[]), root)["written"] == []
     assert not [row for row in audit_rows(root) if row["tool"] == "coco_document_imported"]
 
@@ -486,7 +497,7 @@ def test_an_import_that_committed_no_document_leaves_no_event(tmp_path: Path, mo
 
 
 def test_an_annotation_naming_no_listed_image_refuses_the_whole_import(tmp_path: Path):
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     annotations = [{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX},
                    {"id": 2, "image_id": 42, "category_id": 7, "bbox": BOX}]
 
@@ -502,13 +513,13 @@ def test_a_date_that_names_no_capture_refuses(tmp_path: Path, date: str):
     formed or not, has nothing to import into."""
     from tcip_mcp.tools.ingest_tools import import_coco
 
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     result = import_coco(str(_document(tmp_path / "external.json")), str(root), date)
     assert "error" in result and "names no capture" in result["error"]
 
 
 def test_a_document_that_lists_no_image_refuses(tmp_path: Path):
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     result = _import(_document(tmp_path / "external.json", images=[], annotations=[]), root)
     assert "error" in result and "nothing to import" in result["error"]
 
@@ -517,7 +528,7 @@ def test_a_document_that_lists_no_image_refuses(tmp_path: Path):
 def test_a_malformed_annotations_container_refuses_by_name_through_the_tool(
     tmp_path: Path, annotations,
 ):
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     document = tmp_path / "external.json"
     document.write_text(json.dumps({
         "images": [{"id": 1, "file_name": "tree_01.png"}],
@@ -537,7 +548,7 @@ def test_a_band_grouped_capture_resolves_by_the_stem_the_document_names(tmp_path
 
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     images_dir = root / "images" / DATE
     band_g, band_r = images_dir / "plot7_G.tif", images_dir / "plot7_R.tif"
     tifffile.imwrite(str(band_g), np.full((IMG, IMG), 111, dtype=np.uint16))
@@ -576,7 +587,7 @@ def test_a_crowd_region_imports_and_reaches_training_and_evaluation_as_one(tmp_p
         records_from_annotation, records_from_detector,
     )
 
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     assert "error" not in _import(_crowd_document(tmp_path), root)
 
     stored = ts.read(_label(root, "tree_01"))
@@ -627,7 +638,7 @@ def test_a_run_length_mask_imports_as_the_rings_its_mask_yields(tmp_path: Path, 
     mask = painted_array(IMG, IMG, [((12, 10, 40, 30), 1), ((44, 40, 60, 52), 1)])
     counts: object = (mask_utils.encode(np.asfortranarray(mask))["counts"].decode("ascii")
                       if compressed else _uncompressed_counts(mask))
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     annotations = [{"id": 1, "image_id": 1, "category_id": 7, "iscrowd": 0,
                     "segmentation": {"size": [IMG, IMG], "counts": counts}}]
 
@@ -640,7 +651,7 @@ def test_a_run_length_mask_imports_as_the_rings_its_mask_yields(tmp_path: Path, 
 
 
 def test_a_run_length_mask_that_yields_no_ring_refuses_by_record(tmp_path: Path):
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     empty = [IMG * IMG]  # one run of background: nothing is foreground
     annotations = [{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX},
                    {"id": 2, "image_id": 2, "category_id": 7,
@@ -656,7 +667,7 @@ def test_a_run_length_mask_that_yields_no_ring_refuses_by_record(tmp_path: Path)
 def test_every_fault_the_document_carries_is_reported_together(tmp_path: Path):
     """A duplicate category, an unmapped category, a wrong frame and a missing image are each
     independent of the others, and one refusal names all four."""
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     images = [{"id": 1, "file_name": "tree_01.png", "width": IMG * 2, "height": IMG},
               {"id": 2, "file_name": "tree_99.png", "width": IMG, "height": IMG}]
     annotations = [{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX},
@@ -675,9 +686,10 @@ def test_every_fault_the_document_carries_is_reported_together(tmp_path: Path):
 def test_a_missing_image_is_reported_whatever_document_its_stem_holds(tmp_path: Path):
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    root = _dataset(tmp_path)
+    made = _dataset(tmp_path)
+    root = made.root
     assert "error" not in save_annotations(
-        root, root.parent, str(root / "images" / DATE / "tree_02.png"),
+        bound_to(made), str(root / "images" / DATE / "tree_02.png"),
         annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}])
     images = [{"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
               {"id": 2, "file_name": "tree_02.jpg", "width": IMG, "height": IMG}]
@@ -695,7 +707,7 @@ def test_a_missing_image_is_reported_whatever_document_its_stem_holds(tmp_path: 
     ({"annotations": [{"id": 1, "category_id": 7, "bbox": BOX}]}, "record 0 names image_id None"),
 ], ids=["float_null_category", "no_image_id", "no_annotation_image_id"])
 def test_a_malformed_identity_refuses_by_index(tmp_path: Path, change, fault):
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     document = _document(tmp_path / "external.json", **change)
 
     result = _import(document, root)
@@ -708,7 +720,7 @@ def test_a_malformed_identity_refuses_by_index(tmp_path: Path, change, fault):
 def test_an_image_id_that_is_no_identity_is_a_fault_never_a_lookup_key(tmp_path: Path, image_id):
     # An id found invalid is reported and never used to look the image's records up, so an
     # unhashable id is one more fault in the tool's structured error rather than a TypeError.
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     images = [{"id": image_id, "file_name": "tree_01.png", "width": IMG, "height": IMG},
               {"id": 2, "file_name": "tree_02.png", "width": IMG, "height": IMG}]
 
@@ -719,7 +731,7 @@ def test_an_image_id_that_is_no_identity_is_a_fault_never_a_lookup_key(tmp_path:
 
 
 def test_a_records_identity_and_content_faults_are_both_reported(tmp_path: Path):
-    root = _dataset(tmp_path)
+    root = _dataset(tmp_path).root
     annotations = [{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX},
                    {"id": 2, "image_id": None, "category_id": 7, "bbox": [1.0, 2.0, 3.0]}]
 

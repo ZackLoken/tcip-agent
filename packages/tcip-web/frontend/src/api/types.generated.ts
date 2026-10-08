@@ -78,6 +78,7 @@ export interface CanvasStatePayload {
 }
 
 export interface ImageEntry {
+  contribution_id: string;
   image_name: string;
   seconds: number;
   annotations_added: number;
@@ -85,12 +86,29 @@ export interface ImageEntry {
 }
 
 export interface ImageEventPayload {
+  contribution_id: string;
   image_name: string;
   seconds: number;
   annotations_added: number;
   activity: "new_annotation" | "review" | "negative_confirmation";
   user: string;
   project_id: string;
+  started: string | null;
+}
+
+export interface SessionRef {
+  project_id: string;
+  started: string;
+}
+
+export interface SessionPlace {
+  started: string;
+  ended: boolean;
+}
+
+export interface SessionWrite {
+  status: "ok" | "noop";
+  session: SessionPlace | null;
 }
 
 export interface SessionSummary {

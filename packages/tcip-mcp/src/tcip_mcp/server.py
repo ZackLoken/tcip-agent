@@ -7,13 +7,13 @@ import argparse
 import functools
 import inspect
 import logging
-from pathlib import Path
 from typing import Any, Callable, TypeVar
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from tcip_mcp import agent_identity
+from tcip_mcp.workspace import BoundProject, workspace_from_environment
 
 logger = logging.getLogger(__name__)
 
@@ -61,14 +61,18 @@ import tcip_mcp.tools.orthomosaic_tools  # noqa: F401, E402
 import tcip_mcp.tools.delivery_tools  # noqa: F401, E402
 
 
-def _bound(fn: Callable[..., Any], binding: tuple[Path, Path] | None) -> Callable[..., Any]:
-    """``fn`` as the server registers it: a ``project`` or ``workspace`` parameter is registered
-    without it, every call passing the server's own ``binding``, and an ``actor`` parameter is
-    registered without it, every call passing ``None``, since no person makes an act an MCP client
-    calls. With no binding, a call to a function taking a project or workspace raises
-    :class:`NoProjectError` naming ``--project``."""
+_CONTEXT = ("project", "bound", "actor")
+"""The parameters the server supplies and no client states: ``project``, the bound project's
+directory; ``bound``, the :class:`~tcip_mcp.workspace.BoundProject` whole; ``actor``, ``None``."""
+
+
+def _bound(fn: Callable[..., Any], binding: BoundProject | None) -> Callable[..., Any]:
+    """``fn`` as the server registers it: each :data:`_CONTEXT` parameter it takes is registered
+    without it, every call passing the server's own value, since no person makes an act an MCP
+    client calls and the project is the one the server was started for. With no binding, a call
+    to a function taking one raises :class:`NoProjectError` naming ``--project``."""
     sig = inspect.signature(fn, eval_str=True)
-    bound = {"project", "workspace", "actor"} & sig.parameters.keys()
+    bound = set(_CONTEXT) & sig.parameters.keys()
     if not bound:
         return fn
 
@@ -78,7 +82,7 @@ def _bound(fn: Callable[..., Any], binding: tuple[Path, Path] | None) -> Callabl
             raise NoProjectError(
                 "this MCP server was started for no project, so no tool that acts on "
                 "one can run; restart it with --project <path> naming the project")
-        values = {**dict(zip(("project", "workspace"), binding)), "actor": None}
+        values = {"project": binding.root, "bound": binding, "actor": None}
         return fn(*args, **{name: values[name] for name in bound}, **kwargs)
 
     entry.__signature__ = sig.replace(  # type: ignore[attr-defined]
@@ -86,10 +90,10 @@ def _bound(fn: Callable[..., Any], binding: tuple[Path, Path] | None) -> Callabl
     return entry
 
 
-def build_server(binding: tuple[Path, Path] | None) -> MCPServer:
-    """A server registering every declared tool, each acting on the project of ``binding``
-    (``(project, workspace)``, the workspace naming the backend that serves it) or, with
-    ``None``, a server started for no project, which serves only the tools needing neither."""
+def build_server(binding: BoundProject | None) -> MCPServer:
+    """A server registering every declared tool, each acting on the project of ``binding`` or,
+    with ``None``, a server started for no project, which serves only the tools taking no
+    :data:`_CONTEXT` parameter."""
     server = MCPServer("tcip-pipeline", lifespan=agent_identity.session_lifespan)
     # Records which harness connected, from the handshake, before any tool call is served.
     server.middleware.append(agent_identity.record_connecting_client)
@@ -117,15 +121,14 @@ def main(argv: list[str] | None = None) -> None:
 
     from tcip_store import bind
 
-    from tcip_mcp.workspace import workspace_from_environment
-
     bind()
     binding = None
     if args.project is not None:
         from tcip_mcp.project_record import existing_project
 
         try:
-            binding = (existing_project(args.project), workspace_from_environment())
+            root, record = existing_project(args.project)
+            binding = BoundProject(root, record["id"], workspace_from_environment())
         except ValueError as exc:
             raise SystemExit(f"--project: {exc}") from exc
     # Size GDAL's block cache once per process, at the entry point, never at source construction.

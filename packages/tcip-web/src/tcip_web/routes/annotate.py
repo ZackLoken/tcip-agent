@@ -165,8 +165,9 @@ def save_labels(payload: SavePayload) -> dict:
     :func:`~tcip_mcp.dataset_layout.save_label_document`, by the person
     :func:`~tcip_mcp.identity.actor` makes of ``user``, and answer the saved document with its
     version, as a load answers it (:func:`_labels_body`), and ``accepted``, each accepted
-    proposal's index mapped to the index of the annotation it resolved to. A stale
-    ``base_mtime`` answers 409 and a refusal 400, nothing written.
+    proposal's index mapped to the index of the annotation it resolved to, its audit line in the
+    open project's scope. A stale ``base_mtime``, or no project open, answers 409 and a refusal
+    400, nothing written.
     """
     from tcip_annotation.flags import FlagRequest
 
@@ -190,10 +191,10 @@ def save_labels(payload: SavePayload) -> dict:
         resolve=payload.resolve)
     try:
         version, doc, accepted = save_label_document(
-            store.project_root, key, [ap.model_dump() for ap in payload.annotations],
+            store.held().root, key, [ap.model_dump() for ap in payload.annotations],
             width=w, height=h, author=person, actor=person, expect=expect, gestures=gestures)
     except VersionConflictError as exc:
-        raise HTTPException(409, {"error": "label document changed since it was loaded"}) from exc
+        raise HTTPException(409, {"message": "label document changed since it was loaded"}) from exc
     except (ValueError, UnreadableLabelDocumentError) as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"status": "ok", **_labels_body(payload.image_path, key, w, h, doc, version),
@@ -208,22 +209,24 @@ def load_proposals(image_path: str, bucket: str) -> dict:
     :func:`~tcip_mcp.dataset_layout.proposal_pairs`) and the last ``decision`` its verdict shard
     records; beside them the bucket's ``operating_point``, the ``conf`` a review may accept at on
     its assessment's authority or ``None`` with the ``reason``
-    (:func:`~tcip_mcp.delivery.admitted_conf`). A bucket that names no document for the image, or
-    one that will not read, answers 400."""
+    (:func:`~tcip_mcp.delivery.admitted_conf`), both read against the open project. A bucket that
+    names no document for the image, or one that will not read, answers 400; no project open
+    answers 409."""
     from tcip_annotation.verdicts import read_verdicts
 
     from tcip_mcp.delivery import admitted_conf
     from tcip_mcp.dataset_layout import image_proposals, proposal_pairs, verdict_key_of
 
+    root = store.held().root
     key, _w, _h = _admitted(image_path)
     annotations = _read(key)[0].annotations
     try:
         published, proposals = image_proposals(bucket, key)
         decisions = {v.proposal: v.action for v in read_verdicts(verdict_key_of(key, bucket))}
-        paired = proposal_pairs(store.project_root, published, annotations, proposals)
+        paired = proposal_pairs(root, published, annotations, proposals)
     except (ValueError, UnreadableLabelDocumentError) as exc:
         raise HTTPException(400, str(exc)) from exc
-    conf, reason = admitted_conf(store.open_root(), published)
+    conf, reason = admitted_conf(root, published)
     return {"bucket": published.name, "operating_point": {"conf": conf, "reason": reason},
             "proposals": [
                 {**annotation_dict(p), "index": i, "paired": paired.get(i),
@@ -241,7 +244,7 @@ class PriorityQueueJob:
     subject: Optional[str]
     method: str
     budget: int
-    status: str = "pending"  # pending | running | completed | failed
+    status: str = "pending"  # one of jobstore.JOB_STATES
     error: Optional[str] = None
     # [{image, score, reference_member?}], highest first.
     queue: list[dict] = field(default_factory=list)
@@ -293,7 +296,7 @@ def launch_priority_queue(payload: LaunchPriorityQueuePayload) -> dict:
     if not images_dir.is_dir():
         raise HTTPException(404, f"images_dir not found: {payload.images_dir}")
     job = PriorityQueueJob(
-        job_id=f"pq-{uuid.uuid4().hex[:8]}", project=str(store.open_root()),
+        job_id=f"pq-{uuid.uuid4().hex[:8]}", project=str(store.held().root),
         checkpoint_path=str(checkpoint_path), images_dir=str(images_dir),
         subject=payload.subject, method=payload.method, budget=payload.budget)
     _pq_registry.register(job.job_id, job)

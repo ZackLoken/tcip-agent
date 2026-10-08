@@ -214,13 +214,10 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
       setRankResult(res);
     } catch (e) {
       setRankResult(null);
-      // Branches on the tool's own refusal fields, never on matching the error text: the route
-      // now carries rank_registered_models's whole error dict as the refusal's structured detail.
-      if (e instanceof StructuredRefusalError) {
-        setRankError(typeof e.detail.error === "string" ? e.detail.error : e.message);
-        if (e.detail.all_unverified === true) setNeedsUnverifiedOption(true);
-      } else {
-        setRankError(e instanceof Error ? e.message : String(e));
+      // Branches on the ranking's own refusal fields, never on matching the reason's text.
+      setRankError(e instanceof Error ? e.message : String(e));
+      if (e instanceof StructuredRefusalError && e.detail.all_unverified === true) {
+        setNeedsUnverifiedOption(true);
       }
     }
   }

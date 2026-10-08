@@ -299,7 +299,10 @@ describe("App visit attribution across a change of person", () => {
       vi.spyOn(api.annotate, "save"),
       vi.spyOn(api.images, "bands").mockResolvedValue({ band_count: 3, bands: [] }),
       vi.spyOn(api.images, "viewReads").mockResolvedValue({ reads: [] }),
-      vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue({}),
+      vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue({
+        status: "ok",
+        session: { started: "s1", ended: false },
+      }),
     );
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
@@ -333,15 +336,18 @@ describe("App visit attribution across a change of person", () => {
     await screen.findByText("Open a project");
     await admit("Ridge farm", "second");
 
-    expect(useStore.getState().heldContributions).toEqual([
-      expect.objectContaining({ image_name: "img1.jpg", user: "first", project_id: VALLEY.id }),
-    ]);
+    expect(vi.mocked(sessionsApi.imageEvent).mock.calls[0][0]).toMatchObject({
+      image_name: "img1.jpg",
+      user: "first",
+      project_id: VALLEY.id,
+    });
+    expect(useStore.getState().heldContributions).toEqual([]);
     act(() => {
       const s = useStore.getState();
       s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
     });
-    await waitFor(() => expect(sessionsApi.imageEvent).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(sessionsApi.imageEvent).mock.calls[0][0]).toMatchObject({
+    await waitFor(() => expect(sessionsApi.imageEvent).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(sessionsApi.imageEvent).mock.calls[1][0]).toMatchObject({
       image_name: "img1.jpg",
       user: "second",
       project_id: RIDGE.id,
@@ -350,18 +356,38 @@ describe("App visit attribution across a change of person", () => {
 });
 
 describe("App session end", () => {
-  it("swallows the rejection of the keepalive request sent when the shell goes", async () => {
+  const RECORDED = { project_id: "a1b2c3d4e5f6", started: "2026-10-07T14:00:00+00:00" };
+
+  it("ends the recorded session by its project and start stamp, once, when the shell goes", async () => {
+    const send = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
+    useStore.setState({
+      openProject: { id: "a1b2c3d4e5f6", path: "/ws/valley" },
+      recordedSession: { ...RECORDED, user: "grower" },
+    });
+    const view = render(<App />);
+
+    window.dispatchEvent(new Event("pagehide"));
+    view.unmount();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(
+      expect.stringContaining("/api/sessions/end"),
+      expect.objectContaining({ body: JSON.stringify(RECORDED), keepalive: true }),
+    );
+    expect(useStore.getState().recordedSession).toBeNull();
+  });
+
+  it("sends nothing when no contribution of this page was recorded", async () => {
     const send = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
     useStore.setState({ openProject: { id: "a1b2c3d4e5f6", path: "/ws/valley" } });
     const view = render(<App />);
 
+    window.dispatchEvent(new Event("pagehide"));
     view.unmount();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(send).toHaveBeenCalledWith(
-      expect.stringContaining("/api/sessions/end"),
-      expect.anything(),
-    );
+    expect(send).not.toHaveBeenCalled();
   });
 });
 

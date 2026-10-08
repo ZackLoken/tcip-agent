@@ -16,6 +16,7 @@ from tcip_mcp.subject_registry import SubjectRegistry, Subject
 from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import image_label_key, label_image, registry_over
+from tcip_web import jobstore
 from tcip_web.paths import safe_join
 
 
@@ -802,19 +803,20 @@ def test_annotate_save_persists_box_as_box(opened_client, dataset_root, tmp_path
 
 
 def test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote(
-    opened_client: TestClient, dataset_root: Path, tmp_path: Path
+    opened_client: TestClient, opened, dataset_root: Path, tmp_path: Path
 ) -> None:
     """Labels travel with their dataset, so the trail of a label write is recorded beside them
     and not in the log of the project that happened to have the dataset open. The route and the
     tool save through one library function, so one save through each leaves exactly one line
     apiece in the dataset's log, the same facts recorded."""
     from tcip_mcp.tools.annotation_tools import save_annotations
+    from tests._web_fixtures import bound_to
 
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     before = len(audit_rows(dataset_root))
     resp = _save_box(opened_client, img_path)
     assert resp.status_code == 200
-    answer = save_annotations(tmp_path, tmp_path.parent, str(img_path),
+    answer = save_annotations(bound_to(opened), str(img_path),
                               annotations=[{"subject": "bud", "bbox": [1, 1, 5, 5]}])
     assert "error" not in answer, answer
 
@@ -962,7 +964,7 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
     event.set()
     job = inference_routes._get(job_id)
     for _ in range(100):
-        if job.status not in ("pending", "running"):
+        if not jobstore.live(job):
             break
         time.sleep(0.05)
     assert job.status == "completed"
@@ -1004,7 +1006,7 @@ def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset
     event.set()
     job = inference_routes._get(job_id)
     for _ in range(100):
-        if job.status not in ("pending", "running"):
+        if not jobstore.live(job):
             break
         time.sleep(0.05)
     assert job.status == "completed"

@@ -58,8 +58,8 @@ def push_canvas_state(payload: CanvasStatePayload) -> dict:
     stating a ``user`` that names no one is refused before anything is written."""
     person = actor(payload.user)
     project = store.admit(payload.project_id)
-    root = str(project)
-    image_path = stored_path(payload.image_path, project)
+    root = str(project.root)
+    image_path = stored_path(payload.image_path, project.root)
     now = now_iso()
 
     if payload.shapes is not None:

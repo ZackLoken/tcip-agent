@@ -17,7 +17,7 @@ def _records(img) -> list[dict]:
     return tcip_store.read(image_label_key(img))["annotations"]
 
 
-def test_save_annotations_takes_no_producer_and_names_itself(tmp_path):
+def test_save_annotations_takes_no_producer_and_names_itself(tmp_path, bound):
     """Every saved record carries a producer and its time: the tool's own, which no caller
     states."""
     import inspect
@@ -25,19 +25,19 @@ def test_save_annotations_takes_no_producer_and_names_itself(tmp_path):
     from tcip_mcp.tools.annotation_tools import save_annotations
     assert "created_by" not in inspect.signature(save_annotations).parameters
     img = blank_image(tmp_path)
-    save_annotations(tmp_path, tmp_path.parent, str(img),
+    save_annotations(bound, str(img),
                      annotations=[{"subject": "bud", "bbox": [10, 10, 30, 30]}])
     obj = _records(img)[0]
     assert obj["created_by"] == "save_annotations"
     assert obj["created_at"]
 
 
-def test_save_annotations_never_reads_provenance_off_a_shape(tmp_path):
+def test_save_annotations_never_reads_provenance_off_a_shape(tmp_path, bound):
     """A shape's own ``created_by`` is not an author: every new shape carries the door's."""
     from tcip_mcp.tools.annotation_tools import save_annotations
     img = blank_image(tmp_path)
     save_annotations(
-        tmp_path, tmp_path.parent, str(img),
+        bound, str(img),
         annotations=[
             {"subject": "bud", "bbox": [10, 10, 30, 30], "created_by": "someone-else"},
             {"subject": "bud", "bbox": [40, 40, 60, 60]},

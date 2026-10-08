@@ -90,10 +90,15 @@ them.
   additive image roots read from `TCIP_IMAGE_ROOTS` at startup, and containment is by filesystem
   identity. Every route uses the
   resolved path the guard returns, never the client's string. Never route around a 403 on
-  escape. Every route that acts on a project acts on the one the backend has open
-  (`StateStore.open_root()`, set by `/api/projects/open` from a project's id, 409 while none is
-  open) and takes no project from the request; the Results doors also refuse evidence that does not
-  belong to it.
+  escape. A route that acts on a project acts on the one the backend has open
+  (`StateStore.held()`, set by `/api/projects/open` from a project's id, 409 while none is
+  open), and the Results doors also refuse evidence that does not belong to it. The project
+  routes (open, remove, rename) name a workspace project by id. A request a page or an agent
+  builds for a project (a session end, a contribution naming no session, a canvas push, a panel
+  event) carries that project's id, admitted against the open one (`StateStore.admit`, 409
+  naming it otherwise). A contribution naming a session is admitted by that session instead: it
+  lands in the workspace project its id names while the session is the person's and unended. A
+  job's cancel and status act on the job's own project, whichever is open.
 - A path a route reads out of the platform's own records (a selection directory a run's config
   names, say) is trusted for reading and never for writing; `assert_path_allowed` is for a
   client-supplied path, not this kind.

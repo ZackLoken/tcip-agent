@@ -19,7 +19,7 @@ def _project_with_records(tmp_path: Path) -> Path:
     """A project holding records and log entries in two databases, written by their producers."""
     from tests import _trait_fixtures as fx
 
-    project = new_project(tmp_path)
+    project = new_project(tmp_path).root
     report_friction(project, category="missing_tool", detail="a separator / in the detail")
     write_retrospective(project, project_id="p", task="t", worked="w", did_not_work="d")
     fx.seed_confirmed_count(project)
@@ -74,7 +74,7 @@ def test_every_key_the_store_admits_dumps_to_its_own_file_inside_the_destination
     """A key with no parts, parts that would climb out of the destination, two parts that differ
     only by case and a part holding a lone surrogate each land in a file of their own under
     ``out_dir``, and a key holding both a record and log entries dumps both."""
-    project = new_project(tmp_path)
+    project = new_project(tmp_path).root
     root = str(project)
     for parts, value in (((), {"n": 0}), (("..", "..", "escaped"), {"n": 1}),
                          (("A",), {"n": 2}), (("a",), {"n": 3}), (("both",), {"n": 4}),

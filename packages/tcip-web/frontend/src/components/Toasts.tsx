@@ -2,6 +2,7 @@ import { useEffect } from "react";
 
 import { useStore } from "@/store";
 import type { Toast } from "@/store";
+import { textOf } from "@/store/slices/toasts";
 
 const LEVEL_CLASS: Record<Toast["level"], string> = {
   error: "border-tcip-fp/50 text-tcip-fp",
@@ -26,6 +27,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number)
   }, [toast.id, onDismiss]);
 
   const isError = toast.level === "error";
+  const text = textOf(toast);
   return (
     <div
       role={isError ? "alert" : "status"}
@@ -33,13 +35,13 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number)
       className={`flex items-start gap-2 rounded-md border bg-tcip-panel/95 px-3 py-2 text-[12px] shadow-lg ${LEVEL_CLASS[toast.level]}`}
     >
       <span className="flex-1 break-words">
-        {toast.message}
+        {text}
         {toast.count && toast.count > 1 ? ` (×${toast.count})` : ""}
       </span>
       <button
         className="text-tcip-muted hover:text-tcip-fg"
         onClick={() => onDismiss(toast.id)}
-        aria-label={dismissLabel(toast.message)}
+        aria-label={dismissLabel(text)}
       >
         ×
       </button>

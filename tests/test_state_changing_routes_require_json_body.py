@@ -12,39 +12,20 @@ from tests._route_walk import state_changing_routes
 
 
 class _ProbePayload(BaseModel):
-    """A JSON body model this file owns, so the probe app below declares one at module scope.
-
-    FastAPI resolves a handler's annotations against the module's globals, so a model bound to a
-    local name inside a test reads as no body model at all.
-    """
+    """A JSON body model at module scope, where FastAPI resolves a handler's annotations."""
 
 
 EMPTY_BODY_ROUTES = (
     "/api/training/runs/does-not-exist/tensorboard",
-    "/api/sessions/end",
 )
-"""The state-changing routes whose only body is ``EmptyBodyPayload``.
-
-Named here rather than derived, because deriving them from the app would only ever restate what
-the routes currently declare, and what has to be held is that these particular reachable state
-changes refuse the browser simple-request shape.
-"""
+"""The state-changing routes whose only body is ``EmptyBodyPayload``."""
 
 
 def declares_json_body(route: APIRoute) -> bool:
-    """Whether a route's declared body is JSON and required, which is what closes the
-    simple-request shape.
-
-    A form or multipart route declares a body field too, so the field's presence is not the
-    question; its media type is. Executed against a throwaway app: a pydantic model parameter
-    reports application/x-www-form-urlencoded for Form and multipart/form-data for File, and a
-    route with no body parameter has no body field at all. Media type alone is not enough: a
-    body field with a default value is not required, and FastAPI only parses and validates a
-    request body when one is present, so a route declared with a defaulted body model still
-    substitutes the default and reaches the handler on the empty body a browser simple request
-    sends. Requiring the field closes that: an empty or non-JSON body then fails validation
-    before the handler runs.
-    """
+    """Whether a route's declared body is JSON and required: a form or multipart route declares a
+    body field of another media type, and a defaulted JSON body model is substituted on an empty
+    body instead of validated, so only a required JSON model refuses the browser simple-request
+    shape before the handler runs."""
     field = route.body_field
     return (
         field is not None
@@ -54,9 +35,8 @@ def declares_json_body(route: APIRoute) -> bool:
 
 
 def test_every_state_changing_route_declares_a_json_body_model() -> None:
-    """No exemption list: a route reaches this assertion whatever it is, and fails it unless the
-    body it declares is JSON. A route taking only path parameters, and a form or multipart route,
-    both fail it."""
+    """Every state-changing route declares a required JSON body; one taking only path
+    parameters, and a form or multipart route, fail this."""
     routes = state_changing_routes(app)
     assert routes, "no state-changing routes found; the route walk itself is broken"
     undeclared = sorted(
@@ -70,18 +50,10 @@ def test_every_state_changing_route_declares_a_json_body_model() -> None:
 def test_a_declared_body_model_admits_an_empty_json_object(
     client: TestClient, opened_project
 ) -> None:
-    """The rail must admit valid work: each route that carries no fields of its own still
-    accepts the ``{}`` its real caller sends, and reaches the handler's own outcome rather than
-    a 422 from the body model rejecting the call. A project is open, so each handler reaches
-    its own lookup: an unknown run is a 404, and ending a session when none is open is a no-op
-    200.
-    """
+    """A route that carries no fields of its own accepts the ``{}`` its real caller sends and
+    reaches the handler's own outcome: with a project open, an unknown run is a 404."""
     resp = client.post("/api/training/runs/does-not-exist/tensorboard", json={})
     assert resp.status_code == 404, resp.text
-
-    resp = client.post("/api/sessions/end", json={})
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["status"] == "noop"
 
 
 def test_a_missing_body_is_refused(client: TestClient) -> None:
@@ -101,20 +73,9 @@ def test_a_form_encoded_body_is_refused(client: TestClient) -> None:
 
 
 def test_a_headerless_json_shaped_body_is_refused(client: TestClient) -> None:
-    """Pins a dependency property this rail leans on rather than a version number: a request
-    carrying a non-empty, JSON-shaped body with no ``Content-Type`` header at all must not be
-    parsed as JSON and handed to the route's body model.
-
-    A cross-origin ``fetch`` whose body is an empty-type ``Blob`` sends no ``Content-Type``
-    header and stays a CORS simple request, so it never triggers a preflight; that is exactly
-    the shape this rail exists to keep out. If the body were parsed as JSON here the way it is
-    when the caller declares ``application/json``, ``b"{}"`` would decode to an empty dict, feed
-    through the same body model a real ``json={}`` call satisfies, and reach the handler for its
-    own outcome instead of failing
-    validation. The 422 asserted below is what distinguishes that reverted behavior from the
-    one this rail depends on; a dependency upgrade or pin change that stopped enforcing it would
-    fail this assertion rather than passing silently.
-    """
+    """A JSON-shaped body with no ``Content-Type`` header (what a cross-origin ``fetch`` of an
+    empty-type ``Blob`` sends, a CORS simple request with no preflight) is not parsed as JSON
+    and fails the body model rather than reaching the handler."""
     for url in EMPTY_BODY_ROUTES:
         request = client.build_request("POST", url, content=b"{}")
         assert "content-type" not in request.headers, (url, dict(request.headers))
@@ -123,15 +84,8 @@ def test_a_headerless_json_shaped_body_is_refused(client: TestClient) -> None:
 
 
 def test_the_guard_rejects_the_shapes_it_exists_to_catch() -> None:
-    """The predicate has to discriminate, or the sweep above passes for the wrong reason.
-
-    Four shapes are the ones a future route could open the gap with, and a form route is the
-    exact browser simple request the rail is named for. A defaulted JSON body model is the
-    subtlest of the four: it declares application/json and a body field, same as a real route,
-    but FastAPI substitutes the default on an empty body instead of validating one, so it
-    reaches the handler on the same empty body a form route sends. All four declare something
-    FastAPI is willing to route; only the required JSON model closes the gap.
-    """
+    """The predicate refuses a route with no body, a form route, a multipart route and a
+    defaulted JSON body model, and admits a required JSON body model."""
     from typing import Annotated
 
     from fastapi import FastAPI, File, Form, UploadFile

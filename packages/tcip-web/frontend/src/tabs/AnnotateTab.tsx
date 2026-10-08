@@ -4,9 +4,6 @@ import Konva from "konva";
 
 import { api, type SaveLabelsBody } from "@/api/client";
 import { subjectColor } from "@/api/subjects";
-import { committedOf } from "@/api/http";
-import { sessionsApi } from "@/api/sessions";
-import type { ImageEventPayload } from "@/api/types.generated";
 import { AnnotateLegend } from "@/components/annotate/AnnotateLegend";
 import { AnnotationShapes } from "@/components/annotate/AnnotationShapes";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
@@ -28,6 +25,7 @@ import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
 import { useRegionServes } from "@/hooks/useRegionServes";
 import { compositeParams } from "@/lib/bandSelection";
 import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
+import { postHeldContributions } from "@/lib/sessionLifecycle";
 import type { LoadedImage } from "@/lib/imageLoader";
 import { currentImage } from "@/lib/paths";
 import {
@@ -99,32 +97,6 @@ const SNAP_RADIUS_CANVAS = 15;
 const EDGE_INSERT_THRESHOLD = 6;
 const STREAM_MIN_DIST_CANVAS = 6; // screen px between vertices laid down in Stream (freehand) mode
 
-const contributionsInFlight = new Set<ImageEventPayload>();
-
-/** Post every held image visit of the open project not already in flight. Each is retired once
- *  the backend accepts it, or committed it and could not record the line (the gap toasted),
- *  and stays held for the next send otherwise. */
-function sendHeldContributions() {
-  const { heldContributions, openProject, retireContribution, pushToast } = useStore.getState();
-  for (const contribution of heldContributions) {
-    if (contribution.project_id !== openProject?.id || contributionsInFlight.has(contribution)) {
-      continue;
-    }
-    contributionsInFlight.add(contribution);
-    void sessionsApi
-      .imageEvent(contribution)
-      .then(
-        () => retireContribution(contribution),
-        (e: unknown) => {
-          if (committedOf(e) === null) return;
-          retireContribution(contribution);
-          pushToast(e instanceof Error ? e.message : String(e));
-        },
-      )
-      .finally(() => contributionsInFlight.delete(contribution));
-  }
-}
-
 export function AnnotateTab() {
   const dataset = useStore((s) => s.gui.dataset);
   const view = useStore((s) => s.gui.view);
@@ -163,7 +135,7 @@ export function AnnotateTab() {
   const closeSessionInterval = useStore((s) => s.closeSessionInterval);
   const heldContributions = useStore((s) => s.heldContributions);
   const openProjectId = useStore((s) => s.openProject?.id);
-  useEffect(() => sendHeldContributions(), [heldContributions, openProjectId]);
+  useEffect(() => postHeldContributions(), [heldContributions, openProjectId]);
 
   const [drawing, setDrawing] = useState<DrawingBox | null>(null);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
@@ -626,8 +598,7 @@ export function AnnotateTab() {
   }
 
   /** Save the current canvas, with any gestures it adjudicates, to the path it was loaded from,
-   *  reading the live store and refs so a call mid-transition writes the right image. With
-   *  `interactive` false (the auto-flush on navigate/unmount) a dropped save is a toast. The
+   *  reading the live store and refs so a call mid-transition writes the right image. The
    *  items of `confirm` are named by their position in the very list this save serializes.
    *  Resolves the answer the canvas adopted, or null when it adopted none. */
   async function save(opts?: {

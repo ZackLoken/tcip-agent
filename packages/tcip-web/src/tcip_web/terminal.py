@@ -23,6 +23,7 @@ from typing import Callable, Iterable, Optional
 
 from tcip_mcp.agent_identity import TERMINAL_SESSION_ENV
 from tcip_mcp.project_paths import repo_root_from_here
+from tcip_web.state import OpenProject, store
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ class PreparationFailedError(Exception):
     """A row's launch preparation did not complete; the message names the step and why."""
 
 
-PrepareFn = Callable[[str, Optional[Path]], list[str]]
+PrepareFn = Callable[[str, Optional[OpenProject]], list[str]]
 """A row's launch preparation: given the resolved executable and the session's project, it
 runs to completion and returns one line per step it took, or raises
 :class:`PreparationFailedError`."""
@@ -116,13 +117,14 @@ class McpServer:
     args: tuple[str, ...]
 
 
-def mcp_server(project: Optional[Path]) -> McpServer:
-    """This interpreter running ``tcip_mcp`` for ``project``, for no project when ``None``."""
-    args = ("-m", "tcip_mcp", *(("--project", project.as_posix()) if project else ()))
+def mcp_server(project: Optional[OpenProject]) -> McpServer:
+    """This interpreter running ``tcip_mcp`` for ``project``'s directory, for no project when
+    ``None``."""
+    args = ("-m", "tcip_mcp", *(("--project", project.root.as_posix()) if project else ()))
     return McpServer(Path(sys.executable).as_posix(), args)
 
 
-def codex_mcp_overrides(project: Optional[Path], env_names: Iterable[str]) -> list[str]:
+def codex_mcp_overrides(project: Optional[OpenProject], env_names: Iterable[str]) -> list[str]:
     """:func:`mcp_server` for ``project`` as Codex's ``tcip`` server in ``-c key=value``
     overrides, each value TOML (a JSON string or array of strings is valid TOML), forwarding the
     variables ``env_names`` names to the server and approving its tools without asking."""
@@ -171,7 +173,7 @@ def allow_tcip_tools(settings: Path) -> str:
     return f"allowed {len(missing)} tcip tools in {settings}"
 
 
-def prepare_antigravity(executable: str, project: Optional[Path]) -> list[str]:
+def prepare_antigravity(executable: str, project: Optional[OpenProject]) -> list[str]:
     """Antigravity's launch preparation: register :func:`mcp_server` for ``project`` as its
     ``tcip`` server through ``agy mcp add``, and allow every tcip tool in its settings file."""
     server = mcp_server(project)
@@ -247,7 +249,7 @@ def resolve_terminal_command(provider: Provider) -> Optional[tuple[list[str], bo
     return [executable, *provider.args], False
 
 
-def write_mcp_config(project: Optional[Path]) -> Path:
+def write_mcp_config(project: Optional[OpenProject]) -> Path:
     """Write :func:`mcp_server` for ``project`` as a JSON MCP configuration and return its
     path."""
     server = mcp_server(project)
@@ -257,13 +259,12 @@ def write_mcp_config(project: Optional[Path]) -> Path:
     return dest
 
 
-def render_argv(argv: list[str], project: Optional[Path], env: dict[str, str]) -> list[str]:
+def render_argv(argv: list[str], project: Optional[OpenProject],
+                env: dict[str, str]) -> list[str]:
     """``argv`` with each :data:`WORKSPACE_ARG` replaced by the backend's workspace, each
     :data:`MCP_CONFIG_ARG` by a configuration :func:`write_mcp_config` writes for ``project``,
     and each :data:`CODEX_MCP_ARG` by :func:`codex_mcp_overrides` for ``project`` forwarding
     every variable of ``env``, the environment the launch spawns with."""
-    from tcip_web.state import store
-
     values = {WORKSPACE_ARG: lambda: [str(store.workspace)],
               MCP_CONFIG_ARG: lambda: [str(write_mcp_config(project))],
               CODEX_MCP_ARG: lambda: codex_mcp_overrides(project, env)}
@@ -271,7 +272,7 @@ def render_argv(argv: list[str], project: Optional[Path], env: dict[str, str]) -
 
 
 def prepare_launch(executable: str, provider: Provider,
-                   project: Optional[Path]) -> tuple[list[str], Optional[str]]:
+                   project: Optional[OpenProject]) -> tuple[list[str], Optional[str]]:
     """Run ``provider.prepare`` with the resolved ``executable`` for ``project``: the steps it
     took (empty for a row with no preparation) and the reason it failed, ``None`` when it
     succeeded, prefixed with the row's name."""
@@ -306,25 +307,22 @@ _RITUAL_FRICTION = ("If any mandated action is blocked or errors, that itself is
                     "report_friction, never a silent skip.")
 
 
-def session_ritual(project: Optional[Path]) -> str:
+def session_ritual(project: Optional[OpenProject]) -> str:
     """The session-start directive for an agent launched for ``project``, as one line: the
-    project's display name and the ritual to run first when its record reads, the reason when it
-    does not, and what a session with no project can do when ``project`` is ``None``."""
-    from tcip_mcp.project_record import record_fields
+    display name its record holds now and the ritual to run first, or what a session with no
+    project can do when ``project`` is ``None``. Raises what
+    :func:`tcip_mcp.project_record.existing_project` raises for a record that will not read."""
+    from tcip_mcp.project_record import existing_project
 
     if project is None:
         return (f"{_RITUAL_HEADER}This session has no project: the GUI had none open when the "
                 "terminal started, so every tool that acts on a project refuses. Create one with "
                 "initialize_project, or open one in the GUI, then restart the terminal to work on "
                 f"it. {_RITUAL_FRICTION}")
-    record = record_fields(project)
-    if record["display_name"] is None:
-        return (f"{_RITUAL_HEADER}This session's project ({project}) has no readable record: "
-                f"{record['record_problem']} File this with report_friction before any project "
-                f"work. {_RITUAL_FRICTION}")
-    return (f"{_RITUAL_HEADER}Project: {record['display_name']} ({project}). Run the ritual "
+    _, record = existing_project(project.root)
+    return (f"{_RITUAL_HEADER}Project: {record['display_name']} ({project.root}). Run the ritual "
             "first: load_project_memory (kind='reports' and kind='retrospectives'), "
-            f"inspect_project, then tcip doctor {project}. {_RITUAL_FRICTION}")
+            f"inspect_project, then tcip doctor {project.root}. {_RITUAL_FRICTION}")
 
 
 VERSION_PROBE_TIMEOUT_S = 15

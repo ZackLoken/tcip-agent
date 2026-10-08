@@ -57,7 +57,13 @@ describe("MetaTab annotation sessions", () => {
           started: "2026-02-01T10:00:00+00:00",
           ended: null,
           entries: [
-            { image_name: "a.jpg", seconds: 9, annotations_added: 2, activity: "new_annotation" },
+            {
+              contribution_id: "c1",
+              image_name: "a.jpg",
+              seconds: 9,
+              annotations_added: 2,
+              activity: "new_annotation",
+            },
           ],
           images_annotated: 1,
           total_annotations: 2,

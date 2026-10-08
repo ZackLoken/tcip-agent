@@ -1,10 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
-import { StructuredRefusalError } from "@/api/http";
+import { decodeRefusal } from "@/api/http";
 import type { CompareResult } from "@/api/training";
 import { trainingApi } from "@/api/training";
 import { RunComparison, type MarkedRun } from "@/components/RunComparison";
+
+/** The ranking route's 422 refusal carrying `detail`, decoded as the client decodes it. */
+const rankRefusal = (detail: Record<string, unknown>) =>
+  decodeRefusal(new Response(JSON.stringify({ detail }), { status: 422 }));
+
+const UNVERIFIED = {
+  message:
+    "every registered model carrying 'val_map99' is unverified (metrics_source is not 'trainer')",
+  all_unverified: true,
+};
 
 beforeEach(() => {
   // Every render fetches the declared-direction table once on mount; a test that cares about
@@ -145,17 +155,7 @@ describe("RunComparison rank control", () => {
 
   it("clears a pending rank refusal when a direction is chosen, since it answers what the refusal asked for", async () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(registeredResult());
-    vi.spyOn(trainingApi, "compareBest").mockRejectedValue(
-      new StructuredRefusalError(
-        {
-          error:
-            "every registered model carrying 'val_map99' is unverified (metrics_source is not 'trainer')",
-          all_unverified: true,
-        },
-        422,
-        "",
-      ),
-    );
+    vi.spyOn(trainingApi, "compareBest").mockRejectedValue(await rankRefusal(UNVERIFIED));
 
     render(<RunComparison marked={MARKED} />);
     fireEvent.change(await screen.findByRole("combobox"), {
@@ -176,17 +176,7 @@ describe("RunComparison rank control", () => {
     vi.spyOn(trainingApi, "metricDirections").mockResolvedValue({
       higher_is_better: { map99: true },
     });
-    vi.spyOn(trainingApi, "compareBest").mockRejectedValue(
-      new StructuredRefusalError(
-        {
-          error:
-            "every registered model carrying 'val_map99' is unverified (metrics_source is not 'trainer')",
-          all_unverified: true,
-        },
-        422,
-        "",
-      ),
-    );
+    vi.spyOn(trainingApi, "compareBest").mockRejectedValue(await rankRefusal(UNVERIFIED));
 
     render(<RunComparison marked={MARKED} />);
     const select = await screen.findByRole("combobox");
@@ -303,9 +293,7 @@ describe("RunComparison rank answer", () => {
 
   it("resets rankResult, rankError, the direction choice, needsUnverifiedOption and rankMetric when the marked set changes", async () => {
     const compare = vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
-    vi.spyOn(trainingApi, "compareBest").mockRejectedValue(
-      new StructuredRefusalError({ error: "boom" }, 422, ""),
-    );
+    vi.spyOn(trainingApi, "compareBest").mockRejectedValue(await rankRefusal({ message: "boom" }));
 
     const { rerender } = render(<RunComparison marked={MARKED} />);
     fireEvent.change(await screen.findByRole("combobox", { name: "Rank by metric" }), {
@@ -464,9 +452,7 @@ describe("RunComparison ranking direction control", () => {
     vi.spyOn(trainingApi, "metricDirections").mockResolvedValue({
       higher_is_better: { map99: true },
     });
-    vi.spyOn(trainingApi, "compareBest").mockRejectedValue(
-      new StructuredRefusalError({ error: "boom" }, 422, ""),
-    );
+    vi.spyOn(trainingApi, "compareBest").mockRejectedValue(await rankRefusal({ message: "boom" }));
 
     render(<RunComparison marked={MARKED} />);
     fireEvent.change(await screen.findByRole("combobox", { name: "Rank by metric" }), {

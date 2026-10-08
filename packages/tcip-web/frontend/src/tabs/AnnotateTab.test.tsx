@@ -184,7 +184,10 @@ beforeEach(() => {
     .spyOn(api.annotate, "load")
     .mockImplementation((imagePath) => Promise.resolve(labelsFor(imagePath)));
   saveSpy = vi.spyOn(api.annotate, "save").mockResolvedValue(saved("1"));
-  vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue({});
+  vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue({
+    status: "ok",
+    session: { started: "2026-10-07T14:00:00+00:00", ended: false },
+  });
   // Default: a standard 3-band RGB image; the band picker's own describe block overrides this
   // per-case to exercise the >3-band path.
   vi.spyOn(api.images, "bands").mockResolvedValue({
@@ -235,6 +238,26 @@ describe("AnnotateTab session contributions", () => {
     expect(useStore.getState().heldContributions).toEqual([]);
   });
 
+  it("records the session an accepted visit landed in, by the project and the answered stamp", async () => {
+    useStore.setState({ user: "jordan" });
+    await leaveFirstImage();
+
+    expect(useStore.getState().recordedSession).toEqual({
+      project_id: useStore.getState().openProject!.id,
+      started: "2026-10-07T14:00:00+00:00",
+      user: "jordan",
+    });
+  });
+
+  it("records no session for a visit the backend recorded nothing of", async () => {
+    useStore.setState({ user: "jordan" });
+    vi.mocked(sessionsApi.imageEvent).mockResolvedValueOnce({ status: "noop", session: null });
+    await leaveFirstImage();
+
+    expect(useStore.getState().heldContributions).toEqual([]);
+    expect(useStore.getState().recordedSession).toBeNull();
+  });
+
   it("holds a visit the backend did not accept", async () => {
     useStore.setState({ user: "jordan" });
     vi.mocked(sessionsApi.imageEvent).mockRejectedValueOnce(new Error("backend down"));
@@ -243,23 +266,31 @@ describe("AnnotateTab session contributions", () => {
     expect(useStore.getState().heldContributions).toHaveLength(1);
   });
 
-  it("never posts a held visit into a project other than its own", async () => {
+  it("posts a held visit to its own project once another is open", async () => {
     useStore.setState({ user: "jordan" });
     vi.mocked(sessionsApi.imageEvent).mockRejectedValueOnce(new Error("backend down"));
     await leaveFirstImage();
+    const own = useStore.getState().openProject!.id;
 
     act(() => useStore.setState({ openProject: { id: "other0000000", path: "C:/other" } }));
     await flush();
 
-    expect(sessionsApi.imageEvent).toHaveBeenCalledTimes(1);
-    expect(useStore.getState().heldContributions).toHaveLength(1);
+    expect(sessionsApi.imageEvent).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(sessionsApi.imageEvent).mock.calls[1][0].project_id).toBe(own);
   });
 
-  it("retires a visit the backend committed without its line, and never sends it again", async () => {
+  it("retires a visit the backend committed without its line, adopting the session it answered", async () => {
     useStore.setState({ user: "jordan" });
     vi.mocked(sessionsApi.imageEvent).mockRejectedValueOnce(
       new StructuredRefusalError(
-        { error: "audit_entry_not_written", message: "unrecorded", committed: { status: "ok" } },
+        {
+          error: "audit_entry_not_written",
+          message: "unrecorded",
+          committed: {
+            status: "ok",
+            session: { started: "2026-10-07T15:00:00+00:00", ended: false },
+          },
+        },
         409,
         "unrecorded",
       ),
@@ -270,6 +301,11 @@ describe("AnnotateTab session contributions", () => {
 
     expect(sessionsApi.imageEvent).toHaveBeenCalledTimes(1);
     expect(useStore.getState().heldContributions).toEqual([]);
+    expect(useStore.getState().recordedSession).toEqual({
+      project_id: useStore.getState().openProject!.id,
+      started: "2026-10-07T15:00:00+00:00",
+      user: "jordan",
+    });
   });
 });
 

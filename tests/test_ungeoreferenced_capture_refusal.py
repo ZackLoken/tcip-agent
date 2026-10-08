@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -25,6 +26,9 @@ from tests.test_plant_mapping_binding import (
     PLANTS, _dataset, _deliver, _events, _init, _publish, _write_scene,
 )
 from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
+
+if TYPE_CHECKING:
+    from tcip_web.state import OpenProject
 
 DATE = "2026-02-11"
 PLANT_IDS = [p["plot"] for p in PLANTS]
@@ -90,14 +94,14 @@ def test_build_route_refuses_when_every_capture_carries_no_position(
 ) -> None:
     from tcip_web.state import store
 
-    _init(tmp_path)
+    project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root = dataset_root / "images"
     _write_ungeoreferenced_image(images_root / DATE / "P1_a.jpg")
     plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
     write_plant_csv(plant_csv, PLANTS)
     registry = register_plant_registry_for(tmp_path, [plant_csv])
-    asyncio.run(store.open_project(tmp_path.resolve()))
+    asyncio.run(store.open_project(project))
 
     resp = client.post("/api/results/plant_mapping/build", json={
         "name": "valley", "images_root": str(images_root), "plant_registry": registry,
@@ -116,12 +120,12 @@ def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_a
     mapping."""
     from tcip_web.state import store
 
-    _init(tmp_path)
+    project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root, dates=[DATE])
     (images_root / "2099-01-01").mkdir()
     registry = register_plant_registry_for(tmp_path, [plant_csv])
-    asyncio.run(store.open_project(tmp_path.resolve()))
+    asyncio.run(store.open_project(project))
 
     resp = client.post("/api/results/plant_mapping/build", json={
         "name": "valley", "images_root": str(images_root), "plant_registry": registry,
@@ -178,33 +182,36 @@ def _unmapped_row(stem: str, distance_m: float | None) -> Assignment:
         accession_name=None, source="unmapped", distance_m=distance_m)
 
 
-def _delivery_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, dict[str, str]]:
-    """A registered dataset with one real prediction bucket, and the trait this module's
-    deliveries run under; returns ``(dataset_root, {date: bucket})``.
+def _delivery_scene(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[OpenProject, Path, dict[str, str]]:
+    """``tmp_path`` made a project holding a registered dataset with one real prediction bucket,
+    and the trait this module's deliveries run under; returns ``(project, dataset_root, {date:
+    bucket})``.
     """
-    _init(tmp_path)
+    project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     _, _, preds_by_date = _write_scene(dataset_root, dates=[DATE])
     _seed_currant_bloom_trait(tmp_path)
-    return dataset_root, preds_by_date
+    return project, dataset_root, preds_by_date
 
 
 def _assert_all_doors_refuse(
-    client, tmp_path: Path, dataset_root: Path, preds_by_date: dict[str, str], mapping_name: str,
-    expected_fragment: str,
+    client, project: OpenProject, dataset_root: Path, preds_by_date: dict[str, str],
+    mapping_name: str, expected_fragment: str,
 ) -> None:
     from tcip_web.state import store
 
-    out_csv = tmp_path / "out.csv"
+    out_csv = project.root / "out.csv"
     res = deliver_phenology_milestones(
-        tmp_path, trait="currant_bloom", mapping_name=mapping_name, plants=["P1"],
+        project.root, trait="currant_bloom", mapping_name=mapping_name, plants=["P1"],
         dataset_root=str(dataset_root), buckets=list(preds_by_date.values()),
         output_csv_path=str(out_csv))
     assert "error" in res
     assert expected_fragment in res["error"]
     assert not out_csv.exists()
 
-    asyncio.run(store.open_project(tmp_path.resolve()))
+    asyncio.run(store.open_project(project))
     payload = {
         "mapping_name": mapping_name, "dataset_root": str(dataset_root),
         "buckets": list(preds_by_date.values()), "trait": "currant_bloom",
@@ -224,33 +231,33 @@ def _assert_all_doors_refuse(
 def test_delivery_refuses_naming_a_date_recorded_with_no_capture_at_all(
     tmp_path: Path, client, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
+    project, dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
     plant_csv = tmp_path / "plants.csv"
     write_plant_csv(plant_csv, PLANTS)
     plant_csvs = [{"path": str(plant_csv), "sha256": "0" * 64, "n_plants": len(PLANTS)}]
     _persist_synthetic_mapping(
         tmp_path, dataset_root, "valley", plant_csvs=plant_csvs, assignments={DATE: []})
 
-    _assert_all_doors_refuse(client, tmp_path, dataset_root, preds_by_date, "valley",
+    _assert_all_doors_refuse(client, project, dataset_root, preds_by_date, "valley",
                              "recorded no capture at all")
 
 
 def test_delivery_refuses_naming_the_plant_csvs_when_none_parsed_a_plant(
     tmp_path: Path, client, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
+    project, dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
     _persist_synthetic_mapping(
         tmp_path, dataset_root, "valley", plant_csvs=[],
         assignments={DATE: [_unmapped_row("P1_20260211", None)]})
 
     _assert_all_doors_refuse(
-        client, tmp_path, dataset_root, preds_by_date, "valley", "parsed no plant")
+        client, project, dataset_root, preds_by_date, "valley", "parsed no plant")
 
 
 def test_delivery_refuses_with_the_ungeoreferenced_sentence_when_every_distance_is_none(
     tmp_path: Path, client, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
+    project, dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
     plant_csv = tmp_path / "plants.csv"
     write_plant_csv(plant_csv, PLANTS)
     plant_csvs = [{"path": str(plant_csv), "sha256": "0" * 64, "n_plants": len(PLANTS)}]
@@ -258,14 +265,14 @@ def test_delivery_refuses_with_the_ungeoreferenced_sentence_when_every_distance_
         tmp_path, dataset_root, "valley", plant_csvs=plant_csvs,
         assignments={DATE: [_unmapped_row("P1_20260211", None)]})
 
-    _assert_all_doors_refuse(client, tmp_path, dataset_root, preds_by_date, "valley",
+    _assert_all_doors_refuse(client, project, dataset_root, preds_by_date, "valley",
                              "plant-tag mechanism")
 
 
 def test_delivery_refuses_naming_the_match_distance_when_every_position_is_too_far(
     tmp_path: Path, client, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
+    project, dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
     plant_csv = tmp_path / "plants.csv"
     write_plant_csv(plant_csv, PLANTS)
     plant_csvs = [{"path": str(plant_csv), "sha256": "0" * 64, "n_plants": len(PLANTS)}]
@@ -273,7 +280,7 @@ def test_delivery_refuses_naming_the_match_distance_when_every_position_is_too_f
         tmp_path, dataset_root, "valley", plant_csvs=plant_csvs,
         assignments={DATE: [_unmapped_row("P1_20260211", 5_000.0)]})
 
-    _assert_all_doors_refuse(client, tmp_path, dataset_root, preds_by_date, "valley",
+    _assert_all_doors_refuse(client, project, dataset_root, preds_by_date, "valley",
                              "beyond the accepted match")
 
 
@@ -337,7 +344,7 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
     discloses one unattributed image over the delivered date."""
     from tcip_web.state import store
 
-    _init(tmp_path)
+    project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root, dates=[DATE])
     _write_ungeoreferenced_image(images_root / DATE / "P3_extra.jpg")
@@ -350,7 +357,7 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
     assert build_res["summary"]["per_date"][DATE]["n_unattributed"] == 1
     assert build_res["summary"]["totals"]["n_unattributed"] == 1
 
-    asyncio.run(store.open_project(tmp_path.resolve()))
+    asyncio.run(store.open_project(project))
     load_resp = client.post("/api/results/plant_mapping/load", json={"name": "valley"})
     assert load_resp.status_code == 200, load_resp.text
     loaded_summary = load_resp.json()["summary"]

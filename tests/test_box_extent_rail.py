@@ -120,26 +120,26 @@ def test_the_writer_admits_a_real_polygon(tmp_path):
 # ── the MCP save door ────────────────────────────────────────────────────────
 
 
-def test_save_annotations_refuses_an_inverted_box(tmp_path):
+def test_save_annotations_refuses_an_inverted_box(tmp_path, bound):
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     img = tmp_path / "images" / UNDATED_BUCKET / "img_001.jpg"
     write_image(img, (200, 150))
 
-    result = save_annotations(tmp_path, tmp_path.parent, str(img),
+    result = save_annotations(bound, str(img),
                               annotations=[{"subject": "leaf", "bbox": [10, 10, 5, 5]}])
 
     assert "error" in result
     assert ts.read(image_label_key(img), default=None) is None
 
 
-def test_save_annotations_admits_an_ordered_box(tmp_path):
+def test_save_annotations_admits_an_ordered_box(tmp_path, bound):
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     img = tmp_path / "images" / UNDATED_BUCKET / "img_001.jpg"
     write_image(img, (200, 150))
 
-    result = save_annotations(tmp_path, tmp_path.parent, str(img),
+    result = save_annotations(bound, str(img),
                               annotations=[{"subject": "leaf", "bbox": [5, 5, 10, 20]}])
 
     assert "error" not in result
@@ -149,8 +149,8 @@ def test_save_annotations_admits_an_ordered_box(tmp_path):
 # ── the annotate route's save door ──────────────────────────────────────────
 
 
-def test_annotate_save_refuses_an_inverted_box(client: TestClient, tmp_path: Path) -> None:
-    img = tmp_path / "images" / UNDATED_BUCKET / "img_001.jpg"
+def test_annotate_save_refuses_an_inverted_box(client: TestClient, opened_project: Path) -> None:
+    img = opened_project / "images" / UNDATED_BUCKET / "img_001.jpg"
     write_image(img, (200, 150))
 
     resp = client.post(
@@ -163,8 +163,8 @@ def test_annotate_save_refuses_an_inverted_box(client: TestClient, tmp_path: Pat
     assert ts.read(image_label_key(img), default=None) is None
 
 
-def test_annotate_save_admits_an_ordered_box(client: TestClient, tmp_path: Path) -> None:
-    img = tmp_path / "images" / UNDATED_BUCKET / "img_001.jpg"
+def test_annotate_save_admits_an_ordered_box(client: TestClient, opened_project: Path) -> None:
+    img = opened_project / "images" / UNDATED_BUCKET / "img_001.jpg"
     write_image(img, (200, 150))
 
     resp = client.post(
@@ -187,7 +187,7 @@ def _seed_review_dataset(tmp_path: Path, *, pred_box=(10, 10, 20, 20), gt_box=No
     from tests._producer_fixtures import label_image, registry_over
     from tests._web_fixtures import open_new_project
 
-    dataset_root = open_new_project(tmp_path)
+    dataset_root = open_new_project(tmp_path).root
     img = dataset_root / "images" / UNDATED_BUCKET / "img_001.jpg"
     write_image(img, (200, 150))
     registry_over(dataset_root, SubjectRegistry(subjects=(Subject(name="leaf"),)))

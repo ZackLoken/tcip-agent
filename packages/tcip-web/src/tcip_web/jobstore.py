@@ -11,7 +11,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from tcip_mcp.experiments import FINAL_STATES, TERMINAL_STATES
+from tcip_mcp.experiments import FINAL_STATES
 
 MAX_JOBS = 100
 
@@ -20,15 +20,19 @@ JOB_STATES = ("pending", "running", *FINAL_STATES)
 (``experiments.FINAL_STATES``)."""
 
 
+def live(job: Any) -> bool:
+    """Whether ``job`` has not yet ended: its status is ``pending`` or ``running``."""
+    return job.status not in FINAL_STATES
+
+
 def evict_terminal(jobs: dict, max_jobs: int = MAX_JOBS) -> None:
-    """Drop the oldest terminal jobs of any project, in place, until ``jobs`` holds at most
-    ``max_jobs`` or no terminal job is left. Relies on dict insertion order (oldest first);
-    running and pending jobs are never evicted.
+    """Drop the oldest jobs of any project that have ended (:func:`live`), in place, until
+    ``jobs`` holds at most ``max_jobs`` or every job left is live. Relies on dict insertion order
+    (oldest first).
     """
     overflow = len(jobs) - max_jobs
     if overflow > 0:
-        evictable = [jid for jid, job in jobs.items()
-                     if getattr(job, "status", "") in TERMINAL_STATES]
+        evictable = [jid for jid, job in jobs.items() if not live(job)]
         for jid in evictable[:overflow]:
             del jobs[jid]
 
@@ -73,9 +77,7 @@ class JobRegistry:
         with self.lock:
             return self.jobs.get(job_id)
 
-    def list(self, project: str | None = None) -> list[Any]:
-        """Every live job, or only ``project``'s own share when given."""
+    def list(self, project: str) -> list[Any]:
+        """Every job this process holds that runs for ``project``."""
         with self.lock:
-            if project is None:
-                return list(self.jobs.values())
-            return [j for j in self.jobs.values() if getattr(j, "project", None) == project]
+            return [j for j in self.jobs.values() if j.project == project]

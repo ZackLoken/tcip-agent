@@ -15,11 +15,17 @@ from tcip_store.errors import BadKeyError
 from tcip_mcp.experiments import RunRow, TrainingDetail, TrainingListing, training_listing
 from tcip_mcp.identity import actor
 from tcip_web.routes._body_common import EmptyBodyPayload, PersonPayload
-from tcip_web.state import store
+from tcip_web.state import NoProjectOpenError, store
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/training", tags=["training"])
+
+
+def _refused(result: dict) -> HTTPException:
+    """A tool's error dict ``result`` as a 422 whose detail carries its fields, the ``error``
+    reason named ``message``."""
+    return HTTPException(422, {("message" if k == "error" else k): v for k, v in result.items()})
 
 
 @router.get("/runs/{experiment_id}/splits")
@@ -30,7 +36,7 @@ def list_split_choices_route(experiment_id: str) -> dict:
     check them."""
     from tcip_mcp.tools.training_tools import list_split_choices
 
-    result = list_split_choices(store.open_root(), experiment_id)
+    result = list_split_choices(store.held().root, experiment_id)
     if result.get("error"):
         raise HTTPException(404, result["error"])
     return result
@@ -63,7 +69,7 @@ def relaunch_route(payload: RelaunchPayload) -> dict:
     from tcip_web.routes.audit_gap import audit_gap_409
 
     person = actor(payload.user)
-    project = store.open_root()
+    project = store.held().root
     source = named_directory(payload.relaunched_from, project=project)
     if source is None:
         raise HTTPException(404, f"no run or sweep named {payload.relaunched_from}")
@@ -80,14 +86,14 @@ def relaunch_route(payload: RelaunchPayload) -> dict:
     except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(exc, exc.arguments) from exc
     if result.get("error"):
-        raise HTTPException(422, detail=result)
+        raise _refused(result)
     return result
 
 
 @router.get("/runs")
 def list_runs_route() -> TrainingListing:
     """Every run and sweep of the open project (``experiments.training_listing``)."""
-    return training_listing(store.open_root())
+    return training_listing(store.held().root)
 
 
 @router.get("/runs/{experiment_id}")
@@ -96,7 +102,7 @@ def get_run(experiment_id: str) -> TrainingDetail:
     an id naming none."""
     from tcip_mcp.tools.training_tools import training_detail
 
-    detail = training_detail(store.open_root(), experiment_id)
+    detail = training_detail(store.held().root, experiment_id)
     if detail is None:
         raise HTTPException(404, f"Run not found: {experiment_id}")
     return detail
@@ -114,14 +120,14 @@ def launch_run_tensorboard(experiment_id: str, payload: EmptyBodyPayload) -> dic
     from tcip_mcp.experiments import board_of, named_directory, observe
     from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
 
-    directory = named_directory(experiment_id, project=store.open_root())
+    directory = named_directory(experiment_id, project=store.held().root)
     if directory is None:
         raise HTTPException(404, f"Run not found: {experiment_id}")
     board = board_of(directory)
     error = observe(directory).status_error
     if not any(board.rglob("events.out.tfevents*")):
         raise HTTPException(
-            404, {"error": error or f"run produced no logs: {experiment_id}", "no_logs": True})
+            404, {"message": error or f"run produced no logs: {experiment_id}", "no_logs": True})
     if error:
         raise HTTPException(404, error)
     return launch_tensorboard(str(board))
@@ -133,7 +139,7 @@ def cancel_run_route(experiment_id: str, payload: PersonPayload) -> dict:
     (``cancel_training``), by the person ``user`` names; its refusal answers 404."""
     from tcip_mcp.tools.training_tools import cancel_training
 
-    result = cancel_training(store.open_root(), experiment_id, actor=actor(payload.user))
+    result = cancel_training(store.held().root, experiment_id, actor=actor(payload.user))
     if result.get("error"):
         raise HTTPException(404, result["error"])
     return result
@@ -147,7 +153,7 @@ class ExperimentComparePayload(BaseModel):
 def compare_runs_route(payload: ExperimentComparePayload) -> dict:
     from tcip_mcp.experiments import compare_experiments
 
-    return compare_experiments(payload.experiment_ids, project=store.open_root())
+    return compare_experiments(payload.experiment_ids, project=store.held().root)
 
 
 class CompareBestPayload(BaseModel):
@@ -163,7 +169,7 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
     (:func:`~tcip_mcp.tools.model_tools.ranked_registered_model`).
 
     A registry index that will not decode answers 409 naming why; the ranking's own error dicts
-    map to 422 with the whole dict as ``detail``. The answer is projected to name, experiment id,
+    map to 422 (``_refused``). The answer is projected to name, experiment id,
     stamped metrics, source, the metric ranked by, the direction used and its source, and the
     exclusions.
     """
@@ -173,13 +179,13 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
 
     try:
         result = ranked_registered_model(
-            store.open_root(), payload.metric, higher_is_better=payload.higher_is_better,
+            store.held().root, payload.metric, higher_is_better=payload.higher_is_better,
             include_unverified=payload.include_unverified, experiment_ids=payload.experiment_ids,
             tag=None)
     except DecodeError as exc:
         raise HTTPException(409, f"registry unreadable: {exc}") from exc
     if "error" in result:
-        raise HTTPException(422, detail=result)
+        raise _refused(result)
 
     return {
         "name": result["name"],
@@ -283,9 +289,10 @@ async def _stream_metrics(
 async def training_stream_ws(websocket: WebSocket, experiment_id: str) -> None:
     """Tail ``experiment_id``'s metrics log, a run of the open project, and push new rows to the
     browser; closes with 1008 while no project is open."""
-    project = store.project_root
-    if project is None:
-        await websocket.close(code=1008, reason="no project is open")
+    try:
+        project = store.held().root
+    except NoProjectOpenError as exc:
+        await websocket.close(code=1008, reason=str(exc))
         return
     await websocket.accept()
     try:

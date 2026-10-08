@@ -14,11 +14,9 @@ from tcip_mcp.web_client import VALID_PANELS
 
 
 @pytest.fixture
-def project_id(opened_project) -> str:
+def project_id(opened) -> str:
     """The open project's id, the one an event must name to be delivered."""
-    from tcip_mcp.project_record import read_record
-
-    return read_record(opened_project)["id"]
+    return opened.id
 
 
 # ── HTTP event bridge ────────────────────────────────────────────────────
@@ -116,6 +114,27 @@ class TestPostPanelEventRoute:
         open_new_project(tmp_path.parent / "other")
         assert store.retained_events("results") == []
 
+    def test_an_event_naming_another_project_is_refused_and_retained_nowhere(
+        self, opened_client: TestClient, project_id: str, tmp_path: Path,
+    ) -> None:
+        """The receiver admits the project an event names before retaining it: an event for
+        another project answers 409 naming the open one and is retained nowhere, and the same
+        event naming the open project is retained."""
+        from tcip_web.state import store
+        from tests._web_fixtures import named_project
+
+        other = named_project(tmp_path.parent / "other", "Other")
+        refused = opened_client.post("/api/events/results",
+                    json={"project_id": other.id, "event_type": "count_ready", "data": {}})
+        assert refused.status_code == 409
+        assert refused.json()["detail"]["open_project_id"] == project_id
+        assert store.retained_events("results") == []
+
+        admitted = opened_client.post("/api/events/results",
+                    json={"project_id": project_id, "event_type": "count_ready", "data": {}})
+        assert admitted.status_code == 200, admitted.text
+        assert len(store.retained_events("results")) == 1
+
     def test_annotate_focus_persists_advisory_state(
         self, opened_client: TestClient, project_id: str
     ) -> None:
@@ -153,31 +172,49 @@ class TestPostPanelEventRoute:
         assert "lasso" in resp.json()["detail"]
         assert opened_client.get("/api/state").json()["mode"] == before
 
+    def test_the_focus_tool_answers_the_event_channels_refusal_whole(
+        self, opened, data_dir: Path, monkeypatch,
+    ) -> None:
+        """A focus the backend refuses carries the channel's reason and the project it has open,
+        beside the frame it would have landed on."""
+        from tcip_mcp import web_client
+        from tcip_mcp.tools.gui_tools import focus_human_attention
+        from tests._web_fixtures import bound_to
+
+        refusal = {"error": "the backend does not have this project open",
+                   "open_project_id": "ffffffffffff", "delivered": False, "url": "u"}
+        monkeypatch.setattr(web_client, "post_panel_event", lambda *a: dict(refusal))
+
+        res = focus_human_attention(bound_to(opened), str(data_dir), "bud", "2-11-26",
+                                    mode="point", image_index=2)
+
+        assert {k: res[k] for k in refusal} == refusal
+        assert res["image_index"] == 2
+
     def test_the_focus_tools_own_annotate_event_reaches_the_advisory_state(
-        self, opened_client: TestClient, opened_project: Path, project_id: str, data_dir: Path,
-        monkeypatch,
+        self, opened_client: TestClient, opened, data_dir: Path, monkeypatch,
     ) -> None:
         """The event ``focus_human_attention`` posts, delivered to the backend, sets the
         advisory state it names."""
         from tcip_mcp import web_client
         from tcip_mcp.tools.gui_tools import focus_human_attention
+        from tests._web_fixtures import bound_to
 
         posted: dict = {}
 
-        def _capture(project: Path, workspace: Path, panel: str, event_type: str,
-                     data: dict) -> dict:
-            posted.update(panel=panel, event_type=event_type, data=data)
+        def _capture(target, panel: str, event_type: str, data: dict) -> dict:
+            posted.update(project_id=target.id, panel=panel, event_type=event_type, data=data)
             return {"delivered": True, "status": "ok"}
 
         monkeypatch.setattr(web_client, "post_panel_event", _capture)
-        res = focus_human_attention(opened_project, opened_project.parent,
-                                    str(data_dir), "bud", "2-11-26", mode="point", image_index=2)
+        res = focus_human_attention(bound_to(opened), str(data_dir), "bud", "2-11-26",
+                                    mode="point", image_index=2)
         assert "error" not in res, res
         assert posted["event_type"] == "annotate_focus"
 
         resp = opened_client.post(f"/api/events/{posted['panel']}",
-                           json={"project_id": project_id, "event_type": posted["event_type"],
-                                 "data": posted["data"]})
+                           json={"project_id": posted["project_id"],
+                                 "event_type": posted["event_type"], "data": posted["data"]})
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
         state = opened_client.get("/api/state").json()
@@ -189,24 +226,23 @@ class TestPostPanelEventRoute:
 class TestPushPanelDataTool:
     """``push_panel_event`` posts over HTTP and answers without raising."""
 
-    def test_no_subscribers_when_backend_down(self, project: Path, monkeypatch) -> None:
+    def test_no_subscribers_when_backend_down(self, bound, monkeypatch) -> None:
         """Backend not running → graceful 'no_subscribers' status."""
         from tcip_mcp.tools.gui_tools import push_panel_event
 
         monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
-        result = push_panel_event(project, project.parent, "training", "metrics_update",
-                                  {"epoch": 1})
+        result = push_panel_event(bound, "training", "metrics_update", {"epoch": 1})
         # Either the connection was refused (no_subscribers) or a URL error;
         # both are acceptable. Tool must not raise.
         assert "status" in result or "error" in result
         # Panel name preserved in result
         assert result.get("panel") == "training"
 
-    def test_invalid_panel_rejected(self, tmp_path: Path) -> None:
+    def test_invalid_panel_rejected(self, bound) -> None:
         """Unknown panel names return an error before any HTTP call."""
         from tcip_mcp.tools.gui_tools import push_panel_event
 
-        result = push_panel_event(tmp_path, tmp_path.parent, "bogus", "test", {})
+        result = push_panel_event(bound, "bogus", "test", {})
         assert "error" in result
 
 
@@ -416,31 +452,32 @@ class TestHpoToolOutputSchema:
 # ── Port fallback chain + pytest hermeticity ──────────
 
 
-def test_post_panel_event_suppressed_under_pytest(tmp_path, monkeypatch):
+def test_post_panel_event_suppressed_under_pytest(bound, monkeypatch):
     """Test runs must never steer a live GUI (PYTEST_CURRENT_TEST is set by pytest itself)."""
     from tcip_mcp.web_client import post_panel_event
 
     monkeypatch.delenv("TCIP_ALLOW_PANEL_EVENTS", raising=False)
-    res = post_panel_event(tmp_path, tmp_path.parent, "annotate", "annotate_focus",
-                           {"stem": "IMG_X"})
+    res = post_panel_event(bound, "annotate", "annotate_focus", {"stem": "IMG_X"})
     assert res == {"status": "suppressed_under_pytest", "delivered": False, "url": ""}
 
 
-def test_post_panel_event_opt_in_bypasses_suppression(project, monkeypatch):
+def test_post_panel_event_opt_in_bypasses_suppression(bound, monkeypatch):
     from tcip_mcp.web_client import post_panel_event
 
     import tcip_store as ts
     from tcip_mcp.web_client import backend_port_key
 
     monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
-    ts.replace(backend_port_key(project.parent), "1")  # nothing listens on port 1
-    res = post_panel_event(project, project.parent, "annotate", "annotate_focus", {})
+    ts.replace(backend_port_key(bound.workspace), "1")  # nothing listens on port 1
+    res = post_panel_event(bound, "annotate", "annotate_focus", {})
     assert res["delivered"] is False
     assert res["status"] != "suppressed_under_pytest"   # it really attempted the send
 
 
-def test_post_panel_event_returns_the_backends_response_body(opened_project, monkeypatch):
-    """``post_panel_event`` against a served backend answers with the backend's response body."""
+def test_post_panel_event_returns_the_backends_response_body(opened, monkeypatch):
+    """``post_panel_event`` against a served backend answers with the backend's response body,
+    and with the backend's own none-open refusal once the project is closed."""
+    import asyncio
     import socket
     import threading
     import time
@@ -450,12 +487,15 @@ def test_post_panel_event_returns_the_backends_response_body(opened_project, mon
     import tcip_store as ts
     from tcip_mcp.web_client import backend_port_key, post_panel_event
     from tcip_web.app import app
+    from tcip_web.state import store
+    from tests._web_fixtures import bound_to
 
+    bound = bound_to(opened)
     monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    ts.replace(backend_port_key(opened_project.parent), str(port))
+    ts.replace(backend_port_key(bound.workspace), str(port))
 
     server = uvicorn.Server(
         uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error", lifespan="off")
@@ -468,10 +508,14 @@ def test_post_panel_event_returns_the_backends_response_body(opened_project, mon
             time.sleep(0.02)
         assert server.started, "the test backend never came up"
 
-        res = post_panel_event(opened_project, opened_project.parent, "app", "status_note",
-                               {"text": "a note"})
+        res = post_panel_event(bound, "app", "status_note", {"text": "a note"})
         assert res["delivered"] is True
         assert res["response"] == {"status": "ok", "panel": "app", "event_type": "status_note"}
+
+        asyncio.run(store.close_project(opened.id))
+        refused = post_panel_event(bound, "app", "status_note", {})
+        assert refused["delivered"] is False
+        assert "no project is open" in refused["error"]
     finally:
         server.should_exit = True
         thread.join(timeout=10)

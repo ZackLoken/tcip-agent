@@ -607,6 +607,7 @@ describe("ProjectPicker", () => {
       void startOpen(valley, "2026-03-01", "subject_a", "");
       void startOpen(valley, "2026-03-01", "subject_a", "");
 
+      await waitFor(() => expect(api.projects.open).toHaveBeenCalled());
       expect(api.projects.open).toHaveBeenCalledTimes(1);
     });
 

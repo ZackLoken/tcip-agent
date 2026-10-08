@@ -18,6 +18,7 @@ from tcip_mcp.buckets import Bucket, read_bucket, source_root
 from tcip_mcp.dataset_layout import label_key_of
 from tcip_mcp.pipelines.image_utils import image_path_dimensions
 from tcip_mcp.server import tool
+from tcip_mcp.workspace import BoundProject
 
 if TYPE_CHECKING:
     from tcip_mcp.traits import TraitEntry
@@ -61,8 +62,7 @@ def read_annotations(image_path: str, bucket: str | None = None) -> dict:
 
 @tool()
 def save_annotations(
-    project: Path,
-    workspace: Path,
+    bound: BoundProject,
     image_path: str,
     annotations: list[dict],
 ) -> dict:
@@ -101,12 +101,12 @@ def save_annotations(
     w, h = image_path_dimensions(image_path)
     try:
         key = label_key_of(image_path)
-        save_label_document(project, key, annotations, width=w, height=h,
+        save_label_document(bound.root, key, annotations, width=w, height=h,
                             author="save_annotations", actor=None)  # the answer is for the editor
     except ValueError as exc:
         return {"error": str(exc)}
 
-    post_panel_event(project, workspace, "annotate", PANEL_EVENT_LABELS_WRITTEN,
+    post_panel_event(bound, "annotate", PANEL_EVENT_LABELS_WRITTEN,
                      {"image_path": image_path})
     capture, stem = key.parts
     return {"capture": capture, "written": [stem], "count": len(annotations)}

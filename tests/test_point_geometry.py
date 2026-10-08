@@ -299,11 +299,11 @@ def test_subject_task_names_a_point_only_frame(tmp_path: Path) -> None:
 # ── the agent's own write door ────────────────────────────────────────────────
 
 
-def test_save_annotations_tool_writes_an_incoming_point(tmp_path: Path) -> None:
+def test_save_annotations_tool_writes_an_incoming_point(tmp_path: Path, bound) -> None:
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     img = blank_image(tmp_path)
-    res = save_annotations(tmp_path, tmp_path.parent, str(img),
+    res = save_annotations(bound, str(img),
                            annotations=[{"subject": "bud", "point": [12.0, 34.0]}])
     assert "error" not in res
     (stored,) = saved_annotations(img)
@@ -311,13 +311,13 @@ def test_save_annotations_tool_writes_an_incoming_point(tmp_path: Path) -> None:
     assert (stored.geometry.x, stored.geometry.y) == (12.0, 34.0)
 
 
-def test_save_annotations_tool_keeps_points_and_point_distinct(tmp_path: Path) -> None:
+def test_save_annotations_tool_keeps_points_and_point_distinct(tmp_path: Path, bound) -> None:
     """``points`` is a polygon contour and ``point`` is one location: one spelling must not serve
     both, or a point and a one-vertex polygon become indistinguishable on disk."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     img = blank_image(tmp_path)
-    save_annotations(tmp_path, tmp_path.parent, str(img), annotations=[
+    save_annotations(bound, str(img), annotations=[
         {"subject": "bud", "points": [[50, 50], [70, 50], [70, 70]]},
         {"subject": "bud", "point": [12.0, 34.0]},
     ])
@@ -328,8 +328,8 @@ def test_save_annotations_tool_keeps_points_and_point_distinct(tmp_path: Path) -
 # ── web routes (the human's canvas) ──────────────────────────────────────────
 
 
-def test_annotate_route_round_trips_a_point(client: TestClient, tmp_path: Path) -> None:
-    img = blank_image(tmp_path)
+def test_annotate_route_round_trips_a_point(client: TestClient, opened_project: Path) -> None:
+    img = blank_image(opened_project)
 
     resp = client.post("/api/annotate/labels", json={
         "image_path": str(img),
@@ -345,9 +345,9 @@ def test_annotate_route_round_trips_a_point(client: TestClient, tmp_path: Path) 
 
 
 def test_annotate_route_round_trips_mixed_point_and_box_geometry(
-    client: TestClient, tmp_path: Path
+    client: TestClient, opened_project: Path
 ) -> None:
-    img = blank_image(tmp_path)
+    img = blank_image(opened_project)
     resp = client.post("/api/annotate/labels", json={
         "image_path": str(img),
         "annotations": [{"subject": "bud", "point": [12.0, 34.0]},
@@ -366,7 +366,7 @@ def test_the_proposals_route_pairs_no_proposal_with_a_point(
     from tests._chain_fixtures import published
     from tests._web_fixtures import open_new_project
 
-    tmp_path = open_new_project(tmp_path / "proj")
+    tmp_path = open_new_project(tmp_path / "proj").root
     img = blank_image(tmp_path)
     label_image(img, [Annotation(subject="bud", geometry=Point(20.0, 20.0))], 100, 80)
     bucket = published(tmp_path, "baseline/2026-01-01", [

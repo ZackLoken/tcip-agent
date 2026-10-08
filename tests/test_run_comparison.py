@@ -204,7 +204,7 @@ def test_compare_best_route_422s_with_no_registered_checkpoint(opened_client: Te
         "experiment_ids": ["exp-a"], "metric": "val_map50",
     })
     assert resp.status_code == 422
-    assert resp.json()["detail"]["error"] == "No models registered"
+    assert resp.json()["detail"]["message"] == "No models registered"
     assert tcip_store.read(registry_index_key(tmp_path), default=None) is None
 
 
@@ -235,7 +235,7 @@ def test_compare_best_route_422s_on_the_tools_own_error(opened_client: TestClien
     })
     assert resp.status_code == 422
     detail = resp.json()["detail"]
-    assert "no declared ranking direction" in detail["error"]
+    assert "no declared ranking direction" in detail["message"]
     assert detail["needs_direction"] is True
 
 
@@ -247,7 +247,7 @@ def test_compare_best_route_422s_when_the_marked_set_registered_nothing(opened_c
         "experiment_ids": ["exp-marked"], "metric": "val_map50",
     })
     assert resp.status_code == 422
-    assert resp.json()["detail"]["error"] == (
+    assert resp.json()["detail"]["message"] == (
         "none of the marked experiments registered a checkpoint")
 
 
@@ -263,7 +263,7 @@ def test_an_empty_metric_lists_through_the_listing_route_and_refuses_through_the
     resp = opened_client.post("/api/training/compare/best", json={
         "experiment_ids": ["exp-a"], "metric": ""})
     assert resp.status_code == 422
-    assert "names the metric it ranks by" in resp.json()["detail"]["error"]
+    assert "names the metric it ranks by" in resp.json()["detail"]["message"]
 
 
 def test_compare_best_route_projects_the_answer(opened_client: TestClient, tmp_path):

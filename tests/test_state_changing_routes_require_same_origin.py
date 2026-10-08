@@ -64,16 +64,17 @@ def test_a_foreign_origin_post_to_a_path_no_route_serves_still_refuses(client: T
 
 
 def test_a_permitted_origin_still_reaches_the_handler(client: TestClient) -> None:
-    """The rail must admit valid work: a request from the backend's own origin, from the Vite
-    dev server's origin, and with no Origin header reach the handler's own outcome: both
-    origins are loopback hosts, and a missing Origin is a non-browser client."""
+    """A request from the backend's own origin, from the Vite dev server's origin, and with no
+    Origin header reaches the handler's own outcome: both origins are loopback hosts, and a
+    missing Origin is a non-browser client."""
     body = ActiveTabPayload(active_tab="annotate").model_dump()
     for origin in ("http://127.0.0.1", "http://127.0.0.1:5173", None):
         headers = {"origin": origin} if origin else {}
         resp = client.post("/api/state/tab", json=body, headers=headers)
         assert resp.status_code == 200, (origin, resp.status_code, resp.text)
 
-        resp = client.post("/api/sessions/end", json={}, headers=headers)
+        resp = client.post("/api/sessions/end", headers=headers,
+                           json={"project_id": "000000000000", "started": "never"})
         assert resp.status_code == 409, (origin, resp.status_code, resp.text)
         assert "origin not allowed" not in resp.text
 

@@ -108,7 +108,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
   },
 
   applyRestoredDataset: (sel, project) => {
-    if (project.id !== get().openProject?.id) get().closeSessionInterval();
+    if (project.id !== get().openProject?.id) get().leaveProjectSession(project.id);
     set((s) => {
       const key = datasetKey(project, sel);
       const restored = key ? loadDatasetUi(key) : null;
@@ -200,7 +200,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
     });
     if (accepted) get().recordAcceptedProject(project?.id ?? null);
     if (adoptedOther) {
-      get().closeSessionInterval();
+      get().leaveProjectSession(project?.id ?? null);
       get().supersedeOpen(project?.id ?? null);
     }
   },
