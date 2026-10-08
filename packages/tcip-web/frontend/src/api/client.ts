@@ -102,15 +102,11 @@ interface LabelsBody {
 
 /** The document split into the canvas' buckets (shared with save via labelSerde). */
 function loadedLabels(raw: LabelsBody): LoadedLabels {
-  const { boxes, polygons, points, imageAnnotations } = annotationsToCanvas(raw.annotations ?? []);
   return {
     image_path: raw.image_path,
     img_width: raw.img_width,
     img_height: raw.img_height,
-    boxes,
-    polygons,
-    points,
-    imageAnnotations,
+    ...annotationsToCanvas(raw.annotations ?? []),
     completion: raw.completion,
     flags: raw.flags,
     base_mtime: raw.base_mtime,

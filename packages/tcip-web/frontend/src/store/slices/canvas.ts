@@ -2,15 +2,16 @@ import type { StateCreator } from "zustand";
 
 import { currentImage, pathInDir } from "@/lib/paths";
 import type { AppState } from "@/store/appState";
-import type {
-  Annotation,
-  Box,
-  Flag,
-  ImageLabels,
-  PointShape,
-  PolygonShape,
-  Mode,
-  SubjectState,
+import {
+  contentOf,
+  NO_CONTENT,
+  TOOL_ARRAY,
+  type CanvasContent,
+  type Flag,
+  type ImageLabels,
+  type PolygonShape,
+  type Mode,
+  type SubjectState,
 } from "@/store/types";
 
 /** The one focused item: an annotation of a tool's geometry by its canvas index, or a proposal by
@@ -20,26 +21,25 @@ export interface Focus {
   index: number;
 }
 
-/** The focus after the `kind` shape at `deleted` left its array: dropped when it was that shape,
- *  shifted down when it sat after it. */
-function focusAfterDelete(focus: Focus | null, kind: Mode, deleted: number): Focus | null {
-  if (focus?.kind !== kind) return focus;
+/** A content array's name, and the item it holds. */
+type ContentArray = keyof CanvasContent;
+type ItemOf<A extends ContentArray> = CanvasContent[A][number];
+
+/** The focus after the item at `deleted` left `array`: dropped when it was that item, shifted
+ *  down when it sat after it. */
+function focusAfterDelete(focus: Focus | null, array: ContentArray, deleted: number): Focus | null {
+  if (!focus || focus.kind === "proposal" || TOOL_ARRAY[focus.kind] !== array) return focus;
   if (focus.index === deleted) return null;
-  return focus.index > deleted ? { kind, index: focus.index - 1 } : focus;
+  return focus.index > deleted ? { ...focus, index: focus.index - 1 } : focus;
 }
 
 /**
  * Local canvas state: per-image draft annotations shown on the canvas.
  * These are not synced to the backend until the user hits save.
  */
-export interface CanvasState {
+export interface CanvasState extends CanvasContent {
   imgWidth: number;
   imgHeight: number;
-  boxes: Box[];
-  polygons: PolygonShape[];
-  points: PointShape[];
-  // Geometry-less (image/plant-level) ratings; kept so they round-trip losslessly on save.
-  imageAnnotations: Annotation[];
   currentPolygon: [number, number][];
   focus: Focus | null;
   undoStack: CanvasSnapshot[];
@@ -78,13 +78,8 @@ export function holdsCanvas(canvas: Pick<CanvasState, "saving">, hold: SaveHold)
 }
 
 /** The saved-content fields only: selection, undo stacks and draft state don't make a save. */
-function contentSignature(c: {
-  boxes: Box[];
-  polygons: PolygonShape[];
-  points: PointShape[];
-  imageAnnotations: Annotation[];
-}): string {
-  return JSON.stringify([c.boxes, c.polygons, c.points, c.imageAnnotations]);
+function contentSignature(c: CanvasContent): string {
+  return JSON.stringify(contentOf(c));
 }
 
 /** Recompute dirty from content vs the saved baseline. */
@@ -92,11 +87,7 @@ function withContentDirty(c: CanvasState): CanvasState {
   return { ...c, dirty: contentSignature(c) !== c.savedSignature };
 }
 
-interface CanvasSnapshot {
-  boxes: Box[];
-  polygons: PolygonShape[];
-  points: PointShape[];
-  imageAnnotations: Annotation[];
+interface CanvasSnapshot extends CanvasContent {
   focus: Focus | null;
   /** The focus context the snapshot was taken in (`focusContext`). */
   context: string;
@@ -110,16 +101,13 @@ export const focusContext = (s: Pick<AppState, "gui">): string =>
 const EMPTY_CANVAS: CanvasState = {
   imgWidth: 0,
   imgHeight: 0,
-  boxes: [],
-  polygons: [],
-  points: [],
-  imageAnnotations: [],
+  ...NO_CONTENT,
   currentPolygon: [],
   focus: null,
   undoStack: [],
   redoStack: [],
   dirty: false,
-  savedSignature: contentSignature({ boxes: [], polygons: [], points: [], imageAnnotations: [] }),
+  savedSignature: contentSignature(NO_CONTENT),
   loadedImagePath: null,
   completion: {},
   flags: [],
@@ -136,10 +124,7 @@ export const selectCanvasMatchesDataset = (s: Pick<AppState, "gui" | "canvas">):
 function snapshot(s: AppState): CanvasSnapshot {
   const c = s.canvas;
   return {
-    boxes: c.boxes.slice(),
-    polygons: c.polygons.slice(),
-    points: c.points.slice(),
-    imageAnnotations: c.imageAnnotations.slice(),
+    ...contentOf(c),
     // A proposal's index names a bucket's document, which history does not own.
     focus: c.focus?.kind === "proposal" ? null : c.focus,
     context: focusContext(s),
@@ -160,10 +145,7 @@ function restoreLast(s: AppState): Partial<AppState> | AppState {
       ...s.canvas,
       undoStack: s.canvas.undoStack.slice(0, -1),
       redoStack: [...s.canvas.redoStack, snapshot(s)],
-      boxes: last.boxes,
-      polygons: last.polygons,
-      points: last.points,
-      imageAnnotations: last.imageAnnotations,
+      ...contentOf(last),
       focus: restoredFocus(s, last),
     }),
   };
@@ -182,14 +164,15 @@ export interface CanvasSlice {
    *  shorten instead; for a gesture that took its own snapshot and is reverted whole. */
   rollbackLast: () => void;
   redo: () => void;
-  addBox: (box: Box) => void;
-  updateBox: (idx: number, box: Box) => void;
-  /** No-undo box mutation for a live resize/move drag; undo is captured once at drag
-   *  start (see updateBox for the undo-pushing variant). */
-  dragBox: (idx: number, box: Box) => void;
-  deleteBox: (idx: number) => void;
-  addPolygon: (polygon: PolygonShape) => void;
-  updatePolygon: (idx: number, polygon: PolygonShape) => void;
+  /** Append `item` to `array`, one undo snapshot first. */
+  add: <A extends ContentArray>(array: A, item: ItemOf<A>) => void;
+  /** Replace the item at `idx` of `array`, one undo snapshot first. */
+  update: <A extends ContentArray>(array: A, idx: number, item: ItemOf<A>) => void;
+  /** Replace the item at `idx` of `array` for a live drag: no undo snapshot (the drag takes one at
+   *  its start), dirty flagged without a compare, and a missing index ignored. */
+  drag: <A extends ContentArray>(array: A, idx: number, item: ItemOf<A>) => void;
+  /** Remove the item at `idx` of `array`, one undo snapshot first; the focus follows it. */
+  remove: (array: ContentArray, idx: number) => void;
   /** Move a single polygon vertex (of one ring) without pushing an undo snapshot. */
   dragVertex: (
     polygonIdx: number,
@@ -197,26 +180,14 @@ export interface CanvasSlice {
     vertexIdx: number,
     point: [number, number],
   ) => void;
-  deletePolygon: (idx: number) => void;
   /** Replaces the polygon at `idx` with the two pieces a cut produced: one undo snapshot, the
    *  first piece focused, the parent's subject, attributes and crowd flag on each, and the hover
    *  index cleared since every later polygon's index has just shifted by one. */
   splitPolygon: (idx: number, rings: [[number, number][], [number, number][]]) => void;
   /** Focus one item, or nothing; the previous focus is replaced. */
   setFocus: (focus: Focus | null) => void;
-  /** Point helpers. A point is one coordinate, so it has no vertex/ring variants: it is placed,
-   *  dragged (no-undo, like dragBox/dragVertex: one snapshot per drag, taken at drag start),
-   *  attribute-edited via updatePoint, and deleted whole. */
-  addPoint: (point: PointShape) => void;
-  updatePoint: (idx: number, point: PointShape) => void;
-  dragPoint: (idx: number, x: number, y: number) => void;
-  deletePoint: (idx: number) => void;
   setCurrentPolygon: (pts: [number, number][]) => void;
   commitCurrentPolygon: () => boolean;
-  /** Geometry-less (image/plant-level) rating helpers. */
-  addImageAnnotation: (subject: string) => void;
-  updateImageAnnotation: (idx: number, ann: Annotation) => void;
-  deleteImageAnnotation: (idx: number) => void;
   /** Hold the canvas against edits for a save of `image`, and return the hold; a load unlocks it. */
   holdForSave: (image: string) => SaveHold;
   /** Release the canvas if `hold` still holds it; a hold dropped by a load or taken by another
@@ -232,61 +203,65 @@ export interface CanvasSlice {
 /** Every action that changes the canvas' content or its history; inert while a save is in flight
  *  so the answer is adopted over the very content it was built from. Focus, loads, clearing and
  *  the dirty recount are not edits. */
-const CONTENT_EDITS = [
+export const CONTENT_EDITS = [
   "pushUndo",
   "undo",
   "rollbackLast",
   "redo",
-  "addBox",
-  "updateBox",
-  "dragBox",
-  "deleteBox",
-  "addPolygon",
-  "updatePolygon",
+  "add",
+  "update",
+  "drag",
+  "remove",
   "dragVertex",
-  "deletePolygon",
   "splitPolygon",
-  "addPoint",
-  "updatePoint",
-  "dragPoint",
-  "deletePoint",
   "setCurrentPolygon",
   "commitCurrentPolygon",
-  "addImageAnnotation",
-  "updateImageAnnotation",
-  "deleteImageAnnotation",
 ] as const;
 
+type Item = ItemOf<ContentArray>;
+
+const replaceAt = (items: readonly Item[], idx: number, item: Item): Item[] =>
+  items.map((had, i) => (i === idx ? item : had));
+
 export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (set, get) => {
+  /** One undo snapshot, then `array` replaced by what `change` makes of it, and the focus by what
+   *  `refocus` makes of it. */
+  const edit = (
+    array: ContentArray,
+    change: (items: readonly Item[]) => Item[],
+    refocus = (focus: Focus | null) => focus,
+  ) => {
+    get().pushUndo();
+    set((s) => ({
+      canvas: withContentDirty({
+        ...s.canvas,
+        [array]: change(s.canvas[array]),
+        focus: refocus(s.canvas.focus),
+      }),
+    }));
+  };
+
   const slice: CanvasSlice = {
     canvas: EMPTY_CANVAS,
 
     loadLabelsIntoCanvas: (labels) =>
-      set((s) => {
-        const content = {
-          boxes: labels.boxes.slice(),
-          polygons: labels.polygons.slice(),
-          points: labels.points.slice(),
-          imageAnnotations: labels.imageAnnotations.slice(),
-        };
-        return {
-          canvas: {
-            imgWidth: labels.img_width,
-            imgHeight: labels.img_height,
-            ...content,
-            currentPolygon: [],
-            focus: s.canvas.focus,
-            undoStack: [],
-            redoStack: [],
-            dirty: false,
-            savedSignature: contentSignature(content),
-            loadedImagePath: labels.image_path || null,
-            completion: labels.completion,
-            flags: labels.flags,
-            saving: null,
-          },
-        };
-      }),
+      set((s) => ({
+        canvas: {
+          imgWidth: labels.img_width,
+          imgHeight: labels.img_height,
+          ...contentOf(labels),
+          currentPolygon: [],
+          focus: s.canvas.focus,
+          undoStack: [],
+          redoStack: [],
+          dirty: false,
+          savedSignature: contentSignature(labels),
+          loadedImagePath: labels.image_path || null,
+          completion: labels.completion,
+          flags: labels.flags,
+          saving: null,
+        },
+      })),
 
     clearCanvas: () => set({ canvas: EMPTY_CANVAS }),
 
@@ -322,60 +297,32 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
             ...s.canvas,
             undoStack: [...s.canvas.undoStack, snapshot(s)],
             redoStack: s.canvas.redoStack.slice(0, -1),
-            boxes: last.boxes,
-            polygons: last.polygons,
-            points: last.points,
-            imageAnnotations: last.imageAnnotations,
+            ...contentOf(last),
             focus: restoredFocus(s, last),
           }),
         };
       }),
 
-    addBox: (box) => {
-      get().pushUndo();
-      set((s) => ({
-        canvas: withContentDirty({ ...s.canvas, boxes: [...s.canvas.boxes, box] }),
-      }));
-    },
+    add: (array, item) => edit(array, (items) => [...items, item]),
 
-    updateBox: (idx, box) => {
-      get().pushUndo();
-      set((s) => {
-        const next = s.canvas.boxes.slice();
-        next[idx] = box;
-        return { canvas: withContentDirty({ ...s.canvas, boxes: next }) };
-      });
-    },
+    update: (array, idx, item) => edit(array, (items) => replaceAt(items, idx, item)),
 
-    deleteBox: (idx) => {
-      get().pushUndo();
-      set((s) => ({
-        canvas: withContentDirty({
-          ...s.canvas,
-          boxes: s.canvas.boxes.filter((_, i) => i !== idx),
-          focus: focusAfterDelete(s.canvas.focus, "box", idx),
-        }),
-      }));
-    },
-
-    addPolygon: (polygon) => {
-      get().pushUndo();
-      set((s) => ({
-        canvas: withContentDirty({ ...s.canvas, polygons: [...s.canvas.polygons, polygon] }),
-      }));
-    },
-
-    updatePolygon: (idx, polygon) => {
-      get().pushUndo();
-      set((s) => {
-        const next = s.canvas.polygons.slice();
-        next[idx] = polygon;
-        return { canvas: withContentDirty({ ...s.canvas, polygons: next }) };
-      });
-    },
+    remove: (array, idx) =>
+      edit(
+        array,
+        (items) => items.filter((_, i) => i !== idx),
+        (focus) => focusAfterDelete(focus, array, idx),
+      ),
 
     // The drag actions fire per mousemove: a per-tick content compare would re-serialize the
     // whole canvas at pointer rate, so they flag dirty and the release calls recomputeDirty.
+    drag: (array, idx, item) =>
+      set((s) =>
+        s.canvas[array][idx]
+          ? { canvas: { ...s.canvas, [array]: replaceAt(s.canvas[array], idx, item), dirty: true } }
+          : s,
+      ),
+
     dragVertex: (polygonIdx, ringIdx, vertexIdx, point) =>
       set((s) => {
         const poly = s.canvas.polygons[polygonIdx];
@@ -388,28 +335,6 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
         next[polygonIdx] = { ...poly, rings };
         return { canvas: { ...s.canvas, polygons: next, dirty: true } };
       }),
-
-    dragBox: (idx, box) =>
-      set((s) => {
-        if (!s.canvas.boxes[idx]) return s;
-        const next = s.canvas.boxes.slice();
-        next[idx] = box;
-        return { canvas: { ...s.canvas, boxes: next, dirty: true } };
-      }),
-
-    deletePolygon: (idx) => {
-      get().pushUndo();
-      set((s) => {
-        const polys = s.canvas.polygons.filter((_, i) => i !== idx);
-        return {
-          canvas: withContentDirty({
-            ...s.canvas,
-            polygons: polys,
-            focus: focusAfterDelete(s.canvas.focus, "polygon", idx),
-          }),
-        };
-      });
-    },
 
     splitPolygon: (idx, rings) => {
       get().pushUndo();
@@ -437,106 +362,21 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
 
     setFocus: (focus) => set((s) => ({ canvas: { ...s.canvas, focus } })),
 
-    addPoint: (point) => {
-      get().pushUndo();
-      set((s) => ({
-        canvas: withContentDirty({ ...s.canvas, points: [...s.canvas.points, point] }),
-      }));
-    },
-
-    updatePoint: (idx, point) => {
-      get().pushUndo();
-      set((s) => {
-        const next = s.canvas.points.slice();
-        next[idx] = point;
-        return { canvas: withContentDirty({ ...s.canvas, points: next }) };
-      });
-    },
-
-    dragPoint: (idx, x, y) =>
-      set((s) => {
-        const p = s.canvas.points[idx];
-        if (!p) return s;
-        const next = s.canvas.points.slice();
-        next[idx] = { ...p, x, y };
-        return { canvas: { ...s.canvas, points: next, dirty: true } };
-      }),
-
-    deletePoint: (idx) => {
-      get().pushUndo();
-      set((s) => {
-        const points = s.canvas.points.filter((_, i) => i !== idx);
-        return {
-          canvas: withContentDirty({
-            ...s.canvas,
-            points,
-            focus: focusAfterDelete(s.canvas.focus, "point", idx),
-          }),
-        };
-      });
-    },
-
     setCurrentPolygon: (pts) => set((s) => ({ canvas: { ...s.canvas, currentPolygon: pts } })),
 
     commitCurrentPolygon: () => {
-      const cur = get().canvas.currentPolygon;
-      if (cur.length < 3) {
-        set((s) => ({ canvas: { ...s.canvas, currentPolygon: [] } }));
-        return false;
-      }
+      const { currentPolygon: cur, imgWidth, imgHeight } = get().canvas;
       const subject = get().gui.active_subject;
-      if (!subject) {
-        // No subject selected: refuse to author a subjectless shape (the backend save rejects it).
-        set((s) => ({ canvas: { ...s.canvas, currentPolygon: [] } }));
-        return false;
-      }
-      const { imgWidth, imgHeight } = get().canvas;
+      set((s) => ({ canvas: { ...s.canvas, currentPolygon: [] } }));
+      // No subject selected: refuse to author a subjectless shape (the backend save rejects it).
+      if (cur.length < 3 || !subject) return false;
       const clamped: [number, number][] = cur.map(([x, y]) => [
         imgWidth ? Math.max(0, Math.min(imgWidth, x)) : x,
         imgHeight ? Math.max(0, Math.min(imgHeight, y)) : y,
       ]);
-      get().pushUndo();
-      set((s) => ({
-        canvas: withContentDirty({
-          ...s.canvas,
-          currentPolygon: [],
-          // A hand-drawn shape is one contour: one ring (the canvas never draws a second by hand).
-          polygons: [...s.canvas.polygons, { rings: [clamped], subject, attributes: {} }],
-        }),
-      }));
+      // A hand-drawn shape is one contour: one ring (the canvas never draws a second by hand).
+      get().add("polygons", { rings: [clamped], subject, attributes: {} });
       return true;
-    },
-
-    addImageAnnotation: (subject) => {
-      get().pushUndo();
-      set((s) => ({
-        canvas: withContentDirty({
-          ...s.canvas,
-          imageAnnotations: [
-            ...s.canvas.imageAnnotations,
-            { subject, attributes: {}, iscrowd: false },
-          ],
-        }),
-      }));
-    },
-
-    updateImageAnnotation: (idx, ann) => {
-      get().pushUndo();
-      set((s) => {
-        const next = s.canvas.imageAnnotations.slice();
-        next[idx] = ann;
-        return { canvas: withContentDirty({ ...s.canvas, imageAnnotations: next }) };
-      });
-    },
-
-    deleteImageAnnotation: (idx) => {
-      get().pushUndo();
-      set((s) => ({
-        canvas: withContentDirty({
-          ...s.canvas,
-          imageAnnotations: s.canvas.imageAnnotations.filter((_, i) => i !== idx),
-        }),
-      }));
     },
 
     holdForSave: (image) => {
@@ -558,9 +398,9 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
     recomputeDirty: () => set((s) => ({ canvas: withContentDirty(s.canvas) })),
   };
   for (const name of CONTENT_EDITS) {
-    const edit = slice[name] as (...args: never[]) => unknown;
+    const action = slice[name] as (...args: never[]) => unknown;
     slice[name] = ((...args: never[]) =>
-      get().canvas.saving ? undefined : edit(...args)) as never;
+      get().canvas.saving ? undefined : action(...args)) as never;
   }
   return slice;
 };

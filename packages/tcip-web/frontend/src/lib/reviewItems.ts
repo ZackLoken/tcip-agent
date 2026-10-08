@@ -9,14 +9,14 @@
 import { pointInRings, ringsBbox, type Bbox } from "@/lib/polygonGeometry";
 import { personBacked, type MatchType } from "@/lib/symbology";
 import type { Focus } from "@/store/slices/canvas";
-import type {
-  Box,
-  Flag,
-  FlagRequest,
-  Mode,
-  PointShape,
-  PolygonShape,
-  Proposal,
+import {
+  NO_CONTENT,
+  TOOL_ARRAY,
+  type Flag,
+  type FlagRequest,
+  type Mode,
+  type Proposal,
+  type ToolContent,
 } from "@/store/types";
 
 export interface ReviewItem {
@@ -44,12 +44,6 @@ export interface ReviewItem {
   flags: Flag[];
 }
 
-export interface CanvasArrays {
-  boxes: Box[];
-  polygons: PolygonShape[];
-  points: PointShape[];
-}
-
 /** An annotation's match under the shown bucket, by the proposals pairing with its document
  *  index. A shape drawn since the load has no index, so nothing pairs with it. */
 export function annotationMatch(index: number | undefined, proposals: Proposal[]): MatchType {
@@ -67,25 +61,37 @@ export function proposalMatch(p: Proposal): MatchType {
 }
 
 /** Each canvas array's match types, aligned with it; every entry null while not reviewing. */
-export interface MatchTypes {
-  boxes: (MatchType | null)[];
-  polygons: (MatchType | null)[];
-  points: (MatchType | null)[];
-}
+export type MatchTypes = Record<keyof ToolContent, (MatchType | null)[]>;
 
-export function matchTypes(
-  canvas: CanvasArrays,
+/** A producer of the canvas's match types that recomputes an array's only when that array, the
+ *  proposals or the review state changed since its last call, and otherwise hands back the array
+ *  it computed then. */
+export function matchTypes(): (
+  canvas: ToolContent,
   proposals: Proposal[],
   reviewing: boolean,
-): MatchTypes {
-  const of = (shape: { index?: number }) =>
-    reviewing ? annotationMatch(shape.index, proposals) : null;
-  return {
-    boxes: canvas.boxes.map(of),
-    polygons: canvas.polygons.map(of),
-    points: canvas.points.map(of),
+) => MatchTypes {
+  let last:
+    | { canvas: ToolContent; proposals: Proposal[]; reviewing: boolean; matches: MatchTypes }
+    | undefined;
+  return (canvas, proposals, reviewing) => {
+    const kept = last?.proposals === proposals && last.reviewing === reviewing ? last : undefined;
+    const of = (array: keyof ToolContent) =>
+      kept?.canvas[array] === canvas[array]
+        ? kept.matches[array]
+        : canvas[array].map((shape) =>
+            reviewing ? annotationMatch(shape.index, proposals) : null,
+          );
+    const matches = Object.fromEntries(
+      Object.values(TOOL_ARRAY).map((array) => [array, of(array)]),
+    ) as MatchTypes;
+    last = { canvas, proposals, reviewing, matches };
+    return matches;
   };
 }
+
+/** No array's match types: every array empty, so a lookup misses and the consumer reads none. */
+export const NO_MATCHES = matchTypes()(NO_CONTENT, [], false);
 
 function center(bbox: Bbox): [number, number] {
   return [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
@@ -102,7 +108,7 @@ function proposalGeometry(p: Proposal): { shape: Mode; bbox: Bbox } | null {
  *  the undecided proposal pairing with it, then, while reviewing, the undecided proposals that
  *  pair with nothing. `flags` are the image's; each item holds its open ones. */
 export function reviewItems(args: {
-  canvas: CanvasArrays;
+  canvas: ToolContent;
   proposals: Proposal[];
   /** The canvas's match types (`matchTypes`), resolved once for every consumer. */
   matches: MatchTypes;
@@ -112,11 +118,7 @@ export function reviewItems(args: {
   bucket: string | null;
 }): ReviewItem[] {
   const { canvas, proposals, reviewing, mode } = args;
-  const matchOf = {
-    box: args.matches.boxes,
-    polygon: args.matches.polygons,
-    point: args.matches.points,
-  }[mode];
+  const matchOf = args.matches[TOOL_ARRAY[mode]];
   const open = args.flags.filter((f) => f.resolved_by === null);
   const annotation = (
     ref: number,

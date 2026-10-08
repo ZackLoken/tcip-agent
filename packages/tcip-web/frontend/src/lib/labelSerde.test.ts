@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { annotationsToCanvas, serializeCanvas, type CanvasLabels } from "@/lib/labelSerde";
-import type { Annotation, AnnotationPayload } from "@/store/types";
+import { annotationsToCanvas, serializeCanvas } from "@/lib/labelSerde";
+import type { Annotation, AnnotationPayload, CanvasContent } from "@/store/types";
 
-const canvasToAnnotations = (labels: CanvasLabels) => serializeCanvas(labels).annotations;
+const canvasToAnnotations = (labels: CanvasContent) => serializeCanvas(labels).annotations;
 
 describe("serializeCanvas positions", () => {
   it("name where each canvas shape lands in the saved list", () => {

@@ -165,7 +165,7 @@ function setupDataset() {
 function addBox() {
   useStore
     .getState()
-    .addBox({ x1: 10, y1: 10, x2: 50, y2: 50, subject: "subject_a", attributes: {} });
+    .add("boxes", { x1: 10, y1: 10, x2: 50, y2: 50, subject: "subject_a", attributes: {} });
 }
 
 const flush = () => act(async () => {});
@@ -558,7 +558,7 @@ describe("AnnotateTab subject rendering", () => {
     act(() =>
       useStore
         .getState()
-        .addBox({ x1: 10, y1: 10, x2: 50, y2: 50, subject: "tip", attributes: {} }),
+        .add("boxes", { x1: 10, y1: 10, x2: 50, y2: 50, subject: "tip", attributes: {} }),
     );
     // Color is GUI-local (name-derived); the label is the subject name, no integer id, and
     // appears on selection (labels are hover/selection-only; the legend is the standing key).
@@ -1521,6 +1521,48 @@ describe("click-selection parity across the Snap/Stream toggles", () => {
   });
 });
 
+describe("a polygon gesture is one undo step", () => {
+  const healthy = { ...POLY_A, attributes: { health: "good" } };
+  const undo = () => act(() => useStore.getState().undo());
+  const polygons = () => useStore.getState().canvas.polygons;
+
+  it("one undo restores a right-click-deleted vertex, the next reaches the edit before it", async () => {
+    const stage = await renderPolygonCanvas([POLY_A]);
+    act(() => useStore.getState().update("polygons", 0, healthy));
+    act(() => useStore.getState().setFocus({ kind: "polygon", index: 0 }));
+    fireEvent.contextMenu(stage, { clientX: 10, clientY: 10 });
+    expect(polygons()[0].rings[0]).toHaveLength(3);
+
+    undo();
+    expect(polygons()[0]).toEqual(healthy);
+    undo();
+    expect(polygons()[0]).toEqual(POLY_A);
+  });
+
+  it("one undo removes a streamed polygon, the next reaches the edit before it", async () => {
+    const stage = await renderPolygonCanvas([POLY_A]);
+    act(() => {
+      useStore.getState().update("polygons", 0, healthy);
+      useStore.getState().setStream(true);
+    });
+    fireEvent.click(stage, { clientX: 600, clientY: 600 });
+    act(() => {
+      useStore.getState().setCurrentPolygon([
+        [600, 600],
+        [700, 600],
+        [700, 700],
+      ]);
+      useStore.getState().commitCurrentPolygon();
+    });
+    expect(polygons()).toHaveLength(2);
+
+    undo();
+    expect(polygons()).toEqual([healthy]);
+    undo();
+    expect(polygons()).toEqual([POLY_A]);
+  });
+});
+
 describe("Cut tool arming", () => {
   it("x arms and disarms the cut flag in polygon mode", async () => {
     await renderPolygonCanvas();
@@ -1657,7 +1699,7 @@ describe("Cut gesture", () => {
     fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
     act(() => {
       const poly = useStore.getState().canvas.polygons[0];
-      useStore.getState().updatePolygon(0, { ...poly, attributes: { health: "good" } });
+      useStore.getState().update("polygons", 0, { ...poly, attributes: { health: "good" } });
     });
     fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 });
     expect(useStore.getState().canvas.polygons).toHaveLength(3); // the cut still landed
@@ -1996,8 +2038,8 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
 
     act(() => {
       const s = useStore.getState();
-      s.addImageAnnotation("subject_a");
-      s.updateImageAnnotation(0, {
+      s.add("imageAnnotations", { subject: "subject_a", attributes: {}, iscrowd: false });
+      s.update("imageAnnotations", 0, {
         subject: "subject_a",
         attributes: { canopy_cover: "sparse" },
         iscrowd: false,
@@ -2034,7 +2076,7 @@ describe("AnnotateTab labels show on the focused item only", () => {
     act(() =>
       useStore
         .getState()
-        .addBox({ x1: 10, y1: 10, x2: 50, y2: 50, subject: "tip", attributes: {} }),
+        .add("boxes", { x1: 10, y1: 10, x2: 50, y2: 50, subject: "tip", attributes: {} }),
     );
 
     expect(labelsNamed("tip")).toHaveLength(0);
@@ -2684,7 +2726,7 @@ describe("AnnotateTab review symbology", () => {
       );
       await mountTab();
       await flush();
-      act(() => useStore.getState().updateBox(2, { ...toolBoxTwo()[2], x2: 541 }));
+      act(() => useStore.getState().update("boxes", 2, { ...toolBoxTwo()[2], x2: 541 }));
       expect(useStore.getState().canvas.undoStack).toHaveLength(1);
     };
     const personBoxes = () => boxes().map((b) => ({ ...b, authorship: "person" }));
@@ -2712,7 +2754,7 @@ describe("AnnotateTab review symbology", () => {
 
     it("serves the bucket's proposals again, dropping the pairings the old document gave", async () => {
       const proposalsSpy = await mountReviewing();
-      act(() => useStore.getState().updateBox(0, { ...boxes()[0], x2: 51 }));
+      act(() => useStore.getState().update("boxes", 0, { ...boxes()[0], x2: 51 }));
       saveSpy.mockResolvedValueOnce(saved("7", { boxes: boxes(), polygons: [polygon()] }));
       pressSave();
       await flush();
@@ -2729,7 +2771,7 @@ describe("AnnotateTab review symbology", () => {
       await flush();
       expect(useStore.getState().canvas.saving).not.toBeNull();
 
-      act(() => useStore.getState().addBox({ ...boxes()[0], index: undefined }));
+      act(() => useStore.getState().add("boxes", { ...boxes()[0], index: undefined }));
       await pressBoxTwo();
       const rectsBefore = screen.getAllByTestId("k-rect").length;
       fireEvent.mouseDown(screen.getByTestId("canvas-stage"), {
@@ -2773,7 +2815,7 @@ describe("AnnotateTab review symbology", () => {
     it("proposals are dropped when the answer is adopted, before they are served again", async () => {
       const proposalsSpy = await mountReviewing();
       expect(strokes()).toContain(MATCH_COLORS.proposal_only);
-      act(() => useStore.getState().updateBox(0, { ...boxes()[0], x2: 51 }));
+      act(() => useStore.getState().update("boxes", 0, { ...boxes()[0], x2: 51 }));
       proposalsSpy.mockImplementation(() => new Promise(() => {}));
       saveSpy.mockResolvedValueOnce(saved("7", { boxes: boxes(), polygons: [polygon()] }));
       pressSave();
@@ -2932,7 +2974,7 @@ describe("AnnotateTab flags", () => {
     saveSpy.mockResolvedValue(
       saved("2", { flags: [flag({ resolved_by: "user:second", removed: true })] }),
     );
-    act(() => useStore.getState().deleteBox(0));
+    act(() => useStore.getState().remove("boxes", 0));
     pressSave();
     await flush();
     expect(screen.getByRole("button", { name: /^.?Flag$/ })).toBeInTheDocument();

@@ -25,6 +25,7 @@ import {
   focusesAnnotation,
   focusesProposal,
   type MatchTypes,
+  NO_MATCHES,
   proposalMatch,
   type ReviewItem,
 } from "@/lib/reviewItems";
@@ -39,7 +40,7 @@ import {
   outlineColor,
   proposalLabel,
 } from "@/lib/symbology";
-import type { Box, Flag, PointShape, PolygonShape, Proposal, TabName } from "@/store/types";
+import type { DrawingBox, Flag, Proposal, TabName, ToolContent } from "@/store/types";
 
 export interface CanvasViewport {
   x: number;
@@ -129,8 +130,6 @@ export function shapeVisible(args: {
   return args.mode === ownMode && (args.focused || args.subject === args.activeSubject);
 }
 
-const NO_MATCHES = { boxes: [], polygons: [], points: [] };
-
 /** The line style and focus halo a mirrored shape carries, from the symbology's own rules. */
 function strokeOf(authorship: string | null | undefined, focused: boolean) {
   const dash = dashUnitsFor(lineStyleOf(authorship));
@@ -152,28 +151,27 @@ function strokeOf(authorship: string | null | undefined, focused: boolean) {
  *  never a draft, each committed shape draws by `shapeVisible`, and polygon mode adds the drawing
  *  in progress and the pending cut. Colors, line styles, the halo and labels come from the symbology module: the focused item
  *  and the unpaired proposals are the labeled ones. */
-export function buildAnnotateShapes(args: {
-  boxes: Box[];
-  polygons: PolygonShape[];
-  points?: PointShape[];
-  /** The strokes of the polygon in progress and the pending cut (`draftStrokes`). */
-  draft?: DraftStroke[];
-  /** The box being dragged out, in its own subject's color as on the canvas. */
-  drawingBox?: { x1: number; y1: number; x2: number; y2: number; subject: string } | null;
-  /** The one focused item (an annotation or a shown proposal), or none. */
-  focused?: ReviewItem | null;
-  /** Each array's match types (`matchTypes`); every entry null while not reviewing. */
-  matches?: MatchTypes;
-  /** Each open flag that has a place on the image, with that place (`flagPlaces`). */
-  flagMarks?: { at: [number, number]; flag: Flag }[];
-  mode: string;
-  activeSubject: string;
-  visible: boolean;
-  /** A subject's color, for the box being dragged out. */
-  colorFor: (subject: string) => string;
-  /** The proposals the canvas shows. */
-  proposals?: Proposal[];
-}): CanvasShape[] {
+export function buildAnnotateShapes(
+  args: ToolContent & {
+    /** The strokes of the polygon in progress and the pending cut (`draftStrokes`). */
+    draft?: DraftStroke[];
+    /** The box being dragged out, in its own subject's color as on the canvas. */
+    drawingBox?: DrawingBox | null;
+    /** The one focused item (an annotation or a shown proposal), or none. */
+    focused?: ReviewItem | null;
+    /** Each array's match types (`matchTypes`); every entry null while not reviewing. */
+    matches?: MatchTypes;
+    /** Each open flag that has a place on the image, with that place (`flagPlaces`). */
+    flagMarks?: { at: [number, number]; flag: Flag }[];
+    mode: string;
+    activeSubject: string;
+    visible: boolean;
+    /** A subject's color, for the box being dragged out. */
+    colorFor: (subject: string) => string;
+    /** The proposals the canvas shows. */
+    proposals?: Proposal[];
+  },
+): CanvasShape[] {
   const d = args.drawingBox ? boxDraft(args.drawingBox, args.colorFor) : null;
   const drafts: CanvasShape[] = [
     ...(args.draft ?? []).map(({ points, color, vertices, label }) => ({
@@ -252,7 +250,7 @@ export function buildAnnotateShapes(args: {
   });
   // A point is one mark at one coordinate: one shape entry carrying a single position, never a
   // path and never a derived box (a fabricated box would read downstream as a real detection).
-  (args.points ?? []).forEach((p, i) => {
+  args.points.forEach((p, i) => {
     const pointFocused = isFocused("point", i);
     if (!visible("point", p.subject, pointFocused)) return;
     shapes.push({

@@ -5,9 +5,9 @@ import { HaloLabel } from "@/components/HaloLabel";
 import { dashFor, FOCUS_HALO, type LineStyle } from "@/lib/symbology";
 import type { Box } from "@/store/types";
 
-/** Per-shape memo: dragVertex/dragBox replace the whole polygons/boxes array on each RAF tick
- *  (slice() keeps the unchanged elements' identity), so an unrelated shape's props are
- *  referentially equal and it skips re-render, containing a one-shape drag to that shape. */
+/** Per-shape memo: a drag replaces the whole boxes array on each RAF tick while the unchanged
+ *  boxes keep their identity, so a committed box the drag leaves alone skips re-render. A
+ *  polygon's derived box is built anew each render and never skips. */
 export const BoxOverlay = memo(function BoxOverlay({
   box,
   stroke,

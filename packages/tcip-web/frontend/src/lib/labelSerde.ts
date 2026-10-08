@@ -5,14 +5,13 @@
  * a point stays a point, and a geometry-less rating is never silently dropped on the next save.
  */
 
-import type {
-  Annotation,
-  AnnotationPayload,
-  Box,
-  CarriedFields,
-  Mode,
-  PointShape,
-  PolygonShape,
+import {
+  NO_CONTENT,
+  type Annotation,
+  type AnnotationPayload,
+  type CanvasContent,
+  type CarriedFields,
+  type Mode,
 } from "@/store/types";
 
 /** The facts a shape carries through the canvas unchanged ({@link CarriedFields}). */
@@ -25,26 +24,16 @@ function loaded(a: Annotation): { authorship: string | null; index?: number } {
   return { authorship: a.authorship ?? null, index: a.index };
 }
 
-export interface CanvasLabels {
-  boxes: Box[];
-  polygons: PolygonShape[];
-  points: PointShape[];
-  imageAnnotations: Annotation[];
-}
-
 /** Split a unified annotation list into the canvas' four buckets, keyed on each annotation's own
  *  geometry: rings -> polygon, else bbox -> box, else point -> point, else geometry-less rating.
  *  Every ring of a polygon is kept: dropping the rest of an occlusion-split shape would show the
  *  reviewer a part of the object and save it back as the whole. */
-export function annotationsToCanvas(annotations: Annotation[]): CanvasLabels {
-  const boxes: Box[] = [];
-  const polygons: PolygonShape[] = [];
-  const points: PointShape[] = [];
-  const imageAnnotations: Annotation[] = [];
+export function annotationsToCanvas(annotations: Annotation[]): CanvasContent {
+  const content = structuredClone(NO_CONTENT);
   for (const a of annotations) {
     const attributes = { ...(a.attributes ?? {}) };
     if (a.rings && a.rings.length) {
-      polygons.push({
+      content.polygons.push({
         rings: a.rings.map((ring) => ring.map(([x, y]): [number, number] => [x, y])),
         subject: a.subject,
         attributes,
@@ -53,7 +42,7 @@ export function annotationsToCanvas(annotations: Annotation[]): CanvasLabels {
       });
     } else if (a.bbox) {
       const [x1, y1, x2, y2] = a.bbox;
-      boxes.push({
+      content.boxes.push({
         x1,
         y1,
         x2,
@@ -65,7 +54,7 @@ export function annotationsToCanvas(annotations: Annotation[]): CanvasLabels {
       });
     } else if (a.point) {
       const [x, y] = a.point;
-      points.push({
+      content.points.push({
         x,
         y,
         subject: a.subject,
@@ -74,16 +63,16 @@ export function annotationsToCanvas(annotations: Annotation[]): CanvasLabels {
         ...loaded(a),
       });
     } else {
-      imageAnnotations.push({ ...a, attributes });
+      content.imageAnnotations.push({ ...a, attributes });
     }
   }
-  return { boxes, polygons, points, imageAnnotations };
+  return content;
 }
 
 /** The canvas' four buckets reassembled into one unified annotation list for save, and where each
  *  shape of a tool landed in it: `positions[tool][i]` is the list position of the tool's ith
  *  shape. */
-export function serializeCanvas(labels: CanvasLabels): {
+export function serializeCanvas(labels: CanvasContent): {
   annotations: AnnotationPayload[];
   positions: Record<Mode, number[]>;
 } {
