@@ -43,11 +43,9 @@ TILE_SIZE = 60  # cols at x=0/60/120/180 (4), rows at y=0/60 (2); PATCH_BOX span
 
 def _upright_frame() -> Image.Image:
     """The as-viewed canvas: a dark background with a solid red patch at ``PATCH_BOX``."""
-    frame = Image.new("RGB", (UPRIGHT_W, UPRIGHT_H), color=(20, 20, 20))
-    arr = np.asarray(frame).copy()
-    x1, y1, x2, y2 = PATCH_BOX
-    arr[y1:y2, x1:x2] = (255, 0, 0)
-    return Image.fromarray(arr)
+    from tests._producer_fixtures import painted_frame
+
+    return painted_frame(UPRIGHT_W, UPRIGHT_H, (20, 20, 20), [(PATCH_BOX, (255, 0, 0))])
 
 
 @pytest.fixture
@@ -245,10 +243,8 @@ class TestRegionFrameIsTheResolvedImageSources:
 
         images_dir = tmp_path / "images" / UNDATED_BUCKET
         images_dir.mkdir(parents=True)
-        frame = np.full((UPRIGHT_H, UPRIGHT_W, 3), 20, dtype=np.uint8)
-        x1, y1, x2, y2 = PATCH_BOX
-        frame[y1:y2, x1:x2] = (255, 0, 0)
-        manifest = _write_rgb_band_group(images_dir, "capture_001", frame)
+        manifest = _write_rgb_band_group(images_dir, "capture_001",
+                                         np.asarray(_upright_frame()))
 
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: PatchProposer())
 

@@ -33,6 +33,9 @@ from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
 from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
+from tests._chain_fixtures import (  # noqa: E402
+    BESPOKE_INSTANCE_SEG, BESPOKE_ORDINAL, BESPOKE_REGRESSOR, BESPOKE_SEMANTIC_SEG,
+)
 from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import dataset_over, label_image, run_over  # noqa: E402
 
@@ -46,33 +49,17 @@ IMG = 64
 _save_png = partial(write_noise_image, size=IMG)
 
 
-_TASK_OF_BUILDER = {"build_bespoke_detection": "detection",
-                    "build_bespoke_instance_seg": "instance_seg",
-                    "build_bespoke_semantic_seg": "semantic_seg",
-                    "build_bespoke_ordinal": "ordinal", "build_bespoke_regressor": "regression"}
-
-
-def _model_source(builder: str, **kwargs) -> dict:
-    return {"builder": f"tests.bespoke_models:{builder}", "builder_kwargs": kwargs,
-            "task": _TASK_OF_BUILDER[builder]}
+def _model_source(builder: str, task: str, **kwargs) -> dict:
+    return {"builder": builder, "builder_kwargs": kwargs, "task": task}
 
 
 def _train_config(model_source: dict, data: dict) -> dict:
-    return {
-        "model_source": model_source,
-        "data": data,
-        "device": "cpu",
-        "stages": [{"freeze_to": -1, "epochs": 1}],
-        "mixed_precision": False,
-        "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
-        "scheduler": {"type": "cosine"},
-        "early_stopping": {"enabled": False},
-        # No val_loader at any call site below: loss is the only metric coherent to select on
-        # without one, detection/instance_seg's own default (objective) needs a validation pass.
-        "evaluation": {"selection_metric": "loss"},
-        "gradient_accumulation_steps": 1,
-        "checkpoint_every_n_epochs": 1,
-    }
+    from tests._chain_fixtures import ADAMW, training_config
+
+    # No val_loader at any call site below: loss is the only metric coherent to select on
+    # without one, detection/instance_seg's own default (objective) needs a validation pass.
+    return training_config(model_source, data, optimizer=ADAMW,
+                           evaluation={"selection_metric": "loss"})
 
 
 def _run(model_source: dict, data: dict, tmp_path: Path, run_id: str):
@@ -105,8 +92,9 @@ def test_detection_e2e(tmp_path: Path):
     dataset, data = run_over("detection", str(images_dir), subject="bud")
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("detection"))
 
-    model_source = _model_source("build_bespoke_detection", min_size=IMG, max_size=IMG * 2)
-    run = _run(model_source, data, tmp_path, "auto-run-15")
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
+
+    run = _run(BUILT_DETECTOR, data, tmp_path, "auto-run-15")
     run = train(run, loader, val_loader=None)
     _assert_trained(run, tmp_path / "out")
 
@@ -126,7 +114,8 @@ def test_instance_seg_e2e(tmp_path: Path):
     assert dataset[0][1]["masks"].shape[0] > 0
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("instance_seg"))
 
-    model_source = _model_source("build_bespoke_instance_seg", min_size=IMG, max_size=IMG * 2)
+    model_source = _model_source(BESPOKE_INSTANCE_SEG, "instance_seg", min_size=IMG,
+                                 max_size=IMG * 2)
     run = _run(model_source, data, tmp_path, "auto-run-16")
     run = train(run, loader, val_loader=None)
     _assert_trained(run, tmp_path / "out")
@@ -140,19 +129,17 @@ def test_semantic_seg_e2e(tmp_path: Path):
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     masks_dir = tmp_path / "masks"
     masks_dir.mkdir(parents=True, exist_ok=True)
-    from PIL import Image
-    import numpy as np
+    from tests._producer_fixtures import painted_frame
 
+    block = (IMG // 4, IMG // 4, IMG // 2, IMG // 2)
     for i in range(4):
         _save_png(images_dir / f"img{i}.png")
-        m = np.zeros((IMG, IMG), dtype=np.uint8)
-        m[IMG // 4 : IMG // 2, IMG // 4 : IMG // 2] = 1  # a foreground block
-        Image.fromarray(m, mode="L").save(masks_dir / f"img{i}.png")
+        painted_frame(IMG, IMG, 0, [(block, 1)], mode="L").save(masks_dir / f"img{i}.png")
 
     dataset, data = run_over("semantic_seg", str(images_dir), str(masks_dir))
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("semantic_seg"))
 
-    model_source = _model_source("build_bespoke_semantic_seg")
+    model_source = _model_source(BESPOKE_SEMANTIC_SEG, "semantic_seg")
     run = _run(model_source, data, tmp_path, "auto-run-17")
     run = train(run, loader, val_loader=None)
     _assert_trained(run, tmp_path / "out")
@@ -177,7 +164,7 @@ def test_ordinal_e2e(tmp_path: Path):
     dataset, data = run_over("ordinal", str(images_dir), str(csv_path))
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("ordinal"))
 
-    model_source = _model_source("build_bespoke_ordinal")
+    model_source = _model_source(BESPOKE_ORDINAL, "ordinal")
     run = _run(model_source, data, tmp_path, "auto-run-18")
     run = train(run, loader, val_loader=None)
     _assert_trained(run, tmp_path / "out")
@@ -199,7 +186,7 @@ def test_ordinal_derives_num_ranks_from_data(tmp_path: Path):
     assert data["num_ranks"] == 7 and data.get("num_classes") is None
 
     loader = DataLoader(dataset, batch_size=7, collate_fn=task_collate("ordinal"))
-    model_source = _model_source("build_bespoke_ordinal")
+    model_source = _model_source(BESPOKE_ORDINAL, "ordinal")
     run = _run(model_source, data, tmp_path, "auto-run-19")
     run = train(run, loader, val_loader=None)
     _assert_trained(run, tmp_path / "out")
@@ -262,7 +249,7 @@ def test_regression_e2e(tmp_path: Path):
     dataset, data = run_over("regression", str(images_dir), str(csv_path))
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("regression"))
 
-    model_source = _model_source("build_bespoke_regressor")
+    model_source = _model_source(BESPOKE_REGRESSOR, "regression")
     run = _run(model_source, data, tmp_path, "auto-run-20")
     run = train(run, loader, val_loader=None)
     _assert_trained(run, tmp_path / "out")
@@ -285,7 +272,7 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
 
     dataset, data = run_over("ordinal", str(images_dir), str(csv_path))
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("ordinal"))
-    model_source = _model_source("build_bespoke_ordinal")
+    model_source = _model_source(BESPOKE_ORDINAL, "ordinal")
     run = _run(model_source, data, tmp_path, "auto-run-21")
     run = train(run, loader, val_loader=None)
     _assert_trained(run, tmp_path / "out")
@@ -316,7 +303,7 @@ def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
 
     dataset, data = run_over("regression", str(images_dir), str(csv_path))
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("regression"))
-    model_source = _model_source("build_bespoke_regressor")
+    model_source = _model_source(BESPOKE_REGRESSOR, "regression")
     run = _run(model_source, data, tmp_path, "auto-run-22")
     run = train(run, loader, val_loader=None)
     _assert_trained(run, tmp_path / "out")

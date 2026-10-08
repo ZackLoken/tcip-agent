@@ -4,6 +4,7 @@ carries channel counts and validates them."""
 
 import pytest
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tests._chain_fixtures import BESPOKE_CLASSIFIER
 from tests._producer_fixtures import dataset_over  # noqa: E402
 
 torch = pytest.importorskip("torch")
@@ -320,7 +321,7 @@ def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
     data_cfg, train_ds, image = _classification_run(tmp_path, num_channels=1)
     assert data_cfg["num_channels"] == train_ds.expected_channels == 1
 
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_classifier",
+    model_source = {"builder": BESPOKE_CLASSIFIER,
                     "task": "classification"}
     config = {"model_source": model_source, "data": data_cfg}
     # The run recorded both: the width it read at and the count its own table carried.

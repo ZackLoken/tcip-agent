@@ -24,6 +24,7 @@ from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
     auto_train_val, partition_samples,
 )
 from tcip_mcp.tools.data_tools import draw_splits  # noqa: E402
+from tests._producer_fixtures import painted_frame  # noqa: E402
 from tests._verified_checkpoint_fixtures import partition_side  # noqa: E402
 
 STEMS = ("a", "b", "c", "d", "e", "f", "g", "h")
@@ -52,9 +53,8 @@ def _mask_dataset(root: Path) -> tuple[Path, Path]:
     masks_dir.mkdir(parents=True, exist_ok=True)
     for index, stem in enumerate(STEMS):
         Image.new("RGB", (16, 16), (10 * index, 20, 30)).save(images_dir / f"{stem}.png")
-        mask = np.zeros((16, 16), dtype=np.uint8)
-        mask[: index + 1, : index + 1] = 1
-        Image.fromarray(mask, mode="L").save(masks_dir / f"{stem}.png")
+        painted_frame(16, 16, 0, [((0, 0, index + 1, index + 1), 1)], mode="L").save(
+            masks_dir / f"{stem}.png")
     return images_dir, masks_dir
 
 
@@ -418,9 +418,8 @@ def test_a_mask_edited_after_the_run_refuses_the_freeze_by_name(tmp_path: Path):
 
     _resolved(tmp_path, "exp-mask-moved", "semantic_seg", data_cfg)
 
-    edited = np.zeros((16, 16), dtype=np.uint8)
-    edited[:12, :12] = 1
-    Image.fromarray(edited, mode="L").save(masks_dir / f"{STEMS[0]}.png")
+    painted_frame(16, 16, 0, [((0, 0, 12, 12), 1)], mode="L").save(
+        masks_dir / f"{STEMS[0]}.png")
 
     result = freeze_selection(tmp_path, "exp-mask-moved")
 
@@ -436,11 +435,8 @@ def _three_class_masks(root: Path) -> tuple[Path, Path]:
     masks_dir.mkdir(parents=True, exist_ok=True)
     for index, stem in enumerate(STEMS[:4]):
         Image.new("RGB", (16, 16), (10 * index, 20, 30)).save(images_dir / f"{stem}.png")
-        mask = np.zeros((16, 16), dtype=np.uint8)
-        mask[:8, :8] = 1
-        if index == 0:
-            mask[8:, 8:] = 2
-        Image.fromarray(mask, mode="L").save(masks_dir / f"{stem}.png")
+        extents = [((0, 0, 8, 8), 1)] + ([((8, 8, 16, 16), 2)] if index == 0 else [])
+        painted_frame(16, 16, 0, extents, mode="L").save(masks_dir / f"{stem}.png")
     return images_dir, masks_dir
 
 

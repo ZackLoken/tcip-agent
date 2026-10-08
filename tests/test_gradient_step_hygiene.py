@@ -21,6 +21,7 @@ from tests.tiny_trainer_fixtures import (
     ConstantImageDataset,
     build_data_scaled_gradient_model,
     capture_model,
+    regressor_config,
     trainer_run,
 )
 
@@ -38,17 +39,9 @@ def _loader(values, intensities, batch_size: int = 1) -> DataLoader:
 
 
 def _config(*, accumulation: int = 1) -> dict:
-    return {
-        "model_source": {"builder": BUILDER, "task": "regression"},
-        "data": {"num_channels": 1, "scope": {}},
-        "device": "cpu",
-        "mixed_precision": False,
-        "stages": [{"freeze_to": 0, "epochs": 1}],
-        "optimizer": {"name": "adamw", "backbone_lr": 0.01, "head_lr": 0.01, "weight_decay": 0.0},
-        "gradient_accumulation_steps": accumulation,
-        "checkpoint_every_n_epochs": 0,
-        "early_stopping": {"enabled": False},
-    }
+    return regressor_config(
+        1, builder=BUILDER, gradient_accumulation_steps=accumulation,
+        optimizer={"name": "adamw", "backbone_lr": 0.01, "head_lr": 0.01, "weight_decay": 0.0})
 
 
 def _per_batch_gradients(loader: DataLoader) -> list[torch.Tensor]:

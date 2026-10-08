@@ -16,6 +16,8 @@ import tcip_mcp.audit as audit_module
 import tcip_store as ts
 
 CAPTURE_DATE = "2024-05-01"
+STUB_ENGINE = "tests.proposal_stub:factory"
+"""The dotted proposal engine ``tests/proposal_stub.py`` defines."""
 
 
 def _entries(root: Path) -> list[dict]:
@@ -83,7 +85,7 @@ def test_propose_annotations_records_in_the_dataset_named_by_the_image_it_ran_ag
 
     image = dataset_root / "images" / CAPTURE_DATE / "IMG_0001.JPG"
     result = propose_annotations(project, image_path=str(image),
-                                 engine="tests.proposal_stub:factory")
+                                 engine=STUB_ENGINE)
     assert "error" not in result, result
 
     rows = _rows_for(dataset_root, "propose_annotations")
@@ -104,7 +106,7 @@ def test_propose_annotations_staging_nothing_leaves_no_audit_line(
     Image.new("RGB", (100, 80)).save(image)
 
     result = propose_annotations(project, image_path=str(image),
-                                 engine="tests.proposal_stub:factory")
+                                 engine=STUB_ENGINE)
     assert "error" not in result, result
     assert result["staged"] is False
 

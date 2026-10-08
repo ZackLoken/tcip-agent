@@ -29,13 +29,12 @@ def _five_band_raster(images_dir: Path) -> str:
 
 def _predicted(tmp_path, images_dir: Path, *, in_chans, builder_kwargs=None, **stated):
     """The pass of a real checkpoint built at ``in_chans`` over ``images_dir``, and its results."""
-    from tests._verified_checkpoint_fixtures import predicted_over, registered_checkpoint
+    from tests._verified_checkpoint_fixtures import (
+        built_detector, predicted_over, registered_checkpoint,
+    )
 
-    ckpt = registered_checkpoint(tmp_path, model_source={
-        "builder": "tests.bespoke_models:build_bespoke_detection",
-        "builder_kwargs": {"min_size": 64, "max_size": 128, **(builder_kwargs or {})},
-        "task": "detection",
-    }, data={"num_channels": in_chans, "scope": {"subject": "bud"}})
+    ckpt = registered_checkpoint(tmp_path, model_source=built_detector(**(builder_kwargs or {})),
+                                 data={"num_channels": in_chans, "scope": {"subject": "bud"}})
     return predicted_over(tmp_path, str(ckpt), str(images_dir), device="cpu", **stated)
 
 

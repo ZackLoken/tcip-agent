@@ -107,9 +107,9 @@ def build_two_rate_regressor(*, in_chans: int = 1, reverse_groups: bool = False
 class NanEvalRegressor(MeanIntensityRegressor):
     """Finite squared-error loss in train mode, all-nan predictions in eval mode.
 
-    The training loss stays healthy so the run completes; every prediction-derived
-    validation metric goes non-finite, for tests of how a completed run's non-finite
-    metrics are normalized downstream.
+    The training loss stays finite while every prediction-derived validation metric goes
+    non-finite: a run selecting on the loss completes with those metrics normalized, and one
+    selecting on a prediction-derived metric has no selectable epoch.
     """
 
     def forward(self, images, targets=None):
@@ -249,6 +249,66 @@ def count_validations(monkeypatch) -> list[str]:
 
         monkeypatch.setattr(schema, "model_validate", classmethod(counted))
     return seen
+
+
+MEAN_INTENSITY_REGRESSOR = "tests.tiny_trainer_fixtures:build_mean_intensity_regressor"
+MEAN_INTENSITY_CLASSIFIER = "tests.tiny_trainer_fixtures:build_mean_intensity_classifier"
+ALWAYS_DIVERGED_MODEL = "tests.tiny_trainer_fixtures:build_always_diverged_model"
+NAN_EVAL_REGRESSOR = "tests.tiny_trainer_fixtures:build_nan_eval_regressor"
+TWO_RATE_REGRESSOR = "tests.tiny_trainer_fixtures:build_two_rate_regressor"
+
+REGRESSOR_ADAMW = {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0}
+"""The AdamW section the one-weight regressors here train at."""
+
+
+def regressor_config(epochs: int = 1, *, builder: str = MEAN_INTENSITY_REGRESSOR,
+                     builder_kwargs: dict | None = None, data: dict | None = None,
+                     **overrides) -> dict:
+    """A :func:`~tests._chain_fixtures.training_config` of the regression ``builder`` (by
+    default the mean-intensity regressor) at ``builder_kwargs`` over ``data`` (by default
+    one-band frames with no scope): ``epochs`` epochs of one unfrozen stage at
+    :data:`REGRESSOR_ADAMW`, no epoch checkpoints, with ``overrides`` in place of their keys."""
+    from tests._chain_fixtures import training_config
+
+    source: dict = {"builder": builder, "task": "regression"}
+    if builder_kwargs is not None:
+        source["builder_kwargs"] = builder_kwargs
+    return training_config(
+        source, data if data is not None else {"num_channels": 1, "scope": {}},
+        **{"stages": [{"freeze_to": 0, "epochs": epochs}], "optimizer": REGRESSOR_ADAMW,
+           "checkpoint_every_n_epochs": 0, **overrides})
+
+
+def classifier_config(epochs: int, **overrides) -> dict:
+    """A :func:`~tests._chain_fixtures.training_config` of the mean-intensity classifier
+    (weight -1) over one-band, two-class frames: ``epochs`` epochs of one unfrozen stage, AdamW
+    at 0.2, no epoch checkpoints, with ``overrides`` in place of their keys."""
+    from tests._chain_fixtures import training_config
+
+    return training_config(
+        {"builder": MEAN_INTENSITY_CLASSIFIER, "builder_kwargs": {"init_weight": -1.0},
+         "task": "classification"},
+        {"num_channels": 1, "num_classes": 2, "scope": {}},
+        **{"stages": [{"freeze_to": 0, "epochs": epochs}],
+           "optimizer": {"name": "adamw", "backbone_lr": 0.2, "head_lr": 0.2,
+                         "weight_decay": 0.0},
+           "checkpoint_every_n_epochs": 0, **overrides})
+
+
+def separable_classifier_loaders():
+    """A classification training loader of six frames (three of negative intensity, three of
+    positive, batches of three) and a validation loader of four (two each, one batch), labeled 0
+    for negative intensity and 1 for positive."""
+    from torch.utils.data import DataLoader
+
+    from tcip_mcp.pipelines.training.collation import task_collate
+
+    collate = task_collate("classification")
+    train_ds = ConstantImageDataset(
+        [-2.0, -1.5, -1.0, 1.0, 1.5, 2.0], [0, 0, 0, 1, 1, 1], key="labels", cast=int)
+    val_ds = ConstantImageDataset([-1.8, -0.4, 0.4, 1.8], [0, 0, 1, 1], key="labels", cast=int)
+    return (DataLoader(train_ds, batch_size=3, collate_fn=collate),
+            DataLoader(val_ds, batch_size=4, collate_fn=collate))
 
 
 def opposed_regression_loaders(train_intensities, val_intensities, *, shuffle_seed=None):

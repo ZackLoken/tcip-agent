@@ -27,10 +27,16 @@ def build(**kwargs):
 '''
 
 
+PROBE_MODULE = "probe_builder"
+PROBE_BUILDER = f"{PROBE_MODULE}:build_probe"
+"""The builder :data:`TOP_LEVEL_BUILDER` defines, as a ``model_source`` names it."""
+
+
 def _builder_dir(tmp_path: Path) -> Path:
+    """A directory outside the interpreter's path holding :data:`PROBE_MODULE`; the directory."""
     src = tmp_path / "agent_project" / "models"
     src.mkdir(parents=True)
-    (src / "probe_builder.py").write_text(TOP_LEVEL_BUILDER, encoding="utf-8", newline="\n")
+    (src / f"{PROBE_MODULE}.py").write_text(TOP_LEVEL_BUILDER, encoding="utf-8", newline="\n")
     return src
 
 
@@ -61,10 +67,10 @@ def test_a_builder_outside_the_interpreters_path_launches_in_a_fresh_subprocess(
     src = _builder_dir(tmp_path)
     monkeypatch.setattr(sys, "path", [p for p in sys.path if p != str(src)])
     monkeypatch.delenv("PYTHONPATH", raising=False)
-    model_source = {"builder": "probe_builder:build_probe",
-                    "source_files": [str(src / "probe_builder.py")]}
+    model_source = {"builder": PROBE_BUILDER,
+                    "source_files": [str(src / f"{PROBE_MODULE}.py")]}
 
-    before = _child_imports("probe_builder", {**os.environ, "PYTHONPATH": child_pythonpath()})
+    before = _child_imports(PROBE_MODULE, {**os.environ, "PYTHONPATH": child_pythonpath()})
     assert before.returncode != 0
     assert "ModuleNotFoundError" in before.stderr
 
@@ -72,7 +78,7 @@ def test_a_builder_outside_the_interpreters_path_launches_in_a_fresh_subprocess(
     assert fn(width=4) == {"built": True, "kwargs": {"width": 4}}
     assert str(src) in sys.path
 
-    after = _child_imports("probe_builder", {**os.environ, "PYTHONPATH": child_pythonpath()})
+    after = _child_imports(PROBE_MODULE, {**os.environ, "PYTHONPATH": child_pythonpath()})
     assert after.returncode == 0, after.stderr
 
 
@@ -105,6 +111,7 @@ def test_a_packaged_builder_outside_the_path_launches_and_trains_in_the_worker(
     worker process builds it, and the run completes."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import launch_training
+    from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import run_to_end
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
@@ -114,15 +121,12 @@ def test_a_packaged_builder_outside_the_path_launches_and_trains_in_the_worker(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
     images_dir, csv_path = write_regression_dataset(
         tmp_path / "ds", intensities=[0.1, 0.9] * 4, values=[0, 1] * 4)
-    cfg = {
-        "model_source": {"builder": "agentpkg_launch.model:build", "task": "classification",
-                         "source_files": [str(model)]},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path),
-                 "split": {"seed": 0, "val_ratio": 0.15}},
-        "batch_size": 4, "stages": [{"freeze_to": 0, "epochs": 1}],
-        "mixed_precision": False, "device": "cpu",
-        "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
-    }
+    cfg = training_config(
+        {"builder": "agentpkg_launch.model:build", "task": "classification",
+         "source_files": [str(model)]},
+        {"images_dir": str(images_dir), "labels_dir": str(csv_path),
+         "split": {"seed": 0, "val_ratio": 0.15}},
+        batch_size=4, stages=[{"freeze_to": 0, "epochs": 1}], checkpoint_every_n_epochs=0)
 
     res = launch_training(tmp_path, cfg, actor=None)
 
@@ -144,8 +148,8 @@ def test_preflight_imports_a_builder_through_its_source_files(
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     cfg = {
-        "model_source": {"builder": "probe_builder:build_probe", "task": "classification",
-                         "source_files": [str(src / "probe_builder.py")]},
+        "model_source": {"builder": PROBE_BUILDER, "task": "classification",
+                         "source_files": [str(src / f"{PROBE_MODULE}.py")]},
         "data": {"images_dir": str(images_dir)},
     }
 

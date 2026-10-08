@@ -9,6 +9,7 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from pathlib import Path
 
 import pytest
+from tests._chain_fixtures import BESPOKE_DETECTION  # noqa: E402
 from tests._producer_fixtures import dataset_over, registry_over  # noqa: E402
 
 torch = pytest.importorskip("torch")
@@ -141,7 +142,7 @@ def _serve(monkeypatch, train_ds):
 
 def _base_config(tiling, project: Path):
     return {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": {"images_dir": str(project / "imgs"), "tiling": tiling,
                  "split": {"seed": 0, "val_ratio": 0.15}},

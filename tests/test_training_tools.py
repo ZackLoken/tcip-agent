@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._chain_fixtures import BESPOKE_CLASSIFIER, BESPOKE_DETECTION
+
 # No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
 # test's pinned platform state root so trait="bud_opening" call sites keep resolving.
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
@@ -57,7 +59,7 @@ def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
     from tcip_mcp.tools.training_tools import preflight_config
 
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": _labeled(tmp_path),
         # launch_training's own default stage shape: freeze_to + epochs, no lr.
@@ -84,7 +86,7 @@ def test_preflight_config_refuses_a_nested_training_section_by_name(tmp_path):
     from tcip_mcp.tools.training_tools import preflight_config
 
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": _labeled(tmp_path),
     }
@@ -101,16 +103,17 @@ def test_a_smoke_preflight_validates_its_config_once(tmp_path, monkeypatch):
     its smoke build, reads it off one validation and never validates its model source again."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
-    from tests.tiny_trainer_fixtures import count_validations, write_regression_dataset
+    from tests.tiny_trainer_fixtures import (
+        TWO_RATE_REGRESSOR, count_validations, regressor_config, write_regression_dataset,
+    )
 
     intensities = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
     images_dir, csv_path = write_regression_dataset(
         tmp_path / "ds", intensities, [2.0 * c for c in intensities])
-    config = {"model_source": {"builder": "tests.tiny_trainer_fixtures:build_two_rate_regressor",
-                               "task": "regression"},
-              "data": {"num_channels": 1, "scope": {}, "images_dir": str(images_dir),
-                       "labels_dir": str(csv_path), "split": {"seed": 1, "val_ratio": 0.15}},
-              "device": "cpu", "mixed_precision": False}
+    config = regressor_config(
+        builder=TWO_RATE_REGRESSOR,
+        data={"num_channels": 1, "scope": {}, "images_dir": str(images_dir),
+              "labels_dir": str(csv_path), "split": {"seed": 1, "val_ratio": 0.15}})
 
     validations = count_validations(monkeypatch)
     report = preflight_config(tmp_path, config, smoke=True)
@@ -174,7 +177,7 @@ def test_preflight_config_overfit_restores_rng_state(tmp_path, monkeypatch):
     monkeypatch.setattr(model_contract, "overfit_check",
                         functools.partial(model_contract.overfit_check, steps=4))
 
-    cfg = _detection_smoke_cfg("tests.bespoke_models:build_bespoke_detection", tmp_path)
+    cfg = _detection_smoke_cfg(BESPOKE_DETECTION, tmp_path)
 
     random.seed(11)
     np.random.seed(11)
@@ -216,7 +219,7 @@ def test_preflight_config_refuses_a_per_stage_lr_by_name(tmp_path):
     from tcip_mcp.tools.training_tools import preflight_config
 
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": _labeled(tmp_path),
         "batch_size": 2,
@@ -244,7 +247,7 @@ def test_preflight_config_warns_when_most_candidates_wont_train(tmp_path):
         _bud_image(imgs / f"{stem}.jpg", labeled=False)
 
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": {"images_dir": str(imgs), "scope": {"subject": "bud"},
                  "auto_val": False},
@@ -267,7 +270,7 @@ def test_preflight_config_no_coverage_warning_when_everything_trains(tmp_path):
     _bud_image(imgs / "ann.jpg")
 
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": {"images_dir": str(imgs), "scope": {"subject": "bud"},
                  "split": {"seed": 0, "val_ratio": 0.15}},
@@ -298,7 +301,7 @@ def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(tmp_pa
     data_cfg = {"images_dir": str(imgs), "scope": {"subject": "bud"},
                 "split": {"seed": 0, "val_ratio": 0.15}}
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": dict(data_cfg),
         "batch_size": 2,
@@ -336,7 +339,7 @@ def test_preflight_admits_the_run_once(tmp_path):
         return real_admit(*args, **kwargs)
 
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": {"images_dir": str(imgs), "scope": {"subject": "bud"},
                  "tiling": {"enabled": True, "tile_size": 64, "overlap": 0.2},
@@ -374,7 +377,7 @@ def test_preflight_config_blocks_a_document_only_the_admission_reader_refuses(
     _damaged(imgs / "bad.jpg", encode_record(json.loads(bad_document)))
 
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": {"images_dir": str(imgs), "scope": {"subject": "bud"},
                  "split": {"seed": 0, "val_ratio": 0.15}},
@@ -390,14 +393,14 @@ def test_preflight_config_training_source_shape_and_importability(tmp_path):
     from tcip_mcp.tools.training_tools import preflight_config
 
     base_cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": _labeled(tmp_path),
         "batch_size": 2,
     }
 
     # A dict is rejected.
-    cfg = dict(base_cfg, training_source={"train": "tests.bespoke_models:build_bespoke_detection"})
+    cfg = dict(base_cfg, training_source={"train": BESPOKE_DETECTION})
     r = preflight_config(tmp_path, cfg)
     assert any("training_source must be a non-empty" in i for i in r["issues"])
 
@@ -407,7 +410,7 @@ def test_preflight_config_training_source_shape_and_importability(tmp_path):
     assert any("training_source not importable" in i for i in r["issues"])
 
     # A bare, importable string passes.
-    cfg = dict(base_cfg, training_source="tests.bespoke_models:build_bespoke_detection")
+    cfg = dict(base_cfg, training_source=BESPOKE_DETECTION)
     assert preflight_config(tmp_path, cfg)["valid"] is True
 
     # Absent training_source is fine (optional seam).
@@ -424,7 +427,7 @@ def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
     from tcip_mcp.tools.training_tools import preflight_config
 
     base_cfg: dict[str, object] = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": _labeled(tmp_path),
         "batch_size": 2,
@@ -461,7 +464,7 @@ def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(tmp_p
     imgs = tmp_path / "images" / UNDATED_BUCKET
     imgs.mkdir(parents=True)
     cfg: dict[str, object] = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": {"images_dir": str(imgs), "scope": {"subject": "bud"},
                  "split": {"seed": 0, "val_ratio": 0.15}},
@@ -509,7 +512,7 @@ def test_preflight_calibration_ratio_wrong_task_flags_issue(tmp_path):
         rows.append(f"img{i},{i % 2}")
     (tmp_path / "labels.csv").write_text("\n".join(rows) + "\n")
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
+        "model_source": {"builder": BESPOKE_CLASSIFIER,
                          "task": "classification"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(tmp_path / "labels.csv"),
                  "split": {"calibration_ratio": 0.15, "val_ratio": 0.15, "seed": 1}},
@@ -528,7 +531,7 @@ def test_preflight_calibration_ratio_multi_member_flags_issue(tmp_path):
     for stem in ("a", "b"):
         _bud_image(images_dir / f"{stem}.png")
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
                  # sliver_frac stated: two boxes derive no size spread.
@@ -546,7 +549,7 @@ def test_preflight_reserved_regions_infeasible_layout_refuses_under_smoke(tmp_pa
 
     images_dir = _reserve_cal_big_single_source(tmp_path / "ds")
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
                  "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
@@ -573,7 +576,7 @@ def test_preflight_reserved_regions_report_an_unreadable_label_by_name(tmp_path)
     images_dir = _reserve_cal_big_single_source(tmp_path / "ds")
     _damaged(images_dir / "mosaic.png", b"{not json")
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
                  "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
@@ -593,7 +596,7 @@ def test_preflight_reserved_regions_admit_a_feasible_layout(tmp_path):
 
     images_dir = _reserve_cal_big_single_source(tmp_path / "ds")
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "builder_kwargs": {"min_size": 128, "max_size": 256},
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
@@ -632,7 +635,7 @@ def test_apply_hpo_params_lr_reaches_optimizer_param_groups():
     rate and every group's weight decay."""
     from tcip_mcp.tools.training_tools import _apply_hpo_params
 
-    base = {"model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+    base = {"model_source": {"builder": BESPOKE_DETECTION,
                              "task": "detection"}}
     (_, backbone_decay), (head_lr, head_decay) = _built_groups(
         _apply_hpo_params(base, {"lr": 3e-3, "weight_decay": 2e-4}))
@@ -756,7 +759,7 @@ class _TiledFakeDataset(_FakeDataset):
 
 def _detection_base() -> dict:
     return {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": {"images_dir": "imgs"},
         "batch_size": 2,
@@ -904,7 +907,7 @@ def test_run_hpo_trial_result_is_the_highest_value_for_a_higher_is_better_metric
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
     base = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
+        "model_source": {"builder": BESPOKE_CLASSIFIER,
                          "task": "classification"},
         "data": {"images_dir": "imgs"},
         "batch_size": 2,
@@ -925,7 +928,7 @@ def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
     pytest.importorskip("torch")
 
     base = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
+        "model_source": {"builder": BESPOKE_CLASSIFIER,
                          "task": "classification"},
         "data": {"images_dir": "imgs"},
         "batch_size": 2,
@@ -971,7 +974,7 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=captured)
     base = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
+        "model_source": {"builder": BESPOKE_CLASSIFIER,
                          "task": "classification"},
         "data": {"images_dir": "imgs"},
         "batch_size": 2,
@@ -979,7 +982,7 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
     }
     _trial({"lr": 3e-4}, [].append, base, tmp_path)
     assert captured["transforms"] is not None       # augmentation was built + passed
-    assert captured["model_source"]["builder"].endswith(":build_bespoke_classifier")
+    assert captured["model_source"]["builder"] == BESPOKE_CLASSIFIER
 
 
 def test_run_hpo_trial_dotted_seed_axis_reaches_the_data_cfg_handed_to_auto_train_val(
@@ -1059,7 +1062,7 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
 
     images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     base = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
                  "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
@@ -1114,23 +1117,15 @@ def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(tmp_
     one good forward on measuring rather than training.
     """
     pytest.importorskip("torch")
-    from tests.tiny_trainer_fixtures import write_regression_dataset
+    from tests.tiny_trainer_fixtures import regressor_config, write_regression_dataset
 
     images_dir, csv_path = write_regression_dataset(
         tmp_path, intensities=[0.1, 0.3, 0.5, 0.7], values=[0.2, 0.6, 1.0, 1.4])
 
-    base_config = {
-        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_diverges_after_model",
-                         "builder_kwargs": {"good_calls": 1}, "task": "regression"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path), "auto_val": False},
-        "device": "cpu",
-        "mixed_precision": False,
-        "batch_size": 4,
-        "stages": [{"freeze_to": 0, "epochs": 5}],
-        "optimizer": {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0},
-        "checkpoint_every_n_epochs": 0,
-        "early_stopping": {"enabled": False},
-    }
+    base_config = regressor_config(
+        5, builder="tests.tiny_trainer_fixtures:build_diverges_after_model",
+        builder_kwargs={"good_calls": 1}, batch_size=4,
+        data={"images_dir": str(images_dir), "labels_dir": str(csv_path), "auto_val": False})
     reported: list = []
     _trial({}, reported.append, base_config, tmp_path, metric="loss")
 
@@ -1252,7 +1247,7 @@ def test_an_ordinary_sweep_payload_still_runs_its_search(tmp_path, monkeypatch):
     seen = _spaces_searched(monkeypatch)
 
     base_config = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": _labeled(tmp_path),
     }
@@ -1327,19 +1322,13 @@ def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_a
     from tcip_mcp.experiments import (
         RUN_FILE, experiment_dir, observe, read_record, request_cancel,
     )
-    from tests.tiny_trainer_fixtures import write_regression_dataset
+    from tests.tiny_trainer_fixtures import regressor_config, write_regression_dataset
 
     images_dir, csv_path = write_regression_dataset(
         tmp_path, intensities=[0.1, 0.3, 0.5, 0.7], values=[0.2, 0.6, 1.0, 1.4])
-    base_config = {
-        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
-                         "task": "regression"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path),
-                 "split": {"seed": 0, "val_ratio": 0.15}},
-        "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 5}],
-                     "mixed_precision": False, "device": "cpu",
-                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
-    }
+    base_config = regressor_config(5, data={
+        "images_dir": str(images_dir), "labels_dir": str(csv_path),
+        "split": {"seed": 0, "val_ratio": 0.15}})
     reported: list = []
 
     def report(value: float) -> None:

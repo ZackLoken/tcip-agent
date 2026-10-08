@@ -15,9 +15,10 @@ def test_mask_rcnn_uses_masks_in_loss_and_predicts_masks():
     model = bespoke_models.build_bespoke_instance_seg(num_classes=1, min_size=64, max_size=128)
     assert isinstance(model, bespoke_models.BespokeDetection)
 
+    from tests._producer_fixtures import painted_array
+
     img = torch.rand(3, 64, 64)
-    masks = torch.zeros((1, 64, 64), dtype=torch.uint8)
-    masks[0, 10:40, 10:40] = 1
+    masks = torch.as_tensor(painted_array(64, 64, [((10, 10, 40, 40), 1)]))[None]
     target = {"boxes": torch.tensor([[10.0, 10.0, 40.0, 40.0]]),
               "labels": torch.tensor([1]), "masks": masks}
 
@@ -32,9 +33,9 @@ def test_mask_rcnn_uses_masks_in_loss_and_predicts_masks():
 
 def test_segm_metrics_score_mask_overlap():
     from tcip_mcp.pipelines.training.evaluation import detection_metrics, records_from_detector
+    from tests._producer_fixtures import painted_array
 
-    mask = torch.zeros((1, 32, 32), dtype=torch.uint8)
-    mask[0, 8:24, 8:24] = 1
+    mask = torch.as_tensor(painted_array(32, 32, [((8, 8, 24, 24), 1)]))[None]
     target = {"boxes": torch.tensor([[8.0, 8.0, 24.0, 24.0]]),
               "labels": torch.tensor([1]), "iscrowd": torch.tensor([0]), "masks": mask}
     output = {"boxes": torch.tensor([[8.0, 8.0, 24.0, 24.0]]),

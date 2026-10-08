@@ -187,18 +187,13 @@ def test_a_completed_runs_metrics_come_from_its_best_checkpoint_not_its_last_epo
     from tcip_mcp.experiments import METRICS_FILE, partition_rows, read_rows
     from tcip_mcp.model_registry import ModelRegistry
     from tests._verified_checkpoint_fixtures import worker_run
-    from tests.tiny_trainer_fixtures import write_regression_dataset
+    from tests.tiny_trainer_fixtures import regressor_config, write_regression_dataset
 
     images_dir, csv_path = write_regression_dataset(
         tmp_path, intensities=[0.1, 0.3, 0.5, 0.7], values=[0.2, 0.6, 1.0, 1.4])
-    run_dir = worker_run(tmp_path, {
-        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
-                         "task": "regression"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path), "auto_val": False},
-        "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 3}],
-        "mixed_precision": False, "device": "cpu",
-        "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
-    }, experiment_id="exp-best")
+    run_dir = worker_run(tmp_path, regressor_config(3, data={
+        "images_dir": str(images_dir), "labels_dir": str(csv_path), "auto_val": False}),
+        experiment_id="exp-best")
 
     entry = _named(ModelRegistry(str(tmp_path)), "exp-best")
     assert entry["metrics_source"] == "trainer"

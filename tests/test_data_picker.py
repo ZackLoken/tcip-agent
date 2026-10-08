@@ -24,16 +24,12 @@ from tests.test_selection_binding import DATES, OTHER_SUBJECT, SUBJECT, _draw, \
 
 
 def _bespoke_config(images_dir: Path, *, subject: str = SUBJECT) -> dict:
-    return {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"min_size": 64, "max_size": 64},
-                         "task": "detection"},
-        "data": {"images_dir": str(images_dir), "scope": {"subject": subject},
-                 "split": {"seed": 0, "val_ratio": 0.15}},
-        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-                     "mixed_precision": False, "device": "cpu",
-                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
-    }
+    from tests._chain_fixtures import training_config
+    from tests._verified_checkpoint_fixtures import SQUARE_64_DETECTOR
+
+    return training_config(SQUARE_64_DETECTOR, {
+        "images_dir": str(images_dir), "scope": {"subject": subject},
+        "split": {"seed": 0, "val_ratio": 0.15}})
 
 
 def _bound_config(root: Path, selection_dir: Path) -> dict:

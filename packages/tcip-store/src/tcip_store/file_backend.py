@@ -303,16 +303,30 @@ def _remove_quietly(path: str) -> None:
         pass
 
 
-def retry_while_denied(action: Callable[[], Any], budget_s: float) -> Any:
-    """Run a filesystem action an atomic replace can transiently deny (on Windows, a rename or open
-    racing another handle), retrying with jittered waits within ``budget_s``, then raising. Never
-    triggers on POSIX.
-    """
+SHARING_VIOLATION = 32
+"""Windows' ``ERROR_SHARING_VIOLATION``: the file is open through a handle whose sharing mode
+conflicts with the access asked for, a conflict that may last only until that handle closes."""
+
+
+def is_sharing_violation(exc: PermissionError) -> bool:
+    """Whether ``exc`` is a Windows sharing violation (:data:`SHARING_VIOLATION`)."""
+    return getattr(exc, "winerror", None) == SHARING_VIOLATION
+
+
+def retry_while_denied(action: Callable[[], Any], budget_s: float, *,
+                       denied: Callable[[PermissionError], bool] = lambda exc: True) -> Any:
+    """Run a filesystem action a conflicting handle may deny for a while, retrying a
+    ``PermissionError`` that ``denied`` accepts (by default every one) after a jittered wait
+    capped at the time left of ``budget_s`` from the first attempt; the denial is raised instead
+    when the clock, read once the wait ends, has reached that deadline, so no attempt starts
+    after it. Any other error raises at once."""
     deadline = time.monotonic() + budget_s
     while True:
         try:
             return action()
-        except PermissionError:
+        except PermissionError as exc:
+            if not denied(exc):
+                raise
+            time.sleep(min(random.uniform(0.005, 0.05), max(0.0, deadline - time.monotonic())))
             if time.monotonic() >= deadline:
                 raise
-            time.sleep(random.uniform(0.005, 0.05))

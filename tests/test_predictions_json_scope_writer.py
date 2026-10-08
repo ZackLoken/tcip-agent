@@ -95,10 +95,11 @@ def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(tmp
 
     from tcip_mcp.buckets import pass_documents, publish
     from tcip_mcp.pipelines.execution import Stated, prepare_pass
+    from tests._chain_fixtures import BESPOKE_REGRESSOR
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     checkpoint = verified_checkpoint(tmp_path, model_source={
-        "builder": "tests.bespoke_models:build_bespoke_regressor", "task": "regression"})
+        "builder": BESPOKE_REGRESSOR, "task": "regression"})
     images = tmp_path / "ds" / "images" / "2026-01-01"
     images.mkdir(parents=True)
     Image.new("RGB", (32, 32), color=(90, 90, 90)).save(images / "a.png")

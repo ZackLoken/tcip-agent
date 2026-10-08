@@ -21,6 +21,7 @@ import tifffile
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
+from tests._chain_fixtures import BESPOKE_DETECTION  # noqa: E402
 pytest.importorskip("torchvision")
 
 TILE = 32
@@ -41,7 +42,7 @@ def _detection_checkpoint(tmp_path: Path) -> str:
     from tcip_mcp.tools.model_tools import register_model
 
     model_source = {
-        "builder": "tests.bespoke_models:build_bespoke_detection",
+        "builder": BESPOKE_DETECTION,
         "builder_kwargs": {
             "min_size": TILE, "max_size": TILE * 2,
             "image_mean": [0.5, 0.5], "image_std": [0.25, 0.25],

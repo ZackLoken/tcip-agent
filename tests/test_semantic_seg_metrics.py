@@ -84,8 +84,10 @@ def test_ignore_index_drops_pixels():
 
 def test_batched_shapes_flatten():
     # [N,H,W] input flattens the same way for pred and gt.
-    gt = torch.zeros(2, 4, 4, dtype=torch.long)
-    gt[:, :2] = 1
+    from tests._producer_fixtures import painted_array
+
+    stripe = torch.as_tensor(painted_array(4, 4, [((0, 0, 4, 2), 1)]))
+    gt = torch.stack([stripe, stripe]).long()
     m = semantic_seg_metrics(gt.clone(), gt, num_classes=2)
     assert m["mIoU"] == pytest.approx(1.0)
 
@@ -102,6 +104,7 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
 
     from tcip_mcp.pipelines.training.collation import task_collate
     from tests import bespoke_models
+    from tests._producer_fixtures import painted_frame
 
     side = 64
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -111,9 +114,8 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
     for i in range(4):
         arr = (np.random.rand(side, side, 3) * 255).astype(np.uint8)
         Image.fromarray(arr).save(images_dir / f"img{i}.png")
-        m = np.zeros((side, side), dtype=np.uint8)
-        m[side // 4:side // 2, side // 4:side // 2] = 1  # a foreground block
-        Image.fromarray(m, mode="L").save(masks_dir / f"img{i}.png")
+        block = (side // 4, side // 4, side // 2, side // 2)
+        painted_frame(side, side, 0, [(block, 1)], mode="L").save(masks_dir / f"img{i}.png")
 
     dataset = dataset_over("semantic_seg", str(images_dir), str(masks_dir))
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("semantic_seg"))

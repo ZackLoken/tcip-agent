@@ -21,6 +21,7 @@ from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
 )
 from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY
 from tcip_mcp.pipelines.raster_source import open_raster
+from tests._chain_fixtures import BESPOKE_DETECTION, BESPOKE_INSTANCE_SEG
 
 from tests._geotiff_fixtures import (
     PIXEL_SCALE,
@@ -336,7 +337,7 @@ def _bespoke_detection_checkpoint(tmp_path: Path, raster_path: Path, *, in_chans
         builder_kwargs["image_mean"] = mean
         builder_kwargs["image_std"] = std
 
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
+    model_source = {"builder": BESPOKE_DETECTION,
                     "builder_kwargs": builder_kwargs, "task": "detection"}
     config = {"model_source": model_source,
               "data": {"num_channels": in_chans,
@@ -386,7 +387,7 @@ def _bespoke_instance_seg_checkpoint(
 
     from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
 
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_instance_seg",
+    model_source = {"builder": BESPOKE_INSTANCE_SEG,
                     "builder_kwargs": {"min_size": tile_size, "max_size": tile_size * 2},
                     "task": "instance_seg"}
     config = {"model_source": model_source,

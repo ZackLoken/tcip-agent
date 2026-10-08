@@ -21,9 +21,9 @@ from tcip_mcp.pipelines.measurement import instance_geometries, mask_geometry
 
 def _rect_mask(h=64, w=64, r0=5, r1=24, c0=10, c1=49):
     """Solid rectangle: rows r0..r1 (inclusive), cols c0..c1 -> (r1-r0+1) x (c1-c0+1)."""
-    m = np.zeros((h, w), dtype=np.uint8)
-    m[r0:r1 + 1, c0:c1 + 1] = 1
-    return m
+    from tests._producer_fixtures import painted_array
+
+    return painted_array(w, h, [((c0, r0, c1 + 1, r1 + 1), 1)])
 
 
 def test_rectangle_pixel_measurements_exact():
@@ -132,8 +132,7 @@ def test_empty_mask_is_handled_without_inventing_a_measurement():
 
 
 def test_single_row_line_is_1px_wide():
-    m = np.zeros((16, 16), dtype=np.uint8)
-    m[8, 3:13] = 1                      # a 10 px horizontal line
+    m = _rect_mask(h=16, w=16, r0=8, r1=8, c0=3, c1=12)  # a 10 px horizontal line
     g = mask_geometry(m, unit="mm")
     assert g["area_px"] == 10.0
     assert g["principal_axis_extent_px"] == 10.0 and g["secondary_axis_extent_px"] == 1.0

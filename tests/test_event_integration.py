@@ -298,19 +298,13 @@ class TestTrainingToolOutputSchema:
         pytest.importorskip("torchvision")
         monkeypatch.chdir(tmp_path)
 
-        from PIL import Image
-        from tcip_annotation.state import Annotation, BBox
         from tcip_mcp.experiments import experiment_dir, find_run
         from tcip_mcp.pipelines.training import tensorboard_manager
         from tcip_mcp.tools import training_tools
-        from tests._producer_fixtures import label_image
+        from tests._producer_fixtures import seed_bud_images, small_detection_config
 
-        images_dir = tmp_path / "images" / UNDATED_BUCKET
-        images_dir.mkdir(parents=True)
-        for i in range(2):
-            Image.new("RGB", (128, 128)).save(images_dir / f"t{i}.png")
-            label_image(images_dir / f"t{i}.png",
-                        [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
+        images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET, n=2, size=128,
+                                     box=(10, 10, 40, 40))
 
         class _NoChild:
             """Stands in for the training subprocess; no child is spawned."""
@@ -323,16 +317,8 @@ class TestTrainingToolOutputSchema:
         monkeypatch.setattr(training_tools.subprocess, "Popen", _NoChild)
         monkeypatch.setattr(tensorboard_manager, "launch_tensorboard", lambda *a, **k: {})
 
-        cfg = {
-            "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                             "builder_kwargs": {"min_size": 64, "max_size": 128},
-                             "task": "detection"},
-            "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
-                     "split": {"seed": 0, "val_ratio": 0.15}},
-            "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-                         "mixed_precision": False, "device": "cpu",
-        }
-        res = training_tools.launch_training(tmp_path, cfg, actor=None)
+        res = training_tools.launch_training(tmp_path, small_detection_config(images_dir),
+                                             actor=None)
 
         assert "error" not in res, res
         assert res["status"] == "launched"
@@ -371,11 +357,10 @@ class TestInferenceToolOutputSchema:
         """A dry run reports each operating-point dimension as the caller named it."""
         from tcip_mcp.pipelines.execution import Stated
         from tcip_mcp.tools.inference_tools import run_inference
+        from tests._chain_fixtures import BLOB_BUILDER
         from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-        ckpt = registered_checkpoint(
-            tmp_path, model_source={"builder": "tests.bespoke_models:build_bright_blob_detector",
-                          "task": "detection"})
+        ckpt = registered_checkpoint(tmp_path, model_source=dict(BLOB_BUILDER))
         (tmp_path / "images" / UNDATED_BUCKET).mkdir(parents=True)
         res = run_inference(tmp_path, ckpt, images_dir=str(tmp_path / "images" / UNDATED_BUCKET),
                             bucket="out/2026-01-01",

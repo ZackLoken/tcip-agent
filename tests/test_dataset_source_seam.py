@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._chain_fixtures import GT_ANCHOR_DETECTOR
+
 torch = pytest.importorskip("torch")
 
 from torch.utils.data import Dataset  # noqa: E402
@@ -40,6 +42,10 @@ class _CountingDataset(Dataset):
 def build_bespoke_ds(**kwargs) -> _CountingDataset:
     """Agent-authored dataset builder (importable, no exec)."""
     return _CountingDataset(**kwargs)
+
+
+BESPOKE_DS = "tests.test_dataset_source_seam:build_bespoke_ds"
+"""The ``dataset_source`` builder of :func:`build_bespoke_ds`."""
 
 
 class _PointDataset(Dataset):
@@ -76,7 +82,7 @@ def build_point_ds(**kwargs) -> _PointDataset:
 
 
 DATASET_SOURCE = {
-    "builder": "tests.test_dataset_source_seam:build_bespoke_ds",
+    "builder": BESPOKE_DS,
     "builder_kwargs": {"marker": "bespoke", "rows": ["s0", "s1"]},
     "source_files": [__file__],
 }
@@ -168,7 +174,7 @@ def test_builder_kwargs_may_not_restate_what_the_producer_named():
     for reserved in ("samples", "scope", "task", "transforms"):
         with pytest.raises(ValueError, match="restates"):
             build_from_dataset_source(
-                {"builder": "tests.test_dataset_source_seam:build_bespoke_ds",
+                {"builder": BESPOKE_DS,
                  "builder_kwargs": {reserved: "foreign"}},
                 samples=[], scope=_scope(), task="detection", transforms=None)
 
@@ -197,14 +203,14 @@ def test_builder_kwargs_configure_the_builder(tmp_path: Path):
 
     samples = _admitted_samples(tmp_path / "ds")
     ds = build_from_dataset_source(
-        {"builder": "tests.test_dataset_source_seam:build_bespoke_ds",
+        {"builder": BESPOKE_DS,
          "builder_kwargs": {"marker": "pinned"}},
         task="grape_bunch_count", samples=samples, scope=_scope(), transforms=None)
     assert ds.marker == "pinned" and ds.samples == list(samples)
 
     with pytest.raises(ValueError, match="builder_kwargs must be a dict"):
         build_from_dataset_source(
-            {"builder": "tests.test_dataset_source_seam:build_bespoke_ds",
+            {"builder": BESPOKE_DS,
              "builder_kwargs": [1, 2]},
             task="grape_bunch_count", samples=samples, scope=_scope(), transforms=None)
 
@@ -217,7 +223,7 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(tmp_pa
 
     data: dict = {"dataset_source": DATASET_SOURCE}
     config = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detector",
+        "model_source": {"builder": GT_ANCHOR_DETECTOR,
                          "builder_kwargs": {"gt_boxes_wh": [(10, 10)]},
                          "task": "grape_bunch_count"},
         "data": data,
@@ -249,7 +255,7 @@ def test_snapshot_records_dataset_builder(tmp_path: Path):
     config = {"data": {"dataset_source": DATASET_SOURCE}}
     manifest = snapshot_model_source(config, tmp_path)
     assert manifest is not None
-    assert manifest["dataset_builder"] == "tests.test_dataset_source_seam:build_bespoke_ds"
+    assert manifest["dataset_builder"] == BESPOKE_DS
     [entry] = [e for e in manifest["files"] if e["src"] == __file__]
     assert len(entry["sha256"]) == 64
     assert (tmp_path / SNAPSHOT_DIR / entry["file"]).read_bytes() == Path(__file__).read_bytes()

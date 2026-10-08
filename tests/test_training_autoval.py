@@ -399,10 +399,11 @@ def _multiband_source(images_dir: Path, stem: str, bands: int) -> None:
     import numpy as np
     import tifffile
 
+    from tests._producer_fixtures import painted_array
+
     images_dir.mkdir(parents=True, exist_ok=True)
-    array = np.zeros((24, 40, bands), dtype=np.uint8)
-    array[12:18, 28:34, :] = 255
-    tifffile.imwrite(str(images_dir / f"{stem}.tif"), array)
+    band = painted_array(40, 24, [((28, 12, 34, 18), 255)])
+    tifffile.imwrite(str(images_dir / f"{stem}.tif"), np.stack([band] * bands, axis=-1))
     label_image(images_dir / f"{stem}.tif",
                 [Annotation(subject="bud", geometry=BBox(28, 12, 34, 18))], 40, 24)
 
@@ -489,12 +490,11 @@ def test_one_preflight_reads_a_sources_header_once_for_its_sizes(tmp_path: Path,
     the reserved-calibration feasibility probe builds the run's own dataset at the sizes already
     resolved rather than resolving a second time over the same source."""
     from tcip_mcp.tools.training_tools import preflight_config
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"min_size": 64, "max_size": 128},
-                         "task": "detection"},
+        "model_source": dict(BUILT_DETECTOR),
         "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
                  "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
                  "split": {"val_ratio": 0.2, "holdout_ratio": 0.1, "calibration_ratio": 0.15,
@@ -661,7 +661,11 @@ def test_a_spatial_split_records_raster_content_identity(tmp_path: Path):
 
 
 def test_train_emits_val_loss_with_autoval(tmp_path: Path):
-    images_dir, _ = _detection_dataset(tmp_path / "ds")
+    from tests._chain_fixtures import BLOB_BUILDER, training_config
+    from tests._producer_fixtures import seed_labeled_images
+
+    images_dir = seed_labeled_images(tmp_path / "ds" / "images" / UNDATED_BUCKET, _BUD, n=8,
+                                     width=IMG, height=IMG)
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
@@ -673,20 +677,7 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
     train_loader = DataLoader(train_ds, batch_size=2, collate_fn=task_collate("detection"))
     val_loader = DataLoader(val_ds, batch_size=2, collate_fn=task_collate("detection"))
 
-    cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"min_size": IMG, "max_size": IMG * 2},
-                         "task": "detection"},
-        "data": data_cfg,
-        "device": "cpu",
-        "stages": [{"freeze_to": -1, "epochs": 1}],
-        "mixed_precision": False,
-        "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
-        "early_stopping": {"enabled": False},
-        # An untrained toy detector scores no objective; its validation loss is what ranks.
-        "evaluation": {"selection_metric": "loss"},
-    }
-    run = trainer_run(cfg, tmp_path / "out", project=tmp_path,
+    run = trainer_run(training_config(BLOB_BUILDER, data_cfg), tmp_path / "out", project=tmp_path,
                       has_val_loader=val_loader is not None, id="auto-run-77")
     run = train(run, train_loader, val_loader=val_loader)
 

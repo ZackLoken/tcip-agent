@@ -118,10 +118,9 @@ def test_status_error_names_a_diverged_run_reason(tmp_path):
     compare_experiments surfaces as status_error; a run with no final status carries none."""
     from tcip_mcp.experiments import observe
     from tests.test_lifecycle_wiring import _stock_run
+    from tests.tiny_trainer_fixtures import ALWAYS_DIVERGED_MODEL
 
-    run_dir = _stock_run(
-        tmp_path, {"builder": "tests.tiny_trainer_fixtures:build_always_diverged_model"}, 3,
-        "exp-diverged-cmp")
+    run_dir = _stock_run(tmp_path, ALWAYS_DIVERGED_MODEL, 3, "exp-diverged-cmp")
     assert "2 consecutive full training passes" in observe(run_dir).final["status_error"]
     _opened(tmp_path, "exp-healthy-cmp")
 

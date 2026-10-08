@@ -347,14 +347,16 @@ class FixedMaskSegmenter(_OneConvDetector):
     scored 0.9 and a mask of ones filling that box, so every pass carries a real mask."""
 
     def forward(self, images, targets=None):
+        from tests._producer_fixtures import painted_array
+
         if self.training:
             return self.zero_loss(images)
         results = []
         for im in images:
             h, w = int(im.shape[-2]), int(im.shape[-1])
             y0, y1, x0, x1 = h // 4, 3 * h // 4, w // 4, 3 * w // 4
-            mask = torch.zeros((1, 1, h, w))
-            mask[..., y0:y1, x0:x1] = 1.0
+            mask = torch.as_tensor(painted_array(w, h, [((x0, y0, x1, y1), 1.0)],
+                                                 background=0.0, mode="F"))[None, None]
             results.append({"boxes": torch.tensor([[x0, y0, x1, y1]], dtype=torch.float32),
                             "scores": torch.tensor([0.9]), "labels": torch.tensor([1]),
                             "masks": mask})
@@ -517,19 +519,22 @@ def build_bright_region_detector(*, in_chans: int = 3, num_classes: int = 1, bri
 
 class BrightBlobDetector(nn.Module):
     """One detection per connected bright blob of a frame, labeled the one subject and scored by
-    the fraction of the frame the blob covers, with the blob's own soft mask when ``with_masks``.
-    A blob is bright where the band mean exceeds 0.5; with ``attributes`` (the count of attributes
-    it is built at) it is bright where one band exceeds 0.5, and carries that band's index as its
-    first attribute's id and 0 for every other. Every forward records each input's channel count
-    in ``seen_channels`` and its per-band peak value in ``seen_band_peaks``."""
+    a learned confidence (0.5 untrained) plus the fraction of the frame the blob covers, capped
+    at 1, with the blob's own soft mask when ``with_masks``. A blob is bright where the band mean
+    exceeds 0.5; with ``attributes`` (the count of attributes it is built at) it is bright where
+    one band exceeds 0.5, and carries that band's index as its first attribute's id and 0 for
+    every other. A training step's loss is the squared distance of the confidence from each
+    frame's label presence (one when it holds a labeled object, zero when not). Every inference
+    forward records each input's channel count in ``seen_channels`` and its per-band peak value
+    in ``seen_band_peaks``."""
 
     def __init__(self, in_chans: int = 3, with_masks: bool = False, attributes: int = 0) -> None:
         super().__init__()
-        self.conv = nn.Conv2d(in_chans, 1, 1)
+        self.logit = nn.Parameter(torch.tensor([0.0]))
         self.with_masks = with_masks
         self.attributes = attributes
         self.score_thresh = 0.0
-        self.nms_thresh = 0.45  # the builder's own in-model NMS, which inference never sets
+        self.nms_thresh = 0.45  # never applied here; a sentinel a pass must leave unchanged
         self.seen_channels: list[int] = []
         self.seen_band_peaks: list[list[float]] = []
 
@@ -537,8 +542,11 @@ class BrightBlobDetector(nn.Module):
         import cv2
         import numpy as np
 
-        if self.training:
-            return {"loss": sum(self.conv(im.unsqueeze(0)).sum() for im in images) * 0.0}
+        confidence = torch.sigmoid(self.logit)
+        if self.training and targets is not None:
+            present = torch.tensor([1.0 if len(t.get("boxes", [])) else 0.0 for t in targets])
+            return {"loss": ((confidence - present.to(confidence.device)) ** 2).mean()}
+        reported = float(confidence.detach())
         results = []
         for image in images:
             self.seen_channels.append(int(image.shape[0]))
@@ -553,7 +561,7 @@ class BrightBlobDetector(nn.Module):
                 for k in range(1, n):
                     x, y, bw, bh, area = (int(v) for v in stats[k])
                     boxes.append([float(x), float(y), float(x + bw), float(y + bh)])
-                    scores.append(min(1.0, 0.5 + area / float(h * w)))
+                    scores.append(min(1.0, reported + area / float(h * w)))
                     masks.append(torch.from_numpy((labels == k).astype(np.float32))[None])
                     values.append(value)
             out = {"boxes": torch.tensor(boxes, dtype=torch.float32).reshape(-1, 4),

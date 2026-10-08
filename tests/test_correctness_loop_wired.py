@@ -12,6 +12,8 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 import pytest
 
+from tests._chain_fixtures import BESPOKE_CLASSIFIER, BESPOKE_SEMANTIC_SEG
+
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
@@ -97,6 +99,10 @@ def _admitted_tree(tmp_path):
         label_image(imgs / f"{stem}.png", [Annotation(subject="leaf", geometry=BBox(2, 2, 10, 10))],
                     32, 32, keep_empty=True)
     return imgs
+
+
+TASK_MODEL = f"{__name__}:_bespoke_task_model"
+"""The ``model_source`` builder of :func:`_bespoke_task_model`."""
 
 
 def _bespoke_task_model(**_kwargs):
@@ -196,12 +202,11 @@ def test_preflight_smoke_blocks_broken_builder(tmp_path, monkeypatch):
 def test_preflight_smoke_passes_valid_builder(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     imgs = _admitted_tree(tmp_path)
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"min_size": 64, "max_size": 128},
-                         "task": "detection"},
+        "model_source": dict(BUILT_DETECTOR),
         "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"},
                  "split": {"seed": 0, "val_ratio": 0.15}},
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
@@ -227,7 +232,7 @@ def test_preflight_builds_and_smokes_at_the_count_the_run_resolved(tmp_path, mon
 
     images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_semantic_seg",
+        "model_source": {"builder": BESPOKE_SEMANTIC_SEG,
                          "task": "semantic_seg"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
                  "split": {"seed": 0, "val_ratio": 0.15}},
@@ -259,7 +264,7 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(tmp_path, monk
             masks_dir / f"{stem}.png"
         )
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_semantic_seg",
+        "model_source": {"builder": BESPOKE_SEMANTIC_SEG,
                          "task": "semantic_seg"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
                  "split": {"seed": 0, "val_ratio": 0.15}},
@@ -294,7 +299,7 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
 
     imgs = _admitted_tree(tmp_path)
     cfg = {
-        "model_source": {"builder": f"{__name__}:_bespoke_task_model",
+        "model_source": {"builder": TASK_MODEL,
                          "task": "bunch_compactness"},
         "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"},
                  "split": {"seed": 0, "val_ratio": 0.15},
@@ -344,7 +349,7 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
 
     imgs = _admitted_tree(tmp_path)
     cfg = {  # structurally valid, but the dataset cannot produce an item
-        "model_source": {"builder": f"{__name__}:_bespoke_task_model",
+        "model_source": {"builder": TASK_MODEL,
                          "task": "bunch_compactness"},
         "data": {"images_dir": str(imgs), "scope": {"subject": "leaf"},
                  "split": {"seed": 0, "val_ratio": 0.15},
@@ -374,7 +379,7 @@ def _ctx_for(project, task: str, builder: str, data: dict):
 def test_ctx_check_contract_and_overfit_check(tmp_path):
     """The model is built and smoked at what the run recorded: its own width and class count, the
     sizes its loaders were built at."""
-    ctx = _ctx_for(tmp_path, "classification", "tests.bespoke_models:build_bespoke_classifier",
+    ctx = _ctx_for(tmp_path, "classification", BESPOKE_CLASSIFIER,
                    data={"num_channels": 3, "num_classes": 2})
     report = ctx.check_contract()
     assert report["ok"], report["issues"]
@@ -409,7 +414,7 @@ def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(tmp_path,
     data = {"images_dir": str(imgs), "labels_dir": str(table), "num_classes": 3,
             "split": {"seed": 0, "val_ratio": 0.15},
             "dataset_source": {"builder": f"{__name__}:_bespoke_classification_dataset"}}
-    config = {"model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
+    config = {"model_source": {"builder": BESPOKE_CLASSIFIER,
                                "task": "classification"},
               "device": "cpu", "data": data}
     train_ds, _val_ds, _partition = auto_train_val(tmp_path, "classification", data, None)
@@ -432,7 +437,7 @@ def test_ctx_refuses_a_classification_run_recording_no_class_count(tmp_path):
     """A classification run recording no class count is refused by name by both proofs: a batch
     shaped at a count nobody resolved would prove the model against a class space the run does
     not train in."""
-    ctx = _ctx_for(tmp_path, "classification", f"{__name__}:_bespoke_task_model",
+    ctx = _ctx_for(tmp_path, "classification", TASK_MODEL,
                    data={"num_channels": 3})
 
     with pytest.raises(ValueError, match="records no num_classes"):

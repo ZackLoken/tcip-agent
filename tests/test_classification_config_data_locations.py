@@ -11,6 +11,7 @@ import pytest
 
 pytest.importorskip("torch")
 
+from tests._chain_fixtures import BESPOKE_DETECTION  # noqa: E402
 from tests._verified_checkpoint_fixtures import run_to_end  # noqa: E402
 
 
@@ -23,21 +24,18 @@ def test_a_classification_config_launches_with_images_and_csv_only(
     import os
 
     from tcip_mcp.tools.training_tools import launch_training
-    from tests.tiny_trainer_fixtures import write_regression_dataset
+    from tests._chain_fixtures import training_config
+    from tests.tiny_trainer_fixtures import MEAN_INTENSITY_CLASSIFIER, write_regression_dataset
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
     images_dir, csv_path = write_regression_dataset(
         tmp_path / "ds", intensities=[0.1, 0.9] * 4, values=[0, 1] * 4)
-    cfg = {
-        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_classifier",
-                         "task": "classification"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path),
-                 "split": {"seed": 0, "val_ratio": 0.15}},
-        "batch_size": 4, "stages": [{"freeze_to": 0, "epochs": 1}],
-        "mixed_precision": False, "device": "cpu",
-        "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
-    }
+    cfg = training_config(
+        {"builder": MEAN_INTENSITY_CLASSIFIER, "task": "classification"},
+        {"images_dir": str(images_dir), "labels_dir": str(csv_path),
+         "split": {"seed": 0, "val_ratio": 0.15}},
+        batch_size=4, stages=[{"freeze_to": 0, "epochs": 1}], checkpoint_every_n_epochs=0)
 
     res = launch_training(tmp_path, cfg, actor=None)
 
@@ -49,12 +47,12 @@ def test_a_classification_config_launches_with_images_and_csv_only(
 
 def test_a_classification_config_naming_a_missing_csv_is_refused_by_name(tmp_path: Path) -> None:
     from tcip_mcp.tools.training_tools import preflight_config
+    from tests.tiny_trainer_fixtures import MEAN_INTENSITY_CLASSIFIER
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     cfg = {
-        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_classifier",
-                         "task": "classification"},
+        "model_source": {"builder": MEAN_INTENSITY_CLASSIFIER, "task": "classification"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(tmp_path / "gone.csv")},
     }
 
@@ -71,7 +69,7 @@ def test_a_detection_config_names_its_images_alone(tmp_path: Path) -> None:
 
     scope = {"subject": "bud"}
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "builder_kwargs": {}, "task": "detection"},
         "data": {**detection_images(tmp_path / "ds", scope), "scope": scope,
                  "split": {"seed": 0, "val_ratio": 0.15}},

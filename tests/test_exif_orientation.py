@@ -1,12 +1,12 @@
 """EXIF-orientation regression: the training loader must read the same upright frame the
 labels are authored in (and that ``get_image_dimensions`` / the GUI / eval already use).
 
-Every Valley_Farm JPEG is EXIF Orientation 6 (raw 5712×4284 stored, 4284×5712 upright).
-Labels are normalized in the *upright* frame. If ``load_image`` ever returns the raw
-sensor frame while ``get_image_dimensions`` returns the upright one, the loader
-denormalizes upright coords against raw ``(w, h)`` and scatters every box, with in-loop
-mAP blind to it (raw-vs-raw). These tests assert the frames are one, by construction and
-spatially, through the real dataset classes.
+A JPEG tagged EXIF Orientation 6 stores its sensor frame rotated from the upright one, and a
+label document records its pixel boxes and its width and height in the upright frame. If
+``load_image`` ever returns the raw sensor frame while ``get_image_dimensions`` returns the
+upright one, the loader reads upright boxes against a raw ``(w, h)`` and scatters every box,
+with in-loop mAP blind to it (raw-vs-raw). These tests assert the frames are one, by
+construction and spatially, through the real dataset classes.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PIL import Image, ImageDraw
+from PIL import Image
 
 pytest.importorskip("torch")
 import torch  # noqa: E402
@@ -26,7 +26,7 @@ from tests._producer_fixtures import dataset_over  # noqa: E402
 
 # --------------------------------------------------------------------------
 # Fixture: an Orientation-6 JPEG whose upright frame carries a known red marker,
-# plus a YOLO label normalized in that upright frame.
+# plus a label document holding the marker's pixel box in that upright frame.
 # --------------------------------------------------------------------------
 
 UP_W, UP_H = 80, 120  # upright is portrait (taller than wide), like a rotated bud bush
@@ -41,19 +41,18 @@ def _make_orient6_dataset(tmp_path: Path) -> tuple[Path, tuple[int, int, int, in
     """
     from tcip_annotation.state import Annotation, BBox
 
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import label_image, painted_frame
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
 
-    up = Image.new("RGB", (UP_W, UP_H), (0, 0, 0))
-    ImageDraw.Draw(up).rectangle(list(MARKER), fill=(255, 0, 0))
+    x1, y1, x2, y2 = MARKER
+    up = painted_frame(UP_W, UP_H, (0, 0, 0), [((x1, y1, x2 + 1, y2 + 1), (255, 0, 0))])
     raw = up.rotate(90, expand=True)  # stored sensor frame (landscape)
     exif = raw.getexif()
     exif[274] = 6  # Orientation
     raw.save(images_dir / "m.jpg", format="JPEG", exif=exif, quality=95)
 
-    x1, y1, x2, y2 = MARKER  # already pixel xyxy in the upright frame
     label_image(images_dir / "m.jpg", [Annotation(subject="bud", geometry=BBox(x1, y1, x2, y2))],
                 UP_W, UP_H)
     return images_dir, MARKER
@@ -96,7 +95,7 @@ def test_load_image_frame_matches_get_image_dimensions(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------
-# 3. Spatial: a round-tripped YOLO box overlays the object in the real training loader.
+# 3. Spatial: the label document's pixel box overlays the object in the real training loader.
 # --------------------------------------------------------------------------
 
 def test_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
@@ -108,7 +107,7 @@ def test_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
     assert img_t.shape[1:] == (UP_H, UP_W)  # [C, H, W] upright, not the raw sensor frame
     box = target["boxes"][0]
     x1, y1, x2, y2 = (int(v) for v in box.tolist())
-    # The denormalized box must bound the red marker in the frame the model actually sees.
+    # The loaded box must bound the red marker in the frame the model actually sees.
     inside = _red_fraction(img_t[0, y1:y2, x1:x2], img_t[1, y1:y2, x1:x2])
     assert inside > 0.5, (
         f"box ({x1},{y1},{x2},{y2}) does not cover the marker (red_frac={inside:.2f})"

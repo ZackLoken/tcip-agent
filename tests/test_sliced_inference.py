@@ -40,10 +40,10 @@ def _checkpoint(tmp_path: Path, *, in_chans: int = 3, with_masks: bool = False,
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.tools.model_tools import register_model
+    from tests._chain_fixtures import BLOB_BUILDER
 
     task = "instance_seg" if with_masks else "detection"
-    model_source = {"builder": "tests.bespoke_models:build_bright_blob_detector",
-                    "builder_kwargs": {"with_masks": with_masks}, "task": task}
+    model_source = {**BLOB_BUILDER, "builder_kwargs": {"with_masks": with_masks}, "task": task}
     ckpt = tmp_path / "model_best.pt"
     scope = {"subject": "bud", "attributes": [COLOR] if by_band else []}
     data_cfg = {"num_channels": in_chans, "scope": scope,
@@ -58,10 +58,12 @@ def _checkpoint(tmp_path: Path, *, in_chans: int = 3, with_masks: bool = False,
 
 
 def _frame(bands: int = 3, *, value=255, blobs=BLOBS) -> np.ndarray:
-    arr = np.zeros((FRAME, FRAME, bands), dtype=np.uint8)
-    for x0, y0, x1, y1 in blobs:
-        arr[y0:y1, x0:x1] = value
-    return arr
+    """A black ``bands``-band frame holding each of ``blobs`` at ``value`` (one per band, or one
+    for every band)."""
+    from tests._producer_fixtures import painted_array
+
+    return np.stack([painted_array(FRAME, FRAME, [(b, int(v)) for b in blobs])
+                     for v in np.broadcast_to(np.asarray(value), (bands,))], axis=-1)
 
 
 def _pass(checkpoint, **stated):
@@ -169,12 +171,10 @@ def test_instance_masks_merged_across_a_seam_are_one_polygon_per_object_whatever
     slice's partial masks merge into one polygon spanning the whole object, carrying one value of
     its attribute, since the merge compares the one subject and never its attribute values."""
     _path, checkpoint = _checkpoint(tmp_path, with_masks=True, by_band=True)
-    arr = np.zeros((FRAME, FRAME, 3), dtype=np.uint8)
     x0, y0, x1, y1 = WIDE_BLOB
-    arr[y0:y1, x0:x1, 0] = 255
-    arr[y0:y1, x0:x1, 1] = 255
 
-    result = _sliced(_pass(checkpoint), _png(tmp_path, arr))
+    result = _sliced(_pass(checkpoint), _png(tmp_path, _frame(value=(255, 255, 0),
+                                                             blobs=(WIDE_BLOB,))))
 
     assert result["labels"] == [1]
     assert result["attributes"][0][0] in (0, 1)
@@ -397,14 +397,10 @@ def _blob_capture(project: Path) -> Path:
     raw.mkdir()
     labels = {}
     for i in range(N_CALIBRATION_IMAGES):
-        arr = np.zeros((FRAME, FRAME, 3), dtype=np.uint8)
-        boxes = []
-        for y0 in (20, 80, 140):
-            for col in range(4):
-                x0 = 40 + col * 22 + i
-                arr[y0:y0 + 20, x0:x0 + 20] = 255
-                boxes.append(BBox(x0 - 6, y0 - 6, x0 + 26, y0 + 26))
-        _png(raw, arr, f"img{i:02d}.png")
+        corners = [(40 + col * 22 + i, y0) for y0 in (20, 80, 140) for col in range(4)]
+        boxes = [BBox(x0 - 6, y0 - 6, x0 + 26, y0 + 26) for x0, y0 in corners]
+        _png(raw, _frame(blobs=[(x0, y0, x0 + 20, y0 + 20) for x0, y0 in corners]),
+             f"img{i:02d}.png")
         labels[f"img{i:02d}.png"] = [Annotation(subject="bud", geometry=b) for b in boxes]
     ingested = ingest_images(root, source=str(raw), date_from=date)
     assert "error" not in ingested, ingested

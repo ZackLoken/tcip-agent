@@ -100,20 +100,12 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
     ds, data = run_over("detection", str(images_dir), subject="bud")
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
-    model_source = {
-        "builder": "tests.bespoke_models:build_bespoke_detection",
-        "builder_kwargs": {"detector": "fcos", "min_size": 64, "max_size": 128},
-        "task": "detection",
-    }
-    cfg = {
-        "model_source": model_source, "data": data, "device": "cpu",
-        "stages": [{"freeze_to": -1, "epochs": 1}],
-        "mixed_precision": False,
-        "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
-        "early_stopping": {"enabled": False},
-        # No val_loader below: loss is the only metric coherent to select on without one.
-        "evaluation": {"selection_metric": "loss"},
-    }
+    from tests._chain_fixtures import ADAMW, training_config
+    from tests._verified_checkpoint_fixtures import built_detector
+
+    # No val_loader below: loss is the only metric coherent to select on without one.
+    cfg = training_config(built_detector(detector="fcos"), data, optimizer=ADAMW,
+                          evaluation={"selection_metric": "loss"})
     run = trainer_run(
         cfg, tmp_path / "out", has_val_loader=False, id="auto-run-8", project=tmp_path
     )

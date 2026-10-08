@@ -6,6 +6,7 @@ import pytest
 torch = pytest.importorskip("torch")
 from PIL import Image  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
+from tests._chain_fixtures import BESPOKE_CLASSIFIER  # noqa: E402
 from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
 
 
@@ -59,11 +60,9 @@ def test_grayscale_classification_end_to_end(tmp_path):
     ds, data = run_over("classification", str(images_dir), str(tmp_path / "labels.csv"),
                         stated={"num_channels": 1})
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_classifier",
-                    "task": "classification"}
-    cfg = {"model_source": model_source, "data": data, "device": "cpu",
-           "stages": [{"freeze_to": -1, "epochs": 1}],
-           "mixed_precision": False, "early_stopping": {"enabled": False}}
+    from tests._chain_fixtures import training_config
+
+    cfg = training_config({"builder": BESPOKE_CLASSIFIER, "task": "classification"}, data)
     run = train(trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
                             id="auto-run-39"),
                 loader)

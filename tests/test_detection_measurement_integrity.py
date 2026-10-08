@@ -177,15 +177,11 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, 
     """The door measures at the width the checkpoint reads at, and a checkpoint recording none
     stops it where the predictor refuses rather than sizing the loader off the references."""
     from tcip_mcp.tools.training_tools import evaluate_model
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._verified_checkpoint_fixtures import ONE_BAND_DETECTOR, registered_checkpoint
 
     images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)  # three-band sources
     scope = {"subject": "bud"}
-    one_band = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                "builder_kwargs": {"min_size": 64, "max_size": 128,
-                                   "image_mean": [0.4], "image_std": [0.2]},
-                "task": "detection"}
-    ckpt = registered_checkpoint(tmp_path, model_source=one_band,
+    ckpt = registered_checkpoint(tmp_path, model_source=ONE_BAND_DETECTOR,
                                  data={"num_channels": 1, "scope": scope})
 
     captured = _capture_run_test_evaluation(monkeypatch)
@@ -253,17 +249,13 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     from tcip_mcp.pipelines.model_build import STATE_DICT_KEY
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
     from tcip_mcp.tools.training_tools import evaluate_model
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._verified_checkpoint_fixtures import built_detector, registered_checkpoint
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
     for i in range(2):
         Image.new("RGB", (128, 128), color=(120, 120, 120)).save(images_dir / f"img{i}.png")
-    declares_its_point = {
-        "builder": "tests.bespoke_models:build_bespoke_detection",
-        "builder_kwargs": {"min_size": 64, "max_size": 128, "box_score_thresh": 0.6},
-        "task": "detection",
-    }
+    declares_its_point = built_detector(box_score_thresh=0.6)
     # This seed's weights score just above 0.5, so the declared floor of 0.6 excludes every
     # detection and a substituted floor of 0.5 or 0.0 would not.
     ckpt = registered_checkpoint(tmp_path, model_source=declares_its_point, seed=0)
@@ -513,6 +505,8 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
     from tcip_mcp.experiments import run_resolution
     import tcip_mcp.pipelines.training.generic_trainer as gt
     from tcip_mcp.tools import training_tools
+    from tests._chain_fixtures import BLOB_BUILDER
+    from tests._producer_fixtures import small_detection_config
     from tests._verified_checkpoint_fixtures import run_to_end
 
     def _poison_train(*a, **k):
@@ -526,19 +520,9 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
 
-    cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"min_size": 64, "max_size": 128},
-                         "task": "detection"},
-        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
-                 "split": {"seed": 0, "val_ratio": 0.15},
-                 # no tile_size: the effective default must be persisted
-                 "tiling": {"enabled": True, "sliver_frac": 0.5}},
-        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-        "mixed_precision": False, "device": "cpu",
-        # An untrained toy detector scores no objective; its validation loss is what ranks.
-        "evaluation": {"selection_metric": "loss"},
-    }
+    cfg = small_detection_config(images_dir, BLOB_BUILDER)
+    # no tile_size: the effective default must be persisted
+    cfg["data"]["tiling"] = {"enabled": True, "sliver_frac": 0.5}
     res = training_tools.launch_training(tmp_path, cfg, actor=None)
     assert res["pid"] != os.getpid()  # a different OS process, not this one
     eid = res["experiment_id"]

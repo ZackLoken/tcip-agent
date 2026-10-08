@@ -190,11 +190,12 @@ def real_hpo_base_config(tmp_path: Path) -> dict:
     """A base config the sweep door's own preflight admits: an importable builder and a data
     section over two labeled frames of its subject (``_verified_checkpoint_fixtures.
     detection_images``), drawn at seed 0."""
+    from tests._chain_fixtures import BESPOKE_DETECTION
     from tests._verified_checkpoint_fixtures import detection_images
 
     scope = {"subject": DATA_DIR_SUBJECT}
     return {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "builder_kwargs": {}, "task": "detection"},
         "data": {**detection_images(tmp_path / "hpo-data", scope), "scope": scope,
                  "split": {"seed": 0, "val_ratio": 0.15}},

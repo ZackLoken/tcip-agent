@@ -25,7 +25,7 @@ def _context(tmp_path, **kwargs) -> tuple[TrainContext, Path]:
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
-    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data", device="cpu"))
+    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
     return TrainContext(run=observed_run(observe(run_dir)), train_loader=None, **kwargs), run_dir
 
 

@@ -5,7 +5,8 @@ predictor's detection record carries them as polygons, ``encode_predictions`` co
 from __future__ import annotations
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
-from tests._producer_fixtures import checkpoint_admission, gray_frame
+from tests._chain_fixtures import BESPOKE_INSTANCE_SEG
+from tests._producer_fixtures import checkpoint_admission, gray_frame, painted_array
 
 from pathlib import Path
 
@@ -134,7 +135,7 @@ def instance_seg_ckpt(tmp_path_factory) -> str:
     untiled instead, see ``resolve_tile_geometry``)."""
     from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
 
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_instance_seg",
+    model_source = {"builder": BESPOKE_INSTANCE_SEG,
                     "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
                     "task": "instance_seg"}
     config = {"model_source": model_source,
@@ -361,8 +362,7 @@ def _mask_record(mask: np.ndarray) -> dict:
 def test_export_single_component_mask_writes_polygon():
     from tcip_annotation.state import Polygon
 
-    mask = np.zeros((32, 32), dtype=np.float32)
-    mask[5:20, 5:20] = 0.9
+    mask = painted_array(32, 32, [((5, 5, 20, 20), 0.9)], background=0.0, mode="F")
     result = {
         "image": "img.jpg", "width": 32, "height": 32,
         "boxes": [[5.0, 5.0, 19.0, 19.0]], "scores": [0.9], "labels": [1],
@@ -377,8 +377,7 @@ def test_export_single_component_mask_writes_polygon():
 def test_export_does_not_pollute_annotation_attributes_with_binarize_threshold(tmp_path):
     """Under a scope declaring no attribute, an exported mask annotation carries no attributes:
     the binarize threshold never lands in ``Annotation.attributes``."""
-    mask = np.zeros((32, 32), dtype=np.float32)
-    mask[5:20, 5:20] = 0.9
+    mask = painted_array(32, 32, [((5, 5, 20, 20), 0.9)], background=0.0, mode="F")
     result = {
         "image": "img.jpg", "width": 32, "height": 32,
         "boxes": [[5.0, 5.0, 19.0, 19.0]], "scores": [0.9], "labels": [1],
@@ -394,9 +393,8 @@ def test_export_multi_component_mask_writes_multi_ring_polygon(tmp_path):
     the shape entirely."""
     from tcip_annotation.state import Polygon
 
-    mask = np.zeros((64, 64), dtype=np.float32)
-    mask[5:15, 5:15] = 0.9
-    mask[40:55, 40:55] = 0.9
+    mask = painted_array(64, 64, [((5, 5, 15, 15), 0.9), ((40, 40, 55, 55), 0.9)],
+                         background=0.0, mode="F")
     result = {
         "image": "img.jpg", "width": 64, "height": 64,
         "boxes": [[5.0, 5.0, 54.0, 54.0]], "scores": [0.9], "labels": [1],

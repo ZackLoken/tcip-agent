@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._chain_fixtures import BESPOKE_CLASSIFIER
+
 torch = pytest.importorskip("torch")
 import numpy as np  # noqa: E402
 
@@ -69,21 +71,15 @@ def _classification_data(tmp_path: Path, n: int = 6):
 
 
 def _model_source():
-    return {"builder": "tests.bespoke_models:build_bespoke_classifier", "task": "classification"}
+    return {"builder": BESPOKE_CLASSIFIER, "task": "classification"}
 
 
 def _cfg(stages, **extra):
-    cfg = {
-        "model_source": _model_source(),
-        # The sizes and empty scope _classification_data's RGB, two-label table records.
-        "data": {"num_channels": 3, "num_classes": 2, "scope": {}},
-        "device": "cpu", "stages": stages,
-        "mixed_precision": False,
-        "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
-        "early_stopping": {"enabled": False}, "checkpoint_every_n_epochs": 1,
-    }
-    cfg.update(extra)
-    return cfg
+    from tests._chain_fixtures import ADAMW, training_config
+
+    # The sizes and empty scope _classification_data's RGB, two-label table records.
+    return training_config(_model_source(), {"num_channels": 3, "num_classes": 2, "scope": {}},
+                           stages=stages, optimizer=ADAMW, **extra)
 
 
 def _run(project: Path, cfg: dict, output_dir: str, id: str):

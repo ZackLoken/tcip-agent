@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tests._chain_fixtures import BESPOKE_DETECTION, SAVE_BUILT_WEIGHTS
 
 torch = pytest.importorskip("torch")
 
@@ -20,12 +21,25 @@ SCOPED_DATA = {
 """A three-band detection run's data section, stating the one subject it is scoped to and the
 seed its own draw is made at; the admission reads the attributes the registry declares for it."""
 
-BUILT_DETECTOR = {
-    "builder": "tests.bespoke_models:build_bespoke_detection",
+BUILT_DETECTOR: dict[str, Any] = {
+    "builder": BESPOKE_DETECTION,
     "builder_kwargs": {"min_size": 64, "max_size": 128},
     "task": "detection",
 }
 """A tiny detection builder's ``model_source``."""
+
+
+def built_detector(**builder_kwargs: Any) -> dict:
+    """:data:`BUILT_DETECTOR` with ``builder_kwargs`` laid over its own builder keywords."""
+    return {**BUILT_DETECTOR,
+            "builder_kwargs": {**BUILT_DETECTOR["builder_kwargs"], **builder_kwargs}}
+
+
+ONE_BAND_DETECTOR = built_detector(image_mean=[0.4], image_std=[0.2])
+""":data:`BUILT_DETECTOR` normalizing one band, for a checkpoint whose data records one channel."""
+
+SQUARE_64_DETECTOR = built_detector(max_size=64)
+""":data:`BUILT_DETECTOR` with its resize bounds both at 64 px."""
 
 
 def detection_images(where: Path, scope: dict, *, n: int = 2, polygons: bool = False,
@@ -70,11 +84,16 @@ def table_images(where: Path, *, n: int = 2) -> dict:
     return {"images_dir": str(images_dir), "labels_dir": str(table)}
 
 
-def detection_config(where: Path, **config: Any) -> dict:
-    """A :data:`BUILT_DETECTOR` run's config over two :func:`detection_images` frames under
-    ``where``, scoped as :data:`SCOPED_DATA`, with ``config``'s keys laid over it."""
-    return {"model_source": dict(BUILT_DETECTOR),
-            "data": {**detection_images(where, SCOPED_DATA["scope"]), **SCOPED_DATA}, **config}
+def detection_config(where: Path, *, model_source: dict = BUILT_DETECTOR,
+                     **config: Any) -> dict:
+    """A :func:`~tests._chain_fixtures.training_config` of ``model_source`` (by default
+    :data:`BUILT_DETECTOR`) over two :func:`detection_images` frames under ``where``, scoped as
+    :data:`SCOPED_DATA`, with ``config``'s keys in place of their own."""
+    from tests._chain_fixtures import training_config
+
+    return training_config(
+        model_source, {**detection_images(where, SCOPED_DATA["scope"]), **SCOPED_DATA},
+        **config)
 
 
 def fixture_data_dir(root: str | Path, name: str) -> Path:
@@ -153,7 +172,7 @@ def finished_run(
     data: dict | None = None,
     metrics: dict | None = None,
     rows: list[dict] | None = None,
-    training_source: str = "tests.bespoke_models:save_built_weights",
+    training_source: str = SAVE_BUILT_WEIGHTS,
     wall_clock_passed: bool = False,
     cancel_requested: bool = False,
     seed: int | None = None,

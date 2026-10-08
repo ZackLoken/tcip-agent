@@ -11,19 +11,14 @@ torch = pytest.importorskip("torch")
 torchvision = pytest.importorskip("torchvision")
 
 from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
-from tests._verified_checkpoint_fixtures import register_checkpoint  # noqa: E402
+from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, register_checkpoint  # noqa: E402
 
 
 def _bespoke_checkpoint(path: Path) -> str:
     """A real, unpicklable tcip checkpoint at path, the platform's own producer's shape."""
     from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
 
-    model_source = {
-        "builder": "tests.bespoke_models:build_bespoke_detection",
-        "builder_kwargs": {"min_size": 64, "max_size": 128},
-        "task": "detection",
-    }
-    config = {"model_source": model_source,
+    config = {"model_source": dict(BUILT_DETECTOR),
               "data": {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}}}
     payload = {
         CONFIG_KEY: config,

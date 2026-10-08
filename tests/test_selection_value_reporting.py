@@ -12,40 +12,27 @@ from __future__ import annotations
 import pytest
 
 torch = pytest.importorskip("torch")
-from torch.utils.data import DataLoader
 
 from tcip_mcp.pipelines.model_build import METRICS_KEY
 from tcip_mcp.pipelines.training.generic_trainer import train
-from tcip_mcp.pipelines.training.collation import task_collate
 from tests.tiny_trainer_fixtures import (
-    ConstantImageDataset,
+    classifier_config,
     opposed_regression_loaders,
+    regressor_config,
+    separable_classifier_loaders,
     trainer_run,
     write_regression_dataset,
 )
-
-BUILDER = "tests.tiny_trainer_fixtures:build_mean_intensity_regressor"
-CLASSIFIER_BUILDER = "tests.tiny_trainer_fixtures:build_mean_intensity_classifier"
 
 TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
 VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
 
 
 def _config(evaluation: dict | None = None) -> dict:
-    config = {
-        "model_source": {"builder": BUILDER, "builder_kwargs": {"init_weight": 0.0},
-                         "task": "regression"},
-        "data": {"num_channels": 1, "scope": {}, "split": {"seed": 1, "val_ratio": 0.15}},
-        "device": "cpu",
-        "mixed_precision": False,
-        "stages": [{"freeze_to": 0, "epochs": 3}],
-        "optimizer": {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0},
-        "checkpoint_every_n_epochs": 0,
-        "early_stopping": {"enabled": False},
-    }
-    if evaluation is not None:
-        config["evaluation"] = evaluation
-    return config
+    return regressor_config(
+        3, builder_kwargs={"init_weight": 0.0},
+        data={"num_channels": 1, "scope": {}, "split": {"seed": 1, "val_ratio": 0.15}},
+        **({"evaluation": evaluation} if evaluation is not None else {}))
 
 
 def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(tmp_path):
@@ -143,26 +130,9 @@ def test_epoch_record_follows_a_configured_selection_metric(tmp_path):
 
 def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(tmp_path):
     """``f1`` is higher-is-better; model_best.pt must hold the epoch with the highest val f1,
-    not the lowest, and early stopping must track improvement in the same direction."""
-    train_ds = ConstantImageDataset(
-        [-2.0, -1.5, -1.0, 1.0, 1.5, 2.0], [0, 0, 0, 1, 1, 1], key="labels", cast=int)
-    val_ds = ConstantImageDataset([-1.8, -0.4, 0.4, 1.8], [0, 0, 1, 1], key="labels", cast=int)
-    collate = task_collate("classification")
-    train_loader = DataLoader(train_ds, batch_size=3, collate_fn=collate)
-    val_loader = DataLoader(val_ds, batch_size=4, collate_fn=collate)
-
-    config = {
-        "model_source": {"builder": CLASSIFIER_BUILDER, "builder_kwargs": {"init_weight": -1.0},
-                         "task": "classification"},
-        "data": {"num_channels": 1, "num_classes": 2, "scope": {}},
-        "device": "cpu",
-        "mixed_precision": False,
-        "stages": [{"freeze_to": 0, "epochs": 5}],
-        "optimizer": {"name": "adamw", "backbone_lr": 0.2, "head_lr": 0.2, "weight_decay": 0.0},
-        "checkpoint_every_n_epochs": 0,
-        "early_stopping": {"enabled": False},
-        "evaluation": {"selection_metric": "f1"},
-    }
+    not the lowest."""
+    train_loader, val_loader = separable_classifier_loaders()
+    config = classifier_config(5, evaluation={"selection_metric": "f1"})
     run = trainer_run(config, tmp_path / "out", project=tmp_path, has_val_loader=True,
                       id="auto-run-65")
     run = train(run, train_loader, val_loader=val_loader)

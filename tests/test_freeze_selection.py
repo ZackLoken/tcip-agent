@@ -23,10 +23,9 @@ from tcip_mcp.pipelines.data.selection import read_selection  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import partition_samples, resolve_run  # noqa: E402
 from tcip_mcp.pipelines.schemas import train_config  # noqa: E402
 
+from tests._chain_fixtures import BESPOKE_DETECTION  # noqa: E402
 from tests._verified_checkpoint_fixtures import opened_run, resolved_run  # noqa: E402
 from tests.test_selection_binding import DATES, SUBJECT, _two_subject_two_date_dataset  # noqa: E402
-
-BUILDER = "tests.bespoke_models:build_bespoke_detection"
 
 
 def _real_drawn_experiment(
@@ -83,7 +82,7 @@ def test_freeze_selection_round_trips_through_a_real_bind(tmp_path: Path):
         assert ts.exists(sample.ground_truth)
 
     second_cfg: dict[str, Any] = {
-        "model_source": {"builder": BUILDER, "task": "detection"},
+        "model_source": {"builder": BESPOKE_DETECTION, "task": "detection"},
         "data": {"split": {"selection_dir": selection_dir}},
     }
     assert selection_compatibility(second_cfg["data"], frozen, selection_dir) == []

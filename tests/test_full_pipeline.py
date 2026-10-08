@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 
 import pytest
+
+from tests._chain_fixtures import BESPOKE_CLASSIFIER
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
@@ -62,7 +64,7 @@ class TestFullClassificationPipeline:
     def test_build_train_infer(self, tiny_classification_data, output_dir, tmp_path):
         # --- Step 1: A bespoke classification model_source ---
         model_source = {
-            "builder": "tests.bespoke_models:build_bespoke_classifier",
+            "builder": BESPOKE_CLASSIFIER,
             "task": "classification",
         }
 
@@ -98,20 +100,12 @@ class TestFullClassificationPipeline:
 
         # --- Step 4: Create run and train 2 epochs ---
         from tcip_mcp.pipelines.training.generic_trainer import train
+        from tests._chain_fixtures import ADAMW, training_config
         from tests.tiny_trainer_fixtures import trainer_run
 
-        config = {
-            "model_source": model_source,
-            "data": data,
-            "device": "cpu",
-            "stages": [{"freeze_to": -1, "epochs": 2}],
-            "mixed_precision": False,
-            "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
-            "scheduler": {"type": "cosine"},
-            "early_stopping": {"enabled": True, "patience": 10, "min_delta": 1e-4},
-            "gradient_accumulation_steps": 1,
-            "checkpoint_every_n_epochs": 1,
-        }
+        config = training_config(
+            model_source, data, stages=[{"freeze_to": -1, "epochs": 2}], optimizer=ADAMW,
+            early_stopping={"enabled": True, "patience": 10, "min_delta": 1e-4})
         run = trainer_run(config, output_dir, project=tmp_path,
                           has_val_loader=val_loader is not None, id="auto-run-32")
 
@@ -200,14 +194,11 @@ class TestDetectionPipelineRealData:
     def test_build_train_infer(self, detection_output_dir, tmp_path):
         from tcip_mcp.pipelines.training.generic_trainer import train
         from tcip_mcp.pipelines.training.collation import task_collate
+        from tests._verified_checkpoint_fixtures import built_detector
         from tests.tiny_trainer_fixtures import trainer_run
 
-        # --- Step 1: A bespoke detection model_source (small input sizes for speed) ---
-        model_source = {
-            "builder": "tests.bespoke_models:build_bespoke_detection",
-            "builder_kwargs": {"min_size": 320, "max_size": 512},
-            "task": "detection",
-        }
+        # --- Step 1: A bespoke detection model_source at the real images' larger input sizes ---
+        model_source = built_detector(min_size=320, max_size=512)
         model = bespoke_models.build_bespoke_detection(num_classes=1, min_size=320, max_size=512)
         assert isinstance(model, bespoke_models.BespokeDetection)
 
@@ -239,19 +230,10 @@ class TestDetectionPipelineRealData:
         )
 
         # --- Step 3: Train 1 epoch ---
-        config = {
-            "model_source": model_source,
-            "data": data,
-            "device": "cpu",
-            "stages": [{"freeze_to": 0, "epochs": 1}],
-            "mixed_precision": False,
-            "optimizer": {"name": "sgd", "backbone_lr": 1e-3, "head_lr": 1e-2, "weight_decay": 0},
-            "scheduler": {"type": "cosine"},
-            "early_stopping": {"enabled": False},
-            "evaluation": {"selection_metric": "loss"},
-            "gradient_accumulation_steps": 1,
-            "checkpoint_every_n_epochs": 1,
-        }
+        from tests._chain_fixtures import training_config
+
+        config = training_config(model_source, data, stages=[{"freeze_to": 0, "epochs": 1}],
+                                 evaluation={"selection_metric": "loss"})
         run = trainer_run(config, detection_output_dir, project=tmp_path, has_val_loader=False,
                           id="auto-run-33")
         completed = train(run, loader, val_loader=None)

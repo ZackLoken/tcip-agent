@@ -20,6 +20,7 @@ from tcip_annotation.state import Annotation, BBox  # noqa: E402
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tests import _trait_fixtures as fx  # noqa: E402
+from tests._chain_fixtures import BESPOKE_DETECTION, SAVE_BUILT_WEIGHTS  # noqa: E402
 from tests._mapping_fixtures import write_plant_csv  # noqa: E402
 from tests._producer_fixtures import image_label_key, label_image  # noqa: E402
 
@@ -56,7 +57,7 @@ def _write_mosaic(path: Path, *, seed: int = 0, georeferenced: bool = False,
     )
 
 
-_BLOCK_MODEL_SOURCE = {"builder": "tests.bespoke_models:build_bespoke_detection",
+_BLOCK_MODEL_SOURCE = {"builder": BESPOKE_DETECTION,
                        "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
                        "task": "detection"}
 
@@ -70,7 +71,7 @@ def _completed_over(project: Path, data_cfg: dict, experiment_id: str) -> dict:
 
     run_dir = worker_run(project, {
         "model_source": _BLOCK_MODEL_SOURCE, "data": data_cfg, "device": "cpu",
-        "training_source": "tests.bespoke_models:save_built_weights",
+        "training_source": SAVE_BUILT_WEIGHTS,
     }, experiment_id=experiment_id)
     observation = observe(run_dir)
     checkpoint = observation.checkpoint

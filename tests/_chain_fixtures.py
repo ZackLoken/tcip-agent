@@ -15,7 +15,25 @@ IMG = 64
 SUBJECT = "bud"
 DATE = "2-11-26"
 STEMS = tuple(f"s{i:02d}" for i in range(40))
-BUILDER = "tests.bespoke_models:build_bright_region_detector"
+BESPOKE_DETECTION = "tests.bespoke_models:build_bespoke_detection"
+"""The torchvision bespoke detector's builder, its sizes left to each caller."""
+BESPOKE_CLASSIFIER = "tests.bespoke_models:build_bespoke_classifier"
+BESPOKE_SEMANTIC_SEG = "tests.bespoke_models:build_bespoke_semantic_seg"
+BESPOKE_INSTANCE_SEG = "tests.bespoke_models:build_bespoke_instance_seg"
+BESPOKE_ORDINAL = "tests.bespoke_models:build_bespoke_ordinal"
+BESPOKE_REGRESSOR = "tests.bespoke_models:build_bespoke_regressor"
+GT_ANCHOR_DETECTOR = "tests.bespoke_models:build_bespoke_detector"
+"""The GroupNorm detector whose anchors come from the ground truth's own box shapes."""
+BARE_SCORE_THRESH_DETECTOR = "tests.bespoke_models:build_bare_score_thresh_detector"
+BARE_NO_KNOB_DETECTOR = "tests.bespoke_models:build_bare_no_knob_detector"
+SAVE_BUILT_WEIGHTS = "tests.bespoke_models:save_built_weights"
+"""A ``training_source`` that takes no step and saves the weights its model was built with."""
+TRAIN_BESPOKE = "tests.bespoke_models:train_bespoke"
+"""A ``training_source`` training through the ``ctx`` sinks."""
+REGION_BUILDER = {"builder": "tests.bespoke_models:build_bright_region_detector",
+                  "builder_kwargs": {}, "task": "detection"}
+BLOB_BUILDER = {"builder": "tests.bespoke_models:build_bright_blob_detector",
+                "builder_kwargs": {}, "task": "detection"}
 
 
 def object_at(index: int) -> tuple[int, int, int]:
@@ -30,20 +48,16 @@ def object_at(index: int) -> tuple[int, int, int]:
 def synthetic_capture(root: Path, *, date: str = DATE) -> Path:
     """Ingest one capture date of dim frames through ``ingest_images``, each holding one bright
     square its label document names; the capture's image directory."""
-    from PIL import Image, ImageDraw
-
     from tcip_mcp.tools.ingest_tools import ingest_images
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import BRIGHT, label_image, painted_frame
 
     raw = root.parent / f"raw-{date}"
     raw.mkdir(parents=True, exist_ok=True)
     for index, stem in enumerate(STEMS):
         x0, y0, size = object_at(index)
         shade = 28 + (index % 7)
-        frame = Image.new("RGB", (IMG, IMG), color=(shade, shade, shade))
-        ImageDraw.Draw(frame).rectangle([x0, y0, x0 + size - 1, y0 + size - 1],
-                                        fill=(230, 230, 230))
-        frame.save(raw / f"{stem}.png")
+        painted_frame(IMG, IMG, (shade, shade, shade),
+                      [((x0, y0, x0 + size, y0 + size), BRIGHT)]).save(raw / f"{stem}.png")
 
     ingested = ingest_images(root, source=str(raw), date_from=date)
     assert "error" not in ingested, ingested
@@ -70,22 +84,36 @@ def draw_reference_selection(project: Path, root: Path, out: Path):
     return read_selection(out, project=project)
 
 
-def run_config(selection_dir: Path) -> dict:
-    """A run that binds the drawn selection rather than drawing a partition of its own."""
+def run_config(selection_dir: Path, model_source: dict = REGION_BUILDER,
+               **overrides: Any) -> dict:
+    """A :func:`training_config` of ``model_source`` with ``overrides`` that binds the drawn
+    selection rather than drawing a partition of its own."""
+    return training_config(model_source, {"split": {"selection_dir": str(selection_dir)}},
+                           **overrides)
+
+
+ADAMW = {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0}
+"""The AdamW optimizer section a caller of :func:`training_config` chooses over its SGD one."""
+
+
+def training_config(model_source: dict, data: dict, **overrides: Any) -> dict:
+    """A one-epoch CPU run of ``model_source`` over the ``data`` section, every other key the
+    toy detectors train at, with a copy of each of ``overrides`` in place of its key."""
+    import copy
+
     return {
-        "model_source": {"builder": BUILDER, "builder_kwargs": {}, "task": "detection"},
-        "data": {"split": {"selection_dir": str(selection_dir)}},
+        "model_source": copy.deepcopy(model_source),
+        "data": data,
         "batch_size": 2,
         "stages": [{"freeze_to": -1, "epochs": 1}],
         "mixed_precision": False,
         "device": "cpu",
         "checkpoint_every_n_epochs": 1,
         "early_stopping": {"enabled": False},
-        # An untrained toy detector scores no objective; its validation loss is what ranks.
-        "evaluation": {"selection_metric": "loss"},
         "optimizer": {"name": "sgd", "backbone_lr": 1e-3, "head_lr": 1e-2, "weight_decay": 0},
         "scheduler": {"type": "cosine"},
         "gradient_accumulation_steps": 1,
+        **copy.deepcopy(overrides),
     }
 
 
@@ -254,8 +282,6 @@ apart."""
 REFERENCE_SITE = (43.20300, -90.05000)
 """Where the labeled reference frames of each date were taken, about 900 m from every plant, so
 the mapping attributes none of them."""
-BLOB_BUILDER = {"builder": "tests.bespoke_models:build_bright_blob_detector",
-                "builder_kwargs": {}, "task": "detection"}
 
 
 def blob_boxes(values: list[str], index: int) -> list[tuple[str, BBox]]:
@@ -271,15 +297,13 @@ def blob_boxes(values: list[str], index: int) -> list[tuple[str, BBox]]:
 
 def blob_frame(values: list[str], index: int):
     """A dim frame holding each blob :func:`blob_boxes` places, bright in its value's band."""
-    from PIL import Image, ImageDraw
+    from tests._producer_fixtures import painted_frame
 
     shade = 20 + (index % 11)
-    frame = Image.new("RGB", (IMG, IMG), color=(shade, shade, shade))
-    draw = ImageDraw.Draw(frame)
-    for value, box in blob_boxes(values, index):
-        color = tuple(230 if band == VALUES.index(value) else 20 for band in range(3))
-        draw.rectangle([box.x1, box.y1, box.x2 - 1, box.y2 - 1], fill=color)
-    return frame
+    return painted_frame(IMG, IMG, (shade, shade, shade), [
+        ((box.x1, box.y1, box.x2, box.y2),
+         tuple(230 if band == VALUES.index(value) else 20 for band in range(3)))
+        for value, box in blob_boxes(values, index)])
 
 
 def write_attributed_registry(*roots: Path, attributes: tuple | None = None) -> None:
@@ -415,8 +439,7 @@ def attributed_series(
                         seed=2, val_ratio=0.2, calibration_ratio=0.2,
                         holdout_ratio=0.2)
     assert "error" not in drawn, drawn
-    config = {**run_config(selection_dir), "model_source": dict(model_source or BLOB_BUILDER),
-              "seed": 2}
+    config = run_config(selection_dir, model_source or BLOB_BUILDER, seed=2)
     from tcip_mcp.experiments import observe
 
     checkpoint = observe(worker_run(project, config, experiment_id=experiment_id)).checkpoint
