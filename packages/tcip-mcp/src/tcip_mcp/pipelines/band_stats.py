@@ -11,12 +11,10 @@ sees on screen, those describe what the model is fed.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Literal, get_args
 
 if TYPE_CHECKING:
-    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.raster_source import WindowSampling
+    from tcip_mcp.pipelines.raster_source import RasterSource, WindowSampling
 
 # The bounds a ``percent_clip`` render stretches between, as percentiles of the band's own values:
 # the display clip the band-composite route offers a viewer.
@@ -209,22 +207,23 @@ def _reservoir_take(reservoir, seen: int, values, size: int, rng):
     return reservoir, seen
 
 
-def sampled_band_ranges(source: "str | Path | BandGroupRef", num_channels: int, *, seed: int,
+def sampled_band_ranges(src: "RasterSource", *, label: str, seed: int,
                         window_size: int, max_windows: int, reservoir_size: int,
                         percentiles: tuple[float, float] = DISPLAY_CLIP_PERCENTILES,
                         ) -> SampledBandRanges:
-    """Per-band display bounds from a seeded sample of ``source``'s pixel windows, in one pass.
+    """Per-band display bounds from a seeded sample of the open reader ``src``'s pixel windows,
+    in one pass, the sampling record naming the source as ``label``.
 
-    Reads through ``raster_source.open_raster``, so a raster far too large to decode whole is
-    described from the windows ``raster_source.sample_windows`` picks and from nothing else. One
-    walk of those windows produces each band's min/max and each band's ``percentiles`` cut points
-    off a bounded reservoir of the pixels walked. The result is a sample's bounds, never the
-    raster's, and says so through its :class:`SampledBandRanges` type and the returned sampling
-    record; :func:`band_ranges` gives the exact range of decoded pixels.
+    A raster far too large to decode whole is described from the windows
+    ``raster_source.sample_windows`` picks and from nothing else. One walk of those windows
+    produces each band's min/max and each band's ``percentiles`` cut points off a bounded
+    reservoir of the pixels walked. The result is a sample's bounds, never the raster's, and
+    says so through its :class:`SampledBandRanges` type and the returned sampling record;
+    :func:`band_ranges` gives the exact range of decoded pixels.
 
     ``seed`` and ``reservoir_size`` are required; the reservoir holds at most ``reservoir_size`` x
-    ``num_channels`` values whatever the raster's size. Two calls with the same seed over the same
-    raster return the same numbers.
+    the reader's channel count values whatever the raster's size. Two calls with the same seed
+    over the same raster return the same numbers.
     """
     import numpy as np
 
@@ -233,27 +232,25 @@ def sampled_band_ranges(source: "str | Path | BandGroupRef", num_channels: int, 
     if reservoir_size <= 0:
         raise ValueError(f"reservoir_size must be positive, got {reservoir_size}")
 
-    with raster_source.open_raster(source, num_channels) as src:
-        windows = raster_source.sample_windows(
-            src.width, src.height, seed=seed, window_size=window_size, max_windows=max_windows)
-        label = str(getattr(source, "manifest_path", source))
-        rng = np.random.default_rng(seed)
-        lows = highs = None
-        reservoir = None
-        seen = 0
-        covered = 0
-        for rect in windows:
-            region = raster_source.hwc_array(src.read_region(rect)[0])
-            flat = region.reshape(-1, region.shape[-1])
-            band_lo = flat.min(axis=0).astype(np.float64)
-            band_hi = flat.max(axis=0).astype(np.float64)
-            lows = band_lo if lows is None else np.minimum(lows, band_lo)
-            highs = band_hi if highs is None else np.maximum(highs, band_hi)
-            reservoir, seen = _reservoir_take(reservoir, seen, flat, reservoir_size, rng)
-            covered += rect.width * rect.height
-        fraction = covered / float(src.width * src.height)
-    # sample_windows always returns at least one window for a raster with positive dimensions
-    # (guaranteed by open_raster having opened it), so the loop above ran at least once.
+    windows = raster_source.sample_windows(
+        src.width, src.height, seed=seed, window_size=window_size, max_windows=max_windows)
+    rng = np.random.default_rng(seed)
+    lows = highs = None
+    reservoir = None
+    seen = 0
+    covered = 0
+    for rect in windows:
+        region = raster_source.hwc_array(src.read_region(rect)[0])
+        flat = region.reshape(-1, region.shape[-1])
+        band_lo = flat.min(axis=0).astype(np.float64)
+        band_hi = flat.max(axis=0).astype(np.float64)
+        lows = band_lo if lows is None else np.minimum(lows, band_lo)
+        highs = band_hi if highs is None else np.maximum(highs, band_hi)
+        reservoir, seen = _reservoir_take(reservoir, seen, flat, reservoir_size, rng)
+        covered += rect.width * rect.height
+    fraction = covered / float(src.width * src.height)
+    # sample_windows always returns at least one window for a raster with positive dimensions,
+    # so the loop above ran at least once.
     assert lows is not None and highs is not None and reservoir is not None
     sampling = raster_source.WindowSampling(
         tuple((label, rect) for rect in windows), int(seed), float(fraction))

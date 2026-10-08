@@ -295,8 +295,8 @@ def test_the_view_routes_cells_and_the_image_routes_cap_are_one_derivation(
 def test_the_view_and_labels_routes_measure_the_frame_the_image_routes_reader_opens(
     client: TestClient, tmp_path: Path,
 ):
-    """An RGB TIFF whose channel count the header probe and a fixed hint of three answer
-    differently is measured by the view route and the annotation route at the count the image
+    """A one-row RGB TIFF, whose single row the axes would once have been read as a channel
+    plane of, is measured by the view route and the annotation route at the count the image
     route's plain read opens it at: the canvas frame the labels route answers is the view route's
     advertised extent, and every read the view route advertises lies inside the reader's frame
     and serves."""
@@ -887,9 +887,10 @@ def test_get_bands_says_so_when_it_read_only_part_of_the_raster(
     assert body["seed"] == 0
 
 
-def test_get_bands_reads_no_whole_decode(client: TestClient, tmp_path: Path, monkeypatch):
-    """The per-band stats come from sampled windows, so describing a raster never costs a decode
-    of all of it (which is what makes a raster too large to decode describable at all)."""
+def test_get_bands_never_loads_a_tiff_through_load_image(client: TestClient, tmp_path: Path,
+                                                         monkeypatch):
+    """The per-band stats of a windowed TIFF come from sampled windows through its reader:
+    describing it never goes through ``image_utils.load_image``, the whole-image load."""
     from tcip_mcp.pipelines import image_utils
 
     calls: list = []
@@ -905,6 +906,27 @@ def test_get_bands_reads_no_whole_decode(client: TestClient, tmp_path: Path, mon
     resp = client.get("/api/images/bands", params={"path": str(path)})
     assert resp.status_code == 200
     assert calls == []
+
+
+def test_cold_band_stats_open_the_raster_once(client: TestClient, tmp_path: Path, monkeypatch):
+    """The statistics are sampled through the reader the route already holds for the raster's
+    metadata, never through a second open: a stacked numpy raster, which decodes whole at
+    open, is opened once for its cold stats."""
+    from tcip_mcp.pipelines import raster_source
+
+    opened: list = []
+    real = raster_source.open_raster
+
+    def counted(*args, **kwargs):
+        opened.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(raster_source, "open_raster", counted)
+    path = tmp_path / "capture.npz"
+    np.savez(str(path), bands=np.random.default_rng(3).integers(0, 1000, size=(24, 40, 4)))
+    body = client.get("/api/images/bands", params={"path": str(path)}).json()
+    assert body["band_count"] == 4 and body["pixel_fraction"] == 1.0
+    assert len(opened) == 1
 
 
 def test_get_bands_reads_an_oversized_rasters_stats_off_its_overviews(

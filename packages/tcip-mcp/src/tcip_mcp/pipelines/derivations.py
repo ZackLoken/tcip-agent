@@ -21,30 +21,21 @@ def probe_channels(image_path: "str | Path | BandGroupRef") -> int:
     as one logical image) probes each sibling on its own and sums them.
     """
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.image_utils import _channels_from_shape
-    from tcip_mcp.pipelines.raster_source import tiff_series_shape
+    from tcip_mcp.pipelines.raster_source import tiff_channel_count
 
     if isinstance(image_path, BandGroupRef):
         return sum(probe_channels(p) for p in image_path.bands.values())
     path = Path(image_path)
     ext = path.suffix.lower()
-    if ext == ".npy":
+    if ext in (".npy", ".npz"):
         import numpy as np
         arr = np.load(str(path))
-        return int(arr.shape[-1]) if arr.ndim == 3 else 1
-    if ext == ".npz":
-        import numpy as np
-        with np.load(str(path)) as z:
-            arr = z[list(z.files)[0]]
+        if ext == ".npz":
+            with arr as container:
+                arr = container[container.files[0]]
         return int(arr.shape[-1]) if arr.ndim == 3 else 1
     if ext in (".tif", ".tiff"):
-        shape = tiff_series_shape(path)  # header-only; no pixel decode when this succeeds
-        if shape is not None:
-            return _channels_from_shape(shape)
-        import numpy as np
-        import tifffile
-        arr = np.asarray(tifffile.imread(str(path)))
-        return _channels_from_shape(arr.shape)
+        return tiff_channel_count(path)
     from PIL import Image
     with Image.open(path) as im:
         return len(im.getbands())  # RGB->3, L->1, RGBA->4, already header-only (PIL is lazy)
@@ -396,12 +387,6 @@ def derive_block_scale_px(
     )
 
 
-def _image_stats_label(path) -> str:
-    """The path string recorded for one raster: its own path, or a band group's manifest path
-    when the source is a :class:`BandGroupRef`."""
-    return str(getattr(path, "manifest_path", path))
-
-
 def band_normalization_stats(
     image_paths: "Sequence[str | Path | BandGroupRef]", num_channels: int, *, max_images: int = 50,
 ) -> tuple[list[float], list[float], list[str]] | None:
@@ -412,7 +397,7 @@ def band_normalization_stats(
     """
     import numpy as np
 
-    from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
+    from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor, source_path_of
 
     moments = _BandMoments(num_channels)
     paths_read: list[str] = []
@@ -422,7 +407,7 @@ def band_normalization_stats(
         except Exception:  # noqa: BLE001, an unreadable raster is skipped, not fatal
             continue
         if moments.add(arr):
-            paths_read.append(_image_stats_label(path))
+            paths_read.append(source_path_of(path))
     result = moments.result()
     if result is None:
         return None
@@ -494,7 +479,7 @@ def band_normalization_stats_sampled(
     import numpy as np
 
     from tcip_mcp.pipelines import raster_source
-    from tcip_mcp.pipelines.image_utils import pil_to_tensor
+    from tcip_mcp.pipelines.image_utils import pil_to_tensor, source_path_of
 
     moments = _BandMoments(num_channels)
     read: list[tuple[str, raster_source.Rect]] = []
@@ -504,7 +489,7 @@ def band_normalization_stats_sampled(
         try:
             with raster_source.open_raster(path, num_channels) as src:
                 total += src.width * src.height
-                label = _image_stats_label(path)
+                label = source_path_of(path)
                 for rect in raster_source.sample_windows(
                         src.width, src.height, seed=seed, window_size=window_size,
                         max_windows=max_windows_per_image):

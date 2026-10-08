@@ -290,10 +290,9 @@ class TestRegionFrameIsTheResolvedImageSources:
     def test_a_crop_is_read_in_the_frame_its_cells_were_measured_in(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """An RGB TIFF whose channel count the header probe and a fixed hint of three answer
-        differently: the crop is read at the count its cells were measured at, so the named cell
-        lies inside the frame the reader opens and the read reaches the RGB check, rather than
-        failing as a region outside a frame read another way."""
+        """An RGB TIFF one pixel high and far wider than it has bands: its cells are measured in
+        the frame its header's axes describe, the crop is read in that same frame, and the engine
+        receives an RGB crop of the named cell."""
         import tifffile
 
         from tcip_mcp.pipelines import proposal
@@ -305,16 +304,23 @@ class TestRegionFrameIsTheResolvedImageSources:
         tifffile.imwrite(str(path), np.tile(np.array([20, 100, 220], dtype=np.uint8),
                                             (1, 200_000, 1)), photometric="rgb")
 
-        class NeverProposer:
-            def propose(self, image_path, **params):
-                raise AssertionError("the engine ran on a crop that is not RGB")
+        crops: list[tuple[str, tuple[int, int]]] = []
 
-        monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: NeverProposer())
+        class RecordingProposer:
+            def propose(self, image_path, **params):
+                with Image.open(image_path) as im:
+                    crops.append((im.mode, im.size))
+                return [{"candidate_id": 0, "bbox": [1.0, 0.0, 3.0, 1.0], "area": 2,
+                         "score": 0.9, "engine": "patch", "engine_meta": {},
+                         "rings": [[(1, 0), (3, 0), (3, 1), (1, 1)]]}]
+
+        monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: RecordingProposer())
 
         result = propose_annotations(tmp_path, image_path=str(path), engine="patch",
                                      grid_cells=["A1"], tile_size=1024)
-        assert "out of bounds" not in result.get("error", ""), result
-        assert "1 band(s) of uint8" in result.get("error", ""), result
+        assert "error" not in result, result
+        assert crops == [("RGB", (1024, 1))]
+        assert result["candidates"][0]["bbox"] == [1.0, 0.0, 3.0, 1.0]
 
 
 class TestWholeFrameDefaultIsUnaffected:
@@ -387,11 +393,7 @@ class TestWholeFrameDefaultIsUnaffected:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A bespoke engine returns its own dicts, so what a segmenter hands back natively
-        (an array, a numpy scalar) is named instead of being staged as a repr of itself.
-
-        The staged envelope is what ``stage_proposals`` turns into real annotations, so a
-        candidate that reached it as a string would become a label nobody could trace back.
-        """
+        (an array, a numpy scalar) is named instead of being staged as a repr of itself."""
         import numpy as np
         import tcip_store as ts
         from tcip_mcp.pipelines import proposal
@@ -447,7 +449,7 @@ class TestWholeFrameDefaultIsUnaffected:
     def test_an_ordinary_candidate_is_still_staged(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """The refusal above must not cost a working engine its staged proposals."""
+        """A working engine's ordinary candidate is staged."""
         import tcip_store as ts
         from tcip_mcp.pipelines import proposal
         from tcip_mcp.tools import proposal_tools
@@ -477,8 +479,8 @@ class TestWholeFrameDefaultIsUnaffected:
     def test_a_candidate_stating_no_confidence_is_refused_where_it_arrives(
         self, tmp_path: Path,
     ) -> None:
-        """A candidate's confidence is its engine's to state: one stating none is refused by name
-        where it arrives, never staged under a confidence nobody reported."""
+        """A candidate stating no confidence is refused by name where it arrives and is not
+        staged."""
         import tcip_store as ts
         from tcip_mcp.pipelines.proposal import register_proposal_engine
         from tcip_mcp.tools import proposal_tools

@@ -20,6 +20,7 @@ from tcip_mcp.pipelines.band_stats import (
     DISPLAY_CLIP_PERCENTILES,
     STRETCH_MODES,
     BandRange,
+    SampledBandRanges,
     band_ranges,
     clip_bounds,
     composite_display_rgb,
@@ -297,6 +298,13 @@ def test_a_composite_refuses_a_selection_it_cannot_display():
 # ── Sampled ranges: read through the windowed raster layer, never a full decode ──────────
 
 
+def _sampled(path: Path, num_channels: int, **kwargs) -> SampledBandRanges:
+    """``sampled_band_ranges`` over ``path`` opened at ``num_channels``, as the image route
+    opens it."""
+    with raster_source.open_raster(path, num_channels) as src:
+        return sampled_band_ranges(src, label=str(path), **kwargs)
+
+
 def test_sampled_band_ranges_read_through_the_windowed_backend(tmp_path: Path):
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
@@ -307,7 +315,7 @@ def test_sampled_band_ranges_read_through_the_windowed_backend(tmp_path: Path):
 def test_sampled_band_ranges_over_full_coverage_equal_the_exact_ranges(tmp_path: Path):
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
-    sampled = sampled_band_ranges(path, arr.shape[-1], seed=3, window_size=8, max_windows=999,
+    sampled = _sampled(path, arr.shape[-1], seed=3, window_size=8, max_windows=999,
                                   reservoir_size=4096)
     assert sampled.sampling.pixel_fraction == 1.0
     assert sampled.ranges == band_ranges(arr)
@@ -316,7 +324,7 @@ def test_sampled_band_ranges_over_full_coverage_equal_the_exact_ranges(tmp_path:
 def test_partial_sampled_band_ranges_are_the_exact_ranges_of_the_windows_recorded(tmp_path: Path):
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
-    sampled = sampled_band_ranges(path, arr.shape[-1], seed=11, window_size=8, max_windows=3,
+    sampled = _sampled(path, arr.shape[-1], seed=11, window_size=8, max_windows=3,
                                   reservoir_size=4096)
 
     assert len(sampled.sampling.windows) == 3
@@ -334,14 +342,14 @@ def test_sampled_band_ranges_repeat_exactly_for_the_same_seed(tmp_path: Path):
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
     kwargs = {"seed": 11, "window_size": 8, "max_windows": 3, "reservoir_size": 4096}
-    assert (sampled_band_ranges(path, arr.shape[-1], **kwargs)
-            == sampled_band_ranges(path, arr.shape[-1], **kwargs))
+    assert (_sampled(path, arr.shape[-1], **kwargs)
+            == _sampled(path, arr.shape[-1], **kwargs))
 
 
 def test_sampled_band_ranges_label_says_the_numbers_are_a_sample(tmp_path: Path):
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
-    sampled = sampled_band_ranges(path, arr.shape[-1], seed=11, window_size=8, max_windows=3,
+    sampled = _sampled(path, arr.shape[-1], seed=11, window_size=8, max_windows=3,
                                   reservoir_size=4096)
     assert sampled.sampling.label.startswith("sampled from 3 pixel window(s), seed 11")
 
@@ -354,7 +362,7 @@ def test_sampled_clip_bounds_are_exact_when_the_reservoir_holds_every_pixel_walk
     points are that band's own percentiles and not an estimate of them."""
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
-    sampled = sampled_band_ranges(path, arr.shape[-1], seed=3, window_size=8, max_windows=999,
+    sampled = _sampled(path, arr.shape[-1], seed=3, window_size=8, max_windows=999,
                                   reservoir_size=arr.shape[0] * arr.shape[1])
 
     assert sampled.sampling.pixel_fraction == 1.0
@@ -366,7 +374,7 @@ def test_sampled_clip_bounds_are_exact_when_the_reservoir_holds_every_pixel_walk
 def test_sampled_clip_bounds_answer_the_percentiles_they_were_asked_for(tmp_path: Path):
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
-    sampled = sampled_band_ranges(path, arr.shape[-1], seed=3, window_size=8, max_windows=999,
+    sampled = _sampled(path, arr.shape[-1], seed=3, window_size=8, max_windows=999,
                                   reservoir_size=arr.shape[0] * arr.shape[1],
                                   percentiles=(10.0, 90.0))
 
@@ -380,7 +388,7 @@ def test_the_clip_reservoir_holds_at_most_the_size_it_was_given(tmp_path: Path):
     are read off never outgrow the reservoir, however many pixels the windows cover."""
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path, height=200, width=160, channels=3, rowsperstrip=20)
-    sampled = sampled_band_ranges(path, arr.shape[-1], seed=5, window_size=40, max_windows=999,
+    sampled = _sampled(path, arr.shape[-1], seed=5, window_size=40, max_windows=999,
                                   reservoir_size=500)
 
     assert sampled.sampling.pixel_fraction == 1.0
@@ -398,9 +406,9 @@ def test_sampled_clip_bounds_repeat_exactly_for_the_same_seed(tmp_path: Path):
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path, height=200, width=160, channels=3, rowsperstrip=20)
     kwargs = {"window_size": 40, "max_windows": 4, "reservoir_size": 300}
-    first = sampled_band_ranges(path, arr.shape[-1], seed=5, **kwargs)
-    again = sampled_band_ranges(path, arr.shape[-1], seed=5, **kwargs)
-    other = sampled_band_ranges(path, arr.shape[-1], seed=6, **kwargs)
+    first = _sampled(path, arr.shape[-1], seed=5, **kwargs)
+    again = _sampled(path, arr.shape[-1], seed=5, **kwargs)
+    other = _sampled(path, arr.shape[-1], seed=6, **kwargs)
 
     assert first.clip_sample_size == 300  # the reservoir replaced, it did not just fill
     assert first == again
@@ -411,7 +419,7 @@ def test_sampled_band_ranges_refuses_a_reservoir_it_cannot_fill(tmp_path: Path):
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
     with pytest.raises(ValueError, match="reservoir_size must be positive"):
-        sampled_band_ranges(path, arr.shape[-1], seed=3, window_size=8, max_windows=999,
+        _sampled(path, arr.shape[-1], seed=3, window_size=8, max_windows=999,
                             reservoir_size=0)
 
 

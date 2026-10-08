@@ -33,16 +33,6 @@ from pathlib import Path
 from tcip_mcp.pipelines.data.splits import DEFAULT_SHARES
 
 
-def _raster_pixel_extent(path: Path) -> tuple[int, int]:
-    """``(width, height)`` of a GeoTIFF's first page, without decoding any pixel data."""
-    import tifffile
-
-    with tifffile.TiffFile(str(path)) as tif:
-        shape = tif.pages[0].shape
-    height, width = shape[0], shape[1]
-    return width, height
-
-
 def derive_plant_group_key_map(
     stem_to_raster: dict[str, Path],
     plants: list,
@@ -64,6 +54,7 @@ def derive_plant_group_key_map(
     """
     import tifffile
 
+    from tcip_mcp.pipelines.image_utils import display_frame
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
         GeoreferencingError,
         OrthomosaicGeoreference,
@@ -85,9 +76,10 @@ def derive_plant_group_key_map(
         path = stem_to_raster[stem]
         try:
             georef = OrthomosaicGeoreference.from_file(path)
-            width, height = _raster_pixel_extent(path)
+            width, height = display_frame(path)
             lat, lon = georef.pixel_to_wgs84(width / 2.0, height / 2.0)
-        except (RotatedRasterError, GeoreferencingError, OSError, tifffile.TiffFileError) as exc:
+        except (RotatedRasterError, GeoreferencingError, OSError, ValueError,
+                tifffile.TiffFileError) as exc:
             failures.append(f"{stem} ({path}): could not georeference - {exc}")
             continue
 
