@@ -39,7 +39,7 @@ def test_archive_project_carries_a_registered_checkpoint_outside_models(tmp_path
     weights_dir.mkdir()
     ckpt = weights_dir / "m.pt"
     _checkpoint(ckpt, "weights outside the .tcip/models convenience location")
-    ModelRegistry(str(project)).register_model("m", str(ckpt), {})
+    ModelRegistry(str(project)).register_model("m", str(ckpt))
     out = tmp_path / "out.zip"
 
     result = archive_project(project, str(out), include_models=True)
@@ -91,7 +91,7 @@ def test_dataset_and_checkpoint_spellers_agree_on_the_same_geometry(tmp_path: Pa
     _checkpoint(ckpt, "weights")
 
     reg = ModelRegistry(str(project))
-    entry = reg.register_model("m", str(ckpt), {})
+    entry = reg.register_model("m", str(ckpt))
     stored_ckpt = read_registry_index(project)[0]["checkpoint_path"]
     dataset_path = stored_path(nested_dataset, project)
 
@@ -103,7 +103,7 @@ def test_dataset_and_checkpoint_spellers_agree_on_the_same_geometry(tmp_path: Pa
     outside.mkdir()
     outside_ckpt = outside / "m2.pt"
     _checkpoint(outside_ckpt, "other weights")
-    reg.register_model("m2", str(outside_ckpt), {})
+    reg.register_model("m2", str(outside_ckpt))
     stored_outside = read_registry_index(project)[1]["checkpoint_path"]
     outside_dataset_path = stored_path(outside, project)
 
@@ -120,7 +120,7 @@ def _register_internal_checkpoint(project: Path) -> tuple[ModelRegistry, str]:
     ckpt = ckpt_dir / "model_final.pt"
     _checkpoint(ckpt, "a resolved-response fixture's own weights")
     reg = ModelRegistry(str(project))
-    reg.register_model("m", str(ckpt), {})
+    reg.register_model("m", str(ckpt))
     return reg, str(ckpt)
 
 
@@ -152,7 +152,7 @@ def test_rank_registered_models_tool_answers_resolved_absolute(tmp_path: Path):
     ckpt_dir.mkdir(parents=True)
     ckpt = ckpt_dir / "model_final.pt"
     _checkpoint(ckpt, "best-model fixture weights")
-    ModelRegistry(str(project)).register_model("m", str(ckpt), {}, metrics={"val_map50": 0.9})
+    ModelRegistry(str(project)).register_model("m", str(ckpt), metrics={"val_map50": 0.9})
 
     result = rank_registered_models(project, metric="val_map50", higher_is_better=True,
                                     include_unverified=True)
@@ -168,7 +168,7 @@ def test_explicit_register_model_return_is_resolved_absolute(tmp_path: Path):
     ckpt = ckpt_dir / "m.pt"
     _checkpoint(ckpt, "explicit-mode weights")
 
-    entry = ModelRegistry(str(project)).register_model("m", str(ckpt), {})
+    entry = ModelRegistry(str(project)).register_model("m", str(ckpt))
 
     assert Path(entry["checkpoint_path"]) == ckpt.resolve()
 
@@ -313,7 +313,7 @@ def test_a_symlink_to_a_checkpoint_outside_root_stores_the_resolved_external_loc
         pytest.skip(f"this environment cannot create a symlink: {exc}")
 
     reg = ModelRegistry(str(project))
-    reg.register_model("m", str(link), {})
+    reg.register_model("m", str(link))
 
     stored = read_registry_index(project)[0]["checkpoint_path"]
     assert stored == str(real.resolve())
@@ -339,7 +339,7 @@ def test_a_symlink_to_a_checkpoint_under_root_stores_the_resolved_internal_locat
         pytest.skip(f"this environment cannot create a symlink: {exc}")
 
     reg = ModelRegistry(str(project))
-    reg.register_model("m", str(link), {})
+    reg.register_model("m", str(link))
 
     stored = read_registry_index(project)[0]["checkpoint_path"]
     assert stored == "weights_home/m.pt"

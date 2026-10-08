@@ -140,16 +140,20 @@ def test_a_mosaic_reference_band_is_held_out_only_inside_a_non_training_region()
     """Against a within-image split's recorded regions, a reference rect is held out when it lies
     wholly inside one non-training region; one straddling the training boundary is not."""
     from tcip_mcp.pipelines.operating_point import spatial_disjointness
+    from tcip_mcp.pipelines.schemas import SpatialManifest
 
-    spatial = {"train_region": [[0, 0, 500, 1000]], "val_region": [[500, 0, 650, 1000]],
-               "calibration_region": [[650, 0, 800, 1000]],
-               "holdout_region": [[800, 0, 1000, 1000]]}
+    regions = {"train_region": [(0, 0, 500, 1000)], "val_region": [(500, 0, 650, 1000)],
+               "calibration_region": [(650, 0, 800, 1000)],
+               "holdout_region": [(800, 0, 1000, 1000)]}
+    spatial = SpatialManifest.model_construct(**regions)
 
     assert spatial_disjointness(spatial, [(550, 100, 600, 300), (680, 100, 780, 300),
                                           (850, 100, 950, 300)]) == []
     assert spatial_disjointness(spatial, [(400, 100, 600, 300)]) == ["[400, 100, 600, 300]"]
+    # A manifest not stating its regions whole refuses where it is read back.
     with pytest.raises(ValueError, match="calibration_region"):
-        spatial_disjointness({k: v for k, v in spatial.items() if k != "calibration_region"}, [])
+        SpatialManifest.model_validate(
+            {k: v for k, v in regions.items() if k != "calibration_region"})
 
 
 # -- the count and classifier criteria ------------------------------------------------

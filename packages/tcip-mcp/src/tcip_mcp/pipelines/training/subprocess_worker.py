@@ -33,8 +33,9 @@ def prepare_run_context(
     datasets and loaders (:func:`~tcip_mcp.pipelines.data.split_construction.recorded_datasets`).
     ``origin`` and ``epoch_hook`` are the context's own.
     """
-    from tcip_mcp.pipelines.data.split_construction import partition_samples, recorded_datasets
-    from tcip_mcp.pipelines.model_build import run_task
+    from tcip_mcp.pipelines.data.split_construction import (
+        partition_samples, partition_spatial, recorded_datasets,
+    )
     from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.generic_trainer import run_loaders, run_transforms
@@ -43,14 +44,15 @@ def prepare_run_context(
     run_dir = observation.directory
     run_record = observation.record
     run_obj = observed_run(observation, origin=origin)
-    config, resolved = run_obj.config, cast(dict, observation.resolution)
     if run_record["max_wall_clock_seconds"] is not None:
         run_obj.deadline = time.time() + run_record["max_wall_clock_seconds"]
 
-    task, spec = run_task(config), run_obj.spec
-    train_ds, val_ds = recorded_datasets(task, resolved["data"],
-                                         partition_samples(resolved["partition"]),
-                                         run_transforms(spec))
+    spec = run_obj.spec
+    task = spec.model_source.task
+    partition = cast(dict, observation.resolution)["partition"]
+    train_ds, val_ds = recorded_datasets(
+        task, spec.data, partition_samples(partition), partition_spatial(partition),
+        run_transforms(spec))
     train_loader, val_loader = run_loaders(spec, task, train_ds, val_ds)
     if val_loader is None and task in DETECTION_TASKS:
         logger.warning(

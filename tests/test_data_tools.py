@@ -146,7 +146,7 @@ def test_draw_splits_and_a_runs_own_draw_side_the_same_members(tmp_path: Path):
     and val share answer the same sides: the tool's per-side sizes and foreground equal what the
     run's partition holds, its foreground recounted here from each member's own leaves."""
     pytest.importorskip("torch")
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tests._producer_fixtures import train_val
 
     root = _leaf_scene(tmp_path / "ds")
     drawn = draw_splits(tmp_path, str(root), subject="leaf", val_ratio=0.5, calibration_ratio=0,
@@ -154,7 +154,7 @@ def test_draw_splits_and_a_runs_own_draw_side_the_same_members(tmp_path: Path):
     assert "error" not in drawn, drawn
     data_cfg = {"images_dir": str(root / "images" / LEAF_DATE), "scope": {"subject": "leaf"},
                 "split": {"val_ratio": 0.5, "seed": 7, "group_by": "stem"}}
-    _train, _val, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
+    _train, _val, partition, _data = train_val(tmp_path, "detection", data_cfg)
 
     by_side: dict[str, list[int]] = {"train": [], "val": []}
     for sample in partition["samples"]:
@@ -170,7 +170,7 @@ def test_every_draw_refuses_a_tree_short_of_its_floor_the_same_way(tmp_path: Pat
     are one foreground group, short of a train and a val side, and both refuse with that floor's
     words rather than one of them training without validation."""
     pytest.importorskip("torch")
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tests._producer_fixtures import train_val
 
     root = _leaf_scene(tmp_path / "ds", n=2)
     one_group = {f"{LEAF_DATE}/s{i}": "plot" for i in range(2)}
@@ -182,7 +182,7 @@ def test_every_draw_refuses_a_tree_short_of_its_floor_the_same_way(tmp_path: Pat
     data_cfg = {"images_dir": str(root / "images" / LEAF_DATE), "scope": {"subject": "leaf"},
                 "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": one_group}}
     with pytest.raises(ValueError, match=floor.replace("(", r"\(").replace(")", r"\)")):
-        auto_train_val(tmp_path, "detection", data_cfg, None)
+        train_val(tmp_path, "detection", data_cfg)
 
 
 def test_draw_splits_stats_only_admits_a_nonzero_calibration_ratio(data_dir: Path):

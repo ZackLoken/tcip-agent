@@ -334,7 +334,7 @@ def _run_sides(project: Path, experiment_id: str | None) -> dict[str, list[Sampl
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.data.split_construction import partition_samples
 
-    run = partition_samples(run_resolution(experiment_id, project=project)["partition"])
+    run = partition_samples(run_resolution(experiment_id, project=project).partition)
     return {side: [s for s in run if s.side == side] for side in ("train", "val")}
 
 
@@ -608,14 +608,14 @@ def assess_reserved_regions(
             "no run of this project produced this checkpoint, so no mosaic's "
             "reserved regions are known to have been held out from it.")
     resolved = run_resolution(experiment_id, project=project)
-    spatial = blocks.reserved_spatial_regions(resolved)
+    spatial = blocks.reserved_spatial_regions(resolved.spatial)
     if spatial is None:
         raise AssessmentRefusedError(
             f"run {experiment_id!r} resolved no within-image spatial split with a reserved "
             "calibration and holdout region (train it with data.split.calibration_ratio set).")
-    (mosaic,) = partition_samples(resolved["partition"])
+    (mosaic,) = partition_samples(resolved.partition)
     stem = mosaic.member
-    tile_size, overlap = int(spatial["tile_size"]), float(spatial["overlap"])
+    tile_size, overlap = spatial.tile_size, spatial.overlap
     if prep.tile_size != tile_size:
         raise AssessmentRefusedError(
             f"the run's reserved regions were tiled at {tile_size}px and this pass runs at "
@@ -625,7 +625,7 @@ def assess_reserved_regions(
     (mosaic,) = _admit_reference([mosaic], scope)
     document = mosaic.read
     reads = _reference_reads([mosaic])
-    cal_rect, test_rect = (tuple(spatial[k][0]) for k in ("calibration_region", "holdout_region"))
+    cal_rect, test_rect = spatial.calibration_region[0], spatial.holdout_region[0]
     blocks.check_completeness(document, f"{stem}'s label document", cast(str, scope.subject),
                               {"calibration_region": cal_rect, "holdout_region": test_rect})
     source = mosaic.image
@@ -637,10 +637,10 @@ def assess_reserved_regions(
     objects = gt["boxes"][object_rows(crowd_of(gt))]
     calibration_objects = objects[blocks.centered_in(objects, cal_rect)]
     plants = None
-    if resolved["data"].get("plant_csv_paths"):
+    if resolved.data.plant_csv_paths:
         from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
 
-        plants = read_plant_csvs([Path(c) for c in resolved["data"]["plant_csv_paths"]]) or None
+        plants = read_plant_csvs([Path(c) for c in resolved.data.plant_csv_paths]) or None
     try:
         buffer_px, scale_source = derive_block_scale_px(
             tile_size=tile_size, plants=plants,
@@ -672,13 +672,13 @@ def assess_reserved_regions(
                          for rect in bands["calibration"].values()],
         counted=[(band_counts["calibration"][name], float((x1 - x0) * (y1 - y0)))
                  for name, (x0, y0, x1, y1) in bands["calibration"].items()],
-        footprint=float(int(spatial["width"]) * int(spatial["height"]))))
+        footprint=float(spatial.width * spatial.height)))
 
     def collect(execution: Execution) -> tuple[list[dict], list[dict]]:
         with open_raster(source, p.predictor.in_chans) as reader:
-            if (reader.width, reader.height) != (int(spatial["width"]), int(spatial["height"])):
+            if (reader.width, reader.height) != (spatial.width, spatial.height):
                 raise AssessmentRefusedError(
-                    f"the run recorded a {spatial['width']}x{spatial['height']} mosaic and "
+                    f"the run recorded a {spatial.width}x{spatial.height} mosaic and "
                     f"{source} now reads {reader.width}x{reader.height}; retrain or re-split "
                     "against the current file.")
             return (_band_records(reader, bands["calibration"], p, execution, gt=gt,
@@ -693,7 +693,7 @@ def assess_reserved_regions(
     return _finish(project, run_dir, revision, {
         "delivery_kind": delivery_kind, "producer": p.checkpoint.producer,
         "execution": p.execution.record(),
-        "reference": _reference_record(None, spatial["raster_content_identity"], samples,
+        "reference": _reference_record(None, spatial.raster_content_identity, samples,
                                        digest_of, retained),
         "disjointness": disjointness,
         "criterion": {"count": {**evidence, "block_scale_px": buffer_px,

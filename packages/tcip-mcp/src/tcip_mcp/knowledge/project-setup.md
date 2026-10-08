@@ -152,7 +152,7 @@ own floor.
 ## 6. Build a model, train, infer
 
 - Write an `nn.Module` (from scratch or importing the plain blocks) + a `train(ctx)` loop,
-  build via `model_source` → `build_model`, pre-flight with `model_contract`; see
+  build via `model_source` → `build_from_model_source`, pre-flight with `model_contract`; see
   `packages/tcip-mcp/src/tcip_mcp/knowledge/pipeline-design.md`.
 - `launch_training` (immutable experiment per run) → watch metrics.
 - `run_inference` to produce predictions for the review loop.

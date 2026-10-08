@@ -130,6 +130,16 @@ def training_config(model_source: dict, data: dict, **overrides: Any) -> dict:
     }
 
 
+def built_model(config: dict):
+    """The model a run over ``config`` builds: its validated ``model_source`` at the dims its data
+    block records (``model_build.recorded_model_dims``)."""
+    from tcip_mcp.pipelines.model_build import build_from_model_source, recorded_model_dims
+    from tcip_mcp.pipelines.schemas import train_config
+
+    spec = train_config(config)
+    return build_from_model_source(spec.model_source, recorded_model_dims(spec))
+
+
 def train_on(selection_dir: Path, project_root: Path, experiment_id: str) -> str:
     """Train the tiny detector over the selection's train side through the child's own entry,
     whose completion registers the checkpoint; the checkpoint's path."""

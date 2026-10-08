@@ -197,19 +197,19 @@ def test_a_first_registration_and_a_replacement_each_leave_one_row(tmp_path):
     from tcip_mcp.model_registry import ModelRegistry
 
     reg = ModelRegistry(str(tmp_path))
-    first_sha = reg.register_model("exp1", _ckpt(tmp_path, "a.pt", b"first"), {})["sha256"]
+    first_sha = reg.register_model("exp1", _ckpt(tmp_path, "a.pt", b"first"))["sha256"]
     (first,) = _rows(tmp_path)
     assert first["tool"] == "model_registered"
     assert first["arguments"] == {"name": "exp1", "new_sha256": first_sha}
 
-    reg.register_model("exp2", _ckpt(tmp_path, "a.pt", b"first"), {})
+    reg.register_model("exp2", _ckpt(tmp_path, "a.pt", b"first"))
     _, replaced = _rows(tmp_path)
     assert replaced["arguments"] == {"name": "exp2", "new_sha256": first_sha,
                                      "superseded_name": "exp1", "superseded_tags": []}
     assert _entry(tmp_path, first_sha)["name"] == "exp2"
 
-    second_sha = reg.register_model("exp1", _ckpt(tmp_path, "b.pt", b"second, different"),
-                                    {})["sha256"]
+    second_sha = reg.register_model("exp1",
+                                    _ckpt(tmp_path, "b.pt", b"second, different"))["sha256"]
     assert second_sha != first_sha
     assert "superseded_name" not in _rows(tmp_path)[-1]["arguments"]
     assert _entry(tmp_path, first_sha)["name"] == "exp2"
@@ -223,14 +223,13 @@ def test_the_register_model_door_leaves_only_the_registrys_own_rows(tmp_path):
     first = _ckpt(tmp_path, "a.pt", b"first")
     for path in (first, _ckpt(tmp_path, "b.pt", b"second, different"),
                  _ckpt(tmp_path, "c.pt", b"first")):
-        assert "error" not in register_model(tmp_path, name="door", checkpoint_path=path,
-                                             config={})
+        assert "error" not in register_model(tmp_path, name="door", checkpoint_path=path)
 
     rows = _rows(tmp_path)
     assert [r["tool"] for r in rows] == ["model_registered", "model_registered", "model_registered"]
     assert ["superseded_name" in r["arguments"] for r in rows] == [False, False, True]
     assert "error" not in register_model(tmp_path, name="door",
-                                         checkpoint_path=str(tmp_path / "c.pt"), config={})
+                                         checkpoint_path=str(tmp_path / "c.pt"))
     assert len(_rows(tmp_path)) == 3  # the same entry re-registered: nothing changed, no row
 
 
@@ -239,9 +238,9 @@ def test_reregistering_an_identical_entry_changes_nothing_and_leaves_no_row(tmp_
 
     reg = ModelRegistry(str(tmp_path))
     ckpt = _ckpt(tmp_path, "a.pt", b"same bytes")
-    reg.register_model("exp1", ckpt, {})
+    reg.register_model("exp1", ckpt)
     before = ts.read_versioned(registry_index_key(tmp_path))
-    reg.register_model("exp1", ckpt, {})
+    reg.register_model("exp1", ckpt)
 
     after = ts.read_versioned(registry_index_key(tmp_path))
     assert (after.value, after.version) == (before.value, before.version)
@@ -255,8 +254,8 @@ def test_the_same_weights_under_new_tags_change_the_entry_and_leave_one_row(tmp_
 
     reg = ModelRegistry(str(tmp_path))
     ckpt = _ckpt(tmp_path, "a.pt", b"same bytes")
-    sha = reg.register_model("exp1", ckpt, {})["sha256"]
-    reg.register_model("exp1", ckpt, {}, tags=["chestnut"])
+    sha = reg.register_model("exp1", ckpt)["sha256"]
+    reg.register_model("exp1", ckpt, tags=["chestnut"])
 
     assert _entry(tmp_path, sha)["tags"] == ["chestnut"]
     assert [e["tool"] for e in _rows(tmp_path)] == ["model_registered", "model_registered"]
@@ -270,7 +269,7 @@ def test_replace_raises_and_stays_committed_when_its_audit_line_fails(tmp_path, 
     from tcip_mcp.model_registry import ModelRegistry
 
     reg = ModelRegistry(str(tmp_path))
-    sha = reg.register_model("exp1", _ckpt(tmp_path, "a.pt", b"first"), {})["sha256"]
+    sha = reg.register_model("exp1", _ckpt(tmp_path, "a.pt", b"first"))["sha256"]
 
     def _refuse(*args, **kwargs):
         raise RuntimeError("the audit log could not be appended to")
@@ -278,7 +277,7 @@ def test_replace_raises_and_stays_committed_when_its_audit_line_fails(tmp_path, 
     monkeypatch.setattr(audit_mod, "append", _refuse)
 
     with pytest.raises(audit_mod.AuditEntryNotWrittenError) as caught:
-        reg.register_model("exp2", _ckpt(tmp_path, "a.pt", b"first"), {})
+        reg.register_model("exp2", _ckpt(tmp_path, "a.pt", b"first"))
 
     assert caught.value.tool == "model_registered"
     assert _entry(tmp_path, sha)["name"] == "exp2"

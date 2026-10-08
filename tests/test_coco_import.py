@@ -93,10 +93,11 @@ def _import(document: Path, root: Path) -> dict:
 def _loader(task: str, root: Path):
     """The loader the ordinary producer builds over the dataset's imported documents."""
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tcip_mcp.pipelines.schemas import DataSpec
 
-    data_cfg = {"images_dir": str(root / "images" / DATE), "scope": {"subject": SUBJECT},
-                "auto_val": False}
-    loader, _, _ = auto_train_val(root, task, data_cfg, None)
+    data = DataSpec.model_validate({"images_dir": str(root / "images" / DATE),
+                                    "scope": {"subject": SUBJECT}, "auto_val": False})
+    loader, _, _, _ = auto_train_val(root, task, data, None)
     return loader
 
 

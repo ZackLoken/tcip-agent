@@ -127,11 +127,18 @@ def _bespoke_task_model(**_kwargs):
 # resolve_contract_dims: the size the run will actually see
 # --------------------------------------------------------------------------
 
-def test_resolve_contract_dims_prefers_tile_edge_over_default():
-    cfg = {"model_source": {"task": "detection"},
-           "data": {"tiling": {"enabled": True, "tile_size": 512}}}
+def _spec(task: str, data: dict):
+    """A validated config of a ``task`` model over ``data``."""
+    from tcip_mcp.pipelines.schemas import train_config
+    from tests._verified_checkpoint_fixtures import unbuilt_source
 
-    dims = resolve_contract_dims(cfg, "detection", {"in_chans": 4, "num_classes": 5})
+    return train_config(training_config(unbuilt_source(task), data))
+
+
+def test_resolve_contract_dims_prefers_tile_edge_over_default():
+    spec = _spec("detection", {"tiling": {"enabled": True, "tile_size": 512}})
+
+    dims = resolve_contract_dims(spec, {"in_chans": 4, "num_classes": 5})
     assert dims == {"in_chans": 4, "num_classes": 5, "img_size": 512}
 
 
@@ -143,17 +150,17 @@ def test_model_dims_states_only_what_the_run_holds():
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.model_build import model_dims
 
-    cfg, scope = {"model_source": {}}, ClassScope()
+    scope = ClassScope()
 
     with pytest.raises(ValueError, match="data.num_channels"):
         model_dims(scope, {})
     detector = model_dims(scope, {"num_channels": 3})
     assert detector == {"in_chans": 3}
-    assert resolve_contract_dims(cfg, "detection", detector) == {
+    assert resolve_contract_dims(_spec("detection", {}), detector) == {
         "in_chans": 3, "img_size": 224}  # a detector's synthetic box needs no count
     ordinal = model_dims(scope, {"num_channels": 3, "num_ranks": 4})
     assert ordinal == {"in_chans": 3, "num_ranks": 4}
-    assert resolve_contract_dims(cfg, "ordinal", ordinal) == {
+    assert resolve_contract_dims(_spec("ordinal", {}), ordinal) == {
         "in_chans": 3, "num_classes": 4, "img_size": 224}
 
 
@@ -271,16 +278,18 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(tmp_path, monk
     assert synthetic["smoke"]["ok"] is True, synthetic["smoke"]["issues"]
     # The same model over the run's own batch reaches the same verdict.
     from tcip_mcp.pipelines.data.split_construction import resolve_run
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_from_model_source
     from tcip_mcp.pipelines.model_contract import check_model_contract
     from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.tools.training_tools import _one_real_batch
 
-    batch, why = _one_real_batch(
-        "semantic_seg", resolve_run(cfg, train_config(cfg), project=tmp_path).train_ds)
+    spec = train_config(cfg)
+    batch, why = _one_real_batch("semantic_seg", resolve_run(spec, project=tmp_path).train_ds)
     assert batch is not None, why
     smoked = synthetic["smoke"]["dims"]
-    model = build_model(cfg, {"in_chans": smoked["in_chans"], "num_classes": smoked["num_classes"]})
+    model = build_from_model_source(
+        spec.model_source,
+        {"in_chans": smoked["in_chans"], "num_classes": smoked["num_classes"]})
     assert check_model_contract(model, "semantic_seg", sample_batch=batch)["ok"]
 
 
@@ -295,8 +304,7 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
         {"builder": TASK_MODEL, "task": "bunch_compactness"},
         {"images_dir": str(imgs), "scope": {"subject": "leaf"},
          "split": {"seed": 0, "val_ratio": 0.15},
-         "dataset_source": {"builder": f"{__name__}:_bespoke_task_dataset",
-                            "task": "bunch_compactness"}},
+         "dataset_source": {"builder": f"{__name__}:_bespoke_task_dataset"}},
         stages=[{"freeze_to": 0, "epochs": 1}])
     r = preflight_config(tmp_path, cfg, smoke=True, overfit=True)
     assert r["valid"] is True, r["issues"]
@@ -322,10 +330,9 @@ def test_preflight_smoke_batch_matches_what_the_run_will_build(tmp_path, monkeyp
     imgs = _admitted_tree(tmp_path)
     data = {"images_dir": str(imgs), "scope": {"subject": "leaf"},
             "split": {"seed": 0, "val_ratio": 0.15},
-            "dataset_source": {"builder": f"{__name__}:_strict_bespoke_dataset",
-                               "task": "bunch_compactness"}}
-    config = training_config({"task": "bunch_compactness"}, data)
-    resolution = resolve_run(config, train_config(config), project=tmp_path)
+            "dataset_source": {"builder": f"{__name__}:_strict_bespoke_dataset"}}
+    config = training_config({"builder": TASK_MODEL, "task": "bunch_compactness"}, data)
+    resolution = resolve_run(train_config(config), project=tmp_path)
 
     batch, why = _one_real_batch("bunch_compactness", resolution.train_ds)
     assert why is None, why
@@ -344,8 +351,7 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
         {"builder": TASK_MODEL, "task": "bunch_compactness"},
         {"images_dir": str(imgs), "scope": {"subject": "leaf"},
          "split": {"seed": 0, "val_ratio": 0.15},
-         "dataset_source": {"builder": f"{__name__}:_unbuildable_dataset",
-                            "task": "bunch_compactness"}},
+         "dataset_source": {"builder": f"{__name__}:_unbuildable_dataset"}},
         stages=[{"freeze_to": 0, "epochs": 1}])
     r = preflight_config(tmp_path, cfg, smoke=True)
     assert r["valid"] is False
@@ -400,12 +406,16 @@ def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(tmp_path,
         writer = csv.writer(handle)
         writer.writerow(("stem", "label"))
         writer.writerows(rows)
+    from tcip_mcp.pipelines.schemas import DataSpec
+
     data = {"images_dir": str(imgs), "labels_dir": str(table), "num_classes": 3,
             "split": {"seed": 0, "val_ratio": 0.15},
             "dataset_source": {"builder": f"{__name__}:_bespoke_classification_dataset"}}
-    config = training_config({"builder": BESPOKE_CLASSIFIER, "task": "classification"}, data)
-    train_ds, _val_ds, _partition = auto_train_val(tmp_path, "classification", data, None)
-    assert (data["num_channels"], data["num_classes"]) == (3, 3)
+    train_ds, _val_ds, _partition, resolved = auto_train_val(
+        tmp_path, "classification", DataSpec.model_validate(data), None)
+    assert (resolved.num_channels, resolved.num_classes) == (3, 3)
+    config = training_config({"builder": BESPOKE_CLASSIFIER, "task": "classification"},
+                             resolved.record())
     loader = DataLoader(train_ds, batch_size=2, collate_fn=task_collate("classification"))
     ctx = TrainContext(run=trainer_run(config, tmp_path / "out", project=tmp_path,
                                        has_val_loader=False, id="auto-run-62"),
@@ -437,7 +447,9 @@ def test_ctx_apply_stage_freeze_matches_trainer_guard(tmp_path):
     from tcip_mcp.pipelines.training.generic_trainer import apply_stage_freeze
 
     model = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.Linear(4, 2))
-    ctx = TrainContext(run=trainer_run(training_config({"task": "regression"}, {}), "out",
+    from tests._verified_checkpoint_fixtures import unbuilt_source
+
+    ctx = TrainContext(run=trainer_run(training_config(unbuilt_source("regression"), {}), "out",
                                        project=tmp_path, has_val_loader=False, id="auto-run-7"),
                        train_loader=None)
     full = ctx.apply_stage_freeze(model, 0)

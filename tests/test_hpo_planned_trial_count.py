@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import pytest
 
+from tcip_mcp.pipelines.schemas import SplitSpec
 from tcip_mcp.pipelines.training.hpo import (
     _search_space_and_points,
     planned_trial_count,
+    resolved_draw_seeds,
     split_draw_search_space,
 )
 from tests._training_values import tune_arguments
@@ -26,11 +28,12 @@ SPACE = {
 BASELINE = {"optimizer.head_lr": 3e-4, "batch_size": 4, "optimizer.weight_decay": 1e-4}
 """A sample baseline point over :data:`SPACE`'s own axes."""
 
+SEEDED_SPLIT = SplitSpec.model_validate({"seed": 42})
+"""A base config's ``data.split`` stating seed 42."""
 
-def _paired_space(draws: int) -> dict:
-    space, _seeds = split_draw_search_space(
-        SPACE, {"data": {"split": {"seed": 42}}}, draws, None)
-    return space
+
+def _paired_space(draws: int, param_space: dict = SPACE) -> dict:
+    return split_draw_search_space(param_space, resolved_draw_seeds(SEEDED_SPLIT, draws, None))
 
 
 # -- the measured counts over the sample space --------------------------------------
@@ -90,7 +93,7 @@ def test_planned_trial_count_over_an_empty_param_space_at_one_draw():
 def test_planned_trial_count_over_an_empty_param_space_run_through_split_draw_search_space():
     """Above one draw, an empty param_space run through split_draw_search_space first carries
     only the paired seed axis: the paired sweep runs the seed axis alone."""
-    space, _seeds = split_draw_search_space({}, {"data": {"split": {"seed": 42}}}, 2, None)
+    space = _paired_space(2, {})
     assert space == {"data.split.seed": {"type": "categorical", "choices": [42, 43]}}
     assert planned_trial_count(space, 1, "grid", 2, None) == 2
 
@@ -191,12 +194,12 @@ def test_tune_search_and_planned_trial_count_share_one_search_space_derivation(
 
 
 def test_split_draw_search_space_at_one_draw_returns_param_space_itself():
-    """At split_draws of one or below, split_draw_search_space is a no-op: the same object
-    back, and no seeds resolved."""
+    """At split_draws of one or below no seeds resolve, and split_draw_search_space is then a
+    no-op: the same object back."""
     space = {"optimizer.head_lr": {"type": "loguniform", "low": 1e-4, "high": 1e-2}}
-    result, seeds = split_draw_search_space(space, {}, 1, None)
-    assert result is space
+    seeds = resolved_draw_seeds(SplitSpec.model_validate({}), 1, None)
     assert seeds is None
+    assert split_draw_search_space(space, seeds) is space
 
 
 def test_planned_trial_count_leaves_nothing_under_home_or_the_project_root(tmp_path, monkeypatch):

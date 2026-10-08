@@ -25,16 +25,22 @@ class _OpaqueStub:
     """No tile geometry and no source list: nothing can be probed, nothing is stamped."""
 
 
+def _geometry(data_cfg: dict, train_ds):
+    """``data_cfg`` validated as a run's data block with the geometry ``train_ds`` serves
+    recorded on it (``generic_trainer.effective_data_geometry``)."""
+    from tcip_mcp.pipelines.schemas import DataSpec
+    from tcip_mcp.pipelines.training.generic_trainer import effective_data_geometry
+
+    return effective_data_geometry(DataSpec.model_validate(data_cfg), train_ds)
+
+
 def test_stamp_tiled_run_fills_effective_geometry_into_tiling():
-    from tcip_mcp.pipelines.training.generic_trainer import stamp_effective_data_geometry
+    # No tile_size: the dataset's default is the truth.
+    stamped = _geometry({"tiling": {"enabled": True}}, _TiledStub())
 
-    data_cfg = {"tiling": {"enabled": True}}  # no tile_size: the dataset's default is the truth
-    stamped = stamp_effective_data_geometry(data_cfg, _TiledStub())
-
-    assert data_cfg["tiling"] == {"enabled": True, "tile_size": 224, "overlap": pytest.approx(0.2)}
-    assert stamped["tiling_replaced"] is False
-    assert stamped["train_native_size"] is None
-    assert "train_native_size" not in data_cfg
+    assert stamped.record()["tiling"] == {
+        "enabled": True, "tile_size": 224, "overlap": pytest.approx(0.2)}
+    assert stamped.train_native_size is None
 
 
 def test_a_bespoke_run_records_no_geometry_at_all():
@@ -42,32 +48,27 @@ def test_a_bespoke_run_records_no_geometry_at_all():
     platform did not build is one it cannot measure, not one serving untiled frames. Recording
     ``{"enabled": False}`` there would put a geometry nobody measured onto the checkpoint every
     predictor and tiled-eval default reads back, so a bespoke run records nothing."""
-    from tcip_mcp.pipelines.training.generic_trainer import stamp_effective_data_geometry
-
     data_cfg = {"dataset_source": {"builder": "my_module:build_ds"},
                 "tiling": {"enabled": True, "tile_size": 640}}
 
-    assert stamp_effective_data_geometry(data_cfg, _OpaqueStub()) is None
-    assert data_cfg["tiling"] == {"enabled": True, "tile_size": 640}  # untouched, not replaced
-    assert "train_native_size" not in data_cfg
+    stamped = _geometry(data_cfg, _OpaqueStub())
+    # untouched, not replaced
+    assert stamped.record()["tiling"] == {"enabled": True, "tile_size": 640}
+    assert stamped.train_native_size is None
 
     # A platform-built dataset in the same shape still stamps: absence is the bespoke fact alone.
-    platform_cfg = {"tiling": {"enabled": True, "tile_size": 640}}
-    assert stamp_effective_data_geometry(platform_cfg, _OpaqueStub()) is not None
-    assert platform_cfg["tiling"] == {"enabled": False}
+    platform = _geometry({"tiling": {"enabled": True, "tile_size": 640}}, _OpaqueStub())
+    assert platform.record()["tiling"] == {"enabled": False}
 
 
 def test_stamp_untiled_run_replaces_tiling_record_wholesale():
     """An untiled run must never carry a requested tile_size into its persisted config: a
     reader would take it for the frame the model trained on."""
-    from tcip_mcp.pipelines.training.generic_trainer import stamp_effective_data_geometry
+    stamped = _geometry({"tiling": {"enabled": True, "tile_size": 640, "overlap": 0.3}},
+                        _OpaqueStub())
 
-    data_cfg = {"tiling": {"enabled": True, "tile_size": 640, "overlap": 0.3}}
-    stamped = stamp_effective_data_geometry(data_cfg, _OpaqueStub())
-
-    assert data_cfg["tiling"] == {"enabled": False}
-    assert stamped["tiling_replaced"] is True
-    assert stamped["train_native_size"] is None
+    assert stamped.record()["tiling"] == {"enabled": False}
+    assert stamped.train_native_size is None
 
 
 def _detection_dataset(tmp_path, sizes):
@@ -91,29 +92,19 @@ def _detection_dataset(tmp_path, sizes):
 def test_stamp_untiled_uniform_frames_record_train_native_size(tmp_path):
     """With no tiling dict at all, the untiled stamp still runs: the tiling record states the
     untiled truth and the shared native frame is recorded as [width, height]."""
-    from tcip_mcp.pipelines.training.generic_trainer import stamp_effective_data_geometry
+    stamped = _geometry({}, _detection_dataset(tmp_path, [(64, 48), (64, 48)]))
 
-    ds = _detection_dataset(tmp_path, [(64, 48), (64, 48)])
-    data_cfg: dict = {}
-    stamped = stamp_effective_data_geometry(data_cfg, ds)
-
-    assert data_cfg["tiling"] == {"enabled": False}
-    assert data_cfg["train_native_size"] == [64, 48]
-    assert stamped["train_native_size"] == [64, 48]
+    assert stamped.record()["tiling"] == {"enabled": False}
+    assert stamped.train_native_size == [64, 48]
 
 
 def test_stamp_untiled_mixed_frames_record_nothing(tmp_path):
     """Mixed source sizes have no single native frame; stamping any one of them would be a
     guess, so no train_native_size is written."""
-    from tcip_mcp.pipelines.training.generic_trainer import stamp_effective_data_geometry
+    stamped = _geometry({}, _detection_dataset(tmp_path, [(64, 48), (32, 32)]))
 
-    ds = _detection_dataset(tmp_path, [(64, 48), (32, 32)])
-    data_cfg: dict = {}
-    stamped = stamp_effective_data_geometry(data_cfg, ds)
-
-    assert data_cfg["tiling"] == {"enabled": False}
-    assert "train_native_size" not in data_cfg
-    assert stamped["train_native_size"] is None
+    assert stamped.record()["tiling"] == {"enabled": False}
+    assert stamped.train_native_size is None
 
 
 # ── the run's resolved record, for a launched run and an HPO trial alike ──
@@ -136,9 +127,11 @@ def _serve(monkeypatch, train_ds):
     record carries only what the stamp wrote."""
     from tcip_mcp.pipelines.data import split_construction as sc
 
+    partition = sc._partition_record([], seed=None, group_by="stem", selection=None,
+                                     spatial=None)
     monkeypatch.setattr(
         sc, "auto_train_val",
-        lambda project, task, data_cfg, transforms, **_: (train_ds, None, {"samples": []}))
+        lambda project, task, data, transforms, **_: (train_ds, None, partition, data))
 
 
 def _base_config(tiling, project: Path):

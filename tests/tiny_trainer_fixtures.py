@@ -79,6 +79,31 @@ def build_mean_intensity_regressor(
     return MeanIntensityRegressor(init_weight=init_weight)
 
 
+class CountingRegressor(MeanIntensityRegressor):
+    """A :class:`MeanIntensityRegressor` whose state also holds a registered buffer, the count of
+    its training forwards, and whose one param group (``get_param_groups``, at the head rate)
+    carries a tensor-valued setting, ``rates``, the two rates it was built at: a capture of its
+    training state has a buffer and a tensor setting to hold."""
+
+    def __init__(self, init_weight: float = 0.0) -> None:
+        super().__init__(init_weight)
+        self.register_buffer("forwards", torch.zeros(()))
+
+    def fit_loss(self, images, targets) -> dict:
+        self.forwards += 1
+        return super().fit_loss(images, targets)
+
+    def get_param_groups(self, backbone_lr, head_lr):
+        return [{"params": [self.weight], "lr": head_lr,
+                 "rates": torch.tensor([backbone_lr, head_lr])}]
+
+
+def build_counting_regressor(*, in_chans: int = 1, init_weight: float = 0.0
+                             ) -> CountingRegressor:
+    """``model_source`` builder for :class:`CountingRegressor`."""
+    return CountingRegressor(init_weight=init_weight)
+
+
 class TwoRateRegressor(MeanIntensityRegressor):
     """Predicts ``weight * mean(image) + bias``, its weight in a param group at the backbone rate
     and its bias in one at the head rate (``get_param_groups``), the two groups in reverse order
@@ -220,14 +245,13 @@ def trainer_run(config: dict, output_dir, *, project, has_val_loader: bool, id: 
     the launcher's own producer resolves for it (``generic_trainer.resolve_objective``)."""
     from pathlib import Path
 
-    from tcip_mcp.pipelines.model_build import run_task
     from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.pipelines.training.generic_trainer import resolve_objective
     from tcip_mcp.pipelines.training.run_registry import TrainRun
 
     spec = train_config(config)
-    return TrainRun(id=id, config=config, spec=spec,
-                    objective=resolve_objective(spec, run_task(config),
+    return TrainRun(id=id, spec=spec,
+                    objective=resolve_objective(spec, spec.model_source.task,
                                                 project=Path(project),
                                                 has_val_loader=has_val_loader),
                     project=Path(project), output_dir=str(output_dir))
@@ -256,6 +280,7 @@ MEAN_INTENSITY_CLASSIFIER = "tests.tiny_trainer_fixtures:build_mean_intensity_cl
 ALWAYS_DIVERGED_MODEL = "tests.tiny_trainer_fixtures:build_always_diverged_model"
 NAN_EVAL_REGRESSOR = "tests.tiny_trainer_fixtures:build_nan_eval_regressor"
 TWO_RATE_REGRESSOR = "tests.tiny_trainer_fixtures:build_two_rate_regressor"
+COUNTING_REGRESSOR = "tests.tiny_trainer_fixtures:build_counting_regressor"
 
 REGRESSOR_ADAMW = {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0}
 """The AdamW section the one-weight regressors here train at."""

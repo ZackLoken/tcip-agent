@@ -19,7 +19,8 @@ def _fixture_config(root: Path) -> Path:
     from tests._verified_checkpoint_fixtures import SCOPED_DATA, detection_images
 
     config = training_config(
-        {"builder": "tcip_mcp.pipelines.model_build:build_model", "task": "detection"},
+        {"builder": "tcip_mcp.pipelines.model_build:build_from_model_source",
+         "task": "detection"},
         {**detection_images(root / "data", SCOPED_DATA["scope"]), **SCOPED_DATA})
     config_path = root / "config.json"
     config_path.write_text(json.dumps(config), encoding="utf-8")

@@ -7,18 +7,19 @@ its objective, and builds ``(train_ds, val_ds)`` from that record (:func:`record
 
 from __future__ import annotations
 
-import copy
 import logging
-from dataclasses import asdict, replace
+from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
     from tcip_mcp.pipelines.data.selection import ClassScope, Sample, Selection
     from tcip_mcp.pipelines.image_utils import BandGroupRef
-    from tcip_mcp.pipelines.schemas import TrainConfigSchema
+    from tcip_mcp.pipelines.schemas import (
+        DataSpec, SpatialManifest, SplitSpec, TilingSpec, TrainConfigSchema,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -36,61 +37,59 @@ def _selection_conflict_keys() -> tuple[str, ...]:
             *(f"{side}_ratio" for side in SIDES[1:]))
 
 
-def data_dir_issues(data_cfg: dict) -> list[str]:
+def data_dir_issues(data: "DataSpec") -> list[str]:
     """Every objection to the data locations an unbound run's producer reads: ``data.images_dir``
     missing or naming a path that does not exist, and a stated ``data.labels_dir`` that is not a
     mask directory or a table (:func:`~tcip_mcp.pipelines.data.label_queries.ground_truth_shape`).
     Empty for a config bound to a selection (:func:`selection_compatibility`)."""
     from tcip_mcp.pipelines.data.label_queries import ground_truth_shape
 
-    split_cfg = data_cfg.get("split")
-    if isinstance(split_cfg, dict) and split_cfg.get("selection_dir"):
+    if data.split.selection_dir:
         return []
-    images_dir = data_cfg.get("images_dir")
+    images_dir = data.images_dir
     issues = [] if images_dir else ["Missing 'data.images_dir'"]
     if images_dir and not Path(images_dir).exists():
         issues.append(f"Not found: data.images_dir = '{images_dir}'")
-    if data_cfg.get("labels_dir") is not None:
+    if data.labels_dir is not None:
         try:
-            ground_truth_shape(data_cfg["labels_dir"])
+            ground_truth_shape(data.labels_dir)
         except ValueError as exc:
             issues.append(f"data.labels_dir: {exc}")
     return issues
 
 
-def selection_compatibility(data_cfg: dict, selection: "Selection | None",
+def selection_compatibility(data: "DataSpec", selection: "Selection | None",
                             selection_dir: str) -> list[str]:
-    """Every objection binding a run's data section ``data_cfg`` to ``selection`` (read at
+    """Every objection binding a run's data block ``data`` to ``selection`` (read at
     ``selection_dir``; ``None`` when it would not read) raises: a drawn split's own key under
     ``data.split`` beside the selection (``seed`` admitted only beside
     ``redraw_within_selection``), that flag with no seed, a stated ``data.labels_dir`` (each
     sample names its own ground truth), and, with a selection in hand, a stated ``data.scope``
     (the selection records its own class space) and an empty train or val side.
     """
-    split_cfg_raw = data_cfg.get("split")
-    split_cfg: dict = split_cfg_raw if isinstance(split_cfg_raw, dict) else {}
-    redraw = bool(split_cfg.get("redraw_within_selection"))
+    split = data.split
+    redraw = split.redraw_within_selection
     conflicts = sorted(k for k in _selection_conflict_keys()
-                       if split_cfg.get(k) is not None and not (redraw and k == "seed"))
+                       if k in split.stated and not (redraw and k == "seed"))
     issues: list[str] = []
     if conflicts:
         issues.append(
             f"data.split.selection_dir conflicts with {conflicts}: a recorded partition and "
             "a drawn split's own parameters/source cannot both govern one run."
         )
-    if redraw and split_cfg.get("seed") is None:
+    if redraw and split.seed is None:
         issues.append(
             "data.split.redraw_within_selection=true requires data.split.seed: the seed the "
             "redraw draws train and val at."
         )
-    if "labels_dir" in data_cfg:
+    if data.labels_dir is not None:
         issues.append(
             "data.labels_dir is stated beside data.split.selection_dir, whose samples each name "
             "their own ground truth; a second place would not be the one the run reads. Drop "
             "data.labels_dir.")
     if selection is None:
         return issues
-    if "scope" in data_cfg:
+    if data.scope is not None:
         issues.append(
             f"data.scope is stated beside data.split.selection_dir, whose selection records its "
             f"own class space ({selection.scope}); a second one would not be the one the run "
@@ -166,19 +165,20 @@ def admitted_membership(
                       tallies)
 
 
-def run_membership(data_cfg: "Mapping[str, Any]") -> Membership:
-    """:func:`admitted_membership` over a run's data section: its one place (``images_dir`` and
-    the ``labels_dir`` a mask or table run names), under the ``scope`` it states (the empty one
-    when it states none), grouped by its ``split`` section's policy."""
+def run_membership(data: "DataSpec") -> Membership:
+    """:func:`admitted_membership` over a run's data block naming its locations
+    (:func:`data_dir_issues`): its one place (``images_dir`` and the ``labels_dir`` a mask or
+    table run names), under the ``scope`` it states (the empty one when it states none), grouped
+    by its ``split`` section's policy."""
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.data.splits import DEFAULT_GROUP_BY
 
-    split_cfg = data_cfg.get("split") or {}
+    images_dir = cast(str, data.images_dir)
     return admitted_membership(
-        [(str(data_cfg["images_dir"]), data_cfg["images_dir"], data_cfg.get("labels_dir"))],
-        scope=ClassScope.of(data_cfg) if "scope" in data_cfg else ClassScope(),
-        group_by=split_cfg.get("group_by", DEFAULT_GROUP_BY),
-        group_key_map=split_cfg.get("group_key_map"))
+        [(images_dir, images_dir, data.labels_dir)],
+        scope=data.scope if data.scope is not None else ClassScope(),
+        group_by=data.split.group_by or DEFAULT_GROUP_BY,
+        group_key_map=data.split.group_key_map)
 
 
 def check_shares(sides: "Mapping[str, float]") -> dict[str, float]:
@@ -199,14 +199,14 @@ def check_shares(sides: "Mapping[str, float]") -> dict[str, float]:
     return {"train": remainder, **drawn}
 
 
-def run_shares(split_cfg: "Mapping[str, Any]", *, spatial: bool) -> dict[str, float]:
+def run_shares(split: "SplitSpec", *, spatial: bool) -> dict[str, float]:
     """The shares a run drawing its own split states (:func:`check_shares`, ``train`` the
     remainder): ``val`` at ``val_ratio``, and on a within-image spatial split each other side of
     :data:`SPATIAL_SIDE_ORDER` whose ``<side>_ratio`` is stated. A ``val`` share unstated or zero
     refuses, since the run draws its own validation side."""
     sides = SPATIAL_SIDE_ORDER[1:] if spatial else ("val",)
-    shares = check_shares({side: split_cfg[f"{side}_ratio"] for side in sides
-                           if f"{side}_ratio" in split_cfg})
+    stated = {side: getattr(split, f"{side}_ratio") for side in sides}
+    shares = check_shares({side: share for side, share in stated.items() if share is not None})
     if "val" not in shares:
         raise ValueError("a run drawing its own validation side states data.split.val_ratio "
                          "above zero; set data.auto_val=False to train without validation.")
@@ -269,15 +269,15 @@ def draw_sides(
              for side, keys in drawn.items() for key in keys}, counted)
 
 
-def split_seed(split_cfg: "Mapping[str, Any]") -> int:
-    """The seed a draw over ``split_cfg`` states; one stating none refuses (``ValueError``)."""
-    if split_cfg.get("seed") is None:
+def split_seed(split: "SplitSpec") -> int:
+    """The seed a draw over ``split`` states; one stating none refuses (``ValueError``)."""
+    if split.seed is None:
         raise ValueError("this run draws its own split and states no seed: the partition a draw "
                          "produces depends on it, so state data.split.seed.")
-    return int(split_cfg["seed"])
+    return split.seed
 
 
-def dataset_identity(data_cfg: dict, samples: "Iterable[Sample]" = ()
+def dataset_identity(data: "DataSpec", samples: "Iterable[Sample]" = ()
                      ) -> tuple[str | None, str | None]:
     """``(dataset_id, dataset_fingerprint)`` for the run's dataset: the fingerprint recomputed
     over ``samples``, the run's admitted partition (:func:`dataset_fingerprint`), the id from the
@@ -285,7 +285,7 @@ def dataset_identity(data_cfg: dict, samples: "Iterable[Sample]" = ()
     whose images sit under no dataset root. A fingerprint that cannot be read and an identity
     record that does not decode raise.
     """
-    images_dir = data_cfg.get("images_dir")
+    images_dir = data.images_dir
     if not images_dir:
         return None, None
 
@@ -312,15 +312,14 @@ def raster_identity(image: "Path | BandGroupRef") -> dict:
 
 
 def spatial_single_source_split(
-    sample: "Sample", scope: "ClassScope", tiling: dict, split_cfg: dict,
+    sample: "Sample", scope: "ClassScope", tiling: TilingSpec,
     sizes: "Mapping[str, int]", shares: "Mapping[str, float]",
-) -> None:
+) -> SpatialManifest:
     """Derive the run's requested ``shares`` (:func:`run_shares`: ``train``, ``val``, ``holdout``
     and, when stated, ``calibration``) over one detection source's own tile lattice,
     by disjoint pixel strips (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`), and
-    record it as
-    ``split_cfg["spatial_manifest"]``; the reserved regions record only their geometry and
-    kept-tile count.
+    return it as the :class:`~tcip_mcp.pipelines.schemas.SpatialManifest` a run's partition
+    records; the reserved regions record only their geometry and kept-tile count.
 
     ``sample`` is the run's own single admitted sample, which every view here is built over
     (:func:`_spatial_views`). ``sizes`` is what this run resolved (:func:`run_sizes`).
@@ -333,6 +332,7 @@ def spatial_single_source_split(
     from tcip_mcp.pipelines.data.label_queries import acquired, resolved
     from tcip_mcp.pipelines.data.splits import label_document_extent, spatial_strip_split
     from tcip_mcp.pipelines.execution import DEFAULT_OVERLAP
+    from tcip_mcp.pipelines.schemas import SpatialManifest
 
     stem = sample.member
     remedy = ("reduce the reserved shares, or set data.auto_val=False to train on it without "
@@ -351,7 +351,7 @@ def spatial_single_source_split(
     try:
         spatial = spatial_strip_split(
             width, height, tile_size, overlap, fractions=tuple(shares[s] for s in split_names),
-            split_names=split_names, buffer=tiling.get("buffer"),
+            split_names=split_names, buffer=tiling.buffer,
         )
     except ValueError as exc:
         raise ValueError(
@@ -377,40 +377,41 @@ def spatial_single_source_split(
         raw = {spatial.identity_for(ds.sample_of(key).member, box) for key, box in ds.tile_entries}
         return sorted(name for name in raw if name is not None)
 
-    split_cfg["spatial_manifest"] = {
-        "stem": stem,
-        "train_identities": _identities(train_ds), "val_identities": _identities(val_ds),
-        "train_region": spatial.regions.get("train", []),
-        "val_region": spatial.regions.get("val", []),
-        "holdout_region": spatial.regions.get("holdout", []),
-        "calibration_region": spatial.regions.get("calibration", []),
-        "kept_holdout_tiles": spatial.kept_tiles.get("holdout", 0),
-        "kept_calibration_tiles": spatial.kept_tiles.get("calibration", 0),
-        "width": spatial.width, "height": spatial.height, "tile_size": spatial.tile_size,
-        "overlap": spatial.overlap, "axis": spatial.axis, "buffer": spatial.buffer,
-        "requested_fractions": dict(zip(spatial.split_names, spatial.requested_fractions)),
-        "realized_fractions": spatial.realized_fractions,
-        "realized_discard_fraction": spatial.realized_discard_fraction,
-        "kept_train_tiles": spatial.kept_tiles.get("train", 0),
-        "kept_val_tiles": spatial.kept_tiles.get("val", 0),
-        "tiles_dropped_past_extent": spatial.tiles_dropped_past_extent,
-        "tiles_dropped_outside_regions": spatial.tiles_dropped_outside_regions,
-        "raster_content_identity": raster_identity(sample.image),
-    }
     logger.info(
         "Spatial train/val split for %r: %d train / %d val tiles (axis=%s, "
         "realized_fractions=%s, realized_discard_fraction=%.3f).",
         stem, train_ds.num_samples, val_ds.num_samples, spatial.axis,
         spatial.realized_fractions, spatial.realized_discard_fraction,
     )
+    return SpatialManifest(
+        stem=stem,
+        train_identities=_identities(train_ds), val_identities=_identities(val_ds),
+        train_region=spatial.regions.get("train", []),
+        val_region=spatial.regions.get("val", []),
+        holdout_region=spatial.regions.get("holdout", []),
+        calibration_region=spatial.regions.get("calibration", []),
+        kept_holdout_tiles=spatial.kept_tiles.get("holdout", 0),
+        kept_calibration_tiles=spatial.kept_tiles.get("calibration", 0),
+        width=spatial.width, height=spatial.height, tile_size=spatial.tile_size,
+        overlap=spatial.overlap, axis=spatial.axis, buffer=spatial.buffer,
+        requested_fractions=dict(zip(spatial.split_names, spatial.requested_fractions)),
+        realized_fractions=spatial.realized_fractions,
+        realized_discard_fraction=spatial.realized_discard_fraction,
+        kept_train_tiles=spatial.kept_tiles.get("train", 0),
+        kept_val_tiles=spatial.kept_tiles.get("val", 0),
+        tiles_dropped_past_extent=spatial.tiles_dropped_past_extent,
+        tiles_dropped_outside_regions=spatial.tiles_dropped_outside_regions,
+        raster_content_identity=raster_identity(sample.image),
+    )
 
 
-def _tile_options(tiling: dict) -> dict:
-    """``tiling``'s tile options (``datasets.stated_tiling``) without ``keep_regions``, which a
+def _tile_options(tiling: TilingSpec | None) -> dict:
+    """``tiling``'s tile options (``TilingSpec.tiler_options``) without ``keep_regions``, which a
     spatial split sets per side."""
     from tcip_mcp.pipelines.data.datasets import stated_tiling
 
-    return {k: v for k, v in (stated_tiling(tiling) or {}).items() if k != "keep_regions"}
+    stated = stated_tiling(tiling)
+    return {} if stated is None else stated.tiler_options(frozenset({"keep_regions"}))
 
 
 def _spatial_views(samples: "Sequence[Sample]", scope: "ClassScope", sizes: "Mapping[str, int]",
@@ -457,13 +458,14 @@ def redrawn_selection(selection: "Selection", selection_dir: str, seed: int) -> 
 
 
 def _partition_record(samples: "Sequence[Sample]", *, seed: int | None, group_by: str,
-                      selection: dict | None) -> dict:
+                      selection: dict | None, spatial: SpatialManifest | None) -> dict:
     """The partition a run's resolved record holds: the draw's ``seed`` (``None`` for a route
     that drew nothing) and resolved ``group_by``, every sample the run bound on the side it
     landed on in its one recorded shape
     (:func:`~tcip_mcp.pipelines.data.selection.sample_document`), with the ground-truth digest it
-    carries, and ``selection``, the selection a bound run bound (its directory, its digest and
-    whether the run redrew inside it), ``None`` for a run that drew its own."""
+    carries, ``selection``, the selection a bound run bound (its directory, its digest and
+    whether the run redrew inside it), ``None`` for a run that drew its own, and ``spatial``, a
+    within-image split's regions (:func:`spatial_single_source_split`), ``None`` otherwise."""
     from tcip_mcp.pipelines.data.selection import sample_document
 
     return {
@@ -471,6 +473,7 @@ def _partition_record(samples: "Sequence[Sample]", *, seed: int | None, group_by
         "group_by": group_by,
         "samples": [sample_document(s) for s in samples],
         "selection": selection,
+        "spatial": None if spatial is None else spatial.model_dump(mode="json"),
     }
 
 
@@ -483,84 +486,95 @@ def partition_samples(partition: "Mapping[str, Any]") -> list["Sample"]:
             for position, raw in enumerate(partition["samples"])]
 
 
-def run_sizes(
-    task: str, data_cfg: dict, samples: "Sequence[Sample]", dataset_source=None,
-) -> dict[str, int]:
-    """This run's own sizes (:func:`~tcip_mcp.pipelines.data.datasets.resolve_sizes`), recorded on
-    its data config beside its ``scope``, each by its own name.
+def partition_spatial(partition: "Mapping[str, Any]") -> SpatialManifest | None:
+    """A resolved partition's within-image split read back, validated; ``None`` for a partition
+    that drew none."""
+    from tcip_mcp.pipelines.schemas import SpatialManifest
+
+    spatial = partition["spatial"]
+    return None if spatial is None else SpatialManifest.model_validate(spatial)
+
+
+def run_sizes(task: str, data: "DataSpec", scope: "ClassScope",
+              samples: "Sequence[Sample]") -> "DataSpec":
+    """``data`` with what a run resolved over ``samples`` recorded on it: the class space
+    ``scope`` it was admitted under, and its sizes
+    (:func:`~tcip_mcp.pipelines.data.datasets.resolve_sizes` over the ones ``data`` states), each
+    by its own name."""
+    from tcip_mcp.pipelines.data.datasets import SIZE_NAMES, resolve_sizes, stated_sizes
+
+    sizes = resolve_sizes(task, stated_sizes(data), samples, data.dataset_source)
+    return data.model_copy(update={"scope": scope,
+                                   **{name: sizes.get(name) for name in SIZE_NAMES}})
+
+
+def _sample_loaders(task: str, data: "DataSpec", recorded: "Sequence[Sample]", transforms, *,
+                    seed: int | None, group_by: str, selection: dict | None = None,
+                    spatial: SpatialManifest | None = None):
+    """``(train_ds, val_ds, partition, data)``: the partition (:func:`_partition_record` over
+    ``recorded`` at ``seed``, ``group_by``, the ``selection`` a bound run bound and a
+    within-image run's ``spatial`` split) and :func:`recorded_datasets` over it and the resolved
+    block ``data``. ``recorded`` is the membership the partition holds: the two sides for a drawn
+    run, and the selection's held-out samples besides for a bound one."""
+    partition = _partition_record(recorded, seed=seed, group_by=group_by, selection=selection,
+                                  spatial=spatial)
+    return (*recorded_datasets(task, data, recorded, spatial, transforms), partition, data)
+
+
+def _drawn_split(task: str, data: "DataSpec", *, transforms,
+                 tallies_out: dict[str, int] | None):
+    """``(train_ds, val_ds, partition, resolved)`` for a run that draws its own split over
+    ``data``'s ground truth: its one place's membership (:func:`admitted_membership`, its tallies
+    copied into ``tallies_out``), then, with ``auto_val`` on, train and val drawn through
+    :func:`draw_sides`, or a single tiled detection source split over its own tile lattice
+    (:func:`spatial_single_source_split`). ``auto_val`` off trains on every member with no
+    validation. ``resolved`` is ``data`` with its class space and sizes recorded, and a
+    within-image split is the partition's. Raises when the validation requested cannot be drawn
+    (naming ``auto_val=False``), and with the membership's and the draw's own refusals. Either
+    geometry draws the one partition :func:`run_shares` resolves.
     """
-    from tcip_mcp.pipelines.data.datasets import SIZE_NAMES, resolve_sizes
-
-    sizes = resolve_sizes(task, data_cfg, samples, dataset_source)
-    data_cfg.update({name: sizes.get(name) for name in SIZE_NAMES})
-    return sizes
-
-
-def _sample_loaders(task: str, data_cfg: dict, recorded: "Sequence[Sample]", transforms, *,
-                    seed: int | None, group_by: str, selection: dict | None = None):
-    """``(train_ds, val_ds, partition)``: the partition (:func:`_partition_record` over
-    ``recorded`` at ``seed``, ``group_by`` and the ``selection`` a bound run bound) and
-    :func:`recorded_datasets` over it and ``data_cfg``, whose class space and sizes
-    (:func:`run_sizes`) are recorded. ``recorded`` is the membership the partition holds: the two
-    sides for a drawn run, and the selection's held-out samples besides for a bound one."""
-    partition = _partition_record(recorded, seed=seed, group_by=group_by, selection=selection)
-    return (*recorded_datasets(task, data_cfg, recorded, transforms), partition)
-
-
-def _drawn_split(
-    task: str, data_cfg: dict, *, tiling, transforms, dataset_source=None,
-    tallies_out: dict[str, int] | None,
-):
-    """``(train_ds, val_ds, partition)`` for a run that draws its own split over ``data_cfg``'s
-    ground truth: its one place's membership (:func:`admitted_membership`, its tallies copied into
-    ``tallies_out``), then, with ``auto_val`` on,
-    train and val drawn through :func:`draw_sides`, or a single tiled detection source split over
-    its own tile lattice (:func:`spatial_single_source_split`). ``auto_val`` off trains on every
-    member with no validation. Raises when the validation requested cannot be drawn (naming
-    ``auto_val=False``), and with the membership's and the draw's own refusals. Either geometry
-    draws the one partition :func:`run_shares` resolves.
-    """
-    split_cfg = data_cfg.setdefault("split", {})
-    membership = run_membership(data_cfg)
+    split = data.split
+    membership = run_membership(data)
     if tallies_out is not None:
         tallies_out.update(membership.tallies)
-    data_cfg["scope"] = asdict(membership.scope)
     samples = list(membership.samples.values())
-    sizes = run_sizes(task, data_cfg, samples, dataset_source)
+    resolved = run_sizes(task, data, membership.scope, samples)
 
-    if not data_cfg.get("auto_val", True):
-        return _sample_loaders(task, data_cfg, samples, transforms, seed=None,
+    if not data.auto_val:
+        return _sample_loaders(task, resolved, samples, transforms, seed=None,
                                group_by=membership.group_by)
     if len(samples) < 2:
-        from tcip_mcp.pipelines.data.datasets import run_tiling
+        from tcip_mcp.pipelines.data.datasets import run_tiling, stated_sizes
 
-        if run_tiling(task, tiling) is None or dataset_source is not None:
+        tiler = run_tiling(task, data.tiling)
+        if tiler is None or data.dataset_source is not None:
             raise ValueError(
                 f"{len(samples)} admitted source(s) leave nothing to hold a validation side out "
                 f"of for this {task} run; set data.auto_val=False to train without validation, "
                 "or admit more sources.")
         # A tiled detection source the platform builds itself holds out disjoint pixel blocks.
-        spatial_single_source_split(samples[0], membership.scope, tiling, split_cfg, sizes,
-                                    run_shares(split_cfg, spatial=True))
-        return _sample_loaders(task, data_cfg, samples, transforms, seed=None, group_by="stem")
+        manifest = spatial_single_source_split(
+            samples[0], membership.scope, tiler, stated_sizes(resolved),
+            run_shares(split, spatial=True))
+        return _sample_loaders(task, resolved, samples, transforms, seed=None, group_by="stem",
+                               spatial=manifest)
 
-    seed = split_seed(split_cfg)
+    seed = split_seed(split)
     drawn, _counted = draw_sides(
-        membership.samples, membership.scope, ratios=run_shares(split_cfg, spatial=False),
-        seed=seed,
-        stratify=split_cfg.get("stratify_foreground", True))
-    return _sample_loaders(task, data_cfg, [drawn[key] for key in sorted(drawn)], transforms,
+        membership.samples, membership.scope, ratios=run_shares(split, spatial=False),
+        seed=seed, stratify=split.stratify_foreground)
+    return _sample_loaders(task, resolved, [drawn[key] for key in sorted(drawn)], transforms,
                            seed=seed, group_by=membership.group_by)
 
 
-def auto_train_val(project: Path, task: str, data_cfg: dict, transforms, *,
+def auto_train_val(project: Path, task: str, data: "DataSpec", transforms, *,
                    tallies_out: dict[str, int] | None = None):
-    """Build ``(train_ds, val_ds, partition)`` for a run of ``project``, deriving a leakage-free
-    val split, and resolve ``data_cfg`` in place: its ``scope``, sizes, and a within-image run's
-    ``split.spatial_manifest``.
+    """Build ``(train_ds, val_ds, partition, resolved)`` for a run of ``project`` over its data
+    block ``data``, deriving a leakage-free val split; ``resolved`` is ``data`` with its
+    ``scope`` and sizes recorded on it.
 
     ``partition`` is :func:`_partition_record`'s; a within-image spatial split's holds its one
-    sample, its regions being the manifest's. ``tallies_out`` receives a drawn run's admission's
+    sample and its ``spatial`` regions. ``tallies_out`` receives a drawn run's admission's
     tallies.
 
     Two routes, and a run of any task takes one of them:
@@ -578,24 +592,17 @@ def auto_train_val(project: Path, task: str, data_cfg: dict, transforms, *,
         builds every loader from the resulting samples.
         A bespoke ``data.dataset_source`` builder takes this route too and is handed those samples.
 
-    Reads ``auto_val`` / ``split.*`` from ``data_cfg`` (== config["data"]).
     """
-    from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY
-
     # The one missing-key refusal, so a run and the preflight that offered it name a missing or
     # moved location with the same words. A no-op for a config bound to a selection.
-    location_issues = data_dir_issues(data_cfg)
+    location_issues = data_dir_issues(data)
     if location_issues:
         raise ValueError(
             f"{'; '.join(location_issues)}: a run reads its own samples out of the places its "
             "config names, so there is nothing here to admit."
         )
 
-    tiling = data_cfg.get("tiling")  # detection tiling (None for other tasks/configs)
-
-    split_cfg_raw = data_cfg.get("split")
-    split_cfg_raw = split_cfg_raw if isinstance(split_cfg_raw, dict) else {}
-    selection_dir = split_cfg_raw.get("selection_dir")
+    selection_dir = data.split.selection_dir
 
     # 1. A named selection is an explicit partition auto_val does not govern; every refusal
     # here, and any build failure while binding to it, raises rather than degrading.
@@ -613,7 +620,7 @@ def auto_train_val(project: Path, task: str, data_cfg: dict, transforms, *,
             unread = exc
         # The bind's own refusals, stated once so the preflight that offered this selection and
         # the launch that binds it say the same thing, the config's own even over an unread one.
-        bind_issues = selection_compatibility(data_cfg, selection, selection_dir)
+        bind_issues = selection_compatibility(data, selection, selection_dir)
         if bind_issues:
             raise ValueError(" ".join(bind_issues)) from unread
         if selection is None:
@@ -626,10 +633,10 @@ def auto_train_val(project: Path, task: str, data_cfg: dict, transforms, *,
         selection = replace(selection, samples=tuple(readmitted.get(s.location, s)
                                                      for s in selection.samples))
         # A redraw repartitions the selection's own train-plus-val samples; the reference untouched.
-        redraw = bool(split_cfg_raw.get("redraw_within_selection"))
+        redraw = data.split.redraw_within_selection
         seed = selection.seed
         if redraw:
-            seed = int(split_cfg_raw["seed"])
+            seed = split_seed(data.split)
             selection = redrawn_selection(selection, selection_dir, seed)
 
         reference_samples = [s for s in selection.samples if s.side in REFERENCE_SIDES]
@@ -640,85 +647,88 @@ def auto_train_val(project: Path, task: str, data_cfg: dict, transforms, *,
         bound = trained + reference_samples
         # The selection's own scope and exact map become this run's, so the checkpoint records
         # the vocabulary it trained in rather than one rediscovered from a live registry.
-        data_cfg["scope"] = asdict(selection.scope)
-        run_sizes(task, data_cfg, train_samples + val_samples,
-                  data_cfg.get(DATASET_SOURCE_KEY) or None)
         # The selection's own named policy, not "explicit_map": the per-stem map the partition
         # records covers this run's members, and a stem outside it is what a policy name answers.
         return _sample_loaders(
-            task, data_cfg, bound, transforms, seed=seed, group_by=selection.group_by,
+            task, run_sizes(task, data, selection.scope, train_samples + val_samples), bound,
+            transforms, seed=seed, group_by=selection.group_by,
             selection={"selection_dir": selection_dir,
                        "selection_sha256": selection_digest(selection, project),
                        "redraw": redraw})
 
     # 2. Otherwise the producer names this run's membership off the ground truth its config points
     # at, and every branch of the resolution order below builds from the samples it made.
-    return _drawn_split(task, data_cfg, tiling=tiling, transforms=transforms,
-                        dataset_source=data_cfg.get(DATASET_SOURCE_KEY) or None,
-                        tallies_out=tallies_out)
+    return _drawn_split(task, data, transforms=transforms, tallies_out=tallies_out)
 
 
 class ResolvedRun(NamedTuple):
-    """A run resolved once, at launch: the ``record`` its ``run.json`` holds (its resolved
-    ``data`` section, its ``partition`` and its ``objective``), the datasets built at it, and
-    ``spec``, the validated config it was resolved from."""
+    """A run resolved once, at launch: the datasets built at it, ``spec``, the validated launch
+    config it was resolved from, and ``data``, ``partition`` and ``objective``, what it
+    resolved."""
 
-    record: dict
     train_ds: Any
     val_ds: Any
     spec: TrainConfigSchema
+    data: "DataSpec"
+    partition: dict
+    objective: dict
+
+    @property
+    def spatial(self) -> SpatialManifest | None:
+        """The within-image split ``partition`` records (:func:`partition_spatial`)."""
+        return partition_spatial(self.partition)
+
+    @property
+    def record(self) -> dict:
+        """What the run's ``run.json`` holds of this resolution: ``data`` as it records itself,
+        ``partition`` and ``objective``."""
+        return {"data": self.data.record(), "partition": self.partition,
+                "objective": self.objective}
 
 
-def resolve_run(config: dict, spec: TrainConfigSchema, *, project: Path,
-                objective: dict | None = None,
+def resolve_run(spec: TrainConfigSchema, *, project: Path, objective: dict | None = None,
                 tallies_out: dict[str, int] | None = None) -> ResolvedRun:
-    """Resolve ``config``, validated as ``spec`` (``schemas.train_config``), once for a run of
-    ``project``: a copy of its data section through
-    :func:`auto_train_val`, the geometry its train dataset serves stamped on it
-    (:func:`~tcip_mcp.pipelines.training.generic_trainer.stamp_effective_data_geometry`), and its
+    """Resolve the validated config ``spec`` (``schemas.train_config``) once for a run of
+    ``project``: its data block through :func:`auto_train_val`, the geometry its train dataset
+    serves recorded on it
+    (:func:`~tcip_mcp.pipelines.training.generic_trainer.effective_data_geometry`), and its
     objective (:func:`~tcip_mcp.pipelines.training.generic_trainer.resolve_objective` for a run
     with or without a val side), or ``objective`` as given, a sweep's own for its trials.
     ``tallies_out`` is :func:`auto_train_val`'s. Every refusal of the resolution raises."""
-    from tcip_mcp.pipelines.model_build import run_task
     from tcip_mcp.pipelines.training.generic_trainer import (
-        resolve_objective, run_transforms, stamp_effective_data_geometry,
+        effective_data_geometry, resolve_objective, run_transforms,
     )
 
-    task = run_task(config)
-    data = copy.deepcopy(config.get("data") or {})
-    train_ds, val_ds, partition = auto_train_val(
-        project, task, data, run_transforms(spec), tallies_out=tallies_out)
-    stamp_effective_data_geometry(data, train_ds)
+    task = spec.model_source.task
+    train_ds, val_ds, partition, data = auto_train_val(
+        project, task, spec.data, run_transforms(spec), tallies_out=tallies_out)
+    data = effective_data_geometry(data, train_ds)
     if objective is None:
         objective = resolve_objective(spec, task, project=project,
                                       has_val_loader=val_ds is not None)
-    return ResolvedRun({"data": data, "partition": partition, "objective": objective},
-                       train_ds, val_ds, spec)
+    return ResolvedRun(train_ds, val_ds, spec, data, partition, objective)
 
 
-def recorded_datasets(task: str, data: dict, samples: "Sequence[Sample]",
-                      transforms) -> tuple[Any, Any]:
+def recorded_datasets(task: str, data: "DataSpec", samples: "Sequence[Sample]",
+                      spatial: SpatialManifest | None, transforms) -> tuple[Any, Any]:
     """``(train_ds, val_ds)`` built from what a run resolved, resolving nothing again: the train
-    and val ``samples`` of its partition under ``data``'s recorded class space, sizes, tiling
-    and dataset source, or for a within-image spatial split (``data.split.spatial_manifest``) its
-    one sample's recorded train and val regions. ``val_ds`` is ``None`` for a run whose partition
-    holds no val side. The samples' ground truth is read once for both loaders
-    (:func:`~tcip_mcp.pipelines.data.label_queries.acquired`)."""
+    and val ``samples`` of its partition under the resolved block ``data``'s class space, sizes,
+    tiling and dataset source, or for a within-image split ``spatial``
+    (:func:`partition_spatial`) its one sample's recorded train and val regions. ``val_ds`` is
+    ``None`` for a run whose partition holds no val side. The samples' ground truth is read
+    once for both loaders (:func:`~tcip_mcp.pipelines.data.label_queries.acquired`)."""
     from tcip_mcp.pipelines.data.datasets import build_dataset, stated_sizes
     from tcip_mcp.pipelines.data.label_queries import acquired
-    from tcip_mcp.pipelines.data.selection import ClassScope
-    from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY
 
     samples = acquired(samples)
-    scope, sizes = ClassScope.of(data), stated_sizes(data)
-    spatial = data["split"].get("spatial_manifest")
+    scope, sizes = data.recorded_scope, stated_sizes(data)
     if spatial is not None:
-        views = _spatial_views(samples, scope, sizes, _tile_options(data["tiling"]),
-                               {"train": spatial["train_region"], "val": spatial["val_region"]},
+        views = _spatial_views(samples, scope, sizes, _tile_options(data.tiling),
+                               {"train": spatial.train_region, "val": spatial.val_region},
                                transforms=transforms)
         return views["train"], views["val"]
     build_kwargs: dict[str, Any] = {
-        "tiling": data.get("tiling"), "dataset_source": data.get(DATASET_SOURCE_KEY) or None,
+        "tiling": data.tiling, "dataset_source": data.dataset_source,
         "scope": scope, "sizes": sizes,
     }
     train = [s for s in samples if s.side == "train"]

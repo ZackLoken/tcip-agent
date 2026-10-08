@@ -642,7 +642,7 @@ def test_registered_models_answers_a_resolved_absolute_checkpoint_path(
     ckpt_dir = opened_project / ".tcip" / "models"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     ckpt = checkpoint_file(ckpt_dir / "m.pt", "route fixture weights")
-    ModelRegistry(str(opened_project)).register_model("m", str(ckpt), {})
+    ModelRegistry(str(opened_project)).register_model("m", str(ckpt))
 
     resp = client.get("/api/results/models/registered")
 
@@ -694,7 +694,7 @@ def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(
     Image.new("RGB", (16, 16)).save(source / "tree_01.jpg")
     assert "error" not in ingest_images(opened_project, str(source), date_from="2026-02-11")
     ckpt = checkpoint_file(opened_project / "m.pt", "cancel fixture weights")
-    ModelRegistry(str(opened_project)).register_model("m", str(ckpt), {})
+    ModelRegistry(str(opened_project)).register_model("m", str(ckpt))
     launched = client.post("/api/inference/launch", json={
         "checkpoint_path": str(ckpt), "dataset_root": str(opened_project), "date": "2026-02-11",
         "bucket": "baseline/2026-02-11", "user": "tester"})

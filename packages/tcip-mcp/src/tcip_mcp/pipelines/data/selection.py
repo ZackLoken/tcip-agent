@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence, cast
 
 import tcip_store
+from pydantic import ConfigDict, TypeAdapter
 from tcip_store import Key, encode_record
 
 from tcip_mcp.registry_paths import PathFields, recorded_paths, runtime_paths, within
@@ -131,27 +132,31 @@ class ClassScope:
 
     subject: str | None = None
     attributes: tuple[Attribute, ...] | None = None
+    __pydantic_config__ = ConfigDict(extra="forbid")
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "subject", self.subject or None)
 
     @classmethod
     def of(cls, record: "Mapping[str, Any]") -> "ClassScope":
-        """The class space ``record`` carries under ``scope``: a run's data section, a selection
-        document or a prediction bucket's stamp, each attribute rebuilt from the mapping
-        :func:`dataclasses.asdict` wrote. A record carrying no ``scope`` refuses by name.
+        """The class space ``record`` carries under ``scope``, a selection document or a
+        prediction bucket's stamp, validated as a run's data block validates its own
+        (``schemas.DataSpec.scope``) and read through :meth:`recorded`. A scope naming a key
+        outside these fields refuses by name.
         """
-        if "scope" not in record:
+        stated = record.get("scope")
+        return cls.recorded(None if stated is None else TypeAdapter(cls).validate_python(stated))
+
+    @staticmethod
+    def recorded(scope: "ClassScope | None") -> "ClassScope":
+        """``scope``, the class space a record carries; a record carrying none refuses
+        (``ValueError``) by name."""
+        if scope is None:
             raise ValueError(
                 "this record carries no scope: the class space its ground truth was admitted "
                 "under is not recorded, so no reader can hold targets or predictions to it. "
-                "Produce it through an admission, which records one."
-            )
-        stated = dict(record["scope"])
-        if stated.get("attributes") is not None:
-            stated["attributes"] = tuple(Attribute(**{**a, "values": tuple(a["values"])})
-                                         for a in stated["attributes"])
-        return cls(**stated)
+                "Produce it through an admission, which records one.")
+        return scope
 
     def state_ids(self, state: "PositiveState | None") -> tuple[int, int] | None:
         """``(column, value id)`` of ``state`` under this class space: its attribute's position

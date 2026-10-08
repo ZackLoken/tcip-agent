@@ -279,7 +279,7 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     _assert_trained(run, tmp_path / "out")
 
     ckpt_path = str(tmp_path / "out" / "model_best.pt")
-    reg = register_model(name="ordinal-model", checkpoint_path=ckpt_path, config={},
+    reg = register_model(name="ordinal-model", checkpoint_path=ckpt_path,
                          project=tmp_path)
     assert "error" not in reg, reg
 
@@ -310,7 +310,7 @@ def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     _assert_trained(run, tmp_path / "out")
 
     ckpt_path = str(tmp_path / "out" / "model_best.pt")
-    reg = register_model(name="regression-model", checkpoint_path=ckpt_path, config={},
+    reg = register_model(name="regression-model", checkpoint_path=ckpt_path,
                          project=tmp_path)
     assert "error" not in reg, reg
 

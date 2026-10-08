@@ -368,7 +368,7 @@ def _internal_foreign_checkpoint(src: Path) -> Path:
     weights = src / ".tcip" / "models" / "internal.pt"
     weights.parent.mkdir(parents=True, exist_ok=True)
     checkpoint_file(weights, "weights registered from inside the project")
-    ModelRegistry(str(src)).register_model("internal", str(weights), {})
+    ModelRegistry(str(src)).register_model("internal", str(weights))
     return weights
 
 
@@ -461,8 +461,8 @@ def test_import_project_discloses_a_designed_external_checkpoint_separately_from
     external_ckpt = checkpoint_file(external_dir / "external.pt", "external weights")
 
     reg = ModelRegistry(str(src))
-    reg.register_model("m_internal", str(internal_ckpt), {})
-    reg.register_model("m_external", str(external_ckpt), {})
+    reg.register_model("m_internal", str(internal_ckpt))
+    reg.register_model("m_external", str(external_ckpt))
 
     zip_path = tmp_path / "export.zip"
     exported = archive_project(src, str(zip_path), include_models=True)
@@ -487,7 +487,7 @@ def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(tmp_pa
     src = tmp_path / "src_project"
     _initialized(src)
     ckpt = checkpoint_file(src / ".tcip" / "models" / "m.pt", "weights")
-    ModelRegistry(str(src)).register_model("m", str(ckpt), {})
+    ModelRegistry(str(src)).register_model("m", str(ckpt))
 
     assert Path(ckpt).resolve() in checkpoint_files(src)
 
@@ -517,7 +517,7 @@ def test_a_checkpoint_registered_from_anywhere_in_the_project_travels_only_with_
     _initialized(src)
     (src / "weights").mkdir()
     ckpt = checkpoint_file(src / "weights" / "foreign.pt", "weights registered in the project")
-    ModelRegistry(str(src)).register_model("foreign", str(ckpt), {})
+    ModelRegistry(str(src)).register_model("foreign", str(ckpt))
 
     without = archive_project(src, str(tmp_path / "without.zip"), include_models=False)
     with_models = archive_project(src, str(tmp_path / "with.zip"), include_models=True)

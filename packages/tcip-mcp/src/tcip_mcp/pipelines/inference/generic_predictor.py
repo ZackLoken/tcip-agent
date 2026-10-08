@@ -21,9 +21,8 @@ if TYPE_CHECKING:
 from tcip_mcp.pipelines.derivations import probe_channels
 from tcip_mcp.pipelines.execution import DEFAULT_IMAGE_BATCH_SIZE, DEFAULT_TILE_BATCH_SIZE
 from tcip_mcp.pipelines.model_build import (
-    MODEL_SOURCE_KEY,
     STATE_DICT_KEY,
-    build_model,
+    build_from_model_source,
     recorded_model_dims,
 )
 from tcip_mcp.pipelines.image_utils import (
@@ -66,21 +65,20 @@ class GenericPredictor:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.checkpoint_path = checkpoint.path
         self.checkpoint_sha256 = checkpoint.sha256
-        self.config = checkpoint.config
-        self.model_source = self.config.get(MODEL_SOURCE_KEY)
-        self.task = checkpoint.task
+        spec = checkpoint.spec
+        self.model_source = spec.model_source
+        self.task = spec.model_source.task
 
-        data = checkpoint.data_config
-        tiling = stated_tiling(data.get("tiling")) or {}
-        self.train_tile_size = tiling.get("tile_size")
-        self.train_overlap = tiling.get("overlap")
-        self.train_native_size = data.get("train_native_size")
-        self.train_augmentation = self.config.get("augmentation")
+        tiling = stated_tiling(spec.data.tiling)
+        self.train_tile_size = tiling.tile_size if tiling is not None else None
+        self.train_overlap = tiling.overlap if tiling is not None else None
+        self.train_native_size = spec.data.train_native_size
+        self.train_augmentation = spec.augmentation
 
-        self.dims = recorded_model_dims(self.config)
+        self.dims = recorded_model_dims(spec)
         self.in_chans = self.dims["in_chans"]
         self.attribute_sizes = [len(a.values) for a in self.dims.get("attributes", ())]
-        self.model = build_model(self.config, self.dims)
+        self.model = build_from_model_source(spec.model_source, self.dims)
         self.model.load_state_dict(checkpoint.payload[STATE_DICT_KEY])
         self.model.to(self.device)
         self.model.eval()
@@ -266,7 +264,7 @@ class GenericPredictor:
 
         tile_size, tile_resize = cast(int, execution.tile_size), execution.tile_resize
         model_edge = min(int(tile_resize[0]), int(tile_resize[1])) if tile_resize else tile_size
-        min_size = ((self.model_source or {}).get("builder_kwargs") or {}).get("min_size")
+        min_size = (self.model_source.builder_kwargs or {}).get("min_size")
         if min_size and abs(int(min_size) - model_edge) > model_edge:
             logger.warning("tiled inference: model min_size=%s differs greatly from the %spx tiles "
                            "it is handed (tiles will be rescaled).", min_size, model_edge)

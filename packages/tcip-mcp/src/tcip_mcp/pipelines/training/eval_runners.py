@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.label_queries import Admission
     from tcip_mcp.pipelines.execution import Pass, Stated
+    from tcip_mcp.pipelines.schemas import TilingSpec
     from tcip_mcp.traits import TraitEntry
 
 
@@ -38,7 +39,7 @@ def evaluation_result(common: dict, extra: dict) -> dict:
 
 def run_test_evaluation(
     pass_: Pass, loader, device, *, iou_threshold: float = 0.5,
-    score_weights: dict | None = None, tiling: dict | None = None,
+    score_weights: dict | None = None, tiling: TilingSpec | None = None,
     trait: TraitEntry | None = None,
 ) -> dict:
     """Score ``loader`` against the untiled ``pass_``'s model, governed by the pass's execution

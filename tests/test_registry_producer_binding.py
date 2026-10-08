@@ -31,7 +31,7 @@ def test_a_tag_naming_a_run_never_makes_that_run_a_producer(tmp_path):
 
     opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="exp-rail1")
     forged = checkpoint_file(tmp_path / "forged.pt", "a checkpoint no run completed with")
-    registered = register_model(name="exp-rail1-forged", checkpoint_path=str(forged), config={},
+    registered = register_model(name="exp-rail1-forged", checkpoint_path=str(forged),
                                 project=tmp_path, tags=["experiment:exp-rail1"])
     assert "error" not in registered, registered
 
@@ -46,8 +46,8 @@ def test_a_replacements_registry_event_names_the_superseded_entry(tmp_path):
 
     reg = ModelRegistry(str(tmp_path))
     ckpt = checkpoint_file(tmp_path / "a.pt", "first content")
-    reg.register_model("m", str(ckpt), {}, tags=["first"])
-    reg.register_model("m-renamed", str(ckpt), {})
+    reg.register_model("m", str(ckpt), tags=["first"])
+    reg.register_model("m-renamed", str(ckpt))
 
     events = ts.read_log(audit_log_key(tmp_path)).records
     replace = [e for e in events if "superseded_name" in e.get("arguments", {})]
@@ -62,7 +62,7 @@ def test_caller_tag_still_round_trips_and_filters(tmp_path):
 
     reg = ModelRegistry(str(tmp_path))
     ckpt = checkpoint_file(tmp_path / "m.pt", "weights")
-    reg.register_model("m", str(ckpt), {}, tags=["current"])
+    reg.register_model("m", str(ckpt), tags=["current"])
 
     assert [m["name"] for m in reg.list_models(tag="current")] == ["m"]
     assert reg.list_models(tag="nonexistent") == []
@@ -83,10 +83,10 @@ def test_a_checkpoint_carrying_no_weights_refuses_at_registration_naming_the_fie
     registry = ModelRegistry(str(tmp_path))
 
     with pytest.raises(ValueError, match=STATE_DICT_KEY):
-        registry.register_model("weightless", str(weightless), {})
+        registry.register_model("weightless", str(weightless))
 
     assert registry.list_models() == []
-    registry.register_model("weighted", str(checkpoint_file(tmp_path / "w.pt", "weights")), {})
+    registry.register_model("weighted", str(checkpoint_file(tmp_path / "w.pt", "weights")))
     assert [m["name"] for m in registry.list_models()] == ["weighted"]
 
 
@@ -107,7 +107,7 @@ def test_an_indexed_checkpoint_carrying_no_weights_refuses_at_load_naming_the_fi
     from tests._verified_checkpoint_fixtures import checkpoint_file
 
     weighted = checkpoint_file(tmp_path / "w.pt", "weights")
-    ModelRegistry(str(tmp_path)).register_model("weighted", str(weighted), {})
+    ModelRegistry(str(tmp_path)).register_model("weighted", str(weighted))
     weightless = tmp_path / "weightless.pt"
     torch.save({CONFIG_KEY: {}}, weightless)
     key = registry_index_key(tmp_path)

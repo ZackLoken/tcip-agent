@@ -49,7 +49,7 @@ def test_the_producer_of_a_foreign_checkpoint_names_no_run(tmp_path):
 
     ckpt = tmp_path / "foreign.pt"
     torch.save({STATE_DICT_KEY: {}}, ckpt)
-    ModelRegistry(str(tmp_path)).register_model("foreign", str(ckpt), {})
+    ModelRegistry(str(tmp_path)).register_model("foreign", str(ckpt))
 
     producer = load_registered_checkpoint(ckpt, project=tmp_path).producer
     assert producer["checkpoint_sha256"]       # the digest still recorded
@@ -65,7 +65,7 @@ def test_a_payloads_own_experiment_id_names_no_producer(tmp_path):
 
     ckpt = tmp_path / "stamped.pt"
     torch.save({STATE_DICT_KEY: {}, "experiment_id": "expStamped"}, ckpt)
-    ModelRegistry(str(tmp_path)).register_model("stamped", str(ckpt), {})
+    ModelRegistry(str(tmp_path)).register_model("stamped", str(ckpt))
 
     producer = load_registered_checkpoint(ckpt, project=tmp_path).producer
     assert producer["experiment_id"] is None

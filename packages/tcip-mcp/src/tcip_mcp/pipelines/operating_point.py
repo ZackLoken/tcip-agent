@@ -5,9 +5,12 @@ from __future__ import annotations
 
 import math
 import statistics
-from typing import Any, Callable, Sequence, cast
+from typing import TYPE_CHECKING, Any, Callable, Sequence, cast
 
 from tcip_store import non_finite_state, stored_number
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.schemas import SpatialManifest
 
 from tcip_mcp.pipelines.training.evaluation import (
     classes_with_evidence,
@@ -320,22 +323,16 @@ def scalar_criterion(hold_items: list[dict], *, score: Callable[[Any, Any], floa
     return evidence, failures
 
 
-def spatial_disjointness(spatial: dict, rects: Sequence[tuple[int, int, int, int]]) -> list[str]:
+def spatial_disjointness(spatial: SpatialManifest,
+                         rects: Sequence[tuple[int, int, int, int]]) -> list[str]:
     """The reference rects (full-mosaic pixel coordinates) not held out from training under a
-    within-image split's persisted regions (``spatial``, a run's ``data.split.spatial_manifest``):
-    each rect must lie inside one of its ``val_region``/``holdout_region``/``calibration_region``
-    rects and overlap none of its ``train_region`` rects. A manifest missing any of those four keys
-    refuses naming it."""
+    within-image split's recorded regions ``spatial``: each rect must lie inside one of its
+    ``val_region``/``holdout_region``/``calibration_region`` rects and overlap none of its
+    ``train_region`` rects."""
     from tcip_mcp.pipelines.raster_source import rect_contains_rect, rects_overlap
 
-    missing = [k for k in ("train_region", "val_region", "holdout_region", "calibration_region")
-               if k not in spatial]
-    if missing:
-        raise ValueError(f"the run's spatial manifest records no {missing}: the partition it "
-                         "certifies is not stated whole, so containment cannot be checked.")
-    train = [tuple(r) for r in spatial["train_region"]]
-    held = [tuple(r) for key in ("val_region", "holdout_region", "calibration_region")
-            for r in spatial[key]]
+    train = spatial.train_region
+    held = [*spatial.val_region, *spatial.holdout_region, *spatial.calibration_region]
     return sorted(str(list(rect)) for rect in rects
                   if not any(rect_contains_rect(h, rect) for h in held)
                   or any(rects_overlap(t, rect) for t in train))

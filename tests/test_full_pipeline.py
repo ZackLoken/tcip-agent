@@ -141,8 +141,7 @@ class TestFullClassificationPipeline:
         from tcip_mcp.model_registry import load_registered_checkpoint
 
         ckpt_path = str(out / "model_best.pt")
-        result = register_model(tmp_path, name="test-classifier", checkpoint_path=ckpt_path,
-                                config={})
+        result = register_model(tmp_path, name="test-classifier", checkpoint_path=ckpt_path)
         assert "error" not in result, result
         checkpoint = load_registered_checkpoint(ckpt_path, project=tmp_path)
         p = prepare(checkpoint, Stated(tile=False), device="cpu").runnable()
@@ -258,8 +257,7 @@ class TestDetectionPipelineRealData:
         from tcip_mcp.model_registry import load_registered_checkpoint
 
         ckpt_path = str(out / "model_best.pt")
-        result = register_model(tmp_path, name="test-detector", checkpoint_path=ckpt_path,
-                                config={})
+        result = register_model(tmp_path, name="test-detector", checkpoint_path=ckpt_path)
         assert "error" not in result, result
         checkpoint = load_registered_checkpoint(ckpt_path, project=tmp_path)
         detector = prepare(checkpoint, Stated(tile=False, conf=0.01, max_dets=SAMPLE_MAX_DETS),

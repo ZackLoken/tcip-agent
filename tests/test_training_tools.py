@@ -274,6 +274,7 @@ def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(tmp_pa
     pytest.importorskip("torch")
     from tcip_annotation import json_io
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tcip_mcp.pipelines.schemas import DataSpec
     from tcip_mcp.tools.training_tools import preflight_config
 
     imgs = tmp_path / "images" / UNDATED_BUCKET
@@ -286,7 +287,7 @@ def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(tmp_pa
     cfg = training_config({"builder": BESPOKE_DETECTION, "task": "detection"}, dict(data_cfg))
     r = preflight_config(tmp_path, cfg)
     with pytest.raises(json_io.UnreadableLabelDocumentError, match="bad") as raised:
-        auto_train_val(tmp_path, "detection", dict(data_cfg), None)
+        auto_train_val(tmp_path, "detection", DataSpec.model_validate(data_cfg), None)
     assert r["valid"] is False
     assert any(str(raised.value) in i for i in r["issues"]), r["issues"]
 
@@ -366,10 +367,10 @@ def test_preflight_config_training_source_shape_and_importability(tmp_path):
     base_cfg = training_config({"builder": BESPOKE_DETECTION, "task": "detection"},
                                _labeled(tmp_path))
 
-    # A dict is rejected.
-    cfg = dict(base_cfg, training_source={"train": BESPOKE_DETECTION})
-    r = preflight_config(tmp_path, cfg)
-    assert any("training_source must be a non-empty" in i for i in r["issues"])
+    # A dict and an empty string are refused by the config's own schema.
+    for stated in ({"train": BESPOKE_DETECTION}, ""):
+        r = preflight_config(tmp_path, dict(base_cfg, training_source=stated))
+        assert any(i.startswith("training_source: ") for i in r["issues"]), r["issues"]
 
     # A bare string that doesn't import is rejected with the import error surfaced.
     cfg = dict(base_cfg, training_source="nonexistent_module:train")
@@ -592,16 +593,25 @@ def test_a_detector_config_refuses_an_unstated_validation_conf_under_any_trainer
     assert train_config(classifier).evaluation.conf_threshold is None
 
 
+def _applied(base: dict, params: dict) -> dict:
+    """``params`` applied to ``base`` (``training_tools._apply_hpo_params``)."""
+    from tcip_mcp.tools.training_tools import _apply_hpo_params
+
+    return _apply_hpo_params(base, params)
+
+
+def _base(builder: str = BESPOKE_DETECTION, **overrides) -> dict:
+    """A detection base config of ``builder`` over no data, ``overrides`` in place of theirs."""
+    return training_config({"builder": builder, "task": "detection"}, {}, **overrides)
+
+
 def test_apply_hpo_params_optimizer_axes_reach_optimizer_param_groups():
     """Swept optimizer values survive the trainer's own optimizer read into each group's rate
     and every group's weight decay."""
-    from tcip_mcp.tools.training_tools import _apply_hpo_params
-
-    base = training_config({"builder": BESPOKE_DETECTION, "task": "detection"}, {})
     swept = {"optimizer.backbone_lr": 3e-4, "optimizer.head_lr": 3e-3,
              "optimizer.weight_decay": 2e-4}
     (backbone_lr, backbone_decay), (head_lr, head_decay) = _built_groups(
-        _apply_hpo_params(base, swept))
+        _applied(_base(), swept))
     assert (backbone_lr, head_lr) == (pytest.approx(3e-4), pytest.approx(3e-3))
     assert backbone_decay == head_decay == pytest.approx(2e-4)
 
@@ -609,32 +619,22 @@ def test_apply_hpo_params_optimizer_axes_reach_optimizer_param_groups():
 def test_apply_hpo_params_preserves_base_config_stages():
     """Sweeping a rate must not overwrite the agent's own progressive-unfreeze schedule with a
     hardcoded recipe: base_config's stages survive unchanged."""
-    from tcip_mcp.tools.training_tools import _apply_hpo_params
-
     custom_stages = [{"freeze_to": -1, "epochs": 2}, {"freeze_to": 0, "epochs": 8}]
-    base = {"model_source": {"builder": "x:y", "task": "detection"},
-            "stages": custom_stages}
-    out = _apply_hpo_params(base, {"optimizer.head_lr": 3e-3})
+    out = _applied(_base("x:y", stages=custom_stages), {"optimizer.head_lr": 3e-3})
     assert out["stages"] == custom_stages
 
 
 def test_apply_hpo_params_undotted_key_reaches_top_level():
     """An undotted swept key must land at the top level of the resolved config, the one
     placement train() reads, never nested under "training", which the config schema refuses."""
-    from tcip_mcp.tools.training_tools import _apply_hpo_params
-
-    base = {"model_source": {"builder": "x:y", "task": "detection"}}
-    out = _apply_hpo_params(base, {"batch_size": 4})
+    out = _applied(_base("x:y"), {"batch_size": 4})
     assert out["batch_size"] == 4
     assert "training" not in out
 
 
 def test_apply_hpo_params_dotted_key_reaches_nested_field():
     """A dotted param (e.g. a swept builder) reaches the nested field it names."""
-    from tcip_mcp.tools.training_tools import _apply_hpo_params
-
-    base = {"model_source": {"builder": "old:builder", "task": "detection"}}
-    out = _apply_hpo_params(base, {"model_source.builder": "new:builder"})
+    out = _applied(_base("old:builder"), {"model_source.builder": "new:builder"})
     assert out["model_source"]["builder"] == "new:builder"
     assert out["model_source"]["task"] == "detection"  # the rest of the mapping survives
 
@@ -643,21 +643,15 @@ def test_apply_hpo_params_dotted_seed_key_reaches_the_split_config():
     """split_draws's own paired grid axis (data.split.seed) reaches the nested field
     run_hyperparameter_search's drawn path reads, the same dotted-key mechanism a swept
     builder uses above."""
-    from tcip_mcp.tools.training_tools import _apply_hpo_params
-
-    base = {"model_source": {"builder": "x:y", "task": "detection"}}
-    out = _apply_hpo_params(base, {"data.split.seed": 7})
+    out = _applied(_base("x:y"), {"data.split.seed": 7})
     assert out["data"]["split"]["seed"] == 7
 
 
 def test_apply_hpo_params_refuses_a_dotted_key_through_a_non_mapping_intermediate():
     """A dotted key whose path walks through a value that is not a mapping is refused by name,
     naming the key and what was found there, rather than raising an opaque AttributeError."""
-    from tcip_mcp.tools.training_tools import _apply_hpo_params
-
-    base = {"model_source": "not-a-mapping"}
-    with pytest.raises(ValueError, match="model_source.builder"):
-        _apply_hpo_params(base, {"model_source.builder": "x:y"})
+    with pytest.raises(ValueError, match="model_source.builder.x"):
+        _applied(_base("x:y"), {"model_source.builder.x": "y"})
 
 
 def test_preflight_points_covers_every_categorical_choice_and_both_numeric_bounds():
@@ -693,7 +687,7 @@ class _FakeDataset:
 
 
 class _TiledFakeDataset(_FakeDataset):
-    """A stand-in dataset carrying tile geometry, for stamp_effective_data_geometry to record."""
+    """A stand-in dataset carrying tile geometry, for effective_data_geometry to record."""
     tile_size = 224
     overlap = 0.2
 
@@ -757,11 +751,12 @@ def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
 
     ds = _FakeDataset()
 
-    def fake_auto_train_val(project, task, data_cfg, transforms, **_):
+    def fake_auto_train_val(project, task, data, transforms, **_):
         if captured is not None:
             captured["transforms"] = transforms
-            captured["data_cfg"] = data_cfg
-        return ds, ds, {"seed": None, "group_by": "stem", "samples": [], "selection": None}
+            captured["data"] = data
+        return ds, ds, sc._partition_record([], seed=None, group_by="stem", selection=None,
+                                            spatial=None), data
 
     monkeypatch.setattr(sc, "auto_train_val", fake_auto_train_val)
     monkeypatch.setattr(sc, "recorded_datasets", lambda *a, **k: (ds, ds))
@@ -897,7 +892,7 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
 
     def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, batch_callback=None, resume_from=""):
-        captured["model_source"] = run.config["model_source"]
+        captured["model_source"] = run.spec.model_source.model_dump(exclude_unset=True)
         run.status = "completed"
         return run
 
@@ -920,17 +915,17 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_data_cfg_handed_to_auto_trai
     captured: dict = {}
     _patch_hpo_trial_machinery(monkeypatch, _completed_train, captured=captured)
     _trial({"data.split.seed": 7}, [].append, _detection_base(), tmp_path)
-    assert captured["data_cfg"]["split"]["seed"] == 7
+    assert captured["data"].split.seed == 7
 
 
-def _fake_auto_train_val_reading_seed_like_split_construction(
-        project, task, data_cfg, transforms, **_):
-    """The reads ``auto_train_val`` performs on its multi-stem drawn path: setdefault the split
-    block, then get its seed off that block."""
-    split_cfg = data_cfg.setdefault("split", {})
-    split_cfg.get("seed", 42)
+def _fake_auto_train_val_serving_tiles(project, task, data, transforms, **_):
+    """A resolution of ``data`` that serves a tiled stand-in dataset on both sides and records
+    no samples, its data block resolved unchanged."""
+    from tcip_mcp.pipelines.data.split_construction import _partition_record
+
     ds = _TiledFakeDataset()
-    return ds, ds, {"samples": []}
+    return ds, ds, _partition_record([], seed=None, group_by="stem", selection=None,
+                                     spatial=None), data
 
 
 def test_run_hpo_trial_dotted_seed_axis_reaches_the_trials_own_records(monkeypatch, tmp_path):
@@ -942,8 +937,7 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_trials_own_records(monkeypat
 
     _patch_hpo_trial_machinery(monkeypatch, _completed_train)
     from tcip_mcp.pipelines.data import split_construction as sc
-    monkeypatch.setattr(
-        sc, "auto_train_val", _fake_auto_train_val_reading_seed_like_split_construction)
+    monkeypatch.setattr(sc, "auto_train_val", _fake_auto_train_val_serving_tiles)
 
     trial_dir = _trial({"data.split.seed": 7}, [].append, _detection_base(), tmp_path)
 
@@ -956,7 +950,7 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_trials_own_records(monkeypat
 def test_run_hpo_trial_geometry_stamp_from_a_tiled_dataset_reaches_the_resolved_record(
     monkeypatch, tmp_path,
 ):
-    """The tile geometry stamp_effective_data_geometry records off the tiled dataset a trial's
+    """The tile geometry effective_data_geometry records off the tiled dataset a trial's
     auto_train_val returns is in the trial's resolved data section, the record a caller reads
     back to know what the trial actually trained on."""
     pytest.importorskip("torch")
@@ -964,8 +958,7 @@ def test_run_hpo_trial_geometry_stamp_from_a_tiled_dataset_reaches_the_resolved_
 
     _patch_hpo_trial_machinery(monkeypatch, _completed_train)
     from tcip_mcp.pipelines.data import split_construction as sc
-    monkeypatch.setattr(
-        sc, "auto_train_val", _fake_auto_train_val_reading_seed_like_split_construction)
+    monkeypatch.setattr(sc, "auto_train_val", _fake_auto_train_val_serving_tiles)
 
     trial_dir = _trial({"data.split.seed": 7}, [].append, _detection_base(), tmp_path)
 
@@ -977,8 +970,8 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
 ):
     """The producer path: a real one-source tiled dataset through the real, unstubbed
     auto_train_val. Its single-source spatial-strip branch places every strip by declared order
-    alone, and the trial's launch record carries the real spatial_manifest and tiling
-    auto_train_val wrote, with no seed inside the manifest it never read one for."""
+    alone, and the trial's launch record carries the real spatial split and tiling
+    auto_train_val wrote, with no seed inside the split it never read one for."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     from tcip_mcp.experiments import RUN_FILE, read_record
@@ -1002,8 +995,8 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
 
     resolved = read_record(trial_dir / RUN_FILE)["resolved"]
     assert resolved["partition"]["seed"] is None
-    assert resolved["data"]["split"]["spatial_manifest"]
-    assert "seed" not in resolved["data"]["split"]["spatial_manifest"]
+    assert resolved["partition"]["spatial"]
+    assert "seed" not in resolved["partition"]["spatial"]
     assert resolved["data"]["tiling"]["tile_size"] == 128
 
 
@@ -1017,7 +1010,7 @@ def test_a_trials_launch_record_carries_the_seed_it_trained_under(monkeypatch, t
 
     def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, batch_callback=None, resume_from=""):
-        captured["seed"] = run.config.get("seed")
+        captured["seed"] = run.spec.seed
         run.status = "completed"
         return run
 
@@ -1104,7 +1097,7 @@ def test_a_launch_config_that_json_cannot_hold_is_refused_before_the_run_starts(
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(training_tools, "_preflight",
-                        lambda project, config, *, smoke, overfit: (
+                        lambda project, spec, issues, *, smoke, overfit: (
                             {"valid": False, "issues": ["stub"]}, None))
 
     with pytest.raises(TypeError) as refused:
@@ -1121,8 +1114,8 @@ def test_an_ordinary_launch_config_passes_the_boundary_to_preflight(tmp_path, mo
     monkeypatch.chdir(tmp_path)
     seen = []
 
-    def stub_preflight(project, config, *, smoke, overfit):
-        seen.append(config)
+    def stub_preflight(project, spec, issues, *, smoke, overfit):
+        seen.append((spec, issues))
         return {"valid": False, "issues": ["stub"]}, None
 
     monkeypatch.setattr(training_tools, "_preflight", stub_preflight)
@@ -1131,7 +1124,8 @@ def test_an_ordinary_launch_config_passes_the_boundary_to_preflight(tmp_path, mo
                                             actor=None)
 
     assert result == {"error": "Invalid config", "issues": ["stub"]}
-    assert seen == [{"model_source": {"builder": "m:f"}}]
+    [(spec, issues)] = seen
+    assert spec is None and any(issue.startswith("model_source.task") for issue in issues)
 
 
 def test_a_sweep_payload_that_json_cannot_hold_is_refused_before_any_trial_runs(
@@ -1197,6 +1191,58 @@ def test_an_ordinary_sweep_payload_still_runs_its_search(tmp_path, monkeypatch):
     assert seen == [_CHOICE_SPACE]
 
 
+@pytest.mark.parametrize("choices", [[-1.0, 1e-3], [1e-3, -1.0]],
+                         ids=["the-first-corner", "a-later-corner"])
+def test_a_sweep_opens_over_a_base_omitting_what_its_space_sweeps_and_refuses_an_invalid_point(
+    tmp_path, monkeypatch, choices,
+):
+    """A base config may leave unstated what its search space names: the sweep validates each
+    point applied to it, so a base omitting ``optimizer.head_lr`` opens over a space naming it,
+    and a corner whose applied config the schema refuses is named by its path with nothing
+    opened, whether it is the first corner or a later one."""
+    from tcip_mcp import experiments
+    from tcip_mcp.tools import training_tools
+    from tests._verified_checkpoint_fixtures import SWEEP_ARGUMENTS
+
+    monkeypatch.chdir(tmp_path)
+    base = training_config({"builder": BESPOKE_DETECTION, "task": "detection"},
+                           _labeled(tmp_path))
+    del base["optimizer"]["head_lr"]
+    arguments = {k: v for k, v in SWEEP_ARGUMENTS.items() if k != "param_space"}
+
+    refused = training_tools.open_sweep(
+        tmp_path, base, {"optimizer.head_lr": {"type": "categorical", "choices": choices}},
+        actor=None, **arguments)
+
+    assert isinstance(refused, dict), refused
+    assert any(issue.startswith("optimizer.head_lr") for issue in refused["issues"]), refused
+    assert experiments.sweep_dirs(tmp_path) == []
+
+    opened = training_tools.open_sweep(
+        tmp_path, base, {"optimizer.head_lr": {"type": "categorical", "choices": [1e-3, 2e-3]}},
+        actor=None, **arguments)
+
+    assert isinstance(opened, Path), opened
+    assert experiments.sweep_dirs(tmp_path) == [opened]
+
+
+def test_preflight_names_a_missing_task_where_the_config_is_validated(tmp_path):
+    """A config stating no ``model_source.task`` is refused by name where preflight validates it,
+    before any resolver reads the task; the same config stating its task is admitted."""
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    config = training_config({"builder": BESPOKE_DETECTION}, _labeled(tmp_path), batch_size=1)
+
+    refused = preflight_config(tmp_path, config)
+
+    assert refused["valid"] is False
+    assert [issue for issue in refused["issues"] if issue.startswith("model_source.task")]
+
+    stated = {**config, "model_source": {"builder": BESPOKE_DETECTION, "task": "detection"}}
+    admitted = preflight_config(tmp_path, stated)
+    assert admitted["valid"] is True, admitted["issues"]
+
+
 def test_run_hyperparameter_search_admits_an_lr_sweep_beside_a_base_config_selection_metric(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
@@ -1242,11 +1288,12 @@ def test_hpo_admits_a_categorical_evaluation_axis_naming_the_same_metric_at_ever
 def test_dataset_identity_tolerates_a_genuinely_unregistered_dataset(tmp_path):
     """The admitting half: no identity document at all still reads as (None, fp), not a refusal."""
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
+    from tcip_mcp.pipelines.schemas import DataSpec
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
 
-    ds_id, fp = dataset_identity({"images_dir": str(images_dir)})
+    ds_id, fp = dataset_identity(DataSpec.model_validate({"images_dir": str(images_dir)}))
     assert ds_id is None
 
 

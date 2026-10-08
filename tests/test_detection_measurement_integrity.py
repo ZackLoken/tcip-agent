@@ -134,8 +134,8 @@ def test_run_id_reuses_training_tiling(tmp_path, monkeypatch):
     assert captured["ds"].num_samples > 3  # more tiles than the 3 source images
     from tcip_mcp.experiments import run_resolution
 
-    assert captured["tiling"] == run_resolution(run_dir.name, project=tmp_path)["data"]["tiling"]
-    assert captured["tiling"]["tile_size"] == 64
+    assert captured["tiling"] == run_resolution(run_dir.name, project=tmp_path).data.tiling
+    assert captured["tiling"].tile_size == 64
 
 
 def test_evaluating_a_run_leaves_its_directory_byte_identical(tmp_path, monkeypatch):
@@ -201,7 +201,7 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, 
     unstated = tmp_path / "unstated.pt"
     torch.save(payload, str(unstated))
     assert "error" not in register_model(tmp_path, name="unstated-width",
-                                         checkpoint_path=str(unstated), config={})
+                                         checkpoint_path=str(unstated))
 
     r = evaluate_model(tmp_path, str(unstated), str(images_dir), stated=DETECTOR_PASS)
 
@@ -216,10 +216,11 @@ def _detections_as_ground_truth(payload, images_dir, *, subject: str, limit: int
     from tcip_annotation.state import Annotation, BBox
 
     from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
-    from tcip_mcp.pipelines.model_build import STATE_DICT_KEY, build_model, recorded_model_dims
+    from tcip_mcp.pipelines.model_build import STATE_DICT_KEY
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
+    from tests._chain_fixtures import built_model
 
-    model = build_model(payload[CONFIG_KEY], recorded_model_dims(payload[CONFIG_KEY]))
+    model = built_model(payload[CONFIG_KEY])
     model.load_state_dict(payload[STATE_DICT_KEY])
     model.eval()
     set_detector_operating_point(model, score_thresh=0.0)
@@ -267,15 +268,15 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     verified = load_registered_checkpoint(ckpt, project=tmp_path)
     _detections_as_ground_truth(verified.payload, images_dir, subject="bud")
 
-    build_model = model_build.build_model
+    build = model_build.build_from_model_source
     builds = []
 
-    def _spy(payload, dims):
-        builds.append(payload)
-        return build_model(payload, dims)
+    def _spy(source, dims):
+        builds.append(source)
+        return build(source, dims)
 
-    monkeypatch.setattr(model_build, "build_model", _spy)
-    monkeypatch.setattr(generic_predictor, "build_model", _spy)
+    monkeypatch.setattr(model_build, "build_from_model_source", _spy)
+    monkeypatch.setattr(generic_predictor, "build_from_model_source", _spy)
 
     recorded: dict = {}
     run_test_evaluation = runners.run_test_evaluation
@@ -294,8 +295,8 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     assert len(builds) == 1
 
     torch.manual_seed(777)
-    dims = model_build.recorded_model_dims(verified.payload[CONFIG_KEY])
-    independent_model = build_model(verified.payload[CONFIG_KEY], dims)
+    dims = model_build.recorded_model_dims(verified.spec)
+    independent_model = build(verified.spec.model_source, dims)
     independent_model.load_state_dict(verified.payload[STATE_DICT_KEY])
     independent_model.to(recorded["device"])
     kw = recorded["kw"]
@@ -324,6 +325,7 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
 
 def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
+    from tcip_mcp.pipelines.schemas import TilingSpec
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -332,7 +334,8 @@ def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
 
     captured = _capture_run_test_evaluation(monkeypatch)
     evaluate_model(tmp_path, ckpt, str(images_dir), stated=DETECTOR_PASS,
-                   tiling={"enabled": True, "tile_size": 64, "sliver_frac": 0.5})
+                   tiling=TilingSpec.model_validate(
+                       {"enabled": True, "tile_size": 64, "sliver_frac": 0.5}))
     assert isinstance(captured["ds"], TiledDetectionDataset)
 
 
@@ -534,9 +537,10 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
     assert res["pid"] != os.getpid()  # a different OS process, not this one
     eid = res["experiment_id"]
 
-    tiling = run_resolution(eid, project=tmp_path)["data"]["tiling"]
-    assert tiling["tile_size"] == 224  # TiledDetectionDataset default
-    assert tiling["overlap"] == pytest.approx(0.2)
+    tiling = run_resolution(eid, project=tmp_path).data.tiling
+    assert tiling is not None
+    assert tiling.tile_size == 224  # TiledDetectionDataset default
+    assert tiling.overlap == pytest.approx(0.2)
 
     # "completed", not any terminal state: a child run inside this process would hit _poison_train.
     assert run_to_end(tmp_path, eid)["state"] == "completed"

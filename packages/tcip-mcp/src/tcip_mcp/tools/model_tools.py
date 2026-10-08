@@ -13,7 +13,6 @@ def register_model(
     project: Path,
     name: str = "",
     checkpoint_path: str = "",
-    config: dict | None = None,
     metrics: dict | None = None,
     tags: list[str] | None = None,
 ) -> dict:
@@ -26,13 +25,12 @@ def register_model(
 
     Args:
         name: Model name (e.g. '<crop>_<trait>_v1').
-        checkpoint_path: Path to the .pt checkpoint.
-        config: Training configuration used.
+        checkpoint_path: Path to the .pt checkpoint; its config is the one its payload carries.
         metrics: Evaluation metrics.
         tags: Tags for filtering.
     """
     registry = ModelRegistry(str(project))
-    return registry.register_model(name, checkpoint_path, config or {}, metrics, tags)
+    return registry.register_model(name, checkpoint_path, metrics=metrics, tags=tags)
 
 
 def _labeled_available_metrics(models: list[dict]) -> list[dict]:

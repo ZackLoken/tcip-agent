@@ -150,7 +150,7 @@ def train_bespoke(ctx) -> None:
     model = ctx.build_model().to(device)
 
     optimizer = ctx.build_optimizer(model)
-    epochs = int(ctx.config.get("epochs", 2))
+    epochs = int(ctx.spec.model_extra.get("epochs", 2))
     scheduler = ctx.build_scheduler(optimizer, epochs)
 
     best = float("inf")
@@ -202,12 +202,13 @@ def save_built_weights(ctx) -> None:
     ``epoch`` plus its metrics) through the run's own metrics log, then saves the model its config
     builds, as built under the run's own seed, as the run's final weights, carrying the config's
     ``fixture_metrics`` as the checkpoint's metrics when it states any."""
-    for row in ctx.config.get("fixture_rows") or []:
+    own = ctx.spec.model_extra
+    for row in own.get("fixture_rows") or []:
         ctx.log_metrics(row["epoch"], {k: v for k, v in row.items() if k != "epoch"})
     ctx.set_seed()
     state = {STATE_DICT_KEY: ctx.build_model().state_dict()}
-    if ctx.config.get("fixture_metrics"):
-        state[METRICS_KEY] = dict(ctx.config["fixture_metrics"])
+    if own.get("fixture_metrics"):
+        state[METRICS_KEY] = dict(own["fixture_metrics"])
     ctx.save_checkpoint(state, "model_final")
 
 

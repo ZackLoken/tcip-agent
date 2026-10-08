@@ -21,6 +21,7 @@ from tcip_mcp.pipelines.training import generic_trainer as gt  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import train  # noqa: E402
 from tests._training_values import schedule  # noqa: E402
 from tests.tiny_trainer_fixtures import (  # noqa: E402
+    COUNTING_REGRESSOR,
     NAN_EVAL_REGRESSOR,
     TWO_RATE_REGRESSOR,
     capture_model,
@@ -57,6 +58,12 @@ def _tensors(value):
 
 def test_a_stage_starts_from_the_weights_and_optimizer_state_of_the_prior_stage_best_epoch(
         tmp_path, monkeypatch):
+    """The next stage starts from its predecessor's best epoch whole: the weight, its optimizer
+    momentum and the model's registered buffer as they stood then, not as the last epoch left
+    them; and every held epoch state carries the optimizer's tensor-valued group setting beside
+    them, each as it was taken."""
+    from tcip_mcp.pipelines.training.optimizer_factory import GROUPS_KEY
+
     models: list = []
     capture_model(monkeypatch, models)
     optimizers: list = []
@@ -75,7 +82,8 @@ def test_a_stage_starts_from_the_weights_and_optimizer_state_of_the_prior_stage_
         weight = models[0].weight
         at_stage_start.append((weight.detach().clone(),
                                optimizer.state[weight]["exp_avg"].clone()
-                               if weight in optimizer.state else None))
+                               if weight in optimizer.state else None,
+                               models[0].forwards.clone()))
         return real_build_scheduler(optimizer, config, epochs)
 
     monkeypatch.setattr(gt, "_build_scheduler", recording_build_scheduler)
@@ -84,7 +92,8 @@ def test_a_stage_starts_from_the_weights_and_optimizer_state_of_the_prior_stage_
 
     def recording_epoch_state(*args, **kwargs):
         state = real_epoch_state(*args, **kwargs)
-        taken.append((state, copy.deepcopy(state)))
+        taken.append((state, copy.deepcopy(state),
+                      [group["rates"].clone() for group in optimizers[-1].param_groups]))
         return state
 
     monkeypatch.setattr(gt, "_epoch_state", recording_epoch_state)
@@ -93,26 +102,72 @@ def test_a_stage_starts_from_the_weights_and_optimizer_state_of_the_prior_stage_
     def record_epoch(epoch: int, metrics: dict) -> None:
         weight = models[0].weight
         per_epoch.append((weight.detach().clone(),
-                          optimizers[-1].state[weight]["exp_avg"].clone()))
+                          optimizers[-1].state[weight]["exp_avg"].clone(),
+                          models[0].forwards.clone()))
 
-    run = _train(tmp_path, _config([{"freeze_to": 0, "epochs": 3}, {"freeze_to": 0, "epochs": 2}]),
+    run = _train(tmp_path, _config([{"freeze_to": 0, "epochs": 3}, {"freeze_to": 0, "epochs": 2}],
+                                   builder=COUNTING_REGRESSOR),
                  "pairing", epoch_callback=record_epoch)
 
     assert run.status == "completed", run.status_error
     stage0 = [m["val_loss"] for m in run.metrics_history if m["stage"] == 0]
     assert stage0 == sorted(stage0) and len(set(stage0)) == 3
-    best_weight, best_momentum = per_epoch[0]
-    last_weight, _ = per_epoch[2]
+    best_weight, best_momentum, best_forwards = per_epoch[0]
+    last_weight, _, last_forwards = per_epoch[2]
     assert not torch.equal(best_weight, last_weight)
-    weight, momentum = at_stage_start[1]
+    assert not torch.equal(best_forwards, last_forwards)
+    weight, momentum, forwards = at_stage_start[1]
     assert torch.equal(weight, best_weight)
     assert momentum is not None and torch.equal(momentum, best_momentum)
-    # Every held epoch state is as it was taken, after the later stage's steps.
+    assert torch.equal(forwards, best_forwards)
+    # Every held epoch state is as it was taken, after the later stage's steps, and holds the
+    # optimizer's tensor setting as the optimizer held it then.
     assert taken
-    for state, as_taken in taken:
+    for state, as_taken, rates in taken:
         now, then = _tensors(state), _tensors(as_taken)
         assert len(now) == len(then)
         assert all(torch.equal(a, b) for a, b in zip(now, then))
+        held = [group["settings"]["rates"] for group in state[GROUPS_KEY]]
+        assert len(held) == len(rates) and all(map(torch.equal, held, rates))
+
+
+def test_a_resume_puts_back_the_buffer_and_the_tensor_setting_its_capture_holds(tmp_path):
+    """What a capture of a model and its optimizer holds, a resume's restore puts back into a
+    freshly built pair: the model's registered buffer, and a tensor-valued group setting moved
+    in place since the pair was built, the way a scheduler fills a tensor setting. The capture
+    stays as it was taken once the restored pair moves on."""
+    from tcip_mcp.pipelines.schemas import train_config
+    from tcip_mcp.pipelines.training.optimizer_factory import (
+        GROUPS_KEY, build_optimizer, capture_training_state, restore_training_state,
+    )
+    from tests._chain_fixtures import built_model
+
+    config = _config([{"freeze_to": 0, "epochs": 1}], builder=COUNTING_REGRESSOR)
+    stated = train_config(config).default_trainer_regime().optimizer
+
+    def built_pair():
+        model = built_model(config)
+        return model, build_optimizer(stated, model, backbone_lr=stated.backbone_lr,
+                                      head_lr=stated.head_lr)
+
+    trained, optimizer = built_pair()
+    trained.forwards.fill_(7)
+    optimizer.param_groups[0]["rates"].mul_(0.5)
+    captured = capture_training_state(trained, optimizer)
+
+    fresh, fresh_optimizer = built_pair()
+    restore_training_state(fresh, fresh_optimizer, captured, group_settings=True)
+
+    assert float(fresh.forwards) == 7.0
+    restored = fresh_optimizer.param_groups[0]["rates"]
+    assert torch.equal(restored, optimizer.param_groups[0]["rates"])
+    restored.mul_(3.0)
+    fresh.forwards.add_(1)
+    held = optimizer.param_groups[0]["rates"].clone()
+    assert torch.equal(captured[GROUPS_KEY][0]["settings"]["rates"], held)
+    assert float(captured[STATE_DICT_KEY]["forwards"]) == 7.0
+    optimizer.param_groups[0]["rates"].mul_(10.0)
+    assert torch.equal(captured[GROUPS_KEY][0]["settings"]["rates"], held)
 
 
 def test_a_stage_ends_on_its_own_plateau_and_the_next_stage_runs(tmp_path):

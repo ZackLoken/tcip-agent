@@ -19,12 +19,14 @@ pytest.importorskip("torch")
 
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.operating_point import spatial_disjointness  # noqa: E402
+from tcip_mcp.pipelines.schemas import SpatialManifest  # noqa: E402
 
 MOSAIC_W, MOSAIC_H = 4000, 3000
-GAPPED = {"train_region": [[0, 0, 400, 1000]], "val_region": [[600, 0, 1000, 1000]],
-          "holdout_region": [], "calibration_region": []}
-"""A manifest reserving x<400 for training and x>=600 for validation, silent on the strip
-between them."""
+GAPPED = SpatialManifest.model_construct(
+    train_region=[(0, 0, 400, 1000)], val_region=[(600, 0, 1000, 1000)],
+    holdout_region=[], calibration_region=[])
+"""The regions of a manifest reserving x<400 for training and x>=600 for validation, silent on
+the strip between them; the containment check reads nothing else of it."""
 
 
 def test_a_rect_in_an_unattested_gap_between_regions_is_a_leak():
@@ -81,8 +83,9 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
         "split": {"val_ratio": 0.2, "holdout_ratio": 0.1, "calibration_ratio": 0.15, "seed": 1},
     }
     resolved_run(tmp_path, data_cfg, experiment_id="exp_four_way")
-    spatial = run_resolution("exp_four_way", project=tmp_path)["data"]["split"]["spatial_manifest"]
-    cal_region = spatial["calibration_region"]
+    spatial = run_resolution("exp_four_way", project=tmp_path).spatial
+    assert spatial is not None
+    cal_region = spatial.calibration_region
     assert cal_region, "the writer produced no calibration region to read back"
 
     def _shrunk(rect):
@@ -93,7 +96,7 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
 
     beyond_extent = (MOSAIC_W + 1000, 100, MOSAIC_W + 2000, 300)
     from tcip_mcp.pipelines.raster_source import rects_overlap
-    assert all(not rects_overlap(tuple(tr), beyond_extent) for tr in spatial["train_region"])
+    assert all(not rects_overlap(tr, beyond_extent) for tr in spatial.train_region)
 
     assert spatial_disjointness(spatial, [beyond_extent]) == [str(list(beyond_extent))]
 
@@ -115,5 +118,6 @@ def test_a_spatial_runs_resolved_record_carries_no_drawn_seed(tmp_path):
     resolved_run(tmp_path, data_cfg, experiment_id="exp_spatial_no_seed")
     resolved = run_resolution("exp_spatial_no_seed", project=tmp_path)
 
-    assert resolved["partition"]["seed"] is None
-    assert "seed" not in resolved["data"]["split"]["spatial_manifest"]
+    assert resolved.partition["seed"] is None
+    manifest = resolved.partition["spatial"]
+    assert manifest is not None and "seed" not in manifest

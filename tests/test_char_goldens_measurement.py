@@ -307,12 +307,13 @@ def test_golden_evaluate_model_hands_the_diagnostic_its_stated_cap_and_refuses_n
 
 def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_none(
         tmp_path, monkeypatch):
-    """Each of the three regimes, constructed genuinely (a tiling dict for the tile-level run,
+    """Each of the three regimes, constructed genuinely (a tiling block for the tile-level run,
     nothing for the single pass, use_tiled_inference=True for the full frame), runs at the conf
     the caller states, recorded ``explicit``, and refuses naming ``conf`` when none is stated."""
     import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.pipelines import execution as execution_mod
+    from tcip_mcp.pipelines.schemas import TilingSpec
     from tcip_mcp.tools import training_tools as training_tools_mod
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_CONF, SAMPLE_DETECTOR_PASS, foreign_checkpoint,
@@ -365,7 +366,8 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
     monkeypatch.setattr(predictor_mod, "GenericPredictor", lambda *a, **kw: _StubPredictor())
 
     unstated_conf = {k: v for k, v in SAMPLE_DETECTOR_PASS.items() if k != "conf"}
-    regimes = [(tile_ds, {"tiling": {"tile_size": 64, "overlap": 0.0, "sliver_frac": 0.5}}),
+    tiling = TilingSpec.model_validate({"tile_size": 64, "overlap": 0.0, "sliver_frac": 0.5})
+    regimes = [(tile_ds, {"tiling": tiling}),
                (single_ds, {}), (ff_default_ds, {"use_tiled_inference": True})]
     for (images_dir, ckpt), regime in regimes:
         refused = training_tools_mod.evaluate_model(

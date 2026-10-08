@@ -38,7 +38,7 @@ def _reference_stems(checkpoint, images_dir: Path, project: Path) -> set[str] | 
     from tcip_mcp.pipelines.data.splits import same_directory
     from tcip_mcp.pipelines.image_utils import stem_of
 
-    partition = run_resolution(checkpoint.experiment_id, project=project)["partition"]
+    partition = run_resolution(checkpoint.experiment_id, project=project).partition
     if partition["selection"] is None:
         return None
     return {stem_of(s.source) for s in partition_samples(partition)

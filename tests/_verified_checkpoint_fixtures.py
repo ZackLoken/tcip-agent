@@ -109,7 +109,7 @@ def opened_run(root: str | Path, config: dict, *, experiment_id: str | None = No
                **facts: Any) -> Path:
     """A run directory under the project ``root`` resolved by the launcher's own producer
     (``split_construction.resolve_run``) and opened by its own writer (``training_tools.open_run``)
-    over a copy of ``config``, launched by ``process``; ``facts`` are ``open_run``'s other
+    over ``config`` validated, launched by ``process``; ``facts`` are ``open_run``'s other
     keywords. Returns the directory."""
     from tcip_mcp import experiments
     from tcip_mcp.pipelines.data.split_construction import resolve_run
@@ -118,9 +118,8 @@ def opened_run(root: str | Path, config: dict, *, experiment_id: str | None = No
 
     run_dir = experiments.experiment_dir(experiment_id or experiments.mint_experiment_id(),
                                          project=root)
-    config = dict(config)
-    open_run(run_dir, config,
-             resolve_run(config, train_config(config), project=Path(root)).record, **facts)
+    resolution = resolve_run(train_config(config), project=Path(root))
+    open_run(run_dir, resolution.spec, resolution.record, **facts)
     return run_dir
 
 
@@ -228,10 +227,17 @@ def finished_run(
 
 def resolved_run(root: str | Path, data: dict, *, task: str = "detection",
                  experiment_id: str | None = None) -> Path:
-    """A run under ``root`` opened by :func:`opened_run` over ``data``, whose launch record holds
-    the data section, partition and objective the launcher's producer resolved; no body runs.
-    Returns the run directory."""
-    return opened_run(root, training_config({"task": task}, data), experiment_id=experiment_id)
+    """A run under ``root`` of a ``task`` model (:func:`unbuilt_source`) opened by
+    :func:`opened_run` over ``data``, whose launch record holds the data section, partition and
+    objective the launcher's producer resolved; no body runs. Returns the run directory."""
+    return opened_run(root, training_config(unbuilt_source(task), data),
+                      experiment_id=experiment_id)
+
+
+def unbuilt_source(task: str) -> dict:
+    """The ``model_source`` of a ``task`` run no body ever builds a model for: the tiny detection
+    builder named for a run that only resolves and records."""
+    return {"builder": BESPOKE_DETECTION, "task": task}
 
 
 def worker_run(root: str | Path, config: dict, *,
@@ -292,7 +298,7 @@ def register_checkpoint(project_root: str | Path, path: str, *, name: str) -> No
     ``register_model``'s explicit mode, asserting it admitted it."""
     from tcip_mcp.tools.model_tools import register_model
 
-    result = register_model(project_root, name=name, checkpoint_path=path, config={})
+    result = register_model(project_root, name=name, checkpoint_path=path)
     assert "error" not in result, result
 
 

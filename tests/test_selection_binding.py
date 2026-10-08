@@ -21,6 +21,7 @@ from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
 from tcip_mcp.tools.data_tools import draw_splits
 from tests._chain_fixtures import BESPOKE_DETECTION, BLOB_BUILDER, run_config, training_config
 from tests._producer_fixtures import label_image, labeled_frame, registry_over
+from tests._producer_fixtures import train_val as _train_val
 from tests._verified_checkpoint_fixtures import partition_side
 
 SUBJECT = "leaf"
@@ -171,14 +172,13 @@ def test_auto_train_val_binds_the_selections_own_partition(tmp_path: Path):
     """The loaders hold exactly the samples the selection recorded on each side, read by their
     own paths: nothing is rediscovered from a directory, both capture dates reach the samples the
     loaders will actually read, and the calibration side builds neither loader."""
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
     data_cfg = _run_data_cfg(root, out)
 
-    train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
+    train_ds, val_ds, partition, resolved = _train_val(tmp_path, "detection", data_cfg)
 
     assert sorted(train_ds.stems) == sorted(s.location for s in drawn.on("train"))
     assert sorted(val_ds.stems) == sorted(s.location for s in drawn.on("val"))
@@ -193,8 +193,8 @@ def test_auto_train_val_binds_the_selections_own_partition(tmp_path: Path):
     assert binding["selection_dir"] == str(out)
     assert binding["redraw"] is False
     assert "date" not in binding
-    # The class space is the run's own, recorded once on the data config, never restated here.
-    assert data_cfg["scope"] == asdict(drawn.scope)
+    # The class space is the run's own, recorded once on the data block, never restated here.
+    assert resolved.scope == drawn.scope
     assert drawn.scope.subject == SUBJECT
     assert "scope" not in binding
     assert {s.ground_truth.parts[0] for s in partition_samples(partition)} == {
@@ -235,7 +235,7 @@ def test_a_multi_date_selection_trains_without_copying_anything(tmp_path: Path):
         "a bound run reads the dataset's own imagery and ground truth; nothing is copied")
 
     # Both dates reach the members the run actually recorded, from two captures.
-    samples = partition_samples(run_resolution(run_dir.name, project=tmp_path)["partition"])
+    samples = partition_samples(run_resolution(run_dir.name, project=tmp_path).partition)
     consumed = {s for s in samples if s.side in ("train", "val")}
     assert {s.ground_truth.parts[0] for s in consumed} == set(DATES)
     assert {s.ground_truth.parts[-1] for s in consumed} == {
@@ -289,7 +289,6 @@ def test_a_scope_stated_beside_a_selection_refuses_the_bound_run(tmp_path: Path)
     stating one beside it refuses by name, the selection's own included (a stated scope is a
     second spelling, never compared against the record), and one stating none trains in the
     selection's."""
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -297,18 +296,17 @@ def test_a_scope_stated_beside_a_selection_refuses_the_bound_run(tmp_path: Path)
 
     for stated in ({"subject": OTHER_SUBJECT}, asdict(drawn.scope)):
         with pytest.raises(ValueError, match="Drop data.scope"):
-            auto_train_val(tmp_path, "detection", _run_data_cfg(root, out, scope=stated), None)
+            _train_val(tmp_path, "detection", _run_data_cfg(root, out, scope=stated))
 
-    data_cfg = _run_data_cfg(root, out)
-    train_ds, val_ds, _partition = auto_train_val(tmp_path, "detection", data_cfg, None)
-    assert data_cfg["scope"] == asdict(drawn.scope)
+    train_ds, val_ds, _partition, resolved = _train_val(
+        tmp_path, "detection", _run_data_cfg(root, out))
+    assert resolved.scope == drawn.scope
     assert train_ds.scope == drawn.scope and val_ds.scope == drawn.scope
 
 
 def test_a_ground_truth_place_stated_beside_a_selection_refuses_the_bound_run(tmp_path: Path):
     """Each sample names its own ground truth, so a data section naming ``labels_dir`` beside the
     selection refuses by name, an existing directory or not, at the run and at the preflight."""
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.tools.training_tools import preflight_config
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -319,7 +317,7 @@ def test_a_ground_truth_place_stated_beside_a_selection_refuses_the_bound_run(tm
     for place in (tmp_path / "empty", tmp_path / "gone"):
         data_cfg = _run_data_cfg(root, out, labels_dir=str(place))
         with pytest.raises(ValueError, match="Drop data.labels_dir"):
-            auto_train_val(tmp_path, "detection", data_cfg, None)
+            _train_val(tmp_path, "detection", data_cfg)
         issues = preflight_config(tmp_path, _preflight_config(root, out, labels_dir=str(place)))[
             "issues"]
         assert any("Drop data.labels_dir" in issue for issue in issues), issues
@@ -329,7 +327,6 @@ def test_a_selected_label_emptied_since_the_draw_refuses_the_run(tmp_path: Path)
     """A label that held the subject at draw time is emptied with nobody confirming that image
     negative. Training it would put a real object's pixels in the background class, so the bind
     refuses by name rather than reading the empty document as a negative."""
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -338,13 +335,12 @@ def test_a_selected_label_emptied_since_the_draw_refuses_the_run(tmp_path: Path)
     json_io.write_label_document(emptied.ground_truth, [], 64, 64, keep_empty=True)
 
     with pytest.raises(ValueError, match="no longer admissible"):
-        auto_train_val(tmp_path, "detection", _run_data_cfg(root, out), None)
+        _train_val(tmp_path, "detection", _run_data_cfg(root, out))
 
 
 def test_a_selected_label_a_human_confirmed_negative_still_trains(tmp_path: Path):
     """The admitting half of that rail: the same emptied label, this time with a human marking
     the image negative for this subject, is a real negative and the run binds."""
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tests._producer_fixtures import mark_complete
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -354,8 +350,8 @@ def test_a_selected_label_a_human_confirmed_negative_still_trains(tmp_path: Path
     json_io.write_label_document(emptied.ground_truth, [], 64, 64, keep_empty=True)
     mark_complete(emptied.source, SUBJECT, project=root)
 
-    train_ds, val_ds, partition = auto_train_val(
-        tmp_path, "detection", _run_data_cfg(root, out), None)
+    train_ds, val_ds, partition, _data = _train_val(
+        tmp_path, "detection", _run_data_cfg(root, out))
 
     assert len(train_ds) == len(drawn.on("train"))
     assert len(val_ds) == len(drawn.on("val"))
@@ -369,8 +365,6 @@ def test_a_bound_run_admits_when_an_unselected_images_stem_turns_ambiguous(tmp_p
     every sample still names one real file."""
     from PIL import Image
 
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
-
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     images_dir = root / "images" / DATES[0]
     Image.new("RGB", (64, 64), (10, 10, 10)).save(images_dir / "spare.jpg")
@@ -381,8 +375,8 @@ def test_a_bound_run_admits_when_an_unselected_images_stem_turns_ambiguous(tmp_p
     # The same logical image now resolves to two files: the directory can no longer be listed.
     Image.new("RGB", (64, 64), (20, 20, 20)).save(images_dir / "spare.png")
 
-    train_ds, val_ds, _partition = auto_train_val(
-        tmp_path, "detection", _run_data_cfg(root, out), None)
+    train_ds, val_ds, _partition, _data = _train_val(
+        tmp_path, "detection", _run_data_cfg(root, out))
 
     assert len(train_ds) == len(drawn.on("train"))
     assert len(val_ds) == len(drawn.on("val"))
@@ -442,7 +436,6 @@ def test_crops_of_one_parent_cannot_cross_sides(tmp_path: Path):
     whose group keys straddle two sides, so a run bound to one can never train on one crop of a
     parent and validate on another."""
     from tcip_mcp.pipelines.data.selection import as_selection, selection_document
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _tiled_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -454,8 +447,7 @@ def test_crops_of_one_parent_cannot_cross_sides(tmp_path: Path):
         assert side_of_parent.setdefault(parent, sample.side) == sample.side
     assert len(side_of_parent) == 4
 
-    data_cfg = _run_data_cfg(root, out)
-    train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
+    train_ds, val_ds, _, _data = _train_val(tmp_path, "detection", _run_data_cfg(root, out))
     parents_on = {
         side: {Path(stem).stem.rsplit("_", 2)[0] for stem in ds.stems}
         for side, ds in (("train", train_ds), ("val", val_ds))
@@ -475,7 +467,6 @@ def test_auto_train_val_admits_a_confirmed_negative_the_draw_admitted(tmp_path: 
     """A stem whose label document is empty and whose image a human marked negative was admitted
     at the draw, so the bound run trains on it; the loader reads it as a zero-object sample rather
     than re-deciding what a negative is."""
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tests._producer_fixtures import mark_complete
 
     root = _dataset_with_a_confirmed_negative(tmp_path / "ds")
@@ -484,7 +475,7 @@ def test_auto_train_val_admits_a_confirmed_negative_the_draw_admitted(tmp_path: 
     drawn = _draw(tmp_path, root, out, seed=1)
     assert "n" in {s.member for s in drawn.samples}
 
-    train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", _run_data_cfg(root, out), None)
+    train_ds, val_ds, _, _data = _train_val(tmp_path, "detection", _run_data_cfg(root, out))
 
     negatives = [s for s in drawn.on("train") + drawn.on("val") if s.member == "n"]
     assert negatives, "the negative landed on neither loader's side"
@@ -508,7 +499,6 @@ def test_a_bound_run_reads_attribute_ids_from_the_selections_own_scope(tmp_path:
     """The selection records the attributes its admission read, and the loaders read them: an
     edited registry cannot relabel a bound run's targets, and the unassessed stem trains with its
     row marked rather than being held out."""
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -516,28 +506,24 @@ def test_a_bound_run_reads_attribute_ids_from_the_selections_own_scope(tmp_path:
     assert [a.values for a in drawn.scope.attributes] == [("healthy", "damaged")]
     assert "unassessed" in {s.member for s in drawn.samples}
 
-    data_cfg = _run_data_cfg(root, out)
-    train_ds, _val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
+    train_ds, _val_ds, _, resolved = _train_val(tmp_path, "detection", _run_data_cfg(root, out))
 
     assert train_ds.scope == drawn.scope
-    assert data_cfg.get("num_classes") is None  # the scope's subject is the one class
+    assert resolved.num_classes is None  # the scope's subject is the one class
     assert drawn.scope.subject == SUBJECT
 
 
 def test_a_bound_run_threads_a_bespoke_dataset_source(tmp_path: Path):
     """The bespoke seam stays reachable from a selection-bound run: the agent's own builder
     receives the selection's samples and the scope it was drawn under."""
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
     data_cfg = _run_data_cfg(root, out)
-    data_cfg["dataset_source"] = {
-        "builder": RECORDING_DATASET, "task": "detection",
-    }
+    data_cfg["dataset_source"] = {"builder": RECORDING_DATASET}
 
-    train_ds, _val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
+    train_ds, _val_ds, _, _data = _train_val(tmp_path, "detection", data_cfg)
 
     assert sorted(s.location for s in train_ds.seen_samples) == sorted(
         s.location for s in drawn.on("train"))
@@ -555,22 +541,21 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(tmp_pa
     Run for a task with a built-in loader and for one without: a task with no built-in loader is
     not a task with no producer, so both routes name its samples the same way too.
     """
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
-    source = {"builder": RECORDING_DATASET, "task": task}
+    source = {"builder": RECORDING_DATASET}
 
     bound_cfg = _run_data_cfg(root, out)
     bound_cfg["dataset_source"] = source
-    bound_train, bound_val, _partition = auto_train_val(tmp_path, task, bound_cfg, None)
+    bound_train, bound_val, _partition, _bound = _train_val(tmp_path, task, bound_cfg)
 
     unbound_cfg = {"images_dir": str(root / "images" / DATES[0]),
                    "scope": {"subject": SUBJECT}, "dataset_source": source,
                    "split": {"val_ratio": 0.5, "seed": 3}}
-    unbound_train, unbound_val, _unbound_partition = auto_train_val(
-        tmp_path, task, unbound_cfg, None)
+    unbound_train, unbound_val, _unbound_partition, _unbound = _train_val(
+        tmp_path, task, unbound_cfg)
 
     assert bound_val is not None and unbound_val is not None, \
         "each route draws both sides over the samples its producer named"
@@ -617,14 +602,13 @@ def test_the_preflight_smoke_batch_is_the_batch_the_bound_run_trains(tmp_path: P
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
-    config = training_config({"task": "detection"}, _run_data_cfg(root, out))
-    config["data"]["dataset_source"] = {
-        "builder": RECORDING_DATASET, "task": "detection",
-    }
+    config = training_config({"builder": BESPOKE_DETECTION, "task": "detection"},
+                             _run_data_cfg(root, out))
+    config["data"]["dataset_source"] = {"builder": RECORDING_DATASET}
 
     before = len(_RECORDED_BUILDS)
     batch, why = _one_real_batch(
-        "detection", resolve_run(config, train_config(config), project=tmp_path).train_ds)
+        "detection", resolve_run(train_config(config), project=tmp_path).train_ds)
 
     assert why is None and batch is not None
     smoked = _RECORDED_BUILDS[before]  # the training side, built first
@@ -638,7 +622,6 @@ def test_the_preflight_smoke_batch_is_the_batch_the_bound_run_trains(tmp_path: P
 
 def test_auto_train_val_refuses_a_selection_with_an_empty_side(tmp_path: Path):
     from tcip_mcp.pipelines.data.selection import Selection, write_selection
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -649,7 +632,7 @@ def test_auto_train_val_refuses_a_selection_with_an_empty_side(tmp_path: Path):
     ), project=tmp_path)
 
     with pytest.raises(ValueError, match="empty side"):
-        auto_train_val(tmp_path, "detection", _run_data_cfg(root, out), None)
+        _train_val(tmp_path, "detection", _run_data_cfg(root, out))
 
 
 def _strip_the_recorded_subject(out: Path) -> None:
@@ -677,20 +660,16 @@ def test_the_selection_writer_refuses_a_document_selection_with_no_subject(tmp_p
 
 
 def test_auto_train_val_refuses_a_selection_with_no_subject(tmp_path: Path):
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
-
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
     _strip_the_recorded_subject(out)
 
     with pytest.raises(ValueError, match="no subject"):
-        auto_train_val(tmp_path, "detection", _run_data_cfg(root, out), None)
+        _train_val(tmp_path, "detection", _run_data_cfg(root, out))
 
 
 def test_auto_train_val_selection_conflicts_with_a_drawn_splits_own_parameters(tmp_path: Path):
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
-
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
@@ -698,28 +677,24 @@ def test_auto_train_val_selection_conflicts_with_a_drawn_splits_own_parameters(t
     data_cfg["split"]["val_ratio"] = 0.3
 
     with pytest.raises(ValueError, match="val_ratio"):
-        auto_train_val(tmp_path, "detection", data_cfg, None)
+        _train_val(tmp_path, "detection", data_cfg)
 
 
 def test_auto_train_val_selection_refuses_a_task_reading_another_ground_truth(tmp_path: Path):
     """What decides whether a task can bind a selection is the ground truth its samples name, not
     the task's name: a selection of per-image label documents refuses a semantic segmentation run,
     whose loader reads a mask raster, and names the ground truth that loader does read."""
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
-
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
 
     with pytest.raises(ValueError, match="a semantic_seg loader does not read"):
-        auto_train_val(tmp_path, "semantic_seg", _run_data_cfg(root, out), None)
+        _train_val(tmp_path, "semantic_seg", _run_data_cfg(root, out))
 
 
 def test_auto_train_val_binding_failure_raises_rather_than_degrading(tmp_path: Path):
     """A sample whose image has moved since the draw refuses at the bind, naming it; it never
     degrades into a run that trains on whatever is left with no validation."""
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
-
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
@@ -727,7 +702,7 @@ def test_auto_train_val_binding_failure_raises_rather_than_degrading(tmp_path: P
     Path(gone.source).unlink()
 
     with pytest.raises(ValueError, match="no longer admissible"):
-        auto_train_val(tmp_path, "detection", _run_data_cfg(root, out), None)
+        _train_val(tmp_path, "detection", _run_data_cfg(root, out))
 
 
 # -- redraw_within_selection ---------------------------------------------------
@@ -743,16 +718,14 @@ def _redraw_cfg(root: Path, out: Path, seed: int) -> dict:
 def test_a_redraw_repartitions_the_selections_own_members_and_leaves_calibration_alone(
     tmp_path: Path,
 ):
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
-
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
     pool = {s.location for s in drawn.on("train") + drawn.on("val")}
     held_out = {s.location for s in drawn.on("calibration")}
 
-    data_cfg = _redraw_cfg(root, out, seed=1)
-    train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
+    train_ds, val_ds, partition, _data = _train_val(
+        tmp_path, "detection", _redraw_cfg(root, out, seed=1))
 
     assert set(train_ds.stems) | set(val_ds.stems) == pool
     assert not (set(train_ds.stems) | set(val_ds.stems)) & held_out
@@ -761,15 +734,12 @@ def test_a_redraw_repartitions_the_selections_own_members_and_leaves_calibration
 
 
 def test_two_redraw_seeds_differ_and_the_same_seed_repeats(tmp_path: Path):
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
-
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
 
     def _train(seed: int) -> list[str]:
-        train_ds, _val, _ = auto_train_val(
-            tmp_path, "detection", _redraw_cfg(root, out, seed), None)
+        train_ds, _val, _, _data = _train_val(tmp_path, "detection", _redraw_cfg(root, out, seed))
         return sorted(train_ds.stems)
 
     first = _train(1)
@@ -778,8 +748,6 @@ def test_two_redraw_seeds_differ_and_the_same_seed_repeats(tmp_path: Path):
 
 
 def test_a_redraw_without_a_seed_refuses(tmp_path: Path):
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
-
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
@@ -787,12 +755,10 @@ def test_a_redraw_without_a_seed_refuses(tmp_path: Path):
     data_cfg["split"]["redraw_within_selection"] = True
 
     with pytest.raises(ValueError, match="requires data.split.seed"):
-        auto_train_val(tmp_path, "detection", data_cfg, None)
+        _train_val(tmp_path, "detection", data_cfg)
 
 
 def test_a_seed_without_the_redraw_flag_still_conflicts(tmp_path: Path):
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
-
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
@@ -800,7 +766,7 @@ def test_a_seed_without_the_redraw_flag_still_conflicts(tmp_path: Path):
     data_cfg["split"]["seed"] = 3
 
     with pytest.raises(ValueError, match="seed"):
-        auto_train_val(tmp_path, "detection", data_cfg, None)
+        _train_val(tmp_path, "detection", data_cfg)
 
 
 def test_a_redraw_refuses_a_starved_pool_through_the_draws_own_floor(tmp_path: Path):
@@ -831,7 +797,7 @@ def test_the_explicit_draw_the_runs_own_draw_and_the_redraw_agree_member_for_mem
     train and val over that date's directories and a redraw of the written selection at the same
     seed place every member on the same side. The stems sort differently by identity than by
     location, so a draw that depended on how its members are keyed would part them."""
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, redrawn_selection
+    from tcip_mcp.pipelines.data.split_construction import redrawn_selection
 
     root = tmp_path / "ds"
     images_dir = root / "images" / DATES[0]
@@ -844,9 +810,9 @@ def test_the_explicit_draw_the_runs_own_draw_and_the_redraw_agree_member_for_mem
     assert explicit["splits"]["val"] == 2, explicit
     selection = read_selection(out, project=tmp_path)
 
-    _train, _val, partition = auto_train_val(tmp_path, "detection", {
+    _train, _val, partition, _data = _train_val(tmp_path, "detection", {
         "images_dir": str(images_dir), "scope": {"subject": SUBJECT}, "auto_val": True,
-        "split": {"val_ratio": 0.25, "seed": 2}}, None)
+        "split": {"val_ratio": 0.25, "seed": 2}})
     redrawn = redrawn_selection(selection, str(out), 2)
 
     drawn = {s.member: s.side for s in selection.samples}

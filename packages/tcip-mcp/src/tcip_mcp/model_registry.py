@@ -14,6 +14,7 @@ import hashlib
 import io
 import logging
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,6 +32,7 @@ from tcip_mcp.registry_paths import (
 
 if TYPE_CHECKING:
     from tcip_mcp.experiments import RunObservation
+    from tcip_mcp.pipelines.schemas import TrainConfigSchema
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +104,7 @@ def run_entry(observation: "RunObservation") -> dict | None:
     return {
         "name": observation.directory.name, "checkpoint_path": checkpoint["path"],
         "sha256": checkpoint["sha256"], "registered_at": observation.final["ended"],
-        "config": observation.record["config"], "tags": [],
+        "tags": [],
         "experiment_id": observation.directory.name,
     }
 
@@ -128,17 +130,20 @@ def registered_entries(project_path: str | Path) -> list[dict]:
 def entry_facts(entry: dict) -> dict:
     """What ``entry``'s checkpoint says of itself, read from its payload
     (:func:`checkpoint_payload`): the ``metrics`` a ranking reads with their ``metrics_source``.
-    A run's metrics are the ones its payload carries, sourced ``"trainer"``,
-    or ``"training_source"`` for a bespoke loop's; a foreign entry's are the ones its registration
-    stated, sourced ``"caller"``. No metrics carry no source."""
-    from tcip_mcp.pipelines.model_build import METRICS_KEY, TRAINING_SOURCE_KEY
+    A run's metrics are the ones its payload carries, sourced ``"trainer"``, or
+    ``"training_source"`` when the payload's config (:attr:`VerifiedCheckpoint.spec`) names a
+    bespoke loop; a foreign entry's are the ones its registration stated, sourced ``"caller"``.
+    No metrics carry no source."""
+    from tcip_mcp.pipelines.model_build import METRICS_KEY
 
-    payload = checkpoint_payload(entry["checkpoint_path"], entry["sha256"])
+    checkpoint = VerifiedCheckpoint(
+        path=entry["checkpoint_path"], sha256=entry["sha256"], entry=entry,
+        payload=checkpoint_payload(entry["checkpoint_path"], entry["sha256"]))
     if entry["experiment_id"] is None:
         metrics, source = entry["metrics"], "caller"
     else:
-        metrics = payload.get(METRICS_KEY) or {}
-        source = "training_source" if entry["config"].get(TRAINING_SOURCE_KEY) else "trainer"
+        metrics = checkpoint.payload.get(METRICS_KEY) or {}
+        source = "training_source" if checkpoint.spec.training_source else "trainer"
     return {"metrics": metrics, "metrics_source": source if metrics else None}
 
 
@@ -184,28 +189,22 @@ class VerifiedCheckpoint:
         behind it."""
         return {"checkpoint_sha256": self.sha256, "experiment_id": self.experiment_id}
 
-    @property
-    def config(self) -> dict:
-        """The run config the checkpoint carries, ``{}`` for one carrying none (a foreign
-        checkpoint's documented answer)."""
+    @cached_property
+    def spec(self) -> TrainConfigSchema:
+        """The run config the checkpoint's payload carries, validated once
+        (``schemas.train_config``, which refuses (``ValueError``) one that is invalid or absent).
+        The config validates whole, so a registered checkpoint's config states the training
+        regime its trainer would read."""
         from tcip_mcp.pipelines.model_build import CONFIG_KEY
+        from tcip_mcp.pipelines.schemas import train_config
 
-        return self.payload.get(CONFIG_KEY) or {}
-
-    @property
-    def data_config(self) -> dict:
-        """The checkpoint's own stamped ``config["data"]``, ``{}`` for a checkpoint carrying
-        none."""
-        data_cfg = self.config.get("data")
-        return data_cfg if isinstance(data_cfg, dict) else {}
+        return train_config(self.payload.get(CONFIG_KEY, {}))
 
     @property
     def task(self) -> str:
-        """The task the checkpoint's model is for, :func:`run_task` over its own config; raises
-        ``ValueError`` when that states none."""
-        from tcip_mcp.pipelines.model_build import run_task
-
-        return run_task(self.config)
+        """The task the checkpoint's model is for, its validated config's ``model_source.task``;
+        raises ``ValueError`` for a config that does not validate."""
+        return self.spec.model_source.task
 
 
 class UnregisteredCheckpointError(ValueError):
@@ -348,7 +347,7 @@ class ModelRegistry:
         self,
         name: str,
         checkpoint_path: str,
-        config: dict,
+        *,
         metrics: dict | None = None,
         tags: list[str] | None = None,
     ) -> dict:
@@ -361,14 +360,14 @@ class ModelRegistry:
 
         Args:
             name: Model name (e.g. '<crop>_<trait>_detector_v1').
-            checkpoint_path: Path to the .pt checkpoint file.
-            config: Training config dict.
+            checkpoint_path: Path to the .pt checkpoint file; its config is the one its payload
+                carries (:attr:`VerifiedCheckpoint.spec`).
             metrics: Evaluation metrics dict.
             tags: Optional tags for filtering.
 
         Raises:
             FileNotFoundError: ``checkpoint_path`` does not exist.
-            StoreError: ``config`` or ``metrics`` holds something JSON cannot carry, named
+            StoreError: ``metrics`` holds something JSON cannot carry, named
                 before anything is stored.
             ValueError: the checkpoint's payload is one the verified reader refuses.
             AuditEntryNotWrittenError: the write committed but its own audit line could not be
@@ -384,7 +383,6 @@ class ModelRegistry:
             "checkpoint_path": checkpoint_registry_path_for(ckpt, self._project_path),
             "sha256": admitted_digest(ckpt),
             "registered_at": now_iso(),
-            "config": config,
             "metrics": metrics or {},
             "tags": tags or [],
         }

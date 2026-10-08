@@ -170,16 +170,18 @@ def test_a_document_scope_whose_attributes_were_never_read_sizes_no_model(tmp_pa
     sizing a detector with no heads. The same subject read through the admission sizes one."""
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.model_build import recorded_model_dims
+    from tcip_mcp.pipelines.schemas import train_config
+    from tests._chain_fixtures import training_config
 
-    unread = {"model_source": dict(BUILT_DETECTOR),
-              "data": {"num_channels": 3, "scope": {"subject": SUBJECT}}}
+    unread = training_config(BUILT_DETECTOR, {"num_channels": 3, "scope": {"subject": SUBJECT}})
     with pytest.raises(ValueError, match="records no attributes"):
-        recorded_model_dims(unread)
+        recorded_model_dims(train_config(unread))
 
     images_dir = _frames(tmp_path / "ds", {"color": "red"})
-    read = {"model_source": dict(BUILT_DETECTOR),
-            "data": {"num_channels": 3, "scope": asdict(registry_scope(images_dir, SUBJECT))}}
-    assert recorded_model_dims(read)["attributes"] == (COLOR, GRADE)
+    read = training_config(
+        BUILT_DETECTOR,
+        {"num_channels": 3, "scope": asdict(registry_scope(images_dir, SUBJECT))})
+    assert recorded_model_dims(train_config(read))["attributes"] == (COLOR, GRADE)
 
 
 # --- an unassessed instance -------------------------------------------------
@@ -191,7 +193,7 @@ def test_an_instance_unassessed_for_one_attribute_trains_that_head_on_nothing_an
     """Every object assesses ``grade`` and none assesses ``color``: both frames are admitted, the
     color column reads unassessed, the color head's loss is masked to nothing and the grade head
     trains."""
-    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
+    from tests._chain_fixtures import built_model, training_config
     from tests._producer_fixtures import run_over
 
     images_dir = _frames(tmp_path / "ds", {"grade": "high"})
@@ -200,8 +202,7 @@ def test_an_instance_unassessed_for_one_attribute_trains_that_head_on_nothing_an
     image, target = loader[0]
     assert target["attributes"].tolist() == [[UNASSESSED, 2]]
 
-    config = {"model_source": dict(BUILT_DETECTOR), "data": data}
-    model = build_model(config, recorded_model_dims(config))
+    model = built_model(training_config(BUILT_DETECTOR, data))
     model.train()
     losses = model([image], [target])
     color_head, grade_head = model.detector.attribute_heads
@@ -287,21 +288,21 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
     pytest.importorskip("sahi")
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import prepare
-    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.pipelines.data.label_queries import registry_scope
+    from tests._chain_fixtures import built_model, training_config
     from tcip_mcp.tools.model_tools import register_model
     from tests._producer_fixtures import painted_frame, registry_over
 
     registry_over(tmp_path / "ds", cr.SubjectRegistry(
         subjects=(cr.Subject(name=SUBJECT, attributes=(WHOLE,)),)))
     scope = registry_scope(tmp_path / "ds" / "images", SUBJECT)
-    config = {"model_source": {"builder": "tests.bespoke_models:build_whole_blob_detector",
-                               "builder_kwargs": {}, "task": "detection"},
-              "data": {"num_channels": 3, "scope": asdict(scope)}}
+    config = training_config({"builder": "tests.bespoke_models:build_whole_blob_detector",
+                              "builder_kwargs": {}, "task": "detection"},
+                             {"num_channels": 3, "scope": asdict(scope)})
     ckpt = tmp_path / "model_best.pt"
-    model = build_model(config, recorded_model_dims(config))
+    model = built_model(config)
     torch.save({STATE_DICT_KEY: model.state_dict(), CONFIG_KEY: config}, str(ckpt))
-    assert "error" not in register_model(name="whole", checkpoint_path=str(ckpt), config={},
+    assert "error" not in register_model(name="whole", checkpoint_path=str(ckpt),
                                          project=tmp_path)
     source = tmp_path / "frame.png"
     painted_frame(200, 200, (0, 0, 0), [((100, 20, 150, 60), (255, 0, 0))]).save(source)

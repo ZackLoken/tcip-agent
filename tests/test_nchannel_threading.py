@@ -4,7 +4,7 @@ carries channel counts and validates them."""
 
 import pytest
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
-from tests._chain_fixtures import BESPOKE_CLASSIFIER
+from tests._chain_fixtures import BESPOKE_CLASSIFIER, training_config
 from tests._producer_fixtures import dataset_over  # noqa: E402
 
 torch = pytest.importorskip("torch")
@@ -38,9 +38,9 @@ def test_train_start_channel_guard():
     dataset composing its own bands) refuses at the first batch; a matching one trains."""
     from tcip_mcp.pipelines.training.generic_trainer import _validate_input_channels
     with pytest.raises(ValueError, match="channels"):
-        _validate_input_channels({"data": {"num_channels": 4}}, [(torch.rand(2, 3, 16, 16), {})])
+        _validate_input_channels(4, [(torch.rand(2, 3, 16, 16), {})])
     # matching channel counts -> no error
-    _validate_input_channels({"data": {"num_channels": 3}}, [(torch.rand(2, 3, 16, 16), {})])
+    _validate_input_channels(3, [(torch.rand(2, 3, 16, 16), {})])
 
 
 def _nchan_adapter(in_chans: int):
@@ -281,12 +281,14 @@ def test_build_dataset_sets_expected_channels(tmp_path):
 
 def _classification_run(tmp_path, *, num_channels: int | None):
     """A run bound through the producer over three-band sources, with ``data.num_channels``
-    stated when given: returns the run's own data config once its loaders are built."""
+    stated when given: returns the data block it resolved, in the form its record holds it, once
+    its loaders are built."""
     import csv
 
     from PIL import Image
 
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tcip_mcp.pipelines.schemas import DataSpec
 
     images_dir, csv_path = tmp_path / "images" / UNDATED_BUCKET, tmp_path / "labels.csv"
     images_dir.mkdir(parents=True)
@@ -303,8 +305,9 @@ def _classification_run(tmp_path, *, num_channels: int | None):
                 "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1}}
     if num_channels is not None:
         data_cfg["num_channels"] = num_channels
-    train_ds, _val_ds, _partition = auto_train_val(tmp_path, "classification", data_cfg, None)
-    return data_cfg, train_ds, str(images_dir / "img0.png")
+    train_ds, _val_ds, _partition, resolved = auto_train_val(
+        tmp_path, "classification", DataSpec.model_validate(data_cfg), None)
+    return resolved.record(), train_ds, str(images_dir / "img0.png")
 
 
 def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
@@ -314,8 +317,9 @@ def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Stated, prepare
     from tcip_mcp.pipelines.model_build import (
-        build_model, recorded_model_dims, resolve_contract_dims,
+        build_from_model_source, recorded_model_dims, resolve_contract_dims,
     )
+    from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.tools.model_tools import register_model
 
     data_cfg, train_ds, image = _classification_run(tmp_path, num_channels=1)
@@ -323,18 +327,19 @@ def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
 
     model_source = {"builder": BESPOKE_CLASSIFIER,
                     "task": "classification"}
-    config = {"model_source": model_source, "data": data_cfg}
+    config = training_config(model_source, data_cfg)
+    spec = train_config(config)
     # The run recorded both: the width it read at and the count its own table carried.
-    dims = recorded_model_dims(config)
+    dims = recorded_model_dims(spec)
     assert dims == {"in_chans": 1, "num_classes": 2}
-    assert resolve_contract_dims(config, "classification", dims) == {
+    assert resolve_contract_dims(spec, dims) == {
         "in_chans": 1, "num_classes": 2, "img_size": 224}
 
     ckpt = tmp_path / "model_best.pt"
-    torch.save({CONFIG_KEY: config, STATE_DICT_KEY: build_model(config, dims).state_dict()},
-               str(ckpt))
+    model = build_from_model_source(spec.model_source, dims)
+    torch.save({CONFIG_KEY: config, STATE_DICT_KEY: model.state_dict()}, str(ckpt))
     assert "error" not in register_model(name="single-band", checkpoint_path=str(ckpt),
-                                         config={}, project=tmp_path)
+                                         project=tmp_path)
     p = prepare(load_registered_checkpoint(str(ckpt), project=tmp_path), Stated(tile=False),
                 device="cpu").runnable()
 
@@ -350,9 +355,11 @@ def test_a_run_that_states_no_width_records_the_one_its_sources_carry(tmp_path):
     assert data_cfg["num_channels"] == train_ds.expected_channels == 3
 
     from tcip_mcp.pipelines.model_build import recorded_model_dims
+    from tcip_mcp.pipelines.schemas import train_config
 
-    config = {"model_source": {"task": "classification"}, "data": data_cfg}
-    assert recorded_model_dims(config)["in_chans"] == 3
+    spec = train_config(training_config(
+        {"builder": BESPOKE_CLASSIFIER, "task": "classification"}, data_cfg))
+    assert recorded_model_dims(spec)["in_chans"] == 3
 
 
 def test_a_source_whose_band_count_cannot_be_read_refuses_rather_than_defaulting(tmp_path):

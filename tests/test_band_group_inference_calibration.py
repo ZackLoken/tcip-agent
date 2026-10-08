@@ -39,8 +39,8 @@ def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
 
 
 def _detection_checkpoint(tmp_path: Path) -> str:
-    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.tools.model_tools import register_model
+    from tests._chain_fixtures import built_model, training_config
 
     model_source = {
         "builder": BESPOKE_DETECTION,
@@ -50,13 +50,12 @@ def _detection_checkpoint(tmp_path: Path) -> str:
         },
         "task": "detection",
     }
-    config = {"model_source": model_source,
-              "data": {"num_channels": 2, "scope": {"subject": "bud", "attributes": []}}}
-    model = build_model(config, recorded_model_dims(config))
+    config = training_config(model_source,
+                             {"num_channels": 2, "scope": {"subject": "bud", "attributes": []}})
+    model = built_model(config)
     ckpt = tmp_path / "model_best.pt"
     torch.save({STATE_DICT_KEY: model.state_dict(), CONFIG_KEY: config}, str(ckpt))
-    result = register_model(tmp_path, name="band-group-test-model", checkpoint_path=str(ckpt),
-                            config={})
+    result = register_model(tmp_path, name="band-group-test-model", checkpoint_path=str(ckpt))
     assert "error" not in result, result
     return str(ckpt)
 

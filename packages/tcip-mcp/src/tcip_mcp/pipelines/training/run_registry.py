@@ -19,9 +19,8 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TrainRun:
     id: str
-    config: dict
-    # ``config`` validated once by the run's producer (``schemas.train_config``), the one typed
-    # form every reader of the run's settings reads.
+    # The run's config validated once by its producer (``schemas.train_config``), the one form
+    # every reader of the run's settings reads.
     spec: TrainConfigSchema
     # The run's resolved objective, ``{"selection_metric", "higher_is_better"}``
     # (``generic_trainer.resolve_objective``), read by the body and never resolved again.
@@ -72,25 +71,26 @@ class TrainRun:
 
 def observed_run(observation: RunObservation, *, origin: str = "training") -> TrainRun:
     """The :class:`TrainRun` of an observed run, of ``origin``: named for its directory, training
-    under its launch ``config`` with the ``data`` section its launch resolved laid over it,
-    validated once (``schemas.train_config``, which refuses an invalid one), toward the objective
-    that resolution carries. A run whose input resolved to nothing ended at its opening and has
+    under its validated launch config (``RunObservation.spec``) with the data block its launch
+    resolved (``RunObservation.resolved_data``) laid over it, toward the objective that
+    resolution carries. A run whose input resolved to nothing ended at its opening and has
     none."""
     from tcip_mcp.experiments import project_of_run
-    from tcip_mcp.pipelines.schemas import train_config
 
-    resolved = observation.resolution
-    assert resolved is not None, "a run whose input resolved to nothing ended at its opening"
-    config = {**observation.record["config"], "data": resolved["data"]}
-    return TrainRun(id=observation.directory.name, config=config, spec=train_config(config),
+    resolved, data = observation.resolution, observation.resolved_data
+    assert resolved is not None and data is not None, (
+        "a run whose input resolved to nothing ended at its opening")
+    return TrainRun(id=observation.directory.name,
+                    spec=observation.spec.model_copy(update={"data": data}),
                     objective=resolved["objective"], project=project_of_run(observation.directory),
                     output_dir=str(observation.directory), origin=origin)
 
 
-def draw_seed_if_unset(config: dict) -> None:
-    """Draw a seed from OS entropy into ``config`` in place, unless the caller already set one.
-    Never start an unseeded run.
-    """
-    if config.get("seed") is None:
-        config["seed"] = random.SystemRandom().randrange(2**31)
-        logger.info("no seed configured; drew seed=%d.", config["seed"])
+def seeded(spec: TrainConfigSchema) -> TrainConfigSchema:
+    """``spec``, or when it states no ``seed`` a copy carrying one drawn from OS entropy, so no
+    run starts unseeded."""
+    if spec.seed is not None:
+        return spec
+    seed = random.SystemRandom().randrange(2**31)
+    logger.info("no seed configured; drew seed=%d.", seed)
+    return spec.model_copy(update={"seed": seed})

@@ -227,14 +227,13 @@ def test_unresolvable_proposal_engine_raises_valueerror():
 
 
 def _bespoke_checkpoint_payload() -> dict:
-    from tcip_mcp.pipelines.model_build import (
-        CONFIG_KEY, STATE_DICT_KEY, build_model, recorded_model_dims,
-    )
+    from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY
+    from tests._chain_fixtures import built_model, training_config
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
-    config = {"model_source": dict(BUILT_DETECTOR),
-              "data": {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}}}
-    model = build_model(config, recorded_model_dims(config))
+    config = training_config(BUILT_DETECTOR,
+                             {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}})
+    model = built_model(config)
     return {CONFIG_KEY: config, STATE_DICT_KEY: model.state_dict()}
 
 

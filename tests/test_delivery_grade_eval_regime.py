@@ -148,7 +148,7 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(tmp_path
     evaluate_model(tmp_path, str(ckpt), str(images_dir), use_tiled_inference=True)
     # The measurement is handed the checkpoint whose own record states its class space and its
     # tiling, and the door states no geometry of its own beside it.
-    assert captured["checkpoint"].data_config["scope"]["subject"] == "bud"
+    assert captured["checkpoint"].spec.data.recorded_scope.subject == "bud"
     assert captured["stated"].tile_size is None and captured["stated"].overlap is None
 
     from tcip_mcp.pipelines.execution import prepare

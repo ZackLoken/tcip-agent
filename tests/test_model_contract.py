@@ -1,7 +1,7 @@
-"""build_model indirection and the thin measurement-boundary contract.
+"""The model_source build seam and the thin measurement-boundary contract.
 
-Covers ``build_model`` dispatch (``model_source`` only) and the behavioral
-``check_model_contract`` / ``overfit_check`` utilities on real bespoke models.
+Covers ``build_from_model_source`` dispatch (``model_source`` only, validated with its config)
+and the behavioral ``check_model_contract`` / ``overfit_check`` utilities on real bespoke models.
 """
 
 from __future__ import annotations
@@ -13,7 +13,8 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-from tcip_mcp.pipelines.model_build import build_from_model_source, build_model  # noqa: E402
+from tcip_mcp.pipelines.model_build import build_from_model_source  # noqa: E402
+from tcip_mcp.pipelines.schemas import ModelSourceSchema, checked_train_config  # noqa: E402
 from tcip_mcp.pipelines.model_contract import (  # noqa: E402
     TCIPModel,
     check_model_contract,
@@ -32,31 +33,26 @@ def _bespoke_builder(**kwargs):
     return bespoke_models.build_bespoke_classifier(num_classes=2)
 
 
-# --------------------------------------------------------------------------
-# build_model dispatch
-# --------------------------------------------------------------------------
+def _source(builder: str):
+    """``builder``'s classification ``model_source``, validated."""
+    return ModelSourceSchema.model_validate(
+        {"builder": builder, "builder_kwargs": {}, "task": "classification"})
 
-def test_build_model_from_model_source_imports_builder():
-    src = {"builder": f"{__name__}:_bespoke_builder", "builder_kwargs": {},
-           "task": "classification"}
-    dims = {"in_chans": 3, "num_classes": 2}
-    model = build_model({"model_source": src}, dims)
+
+def test_build_from_model_source_imports_builder():
+    model = build_from_model_source(_source(f"{__name__}:_bespoke_builder"),
+                                    {"in_chans": 3, "num_classes": 2})
     assert isinstance(model, TCIPModel)
-    # build_from_model_source is the same path, callable directly on the validated source.
-    from tcip_mcp.pipelines.schemas import ModelSourceSchema
-
-    source = ModelSourceSchema.model_validate(src)
-    assert type(build_from_model_source(source, dims)).__name__ == type(model).__name__
 
 
-def test_build_model_requires_model_source():
-    with pytest.raises(ValueError, match="model_source"):
-        build_model({}, {"in_chans": 3})
+def test_a_config_stating_no_model_source_is_refused_at_validation():
+    _spec, issues = checked_train_config({"data": {}})
+    assert any(issue.startswith("model_source") for issue in issues), issues
 
 
-def test_build_model_bad_builder_raises():
+def test_build_from_model_source_bad_builder_raises():
     with pytest.raises(ValueError, match="not found|Invalid dotted"):
-        build_model({"model_source": {"builder": f"{__name__}:does_not_exist"}}, {"in_chans": 3})
+        build_from_model_source(_source(f"{__name__}:does_not_exist"), {"in_chans": 3})
 
 
 # --------------------------------------------------------------------------

@@ -34,10 +34,17 @@ from tcip_mcp.pipelines.model_build import (
     STATE_DICT_KEY,
     build_from_model_source,
     recorded_model_dims,
-    run_task,
 )
-from tcip_mcp.pipelines.schemas import (CosineSchedule, OneCycleSchedule, PlateauSchedule,
-                                        SchedulerSpec, StageSpec, TrainConfigSchema)
+from tcip_mcp.pipelines.schemas import (
+    CosineSchedule,
+    DataSpec,
+    OneCycleSchedule,
+    PlateauSchedule,
+    SchedulerSpec,
+    StageSpec,
+    TilingSpec,
+    TrainConfigSchema,
+)
 from tcip_mcp.pipelines.training.evaluation import (
     HIGHER_IS_BETTER_BY_METRIC,
     VAL_LOSS_KEY,
@@ -213,50 +220,33 @@ def run_loaders(spec: TrainConfigSchema, task: str, train_ds: Any, val_ds: Any
     return train_loader, val_loader
 
 
-def stamp_effective_data_geometry(data_cfg: dict, train_ds: Any) -> dict | None:
-    """Record the input geometry ``train_ds`` actually serves into ``data_cfg``, in place, or
-    ``None`` for a dataset the platform did not build.
+def effective_data_geometry(data: DataSpec, train_ds: Any) -> DataSpec:
+    """The resolved data block ``data`` with the input geometry ``train_ds`` actually serves
+    recorded on it; ``data`` unchanged for a run whose loaders came from a bespoke
+    ``data.dataset_source`` builder, whose dataset exposes no tile attributes or sources to read.
 
-    A run whose loaders came from a bespoke ``data.dataset_source`` builder stamps nothing and
-    answers ``None``: this reads a dataset's own tile attributes and probes its sources, and a
-    bespoke dataset exposes none of them.
-
-    ``data_cfg`` is the live ``config["data"]`` dict the run persists, so this must run after the
-    dataset is built and before training starts.
-
-    A tiled train dataset (one carrying a ``tile_size``) stamps its effective
-    ``tile_size``/``overlap`` into the tiling record, filling in defaults the caller's config
-    omitted. An untiled one replaces the tiling record with ``{"enabled": False}`` outright, never
-    a merge.
-
-    ``train_native_size``: an untiled run whose training frames all share one size stamps
-        ``data_cfg["train_native_size"] = [width, height]``; mixed sizes stamp nothing. Tiled runs
-        stamp nothing here either: the stamped ``tile_size`` carries their frame. Probing is
-        header-only for the common containers (``image_dimensions``) and needs the dataset's source
-        list.
-
-    Returns the stamped facts, ``{"tiling": dict, "tiling_replaced": bool, "train_native_size": [w,
-    h] | None}``.
+    A tiled train dataset (one carrying a ``tile_size``) records its effective
+    ``tile_size``/``overlap`` in the tiling block, filling in defaults the caller's config
+    omitted. An untiled one replaces the tiling block with ``{"enabled": False}`` outright, never
+    a merge, and records ``train_native_size``, ``[width, height]``, when its training frames all
+    share one size; mixed sizes record none. Probing is header-only for the common containers
+    (``image_dimensions``) and needs the dataset's source list.
     """
-    from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY
-
-    if data_cfg.get(DATASET_SOURCE_KEY):
-        return None
+    if data.dataset_source is not None:
+        return data
     eff_tile = getattr(train_ds, "tile_size", None)
     if eff_tile is not None:
-        tiling = data_cfg.setdefault("tiling", {})
-        tiling["tile_size"] = int(eff_tile)
+        geometry: dict[str, Any] = {"tile_size": int(eff_tile)}
         eff_overlap = getattr(train_ds, "overlap", None)
         if eff_overlap is not None:
-            tiling["overlap"] = float(eff_overlap)
-        return {"tiling": tiling, "tiling_replaced": False, "train_native_size": None}
-
-    data_cfg["tiling"] = {"enabled": False}
+            geometry["overlap"] = float(eff_overlap)
+        stated = data.tiling or TilingSpec.model_validate({})
+        return data.model_copy(update={"tiling": stated.model_copy(update=geometry)})
     native = _uniform_native_size(train_ds)
+    update: dict[str, Any] = {"tiling": TilingSpec.model_validate({"enabled": False})}
     if native is not None:
-        data_cfg["train_native_size"] = list(native)
-    return {"tiling": data_cfg["tiling"], "tiling_replaced": True,
-            "train_native_size": list(native) if native is not None else None}
+        update["train_native_size"] = list(native)
+    return data.model_copy(update=update)
 
 
 def _uniform_native_size(train_ds: Any) -> tuple[int, int] | None:
@@ -298,6 +288,22 @@ def write_checkpoint(payload: dict, path: Path) -> Path:
 
     publish_once(path, lambda handle: torch.save(payload, handle))
     return path
+
+
+def checkpoint_config(spec: TrainConfigSchema) -> dict:
+    """The config every checkpoint of a run under ``spec`` carries: ``spec`` as it records itself
+    (``TrainConfigSchema.record``) without its data locations (``experiments.DATA_PATHS``), which
+    the run's own record keeps."""
+    from tcip_mcp.experiments import DATA_PATHS
+
+    paths: dict = {}
+    for field in DATA_PATHS:
+        *parents, leaf = (step for step in field if step != "[]")
+        node = paths
+        for parent in parents:
+            node = node.setdefault(parent, {})
+        node[leaf] = True
+    return spec.record(exclude={"data": paths})
 
 
 def _checkpoint_metrics(metrics: dict) -> dict:
@@ -546,15 +552,14 @@ def apply_stage_freeze(
     return trainable
 
 
-def _validate_input_channels(config: dict, loader: DataLoader) -> None:
-    """Fail loudly if the first batch's channel count is not the band count the model was built
-    at, ``data.num_channels``.
+def _validate_input_channels(expected: int, loader: DataLoader) -> None:
+    """Fail loudly if the first batch's channel count is not ``expected``, the band count the
+    model was built at (``data.num_channels``).
 
     A built-in loader reads every source at that count; a bespoke ``dataset_source`` builder
     composes its own bands and can hand the model another, which this names before an opaque
     conv-shape error deep in the first forward pass.
     """
-    expected = config["data"]["num_channels"]
     batch = next(iter(loader), None)
     if batch is None:
         return
@@ -587,8 +592,7 @@ def train(
     """Execute a task-agnostic training run.
 
     The model is built from the validated config's ``model_source``
-    (``model_build.build_from_model_source``), for the task that
-    model source names (``model_build.run_task``).
+    (``model_build.build_from_model_source``), for the task that model source names.
     ``epoch_callback(epoch:int, epoch_metrics:dict)`` is how each epoch's row reaches the run's
     metrics log and, under HPO, the pruner. It may raise to abort the run (e.g.
     ``optuna.TrialPruned``); its scalars are the epoch's TensorBoard scalars, so a caller wanting
@@ -597,8 +601,7 @@ def train(
     run's metrics log and its TensorBoard (``TrainContext.log_batch``).
 
     Every key below is read from ``run.spec``, the run's config validated once by its producer
-    (``schemas.train_config``); ``run.config`` is otherwise an open dict, and a bespoke
-    ``model_source``/``dataset_source``/``training_source`` may read its own additional keys:
+    (``schemas.train_config``), and its checkpoints carry that spec (:func:`checkpoint_config`):
 
     - ``device`` (str, default cuda-if-available else cpu)
     - ``seed`` (int | None), ``deterministic`` (bool, default False), RNG seeding before model
@@ -638,7 +641,7 @@ def train(
     written once as ``model_best.pt`` beside ``model_final.pt``, the last epoch's weights; a
     diverged run writes neither. ``run.best_metric`` is the held best epoch's selection value.
     """
-    config = run.config
+    config = checkpoint_config(run.spec)
     run.status = "running"
     run.start_time = time.time()
     higher_is_better = run.objective["higher_is_better"]
@@ -661,11 +664,11 @@ def train(
         if seed is not None:
             set_seed(seed, deterministic=spec.deterministic)
 
-        task = run_task(config)
-        dims = recorded_model_dims(config)
+        task = spec.model_source.task
+        dims = recorded_model_dims(spec)
         model = build_from_model_source(spec.model_source, dims)
         model.to(device)
-        _validate_input_channels(config, train_loader)
+        _validate_input_channels(dims["in_chans"], train_loader)
 
         use_amp = spec.mixed_precision and device.type == "cuda"
         scaler = torch.amp.GradScaler(device.type) if use_amp else None
