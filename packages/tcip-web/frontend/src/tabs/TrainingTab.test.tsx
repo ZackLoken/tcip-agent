@@ -441,7 +441,7 @@ describe("TrainingTab tensorboard panel", () => {
     detailOf(row);
     vi.spyOn(trainingApi, "launchTensorboard").mockRejectedValue(
       new StructuredRefusalError(
-        { error: "run produced no logs: train-nologs", no_logs: true },
+        { message: "run produced no logs: train-nologs", no_logs: true },
         404,
         "run produced no logs: train-nologs",
       ),
@@ -478,7 +478,7 @@ describe("TrainingTab tensorboard panel", () => {
     listing([row]);
     detailOf(row);
     vi.spyOn(trainingApi, "launchTensorboard").mockRejectedValue(
-      new StructuredRefusalError({ error: crash, no_logs: true }, 404, "run produced no logs"),
+      new StructuredRefusalError({ message: crash, no_logs: true }, 404, crash),
     );
 
     render(<TrainingTab />);

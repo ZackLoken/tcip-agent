@@ -8,11 +8,14 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Literal, Optional, get_args
+from typing import TYPE_CHECKING, Any, Literal, Optional, get_args
 
 import tcip_store
 from pydantic import BaseModel, ConfigDict, Field
 from tcip_store import Key
+
+if TYPE_CHECKING:
+    from tcip_mcp.workspace import BoundProject
 
 logger = logging.getLogger(__name__)
 
@@ -281,19 +284,19 @@ def backend_url(workspace: Path, path: str) -> str:
 
 
 def post_panel_event(
-    project: Path,
-    workspace: Path,
+    bound: BoundProject,
     panel: str,
     event_type: str,
     data: dict[str, Any],
     *,
     timeout: float = 2.0,
 ) -> dict[str, Any]:
-    """POST a panel event for ``project`` to the tcip-web backend serving ``workspace``, delivered
-    only when that project is the one it has open. Every answer carries ``delivered``: on a 2xx,
-    ``status`` ``"ok"`` and ``response`` (the JSON body, ``None`` when it does not decode); with
-    the backend down, ``status`` ``"no_subscribers"``; otherwise ``error`` naming why, with
-    ``open_project_id`` when another project, or none, is open."""
+    """POST a panel event for the project ``bound`` names to the tcip-web backend serving its
+    workspace, delivered only when that project is the one it has open. Every answer carries
+    ``delivered``: on a 2xx, ``status`` ``"ok"`` and ``response`` (the JSON body, ``None`` when
+    it does not decode); with the backend down, ``status`` ``"no_subscribers"``; otherwise
+    ``error`` naming why: with ``open_project_id`` when another project is open, the backend's
+    none-open message when none is."""
     import json
     import urllib.error
     import urllib.request
@@ -305,14 +308,13 @@ def post_panel_event(
         return {"status": "suppressed_under_pytest", "delivered": False, "url": ""}
 
     from tcip_mcp import agent_identity
-    from tcip_mcp.project_record import read_record
 
     try:
-        url = backend_url(workspace, f"/api/events/{panel}")
+        url = backend_url(bound.workspace, f"/api/events/{panel}")
     except NoBackendPortError as exc:
         return {"status": "no_subscribers", "delivered": False, "url": "", "error": str(exc)}
     payload = json.dumps({"panel": panel, "event_type": event_type, "data": data,
-                          "project_id": read_record(project)["id"]}).encode("utf-8")
+                          "project_id": bound.id}).encode("utf-8")
 
     # The pushing harness and session, as headers, so the backend can say who steered the GUI.
     req = urllib.request.Request(
@@ -339,8 +341,10 @@ def post_panel_event(
         except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
             detail = None
         if isinstance(detail, dict):
-            return {**detail, "delivered": False, "url": url}
-        return {"error": f"backend returned HTTP {exc.code}", "delivered": False, "url": url}
+            fields = {k: v for k, v in detail.items() if k != "message"}
+            return {**fields, "error": detail.get("message"), "delivered": False, "url": url}
+        error = detail if isinstance(detail, str) else f"backend returned HTTP {exc.code}"
+        return {"error": error, "delivered": False, "url": url}
     except urllib.error.URLError as exc:
         # ConnectionRefusedError or similar -> backend not running
         reason = getattr(exc, "reason", exc)

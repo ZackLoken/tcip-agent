@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/meta", tags=["meta"])
 @router.get("/reports")
 def get_reports(limit: int = 50) -> dict[str, Any]:
     """Return the open project's recent friction reports, newest stated timestamp first."""
-    root = str(store.open_root())
+    root = str(store.held().root)
 
     from tcip_mcp.tools.meta_tools import report_documents, report_row
 
@@ -32,7 +32,7 @@ def get_reports(limit: int = 50) -> dict[str, Any]:
 @router.get("/retrospectives")
 def get_retrospectives(limit: int = 20) -> dict[str, Any]:
     """Return the open project's recent retrospectives (markdown), latest stated section first."""
-    root = str(store.open_root())
+    root = str(store.held().root)
 
     from tcip_mcp.tools.meta_tools import retrospective_documents
 

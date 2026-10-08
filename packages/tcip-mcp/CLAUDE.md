@@ -51,9 +51,11 @@ src/tcip_mcp/
 ```
 
 Every MCP tool in `tools/` is decorated `@tool()` (`server.tool`); a tool that acts on a project
-takes the project the server was started for as its first parameter (the knowledge door and the
-project-creation door act on none), and every mutating door leaves exactly one
-audit line per act, the decorator's or the library's: a tool that changes state is `@audited`
+takes the project the server was started for as its first parameter: `project`, its directory, or
+`bound`, the whole `workspace.BoundProject` (directory, record id, workspace) when it also names
+the project to the backend. The server supplies only those two and `actor` (`server._CONTEXT`), so
+any other parameter, whatever its name, stays the client's (the knowledge door and the
+project-creation door act on none), and every mutating door leaves exactly one audit line per act, the decorator's or the library's: a tool that changes state is `@audited`
 unless the library function it calls records its own event with facts the decorator cannot carry
 (a digest, what was written), and then it is not decorated. The decorator writes no line for a
 call returning its error dict and an exception line for a call that raises. A read-only tool (a status poll, a listing, a

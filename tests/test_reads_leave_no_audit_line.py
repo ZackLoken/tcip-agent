@@ -23,11 +23,11 @@ def test_a_dataset_render_leaves_no_audit_line(project: Path) -> None:
     assert audit_rows(project) == before
 
 
-def test_a_panel_push_leaves_no_audit_line(project: Path) -> None:
+def test_a_panel_push_leaves_no_audit_line(project: Path, bound) -> None:
     from tcip_mcp.tools.gui_tools import push_panel_event
 
     before = audit_rows(project)
 
-    push_panel_event(project, project.parent, "meta", "probe", {"n": 1})
+    push_panel_event(bound, "meta", "probe", {"n": 1})
 
     assert audit_rows(project) == before

@@ -29,18 +29,6 @@ def _stub_gui(monkeypatch):
                         lambda *a, **k: {"delivered": False, "status": "no_subscribers"})
 
 
-def _project_root(tmp_path: Path) -> Path:
-    """A project directory that is genuinely not the dataset directory.
-
-    ``focus_human_attention`` resolves images and predictions from the dataset root and carries the
-    project root through to the GUI event untouched, so passing one directory for both would let a
-    resolution off the wrong root pass unnoticed.
-    """
-    root = tmp_path / "workspace" / "proj"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
 def _images(root: Path, date: str, names: list[str]) -> None:
     idir = Path(image_dir(root, date))
     idir.mkdir(parents=True, exist_ok=True)
@@ -94,14 +82,14 @@ def _damage(root: Path, bucket: str, stem: str) -> None:
     damage_record(prediction_key(root, bucket, stem), b"{not json")
 
 
-def test_focus_over_a_bucket_lands_on_first_frame_with_proposals(tmp_path: Path) -> None:
+def test_focus_over_a_bucket_lands_on_first_frame_with_proposals(tmp_path: Path, bound) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(5)]
     _images(root, date, imgs)
     bucket = _publish(root, date, {"IMG_0002.JPG": [0.9], "IMG_0003.JPG": [0.8]})
 
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud", date,
+    res = focus_human_attention(bound, str(root), "bud", date,
                                 bucket=bucket)
     assert "error" not in res
     assert res["image_index"] == 2  # first frame with proposals from this model
@@ -111,21 +99,21 @@ def test_focus_over_a_bucket_lands_on_first_frame_with_proposals(tmp_path: Path)
     assert isinstance(res["delivered"], bool)
 
 
-def test_focus_over_a_bucket_skips_an_empty_prediction_document(tmp_path: Path) -> None:
+def test_focus_over_a_bucket_skips_an_empty_prediction_document(tmp_path: Path, bound) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
     # IMG_0000's document holds no detections, so it is no target.
     bucket = _publish(root, date, {"IMG_0000.JPG": [], "IMG_0002.JPG": [0.9]})
 
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud", date,
+    res = focus_human_attention(bound, str(root), "bud", date,
                                 bucket=bucket)
     assert res["image_index"] == 2
     assert res["n_holding_subject"] == 1
 
 
 def test_focus_over_a_bucket_navigates_past_an_unreadable_prediction_on_another_frame(
-        tmp_path: Path) -> None:
+        tmp_path: Path, bound) -> None:
     """A corrupt prediction document elsewhere on the date does not close the call: the frame it
     lands on is readable, and the unreadable one is named instead of raising."""
     root = tmp_path / "proj"
@@ -134,7 +122,7 @@ def test_focus_over_a_bucket_navigates_past_an_unreadable_prediction_on_another_
     bucket = _publish(root, date, {"IMG_0000.JPG": [0.7], "IMG_0002.JPG": [0.9]})
     _damage(root, bucket, "IMG_0000")
 
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud", date,
+    res = focus_human_attention(bound, str(root), "bud", date,
                                 bucket=bucket)
 
     assert "error" not in res
@@ -142,36 +130,38 @@ def test_focus_over_a_bucket_navigates_past_an_unreadable_prediction_on_another_
     assert res["unreadable"] == ["IMG_0000.JPG"]
 
 
-def test_focus_over_a_bucket_refuses_an_explicitly_named_unreadable_frame(tmp_path: Path) -> None:
+def test_focus_over_a_bucket_refuses_an_explicitly_named_unreadable_frame(
+        tmp_path: Path, bound) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
     bucket = _publish(root, date, {"IMG_0000.JPG": [0.7]})
     _damage(root, bucket, "IMG_0000")
 
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud", date,
+    res = focus_human_attention(bound, str(root), "bud", date,
                                 bucket=bucket, image_index=0)
 
     assert "error" in res
     assert "IMG_0000" in res["error"]
 
 
-def test_focus_over_a_bucket_carries_the_explicit_index_and_proposal(tmp_path: Path) -> None:
+def test_focus_over_a_bucket_carries_the_explicit_index_and_proposal(
+        tmp_path: Path, bound) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(4)])
     bucket = _publish(root, date, {"IMG_0000.JPG": [0.9]})
 
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud", date,
+    res = focus_human_attention(bound, str(root), "bud", date,
                                 bucket=bucket, image_index=3, proposal=2)
     assert res["image_index"] == 3
     assert res["proposal"] == 2
 
 
-def test_focus_refuses_a_name_that_is_no_bucket(tmp_path: Path) -> None:
+def test_focus_refuses_a_name_that_is_no_bucket(tmp_path: Path, bound) -> None:
     root = tmp_path / "proj"
     _images(root, "2026-02-11", ["IMG_0000.JPG"])
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, str(root), "bud",
+    res = focus_human_attention(bound, str(root), "bud",
                                 "2026-02-11", bucket="baseline/2026-02-11")
     assert "error" in res
 
@@ -239,14 +229,14 @@ def test_stage_proposals_rejects_a_model_name_that_is_no_single_segment(tmp_path
     assert _no_ground_truth(root)  # nothing leaked into ground truth
 
 
-def test_focus_rejects_path_traversal(tmp_path: Path) -> None:
+def test_focus_rejects_path_traversal(tmp_path: Path, bound) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, ["IMG_0000.JPG"])
     # The focus is read-only, but a traversal date still refuses: it becomes a path segment under
     # images/, the guard stage_proposals applies.
     res = focus_human_attention(
-        _project_root(tmp_path), tmp_path.parent, str(root), "bud", "../evil")
+        bound, str(root), "bud", "../evil")
     assert "a capture must be a single safe path segment" in res["error"]
 
 

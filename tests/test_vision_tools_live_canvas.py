@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from tcip_mcp.workspace import BoundProject
 from tests._producer_fixtures import write_image
 
 #: Neutral gray, so a drawn color's dominance is the same size in either channel.
@@ -78,7 +79,7 @@ def _dominance(px: Image.Image, xy: tuple[int, int], channel: int) -> int:
 
 
 def test_canvas_shapes_are_drawn_at_the_resolution_the_pixels_were_served_at(
-    tmp_path: Path,
+    tmp_path: Path, bound,
 ) -> None:
     """A frame read down to ``max_edge`` carries its shapes down with it.
 
@@ -91,8 +92,8 @@ def test_canvas_shapes_are_drawn_at_the_resolution_the_pixels_were_served_at(
     image = _canvas_image(tmp_path)
     _push_state(tmp_path, image, received_at=_ago(0))
 
-    result = capture_live_canvas(tmp_path, tmp_path.parent, refresh=False, crop_to_viewport=False,
-                                 max_edge=SERVED_MAX_EDGE)
+    result = capture_live_canvas(bound, refresh=False,
+                                 crop_to_viewport=False, max_edge=SERVED_MAX_EDGE)
     assert "error" not in result, result
     assert result["shapes_missing"] is False
 
@@ -106,7 +107,7 @@ def test_canvas_shapes_are_drawn_at_the_resolution_the_pixels_were_served_at(
 
 
 def test_a_capture_no_gui_answered_reports_the_state_as_last_known(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, bound, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A ping that reaches the hub but produces no new push leaves the capture unrefreshed.
 
@@ -122,16 +123,17 @@ def test_a_capture_no_gui_answered_reports_the_state_as_last_known(
 
     pings: list[tuple[str, str]] = []
 
-    def silent_hub(project: Path, workspace: Path, panel: str, event_type: str, data: dict,
+    def silent_hub(target: BoundProject, panel: str, event_type: str, data: dict,
                    **kwargs: object) -> dict:
-        pings.append((panel, event_type))
+        pings.append((target, panel, event_type))
         return {"status": "ok", "delivered": True}
 
     monkeypatch.setattr(web_client, "post_panel_event", silent_hub)
 
-    result = capture_live_canvas(tmp_path, tmp_path.parent, refresh=True, crop_to_viewport=False)
+    result = capture_live_canvas(bound, refresh=True,
+                                 crop_to_viewport=False)
     assert "error" not in result, result
-    assert pings == [("app", "canvas_state_request")]
+    assert pings == [(bound, "app", "canvas_state_request")]
     assert result["refresh_ping_delivered"] is True
     assert result["refreshed"] is False
     assert result["state_age_seconds"] > 5
@@ -139,7 +141,7 @@ def test_a_capture_no_gui_answered_reports_the_state_as_last_known(
 
 
 def test_a_capture_the_gui_answered_reports_the_state_as_live(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, bound, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A GUI that pushes fresh state in response to the ping is reported as live: the refresh
     round trip has to admit the answered case, not only flag the unanswered one."""
@@ -149,21 +151,24 @@ def test_a_capture_the_gui_answered_reports_the_state_as_live(
     image = _canvas_image(tmp_path)
     _push_state(tmp_path, image, received_at=_ago(600))
 
-    def answering_hub(project: Path, workspace: Path, panel: str, event_type: str, data: dict,
+    def answering_hub(target: BoundProject, panel: str, event_type: str, data: dict,
                       **kwargs: object) -> dict:
         _push_state(tmp_path, image, received_at=_ago(0))
         return {"status": "ok", "delivered": True}
 
     monkeypatch.setattr(web_client, "post_panel_event", answering_hub)
 
-    result = capture_live_canvas(tmp_path, tmp_path.parent, refresh=True, crop_to_viewport=False)
+    result = capture_live_canvas(bound, refresh=True,
+                                 crop_to_viewport=False)
     assert "error" not in result, result
     assert result["refreshed"] is True
     assert "last known" not in result["summary"]
     assert result["shape_counts_by_tag"] == {"gt": 2}
 
 
-def test_a_canvas_record_without_its_arrival_instant_is_refused_by_name(tmp_path: Path) -> None:
+def test_a_canvas_record_without_its_arrival_instant_is_refused_by_name(
+    tmp_path: Path, bound,
+) -> None:
     """No producer writes a canvas record without ``received_at``, so its age is unknown, never
     zero: the capture refuses rather than describing it as live."""
     import tcip_store
@@ -177,4 +182,4 @@ def test_a_canvas_record_without_its_arrival_instant_is_refused_by_name(tmp_path
     tcip_store.replace(canvas_meta_key(str(tmp_path)), meta)
 
     with pytest.raises(ValueError, match="canvas_live carries no received_at"):
-        capture_live_canvas(tmp_path, tmp_path.parent, refresh=False)
+        capture_live_canvas(bound, refresh=False)

@@ -56,7 +56,7 @@ describe("annotate.save lost-update handling", () => {
   });
 
   it("returns a conflict (not a thrown error) on a 409", async () => {
-    stubFetch(409, { detail: { error: "label document changed since it was loaded" } });
+    stubFetch(409, { detail: { message: "label document changed since it was loaded" } });
     const res = await api.annotate.save({
       image_path: "x",
       annotations: [],
@@ -67,7 +67,7 @@ describe("annotate.save lost-update handling", () => {
   });
 
   it("throws on a 409 whose body carries no detail, as every JSON call does", async () => {
-    stubFetch(409, { error: "label document changed since it was loaded" });
+    stubFetch(409, { message: "label document changed since it was loaded" });
     const save = api.annotate.save({
       image_path: "x",
       annotations: [],
@@ -109,7 +109,7 @@ describe("canvas.pushState 409 recovery", () => {
     // "detail", never the flat shape a naive stub would guess.
     stubFetch(409, {
       detail: {
-        error: "this push was built for a project the backend does not have open",
+        message: "the backend does not have this project open",
         open_project_id: "ffffffffffff",
       },
     });

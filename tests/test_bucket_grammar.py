@@ -82,6 +82,7 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
 ) -> None:
     """The tree route and the project-picker summary both derive dates from the layout's one
     grammar, so a hidden directory under ``images/`` is invisible to both alike."""
+    from tcip_mcp.project_record import record_fields
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
     from tcip_web.routes.projects import _summarize
     from tests._producer_fixtures import registry_over
@@ -92,7 +93,7 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
     registry_over(root, SubjectRegistry((Subject("leaf"),)))
 
     tree = client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
-    picker = _summarize(root)
+    picker = _summarize(root, record_fields(root))
 
     assert tree["dates_with_images"] == ["2026-03-02"]
     assert picker.dates == ["2026-03-02"]
@@ -104,6 +105,7 @@ def test_the_tree_and_the_project_summary_list_only_published_buckets_alike(
     """Both read a bucket off its own record: a published bucket lists by name under the date its
     record states."""
     pytest.importorskip("torch")
+    from tcip_mcp.project_record import record_fields
     from tcip_web.routes.projects import _summarize
     from tests._chain_fixtures import DATE, unassessed_bucket
 
@@ -111,7 +113,7 @@ def test_the_tree_and_the_project_summary_list_only_published_buckets_alike(
     root = tmp_path / "ds"
 
     tree = client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
-    picker = _summarize(root)
+    picker = _summarize(root, record_fields(root))
 
     assert tree["buckets_by_date"][DATE] == [bucket.name]
     assert picker.buckets_by_date == tree["buckets_by_date"]

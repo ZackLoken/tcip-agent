@@ -18,6 +18,7 @@ import pytest
 from PIL import Image
 
 from tcip_mcp.cli import doctor
+from tcip_mcp.workspace import BoundProject, workspace_from_environment
 from tcip_mcp.tools.project_tools import (
     initialize_project,
     inspect_project,
@@ -90,7 +91,7 @@ class TestE2EPipeline:
         root = str(project_dir)
 
         # ── Step 1: Init project ─────────────────────────────────────
-        initialize_project(root, "North orchard", site="north orchard")
+        created = initialize_project(root, "North orchard", site="north orchard")
         assert (project_dir / ".tcip").is_dir()
         assert (project_dir / ".tcip" / "artifacts").is_dir()
 
@@ -124,8 +125,9 @@ class TestE2EPipeline:
             {"subject": "bud", "bbox": [128, 112, 160, 136]},
             {"subject": "bud", "bbox": [400, 300, 440, 340]},
         ]
-        save_result = save_annotations(project_dir, project_dir.parent, img_path,
-                                       annotations=new_anns)
+        save_result = save_annotations(
+            BoundProject(project_dir, created["id"], workspace_from_environment()), img_path,
+            annotations=new_anns)
         assert save_result["count"] == 3  # 3 annotations written
         assert len(save_result["written"]) == 1
 
@@ -239,7 +241,7 @@ class TestE2EPipelineEdgeCases:
         # Either returns an error dict or metrics with 0 TP
         assert isinstance(result, dict)
 
-    def test_save_annotations_writes_a_first_label_document(self, tmp_path: Path):
+    def test_save_annotations_writes_a_first_label_document(self, tmp_path: Path, bound):
         """save_annotations writes an image's first label document."""
         import tcip_store
 
@@ -251,7 +253,7 @@ class TestE2EPipelineEdgeCases:
         img_path = images / "new_img.jpg"
         img.save(img_path)
 
-        result = save_annotations(tmp_path, tmp_path.parent, str(img_path), annotations=[
+        result = save_annotations(bound, str(img_path), annotations=[
             {"subject": "bud", "bbox": [10, 10, 50, 50]},
         ])
         assert result["count"] == 1

@@ -192,5 +192,6 @@ def test_existing_project_resolves_a_project_and_refuses_a_directory_with_no_rec
     with pytest.raises(ValueError, match="names no readable project"):
         existing_project(bare)
 
-    create_record(tmp_path, "Valley block", "north orchard")
-    assert existing_project(tmp_path) == tmp_path.resolve()
+    created = create_record(tmp_path, "Valley block", "north orchard")
+    root, record = existing_project(tmp_path)
+    assert (root, record["id"]) == (tmp_path.resolve(), created["id"])

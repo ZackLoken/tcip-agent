@@ -14,19 +14,24 @@ import shutil
 from datetime import datetime, timedelta
 from collections.abc import Iterable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 import tcip_store as ts
 from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.tools.phenology_tools import build_plant_mapping
-from tcip_mcp.tools.project_tools import initialize_project, register_dataset
+from tcip_mcp.tools.project_tools import register_dataset
 from tcip_mcp.traits import registered_crops
 
 from tests._audit_fixtures import held_by_another_writer
 from tests._image_fixtures import write_geo_image
 from tests._mapping_fixtures import register_plant_registry_for, write_plant_csv
+from tests._web_fixtures import named_project
 from tests.test_second_trait_acceptance import BLOOM_STATE, FLOWERS, _seed_currant_bloom_trait
+
+if TYPE_CHECKING:
+    from tcip_web.state import OpenProject
 
 PLANTS = [
     {"plot": "P1", "accession": "acc-A", "lat": 43.19670, "lon": -90.058000},
@@ -40,9 +45,9 @@ POPULATION = [p["plot"] for p in PLANTS]
 """The plants every delivery here states, the ones the scene's registry places."""
 
 
-def _init(tmp_path: Path) -> None:
-    result = initialize_project(str(tmp_path), "Orchard", site="orchard block")
-    assert "error" not in result, result
+def _init(tmp_path: Path) -> OpenProject:
+    """``tmp_path`` made a project named "Orchard" (``tests._web_fixtures.named_project``)."""
+    return named_project(tmp_path, "Orchard")
 
 
 def _dataset(tmp_path: Path, name: str = "ds") -> Path:
@@ -676,11 +681,11 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
     from tcip_store.sqlite_backend import SqliteBackend
     from tcip_web.state import store
 
-    _init(tmp_path)
+    project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root)
     registry = register_plant_registry_for(tmp_path, [plant_csv])
-    asyncio.run(store.open_project(tmp_path.resolve()))
+    asyncio.run(store.open_project(project))
 
     ts.bind(SqliteBackend(lock_timeout_s=0.2))
 
@@ -719,11 +724,11 @@ def test_a_supersede_whose_receipt_fails_answers_409_and_the_archive_still_loads
     with ``committed`` null, and the archived record still loads on its own build's receipt."""
     from tcip_web.state import store
 
-    _init(tmp_path)
+    project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
     registry = register_plant_registry_for(tmp_path, [plant_csv])
-    asyncio.run(store.open_project(tmp_path.resolve()))
+    asyncio.run(store.open_project(project))
 
     first = client.post("/api/results/plant_mapping/build", json={
         "name": "valley", "images_root": str(images_root), "plant_registry": registry,
@@ -1041,8 +1046,7 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
     mapping name each build and deliver through their own record, never the other's."""
     proj_a, proj_b = tmp_path / "proj_a", tmp_path / "proj_b"
     for proj in (proj_a, proj_b):
-        res = initialize_project(str(proj), proj.name, site=f"orchard {proj.name}")
-        assert "error" not in res, res
+        named_project(proj, proj.name)
 
     from tests._producer_fixtures import registry_over
 

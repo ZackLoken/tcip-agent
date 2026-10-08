@@ -142,23 +142,23 @@ def test_decode_inverts_the_recorded_scope(tmp_path):
 
 
 # (g) save_annotations refuses a missing subject.
-def test_save_annotations_refuses_missing_subject(tmp_path):
+def test_save_annotations_refuses_missing_subject(tmp_path, bound):
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     image = _write_image(tmp_path / "images" / UNDATED_BUCKET, "img_001")
 
-    res = save_annotations(tmp_path, tmp_path.parent, str(image),
+    res = save_annotations(bound, str(image),
                            annotations=[{"bbox": [10, 10, 40, 40]}])
     assert "error" in res and "subject" in res["error"]
     assert not tcip_store.exists(image_label_key(image))
 
     # A real subject still writes (the rail admits valid work).
-    ok = save_annotations(tmp_path, tmp_path.parent, str(image),
+    ok = save_annotations(bound, str(image),
                           annotations=[{"subject": "bud", "bbox": [10, 10, 40, 40]}])
     assert ok.get("count") == 1 and tcip_store.exists(image_label_key(image))
 
 
-def test_save_annotations_prefers_points_over_bbox(tmp_path):
+def test_save_annotations_prefers_points_over_bbox(tmp_path, bound):
     """save_annotations prefers points over bbox (aligned with the web converters), so a payload
     carrying both geometries writes the polygon, never collapsing it to a box-only record."""
     from tcip_mcp.tools.annotation_tools import save_annotations
@@ -166,7 +166,7 @@ def test_save_annotations_prefers_points_over_bbox(tmp_path):
     image = _write_image(tmp_path / "images" / UNDATED_BUCKET, "img_001")
 
     res = save_annotations(
-        tmp_path, tmp_path.parent, str(image),
+        bound, str(image),
         annotations=[{
             "subject": "bud",
             "points": [[10, 20], [110, 20], [110, 220]],
@@ -187,21 +187,21 @@ def test_save_annotations_prefers_points_over_bbox(tmp_path):
     {"rings": []}, {"points": []}, {"points": [[10, 20]]},
     {"points": [], "bbox": [10, 20, 110, 220]},
 ], ids=["no_rings", "no_points", "one_vertex", "no_points_beside_a_box"])
-def test_save_annotations_refuses_a_polygon_that_is_no_shape(tmp_path, geometry):
+def test_save_annotations_refuses_a_polygon_that_is_no_shape(tmp_path, bound, geometry):
     """A supplied polygon that is empty or too short is a malformed value, refused by name before
     anything is written, never read as no geometry nor saved and then dropped on write."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     image = _write_image(tmp_path / "images" / UNDATED_BUCKET, "img_001")
 
-    res = save_annotations(tmp_path, tmp_path.parent, str(image),
+    res = save_annotations(bound, str(image),
                            annotations=[{"subject": "bud", **geometry}])
 
     assert "polygon" in res.get("error", "")
     assert not tcip_store.exists(image_label_key(image))
 
 
-def test_save_annotations_accepts_rings(tmp_path):
+def test_save_annotations_accepts_rings(tmp_path, bound):
     """An occlusion-split instance in either ring-vertex shape (``{x, y}`` mappings or ``[x, y]``
     pairs) saves with its geometry through the write door."""
     from tcip_mcp.tools.annotation_tools import save_annotations
@@ -209,7 +209,7 @@ def test_save_annotations_accepts_rings(tmp_path):
     image = _write_image(tmp_path / "images" / UNDATED_BUCKET, "img_001")
 
     res = save_annotations(
-        tmp_path, tmp_path.parent, str(image),
+        bound, str(image),
         annotations=[{
             "subject": "bud",
             "rings": [
@@ -227,7 +227,7 @@ def test_save_annotations_accepts_rings(tmp_path):
 
     # Round-trip shape ([x,y] pairs, as the client projection's "rings" uses) also works.
     res2 = save_annotations(
-        tmp_path, tmp_path.parent, str(image),
+        bound, str(image),
         annotations=[{"subject": "bud", "rings": [[[1, 2], [3, 2], [3, 4]]]}],
     )
     assert res2.get("count") == 1
@@ -236,7 +236,7 @@ def test_save_annotations_accepts_rings(tmp_path):
 
     # "rings" wins over "points"/"bbox" when more than one is present (never less complete).
     res3 = save_annotations(
-        tmp_path, tmp_path.parent, str(image),
+        bound, str(image),
         annotations=[{
             "subject": "bud",
             "rings": [[{"x": 1, "y": 2}, {"x": 3, "y": 2}, {"x": 3, "y": 4}]],

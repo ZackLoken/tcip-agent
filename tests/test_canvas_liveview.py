@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from PIL import Image
@@ -18,14 +19,16 @@ from PIL import Image
 pytest.importorskip("fastapi")
 
 import tcip_store  # noqa: E402
-from tcip_mcp.project_record import read_record  # noqa: E402
 from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key  # noqa: E402
 from tests import REFUSED_NAMES  # noqa: E402
 
+if TYPE_CHECKING:
+    from tcip_web.state import OpenProject
 
-def _payload(project: Path, image_path: str, shapes=None, **over) -> dict:
+
+def _payload(project_id: str, image_path: str, shapes=None, **over) -> dict:
     body = {
-        "project_id": read_record(project)["id"],
+        "project_id": project_id,
         "tab": "annotate",
         "image_path": image_path,
         "image": Path(image_path).name,
@@ -64,19 +67,18 @@ SHAPES = [
 ]
 
 
-def _other_project(tmp_path: Path) -> Path:
-    from tcip_mcp.tools.project_tools import initialize_project
+def _other_project(tmp_path: Path) -> OpenProject:
+    """A second workspace project beside ``tmp_path`` (``tests._web_fixtures.named_project``)."""
+    from tests._web_fixtures import named_project
 
-    other = tmp_path.parent / "other_project"
-    assert "error" not in initialize_project(str(other), "Other project", "south block")
-    return other
+    return named_project(tmp_path.parent / "other_project", "Other project")
 
 
 # ── route: a push lands only under the project it was built for, while that one is open ─────
 
-def test_full_push_writes_geometry_and_meta(client, opened_project):
+def test_full_push_writes_geometry_and_meta(client, opened, opened_project):
     image = str(opened_project / "images" / "a.jpg")
-    r = client.post("/api/canvas/state", json=_payload(opened_project, image, shapes=SHAPES))
+    r = client.post("/api/canvas/state", json=_payload(opened.id, image, shapes=SHAPES))
     assert r.status_code == 200 and r.json()["shapes_written"] is True
     assert len(_shapes_doc(opened_project)["shapes"]) == 3
     assert _shapes_doc(opened_project)["image_path"] == "images/a.jpg"
@@ -84,52 +86,54 @@ def test_full_push_writes_geometry_and_meta(client, opened_project):
 
 
 def test_a_push_naming_another_project_is_answered_as_a_mismatch_and_writes_nothing(
-    client, opened_project, tmp_path,
+    client, opened, opened_project, tmp_path,
 ):
     """The backend compares the project a push names with the one it has open: a push built for
     another project answers 409 naming the open one, and nothing lands under either."""
     other = _other_project(tmp_path)
 
     r = client.post("/api/canvas/state",
-                    json=_payload(other, A_IMG, shapes=SHAPES))
+                    json=_payload(other.id, A_IMG, shapes=SHAPES))
 
     assert r.status_code == 409
-    assert r.json()["detail"]["open_project_id"] == read_record(opened_project)["id"]
+    assert r.json()["detail"]["open_project_id"] == opened.id
     assert _meta(opened_project) is None
-    assert _meta(other) is None
+    assert _meta(other.root) is None
 
 
-def test_a_push_naming_the_open_project_is_admitted(client, opened_project, tmp_path):
+def test_a_push_naming_the_open_project_is_admitted(client, opened, opened_project, tmp_path):
     """The admitting half: the same push, built for the project the backend has open, lands."""
     _other_project(tmp_path)
 
     r = client.post("/api/canvas/state",
-                    json=_payload(opened_project, A_IMG, shapes=SHAPES))
+                    json=_payload(opened.id, A_IMG, shapes=SHAPES))
 
     assert r.status_code == 200, r.text
     assert _meta(opened_project)["image_path"] == A_STORED
 
 
-def test_a_push_while_no_project_is_open_is_answered_as_a_mismatch(client, project):
-    r = client.post("/api/canvas/state", json=_payload(project, A_IMG, shapes=SHAPES))
+def test_a_push_while_no_project_is_open_is_answered_as_a_mismatch(client, made):
+    r = client.post("/api/canvas/state", json=_payload(made.id, A_IMG, shapes=SHAPES))
 
     assert r.status_code == 409
-    assert r.json()["detail"]["open_project_id"] is None
-    assert _meta(project) is None
+    assert "no project is open" in r.json()["detail"]
+    assert _meta(made.root) is None
 
 
-def test_a_push_naming_no_one_is_refused_before_anything_is_written(client, opened_project):
+def test_a_push_naming_no_one_is_refused_before_anything_is_written(client, opened, opened_project):
     """A push must name its person: a name naming no one is refused before the geometry or the
     meta document is written."""
     for name in REFUSED_NAMES:
         r = client.post("/api/canvas/state",
-                        json={**_payload(opened_project, A_IMG, shapes=SHAPES), "user": name})
+                        json={**_payload(opened.id, A_IMG, shapes=SHAPES), "user": name})
         assert r.status_code == 400, (name, r.text)
     assert _shapes_doc(opened_project) is None and _meta(opened_project) is None
 
 
-def test_a_push_stating_no_person_is_refused_before_anything_is_written(client, opened_project):
-    body = _payload(opened_project, A_IMG, shapes=SHAPES)
+def test_a_push_stating_no_person_is_refused_before_anything_is_written(
+    client, opened, opened_project,
+):
+    body = _payload(opened.id, A_IMG, shapes=SHAPES)
     del body["user"]
 
     r = client.post("/api/canvas/state", json=body)
@@ -138,38 +142,38 @@ def test_a_push_stating_no_person_is_refused_before_anything_is_written(client, 
     assert _shapes_doc(opened_project) is None and _meta(opened_project) is None
 
 
-def test_a_push_naming_a_person_is_stored_under_that_person(client, opened_project):
-    r = client.post("/api/canvas/state", json=_payload(opened_project, A_IMG, shapes=SHAPES))
+def test_a_push_naming_a_person_is_stored_under_that_person(client, opened, opened_project):
+    r = client.post("/api/canvas/state", json=_payload(opened.id, A_IMG, shapes=SHAPES))
 
     assert r.status_code == 200
     assert _meta(opened_project)["user"] == "user:breeder"
 
 
-def test_a_push_naming_a_project_root_refuses_as_an_unknown_field(client, opened_project):
+def test_a_push_naming_a_project_root_refuses_as_an_unknown_field(client, opened, opened_project):
     """The write destination is the open project, never anything the client names: a body that
     names a root refuses outright (extra='forbid') rather than being silently ignored."""
-    body = _payload(opened_project, A_IMG, shapes=SHAPES)
+    body = _payload(opened.id, A_IMG, shapes=SHAPES)
     r = client.post("/api/canvas/state", json={**body, "project_root": str(opened_project)})
     assert r.status_code == 422
 
 
-def test_cut_armed_flag_rides_the_meta_push(client, opened_project):
+def test_cut_armed_flag_rides_the_meta_push(client, opened, opened_project):
     """A client fact like dirty or mode: the completed-cut and refusal cases both leave the flag
     set but clear the mirrored pending segment, so the meta document has to carry the flag itself
     for the mirror to read as armed rather than disarmed."""
     r = client.post(
         "/api/canvas/state",
-        json=_payload(opened_project, A_IMG, shapes=SHAPES, cut_armed=True),
+        json=_payload(opened.id, A_IMG, shapes=SHAPES, cut_armed=True),
     )
     assert r.status_code == 200
     assert _meta(opened_project)["cut_armed"] is True
 
 
-def test_heartbeat_updates_meta_without_touching_geometry(client, opened_project):
+def test_heartbeat_updates_meta_without_touching_geometry(client, opened, opened_project):
     client.post("/api/canvas/state",
-                json=_payload(opened_project, A_IMG, shapes=SHAPES))
+                json=_payload(opened.id, A_IMG, shapes=SHAPES))
     before = tcip_store.read_versioned(canvas_geometry_key(str(opened_project))).version
-    hb = _payload(opened_project, A_IMG, shapes=None,
+    hb = _payload(opened.id, A_IMG, shapes=None,
                   viewport={"x": 40, "y": 10, "w": 80, "h": 50, "scale": 2.0})
     r = client.post("/api/canvas/state", json=hb)
     assert r.json()["shapes_written"] is False
@@ -178,7 +182,7 @@ def test_heartbeat_updates_meta_without_touching_geometry(client, opened_project
     assert after == before                                                 # geometry untouched
 
 
-def test_a_push_waits_for_a_holder_of_the_records_lock_and_then_lands(opened_project):
+def test_a_push_waits_for_a_holder_of_the_records_lock_and_then_lands(opened, opened_project):
     """A push takes the meta record's lock, so it cannot overwrite what a holder is editing.
 
     The push runs on its own thread while another thread holds the key, and is observed still
@@ -193,7 +197,7 @@ def test_a_push_waits_for_a_holder_of_the_records_lock_and_then_lands(opened_pro
     from tests._audit_fixtures import held_by_another_writer
 
     key = canvas_meta_key(str(opened_project))
-    payload = CanvasStatePayload(**_payload(opened_project, A_IMG))
+    payload = CanvasStatePayload(**_payload(opened.id, A_IMG))
     pushing = threading.Thread(target=lambda: push_canvas_state(payload))
     with held_by_another_writer(key):
         pushing.start()
@@ -205,11 +209,11 @@ def test_a_push_waits_for_a_holder_of_the_records_lock_and_then_lands(opened_pro
     assert ts.read(key)["image_path"] == A_STORED
 
 
-def test_heartbeat_for_new_image_invalidates_geometry_by_identity(client, opened_project):
+def test_heartbeat_for_new_image_invalidates_geometry_by_identity(client, opened, opened_project):
     client.post("/api/canvas/state",
-                json=_payload(opened_project, A_IMG, shapes=SHAPES))
+                json=_payload(opened.id, A_IMG, shapes=SHAPES))
     client.post("/api/canvas/state",
-                json=_payload(opened_project, B_IMG, shapes=None))
+                json=_payload(opened.id, B_IMG, shapes=None))
     # The geometry file still holds a.jpg's shapes, but its identity no longer matches the meta:
     # the reader must treat it as stale (a.jpg's polygons never render under b.jpg).
     assert _shapes_doc(opened_project)["image_path"] == A_STORED
@@ -468,20 +472,20 @@ def _write_state(project: Path, img: str, shapes=SHAPES, *, shapes_image: str | 
     })
 
 
-def test_capture_live_canvas_with_no_state_pushed_names_what_pushes_one(project):
+def test_capture_live_canvas_with_no_state_pushed_names_what_pushes_one(project, bound):
     from tcip_mcp.tools.vision_tools import capture_live_canvas
 
-    res = capture_live_canvas(project, project.parent, refresh=False)
+    res = capture_live_canvas(bound, refresh=False)
     assert "error" in res
     assert "no canvas state has been pushed" in res["error"].lower()
 
 
-def test_capture_live_canvas_renders_pushed_state(project):
+def test_capture_live_canvas_renders_pushed_state(project, bound):
     img = _make_image(project)
     _write_state(project, img)
 
     from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(project, project.parent, refresh=False)
+    res = capture_live_canvas(bound, refresh=False)
     assert "error" not in res
     assert Path(res["image_path"]).is_file()
     assert res["source_image"] == img
@@ -492,7 +496,7 @@ def test_capture_live_canvas_renders_pushed_state(project):
     assert res["shapes_missing"] is False
 
 
-def test_capture_live_canvas_names_the_armed_cut(project):
+def test_capture_live_canvas_names_the_armed_cut(project, bound):
     """The mirror's armed state must be readable beside the mode it names, not just implied by
     the pending-segment polyline (which a completed cut or a refusal both clear while the flag
     stays set)."""
@@ -500,11 +504,11 @@ def test_capture_live_canvas_names_the_armed_cut(project):
     _write_state(project, img, cut_armed=True)
 
     from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(project, project.parent, refresh=False)
+    res = capture_live_canvas(bound, refresh=False)
     assert res["cut_armed"] is True
 
 
-def test_capture_live_canvas_renders_exactly_the_viewport_region(project):
+def test_capture_live_canvas_renders_exactly_the_viewport_region(project, bound):
     """The tool reads the visible rectangle and renders that, so the artifact is the region the
     human sees rather than the whole frame."""
     img = _make_image(project)
@@ -514,24 +518,24 @@ def test_capture_live_canvas_renders_exactly_the_viewport_region(project):
     tcip_store.replace(canvas_meta_key(str(project)), live)
 
     from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(project, project.parent, refresh=False)
+    res = capture_live_canvas(bound, refresh=False)
     assert res["cropped_to_viewport"] is True
     assert Image.open(res["image_path"]).size == (100, 100)
 
 
-def test_capture_live_canvas_full_frame_downscales_to_max_edge(project):
+def test_capture_live_canvas_full_frame_downscales_to_max_edge(project, bound):
     img = _make_image(project)
     _write_state(project, img)
 
     from tcip_mcp.tools.vision_tools import capture_live_canvas
     res = capture_live_canvas(
-        project, project.parent, refresh=False, crop_to_viewport=False, max_edge=100
+        bound, refresh=False, crop_to_viewport=False, max_edge=100
     )
     assert res["cropped_to_viewport"] is False
     assert Image.open(res["image_path"]).size == (100, 50)
 
 
-def test_capture_live_canvas_reads_a_multiband_raster_without_writing_a_preview(project):
+def test_capture_live_canvas_reads_a_multiband_raster_without_writing_a_preview(project, bound):
     """A raster PIL has no true-color mode for is composited in memory for the render: the capture
     path writes no throwaway preview file beside the artifact."""
     import numpy as np
@@ -545,19 +549,19 @@ def test_capture_live_canvas_reads_a_multiband_raster_without_writing_a_preview(
     _write_state(project, str(src))
 
     from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(project, project.parent, refresh=False)
+    res = capture_live_canvas(bound, refresh=False)
     assert "error" not in res
     assert Image.open(res["image_path"]).mode == "RGB"
     assert not (project / ".tcip" / "artifacts" / "viz" / "_band_previews").exists()
 
 
-def test_capture_live_canvas_identity_stale_shapes_do_not_render(project):
+def test_capture_live_canvas_identity_stale_shapes_do_not_render(project, bound):
     """Geometry left over from a previous image must not render under the current one."""
     img = _make_image(project)
     _write_state(project, img, shapes_image="C:/img/other.jpg")  # stale identity
 
     from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(project, project.parent, refresh=False)
+    res = capture_live_canvas(bound, refresh=False)
     assert "error" not in res
     assert res["shapes_missing"] is True
     assert res["shape_counts_by_tag"] == {}

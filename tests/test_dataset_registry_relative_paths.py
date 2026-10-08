@@ -129,7 +129,7 @@ def test_stored_path_recognizes_containment_through_a_symlinked_project_root(tmp
 def test_check_dataset_identity_stays_quiet_for_a_self_registered_project(tmp_path: Path):
     from tests._web_fixtures import new_project
 
-    src = new_project(tmp_path / "proj")
+    src = new_project(tmp_path / "proj").root
     _make_dataset(src)
     register_dataset(src, str(src), crop="currant")
 
@@ -146,7 +146,7 @@ def test_check_dataset_identity_still_fires_for_a_genuinely_moved_dataset(tmp_pa
 
     from tests._web_fixtures import new_project
 
-    orig = new_project(tmp_path / "orig")
+    orig = new_project(tmp_path / "orig").root
     _make_dataset(orig)
     register_dataset(orig, str(orig), crop="currant")
 

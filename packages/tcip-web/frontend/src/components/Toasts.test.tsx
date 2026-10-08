@@ -95,6 +95,40 @@ describe("Toasts channel replacement", () => {
   });
 });
 
+describe("Toasts stack", () => {
+  it("caps channeled and unchanneled pushes alike at four, keeping the latest", () => {
+    const s = useStore.getState();
+    s.pushToast("one");
+    s.pushToast("two", "error", "a");
+    s.pushToast("three");
+    s.pushToast("four", "error", "b");
+    s.pushToast("five");
+
+    expect(useStore.getState().toasts.map((t) => t.message)).toEqual([
+      "two",
+      "three",
+      "four",
+      "five",
+    ]);
+    s.pushRefusal("c", "a.jpg", "refused");
+    expect(useStore.getState().toasts).toHaveLength(4);
+  });
+});
+
+describe("Toasts refusal notice", () => {
+  it("shows and names a notice of refusals by the text its refusals give, holding no text of its own", () => {
+    render(<Toasts />);
+    act(() => useStore.getState().pushRefusal("refused", "a.jpg", "ended"));
+    act(() => useStore.getState().pushRefusal("refused", "b.jpg", "ended"));
+
+    expect(useStore.getState().toasts[0].message).toBeUndefined();
+    expect(screen.getByText("Not recorded (ended): a.jpg, b.jpg")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Dismiss: Not recorded (ended): a.jpg, b.jpg" }),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("Toasts dismiss button naming", () => {
   it("carries each toast's own message so two Dismiss buttons never share one name", () => {
     render(<Toasts />);

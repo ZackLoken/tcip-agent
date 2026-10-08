@@ -172,7 +172,7 @@ def test_moving_a_flagged_annotation_off_its_flag_resolves_it_as_removed(tmp_pat
 def test_the_editor_reads_the_flags_at_load_and_after_a_save(tmp_path: Path, client) -> None:
     from tests._web_fixtures import open_new_project
 
-    root = open_new_project(tmp_path / "proj")
+    root = open_new_project(tmp_path / "proj").root
     image = _image(root)
     body = {"image_path": str(image), "user": "breeder",
             "annotations": [{"subject": "bud", "bbox": BOX}]}

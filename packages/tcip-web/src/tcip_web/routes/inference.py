@@ -83,10 +83,6 @@ def _get(job_id: str) -> Optional[InferenceJob]:
     return _registry.get(job_id)
 
 
-def _list_jobs() -> list[InferenceJob]:
-    return _registry.list(str(store.open_root()))
-
-
 # ── Worker ─────────────────────────────────────────────────────────────
 
 
@@ -146,7 +142,7 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
     """Launch a pass over the dataset's images on a background thread, by the person ``user``
     names, who publishes its bucket."""
     person = actor(payload.user)
-    project = store.open_root()
+    project = store.held().root
     # A caller must not name a file outside the allowed roots, registered checkpoint or not.
     checkpoint_path = allowed_path(payload.checkpoint_path)
     dataset_root = allowed_path(payload.dataset_root)
@@ -164,7 +160,7 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
     if not images_dir.is_dir():
         raise HTTPException(404, f"images_dir not found: {images_dir}")
 
-    live_job = next((j for j in _list_jobs() if j.status in ("pending", "running")
+    live_job = next((j for j in _registry.list(str(project)) if jobstore.live(j)
                      and j.bucket == payload.bucket
                      and canonical_path(j.dataset_root) == canonical_path(dataset_root)), None)
     if live_job is not None:
@@ -193,7 +189,7 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
 
 @router.get("/jobs")
 def list_jobs() -> dict:
-    return {"jobs": [_summary(j) for j in _list_jobs()]}
+    return {"jobs": [_summary(j) for j in _registry.list(str(store.held().root))]}
 
 
 @router.post("/jobs/{job_id}/cancel")
@@ -230,16 +226,12 @@ async def stream_job(websocket: WebSocket, job_id: str) -> None:
         await websocket.close()
         return
     try:
-        from tcip_mcp.experiments import TERMINAL_STATES
-
         last_done = -1
         while True:
             if job.done != last_done:
                 last_done = job.done
                 await websocket.send_json({"type": "progress", **_summary(job)})
-            # Terminate on any terminal state: a canceled/interrupted job never
-            # reaches completed/failed, so keying only on those spun this loop forever.
-            if job.status in TERMINAL_STATES:
+            if not jobstore.live(job):
                 await websocket.send_json({"type": "final", **_summary(job)})
                 break
             await asyncio.sleep(0.5)

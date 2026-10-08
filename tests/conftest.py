@@ -92,20 +92,41 @@ def _own_workspace(tmp_path: Path) -> None:
 
 
 @pytest.fixture
-def project(tmp_path: Path) -> Path:
-    """``tmp_path`` made a project through the platform's own creation door."""
+def made(tmp_path: Path):
+    """``tmp_path`` made a project through the platform's own creation door
+    (``tests._web_fixtures.new_project``)."""
     from tests._web_fixtures import new_project
 
     return new_project(tmp_path)
 
 
 @pytest.fixture
-def opened_project(tmp_path: Path) -> Path:
+def project(made) -> Path:
+    """:func:`made`'s directory."""
+    return made.root
+
+
+@pytest.fixture
+def bound(made):
+    """:func:`made` as an MCP server started for it binds it (``tests._web_fixtures.bound_to``)."""
+    from tests._web_fixtures import bound_to
+
+    return bound_to(made)
+
+
+@pytest.fixture
+def opened(tmp_path: Path):
     """``tmp_path`` made a project and open in the web backend, the way the picker's open
-    leaves it."""
+    leaves it (``tests._web_fixtures.open_new_project``)."""
     from tests._web_fixtures import open_new_project
 
     return open_new_project(tmp_path)
+
+
+@pytest.fixture
+def opened_project(opened) -> Path:
+    """:func:`opened`'s directory."""
+    return opened.root
 
 
 @pytest.fixture
@@ -146,10 +167,11 @@ def _close_open_project():
     """Leave the web layer's process-wide state store with no project open after each test."""
     yield
     state = sys.modules.get("tcip_web.state")
-    if state is not None and state.store.project_root is not None:
+    opened = None if state is None else state.store.opened
+    if opened is not None:
         import asyncio
 
-        asyncio.run(state.store.close_project())
+        asyncio.run(state.store.close_project(opened.id))
 
 
 @pytest.fixture

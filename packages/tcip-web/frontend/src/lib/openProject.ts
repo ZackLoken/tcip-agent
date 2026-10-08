@@ -7,6 +7,7 @@ import { api, type ProjectSummary } from "@/api/client";
 import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
 import { toastLabelProblem } from "@/lib/labelProblemToast";
 import { recordRecentProject } from "@/lib/recentProjects";
+import { settleVisits } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
 import type { OpenHold } from "@/store/slices/projectOpen";
 
@@ -64,8 +65,10 @@ export function releaseOpenHold(requestId: number): void {
   if (heldOpen(requestId)) useStore.getState().patchOpenStatus({ opening: null });
 }
 
-/** The open itself, as the committed person. It stops, with nothing applied, as soon as its
- *  request is no longer the held one, before selecting a dataset and again before adopting. */
+/** The open itself, as the committed person, once this page's visits are settled
+ *  (:func:`settleVisits`, whose rejection leaves the open unsent). It stops, with nothing sent
+ *  or applied after that point, as soon as its request is no longer the held one: before asking
+ *  the backend to open, before selecting a dataset and again before adopting. */
 async function performOpen(
   requestId: number,
   p: ProjectSummary & { id: string },
@@ -76,6 +79,8 @@ async function performOpen(
   // Snapshot the outgoing dataset's UI state before the open's broadcast can move it; the
   // restore for the new selection is defined once, below.
   useStore.getState().saveCurrentDatasetUi();
+  await settleVisits();
+  if (!heldOpen(requestId)) return;
   const opened = await api.projects.open({ id: p.id, user: useStore.getState().user });
   if (!heldOpen(requestId)) return;
   const res = date
@@ -108,7 +113,8 @@ async function performOpen(
  *  or, as ``held``, by a caller that took it before its own lookup; a second choice of project or
  *  a snapshot adopting another project releases it, and a result from a request no longer held,
  *  success or failure, is dropped. A held failure is recorded for ``p`` and toasted so a tab that
- *  replaced the picker does not hide it. */
+ *  replaced the picker does not hide it. An image visit the settlement stopped and no departure
+ *  closed resumes counting when the open ends, whatever its outcome. */
 export async function startOpen(
   p: ProjectSummary & { id: string },
   date: string,
@@ -129,6 +135,7 @@ export async function startOpen(
     now.pushToast(String(e));
   } finally {
     releaseOpenHold(requestId);
+    useStore.getState().resumeSessionInterval();
   }
 }
 

@@ -1,7 +1,6 @@
 import { Suspense, lazy, useEffect, useRef, type ReactNode } from "react";
 
 import { subjectsApi } from "@/api/subjects";
-import { ROUTES } from "@/api/routes";
 import {
   PANEL_EVENT_ANNOTATE_FOCUS,
   PANEL_EVENT_CANVAS_STATE_REQUEST,
@@ -19,6 +18,7 @@ import { useActiveTabSync } from "@/hooks/useActiveTabSync";
 import { applyAnnotateFocus, type AnnotateFocusData } from "@/lib/annotateFocus";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { attachCtrlWheelGuard } from "@/lib/ctrlWheelGuard";
+import { endRecordedSession } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
 import { declaredClient } from "@/store/slices/agentActivity";
 import { selectProjectRoot } from "@/store/slices/gui";
@@ -62,8 +62,7 @@ function TabFallback() {
 /**
  * Everything that runs on behalf of a project: the state socket and its snapshot adoption, the
  * agent's panel events, the registry hydration, the session end, the top bar, the agent rail, the
- * status bar and the tabs. App mounts it only while the person's name is committed, so none of
- * it exists before admission.
+ * status bar and the tabs.
  */
 export function ProjectShell() {
   const activeTab = useStore((s) => s.gui.active_tab);
@@ -80,7 +79,6 @@ export function ProjectShell() {
   const subject = useStore((s) => s.gui.dataset.subject);
   const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
   const setRegistry = useStore((s) => s.setRegistry);
-  const endedSessionForRoot = useRef<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -138,49 +136,17 @@ export function ProjectShell() {
     return unsubscribe;
   }, []);
 
-  // A session opens at its person's first recorded contribution (sessionsApi.imageEvent); this
-  // ends the open one when the page or the project goes.
+  // An end for the recorded session is sent when the page is hidden or about to unload and when
+  // the shell unmounts, once the contributions queued before it have answered.
   useEffect(() => {
-    if (!projectRoot) return;
-    endedSessionForRoot.current = null;
-
-    function endSession() {
-      if (endedSessionForRoot.current === projectRoot) return;
-      endedSessionForRoot.current = projectRoot;
-
-      const payload = JSON.stringify({});
-      try {
-        if (navigator.sendBeacon) {
-          const blob = new Blob([payload], { type: "application/json" });
-          navigator.sendBeacon(ROUTES.postSessionsEnd, blob);
-          return;
-        }
-      } catch {
-        // Fall through to fetch keepalive.
-      }
-
-      try {
-        void fetch(ROUTES.postSessionsEnd, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: payload,
-          keepalive: true,
-        }).catch(() => {
-          // Best-effort telemetry only.
-        });
-      } catch {
-        // Best-effort telemetry only.
-      }
-    }
-
-    window.addEventListener("pagehide", endSession);
-    window.addEventListener("beforeunload", endSession);
+    window.addEventListener("pagehide", endRecordedSession);
+    window.addEventListener("beforeunload", endRecordedSession);
     return () => {
-      window.removeEventListener("pagehide", endSession);
-      window.removeEventListener("beforeunload", endSession);
-      endSession();
+      window.removeEventListener("pagehide", endRecordedSession);
+      window.removeEventListener("beforeunload", endRecordedSession);
+      endRecordedSession();
     };
-  }, [projectRoot]);
+  }, []);
 
   // A refresh/close with unsaved canvas edits gets the leave-page prompt (React never unmounts).
   useEffect(() => {

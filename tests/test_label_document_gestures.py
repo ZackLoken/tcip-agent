@@ -191,7 +191,7 @@ def test_rejecting_a_paired_proposal_records_the_rejection_and_keeps_the_annotat
         tmp_path: Path, client) -> None:
     from tests._web_fixtures import open_new_project
 
-    root = open_new_project(tmp_path / "proj")
+    root = open_new_project(tmp_path / "proj").root
     image = _image(root)
     bucket = _bucket(root, image)
     _save(root, image, [{"subject": "bud", "bbox": BOX}])
@@ -283,7 +283,7 @@ def test_the_save_route_confirms_an_annotation_once_and_refuses_it_named_twice(
         tmp_path: Path, client) -> None:
     from tests._web_fixtures import open_new_project
 
-    root = open_new_project(tmp_path / "proj")
+    root = open_new_project(tmp_path / "proj").root
     image = _image(root)
     _save(root, image, [{"subject": "bud", "bbox": BOX}], author="detector")
     body = {"image_path": str(image), "user": "breeder", "annotations": _as_loaded(root, image)}
@@ -327,7 +327,7 @@ def test_the_save_route_answers_the_annotation_an_accepted_proposal_resolved_to(
         tmp_path: Path, client) -> None:
     from tests._web_fixtures import open_new_project
 
-    root = open_new_project(tmp_path / "proj")
+    root = open_new_project(tmp_path / "proj").root
     image = _image(root)
     bucket = _bucket(root, image)
     resp = client.post("/api/annotate/labels", json={
@@ -345,7 +345,7 @@ def test_the_save_answers_the_document_it_stored(tmp_path: Path, client) -> None
     that still name the subject's annotations, the same answer a load gives."""
     from tests._web_fixtures import open_new_project
 
-    root = open_new_project(tmp_path / "proj")
+    root = open_new_project(tmp_path / "proj").root
     image = _image(root)
     body = {"image_path": str(image), "user": "breeder"}
     first = client.post("/api/annotate/labels", json={
@@ -398,7 +398,7 @@ def test_a_proposal_named_twice_refuses_at_the_save_route_before_any_write(
         tmp_path: Path, client) -> None:
     from tests._web_fixtures import open_new_project
 
-    root = open_new_project(tmp_path / "proj")
+    root = open_new_project(tmp_path / "proj").root
     image = _image(root)
     bucket = _bucket(root, image)
     body = {"image_path": str(image), "user": "breeder", "annotations": [], "bucket": bucket}
@@ -417,7 +417,7 @@ def test_a_bucket_document_that_will_not_read_answers_400_at_the_proposals_route
     from tcip_mcp.buckets import read_bucket
     from tests._web_fixtures import open_new_project
 
-    root = open_new_project(tmp_path / "proj")
+    root = open_new_project(tmp_path / "proj").root
     image = _image(root)
     bucket = _bucket(root, image)
     params = {"image_path": str(image), "bucket": bucket}
@@ -453,7 +453,7 @@ def test_the_proposals_payload_carries_what_the_editor_reads_and_no_more(
         tmp_path: Path, client) -> None:
     from tests._web_fixtures import open_new_project
 
-    root = open_new_project(tmp_path / "proj")
+    root = open_new_project(tmp_path / "proj").root
     image = _image(root)
     bucket = _bucket(root, image)
     _save(root, image, [], gestures=Gestures(complete={"bud": True}))
@@ -475,7 +475,7 @@ def test_a_staged_bucket_serves_no_operating_point_and_says_why(
     so beside the proposals rather than deciding admission for each of them."""
     from tests._web_fixtures import open_new_project
 
-    root = open_new_project(tmp_path / "proj")
+    root = open_new_project(tmp_path / "proj").root
     image = _image(root)
     bucket = _bucket(root, image)
 
@@ -492,7 +492,7 @@ def test_the_loaded_annotations_carry_the_index_a_pairing_names(tmp_path: Path, 
     list it re-split by geometry."""
     from tests._web_fixtures import open_new_project
 
-    root = open_new_project(tmp_path / "proj")
+    root = open_new_project(tmp_path / "proj").root
     image = _image(root)
     bucket = _bucket(root, image)
     _save(root, image, [{"subject": "leaf", "points": RING}, {"subject": "bud", "bbox": BOX}])
@@ -546,7 +546,7 @@ def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(
     from tcip_mcp.tools.feedback_tools import _prepare_queue_sources
     from tests._web_fixtures import open_new_project
 
-    root = open_new_project(tmp_path / "proj")
+    root = open_new_project(tmp_path / "proj").root
     image = _image(root)
     checkpoint = root / "model.pt"
     checkpoint.write_bytes(b"only its presence is read before the queue drops finished images")
@@ -571,7 +571,7 @@ def test_saved_provenance_is_the_requests_actor_whatever_the_browser_sends(
         tmp_path: Path, client) -> None:
     from tests._web_fixtures import open_new_project
 
-    root = open_new_project(tmp_path / "proj")
+    root = open_new_project(tmp_path / "proj").root
     image = _image(root)
 
     resp = client.post("/api/annotate/labels", json={

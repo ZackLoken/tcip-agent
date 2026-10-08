@@ -44,7 +44,8 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
     from tests._verified_checkpoint_fixtures import finished_run
 
     ws = tmp_path.parent
-    project, project_id = named_project(ws / "valley_block", "Valley block")
+    made = named_project(ws / "valley_block", "Valley block")
+    project = made.root
     finished_run(project, experiment_id="exp-before")
     (project / "ds").mkdir()
     assert "error" not in register_dataset(project, str(project / "ds"), "currant")
@@ -56,10 +57,10 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
     held, audit_lines = _held(project, but=renamed), audit_rows(project)
 
     resp = client.post("/api/projects/rename", json={
-        "id": project_id, "display_name": "Valley block, north half", "user": "tester"})
+        "id": made.id, "display_name": "Valley block, north half", "user": "tester"})
 
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"id": project_id, "display_name": "Valley block, north half",
+    assert resp.json() == {"id": made.id, "display_name": "Valley block, north half",
                            "previous_display_name": "Valley block"}
     assert read_record(project)["display_name"] == "Valley block, north half"
     assert sorted(p.name for p in ws.iterdir() if (p / ".tcip").is_dir()) == ["valley_block"]
@@ -72,33 +73,33 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
     assert line["arguments"]["previous_display_name"] == "Valley block"
     assert line["actor"] == "user:tester"
     listed = {p["id"]: p for p in client.get("/api/projects").json()["projects"]}
-    assert listed[project_id]["display_name"] == "Valley block, north half"
+    assert listed[made.id]["display_name"] == "Valley block, north half"
 
 
 def test_a_display_name_the_record_refuses_answers_400_and_changes_nothing(client, tmp_path):
     from tcip_mcp.project_record import read_record
 
-    project, project_id = named_project(tmp_path.parent / "valley_block", "Valley block")
+    made = named_project(tmp_path.parent / "valley_block", "Valley block")
 
     resp = client.post("/api/projects/rename", json={
-        "id": project_id, "display_name": "   ", "user": "tester"})
+        "id": made.id, "display_name": "   ", "user": "tester"})
 
     assert resp.status_code == 400
-    assert read_record(project)["display_name"] == "Valley block"
-    assert audit_rows(project, "project_renamed") == []
+    assert read_record(made.root)["display_name"] == "Valley block"
+    assert audit_rows(made.root, "project_renamed") == []
 
 
 def test_a_rename_naming_no_one_changes_nothing(client, tmp_path):
     from tcip_mcp.project_record import read_record
 
-    project, project_id = named_project(tmp_path.parent / "valley_block", "Valley block")
+    made = named_project(tmp_path.parent / "valley_block", "Valley block")
 
     for name in REFUSED_NAMES:
         resp = client.post("/api/projects/rename", json={
-            "id": project_id, "display_name": "Hill block", "user": name})
+            "id": made.id, "display_name": "Hill block", "user": name})
         assert resp.status_code == 400, (name, resp.text)
-    assert read_record(project)["display_name"] == "Valley block"
-    assert audit_rows(project, "project_renamed") == []
+    assert read_record(made.root)["display_name"] == "Valley block"
+    assert audit_rows(made.root, "project_renamed") == []
 
 
 def test_an_id_no_project_holds_answers_404(client, tmp_path):
@@ -132,7 +133,7 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     from tests._verified_checkpoint_fixtures import detection_config, finished_run, opened_run
 
     ws = tmp_path.parent
-    project, _ = named_project(ws / "valley_block", "Valley block")
+    project = named_project(ws / "valley_block", "Valley block").root
     first = finished_run(project, experiment_id="exp-first")
     checkpoint = Path(observe(first).checkpoint["path"])
     opened_run(project, detection_config(project / "data"),

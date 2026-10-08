@@ -2,7 +2,7 @@ import type { StateCreator } from "zustand";
 
 import { setSubjectColorRegistry } from "@/api/subjects";
 import type { AttributeDef, Registry } from "@/api/subjects";
-import type { ImageEventPayload } from "@/api/types.generated";
+import type { ImageEventPayload, SessionRef } from "@/api/types.generated";
 import type { AppState } from "@/store/appState";
 
 interface RegistryState {
@@ -32,18 +32,20 @@ interface AnnotateUiState {
   /** Currently hovered polygon index (for vertex-handle rendering). */
   hoveredPolygonIdx: number | null;
   /** Active vertex drag: [polygonIdx, ringIdx, vertexIdx]; a vertex belongs to one ring of one
-   *  polygon, so a multi-ring shape's second ring is addressable rather than uneditable. */
+   *  polygon. */
   draggingVertex: [number, number, number] | null;
 }
 
 interface SessionTrackingState {
   /** Active image for per-image annotation timing. */
   currentImageName: string | null;
-  /** Epoch ms when the annotator entered this image. */
+  /** Epoch ms the visit's clock last started: entering the image, or resuming after a pause;
+   *  null while paused. */
   imageEnterTimeMs: number | null;
-  /** Number of new annotations created during this image visit. */
+  /** Number of new annotations created since the visit's last contribution was held. */
   annotationsAddedDelta: number;
-  /** Whether a save during this image visit left the dataset subject a confirmed negative. */
+  /** Whether a save since the visit's last contribution was held left the dataset subject a
+   *  confirmed negative. */
   negativeMarked: boolean;
   /** The project the visit was opened under, which it keeps. */
   projectId: string | null;
@@ -62,13 +64,20 @@ export interface RegistryStatusSlice {
   registry: RegistryState;
   annotateUi: AnnotateUiState;
   sessionTracking: SessionTrackingState;
-  /** Finished image visits, each with its person, project and activity, not yet accepted by the
-   *  backend. */
+  /** Contributions of image visits, each a closed visit or a visit's part up to a pause, with
+   *  its identity, person, project and activity, whose recording the backend has not
+   *  acknowledged. */
   heldContributions: ImageEventPayload[];
+  /** The held contributions sent at least once with no answer yet that settles whether they
+   *  were recorded: one in flight, or one whose send failed or answered indeterminately. */
+  unconfirmedContributions: ImageEventPayload[];
+  /** The session named by the latest answer to a contribution of this page that named one, with
+   *  its person: what the next visit of that person in that project names, and what the page
+   *  names to end it; null until one is answered, and again once an end for it has been sent,
+   *  whatever became of that send, or its project stops being the open one. */
+  recordedSession: RecordedSession | null;
 
-  /** Registry helpers. ``version`` is the stored registry's compare-and-set token to carry into
-   *  the next save, null when none is asserted. ``discovered`` is what a load found in the
-   *  labels. */
+  /** Registry helpers. */
   setRegistry: (subjects: Registry, version?: string | null, discovered?: string[]) => void;
   subjectNames: () => string[];
   subjectAttributes: (subject: string | null) => Record<string, AttributeDef>;
@@ -82,12 +91,94 @@ export interface RegistryStatusSlice {
   setDraggingVertex: (v: [number, number, number] | null) => void;
 
   /** Per-image session telemetry helpers. A visit opens under the current person and project;
-   *  closing it holds its contribution when a project was named, and drops it otherwise. */
+   *  closing it holds its contribution when a project was named, naming the recorded session
+   *  when that is the same person's in the same project, and drops it otherwise. */
   startImageSessionTracking: (imageName: string, imageEnterTimeMs?: number) => void;
   incrementAnnotationsAdded: (delta?: number) => void;
   markNegativeConfirmed: () => void;
   closeSessionInterval: () => void;
+  /** Hold the visit's contribution so far and keep its image open with its clock stopped, so
+   *  what follows is counted from zero. */
+  pauseSessionInterval: () => void;
+  /** Restart the clock of a visit `pauseSessionInterval` stopped. */
+  resumeSessionInterval: () => void;
+  /** Close the visit open now and forget the recorded session, as `following` (null for none)
+   *  becomes the open project; every held contribution of another project is retired and the
+   *  person told in one notice per outcome: never sent, not recorded; sent with no settling
+   *  answer, recording not confirmed. The live notice of unconfirmed contributions follows
+   *  (`noticeUnconfirmed`). */
+  leaveProjectSession: (following: string | null) => void;
+  /** Retire `contribution` from the held and unconfirmed contributions; the live notice of
+   *  unconfirmed contributions follows (`noticeUnconfirmed`). */
   retireContribution: (contribution: ImageEventPayload) => void;
+  setRecordedSession: (session: RecordedSession | null) => void;
+}
+
+/** A session this page recorded, as the page names it to end it, and the person it is of. */
+export interface RecordedSession extends SessionRef {
+  user: string;
+}
+
+const UNCONFIRMED_CHANNEL = "unconfirmed-visits";
+
+/** Refresh the notice of unconfirmed contributions from `s.unconfirmedContributions`, as a send
+ *  fails and as contributions leave it: a standing notice is replaced to name every image now
+ *  unconfirmed, or dismissed once none is; with `announce`, a notice is shown even when none
+ *  stands. A send that only adds membership leaves the notice until its answer. */
+export function noticeUnconfirmed(s: AppState, announce: boolean): void {
+  const standing = s.toasts.find((t) => t.channel === UNCONFIRMED_CHANNEL);
+  const images = s.unconfirmedContributions.map((c) => c.image_name).join(", ");
+  if (!images) {
+    if (standing) s.dismissToast(standing.id);
+  } else if (standing || announce) {
+    s.pushToast(
+      `Could not confirm these visits were recorded; they are sent again with the next visit: ` +
+        images,
+      "error",
+      UNCONFIRMED_CHANNEL,
+    );
+  }
+}
+
+/** Whether `list` holds the contribution `c`, by the identity it was minted with. */
+export function holds(list: ImageEventPayload[], c: ImageEventPayload): boolean {
+  return list.some((x) => x.contribution_id === c.contribution_id);
+}
+
+/** `s`'s held contributions with the open visit's contribution so far added after them, under
+ *  an identity minted here that every send of it carries: none added when no visit is open, it
+ *  names no project, or its clock is stopped (`pauseSessionInterval` already held its part) and
+ *  nothing was counted since. Whether a contribution records anything is the backend's answer. */
+function withVisitSoFar(s: AppState): ImageEventPayload[] {
+  const t = s.sessionTracking;
+  if (t.currentImageName === null || t.projectId === null) return s.heldContributions;
+  if (t.imageEnterTimeMs === null && !t.annotationsAddedDelta && !t.negativeMarked) {
+    return s.heldContributions;
+  }
+  const elapsed = t.imageEnterTimeMs === null ? 0 : Date.now() - t.imageEnterTimeMs;
+  const seconds = Number((Math.max(0, elapsed) / 1000).toFixed(2));
+  const recorded = s.recordedSession;
+  return [
+    ...s.heldContributions,
+    {
+      contribution_id: Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
+        b.toString(16).padStart(2, "0"),
+      ).join(""),
+      image_name: t.currentImageName,
+      seconds,
+      annotations_added: t.annotationsAddedDelta,
+      activity:
+        t.annotationsAddedDelta > 0
+          ? "new_annotation"
+          : t.negativeMarked
+            ? "negative_confirmation"
+            : "review",
+      user: s.user,
+      project_id: t.projectId,
+      started:
+        recorded?.project_id === t.projectId && recorded.user === s.user ? recorded.started : null,
+    },
+  ];
 }
 
 export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryStatusSlice> = (
@@ -105,6 +196,8 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
   },
   sessionTracking: EMPTY_SESSION_TRACKING,
   heldContributions: [],
+  unconfirmedContributions: [],
+  recordedSession: null,
 
   setRegistry: (subjects, version = null, discovered = []) => {
     setSubjectColorRegistry(Object.keys(subjects));
@@ -157,31 +250,64 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
     ),
 
   closeSessionInterval: () =>
-    set((s) => {
-      const t = s.sessionTracking;
-      if (t.currentImageName === null || t.imageEnterTimeMs === null) return s;
-      if (t.projectId === null) {
-        return { sessionTracking: EMPTY_SESSION_TRACKING };
-      }
-      const contribution: ImageEventPayload = {
-        image_name: t.currentImageName,
-        seconds: Number((Math.max(0, Date.now() - t.imageEnterTimeMs) / 1000).toFixed(2)),
-        annotations_added: t.annotationsAddedDelta,
-        activity:
-          t.annotationsAddedDelta > 0
-            ? "new_annotation"
-            : t.negativeMarked
-              ? "negative_confirmation"
-              : "review",
-        user: s.user,
-        project_id: t.projectId,
-      };
-      return {
-        sessionTracking: EMPTY_SESSION_TRACKING,
-        heldContributions: [...s.heldContributions, contribution],
-      };
-    }),
+    set((s) => ({
+      sessionTracking: EMPTY_SESSION_TRACKING,
+      heldContributions: withVisitSoFar(s),
+    })),
 
-  retireContribution: (contribution) =>
-    set((s) => ({ heldContributions: s.heldContributions.filter((c) => c !== contribution) })),
+  pauseSessionInterval: () =>
+    set((s) =>
+      s.sessionTracking.currentImageName === null
+        ? s
+        : {
+            sessionTracking: {
+              ...s.sessionTracking,
+              imageEnterTimeMs: null,
+              annotationsAddedDelta: 0,
+              negativeMarked: false,
+            },
+            heldContributions: withVisitSoFar(s),
+          },
+    ),
+
+  resumeSessionInterval: () =>
+    set((s) =>
+      s.sessionTracking.currentImageName !== null && s.sessionTracking.imageEnterTimeMs === null
+        ? { sessionTracking: { ...s.sessionTracking, imageEnterTimeMs: Date.now() } }
+        : s,
+    ),
+
+  leaveProjectSession: (following) => {
+    get().closeSessionInterval();
+    const { heldContributions, unconfirmedContributions, pushToast } = get();
+    const departed = heldContributions.filter((c) => c.project_id !== following);
+    set({
+      recordedSession: null,
+      heldContributions: heldContributions.filter((c) => !holds(departed, c)),
+      unconfirmedContributions: unconfirmedContributions.filter((c) => !holds(departed, c)),
+    });
+    noticeUnconfirmed(get(), false);
+    const images = (sent: boolean) =>
+      departed
+        .filter((c) => holds(unconfirmedContributions, c) === sent)
+        .map((c) => c.image_name)
+        .join(", ");
+    const [unsent, unconfirmed] = [images(false), images(true)];
+    if (unsent) pushToast(`Not recorded, as their project was switched away from: ${unsent}`);
+    if (unconfirmed) {
+      pushToast(
+        `Recording not confirmed before their project was switched away from: ${unconfirmed}`,
+      );
+    }
+  },
+
+  retireContribution: (contribution) => {
+    set((s) => ({
+      heldContributions: s.heldContributions.filter((c) => !holds([contribution], c)),
+      unconfirmedContributions: s.unconfirmedContributions.filter((c) => !holds([contribution], c)),
+    }));
+    noticeUnconfirmed(get(), false);
+  },
+
+  setRecordedSession: (recordedSession) => set(() => ({ recordedSession })),
 });

@@ -24,7 +24,7 @@ def _real_dataset(root: Path) -> None:
 
 def _registered(tmp_path: Path, *, content: bool = True) -> tuple[Path, Path, dict]:
     """A project and a dataset beside it registered to it through ``register_dataset``."""
-    project = new_project(tmp_path / "project")
+    project = new_project(tmp_path / "project").root
     root = tmp_path / "dataset"
     root.mkdir()
     if content:

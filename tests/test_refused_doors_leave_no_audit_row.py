@@ -73,13 +73,6 @@ def _deliver_phenology_milestones(tmp_path: Path):
                                         str(tmp_path / "o.csv"), ["p1"])
 
 
-def _save_annotations_on_a_missing_image(tmp_path: Path):
-    from tcip_mcp.tools.annotation_tools import save_annotations
-
-    return save_annotations(tmp_path, tmp_path.parent, str(tmp_path / "images" / "absent.png"),
-                            annotations=[{"subject": "cyme", "bbox": [1, 1, 5, 5]}])
-
-
 def _assess_an_unregistered_checkpoint(tmp_path: Path):
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
 
@@ -103,8 +96,7 @@ def _calibrate_scale_for_no_such_trait(tmp_path: Path):
 
 DOORS = [_register_model, _deliver_per_image_counts, _import_coco, _build_plant_mapping,
          _deliver_per_plant_csv, _deliver_orthomosaic_plant_counts,
-         _deliver_phenology_milestones, _save_annotations_on_a_missing_image,
-         _assess_an_unregistered_checkpoint,
+         _deliver_phenology_milestones, _assess_an_unregistered_checkpoint,
          _assess_the_reserved_regions_of_an_unregistered_checkpoint,
          _calibrate_scale_for_no_such_trait]
 
@@ -117,3 +109,14 @@ def test_a_door_refused_before_it_acts_leaves_no_row(tmp_path: Path, door):
         result = {"error": "raised"}
     assert "error" in result, result
     assert _rows(tmp_path) == []
+
+
+def test_a_save_on_a_missing_image_leaves_no_row(bound) -> None:
+    from tcip_mcp.tools.annotation_tools import save_annotations
+
+    before = _rows(bound.root)
+    result = save_annotations(bound, str(bound.root / "images" / "absent.png"),
+                              annotations=[{"subject": "cyme", "bbox": [1, 1, 5, 5]}])
+
+    assert "error" in result, result
+    assert _rows(bound.root) == before

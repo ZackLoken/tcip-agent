@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
 
 from tcip_web.app import app
 from tests import REFUSED_NAMES
+
+if TYPE_CHECKING:
+    from tcip_web.state import OpenProject
 
 
 @pytest.fixture
@@ -23,16 +27,15 @@ def workspace_dir(tmp_path: Path) -> Path:
     return ws
 
 
-def _make_project(ws: Path, name: str, *, dates=(), subjects=()) -> Path:
-    """A workspace project created through ``initialize_project``, its display name ``name``,
-    holding one image per date and the named subjects."""
+def _make_project(ws: Path, name: str, *, dates=(), subjects=()) -> OpenProject:
+    """A workspace project made by ``tests._web_fixtures.named_project``, its display name
+    ``name``, holding one image per date and the named subjects."""
     from PIL import Image
 
-    from tcip_mcp.tools.project_tools import initialize_project
+    from tests._web_fixtures import named_project
 
-    proj = ws / name
-    created = initialize_project(str(proj), name, "north orchard")
-    assert "error" not in created, created
+    made = named_project(ws / name, name)
+    proj = made.root
     for d in dates:
         ddir = proj / "images" / d
         ddir.mkdir(parents=True)
@@ -42,7 +45,7 @@ def _make_project(ws: Path, name: str, *, dates=(), subjects=()) -> Path:
         from tests._producer_fixtures import registry_over
 
         registry_over(proj, SubjectRegistry(tuple(Subject(s) for s in sorted(subjects))))
-    return proj
+    return made
 
 
 def _listed(client: TestClient) -> dict[str, dict]:
@@ -81,7 +84,7 @@ def test_projects_report_per_date_subject_model_availability(client, workspace_d
         "currant_bud_valley-farm",
         dates=["2026-02-11", "2026-03-02", "2026-03-24"],
         subjects=["bud", "bush"],
-    )
+    ).root
     label_image(proj / "images" / "2026-02-11" / "img.png",
                 [Annotation(subject="bud", geometry=BBox(1, 1, 7, 7))], 8, 8)
     label_image(proj / "images" / "2026-03-02" / "img.png",
@@ -114,7 +117,7 @@ def test_projects_report_a_label_problem_and_still_list(client, workspace_dir):
     proj = _make_project(
         workspace_dir, "currant_bud_valley-farm",
         dates=["2026-02-11", "2026-03-02"], subjects=["bud"],
-    )
+    ).root
     bad = proj / "images" / "2026-02-11" / "img.png"
     label_image(bad, [Annotation(subject="bud", geometry=BBox(1, 1, 7, 7))], 8, 8)
     damage_record(image_label_key(bad), b"not json {][")
@@ -136,8 +139,8 @@ def test_list_ignores_dirs_without_tcip(client, workspace_dir):
 
 
 def test_list_sorted_by_modified_desc(client, workspace_dir):
-    older = _make_project(workspace_dir, "old_project_site", dates=["2026-02-11"])
-    newer = _make_project(workspace_dir, "new_project_site", dates=["2026-03-01"])
+    older = _make_project(workspace_dir, "old_project_site", dates=["2026-02-11"]).root
+    newer = _make_project(workspace_dir, "new_project_site", dates=["2026-03-01"]).root
     os.utime(older, (1_000_000, 1_000_000))
     os.utime(newer, (2_000_000, 2_000_000))
 
@@ -146,17 +149,17 @@ def test_list_sorted_by_modified_desc(client, workspace_dir):
 
 
 def test_opening_a_project_by_id_marks_it_open_in_the_list(client, workspace_dir):
-    _make_project(workspace_dir, "currant_bud_valley-farm", dates=["2026-02-11"])
+    made = _make_project(workspace_dir, "currant_bud_valley-farm", dates=["2026-02-11"])
     listed = _listed(client)["currant_bud_valley-farm"]
     assert client.get("/api/projects").json()["open_id"] is None
     assert "is_open" not in listed
 
-    resp = client.post("/api/projects/open", json={"id": listed["id"], "user": "grower"})
+    resp = client.post("/api/projects/open", json={"id": made.id, "user": "grower"})
     assert resp.status_code == 200
-    assert resp.json() == {"id": listed["id"], "display_name": "currant_bud_valley-farm",
-                           "path": str((workspace_dir / "currant_bud_valley-farm").resolve())}
+    assert resp.json() == {"id": made.id, "display_name": "currant_bud_valley-farm",
+                           "path": str(made.root.resolve())}
 
-    assert client.get("/api/projects").json()["open_id"] == listed["id"]
+    assert client.get("/api/projects").json()["open_id"] == made.id
 
 
 def test_opening_an_id_no_project_holds_is_404(client, workspace_dir):
@@ -168,11 +171,10 @@ def test_opening_an_id_no_project_holds_is_404(client, workspace_dir):
 
 
 def test_opening_a_project_naming_no_one_is_refused_and_opens_nothing(client, workspace_dir):
-    _make_project(workspace_dir, "currant_bud_valley-farm", dates=["2026-02-11"])
-    listed = _listed(client)["currant_bud_valley-farm"]
+    made = _make_project(workspace_dir, "currant_bud_valley-farm", dates=["2026-02-11"])
 
     for stated in REFUSED_NAMES:
-        resp = client.post("/api/projects/open", json={"id": listed["id"], "user": stated})
+        resp = client.post("/api/projects/open", json={"id": made.id, "user": stated})
         assert resp.status_code == 400
         assert client.get("/api/projects").json()["open_id"] is None
 
@@ -188,15 +190,15 @@ def test_list_reports_record_fields_across_four_project_states(client, workspace
     from tcip_mcp.project_record import project_record_key
     from tests._record_damage_fixtures import damage_record
 
-    recorded = _make_project(workspace_dir, "currant_bud_recorded")
+    recorded = _make_project(workspace_dir, "currant_bud_recorded").root
 
     recordless = workspace_dir / "currant_bud_recordless"
     (recordless / ".tcip").mkdir(parents=True)
 
-    undecodable = _make_project(workspace_dir, "currant_bud_undecodable")
+    undecodable = _make_project(workspace_dir, "currant_bud_undecodable").root
     damage_record(project_record_key(str(undecodable)), b"{not valid json")
 
-    invalid = _make_project(workspace_dir, "currant_bud_invalid")
+    invalid = _make_project(workspace_dir, "currant_bud_invalid").root
     key = project_record_key(str(invalid))
     current = tcip_store.read_versioned(key).version
     tcip_store.replace(key, {"not_site": "x"}, expect=current)

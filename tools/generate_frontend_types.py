@@ -78,7 +78,9 @@ def declared_models() -> list[type[BaseModel]]:
     )
     from tcip_web.routes.annotate import LaunchPriorityQueuePayload
     from tcip_web.routes.canvas import CanvasStatePayload
-    from tcip_web.routes.sessions import ImageEntry, ImageEventPayload, SessionSummary
+    from tcip_web.routes.sessions import (
+        ImageEntry, ImageEventPayload, SessionPlace, SessionRef, SessionSummary, SessionWrite,
+    )
     from tcip_web.routes.terminal import (
         CreateSessionRequest, LaunchedProgram, ProviderStatus, SubmitRequest, TerminalInputFrame,
         TerminalLaunch, TerminalResizeFrame, TerminalStatus,
@@ -87,7 +89,8 @@ def declared_models() -> list[type[BaseModel]]:
     from tcip_web.routes.training import TrainingRowFrame, TrainingStatusFrame
 
     return [LaunchPriorityQueuePayload, CanvasStatePayload, ImageEntry, ImageEventPayload,
-            SessionSummary, ServingCell, ViewReads, RunRow, SweepGroup, TrainingDetail,
+            SessionRef, SessionPlace, SessionWrite, SessionSummary, ServingCell, ViewReads, RunRow,
+            SweepGroup, TrainingDetail,
             TrainingListing, TrainingRowFrame, TrainingStatusFrame, TerminalInputFrame,
             TerminalResizeFrame, CreateSessionRequest, LaunchedProgram, TerminalLaunch,
             ProviderStatus, TerminalStatus, SubmitRequest, ProjectSummary, OpenRequest,
@@ -140,8 +143,7 @@ def tuple_constants() -> dict[str, tuple[str, ...]]:
 
 def platform_panel_event_constants() -> list[tuple[str, str]]:
     """Each named panel-event constant ``tcip_mcp.web_client`` declares (``PANEL_EVENT_*``), in
-    the module's own declaration order: a consumer matching an event by one of these names never
-    depends on where it sits in ``PLATFORM_PANEL_EVENTS``'s tuple."""
+    the module's own declaration order."""
     from tcip_mcp import web_client
 
     return [(name, value) for name, value in vars(web_client).items()

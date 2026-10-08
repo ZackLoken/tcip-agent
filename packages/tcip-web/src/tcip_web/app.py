@@ -110,7 +110,7 @@ async def _project_not_open_handler(_request: Request, exc: ProjectNotOpenError)
     """A request built for a project the backend does not have open answers 409 naming the one it
     has open."""
     return JSONResponse(status_code=409, content={"detail": {
-        "error": str(exc), "open_project_id": exc.open_project_id}})
+        "message": str(exc), "open_project_id": exc.open_project_id}})
 
 
 # This process's launch identity, minted once at import: rides every snapshot envelope so a
@@ -121,12 +121,12 @@ SERVER_EPOCH = uuid.uuid4().hex
 def state_snapshot_message(state: dict[str, Any], version: int) -> dict[str, Any]:
     """The state-snapshot envelope: state, version, the open project (``{id, path}``, or null
     when none is open) and this process's epoch."""
-    root = _gui_store.project_root
+    opened = _gui_store.opened
     return {
         "type": "state_snapshot",
         "state": state,
         "version": version,
-        "project": None if root is None else {"id": _gui_store.project_id, "path": str(root)},
+        "project": None if opened is None else {"id": opened.id, "path": str(opened.root)},
         "epoch": SERVER_EPOCH,
     }
 
@@ -161,7 +161,7 @@ async def set_active_tab(payload: ActiveTabPayload) -> dict:
     """Record which tab the browser is actually showing, so the GUI snapshot tracks what the
     human sees.
     """
-    await _gui_store.mutate({"active_tab": payload.active_tab})
+    await _gui_store.mutate({"active_tab": payload.active_tab}, project=_gui_store.opened)
     return {"status": "ok", "active_tab": payload.active_tab}
 
 
@@ -292,8 +292,9 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
     """Accept an event pushed from an MCP tool and broadcast to subscribers.
 
     Payload shape: ``{panel, event_type, data, project_id}``. An event naming any project but the
-    open one answers 409 with ``open_project_id`` (``StateStore.admit``) and is neither retained
-    nor broadcast. The broadcast
+    open one answers 409 (``StateStore.admit``), naming the open one's ``open_project_id`` when
+    another is open and the none-open message when none is, and is neither retained nor
+    broadcast. The broadcast
     and replay payload, not this route's response, carries every agent identity field the sender
     declared in its headers (``agent_identity.HEADERS``, each ``None`` when not sent). Declared,
     not verified: any sender can set the headers.
@@ -302,7 +303,7 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
 
     if panel not in VALID_PANELS:
         return {"error": f"unknown panel: {panel}", "valid": sorted(VALID_PANELS)}
-    _gui_store.admit(event.project_id)
+    project = _gui_store.admit(event.project_id)
     payload = {
         "panel": panel,
         "event_type": event.event_type,
@@ -319,7 +320,7 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
             mutation["mode"] = event.data["mode"]
         if "active_subject" in event.data:
             mutation["active_subject"] = event.data["active_subject"]
-        await _gui_store.mutate(mutation)
+        await _gui_store.mutate(mutation, project=project)
     await _broadcast_to_panel(panel, payload)
     return {"status": "ok", "panel": panel, "event_type": event.event_type}
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import zipfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from PIL import Image
@@ -19,32 +20,34 @@ from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 from tests._web_fixtures import named_project
 
+if TYPE_CHECKING:
+    from tcip_web.state import OpenProject
 
-def _project(ws: Path, directory: str, display_name: str) -> tuple[Path, str]:
-    """A project made through the creation door (``named_project``), with one image; its path
-    and id."""
-    project, project_id = named_project(ws / directory, display_name)
-    images = project / "images" / "2026-03-04"
+
+def _project(ws: Path, directory: str, display_name: str) -> OpenProject:
+    """A project made through the creation door (``named_project``), with one image."""
+    made = named_project(ws / directory, display_name)
+    images = made.root / "images" / "2026-03-04"
     images.mkdir(parents=True)
     Image.new("RGB", (8, 8), (0, 0, 0)).save(images / "img.jpg")
-    return project, project_id
+    return made
 
 
 def test_removal_archives_moves_and_records_one_line(client, tmp_path):
     """The removal's whole trace in the project's log is one ``project_removed`` line: the
     archive it writes records nothing of its own."""
     ws = tmp_path.parent
-    project, project_id = _project(ws, "valley_block", "Valley block")
-    before = len(audit_rows(project))
+    made = _project(ws, "valley_block", "Valley block")
+    before = len(audit_rows(made.root))
 
     resp = client.post("/api/projects/remove", json={
-        "id": project_id, "confirm_name": "Valley block", "user": "tester"})
+        "id": made.id, "confirm_name": "Valley block", "user": "tester"})
 
     assert resp.status_code == 200, resp.text
     archive, moved_to = Path(resp.json()["archive_path"]), Path(resp.json()["moved_to"])
     assert archive.parent == ws / workspace.REMOVED_DIRNAME and archive.is_file()
     assert moved_to.parent == ws / workspace.REMOVED_DIRNAME and moved_to.is_dir()
-    assert not project.exists()
+    assert not made.root.exists()
     with zipfile.ZipFile(archive) as zf:
         assert ".tcip/store.db" in zf.namelist()
         assert "images/2026-03-04/img.jpg" in zf.namelist()
@@ -52,19 +55,18 @@ def test_removal_archives_moves_and_records_one_line(client, tmp_path):
     assert line["tool"] == "project_removed"
     assert line["arguments"]["archive_path"] == str(archive)
     assert line["actor"] == "user:tester"
-    assert project_id not in {p["id"] for p in client.get("/api/projects").json()["projects"]}
+    assert made.id not in {p["id"] for p in client.get("/api/projects").json()["projects"]}
 
 
 def test_a_removal_naming_no_one_leaves_the_project(client, tmp_path):
-    ws = tmp_path.parent
-    project, project_id = _project(ws, "valley_block", "Valley block")
+    made = _project(tmp_path.parent, "valley_block", "Valley block")
 
     for name in REFUSED_NAMES:
         resp = client.post("/api/projects/remove", json={
-            "id": project_id, "confirm_name": "Valley block", "user": name})
+            "id": made.id, "confirm_name": "Valley block", "user": name})
         assert resp.status_code == 400, (name, resp.text)
-    assert project.is_dir()
-    assert audit_rows(project, "project_removed") == []
+    assert made.root.is_dir()
+    assert audit_rows(made.root, "project_removed") == []
 
 
 def test_an_archive_that_refuses_leaves_the_project_where_it_was_and_still_open(
@@ -75,22 +77,22 @@ def test_an_archive_that_refuses_leaves_the_project_where_it_was_and_still_open(
     from tcip_mcp.tools import project_tools
 
     ws = tmp_path.parent
-    project, project_id = _project(ws, "valley_block", "Valley block")
-    opened = client.post("/api/projects/open", json={"id": project_id, "user": "grower"})
+    made = _project(ws, "valley_block", "Valley block")
+    opened = client.post("/api/projects/open", json={"id": made.id, "user": "grower"})
     assert opened.status_code == 200
-    before = audit_rows(project)
+    before = audit_rows(made.root)
     monkeypatch.setattr(project_tools, "write_archive",
                         lambda *a, **k: {"error": "the store under the project is unreadable"})
 
     resp = client.post("/api/projects/remove", json={
-        "id": project_id, "confirm_name": "Valley block", "user": "tester"})
+        "id": made.id, "confirm_name": "Valley block", "user": "tester"})
 
     assert resp.status_code == 409
     assert "unreadable" in resp.json()["detail"]
-    assert workspace.project_by_id(ws, project_id) == project
+    assert workspace.project_by_id(workspace.project_records(ws), made.id)[0] == made.root
     assert [p for p in (ws / workspace.REMOVED_DIRNAME).iterdir() if p.is_dir()] == []
-    assert client.get("/api/projects").json()["open_id"] == project_id
-    assert audit_rows(project) == before
+    assert client.get("/api/projects").json()["open_id"] == made.id
+    assert audit_rows(made.root) == before
 
 
 def test_a_live_run_refuses_the_removal_and_writes_nothing_then_a_finished_one_admits(
@@ -100,17 +102,17 @@ def test_a_live_run_refuses_the_removal_and_writes_nothing_then_a_finished_one_a
     from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
     ws = tmp_path.parent
-    project, project_id = _project(ws, "valley_block", "Valley block")
-    opened_run(project, detection_config(ws / "run-data"), experiment_id="exp-live")
-    body = {"id": project_id, "confirm_name": "Valley block", "user": "tester"}
+    made = _project(ws, "valley_block", "Valley block")
+    opened_run(made.root, detection_config(ws / "run-data"), experiment_id="exp-live")
+    body = {"id": made.id, "confirm_name": "Valley block", "user": "tester"}
 
     refused = client.post("/api/projects/remove", json=body)
 
     assert refused.status_code == 409
     assert "exp-live" in refused.json()["detail"]
-    assert project.is_dir()
+    assert made.root.is_dir()
     assert not (ws / workspace.REMOVED_DIRNAME).exists()
-    assert audit_rows(project, "project_removed") == []
+    assert audit_rows(made.root, "project_removed") == []
 
     monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", -1.0)
     assert client.post("/api/projects/remove", json=body).status_code == 200
@@ -119,38 +121,36 @@ def test_a_live_run_refuses_the_removal_and_writes_nothing_then_a_finished_one_a
 def test_an_unfinished_inference_job_refuses_the_removal(client, tmp_path):
     from tcip_web.routes import inference
 
-    ws = tmp_path.parent
-    project, project_id = _project(ws, "valley_block", "Valley block")
-    job = inference.InferenceJob(job_id="job-live", actor="user:tester", project=str(project),
+    made = _project(tmp_path.parent, "valley_block", "Valley block")
+    job = inference.InferenceJob(job_id="job-live", actor="user:tester", project=str(made.root),
                                  checkpoint_path="m.pt", dataset_root="ds",
                                  images_dir="ds/images", bucket="out/2026-01-01",
                                  status="running")
     inference._registry.register(job.job_id, job)
     try:
         resp = client.post("/api/projects/remove", json={
-            "id": project_id, "confirm_name": "Valley block", "user": "tester"})
+            "id": made.id, "confirm_name": "Valley block", "user": "tester"})
     finally:
         job.status = "completed"
 
     assert resp.status_code == 409
     assert "job-live" in resp.json()["detail"]
-    assert project.is_dir()
+    assert made.root.is_dir()
 
 
 def test_a_confirm_name_other_than_the_display_name_refuses_then_the_display_name_admits(
     client, tmp_path,
 ):
-    ws = tmp_path.parent
-    project, project_id = _project(ws, "valley_block", "Valley block")
+    made = _project(tmp_path.parent, "valley_block", "Valley block")
 
     wrong = client.post("/api/projects/remove", json={
-        "id": project_id, "confirm_name": "valley_block", "user": "tester"})
+        "id": made.id, "confirm_name": "valley_block", "user": "tester"})
 
     assert wrong.status_code == 400
     assert "Valley block" in wrong.json()["detail"]
-    assert project.is_dir()
+    assert made.root.is_dir()
     assert client.post("/api/projects/remove", json={
-        "id": project_id, "confirm_name": "Valley block", "user": "tester"}).status_code == 200
+        "id": made.id, "confirm_name": "Valley block", "user": "tester"}).status_code == 200
 
 
 def test_an_id_no_project_holds_answers_404(client, tmp_path):
@@ -163,13 +163,12 @@ def test_an_id_no_project_holds_answers_404(client, tmp_path):
 
 
 def test_removing_the_open_project_closes_it_first(client, tmp_path):
-    ws = tmp_path.parent
-    _, project_id = _project(ws, "valley_block", "Valley block")
-    opened = client.post("/api/projects/open", json={"id": project_id, "user": "grower"})
+    made = _project(tmp_path.parent, "valley_block", "Valley block")
+    opened = client.post("/api/projects/open", json={"id": made.id, "user": "grower"})
     assert opened.status_code == 200
 
     resp = client.post("/api/projects/remove", json={
-        "id": project_id, "confirm_name": "Valley block", "user": "tester"})
+        "id": made.id, "confirm_name": "Valley block", "user": "tester"})
 
     assert resp.status_code == 200, resp.text
     assert client.get("/api/projects").json()["open_id"] is None
@@ -180,16 +179,16 @@ def test_the_archive_restores_through_import_project_with_its_identity(client, t
     from tcip_mcp.tools.project_tools import import_project
 
     ws = tmp_path.parent
-    _, project_id = _project(ws, "valley_block", "Valley block")
+    made = _project(ws, "valley_block", "Valley block")
     resp = client.post("/api/projects/remove", json={
-        "id": project_id, "confirm_name": "Valley block", "user": "tester"})
+        "id": made.id, "confirm_name": "Valley block", "user": "tester"})
     assert resp.status_code == 200, resp.text
 
     restored = ws / "restored_block"
     imported = import_project(resp.json()["archive_path"], str(restored))
 
     assert "error" not in imported, imported
-    assert read_record(restored)["id"] == project_id
+    assert read_record(restored)["id"] == made.id
 
 
 def test_a_move_the_filesystem_denies_removes_the_archive_and_leaves_the_project(
@@ -198,7 +197,7 @@ def test_a_move_the_filesystem_denies_removes_the_archive_and_leaves_the_project
     import os
 
     ws = tmp_path.parent
-    project, _ = _project(ws, "valley_block", "Valley block")
+    project = _project(ws, "valley_block", "Valley block").root
     real_rename = os.rename
 
     def _denied(src, dst):

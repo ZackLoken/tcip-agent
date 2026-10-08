@@ -5,34 +5,40 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
+if TYPE_CHECKING:
+    from tcip_web.state import OpenProject
 
-def _persist_a_selection(project: Path) -> None:
+
+def _persist_a_selection(project: OpenProject) -> None:
     """The backend's own producer: open ``project``, select a date's second image, persist."""
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.web_client import selection_for
     from tcip_web.state import StateStore
 
-    images = image_dir(project, "2026-02-11")
+    images = image_dir(project.root, "2026-02-11")
     images.mkdir(parents=True)
     for name in ("IMG_0132.JPG", "IMG_0133.JPG"):
         (images / name).write_bytes(b"")
     store = StateStore()
     asyncio.run(store.open_project(project))
-    asyncio.run(store.mutate({"active_tab": "annotate",
-                              "dataset": selection_for(project, "bud", "2026-02-11", None, 1)}))
+    asyncio.run(store.mutate(
+        {"active_tab": "annotate",
+         "dataset": selection_for(project.root, "bud", "2026-02-11", None, 1)},
+        project=project))
 
 
-def test_view_gui_state_reads_what_the_backend_persisted_and_reopens(project):
+def test_view_gui_state_reads_what_the_backend_persisted_and_reopens(made):
     from tcip_mcp.tools.project_tools import view_gui_state
     from tcip_web.state import StateStore
 
-    _persist_a_selection(project)
-    ctx = view_gui_state(project)
+    _persist_a_selection(made)
+    ctx = view_gui_state(made.root)
     reopened = StateStore()
-    asyncio.run(reopened.open_project(project))
+    asyncio.run(reopened.open_project(made))
 
     assert ctx["dataset"] == reopened.state.dataset.model_dump(mode="json")
     assert ctx["dataset"]["subject"] == "bud" and ctx["dataset"]["date"] == "2026-02-11"

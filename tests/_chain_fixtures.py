@@ -7,9 +7,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from tcip_annotation.state import Annotation, BBox
+
+if TYPE_CHECKING:
+    from tcip_web.state import OpenProject
 
 IMG = 64
 SUBJECT = "bud"
@@ -338,13 +341,15 @@ def confirm_crossing_trait(project_root: Path, **fields: Any):
 @dataclass
 class Series:
     """What the attributed chain leaves behind: its dataset, the checkpoint, the assessment (when
-    one was run), the plant mapping and the name of one published bucket per date."""
+    one was run), the plant mapping, the name of one published bucket per date and the project as
+    the web backend opened it."""
 
     root: Path
     checkpoint_path: str
     assessment: dict | None
     mapping_name: str
     buckets: dict[str, str]
+    project: OpenProject
     trait: str = "bud_opening"
 
     def body(self, **extra: Any) -> dict:
@@ -471,8 +476,8 @@ def attributed_series(
     mapped = build_plant_mapping(project, name="valley", images_root=str(root / "images"),
                                  plant_registry=registry, dates=list(dates))
     assert "error" not in mapped, mapped
-    open_new_project(project)
-    return Series(root, checkpoint_path, assessment, "valley", predictions)
+    return Series(root, checkpoint_path, assessment, "valley", predictions,
+                  open_new_project(project))
 
 
 def run_the_chain(project: Path, *, experiment_id: str, bucket_name: str = "chain") -> Chain:

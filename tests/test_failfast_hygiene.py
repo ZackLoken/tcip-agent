@@ -12,10 +12,10 @@ def test_iou_matrix_valid_and_degenerate():
     assert iou_matrix([[0, 0, 0, 0]], [[0, 0, 0, 0]])[0, 0] == 0.0
 
 
-def test_push_panel_event_reports_delivered_flag(project):
+def test_push_panel_event_reports_delivered_flag(bound):
     from tcip_mcp.tools.gui_tools import push_panel_event
 
-    res = push_panel_event(project, project.parent, "annotate", "load_labels", {"x": 1})
+    res = push_panel_event(bound, "annotate", "load_labels", {"x": 1})
     # The delivery outcome is now an explicit bool: "backend down" can't read as success.
     assert "delivered" in res and isinstance(res["delivered"], bool)
 

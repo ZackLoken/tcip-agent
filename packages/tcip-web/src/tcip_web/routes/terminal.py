@@ -13,7 +13,6 @@ import logging
 import os
 import threading
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -21,6 +20,7 @@ from pydantic import BaseModel, ValidationError
 
 from tcip_mcp.identity import actor
 from tcip_web import terminal as pty_host
+from tcip_web.state import OpenProject, store
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ class TerminalStatus(BaseModel):
     providers: list[ProviderStatus]
 
 
-def _record_start(session_id: str, launched: LaunchedProgram, project: Path | None,
+def _record_start(session_id: str, launched: LaunchedProgram, project: Optional[OpenProject],
                   actor: str) -> None:
     """One audit line by ``actor`` in ``project``'s log per launch for it, naming the session id
     and the provider and program it launched; a launch for no project has no log to land in and
@@ -108,7 +108,7 @@ def _record_start(session_id: str, launched: LaunchedProgram, project: Path | No
     if project is not None:
         record_event_or_raise("agent_terminal_started",
                               {"session_id": session_id, **launched.model_dump()}, actor=actor,
-                              scope=project)
+                              scope=project.root)
 
 
 @dataclass
@@ -154,16 +154,19 @@ class TerminalSession:
 
     def start(self, rows: int, cols: int, provider: pty_host.Provider, actor: str) -> Optional[str]:
         """Spawn ``provider``'s harness in a PTY for the open project as the current launch by
-        ``actor``, or a new one when the current launch already spawned. Returns an error reason,
-        or None on success."""
+        ``actor``, or a new one when the current launch already spawned, its ritual built before
+        the spawn from the project's record as it reads now. Returns an error reason (a record
+        that will not read names why), or None on success."""
         with self._lock:
             if self._pty is not None and self._pty.isalive():
                 return None
             if self._launch.ritual is not None:
                 self._launch = _Launch(gen=self._launch.gen + 1)
-            from tcip_web.state import store
-
-            project = store.project_root
+            project = store.opened
+            try:
+                ritual = pty_host.session_ritual(project)
+            except ValueError as exc:
+                return str(exc)
             command = pty_host.resolve_terminal_command(provider)
             if command is None:
                 return provider.unavailable_reason
@@ -188,7 +191,7 @@ class TerminalSession:
                 self._pty = None
                 return f"could not start the agent terminal: {exc}"
             self._pty = pty
-            self._launch.ritual = pty_host.session_ritual(project)
+            self._launch.ritual = ritual
             self.launch = TerminalLaunch(session_id=self.id, existing=False, launched=launched,
                                          ritual=self._launch.ritual)
             gen = self._launch.gen

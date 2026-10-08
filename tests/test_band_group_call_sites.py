@@ -137,11 +137,10 @@ def test_image_path_dimensions_of_a_grouped_capture_path(grouped_dataset):
     assert image_path_dimensions(str(manifest)) == (16, 16)
 
 
-def test_focus_annotate_lands_on_the_grouped_capture_by_manifest_name(grouped_dataset):
+def test_focus_annotate_lands_on_the_grouped_capture_by_manifest_name(grouped_dataset, bound):
     from tcip_mcp.tools.gui_tools import focus_human_attention
 
-    res = focus_human_attention(grouped_dataset, grouped_dataset.parent, str(grouped_dataset),
-                                "bud", "2026-04-01")
+    res = focus_human_attention(bound, str(grouped_dataset), "bud", "2026-04-01")
     assert "error" not in res
     assert res["n_images"] == 2
     # Sorted names: "capture_001.bandgroup" < "plain_002.jpg"

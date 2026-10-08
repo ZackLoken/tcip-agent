@@ -84,14 +84,15 @@ def read_record(project_path: str | Path) -> dict:
     return _checked(project_path, tcip_store.read(project_record_key(project_path), default=None))
 
 
-def existing_project(value: str | Path) -> Path:
-    """``value`` resolved, when it is a project whose record reads; otherwise ``ValueError``
-    naming the path and what :func:`read_record` refused."""
+def existing_project(value: str | Path) -> tuple[Path, dict]:
+    """``value`` resolved and its record's fields (:func:`record_fields`), when it is a project
+    whose record reads; otherwise ``ValueError`` naming the path and what :func:`read_record`
+    refused."""
     project = Path(value).resolve()
-    problem = record_fields(project)["record_problem"]
-    if problem is not None:
-        raise ValueError(f"{project} names no readable project: {problem}")
-    return project
+    fields = record_fields(project)
+    if fields["record_problem"] is not None:
+        raise ValueError(f"{project} names no readable project: {fields['record_problem']}")
+    return project, fields
 
 
 def _checked(project_path: str | Path, raw: object) -> dict:

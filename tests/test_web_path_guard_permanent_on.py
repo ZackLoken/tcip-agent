@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,6 +28,9 @@ from tests._trait_fixtures import propose, seed_confirmed_crossing
 from tests._trait_fixtures import BUD_OPENING
 from tests._web_fixtures import new_project, open_new_project
 from tests.test_results_mapping_summary_and_audit_anchoring import _capture_fixture
+
+if TYPE_CHECKING:
+    from tests._chain_fixtures import Series
 
 
 @pytest.fixture
@@ -57,7 +61,7 @@ def test_a_workspace_project_reached_through_a_link_is_admitted_as_itself(
 ) -> None:
     """A project the workspace lists through a junction or symlink resolves elsewhere and must
     still be admitted, or the front door would list a project no route can open."""
-    real = new_project(outside / "linked-project")
+    real = new_project(outside / "linked-project").root
     link = tmp_path.parent / "linked"
     try:
         link.symlink_to(real, target_is_directory=True)
@@ -69,7 +73,7 @@ def test_a_workspace_project_reached_through_a_link_is_admitted_as_itself(
 def test_a_dataset_registered_to_a_workspace_project_is_admitted_wherever_it_lives(
     tmp_path: Path, outside: Path,
 ) -> None:
-    project = new_project(tmp_path)
+    project = new_project(tmp_path).root
     external = outside / "field-data"
     (external / "images").mkdir(parents=True)
     with pytest.raises(ValueError):
@@ -89,7 +93,7 @@ def test_a_dataset_registered_as_the_projects_own_tree_contributes_no_relative_r
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_web.paths import allowed_roots
 
-    project = new_project(tmp_path)
+    project = new_project(tmp_path).root
     registered = register_dataset(project, str(project), "currant")
     assert "error" not in registered
 
@@ -192,7 +196,7 @@ def test_the_proposals_route_confines_the_image_whose_bucket_it_reads(
 ) -> None:
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
-    inside = open_new_project(tmp_path / "proj")
+    inside = open_new_project(tmp_path / "proj").root
     image = write_image(inside / "images" / "2026-02-11" / "a.jpg", (8, 8))
     staged = stage_proposals(inside, str(image), model_name="sketch", boxes=[
         {"subject": "bud", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.2, "h": 0.2}])
@@ -212,25 +216,26 @@ def test_the_proposals_route_confines_the_image_whose_bucket_it_reads(
 # ── the Results doors belong to the open project ──────────────────────────
 
 
-def _series_body(project: Path) -> dict:
-    """An assessed attributed series under ``project`` (``_chain_fixtures.attributed_series``);
-    the request body a phenology door takes over it."""
+def _series(project: Path) -> Series:
+    """An assessed attributed series under ``project`` (``_chain_fixtures.attributed_series``),
+    left open in the web backend."""
     pytest.importorskip("torch")
     from tests._chain_fixtures import attributed_series
 
-    return attributed_series(project, fractions=(0.0, 1.0)).body()
+    return attributed_series(project, fractions=(0.0, 1.0))
 
 
 def test_a_results_door_refuses_until_a_project_is_open_and_then_serves_its_own_evidence(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    body = _series_body(tmp_path)
-    asyncio.run(store.close_project())
+    series = _series(tmp_path)
+    body = series.body()
+    asyncio.run(store.close_project(series.project.id))
     refused = client.post("/api/results/phenology_measurement", json=body)
     assert refused.status_code == 409
     assert "no project is open" in refused.json()["detail"]
 
-    open_new_project(tmp_path)
+    asyncio.run(store.open_project(series.project))
     assert client.post("/api/results/phenology_measurement", json=body).status_code == 200
 
 
@@ -239,8 +244,8 @@ def test_a_delivery_from_another_projects_evidence_is_refused_by_name(
 ) -> None:
     """Project B, open and fully set up, is handed project A's mapping and predictions: both inside
     the managed allow-set, neither belonging to B. No export and no audit line lands in B."""
-    body = _series_body(tmp_path)
-    b = new_project(tmp_path.parent / "b")
+    body = _series(tmp_path).body()
+    b = new_project(tmp_path.parent / "b").root
     propose(b, BUD_OPENING)
     seed_confirmed_crossing(b, BUD_OPENING.name, measured_subject="bud")
     open_new_project(b)
@@ -265,7 +270,7 @@ def test_a_delivery_from_a_dataset_registered_to_the_open_project_is_admitted(
     proof here is that neither the belonging refusal nor the allow-set refusal answers."""
     import shutil
 
-    body = _series_body(tmp_path)
+    body = _series(tmp_path).body()
     copied = outside / "ds"
     tcip_store.release_root(body["dataset_root"])
     shutil.copytree(body["dataset_root"], copied)

@@ -12,14 +12,14 @@ from tcip_annotation import json_io
 from tests._producer_fixtures import box_annotation, blank_image, image_label_key, label_image
 
 
-def test_mcp_save_annotations_empty_writes_the_empty_document_the_route_writes(tmp_path):
+def test_mcp_save_annotations_empty_writes_the_empty_document_the_route_writes(bound):
     """An empty save writes an empty label document through the one save both label doors call:
     the document stays, holding nothing, never deleted."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    img = blank_image(tmp_path)
+    img = blank_image(bound.root)
     label_image(img, [box_annotation(1, 1, 9, 9)], 100, 80)
-    res = save_annotations(tmp_path, tmp_path.parent, str(img), annotations=[])
+    res = save_annotations(bound, str(img), annotations=[])
     assert res == {"capture": "undated", "written": [img.stem], "count": 0}
     assert ts.read(image_label_key(img), default=None) is not None
     assert json_io.read_label_document(image_label_key(img)).annotations == []
@@ -27,13 +27,13 @@ def test_mcp_save_annotations_empty_writes_the_empty_document_the_route_writes(t
 
 @pytest.mark.parametrize("bad", ["a bur", {"bbox": [1, 1, 5, 5]}, {"subject": ""}],
                          ids=["not_an_object", "no_subject", "empty_subject"])
-def test_mcp_save_annotations_refuses_by_index_through_the_decoders_checks(tmp_path, bad):
+def test_mcp_save_annotations_refuses_by_index_through_the_decoders_checks(bound, bad):
     """Each annotation is admitted by the decoder's own object and subject checks, the refusal
     naming its index, and nothing is written; the valid one beside it is not written alone."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    img = blank_image(tmp_path)
-    res = save_annotations(tmp_path, tmp_path.parent, str(img),
+    img = blank_image(bound.root)
+    res = save_annotations(bound, str(img),
                            annotations=[{"subject": "bur", "bbox": [1, 1, 5, 5]}, bad])
     assert res["error"].startswith("annotation 1 ")
     assert ts.read(image_label_key(img), default=None) is None

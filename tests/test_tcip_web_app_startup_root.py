@@ -5,8 +5,6 @@ its backend on its own scratch workspace."""
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -57,14 +55,9 @@ def test_main_publishes_the_port_and_configures_the_backend_on_one_workspace(
     assert resolve_web_port(elsewhere.resolve()) == served[0]
 
 
-def test_the_lifespan_opens_the_project_the_last_opened_pointer_names(tmp_path):
-    from tcip_mcp.project_record import read_record
-    from tests._web_fixtures import new_project
-
-    project = new_project(tmp_path)
-    workspace.write_last_opened(tmp_path.parent, read_record(project)["id"])
+def test_the_lifespan_opens_the_project_the_last_opened_pointer_names(made):
+    workspace.write_last_opened(made.root.parent, made.id)
 
     with TestClient(app, base_url="http://127.0.0.1") as client:
-        assert client.get("/api/projects").json()["open_id"] == read_record(project)["id"]
-        assert store.open_root() == project.resolve()
-    asyncio.run(store.close_project())
+        assert client.get("/api/projects").json()["open_id"] == made.id
+        assert store.opened == made

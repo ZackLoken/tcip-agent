@@ -87,7 +87,7 @@ async def select_dataset(req: SelectionRequest) -> dict:
     advisory, never a refusal: a brand-new annotation on an unlabeled date starts empty."""
     from tcip_mcp.buckets import read_bucket
 
-    store.open_root()
+    project, held = store.held_state()
     root = allowed_path(req.dataset_root)
     if not root.is_dir():
         raise HTTPException(404, f"dataset_root not found: {req.dataset_root}")
@@ -95,7 +95,7 @@ async def select_dataset(req: SelectionRequest) -> dict:
     # Re-selecting the same (root, subject, date) in a session resumes at the held position;
     # the first select of a fresh process starts at image 0.
     global _selected_this_session
-    prev = store.state.dataset
+    prev = held.dataset
     same_identity = (
         _selected_this_session
         and prev.dataset_root == str(root)
@@ -109,7 +109,7 @@ async def select_dataset(req: SelectionRequest) -> dict:
                                   prev.current_image_index if same_identity else 0)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    await store.mutate({"dataset": selection})
+    await store.mutate({"dataset": selection}, project=project)
 
     found, unreadable = capture_subjects(root, req.date)
     return {
@@ -127,13 +127,16 @@ class NavRequest(BaseModel):
 
 @router.post("/nav")
 async def set_current_image(req: NavRequest) -> dict:
-    """Persist the browser's current image position into ``GuiState.dataset``, merging into the
-    live dataset so the other selection fields survive.
-    """
-    dataset = store.state.dataset
+    """Persist the browser's current image position into ``GuiState.dataset``: the open project
+    and its selection read as one value (:meth:`~tcip_web.state.StateStore.held_state`), the
+    index replaced, held once :meth:`~tcip_web.state.StateStore.mutate` admits that project
+    under the lock."""
+    project, held = store.held_state()
+    dataset = held.dataset
     n = len(dataset.image_list)
     index = req.current_image_index
     if n and not (0 <= index < n):
         raise HTTPException(400, f"index {index} out of range for {n} images")
-    await store.mutate({"dataset": dataset.model_copy(update={"current_image_index": index})})
+    await store.mutate({"dataset": dataset.model_copy(update={"current_image_index": index})},
+                       project=project)
     return {"status": "ok", "current_image_index": index}

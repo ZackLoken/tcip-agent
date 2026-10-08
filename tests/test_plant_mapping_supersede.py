@@ -5,6 +5,7 @@ silently replaces a mapping a delivery event still cites.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import tcip_store as ts
 
@@ -18,6 +19,9 @@ from tests.test_plant_mapping_binding import DATES, PLANTS, _dataset, _init, _wr
 from tests.test_plant_mapping_binding import _deliver as _deliver_through
 from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 
+if TYPE_CHECKING:
+    from tcip_web.state import OpenProject
+
 
 def _deliver(project: Path, preds_by_date: dict[str, str], out_csv: Path) -> dict:
     """The delivery over the buckets of :func:`_dataset`'s default root."""
@@ -27,10 +31,11 @@ def _deliver(project: Path, preds_by_date: dict[str, str], out_csv: Path) -> dic
         buckets=preds_by_date.values(), output_csv_path=str(out_csv))
 
 
-def _cited_mapping(tmp_path: Path) -> tuple[str, dict[str, str]]:
-    """A mapping built, delivered from (so a delivery event cites its digest), and the plant CSV
-    it was built over, for a rebuild under the same name to then be tried against."""
-    _init(tmp_path)
+def _cited_mapping(tmp_path: Path) -> tuple[OpenProject, str, dict[str, str]]:
+    """``tmp_path`` made a project holding a mapping built, delivered from (so a delivery event
+    cites its digest), and the plant CSV it was built over, for a rebuild under the same name to
+    then be tried against; the project, the images root and the buckets by date."""
+    project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     registry = register_plant_registry_for(tmp_path, [plant_csv])
@@ -41,13 +46,13 @@ def _cited_mapping(tmp_path: Path) -> tuple[str, dict[str, str]]:
 
     res = _deliver(tmp_path, preds_by_date, tmp_path / "out.csv")
     assert "error" not in res, res
-    return str(images_root), preds_by_date
+    return project, str(images_root), preds_by_date
 
 
 def test_a_cited_rebuild_refuses_naming_the_citing_events(tmp_path: Path) -> None:
     """A guard: a same-name rebuild whose current record a delivery event cites refuses unless
     supersede=True."""
-    images_root, _ = _cited_mapping(tmp_path)
+    _, images_root, _ = _cited_mapping(tmp_path)
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
 
@@ -85,7 +90,7 @@ def test_a_cited_rebuild_with_supersede_archives_the_old_record_and_keeps_it_rea
         return [entry["arguments"] for entry in ts.read_log(audit_log_key(tmp_path)).records
                 if entry.get("tool") == "plant_mapping_built"]
 
-    images_root, preds_by_date = _cited_mapping(tmp_path)
+    _, images_root, preds_by_date = _cited_mapping(tmp_path)
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
     archived_digest = before.record_sha256
@@ -122,7 +127,7 @@ def test_resolved_mapping_key_for_citation_names_the_archive_once_superseded(
 ) -> None:
     """Coverage: a delivery event's own cited digest resolves to the current name while
     unmoved, and to the archived key once a supersede rebuild has moved the name on."""
-    images_root, _ = _cited_mapping(tmp_path)
+    _, images_root, _ = _cited_mapping(tmp_path)
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
 
@@ -148,11 +153,11 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
 
     from tcip_web.state import store
 
-    images_root, _ = _cited_mapping(tmp_path)
+    project, images_root, _ = _cited_mapping(tmp_path)
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
 
-    asyncio.run(store.open_project(tmp_path))
+    asyncio.run(store.open_project(project))
     resp = client.get("/api/results/delivery-events")
     assert resp.status_code == 200, resp.text
     record = next(r for r in resp.json()["records"] if r.get("plant_mapping"))

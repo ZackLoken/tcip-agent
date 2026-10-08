@@ -2,7 +2,8 @@
 
 Delivery goes through the tcip-web event channel (:mod:`tcip_mcp.web_client`), which delivers only
 when the backend has this server's project open, and answers ``delivered: false`` naming what it
-has open otherwise, or when no GUI answers there.
+has open otherwise, saying it has none open, or when no backend is serving the workspace.
+``delivered: true`` means the backend accepted the event, not that a browser was listening.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from tcip_annotation.json_io import (
 )
 
 from tcip_mcp.server import tool
+from tcip_mcp.workspace import BoundProject
 
 
 def _logical_image_names(images_dir) -> list[str]:
@@ -28,15 +30,14 @@ def _logical_image_names(images_dir) -> list[str]:
 
 
 @tool()
-def push_panel_event(project: Path, workspace: Path, panel: str, event_type: str,
-                     data: dict) -> dict:
-    """Push structured data to a TCIP GUI panel via the tcip-web backend serving ``workspace``,
-    which delivers it only while it has this project open.
+def push_panel_event(bound: BoundProject, panel: str, event_type: str, data: dict) -> dict:
+    """Push structured data to a TCIP GUI panel via the tcip-web backend serving the bound
+    project's workspace, which delivers it only while it has this project open.
 
     Sends an HTTP POST to the running FastAPI server (see :mod:`tcip_mcp.web_client`); the backend
     broadcasts to any connected browsers via WebSocket, or answers ``delivered: false`` naming the
-    project it has open instead. If the backend itself is not running, returns ``{"status":
-    "no_subscribers"}``.
+    project it has open instead, or saying it has none open. If the backend itself is not
+    running, returns ``{"status": "no_subscribers"}``.
 
     Args:
         panel: Target panel: one per GUI tab, or 'app' for app-level events like
@@ -52,7 +53,7 @@ def push_panel_event(project: Path, workspace: Path, panel: str, event_type: str
     if panel not in VALID_PANELS:
         return {"error": f"Unknown panel: {panel}. Valid: {sorted(VALID_PANELS)}"}
 
-    result = post_panel_event(project, workspace, panel, event_type, data)
+    result = post_panel_event(bound, panel, event_type, data)
     result.setdefault("panel", panel)
     result.setdefault("event_type", event_type)
     return result
@@ -60,8 +61,7 @@ def push_panel_event(project: Path, workspace: Path, panel: str, event_type: str
 
 @tool()
 def focus_human_attention(
-    project: Path,
-    workspace: Path,
+    bound: BoundProject,
     dataset_root: str,
     subject: str,
     date: str,
@@ -75,8 +75,10 @@ def focus_human_attention(
     ``annotate_focus``).
 
     It lands on ``image_index``, else on the first frame holding ``subject``: in the bucket's
-    document for it when a bucket is named, in its label document otherwise. A backend with
-    another project open, or none running, answers ``delivered: false`` rather than raising. An
+    document for it when a bucket is named, in its label document otherwise. The result is the
+    event channel's answer (:func:`~tcip_mcp.web_client.post_panel_event`), its refusal reason
+    and ``open_project_id`` included, with the frame landed on added: a backend with another
+    project open, or none running, answers ``delivered: false`` rather than raising. An
     image elsewhere on the date whose document will not read is named by file name in the result's
     ``unreadable``; only the landed-on frame's own unreadable document refuses, naming that
     document, and an ``image_index`` outside the date's images or a ``date`` that is not one path
@@ -148,10 +150,8 @@ def focus_human_attention(
         "image_index": image_index, "mode": mode, "active_subject": subject,
         "bucket": bucket, "proposal": proposal,
     }
-    result = post_panel_event(project, workspace, "app", PANEL_EVENT_ANNOTATE_FOCUS, payload)
     return {
-        "delivered": result.get("delivered", False),
-        "status": result.get("status"),
+        **post_panel_event(bound, "app", PANEL_EVENT_ANNOTATE_FOCUS, payload),
         "subject": subject, "date": date, "image_index": image_index, "mode": mode,
         "bucket": bucket, "proposal": proposal,
         "n_images": len(images), "n_holding_subject": len(holding), "image": target_name,

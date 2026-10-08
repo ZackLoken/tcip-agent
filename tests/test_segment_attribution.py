@@ -195,7 +195,7 @@ def test_load_canopy_segments_refuses_a_machine_authored_polygon_with_no_persons
 
 
 def test_load_canopy_segments_admits_a_proposed_polygon_accepted_through_the_save_door(
-    tmp_path: Path, client,
+    tmp_path: Path, client, opened_project: Path,
 ) -> None:
     """A staged polygon proposal accepted through the editor's save door delivers: the platform's
     own producer of a person's ``accepted_by``, never a hand-written provenance pair.

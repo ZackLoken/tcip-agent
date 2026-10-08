@@ -843,7 +843,7 @@ def build_image_overviews(payload: OverviewBuildPayload) -> dict:
     """
     src = allowed_file(payload.path)
     job, created = _overview_registry.find_or_register(
-        lambda existing: existing.path == str(src) and existing.status in ("pending", "running"),
+        lambda existing: existing.path == str(src) and jobstore.live(existing),
         lambda: OverviewJob(job_id=f"ovr-{uuid.uuid4().hex[:8]}", path=str(src)),
     )
     if created:

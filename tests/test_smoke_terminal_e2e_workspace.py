@@ -34,13 +34,12 @@ def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
 
     from tcip_mcp import workspace
     from tcip_mcp.audit import audit_log_key
-    from tcip_mcp.project_record import read_record
     from tcip_web.state import store
     from tests._web_fixtures import new_project
 
     live_project = new_project(tmp_path)
-    workspace.write_last_opened(tmp_path.parent, read_record(live_project)["id"])
-    live_lines = len(tcip_store.read_log(audit_log_key(live_project)).records)
+    workspace.write_last_opened(tmp_path.parent, live_project.id)
+    live_lines = len(tcip_store.read_log(audit_log_key(live_project.root)).records)
     monkeypatch.delenv(pty_host.TERMINAL_CMD_ENV, raising=False)
     row = dataclasses.replace(pty_host.PROVIDERS[0], executable="tcip-smoke-test-nonexistent-cli")
     monkeypatch.setattr(pty_host, "PROVIDERS", (row,))
@@ -52,8 +51,8 @@ def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
     assert result == 1
     assert os.environ["TCIP_WORKSPACE"] == str(scratch_ws)
     assert store.workspace == scratch_ws.resolve()
-    assert store.project_id is None
-    assert len(tcip_store.read_log(audit_log_key(live_project)).records) == live_lines
+    assert store.opened is None
+    assert len(tcip_store.read_log(audit_log_key(live_project.root)).records) == live_lines
 
 
 def test_the_signal_is_a_friction_report_of_the_open_project_carrying_the_token(

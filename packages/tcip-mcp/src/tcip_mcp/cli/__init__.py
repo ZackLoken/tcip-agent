@@ -16,6 +16,6 @@ def bound_project(value: str) -> Path:
 
     bind()
     try:
-        return existing_project(value)
+        return existing_project(value)[0]
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc

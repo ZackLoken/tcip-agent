@@ -28,6 +28,7 @@ from tcip_mcp.pipelines.display_bounds import VIZ_ARTIFACT_MAX_EDGE
 from tcip_annotation.matching import REVIEW_CONF_FLOOR
 from tcip_mcp.project_paths import viz_output_path
 from tcip_mcp.server import tool
+from tcip_mcp.workspace import BoundProject
 
 if TYPE_CHECKING:
     import numpy as np
@@ -651,8 +652,7 @@ def _received_at(document: dict, name: str) -> datetime:
 
 @tool()
 def capture_live_canvas(
-    project: Path,
-    workspace: Path,
+    bound: BoundProject,
     refresh: bool = True,
     crop_to_viewport: bool = True,
     max_edge: int = 1600,
@@ -682,6 +682,7 @@ def capture_live_canvas(
         PANEL_EVENT_CANVAS_STATE_REQUEST, canvas_geometry_key, canvas_meta_key, post_panel_event,
     )
 
+    project = bound.root
     meta_doc = canvas_meta_key(str(project))
     shapes_doc = canvas_geometry_key(str(project))
 
@@ -690,7 +691,7 @@ def capture_live_canvas(
     refreshed = False
     ping: dict = {}
     if refresh:
-        ping = post_panel_event(project, workspace, "app", PANEL_EVENT_CANVAS_STATE_REQUEST, {})
+        ping = post_panel_event(bound, "app", PANEL_EVENT_CANVAS_STATE_REQUEST, {})
         if ping.get("delivered"):
             for _ in range(12):  # ~2.4s for the GUI's flush to land
                 _time.sleep(0.2)

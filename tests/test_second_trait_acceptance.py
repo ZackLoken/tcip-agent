@@ -55,7 +55,7 @@ def _currant_bloom_body(tmp_path: Path) -> dict:
     from tests._mapping_fixtures import register_plant_registry_for
     from tests.test_plant_mapping_binding import DATES, PLANTS, _dataset, _init, _write_scene
 
-    _init(tmp_path)
+    project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=DATES)
     registry = register_plant_registry_for(tmp_path, [plant_csv])
@@ -63,7 +63,7 @@ def _currant_bloom_body(tmp_path: Path) -> dict:
                                 plant_registry=registry)
     assert "error" not in built, built
     _seed_currant_bloom_trait(tmp_path)
-    asyncio.run(store.open_project(tmp_path.resolve()))
+    asyncio.run(store.open_project(project))
     return {"mapping_name": "valley", "dataset_root": str(dataset_root),
             "buckets": list(preds_by_date.values()),
             "trait": "currant_bloom", "plants": [p["plot"] for p in PLANTS]}

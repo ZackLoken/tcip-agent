@@ -99,7 +99,7 @@ def build_plant_mapping(payload: BuildMappingPayload) -> dict:
     from tcip_web.routes.audit_gap import audit_gap_409
 
     person = actor(payload.user)
-    root = store.open_root()
+    root = store.held().root
     images_root = _belonging(root, payload.images_root)
     try:
         return plant_mapping.build_plant_mapping(
@@ -129,7 +129,7 @@ def load_plant_mapping(payload: LoadMappingPayload) -> dict:
     """
     from tcip_store import StoreError
 
-    root = store.open_root()
+    root = store.held().root
     try:
         build = plant_mapping.load_mapping(root, payload.name)
     except (StoreError, ValueError) as exc:
@@ -142,7 +142,7 @@ def load_plant_mapping(payload: LoadMappingPayload) -> dict:
 @router.get("/plant_mapping/list")
 def list_plant_mappings() -> dict:
     """Every mapping name persisted under the open project."""
-    root = store.open_root()
+    root = store.held().root
     return {"names": plant_mapping.plant_mapping_names(root)}
 
 
@@ -174,14 +174,13 @@ class PhenologyPayload(PhenologyInputs):
     show_unvalidated: bool = False
 
 
-def _measure(payload: PhenologyInputs) -> "PhenologyMeasurement":
+def _measure(root: Path, payload: PhenologyInputs) -> "PhenologyMeasurement":
     """:func:`~tcip_mcp.pipelines.postprocessing.phenology.measure_phenology` over the buckets this
-    route confines to the open project; each of its refusals answers 400."""
+    route confines to the project ``root``; each of its refusals answers 400."""
     from tcip_mcp.operationalization import OperationalizationRefusedError
     from tcip_mcp.subject_registry import RegistryError
     from tcip_mcp.traits import TraitUnknownError
 
-    root = store.open_root()
     dataset_root = _belonging(root, payload.dataset_root, _is_root)
     try:
         return phenology.measure_phenology(
@@ -211,12 +210,13 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
     from tcip_mcp.operationalization import OperationalizationRefusedError
     from tcip_mcp.traits import STATE_CROSSING_DATES
 
-    measurement = _measure(payload)
+    root = store.held().root
+    measurement = _measure(root, payload)
     reason = None
     digests: dict[str, str] = {}
     for projection in ("curves", "milestones"):
         try:
-            gate(store.open_root(), list(measurement.buckets.values()),
+            gate(root, list(measurement.buckets.values()),
                  delivery_kind=STATE_CROSSING_DATES, revision=measurement.revision,
                  result=measurement.result(curves=projection == "curves"))
         except OperationalizationRefusedError as exc:
@@ -253,9 +253,11 @@ class AcknowledgmentPayload(BaseModel):
     result_sha256: str
 
 
-def _recorded_acknowledgment(payload, person: str, request: Request) -> Optional[str]:
+def _recorded_acknowledgment(root: Path, payload, person: str,
+                             request: Request) -> Optional[str]:
     """Record the acknowledgment ``payload`` carries (:func:`~tcip_mcp.delivery.
-    record_acknowledgment`) by ``person``, and return its id; ``None`` when it carries none. A
+    record_acknowledgment`) in the project ``root`` by ``person``, and return its id; ``None``
+    when it carries none. A
     request with no browser ``Origin``, or one declaring an agent identity
     (:data:`~tcip_mcp.agent_identity.HEADERS`), refuses (403), and a blank reason refuses (400),
     before anything runs; an act recorded whose audit line could not follow answers 409.
@@ -273,7 +275,7 @@ def _recorded_acknowledgment(payload, person: str, request: Request) -> Optional
                                  "request from no browser, or from an agent, cannot record one.")
     try:
         return record_acknowledgment(
-            store.open_root(), acknowledged_by=person,
+            root, acknowledged_by=person,
             reason=payload.acknowledgment.reason,
             result_sha256=payload.acknowledgment.result_sha256).acknowledgment_id
     except AuditEntryNotWrittenError as exc:
@@ -311,13 +313,14 @@ def export_csv(payload: ExportCsvPayload, request: Request) -> Response:
     from tcip_web.routes.audit_gap import audit_gap_409
 
     person = actor(payload.user)
-    measurement = _measure(payload)
-    acknowledgment_id = _recorded_acknowledgment(payload, person, request)
+    root = store.held().root
+    measurement = _measure(root, payload)
+    acknowledgment_id = _recorded_acknowledgment(root, payload, person, request)
     filename = payload.filename or f"{payload.trait}_{payload.payload}.csv"
-    saved_path = store.open_root() / "results_export" / Path(filename).name
+    saved_path = root / "results_export" / Path(filename).name
     try:
         phenology.deliver_phenology(
-            store.open_root(), measurement, curves=payload.payload == "curves",
+            root, measurement, curves=payload.payload == "curves",
             output_path=saved_path, acknowledgment_id=acknowledgment_id,
             door="results.export_csv", actor=person)
     except AuditEntryNotWrittenError as exc:
@@ -404,11 +407,11 @@ def export_count_csv(payload: ExportCountCsvPayload, request: Request) -> Respon
     from tcip_web.routes.audit_gap import audit_gap_409
 
     person = actor(payload.user)
-    root = store.open_root()
+    root = store.held().root
     saved_path = root / "results_export" / Path(payload.filename).name
     delivery = payload.delivery
     dataset_root = _belonging(root, delivery.dataset_root, _is_root)
-    acknowledgment_id = _recorded_acknowledgment(payload, person, request)
+    acknowledgment_id = _recorded_acknowledgment(root, payload, person, request)
     try:
         if delivery.kind == "per_image_count":
             from tcip_mcp.pipelines.postprocessing.export import deliver_per_image_counts_csv
@@ -469,7 +472,7 @@ def list_delivery_events() -> dict:
 
     from tcip_store import StoreError
 
-    root = store.open_root()
+    root = store.held().root
     try:
         events = read_delivery_events(root)
     except (StoreError, ValidationError) as exc:
@@ -516,7 +519,7 @@ def list_traits() -> dict:
     from pydantic import ValidationError
     from tcip_mcp.traits import crops_definitions, read_trait, trait_names
 
-    root = store.open_root()
+    root = store.held().root
     records: list[dict] = []
     unreadable: list[dict] = []
     for name in trait_names(root):
@@ -564,7 +567,7 @@ def confirm_trait_revision(payload: ConfirmRevisionPayload) -> dict:
     from tcip_mcp.traits import RevisionMovedError, TraitUnknownError, confirm_revision, read_trait
 
     person = actor(payload.user)
-    root = store.open_root()
+    root = store.held().root
     audit_warning: Optional[str] = None
     try:
         revision = confirm_revision(
@@ -606,4 +609,4 @@ def registered_models(tag: Optional[str] = None) -> RegisteredModels:
     (:func:`~tcip_mcp.tools.model_tools.registered_listing`), each as the browser lists it."""
     from tcip_mcp.tools.model_tools import registered_listing
 
-    return RegisteredModels.model_validate(registered_listing(store.open_root(), tag=tag))
+    return RegisteredModels.model_validate(registered_listing(store.held().root, tag=tag))
