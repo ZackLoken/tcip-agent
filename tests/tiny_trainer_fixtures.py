@@ -196,48 +196,38 @@ def build_data_scaled_gradient_model(*, in_chans: int = 1) -> DataScaledGradient
 class AlwaysDivergedModel(MeanIntensityRegressor):
     """Reports a non-finite loss unconditionally, for exercising a diverged run end to end.
 
-    ``on_forward``, when given, is called with the one-based training-forward-call count after
-    each training-mode forward, so a caller can trigger a side effect (e.g. requesting
-    cancellation) at an exact point in the batch stream without threading a real clock through
-    the trainer.
+    With ``cancel_at_call`` and ``cancel_output_dir`` given, the training forward with that
+    one-based call count requests the run's own cancellation (``experiments.request_cancel``,
+    what ``TrainRun.should_cancel()`` reads) at that output directory, so a test can place a
+    cancel at an exact point in the batch stream; both are record values, so the builder's
+    kwargs stay a config.
     """
 
-    def __init__(self, on_forward=None) -> None:
+    def __init__(self, cancel_at_call: int | None = None,
+                 cancel_output_dir: str | None = None) -> None:
         super().__init__()
-        self.on_forward = on_forward
+        self.cancel_at_call = cancel_at_call
+        self.cancel_output_dir = cancel_output_dir
         self._calls = 0
 
     def fit_loss(self, images, targets) -> dict:
         self._calls += 1
-        if self.on_forward is not None:
-            self.on_forward(self._calls)
-        return {"nan_loss": self.weight * float("nan")}
-
-
-def build_always_diverged_model(*, in_chans: int = 1, on_forward=None) -> AlwaysDivergedModel:
-    """``model_source`` builder for :class:`AlwaysDivergedModel`."""
-    return AlwaysDivergedModel(on_forward=on_forward)
-
-
-class CancelSentinelAtCall:
-    """An ``AlwaysDivergedModel``-style ``on_forward`` callback that requests the run's own
-    cancellation (``experiments.request_cancel``, what ``TrainRun.should_cancel()`` reads) on one
-    named forward-call count. Holds only ``output_dir`` (a plain string) and the call count, never
-    the run object itself, so it stays picklable through a checkpoint write."""
-
-    def __init__(self, output_dir, at_call: int) -> None:
-        self.output_dir = str(output_dir)
-        self.at_call = int(at_call)
-
-    def __call__(self, call_count: int) -> None:
-        if call_count == self.at_call:
+        if self._calls == self.cancel_at_call and self.cancel_output_dir is not None:
             from pathlib import Path
 
             from tcip_mcp.experiments import request_cancel
 
-            path = Path(self.output_dir)
+            path = Path(self.cancel_output_dir)
             path.mkdir(parents=True, exist_ok=True)
             request_cancel(path)
+        return {"nan_loss": self.weight * float("nan")}
+
+
+def build_always_diverged_model(*, in_chans: int = 1, cancel_at_call: int | None = None,
+                                cancel_output_dir: str | None = None) -> AlwaysDivergedModel:
+    """``model_source`` builder for :class:`AlwaysDivergedModel`."""
+    return AlwaysDivergedModel(cancel_at_call=cancel_at_call,
+                               cancel_output_dir=cancel_output_dir)
 
 
 def trainer_run(config: dict, output_dir, *, project, has_val_loader: bool, id: str = "run"):

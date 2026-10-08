@@ -118,12 +118,10 @@ def test_stage_boundary_resets_the_diverged_epoch_counter(tmp_path):
 def test_cancel_requested_during_the_second_diverged_epoch_still_ends_failed(tmp_path):
     """The landed diverged-before-cancel ordering: a run whose cancel is requested partway
     through the epoch that trips the two-pass rule ends failed, not canceled."""
-    from tests.tiny_trainer_fixtures import CancelSentinelAtCall
-
     train_loader = _train_loader()  # three batches/epoch: epoch 2 is calls 4, 5, 6
     out_dir = str(tmp_path / "out")
-    on_forward = CancelSentinelAtCall(out_dir, at_call=5)
-    run = trainer_run(_config(ALWAYS_DIVERGED_MODEL, {"on_forward": on_forward}, epochs=30),
+    kwargs = {"cancel_at_call": 5, "cancel_output_dir": out_dir}
+    run = trainer_run(_config(ALWAYS_DIVERGED_MODEL, kwargs, epochs=30),
                       out_dir, project=tmp_path, has_val_loader=False, id="auto-run-14")
     run = train(run, train_loader, val_loader=None)
 

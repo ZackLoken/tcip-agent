@@ -25,7 +25,10 @@ ENTRY = fx.with_fields(fx.BUD_OPENING, count_bias_tolerance_frac=0.1, count_erro
 N_IMAGES = 4
 OBJECTS_PER_IMAGE = 6
 TOTAL_OBJECTS = N_IMAGES * OBJECTS_PER_IMAGE
-SPACING = 400.0
+SPACING = 120.0
+"""The center spacing of both sides, which sets the localization fraction the calibration side
+derives: ``120 * 0.5 / 80 = 0.75`` of an object's size, 60 px at 80 px objects and 15 px at 20 px
+ones."""
 DET_OFFSET = 30.0
 
 
@@ -34,8 +37,8 @@ def _records(prefix: str, *, size: float, x0: float, det_offset: float) -> list[
     px centers, each carrying a detection whose center sits ``det_offset`` px to the right of its
     own GT center.
 
-    ``SPACING`` is far larger than any tolerance either object scale here derives, so a detection
-    can only ever match its own GT box, never a neighbor.
+    ``SPACING`` exceeds the larger tolerance by its own width again, so a detection offset by
+    :data:`DET_OFFSET` can only ever match its own GT box, never a neighbor.
     """
     recs = []
     for i in range(N_IMAGES):
