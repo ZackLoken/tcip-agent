@@ -82,23 +82,6 @@ def plan_read(rect: Rect, raster_w: int, raster_h: int, level_dims: list[tuple[i
     return ReadPlan(level, width, height, bool(fitting))
 
 
-def level_dims(source, num_channels: int) -> list[tuple[int, int]]:
-    """The overview levels the reader ``raster_source.open_raster(source, num_channels)`` serves
-    a planned read or a level tile from (``overviews.overview_dims``), decided from headers
-    alone: a TIFF the reader serves windowed through GDAL (``raster_source.opens_windowed``)
-    reports its levels; every other source, a stacked TIFF the reader decodes whole included,
-    has none."""
-    from pathlib import Path
-
-    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.overviews import overview_dims
-    from tcip_mcp.pipelines.raster_source import opens_windowed
-
-    if isinstance(source, BandGroupRef) or Path(source).suffix.lower() not in (".tif", ".tiff"):
-        return []
-    return overview_dims(source) if opens_windowed(source, num_channels) else []
-
-
 def planned_read(raster, rect: Rect, plan: ReadPlan):
     """``raster.read_region`` of ``rect`` at the output size and off the level ``plan`` names,
     natively when that is the rect's own size."""

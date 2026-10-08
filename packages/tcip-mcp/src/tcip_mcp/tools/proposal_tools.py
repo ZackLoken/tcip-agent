@@ -191,10 +191,9 @@ def propose_annotations(
         from tcip_mcp.pipelines.reference_grid import reference_cells
 
         try:
-            w, h = display_frame(source)
-            cells = reference_cells(w, h, tile_size, overlap, clamp=True)
-            rect = _region_rect_from_cells(cells, grid_cells)
             with open_raster(source, image_route_channel_count(source)) as src:
+                cells = reference_cells(src.width, src.height, tile_size, overlap, clamp=True)
+                rect = _region_rect_from_cells(cells, grid_cells)
                 pixels, _spec = src.read_region(rect)
         except ValueError as e:
             return {"error": str(e)}
@@ -334,7 +333,9 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
     candidates = envelope["candidates"]
     cand_map = {c["candidate_id"]: c for c in candidates}
 
-    w, h = display_frame(source)
+    # The frame the identity just verified against the image, opened at the route count.
+    identity = envelope["image_identity"]
+    w, h = int(identity["width"]), int(identity["height"])
 
     # Build name-based predictions (created_by=<engine>, score = the proposal score); each keeps
     # every ring, so an occlusion-split object stays split rather than its largest fragment.

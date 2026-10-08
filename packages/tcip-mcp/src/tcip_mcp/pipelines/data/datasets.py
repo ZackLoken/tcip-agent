@@ -435,11 +435,14 @@ class TiledDetectionDataset(BaseImageDataset):
     slices of SAHI's lattice (:func:`~tcip_mcp.pipelines.slicing.slice_lattice`) with labels
     clipped/remapped to slice space.
 
-    Slice membership is computed at ``__init__`` without decoding pixels. Sources whose backend
-    opens without a decode (``raster_source.opens_windowed``: a GDAL-served raster, a
-    memory-mapped ``.npy``) are opened through the process source pool, so their dims come from
-    the open source and layout refusals surface here; every other container keeps a header-only
-    dimension probe, and its refusals surface at first read. ``__getitem__`` reads a windowed
+    Slice membership is computed at ``__init__`` without holding any source's pixels. Sources
+    whose backend opens without a decode (``raster_source.opens_windowed``: a GDAL-served
+    raster, a memory-mapped ``.npy``) are opened through the process source pool, so their dims
+    come from the open source and layout refusals surface here; every other container is
+    measured through ``image_utils.image_dimensions`` (the header for a TIFF or a photograph,
+    the loaded array for a numpy container), whose refusals surface here too; a refusal of the
+    pixels themselves surfaces at first read.
+    ``__getitem__`` reads a windowed
     stem one slice window at a time through the pool, and a whole-decode stem by decoding once
     and indexing the slice; both emit the same target dict shape as ``DetectionDataset``. The
     dataset itself never holds an open source object, so it pickles into spawned DataLoader
@@ -502,9 +505,10 @@ class TiledDetectionDataset(BaseImageDataset):
                 channels = int(src.num_channels)
                 itemsize: int | None = int(np.dtype(src.dtype).itemsize)
             else:
-                # A header probe: opening a whole-decode source would hold its pixels resident.
+                # Measured without a pooled reader: opening a whole-decode source would hold its
+                # pixels resident.
                 w, h = image_dimensions(img_source, self.expected_channels)
-                channels = int(self.expected_channels)
+                channels = None
                 itemsize = None
             self._source_frames[stem] = {
                 "width": int(w), "height": int(h), "channels": channels,
@@ -578,8 +582,9 @@ class TiledDetectionDataset(BaseImageDataset):
     @property
     def source_frames(self) -> dict[str, dict[str, Any]]:
         """Per-stem frame facts recorded when the index was built: ``width``, ``height``,
-        ``channels``, ``dtype_itemsize`` (``None`` where only a header probe ran, so no dtype was
-        read), and ``windowed`` (whether this source reads through a windowed backend)."""
+        ``channels`` and ``dtype_itemsize`` (both ``None`` for a source no pooled reader was
+        opened for, whose dimensions came from ``image_dimensions``), and ``windowed`` (whether
+        this source reads through a windowed backend)."""
         return {stem: dict(info) for stem, info in self._source_frames.items()}
 
     @property

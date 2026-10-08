@@ -269,14 +269,6 @@ def parse_capture_time(raw: object):
     return None
 
 
-def _channels_from_shape(shape: tuple[int, ...]) -> int:
-    """1 for a 2-D ``(H, W)`` shape; otherwise the channel axis of a channel-first-or-last 3-D
-    shape, the smaller of its two non-spatial-looking axes."""
-    if len(shape) == 2:
-        return 1
-    return int(shape[0]) if shape[0] < shape[-1] else int(shape[-1])
-
-
 def image_dimensions(path: "str | Path | BandGroupRef", num_channels: int) -> tuple[int, int]:
     """``(width, height)`` as ``load_image`` will decode it at ``num_channels``, without decoding
     pixels where possible. :func:`display_frame` is the frame a viewer and annotations use.
@@ -294,10 +286,8 @@ def image_dimensions(path: "str | Path | BandGroupRef", num_channels: int) -> tu
 
         return get_image_dimensions(str(path))  # header-only, EXIF-aware
     if ext in (".tif", ".tiff"):
-        # The frame the TIFF dispatch's own backend will serve, from one shared set of rules.
         frame = raster_source.tiff_frame(path, num_channels)
-        if frame is not None:
-            return int(frame[1]), int(frame[0])
+        return int(frame[1]), int(frame[0])
     return frame_size(load_multiband(path, num_channels))
 
 
@@ -361,8 +351,8 @@ def load_image(path: "str | Path | BandGroupRef", num_channels: int):
     :class:`BandGroupRef`) whose pixels come back uint8 with 1 or 3 channels, or 4 channels whose
     4th band the source itself declares alpha (:func:`to_pil_if_faithful`). Everything else
     (uint16/float rasters, other band counts, an undeclared or genuinely spectral 4th band) stays
-    an ``[H, W, C]`` ndarray. An RGB file requested as 1 channel is converted to grayscale; as 3,
-    kept RGB. Reads through ``raster_source``.
+    an ``[H, W, C]`` ndarray. A photographic RGB file requested as 1 channel is converted to
+    grayscale; as 3, kept RGB. Reads through ``raster_source``.
     """
     with raster_source.open_raster(path, num_channels) as src:
         if isinstance(src, raster_source.PhotographicSource):
@@ -374,7 +364,7 @@ def load_image(path: "str | Path | BandGroupRef", num_channels: int):
 
 
 def load_multiband(path: "str | Path | BandGroupRef", num_channels: int) -> np.ndarray:
-    """Load a multi-band image as ``[H, W, C]`` (NPY/NPZ natively; GeoTIFF via tifffile).
+    """Load a multi-band image as ``[H, W, C]`` through ``raster_source``'s array backends.
 
     A :class:`BandGroupRef` decodes each sibling file (each already a supported single-band
     source) and stacks them into one ``[H, W, C]`` array in the manifest's declared band order.

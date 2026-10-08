@@ -89,8 +89,7 @@ def open_gdal_dataset(path: str | Path, overview: int | None = None):
     (0 the finest) when one is named, with GDAL's own failure wrapped in this layer's error naming
     the file.
 
-    Served through rasterio, which bundles its own GDAL, so no separate ``osgeo`` binding is
-    needed. The returned object is a rasterio dataset, not an ``osgeo.gdal.Dataset``.
+    The returned object is a rasterio dataset.
     """
     import rasterio
 
@@ -211,8 +210,7 @@ class RasterSource(Protocol):
     ``target_size`` (output ``(width, height)``) serves the same rectangle resampled to that size;
     it must be the rectangle's :func:`scaled_size` under one scale (``ValueError`` otherwise), and
     the returned :class:`ReadSpec` records the resampling.
-    :meth:`read_window` is the same read in the row-first argument order the tiled inference loop
-    uses.
+    :meth:`read_window` is the same read in row-first argument order.
     """
 
     width: int
@@ -227,6 +225,8 @@ class RasterSource(Protocol):
                     target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, ReadSpec]: ...
 
     def read_window(self, y0: int, y1: int, x0: int, x1: int) -> np.ndarray: ...
+
+    def level_dims(self) -> list[tuple[int, int]]: ...
 
     def close(self) -> None: ...
 
@@ -248,6 +248,12 @@ class _ClosableSource:
 
     def _release(self) -> None:
         """Drop whatever this backend holds open, once."""
+
+    def level_dims(self) -> list[tuple[int, int]]:
+        """The ``(width, height)`` of each reduced-resolution level this reader serves a planned
+        read or a level tile from, finest first: none, for every backend that holds its pixels
+        decoded; :class:`GdalSource` answers its overview levels."""
+        return []
 
     def read_region(self, rect: Rect, *,
                     target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, "ReadSpec"]:
@@ -280,9 +286,9 @@ class _RegionView:
     """A read-only offset view over an already-open :class:`RasterSource`, restricted to one
     sub-rectangle of its full extent.
 
-    Exposes the ``inference.generic_predictor.WindowedRasterReader`` surface
-    (``read_window``/``height``/``width``/``num_channels``), so a rectangular sub-region of a
-    mosaic reads as an ordinary windowed raster source in its own local coordinate space.
+    Exposes ``read_window``, ``height``, ``width`` and ``num_channels``, so a rectangular
+    sub-region of a mosaic reads as an ordinary windowed raster source in its own local
+    coordinate space.
 
     ``height``/``width`` always report this view's own rect extent, never the parent source's, and
     every read is translated into the parent's coordinate space by adding the rect's own origin. A
@@ -378,10 +384,9 @@ def _channel_last(arr: np.ndarray, num_channels: int) -> np.ndarray:
     """A decoded array as ``[H, W, C]``, using the caller's expected band count to tell a
     channel-first raster from a channel-last one.
 
-    A 2-D array gains a trailing axis of 1. A 3-D array is transposed only when
+    A 2-D array gains a trailing axis of 1. A 3-D array is transposed when
     :func:`channel_first_reinterpreted` says its shape reads channel-first against the expected
-    count; every other shape is returned as decoded, so a count that disagrees with the file never
-    reshapes its pixels.
+    count, and returned as decoded otherwise.
     """
     arr = np.asarray(arr)
     if arr.ndim == 3 and channel_first_reinterpreted(arr.shape, num_channels):
@@ -395,72 +400,124 @@ def hwc_array(img: Any) -> np.ndarray:
     return arr[:, :, None] if arr.ndim == 2 else arr
 
 
-def _tiff_series_probe(path: str | Path) -> tuple[tuple[int, ...], str] | None:
-    """Header-only TIFF series shape and axes string; ``None`` if the header can't be read.
+@dataclass(frozen=True)
+class _TiffHeader:
+    """What a TIFF's header states about its first series: its shape, its axes string, and the
+    color table of a one-band uint8 palette image as a ``(256, 3)`` uint8 lookup (``None`` for
+    any other image)."""
 
-    ``tif.series[0]``, not ``pages[0]``: a channel-last TIFF stores each row-block as its own
-    page, so ``pages[0]`` of a 24x40x5 raster is ``(40, 5)``.
-    """
+    shape: tuple[int, ...]
+    axes: str
+    palette_lut: "np.ndarray | None"
+
+
+def _palette_lut(colormap: np.ndarray) -> np.ndarray:
+    """A TIFF ``ColorMap`` tag's 16-bit entries as the ``(256, 3)`` uint8 lookup they encode, the
+    high byte of each entry. Raises ``ValueError`` for a tag that does not hold three rows of the
+    256 entries a uint8 index addresses."""
+    raw = np.asarray(colormap)
+    if raw.shape != (3, 256):
+        raise ValueError(
+            f"a ColorMap tag shaped {raw.shape} holds no RGB palette for uint8 indices")
+    return (raw.astype(np.uint16) >> 8).astype(np.uint8).T
+
+
+def _tiff_header(path: str | Path) -> _TiffHeader:
+    """``path``'s first-series header, read without a pixel decode. Raises ``ValueError`` naming
+    the file when tifffile cannot open it, and for a palette image this module cannot expand: one
+    that is not uint8, carries no ``ColorMap`` tag, or carries one that holds no RGB palette."""
+    import tifffile
+
     try:
-        import tifffile
-
-        with tifffile.TiffFile(str(path)) as tif:
-            series = tif.series[0]
-            return tuple(int(x) for x in series.shape), str(series.axes)
-    except Exception:  # noqa: BLE001, fall through to a full read rather than guess
-        return None
-
-
-def tiff_series_shape(path: str | Path) -> tuple[int, ...] | None:
-    """Header-only TIFF series shape (no pixel decode); ``None`` if it can't be read this way."""
-    probe = _tiff_series_probe(path)
-    return probe[0] if probe is not None else None
-
-
-def _series_frame(shape: tuple[int, ...], axes: str) -> tuple[int, int, int] | None:
-    """A TIFF series' frame as ``(height, width, channels)``; ``None`` for an axes layout with no
-    single-frame reading (the one-page-per-band or one-page-per-row-block stacks tifffile writes,
-    which only a whole tifffile decode reads correctly)."""
-    if len(axes) != len(shape):
-        return None
-    if axes == "YX":
-        return (shape[0], shape[1], 1)
-    if axes == "YXS":
-        return (shape[0], shape[1], shape[2])
-    if axes == "SYX":  # planar (band-separate) samples report channel-first
-        return (shape[1], shape[2], shape[0])
-    return None
+        tif = tifffile.TiffFile(str(path))
+    except Exception as exc:  # noqa: BLE001, tifffile raises its own kinds for a file it cannot open
+        raise ValueError(f"cannot read the TIFF header of '{path}': {exc}") from exc
+    with tif:
+        if not tif.series:
+            raise ValueError(f"cannot read the TIFF header of '{path}': it holds no image series")
+        series = tif.series[0]
+        page = series.keyframe
+        shape, axes, dtype = tuple(int(x) for x in series.shape), str(series.axes), series.dtype
+        palette = page.photometric == tifffile.PHOTOMETRIC.PALETTE
+        colormap = page.tags["ColorMap"].value if "ColorMap" in page.tags else None
+    if not palette:
+        return _TiffHeader(shape, axes, None)
+    if dtype != np.dtype("uint8") or colormap is None:
+        raise ValueError(
+            f"'{path}' is a palette TIFF of {dtype} "
+            f"{'with' if colormap is not None else 'without'} a ColorMap tag; the palette images "
+            "this platform serves are uint8 with a ColorMap tag")
+    return _TiffHeader(shape, axes, _palette_lut(colormap))
 
 
-def tiff_frame(path: str | Path, num_channels: int) -> tuple[int, int, int] | None:
-    """The ``(height, width, channels)`` frame this module's TIFF dispatch will serve ``path`` in
-    at ``num_channels``, from the header alone; ``None`` when the header can't be read and only a
-    decode can answer.
+_CHANNEL_LAST = (0, 1, 2)
+_CHANNEL_FIRST = (1, 2, 0)
+_FRAME_AXES = ("YX", "YXS", "SYX")
 
-    Applies the dispatch's own axes normalization and channel-first reading (:func:`_series_frame`,
-    :func:`channel_first_reinterpreted`): an axes-normalizable series serves in its own frame
-    unless the channel-first reinterpretation sends it to the whole decode (which transposes); a
-    stacked multi-page series serves whole in tifffile's raw reading.
-    """
-    probe = _tiff_series_probe(path)
-    if probe is None:
-        return None
-    shape, axes = probe
-    frame = _series_frame(shape, axes)
-    if frame is None:
-        # The whole-decode route: tifffile.imread returns the raw series shape and _channel_last
-        # applies the same reinterpretation to it.
-        if len(shape) == 2:
-            return (shape[0], shape[1], 1)
-        if len(shape) != 3:
-            return None
-        if channel_first_reinterpreted(shape, num_channels):
-            return (shape[1], shape[2], shape[0])
-        return (shape[0], shape[1], shape[2])
-    # A planar (SYX) series is channel-first by its own header: no reinterpretation applies.
-    if axes != "SYX" and channel_first_reinterpreted(frame, num_channels):
-        return (frame[1], frame[2], frame[0])
-    return frame
+
+@dataclass(frozen=True)
+class _Layout:
+    """How a TIFF's whole decode is laid out as the frame it serves: ``decoded`` is the 3-D shape
+    the decode has once a palette is expanded and a 2-D image gains its trailing axis, ``order``
+    the axis order that lays it out channel-last, and ``stacked`` whether the series' axes
+    describe no single frame (the multi-page files tifffile writes)."""
+
+    decoded: tuple[int, int, int]
+    order: tuple[int, int, int]
+    stacked: bool
+
+    @property
+    def frame(self) -> tuple[int, int, int]:
+        """The ``(height, width, channels)`` frame the decode serves in."""
+        return (self.decoded[self.order[0]], self.decoded[self.order[1]],
+                self.decoded[self.order[2]])
+
+
+def _layout(header: _TiffHeader, num_channels: int | None) -> _Layout:
+    """The :class:`_Layout` ``header`` serves at ``num_channels``: a planar (``SYX``) series is
+    channel-first by its axes; any other series that decodes three-dimensional (a sample axis, or
+    a palette's expansion) is channel-first when :func:`channel_first_reinterpreted` says so at
+    ``num_channels``, or, for a stacked series with no hint, when its leading axis is the smaller
+    outer one. Raises ``ValueError`` for a series that is not a 2-D image."""
+    shape, palette = header.shape, header.palette_lut is not None
+    if len(shape) == 2:
+        decoded, three_d = (shape[0], shape[1], 3 if palette else 1), palette
+    elif len(shape) == 3 and not palette:
+        decoded, three_d = (shape[0], shape[1], shape[2]), True
+    else:
+        raise ValueError(f"a TIFF series shaped {shape} is not a 2-D image")
+    stacked = header.axes not in _FRAME_AXES
+    if header.axes == "SYX":
+        first = True
+    elif num_channels is not None:
+        first = three_d and channel_first_reinterpreted(decoded, num_channels)
+    else:
+        first = stacked and three_d and decoded[0] < decoded[2]
+    return _Layout(decoded, _CHANNEL_FIRST if first else _CHANNEL_LAST, stacked)
+
+
+def _whole_pixels(path: Path, header: _TiffHeader, layout: _Layout) -> np.ndarray:
+    """``path`` decoded whole by ``tifffile.imread``, a palette image expanded through
+    ``header``'s table, and laid out in the frame ``layout`` describes."""
+    import tifffile
+
+    arr = np.asarray(tifffile.imread(str(path)))
+    if header.palette_lut is not None:
+        arr = header.palette_lut[arr]
+    return np.transpose(hwc_array(arr), layout.order)
+
+
+def tiff_channel_count(path: str | Path) -> int:
+    """The channel count a TIFF serves at, from its header alone (:func:`_layout` with no hint).
+    Raises what :func:`_tiff_header` and :func:`_layout` raise."""
+    return _layout(_tiff_header(path), None).frame[2]
+
+
+def tiff_frame(path: str | Path, num_channels: int) -> tuple[int, int, int]:
+    """The ``(height, width, channels)`` frame this module serves ``path`` in at
+    ``num_channels``, from its header alone (:func:`_layout`). Raises what :func:`_tiff_header`
+    and :func:`_layout` raise."""
+    return _layout(_tiff_header(path), num_channels).frame
 
 
 class _ArraySource(_ClosableSource):
@@ -476,7 +533,7 @@ class _ArraySource(_ClosableSource):
         self._array: np.ndarray | None = array
         self.height = int(array.shape[0])
         self.width = int(array.shape[1])
-        self.num_channels = int(array.shape[2]) if array.ndim > 2 else 1
+        self.num_channels = int(array.shape[2])
         self.dtype = array.dtype
 
     @property
@@ -545,23 +602,21 @@ class PhotographicSource(_ClosableSource):
 
 
 class TiffWholeSource(_ArraySource):
-    """A TIFF decoded whole by ``tifffile.imread``, only for the layouts GDAL's first-IFD data
-    model misreads (the stacked multi-page files tifffile itself writes: a channel-last raster one
-    row-block per page, a plain ``[C, H, W]`` stack one band per page) and for the shapes a whole
-    decode reinterprets channel-first; every single-dataset layout is :class:`GdalSource`'s."""
+    """A TIFF decoded whole (:func:`_whole_pixels`) in the frame its header describes: the
+    stacked multi-page files GDAL's first-IFD reading misreads, the shapes a whole decode
+    reinterprets channel-first, and a readable TIFF GDAL cannot open; every other TIFF is
+    :class:`GdalSource`'s."""
 
     _backend = "tiff_whole"
 
-    def __init__(self, path: str | Path, num_channels: int):
-        import tifffile
-
+    def __init__(self, path: str | Path, header: _TiffHeader, layout: _Layout):
         self.path = Path(path)
-        self._describe(_channel_last(tifffile.imread(str(self.path)), num_channels))
+        self._describe(_whole_pixels(self.path, header, layout))
 
 
 class NpySource(_ArraySource):
     """A ``.npy`` array, memory-mapped so a region read touches only the pages it covers. An array
-    container carries no georeference; every door that needs meters refuses it by name."""
+    container carries no georeference."""
 
     _backend = "npy"
 
@@ -643,11 +698,11 @@ class GdalSource(_ClosableSource):
     (0 native, ``i`` the ``i``-th of :func:`~tcip_mcp.pipelines.overviews.overview_dims`), its
     window the rect mapped onto that level's own dimensions (see ``pipelines.overviews``).
 
-    A single-band palette-color raster (``GCI_PaletteIndex``) is expanded through its own color
-    table to uint8 RGB, the same pixels PIL's palette decode produced, and reports three
-    channels; a ``target_size`` read of one expands the named level's indices at that level's
-    resolution first and area-downsamples the RGB, since palette indices must never be averaged
-    (its pyramid is built by nearest sampling).
+    A one-band palette-color TIFF (its header's ``ColorMap``, :func:`_tiff_header`) is expanded
+    through that table to uint8 RGB, the same pixels PIL's palette decode produces, and reports
+    three channels; a ``target_size`` read of one expands the named level's indices at that
+    level's resolution first and area-downsamples the RGB, since palette indices are never
+    averaged (its pyramid is built by nearest sampling).
 
     ``band_interpretations`` names each served channel's GDAL color interpretation (lowercase,
     e.g. ``("red", "green", "blue", "alpha")``; ``"undefined"`` when the file declares none), so
@@ -660,9 +715,7 @@ class GdalSource(_ClosableSource):
 
     _backend = "gdal"
 
-    def __init__(self, path: str | Path):
-        from rasterio.enums import ColorInterp
-
+    def __init__(self, path: str | Path, header: _TiffHeader):
         self.path = Path(path)
         self._ds = open_gdal_dataset(self.path)
         self._levels: dict[int, Any] = {}
@@ -670,54 +723,14 @@ class GdalSource(_ClosableSource):
         self.height = int(self._ds.height)
         self.num_channels = int(self._ds.count)
         self.dtype = np.dtype(self._ds.dtypes[0])
-        self._palette_lut: np.ndarray | None = None
-        if (self.num_channels == 1 and self.dtype == np.dtype("uint8")
-                and self._ds.colorinterp[0] == ColorInterp.palette):
-            table = self._ds.colormap(1)
-            if table:
-                lut = self._tiff_colormap_lut()
-                if lut is None:
-                    # A container with no readable ColorMap tag: GDAL's converted entries.
-                    lut = np.zeros((256, 3), dtype=np.uint8)
-                    for index, entry in table.items():
-                        if 0 <= int(index) < 256:
-                            lut[int(index)] = tuple(entry)[:3]
-                self._palette_lut = lut
-                self.num_channels = 3
-                self.dtype = np.dtype("uint8")
+        self._palette_lut: np.ndarray | None = header.palette_lut
         if self._palette_lut is not None:
+            self.num_channels = 3
+            self.dtype = np.dtype("uint8")
             self.band_interpretations = ("red", "green", "blue")
         else:
             self.band_interpretations = tuple(
                 interp.name.lower() for interp in self._ds.colorinterp)
-
-    def _tiff_colormap_lut(self) -> "np.ndarray | None":
-        """The palette as the file's own ColorMap tag states it, high byte per 16-bit entry.
-
-        The tag's 16-bit entries carry the 8-bit palette scaled by 256 (PIL) or 257 (the TIFF
-        specification's full-range convention), and the high byte recovers the original value
-        exactly under either scaling; GDAL's converted color-table entries differ across GDAL
-        versions. ``None`` when the tag cannot be read; the caller falls back to GDAL's entries.
-        """
-        try:
-            import tifffile
-
-            with tifffile.TiffFile(str(self.path)) as tif:
-                # tifffile types page 0 as TiffPage | TiffFrame; only TiffPage carries parsed
-                # tags, and a page with none reads exactly as a page with no ColorMap tag.
-                tags = getattr(tif.pages[0], "tags", None)
-                cmap = tags.get("ColorMap") if tags is not None else None
-                if cmap is None:
-                    return None
-                raw = np.asarray(cmap.value)
-        except Exception:  # noqa: BLE001, any unreadable tag falls back to GDAL's table
-            return None
-        if raw.ndim != 2 or raw.shape[0] < 3:
-            return None
-        lut = np.zeros((256, 3), dtype=np.uint8)
-        n = min(256, raw.shape[1])
-        lut[:n] = (raw[:3, :n].astype(np.uint16) >> 8).astype(np.uint8).T
-        return lut
 
     @property
     def resident_bytes(self) -> int:
@@ -765,6 +778,12 @@ class GdalSource(_ClosableSource):
         # GDAL returns [C, H, W]; contiguous copy in the platform's [H, W, C] order.
         return (np.ascontiguousarray(np.transpose(arr, (1, 2, 0))),
                 None if out is None else "average")
+
+    def level_dims(self) -> list[tuple[int, int]]:
+        """This raster's overview levels (:func:`~tcip_mcp.pipelines.overviews.overview_dims`)."""
+        from tcip_mcp.pipelines.overviews import overview_dims
+
+        return overview_dims(self.path)
 
     def _level_dataset(self, overview: int):
         """The ``overview``-th reduced-resolution level, opened once and held until close."""
@@ -848,77 +867,91 @@ def open_array_source(source: "str | Path | BandGroupRef", num_channels: int) ->
     )
 
 
-def _tiff_needs_whole_decode(source: GdalSource, num_channels: int) -> bool:
-    """Whether a GDAL-opened TIFF must instead decode whole through tifffile.
+def _tiff_needs_whole_decode(
+    source: GdalSource, header: _TiffHeader, served: tuple[int, int, int],
+) -> bool:
+    """Whether a GDAL-opened TIFF must instead decode whole through tifffile: when its header's
+    axes describe no single frame (GDAL reads a stacked multi-page file's first page as the
+    dataset), when the frame GDAL serves is not the one the axes describe, or when the frame
+    to serve (``served``, :func:`_layout` at the caller's count) is not that one either."""
+    own = _layout(header, None)
+    return own.stacked or own.frame != (source.height, source.width, source.num_channels) \
+        or served != own.frame
 
-    GDAL reads a TIFF's first IFD as the dataset, which misreads the stacked multi-page layouts
-    tifffile itself writes (a channel-last raster one row-block per page, a ``[C, H, W]`` stack one
-    band per page), so GDAL's frame is checked against the file's own axes-normalized series shape
-    (:func:`_series_frame`) and any disagreement, including an axes layout with no single-frame
-    reading, decodes whole through tifffile. An unreadable series header routes to GDAL alone. A
-    raster whose shape a whole decode would reinterpret channel-first
-    (:func:`channel_first_reinterpreted`) also decodes whole.
 
-    Header reads only, never a pixel decode.
-    """
-    # The raw band count, not the served one: a palette raster serves as three expanded channels
-    # while the file's own header (what tifffile reports) still says one band.
-    gdal_frame = (source.height, source.width, int(source._ds.count))
-    probe = _tiff_series_probe(source.path)
-    if probe is None:
-        return False
-    shape, axes = probe
-    series_frame = _series_frame(shape, axes)
-    if series_frame is None or series_frame != gdal_frame:
-        return True
-    # A planar (SYX) series is channel-first by its own header: no reinterpretation applies.
-    return axes != "SYX" and channel_first_reinterpreted(gdal_frame, num_channels)
+def _tiff_dispatch(path: Path, num_channels: int) -> "GdalSource | tuple[_TiffHeader, _Layout]":
+    """The reader that serves a TIFF at ``num_channels``: the open :class:`GdalSource` when GDAL
+    sees the whole raster, else the header and the layout the whole decode reads it by. The
+    header and the layout are resolved first, so a file tifffile cannot read and a series that is
+    not a 2-D image refuse before any handle opens."""
+    header = _tiff_header(path)
+    layout = _layout(header, num_channels)
+    try:
+        source = GdalSource(path, header)
+    except ValueError:
+        return header, layout
+    if _tiff_needs_whole_decode(source, header, layout.frame):
+        source.close()
+        return header, layout
+    return source
 
 
 def _open_tiff(path: Path, num_channels: int) -> RasterSource:
-    """GDAL first; tifffile's own header read cross-checks that GDAL sees the whole raster
-    (:func:`_tiff_needs_whole_decode` is the one place that check lives)."""
-    try:
-        source = GdalSource(path)
-    except ValueError:
-        # GDAL cannot open it; tifffile's whole decode is the only reader left with a claim.
-        if _tiff_series_probe(path) is not None:
-            return TiffWholeSource(path, num_channels)
-        raise
-    if _tiff_needs_whole_decode(source, num_channels):
-        source.close()
-        return TiffWholeSource(path, num_channels)
-    return source
+    """:func:`_tiff_dispatch`'s GDAL source, or the whole decode in the layout it resolved."""
+    served = _tiff_dispatch(path, num_channels)
+    if isinstance(served, GdalSource):
+        return served
+    return TiffWholeSource(path, *served)
+
+
+def palette_tiff(path: str | Path) -> bool:
+    """Whether ``path`` is a palette TIFF this module expands through its color table, from the
+    header alone (:func:`_tiff_header`, whose refusals propagate)."""
+    return _tiff_header(path).palette_lut is not None
+
+
+def _windowed_probe(source: "str | Path | BandGroupRef",
+                    num_channels: int) -> "GdalSource | None":
+    """The header-only :class:`GdalSource` :func:`_tiff_dispatch` opens for a TIFF ``source`` at
+    ``num_channels``, for the caller to close; ``None`` for a TIFF that would decode whole and
+    for any source that is not a TIFF. A TIFF's header refusals propagate."""
+    if isinstance(source, BandGroupRef) or Path(source).suffix.lower() not in (".tif", ".tiff"):
+        return None
+    served = _tiff_dispatch(Path(source), num_channels)
+    return served if isinstance(served, GdalSource) else None
 
 
 def opens_windowed(source: "str | Path | BandGroupRef", num_channels: int) -> bool:
     """Whether :func:`open_raster` would serve ``source`` through a backend that opens without
     decoding pixels and reads windows on demand (a GDAL-served raster, a memory-mapped ``.npy``).
 
-    Every other backend decodes the whole raster at open (a photographic frame, an ``.npz``, a
-    stacked TIFF, a band group), so a caller deciding whether an eager open is affordable asks
-    here first. For a TIFF the answer needs GDAL's own header read; a probe source is opened and
-    closed again, header-only, never decoding pixels. A file no backend can open answers
-    ``False``: the open that would name the failure is the caller's to attempt.
+    A photographic frame, an ``.npz`` and a stacked TIFF decode whole at open, and a band group
+    answers ``False`` whatever its members open through, so a caller deciding whether an eager
+    open is affordable asks here first. For a TIFF the answer needs GDAL's own header read; a
+    probe source is opened and closed again, header-only, never decoding pixels, and a TIFF
+    whose header refuses raises that refusal.
     """
-    if isinstance(source, BandGroupRef):
+    if not isinstance(source, BandGroupRef) and photographic_container(source, num_channels):
         return False
-    path = Path(source)
-    if photographic_container(path, num_channels):
-        return False
-    ext = path.suffix.lower()
-    if ext == ".npy":
+    if not isinstance(source, BandGroupRef) and Path(source).suffix.lower() == ".npy":
         return True
-    if ext not in (".tif", ".tiff"):
+    probe = _windowed_probe(source, num_channels)
+    if probe is None:
         return False
-    try:
-        probe = GdalSource(path)
-    except ValueError:
-        return False
-    try:
-        return not _tiff_needs_whole_decode(probe, num_channels)
-    finally:
-        probe.close()
+    probe.close()
+    return True
+
+
+def level_dims(source: "str | Path | BandGroupRef", num_channels: int) -> list[tuple[int, int]]:
+    """:meth:`RasterSource.level_dims` of the reader :func:`open_raster` would serve ``source``
+    at ``num_channels`` through, decided from headers alone: a TIFF's probe source is opened and
+    closed again without decoding pixels, and a TIFF whose header refuses raises that refusal;
+    every other source has none."""
+    probe = _windowed_probe(source, num_channels)
+    if probe is None:
+        return []
+    with probe:
+        return probe.level_dims()
 
 
 def open_raster(source: "str | Path | BandGroupRef", num_channels: int) -> RasterSource:

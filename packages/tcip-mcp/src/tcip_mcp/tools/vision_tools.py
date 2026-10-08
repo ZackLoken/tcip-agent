@@ -81,7 +81,7 @@ def _read_for_display(source: "str | Path | BandGroupRef", *,
     """
     from tcip_mcp.pipelines.band_stats import composite_display_rgb
     from tcip_mcp.pipelines.derivations import probe_channels
-    from tcip_mcp.pipelines.display_bounds import level_dims, plan_read, planned_read
+    from tcip_mcp.pipelines.display_bounds import plan_read, planned_read
     from tcip_mcp.pipelines.raster_source import Rect, open_raster
 
     channels = probe_channels(source)
@@ -89,7 +89,7 @@ def _read_for_display(source: "str | Path | BandGroupRef", *,
         native = (int(raster.width), int(raster.height))
         rect = (Rect(0, 0, raster.width, raster.height) if region is None
                 else _clamped_rect(region, raster.width, raster.height))
-        plan = plan_read(rect, raster.width, raster.height, level_dims(source, channels),
+        plan = plan_read(rect, raster.width, raster.height, raster.level_dims(),
                          rect.width * rect.height, max_edge)
         pixels, _spec = planned_read(raster, rect, plan)
     bands = int(pixels.shape[-1])

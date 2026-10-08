@@ -25,12 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from tcip_mcp.pipelines.display_bounds import (
-    level_dims,
-    plan_read,
-    planned_read,
-    within_cap,
-)
+from tcip_mcp.pipelines.display_bounds import plan_read, planned_read, within_cap
 from tcip_web import jobstore
 from tcip_web.paths import allowed_file, resolved_image
 
@@ -148,9 +143,9 @@ grid it draws windows from."""
 
 _STATS_MAX_WINDOWS = 256
 """Windows the stats sample may read natively, about 16.8 million pixels at
-:data:`_STATS_WINDOW_SIZE`. A raster with more pixels than these windows hold has its statistics
-read off its overview pyramid instead. Provisional: a documented bound on one native read's cost,
-not a measurement."""
+:data:`_STATS_WINDOW_SIZE`. A GDAL-served raster with more pixels than these windows hold has its
+statistics read off its overview pyramid instead; any other backend samples these windows
+natively. Provisional: a documented bound on one native read's cost, not a measurement."""
 
 _STATS_RESERVOIR_SIZE = 1 << 20
 """Pixels the percentile pass keeps, bounding what it holds to that many values per band in the
@@ -264,7 +259,8 @@ def get_view_reads(
     area_cap: int = Depends(display_cap),
 ) -> ViewReads:
     """The reads that serve the view ``[x0, x1) x [y0, y1)`` of the raster at ``path``, clipped
-    to its extent and measured off headers, never a decode.
+    to its extent, measured off the header for a TIFF or a photograph and by loading the array
+    for a numpy container (``image_dimensions``).
 
     A view of at most the display's area cap is served by the native region-serving cells it
     intersects. A larger view is planned as one display read (``display_bounds.plan_read``); when
@@ -275,20 +271,22 @@ def get_view_reads(
     are sized by :func:`~tcip_mcp.pipelines.reference_grid.derive_serving_tile_size` under the
     same cap and the edge limit of the encoding each is served in. The frame and the levels are
     the ones the image route's own plain read opens the raster at
-    (``image_utils.display_frame``, ``display_bounds.level_dims``). Refuses a view with no pixels
-    inside the raster.
+    (``raster_source.image_route_channel_count``, read once for both). Refuses a view with no
+    pixels inside the raster.
     """
-    from tcip_mcp.pipelines.image_utils import display_frame
+    from tcip_mcp.pipelines.image_utils import image_dimensions
     from tcip_mcp.pipelines.raster_source import (
         Rect,
         image_route_channel_count,
+        level_dims,
         level_window,
         rects_overlap,
     )
     from tcip_mcp.pipelines.reference_grid import derive_serving_tile_size, reference_cells
 
     source = resolved_image(path)[1]
-    width, height = display_frame(source)
+    open_channels = image_route_channel_count(source)
+    width, height = image_dimensions(source, open_channels)
     x1, y1 = min(x1, width), min(y1, height)
     if not (x0 < x1 and y0 < y1):
         raise HTTPException(400, f"view [{y0}:{y1}, {x0}:{x1}] holds no pixel of this "
@@ -308,7 +306,7 @@ def get_view_reads(
 
     if within_cap(view.width, view.height, area_cap):
         return cells(0, width, height, view)
-    dims = level_dims(source, image_route_channel_count(source))
+    dims = level_dims(source, open_channels)
     plan = plan_read(view, width, height, dims, area_cap)
     if plan.level == 0:
         return ViewReads(reads=[ServingCell(name="view", level=0, x0=x0, y0=y0, x1=x1, y1=y1,
@@ -421,8 +419,8 @@ def _raster_stats(source, num_channels: int) -> _RasterStats:
 
     from tcip_mcp.pipelines import raster_source
     from tcip_mcp.pipelines.band_stats import sampled_band_ranges
+    from tcip_mcp.pipelines.image_utils import source_path_of
 
-    stats = None
     with raster_source.open_raster(source, num_channels) as raster:
         dtype = str(raster.dtype)
         channels = int(raster.num_channels)
@@ -430,7 +428,7 @@ def _raster_stats(source, num_channels: int) -> _RasterStats:
         interpretations = getattr(raster, "band_interpretations", None)
         oversized = raster.width * raster.height > sample_budget
         if oversized and isinstance(raster, raster_source.GdalSource):
-            dims = level_dims(source, num_channels)
+            dims = raster.level_dims()
             if not dims:
                 raise _overviews_required(
                     str(raster.path),
@@ -441,19 +439,16 @@ def _raster_stats(source, num_channels: int) -> _RasterStats:
             stats = _RasterStats(dtype=dtype, num_channels=channels, ranges=ranges,
                                  clip_bounds=clips, overview_size=served,
                                  interpretations=interpretations)
-    if stats is None:
-        sampled = sampled_band_ranges(
-            source, num_channels, seed=_STATS_SEED, window_size=_STATS_WINDOW_SIZE,
-            max_windows=_STATS_MAX_WINDOWS, reservoir_size=_STATS_RESERVOIR_SIZE)
-        stats = _RasterStats(
-            dtype=dtype,
-            num_channels=channels,
-            ranges=list(sampled.ranges),
-            clip_bounds=list(sampled.clip_bounds),
-            seed=sampled.sampling.seed,
-            pixel_fraction=sampled.sampling.pixel_fraction,
-            interpretations=interpretations,
-        )
+        else:
+            sampled = sampled_band_ranges(
+                raster, label=source_path_of(source), seed=_STATS_SEED,
+                window_size=_STATS_WINDOW_SIZE, max_windows=_STATS_MAX_WINDOWS,
+                reservoir_size=_STATS_RESERVOIR_SIZE)
+            stats = _RasterStats(
+                dtype=dtype, num_channels=channels, ranges=list(sampled.ranges),
+                clip_bounds=list(sampled.clip_bounds), seed=sampled.sampling.seed,
+                pixel_fraction=sampled.sampling.pixel_fraction,
+                interpretations=interpretations)
     with _stats_lock:
         _stats_cache[key] = stats
         _stats_cache.move_to_end(key)
@@ -622,7 +617,7 @@ def serve_image(
     try:
         with raster_source.open_raster(source, open_channels) as raster:
             opening = False
-            dims = level_dims(source, open_channels)
+            dims = raster.level_dims()
             grid_w, grid_h = dims[level - 1] if 0 < level <= len(dims) else (
                 raster.width, raster.height)
             if level and (grid_w, grid_h) == (raster.width, raster.height):
@@ -726,17 +721,19 @@ def get_bands(path: str = Query(...)) -> dict:
     (``band_count > 3``) the frontend uses to decide whether to show the picker at all.
 
     ``path`` may be a plain raster or a ``.bandgroup`` manifest naming a grouped multi-band
-    capture. ``band_count`` never decodes pixels for a photographic format. A plain (non-grouped)
-    raster at ``band_count <= 3`` reads no pixels at all; a ``.bandgroup``-grouped capture always
+    capture. ``band_count`` comes from the channel probe (``probe_channels``: the header for a
+    TIFF or a photograph, the loaded array for a numpy container). A plain (non-grouped) raster
+    at ``band_count <= 3`` reads nothing past that probe; a ``.bandgroup``-grouped capture always
     gets the full per-band stats, even at exactly 3 bands.
 
-    The stats never come from a whole decode, and the response says which read produced them. A
-    raster whose pixels fit the native-sampling budget carries ``sampled``, ``pixel_fraction`` and
-    ``seed``: ``sampled`` is false exactly when the sample covered every pixel (``pixel_fraction``
-    1.0), where the numbers are the raster's own exact bounds. A larger one is read once off an
-    overview level instead and carries ``sampled`` false with ``overview_size``, the ``[width,
-    height]`` it was read at; those bounds describe display scale only. Either way they are
-    the same numbers this raster's region renders stretch through.
+    The response says which read produced the stats. A raster whose pixels fit the
+    native-sampling budget, and any raster a backend decodes whole at open, carries ``sampled``,
+    ``pixel_fraction`` and ``seed``: ``sampled`` is false exactly when the sample covered every
+    pixel (``pixel_fraction`` 1.0), where the numbers are the raster's own exact bounds. A
+    larger GDAL-served one is read once off an overview level instead and carries ``sampled``
+    false with ``overview_size``, the ``[width, height]`` it was read at; those bounds describe
+    display scale only. Either way they are the same numbers this raster's region renders
+    stretch through.
 
     A band carries ``interpretation`` (``red``, ``alpha``, and the rest) where the backend reads it
     from the file; the key is absent where nothing knows.

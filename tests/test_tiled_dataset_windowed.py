@@ -159,7 +159,7 @@ def test_source_frames_for_a_photographic_source(tmp_path):
     images_dir = _jpeg_project(tmp_path)
     ds = _tiled(images_dir)
     assert ds.source_frames == {
-        _only_source(ds): {"width": 200, "height": 200, "channels": 3, "dtype_itemsize": None,
+        _only_source(ds): {"width": 200, "height": 200, "channels": None, "dtype_itemsize": None,
                            "windowed": False},
     }
 
@@ -204,7 +204,7 @@ def test_an_unopenable_windowed_layout_refuses_at_construction(tmp_path):
     images_dir, _arr = _tiff_project(tmp_path)
     # Corrupt the file after writing the labels: header parse now fails.
     (images_dir / "img0.tif").write_bytes(b"II*\x00garbage")
-    with pytest.raises(ValueError, match="cannot open raster"):
+    with pytest.raises(ValueError, match="cannot read the TIFF header"):
         _tiled(images_dir)
 
 

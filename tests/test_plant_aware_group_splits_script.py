@@ -29,11 +29,16 @@ def _geokeys() -> tuple[int, ...]:
     return (1, 1, 0, 2, 1024, 0, 1, 1, 3072, 0, 1, UTM_15N_EPSG)
 
 
-def _write_geotiff(path: Path, native_x: float, native_y: float) -> None:
-    """A small GeoTIFF whose pixel (0, 0) sits at real-world ``(native_x, native_y)`` in UTM 15N."""
-    arr = np.zeros(SHAPE, dtype=np.uint8)
+def _write_geotiff(path: Path, native_x: float, native_y: float, *,
+                   shape: tuple[int, int, int] = SHAPE, planar: bool = False) -> None:
+    """A ``shape`` GeoTIFF whose pixel (0, 0) sits at real-world ``(native_x, native_y)`` in UTM
+    15N; ``planar`` stores its bands separately, so its first page is band-first and not the
+    frame."""
+    arr = np.zeros(shape, dtype=np.uint8)
+    if planar:
+        arr = np.moveaxis(arr, -1, 0)
     tifffile.imwrite(
-        str(path), arr, photometric="rgb",
+        str(path), arr, photometric="rgb", planarconfig="separate" if planar else None,
         extratags=[
             (33550, "d", 3, (PIXEL_SCALE, PIXEL_SCALE, 0.0), False),
             (33922, "d", 6, (0.0, 0.0, 0.0, native_x, native_y, 0.0), False),
@@ -46,13 +51,13 @@ def _write_ungeoreferenced_tiff(path: Path) -> None:
     tifffile.imwrite(str(path), np.zeros(SHAPE, dtype=np.uint8), photometric="rgb")
 
 
-def _center_latlon(native_x: float, native_y: float) -> tuple[float, float]:
-    """The (lat, lon) a center-pixel GeoTIFF at this tiepoint resolves to, computed independently
-    via pyproj (not through ``OrthomosaicGeoreference``) so a fixture plant sits exactly at the
-    raster's own center."""
+def _center_latlon(native_x: float, native_y: float,
+                   shape: tuple[int, int, int] = SHAPE) -> tuple[float, float]:
+    """The (lat, lon) the center pixel of a ``shape`` GeoTIFF at this tiepoint resolves to,
+    computed through pyproj so a fixture plant sits exactly at the raster's own center."""
     import pyproj
 
-    height, width, _ = SHAPE
+    height, width, _ = shape
     center_native_x = native_x + (width / 2.0) * PIXEL_SCALE
     center_native_y = native_y - (height / 2.0) * PIXEL_SCALE
     transformer = pyproj.Transformer.from_crs(f"EPSG:{UTM_15N_EPSG}", "EPSG:4326", always_xy=True)
@@ -133,6 +138,21 @@ def test_same_plant_two_capture_dates_share_one_group_key(
     assert result["p1_2026-02-01"] != result["p2_2026-02-01"]
 
 
+def test_a_planar_raster_is_located_by_its_own_frame(tmp_path: Path) -> None:
+    """A wide planar GeoTIFF's center is measured in the frame its header describes, not in its
+    band-first first page: the plant at its true center is found, and no plant stands where a
+    page-shaped reading would put the center."""
+    wide = (4, 40, 3)
+    raster = tmp_path / "wide_planar.tif"
+    _write_geotiff(raster, *P1_TIEPOINT, shape=wide, planar=True)
+    lat, lon = _center_latlon(*P1_TIEPOINT, shape=wide)
+    plants = _plants(write_plant_csv(tmp_path / "plants.csv", [
+        {"plot": "P1", "accession": "acc-A", "lat": lat, "lon": lon},
+        _plant_at("P2", "acc-B", P2_TIEPOINT)]))
+
+    assert derive_plant_group_key_map({"wide": raster}, plants) == {"wide": "P1"}
+
+
 def test_refuses_naming_the_stem_when_no_plant_is_within_tolerance(
     tmp_path: Path, two_plant_csv: Path,
 ) -> None:
@@ -156,11 +176,8 @@ def test_refuses_naming_the_stem_when_the_raster_has_no_georeferencing(
 def test_a_malformed_tiff_is_named_and_does_not_kill_the_whole_batch(
     tmp_path: Path, two_plant_csv: Path,
 ) -> None:
-    """``_raster_pixel_extent`` reads through ``tifffile.TiffFile``, which raises
-    ``tifffile.TiffFileError`` (not an ``OSError`` subclass) on a non-TIFF/malformed file. Mixing
-    one good stem with one malformed one proves the malformed stem is named specifically in the
-    refusal, matching the function's own "name every failing stem" promise, rather than an
-    uncaught TiffFileError killing the whole batch (including the good stem)."""
+    """A malformed file beside a good stem is named in the refusal as the one failing stem; the
+    good stem is still resolved rather than lost to an exception escaping the batch."""
     good = tmp_path / "good.tif"
     _write_geotiff(good, *P1_TIEPOINT)
     malformed = tmp_path / "malformed.tif"

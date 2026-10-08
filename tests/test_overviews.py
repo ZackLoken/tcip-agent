@@ -16,7 +16,7 @@ from tcip_mcp.pipelines.overviews import (
     overview_sidecar,
     sidecar_valid,
 )
-from tcip_mcp.pipelines.raster_source import Rect, open_raster
+from tcip_mcp.pipelines.raster_source import Rect, TiffWholeSource, level_dims, open_raster
 
 
 def _wide_raster(tmp_path: Path, *, width: int = 8192, height: int = 8) -> tuple[Path, np.ndarray]:
@@ -52,11 +52,34 @@ def test_build_overviews_writes_a_sidecar_gdal_serves_reduced_reads_from(tmp_pat
     assert fractions and fractions[-1] == pytest.approx(1.0)
 
     with open_raster(path, 1) as src:
+        # The header-only answer and the open reader's own agree on the levels it serves from.
+        assert level_dims(path, 1) == src.level_dims() == overview_dims(path)
         region, spec = src.read_region(Rect(0, 0, 8192, 8), target_size=(4096, 4))
     assert region.shape == (4, 4096, 1)
     assert spec.resample == "average"
     blocks = arr.reshape(4, 2, 4096, 2).mean(axis=(1, 3))
     assert np.allclose(np.squeeze(region, -1), blocks, atol=1.0)
+
+
+def test_a_raster_the_hint_sends_whole_serves_no_level_off_its_own_pyramid(
+    tmp_path: Path,
+) -> None:
+    """A pyramid is a GDAL reader's to serve from: a TIFF the caller's hint reinterprets, so the
+    whole decode serves it, answers no level before and after opening even though its sidecar
+    holds levels."""
+    path = tmp_path / "three_row.tif"
+    arr = np.zeros((3, 2048, 4), dtype=np.uint8)
+    arr[..., 0] = np.arange(2048, dtype=np.uint16).reshape(1, 2048) % 251
+    tifffile.imwrite(str(path), arr, photometric="rgb", extrasamples=["unassalpha"],
+                     rowsperstrip=1)
+    build_overviews(path)
+    assert overview_dims(path) == [(1024, 2)]
+
+    with open_raster(path, 3) as src:
+        assert isinstance(src, TiffWholeSource)
+        assert level_dims(path, 3) == src.level_dims() == []
+    with open_raster(path, 4) as src:
+        assert level_dims(path, 4) == src.level_dims() == [(1024, 2)]
 
 
 def test_a_decimated_read_is_served_from_the_pyramid_not_by_decoding_the_base(

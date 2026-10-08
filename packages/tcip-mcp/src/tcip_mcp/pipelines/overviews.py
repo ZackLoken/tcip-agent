@@ -3,7 +3,8 @@
 GDAL serves a reduced-resolution read from the nearest overview level at or above the requested
 resolution, so a display-scale read of a huge raster costs the overview's pixels instead of the
 native ones. :func:`build_overviews` writes the GDAL-standard external ``.ovr`` next to the raster
-(a read-only open forces the sidecar form; the raster itself is never rewritten);
+(GDAL's ``TIFF_USE_OVR`` option directs the build to the sidecar; the raster itself is never
+rewritten);
 :func:`overview_dims` and :func:`sidecar_valid` are the checks a caller gates on first.
 """
 
@@ -17,7 +18,7 @@ from typing import Callable
 
 import numpy as np
 
-from tcip_mcp.pipelines.raster_source import open_gdal_dataset
+from tcip_mcp.pipelines.raster_source import open_gdal_dataset, palette_tiff
 
 PYRAMID_FLOOR_EDGE = 1024
 """Longest edge of a pyramid's deepest level, and the edge a raster too large to sample natively
@@ -30,12 +31,11 @@ _BUILD_POLL_SECONDS = 0.2
 _BUILD_CHILD = """
 import sys
 import rasterio
-from rasterio.enums import ColorInterp, Resampling
+from rasterio.enums import Resampling
 
-path, levels = sys.argv[1], [int(v) for v in sys.argv[2].split(",")]
+path, levels, palette = sys.argv[1], [int(v) for v in sys.argv[2].split(",")], sys.argv[3] == "1"
 with rasterio.Env(TIFF_USE_OVR=True):
     with rasterio.open(path, "r+") as ds:
-        palette = ds.colorinterp[0] == ColorInterp.palette
         ds.build_overviews(levels, Resampling.nearest if palette else Resampling.average)
 """
 
@@ -118,8 +118,9 @@ def overview_levels(width: int, height: int) -> list[int]:
 def build_overviews(path: str | Path,
                     *, progress_cb: "Callable[[float], object] | None" = None) -> Path:
     """Build ``path``'s external ``.ovr`` pyramid (the power-of-2 levels :func:`overview_levels`
-    derives from the raster's own size, AVERAGE resampling, or NEAREST for a palette raster whose
-    indices must never be averaged) and return the sidecar's path.
+    derives from the raster's own size, AVERAGE resampling, or NEAREST for a palette raster
+    (:func:`~tcip_mcp.pipelines.raster_source.palette_tiff`) whose indices are never averaged)
+    and return the sidecar's path.
 
     Refuses when a valid sidecar or internal overviews already exist (rebuilding a good pyramid
     is minutes of wasted decode) and when the raster has no level to build (an empty level list
@@ -171,7 +172,8 @@ def build_overviews(path: str | Path,
         abandon(f"overview build for {path} canceled before it started")
 
     child = subprocess.Popen(
-        [sys.executable, "-c", _BUILD_CHILD, str(path), ",".join(str(v) for v in levels)],
+        [sys.executable, "-c", _BUILD_CHILD, str(path), ",".join(str(v) for v in levels),
+         "1" if palette_tiff(path) else "0"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     while child.poll() is None:
