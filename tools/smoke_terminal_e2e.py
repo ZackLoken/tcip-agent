@@ -84,7 +84,8 @@ def main(provider: str, workspace: str | None = None,
     if "error" in record:
         print(f"FAIL: the scratch project was refused: {record['error']}")
         return 1
-    opened = client.post("/api/projects/open", json={"id": record["id"]})
+    user = getpass.getuser()
+    opened = client.post("/api/projects/open", json={"id": record["id"], "user": user})
     if opened.status_code != 200:
         print(f"FAIL: the scratch project did not open ({opened.status_code}): {opened.text}")
         return 1
@@ -92,7 +93,7 @@ def main(provider: str, workspace: str | None = None,
     token = f"ack-{secrets.token_hex(6)}"
 
     resp = client.post("/api/terminal/sessions", json={
-        "provider": provider, "rows": 35, "cols": 120, "user": getpass.getuser()})
+        "provider": provider, "rows": 35, "cols": 120, "user": user})
     if resp.status_code != 200:
         print(f"FAIL: the launch was refused ({resp.status_code}): {resp.text}")
         return 1

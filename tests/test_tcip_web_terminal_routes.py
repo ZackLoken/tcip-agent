@@ -232,10 +232,12 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
         expected_prepared = [
             pty_host.subprocess.list2cmdline(
                 [launched[0], "mcp", "add", "tcip", "--", server.command, *server.args]),
-            f"allowed {len(list_registered_tools())} tcip tools in {settings}",
+            f"allowed {len(list_registered_tools()) + 1} tcip entries in {settings}, dropped 0 "
+            "doctor entries of other projects",
         ]
         allowed = json.loads(settings.read_text(encoding="utf-8"))["permissions"]["allow"]
-        assert allowed == [f"mcp(tcip/{name})" for name in list_registered_tools()]
+        assert allowed == [*(f"mcp(tcip/{name})" for name in list_registered_tools()),
+                           pty_host.doctor_command_entry(opened.root)]
     assert created["launched"]["prepared"] == expected_prepared
     assert created["launched"]["confinement"] == row.confinement
     assert created["launched"]["delivery_unverified"] == row.delivery_unverified(
@@ -270,25 +272,127 @@ def test_allowing_the_tcip_tools_keeps_the_rest_of_the_settings_and_is_idempoten
     from tcip_mcp.server import list_registered_tools
 
     settings = tmp_path / "settings.json"
+    other = pty_host.doctor_command_entry(tmp_path / "other project")
     settings.write_text(json.dumps({
-        "model": "kept", "permissions": {"allow": ["command(git log)"], "deny": ["x"]}}),
+        "model": "kept", "permissions": {"allow": ["command(git log)", other], "deny": ["x"]}}),
         encoding="utf-8")
+    project = tmp_path / "valley (north)"
 
-    first = pty_host.allow_tcip_tools(settings)
-    second = pty_host.allow_tcip_tools(settings)
+    first = pty_host.allow_tcip_tools(settings, project)
+    second = pty_host.allow_tcip_tools(settings, project)
 
     names = list_registered_tools()
-    assert first == f"allowed {len(names)} tcip tools in {settings}"
-    assert second == f"allowed 0 tcip tools in {settings}"
+    assert first == (f"allowed {len(names) + 1} tcip entries in {settings}, dropped 1 doctor "
+                     "entries of other projects")
+    nothing = f"allowed 0 tcip entries in {settings}, dropped 0 doctor entries of other projects"
+    assert second == nothing
     body = json.loads(settings.read_text(encoding="utf-8"))
     assert body["model"] == "kept"
     assert body["permissions"]["deny"] == ["x"]
     assert body["permissions"]["allow"] == [
+        "command(git log)", *(f"mcp(tcip/{name})" for name in names),
+        pty_host.doctor_command_entry(project)]
+
+    # A launch with no project runs no doctor: the entry of the last project goes too.
+    assert pty_host.allow_tcip_tools(settings, None) == (
+        f"allowed 0 tcip entries in {settings}, dropped 1 doctor entries of other projects")
+    assert json.loads(settings.read_text(encoding="utf-8"))["permissions"]["allow"] == [
         "command(git log)", *(f"mcp(tcip/{name})" for name in names)]
 
     settings.write_text("[]", encoding="utf-8")
     with pytest.raises(pty_host.PreparationFailedError, match="does not hold a JSON object"):
-        pty_host.allow_tcip_tools(settings)
+        pty_host.allow_tcip_tools(settings, project)
+
+
+def test_the_doctor_allowance_is_the_rituals_own_line_and_nothing_else(opened):
+    """One renderer spells the ritual's doctor step, and agy's entry admits exactly that line
+    (its regex evaluated under Python's ``re``; agy's own matching is proven by the live
+    smoke): not the line with anything after it, not another project's, not an unquoted
+    spelling, and no handwritten grammar of what a path may hold exists beside it."""
+    opened_project = opened.root
+    line = pty_host.doctor_command(opened_project)
+    assert line == f'tcip doctor "{opened_project.as_posix()}"'
+    ritual = pty_host.session_ritual(opened)
+    assert ritual[ritual.index("tcip doctor"):].split(". ")[0] == line
+
+    entry = pty_host.doctor_command_entry(opened_project)
+    assert entry.startswith("command(regex:^") and entry.endswith("$)")
+    pattern = re.compile(entry[len("command(regex:"):-1])
+    assert pattern.fullmatch(line)
+    for tail in ("; Write-Output x", " | Write-Output x", " && dir", " > out.txt", " `dir`",
+                 " $(dir)", "\nWrite-Output x", " C:/second", " --help", '"', ' "C:/second"'):
+        assert not pattern.fullmatch(f"{line}{tail}"), tail
+    assert not pattern.fullmatch(line[:-1])
+    assert not pattern.fullmatch(f'tcip doctor "{opened_project.parent.as_posix()}"')
+    assert not pattern.fullmatch(f"tcip doctor {opened_project.as_posix()}")
+    for position in range(len(line)):
+        changed = line[:position] + ("y" if line[position] != "y" else "z") + line[position + 1:]
+        assert not pattern.fullmatch(changed), changed
+
+    spaced = pty_host.doctor_command_entry(Path("S:/Savanna Institute (north)/o'neil & sons, b.1"))
+    assert re.compile(spaced[len("command(regex:"):-1]).fullmatch(
+        'tcip doctor "S:/Savanna Institute (north)/o\'neil & sons, b.1"')
+    assert not re.compile(spaced[len("command(regex:"):-1]).fullmatch(
+        'tcip doctor "S:/Savanna Institute (north)/o\'neil & sons, bX1"')
+    assert spaced.startswith(pty_host._DOCTOR_ENTRY_PREFIX)
+
+    curly = pty_host.doctor_command_entry(Path("S:/o\u2019neil \u2018north\u2019 block"))
+    assert re.compile(curly[len("command(regex:"):-1]).fullmatch(
+        'tcip doctor "S:/o\u2019neil \u2018north\u2019 block"')
+
+
+SHELL_READS_INSIDE_DOUBLE_QUOTES = {
+    '"': "closes the double-quoted segment under Bash and PowerShell",
+    "$": "Bash and PowerShell expand a variable",
+    "`": "Bash substitutes a command and PowerShell escapes the next character",
+    "\\": "Bash reads an escape before some of the characters that may follow it",
+    "!": "Bash expands history in an interactive shell with history expansion on",
+    "\r": "breaks the ritual's one line",
+    "\n": "breaks the ritual's one line",
+    "“": "PowerShell reads a left double quotation mark as a double quote",
+    "”": "PowerShell reads a right double quotation mark as a double quote",
+    "„": "PowerShell reads a double low-9 quotation mark as a double quote",
+}
+"""Each character the renderer refuses in a project path, by what Bash or PowerShell does with
+it inside double quotes or what the ritual's one-line contract excludes, written here from the
+shells' grammars rather than read off the renderer's set, so a character dropped from that set
+fails its case. A typographic single quote (U+2018 to U+201B) is literal inside double quotes
+under both shells and is not here."""
+
+
+@pytest.mark.parametrize("held", sorted(SHELL_READS_INSIDE_DOUBLE_QUOTES),
+                         ids=[f"U+{ord(c):04X}" for c in sorted(SHELL_READS_INSIDE_DOUBLE_QUOTES)])
+def test_a_project_path_holding_a_refused_character_is_refused_by_name(
+    held, tmp_path, monkeypatch,
+):
+    """The renderer refuses a path holding a character the doctor line refuses, naming that
+    character; the ritual then says the doctor step cannot be spelled, on one line, and the
+    Antigravity preparation fails naming it, instead of rendering a line a shell could read as
+    anything but the one literal argument on one line. The path is a POSIX one, so a backslash
+    is a path character and not a separator."""
+    from pathlib import PurePosixPath
+
+    project = PurePosixPath(f"/projects/valley{held}block")
+    with pytest.raises(ValueError, match="the doctor line refuses") as refused:
+        pty_host.doctor_command(project)
+    assert repr(held) in str(refused.value) or held in str(refused.value)
+    with pytest.raises(ValueError, match="the doctor line refuses"):
+        pty_host.doctor_command_entry(project)
+
+    # Resolving the path on Windows would read the POSIX backslash as a separator.
+    monkeypatch.setattr("tcip_mcp.project_record.existing_project", lambda _p: (
+        project, {"id": "abc", "display_name": "Valley", "site": "s"}))
+    opened = OpenProject(project, "abc")  # type: ignore[arg-type]
+    ritual = pty_host.session_ritual(opened)
+    assert "cannot be spelled on a shell line" in ritual and "report_friction" in ritual
+    assert "tcip doctor" not in ritual and "\n" not in ritual and "\r" not in ritual
+
+    settings = tmp_path / "settings.json"
+    monkeypatch.setattr(pty_host, "ANTIGRAVITY_SETTINGS", settings)
+    monkeypatch.setattr(pty_host, "run_to_completion", lambda argv, step: "added")
+    with pytest.raises(pty_host.PreparationFailedError, match="the doctor line refuses"):
+        pty_host.prepare_antigravity("agy", opened)
+    assert not settings.exists()
 
 
 def test_the_written_mcp_configuration_is_the_one_server_the_launch_states(opened):
@@ -439,13 +543,14 @@ class _RecordingPty:
         self.writes.append(data)
 
 
-_COMPOSER_LIVE_AT = {"claude": 15, "antigravity": 7, "codex": 10}
+_COMPOSER_LIVE_AT = {"claude": 15, "antigravity": 4, "codex": 10}
 """For each recorded harness, the index of the startup read at which its composer was observed
 live, from the PTY logs and never from a row's marker: Claude Code drew its input prompt in read 15,
-and a paste at read 5 was lost; agy left its loading splash and drew its prompt in read 7, and a
-paste at read 3 was lost; Codex wrote its first window title in read 10, its session footer
-followed, and an Enter before it was held as "Waiting for startup" while a paste at it was
-submitted."""
+and a paste at read 5 was lost; agy 1.3.1 cleared its screen and drew its banner and prompt in
+read 4, right after turning bracketed paste on in read 3 (its 1.3.0 predecessor lost a paste
+written at that point, before its prompt); Codex wrote its first window title in read 10, its
+session footer followed, and an Enter before it was held as "Waiting for startup" while a paste
+at it was submitted."""
 
 _STARTUP_READS = {
     "claude": [
@@ -459,9 +564,10 @@ _STARTUP_READS = {
     ],
     "antigravity": [
         "\x1b[1t", "\x1b[c\x1b[?1004h\x1b[?9001h", "\x1b[?2026$p\x1b[?2027$p\x1b]11;?\x07",
-        "\x1b[>4m\x1b[?1049h\x1b[?25l\x1b[?5W\x1b[?2004h\x1b[>4;2m\x1b[>1u\x1b[?u\x1b[H\x1b[2J",
-        "\x1b[H\x1b[2J\n", "\r ⣯ ", "\r ⣟ ",
-        "\x1b[>4m\x1b[<1u\x1b[?1049l\x1b[>4;2m\x1b[>1u\x1b[?u\x1b[0 q\r\x1b[J\n",
+        "\x1b[?5W\x1b[?2004h\x1b[>4;2m\x1b[>1u\x1b[?u",
+        "\x1b[0 q\r\x1b[J\n\x1b[6C\x1b[38;5;179m▄\x1b[m        "
+        "\x1b[38;5;111;1mAntigravity CLI 1.3.1\x1b[m\n\x1b[38;5;111m>\x1b[m\r\n"
+        "\x1b[38;5;109m? for shortcuts\x1b[m\x1b[?25h",
     ],
     "codex": [
         "\x1b[1t", "\x1b[c\x1b[?1004h\x1b[?9001h", "\x1b[?2004h", "\x1b[?1004l\x1b[?1004h",
@@ -470,11 +576,12 @@ _STARTUP_READS = {
         "\x1b]10;?\x1b\\\x1b]11;?\x1b\\",
     ],
 }
-"""The PTY reads each installed harness wrote while starting in the terminal's PTY (Claude Code
-2.1.292 and agy 1.3.0 under ``tools/smoke_terminal_e2e.py``, Codex 0.160.1 launched with its row's
-arguments and sent no input), long screen draws cut after their opening sequences and spinner frames
-thinned. The first two dropped a paste written at their first bracketed-paste-on; Codex, under the
-smoke, held one in its composer without submitting it, since its session had not started."""
+"""What each installed harness wrote while starting in the terminal's PTY (Claude Code 2.1.292
+under ``tools/smoke_terminal_e2e.py``, agy 1.3.1 as one scrollback snapshot cut at its own control
+sequences, Codex 0.160.1 launched with its row's arguments and sent no input), long screen draws
+cut after their opening sequences and spinner frames thinned. Claude Code dropped a paste written
+at its first bracketed-paste-on, as agy 1.3.0 did; Codex, under the smoke, held one in its
+composer without submitting it, since its session had not started."""
 
 
 @pytest.mark.parametrize("row", pty_host.PROVIDERS, ids=lambda row: row.id)
