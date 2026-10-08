@@ -95,8 +95,10 @@ def test_exact_conf_eval_admits_a_reference_a_nearest_neighbor_comparator_would_
 # ── Dispersion and localization-quality floor ──────────────────────────────
 
 def _tp_zero_bias_zero_records(id_prefix: str, *, n_images: int = 10, objects_per_image: int = 50):
-    """Every image: N GT, N detections, every detection far outside the center-match tolerance, so
-    count bias is exactly 0 (fp == fn == N) while not one detection matches (tp=0)."""
+    """Every image: N GT on a 40 px grid, N detections each 2000 px right of its GT, past the
+    grid's far edge, so no ground truth lies within the center-match tolerance the grid's own
+    spacing derives (20 px at 20 px objects): count bias is exactly 0 (fp == fn == N) while not
+    one detection matches (tp=0)."""
     records = []
     cols = int(objects_per_image**0.5) + 2
     for i in range(n_images):
@@ -105,7 +107,7 @@ def _tp_zero_bias_zero_records(id_prefix: str, *, n_images: int = 10, objects_pe
             row, col = divmod(k, cols)
             cx, cy = 50.0 + col * 40, 50.0 + row * 40
             gt.append({"category_id": 0, "bbox": _box(cx, cy), "iscrowd": 0})
-            dt.append({"category_id": 0, "bbox": _box(cx + 100, cy), "score": 0.9})
+            dt.append({"category_id": 0, "bbox": _box(cx + 2000, cy), "score": 0.9})
         records.append({"width": 4000, "height": 4000, "image_id": f"{id_prefix}_{i}",
                         "gt": gt, "dt": dt, "cap_hit": False})
     return records

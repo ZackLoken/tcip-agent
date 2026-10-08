@@ -161,7 +161,7 @@ def test_a_mapping_with_no_capture_at_all_for_a_delivered_date_refuses(tmp_path,
         DATE, _delivery_scene, _persist_synthetic_mapping,
     )
 
-    dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
+    _, dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
     plant_csv = write_plant_csv(tmp_path / "plants.csv", PLANTS)
     _persist_synthetic_mapping(
         tmp_path, dataset_root, "valley",
