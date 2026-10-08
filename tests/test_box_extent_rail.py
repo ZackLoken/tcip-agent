@@ -22,13 +22,11 @@ from tests._producer_fixtures import image_label_key, write_image
 def test_the_encoding_keeps_only_what_has_extent_on_the_stored_grid(tmp_path):
     """A box that rounds to no width, and a mask whose rings have none, are no detection: the
     encoding keeps the one detection with extent, and the count it reports is the document's."""
-    import numpy as np
-
     from tcip_annotation.mask_contours import mask_to_polygon_rings
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+    from tests._producer_fixtures import painted_array
 
-    solid = np.zeros((40, 40), dtype=np.uint8)
-    solid[5:30, 5:30] = 1
+    solid = painted_array(40, 40, [((5, 5, 30, 30), 1)])
     blob = {"segmentation": [[c for point in ring for c in point]
                              for ring in mask_to_polygon_rings(solid)]}
     # A merged sliced polygon wholly past the right edge clips to one column.

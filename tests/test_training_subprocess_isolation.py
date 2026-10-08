@@ -175,7 +175,7 @@ def test_ctx_should_cancel_and_dispatch_classification_honor_the_cancellation(tm
     from tcip_mcp.pipelines.training.envelope import TrainContext, dispatch_train_body
     from tcip_mcp.pipelines.training.run_registry import TrainRun
 
-    config = {"training_source": "tests.test_training_subprocess_isolation:_bespoke_loop"}
+    config = {"training_source": BESPOKE_LOOP}
     run = TrainRun(id="run_ctx_cancel", config=config, spec=train_config(config),
                    objective={"selection_metric": "loss", "higher_is_better": False},
                    project=tmp_path, output_dir=str(tmp_path))
@@ -194,6 +194,10 @@ def _bespoke_loop(ctx) -> None:
     if ctx.should_cancel():
         return
     raise AssertionError("should_cancel() did not see the requested cancellation")
+
+
+BESPOKE_LOOP = f"{__name__}:_bespoke_loop"
+"""The ``training_source`` of :func:`_bespoke_loop`."""
 
 
 # ── run_summary ─────────────
@@ -250,7 +254,7 @@ def test_run_summary_surfaces_the_wall_clock_failure_the_child_wrote(tmp_path):
     from tests._verified_checkpoint_fixtures import finished_run
 
     run_dir = finished_run(
-        tmp_path, training_source="tests.test_training_subprocess_isolation:_bespoke_loop",
+        tmp_path, training_source=BESPOKE_LOOP,
         wall_clock_passed=True)
 
     result = run_summary(observe(run_dir), [], None).model_dump()
@@ -265,7 +269,7 @@ def test_a_canceled_run_reads_canceled_whatever_its_heartbeat(tmp_path, monkeypa
     from tests._verified_checkpoint_fixtures import finished_run
 
     canceled = finished_run(
-        tmp_path, training_source="tests.test_training_subprocess_isolation:_bespoke_loop",
+        tmp_path, training_source=BESPOKE_LOOP,
         cancel_requested=True)
 
     assert experiments.observe(canceled).state == "canceled"

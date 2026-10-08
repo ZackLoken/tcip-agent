@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._chain_fixtures import BESPOKE_CLASSIFIER, GT_ANCHOR_DETECTOR
+
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
@@ -23,7 +25,7 @@ from tests import bespoke_models  # noqa: E402
 
 
 def _model_source() -> dict:
-    return {"builder": "tests.bespoke_models:build_bespoke_detector",
+    return {"builder": GT_ANCHOR_DETECTOR,
             "builder_kwargs": {"gt_boxes_wh": [[15, 36], [16, 40], [17, 44]],
                                "min_size": 64, "max_size": 128},
             "task": "detection", "source_files": [__file__]}
@@ -50,7 +52,7 @@ def test_snapshot_model_source_copies_files_and_records_provenance(tmp_path):
     entry = next(e for e in manifest["files"] if e["sha256"] == expected_sha)
     stored = (exp_dir / "model_src" / entry["file"]).read_bytes()  # content-addressed destination
     assert hashlib.sha256(stored).hexdigest() == expected_sha
-    assert manifest["builder"].endswith(":build_bespoke_detector")
+    assert manifest["builder"] == GT_ANCHOR_DETECTOR
     assert "seed" not in manifest
     assert manifest["missing"] == []
     assert manifest["snapshot_errors"] == []
@@ -120,7 +122,7 @@ def test_snapshot_model_source_basename_collision_does_not_clobber(tmp_path):
     (a_dir / "model.py").write_text("# builder A")
     (b_dir / "model.py").write_text("# builder B, different content")
 
-    src = {"builder": "tests.bespoke_models:build_bespoke_detector",
+    src = {"builder": GT_ANCHOR_DETECTOR,
           "source_files": [str(a_dir / "model.py"), str(b_dir / "model.py")]}
     manifest = snapshot_model_source({"model_source": src}, exp_dir)
 
@@ -174,7 +176,7 @@ def test_predictor_loads_at_the_two_channels_its_run_recorded(tmp_path):
 
     from tcip_mcp.pipelines.model_build import recorded_model_dims
 
-    src = {"builder": "tests.bespoke_models:build_bespoke_classifier", "task": "classification"}
+    src = {"builder": BESPOKE_CLASSIFIER, "task": "classification"}
     config = {"model_source": src, "data": {"num_channels": 2, "num_classes": 2, "scope": {}}}
     model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "model_best.pt"

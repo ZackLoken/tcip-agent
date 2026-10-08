@@ -5,6 +5,7 @@ name (``KeyError``) rather than being tolerated with a default."""
 from __future__ import annotations
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tests._chain_fixtures import BESPOKE_DETECTION
 
 from pathlib import Path
 
@@ -48,7 +49,7 @@ def test_a_checkpoint_stating_no_task_refuses_naming_where_to_state_it(tmp_path:
     unstated = tmp_path / "unstated.pt"
     torch.save({STATE_DICT_KEY: {},
                 CONFIG_KEY: {"model_source": {
-                                 "builder": "tests.bespoke_models:build_bespoke_detection"},
+                                 "builder": BESPOKE_DETECTION},
                              "data": dict(SCOPED_DATA)}}, str(unstated))
     assert "error" not in register_model(name="unstated", checkpoint_path=str(unstated),
                                          config={}, project=tmp_path)

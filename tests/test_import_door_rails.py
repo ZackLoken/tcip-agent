@@ -14,6 +14,7 @@ import tcip_store as ts
 from tcip_mcp.tools.project_tools import archive_project, import_project
 from tcip_mcp.web_client import gui_snapshot_key
 from tcip_store.file_backend import lock_file_for
+from tests._chain_fixtures import BESPOKE_DETECTION
 from tests._producer_fixtures import one_labeled_capture
 
 
@@ -346,7 +347,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     hpo_result = tt.run_hyperparameter_search(
         root,
         base_config={
-            "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+            "model_source": {"builder": BESPOKE_DETECTION,
                              "task": "detection"},
             "data": {"images_dir": str(root / "images" / "2026-03-04"),
                      "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}},

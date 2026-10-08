@@ -2,6 +2,7 @@
 
 import pytest
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tests._chain_fixtures import BESPOKE_CLASSIFIER
 from tests._producer_fixtures import run_over  # noqa: E402
 
 torch = pytest.importorskip("torch")
@@ -46,13 +47,10 @@ def test_cancel_before_training_yields_canceled(tmp_path):
 
     ds, data = run_over("classification", str(images_dir), str(tmp_path / "labels.csv"))
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
-    cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
-                         "task": "classification"},
-        "data": data,
-        "device": "cpu", "stages": [{"freeze_to": -1, "epochs": 3}],
-        "mixed_precision": False, "early_stopping": {"enabled": False},
-    }
+    from tests._chain_fixtures import training_config
+
+    cfg = training_config({"builder": BESPOKE_CLASSIFIER, "task": "classification"}, data,
+                          stages=[{"freeze_to": -1, "epochs": 3}])
     run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
                       id="cancel-run-2")
     (tmp_path / "out").mkdir()

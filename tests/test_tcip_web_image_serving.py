@@ -29,11 +29,13 @@ def _clear_stats_cache():
 def _quadrant_rgb(path: Path, width: int = 400, height: int = 300) -> np.ndarray:
     """A uint8 RGB raster whose four quadrants are flat, distinct colors, so a served region can
     be told from any other region and a transposed one from an upright one."""
-    arr = np.zeros((height, width, 3), dtype=np.uint8)
-    arr[: height // 2, : width // 2] = (200, 20, 20)
-    arr[: height // 2, width // 2:] = (20, 200, 20)
-    arr[height // 2:, : width // 2] = (20, 20, 200)
-    arr[height // 2:, width // 2:] = (200, 200, 20)
+    from tests._producer_fixtures import painted_array
+
+    x, y = width // 2, height // 2
+    arr = painted_array(width, height, [
+        ((0, 0, x, y), (200, 20, 20)), ((x, 0, width, y), (20, 200, 20)),
+        ((0, y, x, height), (20, 20, 200)), ((x, y, width, height), (200, 200, 20))],
+        background=(0, 0, 0), mode="RGB")
     tifffile.imwrite(str(path), arr)
     return arr
 
@@ -665,9 +667,10 @@ def test_a_float_regions_full_scale_is_the_rasters_own_maximum(client: TestClien
     raster's own sample found, not by the brightest value in the region in hand: a dim corner
     stays dim instead of being lifted to full brightness."""
     path = tmp_path / "float.tif"
-    arr = np.zeros((32, 40), dtype=np.float32)
-    arr[:, :20] = 100.0
-    arr[:, 20:] = 1000.0
+    from tests._producer_fixtures import painted_array
+
+    arr = painted_array(40, 32, [((0, 0, 20, 32), 100.0), ((20, 0, 40, 32), 1000.0)],
+                        background=0.0, mode="F")
     tifffile.imwrite(str(path), arr)
     resp = client.get("/api/images", params={
         "path": str(path), "display_pixels": DISPLAY, "x0": 0, "y0": 0, "x1": 20, "y1": 32})

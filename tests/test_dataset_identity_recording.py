@@ -59,11 +59,11 @@ def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(tmp_path
     document (None) must report unknown identity, not a false apples-to-apples True: the two
     demonstrably did not train on the same (known) data."""
     from tests._verified_checkpoint_fixtures import table_images
+    from tests.tiny_trainer_fixtures import MEAN_INTENSITY_CLASSIFIER
 
     opened_run(tmp_path, _config(_make_dataset(tmp_path / "first")), experiment_id="a")
     opened_run(tmp_path, {
-        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_classifier",
-                         "task": "classification"},
+        "model_source": {"builder": MEAN_INTENSITY_CLASSIFIER, "task": "classification"},
         "data": {**table_images(tmp_path / "loose"), "split": {"seed": 0, "val_ratio": 0.15}}},
         experiment_id="b")
     assert compare_experiments(["a", "b"], project=tmp_path)["same_dataset_fingerprint"] is None
@@ -146,14 +146,12 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(tmp_path, mon
 
     images_dir = _make_dataset(tmp_path)
     registered = register_dataset(tmp_path, str(tmp_path), crop="currant")
-    launched = launch_training(tmp_path, {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"min_size": 64, "max_size": 64},
-                         "task": "detection"},
-        "data": {"images_dir": str(images_dir), "scope": {"subject": SUBJECT},
-                 "split": {"seed": 0, "val_ratio": 0.15}},
-        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}], "device": "cpu",
-    }, actor=None)
+    from tests._chain_fixtures import training_config
+    from tests._verified_checkpoint_fixtures import SQUARE_64_DETECTOR
+
+    launched = launch_training(tmp_path, training_config(SQUARE_64_DETECTOR, {
+        "images_dir": str(images_dir), "scope": {"subject": SUBJECT},
+        "split": {"seed": 0, "val_ratio": 0.15}}), actor=None)
     assert "error" not in launched, launched
 
     dataset = read_record(Path(launched["output_dir"]) / RUN_FILE)["dataset"]

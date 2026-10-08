@@ -16,6 +16,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests._chain_fixtures import BARE_NO_KNOB_DETECTOR, BARE_SCORE_THRESH_DETECTOR
+
 torch = pytest.importorskip("torch")
 
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
@@ -64,11 +66,9 @@ def test_holder_refuses_when_the_module_and_its_detectors_roi_heads_both_expose_
     torchvision two-stage detector under ``.detector`` (whose ``roi_heads`` already exposes the
     knob) plus a knob restated on the wrapper itself. The platform must not silently pick one."""
     from tcip_mcp.pipelines.model_build import build_model
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
-    model = build_model({"model_source": {
-        "builder": "tests.bespoke_models:build_bespoke_detection",
-        "builder_kwargs": {"min_size": 64, "max_size": 128},
-        "task": "detection"}}, _DIMS)
+    model = build_model({"model_source": dict(BUILT_DETECTOR)}, _DIMS)
     assert hasattr(model.detector, "roi_heads")
     assert hasattr(model.detector.roi_heads, "score_thresh")
     model.score_thresh = 0.5  # restated on the wrapper itself, ambiguous with .detector.roi_heads
@@ -101,8 +101,8 @@ def _checkpoint(tmp_path, builder: str) -> str:
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     return foreign_checkpoint(
-        tmp_path, name=builder,
-        model_source={"builder": f"tests.bespoke_models:{builder}", "task": "detection"},
+        tmp_path, name=builder.rpartition(":")[2],
+        model_source={"builder": builder, "task": "detection"},
         data={"tiling": {"enabled": False}, "num_channels": 3,
               "scope": {"subject": "bud"}})
 
@@ -141,7 +141,7 @@ def _assessed(tmp_path: Path, builder: str) -> dict:
 def test_a_bespoke_module_exposing_its_own_knob_is_assessed_at_its_stated_floor(tmp_path):
     """A hand-rolled, non-torchvision module exposing score_thresh on itself is assessed at the
     staged floor applied there, and its record names the attribute path it was applied on."""
-    record = _assessed(tmp_path, "build_bare_score_thresh_detector")
+    record = _assessed(tmp_path, BARE_SCORE_THRESH_DETECTOR)
 
     assert record["criterion"]["count"]["staged_conf_floor_attribute_path"] == "self"
     assert "conf_floor_unstated" not in record["failures"]
@@ -151,7 +151,7 @@ def test_a_bespoke_module_exposing_its_own_knob_is_assessed_at_its_stated_floor(
 def test_a_module_exposing_no_knob_fails_unstated_not_censored(tmp_path):
     """A module exposing no operating-point knob under any recognized name has no floor the
     platform can state, and fails with conf_floor_unstated, never conf_censored."""
-    record = _assessed(tmp_path, "build_bare_no_knob_detector")
+    record = _assessed(tmp_path, BARE_NO_KNOB_DETECTOR)
 
     assert record["passed"] is False
     assert record["criterion"]["count"]["staged_conf_floor_attribute_path"] is None
@@ -163,12 +163,10 @@ def test_model_contract_records_the_holders_own_knobs():
     from tcip_mcp.pipelines.model_build import build_model
     from tcip_mcp.pipelines.model_contract import check_model_contract
 
-    with_knob = build_model({"model_source": {
-        "builder": "tests.bespoke_models:build_bare_score_thresh_detector",
-        "task": "detection"}}, _DIMS)
-    without_knob = build_model({"model_source": {
-        "builder": "tests.bespoke_models:build_bare_no_knob_detector",
-        "task": "detection"}}, _DIMS)
+    with_knob = build_model(
+        {"model_source": {"builder": BARE_SCORE_THRESH_DETECTOR, "task": "detection"}}, _DIMS)
+    without_knob = build_model(
+        {"model_source": {"builder": BARE_NO_KNOB_DETECTOR, "task": "detection"}}, _DIMS)
 
     dims = {"in_chans": 3, "num_classes": 1, "img_size": 64}
     assert check_model_contract(with_knob, "detection", dims=dims)["operating_point_knobs"] == [

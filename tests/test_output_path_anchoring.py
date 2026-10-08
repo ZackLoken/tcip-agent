@@ -22,25 +22,16 @@ def test_launch_training_defaults_into_the_projects_experiment_store(
     monkeypatch.chdir(tmp_path)
 
     from tcip_mcp.tools import training_tools
-    from tests._producer_fixtures import seed_bud_images
+    from tests._chain_fixtures import BLOB_BUILDER
+    from tests._producer_fixtures import seed_bud_images, small_detection_config
     from tests._verified_checkpoint_fixtures import run_to_end
 
     images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET, n=2)
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
 
-    cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"min_size": 64, "max_size": 128},
-                         "task": "detection"},
-        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
-                 "split": {"seed": 0, "val_ratio": 0.15}},
-        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-                     "mixed_precision": False, "device": "cpu",
-        # An untrained toy detector scores no objective; its validation loss is what ranks.
-        "evaluation": {"selection_metric": "loss"},
-    }
-    res = training_tools.launch_training(tmp_path, cfg, actor=None)
+    res = training_tools.launch_training(
+        tmp_path, small_detection_config(images_dir, BLOB_BUILDER), actor=None)
     assert "error" not in res, res
     run_dir = Path(res["output_dir"])
     assert run_dir == tmp_path / ".tcip" / "experiments" / res["experiment_id"]

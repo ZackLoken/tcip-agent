@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests._chain_fixtures import BESPOKE_DETECTION
 from tests._verified_checkpoint_fixtures import opened_sweep
 
 
@@ -203,7 +204,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_wo
 
     _root, selection_dir = one_foreground_group_selection(tmp_path)
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": {"split": {"selection_dir": str(selection_dir), "seed": 0}},
     }
@@ -531,7 +532,7 @@ def _bound_hpo_config(selection_dir, *, auto_val: bool | None = None) -> dict:
     if auto_val is not None:
         data["auto_val"] = auto_val
     return {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": data,
     }
@@ -1287,7 +1288,7 @@ def _one_source_tiled_cfg(images_dir) -> dict:
     into ``spatial_single_source_split`` when tiling is on and fewer than two stems are
     admitted, given a ``model_source`` block the way ``real_hpo_base_config`` gives its own."""
     return {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": {
             "images_dir": str(images_dir), "scope": {"subject": "bud"},
@@ -1378,15 +1379,13 @@ def test_split_draws_over_one_bespoke_source_refuse_the_validation_they_cannot_d
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     import tcip_mcp.tools.training_tools as tt
+    from tests.test_dataset_source_seam import BESPOKE_DS
     from tests.test_training_autoval import _big_single_source
 
     images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     cfg = _one_source_tiled_cfg(images_dir)
     untiled = {k: v for k, v in cfg["data"].items() if k != "tiling"}
-    cfg["data"] = {**untiled, "dataset_source": {
-        "builder": "tests.test_dataset_source_seam:build_bespoke_ds"}}
-    # One source holds nothing out, so the run selects on its training loss.
-    cfg["evaluation"] = {"selection_metric": "loss"}
+    cfg["data"] = {**untiled, "dataset_source": {"builder": BESPOKE_DS}}
 
     _search(monkeypatch)
 

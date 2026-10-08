@@ -11,11 +11,13 @@ from pathlib import Path
 
 import pytest
 
+from tests._chain_fixtures import BESPOKE_CLASSIFIER, BESPOKE_DETECTION
+
 SUBJECT = "leaf"
 
 
 def _cfg(images_dir, *, builder_kwargs, image_stats_sampling=None):
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
+    model_source = {"builder": BESPOKE_DETECTION,
                     "builder_kwargs": builder_kwargs, "task": "detection"}
     if image_stats_sampling is not None:
         model_source["image_stats_sampling"] = image_stats_sampling
@@ -109,14 +111,14 @@ def test_preflight_records_not_checked_when_no_membership_resolved(tmp_path):
 
     cfg = {
         "model_source": {
-            "builder": "tests.bespoke_models:build_bespoke_detection",
+            "builder": BESPOKE_DETECTION,
             "builder_kwargs": {"image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]},
             "task": "detection",
             "image_stats_sampling": {"windows": [["a.tif", None]], "seed": None,
                                      "pixel_fraction": 1.0, "window_size": None,
                                      "max_windows_per_image": None},
         },
-        "data": {"dataset_source": {"builder": "tests.bespoke_models:build_bespoke_classifier"}},
+        "data": {"dataset_source": {"builder": BESPOKE_CLASSIFIER}},
     }
 
     r = preflight_config(tmp_path, cfg)
@@ -238,7 +240,7 @@ def test_preflight_keeps_every_sample_of_a_two_date_selection(tmp_path):
         "the fixture must hold one member name on two dates for this to bite")
     assert {Path(s.source).parent.name for s in bound} == set(DATES)
 
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
+    model_source = {"builder": BESPOKE_DETECTION,
                     "builder_kwargs": {"image_mean": [0.1, 0.2, 0.3],
                                        "image_std": [0.1, 0.1, 0.1]},
                     "task": "detection",

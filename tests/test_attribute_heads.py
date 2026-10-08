@@ -14,7 +14,6 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 pytest.importorskip("torch")
@@ -28,7 +27,7 @@ from tcip_mcp import subject_registry as cr  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 
 from tests._chain_fixtures import ATTRIBUTE, PLANTS, VALUES, attributed_series  # noqa: E402
-from tests._verified_checkpoint_fixtures import BUILT_DETECTOR  # noqa: E402
+from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, SQUARE_64_DETECTOR  # noqa: E402
 
 SUBJECT = "object"
 COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
@@ -36,8 +35,6 @@ GRADE = cr.Attribute("grade", "ordinal", ("low", "mid", "high"))
 REGISTRY = cr.SubjectRegistry(subjects=(cr.Subject(name=SUBJECT, attributes=(COLOR, GRADE)),))
 OPENING = cr.Attribute(ATTRIBUTE, "ordinal", VALUES)
 """The series' opening attribute declared ordinal, the one its crossing trait's state names."""
-TWO_HEADS = {"builder": "tests.bespoke_models:build_bespoke_detection",
-             "builder_kwargs": {"min_size": 64, "max_size": 64}, "task": "detection"}
 
 
 def _documents(root: Path, bucket: str) -> dict[str, list[dict]]:
@@ -75,7 +72,7 @@ def test_two_attributes_train_two_heads_publish_both_values_and_deliver(tmp_path
     from tests._chain_fixtures import acknowledged
 
     series = attributed_series(tmp_path, fractions=(0.0, 1.0), assessed=False,
-                               attributes=(OPENING, COLOR), model_source=TWO_HEADS,
+                               attributes=(OPENING, COLOR), model_source=SQUARE_64_DETECTOR,
                                stated=Stated(tile=False, conf=0.0),
                                experiment_id="exp-two-heads")
 
@@ -227,8 +224,9 @@ def test_each_builtin_detector_carries_one_head_per_attribute(name: str):
     target = {"boxes": torch.tensor([[8.0, 8.0, 40.0, 40.0]]), "labels": torch.tensor([1]),
               "attributes": torch.tensor([[1, UNASSESSED]])}
     if name == "mask_rcnn":
-        target["masks"] = torch.zeros(1, 64, 64, dtype=torch.uint8)
-        target["masks"][0, 8:40, 8:40] = 1
+        from tests._producer_fixtures import painted_array
+
+        target["masks"] = torch.as_tensor(painted_array(64, 64, [((8, 8, 40, 40), 1)]))[None]
 
     model.train()
     losses = model([image], [target])
@@ -283,14 +281,12 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
     edge: the whole call covers more of its tile and scores higher, and the merge, over the one
     subject, keeps one box carrying the whole call's value."""
     pytest.importorskip("sahi")
-    from PIL import Image
-
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import prepare_pass
     from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.tools.model_tools import register_model
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import painted_frame, registry_over
 
     registry_over(tmp_path / "ds", cr.SubjectRegistry(
         subjects=(cr.Subject(name=SUBJECT, attributes=(WHOLE,)),)))
@@ -303,10 +299,8 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
     torch.save({STATE_DICT_KEY: model.state_dict(), CONFIG_KEY: config}, str(ckpt))
     assert "error" not in register_model(name="whole", checkpoint_path=str(ckpt), config={},
                                          project=tmp_path)
-    frame = np.zeros((200, 200, 3), dtype=np.uint8)
-    frame[20:60, 100:150, 0] = 255
     source = tmp_path / "frame.png"
-    Image.fromarray(frame).save(source)
+    painted_frame(200, 200, (0, 0, 0), [((100, 20, 150, 60), (255, 0, 0))]).save(source)
 
     p = prepare_pass(load_registered_checkpoint(str(ckpt), project=tmp_path),
                      Stated(tile=True, tile_size=128, overlap=0.25, postprocess=postprocess,

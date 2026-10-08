@@ -16,6 +16,7 @@ from tcip_mcp.pipelines.training.run_registry import observed_run  # noqa: E402
 from tests._verified_checkpoint_fixtures import opened_run  # noqa: E402
 from tests.tiny_trainer_fixtures import (  # noqa: E402
     opposed_regression_loaders,
+    regressor_config,
     write_regression_dataset,
 )
 
@@ -25,7 +26,6 @@ def batch_rows(rows):
     return partition_rows(rows)[1]
 
 
-BUILDER = "tests.tiny_trainer_fixtures:build_mean_intensity_regressor"
 TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
 VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
 
@@ -35,16 +35,9 @@ def _context(tmp_path, hook_calls: list, **extra) -> TrainContext:
     batches an epoch, recording every epoch hook call into ``hook_calls``."""
     images_dir, csv_path = write_regression_dataset(
         tmp_path / "ds", TRAIN_INTENSITIES, [2.0 * c for c in TRAIN_INTENSITIES])
-    config = {
-        "model_source": {"builder": BUILDER, "task": "regression"},
-        "data": {"num_channels": 1, "scope": {}, "images_dir": str(images_dir),
-                 "labels_dir": str(csv_path), "split": {"seed": 1, "val_ratio": 0.15}},
-        "device": "cpu", "mixed_precision": False,
-        "stages": [{"freeze_to": 0, "epochs": 2}],
-        "optimizer": {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0},
-        "checkpoint_every_n_epochs": 0,
-        **extra,
-    }
+    config = regressor_config(2, data={
+        "num_channels": 1, "scope": {}, "images_dir": str(images_dir),
+        "labels_dir": str(csv_path), "split": {"seed": 1, "val_ratio": 0.15}}, **extra)
     run_dir = opened_run(tmp_path, config)
     train_loader, val_loader = opposed_regression_loaders(TRAIN_INTENSITIES, VAL_INTENSITIES)
     return TrainContext(run=observed_run(observe(run_dir)), train_loader=train_loader,

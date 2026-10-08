@@ -39,7 +39,7 @@ def _start(tmp_path, body_name, *, deadline: float | None = None) -> tuple[Train
     from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
     run_dir = opened_run(tmp_path, detection_config(
-        tmp_path / "data", training_source=f"{__name__}:{body_name}", device="cpu"))
+        tmp_path / "data", training_source=f"{__name__}:{body_name}"))
     run = observed_run(observe(run_dir))
     run.deadline = deadline
     ctx = TrainContext(run=run, train_loader=None, val_loader=None)

@@ -13,6 +13,8 @@ from functools import partial
 
 import pytest
 
+from tests._chain_fixtures import BESPOKE_CLASSIFIER
+
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
 
 from tcip_annotation.matching import match_pairs  # noqa: E402
@@ -598,6 +600,7 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(tmp_pa
         governing_counts,
     )
     from tests import bespoke_models
+    from tests._producer_fixtures import painted_array
 
     device = torch.device("cpu")
     img_size = 64
@@ -612,9 +615,8 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(tmp_pa
             model = bespoke_models.build_bespoke_instance_seg(num_classes=1)
             images, targets = _detection_batch(img_size=img_size)
             for t in targets:
-                mask = torch.zeros((1, img_size, img_size), dtype=torch.uint8)
-                mask[0, 10:40, 10:40] = 1
-                t["masks"] = mask
+                t["masks"] = torch.as_tensor(
+                    painted_array(img_size, img_size, [((10, 10, 40, 40), 1)]))[None]
             loader = [(images, targets)]
         elif task == "classification":
             model = bespoke_models.build_bespoke_classifier(num_classes=2)
@@ -631,8 +633,8 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(tmp_pa
         else:
             model = bespoke_models.build_bespoke_semantic_seg(num_classes=2)
             imgs = torch.stack([torch.rand(3, img_size, img_size) for _ in range(2)])
-            m0 = torch.zeros((img_size, img_size), dtype=torch.long)
-            m0[:, : img_size // 2] = 1
+            m0 = torch.as_tensor(
+                painted_array(img_size, img_size, [((0, 0, img_size // 2, img_size), 1)])).long()
             m1 = 1 - m0
             loader = [(imgs, {"masks": torch.stack([m0, m1])})]
 
@@ -779,22 +781,18 @@ def _stored(tmp_path, annotations, size: int = 100):
 
 
 def _cfg(model_source, data: dict) -> dict:
-    return {
-        "model_source": model_source, "data": data, "device": "cpu",
-        "stages": [{"freeze_to": -1, "epochs": 1}], "mixed_precision": False,
-        "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
-        "early_stopping": {"enabled": False},
-    }
+    from tests._chain_fixtures import ADAMW, training_config
+
+    return training_config(model_source, data, optimizer=ADAMW)
 
 
 def test_validate_detection_returns_metrics_and_objective(tmp_path):
     ds, data = run_over("detection", str(_four_bud_images(tmp_path)), subject="bud")
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"min_size": IMG, "max_size": IMG * 2},
-                    "task": "detection"}
-    run = trainer_run(_cfg(model_source, data), tmp_path / "out", project=tmp_path,
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
+
+    run = trainer_run(_cfg(BUILT_DETECTOR, data), tmp_path / "out", project=tmp_path,
                       has_val_loader=True, id="auto-run-23")
     run = train(run, loader, val_loader=loader)  # no AttributeError on model.heads
 
@@ -802,8 +800,8 @@ def test_validate_detection_returns_metrics_and_objective(tmp_path):
     for k in ("val_loss", "val_precision", "val_recall", "val_f1", "val_map50", "val_map",
               "val_objective"):
         assert k in last, f"missing {k}"
-    # An untrained toy detector finds nothing on four images: the epoch has no useful score, so
-    # no epoch is selectable and the run fails naming the stage rather than delivering weights.
+    # An untrained BespokeDetection finds nothing on four images: the epoch has no useful score,
+    # so no epoch is selectable and the run fails naming the stage rather than delivering weights.
     assert last["val_objective"] is None
     assert math.isnan(last["selection"])
     assert run.status == "failed"
@@ -817,18 +815,17 @@ def test_validate_detection_returns_metrics_and_objective(tmp_path):
 def test_train_center_match_trait_records_governing_criterion(tmp_path):
     """Threading `trait` into _validate surfaces val_governing_criterion (a dict) and
     val_map50_role (a str) in val_metrics; the TensorBoard scalar loop must skip these
-    non-numeric values rather than crash `add_scalar` on them. The untrained toy detector never
-    scores, so the run then fails as having no selectable epoch, after the row is logged."""
+    non-numeric values rather than crash `add_scalar` on them. An untrained BespokeDetection never
+    scores here, so the run then fails as having no selectable epoch, after the row is logged."""
     from tcip_mcp.experiments import METRICS_FILE
     from tcip_mcp.pipelines.training.envelope import TrainContext
 
     ds, data = run_over("detection", str(_four_bud_images(tmp_path)), subject="bud")
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"min_size": IMG, "max_size": IMG * 2},
-                    "task": "detection"}
-    cfg = _cfg(model_source, data)
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
+
+    cfg = _cfg(BUILT_DETECTOR, data)
     cfg["evaluation"] = {"trait": "bud_opening"}
     out_dir = tmp_path / "out"
     out_dir.mkdir()
@@ -860,7 +857,7 @@ def test_validate_classification_metrics(tmp_path):
     ds, data = run_over("classification", str(images_dir), str(csv_path))
     loader = DataLoader(ds, batch_size=3, collate_fn=task_collate("classification"))
 
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_classifier",
+    model_source = {"builder": BESPOKE_CLASSIFIER,
                     "task": "classification"}
     run = trainer_run(_cfg(model_source, data), tmp_path / "out", project=tmp_path,
                       has_val_loader=True, id="auto-run-25")

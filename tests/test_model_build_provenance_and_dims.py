@@ -29,6 +29,9 @@ from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
 from tests._producer_fixtures import registry_over  # noqa: E402
 from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 
+PROBE_NET = f"{__name__}:build_probe_net"
+"""The ``model_source`` builder of :func:`build_probe_net`."""
+
 
 def build_probe_net(*, num_classes: int = 2, in_chans: int = 3, attributes: tuple = ()):
     """A tiny module whose parameter shapes follow its builder kwargs, one head per attribute
@@ -211,7 +214,7 @@ def test_a_missing_or_empty_builder_refuses_through_the_one_callee_message():
 def _probe_config() -> dict:
     """A classification run's recorded config: table ground truth records the empty scope."""
     return {
-        "model_source": {"builder": f"{__name__}:build_probe_net", "task": "classification"},
+        "model_source": {"builder": PROBE_NET, "task": "classification"},
         "data": {"num_channels": 5, "num_classes": 7, "scope": {}},
         "device": "cpu",
     }
@@ -241,7 +244,7 @@ def test_a_model_source_stating_its_own_width_refuses_at_the_build():
 def test_an_ordinal_run_recording_no_rank_count_refuses_by_name():
     """A checkpoint's rank count is read at the recorded-dimension boundary, which names what is
     missing rather than failing on a bare key."""
-    config = {"model_source": {"builder": f"{__name__}:build_probe_net", "task": "ordinal"},
+    config = {"model_source": {"builder": PROBE_NET, "task": "ordinal"},
               "data": {"num_channels": 3, "scope": {}}}
 
     with pytest.raises(ValueError, match="records no num_ranks"):
@@ -251,7 +254,7 @@ def test_an_ordinal_run_recording_no_rank_count_refuses_by_name():
 def test_a_run_over_label_documents_recording_a_count_refuses():
     """A run over label documents is sized by its scope, the subject and its attributes; a count
     recorded beside it would be a second size, so the dimensions refuse rather than choose."""
-    config = {"model_source": {"builder": f"{__name__}:build_probe_net", "task": "detection"},
+    config = {"model_source": {"builder": PROBE_NET, "task": "detection"},
               "data": {"num_channels": 3, "num_classes": 5,
                        "scope": {"subject": "bud", "attributes": []}}}
 
@@ -280,7 +283,7 @@ def test_a_run_builds_at_the_width_and_heads_its_admitted_data_records(tmp_path)
                     [Annotation(subject="leaf", geometry=BBox(8, 8, 24, 24),
                                 attributes={"condition": condition})], 64, 64)
     _dataset, data = run_over("detection", images_dir, subject="leaf")
-    config = {"model_source": {"builder": f"{__name__}:build_probe_net", "task": "detection"},
+    config = {"model_source": {"builder": PROBE_NET, "task": "detection"},
               "data": data}
 
     shapes = _param_shapes(build_model(config, recorded_model_dims(config)))

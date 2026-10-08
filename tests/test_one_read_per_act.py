@@ -175,20 +175,18 @@ def test_a_reference_document_emptied_before_the_assessment_reads_it_refuses(tmp
 
 
 def test_a_semantic_run_reads_each_mask_once(tmp_path: Path, monkeypatch):
-    import numpy as np
     from PIL import Image
 
     from tcip_mcp.dataset_layout import UNDATED_BUCKET
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tests._producer_fixtures import painted_frame
 
     images_dir, masks_dir = tmp_path / "images" / UNDATED_BUCKET, tmp_path / "masks"
     images_dir.mkdir(parents=True)
     masks_dir.mkdir()
     for i in range(4):
         Image.new("RGB", (8, 8), (i * 40, 0, 0)).save(images_dir / f"tree{i}.png")
-        mask = np.zeros((8, 8), dtype=np.uint8)
-        mask[2:6, 2:6] = 1
-        Image.fromarray(mask, mode="L").save(masks_dir / f"tree{i}.png")
+        painted_frame(8, 8, 0, [((2, 2, 6, 6), 1)], mode="L").save(masks_dir / f"tree{i}.png")
     counts = _counting_reads(monkeypatch, files=(".png",))
 
     train, val, _partition = auto_train_val(tmp_path, "semantic_seg", {

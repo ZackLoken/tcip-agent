@@ -13,10 +13,13 @@ from torch.utils.data import DataLoader
 
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.collation import task_collate
-from tests.tiny_trainer_fixtures import ConstantImageDataset, trainer_run
-
-DIVERGED_BUILDER = "tests.tiny_trainer_fixtures:build_always_diverged_model"
-HEALTHY_BUILDER = "tests.tiny_trainer_fixtures:build_mean_intensity_regressor"
+from tests.tiny_trainer_fixtures import (
+    ALWAYS_DIVERGED_MODEL,
+    MEAN_INTENSITY_REGRESSOR,
+    ConstantImageDataset,
+    regressor_config,
+    trainer_run,
+)
 TRANSIENT_BUILDER = "tests.tiny_trainer_fixtures:build_transiently_diverged_model"
 STEP_COUNTED_BUILDER = "tests.tiny_trainer_fixtures:build_step_counted_divergence_model"
 
@@ -32,17 +35,7 @@ def _train_loader(batch_size: int = 2) -> DataLoader:
 
 
 def _config(builder: str, builder_kwargs: dict, *, epochs: int) -> dict:
-    return {
-        "model_source": {"builder": builder, "builder_kwargs": builder_kwargs,
-                         "task": "regression"},
-        "data": {"num_channels": 1, "scope": {}},
-        "device": "cpu",
-        "mixed_precision": False,
-        "stages": [{"freeze_to": 0, "epochs": epochs}],
-        "optimizer": {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0},
-        "checkpoint_every_n_epochs": 0,
-        "early_stopping": {"enabled": False},
-    }
+    return regressor_config(epochs, builder=builder, builder_kwargs=builder_kwargs)
 
 
 @pytest.mark.parametrize(
@@ -53,7 +46,7 @@ def test_a_run_whose_loss_never_recovers_stops_after_two_diverged_epochs(tmp_pat
     full passes with no finite loss, never a batch-count-derived threshold, so both shapes stop
     at exactly the same epoch with the same wording."""
     train_loader = _train_loader(batch_size)
-    run = trainer_run(_config(DIVERGED_BUILDER, {}, epochs=30), tmp_path / "out",
+    run = trainer_run(_config(ALWAYS_DIVERGED_MODEL, {}, epochs=30), tmp_path / "out",
                       project=tmp_path, has_val_loader=False, id="auto-run-9")
     run = train(run, train_loader, val_loader=None)
 
@@ -67,8 +60,8 @@ def test_a_healthy_run_never_trips_the_divergence_check(tmp_path):
     """A run whose loss stays finite throughout completes normally and carries no divergence
     text, proving the counter never fires on a model that never produces a bad batch."""
     train_loader = _train_loader()
-    run = trainer_run(_config(HEALTHY_BUILDER, {"init_weight": 0.0}, epochs=3), tmp_path / "out",
-                      project=tmp_path, has_val_loader=False, id="auto-run-10")
+    run = trainer_run(_config(MEAN_INTENSITY_REGRESSOR, {"init_weight": 0.0}, epochs=3),
+                      tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-10")
     run = train(run, train_loader, val_loader=None)
 
     assert run.status == "completed", run.status_error
@@ -130,8 +123,8 @@ def test_cancel_requested_during_the_second_diverged_epoch_still_ends_failed(tmp
     train_loader = _train_loader()  # three batches/epoch: epoch 2 is calls 4, 5, 6
     out_dir = str(tmp_path / "out")
     on_forward = CancelSentinelAtCall(out_dir, at_call=5)
-    run = trainer_run(_config(DIVERGED_BUILDER, {"on_forward": on_forward}, epochs=30), out_dir,
-                      project=tmp_path, has_val_loader=False, id="auto-run-14")
+    run = trainer_run(_config(ALWAYS_DIVERGED_MODEL, {"on_forward": on_forward}, epochs=30),
+                      out_dir, project=tmp_path, has_val_loader=False, id="auto-run-14")
     run = train(run, train_loader, val_loader=None)
 
     assert run.status == "failed"
@@ -155,15 +148,10 @@ def test_launch_training_real_subprocess_reports_the_diverged_stop(tmp_path, mon
     images_dir, csv_path = write_regression_dataset(
         tmp_path, intensities=[0.0, 0.0, 0.0, 0.0], values=[0.1, 0.2, 0.3, 0.4])
 
-    cfg = {
-        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_pixel_sum_divide_model",
-                         "task": "regression"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path),
-                 "split": {"seed": 0, "val_ratio": 0.15}},
-        "batch_size": 4, "stages": [{"freeze_to": 0, "epochs": 5}],
-                     "mixed_precision": False, "device": "cpu",
-                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
-    }
+    cfg = regressor_config(
+        5, builder="tests.tiny_trainer_fixtures:build_pixel_sum_divide_model", batch_size=4,
+        data={"images_dir": str(images_dir), "labels_dir": str(csv_path),
+              "split": {"seed": 0, "val_ratio": 0.15}})
     res = launch_training(tmp_path, cfg, actor=None)
     assert "error" not in res, res
     experiment_id = res["experiment_id"]

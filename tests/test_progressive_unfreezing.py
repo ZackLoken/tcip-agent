@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._chain_fixtures import BESPOKE_CLASSIFIER
+
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 from torch import nn  # noqa: E402
@@ -302,24 +304,19 @@ def _model_source() -> dict:
     # LR-schedule / freeze / warmup logic. The smaller backbone routes through the identical
     # BackboneWrapper.freeze_to path and cuts per-test model-construction cost. The tv_* freeze
     # branch stays covered by test_freeze_to_is_per_stage_for_tv_backbones (kept on resnet50).
-    return {"builder": "tests.bespoke_models:build_bespoke_classifier", "task": "classification"}
+    return {"builder": BESPOKE_CLASSIFIER, "task": "classification"}
 
 
 def _cfg(stages, **extra) -> dict:
-    cfg = {
-        "model_source": _model_source(),
-        # The sizes _classification_loader's RGB, two-label table resolves.
-        "data": {"num_channels": 3, "num_classes": 2, "scope": {}},
-        "device": "cpu",
-        "stages": stages,
-        "mixed_precision": False,
-        "optimizer": {"name": "adamw", "backbone_lr": BASE_BB_LR, "head_lr": 1e-3,
-                      "weight_decay": 0},
-        "scheduler": {"type": "cosine"},
-        "early_stopping": {"enabled": False},
-    }
-    cfg.update(extra)
-    return cfg
+    from tests._chain_fixtures import training_config
+
+    # The sizes _classification_loader's RGB, two-label table resolves.
+    return training_config(
+        _model_source(), {"num_channels": 3, "num_classes": 2, "scope": {}},
+        **{"stages": stages,
+           "optimizer": {"name": "adamw", "backbone_lr": BASE_BB_LR, "head_lr": 1e-3,
+                         "weight_decay": 0},
+           **extra})
 
 
 # --------------------------------------------------------------------------

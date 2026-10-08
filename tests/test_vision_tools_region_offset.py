@@ -58,14 +58,15 @@ class PatchProposer:
 def patched_frame(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A dataset image with one red patch at ``PATCH``, and the patch engine wired in."""
     from tcip_mcp.pipelines import proposal
+    from tests._producer_fixtures import painted_frame
 
     images = tmp_path / "images" / UNDATED_BUCKET
     images.mkdir(parents=True)
-    arr = np.full((FRAME_H, FRAME_W, 3), 20, dtype=np.uint8)
     x1, y1, x2, y2 = PATCH
-    arr[y1:y2 + 1, x1:x2 + 1] = (255, 0, 0)
     path = images / "region.png"
-    Image.fromarray(arr, mode="RGB").save(path)
+    # The patch engine reports inclusive extents, so the patch covers its far edge too.
+    painted_frame(FRAME_W, FRAME_H, (20, 20, 20),
+                  [((x1, y1, x2 + 1, y2 + 1), (255, 0, 0))]).save(path)
 
     monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: PatchProposer())
     return path

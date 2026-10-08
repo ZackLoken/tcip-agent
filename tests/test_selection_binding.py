@@ -19,7 +19,8 @@ from tcip_mcp.pipelines.data.selection import ClassScope, read_selection
 from tcip_mcp.pipelines.data.split_construction import partition_samples
 from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
 from tcip_mcp.tools.data_tools import draw_splits
-from tests._producer_fixtures import label_image, registry_over
+from tests._chain_fixtures import BESPOKE_DETECTION, BLOB_BUILDER, run_config
+from tests._producer_fixtures import label_image, labeled_frame, registry_over
 from tests._verified_checkpoint_fixtures import partition_side
 
 SUBJECT = "leaf"
@@ -28,11 +29,8 @@ DATES = ("2-11-26", "2-12-01")
 
 
 def _write_stem(images_dir: Path, stem: str, annotations) -> None:
-    from PIL import Image
-
-    images_dir.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (64, 64), (100, 120, 90)).save(images_dir / f"{stem}.jpg")
-    label_image(images_dir / f"{stem}.jpg", annotations, 64, 64, keep_empty=True)
+    labeled_frame(images_dir / f"{stem}.jpg", annotations, 64, 64, (100, 120, 90),
+                  keep_empty=True)
 
 
 def _two_subject_two_date_dataset(root: Path) -> Path:
@@ -149,6 +147,10 @@ def build_recording_dataset(samples=None, scope=None, **kwargs) -> _RecordingDat
     return built
 
 
+RECORDING_DATASET = f"{__name__}:build_recording_dataset"
+"""The ``dataset_source`` builder of :func:`build_recording_dataset`."""
+
+
 def _draw(project: Path, root: Path, out: Path, *, subject: str = SUBJECT, seed: int = 2):
     result = draw_splits(project, str(root), output_path=str(out), subject=subject,
                          seed=seed, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
@@ -222,18 +224,7 @@ def test_a_multi_date_selection_trains_without_copying_anything(tmp_path: Path):
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
 
-    config = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"min_size": 64, "max_size": 64},
-                         "task": "detection"},
-        "data": {"split": {"selection_dir": str(out)}},
-        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-        "mixed_precision": False, "device": "cpu",
-        "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
-        # An untrained toy detector scores no objective; its validation loss is what ranks.
-        "evaluation": {"selection_metric": "loss"},
-    }
-    run_dir = opened_run(tmp_path, config, experiment_id="exp-multi-date")
+    run_dir = opened_run(tmp_path, run_config(out, BLOB_BUILDER), experiment_id="exp-multi-date")
 
     from tcip_mcp.pipelines.training.subprocess_worker import run_directory
 
@@ -280,19 +271,10 @@ def test_a_bound_run_keeps_its_selections_attributes_when_the_registry_is_reorde
         )),
     )))
 
-    config = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"min_size": 64, "max_size": 64},
-                         "task": "detection"},
-        # The directory a relaunched config still carries beside its binding: exactly what a
-        # registry re-read would resolve the wrong map from.
-        "data": {"images_dir": str(root / "images" / DATES[0]),
-                 "split": {"selection_dir": str(out)}},
-        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-        "mixed_precision": False, "device": "cpu",
-        "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
-        "evaluation": {"selection_metric": "loss"},
-    }
+    config = run_config(out, BLOB_BUILDER)
+    # The directory a relaunched config still carries beside its binding: exactly what a
+    # registry re-read would resolve the wrong map from.
+    config["data"]["images_dir"] = str(root / "images" / DATES[0])
     run_dir = opened_run(tmp_path, config, experiment_id="exp-reordered")
 
     run_directory(run_dir)
@@ -552,7 +534,7 @@ def test_a_bound_run_threads_a_bespoke_dataset_source(tmp_path: Path):
     drawn = _draw(tmp_path, root, out)
     data_cfg = _run_data_cfg(root, out)
     data_cfg["dataset_source"] = {
-        "builder": f"{__name__}:build_recording_dataset", "task": "detection",
+        "builder": RECORDING_DATASET, "task": "detection",
     }
 
     train_ds, _val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
@@ -578,7 +560,7 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(tmp_pa
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
-    source = {"builder": f"{__name__}:build_recording_dataset", "task": task}
+    source = {"builder": RECORDING_DATASET, "task": task}
 
     bound_cfg = _run_data_cfg(root, out)
     bound_cfg["dataset_source"] = source
@@ -637,7 +619,7 @@ def test_the_preflight_smoke_batch_is_the_batch_the_bound_run_trains(tmp_path: P
     drawn = _draw(tmp_path, root, out)
     config = {"model_source": {"task": "detection"}, "data": _run_data_cfg(root, out)}
     config["data"]["dataset_source"] = {
-        "builder": f"{__name__}:build_recording_dataset", "task": "detection",
+        "builder": RECORDING_DATASET, "task": "detection",
     }
 
     before = len(_RECORDED_BUILDS)
@@ -922,7 +904,7 @@ def test_preflight_flags_a_redraw_whose_members_hold_one_foreground_group(tmp_pa
 def _preflight_config(root: Path, selection_dir: Path, **overrides) -> dict:
     data_cfg = _run_data_cfg(root, selection_dir, **overrides)
     return {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": data_cfg, "batch_size": 2,
     }
@@ -993,6 +975,37 @@ def test_the_resolved_partition_carries_the_selection_it_bound(tmp_path: Path):
     samples = partition_samples(partition)
     assert all(s.group for s in samples)
     assert all(s.ground_truth_digest for s in samples)
+
+
+def test_a_bound_detection_run_stating_no_metric_selects_by_the_composite_objective(
+    tmp_path: Path,
+):
+    """The chain's detector trained over a drawn selection with no selection metric stated:
+    the completed run's record resolves the detection default, the composite objective, and
+    every epoch it logged ranks on a finite objective above zero rather than on its loss."""
+    import math
+
+    from tcip_mcp.experiments import epoch_rows, observe, read_rows
+    from tests import _chain_fixtures as chain
+    from tests._verified_checkpoint_fixtures import worker_run
+
+    root = tmp_path / "ds"
+    chain.synthetic_capture(root)
+    chain.draw_reference_selection(tmp_path, root, tmp_path / "selection")
+    config = chain.run_config(tmp_path / "selection")
+    assert "evaluation" not in config
+
+    observation = observe(worker_run(tmp_path, config, experiment_id="exp-default-objective"))
+
+    assert observation.state == "completed", observation.status_error
+    assert observation.resolution["objective"] == {"selection_metric": "objective",
+                                                   "higher_is_better": False}
+    rows = epoch_rows(read_rows(observation.metrics_log)[0])
+    assert rows
+    for row in rows:
+        assert row["selection_metric"] == "objective"
+        assert row["selection"] == row["val_objective"]
+        assert math.isfinite(row["selection"]) and row["selection"] > 0
 
 
 def test_a_run_that_draws_its_own_split_records_no_binding(tmp_path: Path):

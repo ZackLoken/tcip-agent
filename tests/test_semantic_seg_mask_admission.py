@@ -15,7 +15,7 @@ import pytest
 pytest.importorskip("torch")
 
 from PIL import Image  # noqa: E402
-from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
+from tests._producer_fixtures import dataset_over, painted_frame, run_over  # noqa: E402
 
 
 def _dataset(tmp_path: Path):
@@ -25,9 +25,7 @@ def _dataset(tmp_path: Path):
     masks_dir.mkdir()
     for i in range(2):
         Image.new("RGB", (8, 8), (i * 40, 0, 0)).save(images_dir / f"img{i}.png")
-    mask = np.zeros((8, 8), dtype=np.uint8)
-    mask[2:6, 2:6] = 1
-    Image.fromarray(mask, mode="L").save(masks_dir / "img0.png")
+    painted_frame(8, 8, 0, [((2, 2, 6, 6), 1)], mode="L").save(masks_dir / "img0.png")
     return images_dir, masks_dir
 
 
@@ -59,10 +57,8 @@ def test_the_class_count_is_derived_from_the_masks_the_run_was_handed(tmp_path: 
     reaching id 2 derive three, and a caller stating any count, the derived one included, refuses
     by name: the count is the masks' own, never an input compared against them."""
     images_dir, masks_dir = _dataset(tmp_path)
-    three_classes = np.zeros((8, 8), dtype=np.uint8)
-    three_classes[0:4, 0:4] = 1
-    three_classes[4:8, 4:8] = 2
-    Image.fromarray(three_classes, mode="L").save(masks_dir / "img1.png")
+    painted_frame(8, 8, 0, [((0, 0, 4, 4), 1), ((4, 4, 8, 8), 2)], mode="L").save(
+        masks_dir / "img1.png")
 
     _ds, data = run_over("semantic_seg", str(images_dir), str(masks_dir))
     assert data["num_classes"] == 3

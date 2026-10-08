@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._chain_fixtures import GT_ANCHOR_DETECTOR, TRAIN_BESPOKE
+
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
@@ -83,13 +85,13 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     src_file = bespoke_models.__file__
     config = {
         "model_source": {
-            "builder": "tests.bespoke_models:build_bespoke_detector",
+            "builder": GT_ANCHOR_DETECTOR,
             "builder_kwargs": {"gt_boxes_wh": gt_wh, "min_size": IMG, "max_size": IMG * 2},
             "task": "detection", "source_files": [src_file],
         },
         "data": {"images_dir": str(images_dir), "num_channels": 3,
                  "scope": asdict(dataset.scope), "split": {"seed": 0, "val_ratio": 0.15}},
-        "training_source": "tests.bespoke_models:train_bespoke",
+        "training_source": TRAIN_BESPOKE,
         "device": "cpu", "epochs": 2, "seed": 0,
     }
     from tests._verified_checkpoint_fixtures import worker_run
@@ -121,12 +123,12 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
 
     # ---- (b) the custom loop's checkpoint names its builder; provenance snapshot present ----
     best = torch.load(ckpt, weights_only=False)
-    assert best[CONFIG_KEY]["model_source"]["builder"].endswith(":build_bespoke_detector")
+    assert best[CONFIG_KEY]["model_source"]["builder"] == GT_ANCHOR_DETECTOR
 
     launch = read_record(out / RUN_FILE)
     assert launch["environment"]["torch"]
     manifest = launch["source"]
-    assert manifest["training_source"] == "tests.bespoke_models:train_bespoke"
+    assert manifest["training_source"] == TRAIN_BESPOKE
     assert any(e["src"] == src_file and len(e["sha256"]) == 64
                for e in manifest["files"])                  # source snapshotted with sha256
     assert (out / "model_src" / next(

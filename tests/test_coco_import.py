@@ -622,10 +622,9 @@ def test_a_run_length_mask_imports_as_the_rings_its_mask_yields(tmp_path: Path, 
     from pycocotools import mask as mask_utils
 
     from tcip_annotation.mask_contours import mask_to_polygon_rings
+    from tests._producer_fixtures import painted_array
 
-    mask = np.zeros((IMG, IMG), dtype=np.uint8)
-    mask[10:30, 12:40] = 1
-    mask[40:52, 44:60] = 1
+    mask = painted_array(IMG, IMG, [((12, 10, 40, 30), 1), ((44, 40, 60, 52), 1)])
     counts: object = (mask_utils.encode(np.asfortranarray(mask))["counts"].decode("ascii")
                       if compressed else _uncompressed_counts(mask))
     root = _dataset(tmp_path)

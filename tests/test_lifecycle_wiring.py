@@ -7,32 +7,30 @@ from tcip_mcp.pipelines.model_build import METRICS_KEY
 from tests._verified_checkpoint_fixtures import opened_run
 
 
-def _stock_run(root: Path, builder: dict, epochs: int, experiment_id: str) -> Path:
-    """A run under ``root`` over a regression dataset of its own on disk, opened by the
-    launcher's own writer and run in-process through the envelope's stock trainer over tiny
-    in-memory regression loaders. Returns the run directory."""
+def _stock_run(root: Path, builder: str, epochs: int, experiment_id: str,
+               builder_kwargs: dict | None = None) -> Path:
+    """A run of the regression ``builder`` at ``builder_kwargs`` under ``root`` over a
+    regression dataset of its own on disk, opened by the launcher's own writer and run in-process
+    through the envelope's stock trainer over tiny in-memory regression loaders. Returns the run
+    directory."""
     from torch.utils.data import DataLoader
 
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
     from tcip_mcp.pipelines.training.run_registry import observed_run
-    from tests.tiny_trainer_fixtures import ConstantImageDataset, write_regression_dataset
+    from tests.tiny_trainer_fixtures import (
+        ConstantImageDataset, regressor_config, write_regression_dataset,
+    )
 
     train_ds = ConstantImageDataset([0.1, 0.3, 0.5, 0.7], [0.2, 0.6, 1.0, 1.4])
     val_ds = ConstantImageDataset([0.2, 0.6], [0.4, 1.2])
     collate = task_collate("regression")
     images_dir, csv_path = write_regression_dataset(
         root / f"{experiment_id}-data", [0.1, 0.3, 0.5, 0.7], [0.2, 0.6, 1.0, 1.4])
-    config = {
-        "model_source": {**builder, "task": "regression"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path), "num_channels": 1,
-                 "split": {"seed": 0, "val_ratio": 0.15}},
-        "device": "cpu", "mixed_precision": False,
-        "stages": [{"freeze_to": 0, "epochs": epochs}],
-        "optimizer": {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0},
-        "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
-    }
+    config = regressor_config(epochs, builder=builder, builder_kwargs=builder_kwargs, data={
+        "images_dir": str(images_dir), "labels_dir": str(csv_path), "num_channels": 1,
+        "split": {"seed": 0, "val_ratio": 0.15}})
     run_dir = opened_run(root, config, experiment_id=experiment_id)
     run_training_envelope(TrainContext(
         run=observed_run(observe(run_dir)),
@@ -58,9 +56,10 @@ def test_a_stock_trainer_run_registers_with_trainer_source_and_the_best_epochs_m
 
     from tcip_mcp.experiments import observe
 
-    run_dir = _stock_run(tmp_path, {
-        "builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
-        "builder_kwargs": {"init_weight": 0.0}}, 2, "exp-trainer-source")
+    from tests.tiny_trainer_fixtures import MEAN_INTENSITY_REGRESSOR
+
+    run_dir = _stock_run(tmp_path, MEAN_INTENSITY_REGRESSOR, 2, "exp-trainer-source",
+                         builder_kwargs={"init_weight": 0.0})
 
     assert observe(run_dir).state == "completed", observe(run_dir).final
     entry = _entry(tmp_path, "exp-trainer-source")
@@ -80,9 +79,9 @@ def test_a_diverged_stock_run_ends_failed_and_registers_nothing(tmp_path):
     final status; the verdict leaves no checkpoint on disk and nothing reaches the registry."""
     from tcip_mcp.experiments import observe
 
-    run_dir = _stock_run(
-        tmp_path, {"builder": "tests.tiny_trainer_fixtures:build_always_diverged_model"}, 3,
-        "exp-diverged")
+    from tests.tiny_trainer_fixtures import ALWAYS_DIVERGED_MODEL
+
+    run_dir = _stock_run(tmp_path, ALWAYS_DIVERGED_MODEL, 3, "exp-diverged")
 
     final = observe(run_dir).final
     assert final["state"] == "failed"
@@ -102,9 +101,9 @@ def test_a_completed_run_with_a_diverged_val_metric_registers_it_as_null(tmp_pat
 
     from tcip_mcp.experiments import observe
 
-    run_dir = _stock_run(
-        tmp_path, {"builder": "tests.tiny_trainer_fixtures:build_nan_eval_regressor"}, 3,
-        "exp-nan-val")
+    from tests.tiny_trainer_fixtures import NAN_EVAL_REGRESSOR
+
+    run_dir = _stock_run(tmp_path, NAN_EVAL_REGRESSOR, 3, "exp-nan-val")
 
     assert observe(run_dir).state == "completed", observe(run_dir).final
 

@@ -36,6 +36,7 @@ from tcip_store import (
     BadKeyError, DecodeError, decode_value, encode_log_line, encode_record, finite_number,
     stored_number,
 )
+from tcip_store.file_backend import is_sharing_violation, retry_while_denied
 from tcip_store.values import NOT_FINITE_SUFFIX
 
 from tcip_mcp.audit import now_iso
@@ -251,10 +252,19 @@ def append_row(path: Path, row: dict) -> None:
         handle.write(line)
 
 
+SHARING_RETRY_BUDGET_S = 0.35
+"""Provisional, chosen rather than measured: how long a record read keeps retrying a sharing
+violation (``tcip_store.file_backend.retry_while_denied``) before raising it."""
+
+
 def read_record(path: Path) -> Any:
-    """The JSON record at ``path``. A missing file raises ``FileNotFoundError``; bytes that do not
-    decode raise ``DecodeError`` naming the file."""
-    data = path.read_bytes()
+    """The JSON record at ``path``. A Windows sharing violation is retried while
+    :data:`SHARING_RETRY_BUDGET_S` is unspent and raised once it is, no read starting after
+    the deadline; every other ``PermissionError``,
+    a missing file (``FileNotFoundError``) and bytes that do not decode (``DecodeError`` naming
+    the file) raise at once."""
+    data = retry_while_denied(path.read_bytes, SHARING_RETRY_BUDGET_S,
+                              denied=is_sharing_violation)
     try:
         return decode_value(data)
     except ValueError as exc:

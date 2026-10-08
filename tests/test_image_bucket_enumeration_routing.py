@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError
+from tests._chain_fixtures import BESPOKE_DETECTION
 from tests._cli_fixtures import run_tcip
 
 
@@ -82,7 +83,7 @@ def test_preflight_refuses_a_stem_collision(tmp_path):
     _label(bucket, "shoot_001")
 
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": {"images_dir": str(bucket), "scope": {"subject": SUBJECT}},
     }
@@ -141,7 +142,7 @@ def test_preflight_admits_a_clean_multi_image_bucket(tmp_path):
     _label(bucket, "shoot_001", "shoot_002")
 
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": {"images_dir": str(bucket), "scope": {"subject": SUBJECT},
                  "split": {"seed": 0, "val_ratio": 0.15}},
@@ -160,7 +161,7 @@ def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(tmp_path
     _label(bucket, "shoot_001", "shoot_002")
 
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": {"images_dir": str(bucket), "scope": {"subject": SUBJECT},
                  "split": {"group_by": "stem", "seed": 0, "val_ratio": 0.15}},
@@ -179,7 +180,7 @@ def test_calibration_ratio_feasibility_admits_a_clean_multi_image_bucket(tmp_pat
     _label(bucket, "shoot_001", "shoot_002")
 
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": BESPOKE_DETECTION,
                          "task": "detection"},
         "data": {"images_dir": str(bucket), "scope": {"subject": SUBJECT},
                  "tiling": {"enabled": True, "sliver_frac": 0.5},  # stated: two boxes, no spread

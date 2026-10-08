@@ -30,6 +30,7 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
     from tcip_annotation.state import Annotation, BBox
 
+    from tests._chain_fixtures import BLOB_BUILDER, training_config
     from tests._producer_fixtures import seed_labeled_images
 
     images_dir = seed_labeled_images(
@@ -38,17 +39,10 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
     proposed = propose_and_confirm(
         tmp_path, entry("leaf", ("leaf_length",), localization=CENTER_MATCH))
 
-    cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"min_size": 64, "max_size": 128},
-                         "task": "detection"},
-        "data": {"images_dir": str(images_dir), "scope": {"subject": "leaf"},
-                 "split": {"seed": 0, "val_ratio": 0.15}},
-        # An untrained toy detector scores no objective; its validation loss is what ranks.
-        "evaluation": {"trait": "leaf", "selection_metric": "loss"},
-        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-                     "mixed_precision": False, "device": "cpu",
-    }
+    cfg = training_config(BLOB_BUILDER, {"images_dir": str(images_dir),
+                                         "scope": {"subject": "leaf"},
+                                         "split": {"seed": 0, "val_ratio": 0.15}},
+                          evaluation={"trait": "leaf"})
     res = training_tools.launch_training(tmp_path, cfg, actor=None)
     assert "error" not in res, res
     assert res["pid"] != os.getpid()

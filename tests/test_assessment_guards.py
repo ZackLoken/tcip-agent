@@ -41,18 +41,14 @@ def _trained(project: Path, experiment_id: str):
 def _add_frame(images_dir: Path, stem: str, *, like: str, same_pixels: bool) -> None:
     """Add frame ``stem`` labelled exactly as frame ``like``: its image a byte copy of ``like``'s
     when ``same_pixels``, else a frame of its own (another shade) holding the same box."""
-    from PIL import Image, ImageDraw
-
-    from tests._producer_fixtures import image_label_key, label_image
+    from tests._producer_fixtures import image_label_key, label_image, painted_frame
 
     if same_pixels:
         shutil.copyfile(images_dir / f"{like}.png", images_dir / f"{stem}.png")
     else:
         x0, y0, size = object_at(int(like[1:]))
-        frame = Image.new("RGB", (IMG, IMG), color=(90, 60, 30))
-        ImageDraw.Draw(frame).rectangle([x0, y0, x0 + size - 1, y0 + size - 1],
-                                        fill=(250, 240, 200))
-        frame.save(images_dir / f"{stem}.png")
+        painted_frame(IMG, IMG, (90, 60, 30), [((x0, y0, x0 + size, y0 + size),
+                                                 (250, 240, 200))]).save(images_dir / f"{stem}.png")
     label_image(images_dir / f"{stem}.png", json_io.read_label_document(
         image_label_key(images_dir / f"{like}.png")).annotations, IMG, IMG)
 

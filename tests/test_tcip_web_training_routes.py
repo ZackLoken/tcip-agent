@@ -403,9 +403,8 @@ def test_a_route_launch_shows_its_declaration_from_its_launch_event(
     from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
     from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
-    opened_run(tmp_path, detection_config(
-        tmp_path / "gui-data", batch_size=1, stages=[{"freeze_to": -1, "epochs": 1}],
-        mixed_precision=False, device="cpu"), experiment_id="exp-gui-relaunch")
+    opened_run(tmp_path, detection_config(tmp_path / "gui-data", batch_size=1),
+               experiment_id="exp-gui-relaunch")
 
     from tcip_mcp.audit import audit_log_key
     from tcip_store import read_log
@@ -427,19 +426,12 @@ def test_a_route_launch_shows_its_declaration_from_its_launch_event(
 
 
 def _regression_config(tmp_path: Path) -> dict:
-    from tests.tiny_trainer_fixtures import write_regression_dataset
+    from tests.tiny_trainer_fixtures import regressor_config, write_regression_dataset
 
     images_dir, csv_path = write_regression_dataset(
         tmp_path, intensities=[0.0, 1.0], values=[0.1, 0.9])
-    return {
-        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
-                         "task": "regression"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path),
-                 "split": {"seed": 0, "val_ratio": 0.15}},
-        "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
-        "mixed_precision": False, "device": "cpu",
-        "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
-    }
+    return regressor_config(1, data={"images_dir": str(images_dir), "labels_dir": str(csv_path),
+                                     "split": {"seed": 0, "val_ratio": 0.15}})
 
 
 def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
@@ -495,8 +487,8 @@ def test_list_runs_route_names_the_run_s_selection_metric(
 
     by_id = {r["experiment_id"]: r for r in list_runs_route().model_dump()["runs"]}
     row = by_id[result["experiment_id"]]
-    # Regression selects on the training loss by default; there is no evaluation.selection_metric
-    # override in this config.
+    # Regression selects on its loss by default; there is no evaluation.selection_metric override
+    # in this config.
     assert row["best_metric_name"] == "loss"
     assert isinstance(row["best_metric"], (int, float)) and math.isfinite(row["best_metric"])
 

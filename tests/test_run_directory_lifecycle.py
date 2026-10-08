@@ -46,22 +46,15 @@ def launch(tmp_path, monkeypatch, children):
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
     from tcip_mcp.tools.training_tools import launch_training
-    from tests.tiny_trainer_fixtures import write_regression_dataset
+    from tests.tiny_trainer_fixtures import regressor_config, write_regression_dataset
 
     images_dir, csv_path = write_regression_dataset(
         tmp_path / "ds", intensities=[0.0, 0.25, 0.5, 1.0], values=[0.1, 0.3, 0.5, 0.9])
 
     def _launch(epochs: int = 1, *, resume_from: str = "", **extra) -> dict:
-        config = {
-            "model_source": {
-                "builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
-                "task": "regression"},
-            "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path),
-                     "split": {"seed": 0, "val_ratio": 0.15}},
-            "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": epochs}],
-            "mixed_precision": False, "device": "cpu",
-            "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False}, **extra,
-        }
+        config = regressor_config(epochs, data={
+            "images_dir": str(images_dir), "labels_dir": str(csv_path),
+            "split": {"seed": 0, "val_ratio": 0.15}}, **extra)
         return launch_training(tmp_path, config, resume_from=resume_from, actor=None)
 
     return _launch
@@ -231,6 +224,104 @@ def test_a_reader_never_sees_a_final_status_before_its_bytes_are_whole(tmp_path,
     assert experiments.observe(run_dir).state == "failed"
 
 
+def _refusing_final_status(monkeypatch, times: float, winerror: int | None = None) -> list[Path]:
+    """Make the next ``times`` reads of any final-status record fail with a ``PermissionError``
+    carrying ``winerror`` (by default a Windows sharing violation); the paths refused, in
+    order."""
+    from tcip_store.file_backend import SHARING_VIOLATION
+
+    from tcip_mcp.experiments import FINAL_STATUS_FILE
+
+    code = SHARING_VIOLATION if winerror is None else winerror
+
+    refused: list[Path] = []
+    real_read = Path.read_bytes
+
+    def read_bytes(self: Path) -> bytes:
+        if self.name == FINAL_STATUS_FILE and len(refused) < times:
+            refused.append(self)
+            exc = PermissionError(13, "The process cannot access the file", str(self))
+            exc.winerror = code  # type: ignore[misc]
+            raise exc
+        return real_read(self)
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    return refused
+
+
+def test_a_final_status_a_sharing_violation_refuses_once_is_read_on_the_retry(
+    tmp_path, monkeypatch,
+):
+    """A completed run's final status refused once by a sharing violation is read again and the
+    run observes as completed, rather than one unlucky poll failing the observation."""
+    from tcip_mcp.experiments import observe
+    from tests._verified_checkpoint_fixtures import finished_run
+
+    run_dir = finished_run(tmp_path, experiment_id="exp-shared-status")
+    refused = _refusing_final_status(monkeypatch, times=1)
+
+    assert observe(run_dir).state == "completed"
+    assert len(refused) == 1
+
+
+def test_a_final_status_a_sharing_violation_keeps_refusing_raises(tmp_path, monkeypatch):
+    """A sharing violation that outlasts the retry budget is raised, never read as a run with no
+    final status."""
+    import math
+
+    from tcip_mcp.experiments import observe
+    from tests._verified_checkpoint_fixtures import finished_run
+
+    run_dir = finished_run(tmp_path, experiment_id="exp-locked-status")
+    refused = _refusing_final_status(monkeypatch, times=math.inf)
+
+    with pytest.raises(PermissionError):
+        observe(run_dir)
+    assert len(refused) > 1
+
+
+def test_a_final_status_denied_for_another_reason_raises_without_a_retry(tmp_path, monkeypatch):
+    """Only a sharing violation is retried: a read denied for any other reason (here Windows'
+    access denied, 5) raises on its first refusal."""
+    import math
+
+    from tcip_mcp.experiments import observe
+    from tests._verified_checkpoint_fixtures import finished_run
+
+    run_dir = finished_run(tmp_path, experiment_id="exp-denied-status")
+    refused = _refusing_final_status(monkeypatch, times=math.inf, winerror=5)
+
+    with pytest.raises(PermissionError):
+        observe(run_dir)
+    assert len(refused) == 1
+
+
+def test_no_retry_starts_after_the_budget_is_spent(monkeypatch):
+    """A denied action that would succeed only after the budget is never run: a wait that wakes
+    late, past the deadline, ends in the denial being raised rather than in another attempt."""
+    from tcip_store import file_backend
+
+    clock = {"now": 0.0}
+
+    def sleep_waking_late(seconds: float) -> None:
+        clock["now"] += seconds + 0.001
+
+    monkeypatch.setattr(file_backend.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(file_backend.time, "sleep", sleep_waking_late)
+    monkeypatch.setattr(file_backend.random, "uniform", lambda lo, hi: 0.05)
+    started: list[float] = []
+
+    def action() -> str:
+        started.append(clock["now"])
+        if clock["now"] > 0.12:
+            return "released"
+        raise PermissionError(13, "denied")
+
+    with pytest.raises(PermissionError):
+        file_backend.retry_while_denied(action, 0.12)
+    assert started == pytest.approx([0.0, 0.051, 0.102])
+
+
 def test_a_completed_run_missing_its_checkpoint_refuses_naming_it(tmp_path):
     """A completed run's checkpoint is read by whatever loads it; with that file gone the load
     refuses naming it rather than answering from anything else."""
@@ -315,20 +406,14 @@ def _trial(tmp_path, point: dict | None = None, **extra) -> tuple[Path, list[flo
     from tcip_mcp.experiments import run_dirs
     from tcip_mcp.tools.training_tools import _run_hpo_trial
     from tests._verified_checkpoint_fixtures import opened_sweep
-    from tests.tiny_trainer_fixtures import write_regression_dataset
+    from tests.tiny_trainer_fixtures import regressor_config, write_regression_dataset
 
     images_dir, csv_path = write_regression_dataset(
         tmp_path / "ds", intensities=[0.0, 0.25, 0.5, 0.75, 1.0, 0.1],
         values=[0.1, 0.3, 0.5, 0.7, 0.9, 0.2])
-    base_config = {
-        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
-                         "task": "regression"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path),
-                 "split": {"val_ratio": 0.34, "seed": 3}},
-        "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 2}],
-        "mixed_precision": False, "device": "cpu",
-        "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False}, **extra,
-    }
+    base_config = regressor_config(2, data={
+        "images_dir": str(images_dir), "labels_dir": str(csv_path),
+        "split": {"val_ratio": 0.34, "seed": 3}}, **extra)
     sweep = opened_sweep(tmp_path, base_config)
     reported: list[float] = []
     _run_hpo_trial(point or {"lr": 0.01}, reported.append, sweep, "a")

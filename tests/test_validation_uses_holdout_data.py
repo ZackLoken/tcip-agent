@@ -18,11 +18,10 @@ from tcip_mcp.pipelines.training.generic_trainer import train
 from tests.tiny_trainer_fixtures import (
     capture_model,
     opposed_regression_loaders,
+    regressor_config,
     trainer_run,
     write_regression_dataset,
 )
-
-BUILDER = "tests.tiny_trainer_fixtures:build_mean_intensity_regressor"
 
 # Train values sit at 2x the frame intensity, holdout values at -5x: the two loaders are fit by
 # opposite-signed weights, so training progress on one is a regression on the other.
@@ -30,18 +29,8 @@ TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
 VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
 
 
-def _config(out_dir, *, epochs: int, early_stopping: dict) -> dict:
-    return {
-        "model_source": {"builder": BUILDER, "builder_kwargs": {"init_weight": 0.0},
-                         "task": "regression"},
-        "data": {"num_channels": 1, "scope": {}},
-        "device": "cpu",
-        "mixed_precision": False,
-        "stages": [{"freeze_to": 0, "epochs": epochs}],
-        "optimizer": {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0},
-        "checkpoint_every_n_epochs": 0,
-        "early_stopping": early_stopping,
-    }
+def _config(epochs: int, **overrides) -> dict:
+    return regressor_config(epochs, builder_kwargs={"init_weight": 0.0}, **overrides)
 
 
 def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path, monkeypatch):
@@ -58,7 +47,7 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
 
     images_dir, csv_path = write_regression_dataset(
         tmp_path / "ds", TRAIN_INTENSITIES, [2.0 * c for c in TRAIN_INTENSITIES])
-    config = _config(tmp_path, epochs=1, early_stopping={"enabled": False})
+    config = _config(1)
     config["data"] = {**config["data"], "images_dir": str(images_dir),
                       "labels_dir": str(csv_path), "split": {"seed": 1, "val_ratio": 0.15}}
     out_dir = opened_run(tmp_path, config)
@@ -99,8 +88,7 @@ def test_best_checkpoint_and_early_stopping_follow_the_holdout_loader(tmp_path, 
     capture_model(monkeypatch, models)
 
     out_dir = tmp_path / "out"
-    config = _config(out_dir, epochs=4,
-                     early_stopping={"enabled": True, "patience": 1, "min_delta": 1e-4})
+    config = _config(4, early_stopping={"enabled": True, "patience": 1, "min_delta": 1e-4})
     run = trainer_run(config, out_dir, project=tmp_path, has_val_loader=True, id="auto-run-76")
     run = train(run, train_loader, val_loader=val_loader)
 

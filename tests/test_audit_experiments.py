@@ -8,7 +8,9 @@ import pytest
 
 import tcip_store as ts
 
-from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
+from tests._verified_checkpoint_fixtures import (
+    BUILT_DETECTOR, detection_config, log_epoch, opened_run,
+)
 
 
 # ── Audit logging ──
@@ -154,7 +156,7 @@ def test_compare_experiments(tmp_path):
     result = exp.compare_experiments(["exp-x", "exp-y"], project=tmp_path)
     assert result["count"] == 2
     exps = {e["experiment_id"]: e for e in result["experiments"]}
-    assert exps["exp-x"]["model"] == "tests.bespoke_models:build_bespoke_detection"
+    assert exps["exp-x"]["model"] == BUILT_DETECTOR["builder"]
     assert exps["exp-y"]["last_logged_metrics"]["mAP50"] == 0.7
 
 

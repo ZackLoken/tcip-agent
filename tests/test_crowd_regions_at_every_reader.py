@@ -22,7 +22,7 @@ from PIL import Image  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key  # noqa: E402
-from tests._producer_fixtures import label_image  # noqa: E402
+from tests._producer_fixtures import label_image, labeled_frame  # noqa: E402
 from tests.bespoke_models import BrightRegionDetector  # noqa: E402
 
 SUBJECT = "bur"
@@ -56,16 +56,14 @@ def _read_back(root: Path, stem: str, anns: list) -> list:
 
 
 def _labeled(root: Path, stems=("c0", "c1"), crowd=True) -> Path:
-    """Frames each holding one bur and, when ``crowd``, one region of unseparated burs; their
-    images directory."""
+    """Frames each holding one bright bur and, when ``crowd``, one region of unseparated burs;
+    their images directory."""
     images = root / "images" / UNDATED_BUCKET
-    images.mkdir(parents=True, exist_ok=True)
     for stem in stems:
-        Image.new("RGB", (IMG, IMG), (40, 40, 40)).save(images / f"{stem}.png")
         anns = [Annotation(subject=SUBJECT, geometry=OBJECT)]
         if crowd:
             anns.append(Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True))
-        label_image(images / f"{stem}.png", anns, IMG, IMG)
+        labeled_frame(images / f"{stem}.png", anns, IMG, IMG, (40, 40, 40))
     return images
 
 
@@ -150,21 +148,6 @@ def test_a_crop_keeps_each_rows_crowd_flag_with_its_box(tmp_path: Path):
     assert cropped["iscrowd"].tolist() == [1] and cropped["labels"].tolist() == [1]
 
 
-def _train_config(root: Path) -> dict:
-    return {
-        "model_source": {"builder": f"{__name__}:build_recording_detector", "builder_kwargs": {},
-                         "task": "detection"},
-        "data": {"num_channels": 3, "scope": {"subject": SUBJECT, "attributes": []}},
-        "batch_size": 2, "stages": [{"freeze_to": -1, "epochs": 1}],
-        "mixed_precision": False, "device": "cpu", "checkpoint_every_n_epochs": 1,
-        "early_stopping": {"enabled": False},
-        # An untrained toy detector scores no objective; its validation loss is what ranks.
-        "evaluation": {"selection_metric": "loss"},
-        "optimizer": {"name": "sgd", "backbone_lr": 1e-3, "head_lr": 1e-2, "weight_decay": 0},
-        "scheduler": {"type": "cosine"}, "gradient_accumulation_steps": 1,
-    }
-
-
 def test_the_trainer_and_the_validation_loss_hand_the_heads_objects_only(tmp_path: Path):
     """Both hand-offs to a model's training forward, the training step and the validation loss,
     withhold every crowd row the loader keeps."""
@@ -172,14 +155,18 @@ def test_the_trainer_and_the_validation_loss_hand_the_heads_objects_only(tmp_pat
 
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.generic_trainer import train
+    from tests._chain_fixtures import training_config
     from tests.tiny_trainer_fixtures import trainer_run
 
     loader_ds = _detection_loader(tmp_path / "ds")
     assert loader_ds[0][1]["iscrowd"].tolist() == [0, 1]  # the loader keeps every row
     collate = task_collate("detection")
     RecordingDetector.handed.clear()
-    run = trainer_run(_train_config(tmp_path), tmp_path / "run", project=tmp_path,
-                      has_val_loader=True, id="crowd-run")
+    config = training_config(
+        {"builder": f"{__name__}:build_recording_detector", "task": "detection"},
+        {"num_channels": 3, "scope": {"subject": SUBJECT, "attributes": []}})
+    run = trainer_run(config, tmp_path / "run", project=tmp_path, has_val_loader=True,
+                      id="crowd-run")
     completed = train(run, DataLoader(loader_ds, batch_size=2, collate_fn=collate),
                       val_loader=DataLoader(loader_ds, batch_size=2, collate_fn=collate))
 

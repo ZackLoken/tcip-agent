@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from tests._chain_fixtures import BESPOKE_DETECTION
 from tests._producer_fixtures import gray_frame
 
 torch = pytest.importorskip("torch")
@@ -22,7 +23,7 @@ def _detection_checkpoint(tmp_path: Path) -> str:
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     return registered_checkpoint(tmp_path, model_source={
-        "builder": "tests.bespoke_models:build_bespoke_detection",
+        "builder": BESPOKE_DETECTION,
         "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2}, "task": "detection"})
 
 
@@ -139,7 +140,7 @@ def test_the_pass_decodes_through_the_checkpoints_own_recorded_attributes(tmp_pa
                   cr.Attribute("grade", "ordinal", ("low", "mid", "high")))
     ckpt = registered_checkpoint(
         tmp_path,
-        model_source={"builder": "tests.bespoke_models:build_bespoke_detection",
+        model_source={"builder": BESPOKE_DETECTION,
                       "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
                       "task": "detection"},
         data={"num_channels": 3, "scope": {"subject": "bud"}},

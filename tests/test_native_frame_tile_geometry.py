@@ -21,6 +21,7 @@ import pytest
 pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
+from tests._chain_fixtures import BESPOKE_DETECTION  # noqa: E402
 from tests._producer_fixtures import gray_frame  # noqa: E402
 pytest.importorskip("torchvision")
 import torch  # noqa: E402
@@ -209,7 +210,7 @@ def test_a_checkpoint_carries_its_untiled_training_geometry_to_the_predictor(tmp
     from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.tools.model_tools import register_model
 
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
+    model_source = {"builder": BESPOKE_DETECTION,
                     "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
                     "task": "detection"}
     ckpt = tmp_path / "model_best.pt"
@@ -358,7 +359,7 @@ def test_a_tile_no_pil_mode_represents_keeps_its_own_pixels(tmp_path, caplog):
 def _native_frame_checkpoint(tmp_path: Path, augmentation: dict | str | None = None) -> str:
     from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
 
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
+    model_source = {"builder": BESPOKE_DETECTION,
                     "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
                     "task": "detection"}
     config: dict = {"model_source": model_source,
@@ -628,7 +629,7 @@ def test_an_explicit_edge_on_a_checkpoint_recording_no_geometry_clears():
 def _tiled_checkpoint(tmp_path: Path, tile_size: int) -> str:
     from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
 
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
+    model_source = {"builder": BESPOKE_DETECTION,
                     "builder_kwargs": {"min_size": tile_size, "max_size": tile_size * 2},
                     "task": "detection"}
     config = {"model_source": model_source,
@@ -642,7 +643,7 @@ def _tiled_checkpoint(tmp_path: Path, tile_size: int) -> str:
 def _native_frame_checkpoint_of_size(tmp_path: Path, size: int) -> str:
     from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
 
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
+    model_source = {"builder": BESPOKE_DETECTION,
                     "builder_kwargs": {"min_size": size, "max_size": size * 2},
                     "task": "detection"}
     config = {"model_source": model_source,

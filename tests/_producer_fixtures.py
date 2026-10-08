@@ -69,16 +69,54 @@ def one_labeled_capture(root):
     return root
 
 
-def seed_labeled_images(images_dir, annotations, *, n: int, width: int, height: int):
-    """Make ``images_dir``, a capture of a dataset image tree, and write ``n`` three-band
-    ``width`` by ``height`` images ``img<i>.png``, each with a label document holding
-    ``annotations``; ``images_dir``."""
-    from PIL import Image
+BRIGHT = (230, 230, 230)
+"""The color a painted object is bright in, past every bright-pixel threshold the toy detectors
+read."""
 
+
+def painted_frame(width: int, height: int, background, extents, mode: str = "RGB"):
+    """A ``mode`` image of ``width`` by ``height`` in ``background``, each of ``extents`` (a
+    half-open pixel box ``(x1, y1, x2, y2)`` beside its color) filled in its color."""
+    from PIL import Image, ImageDraw
+
+    frame = Image.new(mode, (width, height), background)
+    draw = ImageDraw.Draw(frame)
+    for (x1, y1, x2, y2), color in extents:
+        draw.rectangle([x1, y1, x2 - 1, y2 - 1], fill=color)
+    return frame
+
+
+def painted_array(width: int, height: int, extents, *, background=0, mode: str = "L"):
+    """The :func:`painted_frame` of ``extents`` as a writable numpy array (``uint8`` in mode
+    ``L``, ``float32`` in mode ``F``), ``height`` rows by ``width`` columns."""
+    import numpy as np
+
+    return np.array(painted_frame(width, height, background, extents, mode=mode))
+
+
+def labeled_frame(path, annotations, width: int, height: int,
+                  background: tuple[int, int, int], **kwargs: Any):
+    """A :func:`painted_frame` of the dim ``background`` written at ``path``, :data:`BRIGHT`
+    over the extent of each of ``annotations`` that has one and is no crowd region, and labeled
+    with ``annotations`` (:func:`label_image`, ``kwargs`` its own); ``path``."""
+    from tcip_annotation.state import Point, bbox_of
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    boxes = [bbox_of(a.geometry) for a in annotations
+             if not isinstance(a.geometry, Point) and not a.iscrowd]
+    painted_frame(width, height, background,
+                  [((b.x1, b.y1, b.x2, b.y2), BRIGHT) for b in boxes]).save(path)
+    label_image(path, annotations, width, height, **kwargs)
+    return path
+
+
+def seed_labeled_images(images_dir, annotations, *, n: int, width: int, height: int):
+    """Make ``images_dir``, a capture of a dataset image tree, and write ``n``
+    :func:`labeled_frame` images ``img<i>.png`` of ``width`` by ``height``, each holding
+    ``annotations``; ``images_dir``."""
     images_dir.mkdir(parents=True, exist_ok=True)
     for i in range(n):
-        Image.new("RGB", (width, height), color=(10 * i, 0, 0)).save(images_dir / f"img{i}.png")
-        label_image(images_dir / f"img{i}.png", annotations, width, height)
+        labeled_frame(images_dir / f"img{i}.png", annotations, width, height, (10 * i, 0, 0))
     return images_dir
 
 
@@ -92,18 +130,18 @@ def seed_bud_images(images_dir, *, n: int = 3, size: int = 128,
                                n=n, width=size, height=size)
 
 
-def small_detection_config(images_dir) -> dict:
-    """A one-epoch CPU detection run of the bespoke detector over ``images_dir``, drawing its
-    split at seed 0."""
-    return {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"min_size": 64, "max_size": 128},
-                         "task": "detection"},
-        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
-                 "split": {"seed": 0, "val_ratio": 0.15}},
-        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-        "mixed_precision": False, "device": "cpu",
-    }
+def small_detection_config(images_dir, model_source: dict | None = None) -> dict:
+    """A :func:`~tests._chain_fixtures.training_config` of ``model_source`` (by default the
+    bespoke torchvision detector,
+    :data:`~tests._verified_checkpoint_fixtures.BUILT_DETECTOR`) over ``images_dir``'s ``bud``
+    boxes, drawing its split at seed 0."""
+    from tests._chain_fixtures import training_config
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
+
+    return training_config(
+        model_source or BUILT_DETECTOR,
+        {"images_dir": str(images_dir), "scope": {"subject": "bud"},
+         "split": {"seed": 0, "val_ratio": 0.15}})
 
 
 def registry_over(dataset_root, registry) -> None:

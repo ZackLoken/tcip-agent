@@ -1,9 +1,10 @@
 """What a training stage starts from, when it ends, and that a resumed run trains as an
 uninterrupted one across a stage boundary.
 
-Every run here trains a one-parameter regressor whose holdout loss worsens with every epoch
-(``opposed_regression_loaders``), so each stage's best epoch is its first and never its last: a
-stage that started from its predecessor's last epoch instead of its best one is visible.
+The multi-epoch handoff runs of ``MeanIntensityRegressor`` train over
+``opposed_regression_loaders``, whose holdout loss worsens as the training loss improves, so
+each of their stages has its best epoch first and not last: a stage that started from its
+predecessor's last epoch instead of its best one is visible.
 """
 
 from __future__ import annotations
@@ -19,37 +20,25 @@ from tcip_mcp.pipelines.schemas import SCHEDULER_TYPES  # noqa: E402
 from tcip_mcp.pipelines.training import generic_trainer as gt  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import train  # noqa: E402
 from tests.tiny_trainer_fixtures import (  # noqa: E402
+    NAN_EVAL_REGRESSOR,
+    TWO_RATE_REGRESSOR,
     capture_model,
     opposed_regression_loaders,
+    regressor_config,
     trainer_run,
 )
 
-BUILDER = "tests.tiny_trainer_fixtures:build_mean_intensity_regressor"
 TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
 VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
 
 
 def _config(stages: list[dict], **extra) -> dict:
-    config = {
-        "model_source": {"builder": BUILDER, "task": "regression"},
-        "data": {"num_channels": 1, "scope": {}},
-        "device": "cpu",
-        "mixed_precision": False,
-        "seed": 3,
-        "stages": stages,
-        "optimizer": {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0},
-        "checkpoint_every_n_epochs": 0,
-        "early_stopping": {"enabled": False},
-    }
-    config.update(extra)
-    return config
+    return regressor_config(**{"seed": 3, "stages": stages, **extra})
 
 
-def _train(tmp_path, config: dict, name: str, *, shuffle_seed=None, builder=None, **kwargs):
+def _train(tmp_path, config: dict, name: str, *, shuffle_seed=None, **kwargs):
     train_loader, val_loader = opposed_regression_loaders(
         TRAIN_INTENSITIES, VAL_INTENSITIES, shuffle_seed=shuffle_seed)
-    if builder is not None:
-        config = {**config, "model_source": {"builder": builder, "task": "regression"}}
     run = trainer_run(config, tmp_path / name, project=tmp_path, has_val_loader=True, id=name)
     return train(run, train_loader, val_loader=val_loader, **kwargs)
 
@@ -151,9 +140,8 @@ def test_a_stage_with_no_selectable_epoch_fails_the_run_naming_it(tmp_path):
     """A model whose predictions are all non-finite gives its prediction-derived selection metric
     no value that ranks, so no epoch of the first stage is selectable."""
     config = _config([{"freeze_to": 0, "epochs": 2}, {"freeze_to": 0, "epochs": 2}],
-                     evaluation={"selection_metric": "mae"})
-    run = _train(tmp_path, config, "no-best",
-                 builder="tests.tiny_trainer_fixtures:build_nan_eval_regressor")
+                     evaluation={"selection_metric": "mae"}, builder=NAN_EVAL_REGRESSOR)
+    run = _train(tmp_path, config, "no-best")
 
     assert run.status == "failed"
     assert "stage 0 produced no selectable epoch" in run.status_error
@@ -193,18 +181,18 @@ def test_a_resume_whose_optimizer_orders_its_groups_differently_warms_up_as_the_
     """Two param groups at different rates, a stage boundary with warmup, and a resume part way
     through the warmup into an optimizer whose groups come in the reverse order: each parameter
     warms up from its own handed-off rate, so the resumed run trains as the uninterrupted one."""
-    two_rate = "tests.tiny_trainer_fixtures:build_two_rate_regressor"
-    config = _config([{"freeze_to": 0, "epochs": 2}, {"freeze_to": 0, "epochs": 4}],
-                     optimizer={"name": "adamw", "backbone_lr": 0.01, "head_lr": 0.05,
-                                "weight_decay": 0.0},
-                     scheduler={"type": "step"}, stage_warmup_epochs=3,
-                     checkpoint_every_n_epochs=1)
-    config["model_source"] = {"builder": two_rate, "task": "regression"}
-    straight = _train(tmp_path, config, "straight")
+    def two_rate_config(**builder_kwargs) -> dict:
+        return _config([{"freeze_to": 0, "epochs": 2}, {"freeze_to": 0, "epochs": 4}],
+                       optimizer={"name": "adamw", "backbone_lr": 0.01, "head_lr": 0.05,
+                                  "weight_decay": 0.0},
+                       scheduler={"type": "step"}, stage_warmup_epochs=3,
+                       checkpoint_every_n_epochs=1, builder=TWO_RATE_REGRESSOR,
+                       builder_kwargs=builder_kwargs or None)
+
+    straight = _train(tmp_path, two_rate_config(), "straight")
     assert straight.status == "completed", straight.status_error
 
-    reversed_config = {**config, "model_source": {
-        "builder": two_rate, "builder_kwargs": {"reverse_groups": True}, "task": "regression"}}
+    reversed_config = two_rate_config(reverse_groups=True)
     checkpoint = tmp_path / "straight" / "checkpoint_epoch_3.pt"
     resumed = _train(tmp_path, reversed_config, "resumed", resume_from=str(checkpoint))
     assert resumed.status == "completed", resumed.status_error

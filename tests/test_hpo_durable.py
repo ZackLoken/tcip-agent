@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests._chain_fixtures import BARE_SCORE_THRESH_DETECTOR, BESPOKE_DETECTION
+
 
 def _stub_search(monkeypatch, *, during=None) -> dict:
     """Replace Ray Tune's search with one that calls ``during(**kw)``; returns the keywords it
@@ -149,14 +151,14 @@ def test_run_hyperparameter_search_checks_a_swept_placeholder_axis_at_its_resolv
                                       "task": "detection"},
                      "data": real_hpo_base_config["data"]},
         param_space={"model_source.builder": {
-            "type": "categorical", "choices": ["tests.bespoke_models:build_bespoke_detection"]}},
+            "type": "categorical", "choices": [BESPOKE_DETECTION]}},
         n_trials=1, search_seed=0)
 
     assert "error" not in result, result
 
 
 @pytest.mark.parametrize("choices", [["still:bad"],
-                                     ["tests.bespoke_models:build_bespoke_detection", "still:bad"]],
+                                     [BESPOKE_DETECTION, "still:bad"]],
                          ids=["every-choice-fails", "a-later-choice-fails"])
 def test_run_hyperparameter_search_refuses_a_swept_axis_any_of_whose_choices_fails(
     tmp_path, real_hpo_base_config, monkeypatch, choices
@@ -189,8 +191,8 @@ def test_run_hyperparameter_search_admits_a_swept_axis_whose_every_choice_resolv
                      "data": real_hpo_base_config["data"]},
         param_space={"model_source.builder": {
             "type": "categorical",
-            "choices": ["tests.bespoke_models:build_bespoke_detection",
-                        "tests.bespoke_models:build_bare_score_thresh_detector"]}},
+            "choices": [BESPOKE_DETECTION,
+                        BARE_SCORE_THRESH_DETECTOR]}},
         n_trials=1, search_seed=0)
 
     assert "error" not in result, result

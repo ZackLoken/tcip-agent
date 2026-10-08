@@ -76,10 +76,11 @@ def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
     from tcip_mcp import experiments
     from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
     from tcip_mcp.pipelines.training.run_registry import observed_run
+    from tests._chain_fixtures import SAVE_BUILT_WEIGHTS
 
     run_id = "exp-023-walnut-shell-det"
     run_dir = opened_run(tmp_path, detection_config(
-        tmp_path / "data", training_source="tests.bespoke_models:save_built_weights",
+        tmp_path / "data", training_source=SAVE_BUILT_WEIGHTS,
         fixture_rows=[{"epoch": 2, "loss": 0.2}]), experiment_id=run_id)
     log_epoch(run_dir, 1, {"loss": 0.5})
 

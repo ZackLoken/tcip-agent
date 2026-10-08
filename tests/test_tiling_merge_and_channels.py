@@ -5,7 +5,15 @@ from __future__ import annotations
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 import numpy as np
-from tests._producer_fixtures import dataset_over, label_image  # noqa: E402
+from tests._producer_fixtures import dataset_over, label_image, painted_array  # noqa: E402
+
+
+def _patched(width=40, height=24, bands=5, patch=(28, 12)) -> np.ndarray:
+    """A black ``height`` by ``width`` array of ``bands`` bands, bright in every band over the
+    6 px square at ``patch``."""
+    px, py = patch
+    band = painted_array(width, height, [((px, py, px + 6, py + 6), 255)])
+    return np.stack([band] * bands, axis=-1)
 
 
 def _multiband_detection_fixture(tmp_path, width=40, height=24, bands=5, patch=(28, 12)):
@@ -16,10 +24,8 @@ def _multiband_detection_fixture(tmp_path, width=40, height=24, bands=5, patch=(
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
-    arr = np.zeros((height, width, bands), dtype=np.uint8)
     px, py = patch
-    arr[py:py + 6, px:px + 6, :] = 255
-    tifffile.imwrite(images_dir / "a.tif", arr)
+    tifffile.imwrite(images_dir / "a.tif", _patched(width, height, bands, patch))
     label_image(images_dir / "a.tif",
                 [Annotation(subject="bud", geometry=BBox(px, py, px + 6, py + 6))],
                 width, height, keep_empty=True)
@@ -68,9 +74,7 @@ def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(tmp_path):
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
-    arr = np.zeros((24, 40, 5), dtype=np.uint8)
-    arr[12:18, 28:34, :] = 255
-    tifffile.imwrite(images_dir / "a.tif", arr)
+    tifffile.imwrite(images_dir / "a.tif", _patched())
 
     pil_w, pil_h = get_image_dimensions(str(images_dir / "a.tif"))
     assert (pil_w, pil_h) == (5, 40), "fixture assumes PIL misreads this multi-band raster"
@@ -118,9 +122,7 @@ def test_tiled_detection_handles_channel_first_rasters(tmp_path):
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
-    arr = np.zeros((24, 40, 5), dtype=np.uint8)
-    arr[12:18, 28:34, :] = 255
-    tifffile.imwrite(images_dir / "a.tif", np.transpose(arr, (2, 0, 1)))  # [C, H, W]
+    tifffile.imwrite(images_dir / "a.tif", np.transpose(_patched(), (2, 0, 1)))  # [C, H, W]
     label_image(images_dir / "a.tif", [Annotation(subject="bud", geometry=BBox(28, 12, 34, 18))],
                 40, 24, keep_empty=True)
 

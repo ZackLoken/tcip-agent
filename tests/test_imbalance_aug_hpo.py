@@ -206,8 +206,9 @@ def test_random_rotation_classification_passthrough():
 
 def _instance_target(x1: int, y1: int, x2: int, y2: int, size: int = 64) -> dict:
     """One box with an exactly-matching [1, H, W] instance mask."""
-    mask = torch.zeros((1, size, size), dtype=torch.uint8)
-    mask[0, y1:y2, x1:x2] = 1
+    from tests._producer_fixtures import painted_array
+
+    mask = torch.as_tensor(painted_array(size, size, [((x1, y1, x2, y2), 1)]))[None]
     return {
         "boxes": torch.tensor([[float(x1), float(y1), float(x2), float(y2)]]),
         "labels": torch.tensor([1]),
@@ -230,9 +231,9 @@ def test_horizontal_flip_flips_instance_masks_with_boxes():
 
 def test_vertical_flip_flips_semantic_mask():
     from tcip_mcp.pipelines.data.augmentations import RandomVerticalFlip
+    from tests._producer_fixtures import painted_array
     img = Image.new("RGB", (64, 64))
-    sem = torch.zeros((64, 64), dtype=torch.long)
-    sem[:10, :] = 2  # class stripe at top
+    sem = torch.as_tensor(painted_array(64, 64, [((0, 0, 64, 10), 2)])).long()  # top stripe
     out, t = RandomVerticalFlip(p=1.0)(img, {"masks": sem.clone()})
     assert torch.equal(t["masks"], torch.flip(sem, dims=[-2]))
     assert (t["masks"][-10:, :] == 2).all()
@@ -291,9 +292,10 @@ def test_random_resized_crop_semantic_mask_follows_image():
 
 def test_random_rotation_rotates_semantic_mask():
     import random as _random
+
+    from tests._producer_fixtures import painted_array
     _random.seed(1)
-    sem = torch.zeros((64, 64), dtype=torch.long)
-    sem[:16, :] = 1  # asymmetric stripe
+    sem = torch.as_tensor(painted_array(64, 64, [((0, 0, 64, 16), 1)])).long()  # asymmetric
     out, t = RandomRotation(degrees=180, p=1.0)(Image.new("RGB", (64, 64)), {"masks": sem.clone()})
     assert t["masks"].shape == (64, 64)
     assert t["masks"].dtype == sem.dtype

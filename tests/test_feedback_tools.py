@@ -179,13 +179,9 @@ def _bespoke_checkpoint_payload() -> dict:
     from tcip_mcp.pipelines.model_build import (
         CONFIG_KEY, STATE_DICT_KEY, build_model, recorded_model_dims,
     )
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
-    src = {
-        "builder": "tests.bespoke_models:build_bespoke_detection",
-        "builder_kwargs": {"min_size": 64, "max_size": 128},
-        "task": "detection",
-    }
-    config = {"model_source": src,
+    config = {"model_source": dict(BUILT_DETECTOR),
               "data": {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}}}
     model = build_model(config, recorded_model_dims(config))
     return {CONFIG_KEY: config, STATE_DICT_KEY: model.state_dict()}
@@ -197,11 +193,12 @@ def _bound_checkpoint(project: Path, manifest_dir: Path, experiment_id: str) -> 
     its completed checkpoint's producer is that bound run. Returns ``(run directory, checkpoint
     path)``."""
     from tcip_mcp.experiments import observe
+    from tests._chain_fixtures import SAVE_BUILT_WEIGHTS
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, worker_run
 
     run_dir = worker_run(project, {
         "model_source": dict(BUILT_DETECTOR),
-        "training_source": "tests.bespoke_models:save_built_weights",
+        "training_source": SAVE_BUILT_WEIGHTS,
         "data": {"split": {"selection_dir": str(manifest_dir)}},
     }, experiment_id=experiment_id)
     checkpoint = observe(run_dir).checkpoint
@@ -293,15 +290,10 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(tm
     an image three times as wide as the one it was trained on."""
     from PIL import Image
 
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._verified_checkpoint_fixtures import ONE_BAND_DETECTOR, registered_checkpoint
 
-    ckpt = registered_checkpoint(
-        tmp_path,
-        model_source={"builder": "tests.bespoke_models:build_bespoke_detection",
-                      "builder_kwargs": {"min_size": 64, "max_size": 128, "image_mean": [0.4],
-                                         "image_std": [0.2]},
-                      "task": "detection"},
-        data={"num_channels": 1, "scope": {"subject": "bud"}})
+    ckpt = registered_checkpoint(tmp_path, model_source=ONE_BAND_DETECTOR,
+                                 data={"num_channels": 1, "scope": {"subject": "bud"}})
     images = tmp_path / "images" / UNDATED_BUCKET
     images.mkdir(parents=True)
     for stem in ("a", "b"):

@@ -17,6 +17,7 @@ from tests._mapping_fixtures import GRID_COLUMNS, register_plant_registry_for, w
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
+from tests._chain_fixtures import BESPOKE_DETECTION  # noqa: E402
 pytest.importorskip("torchvision")
 
 # UTM zone 15N: the same real projected CRS test_orthomosaic_mapping.py uses.
@@ -65,7 +66,7 @@ def _bespoke_detection_checkpoint(
     from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.tools.model_tools import register_model
 
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
+    model_source = {"builder": BESPOKE_DETECTION,
                     "builder_kwargs": {"min_size": tile_size, "max_size": tile_size * 2},
                     "task": "detection"}
     config = {"model_source": model_source,

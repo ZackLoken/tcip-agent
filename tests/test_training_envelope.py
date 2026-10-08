@@ -48,8 +48,7 @@ def _context(tmp_path, config: dict, **kwargs) -> tuple[TrainContext, Path]:
 def _bespoke(tmp_path, body: str) -> dict:
     """A detector run over two frames of its own whose training body is ``body`` of this
     module."""
-    return detection_config(tmp_path / "data", training_source=f"{__name__}:{body}",
-                            device="cpu")
+    return detection_config(tmp_path / "data", training_source=f"{__name__}:{body}")
 
 
 def _agent_train(ctx):
@@ -224,15 +223,11 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
         return DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
 
     _ds, data = run_over("classification", str(images_dir), str(csv_path))
-    cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
-                         "task": "classification"},
-        "data": data,
-        "device": "cpu", "stages": [{"freeze_to": -1, "epochs": 2}], "mixed_precision": False,
-        "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
-        "early_stopping": {"enabled": False}, "checkpoint_every_n_epochs": 1,
-        "seed": 3,
-    }
+    from tests._chain_fixtures import ADAMW, BESPOKE_CLASSIFIER, training_config
+
+    cfg = training_config(
+        {"builder": BESPOKE_CLASSIFIER, "task": "classification"},
+        data, stages=[{"freeze_to": -1, "epochs": 2}], optimizer=ADAMW, seed=3)
     # Generate the resumable checkpoint directly (not through the envelope).
     train(trainer_run(dict(cfg), tmp_path / "out", project=tmp_path, has_val_loader=False,
                       id="resume-source"),
@@ -286,7 +281,7 @@ def test_envelope_default_path_runs_default_train_and_audits(tmp_path, monkeypat
 
     monkeypatch.setattr(gt, "train", _stub_train)
 
-    ctx, _ = _context(tmp_path, detection_config(tmp_path / "data", device="cpu"))
+    ctx, _ = _context(tmp_path, detection_config(tmp_path / "data"))
     run_training_envelope(ctx)
 
     assert captured.get("called") is True                     # dispatched to default_train

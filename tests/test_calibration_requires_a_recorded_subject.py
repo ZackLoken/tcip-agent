@@ -59,19 +59,16 @@ def build_mask_box_ds(**kwargs) -> _MaskBoxDataset:
 
 def _capture(root: Path) -> tuple[Path, Path]:
     """Frames holding one bright square, and its mask raster."""
-    from PIL import Image, ImageDraw
+    from tests._producer_fixtures import BRIGHT, painted_frame
 
     images, masks = root / "images" / UNDATED_BUCKET, root / "masks"
     for d in (images, masks):
         d.mkdir(parents=True)
     for index, stem in enumerate(STEMS):
         shade = 30 + index
-        frame = Image.new("RGB", (IMG, IMG), (shade, shade, shade))
-        ImageDraw.Draw(frame).rectangle([BOX[0], BOX[1], BOX[2] - 1, BOX[3] - 1], fill=(230,) * 3)
-        frame.save(images / f"{stem}.png")
-        mask = Image.new("L", (IMG, IMG), 0)
-        ImageDraw.Draw(mask).rectangle([BOX[0], BOX[1], BOX[2] - 1, BOX[3] - 1], fill=1)
-        mask.save(masks / f"{stem}.png")
+        painted_frame(IMG, IMG, (shade, shade, shade), [(BOX, BRIGHT)]).save(
+            images / f"{stem}.png")
+        painted_frame(IMG, IMG, 0, [(BOX, 1)], mode="L").save(masks / f"{stem}.png")
     return images, masks
 
 
@@ -82,17 +79,10 @@ def _train_and_register(data_cfg: dict, out_dir: Path, project_root: Path) -> st
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.tools.model_tools import register_model
+    from tests._chain_fixtures import REGION_BUILDER, training_config
     from tests.tiny_trainer_fixtures import trainer_run
 
-    config = {
-        "model_source": {"builder": "tests.bespoke_models:build_bright_region_detector",
-                         "builder_kwargs": {}, "task": "detection"},
-        "data": data_cfg, "batch_size": 2, "stages": [{"freeze_to": -1, "epochs": 1}],
-        "mixed_precision": False, "device": "cpu", "checkpoint_every_n_epochs": 1,
-        "early_stopping": {"enabled": False},
-        "optimizer": {"name": "sgd", "backbone_lr": 1e-3, "head_lr": 1e-2, "weight_decay": 0},
-        "scheduler": {"type": "cosine"}, "gradient_accumulation_steps": 1,
-    }
+    config = training_config(REGION_BUILDER, data_cfg)
     train_ds, _val, _partition = auto_train_val(project_root, "detection", data_cfg, None)
     collate = task_collate("detection")
     run = trainer_run(config, out_dir, project=project_root, has_val_loader=True, id=out_dir.name)
