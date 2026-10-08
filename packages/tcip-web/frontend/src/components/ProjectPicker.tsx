@@ -230,15 +230,13 @@ export function ProjectPicker() {
   const { projectId: selected, date, subject, bucket } = useStore((s) => s.openChoice);
   const opening = useStore((s) => s.opening !== null);
   const openError = useStore((s) => s.openError);
-  const refusal = useStore((s) => s.nameRefusal);
-  const nameRefusal = refusal?.name === draft.trim() ? refusal.message : null;
   const patchOpenChoice = useStore((s) => s.patchOpenChoice);
   const [removalTarget, setRemovalTarget] = useState<OpenableProject | null>(null);
   const [renameTarget, setRenameTarget] = useState<OpenableProject | null>(null);
   const annotatorFieldRef = useRef<HTMLInputElement | null>(null);
 
   function commitName() {
-    setUser(draft.trim());
+    setUser(draft);
   }
 
   // Changing date re-scopes the subject/bucket choices to that date's data: keep the current
@@ -338,16 +336,11 @@ export function ProjectPicker() {
               }}
               spellCheck={false}
               autoComplete="off"
-              aria-invalid={!annotatorNamed || nameRefusal !== null}
-              aria-describedby={annotatorNamed && !nameRefusal ? undefined : annotatorHintId}
+              aria-invalid={!annotatorNamed}
+              aria-describedby={annotatorNamed ? undefined : annotatorHintId}
             />
           </label>
-          {nameRefusal && (
-            <span id={annotatorHintId} role="alert" className="text-[11px] text-tcip-fp">
-              {nameRefusal}
-            </span>
-          )}
-          {!annotatorNamed && !nameRefusal && (
+          {!annotatorNamed && (
             <span id={annotatorHintId} className="text-[11px] text-tcip-warn">
               Enter your name and press Enter, or open a project. It is recorded on the labels,
               decisions and runs you make.

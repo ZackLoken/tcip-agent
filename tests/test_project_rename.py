@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 
 import tcip_store as ts
+from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 from tests._web_fixtures import named_project
 
@@ -87,16 +88,15 @@ def test_a_display_name_the_record_refuses_answers_400_and_changes_nothing(clien
     assert audit_rows(project, "project_renamed") == []
 
 
-def test_a_rename_naming_no_one_answers_400_and_changes_nothing(client, tmp_path, monkeypatch):
+def test_a_rename_naming_no_one_changes_nothing(client, tmp_path):
     from tcip_mcp.project_record import read_record
 
-    monkeypatch.setenv("TCIP_USER", "osuser")
     project, project_id = named_project(tmp_path.parent / "valley_block", "Valley block")
 
-    resp = client.post("/api/projects/rename", json={
-        "id": project_id, "display_name": "Hill block", "user": "  "})
-
-    assert resp.status_code == 400 and "names no one" in resp.text
+    for name in REFUSED_NAMES:
+        resp = client.post("/api/projects/rename", json={
+            "id": project_id, "display_name": "Hill block", "user": name})
+        assert resp.status_code == 400, (name, resp.text)
     assert read_record(project)["display_name"] == "Valley block"
     assert audit_rows(project, "project_renamed") == []
 

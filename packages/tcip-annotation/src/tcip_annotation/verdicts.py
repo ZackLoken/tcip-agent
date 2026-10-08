@@ -11,6 +11,8 @@ from typing import Literal, get_args
 import tcip_store
 from tcip_store import Key
 
+from tcip_annotation.json_io import is_person
+
 VerdictAction = Literal["accepted", "rejected"]
 VERDICT_ACTIONS: tuple[VerdictAction, ...] = get_args(VerdictAction)
 
@@ -34,14 +36,15 @@ def encode_verdict(verdict: Verdict) -> dict:
 
 def decode_verdict(entry: Mapping) -> Verdict:
     """One stored entry as a :class:`Verdict`, or ``ValueError`` naming the entry when a key is
-    missing, the proposal is not an index, the action is not one of :data:`VERDICT_ACTIONS` or
-    the person or time is not a string."""
+    missing, the proposal is not an index, the action is not one of :data:`VERDICT_ACTIONS`, the
+    person is not a person's recorded identity (:func:`~tcip_annotation.json_io.is_person`) or
+    the time is not a string."""
     try:
         proposal, action, by, at = (entry["proposal"], entry["action"], entry["by"], entry["at"])
     except KeyError as exc:
         raise ValueError(f"verdict entry {dict(entry)!r} states no {exc.args[0]!r}") from exc
     if (isinstance(proposal, bool) or not isinstance(proposal, int) or proposal < 0
-            or action not in VERDICT_ACTIONS or not isinstance(by, str) or not by
+            or action not in VERDICT_ACTIONS or not is_person(by)
             or not isinstance(at, str) or not at):
         raise ValueError(f"verdict entry {dict(entry)!r} is not a proposal index, one of "
                          f"{VERDICT_ACTIONS}, a person and a time")

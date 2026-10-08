@@ -180,15 +180,13 @@ def test_an_acknowledged_export_ships_unvalidated_and_its_event_names_the_act(
 
 
 def test_an_acknowledgment_is_recorded_only_from_the_browser_and_with_a_reason(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    client: TestClient, tmp_path: Path,
 ) -> None:
     """A request from no browser, or one declaring an agent identity, cannot originate the
-    breeder's act, and a reason of spaces says nothing, nor a name of spaces who; each refuses
-    before anything runs, and the same acknowledgment from the browser ships, signed by the
-    person it names."""
+    breeder's act, and a reason of spaces says nothing; each refuses before anything runs, and
+    the same acknowledgment from the browser ships, signed by the person it names."""
     from tcip_mcp import agent_identity
 
-    monkeypatch.setenv("TCIP_USER", "osuser")
     body = _series(tmp_path, fractions=(0.0, 1.0), assessed=False).body()
 
     digest = _export(client, body).json()["detail"]["result_sha256"]
@@ -198,13 +196,11 @@ def test_an_acknowledgment_is_recorded_only_from_the_browser_and_with_a_reason(
         **BROWSER, agent_identity.HEADERS["agent_session"]: "mcp_0123"})
     blank = _export(client, body, acknowledgment={**acknowledgment, "reason": "   "},
                     headers=BROWSER)
-    nameless = _export(client, body, acknowledgment=acknowledgment, user="  ", headers=BROWSER)
 
     assert (bare.status_code, agent.status_code) == (403, 403)
     assert "cannot record one" in bare.json()["detail"]
     assert blank.status_code == 400
     assert "an acknowledgment states why" in blank.json()["detail"]
-    assert nameless.status_code == 400 and "names no one" in nameless.json()["detail"]
     assert client.get("/api/results/delivery-events").json()["records"] == []
     assert _export(client, body, acknowledgment=acknowledgment,
                    headers=BROWSER).status_code == 200

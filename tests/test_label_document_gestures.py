@@ -163,6 +163,30 @@ def test_the_shard_records_each_decision_once_and_refuses_an_entry_it_cannot_rea
         read_verdicts(key)
 
 
+def test_a_decision_or_a_completion_mark_by_no_person_does_not_read(tmp_path: Path) -> None:
+    """A verdict's and a completion mark's ``by`` name a person; one naming a producer that is no
+    person refuses as the record it is read from."""
+    from dataclasses import replace
+
+    from tcip_annotation.verdicts import decode_verdict, encode_verdict
+
+    image = _image(tmp_path)
+    bucket = _bucket(tmp_path, image)
+    _save(tmp_path, image, [], gestures=Gestures(bucket=bucket, accept=frozenset({0}),
+                                                 complete={"bud": True}))
+
+    (decided,) = read_verdicts(verdict_key_of(image_label_key(image), bucket))
+    with pytest.raises(ValueError, match="a person"):
+        decode_verdict(encode_verdict(replace(decided, by="save_annotations")))
+    stored = ts.read(image_label_key(image))
+    (mark,) = stored[json_io.COMPLETION_KEY]["bud"]
+    assert _stored(tmp_path, image).marks["bud"][0].by == mark["by"]
+    ts.replace(image_label_key(image), {**stored, json_io.COMPLETION_KEY: {
+        "bud": [{**mark, "by": "save_annotations"}]}})
+    with pytest.raises(json_io.UnreadableLabelDocumentError, match="recorded identity"):
+        _stored(tmp_path, image)
+
+
 def test_rejecting_a_paired_proposal_records_the_rejection_and_keeps_the_annotation(
         tmp_path: Path, client) -> None:
     from tests._web_fixtures import open_new_project

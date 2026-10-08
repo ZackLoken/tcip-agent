@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 import tcip_store
 from tcip_mcp.web_client import annotation_stats_key
+from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 
 
@@ -63,13 +64,12 @@ def test_a_session_is_its_persons_and_records_them_in_the_actor_spelling(
     assert sessions[1]["ended"] is None
 
 
-def test_a_contribution_naming_no_one_is_refused_and_opens_no_session(
+def test_a_contribution_naming_no_one_opens_no_session(
     client: TestClient, opened_project: Path
 ) -> None:
-    resp = _event(client, "IMG_A", 3.0, 1, "new_annotation", user="")
-
-    assert resp.status_code == 400
-    assert "names no one" in resp.json()["detail"]
+    for name in REFUSED_NAMES:
+        resp = _event(client, "IMG_A", 3.0, 1, "new_annotation", user=name)
+        assert resp.status_code == 400, (name, resp.text)
     assert tcip_store.read(annotation_stats_key(str(opened_project)), default=None) is None
 
 

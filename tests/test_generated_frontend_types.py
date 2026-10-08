@@ -19,9 +19,8 @@ from typing import Literal, Optional
 import pytest
 from pydantic import BaseModel
 
-from tests import REPO_ROOT
+from tests import FRONTEND_SRC, REPO_ROOT
 
-FRONTEND_SRC = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
 GENERATED = FRONTEND_SRC / "api" / "types.generated.ts"
 GENERATOR = REPO_ROOT / "tools" / "generate_frontend_types.py"
 

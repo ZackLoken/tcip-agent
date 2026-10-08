@@ -16,6 +16,7 @@ from shapely.geometry import Point as ShapelyPoint
 from shapely.ops import nearest_points
 
 from tcip_annotation.json_io import (
+    PERSON_IDENTITY_PREFIX,
     LabelDocument,
     authorship_of,
     is_unadjudicated_prediction,
@@ -115,10 +116,12 @@ def load_canopy_segments(
             )
 
     for i, a in enumerate(annotations):
-        if authorship_of(a) in ("person", "tool_accepted"):
+        authorship = authorship_of(a)
+        if authorship in ("person", "tool_accepted"):
             continue
-        by = (f"is authored by {a.created_by!r}, which names no person under this platform's "
-              "user:<name> convention," if a.created_by else "carries no created_by at all,")
+        by = ("carries no created_by at all," if authorship == "unattributed" else
+              f"is authored by {a.created_by!r}, which names no person under this platform's "
+              f"{PERSON_IDENTITY_PREFIX}<name> convention,")
         raise CanopySegmentError(
             f"canopy segment {i} of subject {subject!r} {by} and no person accepted it; a canopy "
             "boundary must be positively a person's, a reviewer's acceptance included"

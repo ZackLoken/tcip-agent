@@ -29,26 +29,17 @@ export interface OpenHold {
   accepted: { projectId: string | null } | null;
 }
 
-/** The backend's refusal of the name an open sent, kept with that name. */
-export interface NameRefusal {
-  name: string;
-  message: string;
-}
-
 export interface ProjectOpenSlice {
   /** What the person chose to open and the open in flight, held here so they survive the picker
    *  being replaced when the person's name is committed. */
   openChoice: OpenChoice;
   opening: OpenHold | null;
   openError: OpenFailure | null;
-  nameRefusal: NameRefusal | null;
   /** Whether the first-load opening of the backend's open project has been attempted. */
   initialOpenAttempted: boolean;
   /** Choosing another project than the one in flight supersedes that open. */
   patchOpenChoice: (patch: Partial<OpenChoice>) => void;
-  patchOpenStatus: (
-    patch: Partial<Pick<ProjectOpenSlice, "opening" | "openError" | "nameRefusal">>,
-  ) => void;
+  patchOpenStatus: (patch: Partial<Pick<ProjectOpenSlice, "opening" | "openError">>) => void;
   /** Release the open in flight when it is bound to a project other than ``keepProjectId``. */
   supersedeOpen: (keepProjectId: string | null) => void;
   /** A snapshot was accepted naming ``projectId`` as open (null for none), whether or not it
@@ -68,7 +59,6 @@ export const createProjectOpenSlice: StateCreator<AppState, [], [], ProjectOpenS
   openChoice: NO_OPEN_CHOICE,
   opening: null,
   openError: null,
-  nameRefusal: null,
   initialOpenAttempted: false,
   patchOpenChoice: (patch) => {
     set((s) => ({ openChoice: { ...s.openChoice, ...patch } }));

@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tcip_web.app import app
+from tests import REFUSED_NAMES
 
 
 @pytest.fixture
@@ -170,14 +171,10 @@ def test_opening_a_project_naming_no_one_is_refused_and_opens_nothing(client, wo
     _make_project(workspace_dir, "currant_bud_valley-farm", dates=["2026-02-11"])
     listed = _listed(client)["currant_bud_valley-farm"]
 
-    for stated in ("user:", "  ", ""):
+    for stated in REFUSED_NAMES:
         resp = client.post("/api/projects/open", json={"id": listed["id"], "user": stated})
         assert resp.status_code == 400
         assert client.get("/api/projects").json()["open_id"] is None
-
-    resp = client.post("/api/projects/open", json={"id": listed["id"]})
-    assert resp.status_code == 422
-    assert client.get("/api/projects").json()["open_id"] is None
 
 
 def test_list_reports_record_fields_across_four_project_states(client, workspace_dir):

@@ -1,31 +1,12 @@
-"""Native provenance stamping at the non-web write sites, the read path that carries it back out,
-and the identity helper."""
+"""Native provenance stamping at the non-web write sites and the read path that carries it back
+out."""
 
 from __future__ import annotations
-
-import pytest
 
 from tests._producer_fixtures import blank_image
 
 
-# ── the one actor function ───────────────────────────────────────────────────
-
-def test_actor_prefixes_a_person_idempotently():
-    from tcip_mcp.identity import actor
-    assert actor("breeder") == "user:breeder"
-    assert actor("user:breeder") == "user:breeder"   # idempotent, never doubles
-
-
-@pytest.mark.parametrize("name", [None, "", "  "])
-def test_actor_refuses_a_request_that_names_no_one_whatever_the_process_runs_as(
-        monkeypatch, name):
-    from tcip_mcp import identity
-    monkeypatch.setenv("TCIP_USER", "osuser")
-    with pytest.raises(ValueError, match="names no one"):
-        identity.actor(name)
-
-
-# ── MCP save_annotations: optional producer created_by ───────────────────────
+# ── MCP save_annotations: the tool is the producer ───────────────────────────
 
 def _records(img) -> list[dict]:
     """The records of ``img``'s label document as stored."""

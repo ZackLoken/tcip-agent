@@ -15,6 +15,7 @@ import pytest
 from PIL import Image
 
 from tcip_mcp import workspace
+from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 from tests._web_fixtures import named_project
 
@@ -54,15 +55,14 @@ def test_removal_archives_moves_and_records_one_line(client, tmp_path):
     assert project_id not in {p["id"] for p in client.get("/api/projects").json()["projects"]}
 
 
-def test_a_removal_naming_no_one_refuses_and_leaves_the_project(client, tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_USER", "osuser")
+def test_a_removal_naming_no_one_leaves_the_project(client, tmp_path):
     ws = tmp_path.parent
     project, project_id = _project(ws, "valley_block", "Valley block")
 
-    resp = client.post("/api/projects/remove", json={
-        "id": project_id, "confirm_name": "Valley block", "user": " "})
-
-    assert resp.status_code == 400 and "names no one" in resp.text
+    for name in REFUSED_NAMES:
+        resp = client.post("/api/projects/remove", json={
+            "id": project_id, "confirm_name": "Valley block", "user": name})
+        assert resp.status_code == 400, (name, resp.text)
     assert project.is_dir()
     assert audit_rows(project, "project_removed") == []
 

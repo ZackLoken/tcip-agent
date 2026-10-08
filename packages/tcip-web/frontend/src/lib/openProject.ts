@@ -4,7 +4,6 @@
  */
 
 import { api, type ProjectSummary } from "@/api/client";
-import { StructuredRefusalError } from "@/api/http";
 import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
 import { toastLabelProblem } from "@/lib/labelProblemToast";
 import { recordRecentProject } from "@/lib/recentProjects";
@@ -26,9 +25,6 @@ export type OpenableProject = ProjectSummary & { id: string; display_name: strin
 export const openable = (p: ProjectSummary): p is OpenableProject =>
   p.id !== null && p.display_name !== null;
 
-/** The backend refused the committed name when opening a project. */
-export class NameRefusedError extends Error {}
-
 let lastRequestId = 0;
 
 /** The held open when it is the one with ``requestId``, else null: nothing has superseded it. */
@@ -46,7 +42,6 @@ export function takeOpenHold(projectId: string | null): number | null {
   state.patchOpenStatus({
     opening: { requestId, projectId, accepted: null },
     openError: null,
-    nameRefusal: null,
   });
   return requestId;
 }
@@ -81,14 +76,7 @@ async function performOpen(
   // Snapshot the outgoing dataset's UI state before the open's broadcast can move it; the
   // restore for the new selection is defined once, below.
   useStore.getState().saveCurrentDatasetUi();
-  let opened;
-  try {
-    opened = await api.projects.open({ id: p.id, user: useStore.getState().user });
-  } catch (e) {
-    if (e instanceof StructuredRefusalError && e.status === 400)
-      throw new NameRefusedError(e.message);
-    throw e;
-  }
+  const opened = await api.projects.open({ id: p.id, user: useStore.getState().user });
   if (!heldOpen(requestId)) return;
   const res = date
     ? await api.dataset.select({
@@ -120,8 +108,7 @@ async function performOpen(
  *  or, as ``held``, by a caller that took it before its own lookup; a second choice of project or
  *  a snapshot adopting another project releases it, and a result from a request no longer held,
  *  success or failure, is dropped. A held failure is recorded for ``p`` and toasted so a tab that
- *  replaced the picker does not hide it; a refused name is recorded with the name it refused, for
- *  the Annotator field. */
+ *  replaced the picker does not hide it. */
 export async function startOpen(
   p: ProjectSummary & { id: string },
   date: string,
@@ -132,20 +119,14 @@ export async function startOpen(
   const hold = heldOpen(held ?? takeOpenHold(p.id));
   if (!hold) return;
   const { requestId } = hold;
-  const sentName = useStore.getState().user;
   useStore.getState().patchOpenStatus({ opening: { ...hold, projectId: p.id } });
   try {
     await performOpen(requestId, p, date, subject, bucket);
   } catch (e) {
     const now = useStore.getState();
     if (!heldOpen(requestId)) return;
-    if (e instanceof NameRefusedError) {
-      now.patchOpenStatus({ nameRefusal: { name: sentName, message: e.message } });
-      now.pushToast(e.message);
-    } else {
-      now.patchOpenStatus({ openError: { projectId: p.id, message: String(e) } });
-      now.pushToast(String(e));
-    }
+    now.patchOpenStatus({ openError: { projectId: p.id, message: String(e) } });
+    now.pushToast(String(e));
   } finally {
     releaseOpenHold(requestId);
   }

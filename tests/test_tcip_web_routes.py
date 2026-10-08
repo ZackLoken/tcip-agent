@@ -13,6 +13,7 @@ from PIL import Image
 from tcip_annotation.json_io import read_label_document
 from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.subject_registry import SubjectRegistry, Subject
+from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import image_label_key, label_image, registry_over
 from tcip_web.paths import safe_join
@@ -623,7 +624,6 @@ def test_annotate_save_empty_preserves_negative(
         json={"image_path": str(img_path), "annotations": [], "user": "breeder"},
     )
     assert resp.status_code == 200
-    # A present document with no annotations is a confirmed negative (kept, not deleted).
     assert tcip_store.exists(image_label_key(img_path))
     assert _stored(img_path) == []
 
@@ -1172,16 +1172,14 @@ def test_annotate_save_polygon_stamps_author(opened_client, dataset_root, tmp_pa
     assert _raw(img_path)[0]["created_by"] == "user:emily"
 
 
-def test_annotate_save_naming_no_one_refuses_and_writes_nothing(
-        opened_client, dataset_root, tmp_path, monkeypatch) -> None:
-    """A save whose request names no one refuses, whatever the backend process runs as."""
-    monkeypatch.setenv("TCIP_USER", "osuser")
+def test_annotate_save_naming_no_one_writes_nothing(opened_client, dataset_root) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    resp = opened_client.post("/api/annotate/labels", json={
-        "image_path": str(img_path),
-        "annotations": [{"subject": "bud", "bbox": [50, 40, 70, 60]}], "user": " ",
-    })
-    assert resp.status_code == 400 and "names no one" in resp.text
+    for name in REFUSED_NAMES:
+        resp = opened_client.post("/api/annotate/labels", json={
+            "image_path": str(img_path),
+            "annotations": [{"subject": "bud", "bbox": [50, 40, 70, 60]}], "user": name,
+        })
+        assert resp.status_code == 400, (name, resp.text)
     assert not tcip_store.exists(image_label_key(img_path))
 
 

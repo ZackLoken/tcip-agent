@@ -15,10 +15,9 @@ import pytest
 from fastapi import FastAPI
 
 from tcip_web.app import app
-from tests import REPO_ROOT
+from tests import FRONTEND_SRC, REPO_ROOT
 from tests._route_walk import route_generator as _generator
 
-FRONTEND_SRC = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
 GENERATED = FRONTEND_SRC / "api" / "routes.ts"
 PROXY_GENERATED = FRONTEND_SRC / "api" / "devProxy.generated.ts"
 VITE_CONFIG = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "vite.config.ts"

@@ -2,7 +2,6 @@ import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-import { StructuredRefusalError } from "@/api/http";
 import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
 import { ProjectPicker } from "@/components/ProjectPicker";
 import { startOpen } from "@/lib/openProject";
@@ -198,7 +197,7 @@ describe("ProjectPicker", () => {
     expect(screen.queryByText(/press Enter/)).not.toBeInTheDocument();
   });
 
-  it("commits the typed name and opens the project from the open button", async () => {
+  it("commits the typed name as typed and opens the project from the open button", async () => {
     vi.mocked(api.projects.list).mockResolvedValue(listing());
     vi.mocked(api.projects.open).mockResolvedValue({
       id: "a1b2c3d4e5f6",
@@ -214,9 +213,9 @@ describe("ProjectPicker", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open project" }));
 
     await waitFor(() =>
-      expect(api.projects.open).toHaveBeenCalledWith({ id: "a1b2c3d4e5f6", user: "jordan" }),
+      expect(api.projects.open).toHaveBeenCalledWith({ id: "a1b2c3d4e5f6", user: " jordan " }),
     );
-    expect(useStore.getState().user).toBe("jordan");
+    expect(useStore.getState().user).toBe(" jordan ");
   });
 
   describe("an open in flight", () => {
@@ -611,35 +610,6 @@ describe("ProjectPicker", () => {
       expect(api.projects.open).toHaveBeenCalledTimes(1);
     });
 
-    it("does not show a refusal of one name under another name the draft was edited to", async () => {
-      vi.mocked(api.projects.list).mockResolvedValue(listing());
-      let refuse!: () => void;
-      vi.mocked(api.projects.open).mockReturnValue(
-        new Promise((_, reject) => {
-          refuse = () =>
-            reject(new StructuredRefusalError({ message: "old name" }, 400, "old name"));
-        }),
-      );
-      useStore.getState().setUser("");
-      render(<ProjectPicker />);
-      fireEvent.click(await screen.findByText("Valley farm"));
-      const field = screen.getByLabelText("Annotator");
-      fireEvent.change(field, { target: { value: "user:" } });
-      fireEvent.click(screen.getByRole("button", { name: "Open project" }));
-      await waitFor(() => expect(useStore.getState().opening).not.toBeNull());
-      fireEvent.change(field, { target: { value: "jordan" } });
-
-      await act(async () => refuse());
-      fireEvent.keyDown(field, { key: "Enter" });
-
-      expect(useStore.getState().user).toBe("jordan");
-      expect(useStore.getState().nameRefusal).toEqual({ name: "user:", message: "old name" });
-      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-
-      fireEvent.change(field, { target: { value: "user:" } });
-      expect(screen.getByRole("alert")).toHaveTextContent("old name");
-    });
-
     it("shows a failure only on the card of the project it belongs to", async () => {
       vi.mocked(api.projects.list).mockResolvedValue(listing({ projects: [PROJECTS[0], HILL] }));
       render(<ProjectPicker />);
@@ -671,34 +641,6 @@ describe("ProjectPicker", () => {
       expect(await screen.findByRole("button", { name: "Opening…" })).toBeDisabled();
       expect(api.projects.open).toHaveBeenCalledTimes(1);
     });
-  });
-
-  it("shows the backend's refusal of the committed name at the Annotator field, not on the card", async () => {
-    vi.mocked(api.projects.list).mockResolvedValue(listing());
-    vi.mocked(api.projects.open).mockRejectedValue(
-      new StructuredRefusalError(
-        { message: "an act records who made it" },
-        400,
-        "an act records who made it",
-      ),
-    );
-    useStore.getState().setUser("");
-    render(<ProjectPicker />);
-
-    fireEvent.click(await screen.findByText("Valley farm"));
-    const field = screen.getByLabelText("Annotator");
-    fireEvent.change(field, { target: { value: "user:" } });
-    fireEvent.click(screen.getByRole("button", { name: "Open project" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("an act records who made it");
-    expect(field).toHaveAccessibleDescription(/an act records who made it/);
-    expect(useStore.getState().openError).toBeNull();
-    expect(useStore.getState().toasts.map((t) => t.message)).toContain(
-      "an act records who made it",
-    );
-
-    fireEvent.change(field, { target: { value: "jordan" } });
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("marks the project the listing names as open", async () => {

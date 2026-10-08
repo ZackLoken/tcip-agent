@@ -113,13 +113,15 @@ def render_cache_version() -> int:
 def string_constants() -> dict[str, str]:
     """Each backend string the frontend matches at runtime, by its constant's name."""
     from tcip_store.values import NOT_FINITE_SUFFIX
+    from tcip_annotation.json_io import PERSON_NAME_RULE
     from tcip_mcp.experiments import EPOCH_KEY, STEP_KEY, TIMESTAMP_KEY
     from tcip_mcp.pipelines.training.evaluation import VAL_METRIC_PREFIX
     from tcip_web.routes.images import IMAGE_ERROR_HEADER, OVERVIEWS_REQUIRED
 
     return {"IMAGE_ERROR_HEADER": IMAGE_ERROR_HEADER, "OVERVIEWS_REQUIRED": OVERVIEWS_REQUIRED,
             "NOT_FINITE_SUFFIX": NOT_FINITE_SUFFIX, "VAL_METRIC_PREFIX": VAL_METRIC_PREFIX,
-            "EPOCH_KEY": EPOCH_KEY, "STEP_KEY": STEP_KEY, "TIMESTAMP_KEY": TIMESTAMP_KEY}
+            "EPOCH_KEY": EPOCH_KEY, "STEP_KEY": STEP_KEY, "TIMESTAMP_KEY": TIMESTAMP_KEY,
+            "PERSON_NAME_RULE": PERSON_NAME_RULE}
 
 
 def tuple_constants() -> dict[str, tuple[str, ...]]:
