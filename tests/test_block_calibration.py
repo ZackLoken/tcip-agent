@@ -78,8 +78,7 @@ def _completed_over(project: Path, data_cfg: dict, experiment_id: str) -> dict:
     checkpoint = observation.checkpoint
     assert checkpoint is not None, observation.final
     return {"checkpoint_path": checkpoint["path"],
-            "spatial_manifest":
-                observation.record["resolved"]["data"]["split"]["spatial_manifest"]}
+            "spatial_manifest": observation.record["resolved"]["partition"]["spatial"]}
 
 
 def _build_experiment(tmp_path: Path, *, calibration_ratio: float = 0.15,
@@ -314,7 +313,7 @@ def test_a_recorded_mosaic_size_other_than_the_file_refuses_by_name(tmp_path: Pa
     exp = _attested(tmp_path)
     run_dir = experiment_dir(exp["experiment_id"], project=tmp_path)
     run = read_record(run_dir / RUN_FILE)
-    run["resolved"]["data"]["split"]["spatial_manifest"]["width"] = width
+    run["resolved"]["partition"]["spatial"]["width"] = width
     (run_dir / RUN_FILE).write_bytes(encode_record(run))
 
     with pytest.raises(AssessmentRefusedError, match="now reads"):
@@ -600,7 +599,6 @@ def _build_attribute_scoped_experiment(
     """An experiment whose subject declares a categorical attribute, with the dataset's registry
     reordered after the run resolved and recorded its own attributes."""
     from tcip_mcp.experiments import run_resolution
-    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
     from tests._producer_fixtures import registry_over
 
@@ -628,7 +626,7 @@ def _build_attribute_scoped_experiment(
                   "calibration_ratio": 0.15},
     }
     completed = _completed_over(tmp_path, data_cfg, experiment_id)
-    recorded_scope = ClassScope.of(run_resolution(experiment_id, project=tmp_path)["data"])
+    recorded_scope = run_resolution(experiment_id, project=tmp_path).data.recorded_scope
     assert recorded_scope.subject and recorded_scope.attributes
 
     _write_registry(reordered_values)

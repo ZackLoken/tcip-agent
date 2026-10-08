@@ -38,9 +38,8 @@ def _checkpoint(tmp_path: Path, *, in_chans: int = 3, with_masks: bool = False,
     """A registered bright-blob checkpoint, loaded through the platform's own loader; with
     ``by_band`` its recorded scope declares :data:`COLOR`."""
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
+    from tests._chain_fixtures import BLOB_BUILDER, built_model, training_config
     from tcip_mcp.tools.model_tools import register_model
-    from tests._chain_fixtures import BLOB_BUILDER
 
     task = "instance_seg" if with_masks else "detection"
     model_source = {**BLOB_BUILDER, "builder_kwargs": {"with_masks": with_masks}, "task": task}
@@ -48,10 +47,10 @@ def _checkpoint(tmp_path: Path, *, in_chans: int = 3, with_masks: bool = False,
     scope = {"subject": "bud", "attributes": [COLOR] if by_band else []}
     data_cfg = {"num_channels": in_chans, "scope": scope,
                 **(data or {}), **({"tiling": tiling} if tiling else {})}
-    config = {"model_source": model_source, "data": data_cfg}
-    model = build_model(config, recorded_model_dims(config))
+    config = training_config(model_source, data_cfg)
+    model = built_model(config)
     torch.save({STATE_DICT_KEY: model.state_dict(), CONFIG_KEY: config}, str(ckpt))
-    result = register_model(name="blob", checkpoint_path=str(ckpt), config={},
+    result = register_model(name="blob", checkpoint_path=str(ckpt),
                             project=tmp_path)
     assert "error" not in result, result
     return str(ckpt), load_registered_checkpoint(str(ckpt), project=tmp_path)

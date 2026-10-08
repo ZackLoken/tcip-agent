@@ -1,6 +1,7 @@
-"""Pydantic v2 config schemas. A training config's platform-owned keys are typed here, and the
-trainer and its loaders read them from the validated model (:func:`train_config`); a bespoke
-``model_source``/``dataset_source``/``training_source`` may read its own additional keys.
+"""Pydantic v2 config schemas. A training config's platform-owned keys are typed here, its
+``model_source`` and ``data`` blocks included, and every reader takes them from the validated
+model (:func:`train_config`); a bespoke ``training_source`` may read its own additional
+top-level keys.
 
 A training config has one shape: every key ``generic_trainer.train()`` reads (``batch_size``,
 ``stages``, ``mixed_precision``, ``device``, ``seed``, ``evaluation``, ...) sits at the top level
@@ -13,6 +14,8 @@ from __future__ import annotations
 from typing import Annotated, Literal, NamedTuple, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+from tcip_mcp.pipelines.data.selection import ClassScope
 
 
 class StageSpec(BaseModel):
@@ -161,14 +164,139 @@ class ImageStatsSampling(BaseModel):
 
 
 class ModelSourceSchema(BaseModel):
-    """The importable-builder reference; a key outside these fields refuses by name."""
+    """The importable-builder reference and the task its model is for; a key outside these
+    fields refuses by name."""
 
     model_config = ConfigDict(extra="forbid")
-    builder: str | None = None
+    builder: str = Field(min_length=1)
     builder_kwargs: dict | None = None
-    task: str | None = None
+    task: str = Field(min_length=1)
+    """The run's task (detection, instance_seg, classification, ...)."""
     source_files: list[str] | None = None
     image_stats_sampling: ImageStatsSampling | None = None
+
+
+class DatasetSourceSchema(BaseModel):
+    """A bespoke dataset builder (``datasets.build_from_dataset_source``); a key outside these
+    fields refuses by name."""
+
+    model_config = ConfigDict(extra="forbid")
+    builder: str = Field(min_length=1)
+    builder_kwargs: dict | None = None
+    source_files: list[str] | None = None
+
+
+class SplitSpec(BaseModel):
+    """``data.split``: a bound selection (``selection_dir``, ``redraw_within_selection``), or the
+    parameters a run drawing its own split states."""
+
+    model_config = ConfigDict(extra="forbid")
+    selection_dir: str | None = None
+    redraw_within_selection: bool = False
+    seed: int | None = None
+    group_by: str | None = None
+    group_key_map: dict[str, str] | None = None
+    stratify_foreground: bool = True
+    val_ratio: float | None = None
+    calibration_ratio: float | None = None
+    holdout_ratio: float | None = None
+
+    @property
+    def stated(self) -> set[str]:
+        """The keys this section states a value for."""
+        return set(self.model_dump(exclude_unset=True, exclude_none=True))
+
+
+Rect = tuple[int, int, int, int]
+
+
+class SpatialManifest(BaseModel):
+    """The within-image split a run's resolution drew over its one source's tile lattice
+    (``split_construction.spatial_single_source_split``), recorded in its resolved partition:
+    each side's half-open pixel regions, the region identities its train and val tiles carry,
+    the lattice and buffer it was drawn at, what it requested and realized, and the raster it
+    was drawn over (``split_construction.raster_identity``)."""
+
+    model_config = ConfigDict(extra="forbid")
+    stem: str
+    train_identities: list[str]
+    val_identities: list[str]
+    train_region: list[Rect]
+    val_region: list[Rect]
+    holdout_region: list[Rect]
+    calibration_region: list[Rect]
+    kept_train_tiles: int
+    kept_val_tiles: int
+    kept_holdout_tiles: int
+    kept_calibration_tiles: int
+    width: int
+    height: int
+    tile_size: int
+    overlap: float
+    axis: str
+    buffer: int
+    requested_fractions: dict[str, float]
+    realized_fractions: dict[str, float]
+    realized_discard_fraction: float
+    tiles_dropped_past_extent: int
+    tiles_dropped_outside_regions: int
+    raster_content_identity: dict
+
+
+class TilingSpec(BaseModel):
+    """``data.tiling``: whether a detection run tiles its loader, the
+    ``datasets.TiledDetectionDataset`` options it states (``None``, the tiler's own default), and
+    a within-image spatial split's ``buffer``. A key outside these fields refuses by name."""
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
+    tile_size: int | None = None
+    overlap: float | None = None
+    sliver_frac: float | None = None
+    dedup_iou: float | None = None
+    skip_empty: bool | None = None
+    keep_regions: list[Rect] | None = None
+    buffer: int | None = None
+
+    def tiler_options(self, exclude: frozenset[str] = frozenset()) -> dict:
+        """The ``TiledDetectionDataset`` keyword arguments this block states, but ``exclude``;
+        an option it leaves ``None`` is omitted so the tiler's own default applies."""
+        return self.model_dump(exclude_none=True, exclude={"enabled", "buffer", *exclude})
+
+
+class _Recorded(BaseModel):
+    """A validated block a run's records hold as :meth:`record` dumps it."""
+
+    def record(self, exclude: dict | None = None) -> dict:
+        """This block as a run's record holds it: every key stated or resolved, in JSON form,
+        but the fields ``exclude`` names (``BaseModel.model_dump``'s nested form)."""
+        return self.model_dump(mode="json", exclude_unset=True, exclude=exclude)
+
+
+class DataSpec(_Recorded):
+    """``data``: where a run's samples are and how they split, and what its resolution records
+    beside them (``scope``, the sizes, the stamped geometry). A key outside these fields refuses
+    by name."""
+
+    model_config = ConfigDict(extra="forbid")
+    images_dir: str | None = None
+    labels_dir: str | None = None
+    dataset_source: DatasetSourceSchema | None = None
+    split: SplitSpec = Field(default_factory=lambda: SplitSpec.model_validate({}))
+    auto_val: bool = True
+    scope: ClassScope | None = None
+    tiling: TilingSpec | None = None
+    num_channels: int | None = None
+    num_classes: int | None = None
+    num_ranks: int | None = None
+    train_native_size: list[int] | None = None
+    plant_csv_paths: list[str] | None = None
+
+    @property
+    def recorded_scope(self) -> ClassScope:
+        """The class space this block records (``ClassScope.recorded``, which refuses a block
+        recording none)."""
+        return ClassScope.recorded(self.scope)
 
 
 NESTED_TRAINING_SECTION_REFUSAL = (
@@ -187,18 +315,21 @@ class DefaultTrainerRegime(NamedTuple):
     checkpoint_every_n_epochs: int
 
 
-class TrainConfigSchema(BaseModel):
+class TrainConfigSchema(_Recorded):
     """The one training config shape: trainer keys at the top level, no nested section. A run's
     config is validated once by its producer (:func:`checked_train_config`), and the trainer, its
-    loaders and preflight read that one validated model; inference builds a model from a
-    checkpoint's ``model_source`` alone (``model_build.build_model``). ``data``, typed here only as
-    a mapping, is resolved by the dataset producers. A config naming no ``training_source`` runs
-    the default trainer and states its regime (:meth:`default_trainer_regime`); one naming its own
-    loop states what that loop reads."""
+    loaders, preflight, the model builder and every record of the run read that one validated
+    model, ``model_source``, ``data`` and ``training_source`` included; a key outside these
+    fields is a bespoke loop's own and is kept as stated. A config naming no ``training_source``
+    runs the default trainer and states its regime (:meth:`default_trainer_regime`); one naming
+    its own loop states what that loop reads."""
 
     model_config = ConfigDict(extra="allow", protected_namespaces=())
-    model_source: ModelSourceSchema | None = None
-    data: dict | None = None
+    model_source: ModelSourceSchema
+    data: DataSpec
+    training_source: str | None = Field(None, min_length=1)
+    """A bespoke ``train(ctx)`` loop, a dotted ``module:function``; ``None`` for the default
+    trainer."""
     batch_size: int = Field(ge=1)
     num_workers: int = Field(0, ge=0)
     sampler: str = "random"
@@ -234,11 +365,11 @@ class TrainConfigSchema(BaseModel):
     def _the_config_states_what_its_trainer_reads(self) -> TrainConfigSchema:
         from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
 
-        task = self.model_source.task if self.model_source is not None else None
-        if task in DETECTION_TASKS and self.evaluation.conf_threshold is None:
+        if (self.model_source.task in DETECTION_TASKS
+                and self.evaluation.conf_threshold is None):
             raise ValueError("evaluation.conf_threshold unstated: a detector's validation counts "
                              "its boxes at a confidence the run states, under any trainer")
-        if not (self.model_extra or {}).get("training_source"):
+        if self.training_source is None:
             self.default_trainer_regime()
         return self
 
@@ -255,7 +386,7 @@ class TrainConfigSchema(BaseModel):
 def checked_train_config(config: dict) -> tuple[TrainConfigSchema | None, list[str]]:
     """``config`` validated once against the schema: the validated config and no issues, or
     ``None`` and one issue string per type or structure error (e.g. ``batch_size="big"``, a stage
-    missing ``epochs``, a nested ``training`` section). Does not require ``model_source``."""
+    missing ``epochs``, a nested ``training`` section, a missing ``model_source.task``)."""
     try:
         return TrainConfigSchema.model_validate(config), []
     except ValidationError as e:

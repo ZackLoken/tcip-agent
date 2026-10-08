@@ -28,9 +28,9 @@ pytest.importorskip("torchvision")
 
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
-    auto_train_val, partition_samples,
+    partition_samples, partition_spatial,
 )
-from tests._producer_fixtures import label_image, write_image  # noqa: E402
+from tests._producer_fixtures import label_image, train_val, write_image  # noqa: E402
 from tests._training_values import evaluation_block  # noqa: E402
 from tests._verified_checkpoint_fixtures import partition_side as recorded_side  # noqa: E402
 
@@ -108,11 +108,11 @@ def _recorded(project: Path, task: str, data_cfg: dict, **config) -> dict:
 
     from tcip_mcp.experiments import run_resolution
     from tests._chain_fixtures import training_config
-    from tests._verified_checkpoint_fixtures import opened_run
+    from tests._verified_checkpoint_fixtures import opened_run, unbuilt_source
 
-    run_dir = opened_run(project, training_config({"task": task}, copy.deepcopy(data_cfg),
-                                                  **config))
-    return run_resolution(run_dir.name, project=project)["partition"]
+    run_dir = opened_run(project, training_config(unbuilt_source(task),
+                                                  copy.deepcopy(data_cfg), **config))
+    return run_resolution(run_dir.name, project=project).partition
 
 
 @pytest.mark.parametrize("task", GEOMETRY_TASKS)
@@ -122,7 +122,7 @@ def test_the_drawn_route_loaders_name_their_own_samples(tmp_path: Path, task: st
     data_cfg = {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}, "auto_val": True,
                 "split": {"val_ratio": 0.5, "seed": 1}}
 
-    train_ds, val_ds, partition = auto_train_val(tmp_path, task, data_cfg, None)
+    train_ds, val_ds, partition, _data = train_val(tmp_path, task, data_cfg)
 
     assert val_ds is not None
     assert _membership(train_ds).isdisjoint(_membership(val_ds))
@@ -139,7 +139,7 @@ def test_auto_val_off_trains_on_every_admitted_sample_and_records_them(tmp_path:
     record = _recorded(tmp_path, task, data_cfg,
                        evaluation=evaluation_block(selection_metric="loss"))
 
-    train_ds, val_ds, partition = auto_train_val(tmp_path, task, data_cfg, None)
+    train_ds, val_ds, partition, _data = train_val(tmp_path, task, data_cfg)
 
     assert val_ds is None
     assert _membership(train_ds) == set(stems)
@@ -161,7 +161,7 @@ def test_a_starved_draw_refuses_by_the_draws_own_floor(tmp_path: Path, task: str
                                             for s in stems}}}
 
     with pytest.raises(ValueError, match="fewer than the 2 the requested sides need"):
-        auto_train_val(tmp_path, task, data_cfg, None)
+        train_val(tmp_path, task, data_cfg)
 
 
 def test_one_tiled_source_still_splits_spatially_over_its_own_samples(tmp_path: Path):
@@ -179,16 +179,17 @@ def test_one_tiled_source_still_splits_spatially_over_its_own_samples(tmp_path: 
         "split": {"val_ratio": 0.25, "holdout_ratio": 0.1, "calibration_ratio": 0, "seed": 1},
     }
 
-    train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
+    train_ds, val_ds, partition, _resolved = train_val(tmp_path, "detection", data_cfg)
 
     assert val_ds is not None
     assert [s.member for s in partition_samples(partition)] == [stem]
     assert _membership(train_ds) == _membership(val_ds) == {stem}
     assert set(train_ds.tile_entries).isdisjoint(set(val_ds.tile_entries))
-    manifest = data_cfg["split"]["spatial_manifest"]
-    assert manifest["stem"] == stem
-    assert all(i.startswith(f"{stem}::strip_") for i in manifest["train_identities"])
-    assert set(manifest["train_identities"]).isdisjoint(manifest["val_identities"])
+    manifest = partition_spatial(partition)
+    assert manifest is not None
+    assert manifest.stem == stem
+    assert all(i.startswith(f"{stem}::strip_") for i in manifest.train_identities)
+    assert set(manifest.train_identities).isdisjoint(manifest.val_identities)
 
 
 def test_the_train_only_and_drawn_routes_record_one_directory_the_same_way(tmp_path: Path):

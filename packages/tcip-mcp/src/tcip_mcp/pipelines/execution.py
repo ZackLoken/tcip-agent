@@ -197,7 +197,6 @@ def prepare(
     checkpoint's geometry contradicts and a tiled pass with no basis for its edge refusing."""
     import sahi
 
-    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.image_utils import list_logical_images
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
     from tcip_mcp.pipelines.slicing import TileEdgeContradictionError, resolve_tile_geometry
@@ -231,7 +230,7 @@ def prepare(
                 "untiled training frame yields no square tile edge, so tiled inference has no "
                 "basis to run at. Pass tile_size explicitly, or run untiled.")
     return Preparation(checkpoint=checkpoint, predictor=predictor,
-                       scope=ClassScope.of(checkpoint.data_config), geometry=geometry,
+                       scope=checkpoint.spec.data.recorded_scope, geometry=geometry,
                        stated=stated, restored=restored, tile_batch_size=tile_batch_size,
                        paths=paths)
 

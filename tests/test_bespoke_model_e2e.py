@@ -62,7 +62,6 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     from dataclasses import asdict
 
     from tcip_mcp.pipelines.execution import Stated, prepare
-    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.pipelines.model_contract import overfit_check
     from tcip_mcp.pipelines.training.collation import task_collate
 
@@ -150,7 +149,9 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert entry["sha256"] and len(entry["sha256"]) == 64
 
     # ---- the module actually learns, and its predictor answers a detection record ----
-    overfit = overfit_check(build_model(config, recorded_model_dims(config)), "detection",
+    from tests._chain_fixtures import built_model
+
+    overfit = overfit_check(built_model(config), "detection",
                             steps=30, lr=5e-3,
                             dims={"in_chans": 3, "num_classes": 1, "img_size": 64})
     assert overfit["passed"], overfit["issue"]

@@ -16,13 +16,13 @@ from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, register_checkpo
 
 def _bespoke_checkpoint(path: Path) -> str:
     """A real, unpicklable tcip checkpoint at path, the platform's own producer's shape."""
-    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
+    from tests._chain_fixtures import built_model, training_config
 
-    config = {"model_source": dict(BUILT_DETECTOR),
-              "data": {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}}}
+    config = training_config(BUILT_DETECTOR,
+                             {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}})
     payload = {
         CONFIG_KEY: config,
-        STATE_DICT_KEY: build_model(config, recorded_model_dims(config)).state_dict(),
+        STATE_DICT_KEY: built_model(config).state_dict(),
     }
     torch.save(payload, str(path))
     return str(path)

@@ -193,9 +193,8 @@ def checkpoint_admission(checkpoint, images_dir, ground_truth=None):
     """The admission ``evaluate_model`` measures ``checkpoint`` over: the images of
     ``images_dir`` and their ground truth under the class space the checkpoint records."""
     from tcip_mcp.pipelines.data.label_queries import admit
-    from tcip_mcp.pipelines.data.selection import ClassScope
 
-    return admit(images_dir, ground_truth, scope=ClassScope.of(checkpoint.data_config))
+    return admit(images_dir, ground_truth, scope=checkpoint.spec.data.recorded_scope)
 
 
 def samples_over(
@@ -208,23 +207,34 @@ def samples_over(
 
 def run_over(
     task: str, images_dir, ground_truth=None, *, subject: str | None = None,
-    members: list[str] | None = None, stated: dict[str, Any] | None = None, **kwargs: Any,
+    members: list[str] | None = None, stated: dict[str, Any] | None = None,
+    tiling: dict | None = None, **kwargs: Any,
 ):
     """A loader for ``task`` over one place holding ground truth and the data section a run over
     it records (its ``scope`` and sizes), both through the producer.
 
-    ``stated`` is what a config would state about the sizes (a band count, a class count); the
-    rest are resolved off the admitted samples the way a run resolves them."""
-    from dataclasses import asdict
-
-    from tcip_mcp.pipelines.data.datasets import build_dataset
+    ``stated`` is what a config would state about the sizes (a band count, a class count), and
+    ``tiling`` its ``data.tiling`` block; the rest are resolved off the admitted samples the way a
+    run resolves them. The data section is in the form a run's record holds it."""
+    from tcip_mcp.pipelines.data.datasets import build_dataset, stated_sizes
     from tcip_mcp.pipelines.data.split_construction import run_sizes
+    from tcip_mcp.pipelines.schemas import DataSpec
 
     admitted = admit_over(images_dir, ground_truth, subject=subject, members=members)
     samples = admitted.every_sample()
-    data = {**(stated or {}), "scope": asdict(admitted.scope)}
-    sizes = run_sizes(task, data, samples, kwargs.get("dataset_source"))
-    return build_dataset(task, samples=samples, scope=admitted.scope, sizes=sizes, **kwargs), data
+    block = {**(stated or {}), **({} if tiling is None else {"tiling": tiling})}
+    data = run_sizes(task, DataSpec.model_validate(block), admitted.scope, samples)
+    return (build_dataset(task, samples=samples, scope=admitted.scope, sizes=stated_sizes(data),
+                          tiling=data.tiling, **kwargs), data.record())
+
+
+def train_val(project, task: str, data_cfg: dict, transforms: Any = None):
+    """``split_construction.auto_train_val`` for a ``task`` run of ``project`` over ``data_cfg``
+    validated as a run's data block: ``(train_ds, val_ds, partition, resolved)``."""
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tcip_mcp.pipelines.schemas import DataSpec
+
+    return auto_train_val(project, task, DataSpec.model_validate(data_cfg), transforms)
 
 
 def dataset_over(task: str, images_dir, ground_truth=None, **kwargs: Any):

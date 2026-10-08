@@ -66,7 +66,7 @@ def _register_absent_checkpoint(root: Path, name: str, checkpoint_path: Path) ->
 
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint_file(checkpoint_path, f"{name} weights")
-    ModelRegistry(str(root)).register_model(name, str(checkpoint_path), {})
+    ModelRegistry(str(root)).register_model(name, str(checkpoint_path))
     checkpoint_path.unlink()
 
 
@@ -219,7 +219,7 @@ def test_registry_findings_are_read_through_the_registrys_own_entry_shape(tmp_pa
     for name, payload in (("currant_bud_detector_v1", "weights"),
                           ("chestnut_burr_counter_v3", "other weights")):
         ckpt = checkpoint_file(ckpt_dir / f"{name}.pt", payload)
-        registry.register_model(name=name, checkpoint_path=str(ckpt), config={}, metrics={})
+        registry.register_model(name=name, checkpoint_path=str(ckpt), metrics={})
         paths[name] = ckpt
     for ckpt in paths.values():
         ckpt.unlink()
@@ -264,7 +264,7 @@ def test_a_checkpoint_under_a_temp_rooted_project_is_not_pollution(tmp_path):
     ckpt_dir.mkdir(parents=True)
     checkpoint_file(ckpt_dir / "m.pt", "weights")
     ModelRegistry(str(root)).register_model(
-        name="m", checkpoint_path=str(ckpt_dir / "m.pt"), config={})
+        name="m", checkpoint_path=str(ckpt_dir / "m.pt"))
 
     res = run_tcip("doctor", [str(root)])
 

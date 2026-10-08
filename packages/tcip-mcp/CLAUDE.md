@@ -21,7 +21,8 @@ src/tcip_mcp/
                            # anchor ratios) from the artifact in hand instead of pinning it
     pixel_size.py          # the one raster-georeferencing-to-meters-per-pixel resolver, read
                             # by the block-scale derivation
-    model_build.py          # build_model: the one seam from a model_source config to an nn.Module
+    model_build.py          # build_from_model_source: the one seam from a validated
+                             # model_source to an nn.Module
     model_contract.py        # the measurement boundary a bespoke model must pass
                               # (check_model_contract, overfit_check)
     proposal.py               # auto-labeling engine seam: a registered or dotted Proposer

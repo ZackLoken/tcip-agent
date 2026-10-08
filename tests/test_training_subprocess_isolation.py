@@ -14,6 +14,14 @@ from tests._chain_fixtures import training_config
 from tests._training_values import tune_arguments
 
 
+def _config(**keys) -> dict:
+    """A :func:`~tests._chain_fixtures.training_config` of a detection model no body builds, over
+    no data, with ``keys`` in place of theirs."""
+    from tests._verified_checkpoint_fixtures import unbuilt_source
+
+    return training_config(unbuilt_source("detection"), {}, **keys)
+
+
 # ── persist the training run's class space ───────────────────────────
 
 
@@ -50,38 +58,43 @@ def _document_dataset(root, subject="bud", attribute=None, values=None):
     return images_dir
 
 
+def _resolved_data(project, task: str, data_cfg: dict):
+    """The data block a ``task`` run of ``project`` over ``data_cfg`` resolves
+    (``split_construction.auto_train_val``)."""
+    from tests._producer_fixtures import train_val
+
+    return train_val(project, task, data_cfg)[3]
+
+
 def test_the_class_space_recorded_is_the_one_the_run_admitted(tmp_path):
     """The checkpoint records the vocabulary the run trained in: the producer writes the scope it
     admitted under onto the run's own data config, and that is what is read back, so a
     ``subjects.json`` whose declared order changed after the admission cannot restamp the run
     with a vocabulary it never trained in."""
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
-
     root = tmp_path / "plain"
     images_dir = _document_dataset(root, subject="bud")
-    data_cfg = {"images_dir": str(images_dir),
-                "scope": {"subject": "bud"}, "split": {"val_ratio": 0.5, "seed": 1}}
-    auto_train_val(tmp_path, "detection", data_cfg, None)
+    resolved = _resolved_data(tmp_path, "detection", {
+        "images_dir": str(images_dir), "scope": {"subject": "bud"},
+        "split": {"val_ratio": 0.5, "seed": 1}})
 
-    assert ClassScope.of(data_cfg) == ClassScope("bud", ())
+    assert resolved.recorded_scope == ClassScope("bud", ())
 
     _write_classes_json(root, subject="bud", attribute="opening", values=["open", "closed"])
-    assert ClassScope.of(data_cfg) == ClassScope("bud", ())
+    assert resolved.recorded_scope == ClassScope("bud", ())
 
 
 def test_a_run_over_an_attributed_subject_records_its_attributes_in_declared_order(tmp_path):
     """A run's class space is its subject and every attribute the registry declares for it, its
     values in declared order, admitted once."""
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.subject_registry import Attribute
 
     images_dir = _document_dataset(
         tmp_path / "scoped", subject="bud", attribute="opening", values=["closed", "open"])
-    data_cfg = {"images_dir": str(images_dir),
-                "scope": {"subject": "bud"}, "split": {"val_ratio": 0.5, "seed": 1}}
-    auto_train_val(tmp_path, "detection", data_cfg, None)
+    resolved = _resolved_data(tmp_path, "detection", {
+        "images_dir": str(images_dir), "scope": {"subject": "bud"},
+        "split": {"val_ratio": 0.5, "seed": 1}})
 
-    assert ClassScope.of(data_cfg) == ClassScope(
+    assert resolved.recorded_scope == ClassScope(
         "bud", (Attribute("opening", "categorical", ("closed", "open")),))
 
 
@@ -91,8 +104,6 @@ def test_a_run_whose_ground_truth_carries_its_own_classes_records_the_empty_scop
     attributes."""
     from PIL import Image
 
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
-
     root = tmp_path / "masks"
     images_dir, masks_dir = root / "images" / UNDATED_BUCKET, root / "masks"
     images_dir.mkdir(parents=True)
@@ -100,11 +111,11 @@ def test_a_run_whose_ground_truth_carries_its_own_classes_records_the_empty_scop
     for stem in ("a", "b"):
         Image.new("RGB", (32, 32), (10, 20, 30)).save(images_dir / f"{stem}.png")
         Image.new("L", (32, 32), 1).save(masks_dir / f"{stem}.png")
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
-                "split": {"val_ratio": 0.5, "seed": 1}}
-    auto_train_val(tmp_path, "semantic_seg", data_cfg, None)
+    resolved = _resolved_data(tmp_path, "semantic_seg", {
+        "images_dir": str(images_dir), "labels_dir": str(masks_dir),
+        "split": {"val_ratio": 0.5, "seed": 1}})
 
-    assert ClassScope.of(data_cfg) == ClassScope()
+    assert resolved.recorded_scope == ClassScope()
 
 
 def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing(tmp_path,
@@ -132,7 +143,7 @@ def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing
     ctx = worker.prepare_run_context(observe(run_dir))
 
     assert ctx.run.objective == resolved["objective"]
-    assert ctx.run.config["data"] == resolved["data"]
+    assert ctx.spec.data.record() == resolved["data"]
     train_ds = ctx.train_loader.dataset
     assert sorted({train_ds.sample_of(key).member for key in train_ds.stems}) == partition_side(
         resolved["partition"], "train")
@@ -177,8 +188,7 @@ def test_ctx_should_cancel_and_dispatch_classification_honor_the_cancellation(tm
     from tcip_mcp.pipelines.training.envelope import TrainContext, dispatch_train_body
     from tcip_mcp.pipelines.training.run_registry import TrainRun
 
-    config = training_config({}, {}, training_source=BESPOKE_LOOP)
-    run = TrainRun(id="run_ctx_cancel", config=config, spec=train_config(config),
+    run = TrainRun(id="run_ctx_cancel", spec=train_config(_config(training_source=BESPOKE_LOOP)),
                    objective={"selection_metric": "loss", "higher_is_better": False},
                    project=tmp_path, output_dir=str(tmp_path))
     request_cancel(tmp_path)
@@ -331,8 +341,7 @@ def test_gpu_device_pinning_round_robins(monkeypatch):
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
     seen = set()
     for _ in range(4):
-        env = training_tools._child_env_for_launch(
-            train_config(training_config({}, {}, device=None)))
+        env = training_tools._child_env_for_launch(train_config(_config(device=None)))
         seen.add(env["CUDA_VISIBLE_DEVICES"])
     assert seen == {"0", "1"}
 
@@ -354,8 +363,7 @@ def test_gpu_pinning_skipped_when_device_explicit(monkeypatch):
 
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
 
-    env = training_tools._child_env_for_launch(
-        train_config(training_config({}, {}, device="cuda:1")))
+    env = training_tools._child_env_for_launch(train_config(_config(device="cuda:1")))
     assert "CUDA_VISIBLE_DEVICES" not in env
 
 
@@ -372,8 +380,7 @@ def test_gpu_pinning_noop_with_single_gpu(monkeypatch):
             return 1
 
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
-    env = training_tools._child_env_for_launch(
-        train_config(training_config({}, {}, device=None)))
+    env = training_tools._child_env_for_launch(train_config(_config(device=None)))
     assert "CUDA_VISIBLE_DEVICES" not in env
 
 

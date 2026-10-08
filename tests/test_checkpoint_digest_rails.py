@@ -44,7 +44,7 @@ def _register(tmp_path: Path, ckpt_path: str, *, name: str = "rail-model",
               tags: list[str] | None = None) -> dict:
     from tcip_mcp.tools.model_tools import register_model
 
-    result = register_model(tmp_path, name=name, checkpoint_path=ckpt_path, config={}, tags=tags)
+    result = register_model(tmp_path, name=name, checkpoint_path=ckpt_path, tags=tags)
     assert "error" not in result, result
     return result
 
@@ -271,7 +271,7 @@ def test_a_foreign_registration_after_its_run_completed_leaves_the_run_its_one_o
     copy = tmp_path / "copy.pt"
     copy.write_bytes(Path(ckpt).read_bytes())
 
-    owner = register_model(tmp_path, name="entry-untagged", checkpoint_path=str(copy), config={})
+    owner = register_model(tmp_path, name="entry-untagged", checkpoint_path=str(copy))
 
     assert owner["experiment_id"] == "expA"
     assert [e["experiment_id"] for e in registered_entries(tmp_path)] == ["expA"]
@@ -288,8 +288,7 @@ def test_a_foreign_registration_before_its_run_completed_leaves_the_run_its_one_
     elsewhere = observe(finished_run(tmp_path.parent / f"{tmp_path.name}-elsewhere",
                                      experiment_id="expX", seed=7, data=data)).checkpoint
     assert elsewhere is not None
-    registered = register_model(tmp_path, name="foreign-first", checkpoint_path=elsewhere["path"],
-                                config={})
+    registered = register_model(tmp_path, name="foreign-first", checkpoint_path=elsewhere["path"])
     assert registered["experiment_id"] is None
 
     run = observe(finished_run(tmp_path, experiment_id="expA", seed=7, data=data)).checkpoint
@@ -311,8 +310,7 @@ def test_two_foreign_registrations_of_one_sha256_resolve_to_one_entry(tmp_path):
     ckpt = foreign_checkpoint(tmp_path, name="first-name")
     copy = tmp_path / "copy.pt"
     copy.write_bytes(Path(ckpt).read_bytes())
-    assert "error" not in register_model(tmp_path, name="second-name", checkpoint_path=str(copy),
-                                         config={})
+    assert "error" not in register_model(tmp_path, name="second-name", checkpoint_path=str(copy))
 
     (entry,) = registered_entries(tmp_path)
     assert entry["name"] == "second-name"
@@ -444,11 +442,12 @@ def test_ctx_save_checkpoint_admits_a_state_naming_no_reserved_key(tmp_path):
     """An ordinary bespoke state, through a real ctx.save_checkpoint call."""
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tests._chain_fixtures import training_config
+    from tests._verified_checkpoint_fixtures import unbuilt_source
     from tests.tiny_trainer_fixtures import trainer_run
 
     run_dir = tmp_path / "out"
     run_dir.mkdir()
-    run = trainer_run(training_config({"task": "regression"}, {}), run_dir,
+    run = trainer_run(training_config(unbuilt_source("regression"), {}), run_dir,
                       project=tmp_path, has_val_loader=False, id="auto-run-4")
     ctx = TrainContext(run=run, train_loader=None)
 

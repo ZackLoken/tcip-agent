@@ -56,15 +56,15 @@ def _consume(*datasets) -> None:
 
 
 def test_a_drawn_detection_run_reads_each_document_once(tmp_path: Path, monkeypatch):
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tests._producer_fixtures import train_val
     from tests.test_training_autoval import _detection_dataset
 
     images_dir, stems = _detection_dataset(tmp_path / "ds")
     counts = _counting_reads(monkeypatch)
 
-    train, val, _partition = auto_train_val(tmp_path, "detection", {
+    train, val, _partition, _data = train_val(tmp_path, "detection", {
         "images_dir": str(images_dir), "scope": {"subject": "bud"},
-        "split": {"val_ratio": 0.4, "seed": 1}}, None)
+        "split": {"val_ratio": 0.4, "seed": 1}})
     _consume(train, val)
 
     assert len(counts) == len(stems)
@@ -72,16 +72,16 @@ def test_a_drawn_detection_run_reads_each_document_once(tmp_path: Path, monkeypa
 
 
 def test_a_drawn_table_run_reads_its_table_once(tmp_path: Path, monkeypatch):
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tests._producer_fixtures import train_val
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
     images_dir, csv_path = write_regression_dataset(
         tmp_path, intensities=[0.1, 0.3, 0.5, 0.7], values=[0.2, 0.6, 1.0, 1.4])
     counts = _counting_reads(monkeypatch, files=(".csv",))
 
-    train, val, _partition = auto_train_val(tmp_path, "regression", {
+    train, val, _partition, _data = train_val(tmp_path, "regression", {
         "images_dir": str(images_dir), "labels_dir": str(csv_path),
-        "split": {"val_ratio": 0.5, "seed": 0}}, None)
+        "split": {"val_ratio": 0.5, "seed": 0}})
     _consume(train, val)
 
     assert counts == Counter({str(csv_path): 1})
@@ -178,8 +178,7 @@ def test_a_semantic_run_reads_each_mask_once(tmp_path: Path, monkeypatch):
     from PIL import Image
 
     from tcip_mcp.dataset_layout import UNDATED_BUCKET
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
-    from tests._producer_fixtures import painted_frame
+    from tests._producer_fixtures import painted_frame, train_val
 
     images_dir, masks_dir = tmp_path / "images" / UNDATED_BUCKET, tmp_path / "masks"
     images_dir.mkdir(parents=True)
@@ -189,9 +188,9 @@ def test_a_semantic_run_reads_each_mask_once(tmp_path: Path, monkeypatch):
         painted_frame(8, 8, 0, [((2, 2, 6, 6), 1)], mode="L").save(masks_dir / f"tree{i}.png")
     counts = _counting_reads(monkeypatch, files=(".png",))
 
-    train, val, _partition = auto_train_val(tmp_path, "semantic_seg", {
+    train, val, _partition, _data = train_val(tmp_path, "semantic_seg", {
         "images_dir": str(images_dir), "labels_dir": str(masks_dir),
-        "split": {"val_ratio": 0.5, "seed": 0}}, None)
+        "split": {"val_ratio": 0.5, "seed": 0}})
     _consume(train, val)
 
     masks = {k: n for k, n in counts.items() if Path(k).parent == masks_dir}
@@ -321,7 +320,7 @@ def test_an_assessment_resolves_each_image_once(tmp_path: Path, monkeypatch):
 
 
 def test_a_selection_bound_run_resolves_each_image_once(tmp_path: Path, monkeypatch):
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tests._producer_fixtures import train_val
     from tests.test_selection_binding import (
         _draw, _run_data_cfg, _two_subject_two_date_dataset,
     )
@@ -330,8 +329,8 @@ def test_a_selection_bound_run_resolves_each_image_once(tmp_path: Path, monkeypa
     drawn = _draw(tmp_path, root, tmp_path / "m")
     resolutions = _counting_resolutions(monkeypatch)
 
-    train, val, _partition = auto_train_val(tmp_path, "detection",
-                                            _run_data_cfg(root, tmp_path / "m"), None)
+    train, val, _partition, _data = train_val(tmp_path, "detection",
+                                              _run_data_cfg(root, tmp_path / "m"))
     _consume(train, val)
 
     trained = {str(Path(s.source)) for s in drawn.on("train") + drawn.on("val")}

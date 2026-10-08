@@ -10,7 +10,7 @@ torch = pytest.importorskip("torch")
 from tcip_mcp.pipelines.schemas import train_config
 from tcip_mcp.pipelines.training import generic_trainer as gt
 from tcip_mcp.pipelines.training.generic_trainer import train
-from tcip_mcp.pipelines.training.run_registry import TrainRun, draw_seed_if_unset
+from tcip_mcp.pipelines.training.run_registry import TrainRun, seeded
 from tests._chain_fixtures import training_config
 
 LOSS_OBJECTIVE = {"selection_metric": "loss", "higher_is_better": False}
@@ -49,27 +49,25 @@ def test_mint_experiment_id_unique_across_threads():
     assert len(set(results)) == n
 
 
-# draw_seed_if_unset: reproducibility, every run gets a recorded seed
+# seeded: reproducibility, every run gets a recorded seed
 
-def test_draw_seed_if_unset_draws_and_records_seed_when_unset():
-    config = {"model_source": {}}
-    draw_seed_if_unset(config)
-    seed = config.get("seed")
+def _spec(**stated):
+    from tests._verified_checkpoint_fixtures import unbuilt_source
+
+    return train_config(training_config(unbuilt_source("detection"), {}, **stated))
+
+
+def test_seeded_draws_and_records_a_seed_when_unset():
+    seed = seeded(_spec()).record().get("seed")
     assert isinstance(seed, int) and 0 <= seed < 2**31
 
 
-def test_draw_seed_if_unset_keeps_explicit_top_level_seed():
-    config = {"model_source": {}, "seed": 123}
-    draw_seed_if_unset(config)
-    assert config["seed"] == 123
+def test_seeded_keeps_an_explicit_seed():
+    assert seeded(_spec(seed=123)).seed == 123
 
 
-def test_draw_seed_if_unset_drawn_seeds_are_independent():
-    seeds = set()
-    for _ in range(8):
-        config = {"model_source": {}}
-        draw_seed_if_unset(config)
-        seeds.add(config["seed"])
+def test_seeded_drawn_seeds_are_independent():
+    seeds = {seeded(_spec()).seed for _ in range(8)}
     assert len(seeds) == 8  # OS entropy per run, not one fixed default
 
 
@@ -81,13 +79,11 @@ def test_train_applies_the_drawn_seed(tmp_path, monkeypatch):
         captured["deterministic"] = deterministic
 
     monkeypatch.setattr(gt, "set_seed", fake_set_seed)
-    config = training_config({}, {})
-    draw_seed_if_unset(config)
-    run = TrainRun(id="auto-run-seed-applied", config=config, spec=train_config(config),
+    run = TrainRun(id="auto-run-seed-applied", spec=seeded(_spec()),
                    objective=LOSS_OBJECTIVE, project=tmp_path, output_dir=str(tmp_path / "out"))
     train(run, train_loader=None)  # fails at build, after seeding
 
-    assert captured["seed"] == run.config["seed"]
+    assert captured["seed"] == run.spec.seed
     assert captured["deterministic"] is False
 
 
@@ -100,8 +96,7 @@ def test_train_with_unwritable_output_dir_marks_run_failed(tmp_path):
     blocker.write_text("I am a file, not a directory")
 
     # output_dir nests under an existing *file*, so out_dir.mkdir() raises.
-    config = training_config({}, {})
-    run = TrainRun(id="auto-run-unwritable", config=config, spec=train_config(config),
+    run = TrainRun(id="auto-run-unwritable", spec=_spec(),
                    objective=LOSS_OBJECTIVE, project=tmp_path, output_dir=str(blocker / "out"))
     run = train(run, train_loader=None)
 

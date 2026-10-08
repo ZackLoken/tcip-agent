@@ -19,9 +19,10 @@ pytest.importorskip("torchvision")
 
 from tcip_mcp.pipelines.execution import Stated, prepare  # noqa: E402
 from tcip_mcp.pipelines.model_build import (  # noqa: E402
-    CONFIG_KEY, METRICS_KEY, STATE_DICT_KEY, build_model, snapshot_model_source,
+    CONFIG_KEY, METRICS_KEY, STATE_DICT_KEY, snapshot_model_source,
 )
 from tests import bespoke_models  # noqa: E402
+from tests._chain_fixtures import built_model, training_config
 
 
 def _model_source() -> dict:
@@ -31,11 +32,18 @@ def _model_source() -> dict:
             "task": "detection", "source_files": [__file__]}
 
 
+def _snapshot(config: dict, exp_dir: Path) -> dict:
+    """``snapshot_model_source`` over a run of ``config``'s ``model_source`` over no data, its
+    other keys in place of :func:`~tests._chain_fixtures.training_config`'s, validated."""
+    from tcip_mcp.pipelines.schemas import train_config
+    from tests._chain_fixtures import training_config
+
+    source = config.pop("model_source")
+    return snapshot_model_source(train_config(training_config(source, {}, **config)), exp_dir)
+
+
 _DATA = {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}}
 """The data section a one-subject, three-band run records, which its checkpoint carries."""
-
-_DIMS = {"in_chans": 3, "num_classes": 1}
-"""What :func:`~tcip_mcp.pipelines.model_build.recorded_model_dims` reads off :data:`_DATA`."""
 
 
 # --------------------------------------------------------------------------
@@ -45,9 +53,8 @@ _DIMS = {"in_chans": 3, "num_classes": 1}
 def test_snapshot_model_source_copies_files_and_records_provenance(tmp_path):
     exp_dir = tmp_path / "exp"
     exp_dir.mkdir()
-    manifest = snapshot_model_source({"model_source": _model_source(), "seed": 123}, exp_dir)
+    manifest = _snapshot({"model_source": _model_source(), "seed": 123}, exp_dir)
 
-    assert manifest is not None
     expected_sha = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     entry = next(e for e in manifest["files"] if e["sha256"] == expected_sha)
     stored = (exp_dir / "model_src" / entry["file"]).read_bytes()  # content-addressed destination
@@ -68,7 +75,7 @@ def test_snapshot_model_source_records_missing_files(tmp_path):
     src = _model_source()
     missing_path = str(tmp_path / "does_not_exist.py")
     src["source_files"] = [__file__, missing_path]
-    manifest = snapshot_model_source({"model_source": src}, exp_dir)
+    manifest = _snapshot({"model_source": src}, exp_dir)
 
     assert manifest["missing"] == [missing_path]
     assert any(e["src"] == __file__ for e in manifest["files"])  # the real file still captured
@@ -77,8 +84,9 @@ def test_snapshot_model_source_records_missing_files(tmp_path):
 def test_snapshot_model_source_records_import_error(tmp_path):
     exp_dir = tmp_path / "exp"
     exp_dir.mkdir()
-    manifest = snapshot_model_source(
-        {"model_source": {"builder": "definitely_not_a_real_module_xyz:build"}}, exp_dir)
+    manifest = _snapshot(
+        {"model_source": {"builder": "definitely_not_a_real_module_xyz:build",
+                          "task": "detection"}}, exp_dir)
 
     assert manifest["snapshot_errors"]
     assert "definitely_not_a_real_module_xyz" in manifest["snapshot_errors"][0]
@@ -103,7 +111,7 @@ def test_snapshot_model_source_dedups_same_file_reached_two_ways(tmp_path):
 
     src = _model_source()
     src["source_files"] = [str(real), alt_spelling]
-    manifest = snapshot_model_source({"model_source": src}, exp_dir)
+    manifest = _snapshot({"model_source": src}, exp_dir)
 
     expected_sha = hashlib.sha256(real.read_bytes()).hexdigest()
     matches = [e for e in manifest["files"] if e["sha256"] == expected_sha]
@@ -122,9 +130,9 @@ def test_snapshot_model_source_basename_collision_does_not_clobber(tmp_path):
     (a_dir / "model.py").write_text("# builder A")
     (b_dir / "model.py").write_text("# builder B, different content")
 
-    src = {"builder": GT_ANCHOR_DETECTOR,
-          "source_files": [str(a_dir / "model.py"), str(b_dir / "model.py")]}
-    manifest = snapshot_model_source({"model_source": src}, exp_dir)
+    src = {"builder": GT_ANCHOR_DETECTOR, "task": "detection",
+           "source_files": [str(a_dir / "model.py"), str(b_dir / "model.py")]}
+    manifest = _snapshot({"model_source": src}, exp_dir)
 
     a_path, b_path = str(a_dir / "model.py"), str(b_dir / "model.py")
     file_entries = [e for e in manifest["files"] if e["src"] in (a_path, b_path)]
@@ -142,19 +150,18 @@ def test_snapshot_model_source_basename_collision_does_not_clobber(tmp_path):
 def test_a_pass_rebuilds_a_bespoke_detector_and_predicts(tmp_path):
     from PIL import Image
 
-    src = _model_source()
-    model = build_model({"model_source": src}, _DIMS)
+    config = training_config(_model_source(), _DATA)
+    model = built_model(config)
     assert isinstance(model, bespoke_models.BespokeGNDetector)  # built via the importable builder
 
     ckpt = tmp_path / "model_best.pt"
     torch.save({STATE_DICT_KEY: model.state_dict(), METRICS_KEY: {"val_loss": 0.3, "epoch": 1},
-                CONFIG_KEY: {"model_source": src, "data": _DATA}}, ckpt)
+                CONFIG_KEY: config}, ckpt)
 
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.model_tools import register_model
 
-    reg_result = register_model(tmp_path, name="bespoke-detector", checkpoint_path=str(ckpt),
-                                config={})
+    reg_result = register_model(tmp_path, name="bespoke-detector", checkpoint_path=str(ckpt))
     assert "error" not in reg_result, reg_result
     checkpoint = load_registered_checkpoint(str(ckpt), project=tmp_path)
 
@@ -177,19 +184,16 @@ def test_predictor_loads_at_the_two_channels_its_run_recorded(tmp_path):
     silent default of 3."""
     import numpy as np
 
-    from tcip_mcp.pipelines.model_build import recorded_model_dims
-
     src = {"builder": BESPOKE_CLASSIFIER, "task": "classification"}
-    config = {"model_source": src, "data": {"num_channels": 2, "num_classes": 2, "scope": {}}}
-    model = build_model(config, recorded_model_dims(config))
+    config = training_config(src, {"num_channels": 2, "num_classes": 2, "scope": {}})
+    model = built_model(config)
     ckpt = tmp_path / "model_best.pt"
     torch.save({STATE_DICT_KEY: model.state_dict(), CONFIG_KEY: config}, ckpt)
 
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.model_tools import register_model
 
-    reg_result = register_model(tmp_path, name="bespoke-classifier", checkpoint_path=str(ckpt),
-                                config={})
+    reg_result = register_model(tmp_path, name="bespoke-classifier", checkpoint_path=str(ckpt))
     assert "error" not in reg_result, reg_result
     checkpoint = load_registered_checkpoint(str(ckpt), project=tmp_path)
 

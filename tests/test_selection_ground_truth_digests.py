@@ -18,6 +18,7 @@ from tests._producer_fixtures import label_image, write_image
 torch = pytest.importorskip("torch")
 
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
+from tcip_mcp.pipelines.schemas import DataSpec  # noqa: E402
 from tcip_store import encode_record  # noqa: E402
 
 IMG = 32
@@ -111,8 +112,8 @@ def test_the_run_binding_records_the_selection_digest_once_never_on_a_sample(
 
     selection = read_selection(out, project=tmp_path)
     assert selection_digest(selection, tmp_path) == _manifest_sha256(out)
-    assert resolved["partition"]["selection"]["selection_sha256"] == _manifest_sha256(out)
-    assert not any("selection_sha256" in sample for sample in resolved["partition"]["samples"])
+    assert resolved.partition["selection"]["selection_sha256"] == _manifest_sha256(out)
+    assert not any("selection_sha256" in sample for sample in resolved.partition["samples"])
 
 
 def test_a_document_emptied_after_its_admission_never_trains_as_empty(
@@ -132,10 +133,10 @@ def test_a_document_emptied_after_its_admission_never_trains_as_empty(
         return real_samples(self, assignment, group_of)
 
     monkeypatch.setattr(label_queries.Admission, "samples", emptied_first)
-    data_cfg = {"images_dir": str(images_dir), "scope": {"subject": SUBJECT},
-                "split": {"seed": 0, "val_ratio": 0.15}}
+    data = DataSpec.model_validate({"images_dir": str(images_dir), "scope": {"subject": SUBJECT},
+                                    "split": {"seed": 0, "val_ratio": 0.15}})
 
-    train, val, _partition = auto_train_val(tmp_path, "detection", data_cfg, None)
+    train, val, _partition, _resolved = auto_train_val(tmp_path, "detection", data, None)
 
     (key,) = [k for ds in (train, val) for k in ds.stems if Path(k).stem == "a"]
     held = next(ds for ds in (train, val) if key in ds.stems)
@@ -156,7 +157,7 @@ def test_the_partition_alone_carries_the_per_sample_digests(tmp_path: Path) -> N
     resolved = run_resolution(_bind_run(tmp_path, out, "exp_split_config_readback").name,
                               project=tmp_path)
 
-    assert resolved["partition"]["samples"]
-    assert all(sample["ground_truth_digest"] for sample in resolved["partition"]["samples"])
-    for block in (resolved["data"]["split"], resolved["partition"]["selection"]):
+    assert resolved.partition["samples"]
+    assert all(sample["ground_truth_digest"] for sample in resolved.partition["samples"])
+    for block in (resolved.data.record()["split"], resolved.partition["selection"]):
         assert "samples" not in block

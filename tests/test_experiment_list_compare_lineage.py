@@ -13,9 +13,7 @@ def _opened(project, experiment_id: str, builder: str = "my_models:tree_detector
 
 
 def test_experiment_list_compare_lineage(tmp_path):
-    from tcip_mcp.experiments import (
-        compare_experiments, get_experiment_lineage, run_resolution, run_rows,
-    )
+    from tcip_mcp.experiments import compare_experiments, get_experiment_lineage, observe, run_rows
     from tests._verified_checkpoint_fixtures import log_epoch
 
     e1 = _opened(tmp_path, "e1", "my_models:tv_resnet50_det", relaunched_from="e0")
@@ -32,7 +30,7 @@ def test_experiment_list_compare_lineage(tmp_path):
     assert any("error" in c for c in cmp["experiments"])   # the missing run is reported
 
     lineage = get_experiment_lineage("e1", project=tmp_path)["lineage"]
-    assert lineage["data"] == run_resolution("e1", project=tmp_path)["data"]
+    assert lineage["data"] == observe(e1).record["resolved"]["data"]
     assert lineage["relaunched_from"] == "e0"
     assert lineage["checkpoint"] is None  # no final status names a checkpoint yet
     assert "error" in get_experiment_lineage("nope", project=tmp_path)

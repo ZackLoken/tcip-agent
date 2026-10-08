@@ -14,6 +14,8 @@ import numpy as np
 if TYPE_CHECKING:
     from tcip_annotation.json_io import LabelDocument
 
+    from tcip_mcp.pipelines.schemas import SpatialManifest
+
 logger = logging.getLogger(__name__)
 
 # Enough bands to measure a per-band bias spread (the count criterion needs n >= 2 present images
@@ -22,12 +24,11 @@ DEFAULT_K_CAL = 3
 DEFAULT_K_TEST = 3
 
 
-def reserved_spatial_regions(resolved: dict) -> dict | None:
-    """The spatial manifest of a run's resolution (``data.split.spatial_manifest``) when it
+def reserved_spatial_regions(spatial: SpatialManifest | None) -> SpatialManifest | None:
+    """A run's within-image split ``spatial`` (``experiments.RunResolution.spatial``) when it
     reserved a calibration and a holdout region, else ``None``: a run that drew no within-image
-    spatial split, or one that reserved no calibration or no holdout region."""
-    spatial = resolved["data"]["split"].get("spatial_manifest")
-    if not spatial or not spatial["calibration_region"] or not spatial["holdout_region"]:
+    split, or one that reserved no calibration or no holdout region."""
+    if spatial is None or not spatial.calibration_region or not spatial.holdout_region:
         return None
     return spatial
 

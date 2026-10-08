@@ -139,15 +139,15 @@ def instance_seg_ckpt(tmp_path_factory) -> str:
     unset genuinely exercise the tiled default derived from *this* checkpoint's own geometry, not a
     platform-wide fallback (an untrained-tiled checkpoint has no such basis and would derive
     untiled instead, see ``resolve_tile_geometry``)."""
-    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
+    from tests._chain_fixtures import built_model, training_config
 
     model_source = {"builder": BESPOKE_INSTANCE_SEG,
                     "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
                     "task": "instance_seg"}
-    config = {"model_source": model_source,
-              "data": {"tiling": {"tile_size": TILE, "overlap": 0.2}, "num_channels": 3,
-                       "scope": {"subject": "stem", "attributes": []}}}
-    model = build_model(config, recorded_model_dims(config))
+    config = training_config(model_source,
+                             {"tiling": {"tile_size": TILE, "overlap": 0.2}, "num_channels": 3,
+                              "scope": {"subject": "stem", "attributes": []}})
+    model = built_model(config)
     ckpt = tmp_path_factory.mktemp("instance_seg_ckpt") / "model_best.pt"
     torch.save({STATE_DICT_KEY: model.state_dict(), CONFIG_KEY: config}, str(ckpt))
     return str(ckpt)
@@ -158,7 +158,7 @@ def _register_instance_seg_ckpt(ckpt_path: str, project_root: Path) -> None:
     from tcip_mcp.tools.model_tools import register_model
 
     result = register_model(name="instance-seg-test-model", checkpoint_path=ckpt_path,
-                            config={}, project=project_root)
+                            project=project_root)
     assert "error" not in result, result
 
 

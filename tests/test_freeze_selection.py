@@ -24,7 +24,9 @@ from tcip_mcp.pipelines.schemas import train_config  # noqa: E402
 
 from tests._chain_fixtures import BESPOKE_DETECTION, run_config, training_config  # noqa: E402
 from tests._training_values import evaluation_block  # noqa: E402
-from tests._verified_checkpoint_fixtures import opened_run, resolved_run  # noqa: E402
+from tests._verified_checkpoint_fixtures import (  # noqa: E402
+    opened_run, resolved_run, unbuilt_source,
+)
 from tests.test_selection_binding import DATES, SUBJECT, _two_subject_two_date_dataset  # noqa: E402
 
 
@@ -34,15 +36,15 @@ def _real_drawn_experiment(
 ) -> dict:
     """Draws a real train/val split over ``root``'s own fixture dataset through the launcher's
     own resolution, recorded in ``experiment_id``'s launch record under ``project``; a run with
-    ``auto_val`` off selects on its training loss. Returns the resolved ``data`` section."""
+    ``auto_val`` off selects on its training loss. Returns the resolved ``data`` block."""
     images_dir = root / "images" / date
     opened_run(project, training_config(
-        {"task": "detection"},
+        unbuilt_source("detection"),
         {"images_dir": str(images_dir), "scope": {"subject": subject},
          "auto_val": auto_val, "split": {"seed": 0, "val_ratio": 0.15}},
         **({} if auto_val else {"evaluation": evaluation_block(selection_metric="loss")})),
         experiment_id=experiment_id)
-    return run_resolution(experiment_id, project=project)["data"]
+    return run_resolution(experiment_id, project=project).data
 
 
 def _damage_resolved(project: Path, experiment_id: str, change) -> None:
@@ -81,11 +83,11 @@ def test_freeze_selection_round_trips_through_a_real_bind(tmp_path: Path):
         assert Path(sample.source).parent == root / "images" / DATES[0]
         assert ts.exists(sample.ground_truth)
 
-    second_cfg = run_config(Path(selection_dir),
-                            {"builder": BESPOKE_DETECTION, "task": "detection"})
-    assert selection_compatibility(second_cfg["data"], frozen, selection_dir) == []
+    second = train_config(run_config(Path(selection_dir),
+                                     {"builder": BESPOKE_DETECTION, "task": "detection"}))
+    assert selection_compatibility(second.data, frozen, selection_dir) == []
 
-    resolution = resolve_run(second_cfg, train_config(second_cfg), project=tmp_path)
+    resolution = resolve_run(second, project=tmp_path)
     assert len(resolution.train_ds) > 0 and len(resolution.val_ds) > 0
 
 
@@ -101,7 +103,7 @@ def test_freeze_selection_names_the_sources_the_run_read_not_the_launch_input(tm
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     data_cfg = _real_drawn_experiment(tmp_path, root, "exp-elsewhere")
-    trained_images = Path(data_cfg["images_dir"])
+    trained_images = Path(str(data_cfg.images_dir))
 
     other = root / "images" / "other"
     other.mkdir(parents=True)
@@ -148,7 +150,8 @@ def test_freeze_selection_keeps_two_scopes_same_named_members_apart(tmp_path: Pa
 
     _real_drawn_experiment(tmp_path, root, "exp-two-scope")
     _damage_resolved(tmp_path, "exp-two-scope", lambda resolved: resolved.update(
-        partition=_partition_record(train + val, seed=0, group_by="stem", selection=None)))
+        partition=_partition_record(train + val, seed=0, group_by="stem", selection=None,
+                                    spatial=None)))
 
     result = freeze_selection(tmp_path, "exp-two-scope", output_path=str(tmp_path / "frozen"))
 
@@ -227,7 +230,7 @@ def test_a_bound_run_freezes_and_a_later_run_rebinds_to_its_membership(
                  experiment_id="exp-rebound")
 
     def _sides(experiment_id: str) -> dict:
-        samples = partition_samples(run_resolution(experiment_id, project=tmp_path)["partition"])
+        samples = partition_samples(run_resolution(experiment_id, project=tmp_path).partition)
         return {side: {s.ground_truth for s in samples if s.side == side}
                 for side in ("train", "val")}
 
@@ -235,16 +238,16 @@ def test_a_bound_run_freezes_and_a_later_run_rebinds_to_its_membership(
 
 
 def test_freeze_selection_refuses_a_spatial_split(tmp_path: Path):
-    """A within-image spatial split resolves region identities, which its data section records as
-    ``split.spatial_manifest``, the one field freeze_selection's spatial refusal reads, set here
-    past the writer rather than through a tiled single-source fixture, since that field is the
-    whole of what the refusal inspects."""
+    """A within-image spatial split resolves region identities, which its partition records as
+    its ``spatial`` split, and freeze_selection binds only a stem-keyed partition."""
     from tcip_mcp.tools.data_tools import freeze_selection
+    from tests.test_spatial_region_containment import _mosaic_dataset
 
-    root = _two_subject_two_date_dataset(tmp_path / "ds")
-    _real_drawn_experiment(tmp_path, root, "exp-spatial")
-    _damage_resolved(tmp_path, "exp-spatial",
-                     lambda resolved: resolved["data"]["split"].update(spatial_manifest={}))
+    images_dir = _mosaic_dataset(tmp_path / "ds")
+    resolved_run(tmp_path, {
+        "images_dir": str(images_dir), "scope": {"subject": "bud"},
+        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {"val_ratio": 0.2, "seed": 1}}, experiment_id="exp-spatial")
 
     result = freeze_selection(tmp_path, "exp-spatial")
     assert "error" in result and "spatial" in result["error"]

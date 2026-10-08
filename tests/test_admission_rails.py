@@ -144,9 +144,12 @@ def test_a_point_document_is_admitted_and_trains_through_the_builder_that_reads_
 
     # Admits valid work: a builder that reads points is handed the same admitted samples, reads
     # each document's own coordinates, and trains over them.
+    from tcip_mcp.pipelines.schemas import DatasetSourceSchema
+
     built = dataset_over(
         "keypoints", images, subject=BUD,
-        dataset_source={"builder": "tests.test_dataset_source_seam:build_point_ds"})
+        dataset_source=DatasetSourceSchema.model_validate(
+            {"builder": "tests.test_dataset_source_seam:build_point_ds"}))
     assert sorted(s.member for s in built.samples) == ["p0", "p1"]
     assert built.points == [(20.0, 30.0), (21.0, 31.0)]
 

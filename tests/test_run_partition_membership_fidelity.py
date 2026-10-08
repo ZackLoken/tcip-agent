@@ -1,6 +1,6 @@
 """What a run's resolved record claims about a spatial-strip split.
 
-The resolved data section's ``split.spatial_manifest`` is the immutable record a reviewer
+The resolved partition's ``spatial`` split is the immutable record a reviewer
 reconstructs a metric from: which units trained, which validated, and which pixel regions each
 side occupied. These drive the real writer (the launcher's own resolution and launch record) and
 read the result back, including through the geometric disjointness check that consumes it.
@@ -44,7 +44,7 @@ def _data_cfg(images_dir: Path, **split) -> dict:
             "split": cfg}
 
 
-def _persisted_split(project: Path, experiment_id: str, data_cfg: dict) -> dict:
+def _persisted_split(project: Path, experiment_id: str, data_cfg: dict):
     """The spatial manifest the run ``experiment_id`` under ``project`` over ``data_cfg``
     resolved and recorded."""
     from tcip_mcp.experiments import run_resolution
@@ -52,8 +52,9 @@ def _persisted_split(project: Path, experiment_id: str, data_cfg: dict) -> dict:
 
     resolved_run(project, data_cfg, experiment_id=experiment_id)
     resolved = run_resolution(experiment_id, project=project)
-    assert partition_side(resolved["partition"], "train") == ["mosaic"]
-    return {"spatial": resolved["data"]["split"]["spatial_manifest"]}
+    assert partition_side(resolved.partition, "train") == ["mosaic"]
+    assert resolved.spatial is not None
+    return resolved.spatial
 
 
 def test_spatial_split_records_val_membership_from_the_val_side(tmp_path: Path) -> None:
@@ -63,9 +64,9 @@ def test_spatial_split_records_val_membership_from_the_val_side(tmp_path: Path) 
     images_dir, _ = _single_source_mosaic(tmp_path / "ds")
     data_cfg = _data_cfg(images_dir)
 
-    split = _persisted_split(tmp_path, "exp_membership", data_cfg)
+    spatial = _persisted_split(tmp_path, "exp_membership", data_cfg)
 
-    train, val = split["spatial"]["train_identities"], split["spatial"]["val_identities"]
+    train, val = spatial.train_identities, spatial.val_identities
     assert train and val
     assert set(train).isdisjoint(val)
 
@@ -74,8 +75,7 @@ def test_spatial_split_records_val_membership_from_the_val_side(tmp_path: Path) 
     def _axis_width(region):
         return sum(x1 - x0 for x0, _y0, x1, _y1 in region)
 
-    assert _axis_width(split["spatial"]["train_region"]) > _axis_width(
-        split["spatial"]["val_region"]) > 0
+    assert _axis_width(spatial.train_region) > _axis_width(spatial.val_region) > 0
 
 
 def test_persisted_calibration_region_is_reserved_away_from_train(tmp_path: Path) -> None:
@@ -88,10 +88,8 @@ def test_persisted_calibration_region_is_reserved_away_from_train(tmp_path: Path
     images_dir, _stem = _single_source_mosaic(tmp_path / "ds")
     data_cfg = _data_cfg(images_dir, val_ratio=0.2, holdout_ratio=0.1, calibration_ratio=0.15)
 
-    split = _persisted_split(tmp_path, "exp_reserved_cal", data_cfg)
-    spatial = split["spatial"]
-    cal_region = [tuple(r) for r in spatial["calibration_region"]]
-    train_region = [tuple(r) for r in spatial["train_region"]]
+    spatial = _persisted_split(tmp_path, "exp_reserved_cal", data_cfg)
+    cal_region, train_region = spatial.calibration_region, spatial.train_region
     assert cal_region and train_region
     for cal_rect in cal_region:
         for train_rect in train_region:

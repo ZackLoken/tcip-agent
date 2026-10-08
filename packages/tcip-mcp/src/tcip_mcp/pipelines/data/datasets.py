@@ -36,6 +36,7 @@ from tcip_mcp.pipelines.image_utils import (
     to_pil_if_faithful,
 )
 from tcip_mcp.pipelines.execution import DEFAULT_OVERLAP
+from tcip_mcp.pipelines.schemas import DatasetSourceSchema, DataSpec, TilingSpec
 
 logger = logging.getLogger(__name__)
 
@@ -786,17 +787,18 @@ _DATASET_MAP: dict[str, type[BaseImageDataset]] = {
 only through a bespoke ``dataset_source`` builder."""
 
 
-def builtin_loader(task: str, dataset_source: dict | None = None) -> type[BaseImageDataset] | None:
+def builtin_loader(task: str, dataset_source: DatasetSourceSchema | None = None
+                   ) -> type[BaseImageDataset] | None:
     """The built-in loader a run of ``task`` is read by: ``None`` for a run naming a bespoke
     ``dataset_source`` and for a task no built-in loader reads."""
     return None if dataset_source else _DATASET_MAP.get(task)
 
 
 def build_from_dataset_source(
-    dataset_source: dict, *, task: str, samples: Sequence[Sample],
+    dataset_source: DatasetSourceSchema, *, task: str, samples: Sequence[Sample],
     scope: ClassScope, transforms: Any,
 ) -> Dataset:
-    """Import the agent's dataset builder and call it.
+    """Import the agent's dataset builder ``dataset_source`` names and call it.
 
     The builder is called with a context of ``samples`` (the sample list for the side being built,
     each carrying its logical image, :func:`~tcip_mcp.pipelines.data.label_queries.resolved`),
@@ -806,21 +808,11 @@ def build_from_dataset_source(
 
     ``builder_kwargs`` configure the builder; a key the context already states refuses by name.
     Declare ``**kwargs`` on the builder to ignore context keys it doesn't use.
-
-    ``dataset_source`` schema (parallels ``model_source``)::
-
-        {"builder": "my_module:build_ds",  # required, 'module:function' (or 'module.function')
-         "builder_kwargs": {...},          # optional, the builder's own configuration
-         "source_files": [...]}            # optional, provenance
     """
-    if not isinstance(dataset_source, dict):
-        raise ValueError("dataset_source must be a dict")
     from tcip_mcp.pipelines.model_build import import_source_builder
 
-    fn = import_source_builder(dataset_source.get("builder"), dataset_source.get("source_files"))
-    builder_kwargs = dataset_source.get("builder_kwargs") or {}
-    if not isinstance(builder_kwargs, dict):
-        raise ValueError("dataset_source.builder_kwargs must be a dict")
+    fn = import_source_builder(dataset_source.builder, dataset_source.source_files)
+    builder_kwargs = dataset_source.builder_kwargs or {}
     context = {"task": task, "samples": resolved(samples), "scope": scope,
                "transforms": transforms}
     restated = sorted(set(context) & set(builder_kwargs))
@@ -877,17 +869,18 @@ SIZE_NAMES = GROUND_TRUTH_COUNTS + ("num_channels",)
 """Every size a loader is built at, in the spelling a config and a caller state them by."""
 
 
-def stated_sizes(stated: "Mapping[str, Any]") -> dict[str, int]:
-    """The sizes a mapping (a config's data section) states, absent where it states none."""
-    return {name: int(stated[name]) for name in SIZE_NAMES if stated.get(name) is not None}
+def stated_sizes(data: DataSpec) -> dict[str, int]:
+    """The sizes a data block states or records, absent where it states none."""
+    sizes = {name: getattr(data, name) for name in SIZE_NAMES}
+    return {name: int(size) for name, size in sizes.items() if size is not None}
 
 
 def resolve_sizes(
-    task: str, stated: "Mapping[str, Any]", samples: Sequence[Sample],
-    dataset_source: dict | None = None,
+    task: str, stated: "Mapping[str, int]", samples: Sequence[Sample],
+    dataset_source: DatasetSourceSchema | None = None,
 ) -> dict[str, int]:
-    """The sizes a run's loaders are built at: what its caller states, and, for each size stated
-    nowhere, what the samples themselves carry.
+    """The sizes a run's loaders are built at: what its caller states (``stated``, by
+    :data:`SIZE_NAMES`), and, for each size stated nowhere, what the samples themselves carry.
 
     Read over every sample the loaders are built from: a class reaching only one side sizes both,
     and two sources disagreeing about their band count refuse. A stated band count is taken as
@@ -898,7 +891,7 @@ def resolve_sizes(
     For a task no built-in loader reads and for a bespoke ``dataset_source``, the band count the
     sources carry and only the counts the caller states.
     """
-    resolved = stated_sizes(stated)
+    resolved = dict(stated)
     cls = builtin_loader(task, dataset_source)
     if cls is not None:
         # Before any ground truth is read, so no size is read off a sample this loader cannot read.
@@ -924,27 +917,21 @@ def resolve_sizes(
     return resolved
 
 
-def stated_tiling(tiling: "Mapping[str, Any] | None") -> dict | None:
-    """The ``TiledDetectionDataset`` constructor kwargs a ``tiling`` section states, keys omitted
-    so the class's own constructor defaults apply, when it is stated and not ``enabled: false``;
-    ``None`` otherwise."""
-    if not tiling or not tiling.get("enabled", True):
-        return None
-    return {k: tiling[k] for k in
-            ("tile_size", "overlap", "sliver_frac", "dedup_iou", "skip_empty", "keep_regions")
-            if k in tiling}
+def stated_tiling(tiling: TilingSpec | None) -> TilingSpec | None:
+    """``tiling`` when it is stated and enabled; ``None`` otherwise."""
+    return tiling if tiling is not None and tiling.enabled else None
 
 
-def run_tiling(task: str, tiling: "Mapping[str, Any] | None") -> dict | None:
+def run_tiling(task: str, tiling: TilingSpec | None) -> TilingSpec | None:
     """:func:`stated_tiling` for a run of ``task`` that tiles its training loader: a detection
     run; ``None`` for a run that does not."""
     return stated_tiling(tiling) if task == "detection" else None
 
 
 def build_dataset(
-    task: str, dataset_source: dict | None = None, *,
+    task: str, dataset_source: DatasetSourceSchema | None = None, *,
     samples: Sequence[Sample], sizes: "Mapping[str, int]", scope: ClassScope,
-    transforms: Any = None, tiling: dict | None = None, **unowned: Any,
+    transforms: Any = None, tiling: TilingSpec | None = None, **unowned: Any,
 ) -> Dataset:
     """Factory: build a dataset by task type, or via a bespoke ``dataset_source`` builder.
 
@@ -957,8 +944,8 @@ def build_dataset(
     ``sizes`` is what the caller resolved for this run (:func:`resolve_sizes`); a loader reads its
     sources at its band count. Anything given that no recipient could take refuses by name.
 
-    An optional ``tiling`` dict (``{enabled, tile_size, overlap, sliver_frac, dedup_iou,
-    skip_empty, keep_regions}``) wraps the detection dataset in a :class:`TiledDetectionDataset`; a
+    An enabled ``tiling`` wraps the detection dataset in a :class:`TiledDetectionDataset` at the
+    options it states (``TilingSpec.tiler_options``); a
     bespoke builder composes its own tiling, and a ``tiling`` beside it refuses. An unknown task
     with no builder raises ``Unknown task``.
     """
@@ -994,7 +981,8 @@ def build_dataset(
         assert isinstance(base, DetectionDataset), "_DATASET_MAP's detection entry is this class"
         # Stamped before the tiler indexes every image at the base's band count.
         base.expected_channels = sizes["num_channels"]
-        ds: BaseDataset = TiledDetectionDataset(base, transforms=transforms, **tiler)
+        ds: BaseDataset = TiledDetectionDataset(base, transforms=transforms,
+                                                **tiler.tiler_options())
     else:
         if stated_tiling(tiling) is not None:
             logger.warning(

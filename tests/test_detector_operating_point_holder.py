@@ -65,10 +65,11 @@ def test_holder_refuses_when_the_module_and_its_detectors_roi_heads_both_expose_
     """An ambiguous module, ambiguous in the same shape a real bespoke wrapper could build: a
     torchvision two-stage detector under ``.detector`` (whose ``roi_heads`` already exposes the
     knob) plus a knob restated on the wrapper itself. The platform must not silently pick one."""
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_from_model_source
+    from tcip_mcp.pipelines.schemas import ModelSourceSchema
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
-    model = build_model({"model_source": dict(BUILT_DETECTOR)}, _DIMS)
+    model = build_from_model_source(ModelSourceSchema.model_validate(BUILT_DETECTOR), _DIMS)
     assert hasattr(model.detector, "roi_heads")
     assert hasattr(model.detector.roi_heads, "score_thresh")
     model.score_thresh = 0.5  # restated on the wrapper itself, ambiguous with .detector.roi_heads
@@ -160,13 +161,15 @@ def test_a_module_exposing_no_knob_fails_unstated_not_censored(tmp_path):
 
 
 def test_model_contract_records_the_holders_own_knobs():
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_from_model_source
     from tcip_mcp.pipelines.model_contract import check_model_contract
+    from tcip_mcp.pipelines.schemas import ModelSourceSchema
 
-    with_knob = build_model(
-        {"model_source": {"builder": BARE_SCORE_THRESH_DETECTOR, "task": "detection"}}, _DIMS)
-    without_knob = build_model(
-        {"model_source": {"builder": BARE_NO_KNOB_DETECTOR, "task": "detection"}}, _DIMS)
+    def built(builder: str):
+        return build_from_model_source(
+            ModelSourceSchema.model_validate({"builder": builder, "task": "detection"}), _DIMS)
+
+    with_knob, without_knob = built(BARE_SCORE_THRESH_DETECTOR), built(BARE_NO_KNOB_DETECTOR)
 
     dims = {"in_chans": 3, "num_classes": 1, "img_size": 64}
     assert check_model_contract(with_knob, "detection", dims=dims)["operating_point_knobs"] == [

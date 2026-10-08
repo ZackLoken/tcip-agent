@@ -63,9 +63,7 @@ def relaunch_route(payload: RelaunchPayload) -> dict:
     """
     from tcip_mcp.audit import AuditEntryNotWrittenError
     from tcip_mcp.experiments import SWEEP_FILE, named_directory, observe
-    from tcip_mcp.tools.training_tools import (
-        candidate_config_with_selection, launch_sweep, launch_training,
-    )
+    from tcip_mcp.tools.training_tools import data_with_selection, launch_sweep, launch_training
     from tcip_web.routes.audit_gap import audit_gap_409
 
     person = actor(payload.user)
@@ -79,10 +77,13 @@ def relaunch_route(payload: RelaunchPayload) -> dict:
                 raise HTTPException(422, "a sweep relaunches from its own recorded input")
             result = launch_sweep(project, source, actor=person)
         else:
-            config = observe(source).record["config"]
+            observation = observe(source)
+            spec = observation.spec
             if payload.selection_dir:
-                config = candidate_config_with_selection(config, payload.selection_dir)
-            result = launch_training(project, config, relaunched_from=source.name, actor=person)
+                data = data_with_selection(spec.data, payload.selection_dir)
+                spec = spec.model_copy(update={"data": data})
+            result = launch_training(project, spec.record(), relaunched_from=source.name,
+                                     actor=person)
     except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(exc, exc.arguments) from exc
     if result.get("error"):

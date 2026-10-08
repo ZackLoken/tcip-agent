@@ -42,7 +42,7 @@ def freeze_selection(project: Path, experiment_id: str, output_path: str | None 
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
     from tcip_mcp.pipelines.data.selection import (
-        ClassScope, Selection, read_selection_checked, write_selection,
+        Selection, read_selection_checked, write_selection,
     )
     from tcip_annotation.json_io import UnreadableLabelDocumentError
 
@@ -53,13 +53,13 @@ def freeze_selection(project: Path, experiment_id: str, output_path: str | None 
         resolved = run_resolution(experiment_id, project=project)
     except ValueError as exc:
         return {"error": str(exc)}
-    partition = resolved["partition"]
-    if "spatial_manifest" in resolved["data"]["split"]:
+    partition = resolved.partition
+    if resolved.spatial is not None:
         return {"error": f"{experiment_id!r}'s split is spatial (region identities, not stems): "
                          "freeze_selection binds a stem-keyed partition, which a spatial split "
                          "never draws."}
     # The run's own class space, so what this selection records is what the checkpoint records.
-    scope = ClassScope.of(resolved["data"])
+    scope = resolved.data.recorded_scope
     samples = [s for s in partition_samples(partition) if s.side in ("train", "val")]
     n_train = sum(1 for s in samples if s.side == "train")
     n_val = len(samples) - n_train

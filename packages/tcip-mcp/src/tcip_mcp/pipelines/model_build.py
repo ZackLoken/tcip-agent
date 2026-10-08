@@ -1,5 +1,6 @@
-"""``build_model``: a run config's ``model_source`` to an ``nn.Module``, by importing the dotted
-builder it names and calling it.
+"""``build_from_model_source``: a validated run config's ``model_source``
+(``schemas.ModelSourceSchema``) to an ``nn.Module``, by importing the dotted builder it names and
+calling it.
 
 ``model_source`` schema::
 
@@ -7,7 +8,7 @@ builder it names and calling it.
      "builder_kwargs": {...},              # optional, passed to the builder
      "source_files": [...],                # optional: the builder's own files, joined to sys.path
                                            # for the import and snapshotted as provenance
-     "task": "detection"}                  # the run's task
+     "task": "detection"}                  # required, the run's task
 
 The builder is also handed the run's width, count and attributes (:func:`model_dims`), never
 stated here.
@@ -21,16 +22,13 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.selection import ClassScope
-    from tcip_mcp.pipelines.schemas import ModelSourceSchema
+    from tcip_mcp.pipelines.schemas import ModelSourceSchema, TrainConfigSchema
 
-MODEL_SOURCE_KEY = "model_source"
-TRAINING_SOURCE_KEY = "training_source"
-DATASET_SOURCE_KEY = "dataset_source"
 STATE_DICT_KEY = "model_state_dict"
 CONFIG_KEY = "config"
 METRICS_KEY = "metrics"
-"""The config keys naming a run's bespoke sources, and a checkpoint's keys holding its weights,
-the config its model builds from and the metrics it was selected on."""
+"""A checkpoint's keys holding its weights, the config its model builds from and the metrics it
+was selected on."""
 
 RESERVED_DIMS = ("in_chans", "num_classes", "num_ranks", "attributes")
 """The dimensions the platform hands a model builder (:func:`model_dims`), never its
@@ -200,47 +198,31 @@ def model_dims(scope: "ClassScope", sizes: "Mapping[str, int]") -> dict[str, Any
             **({"attributes": attributes} if attributes else {})}
 
 
-def recorded_model_dims(config: "Mapping[str, Any]") -> dict[str, Any]:
-    """:func:`model_dims` over what a run's config records on its data section: its ``scope`` and
-    its sizes. Refuses by name a run of a built-in loader's task that records no count its ground
-    truth derives (``num_ranks`` for an ordinal run)."""
+def recorded_model_dims(spec: "TrainConfigSchema") -> dict[str, Any]:
+    """:func:`model_dims` over what a validated run config records on its data block: its
+    ``scope`` and its sizes. Refuses by name a run of a built-in loader's task that records no
+    count its ground truth derives (``num_ranks`` for an ordinal run)."""
     from tcip_mcp.pipelines.data.datasets import builtin_loader, stated_sizes
-    from tcip_mcp.pipelines.data.selection import ClassScope
 
-    data_cfg = config.get("data") or {}
-    dims = model_dims(ClassScope.of(data_cfg), stated_sizes(data_cfg))
-    loader = builtin_loader(run_task(config), data_cfg.get(DATASET_SOURCE_KEY))
+    data, task = spec.data, spec.model_source.task
+    dims = model_dims(data.recorded_scope, stated_sizes(data))
+    loader = builtin_loader(task, data.dataset_source)
     count = loader.ground_truth_count if loader is not None else None
     if count is not None and count not in dims:
         raise ValueError(
-            f"this {run_task(config)} run records no {count} (data.{count}), so the head its "
+            f"this {task} run records no {count} (data.{count}), so the head its "
             "model was built at is unknown. Build from a run this platform trained, whose "
             "admission records it."
         )
     return dims
 
 
-def run_task(config: "Mapping[str, Any]") -> str:
-    """The task a run's config names, ``model_source.task``. Raises ``ValueError`` when it states
-    none."""
-    task = (config.get(MODEL_SOURCE_KEY) or {}).get("task")
-    if not task:
-        raise ValueError(
-            "this config states no task: name it as model_source.task (detection, "
-            "instance_seg, classification, ...), the task the builder's model is for")
-    return task
-
-
-def build_from_model_source(source: "ModelSourceSchema | None",
-                            dims: "Mapping[str, Any]") -> Any:
+def build_from_model_source(source: "ModelSourceSchema", dims: "Mapping[str, Any]") -> Any:
     """Import the builder a validated ``model_source`` (``schemas.TrainConfigSchema``'s) names
-    and call it with its ``builder_kwargs`` and ``dims`` (:func:`model_dims`). Only ``builder``
-    is required to construct the model. Refuses (``ValueError``) a config with no
-    ``model_source``, and by name a ``builder_kwargs`` naming a dimension
-    (:data:`RESERVED_DIMS`), whether or not this run resolved it.
+    and call it with its ``builder_kwargs`` and ``dims`` (:func:`model_dims`). Refuses
+    (``ValueError``) by name a ``builder_kwargs`` naming a dimension (:data:`RESERVED_DIMS`),
+    whether or not this run resolved it.
     """
-    if source is None:
-        raise ValueError("Config has no 'model_source'.")
     fn = import_source_builder(source.builder, source.source_files)
     kwargs = source.builder_kwargs or {}
     restated = sorted(set(RESERVED_DIMS) & set(kwargs))
@@ -254,22 +236,10 @@ def build_from_model_source(source: "ModelSourceSchema | None",
     return fn(**kwargs, **dims)
 
 
-def build_model(config: dict, dims: "Mapping[str, Any]") -> Any:
-    """Build a model from a raw run config (a checkpoint's own ``config`` included) via its
-    ``model_source``, validated alone (``schemas.ModelSourceSchema``), and its builder
-    (:func:`build_from_model_source`), at ``dims`` (:func:`model_dims`); the training values the
-    config carries are the trainer's, never read here."""
-    from tcip_mcp.pipelines.schemas import ModelSourceSchema
-
-    source = config.get(MODEL_SOURCE_KEY)
-    return build_from_model_source(
-        None if source is None else ModelSourceSchema.model_validate(source), dims)
-
-
-def resolve_contract_dims(config: dict, task: str, dims: "Mapping[str, Any]") -> dict:
-    """The dimensions a synthetic smoke batch is shaped at: the width, count and attributes the
-    model is built at (``dims``, :func:`model_dims`, a rank count carried as ``num_classes``) and
-    an ``img_size``.
+def resolve_contract_dims(spec: "TrainConfigSchema", dims: "Mapping[str, Any]") -> dict:
+    """The dimensions a synthetic smoke batch of a validated run config is shaped at: the width,
+    count and attributes the model is built at (``dims``, :func:`model_dims`, a rank count
+    carried as ``num_classes``) and an ``img_size``.
 
     ``img_size`` is the tile edge when detection tiling is on (the real training input), else a
     safe non-tiny fallback that clears typical stride-32 backbones. The count is the one ``dims``
@@ -278,9 +248,9 @@ def resolve_contract_dims(config: dict, task: str, dims: "Mapping[str, Any]") ->
     from tcip_mcp.pipelines.data.datasets import run_tiling
 
     count = dims.get("num_classes", dims.get("num_ranks"))
-    tiling = run_tiling(task, (config.get("data") or {}).get("tiling")) or {}
+    tiler = run_tiling(spec.model_source.task, spec.data.tiling)
     # 224 clears typical stride-32 backbones at 7x7; a tiled run's real tile edge replaces it.
-    img_size = int(tiling.get("tile_size") or 224)
+    img_size = (tiler.tile_size if tiler is not None else None) or 224
     return {"in_chans": dims["in_chans"], "img_size": img_size,
             **({} if count is None else {"num_classes": count}),
             **({"attributes": dims["attributes"]} if "attributes" in dims else {})}
@@ -336,32 +306,24 @@ SNAPSHOT_DIR = "model_src"
 """The run-directory subdirectory a bespoke run's copied source files land in."""
 
 
-def snapshot_model_source(config: dict, run_dir: Path) -> dict | None:
-    """Copy a bespoke run's model, training and dataset source into ``<run_dir>/model_src/``,
-    each file content-addressed as ``<sha256[:8]>/<basename>``, and return what was copied.
+def snapshot_model_source(spec: "TrainConfigSchema", run_dir: Path) -> dict:
+    """Copy a run's model, training and dataset source into ``<run_dir>/model_src/``, each file
+    content-addressed as ``<sha256[:8]>/<basename>``, and return what was copied.
 
-    Covers each source's ``source_files`` and the module files of ``model_source``'s builder,
-    ``training_source`` and ``data.dataset_source``'s builder. A missing file is listed under
-    ``missing`` and a module that will not import under ``snapshot_errors``, never raised.
-    Returns ``None`` when nothing bespoke is named.
+    Covers each source's ``source_files`` and the module files of the validated config's
+    ``model_source`` builder, ``training_source`` and ``data.dataset_source``'s builder. A
+    missing file is listed under ``missing`` and a module that will not import under
+    ``snapshot_errors``, never raised.
     """
     import hashlib
 
-    model_source = config.get(MODEL_SOURCE_KEY)
-    training_source = config.get(TRAINING_SOURCE_KEY)
-    dataset_source = (config.get("data") or {}).get(DATASET_SOURCE_KEY)
-    if not model_source and not training_source and not dataset_source:
-        return None
-
-    files: list[str] = []
-    builder = None
-    if isinstance(model_source, dict):
-        builder = model_source.get("builder")
-        files.extend(model_source.get("source_files") or [])
+    builder, training_source = spec.model_source.builder, spec.training_source
+    files: list[str] = list(spec.model_source.source_files or [])
+    dataset_source = spec.data.dataset_source
     dataset_builder = None
-    if isinstance(dataset_source, dict):
-        dataset_builder = dataset_source.get("builder")
-        files.extend(dataset_source.get("source_files") or [])
+    if dataset_source is not None:
+        dataset_builder = dataset_source.builder
+        files.extend(dataset_source.source_files or [])
     snapshot_errors: list[str] = []
     # Snapshot the agent's training-loop + dataset modules too (best-effort, resolve mod:fn ->
     # file).

@@ -23,7 +23,7 @@ def _registered(tmp_path, *entries: tuple[str, dict | None]):
 
     reg = ModelRegistry(str(tmp_path))
     for name, metrics in entries:
-        reg.register_model(name, _checkpoint(tmp_path, name), {}, metrics=metrics, tags=[])
+        reg.register_model(name, _checkpoint(tmp_path, name), metrics=metrics, tags=[])
     return reg
 
 
@@ -118,7 +118,7 @@ def test_register_model_refuses_a_nonexistent_checkpoint(tmp_path):
 
     reg = ModelRegistry(str(tmp_path))
     with pytest.raises(FileNotFoundError):
-        reg.register_model("ghost", str(tmp_path / "nonexistent.pt"), {})
+        reg.register_model("ghost", str(tmp_path / "nonexistent.pt"))
     assert reg.list_models() == []
 
 
@@ -132,10 +132,10 @@ def test_register_model_refuses_bytes_the_verified_reader_refuses(tmp_path):
     garbage.write_bytes(b"not a checkpoint")
 
     with pytest.raises(UnregisteredCheckpointError):
-        reg.register_model("garbage", str(garbage), {})
+        reg.register_model("garbage", str(garbage))
     assert reg.list_models() == []
 
-    reg.register_model("real", _checkpoint(tmp_path, "real"), {})
+    reg.register_model("real", _checkpoint(tmp_path, "real"))
     assert [m["name"] for m in reg.list_models()] == ["real"]
 
 
@@ -204,23 +204,17 @@ def test_a_completed_runs_metrics_come_from_its_best_checkpoint_not_its_last_epo
 
 
 def test_a_registry_payload_that_json_cannot_hold_is_refused_at_register_model(tmp_path):
-    """Config and metrics arrive from a caller, so the field that will not encode is named
-    before anything reaches the registry: a stringified measurement would read as a recorded
-    number to every later reader."""
-    from pathlib import Path
-
+    """Metrics arrive from a caller, so the field that will not encode is named before anything
+    reaches the registry: a stringified measurement would read as a recorded number to every
+    later reader."""
     import tcip_store as ts
     from tcip_mcp.model_registry import ModelRegistry
 
     reg = ModelRegistry(str(tmp_path))
     ckpt = _checkpoint(tmp_path, "m")
 
-    with pytest.raises(ts.StoreError) as config_refused:
-        reg.register_model("a", str(ckpt), {"weights": Path("model_best.pt")})
-    assert "config.weights" in str(config_refused.value)
-
     with pytest.raises(ts.StoreError) as metrics_refused:
-        reg.register_model("a", str(ckpt), {}, metrics={"val_map50": float("inf")})
+        reg.register_model("a", str(ckpt), metrics={"val_map50": float("inf")})
     assert "metrics.val_map50" in str(metrics_refused.value)
 
     assert reg.list_models() == []
@@ -231,8 +225,7 @@ def test_an_ordinary_registry_payload_is_still_registered(tmp_path):
     from tcip_mcp.model_registry import ModelRegistry, best_model
 
     reg = ModelRegistry(str(tmp_path))
-    entry = reg.register_model("a", _checkpoint(tmp_path, "a"), {"epochs": 3},
-                               metrics={"val_map50": 0.70})
+    entry = reg.register_model("a", _checkpoint(tmp_path, "a"), metrics={"val_map50": 0.70})
 
     assert entry["name"] == "a"
     assert [m["name"] for m in reg.list_models()] == ["a"]

@@ -159,16 +159,15 @@ def test_top_level_stages_are_typed_by_stage_spec():
 
 
 def test_the_trainer_reads_the_flat_config_as_given(tmp_path, monkeypatch):
-    """What train() reads (run.config['stages']) is the configured schedule itself, with no
+    """What train() reads (run.spec.stages) is the configured schedule itself, with no
     second placement to reconcile against."""
     monkeypatch.chdir(tmp_path)
     from tests.tiny_trainer_fixtures import trainer_run
 
     run = trainer_run(dict(FLAT_CONFIG), tmp_path, project=tmp_path, has_val_loader=True,
                       id="auto-run-5")
-    assert run.config["stages"] == FLAT_CONFIG["stages"]
-    assert len(run.config["stages"]) == 2
-    assert "training" not in run.config
+    assert run.spec.record()["stages"] == FLAT_CONFIG["stages"]
+    assert "training" not in run.spec.record()
 
 
 def test_stage_spec_refuses_a_per_stage_lr():
@@ -242,7 +241,7 @@ def test_model_source_admits_every_declared_key():
         "image_stats_sampling": {"windows": [["a.tif", None]], "seed": None,
                                  "pixel_fraction": 1.0, "window_size": None,
                                  "max_windows_per_image": None},
-    }})
+    }, "data": {}})
     assert issues == []
 
 
@@ -250,5 +249,38 @@ def test_a_width_stated_on_the_model_source_is_refused_by_name():
     """The width is the run's own ``data.num_channels``, handed to the builder; a model source
     stating one beside it is refused by name rather than read as a second spelling."""
     issues = _issues_of(
-        {"model_source": {"builder": "m:f", "task": "detection", "in_chans": 2}})
+        {"model_source": {"builder": "m:f", "task": "detection", "in_chans": 2}, "data": {}})
     assert any("model_source.in_chans" in issue for issue in issues), issues
+
+
+@pytest.mark.parametrize(("path", "config"), [
+    ("model_source.task", {**FLAT_CONFIG, "model_source": {"builder": "module:build_net"}}),
+    ("data.split.seed", {**FLAT_CONFIG, "data": {"split": {"seed": "first"}}}),
+    ("data.split.selection_dirr", {**FLAT_CONFIG, "data": {"split": {"selection_dirr": "m"}}}),
+    ("data.dataset_source.builder", {**FLAT_CONFIG, "data": {"dataset_source": {}}}),
+    ("data.tiling.tile_sze", {**FLAT_CONFIG, "data": {"tiling": {"tile_sze": 64}}}),
+    ("data.tiling.tile_size", {**FLAT_CONFIG, "data": {"tiling": {"tile_size": "large"}}}),
+    ("data.split.spatial_manifest",
+     {**FLAT_CONFIG, "data": {"split": {"spatial_manifest": {"stem": "a"}}}}),
+])
+def test_a_fact_a_reader_reads_is_refused_where_the_config_is_validated(path, config):
+    """``model_source.task`` and every ``data`` key a resolver or a recorded-dimension reader
+    reads are typed where the config enters: one missing, of the wrong type or misspelled is
+    named there, before any reader below the boundary meets it."""
+    issues = _issues_of(config)
+    assert any(issue.startswith(path) for issue in issues), issues
+
+
+def test_a_stated_tiling_block_reaches_the_tiler_as_stated():
+    """Admits valid work: every tiler option a ``data.tiling`` block states validates and reaches
+    the tiler's keyword arguments by name, and one left unstated is left to the tiler."""
+    from tcip_mcp.pipelines.schemas import train_config
+
+    stated = {"enabled": True, "tile_size": 64, "overlap": 0.25, "sliver_frac": 0.5,
+              "dedup_iou": 0.7, "skip_empty": True, "keep_regions": [[0, 0, 64, 64]]}
+    tiling = train_config({**FLAT_CONFIG, "data": {"tiling": stated}}).data.tiling
+    assert tiling is not None
+    assert tiling.tiler_options() == {**{k: v for k, v in stated.items() if k != "enabled"},
+                                      "keep_regions": [(0, 0, 64, 64)]}
+    assert tiling.tiler_options(frozenset({"keep_regions", "dedup_iou"})) == {
+        "tile_size": 64, "overlap": 0.25, "sliver_frac": 0.5, "skip_empty": True}

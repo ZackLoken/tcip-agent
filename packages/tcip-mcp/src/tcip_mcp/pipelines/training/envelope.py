@@ -18,9 +18,12 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from tcip_store import stored_number
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.schemas import TrainConfigSchema
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +47,6 @@ class TrainContext:
     _epoch: int = 0
     _tb: Any = None
 
-    # ---- config / reproducibility ----
-    @property
-    def config(self) -> dict:
-        return self.run.config
-
     @property
     def run_dir(self) -> Path:
         """The run's own directory."""
@@ -56,14 +54,13 @@ class TrainContext:
 
     @property
     def task(self) -> str:
-        """The task this run's config names (:func:`~tcip_mcp.pipelines.model_build.run_task`)."""
-        from tcip_mcp.pipelines.model_build import run_task
-
-        return run_task(self.config)
+        """The task this run's validated config names, ``model_source.task``."""
+        return self.spec.model_source.task
 
     @property
-    def spec(self) -> Any:
-        """The run's validated config (``TrainRun.spec``), the typed form of :attr:`config`."""
+    def spec(self) -> TrainConfigSchema:
+        """The run's validated config (``TrainRun.spec``); a bespoke loop's own keys are its
+        ``model_extra``."""
         return self.run.spec
 
     @property
@@ -92,7 +89,7 @@ class TrainContext:
         its config records (:func:`~tcip_mcp.pipelines.model_build.recorded_model_dims`)."""
         from tcip_mcp.pipelines.model_build import build_from_model_source, recorded_model_dims
 
-        return build_from_model_source(self.spec.model_source, recorded_model_dims(self.config))
+        return build_from_model_source(self.spec.model_source, recorded_model_dims(self.spec))
 
     def _contract_args(self, **overrides: Any) -> dict:
         """What the smoke runs against: the dims this run resolved, or one batch off its own train
@@ -101,7 +98,7 @@ class TrainContext:
         from tcip_mcp.pipelines.model_build import recorded_model_dims, resolve_contract_dims
         from tcip_mcp.pipelines.model_contract import no_batch_reason
 
-        dims = resolve_contract_dims(self.config, self.task, recorded_model_dims(self.config))
+        dims = resolve_contract_dims(self.spec, recorded_model_dims(self.spec))
         if no_batch_reason(self.task, dims, None) is not None:
             batch = next(iter(self.train_loader or []), None)
             if batch is not None:
@@ -140,17 +137,15 @@ class TrainContext:
     def build_dataset(self, task: str | None = None, *, samples: Any,
                       sizes: "Mapping[str, int] | None" = None, **kwargs: Any) -> Any:
         """The factory, over the samples you were handed. ``sizes`` and ``scope`` unstated are
-        the ones this run's data config records, so a loader you build here reads at its width
+        the ones this run's data block records, so a loader you build here reads at its width
         and count whichever subset of samples it holds."""
         from tcip_mcp.pipelines.data.datasets import build_dataset, stated_sizes
-        from tcip_mcp.pipelines.data.selection import ClassScope
 
-        resolved_task = task or self.task
-        data_cfg = self.config.get("data") or {}
+        data = self.spec.data
         if sizes is None:
-            sizes = stated_sizes(data_cfg)
-        kwargs.setdefault("scope", ClassScope.of(data_cfg))
-        return build_dataset(resolved_task, samples=samples, sizes=sizes, **kwargs)
+            sizes = stated_sizes(data)
+        kwargs.setdefault("scope", data.recorded_scope)
+        return build_dataset(task or self.task, samples=samples, sizes=sizes, **kwargs)
 
     def tiled_dataset(self, base: Any, **kwargs: Any) -> Any:
         """Wrap a detection dataset in the native-resolution tiler (same derived sliver cutoff
@@ -237,7 +232,7 @@ class TrainContext:
         from tcip_mcp.pipelines.training.evaluation import evaluate
 
         return evaluate(model, self.val_loader if loader is None else loader,
-                        self.device, self.task, dims=recorded_model_dims(self.config),
+                        self.device, self.task, dims=recorded_model_dims(self.spec),
                         conf_threshold=self.spec.evaluation.conf_threshold, **kwargs)
 
     # ---- measurement primitives (compose for dimensional traits) ----
@@ -327,11 +322,11 @@ class TrainContext:
         self._write_scalars(metrics, step)
 
     def save_checkpoint(self, state: dict, tag: str = "checkpoint") -> str:
-        """Write ``state`` once under ``tag``, stamped with this run's ``config``
-        without its data locations (``experiments.DATA_PATHS``; the run's own record keeps them),
-        record it in ``run.saved``, and return the path written. A tag already written refuses
-        with ``FileExistsError``. A ``metrics`` key in ``state`` is the deliverable's metrics,
-        sourced ``training_source``.
+        """Write ``state`` once under ``tag``, stamped with this run's config
+        (``generic_trainer.checkpoint_config``), record it in ``run.saved``, and return the path
+        written.
+        A tag already written refuses with ``FileExistsError``. A ``metrics`` key in ``state`` is
+        the deliverable's metrics, sourced ``training_source``.
 
         Refuses (``ValueError``) a ``state`` carrying a ``config`` key: the checkpoint's
         ``config`` is always this run's own.
@@ -346,18 +341,13 @@ class TrainContext:
                 "launch config, the record every publishing door reads this run's scope from; "
                 "name a bespoke loop's own field something else."
             )
-        import copy
+        from tcip_mcp.pipelines.training.generic_trainer import (
+            checkpoint_config,
+            checkpoint_path,
+            write_checkpoint,
+        )
 
-        from tcip_mcp.experiments import DATA_PATHS
-        from tcip_mcp.pipelines.training.generic_trainer import checkpoint_path, write_checkpoint
-
-        config = copy.deepcopy(self.config)
-        for field in DATA_PATHS:
-            *parents, leaf = (step for step in field if step != "[]")
-            node = config.get("data") or {}
-            for parent in parents:
-                node = node.get(parent) or {}
-            node.pop(leaf, None)
+        config = checkpoint_config(self.spec)
         self.run.saved[tag] = write_checkpoint({**state, CONFIG_KEY: config},
                                                checkpoint_path(self.run_dir, tag))
         return str(self.run.saved[tag])
@@ -401,9 +391,8 @@ def dispatch_train_body(ctx: TrainContext) -> None:
     """
     run = ctx.run
     from tcip_mcp.experiments import FINAL_STATES
-    from tcip_mcp.pipelines.model_build import TRAINING_SOURCE_KEY
 
-    training_source = run.config.get(TRAINING_SOURCE_KEY)
+    training_source = run.spec.training_source
     try:
         if training_source:
             from tcip_mcp.pipelines.model_build import _import_dotted

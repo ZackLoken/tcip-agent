@@ -72,28 +72,32 @@ def _capture(root: Path) -> tuple[Path, Path]:
     return images, masks
 
 
-def _train_and_register(data_cfg: dict, out_dir: Path, project_root: Path) -> str:
+def _train_and_register(data_cfg: dict, out_dir: Path, project_root: Path) -> dict:
+    """Train a detector over ``data_cfg`` through the producer's own resolution and register its
+    checkpoint under ``project_root``: ``{"checkpoint", "data"}``, the data block the run
+    resolved in the form its record holds it."""
     from torch.utils.data import DataLoader
 
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tcip_mcp.pipelines.schemas import DataSpec
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.tools.model_tools import register_model
     from tests._chain_fixtures import REGION_BUILDER, training_config
     from tests.tiny_trainer_fixtures import trainer_run
 
-    config = training_config(REGION_BUILDER, data_cfg)
-    train_ds, _val, _partition = auto_train_val(project_root, "detection", data_cfg, None)
+    train_ds, _val, _partition, resolved = auto_train_val(
+        project_root, "detection", DataSpec.model_validate(data_cfg), None)
+    config = training_config(REGION_BUILDER, resolved.record())
     collate = task_collate("detection")
     run = trainer_run(config, out_dir, project=project_root, has_val_loader=True, id=out_dir.name)
     completed = train(run, DataLoader(train_ds, batch_size=2, collate_fn=collate),
                       val_loader=DataLoader(train_ds, batch_size=2, collate_fn=collate))
     assert completed.status == "completed", completed.status
     checkpoint = out_dir / "model_best.pt"
-    registered = register_model(project_root, name=out_dir.name, checkpoint_path=str(checkpoint),
-                                config={})
+    registered = register_model(project_root, name=out_dir.name, checkpoint_path=str(checkpoint))
     assert "error" not in registered, registered
-    return str(checkpoint)
+    return {"checkpoint": str(checkpoint), "data": resolved.record()}
 
 
 def test_a_run_that_recorded_no_subject_is_refused_assessment_by_name(tmp_path: Path):
@@ -102,9 +106,10 @@ def test_a_run_that_recorded_no_subject_is_refused_assessment_by_name(tmp_path: 
     images, masks = _capture(tmp_path / "masks")
     data_cfg = {"images_dir": str(images), "labels_dir": str(masks), "auto_val": False,
                 "dataset_source": {"builder": f"{__name__}:build_mask_box_ds"}}
-    checkpoint = _train_and_register(data_cfg, tmp_path / "unscoped", tmp_path)
+    trained = _train_and_register(data_cfg, tmp_path / "unscoped", tmp_path)
+    checkpoint = trained["checkpoint"]
     # The producer admitted by shape and recorded an empty scope.
-    assert data_cfg["scope"] == {"subject": None, "attributes": None}
+    assert trained["data"]["scope"] == {"subject": None, "attributes": None}
     chain.synthetic_capture(tmp_path / "ds")
     chain.draw_reference_selection(tmp_path, tmp_path / "ds", tmp_path / "selection")
     chain.confirm_count_trait(tmp_path)

@@ -127,9 +127,10 @@ Three seams support bespoke work; the platform guarantees integrity around it:
   built-in loader is not a task with no producer: the platform admits by the shape of the ground
   truth (the images' own label documents, or the masks or table `data.labels_dir` names), whatever
   the task, so your builder receives the same samples a built-in loader would. Registry-free, imported like any module, never `exec`'d.
-- `pipelines.model_build.build_model(config, dims)` builds from a `model_source`: an *importable*
-  builder you wrote (`{"builder": "my_module:build_net", "builder_kwargs": {...},
-  "source_files": [...], "task": "detection"}`). It is imported, never `exec`'d. The platform
+- `pipelines.model_build.build_from_model_source(spec.model_source, dims)` builds from a validated
+  config's `model_source`: an *importable* builder you wrote (`{"builder": "my_module:build_net",
+  "builder_kwargs": {...}, "source_files": [...], "task": "detection"}`, `builder` and `task`
+  required). It is imported, never `exec`'d. The platform
   hands your builder the run's width as `in_chans` (`data.num_channels`, the band count its
   sources carry) and its head sizes: over label documents, `num_classes`, the subjects the scope
   isolates, and `attributes`, the scope's attribute records when it declares any, one

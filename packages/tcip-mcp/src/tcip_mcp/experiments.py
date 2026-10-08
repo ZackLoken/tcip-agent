@@ -27,8 +27,9 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import cached_property
 from pathlib import Path, PureWindowsPath
-from typing import Any, BinaryIO, cast
+from typing import TYPE_CHECKING, Any, BinaryIO, NamedTuple, cast
 
 from pydantic import BaseModel
 
@@ -40,8 +41,11 @@ from tcip_store.file_backend import is_sharing_violation, retry_while_denied
 from tcip_store.values import NOT_FINITE_SUFFIX
 
 from tcip_mcp.audit import now_iso
-from tcip_mcp.pipelines.data.selection import SAMPLE_PATHS, ClassScope
+from tcip_mcp.pipelines.data.selection import SAMPLE_PATHS
 from tcip_mcp.registry_paths import PathFields, recorded_paths, runtime_paths, within
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.schemas import DataSpec, SpatialManifest, TrainConfigSchema
 
 logger = logging.getLogger(__name__)
 
@@ -395,6 +399,23 @@ class RunObservation:
         ``objective``), ``None`` for a sweep trial whose sampled point failed to resolve."""
         return self.record["resolved"]
 
+    @cached_property
+    def spec(self) -> TrainConfigSchema:
+        """A run's launch ``config`` validated once (``schemas.train_config``, which refuses an
+        invalid one)."""
+        from tcip_mcp.pipelines.schemas import train_config
+
+        return train_config(self.record["config"])
+
+    @cached_property
+    def resolved_data(self) -> DataSpec | None:
+        """The data block a run's launch resolved (:attr:`resolution`'s), validated once;
+        ``None`` for a run that resolved to nothing."""
+        from tcip_mcp.pipelines.schemas import DataSpec
+
+        resolved = self.resolution
+        return None if resolved is None else DataSpec.model_validate(resolved["data"])
+
     @property
     def sweep(self) -> str | None:
         """The sweep a trial run belongs to, ``None`` for a run launched on its own."""
@@ -471,14 +492,28 @@ def find_observation(experiment_id: str, *, project: Path | str) -> RunObservati
     return observe(run_dir) if run_dir is not None else None
 
 
-def run_resolution(experiment_id: str, *, project: Path | str) -> dict:
-    """What the run ``experiment_id`` names resolved at launch (:func:`find_observation`): its
-    ``data`` section, its ``partition`` and its ``objective``. Refuses (``ValueError``) an id
-    naming no run directory or one whose input resolved to nothing."""
+class RunResolution(NamedTuple):
+    """What a run resolved at launch: its data block (``RunObservation.resolved_data``), its
+    ``partition`` and the within-image split that partition records
+    (``split_construction.partition_spatial``)."""
+
+    data: DataSpec
+    partition: dict
+    spatial: SpatialManifest | None
+
+
+def run_resolution(experiment_id: str, *, project: Path | str) -> RunResolution:
+    """What the run ``experiment_id`` names resolved at launch (:func:`find_observation`).
+    Refuses (``ValueError``) an id naming no run directory or one whose input resolved to
+    nothing."""
     observation = find_observation(experiment_id, project=project)
-    if observation is None or observation.resolution is None:
+    data = observation.resolved_data if observation is not None else None
+    if observation is None or observation.resolution is None or data is None:
         raise ValueError(f"no run directory records what {experiment_id!r} resolved to.")
-    return observation.resolution
+    from tcip_mcp.pipelines.data.split_construction import partition_spatial
+
+    partition = observation.resolution["partition"]
+    return RunResolution(data, partition, partition_spatial(partition))
 
 
 def partition_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -545,17 +580,15 @@ def run_summary(observation: RunObservation, rows: list[dict[str, Any]],
     fields, its last logged epoch, and its best selection value under the objective its launch
     resolved (:func:`best_selection`) with that objective's metric name, both ``None`` for a run
     that resolved to nothing."""
-    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY, run_task
-
-    record, resolution = observation.record, observation.resolution
+    record, resolution, spec = observation.record, observation.resolution, observation.spec
     objective = resolution["objective"] if resolution is not None else None
     rows = epoch_rows(rows)
     return RunRow(
         experiment_id=observation.directory.name, state=observation.state,
         created=record["created"], relaunched_from=record["relaunched_from"],
         sweep=observation.sweep, trial_params=record["trial_params"],
-        builder=record["config"][MODEL_SOURCE_KEY]["builder"], task=run_task(record["config"]),
-        images_dir=(record["config"].get("data") or {}).get("images_dir"),
+        builder=spec.model_source.builder, task=spec.model_source.task,
+        images_dir=spec.data.images_dir,
         current_epoch=rows[-1].get(EPOCH_KEY) if rows else None,
         best_metric=best_selection(rows, objective) if objective is not None else None,
         best_metric_name=objective["selection_metric"] if objective is not None else None,
@@ -734,19 +767,22 @@ def get_experiment(
     }
 
 
-def _split_summary(resolved: dict | None) -> dict[str, Any]:
-    """The partition column of a comparison: ``{"case": "bound", "selection_dir", "seed",
-    "redraw"}`` for a run bound to a selection, ``{"case": "spatial"}`` for a within-image split,
-    ``{"case": "drawn", "seed"}`` for a drawn one, and ``{"case": "none"}`` for a run that resolved
-    to nothing."""
-    if resolved is None:
+def _split_summary(observation: RunObservation) -> dict[str, Any]:
+    """The partition column of a comparison of the observed run: ``{"case": "bound",
+    "selection_dir", "seed", "redraw"}`` for a run bound to a selection, ``{"case": "spatial"}``
+    for a within-image split, ``{"case": "drawn", "seed"}`` for a drawn one, and ``{"case":
+    "none"}`` for a run that resolved to nothing."""
+    resolved, data = observation.resolution, observation.resolved_data
+    if resolved is None or data is None:
         return {"case": "none"}
     partition = resolved["partition"]
     binding = partition["selection"]
     if binding is not None:
         return {"case": "bound", "selection_dir": binding["selection_dir"],
                 "seed": partition["seed"], "redraw": binding["redraw"]}
-    if "spatial_manifest" in resolved["data"]["split"]:
+    from tcip_mcp.pipelines.data.split_construction import partition_spatial
+
+    if partition_spatial(partition) is not None:
         return {"case": "spatial"}
     return {"case": "drawn", "seed": partition["seed"]}
 
@@ -777,7 +813,6 @@ def compare_experiments(experiment_ids: list[str], *, project: Path | str) -> di
     unset, else whether every run names one fingerprint.
     """
     from tcip_mcp.model_registry import entry_facts, run_entry
-    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY, run_task
 
     comparisons: list[dict[str, Any]] = []
     for eid in experiment_ids:
@@ -785,8 +820,7 @@ def compare_experiments(experiment_ids: list[str], *, project: Path | str) -> di
         if observation is None:
             comparisons.append({"experiment_id": eid, "error": f"Experiment not found: {eid}"})
             continue
-        run, final = observation.record, observation.final
-        config = run["config"]
+        run, final, spec = observation.record, observation.final, observation.spec
         metrics = read_rows(observation.metrics_log)[0]
         epochs = epoch_rows(metrics)
         summary: dict[str, Any] = {
@@ -808,11 +842,11 @@ def compare_experiments(experiment_ids: list[str], *, project: Path | str) -> di
             "name": entry["name"], "registered_at": entry["registered_at"],
             **entry_facts(entry),
         }]
-        resolved = observation.resolution
-        summary["split"] = _split_summary(resolved)
-        summary["model"] = config[MODEL_SOURCE_KEY]["builder"]
-        summary["task"] = run_task(config)
-        summary["subject"] = ClassScope.of(resolved["data"]).subject if resolved else None
+        data = observation.resolved_data
+        summary["split"] = _split_summary(observation)
+        summary["model"] = spec.model_source.builder
+        summary["task"] = spec.model_source.task
+        summary["subject"] = data.recorded_scope.subject if data is not None else None
         summary["dataset_id"] = run["dataset"]["id"]
         summary["dataset_fingerprint"] = run["dataset"]["fingerprint"]
         comparisons.append(summary)
@@ -832,9 +866,9 @@ def get_experiment_lineage(experiment_id: str, *, project: Path | str) -> dict[s
     observation = find_observation(experiment_id, project=project)
     if observation is None:
         return {"error": f"Experiment not found: {experiment_id}"}
-    run, resolved = observation.record, observation.resolution
+    run, data = observation.record, observation.resolved_data
     return {"experiment_id": experiment_id, "lineage": {
-        "data": resolved["data"] if resolved is not None else None,
+        "data": data.record() if data is not None else None,
         "dataset_id": run["dataset"]["id"],
         "dataset_fingerprint": run["dataset"]["fingerprint"],
         "relaunched_from": run["relaunched_from"],

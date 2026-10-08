@@ -67,18 +67,17 @@ def _bespoke_detection_checkpoint(
     """Write a bespoke detection checkpoint under ``tmp_path`` and register it in that project's
     model registry, so a caller can hand its bare path to a door that resolves the registry
     itself."""
-    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
+    from tests._chain_fixtures import built_model, training_config
     from tcip_mcp.tools.model_tools import register_model
 
     model_source = {"builder": BESPOKE_DETECTION,
                     "builder_kwargs": {"min_size": tile_size, "max_size": tile_size * 2},
                     "task": "detection"}
-    config = {"model_source": model_source,
-              "data": {"num_channels": in_chans, "scope": dict(SCOPE)}}
-    model = build_model(config, recorded_model_dims(config))
+    config = training_config(model_source, {"num_channels": in_chans, "scope": dict(SCOPE)})
+    model = built_model(config)
     ckpt = tmp_path / "model_best.pt"
     torch.save({CONFIG_KEY: config, STATE_DICT_KEY: model.state_dict()}, str(ckpt))
-    result = register_model(tmp_path, name="test-model", checkpoint_path=str(ckpt), config={})
+    result = register_model(tmp_path, name="test-model", checkpoint_path=str(ckpt))
     assert "error" not in result, result
     return str(ckpt)
 

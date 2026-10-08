@@ -20,7 +20,10 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.schemas import SplitSpec
 
 logger = logging.getLogger(__name__)
 
@@ -409,32 +412,29 @@ def _build_sweep_stopper(sweep_root: Path) -> tuple[Any, Any]:
     return _SweepStopper(), live_trials
 
 
-def split_draw_search_space(
-    param_space: dict, base_config: dict, split_draws: int, split_draw_seeds: list[int] | None,
-) -> tuple[dict, list[int] | None]:
-    """The search space for ``tune_search`` and :func:`planned_trial_count`: ``param_space``
-    itself, unaugmented, at ``split_draws`` of one or below; above one, a copy carrying
-    :data:`SPLIT_DRAW_SEED_KEY` as a categorical grid axis over the resolved draw seeds
-    (``split_draw_seeds`` when given, else ``base_config``'s own ``data.split.seed`` plus the draw
-    index, refused when it states none).
-
-    Returns ``(search_param_space, resolved_draw_seeds)``: the second element is ``None`` at one
-    draw and the list of seeds paired above it.
-    """
+def resolved_draw_seeds(split: SplitSpec, split_draws: int,
+                        stated: list[int] | None) -> list[int] | None:
+    """The seeds a sweep over ``split_draws`` draws pairs with every sampled point: ``None`` at
+    one draw or below; above one, ``stated`` when given, else the base config's validated
+    ``data.split`` section ``split``'s own seed plus the draw index, refused when it states
+    none."""
     if split_draws <= 1:
-        return param_space, None
+        return None
+    if stated is not None:
+        return list(stated)
     from tcip_mcp.pipelines.data.split_construction import split_seed
 
-    if split_draw_seeds is not None:
-        resolved_draw_seeds = list(split_draw_seeds)
-    else:
-        base_seed = split_seed((base_config.get("data") or {}).get("split") or {})
-        resolved_draw_seeds = [base_seed + i for i in range(split_draws)]
-    search_param_space = {
-        **param_space,
-        SPLIT_DRAW_SEED_KEY: {"type": "categorical", "choices": resolved_draw_seeds},
-    }
-    return search_param_space, resolved_draw_seeds
+    base_seed = split_seed(split)
+    return [base_seed + i for i in range(split_draws)]
+
+
+def split_draw_search_space(param_space: dict, draw_seeds: list[int] | None) -> dict:
+    """The search space for ``tune_search`` and :func:`planned_trial_count`: ``param_space``
+    itself when ``draw_seeds`` (:func:`resolved_draw_seeds`) is ``None``; otherwise a copy
+    carrying :data:`SPLIT_DRAW_SEED_KEY` as a categorical grid axis over them."""
+    if draw_seeds is None:
+        return param_space
+    return {**param_space, SPLIT_DRAW_SEED_KEY: {"type": "categorical", "choices": draw_seeds}}
 
 
 def _search_space_and_points(

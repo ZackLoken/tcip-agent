@@ -212,7 +212,7 @@ def test_the_run_record_the_worker_reads_carries_the_seed_and_the_training_keys(
     """The writer is the real launch_training (Popen and TensorBoard stubbed by
     recorded_children so no subprocess actually spawns); the reader is the one the training
     child performs, the run directory's own ``run.json``. The trainer's keys sit at the config's
-    top level and ``draw_seed_if_unset`` draws a seed into it before the record is written, so
+    top level and ``run_registry.seeded`` draws a seed into it before the record is written, so
     the config the worker reads carries both, in the directory the run's own id names."""
     pytest.importorskip("torchvision")
     project = tmp_path / "project"

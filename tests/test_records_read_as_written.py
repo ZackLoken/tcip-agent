@@ -22,7 +22,7 @@ def test_a_registered_entry_ranks_through_best_model(tmp_path: Path) -> None:
 
     ckpt = checkpoint_file(tmp_path / "m.pt", "weights")
     registry = ModelRegistry(str(tmp_path))
-    registry.register_model("m", str(ckpt), {}, metrics={"val_map50": 0.7})
+    registry.register_model("m", str(ckpt), metrics={"val_map50": 0.7})
 
     models = ModelRegistry(str(tmp_path)).list_models()
     best = best_model(models, "val_map50", higher_is_better=True, include_unverified=True)
@@ -52,7 +52,7 @@ def test_a_checkpoint_stating_no_task_refuses_naming_where_to_state_it(tmp_path:
                                  "builder": BESPOKE_DETECTION},
                              "data": dict(SCOPED_DATA)}}, str(unstated))
     assert "error" not in register_model(name="unstated", checkpoint_path=str(unstated),
-                                         config={}, project=tmp_path)
+                                         project=tmp_path)
     with pytest.raises(ValueError, match="model_source.task"):
         load_registered_checkpoint(str(unstated), project=tmp_path).task
 

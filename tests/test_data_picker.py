@@ -40,6 +40,21 @@ def _bound_config(root: Path, selection_dir: Path) -> dict:
     return config
 
 
+def _data(config: dict):
+    """``config``'s data block as a run validates it."""
+    from tcip_mcp.pipelines.schemas import train_config
+
+    return train_config(config).data
+
+
+def _chosen(config: dict, selection_dir: str) -> dict:
+    """``config`` with the data block choosing ``selection_dir`` builds
+    (``training_tools.data_with_selection``), as the relaunch route launches it."""
+    from tcip_mcp.tools.training_tools import data_with_selection
+
+    return {**config, "data": data_with_selection(_data(config), selection_dir).record()}
+
+
 def _stub_child(monkeypatch) -> None:
     """Launches spawn no training process and start no TensorBoard."""
     import subprocess
@@ -80,7 +95,7 @@ def test_selection_compatibility_flags_an_empty_side(tmp_path: Path):
     out = tmp_path / "m"
     selection = _selection_with_an_empty_val_side(tmp_path, root, out)
 
-    issues = selection_compatibility(_bound_config(root, out)["data"], selection, str(out))
+    issues = selection_compatibility(_data(_bound_config(root, out)), selection, str(out))
 
     assert any("empty side" in i for i in issues)
 
@@ -110,7 +125,7 @@ def test_selection_compatibility_admits_a_draw_splits_selection_with_no_empty_si
     out = tmp_path / "m"
     selection = _draw(tmp_path, root, out)
 
-    assert selection_compatibility(_bound_config(root, out)["data"], selection, str(out)) == []
+    assert selection_compatibility(_data(_bound_config(root, out)), selection, str(out)) == []
 
 
 def test_preflight_reports_the_conflict_issues_even_when_the_manifest_is_unreadable(
@@ -171,7 +186,7 @@ def test_list_split_choices_offers_a_table_selection_for_a_table_configuration(
     opened_run(tmp_path, training_config(
         {"builder": "m:f", "task": "classification"},
         {"images_dir": str(images_dir), "labels_dir": str(csv_path),
-         "task": "classification", "split": {"seed": 0, "val_ratio": 0.15}}),
+         "split": {"seed": 0, "val_ratio": 0.15}}),
         experiment_id="exp-table-picker")
 
     result = list_split_choices(tmp_path, "exp-table-picker")
@@ -212,9 +227,7 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
     _stub_child(monkeypatch)
 
     from tcip_mcp.pipelines.data.selection import selection_key
-    from tcip_mcp.tools.training_tools import (
-        candidate_config_with_selection, launch_training, list_split_choices,
-    )
+    from tcip_mcp.tools.training_tools import launch_training, list_split_choices
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     dataset_default = root / "splits"
@@ -255,7 +268,7 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
     # scope, since a bound run reads its scope off the selection.
     other_subject_entry = by_dir[str(other_subject_dir)]
     assert other_subject_entry["enabled"] is True
-    chosen = candidate_config_with_selection(picked_cfg, str(other_subject_dir))
+    chosen = _chosen(picked_cfg, str(other_subject_dir))
     assert "scope" not in chosen["data"]
 
     broken_entry = by_dir[str(broken_dir)]
@@ -339,10 +352,10 @@ def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces
     tmp_path: Path, monkeypatch,
 ):
     """Choosing a partition replaces ``data.split`` wholesale
-    (:func:`candidate_config_with_selection`); the listing discloses every stated key other
+    (``training_tools.data_with_selection``); the listing discloses every stated key other
     than ``selection_dir`` that drops, per offered selection."""
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.tools.training_tools import candidate_config_with_selection, list_split_choices
+    from tcip_mcp.tools.training_tools import list_split_choices
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     dataset_default = root / "splits"
@@ -355,7 +368,7 @@ def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces
     result = list_split_choices(tmp_path, "exp-drawn-policy")
     entry = next(m for m in result["selections"] if m["selection_dir"] == str(dataset_default))
 
-    candidate = candidate_config_with_selection(cfg, str(dataset_default))
+    candidate = _chosen(cfg, str(dataset_default))
     dropped = sorted(set(cfg["data"]["split"]) - set(candidate["data"]["split"]))
     assert entry["replaced_split_keys"] == dropped
 
@@ -368,7 +381,7 @@ def test_list_split_choices_reports_the_redraw_flag_among_the_keys_a_partition_r
     all of them but ``selection_dir`` itself, and the listing names every one dropped, the
     redraw flag included."""
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.tools.training_tools import candidate_config_with_selection, list_split_choices
+    from tcip_mcp.tools.training_tools import list_split_choices
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     dataset_default = root / "splits"
@@ -383,7 +396,7 @@ def test_list_split_choices_reports_the_redraw_flag_among_the_keys_a_partition_r
     result = list_split_choices(tmp_path, "exp-redrawn-policy")
     entry = next(m for m in result["selections"] if m["selection_dir"] == str(dataset_default))
 
-    candidate = candidate_config_with_selection(cfg, str(dataset_default))
+    candidate = _chosen(cfg, str(dataset_default))
     dropped = sorted(set(cfg["data"]["split"]) - set(candidate["data"]["split"]))
     assert entry["replaced_split_keys"] == dropped
 
@@ -401,7 +414,7 @@ def test_list_split_choices_never_names_a_null_valued_split_key_as_replaced(
     _draw(tmp_path, root, dataset_default)
 
     cfg = _bespoke_config(root / "images" / DATES[0])
-    cfg["data"]["split"] = {"seed": 7, "val_ratio": 0.15, "redraw_within_selection": None}
+    cfg["data"]["split"] = {"seed": 7, "val_ratio": 0.15, "group_by": None}
     opened_run(tmp_path, cfg, experiment_id="exp-null-policy-key")
 
     result = list_split_choices(tmp_path, "exp-null-policy-key")
@@ -565,10 +578,11 @@ def test_relaunch_route_refuses_a_selection_dir_the_launch_cannot_bind(
 def test_relaunch_route_launches_the_stated_data_unchanged_when_no_partition_is_chosen(
     tmp_path: Path, opened_project: Path, monkeypatch, client: TestClient,
 ) -> None:
-    """"As recorded" launches the stated config's own data section, whether it was bound or
-    drawn, byte for byte: the route never rewrites data.split unless a partition is chosen."""
+    """"As recorded" launches the stated config's own data section as it validates, whether it
+    was bound or drawn: the route never rewrites data.split unless a partition is chosen."""
     monkeypatch.chdir(tmp_path)
     import tcip_mcp.tools.training_tools as training_tools_module
+    from tcip_mcp.pipelines.schemas import train_config
 
     captured: dict = {}
 
@@ -585,7 +599,7 @@ def test_relaunch_route_launches_the_stated_data_unchanged_when_no_partition_is_
         "/api/training/runs", json={"relaunched_from": "exp-drawn", "user": "tester"}
     )
     assert resp.status_code == 200, resp.json()
-    assert captured["data"] == drawn["data"]
+    assert captured["data"] == train_config(drawn).data.record()
 
     _draw(tmp_path, root, tmp_path / "manifest")
     bound = _bound_config(root, tmp_path / "manifest")
@@ -594,7 +608,7 @@ def test_relaunch_route_launches_the_stated_data_unchanged_when_no_partition_is_
         "/api/training/runs", json={"relaunched_from": "exp-bound", "user": "tester"}
     )
     assert resp.status_code == 200, resp.json()
-    assert captured["data"] == bound["data"]
+    assert captured["data"] == train_config(bound).data.record()
 
 
 def _relaunched_config(project: Path, response) -> dict:
@@ -686,14 +700,13 @@ def test_a_chosen_selection_binds_and_the_runs_own_resolved_record_names_it(tmp_
     launcher's own producer: the run's launch record names the chosen selection as the partition
     it bound to."""
     from tcip_mcp.experiments import observe
-    from tcip_mcp.tools.training_tools import candidate_config_with_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     chosen = tmp_path / "chosen"
     _draw(tmp_path, root, chosen, seed=5)
     stated = _bespoke_config(root / "images" / DATES[0])
 
-    run_dir = opened_run(tmp_path, candidate_config_with_selection(stated, str(chosen)),
+    run_dir = opened_run(tmp_path, _chosen(stated, str(chosen)),
                          experiment_id="exp-bound-split-record")
 
     binding = observe(run_dir).record["resolved"]["partition"]["selection"]

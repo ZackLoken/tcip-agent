@@ -27,18 +27,17 @@ from tests.test_orthomosaic_tools import (  # noqa: E402
 
 
 def _instance_seg_checkpoint(tmp_path: Path) -> str:
-    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
+    from tests._chain_fixtures import built_model, training_config
     from tcip_mcp.tools.model_tools import register_model
 
     model_source = {"builder": "tests.bespoke_models:build_fixed_mask_instance_seg",
                     "task": "instance_seg"}
-    config = {"model_source": model_source,
-              "data": {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}}}
-    model = build_model(config, recorded_model_dims(config))
+    config = training_config(model_source,
+                             {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}})
+    model = built_model(config)
     ckpt = tmp_path / "instance_seg.pt"
     torch.save({CONFIG_KEY: config, STATE_DICT_KEY: model.state_dict()}, str(ckpt))
-    result = register_model(tmp_path, name="instance-seg-test-model", checkpoint_path=str(ckpt),
-                            config={})
+    result = register_model(tmp_path, name="instance-seg-test-model", checkpoint_path=str(ckpt))
     assert "error" not in result, result
     return str(ckpt)
 

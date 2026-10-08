@@ -328,7 +328,7 @@ def _bespoke_detection_checkpoint(tmp_path: Path, raster_path: Path, *, in_chans
     import torch
 
     from tcip_mcp.pipelines.derivations import band_normalization_stats
-    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
+    from tests._chain_fixtures import built_model, training_config
 
     builder_kwargs: dict = {"min_size": tile_size, "max_size": tile_size * 2}
     if in_chans != 3:
@@ -340,10 +340,9 @@ def _bespoke_detection_checkpoint(tmp_path: Path, raster_path: Path, *, in_chans
 
     model_source = {"builder": BESPOKE_DETECTION,
                     "builder_kwargs": builder_kwargs, "task": "detection"}
-    config = {"model_source": model_source,
-              "data": {"num_channels": in_chans,
-                       "scope": {"subject": "bud", "attributes": []}}}
-    model = build_model(config, recorded_model_dims(config))
+    config = training_config(model_source, {"num_channels": in_chans,
+                                            "scope": {"subject": "bud", "attributes": []}})
+    model = built_model(config)
     ckpt = tmp_path / "model_best.pt"
     torch.save({CONFIG_KEY: config, STATE_DICT_KEY: model.state_dict()}, str(ckpt))
     return str(ckpt)
@@ -386,15 +385,14 @@ def _bespoke_instance_seg_checkpoint(
     for this end-to-end mask-shape test)."""
     import torch
 
-    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
+    from tests._chain_fixtures import built_model, training_config
 
     model_source = {"builder": BESPOKE_INSTANCE_SEG,
                     "builder_kwargs": {"min_size": tile_size, "max_size": tile_size * 2},
                     "task": "instance_seg"}
-    config = {"model_source": model_source,
-              "data": {"num_channels": in_chans,
-                       "scope": {"subject": "bud", "attributes": []}}}
-    model = build_model(config, recorded_model_dims(config))
+    config = training_config(model_source, {"num_channels": in_chans,
+                                            "scope": {"subject": "bud", "attributes": []}})
+    model = built_model(config)
     ckpt = tmp_path / "instance_seg_best.pt"
     torch.save({CONFIG_KEY: config, STATE_DICT_KEY: model.state_dict()}, str(ckpt))
     return str(ckpt)
@@ -517,6 +515,7 @@ def test_windowed_predict_sliced_reaches_real_slicing_for_instance_seg_with_and_
     by ``predict_sliced`` itself."""
     torch = pytest.importorskip("torch")
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.pipelines.schemas import ModelSourceSchema
 
     class _FakeReader:
         height, width, num_channels = 64, 64, 3
@@ -528,7 +527,7 @@ def test_windowed_predict_sliced_reaches_real_slicing_for_instance_seg_with_and_
     p.task = "instance_seg"
     p.in_chans = 3
     p.attribute_sizes = []
-    p.model_source = None
+    p.model_source = ModelSourceSchema.model_validate({"builder": "m:f", "task": p.task})
     p.model = torch.nn.Identity()
     p.device = torch.device("cpu")
 

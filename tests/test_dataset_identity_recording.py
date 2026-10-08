@@ -73,13 +73,15 @@ def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(tmp_path
 def test_dataset_identity_helper_registered_vs_bespoke(tmp_path):
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
+    from tcip_mcp.pipelines.schemas import DataSpec
 
     _make_dataset(tmp_path)
     reg = register_dataset(tmp_path, str(tmp_path), crop="currant")
-    ds_id, fp = dataset_identity({"images_dir": str(tmp_path / "images" / "2-11-26")})
+    ds_id, fp = dataset_identity(
+        DataSpec.model_validate({"images_dir": str(tmp_path / "images" / "2-11-26")}))
     assert ds_id == reg["id"] and fp == reg["fingerprint"]
     # bespoke / imageless run -> no fabricated identity
-    assert dataset_identity({}) == (None, None)
+    assert dataset_identity(DataSpec.model_validate({})) == (None, None)
 
 
 def test_dataset_identity_raises_a_fingerprint_read_failure(tmp_path, monkeypatch):
@@ -87,6 +89,7 @@ def test_dataset_identity_raises_a_fingerprint_read_failure(tmp_path, monkeypatc
     reading as a run with no identity: the launch refuses before its directory exists."""
     import tcip_mcp.pipelines.data.dataset_fingerprint as dataset_fingerprint_mod
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
+    from tcip_mcp.pipelines.schemas import DataSpec
     from tcip_mcp.tools.project_tools import register_dataset
 
     _make_dataset(tmp_path)
@@ -99,7 +102,8 @@ def test_dataset_identity_raises_a_fingerprint_read_failure(tmp_path, monkeypatc
     # patched at the source module.
     monkeypatch.setattr(dataset_fingerprint_mod, "dataset_fingerprint", _raise)
     with pytest.raises(OSError, match="simulated I/O error"):
-        dataset_identity({"images_dir": str(tmp_path / "images" / "2-11-26")})
+        dataset_identity(
+            DataSpec.model_validate({"images_dir": str(tmp_path / "images" / "2-11-26")}))
 
 
 def test_a_trial_over_a_data_axis_records_the_dataset_its_own_input_names(tmp_path, monkeypatch):

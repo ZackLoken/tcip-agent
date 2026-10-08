@@ -27,7 +27,7 @@ def test_a_scope_the_admission_produced_round_trips_through_the_selection_and_th
     targets under, every declared attribute in it, the selection reads it back whole, and a run
     bound to it records that same scope on its own data section."""
     pytest.importorskip("torch")
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tests._producer_fixtures import train_val
 
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -40,9 +40,8 @@ def test_a_scope_the_admission_produced_round_trips_through_the_selection_and_th
     assert drawn.scope == ClassScope(SUBJECT, (CONDITION,))
     assert result["scope"] == asdict(drawn.scope)
 
-    data_cfg: dict = {"split": {"selection_dir": str(out)}}
-    auto_train_val(tmp_path, "detection", data_cfg, None)
-    assert ClassScope.of(data_cfg) == drawn.scope
+    *_loaders, resolved = train_val(tmp_path, "detection", {"split": {"selection_dir": str(out)}})
+    assert resolved.recorded_scope == drawn.scope
 
 
 REVERSED = Attribute(name="condition", type="categorical", values=("damaged", "healthy"))
@@ -57,10 +56,11 @@ def test_a_run_recording_its_attributes_is_admitted_under_them_not_the_registrys
     tmp_path: Path,
 ) -> None:
     from tcip_mcp.pipelines.data.split_construction import run_membership
+    from tcip_mcp.pipelines.schemas import DataSpec
 
     images_dir = _images_dir(_attribute_scoped_dataset(tmp_path / "ds"))
-    membership = run_membership({"images_dir": images_dir,
-                                 "scope": asdict(ClassScope(SUBJECT, (REVERSED,)))})
+    membership = run_membership(DataSpec.model_validate(
+        {"images_dir": images_dir, "scope": asdict(ClassScope(SUBJECT, (REVERSED,)))}))
 
     assert membership.scope.attributes == (REVERSED,)
 
@@ -70,10 +70,12 @@ def test_a_document_scope_with_no_attributes_read_refuses_and_a_fresh_statement_
 ) -> None:
     from tcip_mcp.pipelines.data.label_queries import admit
     from tcip_mcp.pipelines.data.split_construction import run_membership
+    from tcip_mcp.pipelines.schemas import DataSpec
 
     images_dir = _images_dir(_attribute_scoped_dataset(tmp_path / "ds"))
     with pytest.raises(ValueError, match="records no attributes"):
         admit(images_dir, scope=ClassScope(SUBJECT))
 
-    fresh = run_membership({"images_dir": images_dir, "scope": {"subject": SUBJECT}})
+    fresh = run_membership(DataSpec.model_validate(
+        {"images_dir": images_dir, "scope": {"subject": SUBJECT}}))
     assert fresh.scope.attributes == (CONDITION,)

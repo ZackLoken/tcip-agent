@@ -21,10 +21,10 @@ from tcip_mcp.pipelines.data.split_construction import (
     ResolvedRun, data_dir_issues, resolve_run, selection_compatibility, split_seed,
 )
 from tcip_mcp.pipelines.execution import Stated
-from tcip_mcp.pipelines.model_build import run_task
+from tcip_mcp.pipelines.schemas import TilingSpec, checked_train_config
 
 if TYPE_CHECKING:
-    from tcip_mcp.pipelines.schemas import TrainConfigSchema
+    from tcip_mcp.pipelines.schemas import DataSpec, TrainConfigSchema
 
 logger = logging.getLogger(__name__)
 
@@ -36,18 +36,16 @@ _gpu_round_robin = itertools.count()
 _OVERFIT_CHECK_LOCK = threading.Lock()
 
 
-def candidate_config_with_selection(config: dict, selection_dir: str) -> dict:
-    """The launch config choosing ``selection_dir`` over ``config``'s own data section would
-    build: ``data.split`` replaced wholesale by ``{"selection_dir": selection_dir}``, and the
-    stated ``scope`` and ``labels_dir`` dropped, since a bound run reads its scope and each
-    sample's ground truth off the selection.
+def data_with_selection(data: DataSpec, selection_dir: str) -> DataSpec:
+    """The data block choosing ``selection_dir`` over ``data`` would launch with: ``split``
+    replaced wholesale by one naming only ``selection_dir``, and the stated ``scope`` and
+    ``labels_dir`` dropped, since a bound run reads its scope and each sample's ground truth off
+    the selection.
     """
-    data_cfg_raw = config.get("data")
-    data_cfg: dict = {**data_cfg_raw} if isinstance(data_cfg_raw, dict) else {}
-    data_cfg.pop("scope", None)
-    data_cfg.pop("labels_dir", None)
-    data_cfg["split"] = {"selection_dir": selection_dir}
-    return {**config, "data": data_cfg}
+    from tcip_mcp.pipelines import schemas
+
+    kept = data.record(exclude={"scope": True, "labels_dir": True, "split": True})
+    return schemas.DataSpec.model_validate({**kept, "split": {"selection_dir": selection_dir}})
 
 # Lazy imports of heavy dependencies inside tool functions to keep server startup fast.
 
@@ -55,14 +53,17 @@ def candidate_config_with_selection(config: dict, selection_dir: str) -> dict:
 def preflight_config(project: Path, config: dict, smoke: bool = False,
                      overfit: bool = False) -> dict:
     """Validate a training configuration before launching (:func:`_preflight`'s report)."""
-    return _preflight(project, config, smoke=smoke, overfit=overfit)[0]
+    return _preflight(project, *checked_train_config(config), smoke=smoke, overfit=overfit)[0]
 
 
-def _preflight(project: Path, config: dict, *, smoke: bool,
+def _preflight(project: Path, spec: TrainConfigSchema | None, issues: list[str], *, smoke: bool,
                overfit: bool) -> tuple[dict, ResolvedRun | None]:
-    """Validate a training configuration before launching a run of ``project`` and resolve it once
-    (:func:`~tcip_mcp.pipelines.data.split_construction.resolve_run`) when its structure admits
-    that. Returns the report and the resolution, ``None`` when structure refused first.
+    """Check a training configuration its caller validated once
+    (``schemas.checked_train_config``: ``spec``, ``None`` with the schema's ``issues`` when it
+    refused) before launching a run of ``project``, and resolve it once
+    (:func:`~tcip_mcp.pipelines.data.split_construction.resolve_run`) when its structure
+    (:func:`_structural_issues`) admits that. Returns the report and the resolution, ``None`` when
+    structure refused first.
 
     Config structure, one placement for everything::
 
@@ -78,7 +79,6 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
     A nested ``training`` section is refused by name (``schemas.TrainConfigSchema``).
 
     Args:
-        config: Full training configuration dict.
         smoke: When True, actually build the model and run ``check_model_contract`` (a train+eval
             forward at the run's resolved dims and img_size, every attribute head included). A
             contract failure is appended
@@ -91,12 +91,10 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
     """
     from tcip_mcp.pipelines.data.label_queries import admits
 
-    spec, issues = _structural_issues(config)
+    issues = list(issues) if spec is None else _structural_issues(spec)
     warnings: list[str] = []
-    data_cfg_dict: dict = (spec.data if spec is not None else None) or {}
-    split_cfg_raw = data_cfg_dict.get("split")
-    split_cfg_dict: dict = split_cfg_raw if isinstance(split_cfg_raw, dict) else {}
-    if split_cfg_dict.get("selection_dir") and split_cfg_dict.get("redraw_within_selection"):
+    split = spec.data.split if spec is not None else None
+    if split is not None and split.selection_dir and split.redraw_within_selection:
         warnings.append(
             "data.split.redraw_within_selection=true: this run redraws train and val inside the "
             "selection's own train and val samples at this seed; the selection's calibration side "
@@ -106,8 +104,8 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
     # Normalization provenance: per-band builder_kwargs statistics must carry which images
     # produced them.
     sampling_record = None
-    source = spec.model_source if spec is not None else None
-    if source is not None:
+    if spec is not None:
+        source = spec.model_source
         bk = source.builder_kwargs or {}
         if bk.get("image_mean") is not None or bk.get("image_std") is not None:
             sampling_record = source.image_stats_sampling
@@ -125,7 +123,7 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
         counts: dict[str, int] = {}
         try:
             assert spec is not None, "a config with no structural issue validated"
-            resolution = resolve_run(config, spec, project=project, tallies_out=counts)
+            resolution = resolve_run(spec, project=project, tallies_out=counts)
         except Exception as exc:  # noqa: BLE001, whatever stops the resolution stops the launch
             issues.append(str(exc))
         # Trainable-sample coverage, never gating: a run admitting a fraction of its annotated
@@ -142,16 +140,14 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
     if sampling_record is not None and resolution is None:
         result["image_stats_containment"] = "not_checked"
     if resolution is not None:
+        from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
         from tcip_mcp.pipelines.data.split_construction import partition_samples
 
-        resolved_data = resolution.record["data"]
-        known = {str(Path(s.source).resolve())
-                 for s in partition_samples(resolution.record["partition"])}
-        from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
-
+        resolved_split = resolution.data.split
+        known = {str(Path(s.source).resolve()) for s in partition_samples(resolution.partition)}
         reserved = sorted(f"{side}_ratio" for side in REFERENCE_SIDES
-                          if split_cfg_dict.get(f"{side}_ratio"))
-        if reserved and "spatial_manifest" not in resolved_data["split"]:
+                          if getattr(resolved_split, f"{side}_ratio"))
+        if reserved and resolution.spatial is None:
             issues.append(
                 f"data.split {reserved} have no effect: this run over {len(known)} admitted "
                 "sources did not resolve to the single-source spatial-strip split a reserved "
@@ -173,7 +169,7 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
     # config can't build and the contract would just re-report the same failure. Overfit stays a
     # voluntary, non-gating diagnostic (a valid model can fail 20 steps on noise).
     if smoke and not issues:
-        assert resolution is not None and spec is not None, "a config with no issue resolved"
+        assert resolution is not None, "a config with no issue resolved"
         try:
             from tcip_mcp.pipelines.model_build import (
                 build_from_model_source, recorded_model_dims, resolve_contract_dims,
@@ -182,11 +178,11 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
                 check_model_contract, overfit_check, render_overfit_report,
             )
 
-            task = run_task(config)
-            resolved_config = {**config, "data": resolution.record["data"]}
-            built_at = recorded_model_dims(resolved_config)
-            dims = resolve_contract_dims(resolved_config, task, built_at)
-            model = build_from_model_source(spec.model_source, built_at)
+            resolved_spec = resolution.spec.model_copy(update={"data": resolution.data})
+            task = resolved_spec.model_source.task
+            built_at = recorded_model_dims(resolved_spec)
+            dims = resolve_contract_dims(resolved_spec, built_at)
+            model = build_from_model_source(resolved_spec.model_source, built_at)
             report = check_model_contract(model, task, dims=dims)
             batch, why_no_batch = None, None
             if report.get("not_smokeable"):
@@ -235,88 +231,63 @@ def _preflight(project: Path, config: dict, *, smoke: bool,
     return result, resolution
 
 
-def _structural_issues(config: dict) -> tuple[TrainConfigSchema | None, list[str]]:
-    """``config`` validated once (``schemas.checked_train_config``) and what stops it before
-    anything reads its data: its schema's issues, reported alone with no validated config when
-    it refuses; then a ``model_source`` builder (read from the validated config), a
-    ``training_source`` (an untyped key, read as stated) or a ``data.dataset_source`` builder that
-    is missing or does not import, and a ``data`` section that is missing or names no locations
+def _structural_issues(spec: TrainConfigSchema) -> list[str]:
+    """What stops the validated config ``spec`` before anything reads its data: a
+    ``model_source`` or ``data.dataset_source`` builder or a ``training_source`` that does not
+    import, and a ``data`` block that names no locations
     (``split_construction.data_dir_issues``)."""
-    from tcip_mcp.pipelines.schemas import checked_train_config
-    from tcip_mcp.pipelines.model_build import (
-        DATASET_SOURCE_KEY, TRAINING_SOURCE_KEY, _import_dotted, import_source_builder,
-    )
+    from tcip_mcp.pipelines.model_build import _import_dotted, import_source_builder
 
-    spec, issues = checked_train_config(config)
-    if spec is None:
-        return None, issues
+    issues: list[str] = []
+    try:
+        import_source_builder(spec.model_source.builder, spec.model_source.source_files)
+    except Exception as exc:
+        issues.append(f"model_source.builder not importable: {exc}")
 
-    if spec.model_source is None:
-        issues.append("Missing 'model_source' section")
-    elif not spec.model_source.builder:
-        issues.append("model_source must carry a 'builder' (module:function)")
-    else:
+    if spec.training_source is not None:
         try:
-            import_source_builder(spec.model_source.builder, spec.model_source.source_files)
+            _import_dotted(spec.training_source)
         except Exception as exc:
-            issues.append(f"model_source.builder not importable: {exc}")
+            issues.append(f"training_source not importable: {exc}")
 
-    training_source = config.get(TRAINING_SOURCE_KEY)
-    if training_source is not None:
-        if not isinstance(training_source, str) or not training_source:
-            issues.append("training_source must be a non-empty 'module:function' string")
-        else:
-            try:
-                _import_dotted(training_source)
-            except Exception as exc:
-                issues.append(f"training_source not importable: {exc}")
-
-    data_cfg = spec.data
-    if not data_cfg:
-        issues.append("Missing 'data' section")
-    else:
-        if data_cfg.get(DATASET_SOURCE_KEY) is not None:
-            dataset_source = data_cfg[DATASET_SOURCE_KEY]
-            if not isinstance(dataset_source, dict) or not dataset_source.get("builder"):
-                issues.append(
-                    "data.dataset_source must be a dict with a 'builder' (module:function)")
-            else:
-                try:
-                    import_source_builder(dataset_source["builder"],
-                                          dataset_source.get("source_files"))
-                except Exception as exc:
-                    issues.append(f"data.dataset_source.builder not importable: {exc}")
-        issues.extend(data_dir_issues(data_cfg))
-    return spec, issues
+    dataset_source = spec.data.dataset_source
+    if dataset_source is not None:
+        try:
+            import_source_builder(dataset_source.builder, dataset_source.source_files)
+        except Exception as exc:
+            issues.append(f"data.dataset_source.builder not importable: {exc}")
+    issues.extend(data_dir_issues(spec.data))
+    return issues
 
 
 def open_run(
-    run_dir: Path, config: dict, resolved: dict | None, *, relaunched_from: str | None = None,
-    resume_from: str | None = None,
+    run_dir: Path, spec: TrainConfigSchema, resolved: dict | None, *,
+    relaunched_from: str | None = None, resume_from: str | None = None,
     max_wall_clock_seconds: float | None = None, model_contract: dict | None = None,
     trial_params: dict | None = None,
 ) -> None:
     """Open the run directory ``run_dir`` (``experiments.open_run_directory``) with its
-    ``run.json``: ``config`` as the run's input, ``resolved`` as what that input resolved to
-    (``split_construction.resolve_run``'s record, ``None`` for an HPO trial whose resolution
-    failed, which then ends ``failed``), the environment and the dataset identity of
-    ``config``'s own data section (``split_construction.dataset_identity``), a bespoke run's
-    sources copied into the directory, the run it was relaunched from and the checkpoint it
-    resumes from, its wall clock, the model contract preflight proved, and an HPO
-    trial's sampled point. A seed is drawn onto ``config`` when it states none. Refuses an
-    existing directory (``experiments.RunDirectoryExistsError``)."""
+    ``run.json``: the validated launch config ``spec``, seeded (``run_registry.seeded``) and
+    recorded as it dumps (``TrainConfigSchema.record``), as the run's input, ``resolved`` as what
+    that input resolved to (``split_construction.resolve_run``'s record, ``None`` for an HPO
+    trial whose resolution failed, which then ends ``failed``), the environment and the dataset
+    identity of ``spec``'s data block (``split_construction.dataset_identity``), the run's
+    sources copied into the directory (``model_build.snapshot_model_source``), the run it was
+    relaunched from and the checkpoint it resumes from, its wall clock, the model contract
+    preflight proved, and an HPO trial's sampled point. Refuses an existing directory
+    (``experiments.RunDirectoryExistsError``)."""
     from tcip_mcp.pipelines.data.split_construction import dataset_identity, partition_samples
     from tcip_mcp.pipelines.model_build import capture_env, snapshot_model_source
-    from tcip_mcp.pipelines.training.run_registry import draw_seed_if_unset
+    from tcip_mcp.pipelines.training.run_registry import seeded
 
-    draw_seed_if_unset(config)
+    spec = seeded(spec)
     dataset_id, fingerprint = dataset_identity(
-        config.get("data") or {}, partition_samples(resolved["partition"]) if resolved else ())
+        spec.data, partition_samples(resolved["partition"]) if resolved else ())
     experiments.open_run_directory(run_dir, lambda directory: {
-        "created": now_iso(), "config": config, "resolved": resolved,
+        "created": now_iso(), "config": spec.record(), "resolved": resolved,
         "environment": capture_env(),
         "dataset": {"id": dataset_id, "fingerprint": fingerprint},
-        "source": snapshot_model_source(config, directory),
+        "source": snapshot_model_source(spec, directory),
         "relaunched_from": relaunched_from, "resume_from": resume_from,
         "max_wall_clock_seconds": max_wall_clock_seconds, "model_contract": model_contract,
         "trial_params": trial_params,
@@ -370,7 +341,8 @@ def launch_training(
                          "mints every run's id and answers it as experiment_id."}
     # smoke=True: build the model and run the correctness contract before spawning the training
     # subprocess, so a broken builder returns here instead of wasting a full audited run.
-    validation, resolution = _preflight(project, config, smoke=True, overfit=overfit_check)
+    validation, resolution = _preflight(project, *checked_train_config(config), smoke=True,
+                                        overfit=overfit_check)
     if not validation["valid"]:
         return {"error": "Invalid config", "issues": validation["issues"]}
     assert resolution is not None, "a valid config resolved"
@@ -391,12 +363,10 @@ def launch_training(
         "overfit_check": rendered_overfit_report,
     }
 
-    # A copy: the launch records onto it, never onto the caller's own dict.
-    config = dict(config)
     experiment_id = experiments.mint_experiment_id()
     try:
         run_dir = experiments.experiment_dir(experiment_id, project=project)
-        open_run(run_dir, config, resolution.record, relaunched_from=relaunched_from,
+        open_run(run_dir, resolution.spec, resolution.record, relaunched_from=relaunched_from,
                  resume_from=resume_from or None, max_wall_clock_seconds=max_wall_clock_seconds,
                  model_contract=model_contract_record)
     except (StoreError, ValueError, OSError) as exc:
@@ -519,7 +489,7 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
 
     Every check is :func:`selection_compatibility` over a selection this reader read itself,
     through :func:`~tcip_mcp.pipelines.data.selection.read_selection_checked`. A candidate
-    selection is checked against the config :func:`candidate_config_with_selection` builds
+    selection is checked against the data block :func:`data_with_selection` builds
     (``data.split`` replaced wholesale); "As recorded" is checked against the stated config
     unchanged, plus the directory-presence issues :func:`preflight_config` would raise.
 
@@ -547,13 +517,9 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
     own = next((obs for obs in runs if obs.directory.name == experiment_id), None)
     if own is None:
         return {"error": f"Experiment not found: {experiment_id}"}
-    config = own.record["config"]
-    data_cfg = config.get("data") or {}
-    split_cfg = data_cfg.get("split") or {}
-    own_selection_dir = split_cfg.get("selection_dir")
-    replaced_split_keys = sorted(
-        k for k, v in split_cfg.items() if k != "selection_dir" and v is not None
-    )
+    data = own.spec.data
+    own_selection_dir = data.split.selection_dir
+    replaced_split_keys = sorted(data.split.stated - {"selection_dir"})
 
     own_selection = None
     if own_selection_dir:
@@ -566,7 +532,7 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
                 f"no selection recorded under {own_selection_dir}; run draw_splits first."
             )
         else:
-            own_issues = selection_compatibility(data_cfg, own_selection, own_selection_dir)
+            own_issues = selection_compatibility(data, own_selection, own_selection_dir)
             if own_issues:
                 as_recorded["compatible"] = False
                 as_recorded["reason"] = "; ".join(own_issues)
@@ -581,7 +547,7 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
             "compatible": True, "reason": None,
         }
 
-    dir_issues = data_dir_issues(data_cfg)
+    dir_issues = data_dir_issues(data)
     if dir_issues:
         as_recorded["compatible"] = False
         combined_reason = list(dir_issues)
@@ -595,7 +561,7 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
     if own_selection is not None and own_selection.samples:
         root_anchor = str(Path(own_selection.samples[0].source).parent)
     elif not own_selection_dir and not dir_issues:
-        root_anchor = str(data_cfg["images_dir"])
+        root_anchor = str(data.images_dir)
     else:
         return {"as_recorded": as_recorded, "selections": []}
 
@@ -641,8 +607,8 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
                 "replaced_split_keys": replaced_split_keys,
             })
             continue
-        candidate_config = candidate_config_with_selection(config, candidate_dir)
-        issues = selection_compatibility(candidate_config["data"], selection, candidate_dir)
+        issues = selection_compatibility(data_with_selection(data, candidate_dir), selection,
+                                         candidate_dir)
         counts = selection.counts()
         entry: dict = {
             "selection_dir": candidate_dir, "seed": selection.seed,
@@ -737,23 +703,25 @@ _CANCEL_DURING_RUN_REASON = "the sweep was canceled by request before it could f
 
 def open_trial(sweep: Path, trial_id: str, point: dict) -> Path:
     """Open the trial ``trial_id`` of the sweep at ``sweep`` as a run directory beneath it named
-    ``<sweep id>_<trial_id>``, and return it. The sweep's base config with ``point`` applied is
-    resolved against its project through the one run producer (``split_construction.resolve_run``,
-    at the sweep's own objective) and the directory opened (:func:`open_run`) with ``point`` as
-    its ``trial_params``, whatever the resolution did: a resolution that fails is the trial's
-    final status ``failed`` naming why."""
-    record = experiments.observe(sweep).record
-    config = _apply_hpo_params(record["input"]["base_config"], point)
-    trial_dir = sweep / f"{sweep.name}_{trial_id}"
+    ``<sweep id>_<trial_id>``, and return it. The sweep's recorded base config with ``point``
+    applied (:func:`_apply_hpo_params`), validated once as the trial's config
+    (``schemas.train_config``), is resolved against its project through the one run producer
+    (``split_construction.resolve_run``, at the sweep's own objective) and the directory opened
+    (:func:`open_run`) with ``point`` as its ``trial_params``, whatever the resolution did: a
+    resolution that fails is the trial's final status ``failed`` naming why. A config the
+    validation refuses raises before any directory is opened: a config that never validated is
+    no trial, and a failed-trial record for it would fabricate one."""
     from tcip_mcp.pipelines.schemas import train_config
 
+    record = experiments.observe(sweep).record
+    spec = train_config(_apply_hpo_params(record["input"]["base_config"], point))
+    trial_dir = sweep / f"{sweep.name}_{trial_id}"
     try:
-        resolved, status_error = resolve_run(config, train_config(config),
-                                             project=experiments.project_of_run(sweep),
+        resolved, status_error = resolve_run(spec, project=experiments.project_of_run(sweep),
                                              objective=record["objective"]).record, None
     except Exception as exc:  # noqa: BLE001, whatever stops the resolution fails the trial
         resolved, status_error = None, str(exc)
-    open_run(trial_dir, config, resolved, trial_params=point)
+    open_run(trial_dir, spec, resolved, trial_params=point)
     if status_error is not None:
         experiments.write_final_status(trial_dir, "failed", status_error, checkpoint=None)
     return trial_dir
@@ -924,16 +892,18 @@ def open_sweep(
     search_seed: int, trial_budget: int | None, relaunched_from: str | None, actor: str | None,
 ) -> Path | dict:
     """Check a sweep's arguments: the first corner of the search space (:func:`_preflight_points`)
-    resolved once (:func:`_preflight`), whose objective every trial records and whose partition
-    answers whether its draws can vary (:func:`_spatial_draws_issue`), then the structure
-    (:func:`_structural_issues`) of each single-axis choice and range end it lists; every other
-    point is validated by its own trial. Create the sweep's
+    applied to ``base_config`` and validated once (``schemas.checked_train_config``), its data
+    block the one every split-draw check reads, then resolved once (:func:`_preflight`), whose
+    objective every trial records and whose partition answers whether its draws can vary
+    (:func:`_spatial_draws_issue`), then the structure (:func:`_structural_issues`) of each
+    single-axis choice and range end it lists; every other point is validated by its own trial.
+    Create the sweep's
     directory under ``project``, named by ``experiments.mint_experiment_id("hpo")``, with its
     ``sweep.json`` written once, carrying the objective and
     every argument resolved as its ``input``, then the act's one audit line by ``actor`` naming
     the sweep (``AuditEntryNotWrittenError`` when it cannot be appended). Returns the opened sweep's
     directory, or the refusal ``{"error", "issues"}`` with nothing created."""
-    from tcip_mcp.pipelines.training.hpo import split_draw_search_space
+    from tcip_mcp.pipelines.training.hpo import resolved_draw_seeds, split_draw_search_space
 
     # Both reach a written record: the space into the sweep's input, the base config into every
     # trial's run.json once a sampled point is applied to it.
@@ -953,13 +923,29 @@ def open_sweep(
     # type, and computed once so every leg that reads it agrees on whether a bound is read.
     reads_bound = trial_budget is not None or (split_draws > 1 and relaunched_from is None)
 
+    try:
+        (first_label, first_point), *rest = _preflight_points(param_space, search_alg)
+    except (KeyError, TypeError, ValueError) as exc:
+        return {"error": f"param_space is not a search space: {exc!r}", "issues": []}
+    try:
+        first_spec, first_issues = checked_train_config(
+            _apply_hpo_params(base_config, first_point))
+    except ValueError as exc:
+        first_spec, first_issues = None, [str(exc)]
+    if first_spec is None:
+        return {"error": f"the sweep's base config fails preflight at {first_label}",
+                "issues": first_issues}
+
     # A bound base_config admitted to split_draws redraws inside its selection from here on.
-    base_config = _base_config_for_split_draws(base_config, split_draws)
+    data = _data_for_split_draws(first_spec.data, split_draws)
+    if data is not first_spec.data:
+        base_config = {**base_config, "data": data.record()}
+        first_spec = first_spec.model_copy(update={"data": data})
 
     # Checked ahead of preflight, so its own reason is what an auto_val refusal reads as, not
     # whatever preflight would have hit first.
     draws_refusal = _split_draws_refusal(
-        base_config, param_space, search_alg, scheduler,
+        first_spec.data, param_space, search_alg, scheduler,
         split_draws, split_draw_seeds, baseline_params)
     if draws_refusal is not None:
         return {"error": draws_refusal, "issues": []}
@@ -968,30 +954,27 @@ def open_sweep(
     if seed_axis_refusal is not None:
         return {"error": f"{seed_axis_refusal.reason} {seed_axis_refusal.remedy}", "issues": []}
 
-    try:
-        (first_label, first_point), *rest = _preflight_points(param_space, search_alg)
-    except (KeyError, TypeError, ValueError) as exc:
-        return {"error": f"param_space is not a search space: {exc!r}", "issues": []}
-    preflight, resolution = _preflight(project, _apply_hpo_params(base_config, first_point),
-                                       smoke=False, overfit=False)
+    preflight, resolution = _preflight(project, first_spec, [], smoke=False, overfit=False)
     if resolution is None or not preflight["valid"]:
         return {"error": f"the sweep's base config fails preflight at {first_label}",
                 "issues": preflight["issues"]}
     for label, point in rest:
         try:
-            _spec, issues = _structural_issues(_apply_hpo_params(base_config, point))
+            spec, issues = checked_train_config(_apply_hpo_params(base_config, point))
         except ValueError as exc:
-            issues = [str(exc)]
+            spec, issues = None, [str(exc)]
+        if spec is not None:
+            issues = _structural_issues(spec)
         if issues:
             return {"error": f"the sweep's base config fails preflight at {label}",
                     "issues": issues}
-    spatial_refusal = _spatial_draws_issue(resolution.record, split_draws)
+    spatial_refusal = _spatial_draws_issue(resolution, split_draws)
     if spatial_refusal is not None:
         return {"error": spatial_refusal, "issues": []}
-    objective = resolution.record["objective"]
+    objective = resolution.objective
 
-    search_param_space, resolved_draw_seeds = split_draw_search_space(
-        param_space, base_config, split_draws, split_draw_seeds)
+    draw_seeds = resolved_draw_seeds(resolution.spec.data.split, split_draws, split_draw_seeds)
+    search_param_space = split_draw_search_space(param_space, draw_seeds)
 
     budget_refusal = _trial_budget_refusal(
         reads_bound=reads_bound, split_draws=split_draws, n_trials=n_trials,
@@ -1014,7 +997,7 @@ def open_sweep(
         "resources_per_trial": resources_per_trial,
         "param_space": param_space, "base_config": base_config,
         "relaunched_from": relaunched_from, "split_draws": split_draws,
-        "split_draw_seeds": resolved_draw_seeds, "search_seed": search_seed,
+        "split_draw_seeds": draw_seeds, "search_seed": search_seed,
         "trial_budget": trial_budget,
     }}
     experiments.write_record(directory / SWEEP_FILE, record)
@@ -1066,8 +1049,7 @@ def run_sweep(directory: Path) -> SweepGroup:
             tid = uuid.uuid4().hex[:8]
         _run_hpo_trial(config, report, directory, tid)
 
-    search_param_space, _ = split_draw_search_space(
-        given["param_space"], given["base_config"], given["split_draws"], given["split_draw_seeds"])
+    search_param_space = split_draw_search_space(given["param_space"], given["split_draw_seeds"])
     stop_heartbeat = experiments.keep_heartbeat(directory)
     try:
         tune_search(
@@ -1101,8 +1083,10 @@ def run_sweep(directory: Path) -> SweepGroup:
 
 
 def _apply_hpo_params(base_config: dict, params: dict) -> dict:
-    """Apply HPO params onto a deep copy of ``base_config``: a dotted key (``optimizer.head_lr``)
-    at the nested field it names, any other key (``batch_size``) at the top level."""
+    """Apply HPO params onto a deep copy of ``base_config``, which may leave unstated a value
+    ``params`` names: a dotted key (``optimizer.head_lr``) at the nested field it names, any other
+    key (``batch_size``) at the top level. The result is a trial's config, validated by its
+    caller."""
     import copy
 
     cfg = copy.deepcopy(base_config)
@@ -1129,26 +1113,22 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
     return cfg
 
 
-def _base_config_for_split_draws(base_config: dict, split_draws: int) -> dict:
-    """``base_config`` as a sweep over ``split_draws`` draws is minted from: unchanged unless
-    ``split_draws`` is above 1 and the config is bound to a selection, in which case a copy carries
-    ``data.split.redraw_within_selection: true``; a config stating no ``data.split.seed`` refuses
-    (``ValueError``).
+def _data_for_split_draws(data: DataSpec, split_draws: int) -> DataSpec:
+    """The validated data block ``data`` a sweep over ``split_draws`` draws is minted from:
+    ``data`` itself unless ``split_draws`` is above 1 and it is bound to a selection, in which
+    case a copy with ``split.redraw_within_selection: true``; a block stating no
+    ``split.seed`` refuses (``ValueError``).
     """
-    if split_draws <= 1:
-        return base_config
-    data_cfg = base_config.get("data") or {}
-    split_cfg = data_cfg.get("split") or {}
-    if not split_cfg.get("selection_dir"):
-        return base_config
-    new_split = {**split_cfg, "redraw_within_selection": True}
-    new_split["seed"] = split_seed(split_cfg)
-    return {**base_config, "data": {**data_cfg, "split": new_split}}
+    if split_draws <= 1 or not data.split.selection_dir:
+        return data
+    split = data.split.model_copy(
+        update={"redraw_within_selection": True, "seed": split_seed(data.split)})
+    return data.model_copy(update={"split": split})
 
 
 def _split_draws_argument_refusal(split_draws: object) -> str | None:
     """Whether ``split_draws`` itself is a draw count at all, checked before every other leg
-    (including :func:`_base_config_for_split_draws`): a value that is not an ``int`` (a ``bool`` is
+    (including :func:`_data_for_split_draws`): a value that is not an ``int`` (a ``bool`` is
     an ``int`` and reads as the integer it names) refuses by name, and a value below one refuses by
     name.
     """
@@ -1220,24 +1200,22 @@ def _trial_budget_refusal(
 
 
 def _split_draws_refusal(
-    base_config: dict, param_space: dict, search_alg: str,
+    data: DataSpec, param_space: dict, search_alg: str,
     scheduler: str, split_draws: int, split_draw_seeds: list[int] | None,
     baseline_params: dict | None,
 ) -> str | None:
     """Every reason of the paired path's own a sweep refuses ``split_draws`` above 1 for before
-    its first point resolves. ``None`` when nothing here objects, and for one draw. A
-    ``base_config`` bound to a selection skips the ``auto_val`` leg; whether its selection admits
-    a redraw is the first point's resolution's answer."""
+    its first point resolves, its base config's validated data block being ``data``. ``None``
+    when nothing here objects, and for one draw. A base config bound to a selection skips the
+    ``auto_val`` leg; whether its selection admits a redraw is the first point's resolution's
+    answer."""
     if split_draws <= 1:
         return None
     from tcip_mcp.pipelines.training.hpo import (
         SPLIT_DRAW_SEED_KEY, _NATIVE_SEARCH, _NO_SCHEDULER, search_alg_key,
     )
 
-    data_cfg = base_config.get("data") or {}
-    split_cfg = data_cfg.get("split") or {}
-    bound = bool(split_cfg.get("selection_dir"))
-    if not bound and not data_cfg.get("auto_val", True):
+    if not data.split.selection_dir and not data.auto_val:
         return ("split_draws needs a drawn validation split, and base_config sets "
                 "data.auto_val=False.")
     if search_alg_key(search_alg) not in _NATIVE_SEARCH:
@@ -1274,11 +1252,11 @@ def _split_draws_refusal(
     return None
 
 
-def _spatial_draws_issue(resolved: dict, split_draws: int) -> str | None:
-    """The refusal ``split_draws`` above 1 meets when the sweep's ``resolved`` first point split
-    one source over its own pixels (its ``data.split.spatial_manifest``), a partition no draw of
-    ``data.split.seed`` varies; ``None`` otherwise."""
-    if split_draws <= 1 or resolved["data"]["split"].get("spatial_manifest") is None:
+def _spatial_draws_issue(resolution: ResolvedRun, split_draws: int) -> str | None:
+    """The refusal ``split_draws`` above 1 meets when the sweep's first point, resolved as
+    ``resolution``, split one source over its own pixels (its ``spatial`` split), a partition
+    no draw of ``data.split.seed`` varies; ``None`` otherwise."""
+    if split_draws <= 1 or resolution.spatial is None:
         return None
     return (
         f"split_draws={split_draws} redraws the split, and base_config's one admitted source is "
@@ -1383,7 +1361,7 @@ def evaluate_model(
     labels_dir: str | None = None,
     stated: Stated | None = None,
     iou_threshold: float = 0.5,
-    tiling: dict | None = None,
+    tiling: TilingSpec | None = None,
     use_tiled_inference: bool = False,
     trait: str | None = None,
 ) -> dict:
@@ -1425,9 +1403,9 @@ def evaluate_model(
             ground truth when unstated). The resolved record, each value's source with it, is
             returned under ``execution``.
         iou_threshold: The IoU a match must reach under the IoU convention.
-        tiling: Optional detection tiling dict ({enabled, tile_size, overlap, ...}) for a
-            tile-level eval. None + a run id reuses the run's training tiling; None + a checkpoint
-            path stays untiled.
+        tiling: Optional detection tiling (``schemas.TilingSpec``: enabled, tile_size, overlap,
+            ...) for a tile-level eval. None + a run id reuses the run's training tiling;
+            None + a checkpoint path stays untiled.
         use_tiled_inference: Score the delivery regime (full-frame via tiled inference).
         trait: When set, the derived localization criterion of the trait's latest confirmed
             revision (traits.py, e.g. a count trait's center-match) governs the reported count
@@ -1466,15 +1444,13 @@ def evaluate_model(
 
     from tcip_mcp.model_registry import UnregisteredCheckpointError, load_registered_checkpoint
 
-    from tcip_mcp.pipelines.data.selection import ClassScope
-
     try:
         checkpoint = load_registered_checkpoint(ckpt, project=project)
         task = checkpoint.task
-        scope = ClassScope.of(checkpoint.data_config)
+        scope = checkpoint.spec.data.recorded_scope
     except (UnregisteredCheckpointError, ValueError) as exc:
         return {"error": str(exc)}
-    run_tiling = checkpoint.data_config.get("tiling")
+    run_tiling = checkpoint.spec.data.tiling
     stated = stated or Stated()
 
     from tcip_annotation.json_io import UnreadableLabelDocumentError
