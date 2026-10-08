@@ -11,8 +11,20 @@ from typing import TYPE_CHECKING, Any
 
 from tcip_annotation.state import Annotation, BBox
 
+from tcip_mcp.pipelines.execution import Stated
+from tests._training_values import evaluation_block, schedule, sgd_optimizer
+
 if TYPE_CHECKING:
     from tcip_web.state import OpenProject
+
+
+def chain_pass() -> Stated:
+    """The untiled pass the chain's detectors publish at without an assessment: the conf their
+    one bright square is found at, and the sample cap."""
+    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
+
+    return Stated(tile=False, conf=0.5, max_dets=SAMPLE_MAX_DETS)
+
 
 IMG = 64
 SUBJECT = "bud"
@@ -95,13 +107,10 @@ def run_config(selection_dir: Path, model_source: dict = REGION_BUILDER,
                            **overrides)
 
 
-ADAMW = {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0}
-"""The AdamW optimizer section a caller of :func:`training_config` chooses over its SGD one."""
-
-
 def training_config(model_source: dict, data: dict, **overrides: Any) -> dict:
     """A one-epoch CPU run of ``model_source`` over the ``data`` section, every other key the
-    toy detectors train at, with a copy of each of ``overrides`` in place of its key."""
+    toy detectors train at (the optimizer, schedule and evaluation blocks the sample ones of
+    ``tests._training_values``), with a copy of each of ``overrides`` in place of its key."""
     import copy
 
     return {
@@ -113,8 +122,9 @@ def training_config(model_source: dict, data: dict, **overrides: Any) -> dict:
         "device": "cpu",
         "checkpoint_every_n_epochs": 1,
         "early_stopping": {"enabled": False},
-        "optimizer": {"name": "sgd", "backbone_lr": 1e-3, "head_lr": 1e-2, "weight_decay": 0},
-        "scheduler": {"type": "cosine"},
+        "evaluation": evaluation_block(),
+        "optimizer": sgd_optimizer(),
+        "scheduler": schedule("cosine"),
         "gradient_accumulation_steps": 1,
         **copy.deepcopy(overrides),
     }
@@ -149,14 +159,15 @@ def confirm_count_trait(project_root: Path, **fields: Any):
 def assess(project: Path, checkpoint_path: str, selection_dir: Path, *,
            device: str | None = None, **stated: Any) -> dict:
     """``assess_checkpoint`` of the count trait's per-image count over ``selection_dir`` under the
-    ``stated`` execution values."""
-    from tcip_mcp.pipelines.execution import Stated
+    ``stated`` execution values, the sample cap unless they name one."""
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
     from tests import _trait_fixtures as fx
+    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
 
     return assess_checkpoint(project, checkpoint_path=checkpoint_path, trait=fx.COUNT_TRAIT,
                              delivery_kind="per_image_count", selection_dir=str(selection_dir),
-                             stated=Stated(**stated), device=device)
+                             stated=Stated(**{"max_dets": SAMPLE_MAX_DETS, **stated}),
+                             device=device)
 
 
 @dataclass
@@ -192,7 +203,7 @@ def unassessed_bucket(project: Path, *, experiment_id: str, bucket_name: str = "
     checkpoint_path = train_on(selection_dir, project, experiment_id)
     bucket = f"{bucket_name}/{DATE}"
     published = run_inference(project, checkpoint_path=checkpoint_path,
-                              images_dir=str(images_dir), bucket=bucket)
+                              images_dir=str(images_dir), bucket=bucket, stated=chain_pass())
     assert "error" not in published, published
     return read_bucket(root, bucket)
 
@@ -255,9 +266,11 @@ def published(project: Path, name: str, results: list[dict], *, scope: dict,
     from tcip_mcp.buckets import pass_documents, publish, source_root
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.data.split_construction import raster_identity
-    from tcip_mcp.pipelines.execution import Stated, prepare_pass
+    from tcip_mcp.pipelines.execution import prepare
     from tcip_mcp.pipelines.image_utils import resolve_image_path
-    from tests._verified_checkpoint_fixtures import project_checkpoint
+    from tests._verified_checkpoint_fixtures import (
+        SAMPLE_CONF, SAMPLE_MAX_DETS, project_checkpoint,
+    )
 
     from tcip_store import decode_value, encode_record
 
@@ -266,7 +279,8 @@ def published(project: Path, name: str, results: list[dict], *, scope: dict,
         project=project)
     identity = (decode_value(encode_record(raster_identity(resolve_image_path(raster_path))))
                 if raster_path is not None else None)
-    p = prepare_pass(checkpoint, Stated(tile=False))
+    p = prepare(checkpoint,
+                Stated(tile=False, conf=SAMPLE_CONF, max_dets=SAMPLE_MAX_DETS)).runnable()
     root = source_root([raster_path] if raster_path is not None else [r["image"] for r in results])
     return publish(project, root, name, pass_documents(p, results), producer=checkpoint.producer,
                    scope=p.scope, execution=p.execution,
@@ -380,7 +394,8 @@ def attributed_series(
     :data:`REFERENCE_SITE`; draw the labeled frames into a selection, train ``model_source``
     (by default the blob detector) on it, confirm the crossing trait, assess it when ``assessed``,
     publish one bucket per date under the ``stated`` execution values (under the assessment when
-    there is one), build the plant mapping, and open ``project`` in the web backend.
+    there is one, :func:`chain_pass` when neither is given), build the plant mapping, and open
+    ``project`` in the web backend.
 
     The registry declares ``attributes`` on :data:`SUBJECT` (:func:`write_attributed_registry`),
     one of them :data:`ATTRIBUTE` over :data:`VALUES`; every labeled object carries a value of
@@ -454,12 +469,17 @@ def attributed_series(
 
     assessment = None
     if assessed:
+        from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
+
         assessment = assess_checkpoint(project, checkpoint_path=checkpoint_path,
                                        trait="bud_opening", delivery_kind="state_crossing_dates",
-                                       selection_dir=str(selection_dir))
+                                       selection_dir=str(selection_dir),
+                                       stated=Stated(max_dets=SAMPLE_MAX_DETS))
         assert "error" not in assessment, assessment
         assert assessment["passed"] is True, assessment["failures"]
 
+    if stated is None and assessment is None:
+        stated = chain_pass()
     predictions: dict[str, str] = {}
     for date in dates:
         published = run_inference(

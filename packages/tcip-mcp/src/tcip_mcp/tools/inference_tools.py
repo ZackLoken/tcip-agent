@@ -42,7 +42,7 @@ def infer(
     from tcip_mcp.buckets import pass_documents, publish, source_root
     from tcip_mcp.dataset_layout import bucket_key, parse_capture_dir
     from tcip_mcp.model_registry import UnregisteredCheckpointError, load_registered_checkpoint
-    from tcip_mcp.pipelines.execution import Execution, ExecutionRefusedError, prepare_pass
+    from tcip_mcp.pipelines.execution import Execution, ExecutionRefusedError, prepare
 
     if not bucket:
         return {"error": "bucket is required: the name the predictions are published under"}
@@ -72,8 +72,8 @@ def infer(
         restored = (Execution.of(recorded.pop("execution")) if recorded is not None
                     else read_assessment(project, assessment_id).execution
                     if assessment_id is not None else None)
-        p = prepare_pass(checkpoint, stated, images_dir=images_dir, device=device,
-                         tile_batch_size=tile_batch_size, restored=restored)
+        p = prepare(checkpoint, stated, images_dir=images_dir, device=device,
+                    tile_batch_size=tile_batch_size, restored=restored).runnable()
     except (ExecutionRefusedError, ValueError) as exc:
         return {"error": str(exc)}
 
@@ -182,8 +182,10 @@ def run_inference(
     With ``assessment_id`` the pass runs exactly that assessment's execution record (its conf,
     cap, tile edge, overlap, merge and threshold) and the bucket names the assessment, which is
     what a delivery reads to call its numbers validated; a stated execution value it records
-    differently refuses by name. Without one, every execution value is the stated one, else the
-    checkpoint's own recorded geometry, else a documented default, and the bucket is unassessed.
+    differently refuses by name. Without one, the bucket is unassessed and the pass runs at the
+    stated values: a detector's ``conf`` and ``max_dets`` and a tiled pass's ``cross_tile_nms`` are
+    required, no reference standing behind any of them; the tile edge and overlap are the stated
+    ones, else the checkpoint's own recorded geometry, else a documented default.
 
     Args:
         checkpoint_path: A checkpoint registered in this project.

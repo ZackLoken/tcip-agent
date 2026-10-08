@@ -219,7 +219,7 @@ def test_the_density_cap_counts_objects_not_crowd_regions(tmp_path: Path):
     beside the objects leaves unchanged."""
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.data.splits import count_label_lines
-    from tcip_mcp.pipelines.derivations import derive_max_dets_from_counts
+    from tcip_mcp.pipelines.derivations import derive_max_dets
 
     counts = {}
     for crowd in (True, False):
@@ -230,7 +230,9 @@ def test_the_density_cap_counts_objects_not_crowd_regions(tmp_path: Path):
         counts[crowd] = count_label_lines(json_io.read_label_document(key),
                                           registry_scope(tmp_path / "images", SUBJECT))
     assert counts[True] == counts[False] == 1
-    assert derive_max_dets_from_counts([counts[True]]) == 100
+    frame = float(IMG * IMG)
+    assert derive_max_dets([(counts[True], frame)], frame) == derive_max_dets(
+        [(counts[False], frame)], frame)
 
 
 def test_the_object_size_and_spacing_ignore_crowd_regions(tmp_path: Path):
@@ -389,6 +391,6 @@ def test_the_derived_spacing_and_cross_tile_nms_ignore_crowd_regions(tmp_path: P
     with_crowd, without = (localization_frac(fx.COUNT_SPEC, boxes[c]) for c in (True, False))
     assert without[1] == "GT nearest-neighbor spacing (p10 + margin)", without
     assert with_crowd == without
-    merges = [derive_cross_tile_nms(boxes[c], metric="IOU") for c in (True, False)]
+    merges = [derive_cross_tile_nms(boxes[c]) for c in (True, False)]
     assert merges[1] is not None
     assert merges[0] == merges[1]

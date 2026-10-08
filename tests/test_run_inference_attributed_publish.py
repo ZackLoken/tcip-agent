@@ -16,6 +16,7 @@ from tcip_mcp import subject_registry as cr  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._predictor_fixtures import BOX, StubPredictor, install  # noqa: E402
 from tests._producer_fixtures import write_image  # noqa: E402
+from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS  # noqa: E402
 
 SUBJECT = "bud"
 COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
@@ -47,7 +48,7 @@ def _published(tmp_path: Path, checkpoint: str, images_dir: Path):
     import tcip_store
 
     result = run_inference(tmp_path, checkpoint, str(images_dir), bucket="out/2026-01-01",
-                           stated=Stated(tile=False))
+                           stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS))
     assert "error" not in result, result
     bucket = read_bucket(result["dataset_root"], result["bucket"])
     key = bucket.document_key("img")

@@ -73,6 +73,23 @@ CONSTITUTING_FIELDS: dict[str, tuple[str, ...]] = {
 """The spec fields an operationalization of each kind rests on, its assessment's criterion
 included, each required to hold a value before the operationalization is proposed."""
 
+LOCALIZATION_FIELDS: dict[str, tuple[str, ...]] = {
+    CENTER_MATCH: (), IOU_MATCH: ("iou_jitter_px", "iou_margin"),
+}
+"""The spec fields each localization's match criterion compares by, required beside
+``localization`` wherever a kind rests on it."""
+
+
+def criterion_fields(entry: TraitEntry, kind: str) -> tuple[str, ...]:
+    """The spec fields an operationalization of ``kind`` rests on for ``entry``: the kind's own
+    (:data:`CONSTITUTING_FIELDS`) and, where it rests on ``localization``, the fields the
+    selected localization compares by (:data:`LOCALIZATION_FIELDS`)."""
+    fields = CONSTITUTING_FIELDS[kind]
+    if "localization" not in fields:
+        return fields
+    return (*fields, *LOCALIZATION_FIELDS.get(entry.localization, ()))
+
+
 PHENOTYPE_NAMING_KINDS = frozenset({
     STATE_CROSSING_DATES,
     PER_PLANT_COUNT_AGGREGATE,
@@ -208,6 +225,14 @@ class TraitEntry(BaseModel):
     """How the localization tolerance is derived, by name."""
     localization_tolerance_frac: float
     """The tolerance multiplier used when no ground truth is at hand to derive one from."""
+    iou_jitter_px: float | None = Field(ge=0, allow_inf_nan=False)
+    """For an ``iou_match`` trait, how far in pixels on the reference grid two careful
+    annotations of one object sit apart, the displacement the threshold models (two equal boxes of
+    the reference's mean characteristic size moved along one axis,
+    ``derivations.derive_iou_match_threshold``); null until the breeder authors it."""
+    iou_margin: float | None = Field(ge=0, allow_inf_nan=False)
+    """For an ``iou_match`` trait, the absolute IoU the threshold sits below that modeled IoU;
+    null until authored."""
     count_bias_tolerance_frac: float | None
     """Max acceptable mean per-image count bias on the held-out split, relative to the scope's
     typical per-image count; null until the breeder authors it."""
@@ -262,6 +287,13 @@ QUESTIONS: dict[str, str] = {
     "localization": (
         "Does finding an object mean the model's mark lands near its center, or that the "
         "model's outline overlaps it?"),
+    "iou_jitter_px": (
+        "If the same person boxed one object twice, how many pixels apart, on the images the "
+        "reference is drawn on, would the two boxes sit? The match threshold models two equal "
+        "boxes of the objects' typical size moved apart by that much."),
+    "iou_margin": (
+        "By how much overlap (0 to 1, as an absolute amount) may the model's box fall short of "
+        "the overlap those two repeat boxes reach and still count as finding the object?"),
     "milestone_on": "Which share of a plant's objects do the milestone dates track?",
     "milestone_fractions": "At which shares of that state across a plant do you record a date?",
     "scale_tolerance_frac": (
@@ -293,7 +325,7 @@ def authored(entry: TraitEntry, names: tuple[str, ...]) -> None:
 def check_proposed_entry(entry: TraitEntry) -> None:
     """Refuse (``ValueError``) an entry a proposal may not append: ``delivers`` empty or naming
     anything outside crops.yml, or an operationalization that leaves a spec field its kind rests
-    on (:data:`CONSTITUTING_FIELDS`) unauthored (:func:`authored`, asking the breeder), covers a
+    on (:func:`criterion_fields`) unauthored (:func:`authored`, asking the breeder), covers a
     phenotype the entry does not deliver, or names phenotypes or value keys where its kind
     carries none (or none where it carries them)."""
     vocab = {t["name"] for t in _crops_traits()}
@@ -304,7 +336,7 @@ def check_proposed_entry(entry: TraitEntry) -> None:
             f"(off-vocabulary: {off_vocab})"
         )
     for kind, stated in entry.operationalizations.items():
-        authored(entry, CONSTITUTING_FIELDS[kind])
+        authored(entry, criterion_fields(entry, kind))
         off_spec = [p for p in stated.delivered_phenotypes if p not in entry.delivers]
         if off_spec:
             raise ValueError(

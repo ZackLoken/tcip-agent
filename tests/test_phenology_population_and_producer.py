@@ -76,7 +76,7 @@ def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:
     from tcip_mcp.experiments import observe
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
-    from tests._chain_fixtures import BLOB_BUILDER, attributed_series, run_config
+    from tests._chain_fixtures import BLOB_BUILDER, attributed_series, chain_pass, run_config
     from tests._verified_checkpoint_fixtures import worker_run
 
     series = attributed_series(tmp_path, fractions=(0.0, 1.0))
@@ -96,7 +96,7 @@ def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:
     other_bucket = f"other/{second}"
     published = run_inference(tmp_path, checkpoint_path=other["path"],
                               images_dir=str(series.root / "images" / second),
-                              bucket=other_bucket)
+                              bucket=other_bucket, stated=chain_pass())
     assert "error" not in published, published
 
     out_csv = tmp_path / "out" / "two_producers.csv"

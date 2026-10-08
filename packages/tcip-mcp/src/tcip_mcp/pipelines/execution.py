@@ -22,15 +22,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONF = 0.5
-"""The confidence a pass runs at when its caller states none and no assessment supplies one."""
-DEFAULT_NMS_IOU = 0.3
-"""The cross-tile merge threshold when none is stated and the ground truth in hand derives none."""
 DEFAULT_OVERLAP = 0.2
 """The tile overlap when none is stated and the checkpoint records none."""
-DEFAULT_MAX_DETS = 1000
-"""The full-frame detection cap when none is stated, high enough that a dense scene is not
-truncated at a framework default."""
 DEFAULT_TILE_BATCH_SIZE = 96
 """Tiles per forward batch: a throughput setting that changes no prediction."""
 DEFAULT_IMAGE_BATCH_SIZE = 16
@@ -125,10 +118,24 @@ class Stated(BaseModel):
         return sorted(differing)
 
 
+@dataclass(frozen=True)
+class Reference:
+    """The ground truth a caller holding a calibration reference supplies a pass's unstated
+    values from: one list of xywh boxes per image, the cross-tile merge threshold's basis; each
+    reference region's object count beside the pixel area it was counted over, and the pixel
+    area one published frame covers, together the detection cap's basis. ``counted`` is ``None``
+    where the caller derives no cap from the reference, ``footprint`` where the published frame's
+    area is unknown."""
+
+    boxes_per_image: list[list[list[float]]]
+    counted: list[tuple[int, float]] | None
+    footprint: float | None
+
+
 @dataclass
 class Pass:
-    """A predictor built from a verified checkpoint and running under one execution record, the
-    images it runs over and the class scope its labels decode under."""
+    """A predictor built from a verified checkpoint and running under one complete execution
+    record, the images it runs over and the class scope its labels decode under."""
 
     checkpoint: VerifiedCheckpoint
     predictor: GenericPredictor
@@ -144,38 +151,50 @@ class Pass:
         return self.predictor.predict_batch(
             sources, execution=execution or self.execution, tile_batch_size=self.tile_batch_size)
 
-    def derive_merge(self, gt_boxes_per_image: list[list[list[float]]]) -> None:
-        """For a tiled pass whose merge threshold was not stated, the threshold the ground truth's
-        neighbor-overlap tail derives in the record's own match metric (``gt_boxes_per_image`` one
-        list of xywh boxes per image); the record is left as it is when nothing derives."""
-        from tcip_mcp.pipelines.derivations import (
-            CROSS_TILE_NMS_DERIVATIONS, derive_cross_tile_nms,
-        )
 
-        record = self.execution
-        if not record.tiled or record.sources.get("cross_tile_nms") == "explicit":
-            return
-        assert record.match_metric is not None
-        value = derive_cross_tile_nms(gt_boxes_per_image, metric=record.match_metric)
-        if value is not None:
-            self.execution = record.with_value(
-                "cross_tile_nms", value, CROSS_TILE_NMS_DERIVATIONS[record.match_metric])
+@dataclass
+class Preparation:
+    """A checkpoint readied for a pass and holding no execution record yet: its predictor, the
+    class scope its labels decode under, the tile geometry a tiled pass runs at (``None``
+    untiled), what the caller stated, the record being restored where one is, and the images the
+    pass runs over. :meth:`runnable` constructs the pass."""
+
+    checkpoint: VerifiedCheckpoint
+    predictor: GenericPredictor
+    scope: ClassScope
+    geometry: TileGeometry | None
+    stated: Stated
+    restored: Execution | None
+    tile_batch_size: int
+    paths: list[Any]
+
+    @property
+    def tile_size(self) -> int | None:
+        """The tile edge the pass runs at, ``None`` untiled."""
+        if self.restored is not None:
+            return self.restored.tile_size
+        return None if self.geometry is None else self.geometry.tile_size
+
+    def runnable(self, reference: Reference | None = None) -> Pass:
+        """The pass under the restored record, or under the record :func:`execution_record`
+        resolves from what was stated and ``reference``."""
+        execution = (self.restored if self.restored is not None else
+                     execution_record(self.checkpoint, self.stated, self.geometry, reference))
+        return Pass(checkpoint=self.checkpoint, predictor=self.predictor, scope=self.scope,
+                    execution=execution, tile_batch_size=self.tile_batch_size, paths=self.paths)
 
 
-def prepare_pass(
+def prepare(
     checkpoint: VerifiedCheckpoint, stated: Stated = Stated(), *, images_dir: str | None = None,
     device: str | None = None, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
     restored: Execution | None = None,
-) -> Pass:
-    """The pass ``checkpoint`` runs, over ``images_dir``'s logical images (none for a raster pass).
-
-    With ``restored`` the pass runs exactly that record, and a value ``stated`` states differently
-    refuses (:class:`ExecutionRefusedError`) naming each. Otherwise each value is the stated
-    one, else the checkpoint's own recorded geometry, else a documented default, its source
-    recorded; a
-    stated tile edge the checkpoint's geometry contradicts, and a tiled pass with no basis for its
-    edge, refuse.
-    """
+) -> Preparation:
+    """``checkpoint`` readied for a pass over ``images_dir``'s logical images (none for a raster
+    pass). With ``restored`` the pass will run exactly that record, and a value ``stated`` states
+    differently refuses (:class:`ExecutionRefusedError`) naming each. Otherwise the pass is tiled
+    as stated, else as the checkpoint trained; its tile edge and overlap are the stated ones, else
+    the checkpoint's own recorded geometry, else a documented default, a stated edge the
+    checkpoint's geometry contradicts and a tiled pass with no basis for its edge refusing."""
     import sahi
 
     from tcip_mcp.pipelines.data.selection import ClassScope
@@ -195,11 +214,9 @@ def prepare_pass(
                 f"the recorded execution differs from this call: {'; '.join(differing)}. A pass "
                 "restored from a record runs exactly that record; drop the differing argument "
                 "or start a new pass.")
-        execution = restored
-    else:
-        execution = untiled_execution(checkpoint, conf=stated.conf, max_dets=stated.max_dets)
 
     predictor = GenericPredictor(checkpoint, device=device)
+    geometry = None
     if restored is None and (predictor.train_tile_size is not None
                              if stated.tile is None else stated.tile):
         try:
@@ -213,53 +230,88 @@ def prepare_pass(
                 "no persisted training tile geometry, no tile_size was given explicitly, and its "
                 "untiled training frame yields no square tile edge, so tiled inference has no "
                 "basis to run at. Pass tile_size explicitly, or run untiled.")
-        execution = tiled_execution(execution, geometry, postprocess=stated.postprocess,
-                                    cross_tile_nms=stated.cross_tile_nms)
-    return Pass(checkpoint=checkpoint, predictor=predictor,
-                scope=ClassScope.of(checkpoint.data_config), execution=execution,
-                tile_batch_size=tile_batch_size, paths=paths)
+    return Preparation(checkpoint=checkpoint, predictor=predictor,
+                       scope=ClassScope.of(checkpoint.data_config), geometry=geometry,
+                       stated=stated, restored=restored, tile_batch_size=tile_batch_size,
+                       paths=paths)
 
 
-def tiled_execution(base: Execution, geometry: TileGeometry, *, postprocess: str | None,
-                    cross_tile_nms: float | None) -> Execution:
-    """``base`` tiled at ``geometry``, merging across tiles by ``postprocess`` at
-    ``cross_tile_nms``, each the documented default when ``None``, every value's source recorded,
-    under the installed SAHI version."""
+def execution_record(checkpoint: VerifiedCheckpoint, stated: Stated,
+                     geometry: TileGeometry | None, reference: Reference | None) -> Execution:
+    """The one complete execution record a fresh pass of ``checkpoint`` runs under, each value's
+    source recorded. A detector's ``conf`` is the stated one; its ``max_dets`` the stated one,
+    else the cap ``reference``'s counted density derives over its published frame's footprint
+    (``derivations.derive_max_dets``).
+    Tiled at ``geometry``, it merges across tiles by ``postprocess`` (the documented default when
+    unstated) at the stated ``cross_tile_nms``, else, for a merge comparing by IoU, the threshold
+    ``reference``'s boxes derive (``derivations.derive_cross_tile_nms``). Every value left with no
+    statement and no basis refuses (:class:`ExecutionRefusedError`) naming it, and a conf or cap
+    stated for a head that is no detector refuses too."""
     import sahi
 
+    from tcip_mcp.pipelines.derivations import (
+        CROSS_TILE_NMS_DERIVATION, MAX_DETS_DERIVATION, derive_cross_tile_nms, derive_max_dets,
+    )
     from tcip_mcp.pipelines.model_build import resolve_named
-
-    merge = DEFAULT_POSTPROCESS if postprocess is None else postprocess
-    merge_type, match_metric = resolve_named(merge, CROSS_TILE_MERGES, kind="cross-tile merge")
-    return replace(
-        base, tile_size=geometry.tile_size, overlap=geometry.overlap,
-        tile_resize=geometry.tile_resize, postprocess=merge, merge_type=merge_type,
-        match_metric=match_metric,
-        cross_tile_nms=float(cross_tile_nms) if cross_tile_nms is not None else DEFAULT_NMS_IOU,
-        sahi_version=sahi.__version__,
-        sources={**base.sources, "tile_size": geometry.tile_size_source,
-                 "overlap": geometry.overlap_source,
-                 "postprocess": "explicit" if postprocess else "default",
-                 "cross_tile_nms": "explicit" if cross_tile_nms is not None else "default"})
-
-
-def untiled_execution(checkpoint: VerifiedCheckpoint, *, conf: float | None,
-                      max_dets: int | None) -> Execution:
-    """The untiled record a fresh pass of ``checkpoint`` starts from: for a detector the stated
-    conf and cap, else the documented defaults, each with its source; for any other head neither,
-    and a stated conf or cap refuses (:class:`ExecutionRefusedError`)."""
     from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
 
+    values: dict[str, Any] = {}
     sources: dict[str, str] = {}
     if checkpoint.task in DETECTION_TASKS:
-        sources = {"conf": "explicit" if conf is not None else "default",
-                   "max_dets": "explicit" if max_dets is not None else "default"}
-        conf = float(conf) if conf is not None else DEFAULT_CONF
-        max_dets = int(max_dets) if max_dets is not None else DEFAULT_MAX_DETS
-    elif conf is not None or max_dets is not None:
+        if stated.conf is None:
+            raise ExecutionRefusedError(
+                f"{checkpoint.path} is a detector and this pass states no conf: state the "
+                "confidence its boxes are kept at, or run under an assessment's record")
+        values["conf"], sources["conf"] = float(stated.conf), "explicit"
+        if stated.max_dets is not None:
+            values["max_dets"], sources["max_dets"] = int(stated.max_dets), "explicit"
+        elif reference is not None and reference.counted is not None:
+            if reference.footprint is None:
+                raise ExecutionRefusedError(
+                    f"{checkpoint.path} is a detector and this pass states no max_dets: its "
+                    "reference's counts scale to a cap only over a known published frame, and "
+                    "this one's area is unknown. State max_dets")
+            values["max_dets"] = derive_max_dets(reference.counted, reference.footprint)
+            sources["max_dets"] = MAX_DETS_DERIVATION
+        else:
+            raise ExecutionRefusedError(
+                f"{checkpoint.path} is a detector and this pass states no max_dets: state the "
+                "most boxes a frame keeps, or run under an assessment's record")
+    elif stated.conf is not None or stated.max_dets is not None:
         raise ExecutionRefusedError(
             f"{checkpoint.path} is a {checkpoint.task!r} checkpoint: a confidence threshold and a "
             "detection cap govern a detector's boxes and nothing this head produces.")
-    return Execution(conf=conf, max_dets=max_dets, tile_size=None, overlap=None, tile_resize=None,
-                     postprocess=None, merge_type=None, match_metric=None, cross_tile_nms=None,
-                     sahi_version=None, sources=sources)
+    if geometry is None:
+        return Execution(conf=values.get("conf"), max_dets=values.get("max_dets"),
+                         tile_size=None, overlap=None, tile_resize=None, postprocess=None,
+                         merge_type=None, match_metric=None, cross_tile_nms=None,
+                         sahi_version=None, sources=sources)
+
+    merge = DEFAULT_POSTPROCESS if stated.postprocess is None else stated.postprocess
+    merge_type, match_metric = resolve_named(merge, CROSS_TILE_MERGES, kind="cross-tile merge")
+    threshold = stated.cross_tile_nms
+    if threshold is not None:
+        sources["cross_tile_nms"] = "explicit"
+    elif match_metric != "IOU":
+        raise ExecutionRefusedError(
+            f"a tiled pass merging by {merge!r} compares by {match_metric} and has no "
+            "cross_tile_nms: state it, since no derivation stands behind an IoS threshold")
+    elif reference is None:
+        raise ExecutionRefusedError(
+            f"a tiled pass merging by {merge!r} has no cross_tile_nms: state it, since this pass "
+            "holds no reference ground truth to derive it from")
+    else:
+        threshold = derive_cross_tile_nms(reference.boxes_per_image)
+        if threshold is None:
+            raise ExecutionRefusedError(
+                "the reference's ground truth derives no cross-tile merge threshold, since no two "
+                "of its boxes in one image overlap; state cross_tile_nms")
+        sources["cross_tile_nms"] = CROSS_TILE_NMS_DERIVATION
+    return Execution(
+        conf=values.get("conf"), max_dets=values.get("max_dets"), tile_size=geometry.tile_size,
+        overlap=geometry.overlap, tile_resize=geometry.tile_resize, postprocess=merge,
+        merge_type=merge_type, match_metric=match_metric, cross_tile_nms=float(threshold),
+        sahi_version=sahi.__version__,
+        sources={**sources, "tile_size": geometry.tile_size_source,
+                 "overlap": geometry.overlap_source,
+                 "postprocess": "explicit" if stated.postprocess else "default"})

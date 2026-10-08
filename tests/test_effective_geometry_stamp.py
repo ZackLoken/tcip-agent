@@ -9,8 +9,9 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from pathlib import Path
 
 import pytest
-from tests._chain_fixtures import BESPOKE_DETECTION  # noqa: E402
+from tests._chain_fixtures import BESPOKE_DETECTION, training_config  # noqa: E402
 from tests._producer_fixtures import dataset_over, registry_over  # noqa: E402
+from tests._training_values import evaluation_block  # noqa: E402
 
 torch = pytest.importorskip("torch")
 
@@ -141,13 +142,11 @@ def _serve(monkeypatch, train_ds):
 
 
 def _base_config(tiling, project: Path):
-    return {
-        "model_source": {"builder": BESPOKE_DETECTION,
-                         "task": "detection"},
-        "data": {"images_dir": str(project / "imgs"), "tiling": tiling,
-                 "split": {"seed": 0, "val_ratio": 0.15}},
-        "batch_size": 2, "evaluation": {"selection_metric": "loss"},
-    }
+    return training_config(
+        {"builder": BESPOKE_DETECTION, "task": "detection"},
+        {"images_dir": str(project / "imgs"), "tiling": tiling,
+         "split": {"seed": 0, "val_ratio": 0.15}},
+        evaluation=evaluation_block(selection_metric="loss"))
 
 
 def _resolved_data(run_dir) -> dict:
@@ -177,7 +176,7 @@ def _trial(tmp_path, base_config):
     from tests._verified_checkpoint_fixtures import opened_sweep
 
     Path(base_config["data"]["images_dir"]).mkdir(parents=True, exist_ok=True)
-    return open_trial(opened_sweep(tmp_path, base_config), "0", {"lr": 3e-4})
+    return open_trial(opened_sweep(tmp_path, base_config), "0", {"optimizer.head_lr": 3e-4})
 
 
 def test_an_hpo_trials_resolved_record_replaces_unrealized_tiling(monkeypatch, tmp_path):

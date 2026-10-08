@@ -17,7 +17,7 @@ torch = pytest.importorskip("torch")  # evaluation.py imports torch at module lo
 
 from tcip_mcp.pipelines.derivations import DERIVATION_IMPLEMENTATIONS  # noqa: E402
 from tests._dense_op_fixtures import gt_only  # noqa: E402
-from tests._trait_fixtures import confirm_bare  # noqa: E402
+from tests._trait_fixtures import IOU_JITTER_PX, IOU_MARGIN, confirm_bare  # noqa: E402
 
 
 def _resolve(label: str):
@@ -48,7 +48,8 @@ def test_the_registered_callable_for_an_iou_threshold_stamp_reproduces_the_stamp
     label resolves to, run on the same GT, has to return that same number. A registry entry that
     names a different-but-importable derivation passes every static check while pointing an
     auditor at code that never produced the value."""
-    trait = confirm_bare(tmp_path, "leaf", localization="iou_match").entry
+    trait = confirm_bare(tmp_path, "leaf", localization="iou_match",
+                         iou_jitter_px=IOU_JITTER_PX, iou_margin=IOU_MARGIN).entry
     from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
 
     boxes = [(0, 0, 60, 60), (500, 0, 60, 60)]
@@ -57,7 +58,8 @@ def test_the_registered_callable_for_an_iou_threshold_stamp_reproduces_the_stamp
 
     label = result["derived_from"]
     assert label in DERIVATION_IMPLEMENTATIONS
-    assert _resolve(label)([list(boxes)]) == pytest.approx(result["iou_threshold"])
+    assert _resolve(label)([list(boxes)], jitter_px=IOU_JITTER_PX, margin=IOU_MARGIN) == (
+        pytest.approx(result["iou_threshold"]))
 
 
 def test_registering_a_picker_registers_the_labels_it_can_stamp(monkeypatch):

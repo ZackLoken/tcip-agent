@@ -36,8 +36,8 @@ from tcip_mcp.pipelines.model_build import (
     recorded_model_dims,
     run_task,
 )
-from tcip_mcp.pipelines.execution import DEFAULT_CONF
-from tcip_mcp.pipelines.schemas import SchedulerSpec, StageSpec, TrainConfigSchema
+from tcip_mcp.pipelines.schemas import (CosineSchedule, OneCycleSchedule, PlateauSchedule,
+                                        SchedulerSpec, StageSpec, TrainConfigSchema)
 from tcip_mcp.pipelines.training.evaluation import (
     HIGHER_IS_BETTER_BY_METRIC,
     VAL_LOSS_KEY,
@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 BATCH_ROWS_PER_EPOCH = 10
 """Per-batch rows an epoch emits when ``log_every_n_batches`` is unstated
-(:func:`batch_row_ends`): an owner-ruled provisional default."""
+(:func:`batch_row_ends`): owner ruling."""
 
 
 def batch_row_ends(n_batches: int) -> set[int]:
@@ -376,19 +376,19 @@ def _save_checkpoint(
 
 def _build_scheduler(optimizer, spec: SchedulerSpec, epochs: int):
     """The scheduler ``spec.type`` names (``schemas.SCHEDULER_TYPES``) over ``epochs`` epochs,
-    at the settings ``spec`` carries; a onecycle schedule with no ``max_lr`` peaks at the
-    optimizer's own rate."""
-    if spec.type == "cosine":
+    at the settings ``spec`` carries; a onecycle schedule cycles the rate alone, the optimizer's
+    stated momentum the one it trains at."""
+    if isinstance(spec, CosineSchedule):
         return torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=epochs, eta_min=spec.eta_min
         )
-    elif spec.type == "plateau":
+    elif isinstance(spec, PlateauSchedule):
         return torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode="min", factor=spec.factor, patience=spec.patience
         )
-    elif spec.type == "onecycle":
-        max_lr = spec.max_lr if spec.max_lr is not None else optimizer.defaults["lr"]
-        return torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=max_lr, total_steps=epochs)
+    elif isinstance(spec, OneCycleSchedule):
+        return torch.optim.lr_scheduler.OneCycleLR(
+            optimizer, max_lr=spec.max_lr, total_steps=epochs, cycle_momentum=False)
     return torch.optim.lr_scheduler.StepLR(
         optimizer, step_size=spec.step_size, gamma=spec.gamma
     )
@@ -401,7 +401,7 @@ def _build_scheduler(optimizer, spec: SchedulerSpec, epochs: int):
 @torch.no_grad()
 def _validate(
     model: TCIPModel, val_loader: DataLoader, device: torch.device, task: str, *,
-    dims: Mapping[str, int], conf_threshold: float, iou_threshold: float,
+    dims: Mapping[str, int], conf_threshold: float | None, iou_threshold: float,
     score_weights: dict | None, trait: TraitEntry | None,
 ) -> dict:
     """``evaluation.evaluate`` of ``model`` over ``val_loader`` at the given thresholds and
@@ -604,12 +604,10 @@ def train(
     - ``seed`` (int | None), ``deterministic`` (bool, default False), RNG seeding before model
       build.
     - ``mixed_precision`` (bool, default True), AMP, only when ``device`` is cuda.
-    - ``stages`` (list of ``{freeze_to, epochs, gradient_accumulation_steps}``), default a single
-      10-epoch full-unfreeze stage.
-    - ``optimizer`` (``{name, backbone_lr, head_lr, weight_decay}``, default adamw/1e-4/1e-3/1e-4),
-      the one source of learning rate, stated for the first stage's target effective batch.
-    - ``scheduler`` (``schemas.SchedulerSpec``; ``type`` one of ``schemas.SCHEDULER_TYPES``,
-      default cosine).
+    - ``stages`` (list of ``{freeze_to, epochs, gradient_accumulation_steps}``), at least one.
+    - ``optimizer`` (``schemas.OptimizerSpec``), the one source of learning rate, stated for the
+      first stage's target effective batch.
+    - ``scheduler`` (``schemas.SchedulerSpec``; ``type`` one of ``schemas.SCHEDULER_TYPES``).
     - ``lr_scaling`` (``{scale_power, max_lr}``, absent for none): each stage's learning rates
       scaled by ``(its target effective batch / the first stage's) ** scale_power``, capped at the
       optional ``max_lr``. The target is nominal (the loader's batch size times the stage's
@@ -620,7 +618,7 @@ def train(
       batch is ``train_loader.batch_size``; a loader with none is refused. An epoch's last window
       may hold fewer batches than the accumulation, and its loss is averaged over the batches it
       holds.
-    - ``checkpoint_every_n_epochs`` (int, default 5), periodic resumable checkpoints.
+    - ``checkpoint_every_n_epochs`` (int), periodic resumable checkpoints.
     - ``log_every_n_batches`` (int): every that many training batches of the run, the batch's
       loss reaches ``batch_callback`` once; unstated, :data:`BATCH_ROWS_PER_EPOCH` times an
       epoch at the evenly spaced batch ends :func:`batch_row_ends` derives from the loader's
@@ -652,7 +650,7 @@ def train(
         # Failable setup lives inside the try so an invalid/unwritable output_dir
         # marks the run "failed" instead of stranding it at "running" forever.
         spec = run.spec
-        ckpt_every = spec.checkpoint_every_n_epochs
+        stages, optimizer_spec, scheduler_spec, ckpt_every = spec.default_trainer_regime()
         out_dir = Path(run.output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -669,13 +667,12 @@ def train(
         model.to(device)
         _validate_input_channels(config, train_loader)
 
-        stages = spec.stages or [StageSpec.model_validate({"epochs": 10})]
         use_amp = spec.mixed_precision and device.type == "cuda"
         scaler = torch.amp.GradScaler(device.type) if use_amp else None
 
         # Progressive-unfreezing fidelity setup.
-        base_backbone_lr = spec.optimizer.backbone_lr
-        base_head_lr = spec.optimizer.head_lr
+        base_backbone_lr = optimizer_spec.backbone_lr
+        base_head_lr = optimizer_spec.head_lr
         stage_warmup_epochs = spec.stage_warmup_epochs
         physical_batch = getattr(train_loader, "batch_size", None)
         if physical_batch is None:
@@ -763,13 +760,8 @@ def train(
                     stage_backbone_lr = min(stage_backbone_lr, max_lr)
                     stage_head_lr = min(stage_head_lr, max_lr)
 
-            optimizer = build_optimizer(
-                spec.optimizer.name,
-                model,
-                backbone_lr=stage_backbone_lr,
-                head_lr=stage_head_lr,
-                weight_decay=spec.optimizer.weight_decay,
-            )
+            optimizer = build_optimizer(optimizer_spec, model, backbone_lr=stage_backbone_lr,
+                                        head_lr=stage_head_lr)
 
             target_lrs = [g["lr"] for g in optimizer.param_groups]
             stage_best: dict | None = None
@@ -791,7 +783,7 @@ def train(
             # Inter-stage LR warmup from the handed-off learning rates (default off).
             warmup_n = min(stage_warmup_epochs, stage_epochs) if warmup_starts is not None else 0
             sched_epochs = max(1, stage_epochs - warmup_n)
-            scheduler = _build_scheduler(optimizer, spec.scheduler, sched_epochs)
+            scheduler = _build_scheduler(optimizer, scheduler_spec, sched_epochs)
             is_plateau = isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau)
 
             start_epoch = 0
@@ -899,10 +891,7 @@ def train(
                 if val_loader is not None:
                     val_metrics = _validate(
                         model, val_loader, device, task, dims=dims,
-                        # A fixed default unless the evaluation block overrides it, not the
-                        # ship-point conf, which an assessment derives later.
-                        conf_threshold=(DEFAULT_CONF if spec.evaluation.conf_threshold is None
-                                        else spec.evaluation.conf_threshold),
+                        conf_threshold=spec.evaluation.conf_threshold,
                         iou_threshold=spec.evaluation.iou_threshold,
                         score_weights=spec.evaluation.score_weights,
                         trait=trait,

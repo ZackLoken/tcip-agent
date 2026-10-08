@@ -23,6 +23,8 @@ from torchvision.utils import save_image
 
 from tests import REPO_ROOT, bespoke_models  # noqa: E402
 from tests._producer_fixtures import run_over  # noqa: E402
+from tests._training_values import adamw_optimizer, evaluation_block  # noqa: E402
+from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -100,11 +102,12 @@ class TestFullClassificationPipeline:
 
         # --- Step 4: Create run and train 2 epochs ---
         from tcip_mcp.pipelines.training.generic_trainer import train
-        from tests._chain_fixtures import ADAMW, training_config
+        from tests._chain_fixtures import training_config
         from tests.tiny_trainer_fixtures import trainer_run
 
         config = training_config(
-            model_source, data, stages=[{"freeze_to": -1, "epochs": 2}], optimizer=ADAMW,
+            model_source, data, stages=[{"freeze_to": -1, "epochs": 2}],
+            optimizer=adamw_optimizer(),
             early_stopping={"enabled": True, "patience": 10, "min_delta": 1e-4})
         run = trainer_run(config, output_dir, project=tmp_path,
                           has_val_loader=val_loader is not None, id="auto-run-32")
@@ -133,7 +136,7 @@ class TestFullClassificationPipeline:
         assert "model_source" in ckpt[CONFIG_KEY] and "model_source" not in ckpt
 
         # --- Step 5: Register the checkpoint, load it verified, and run inference ---
-        from tcip_mcp.pipelines.execution import Stated, prepare_pass
+        from tcip_mcp.pipelines.execution import Stated, prepare
         from tcip_mcp.tools.model_tools import register_model
         from tcip_mcp.model_registry import load_registered_checkpoint
 
@@ -142,7 +145,7 @@ class TestFullClassificationPipeline:
                                 config={})
         assert "error" not in result, result
         checkpoint = load_registered_checkpoint(ckpt_path, project=tmp_path)
-        p = prepare_pass(checkpoint, Stated(tile=False), device="cpu")
+        p = prepare(checkpoint, Stated(tile=False), device="cpu").runnable()
 
         # Pick some test images
         test_images = sorted(Path(images_dir).rglob("*.png"))[:4]
@@ -233,7 +236,7 @@ class TestDetectionPipelineRealData:
         from tests._chain_fixtures import training_config
 
         config = training_config(model_source, data, stages=[{"freeze_to": 0, "epochs": 1}],
-                                 evaluation={"selection_metric": "loss"})
+                                 evaluation=evaluation_block(selection_metric="loss"))
         run = trainer_run(config, detection_output_dir, project=tmp_path, has_val_loader=False,
                           id="auto-run-33")
         completed = train(run, loader, val_loader=None)
@@ -250,7 +253,7 @@ class TestDetectionPipelineRealData:
         assert "model_source" in ckpt[CONFIG_KEY] and "model_source" not in ckpt
 
         # --- Step 4: Register the checkpoint, load it verified, and run inference ---
-        from tcip_mcp.pipelines.execution import Stated, prepare_pass
+        from tcip_mcp.pipelines.execution import Stated, prepare
         from tcip_mcp.tools.model_tools import register_model
         from tcip_mcp.model_registry import load_registered_checkpoint
 
@@ -259,7 +262,8 @@ class TestDetectionPipelineRealData:
                                 config={})
         assert "error" not in result, result
         checkpoint = load_registered_checkpoint(ckpt_path, project=tmp_path)
-        detector = prepare_pass(checkpoint, Stated(tile=False, conf=0.01), device="cpu")
+        detector = prepare(checkpoint, Stated(tile=False, conf=0.01, max_dets=SAMPLE_MAX_DETS),
+                           device="cpu").runnable()
 
         img_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
         test_images = sorted(p for p in images_dir.iterdir()

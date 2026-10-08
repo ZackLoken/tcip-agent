@@ -24,15 +24,17 @@ def _opened(project, experiment_id: str, *, data_dir=None, split: dict | None = 
 def _bound(experiment_id: str, tmp_path, **split):
     """A run bound to a selection ``draw_splits`` drew at seed 7, its ``data.split`` beside the
     binding being ``split``."""
+    from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import opened_run
     from tests.test_selection_binding import _draw, _two_subject_two_date_dataset
 
     selection_dir = tmp_path / "splits" / "2024-01-01"
     if not selection_dir.exists():
         _draw(tmp_path, _two_subject_two_date_dataset(tmp_path / "bound-ds"), selection_dir, seed=7)
-    return opened_run(tmp_path, {"model_source": {"builder": "m:f", "task": "detection"},
-                             "data": {"split": {"selection_dir": str(selection_dir), **split}}},
-                      experiment_id=experiment_id), selection_dir
+    return opened_run(tmp_path, training_config(
+        {"builder": "m:f", "task": "detection"},
+        {"split": {"selection_dir": str(selection_dir), **split}}),
+        experiment_id=experiment_id), selection_dir
 
 
 def _compared(project, *experiment_ids: str) -> list[dict]:

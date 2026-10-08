@@ -64,11 +64,12 @@ refuses before loading an unregistered one.
 
 The full-frame result records the `execution` record the pass ran under, the one a published
 bucket's record carries: each value beside its source in `sources`, `explicit` when the caller
-stated it (a stated value equal to the platform default included) and `default` otherwise;
-`cross_tile_nms` holds the merge threshold the evaluation ran at, in the metric `postprocess`
-compares over. `evaluate_model` takes what it states of that record as `stated`, as
-`run_inference` does; an unstated value resolves to the platform default and is recorded as one,
-never a silent gap. An evaluation answers for no delivery: only an assessment does.
+stated it; `cross_tile_nms` holds the merge threshold the evaluation ran at, in the metric
+`postprocess` compares over. `evaluate_model` takes what it states of that record as `stated`, as
+`run_inference` does. A detector's `conf` and `max_dets` are stated, no default standing behind
+either; the full-frame evaluation derives an unstated `cross_tile_nms` from the evaluated ground
+truth for an IoU merge. A value with neither a statement nor a basis refuses naming it.
+An evaluation answers for no delivery: only an assessment does.
 
 `rank_registered_models` requires a `metric` (no default) and resolves its ranking direction from
 `evaluation.HIGHER_IS_BETTER_BY_METRIC` (keyed by the metric with any `val_` prefix stripped);
@@ -82,8 +83,9 @@ platform's own `default_train` measured them); `include_unverified=True` also ra
 
 A delivered number rests on an assessment: one record of what a checkpoint measured, for one
 delivery kind of a trait's confirmed revision, against a held-out reference. `assess_checkpoint`
-fits every derived value (the conf the trait's count objective picks, the detection cap, the merge
-threshold) on a drawn selection's `calibration` side alone and judges it on the `holdout` side
+fits every derived value (the conf the trait's count objective picks, the merge threshold) on a
+drawn selection's `calibration` side alone, a detector's `max_dets` stated since the frames its
+pass later publishes on are not known there, and judges it on the `holdout` side
 against the revision's authored floors and tolerances, measuring the copy of the reference it
 retains. Every field the kind's criterion reads (its localization, tolerances, floors and,
 for a regression, the statistic) is required when the operationalization is proposed, so a

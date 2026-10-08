@@ -5,7 +5,7 @@ Wraps ``feedback_tools.triage_predictions``, which writes nothing.
 
 Usage:
     tcip triage-predictions --checkpoint <ckpt.pt> --images-dir <dir> \
-        --project <project> [--subject <subject>] [--low 0.3] [--high 0.8]
+        --project <project> [--subject <subject>] [--low 0.3] [--high 0.8] [--max-dets <n>]
 
 The checkpoint must be named by a registry entry under --project (register it with register_model
 first); this command refuses one it is not, naming the digest and the project.
@@ -32,6 +32,8 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                         "needs-review band.")
     parser.add_argument("--high", type=float, default=0.8, help="Upper confidence bound for the "
                         "needs-review band.")
+    parser.add_argument("--max-dets", type=int, default=None, help="The most boxes a detector's "
+                        "frame keeps; required of a detector checkpoint.")
     args = parser.parse_args(argv)
 
     project = bound_project(args.project)
@@ -39,7 +41,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     from tcip_mcp.tools.feedback_tools import triage_predictions
 
     result = triage_predictions(project, args.checkpoint, args.images_dir, low=args.low,
-                                high=args.high, subject=args.subject)
+                                high=args.high, subject=args.subject, max_dets=args.max_dets)
     print(json.dumps(result, indent=2))
     return 1 if "error" in result else 0
 

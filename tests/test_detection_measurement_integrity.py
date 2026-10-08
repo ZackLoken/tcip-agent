@@ -21,12 +21,15 @@ from tcip_mcp.pipelines.model_build import CONFIG_KEY  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
 from tests._producer_fixtures import label_image, seed_bud_images  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
-    SCOPED_DATA, project_checkpoint, verified_checkpoint,
+    SAMPLE_DETECTOR_PASS, SCOPED_DATA, project_checkpoint, verified_checkpoint,
 )
 from tcip_mcp.pipelines.training.evaluation import evaluate  # noqa: E402
+from tests._training_values import VALIDATION_CONF  # noqa: E402
 
 _DIMS = {"in_chans": 3, "num_classes": 1}
 """What a one-subject detector over three-band sources is built at."""
+DETECTOR_PASS = Stated(**SAMPLE_DETECTOR_PASS)
+"""The execution values an evaluation of a detector here states."""
 
 
 # ── detection val-loss includes all-negative images ──────────────────────
@@ -83,7 +86,8 @@ def test_val_loss_forwards_all_negative_images():
     stub = _StubDetector()
     model = _StubModel(stub)
     loader = [_det_batch([1, 0]), _det_batch([0])]  # mixed batch, then all-negative batch
-    evaluate(model, loader, torch.device("cpu"), "detection", dims=_DIMS)
+    evaluate(model, loader, torch.device("cpu"), "detection", dims=_DIMS,
+             conf_threshold=VALIDATION_CONF)
     # Both batches forwarded through the detector (full batch incl. negatives), not just foreground.
     assert stub.calls == [(2, 4), (1, 0)]
 
@@ -92,7 +96,8 @@ def test_all_negative_only_loader_is_not_skipped():
     stub = _StubDetector()
     model = _StubModel(stub)
     loader = [_det_batch([0, 0])]  # nothing but negatives
-    result = evaluate(model, loader, torch.device("cpu"), "detection", dims=_DIMS)
+    result = evaluate(model, loader, torch.device("cpu"), "detection", dims=_DIMS,
+                      conf_threshold=VALIDATION_CONF)
     assert stub.calls == [(2, 0)]  # forwarded, not skipped
     assert result["loss"] == pytest.approx(2.5)  # finite, non-zero: negatives contribute loss
 
@@ -124,7 +129,7 @@ def test_run_id_reuses_training_tiling(tmp_path, monkeypatch):
     run_dir = finished_run(tmp_path, experiment_id="det-measure-tiled", data=data)
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(tmp_path, run_dir.name, str(images_dir))
+    evaluate_model(tmp_path, run_dir.name, str(images_dir), stated=DETECTOR_PASS)
     assert isinstance(captured["ds"], TiledDetectionDataset)
     assert captured["ds"].num_samples > 3  # more tiles than the 3 source images
     from tcip_mcp.experiments import run_resolution
@@ -151,7 +156,7 @@ def test_evaluating_a_run_leaves_its_directory_byte_identical(tmp_path, monkeypa
 
     before = snapshot()
     audit_before = list(ts.read_log(audit_log_key(tmp_path)).records)
-    result = evaluate_model(tmp_path, run_dir.name, str(images_dir))
+    result = evaluate_model(tmp_path, run_dir.name, str(images_dir), stated=DETECTOR_PASS)
 
     assert "error" not in result, result
     assert snapshot() == before
@@ -167,7 +172,7 @@ def test_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
     ckpt = registered_checkpoint(tmp_path)
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(tmp_path, ckpt, str(images_dir))
+    evaluate_model(tmp_path, ckpt, str(images_dir), stated=DETECTOR_PASS)
     assert isinstance(captured["ds"], DetectionDataset)
     assert not isinstance(captured["ds"], TiledDetectionDataset)
     assert captured["tiling"] is None
@@ -185,7 +190,7 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, 
                                  data={"num_channels": 1, "scope": scope})
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(tmp_path, ckpt, str(images_dir))
+    evaluate_model(tmp_path, ckpt, str(images_dir), stated=DETECTOR_PASS)
     assert captured["ds"].expected_channels == 1
 
     from tcip_mcp.tools.model_tools import register_model
@@ -198,7 +203,7 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, 
     assert "error" not in register_model(tmp_path, name="unstated-width",
                                          checkpoint_path=str(unstated), config={})
 
-    r = evaluate_model(tmp_path, str(unstated), str(images_dir))
+    r = evaluate_model(tmp_path, str(unstated), str(images_dir), stated=DETECTOR_PASS)
 
     assert "no band count" in r["error"], r
 
@@ -284,7 +289,7 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     # Both routes run from one seed: the loss pass samples proposals, so two unseeded passes over
     # the same weights differ in that one metric by more than float noise.
     torch.manual_seed(777)
-    measured = evaluate_model(tmp_path, ckpt, str(images_dir))
+    measured = evaluate_model(tmp_path, ckpt, str(images_dir), stated=DETECTOR_PASS)
     assert "error" not in measured, measured
     assert len(builds) == 1
 
@@ -326,7 +331,7 @@ def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
     ckpt = registered_checkpoint(tmp_path)
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(tmp_path, ckpt, str(images_dir),
+    evaluate_model(tmp_path, ckpt, str(images_dir), stated=DETECTOR_PASS,
                    tiling={"enabled": True, "tile_size": 64, "sliver_frac": 0.5})
     assert isinstance(captured["ds"], TiledDetectionDataset)
 
@@ -340,17 +345,19 @@ def _sliced_stub(boxes, **training) -> StubPredictor:
 
 def _full_frame(tmp_path, monkeypatch, stub, annotations, *, checkpoint=None, **stated) -> dict:
     """``run_full_frame_evaluation`` of one 128px frame labeled with ``annotations`` through
-    ``stub``."""
+    ``stub``, at the sample detector values unless ``stated`` names its own."""
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
     from tests._producer_fixtures import blank_image
+    from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
 
     image = blank_image(tmp_path, "a.png", (128, 128))
     label_image(image, annotations, 128, 128, keep_empty=True)
     images_dir = image.parent
     install(monkeypatch, stub)
     checkpoint = checkpoint or verified_checkpoint(tmp_path)
-    return run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
-                                     stated=Stated(**stated))
+    return run_full_frame_evaluation(
+        checkpoint, checkpoint_admission(checkpoint, images_dir),
+        stated=Stated(**{**SAMPLE_DETECTOR_PASS, **stated}))
 
 
 def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):

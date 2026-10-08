@@ -72,13 +72,8 @@ _EMBEDDED_METADATA_STRATEGIES: list[_MetadataStrategy] = [
     _MetadataStrategy(
         "drone-dji:CaptureUUID", "Camera:BandName", "Camera:CentralWavelength",
         identity_checks=(
-            # Verified against the real 16-capture DJI sample: same-capture siblings are exposed
-            # within ~1ms of each other and agree on GPS to sub-meter precision (max observed
-            # intra-capture spread ~0.0007s / ~3e-7 degrees), while the closest two different
-            # captures in that flight are ~109s apart. These tolerances are plain, documented
-            # platform defaults (same shape as derivations.py's jitter_px), generous relative to
-            # the real intra-capture jitter measured, tight relative to any realistic
-            # inter-capture gap, not validated against every DJI multispectral rig or flight speed.
+            # Measured on a 16-capture DJI sample: siblings within ~0.0007s and ~3e-7 degrees,
+            # captures ~109s apart; engineering bounds between the two, not validated per rig.
             ("drone-dji:UTCAtExposure", "timestamp", 1.0),
             ("drone-dji:GpsLatitude", "degrees", 0.0001),
             ("drone-dji:GpsLongitude", "degrees", 0.0001),

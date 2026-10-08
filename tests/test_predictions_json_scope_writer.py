@@ -94,7 +94,7 @@ def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(tmp
     import tcip_store
 
     from tcip_mcp.buckets import pass_documents, publish
-    from tcip_mcp.pipelines.execution import Stated, prepare_pass
+    from tcip_mcp.pipelines.execution import Stated, prepare
     from tests._chain_fixtures import BESPOKE_REGRESSOR
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
@@ -103,7 +103,7 @@ def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(tmp
     images = tmp_path / "ds" / "images" / "2026-01-01"
     images.mkdir(parents=True)
     Image.new("RGB", (32, 32), color=(90, 90, 90)).save(images / "a.png")
-    p = prepare_pass(checkpoint, Stated(), images_dir=str(images))
+    p = prepare(checkpoint, Stated(), images_dir=str(images)).runnable()
 
     bucket = publish(tmp_path, tmp_path / "ds", "r/2026-01-01",
                      pass_documents(p, p.predict(p.paths)), producer=checkpoint.producer,

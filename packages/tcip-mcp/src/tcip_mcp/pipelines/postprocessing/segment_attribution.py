@@ -1,8 +1,9 @@
 """Per-plant attribution by canopy segment: a detection attributed to a plant by containment in a
 canopy boundary a person accepted, the segment itself tied to a registry plant by containment of
-the plant's own projected position. A canopy boundary is one a person accepted
-(:func:`load_canopy_segments`). Provisional: no validated position-error bound exists, so a
-registry position displaced past its disclosed clearance ties the plant to a neighbor's canopy.
+the plant's own projected position, with a clearance inside that boundary of at least the
+position error the project states for its registry (``position_error_m``), so a displaced
+position cannot have tied the plant to a neighbor's canopy. A canopy boundary is one a person
+accepted (:func:`load_canopy_segments`).
 """
 
 from __future__ import annotations
@@ -13,7 +14,6 @@ from dataclasses import dataclass
 from typing import ClassVar, cast
 
 from shapely.geometry import Point as ShapelyPoint
-from shapely.ops import nearest_points
 
 from tcip_annotation.json_io import (
     PERSON_IDENTITY_PREFIX,
@@ -27,7 +27,6 @@ from tcip_annotation.state import (
 )
 
 from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
-    GeoTransform,
     OrthomosaicGeoreference,
     detection_location,
     plants_in_frame,
@@ -135,9 +134,9 @@ def load_canopy_segments(
 class TiedSegment:
     """A canopy segment tied to exactly one registry plant.
 
-    ``clearance_m`` is the distance from the plant's own projected position to this segment's
-    boundary, in the raster's native CRS units: the margin a displaced registry position would have
-    to exceed to leave this segment.
+    ``clearance_m`` is the distance in meters from the plant's own projected position to this
+    segment's boundary: the margin a displaced registry position would have to exceed to leave
+    this segment.
     """
 
     segment_index: int
@@ -149,17 +148,20 @@ class TiedSegment:
 
 @dataclass
 class UntiedSegment:
-    """A canopy segment containing no registry plant."""
+    """A canopy segment tied to no registry plant: it contains none, or it contains
+    ``plant_within_position_error``, the one plant whose position lies closer to its boundary
+    than the stated position error."""
 
     segment_index: int
     polygon: Polygon
+    plant_within_position_error: str | None
 
 
 @dataclass
 class SegmentTie:
     """The result of tying every canopy segment in one raster to the registry plants it can be
-    tied to: the segments actually tied, the segments containing no plant, and the two name lists
-    that account for every in-frame or out-of-frame plant a tie does not cover."""
+    tied to: the segments actually tied, the segments left untied with why, and the plants a tie
+    does not cover because no segment holds them or they lie outside the raster."""
 
     tied: list[TiedSegment]
     untied: list[UntiedSegment]
@@ -170,32 +172,50 @@ class SegmentTie:
     frame (:func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.plants_in_frame`), never
     tested for containment at all."""
 
+    @property
+    def plants_within_position_error(self) -> list[str]:
+        """Plot names of every plant inside a segment but within the position error of its
+        boundary, read off the untied segments."""
+        return sorted(s.plant_within_position_error for s in self.untied
+                      if s.plant_within_position_error is not None)
 
-def _clearance_m(px: float, py: float, polygon: Polygon, transform: GeoTransform) -> float:
-    """The distance from pixel ``(px, py)`` to ``polygon``'s boundary in the raster's native CRS
-    units, each axis's pixel delta scaled by that axis's own pixel scale."""
-    boundary_point = nearest_points(ShapelyPoint(px, py),
-                                    shapely_geometry(polygon.rings).boundary)[1]
-    delta_native_x = (px - boundary_point.x) * transform.pixel_scale_x
-    delta_native_y = (py - boundary_point.y) * transform.pixel_scale_y
-    return math.hypot(delta_native_x, delta_native_y)
+    @property
+    def segments_without_plant(self) -> int:
+        """How many segments contain no registry plant at all."""
+        return sum(s.plant_within_position_error is None for s in self.untied)
+
+
+def _clearance_m(plant: tuple[float, float], polygon: Polygon,
+                 georef: OrthomosaicGeoreference) -> float:
+    """The distance in meters from ``plant``, a position in the raster's native CRS, to
+    ``polygon``'s boundary, the boundary put into that CRS through the raster's own affine and the
+    distance taken there, then scaled by the meters one native unit spans."""
+    rings = [[georef.pixel_to_native(x, y) for x, y in ring] for ring in polygon.rings]
+    native = ShapelyPoint(plant).distance(shapely_geometry(rings).boundary)
+    return native * georef.meters_per_native_unit()
 
 
 def tie_segments_to_plants(
     segments: list[CanopySegment], plants: list[PlantRecord], georef: OrthomosaicGeoreference,
-    *, width: int, height: int,
+    *, width: int, height: int, position_error_m: float,
 ) -> SegmentTie:
     """Tie every one of ``segments`` to the one registry plant, if any, whose own projected
-    position it contains.
+    position it contains with a clearance in meters of at least ``position_error_m``, the error
+    bound in meters the project states for its registry positions; a segment holding a plant
+    whose clearance is smaller is left untied naming that plant.
 
-    Refuses by name: a registry with a blank or duplicate ``plot_name``
-    (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.require_named_plants`); a plant inside
-    more than one segment; a segment containing more than one plant; no in-frame plant in the
-    registry at all. Plants are partitioned first through
+    Refuses by name: a ``position_error_m`` that is not a finite, nonnegative distance; a raster
+    whose CRS states no meters per unit; a registry with a blank or duplicate
+    ``plot_name`` (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.require_named_plants`);
+    a plant inside more than one segment; a segment containing more than one plant; no in-frame
+    plant in the registry at all. Plants are partitioned first through
     :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.plants_in_frame`, so a plant
     outside the raster is never tested for containment and is disclosed by name on the returned
     :class:`SegmentTie`.
     """
+    if not math.isfinite(position_error_m) or position_error_m < 0:
+        raise ValueError(f"position_error_m is a distance in meters; {position_error_m} is not a "
+                         "finite, nonnegative one")
     require_named_plants(plants)
 
     in_frame, outside = plants_in_frame(plants, georef, width=width, height=height)
@@ -236,16 +256,20 @@ def tie_segments_to_plants(
     untied: list[UntiedSegment] = []
     for s in segments:
         contained = segment_plants[s.segment_index]
-        if len(contained) == 1:
-            p = contained[0]
-            px, py = plant_pixel[p.plot_name]
-            clearance_m = _clearance_m(px, py, s.polygon, georef.transform)
-            tied.append(TiedSegment(
-                segment_index=s.segment_index, polygon=s.polygon, plot_name=p.plot_name,
-                accession_name=p.accession_name, clearance_m=clearance_m,
-            ))
-        else:
-            untied.append(UntiedSegment(segment_index=s.segment_index, polygon=s.polygon))
+        if not contained:
+            untied.append(UntiedSegment(segment_index=s.segment_index, polygon=s.polygon,
+                                        plant_within_position_error=None))
+            continue
+        p = contained[0]
+        clearance_m = _clearance_m(georef.wgs84_to_native(p.lat, p.lon), s.polygon, georef)
+        if clearance_m < position_error_m:
+            untied.append(UntiedSegment(segment_index=s.segment_index, polygon=s.polygon,
+                                        plant_within_position_error=p.plot_name))
+            continue
+        tied.append(TiedSegment(
+            segment_index=s.segment_index, polygon=s.polygon, plot_name=p.plot_name,
+            accession_name=p.accession_name, clearance_m=clearance_m,
+        ))
 
     plants_without_segment = sorted(
         p.plot_name for p in in_frame if not plant_segments[p.plot_name]
@@ -290,27 +314,30 @@ def assign_detections_to_segments(boxes: Sequence[Sequence[float]],
                                   tie: SegmentTie) -> list[SegmentAssignment]:
     """One :class:`SegmentAssignment` per xyxy box of ``boxes`` (full-mosaic pixel space), its
     centroid tested against every candidate segment ``tie`` holds, tied and untied both."""
-    candidates: list[tuple[int, Polygon, TiedSegment | None]] = [
-        (s.segment_index, s.polygon, s) for s in tie.tied
-    ] + [
-        (s.segment_index, s.polygon, None) for s in tie.untied
-    ]
+    candidates: list[TiedSegment | UntiedSegment] = [*tie.tied, *tie.untied]
 
     out: list[SegmentAssignment] = []
     for i, box in enumerate(boxes):
         cx, cy = detection_location(box)
-        hits = [
-            (idx, tied) for idx, polygon, tied in candidates if point_in_polygon(cx, cy, polygon)
-        ]
-        tied = hits[0][1] if len(hits) == 1 else None
-        source: SegmentSource = ("outside_segments" if not hits
-                                 else "overlapping_segments" if len(hits) > 1
-                                 else "segment_containment" if tied is not None
-                                 else "segment_without_plant")
+        hits = [s for s in candidates if point_in_polygon(cx, cy, s.polygon)]
+        hit = hits[0] if len(hits) == 1 else None
+        tied = hit if isinstance(hit, TiedSegment) else None
+        source: SegmentSource
+        if not hits:
+            source = "outside_segments"
+        elif hit is None:
+            source = "overlapping_segments"
+        elif tied is not None:
+            source = "segment_containment"
+        elif cast(UntiedSegment, hit).plant_within_position_error is None:
+            source = "segment_without_plant"
+        else:
+            source = "segment_plant_within_position_error"
         out.append(SegmentAssignment(
             detection_index=i, pixel_x=cx, pixel_y=cy,
-            segment_index=hits[0][0] if len(hits) == 1 else None,
+            segment_index=hit.segment_index if hit is not None else None,
             plot_name=tied.plot_name if tied else None,
             accession_name=tied.accession_name if tied else None, source=source, distance_m=None,
-            overlapping_segment_indices=tuple(idx for idx, _ in hits) if len(hits) > 1 else ()))
+            overlapping_segment_indices=tuple(s.segment_index for s in hits)
+            if len(hits) > 1 else ()))
     return out

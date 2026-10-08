@@ -51,6 +51,7 @@ from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import checkpoint_admission  # noqa: E402
 from tests._dense_op_fixtures import gt_only  # noqa: E402
 from tests import _trait_fixtures as fx  # noqa: E402
+from tests._training_values import VALIDATION_CONF, evaluation_block  # noqa: E402
 
 # A test naming trait="bud_opening" proposes it in its project (conftest.seed_bud_trait_spec).
 _with_bud_trait = pytest.mark.usefixtures("seed_bud_trait_spec")
@@ -318,7 +319,8 @@ def test_resolve_match_criterion_refuses_an_unauthored_localization_asking_the_b
 
 def test_resolve_match_criterion_reads_the_stated_kind_as_is():
     """Boxes small enough to suit a center match change nothing when the revision states IoU."""
-    trait = fx.entry("leaf", ("leaf_length",), localization="iou_match")
+    trait = fx.entry("leaf", ("leaf_length",), localization="iou_match",
+                     iou_jitter_px=fx.IOU_JITTER_PX, iou_margin=fx.IOU_MARGIN)
     small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
     assert resolve_match_criterion(trait, gt_only(small_boxes))["kind"] == "iou_match"
 
@@ -343,7 +345,8 @@ def test_resolve_match_criterion_iou_match_derives_a_real_threshold_not_pinned_0
     (derive_iou_match_threshold), not pinned to 0.5."""
     from tcip_mcp.pipelines.derivations import IOU_MATCH_DERIVATION
 
-    trait = fx.entry("leaf", ("leaf_length",), localization="iou_match")
+    trait = fx.entry("leaf", ("leaf_length",), localization="iou_match",
+                     iou_jitter_px=fx.IOU_JITTER_PX, iou_margin=fx.IOU_MARGIN)
     # char size 300 -> derived threshold well above 0.5 (see test_derive_iou_match_threshold_*).
     large_boxes = [(0, 0, 300, 300), (500, 0, 300, 300)]
     result = resolve_match_criterion(trait, gt_only(large_boxes))
@@ -352,9 +355,23 @@ def test_resolve_match_criterion_iou_match_derives_a_real_threshold_not_pinned_0
     assert result["derived_from"] == IOU_MATCH_DERIVATION
 
 
+def test_resolve_match_criterion_iou_match_refuses_an_unauthored_jitter_or_margin():
+    """The jitter and margin the IoU derivation models are the trait's to author; nothing stands
+    in for an unauthored one."""
+    from tcip_mcp.traits import UnauthoredFieldError
+
+    trait = fx.entry("leaf", ("leaf_length",), localization="iou_match")
+    with pytest.raises(UnauthoredFieldError, match="iou_jitter_px"):
+        resolve_match_criterion(trait, gt_only([(0, 0, 300, 300)]))
+    half = fx.with_fields(trait, iou_jitter_px=fx.IOU_JITTER_PX)
+    with pytest.raises(UnauthoredFieldError, match="iou_margin"):
+        resolve_match_criterion(half, gt_only([(0, 0, 300, 300)]))
+
+
 def test_resolve_match_criterion_iou_match_refuses_a_reference_with_no_box_to_derive_from():
     """No conventional IoU stands in for a threshold the reference cannot derive."""
-    trait = fx.entry("leaf", ("leaf_length",), localization="iou_match")
+    trait = fx.entry("leaf", ("leaf_length",), localization="iou_match",
+                     iou_jitter_px=fx.IOU_JITTER_PX, iou_margin=fx.IOU_MARGIN)
     with pytest.raises(ValueError, match="no ground-truth box"):
         resolve_match_criterion(trait, [], iou_threshold=0.42)
 
@@ -642,7 +659,9 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(tmp_pa
         # detection.
         trait = fx.latest("bud_opening", tmp_path) if task == "detection" else None
         dims = {"ordinal": {"num_ranks": 3}, "regression": {}}.get(task, {"num_classes": 2})
-        result = evaluate(model, loader, device, task, dims={"in_chans": 3, **dims}, trait=trait)
+        result = evaluate(model, loader, device, task, dims={"in_chans": 3, **dims}, trait=trait,
+                          conf_threshold=(VALIDATION_CONF if task in ("detection", "instance_seg")
+                                          else None))
         returned.update(result)
 
     per_image = [
@@ -681,7 +700,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
     from tests._producer_fixtures import label_image
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS, registered_checkpoint
 
     common_fields = {
         "model_path", "task", "checkpoint_sha256", "experiment_id",
@@ -691,13 +710,14 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
         "scored_images", "tallies", "max_dets_cap_saturated_frac",
     }
 
-    from tcip_mcp.pipelines.execution import prepare_pass
+    from tcip_mcp.pipelines.execution import prepare
 
     ckpt_path = registered_checkpoint(tmp_path)
     monkeypatch.setattr(evaluation, "evaluate",
                         lambda *a, **k: {"loss": 0.1, "precision": 0.4, "recall": 0.5, "f1": 0.44})
     checkpoint = load_registered_checkpoint(ckpt_path, project=tmp_path)
-    test_result = run_test_evaluation(prepare_pass(checkpoint, Stated(tile=False)), None, "cpu")
+    test_result = run_test_evaluation(
+        prepare(checkpoint, Stated(tile=False, **SAMPLE_DETECTOR_PASS)).runnable(), None, "cpu")
 
     images_dir = tmp_path / "ff" / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
@@ -711,7 +731,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
                                        boxes=(), scores=()))
     ff_result = run_full_frame_evaluation(
         checkpoint, checkpoint_admission(checkpoint, images_dir),
-        stated=Stated(tile_size=32, overlap=0.0))
+        stated=Stated(tile_size=32, overlap=0.0, **SAMPLE_DETECTOR_PASS))
 
     for field in common_fields:
         assert field in test_result, f"{field} missing from the test-regime record"
@@ -719,15 +739,59 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     assert not (full_frame_only_fields & set(test_result))
 
 
+@pytest.mark.parametrize("boxes, derives", [
+    ([(4, 4, 16, 16), (10, 4, 22, 16)], True),
+    ([(4, 4, 12, 12)], False),
+])
+def test_a_full_frame_evaluation_merges_at_the_threshold_its_ground_truth_derives(
+        tmp_path, monkeypatch, boxes, derives):
+    """An unstated merge threshold is the one the evaluated reference's ground truth derives;
+    where that ground truth derives none, the evaluation refuses naming ``cross_tile_nms``."""
+    from PIL import Image
+
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.derivations import CROSS_TILE_NMS_DERIVATION, derive_cross_tile_nms
+    from tcip_mcp.pipelines.execution import ExecutionRefusedError
+    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
+    from tests._predictor_fixtures import StubPredictor, install
+    from tests._producer_fixtures import label_image
+    from tests._verified_checkpoint_fixtures import (
+        SAMPLE_CONF, SAMPLE_MAX_DETS, registered_checkpoint,
+    )
+
+    checkpoint = load_registered_checkpoint(registered_checkpoint(tmp_path), project=tmp_path)
+    images_dir = tmp_path / "ff" / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
+    Image.new("RGB", (32, 32)).save(images_dir / "a.png")
+    label_image(images_dir / "a.png",
+                [Annotation(subject="bud", geometry=BBox(*b)) for b in boxes], 32, 32)
+    install(monkeypatch, StubPredictor(task="detection", in_chans=3, width=32, height=32,
+                                       boxes=(), scores=()))
+    admission = checkpoint_admission(checkpoint, images_dir)
+    stated = Stated(tile_size=32, overlap=0.0, conf=SAMPLE_CONF, max_dets=SAMPLE_MAX_DETS)
+
+    if not derives:
+        with pytest.raises(ExecutionRefusedError, match="cross_tile_nms"):
+            run_full_frame_evaluation(checkpoint, admission, stated=stated)
+        return
+    execution = run_full_frame_evaluation(checkpoint, admission, stated=stated)["execution"]
+    xywh = [[x1, y1, x2 - x1, y2 - y1] for x1, y1, x2, y2 in boxes]
+    assert execution["sources"]["cross_tile_nms"] == CROSS_TILE_NMS_DERIVATION
+    assert execution["cross_tile_nms"] == pytest.approx(derive_cross_tile_nms([xywh]))
+
+
 def test_evaluation_result_refuses_a_key_extra_shares_with_common():
     """A key present in both common and extra is a programming error, not a precedence rule:
     extra silently shadowing a common identity field (or the reverse) would defeat the
     unification evaluation_result exists to enforce, so this refuses naming the key rather than
     pick a winner."""
+    from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
+
     common = {
         "model_path": "m.pt", "task": "detection", "checkpoint_sha256": "abc",
         "experiment_id": "e1",
-        "iou_threshold": 0.5, "execution": {"conf": 0.3, "max_dets": 100},
+        "iou_threshold": 0.5, "execution": dict(SAMPLE_DETECTOR_PASS),
         "eval_regime": "full-frame-single-pass",
     }
     extra = {"precision": 0.9, "task": "classification"}
@@ -745,6 +809,7 @@ from torch.utils.data import DataLoader  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.collation import task_collate
 from tests._producer_fixtures import run_over  # noqa: E402
+from tests._training_values import adamw_optimizer  # noqa: E402
 from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 
 IMG = 64
@@ -781,9 +846,9 @@ def _stored(tmp_path, annotations, size: int = 100):
 
 
 def _cfg(model_source, data: dict) -> dict:
-    from tests._chain_fixtures import ADAMW, training_config
+    from tests._chain_fixtures import training_config
 
-    return training_config(model_source, data, optimizer=ADAMW)
+    return training_config(model_source, data, optimizer=adamw_optimizer())
 
 
 def test_validate_detection_returns_metrics_and_objective(tmp_path):
@@ -826,7 +891,7 @@ def test_train_center_match_trait_records_governing_criterion(tmp_path):
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     cfg = _cfg(BUILT_DETECTOR, data)
-    cfg["evaluation"] = {"trait": "bud_opening"}
+    cfg["evaluation"] = evaluation_block(trait="bud_opening")
     out_dir = tmp_path / "out"
     out_dir.mkdir()
     (out_dir / METRICS_FILE).touch()

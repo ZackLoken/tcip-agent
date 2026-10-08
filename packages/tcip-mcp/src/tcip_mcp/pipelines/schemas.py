@@ -10,7 +10,7 @@ refused by name.
 
 from __future__ import annotations
 
-from typing import Literal, get_args
+from typing import Annotated, Literal, NamedTuple, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -36,45 +36,75 @@ class EarlyStoppingSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool = True
     patience: int = Field(7, ge=1)
-    """An owner-ruled provisional default."""
+    """Owner ruling."""
     min_delta: float = Field(1e-4, ge=0)
-    """An owner-ruled provisional default."""
-
-
-DEFAULT_BACKBONE_LR = 1e-4
-DEFAULT_HEAD_LR = 1e-3
-DEFAULT_WEIGHT_DECAY = 1e-4
-"""The optimizer block's rates and weight decay when a config states none: retained platform
-defaults, provisional."""
+    """Owner ruling."""
 
 
 class OptimizerSpec(BaseModel):
-    """The optimizer every stage builds (``optimizer_factory.build_optimizer``)."""
+    """The optimizer every stage builds (``optimizer_factory.build_optimizer``): its tuned
+    settings required (both rates, the weight decay, and ``momentum`` for ``sgd`` and for no other
+    optimizer), its identity defaulting to the platform's own."""
 
     model_config = ConfigDict(extra="forbid")
     name: str = "adamw"
-    backbone_lr: float = Field(DEFAULT_BACKBONE_LR, gt=0)
-    head_lr: float = Field(DEFAULT_HEAD_LR, gt=0)
-    weight_decay: float = Field(DEFAULT_WEIGHT_DECAY, ge=0)
+    """The platform's optimizer when a config names none."""
+    backbone_lr: float = Field(gt=0)
+    head_lr: float = Field(gt=0)
+    weight_decay: float = Field(ge=0)
+    momentum: float | None = Field(None, ge=0)
+
+    @model_validator(mode="after")
+    def _momentum_belongs_to_sgd(self) -> OptimizerSpec:
+        if (self.name == "sgd") != (self.momentum is not None):
+            raise ValueError(f"optimizer.momentum is stated for sgd and for no other optimizer; "
+                             f"this block names {self.name!r} and momentum {self.momentum!r}.")
+        return self
 
 
-SchedulerType = Literal["cosine", "plateau", "onecycle", "step"]
-SCHEDULER_TYPES: tuple[str, ...] = get_args(SchedulerType)
-"""The ``scheduler.type`` names ``generic_trainer._build_scheduler`` builds."""
-
-
-class SchedulerSpec(BaseModel):
-    """The learning-rate schedule each stage builds (``generic_trainer._build_scheduler``) and
-    the settings its type reads; the defaults are retained platform defaults, provisional."""
+class CosineSchedule(BaseModel):
+    """Cosine annealing over a stage's epochs down to ``eta_min``."""
 
     model_config = ConfigDict(extra="forbid")
-    type: SchedulerType = "cosine"
-    eta_min: float = 0.0
-    factor: float = 0.5
-    patience: int = 3
-    max_lr: float | None = None
-    step_size: int = 10
-    gamma: float = 0.1
+    type: Literal["cosine"]
+    eta_min: float
+
+
+class PlateauSchedule(BaseModel):
+    """The rate times ``factor`` once the validation loss has not improved for ``patience``
+    epochs."""
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["plateau"]
+    factor: float
+    patience: int
+
+
+class OneCycleSchedule(BaseModel):
+    """One cycle over a stage's epochs peaking at ``max_lr``."""
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["onecycle"]
+    max_lr: float
+
+
+class StepSchedule(BaseModel):
+    """The rate times ``gamma`` every ``step_size`` epochs."""
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["step"]
+    step_size: int
+    gamma: float
+
+
+SchedulerSpec = Annotated[CosineSchedule | PlateauSchedule | OneCycleSchedule | StepSchedule,
+                          Field(discriminator="type")]
+"""The learning-rate schedule each stage builds (``generic_trainer._build_scheduler``): its
+``type`` and that type's own settings, each stated, any other type's refused by name."""
+SCHEDULER_TYPES: tuple[str, ...] = tuple(
+    get_args(schedule.model_fields["type"].annotation)[0]
+    for schedule in get_args(get_args(SchedulerSpec)[0]))
+"""The ``scheduler.type`` names ``generic_trainer._build_scheduler`` builds."""
 
 
 class EvaluationSpec(BaseModel):
@@ -85,7 +115,9 @@ class EvaluationSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
     trait: str | None = None
     selection_metric: str | None = None
-    conf_threshold: float | None = None
+    conf_threshold: float | None = Field(None, ge=0, le=1)
+    """The confidence a detector's validation counts boxes at, required of a detector run under
+    every trainer by :class:`TrainConfigSchema`'s own validation."""
     iou_threshold: float = 0.5
     score_weights: dict | None = None
 
@@ -146,21 +178,28 @@ NESTED_TRAINING_SECTION_REFUSAL = (
 )
 
 
-DEFAULT_BATCH_SIZE = 2
-"""Images per training step when a config states no ``batch_size``."""
+class DefaultTrainerRegime(NamedTuple):
+    """The blocks the default trainer (``generic_trainer.train``) reads, each stated."""
+
+    stages: list[StageSpec]
+    optimizer: OptimizerSpec
+    scheduler: SchedulerSpec
+    checkpoint_every_n_epochs: int
 
 
 class TrainConfigSchema(BaseModel):
     """The one training config shape: trainer keys at the top level, no nested section. A run's
     config is validated once by its producer (:func:`checked_train_config`), and the trainer, its
-    loaders, preflight and the model builder read that one validated model, ``model_source``
-    included (``model_build.build_from_model_source`` builds from the ``ModelSourceSchema`` it
-    holds). ``data``, typed here only as a mapping, is resolved by the dataset producers."""
+    loaders and preflight read that one validated model; inference builds a model from a
+    checkpoint's ``model_source`` alone (``model_build.build_model``). ``data``, typed here only as
+    a mapping, is resolved by the dataset producers. A config naming no ``training_source`` runs
+    the default trainer and states its regime (:meth:`default_trainer_regime`); one naming its own
+    loop states what that loop reads."""
 
     model_config = ConfigDict(extra="allow", protected_namespaces=())
     model_source: ModelSourceSchema | None = None
     data: dict | None = None
-    batch_size: int = Field(DEFAULT_BATCH_SIZE, ge=1)
+    batch_size: int = Field(ge=1)
     num_workers: int = Field(0, ge=0)
     sampler: str = "random"
     augmentation: dict | None = None
@@ -171,11 +210,11 @@ class TrainConfigSchema(BaseModel):
     mixed_precision: bool = True
     stages: list[StageSpec] | None = Field(None, min_length=1)
     gradient_accumulation_steps: int = Field(1, ge=1)
-    optimizer: OptimizerSpec = Field(default_factory=lambda: OptimizerSpec.model_validate({}))
-    scheduler: SchedulerSpec = Field(default_factory=lambda: SchedulerSpec.model_validate({}))
+    optimizer: OptimizerSpec | None = None
+    scheduler: SchedulerSpec | None = None
     stage_warmup_epochs: int = Field(0, ge=0)
     enforce_monotonic_unfreeze: bool = True
-    checkpoint_every_n_epochs: int = Field(5, ge=0)
+    checkpoint_every_n_epochs: int | None = Field(None, ge=0)
     early_stopping: EarlyStoppingSpec = Field(
         default_factory=lambda: EarlyStoppingSpec.model_validate({}))
     lr_scaling: LrScalingSpec | None = None
@@ -190,6 +229,27 @@ class TrainConfigSchema(BaseModel):
         if isinstance(values, dict) and "training" in values:
             raise ValueError(NESTED_TRAINING_SECTION_REFUSAL)
         return values
+
+    @model_validator(mode="after")
+    def _the_config_states_what_its_trainer_reads(self) -> TrainConfigSchema:
+        from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+
+        task = self.model_source.task if self.model_source is not None else None
+        if task in DETECTION_TASKS and self.evaluation.conf_threshold is None:
+            raise ValueError("evaluation.conf_threshold unstated: a detector's validation counts "
+                             "its boxes at a confidence the run states, under any trainer")
+        if not (self.model_extra or {}).get("training_source"):
+            self.default_trainer_regime()
+        return self
+
+    def default_trainer_regime(self) -> DefaultTrainerRegime:
+        """The regime the default trainer runs at. Refuses (``ValueError``) naming every block of
+        it this config leaves unstated."""
+        missing = [name for name in DefaultTrainerRegime._fields if getattr(self, name) is None]
+        if missing:
+            raise ValueError(f"{missing} unstated: a config naming no training_source trains "
+                             "under the default trainer, which reads each of them")
+        return DefaultTrainerRegime(*(getattr(self, name) for name in DefaultTrainerRegime._fields))
 
 
 def checked_train_config(config: dict) -> tuple[TrainConfigSchema | None, list[str]]:

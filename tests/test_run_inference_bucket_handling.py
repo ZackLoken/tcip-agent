@@ -13,10 +13,12 @@ from tcip_mcp.dataset_layout import bucket_key  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
 from tests._producer_fixtures import gray_frame  # noqa: E402
-from tests._verified_checkpoint_fixtures import project_checkpoint  # noqa: E402
+from tests._verified_checkpoint_fixtures import (  # noqa: E402
+    SAMPLE_CONF, SAMPLE_DETECTOR_PASS, SAMPLE_MAX_DETS, project_checkpoint,
+)
 
-UNTILED = Stated(tile=False)
-"""The one execution value every run here states."""
+UNTILED = Stated(tile=False, conf=SAMPLE_CONF, max_dets=SAMPLE_MAX_DETS)
+"""The execution values every untiled run here states."""
 
 BUCKET = "out/2026-01-01"
 
@@ -87,7 +89,8 @@ def test_a_second_run_into_a_published_bucket_refuses_and_leaves_it(tmp_path, mo
     before = published()
 
     again = run_inference(tmp_path, ckpt, str(images_dir), bucket=BUCKET, stated=UNTILED)
-    preview = run_inference(tmp_path, ckpt, str(images_dir), bucket=BUCKET, dry_run=True)
+    preview = run_inference(tmp_path, ckpt, str(images_dir), bucket=BUCKET, dry_run=True,
+                            stated=UNTILED)
     fresh = run_inference(tmp_path, ckpt, str(images_dir), bucket="baseline-2/2026-01-01",
                           stated=UNTILED)
 
@@ -144,7 +147,8 @@ def test_a_raster_outside_a_capture_is_admitted(tmp_path, monkeypatch):
     _stubbed(monkeypatch)
 
     result = run_inference(tmp_path, project_checkpoint(tmp_path), raster_path=str(raster),
-                           bucket=BUCKET, stated=Stated(tile_size=32, overlap=0.0), dry_run=True)
+                           bucket=BUCKET, dry_run=True,
+                           stated=Stated(tile_size=32, overlap=0.0, **SAMPLE_DETECTOR_PASS))
 
     assert "error" not in result, result
     assert result["dataset_root"] == str(tmp_path)

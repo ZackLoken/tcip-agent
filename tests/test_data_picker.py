@@ -18,13 +18,13 @@ pytest.importorskip("torchvision")
 
 import tcip_store as ts
 
+from tests._chain_fixtures import training_config
 from tests._verified_checkpoint_fixtures import opened_run
 from tests.test_selection_binding import DATES, OTHER_SUBJECT, SUBJECT, _draw, \
     _two_subject_two_date_dataset
 
 
 def _bespoke_config(images_dir: Path, *, subject: str = SUBJECT) -> dict:
-    from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import SQUARE_64_DETECTOR
 
     return training_config(SQUARE_64_DETECTOR, {
@@ -168,11 +168,11 @@ def test_list_split_choices_offers_a_table_selection_for_a_table_configuration(
                         calibration_ratio=0.125, holdout_ratio=0.125, group_by="stem")
     assert "error" not in drawn, drawn
 
-    opened_run(tmp_path, {
-        "model_source": {"builder": "m:f", "task": "classification"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path),
-                 "task": "classification", "split": {"seed": 0, "val_ratio": 0.15}},
-    }, experiment_id="exp-table-picker")
+    opened_run(tmp_path, training_config(
+        {"builder": "m:f", "task": "classification"},
+        {"images_dir": str(images_dir), "labels_dir": str(csv_path),
+         "task": "classification", "split": {"seed": 0, "val_ratio": 0.15}}),
+        experiment_id="exp-table-picker")
 
     result = list_split_choices(tmp_path, "exp-table-picker")
 

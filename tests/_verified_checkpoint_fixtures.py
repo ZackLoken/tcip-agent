@@ -6,12 +6,13 @@ completion registers its checkpoint), and a foreign checkpoint registered throug
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
-from tests._chain_fixtures import BESPOKE_DETECTION, SAVE_BUILT_WEIGHTS
+from tests._chain_fixtures import BESPOKE_DETECTION, SAVE_BUILT_WEIGHTS, training_config
+from tests._training_values import sweep_space
 
 torch = pytest.importorskip("torch")
 
@@ -124,13 +125,13 @@ def opened_run(root: str | Path, config: dict, *, experiment_id: str | None = No
 
 
 SWEEP_ARGUMENTS: dict[str, Any] = {
-    "param_space": {"lr": {"type": "loguniform", "low": 1e-4, "high": 1e-2}}, "n_trials": 1,
+    "param_space": sweep_space(), "n_trials": 1,
     "search_alg": "random", "scheduler": "none", "grace_period": 1, "reduction_factor": 2,
-    "warm_start": False, "baseline_params": None, "max_concurrent": 1,
+    "baseline_params": None, "max_concurrent": 1,
     "resources_per_trial": None, "split_draws": 1, "split_draw_seeds": None, "search_seed": 0,
     "trial_budget": None, "relaunched_from": None,
 }
-"""A one-trial random sweep over the learning rate, run to completion; ``open_sweep``'s other
+"""A one-trial random sweep over the head learning rate, run to completion; ``open_sweep``'s other
 arguments."""
 
 
@@ -210,11 +211,7 @@ def finished_run(
     split = stated.get("split") or {}
     if "selection_dir" not in split:
         stated = {**stated, "split": {"seed": 0, "val_ratio": 0.15, **split}}
-    config: dict[str, Any] = {
-        "model_source": model_source,
-        "data": stated,
-        "training_source": training_source,
-    }
+    config = training_config(model_source, stated, training_source=training_source)
     if metrics:
         config["fixture_metrics"] = metrics
     if rows:
@@ -234,8 +231,7 @@ def resolved_run(root: str | Path, data: dict, *, task: str = "detection",
     """A run under ``root`` opened by :func:`opened_run` over ``data``, whose launch record holds
     the data section, partition and objective the launcher's producer resolved; no body runs.
     Returns the run directory."""
-    return opened_run(root, {"model_source": {"task": task}, "data": data},
-                      experiment_id=experiment_id)
+    return opened_run(root, training_config({"task": task}, data), experiment_id=experiment_id)
 
 
 def worker_run(root: str | Path, config: dict, *,
@@ -322,34 +318,49 @@ def verified_checkpoint(project_root: str | Path, **kwargs: Any):
                                       project=Path(project_root))
 
 
+SAMPLE_CROSS_TILE_NMS = 0.45
+"""A sample IoU cross-tile merge threshold a test's tiled pass states."""
+SAMPLE_CONF = 0.4
+"""A sample confidence a test's detector pass states."""
+SAMPLE_MAX_DETS = 300
+"""A sample detection cap a test's detector pass states."""
+SAMPLE_DETECTOR_PASS = {"conf": SAMPLE_CONF, "max_dets": SAMPLE_MAX_DETS,
+                        "cross_tile_nms": SAMPLE_CROSS_TILE_NMS}
+"""The execution values a test's detector pass states, by ``execution.Stated`` field."""
+
+
 def tiled_record(*, tile_size: int, overlap: float, conf: float,
-                 tile_resize: tuple[int, int] | None = None, cross_tile_nms: float = 0.3):
+                 tile_resize: tuple[int, int] | None = None,
+                 cross_tile_nms: float = SAMPLE_CROSS_TILE_NMS):
     """A detector's tiled execution record at ``tile_size``, ``overlap`` and ``tile_resize``
-    (each stated), merging by NMS at ``cross_tile_nms``, built by the producers a pass builds its
-    own with (``untiled_execution`` then ``tiled_execution``)."""
+    (each stated), at ``conf`` and the sample cap, merging by NMS at the stated
+    ``cross_tile_nms``, built by the producer a pass builds its own with
+    (``execution.execution_record``)."""
     from types import SimpleNamespace
 
-    from tcip_mcp.pipelines.execution import tiled_execution, untiled_execution
+    from tcip_mcp.pipelines.execution import Stated, execution_record
     from tcip_mcp.pipelines.slicing import TileGeometry
 
     detector = SimpleNamespace(task="detection", path="detector.pt")
     geometry = TileGeometry(tile_size=tile_size, tile_size_source="explicit",
                             tile_size_derived_from=None, overlap=overlap,
                             overlap_source="explicit", tile_resize=tile_resize)
-    return tiled_execution(untiled_execution(detector, conf=conf, max_dets=None), geometry,
-                           postprocess="nms", cross_tile_nms=cross_tile_nms)
+    stated = Stated(conf=conf, max_dets=SAMPLE_MAX_DETS, postprocess="nms",
+                    cross_tile_nms=cross_tile_nms)
+    return execution_record(cast(Any, detector), stated, geometry, None)
 
 
 def predicted_over(project: Path, checkpoint_path: str, images_dir: str, *,
                    device: str | None = None, **stated: Any):
-    """The pass ``run_inference`` prepares for the checkpoint registered at ``checkpoint_path``
-    over ``images_dir`` (``execution.prepare_pass`` under the ``stated`` execution values), run
-    without publishing: ``(pass, results)``."""
+    """The pass ``run_inference`` prepares for the detector registered at ``checkpoint_path``
+    over ``images_dir`` (``execution.prepare`` under the ``stated`` execution values over
+    :data:`SAMPLE_DETECTOR_PASS`), run without publishing: ``(pass, results)``."""
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.execution import Stated, prepare_pass
+    from tcip_mcp.pipelines.execution import Stated, prepare
 
-    p = prepare_pass(load_registered_checkpoint(checkpoint_path, project=Path(project)),
-                     Stated(**stated), images_dir=images_dir, device=device)
+    p = prepare(load_registered_checkpoint(checkpoint_path, project=Path(project)),
+                Stated(**{**SAMPLE_DETECTOR_PASS, **stated}),
+                images_dir=images_dir, device=device).runnable()
     return p, [r for path in p.paths for r in p.predict([path])]
 
 

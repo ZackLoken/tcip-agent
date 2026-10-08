@@ -332,6 +332,7 @@ export interface OrthomosaicPlantCountsDelivery {
   crop?: string;
   pipeline_version?: string;
   canopy_subject?: string;
+  position_error_m?: number | null;
 }
 
 export interface ExportCountCsvPayload {
@@ -396,9 +397,11 @@ export interface CanopySegmentDisclosure {
   raster_identity: Record<string, unknown>;
   canopy_segments: CanopySegmentsDocument;
   segment_ties: SegmentTieDisclosure[];
+  position_error_m: number;
   segments_without_plant: number;
   plants_outside_raster: string[];
   plants_without_segment: string[];
+  plants_within_position_error: string[];
   plants_with_ambiguous_detections: string[];
   detections_unattributed: number;
   detections_unattributed_by_source: Record<string, number>;
@@ -474,6 +477,8 @@ export interface TraitEntry {
   localization: "" | "center_match" | "iou_match";
   localization_tolerance: string;
   localization_tolerance_frac: number;
+  iou_jitter_px: number | null;
+  iou_margin: number | null;
   count_bias_tolerance_frac: number | null;
   count_error_tolerance: number | null;
   classifier_agreement_floor: number | null;

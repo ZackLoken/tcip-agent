@@ -130,7 +130,9 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     from tcip_mcp.pipelines.data.split_construction import partition_samples
     from tcip_mcp.pipelines.training.subprocess_worker import prepare_run_context
     from tcip_mcp.tools.inference_tools import run_inference
-    from tests._verified_checkpoint_fixtures import detection_config, finished_run, opened_run
+    from tests._verified_checkpoint_fixtures import (
+        SAMPLE_DETECTOR_PASS, detection_config, finished_run, opened_run,
+    )
 
     ws = tmp_path.parent
     project = named_project(ws / "valley_block", "Valley block").root
@@ -142,7 +144,7 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     published = run_inference(project, checkpoint_path=str(checkpoint),
                               images_dir=str(project / "data" / "images" / UNDATED_BUCKET),
                               bucket=bucket,
-                              stated=Stated(tile=False))
+                              stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS))
     assert "error" not in published, published
     other_images = str(project / "data" / "other")
     sweep = create_run_directory(experiment_dir("study", project=project))

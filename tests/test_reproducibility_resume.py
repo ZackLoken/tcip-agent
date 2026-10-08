@@ -51,6 +51,7 @@ from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.collation import task_collate
 from torch.utils.data import DataLoader  # noqa: E402
 from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._training_values import adamw_optimizer  # noqa: E402
 from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 
 
@@ -75,11 +76,11 @@ def _model_source():
 
 
 def _cfg(stages, **extra):
-    from tests._chain_fixtures import ADAMW, training_config
+    from tests._chain_fixtures import training_config
 
     # The sizes and empty scope _classification_data's RGB, two-label table records.
     return training_config(_model_source(), {"num_channels": 3, "num_classes": 2, "scope": {}},
-                           stages=stages, optimizer=ADAMW, **extra)
+                           stages=stages, optimizer=adamw_optimizer(), **extra)
 
 
 def _run(project: Path, cfg: dict, output_dir: str, id: str):

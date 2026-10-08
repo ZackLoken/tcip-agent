@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError
-from tests._chain_fixtures import BESPOKE_DETECTION
+from tests._chain_fixtures import BESPOKE_DETECTION, training_config
 from tests._cli_fixtures import run_tcip
 
 
@@ -82,11 +82,8 @@ def test_preflight_refuses_a_stem_collision(tmp_path):
     _collide(bucket)
     _label(bucket, "shoot_001")
 
-    cfg = {
-        "model_source": {"builder": BESPOKE_DETECTION,
-                         "task": "detection"},
-        "data": {"images_dir": str(bucket), "scope": {"subject": SUBJECT}},
-    }
+    cfg = training_config({"builder": BESPOKE_DETECTION, "task": "detection"},
+                          {"images_dir": str(bucket), "scope": {"subject": SUBJECT}})
     r = preflight_config(tmp_path, cfg)
     assert r["valid"] is False
     assert any("shoot_001.jpg" in i and "Shoot_001.png" in i for i in r["issues"]), r["issues"]
@@ -141,12 +138,9 @@ def test_preflight_admits_a_clean_multi_image_bucket(tmp_path):
     bucket = _ingested_bucket_of(tmp_path, ["shoot_001", "shoot_002"])
     _label(bucket, "shoot_001", "shoot_002")
 
-    cfg = {
-        "model_source": {"builder": BESPOKE_DETECTION,
-                         "task": "detection"},
-        "data": {"images_dir": str(bucket), "scope": {"subject": SUBJECT},
-                 "split": {"seed": 0, "val_ratio": 0.15}},
-    }
+    cfg = training_config({"builder": BESPOKE_DETECTION, "task": "detection"},
+                          {"images_dir": str(bucket), "scope": {"subject": SUBJECT},
+                           "split": {"seed": 0, "val_ratio": 0.15}})
     r = preflight_config(tmp_path, cfg)
     assert r["issues"] == [], r["issues"]
 
@@ -160,12 +154,9 @@ def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(tmp_path
     bucket = _ingested_bucket_of(tmp_path, ["shoot_001", "shoot_002"])
     _label(bucket, "shoot_001", "shoot_002")
 
-    cfg = {
-        "model_source": {"builder": BESPOKE_DETECTION,
-                         "task": "detection"},
-        "data": {"images_dir": str(bucket), "scope": {"subject": SUBJECT},
-                 "split": {"group_by": "stem", "seed": 0, "val_ratio": 0.15}},
-    }
+    cfg = training_config({"builder": BESPOKE_DETECTION, "task": "detection"},
+                          {"images_dir": str(bucket), "scope": {"subject": SUBJECT},
+                           "split": {"group_by": "stem", "seed": 0, "val_ratio": 0.15}})
     r = preflight_config(tmp_path, cfg)
     assert not any(i.startswith("data.split:") for i in r["issues"]), r["issues"]
 
@@ -179,13 +170,11 @@ def test_calibration_ratio_feasibility_admits_a_clean_multi_image_bucket(tmp_pat
     bucket = _ingested_bucket_of(tmp_path, ["shoot_001", "shoot_002"])
     _label(bucket, "shoot_001", "shoot_002")
 
-    cfg = {
-        "model_source": {"builder": BESPOKE_DETECTION,
-                         "task": "detection"},
-        "data": {"images_dir": str(bucket), "scope": {"subject": SUBJECT},
-                 "tiling": {"enabled": True, "sliver_frac": 0.5},  # stated: two boxes, no spread
-                 "split": {"calibration_ratio": 0.2, "val_ratio": 0.15, "seed": 1}},
-    }
+    cfg = training_config(
+        {"builder": BESPOKE_DETECTION, "task": "detection"},
+        {"images_dir": str(bucket), "scope": {"subject": SUBJECT},
+         "tiling": {"enabled": True, "sliver_frac": 0.5},  # stated: two boxes, no spread
+         "split": {"calibration_ratio": 0.2, "val_ratio": 0.15, "seed": 1}})
     r = preflight_config(tmp_path, cfg)
     assert any("2 admitted sources" in i for i in r["issues"]), r["issues"]
 

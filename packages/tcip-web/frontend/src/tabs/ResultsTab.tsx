@@ -157,6 +157,7 @@ export function ResultsTab() {
   const [countCrop, setCountCrop] = useState("");
   const [countPipelineVersion, setCountPipelineVersion] = useState("");
   const [countCanopySubject, setCountCanopySubject] = useState("");
+  const [countPositionErrorM, setCountPositionErrorM] = useState("");
   const [countFilename, setCountFilename] = useState("");
   const [countExporting, setCountExporting] = useState(false);
   const [countError, setCountError] = useState<string | null>(null);
@@ -399,7 +400,13 @@ export function ResultsTab() {
               plants,
               crop: countCrop || undefined,
               pipeline_version: countPipelineVersion || undefined,
-              canopy_subject: countCanopySubject || undefined,
+              ...(countCanopySubject
+                ? {
+                    canopy_subject: countCanopySubject,
+                    position_error_m:
+                      countPositionErrorM === "" ? undefined : Number(countPositionErrorM),
+                  }
+                : {}),
             };
       const body: ExportCountCsvPayload = {
         delivery,
@@ -644,6 +651,18 @@ export function ResultsTab() {
                     placeholder="canopy_subject (optional)"
                   />
                 </div>
+                {countCanopySubject && (
+                  <input
+                    className="tcip-input"
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={countPositionErrorM}
+                    onChange={(e) => setCountPositionErrorM(e.target.value)}
+                    placeholder="position_error_m: the registry positions' error bound, in meters"
+                    aria-label="position_error_m"
+                  />
+                )}
               </>
             )}
 

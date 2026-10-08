@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import pytest
 
-from tests._chain_fixtures import BARE_SCORE_THRESH_DETECTOR, BESPOKE_DETECTION
+from tests._chain_fixtures import BARE_SCORE_THRESH_DETECTOR, BESPOKE_DETECTION, training_config
+from tests._training_values import evaluation_block, sweep_space
 
 
 def _stub_search(monkeypatch, *, during=None) -> dict:
@@ -30,8 +31,8 @@ def test_run_hyperparameter_search_threads_the_sweeps_directory_and_records_its_
 
     captured = _stub_search(monkeypatch)
     tt.run_hyperparameter_search(
-        tmp_path, base_config=real_hpo_base_config, n_trials=1, search_seed=0
-    )
+        tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
+        search_seed=0)
 
     assert captured["sweep_dir"].name.startswith("hpo_")
     assert captured["sweep_dir"].parent == tmp_path / ".tcip" / "experiments"
@@ -50,14 +51,16 @@ def test_run_hyperparameter_search_resolves_direction_from_the_top_level_evaluat
     import tcip_mcp.tools.training_tools as tt
 
     cfg = dict(real_hpo_base_config)
-    cfg["evaluation"] = {"selection_metric": "f1"}  # higher-is-better -> mode "max"
+    cfg["evaluation"] = evaluation_block(selection_metric="f1")  # higher-is-better -> "max"
 
     nested = {**cfg, "training": {"evaluation": {"selection_metric": "loss"}}}
-    refused = tt.run_hyperparameter_search(tmp_path, base_config=nested, n_trials=1, search_seed=0)
+    refused = tt.run_hyperparameter_search(tmp_path, base_config=nested,
+                                           param_space=sweep_space(), n_trials=1, search_seed=0)
     assert any("'training' is not a config section" in issue for issue in refused["issues"])
 
     captured = _stub_search(monkeypatch)
-    tt.run_hyperparameter_search(tmp_path, base_config=cfg, n_trials=1, search_seed=0)
+    tt.run_hyperparameter_search(tmp_path, base_config=cfg, param_space=sweep_space(),
+                                 n_trials=1, search_seed=0)
 
     assert captured["metric"] == "objective"
     assert captured["mode"] == "max"
@@ -78,13 +81,13 @@ def test_a_sweep_is_on_disk_while_it_runs_and_its_trials_are_its_own_run_directo
 
     def during(**kw):
         observed["while_running"] = tt.monitor_training(tmp_path, kw["sweep_dir"].name)["sweep"]
-        kw["objective_fn"]({"lr": 0.1}, lambda value: None)
+        kw["objective_fn"]({"optimizer.head_lr": 0.1}, lambda value: None)
 
     monkeypatch.setattr(tt, "_run_hpo_trial", fake_trial)
     _stub_search(monkeypatch, during=during)
 
-    result = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=1,
-                                          search_seed=0)
+    result = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config,
+                                          param_space=sweep_space(), n_trials=1, search_seed=0)
     sweep_id = result["sweep"]["sweep_id"]
 
     running = observed["while_running"]
@@ -112,8 +115,8 @@ def test_a_sweep_whose_search_raises_ends_failed_naming_the_error(
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", exploding_search)
 
     with pytest.raises(RuntimeError):
-        tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=1,
-                                     search_seed=0)
+        tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config,
+                                     param_space=sweep_space(), n_trials=1, search_seed=0)
 
     sweep = tt.monitor_training(tmp_path, captured["sweep_id"])["sweep"]
     assert sweep["state"] == "failed"
@@ -130,10 +133,12 @@ def test_run_hyperparameter_search_refuses_before_minting_when_the_base_config_f
     captured = _stub_search(monkeypatch)
     result = tt.run_hyperparameter_search(
         tmp_path,
-        base_config={"model_source": {"builder": "not.a:real_builder", "task": "detection"}},
-        n_trials=1, search_seed=0)
+        base_config=training_config(
+            {"builder": "not.a:real_builder", "task": "detection"}, {}),
+        param_space=sweep_space(), n_trials=1, search_seed=0)
 
     assert "error" in result
+    assert any("not importable" in issue for issue in result["issues"]), result
     assert not captured
     assert not tt.experiments.experiments_dir(tmp_path).exists()
 
@@ -147,9 +152,9 @@ def test_run_hyperparameter_search_checks_a_swept_placeholder_axis_at_its_resolv
 
     _stub_search(monkeypatch)
     result = tt.run_hyperparameter_search(
-        tmp_path, base_config={"model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
-                                      "task": "detection"},
-                     "data": real_hpo_base_config["data"]},
+        tmp_path, base_config={**real_hpo_base_config,
+                               "model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
+                                                "task": "detection"}},
         param_space={"model_source.builder": {
             "type": "categorical", "choices": [BESPOKE_DETECTION]}},
         n_trials=1, search_seed=0)
@@ -168,9 +173,9 @@ def test_run_hyperparameter_search_refuses_a_swept_axis_any_of_whose_choices_fai
 
     captured = _stub_search(monkeypatch)
     result = tt.run_hyperparameter_search(
-        tmp_path, base_config={"model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
-                                      "task": "detection"},
-                     "data": real_hpo_base_config["data"]},
+        tmp_path, base_config={**real_hpo_base_config,
+                               "model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
+                                                "task": "detection"}},
         param_space={"model_source.builder": {"type": "categorical", "choices": choices}},
         n_trials=1, search_seed=0)
 
@@ -186,9 +191,9 @@ def test_run_hyperparameter_search_admits_a_swept_axis_whose_every_choice_resolv
 
     _stub_search(monkeypatch)
     result = tt.run_hyperparameter_search(
-        tmp_path, base_config={"model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
-                                      "task": "detection"},
-                     "data": real_hpo_base_config["data"]},
+        tmp_path, base_config={**real_hpo_base_config,
+                               "model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
+                                                "task": "detection"}},
         param_space={"model_source.builder": {
             "type": "categorical",
             "choices": [BESPOKE_DETECTION,
@@ -205,9 +210,9 @@ def test_run_hyperparameter_search_passes_agent_search_and_scheduler_choices(
     import tcip_mcp.tools.training_tools as tt
 
     captured = _stub_search(monkeypatch)
-    tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config, n_trials=3,
-                                 search_alg="bayesopt", scheduler="median", max_concurrent=2,
-                                 search_seed=0)
+    tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config,
+                                 param_space=sweep_space(), n_trials=3, search_alg="bayesopt",
+                                 scheduler="median", max_concurrent=2, search_seed=0)
 
     assert (captured["search_alg"], captured["scheduler"], captured["max_concurrent"],
             captured["num_samples"]) == ("bayesopt", "median", 2, 3)

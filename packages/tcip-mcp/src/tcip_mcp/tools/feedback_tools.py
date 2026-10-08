@@ -83,14 +83,14 @@ def _prepare_queue_sources(checkpoint_path: str, images_dir: str, subject: str |
     return kept, len(sources) - len(kept), None
 
 
-def _untiled_pass(checkpoint) -> tuple[Any, dict | None]:
-    """The untiled pass a review-queue door predicts through
-    (:func:`~tcip_mcp.pipelines.execution.prepare_pass`), or its refusal when torch is not
-    installed. Returns ``(pass, refusal)``."""
+def _untiled(checkpoint, stated: Any) -> tuple[Any, dict | None]:
+    """``checkpoint`` readied untiled under ``stated``
+    (:func:`~tcip_mcp.pipelines.execution.prepare`), or the refusal when torch is not installed.
+    Returns ``(preparation, refusal)``."""
     try:
-        from tcip_mcp.pipelines.execution import Stated, prepare_pass
+        from tcip_mcp.pipelines.execution import prepare
 
-        return prepare_pass(checkpoint, Stated(tile=False)), None
+        return prepare(checkpoint, stated.model_copy(update={"tile": False})), None
     except (ImportError, OSError) as e:
         return None, {"error": f"torch/torchvision unavailable: {e}"}
 
@@ -142,12 +142,14 @@ def prioritize_review_queue(
         return {"method": method, "task": task, "total_candidates": 0,
                 "reviewed_skipped": reviewed_skipped, "selected_count": 0, "queue": []}
 
-    p, refusal = _untiled_pass(checkpoint)
+    from tcip_mcp.pipelines.execution import Stated
+
+    prep, refusal = _untiled(checkpoint, Stated())
     if refusal is not None:
         return refusal
     from tcip_mcp.pipelines.active_learning.scorer import resolve_scorer
 
-    predictor = p.predictor
+    predictor = prep.predictor
     try:
         scorer = resolve_scorer(method, task)
     except ValueError as e:  # unknown scorer: refuse rather than silently reordering the queue
@@ -182,13 +184,15 @@ def triage_predictions(
     low: float = 0.3,
     high: float = 0.8,
     subject: str | None = None,
+    max_dets: int | None = None,
 ) -> dict:
     """Sort a checkpoint's own predictions by confidence into needs-review and unscoreable
     queues; this door writes nothing.
 
     Routes predictions between ``low`` and ``high`` into the needs-review queue, and separates out
     predictions with no confidence-bearing signal at all (e.g. a regression head's point estimate)
-    into their own ``unscoreable_images`` list.
+    into their own ``unscoreable_images`` list. A detector predicts at ``low``, so every box the
+    band can hold exists, and at the stated ``max_dets``, refusing without one.
 
     Args:
         checkpoint_path: Trained model checkpoint (drives predictions).
@@ -197,6 +201,8 @@ def triage_predictions(
         high: Upper confidence bound for the needs-review band.
         subject: The subject whose finished images (marked complete in their label document)
             are skipped; omitted triages every candidate image.
+        max_dets: The most boxes a detector's frame keeps; required of a detector, refused for
+            any other head.
     """
     sources, reviewed_skipped, error = _prepare_queue_sources(checkpoint_path, images_dir, subject)
     if error is not None:
@@ -210,10 +216,18 @@ def triage_predictions(
     checkpoint, refusal = _load_or_refuse(checkpoint_path, project)
     if refusal is not None:
         return refusal
-    p, refusal = _untiled_pass(checkpoint)
+    from tcip_mcp.pipelines.execution import ExecutionRefusedError, Stated
+    from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+
+    detector = checkpoint.task in DETECTION_TASKS
+    prep, refusal = _untiled(checkpoint, Stated(conf=low if detector else None,
+                                                max_dets=max_dets))
     if refusal is not None:
         return refusal
-    predictions = p.predict(sources)
+    try:
+        predictions = prep.runnable().predict(sources)
+    except ExecutionRefusedError as exc:
+        return {"error": str(exc)}
     # A prediction with no confidence signal at all (a regression head's point estimate) is
     # tagged unscoreable, not dropped.
     unscoreable_preds = unscoreable(predictions)

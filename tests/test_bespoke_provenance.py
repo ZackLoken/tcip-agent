@@ -17,7 +17,7 @@ from tests._chain_fixtures import BESPOKE_CLASSIFIER, GT_ANCHOR_DETECTOR
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-from tcip_mcp.pipelines.execution import Stated, prepare_pass  # noqa: E402
+from tcip_mcp.pipelines.execution import Stated, prepare  # noqa: E402
 from tcip_mcp.pipelines.model_build import (  # noqa: E402
     CONFIG_KEY, METRICS_KEY, STATE_DICT_KEY, build_model, snapshot_model_source,
 )
@@ -158,7 +158,10 @@ def test_a_pass_rebuilds_a_bespoke_detector_and_predicts(tmp_path):
     assert "error" not in reg_result, reg_result
     checkpoint = load_registered_checkpoint(str(ckpt), project=tmp_path)
 
-    p = prepare_pass(checkpoint, Stated(tile=False, conf=0.0), device="cpu")
+    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
+
+    p = prepare(checkpoint, Stated(tile=False, conf=0.0, max_dets=SAMPLE_MAX_DETS),
+                device="cpu").runnable()
     assert p.predictor.task == "detection"
     assert p.predictor.in_chans == 3
 
@@ -190,7 +193,7 @@ def test_predictor_loads_at_the_two_channels_its_run_recorded(tmp_path):
     assert "error" not in reg_result, reg_result
     checkpoint = load_registered_checkpoint(str(ckpt), project=tmp_path)
 
-    p = prepare_pass(checkpoint, Stated(tile=False), device="cpu")
+    p = prepare(checkpoint, Stated(tile=False), device="cpu").runnable()
     assert p.predictor.in_chans == 2
 
     arr = (np.random.rand(16, 16, 2) * 255).astype(np.uint8)

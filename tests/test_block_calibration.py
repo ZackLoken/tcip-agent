@@ -20,7 +20,9 @@ from tcip_annotation.state import Annotation, BBox  # noqa: E402
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tests import _trait_fixtures as fx  # noqa: E402
-from tests._chain_fixtures import BESPOKE_DETECTION, SAVE_BUILT_WEIGHTS  # noqa: E402
+from tests._chain_fixtures import (  # noqa: E402
+    BESPOKE_DETECTION, SAVE_BUILT_WEIGHTS, training_config,
+)
 from tests._mapping_fixtures import write_plant_csv  # noqa: E402
 from tests._producer_fixtures import image_label_key, label_image  # noqa: E402
 
@@ -69,10 +71,9 @@ def _completed_over(project: Path, data_cfg: dict, experiment_id: str) -> dict:
     from tcip_mcp.experiments import observe
     from tests._verified_checkpoint_fixtures import worker_run
 
-    run_dir = worker_run(project, {
-        "model_source": _BLOCK_MODEL_SOURCE, "data": data_cfg, "device": "cpu",
-        "training_source": SAVE_BUILT_WEIGHTS,
-    }, experiment_id=experiment_id)
+    run_dir = worker_run(project, training_config(
+        _BLOCK_MODEL_SOURCE, data_cfg, training_source=SAVE_BUILT_WEIGHTS),
+        experiment_id=experiment_id)
     observation = observe(run_dir)
     checkpoint = observation.checkpoint
     assert checkpoint is not None, observation.final
@@ -141,15 +142,18 @@ def _attested(tmp_path: Path, **kwargs) -> dict:
 def _assess(exp: dict, *, k_cal: int | None = None, k_test: int | None = None,
             **stated) -> dict:
     """``assess_reserved_regions`` of the count trait's per-image count for ``exp``'s checkpoint
-    under the ``stated`` execution values, answered as its door answers it."""
+    under the ``stated`` execution values (the sample merge threshold unless they name one,
+    ``None`` leaving it to the calibration bands), answered as its door answers it."""
     from tcip_mcp.assessment import assess_reserved_regions
     from tcip_mcp.pipelines.block_calibration import DEFAULT_K_CAL, DEFAULT_K_TEST
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.calibration_tools import _answer
+    from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS
 
     return _answer(assess_reserved_regions(
         exp["project"], checkpoint_path=exp["checkpoint_path"], trait=fx.COUNT_TRAIT,
-        delivery_kind="per_image_count", device="cpu", stated=Stated(**stated),
+        delivery_kind="per_image_count", device="cpu",
+        stated=Stated(**{"cross_tile_nms": SAMPLE_CROSS_TILE_NMS, **stated}),
         k_cal=DEFAULT_K_CAL if k_cal is None else k_cal,
         k_test=DEFAULT_K_TEST if k_test is None else k_test))
 
@@ -226,10 +230,11 @@ def test_every_band_runs_under_the_execution_record_the_assessment_records(
 
     monkeypatch.setattr(GenericPredictor, "predict_sliced", recorded)
 
-    record = _assess(exp, overlap=0.25, postprocess="greedynmm")
+    record = _assess(exp, overlap=0.25, postprocess="greedynmm", cross_tile_nms=0.5)
 
     execution = record["execution"]
     assert execution["overlap"] == 0.25 and execution["postprocess"] == "greedynmm"
+    assert execution["cross_tile_nms"] == 0.5
     assert len(passes) == 6
     assert {(p["execution"].overlap, p["execution"].postprocess,
              p["execution"].cross_tile_nms) for p in passes} == {
@@ -372,7 +377,7 @@ def test_a_saturated_band_cap_surfaces_as_cap_saturated_provenance(tmp_path: Pat
     import tcip_mcp.pipelines.derivations as derivations_module
 
     exp = _attested(tmp_path)
-    monkeypatch.setattr(derivations_module, "derive_max_dets_from_counts", lambda *a, **k: 1)
+    monkeypatch.setattr(derivations_module, "derive_max_dets", lambda *a, **k: 1)
 
     record = _assess(exp)
 
@@ -381,10 +386,10 @@ def test_a_saturated_band_cap_surfaces_as_cap_saturated_provenance(tmp_path: Pat
 
 
 def test_the_recorded_cap_is_derived_from_the_calibration_bands_alone(tmp_path: Path):
-    """The recorded cap is fitted on the calibration bands' object counts only: ground truth made
-    dense inside the test region alone, which a pooled derivation would follow, leaves it where
-    the calibration side puts it."""
-    from tcip_mcp.pipelines.derivations import derive_max_dets_from_counts
+    """The recorded cap is fitted on the calibration bands' densities only, scaled to the whole
+    mosaic the pass publishes: ground truth made dense inside the test region alone, which a
+    pooled derivation would follow, leaves it where the calibration side puts it."""
+    from tcip_mcp.pipelines.derivations import derive_max_dets
 
     exp = _build_experiment(tmp_path)
     manifest = exp["spatial_manifest"]
@@ -398,17 +403,44 @@ def test_the_recorded_cap_is_derived_from_the_calibration_bands_alone(tmp_path: 
 
     record = _assess(exp)
 
+    from tcip_mcp.assessment import read_assessment
+
     counts = record["criterion"]["count"]["band_gt_counts"]
-    pooled = derive_max_dets_from_counts(
-        list(counts["calibration"].values()) + list(counts["holdout"].values()))
-    calibration_only = derive_max_dets_from_counts(list(counts["calibration"].values()))
+    rects = {s.member: s.rect for s in read_assessment(
+        exp["project"], record["assessment_id"]).reference.samples}
+
+    def counted(side: str) -> list[tuple[int, float]]:
+        out = []
+        for name, n in counts[side].items():
+            rect = rects[name]
+            assert rect is not None, name
+            out.append((n, float((rect[2] - rect[0]) * (rect[3] - rect[1]))))
+        return out
+
+    pooled = derive_max_dets(counted("calibration") + counted("holdout"), WIDTH * HEIGHT)
+    calibration_only = derive_max_dets(counted("calibration"), WIDTH * HEIGHT)
     assert pooled != calibration_only
     assert record["execution"]["max_dets"] == calibration_only
 
 
+def test_the_recorded_cap_covers_the_whole_mosaic_it_publishes(tmp_path: Path):
+    """The pass the assessment records publishes the whole mosaic as one frame: its cap scales
+    the calibration bands' density to the mosaic's area, so a mosaic holding more objects than
+    any one band is not truncated at publication."""
+    exp = _attested(tmp_path)
+    record = _assess(exp)
+
+    in_mosaic = len(json_io.read_label_document(exp["label"]).annotations)
+    densest_band = max(record["criterion"]["count"]["band_gt_counts"]["calibration"].values())
+    assert in_mosaic > densest_band
+    assert record["execution"]["max_dets"] >= in_mosaic
+
+
 def test_an_unstated_merge_threshold_derives_from_the_calibration_bands(tmp_path: Path):
     """Each object gains an overlapping neighbor, so the ground-truth tail derives a merge
-    threshold; the record states it as derived, never the documented default."""
+    threshold; the record states it as derived."""
+    from tcip_mcp.pipelines.derivations import CROSS_TILE_NMS_DERIVATION
+
     exp = _build_experiment(tmp_path)
     manifest = exp["spatial_manifest"]
     json_io.write_label_document(exp["label"], [
@@ -418,32 +450,34 @@ def test_an_unstated_merge_threshold_derives_from_the_calibration_bands(tmp_path
     _attest_regions_complete(
         exp["root"], exp["stem"], [manifest["calibration_region"], manifest["holdout_region"]])
 
-    record = _assess(exp)
+    record = _assess(exp, cross_tile_nms=None)
 
-    assert record["execution"]["sources"]["cross_tile_nms"] != "default"
+    assert record["execution"]["sources"]["cross_tile_nms"] == CROSS_TILE_NMS_DERIVATION
 
 
 # ── the raster door without an assessment ─────────────────────────────────
 
 
-def test_a_raster_pass_stamps_an_explicit_conf_as_explicit_and_an_omitted_one_as_default(
-    tmp_path: Path,
-):
-    """A stated conf equal to the documented default is recorded as stated, never laundered into
-    the default, and an omitted one runs at the default, recorded so."""
+def test_a_raster_pass_stamps_its_stated_conf_and_refuses_an_omitted_one(tmp_path: Path):
+    """A raster pass without an assessment runs at the conf it states, recorded as stated, and
+    one stating none refuses naming it before anything is published."""
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.pipelines.execution import DEFAULT_CONF, Stated
+    from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import SAMPLE_CONF, SAMPLE_DETECTOR_PASS
 
     exp = _build_experiment(tmp_path, calibration_ratio=0.0, experiment_id="exp_conf")
-    for name, stated in (("stated", {"conf": DEFAULT_CONF}), ("omitted", {})):
+    unstated_conf = {k: v for k, v in SAMPLE_DETECTOR_PASS.items() if k != "conf"}
+    for name, stated in (("stated", SAMPLE_DETECTOR_PASS), ("omitted", unstated_conf)):
         result = run_inference(tmp_path, exp["checkpoint_path"], bucket=name,
                                raster_path=str(exp["raster_path"]),
                                stated=Stated(tile_size=TILE, overlap=0.2, **stated))
+        if name == "omitted":
+            assert "conf" in result.get("error", ""), result
+            continue
         assert "error" not in result, result
         execution = read_bucket(exp["root"], name).execution
-        assert execution.conf == DEFAULT_CONF
-        assert execution.sources["conf"] == ("explicit" if stated else "default")
+        assert (execution.conf, execution.sources["conf"]) == (SAMPLE_CONF, "explicit")
 
 
 # ── the band geometry ─────────────────────────────────────────────────────

@@ -18,6 +18,38 @@ import { selectProjectRoot } from "@/store/slices/gui";
 // A job can still be stopped only while it is pending/running.
 const CANCELLABLE: ReadonlySet<InferenceStatus> = new Set(["pending", "running"]);
 
+type StatedField = "conf" | "max_dets" | "cross_tile_nms";
+
+/** The execution values a run without an assessment states, one input each. */
+const STATED_INPUTS: {
+  field: StatedField;
+  label: string;
+  placeholder: string;
+  max?: number;
+  step: string;
+}[] = [
+  {
+    field: "conf",
+    label: "Confidence threshold (a detector run without an assessment)",
+    placeholder: "the score a box is kept at",
+    max: 1,
+    step: "any",
+  },
+  {
+    field: "max_dets",
+    label: "Detection cap (a detector run without an assessment)",
+    placeholder: "the most boxes one frame keeps",
+    step: "1",
+  },
+  {
+    field: "cross_tile_nms",
+    label: "Cross-tile merge threshold (a tiled run without an assessment)",
+    placeholder: "the IoU above which two tiles' detections are one object",
+    max: 1,
+    step: "any",
+  },
+];
+
 /** A launch refused for one date, holding what it was refused for. */
 interface RefusedLaunch {
   date: string;
@@ -82,6 +114,11 @@ export function InferenceTab() {
   const [bucketName, setBucketName] = useState("");
   // The assessment whose execution record the run takes and publishes under; empty for none.
   const [assessmentId, setAssessmentId] = useState("");
+  const [statedInputs, setStatedInputs] = useState<Record<StatedField, string>>({
+    conf: "",
+    max_dets: "",
+    cross_tile_nms: "",
+  });
   const [jobs, setJobs] = useState<InferenceJob[]>([]);
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<InferenceJob | null>(null);
@@ -238,7 +275,11 @@ export function InferenceTab() {
         dataset_root: datasetRoot,
         date,
         bucket: `${bucketName.replace(/\/+$/, "")}/${date}`,
-        stated: {},
+        stated: Object.fromEntries(
+          Object.entries(statedInputs)
+            .filter(([, value]) => value.trim() !== "")
+            .map(([field, value]) => [field, Number(value)]),
+        ),
         assessment_id: assessmentId.trim() || null,
         user: useStore.getState().user,
       });
@@ -423,12 +464,32 @@ export function InferenceTab() {
           placeholder="the assessment id this checkpoint earned"
         />
 
+        {STATED_INPUTS.map(({ field, label, placeholder, max, step }) => (
+          <div key={field}>
+            <label className="tcip-label mb-1" htmlFor={`inference-${field}`}>
+              {label}
+            </label>
+            <input
+              id={`inference-${field}`}
+              className="tcip-input w-full mb-3 font-mono"
+              type="number"
+              min={0}
+              max={max}
+              step={step}
+              value={statedInputs[field]}
+              onChange={(e) => setStatedInputs((prev) => ({ ...prev, [field]: e.target.value }))}
+              placeholder={placeholder}
+            />
+          </div>
+        ))}
+
         <p className="text-[11px] text-tcip-muted mb-3">
-          Every execution value (conf, cap, tiling, cross-tile merge) is the named assessment's own,
-          or without one is resolved from this checkpoint as the agent-facing door resolves it, so a
-          run here and a run there cannot diverge. Only predictions published under an assessment
-          can deliver validated numbers. Each date publishes once, as its own bucket under the name
-          above.
+          Every execution value (conf, cap, tiling, cross-tile merge) is the named assessment's own.
+          Without one, a detector's run states its conf and cap above, and a tiled run its merge
+          threshold, since no reference stands behind any of them; the tiling follows this
+          checkpoint as the agent-facing door resolves it. Only predictions published under an
+          assessment can deliver validated numbers. Each date publishes once, as its own bucket
+          under the name above.
         </p>
 
         <button

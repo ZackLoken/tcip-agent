@@ -97,7 +97,9 @@ def test_the_plateau_scheduler_steps_on_the_validation_loss_under_its_declared_k
 
     monkeypatch.setattr(plateau, "step", step)
     train_loader, val_loader = opposed_regression_loaders(TRAIN_INTENSITIES, VAL_INTENSITIES)
-    config = {**_config(), "scheduler": {"type": "plateau"}}
+    from tests._training_values import schedule
+
+    config = {**_config(), "scheduler": schedule("plateau")}
     run = trainer_run(config, tmp_path / "out", project=tmp_path, has_val_loader=True,
                       id="auto-run-plateau")
     run = train(run, train_loader, val_loader=val_loader)

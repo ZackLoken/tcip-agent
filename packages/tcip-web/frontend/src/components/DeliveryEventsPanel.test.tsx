@@ -79,6 +79,48 @@ describe("DeliveryEventsPanel bucket findings", () => {
     expect(within(row).getByText("shipping before assessing")).toBeInTheDocument();
   });
 
+  it("counts the plants a canopy delivery delivered from its recorded population", () => {
+    const record: DeliveryEventRecord = {
+      ...BASE,
+      event_id: "canopy",
+      delivery_kind: "per_plant_count_aggregate",
+      population: ["P-001"],
+      plant_mapping: {
+        plant_registry: { name: "registry-a", digest: "d".repeat(64) },
+        raster_identity: { width: 100, height: 100 },
+        canopy_segments: {
+          capture: "2026-01-01",
+          stem: "mosaic",
+          sha256: "e".repeat(64),
+          subject: "canopy",
+          n_segments: 2,
+        },
+        segment_ties: [
+          { segment_index: 0, plot_name: "P-001", clearance_m: 2.0 },
+          { segment_index: 1, plot_name: "P-002", clearance_m: 2.0 },
+        ],
+        position_error_m: 0.5,
+        segments_without_plant: 0,
+        plants_outside_raster: [],
+        plants_without_segment: [],
+        plants_within_position_error: [],
+        plants_with_ambiguous_detections: [],
+        detections_unattributed: 0,
+        detections_unattributed_by_source: {},
+        detections_unattributed_scope: "delivered_raster",
+        plant_attribution: "segment",
+      },
+    };
+
+    render(<DeliveryEventsPanel records={[record]} loadError={null} />);
+
+    expect(
+      within(screen.getByTestId("canopy-disclosure")).getByText(
+        "Canopy segments (registry-a): 1 registry plant(s) delivered, 0 segment(s) with no plant",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("shows no acknowledgment for a validated record", () => {
     render(<DeliveryEventsPanel records={[BASE]} loadError={null} />);
     const row = screen.getByTestId("delivery-evt-base");

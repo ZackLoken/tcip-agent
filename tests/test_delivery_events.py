@@ -16,6 +16,7 @@ from tcip_mcp import delivery
 from tcip_mcp.delivery import read_delivery_events
 from tcip_mcp.traits import PER_IMAGE_COUNT, STATE_CROSSING_DATES, read_trait
 from tests._chain_fixtures import deliver_milestones
+from tests._mapping_fixtures import POSITION_ERROR_M
 from tests._trait_fixtures import COUNT_SUBJECT, seed_confirmed_count
 
 
@@ -215,11 +216,13 @@ def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid() -> None:
         "raster_identity": {"width": 10, "height": 10},
         "canopy_segments": {"capture": "2026-01-01", "stem": "x", "sha256": "0" * 64,
                             "subject": "canopy", "n_segments": 1},
+        "position_error_m": POSITION_ERROR_M,
         "segment_ties": [], "segments_without_plant": 0, "plants_outside_raster": [],
-        "plants_without_segment": [], "plants_with_ambiguous_detections": [],
-        "detections_unattributed": 0,
+        "plants_without_segment": [], "plants_within_position_error": [],
+        "plants_with_ambiguous_detections": [], "detections_unattributed": 0,
         "detections_unattributed_by_source": {
-            "outside_segments": 0, "overlapping_segments": 0, "segment_without_plant": 0},
+            "outside_segments": 0, "overlapping_segments": 0, "segment_without_plant": 0,
+            "segment_plant_within_position_error": 0},
         "detections_unattributed_scope": "delivered_raster", "plant_attribution": "segment",
     }
 

@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from tests._chain_fixtures import GT_ANCHOR_DETECTOR, TRAIN_BESPOKE
+from tests._chain_fixtures import GT_ANCHOR_DETECTOR, TRAIN_BESPOKE, training_config
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
@@ -30,6 +30,7 @@ pytest.importorskip("torchvision")
 import tcip_mcp.pipelines.components.backbones  # noqa: F401,E402
 import tcip_mcp.pipelines.components.necks  # noqa: F401,E402
 import tcip_mcp.pipelines.components.heads  # noqa: F401,E402
+from tests._training_values import adamw_optimizer  # noqa: E402
 import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
 
 from torch.utils.data import DataLoader  # noqa: E402
@@ -60,7 +61,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     from tcip_mcp.pipelines.derivations import gt_aspect_ratios
     from dataclasses import asdict
 
-    from tcip_mcp.pipelines.execution import Stated, prepare_pass
+    from tcip_mcp.pipelines.execution import Stated, prepare
     from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.pipelines.model_contract import overfit_check
     from tcip_mcp.pipelines.training.collation import task_collate
@@ -83,17 +84,15 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
 
     # 2. Bespoke model_source + custom training_source, run through the audited envelope.
     src_file = bespoke_models.__file__
-    config = {
-        "model_source": {
-            "builder": GT_ANCHOR_DETECTOR,
-            "builder_kwargs": {"gt_boxes_wh": gt_wh, "min_size": IMG, "max_size": IMG * 2},
-            "task": "detection", "source_files": [src_file],
-        },
-        "data": {"images_dir": str(images_dir), "num_channels": 3,
-                 "scope": asdict(dataset.scope), "split": {"seed": 0, "val_ratio": 0.15}},
-        "training_source": TRAIN_BESPOKE,
-        "device": "cpu", "epochs": 2, "seed": 0,
-    }
+    # train_bespoke reads its own epochs beside the loaders' batch and the blocks
+    # ctx.build_optimizer, ctx.build_scheduler and ctx.evaluate read.
+    config = training_config(
+        {"builder": GT_ANCHOR_DETECTOR,
+         "builder_kwargs": {"gt_boxes_wh": gt_wh, "min_size": IMG, "max_size": IMG * 2},
+         "task": "detection", "source_files": [src_file]},
+        {"images_dir": str(images_dir), "num_channels": 3,
+         "scope": asdict(dataset.scope), "split": {"seed": 0, "val_ratio": 0.15}},
+        training_source=TRAIN_BESPOKE, epochs=2, seed=0, optimizer=adamw_optimizer())
     from tests._verified_checkpoint_fixtures import worker_run
 
     out = worker_run(tmp_path, config, experiment_id="expBespoke")
@@ -111,7 +110,10 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert expected_sizes != (32, 64, 128, 256, 512)       # not torchvision's default sizes
 
     checkpoint = load_registered_checkpoint(str(ckpt), project=tmp_path)
-    p = prepare_pass(checkpoint, Stated(tile=False, conf=0.0), device="cpu")
+    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
+
+    p = prepare(checkpoint, Stated(tile=False, conf=0.0, max_dets=SAMPLE_MAX_DETS),
+                device="cpu").runnable()
     predictor = p.predictor
     anchor_gen = predictor.model.detector.rpn.anchor_generator
     assert anchor_gen.aspect_ratios == (expected_ratios,)   # anchors are the GT-derived ratios

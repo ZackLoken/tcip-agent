@@ -276,14 +276,15 @@ TILE = 32
 
 def _pass(tmp_path: Path, ckpt: str):
     """The pass the registered ``ckpt`` runs at this module's lattice: ``TILE`` edge, 0.2
-    overlap, NMS at 0.3, every detection kept."""
+    overlap, NMS at 0.3, every detection kept up to the sample cap."""
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.execution import Stated, prepare_pass
+    from tcip_mcp.pipelines.execution import Stated, prepare
+    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
 
-    return prepare_pass(
+    return prepare(
         load_registered_checkpoint(ckpt, project=tmp_path),
         Stated(tile=True, tile_size=TILE, overlap=0.2, postprocess="nms", cross_tile_nms=0.3,
-               conf=0.0), device="cpu", tile_batch_size=8)
+               conf=0.0, max_dets=SAMPLE_MAX_DETS), device="cpu", tile_batch_size=8).runnable()
 
 
 def _bare_execution():

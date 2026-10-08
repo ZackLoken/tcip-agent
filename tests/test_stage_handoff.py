@@ -19,6 +19,7 @@ from tcip_mcp.pipelines.model_build import STATE_DICT_KEY  # noqa: E402
 from tcip_mcp.pipelines.schemas import SCHEDULER_TYPES  # noqa: E402
 from tcip_mcp.pipelines.training import generic_trainer as gt  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import train  # noqa: E402
+from tests._training_values import schedule  # noqa: E402
 from tests.tiny_trainer_fixtures import (  # noqa: E402
     NAN_EVAL_REGRESSOR,
     TWO_RATE_REGRESSOR,
@@ -156,7 +157,7 @@ def test_a_run_resumed_across_a_stage_boundary_trains_as_the_uninterrupted_run(
     config = _config([{"freeze_to": 0, "epochs": 3}, {"freeze_to": 0, "epochs": 3}],
                      early_stopping={"enabled": True, "patience": 1, "min_delta": 1e-4},
                      checkpoint_every_n_epochs=1, stage_warmup_epochs=warmup_epochs,
-                     scheduler={"type": scheduler})
+                     scheduler=schedule(scheduler))
     straight = _train(tmp_path, config, "straight", shuffle_seed=11)
     assert straight.status == "completed", straight.status_error
     assert len(straight.metrics_history) > resume_epoch
@@ -185,7 +186,7 @@ def test_a_resume_whose_optimizer_orders_its_groups_differently_warms_up_as_the_
         return _config([{"freeze_to": 0, "epochs": 2}, {"freeze_to": 0, "epochs": 4}],
                        optimizer={"name": "adamw", "backbone_lr": 0.01, "head_lr": 0.05,
                                   "weight_decay": 0.0},
-                       scheduler={"type": "step"}, stage_warmup_epochs=3,
+                       scheduler=schedule("step"), stage_warmup_epochs=3,
                        checkpoint_every_n_epochs=1, builder=TWO_RATE_REGRESSOR,
                        builder_kwargs=builder_kwargs or None)
 
@@ -263,13 +264,35 @@ def test_a_stage_of_no_epochs_is_refused_and_one_epoch_is_admitted(tmp_path):
 
 
 def test_an_unknown_scheduler_is_refused_and_a_named_one_is_admitted(tmp_path):
-    with pytest.raises(ValueError, match="scheduler.type"):
+    with pytest.raises(ValueError, match="scheduler.*cosine_warm"):
         trainer_run(_config([{"freeze_to": 0, "epochs": 1}], scheduler={"type": "cosine_warm"}),
                     tmp_path / "unknown", project=tmp_path, has_val_loader=True)
 
     admitted = _train(tmp_path, _config([{"freeze_to": 0, "epochs": 1}],
-                                        scheduler={"type": "step"}), "step")
+                                        scheduler=schedule("step")), "step")
     assert admitted.status == "completed", admitted.status_error
+
+
+def test_a_onecycle_schedule_trains_at_the_stated_sgd_momentum():
+    """OneCycle cycles the rate alone: the momentum the config states is the one each step
+    takes, never a momentum cycle the schedule brings of its own."""
+    from torch import nn
+
+    from tcip_mcp.pipelines.schemas import train_config
+    from tests._training_values import sgd_optimizer
+
+    spec = train_config(_config([{"freeze_to": 0, "epochs": 4}], optimizer=sgd_optimizer(),
+                                scheduler=schedule("onecycle")))
+    assert spec.optimizer is not None and spec.scheduler is not None
+    model = nn.Linear(2, 1)
+    optimizer = torch.optim.SGD(model.parameters(), lr=spec.optimizer.head_lr,
+                                momentum=spec.optimizer.momentum)
+    scheduler = gt._build_scheduler(optimizer, spec.scheduler, 4)
+    model(torch.ones(3, 2)).sum().backward()
+    optimizer.step()
+    scheduler.step()
+
+    assert [g["momentum"] for g in optimizer.param_groups] == [spec.optimizer.momentum]
 
 
 def test_a_loader_stating_no_batch_size_is_refused(tmp_path):

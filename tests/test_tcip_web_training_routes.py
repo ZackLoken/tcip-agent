@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from tests._training_values import sweep_space
+
 
 def test_the_run_list_refuses_while_no_project_is_open(client: TestClient) -> None:
     resp = client.get("/api/training/runs")
@@ -504,14 +506,14 @@ def test_a_sweep_trial_is_listed_read_canceled_and_streamed_by_its_id(
     _opened("run-a", opened_project)
     opened = opened_sweep(opened_project, real_hpo_base_config)
     sweep_id = opened.name
-    trial = open_trial(opened, "t0", {"lr": 0.001})
+    trial = open_trial(opened, "t0", {"optimizer.head_lr": 0.001})
 
     listing = opened_client.get("/api/training/runs").json()
     assert [r["experiment_id"] for r in listing["runs"]] == ["run-a"]
     (sweep,) = listing["sweeps"]
     assert sweep["sweep_id"] == sweep_id
     assert [(t["experiment_id"], t["sweep"], t["trial_params"]) for t in sweep["trials"]] == [
-        (trial.name, sweep_id, {"lr": 0.001})]
+        (trial.name, sweep_id, {"optimizer.head_lr": 0.001})]
 
     read = opened_client.get(f"/api/training/runs/{trial.name}")
     assert (read.status_code, read.json()["run"]["sweep"]) == (200, sweep_id)
@@ -544,14 +546,14 @@ def test_a_sweep_and_its_trial_each_have_one_board_whichever_door_launches_it(
     trials: list[Path] = []
 
     def one_trial_search(**kw) -> None:
-        trial = tt.open_trial(kw["sweep_dir"], "t0", {"lr": 0.1})
+        trial = tt.open_trial(kw["sweep_dir"], "t0", {"optimizer.head_lr": 0.1})
         board_of(trial).mkdir()
         (board_of(trial) / "events.out.tfevents.1.host").write_bytes(b"")
         trials.append(trial)
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", one_trial_search)
     sweep_id = tt.run_hyperparameter_search(
-        opened_project, base_config=real_hpo_base_config, n_trials=1,
+        opened_project, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
         search_seed=0)["sweep"]["sweep_id"]
     for name in (sweep_id, trials[0].name):
         resp = opened_client.post(f"/api/training/runs/{name}/tensorboard", json={})

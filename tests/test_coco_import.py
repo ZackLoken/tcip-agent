@@ -454,7 +454,9 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(tmp_path: Path,
     from tcip_mcp.dataset_layout import PREDICTION_DOCUMENTS, bucket_key
     from tcip_mcp.pipelines.execution import Stated
     from tests._predictor_fixtures import StubPredictor, install
-    from tests._verified_checkpoint_fixtures import foreign_checkpoint
+    from tests._verified_checkpoint_fixtures import (
+        SAMPLE_CONF, SAMPLE_MAX_DETS, foreign_checkpoint,
+    )
 
     root = _dataset(tmp_path).root
     install(monkeypatch, StubPredictor(width=IMG, height=IMG, boxes=(BOX,)))
@@ -471,7 +473,8 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(tmp_path: Path,
     ckpt = foreign_checkpoint(tmp_path)
     with pytest.raises(OSError):
         itools.run_inference(tmp_path, ckpt, str(root / "images" / DATE),
-                             bucket=f"detector/{DATE}", stated=Stated(tile=False))
+                             bucket=f"detector/{DATE}",
+                             stated=Stated(tile=False, conf=SAMPLE_CONF, max_dets=SAMPLE_MAX_DETS))
 
     assert len(calls) == 2
     assert not ts.exists(bucket_key(root, f"detector/{DATE}"))

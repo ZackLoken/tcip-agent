@@ -18,10 +18,12 @@ Derive it by measuring the dataset, not by classifying the trait:
 - `pipelines.derivations.gt_aspect_ratios` over the GT `(w, h)`: the object elongation that
   actually occurs here, rather than an assumed shape.
 - Object scale against your tile size: whether objects survive tiling, and whether a seam cuts
-  them. `pipelines.derivations.derive_cross_tile_nms` reads the GT's neighbor-overlap tail in the
-  metric your cross-tile merge compares over (IoU for `nms`, IoS for `nmm`/`greedynmm`, the IoS
-  derivation provisional until validated), and returns `None` when the GT gives no basis for a
-  threshold; that `None` is expected, not a failure.
+  them. `pipelines.derivations.derive_cross_tile_nms` reads the GT's neighbor-IoU tail for an
+  `nms` merge, and returns `None` when the GT gives no basis for a threshold. An assessment or a
+  full-frame evaluation derives an unstated threshold from its reference this way and refuses
+  when nothing derives; any other tiled pass, and every IoS merge (`nmm`/`greedynmm`), states
+  `cross_tile_nms`. An `iou_match` trait's match threshold derives from the GT's box size at the jitter
+  and margin the trait itself authors.
 - Capture-date bucketing from `ingest_images`: whether a time series exists at all, and at what
   cadence.
 
@@ -149,8 +151,8 @@ Three seams support bespoke work; the platform guarantees integrity around it:
 - `training_source` points the envelope at your custom `train(ctx)`. The `TrainContext` (`ctx`,
   `pipelines.training.envelope`) hands you the craft library: prebuilt leakage-free loaders,
   `ctx.build_optimizer` / `ctx.build_scheduler` / `ctx.evaluate` / `ctx.set_seed`, the
-  progressive-unfreeze primitive `ctx.apply_stage_freeze`, `ctx.tiled_dataset`, `ctx.calibrate`,
-  and the correctness checks `ctx.check_contract` / `ctx.overfit_check`, plus the envelope-owned
+  progressive-unfreeze primitive `ctx.apply_stage_freeze`, `ctx.tiled_dataset`, and the
+  correctness checks `ctx.check_contract` / `ctx.overfit_check`, plus the envelope-owned
   sinks `ctx.log_metrics`, `ctx.log_batch`, `ctx.save_checkpoint`, `ctx.record_artifact`,
   `ctx.should_cancel`. Route
   your loop's metrics and checkpoints through those sinks and the run stays audited, immutably

@@ -26,7 +26,8 @@ src/tcip_mcp/
                               # (check_model_contract, overfit_check)
     proposal.py               # auto-labeling engine seam: a registered or dotted Proposer
     execution.py               # one pass's execution record (conf, cap, tile geometry, merge)
-                                # and prepare_pass, the one place a pass is built
+                                # and prepare, which readies a Preparation whose runnable
+                                # builds the one Pass from a complete record
     operating_point.py          # the criteria an assessment judges against: count, classifier,
                                  # scalar, and the spatial held-out check
     schemas.py, image_utils.py

@@ -161,16 +161,12 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
 
 def _run_one_search(project) -> None:
     from tcip_mcp.pipelines.training.hpo import tune_search
+    from tests._training_values import sweep_space, tune_arguments
 
     tune_search(
-        objective_fn=lambda config, report: None,
-        param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
-        num_samples=1,
-        search_alg="random",
-        scheduler=None,
-        resources_per_trial={"cpu": 1.0, "gpu": 0.0},
-        sweep_dir=project / ".tcip" / "experiments" / "sweep", seed=0
-    )
+        objective_fn=lambda config, report: None, param_space=sweep_space(),
+        sweep_dir=project / ".tcip" / "experiments" / "sweep",
+        **tune_arguments(resources_per_trial={"cpu": 1.0, "gpu": 0.0}))
 
 
 @pytest.fixture(autouse=True)
@@ -378,6 +374,7 @@ def test_a_cluster_this_process_starts_is_sized_to_the_sweep_s_own_request(tmp_p
     the host's: three half-CPU trials at once need two whole CPUs, and the default one-CPU,
     one-at-a-time sweep needs one."""
     from tcip_mcp.pipelines.training.hpo import tune_search
+    from tests._training_values import sweep_space, tune_arguments
 
     entered = [threading.Event(), threading.Event()]
     release = [threading.Event(), threading.Event()]
@@ -386,12 +383,9 @@ def test_a_cluster_this_process_starts_is_sized_to_the_sweep_s_own_request(tmp_p
     ray = _install_fake_ray(monkeypatch, entered, release)
 
     tune_search(
-        objective_fn=lambda config, report: None,
-        param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
-        num_samples=1, search_alg="random", scheduler=None, max_concurrent=3,
-        resources_per_trial={"cpu": 0.5, "gpu": 0.0},
-        sweep_dir=tmp_path / ".tcip" / "experiments" / "sweep", seed=0
-    )
+        objective_fn=lambda config, report: None, param_space=sweep_space(),
+        sweep_dir=tmp_path / ".tcip" / "experiments" / "sweep",
+        **tune_arguments(max_concurrent=3, resources_per_trial={"cpu": 0.5, "gpu": 0.0}))
     assert ray.init_kwargs["num_cpus"] == 2
 
     _run_one_search(tmp_path)

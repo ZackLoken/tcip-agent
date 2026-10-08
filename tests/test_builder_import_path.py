@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._chain_fixtures import training_config
+
 TOP_LEVEL_BUILDER = '''
 def build_probe(**kwargs):
     return {"built": True, "kwargs": kwargs}
@@ -111,7 +113,6 @@ def test_a_packaged_builder_outside_the_path_launches_and_trains_in_the_worker(
     worker process builds it, and the run completes."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import launch_training
-    from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import run_to_end
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
@@ -147,11 +148,9 @@ def test_preflight_imports_a_builder_through_its_source_files(
     monkeypatch.setattr(sys, "path", [p for p in sys.path if p != str(src)])
     images_dir = tmp_path / "images"
     images_dir.mkdir()
-    cfg = {
-        "model_source": {"builder": PROBE_BUILDER, "task": "classification",
-                         "source_files": [str(src / f"{PROBE_MODULE}.py")]},
-        "data": {"images_dir": str(images_dir)},
-    }
+    cfg = training_config({"builder": PROBE_BUILDER, "task": "classification",
+                           "source_files": [str(src / f"{PROBE_MODULE}.py")]},
+                          {"images_dir": str(images_dir)})
 
     result = preflight_config(tmp_path, cfg)
 

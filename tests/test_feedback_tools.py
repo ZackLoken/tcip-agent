@@ -9,6 +9,7 @@ from pathlib import Path
 
 from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
 from tcip_mcp.tools.feedback_tools import prioritize_review_queue
+from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
 
 DATE = "2026-03-04"
 
@@ -68,12 +69,12 @@ def test_triage_predictions_skips_only_the_images_marked_finished(tmp_path, monk
                                              for s in sources]))
 
     r = triage_predictions(tmp_path, checkpoint_path=str(ckpt), images_dir=str(images),
-                           subject="bud")
+                           subject="bud", max_dets=SAMPLE_MAX_DETS)
     assert r["reviewed_skipped"] == 1
     assert r["review_images"] == ["imgB.png"]
 
     other = triage_predictions(tmp_path, checkpoint_path=str(ckpt), images_dir=str(images),
-                               subject="leaf")
+                               subject="leaf", max_dets=SAMPLE_MAX_DETS)
     assert other["reviewed_skipped"] == 0
     assert other["review_images"] == ["imgA.png", "imgB.png"]
 
@@ -100,7 +101,7 @@ def test_triage_predictions_surfaces_unscoreable(tmp_path, monkeypatch):
         lambda *a, **k: SimpleNamespace(predict_batch=lambda sources, **kw: predictions))
 
     r = triage_predictions(
-        tmp_path, checkpoint_path=str(ckpt), images_dir=str(images))
+        tmp_path, checkpoint_path=str(ckpt), images_dir=str(images), max_dets=SAMPLE_MAX_DETS)
     assert r["needs_review"] == 1
     assert r["review_images"] == ["a.jpg"]
     assert r["unscoreable_images"] == ["a.jpg"]
@@ -125,8 +126,58 @@ def _stubbed_triage_predictions(tmp_path, monkeypatch, predictions: list[dict], 
         predmod, "GenericPredictor",
         lambda *a, **k: SimpleNamespace(predict_batch=lambda sources, **kw: predictions))
 
-    return triage_predictions(
-        tmp_path, checkpoint_path=str(ckpt), images_dir=str(images), **kwargs)
+    return triage_predictions(tmp_path, checkpoint_path=str(ckpt), images_dir=str(images),
+                              **{"max_dets": SAMPLE_MAX_DETS, **kwargs})
+
+
+def _triage_over_one_image(tmp_path, monkeypatch) -> tuple[str, str, list]:
+    """A registered detector, a capture holding one image, and the execution records its stubbed
+    predictor is run under, appended as it runs."""
+    from types import SimpleNamespace
+
+    import tcip_mcp.pipelines.inference.generic_predictor as predmod
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    ckpt = registered_checkpoint(tmp_path)
+    images = tmp_path / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
+    (images / "a.jpg").write_bytes(b"x")
+    ran_at: list = []
+
+    def _predict(sources, **kw):
+        ran_at.append(kw["execution"])
+        return [{"image": "a.jpg", "scores": [0.35]}]
+
+    monkeypatch.setattr(predmod, "GenericPredictor",
+                        lambda *a, **k: SimpleNamespace(predict_batch=_predict))
+    return str(ckpt), str(images), ran_at
+
+
+def test_triage_refuses_a_detector_call_stating_no_cap(tmp_path, monkeypatch):
+    """No default stands behind a detector's cap: a triage call stating no ``max_dets`` refuses
+    naming it and predicts nothing."""
+    from tcip_mcp.tools.feedback_tools import triage_predictions
+
+    ckpt, images, ran_at = _triage_over_one_image(tmp_path, monkeypatch)
+
+    refused = triage_predictions(tmp_path, checkpoint_path=ckpt, images_dir=images, low=0.3)
+
+    assert "max_dets" in refused.get("error", ""), refused
+    assert ran_at == []
+
+
+def test_triage_predicts_a_detector_at_its_low_bound(tmp_path, monkeypatch):
+    """Every box the band can hold exists: a detector predicts at ``low`` itself, never at a
+    default above it, under the cap the call states."""
+    from tcip_mcp.tools.feedback_tools import triage_predictions
+
+    ckpt, images, ran_at = _triage_over_one_image(tmp_path, monkeypatch)
+
+    triaged = triage_predictions(tmp_path, checkpoint_path=ckpt, images_dir=images, low=0.3,
+                                 max_dets=SAMPLE_MAX_DETS)
+
+    assert [(e.conf, e.max_dets) for e in ran_at] == [(0.3, SAMPLE_MAX_DETS)]
+    assert triaged["review_images"] == ["a.jpg"]
 
 
 def test_triage_predictions_routes_the_band_and_the_unscoreable_and_accepts_nothing(
@@ -193,14 +244,12 @@ def _bound_checkpoint(project: Path, manifest_dir: Path, experiment_id: str) -> 
     its completed checkpoint's producer is that bound run. Returns ``(run directory, checkpoint
     path)``."""
     from tcip_mcp.experiments import observe
-    from tests._chain_fixtures import SAVE_BUILT_WEIGHTS
+    from tests._chain_fixtures import SAVE_BUILT_WEIGHTS, run_config
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, worker_run
 
-    run_dir = worker_run(project, {
-        "model_source": dict(BUILT_DETECTOR),
-        "training_source": SAVE_BUILT_WEIGHTS,
-        "data": {"split": {"selection_dir": str(manifest_dir)}},
-    }, experiment_id=experiment_id)
+    run_dir = worker_run(project, run_config(manifest_dir, BUILT_DETECTOR,
+                                             training_source=SAVE_BUILT_WEIGHTS),
+                         experiment_id=experiment_id)
     checkpoint = observe(run_dir).checkpoint
     assert checkpoint is not None
     return run_dir, checkpoint["path"]

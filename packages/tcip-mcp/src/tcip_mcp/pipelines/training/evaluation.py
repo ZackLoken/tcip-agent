@@ -242,14 +242,16 @@ def resolve_match_criterion(trait: TraitEntry | None, per_image: list[dict], *,
     (:class:`~tcip_mcp.traits.UnauthoredFieldError`): a center match's tolerance is a
     fraction of the average object size (:func:`localization_frac`), scaled to ``per_image`` here
     and to another reference by :func:`scaled_to`; an IoU match's threshold is the one the ground
-    truth's own box sizes derive, and a reference with no box to derive it from refuses. An IoU
-    match is over masks when ``by_mask`` (:func:`iou_criterion`).
+    truth's own box sizes derive under the trait's authored ``iou_jitter_px`` and ``iou_margin``
+    (unauthored ones refusing the same way), and a reference with no box to derive it from, or
+    whose boxes the jitter displaces past overlap, refuses. An IoU match is over masks when
+    ``by_mask`` (:func:`iou_criterion`).
     """
     if trait is None:
         return {**iou_criterion(iou_threshold, by_mask=by_mask),
                 "derived_from": "comparability convention", "trait": None}
     from tcip_mcp.pipelines.derivations import IOU_MATCH_DERIVATION, derive_iou_match_threshold
-    from tcip_mcp.traits import CENTER_MATCH, authored
+    from tcip_mcp.traits import CENTER_MATCH, IOU_MATCH, LOCALIZATION_FIELDS, authored
 
     authored(trait, ("localization",))
     boxes_per_image = [[a["bbox"] for a in gt_objects(rec, class_id=class_id)]
@@ -258,7 +260,10 @@ def resolve_match_criterion(trait: TraitEntry | None, per_image: list[dict], *,
         frac, frac_source = localization_frac(trait, boxes_per_image)
         return scaled_to({"kind": "center_match", "tolerance_frac": frac,
                           "derived_from": frac_source, "trait": trait.name}, per_image, class_id)
-    threshold = derive_iou_match_threshold(boxes_per_image)
+    authored(trait, LOCALIZATION_FIELDS[IOU_MATCH])
+    threshold = derive_iou_match_threshold(
+        boxes_per_image, jitter_px=cast(float, trait.iou_jitter_px),
+        margin=cast(float, trait.iou_margin))
     if threshold is None:
         raise ValueError(
             f"trait {trait.name!r} matches by IoU, and this reference holds no ground-truth box "
@@ -891,10 +896,12 @@ def detection_metrics(per_image: list[dict], *, trait: TraitEntry | None, conf_t
 @torch.no_grad()
 def evaluate(
     model, loader, device, task: str, *, dims: Mapping[str, Any],
-    conf_threshold: float = 0.25, iou_threshold: float = 0.5,
+    conf_threshold: float | None, iou_threshold: float = 0.5,
     score_weights: dict | None = None, trait: TraitEntry | None = None,
 ) -> dict:
-    """Compute per-task validation/test metrics. Returns bare metric keys.
+    """Compute per-task validation/test metrics. Returns bare metric keys. ``conf_threshold`` is
+    the confidence a detector's boxes are counted at, read from the run's validated
+    ``evaluation.conf_threshold`` or the pass's execution record; ``None`` for any other head.
 
     ``dims`` is what the model was built at (:func:`~tcip_mcp.pipelines.model_build.model_dims`);
     a class or rank count is read from it, never off the half being scored. A detector's metrics
@@ -1006,7 +1013,8 @@ def evaluate(
     result: dict = stored_number("loss", _rounded(loss))
 
     if is_detection:
-        m = detection_metrics(per_image, trait=trait, conf_threshold=conf_threshold,
+        conf = cast(float, conf_threshold)
+        m = detection_metrics(per_image, trait=trait, conf_threshold=conf,
                               iou_threshold=iou_threshold, by_mask=is_instance_seg)
         result.update({k: v for k, v in m.items() if k not in ("tp", "fp", "fn", "matchings")})
         criterion = m["governing_criterion"]
@@ -1017,7 +1025,7 @@ def evaluate(
         if dims.get("attributes"):
             agreement = {}
             for column, attribute in enumerate(dims["attributes"]):
-                pairs = attribute_pairs(per_image, criterion, conf=conf_threshold, column=column)
+                pairs = attribute_pairs(per_image, criterion, conf=conf, column=column)
                 agreement[attribute.name] = {"pairs": len(pairs), **_reported_metrics(
                     classification_metrics(torch.tensor([p for _i, _t, p in pairs]),
                                            torch.tensor([t for _i, t, _p in pairs]),

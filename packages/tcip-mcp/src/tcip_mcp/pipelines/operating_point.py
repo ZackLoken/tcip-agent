@@ -111,8 +111,6 @@ def set_detector_operating_point(model: Any, *, score_thresh: float | None = Non
 STAGED_CONF_FLOOR = 0.01
 """The conf an assessment collects its reference predictions at, so hesitant detections survive to
 be swept; the floor applied is recorded beside the criterion."""
-STAGED_CONF_FLOOR_SOURCE = "staged collection floor"
-"""The source an execution record names for :data:`STAGED_CONF_FLOOR`."""
 
 
 def _min_dt_score(records: list[dict]) -> float | None:

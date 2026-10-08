@@ -11,7 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from tests._chain_fixtures import BESPOKE_CLASSIFIER, BESPOKE_DETECTION
+from tests._chain_fixtures import (
+    BESPOKE_CLASSIFIER, BESPOKE_DETECTION, run_config, training_config,
+)
+from tests._training_values import evaluation_block
 
 SUBJECT = "leaf"
 
@@ -21,11 +24,10 @@ def _cfg(images_dir, *, builder_kwargs, image_stats_sampling=None):
                     "builder_kwargs": builder_kwargs, "task": "detection"}
     if image_stats_sampling is not None:
         model_source["image_stats_sampling"] = image_stats_sampling
-    return {
-        "model_source": model_source,
-        "data": {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}, "auto_val": False},
-        "evaluation": {"selection_metric": "loss"},
-    }
+    return training_config(
+        model_source,
+        {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}, "auto_val": False},
+        evaluation=evaluation_block(selection_metric="loss"))
 
 
 def _label(images_dir, *stems, width=16, height=16):
@@ -109,17 +111,14 @@ def test_preflight_records_not_checked_when_no_membership_resolved(tmp_path):
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    cfg = {
-        "model_source": {
-            "builder": BESPOKE_DETECTION,
-            "builder_kwargs": {"image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]},
-            "task": "detection",
-            "image_stats_sampling": {"windows": [["a.tif", None]], "seed": None,
-                                     "pixel_fraction": 1.0, "window_size": None,
-                                     "max_windows_per_image": None},
-        },
-        "data": {"dataset_source": {"builder": BESPOKE_CLASSIFIER}},
-    }
+    cfg = training_config(
+        {"builder": BESPOKE_DETECTION,
+         "builder_kwargs": {"image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]},
+         "task": "detection",
+         "image_stats_sampling": {"windows": [["a.tif", None]], "seed": None,
+                                  "pixel_fraction": 1.0, "window_size": None,
+                                  "max_windows_per_image": None}},
+        {"dataset_source": {"builder": BESPOKE_CLASSIFIER}})
 
     r = preflight_config(tmp_path, cfg)
     assert r["image_stats_containment"] == "not_checked"
@@ -248,8 +247,7 @@ def test_preflight_keeps_every_sample_of_a_two_date_selection(tmp_path):
                         "windows": [[str(s.source), None] for s in bound], "seed": None,
                         "pixel_fraction": 1.0, "window_size": None,
                         "max_windows_per_image": None}}
-    r = preflight_config(tmp_path, {"model_source": model_source,
-                          "data": {"split": {"selection_dir": str(out)}}})
+    r = preflight_config(tmp_path, run_config(out, model_source))
 
     assert r["image_stats_containment"] == "checked"
     assert not any("outside" in i for i in r["issues"]), r["issues"]

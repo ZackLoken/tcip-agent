@@ -38,6 +38,7 @@ from tests._chain_fixtures import (  # noqa: E402
 )
 from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import dataset_over, label_image, run_over  # noqa: E402
+from tests._training_values import adamw_optimizer, evaluation_block  # noqa: E402
 
 IMG = 64
 
@@ -54,12 +55,12 @@ def _model_source(builder: str, task: str, **kwargs) -> dict:
 
 
 def _train_config(model_source: dict, data: dict) -> dict:
-    from tests._chain_fixtures import ADAMW, training_config
+    from tests._chain_fixtures import training_config
 
     # No val_loader at any call site below: loss is the only metric coherent to select on
     # without one, detection/instance_seg's own default (objective) needs a validation pass.
-    return training_config(model_source, data, optimizer=ADAMW,
-                           evaluation={"selection_metric": "loss"})
+    return training_config(model_source, data, optimizer=adamw_optimizer(),
+                           evaluation=evaluation_block(selection_metric="loss"))
 
 
 def _run(model_source: dict, data: dict, tmp_path: Path, run_id: str):

@@ -24,6 +24,7 @@ from tcip_mcp.pipelines.postprocessing.segment_attribution import (
 )
 
 from tests._geotiff_fixtures import write_canonical_dataset_raster
+from tests._mapping_fixtures import POSITION_ERROR_M
 from tests._producer_fixtures import image_label_key, label_image
 
 WIDTH = HEIGHT = 64
@@ -238,13 +239,100 @@ def test_tie_segments_to_plants_ties_two_disjoint_segments_each_to_one_plant(
         raster_identity={"width": WIDTH, "height": HEIGHT})
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot1", 40, 40)]
 
-    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT)
+    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
+                                 position_error_m=POSITION_ERROR_M)
 
     assert {t.plot_name for t in tie.tied} == {"plot0", "plot1"}
     assert tie.untied == []
     assert tie.plants_without_segment == []
     assert tie.plants_outside_raster == []
     assert all(t.clearance_m > 0 for t in tie.tied)
+
+
+def test_tie_segments_to_plants_leaves_a_plant_within_the_position_error_untied(
+        tmp_path: Path) -> None:
+    """A plant whose projected position clears its segment's boundary by less than the stated
+    position error is not tied: a displaced position could have put it in a neighbor's canopy.
+    The bound is the project's; a negative one refuses."""
+    _, raster_path, georef, _identity = _setup(tmp_path)
+    segments_data = _write_document(raster_path, [
+        Annotation(subject="canopy", geometry=_square(0, 0, 20, 20), created_by="user:breeder"),
+        Annotation(subject="canopy", geometry=_square(30, 30, 50, 50), created_by="user:breeder"),
+    ])
+    segments = load_canopy_segments(
+        segments_data, subject="canopy", raster_stem=raster_path.stem,
+        raster_identity={"width": WIDTH, "height": HEIGHT})
+    plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot1", 31, 40)]
+
+    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
+                                 position_error_m=POSITION_ERROR_M)
+    safe = next(t for t in tie.tied if t.plot_name == "plot0").clearance_m
+    tight = next(t for t in tie.tied if t.plot_name == "plot1").clearance_m
+    assert tight < safe
+
+    bounded = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
+                                     position_error_m=(tight + safe) / 2)
+    assert [t.plot_name for t in bounded.tied] == ["plot0"]
+    assert bounded.plants_within_position_error == ["plot1"]
+    assert [s.segment_index for s in bounded.untied] == [1]
+    assert bounded.plants_without_segment == []
+    # The untied segment holds a plant: it is no plantless segment, and a detection in it says so.
+    assert bounded.segments_without_plant == 0
+    (inside,) = assign_detections_to_segments([[38.0, 38.0, 42.0, 42.0]], bounded)
+    assert (inside.source, inside.plot_name) == ("segment_plant_within_position_error", None)
+
+    for bound in (-1.0, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="finite, nonnegative"):
+            tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
+                                   position_error_m=bound)
+
+
+def _one_segment_tie(transform, plant_px: tuple[float, float], segment: Polygon,
+                     position_error_m: float):
+    """The tie of ``segment`` to one plant at pixel ``plant_px`` under the georeference
+    ``transform`` states, on a 100-pixel frame."""
+    from tcip_mcp.pipelines.postprocessing.segment_attribution import CanopySegment
+
+    georef = OrthomosaicGeoreference(transform)
+    return tie_segments_to_plants(
+        [CanopySegment(segment_index=0, polygon=segment)], [_plant(georef, "plot0", *plant_px)],
+        georef, width=100, height=100, position_error_m=position_error_m)
+
+
+def test_the_clearance_is_measured_in_meters_on_a_raster_in_feet():
+    """EPSG:2263 states its coordinates in US survey feet: a plant two feet (0.61 m) inside its
+    segment's boundary is within a 1 m position error, not two units clear of it."""
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import GeoTransform
+
+    feet = GeoTransform(tiepoint_pixel_x=0.0, tiepoint_pixel_y=0.0,
+                        tiepoint_native_x=1_000_000.0, tiepoint_native_y=200_000.0,
+                        pixel_scale_x=1.0, pixel_scale_y=1.0, epsg=2263)
+
+    tie = _one_segment_tie(feet, (2.0, 50.0), _square(0, 0, 90, 90), position_error_m=1.0)
+
+    assert tie.tied == []
+    assert tie.plants_within_position_error == ["plot0"]
+    clear = _one_segment_tie(feet, (2.0, 50.0), _square(0, 0, 90, 90),
+                             position_error_m=POSITION_ERROR_M)
+    assert clear.tied[0].clearance_m == pytest.approx(2 * 0.3048006096, rel=1e-4)
+
+
+def test_the_clearance_is_the_nearest_boundary_in_meters_on_anisotropic_pixels():
+    """Pixels 10 m wide and 1 m tall: a plant 2 pixels (20 m) from the segment's left edge and 5
+    pixels (5 m) from its top edge clears the boundary by 5 m, so a 10 m bound leaves it untied."""
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import GeoTransform
+
+    anisotropic = GeoTransform(tiepoint_pixel_x=0.0, tiepoint_pixel_y=0.0,
+                               tiepoint_native_x=500_000.0, tiepoint_native_y=4_800_000.0,
+                               pixel_scale_x=10.0, pixel_scale_y=1.0, epsg=32615)
+
+    tie = _one_segment_tie(anisotropic, (2.0, 5.0), _square(0, 0, 10, 99), position_error_m=10.0)
+
+    assert tie.tied == []
+    assert tie.plants_within_position_error == ["plot0"]
+    clear = _one_segment_tie(anisotropic, (2.0, 5.0), _square(0, 0, 10, 99),
+                             position_error_m=4.0)
+    assert clear.tied[0].clearance_m == pytest.approx(5.0, rel=1e-6)
 
 
 def test_tie_segments_to_plants_leaves_a_plantless_segment_untied(tmp_path: Path) -> None:
@@ -258,10 +346,12 @@ def test_tie_segments_to_plants_leaves_a_plantless_segment_untied(tmp_path: Path
         raster_identity={"width": WIDTH, "height": HEIGHT})
     plants = [_plant(georef, "plot0", 10, 10)]
 
-    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT)
+    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
+                                 position_error_m=POSITION_ERROR_M)
 
     assert [t.plot_name for t in tie.tied] == ["plot0"]
     assert [s.segment_index for s in tie.untied] == [1]
+    assert tie.segments_without_plant == 1
 
 
 def test_tie_segments_to_plants_refuses_a_segment_containing_two_plants(tmp_path: Path) -> None:
@@ -275,7 +365,8 @@ def test_tie_segments_to_plants_refuses_a_segment_containing_two_plants(tmp_path
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot1", 15, 15)]
 
     with pytest.raises(ValueError, match="more than one plant"):
-        tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT)
+        tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
+                                 position_error_m=POSITION_ERROR_M)
 
 
 def test_tie_segments_to_plants_refuses_a_plant_inside_two_segments(tmp_path: Path) -> None:
@@ -290,7 +381,8 @@ def test_tie_segments_to_plants_refuses_a_plant_inside_two_segments(tmp_path: Pa
     plants = [_plant(georef, "plot0", 15, 15)]
 
     with pytest.raises(ValueError, match="more than one canopy segment"):
-        tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT)
+        tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
+                                 position_error_m=POSITION_ERROR_M)
 
 
 def test_tie_segments_to_plants_refuses_a_blank_named_plant(tmp_path: Path) -> None:
@@ -304,7 +396,8 @@ def test_tie_segments_to_plants_refuses_a_blank_named_plant(tmp_path: Path) -> N
     plants = [_plant(georef, "", 10, 10)]
 
     with pytest.raises(ValueError, match="blank plot_name"):
-        tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT)
+        tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
+                                 position_error_m=POSITION_ERROR_M)
 
 
 def test_tie_segments_to_plants_refuses_a_duplicate_plot_name(tmp_path: Path) -> None:
@@ -319,7 +412,8 @@ def test_tie_segments_to_plants_refuses_a_duplicate_plot_name(tmp_path: Path) ->
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot0", 40, 40)]
 
     with pytest.raises(ValueError, match="duplicate plot_name"):
-        tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT)
+        tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
+                                 position_error_m=POSITION_ERROR_M)
 
 
 def test_tie_segments_to_plants_refuses_when_no_plant_is_in_frame(tmp_path: Path) -> None:
@@ -333,7 +427,8 @@ def test_tie_segments_to_plants_refuses_when_no_plant_is_in_frame(tmp_path: Path
     plants = [_plant(georef, "plot0", -50, -50)]
 
     with pytest.raises(ValueError, match="no registry plant"):
-        tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT)
+        tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
+                                 position_error_m=POSITION_ERROR_M)
 
 
 def test_tie_segments_to_plants_names_a_plant_outside_the_raster(tmp_path: Path) -> None:
@@ -346,7 +441,8 @@ def test_tie_segments_to_plants_names_a_plant_outside_the_raster(tmp_path: Path)
         raster_identity={"width": WIDTH, "height": HEIGHT})
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot1", -50, -50)]
 
-    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT)
+    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
+                                 position_error_m=POSITION_ERROR_M)
 
     assert tie.plants_outside_raster == ["plot1"]
     assert [t.plot_name for t in tie.tied] == ["plot0"]
@@ -362,7 +458,8 @@ def test_tie_segments_to_plants_names_an_in_frame_plant_with_no_segment(tmp_path
         raster_identity={"width": WIDTH, "height": HEIGHT})
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot1", 45, 45)]
 
-    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT)
+    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
+                                 position_error_m=POSITION_ERROR_M)
 
     assert tie.plants_without_segment == ["plot1"]
     assert [t.plot_name for t in tie.tied] == ["plot0"]
@@ -383,7 +480,8 @@ def test_assign_detections_to_segments_attributes_a_containment_and_names_the_re
         segments_data, subject="canopy", raster_stem=raster_path.stem,
         raster_identity={"width": WIDTH, "height": HEIGHT})
     plants = [_plant(georef, "plot0", 10, 10)]  # segment 1 (30..50) stays untied
-    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT)
+    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
+                                 position_error_m=POSITION_ERROR_M)
 
     detections = [
         [8.0, 8.0, 12.0, 12.0],       # centroid (10, 10): inside the tied segment
@@ -418,7 +516,8 @@ def test_assign_detections_to_segments_attributes_an_overlap_to_neither(tmp_path
         segments_data, subject="canopy", raster_stem=raster_path.stem,
         raster_identity={"width": WIDTH, "height": HEIGHT})
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot1", 40, 10)]
-    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT)
+    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
+                                 position_error_m=POSITION_ERROR_M)
 
     # centroid (25, 15) lies in both segments' overlap (20..30 on x).
     detections = [[23.0, 13.0, 27.0, 17.0]]
@@ -440,6 +539,7 @@ def test_assign_detections_to_segments_no_boxes_returns_empty(tmp_path: Path) ->
         segments_data, subject="canopy", raster_stem=raster_path.stem,
         raster_identity={"width": WIDTH, "height": HEIGHT})
     plants = [_plant(georef, "plot0", 10, 10)]
-    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT)
+    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
+                                 position_error_m=POSITION_ERROR_M)
 
     assert assign_detections_to_segments([], tie) == []

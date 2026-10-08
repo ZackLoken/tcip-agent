@@ -36,11 +36,13 @@ def test_predict_batch_detection_uses_one_forward_per_batch(tmp_path):
 
     from types import SimpleNamespace
 
-    from tcip_mcp.pipelines.execution import untiled_execution
+    from tcip_mcp.pipelines.execution import Stated, execution_record
+    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
 
     detector = SimpleNamespace(task="detection", path="detector.pt")
-    results = pred.predict_batch(paths, untiled_execution(detector, conf=0.0, max_dets=None),
-                                 batch_size=2)
+    results = pred.predict_batch(
+        paths, execution_record(detector, Stated(conf=0.0, max_dets=SAMPLE_MAX_DETS), None, None),
+        batch_size=2)
     assert [r["count"] for r in results] == [0] * 5  # one result per image
     assert calls["n"] == 3              # ceil(5/2) forwards, not 5
     assert calls["sizes"] == [2, 2, 1]

@@ -26,6 +26,8 @@ from tests._chain_fixtures import (  # noqa: E402
     run_the_chain, synthetic_capture, train_on,
 )
 from tests._dense_op_fixtures import dense_records, good_cal_holdout  # noqa: E402
+from tcip_mcp.pipelines.execution import Stated  # noqa: E402
+from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS  # noqa: E402
 
 
 def _trained(project: Path, experiment_id: str):
@@ -226,6 +228,34 @@ def test_an_unauthored_tolerance_refuses_the_revision_with_the_breeders_question
     assert fx.COUNT_TRAIT not in trait_names(tmp_path)
 
 
+def test_an_iou_match_operationalization_is_proposed_only_with_its_jitter_and_margin(tmp_path):
+    """The fields an IoU match compares by are part of the criterion a count operationalization
+    rests on: a proposal selecting ``iou_match`` without them is refused asking the breeder, and
+    one stating them is recorded."""
+    from tcip_mcp.traits import IOU_MATCH, QUESTIONS, UnauthoredFieldError, trait_names
+
+    with pytest.raises(UnauthoredFieldError) as refused:
+        confirm_count_trait(tmp_path, localization=IOU_MATCH)
+    assert "iou_jitter_px" in str(refused.value) and "iou_margin" in str(refused.value)
+    assert QUESTIONS["iou_jitter_px"] in str(refused.value)
+    assert fx.COUNT_TRAIT not in trait_names(tmp_path)
+
+    confirmed = confirm_count_trait(tmp_path, localization=IOU_MATCH,
+                                    iou_jitter_px=fx.IOU_JITTER_PX, iou_margin=fx.IOU_MARGIN)
+    assert confirmed.confirmed
+    assert (confirmed.entry.iou_jitter_px, confirmed.entry.iou_margin) == (
+        fx.IOU_JITTER_PX, fx.IOU_MARGIN)
+
+
+@pytest.mark.parametrize("field, value", [("iou_jitter_px", -3.0), ("iou_jitter_px", "nan"),
+                                          ("iou_margin", -0.1), ("iou_margin", "inf")])
+def test_an_iou_field_that_is_no_finite_nonnegative_value_refuses(field, value):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match=field):
+        fx.with_fields(fx.COUNT_SPEC, **{field: float(value)})
+
+
 def test_a_delivery_under_another_revision_than_the_assessments_refuses_naming_both(tmp_path):
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
@@ -257,7 +287,7 @@ def test_one_producer_clears_the_gate_and_a_series_of_two_refuses(tmp_path):
     other = train_on(chain.selection_dir, tmp_path, "exp-series-b")
     second = f"other/{DATE}"
     published = run_inference(tmp_path, checkpoint_path=other, images_dir=str(chain.images_dir),
-                              bucket=second)
+                              bucket=second, stated=Stated(**SAMPLE_DETECTOR_PASS))
     assert "error" not in published, published
     revision = latest_confirmed(fx.COUNT_TRAIT, tmp_path)
     first = chain.read()
@@ -332,7 +362,7 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(t
 
     from tcip_mcp.assessment import AssessmentRefusedError, _scalar
     from tcip_mcp.pipelines.data.selection import ClassScope, Sample
-    from tcip_mcp.pipelines.execution import Pass, untiled_execution
+    from tcip_mcp.pipelines.execution import Pass, execution_record
 
     class Silent:
         def predict_batch(self, sources, execution, *, tile_batch_size):
@@ -340,7 +370,7 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(t
 
     checkpoint = SimpleNamespace(task="regression", payload={}, path="regressor.pt")
     p = Pass(checkpoint=checkpoint, predictor=Silent(), scope=ClassScope(),
-             execution=untiled_execution(checkpoint, conf=None, max_dets=None), tile_batch_size=1)
+             execution=execution_record(checkpoint, Stated(), None, None), tile_batch_size=1)
     Image.new("RGB", (8, 8)).save(tmp_path / "a.png")
     (tmp_path / "t.csv").write_text("image,value\na,1.0\n", encoding="utf-8")
     sample = Sample(member="a", source=str(tmp_path / "a.png"),
@@ -395,18 +425,21 @@ def test_a_polygon_that_fails_to_rasterize_refuses_rather_than_training_an_empty
 def test_a_restored_record_runs_as_recorded_and_a_changed_overlap_or_merge_refuses_by_name(
         tmp_path):
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.execution import ExecutionRefusedError, Stated, prepare_pass
+    from tcip_mcp.pipelines.execution import ExecutionRefusedError, prepare
 
     _images, _drawn, _sel, checkpoint_path = _trained(tmp_path, "exp-restore")
     checkpoint = load_registered_checkpoint(checkpoint_path, project=tmp_path)
-    recorded = prepare_pass(checkpoint, Stated(tile=True, overlap=0.2)).execution
+    recorded = prepare(checkpoint, Stated(tile=True, overlap=0.2,
+                                          **SAMPLE_DETECTOR_PASS)).runnable().execution
     assert recorded.tiled, recorded
 
-    assert prepare_pass(checkpoint, Stated(overlap=0.2), restored=recorded).execution == recorded
+    assert prepare(checkpoint, Stated(overlap=0.2),
+                   restored=recorded).runnable().execution == recorded
     with pytest.raises(ExecutionRefusedError, match="overlap stated 0.5, recorded 0.2"):
-        prepare_pass(checkpoint, Stated(overlap=0.5), restored=recorded)
+        prepare(checkpoint, Stated(overlap=0.5), restored=recorded).runnable()
     with pytest.raises(ExecutionRefusedError, match="postprocess stated 'nmm', recorded 'nms'"):
-        prepare_pass(checkpoint, Stated(postprocess="nmm"), restored=recorded)
+        prepare(checkpoint, Stated(postprocess="nmm"), restored=recorded).runnable()
     # A blank merge is a name the vocabulary refuses, never the default an omitted one takes.
     with pytest.raises(ValueError, match="Unknown cross-tile merge ''.*nms"):
-        prepare_pass(checkpoint, Stated(tile=True, overlap=0.2, postprocess=""))
+        prepare(checkpoint, Stated(tile=True, overlap=0.2, postprocess="",
+                                   **SAMPLE_DETECTOR_PASS)).runnable()

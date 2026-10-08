@@ -232,11 +232,27 @@ class OrthomosaicGeoreference:
         lon, lat = self._transformer().transform(native_x, native_y)
         return lat, lon
 
+    def wgs84_to_native(self, lat: float, lon: float) -> tuple[float, float]:
+        """(easting, northing) in this raster's own native projected CRS for a WGS84
+        ``(lat, lon)``."""
+        native_x, native_y = self._transformer().transform(lon, lat, direction="INVERSE")
+        return native_x, native_y
+
     def wgs84_to_pixel(self, lat: float, lon: float) -> tuple[float, float]:
         """The pixel (column, row) in this raster for a WGS84 ``(lat, lon)``, the inverse of
         :meth:`pixel_to_wgs84`."""
-        native_x, native_y = self._transformer().transform(lon, lat, direction="INVERSE")
-        return native_to_pixel(self.transform, native_x, native_y)
+        return native_to_pixel(self.transform, *self.wgs84_to_native(lat, lon))
+
+    def meters_per_native_unit(self) -> float:
+        """The meters one unit of this raster's native CRS spans
+        (:func:`~tcip_mcp.pipelines.pixel_size.meters_per_crs_unit`); refuses (``ValueError``)
+        naming why when its CRS states no such span."""
+        from tcip_mcp.pipelines.pixel_size import meters_per_crs_unit
+
+        factor, reason = meters_per_crs_unit(self.transform.epsg)
+        if factor is None:
+            raise ValueError(f"this raster's distances cannot be stated in meters: {reason}")
+        return factor
 
 
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (  # noqa: E402

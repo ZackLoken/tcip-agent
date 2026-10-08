@@ -16,6 +16,7 @@ from tcip_mcp.subject_registry import SubjectRegistry, Subject
 from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import image_label_key, label_image, registry_over
+from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
 from tcip_web import jobstore
 from tcip_web.paths import safe_join
 
@@ -898,7 +899,7 @@ def test_a_launch_into_a_bucket_that_exists_fails_its_job_and_writes_nothing(
 
     resp = opened_client.post("/api/inference/launch", json={
         "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root,
-        "date": date, "bucket": BUCKET, "stated": {"tile": False},
+        "date": date, "bucket": BUCKET, "stated": {"tile": False, **SAMPLE_DETECTOR_PASS},
     })
 
     assert resp.status_code == 200, resp.text
@@ -1015,27 +1016,27 @@ def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset
 def test_inference_launch_resolves_explicit_conf_and_max_dets_source_from_the_payload(
     opened_client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
-    """A caller-stated conf/max_dets equal to the platform default travels on the job as stated,
-    which the worker's pass records as stated."""
-    from tcip_mcp.pipelines.execution import DEFAULT_CONF, DEFAULT_MAX_DETS
+    """A caller-stated conf/max_dets travels on the job as stated, which the worker's pass
+    records as stated."""
+    from tests._verified_checkpoint_fixtures import SAMPLE_CONF, SAMPLE_MAX_DETS
 
     ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
 
     resp = opened_client.post("/api/inference/launch", json={
         "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root, "date": date,
-        "bucket": BUCKET, "stated": {"conf": DEFAULT_CONF, "max_dets": DEFAULT_MAX_DETS},
+        "bucket": BUCKET, "stated": {"conf": SAMPLE_CONF, "max_dets": SAMPLE_MAX_DETS},
     })
     assert resp.status_code == 200, resp.text
     job = inference_routes._get(resp.json()["job_id"])
-    assert job.stated.conf == DEFAULT_CONF
-    assert job.stated.max_dets == DEFAULT_MAX_DETS
+    assert job.stated.conf == SAMPLE_CONF
+    assert job.stated.max_dets == SAMPLE_MAX_DETS
 
 
-def test_inference_launch_defaults_conf_and_max_dets_source_when_omitted(
+def test_inference_launch_carries_an_omitted_conf_and_max_dets_as_unstated(
     opened_client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
-    """An omitted conf/max_dets travels on the job as unstated, never as a value, and the
-    worker's pass resolves the platform default."""
+    """An omitted conf/max_dets travels on the job as unstated, never as a value; the worker's
+    pass, holding no reference, refuses them by name."""
     ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
 
     resp = opened_client.post("/api/inference/launch", json={

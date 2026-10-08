@@ -83,8 +83,8 @@ class _Encoding:
 
 _DISPLAY_ENCODING = _Encoding("JPEG", {"quality": 95, "subsampling": 0}, 65_500)
 """A display read, the whole frame, a region served scaled or a tile of an overview level: JPEG
-at quality 95 with chroma subsampling off. Provisional, from one RGB orthomosaic (239921x141130,
-one sensor, one site) read off its overviews at 4:4:4, as bytes and median encode time of three
+at quality 95 with chroma subsampling off. Measured on one RGB orthomosaic (239921x141130, one
+sensor, one site) read off its overviews at 4:4:4, as bytes and median encode time of three
 runs taken under load: 1,006,644 bytes in 65 ms at quality 95 against 675,889 in 83 ms at 90 for a
 1877x1104 view, 1,737,251 in 207 ms against 1,169,458 in 107 ms at 2503x1472, and 3,543,213 in
 200 ms against 2,423,054 in 453 ms at 3754x2208. The edge limit is the widest single row PIL's JPEG
@@ -92,7 +92,7 @@ encoder accepted here: 65,500 encoded, 65,501 did not."""
 
 _NATIVE_ENCODING = _Encoding("PNG", {"compress_level": 1}, None)
 """A region served at native resolution: lossless PNG at its fastest compression level, the
-pixels a judgment is made on. Provisional, from three 2880x2880 native windows of that same
+pixels a judgment is made on. Measured on three 2880x2880 native windows of that same
 orthomosaic: level 1 took 775 to 986 ms and 25.8 to 26.0 MB, level 6 took 1902 to 1978 ms and
 19.7 to 19.8 MB. PNG encoded a 10,000,000 pixel row here; no edge limit was found."""
 
@@ -145,7 +145,8 @@ _STATS_MAX_WINDOWS = 256
 """Windows the stats sample may read natively, about 16.8 million pixels at
 :data:`_STATS_WINDOW_SIZE`. A GDAL-served raster with more pixels than these windows hold has its
 statistics read off its overview pyramid instead; any other backend samples these windows
-natively. Provisional: a documented bound on one native read's cost, not a measurement."""
+natively. An engineering bound on what one native statistics read may decode, chosen and not
+measured."""
 
 _STATS_RESERVOIR_SIZE = 1 << 20
 """Pixels the percentile pass keeps, bounding what it holds to that many values per band in the

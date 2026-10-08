@@ -3,7 +3,7 @@ and provenance rails that later work will touch.
 
 These are deliberately *exact*: they assert the numbers today's code produces on tiny
 deterministic fixtures, so a later semantic change (a different conf pick, a re-defined
-localization criterion, a consolidated default, a re-shaped stamp) fails loudly instead of
+localization criterion, a value no longer stated, a re-shaped stamp) fails loudly instead of
 sliding through silently. They are not aspirational: a golden turning red is the signal to
 update it *deliberately* alongside the change that moved the number.
 
@@ -11,8 +11,9 @@ Rails pinned here (one section each):
   1. conf operating-point sweep + count-unbiased pick + the count criterion over a reference
   2. phenology fraction curve + milestone dates (crossing_date / plant_milestones /
      per_plant_phenology)
-  3. the execution record a pass runs under, with no value stated
-  4. the one set of inference operating-point defaults
+  3. the execution record a pass runs under: the values it states, and the refusal of an
+     unstated one
+  4. no inference operating-point default anywhere, and the stated values each door hands on
   5. IoU-matching eval metrics at iou_threshold=0.5 (current criterion, to be replaced by a
      derived center-match tolerance)
 """
@@ -93,7 +94,7 @@ def test_golden_pick_count_unbiased_and_f1_max():
 def test_golden_count_criterion_over_a_dense_distinct_reference():
     """The count criterion needs a dense, realistic reference: a sparse 2-image fixture's
     per-image variance trips the equivalence test, a correct refusal."""
-    from tcip_mcp.pipelines.derivations import derive_max_dets_from_counts
+    from tcip_mcp.pipelines.derivations import derive_max_dets
     from tcip_mcp.pipelines.operating_point import count_criterion
     from tcip_mcp.pipelines.training.evaluation import gt_objects
     from tests import _trait_fixtures as fx
@@ -106,7 +107,10 @@ def test_golden_count_criterion_over_a_dense_distinct_reference():
     assert conf == pytest.approx(0.9)
     assert evidence["conf_derived_from"] == "count-unbiased count curve"
     assert failures == []
-    assert derive_max_dets_from_counts([len(gt_objects(r)) for r in cal + hold]) == 120  # ~1.5x p99
+    # ~1.5x p99 over frames of one size, published at that size
+    frame = float(cal[0]["width"] * cal[0]["height"])
+    assert derive_max_dets([(len(gt_objects(r)), float(r["width"] * r["height"]))
+                            for r in cal + hold], frame) == 120
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -186,28 +190,34 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
     assert row["bud_50per_date"] == "2026-02-24"
 
 
-# ── 3. the execution record a pass runs under, with no value stated ──
+# ── 3. the execution record a pass runs under: what it states, and an unstated value refused ──
 
 
-def test_golden_execution_record_of_an_untiled_pass_with_nothing_stated(tmp_path):
-    """Every value a pass runs under is recorded with where it came from; with nothing stated an
-    untiled detector pass runs at the documented defaults, each sourced ``default``."""
-    from tcip_mcp.pipelines.execution import DEFAULT_CONF, DEFAULT_MAX_DETS, Stated, prepare_pass
-    from tests._verified_checkpoint_fixtures import verified_checkpoint
+def test_golden_execution_record_of_an_untiled_pass_runs_at_what_it_states(tmp_path):
+    """Every value a pass runs under is recorded with where it came from: an untiled detector
+    pass runs at the conf and cap it states, each sourced ``explicit``, and stating neither
+    refuses."""
+    from tcip_mcp.pipelines.execution import ExecutionRefusedError, Stated, prepare
+    from tests._verified_checkpoint_fixtures import (
+        SAMPLE_CONF, SAMPLE_MAX_DETS, verified_checkpoint,
+    )
 
-    record = prepare_pass(verified_checkpoint(tmp_path), Stated(tile=False)).execution.record()
+    checkpoint = verified_checkpoint(tmp_path)
+    record = prepare(checkpoint, Stated(tile=False, conf=SAMPLE_CONF,
+                                        max_dets=SAMPLE_MAX_DETS)).runnable().execution.record()
 
-    assert record["conf"] == DEFAULT_CONF == 0.5
-    assert record["max_dets"] == DEFAULT_MAX_DETS == 1000
-    assert record["sources"] == {"conf": "default", "max_dets": "default"}
+    assert (record["conf"], record["max_dets"]) == (SAMPLE_CONF, SAMPLE_MAX_DETS)
+    assert record["sources"] == {"conf": "explicit", "max_dets": "explicit"}
     assert record["tile_size"] is None and record["cross_tile_nms"] is None
+    with pytest.raises(ExecutionRefusedError, match="conf"):
+        prepare(checkpoint, Stated(tile=False)).runnable()
 
 
-# ── 4. the one set of inference operating-point defaults ──
+# ── 4. no inference operating-point default, and the stated values each door hands on ──
 
-def test_golden_consolidated_operating_point_defaults(tmp_path):
-    # No module but the execution record's own carries a copy of the inference operating-point
-    # knobs: a second copy would let the same model and images give a different count by door.
+def test_golden_no_operating_point_default_survives_and_each_door_takes_stated_values(tmp_path):
+    # No module carries an inference operating-point default: each value is stated, derived from
+    # a reference the caller holds, or refused, and every door hands its stated values on whole.
     from tcip_mcp.pipelines import execution as execution_mod
     from tcip_mcp.pipelines import operating_point as operating_point_mod
     from tcip_mcp.pipelines.inference import generic_predictor as generic_predictor_mod
@@ -215,12 +225,11 @@ def test_golden_consolidated_operating_point_defaults(tmp_path):
     from tcip_mcp.pipelines.training import evaluation as evaluation_mod
     from tcip_mcp.tools import training_tools as training_tools_mod
 
-    # tile_size/tiled carry no shared fallback constant at all: a caller derives or states them.
-    assert execution_mod.DEFAULT_CONF == 0.5
-    assert execution_mod.DEFAULT_NMS_IOU == 0.3
-    assert execution_mod.DEFAULT_MAX_DETS == 1000
-    assert not hasattr(execution_mod, "DEFAULT_TILE_SIZE")
-    assert not hasattr(execution_mod, "DEFAULT_TILED")
+    # The operating point carries no shared fallback constant at all: a caller states each value
+    # or derives it from a reference it holds.
+    for name in ("DEFAULT_TILE_SIZE", "DEFAULT_TILED", "DEFAULT_NMS_IOU", "DEFAULT_CONF",
+                 "DEFAULT_MAX_DETS"):
+        assert not hasattr(execution_mod, name), name
 
     for name in ("DEFAULT_CONF", "DEFAULT_MAX_DETS", "DEFAULT_NMS_IOU", "DEFAULT_OVERLAP",
                  "_DEFAULT_CROSS_TILE_NMS", "_DEFAULT_MAX_DETS", "DEFAULT_TILE_SIZE"):
@@ -232,8 +241,8 @@ def test_golden_consolidated_operating_point_defaults(tmp_path):
     for name in ("execution", "tile_batch_size", "require_masks"):
         assert gp_sig.parameters[name].default is inspect.Parameter.empty
 
-    # evaluate_model's stated values are a None sentinel each regime resolves for itself; what
-    # each resolves to for a no-arg caller is pinned by the two goldens below.
+    # evaluate_model states nothing when its caller states nothing; each regime then refuses what
+    # a detector leaves unstated, as the two goldens below pin.
     ev_sig = inspect.signature(training_tools_mod.evaluate_model)
     assert ev_sig.parameters["stated"].default is None
     assert ev_sig.parameters["iou_threshold"].default == 0.5
@@ -247,14 +256,18 @@ def test_golden_consolidated_operating_point_defaults(tmp_path):
     assert evaluation_mod.DEFAULT_SCORE_WEIGHTS == {"loss": 0.45, "f1": 0.35, "map50": 0.2}
 
 
-def test_golden_evaluate_model_resolves_diagnostic_max_dets_when_unset(tmp_path, monkeypatch):
-    """A signature-shape golden alone cannot see what a no-arg caller's max_dets resolves to on
-    the tile-level/diagnostic regime: evaluate_model resolves none of its own and hands the
-    runner the pass the one execution resolver prepared, its cap the documented default."""
-    from tcip_mcp.pipelines.execution import DEFAULT_MAX_DETS
+def test_golden_evaluate_model_hands_the_diagnostic_its_stated_cap_and_refuses_none(
+        tmp_path, monkeypatch):
+    """A signature-shape golden alone cannot see what a caller's max_dets resolves to on the
+    tile-level/diagnostic regime: evaluate_model resolves none of its own and hands the runner
+    the pass the one execution resolver prepared, its cap the stated one; a call stating none
+    refuses naming it."""
+    from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.pipelines.training import eval_runners as runners
     from tcip_mcp.tools import training_tools as training_tools_mod
-    from tests._verified_checkpoint_fixtures import foreign_checkpoint
+    from tests._verified_checkpoint_fixtures import (
+        SAMPLE_CONF, SAMPLE_MAX_DETS, foreign_checkpoint,
+    )
 
     captured: dict = {}
 
@@ -280,24 +293,30 @@ def test_golden_evaluate_model_resolves_diagnostic_max_dets_when_unset(tmp_path,
                     64, 64)
         ckpt = foreign_checkpoint(tmp)
 
-        training_tools_mod.evaluate_model(tmp, str(ckpt), str(images_dir))
+        refused = training_tools_mod.evaluate_model(tmp, str(ckpt), str(images_dir),
+                                                    stated=Stated(conf=SAMPLE_CONF))
+        training_tools_mod.evaluate_model(
+            tmp, str(ckpt), str(images_dir),
+            stated=Stated(conf=SAMPLE_CONF, max_dets=SAMPLE_MAX_DETS))
     finally:
         runners.run_test_evaluation = orig_diag
 
-    assert captured["diagnostic_max_dets"] == (DEFAULT_MAX_DETS, "default")
+    assert "max_dets" in refused.get("error", ""), refused
+    assert captured["diagnostic_max_dets"] == (SAMPLE_MAX_DETS, "explicit")
 
 
-def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp_path, monkeypatch):
-    """A no-arg caller's conf_threshold resolves to the platform default on all three regimes,
-    each constructed genuinely (a tiling dict for the tile-level run, nothing for the single
-    pass, use_tiled_inference=True for the full frame), and the discriminating case: a caller
-    stating the default value explicitly (0.5) still reaches the full-frame runner's record as an
-    explicit stated value, never read back as an untouched default at the same number."""
+def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_none(
+        tmp_path, monkeypatch):
+    """Each of the three regimes, constructed genuinely (a tiling dict for the tile-level run,
+    nothing for the single pass, use_tiled_inference=True for the full frame), runs at the conf
+    the caller states, recorded ``explicit``, and refuses naming ``conf`` when none is stated."""
     import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.pipelines import execution as execution_mod
     from tcip_mcp.tools import training_tools as training_tools_mod
-    from tests._verified_checkpoint_fixtures import foreign_checkpoint
+    from tests._verified_checkpoint_fixtures import (
+        SAMPLE_CONF, SAMPLE_DETECTOR_PASS, foreign_checkpoint,
+    )
 
     from tests._producer_fixtures import label_image
 
@@ -340,32 +359,25 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
     tile_ds = _prepare("tile", "conf-tile-level")
     single_ds = _prepare("single", "conf-single-pass")
     ff_default_ds = _prepare("ff-default", "conf-full-frame-default")
-    ff_stated_ds = _prepare("ff-stated", "conf-full-frame-stated")
 
     monkeypatch.setattr(evaluation, "evaluate",
                         lambda *a, **k: {"loss": 0.1, "precision": 0.4, "recall": 0.5, "f1": 0.44})
     monkeypatch.setattr(predictor_mod, "GenericPredictor", lambda *a, **kw: _StubPredictor())
 
-    def _run(dataset, **kw):
-        images_dir, ckpt = dataset
-        r = training_tools_mod.evaluate_model(tmp_path, str(ckpt), str(images_dir), **kw)
-        assert "error" not in r, r
-        return r
-
-    tile_level = _run(tile_ds, tiling={"tile_size": 64, "overlap": 0.0, "sliver_frac": 0.5})
-    assert tile_level["execution"]["conf"] == execution_mod.DEFAULT_CONF == 0.5
-
-    single_pass = _run(single_ds)
-    assert single_pass["execution"]["conf"] == execution_mod.DEFAULT_CONF == 0.5
-
-    full_frame_default = _run(ff_default_ds, use_tiled_inference=True)
-    assert full_frame_default["execution"]["conf"] == execution_mod.DEFAULT_CONF == 0.5
-    assert full_frame_default["execution"]["sources"]["conf"] == "default"
-
-    full_frame_stated = _run(
-        ff_stated_ds, use_tiled_inference=True, stated=execution_mod.Stated(conf=0.5))
-    assert full_frame_stated["execution"]["conf"] == 0.5
-    assert full_frame_stated["execution"]["sources"]["conf"] == "explicit"
+    unstated_conf = {k: v for k, v in SAMPLE_DETECTOR_PASS.items() if k != "conf"}
+    regimes = [(tile_ds, {"tiling": {"tile_size": 64, "overlap": 0.0, "sliver_frac": 0.5}}),
+               (single_ds, {}), (ff_default_ds, {"use_tiled_inference": True})]
+    for (images_dir, ckpt), regime in regimes:
+        refused = training_tools_mod.evaluate_model(
+            tmp_path, str(ckpt), str(images_dir), **regime,
+            stated=execution_mod.Stated(**unstated_conf))
+        assert "conf" in refused.get("error", ""), (regime, refused)
+        ran = training_tools_mod.evaluate_model(
+            tmp_path, str(ckpt), str(images_dir), **regime,
+            stated=execution_mod.Stated(**SAMPLE_DETECTOR_PASS))
+        assert "error" not in ran, (regime, ran)
+        assert (ran["execution"]["conf"], ran["execution"]["sources"]["conf"]) == (
+            SAMPLE_CONF, "explicit"), regime
 
 
 # ══════════════════════════════════════════════════════════════════════════

@@ -22,6 +22,7 @@ from tcip_mcp.experiments import observe  # noqa: E402
 from tcip_mcp.pipelines.model_build import CONFIG_KEY, METRICS_KEY, STATE_DICT_KEY  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope  # noqa: E402
 from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
+from tests._training_values import adamw_optimizer  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     completed_checkpoint,
     detection_config,
@@ -223,11 +224,11 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
         return DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
 
     _ds, data = run_over("classification", str(images_dir), str(csv_path))
-    from tests._chain_fixtures import ADAMW, BESPOKE_CLASSIFIER, training_config
+    from tests._chain_fixtures import BESPOKE_CLASSIFIER, training_config
 
     cfg = training_config(
         {"builder": BESPOKE_CLASSIFIER, "task": "classification"},
-        data, stages=[{"freeze_to": -1, "epochs": 2}], optimizer=ADAMW, seed=3)
+        data, stages=[{"freeze_to": -1, "epochs": 2}], optimizer=adamw_optimizer(), seed=3)
     # Generate the resumable checkpoint directly (not through the envelope).
     train(trainer_run(dict(cfg), tmp_path / "out", project=tmp_path, has_val_loader=False,
                       id="resume-source"),
@@ -261,6 +262,23 @@ def test_report_objective_records_a_selection_row_that_reaches_the_epoch_hook(tm
     assert seen[-1] == (2, {"selection": 3.14, "selection_metric": metric})
     last = read_rows(run_dir / METRICS_FILE)[0][-1]
     assert (last["epoch"], last["selection"], last["selection_metric"]) == (2, 3.14, metric)
+
+
+def test_ctx_evaluate_counts_at_the_runs_validated_conf_and_takes_none_of_its_own(
+        tmp_path, monkeypatch):
+    """A bespoke body's evaluation counts a detector's boxes at the conf its run's validated
+    evaluation block states; a caller naming another conf is refused by the call itself."""
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tests._training_values import VALIDATION_CONF
+
+    handed: dict = {}
+    monkeypatch.setattr(evaluation, "evaluate", lambda *a, **k: handed.update(k) or {})
+    ctx, _run_dir = _context(tmp_path, detection_config(tmp_path / "data"))
+
+    ctx.evaluate(object(), loader=[])
+    assert handed["conf_threshold"] == VALIDATION_CONF
+    with pytest.raises(TypeError, match="conf_threshold"):
+        ctx.evaluate(object(), loader=[], conf_threshold=0.1)
 
 
 def test_envelope_default_path_runs_default_train_and_audits(tmp_path, monkeypatch):

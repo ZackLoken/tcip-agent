@@ -99,13 +99,19 @@ def test_set_detector_operating_point_one_stage():
     assert m.detector.score_thresh == 0.4 and m.detector.nms_thresh == 0.6
 
 
-def test_the_detection_cap_scales_above_its_floor_and_floors_sparse_scenes():
-    # 1.5x the p99 GT-per-image count exceeds the 100 floor, so the cap scales with density
-    # instead of pinning to the floor (a dense scene must not be truncated).
-    from tcip_mcp.pipelines.derivations import derive_max_dets_from_counts
+def test_the_detection_cap_is_its_formula_at_every_density_and_refuses_no_positive_cap():
+    """``ceil(1.5 * p99 density * footprint)``, a sparse scene included, with no floor over it;
+    a reference whose selected percentile is zero yields no positive cap and refuses naming
+    ``max_dets``, an all-empty one and a sparse one holding a single object alike."""
+    from tcip_mcp.pipelines.derivations import derive_max_dets
 
-    assert derive_max_dets_from_counts([80] * 20) == 120  # ceil(1.5 * 80)
-    assert derive_max_dets_from_counts([2] * 20) == 100  # floor, not ceil(1.5 * 2)
+    frame = 100.0 * 100.0
+    assert derive_max_dets([(80, frame)] * 20, frame) == 120
+    assert derive_max_dets([(2, frame)] * 20, frame) == 3
+    assert derive_max_dets([(10, frame)] * 3, frame * 10) == 150
+    for sparse in ([0] * 5, [0] * 199 + [1]):
+        with pytest.raises(ValueError, match="no positive cap; state max_dets"):
+            derive_max_dets([(n, frame) for n in sparse], frame)
 
 
 # --- the cross-tile merge threshold ---
@@ -126,8 +132,7 @@ def _gt_boxes(records):
 def test_the_merge_threshold_derives_from_the_ground_truths_neighbor_overlap_tail():
     from tcip_mcp.pipelines.derivations import derive_cross_tile_nms
 
-    value = derive_cross_tile_nms(_gt_boxes(_overlap_records()), metric="IOU")
-    assert value is not None and 0.2 <= value <= 0.8
+    value = derive_cross_tile_nms(_gt_boxes(_overlap_records()))
     # p99 of the GT neighbor-IoU tail + margin
     assert value == pytest.approx(0.4286 + 0.05, abs=1e-2)
 
@@ -135,43 +140,46 @@ def test_the_merge_threshold_derives_from_the_ground_truths_neighbor_overlap_tai
 def test_no_overlapping_ground_truth_derives_no_merge_threshold():
     from tcip_mcp.pipelines.derivations import derive_cross_tile_nms
 
-    assert derive_cross_tile_nms([], metric="IOU") is None
-    assert derive_cross_tile_nms(_gt_boxes(_records("c")), metric="IOU") is None
+    assert derive_cross_tile_nms([]) is None
+    assert derive_cross_tile_nms(_gt_boxes(_records("c"))) is None
 
 
-def _tiled_pass(tmp_path, **stated):
-    from tcip_mcp.pipelines.execution import Stated, prepare_pass
-    from tests._verified_checkpoint_fixtures import verified_checkpoint
+def _tiled_pass(tmp_path, records, **stated):
+    """The tiled pass of a verified checkpoint at the sample conf and cap, made runnable from
+    ``records``' ground truth."""
+    from tcip_mcp.pipelines.execution import Reference, Stated, prepare
+    from tests._verified_checkpoint_fixtures import (
+        SAMPLE_CONF, SAMPLE_MAX_DETS, verified_checkpoint,
+    )
 
-    return prepare_pass(verified_checkpoint(tmp_path), Stated(tile=True, tile_size=64, **stated))
+    prep = prepare(verified_checkpoint(tmp_path),
+                   Stated(tile=True, tile_size=64, conf=SAMPLE_CONF, max_dets=SAMPLE_MAX_DETS,
+                          **stated))
+    return prep.runnable(Reference(boxes_per_image=_gt_boxes(records), counted=None,
+                                   footprint=None))
 
 
 def test_a_tiled_pass_records_its_derived_merge_threshold_by_the_derivations_name(tmp_path):
-    from tcip_mcp.pipelines.derivations import CROSS_TILE_NMS_DERIVATIONS
+    from tcip_mcp.pipelines.derivations import CROSS_TILE_NMS_DERIVATION
 
-    p = _tiled_pass(tmp_path)
-    p.derive_merge(_gt_boxes(_overlap_records()))
+    p = _tiled_pass(tmp_path, _overlap_records())
 
     assert p.execution.cross_tile_nms == pytest.approx(0.4786, abs=1e-2)
-    assert p.execution.sources["cross_tile_nms"] == CROSS_TILE_NMS_DERIVATIONS["IOU"]
+    assert p.execution.sources["cross_tile_nms"] == CROSS_TILE_NMS_DERIVATION
 
 
 def test_a_stated_merge_threshold_is_never_relabeled_derived(tmp_path):
-    p = _tiled_pass(tmp_path, cross_tile_nms=0.55)
-    p.derive_merge(_gt_boxes(_overlap_records()))
+    p = _tiled_pass(tmp_path, _overlap_records(), cross_tile_nms=0.55)
 
     assert p.execution.cross_tile_nms == pytest.approx(0.55)
     assert p.execution.sources["cross_tile_nms"] == "explicit"
 
 
-def test_an_underivable_merge_threshold_keeps_the_documented_default(tmp_path):
-    from tcip_mcp.pipelines.execution import DEFAULT_NMS_IOU
+def test_an_underivable_merge_threshold_refuses_naming_its_missing_basis(tmp_path):
+    from tcip_mcp.pipelines.execution import ExecutionRefusedError
 
-    p = _tiled_pass(tmp_path)
-    p.derive_merge(_gt_boxes(_records("c")))
-
-    assert p.execution.cross_tile_nms == DEFAULT_NMS_IOU
-    assert p.execution.sources["cross_tile_nms"] == "default"
+    with pytest.raises(ExecutionRefusedError, match="no two of its boxes in one image overlap"):
+        _tiled_pass(tmp_path, _records("c"))
 
 
 def test_classification_metrics_per_class_and_bias():

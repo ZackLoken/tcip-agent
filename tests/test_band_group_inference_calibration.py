@@ -22,6 +22,7 @@ torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
 from tests._chain_fixtures import BESPOKE_DETECTION  # noqa: E402
+from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS  # noqa: E402
 pytest.importorskip("torchvision")
 
 TILE = 32
@@ -88,13 +89,14 @@ def test_the_assessments_records_over_grouped_samples_decode_each_capture(tmp_pa
     from tcip_mcp.pipelines import raster_source
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.data.selection import source_digests
-    from tcip_mcp.pipelines.execution import Stated, prepare_pass
+    from tcip_mcp.pipelines.execution import Stated, prepare
     from tests._producer_fixtures import samples_over
 
     images_dir = _grouped_dataset(tmp_path)
     checkpoint = load_registered_checkpoint(_detection_checkpoint(tmp_path), project=tmp_path)
-    p = prepare_pass(checkpoint, Stated(tile=False, conf=0.0, max_dets=100, postprocess="nms"),
-                     device="cpu", tile_batch_size=8)
+    p = prepare(checkpoint,
+                Stated(tile=False, conf=0.0, max_dets=SAMPLE_MAX_DETS, postprocess="nms"),
+                device="cpu", tile_batch_size=8).runnable()
     samples = samples_over(images_dir, subject="bud")
 
     seen_sources = []
@@ -133,12 +135,13 @@ def test_predict_batch_rejects_stringified_band_group_refs(tmp_path):
     """Stringifying a ``BandGroupRef`` before calling ``predict_batch``, instead of passing the
     raw reference, raises."""
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.execution import Stated, prepare_pass
+    from tcip_mcp.pipelines.execution import Stated, prepare
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
     images_dir = _grouped_dataset(tmp_path)
     checkpoint = load_registered_checkpoint(_detection_checkpoint(tmp_path), project=tmp_path)
-    p = prepare_pass(checkpoint, Stated(tile=False, conf=0.0), device="cpu")
+    p = prepare(checkpoint, Stated(tile=False, conf=0.0, max_dets=SAMPLE_MAX_DETS),
+                device="cpu").runnable()
 
     logical = list_logical_images(images_dir)
     with pytest.raises(ValueError):

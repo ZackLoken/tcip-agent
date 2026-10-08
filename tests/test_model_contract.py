@@ -43,9 +43,9 @@ def test_build_model_from_model_source_imports_builder():
     model = build_model({"model_source": src}, dims)
     assert isinstance(model, TCIPModel)
     # build_from_model_source is the same path, callable directly on the validated source.
-    from tcip_mcp.pipelines.schemas import train_config
+    from tcip_mcp.pipelines.schemas import ModelSourceSchema
 
-    source = train_config({"model_source": src}).model_source
+    source = ModelSourceSchema.model_validate(src)
     assert type(build_from_model_source(source, dims)).__name__ == type(model).__name__
 
 
