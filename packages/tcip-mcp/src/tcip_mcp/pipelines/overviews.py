@@ -22,8 +22,8 @@ from tcip_mcp.pipelines.raster_source import open_gdal_dataset, palette_tiff
 
 PYRAMID_FLOOR_EDGE = 1024
 """Longest edge of a pyramid's deepest level, and the edge a raster too large to sample natively
-has its display statistics read at, so that read always has a level to come off. Provisional: a
-documented choice, not a measurement."""
+has its display statistics read at, so that read always has a level to come off: an engineering
+bound, a level small enough to read whole in one native pass, chosen and not measured."""
 
 # How often the parent samples the growing sidecar to report progress and honor a cancel.
 _BUILD_POLL_SECONDS = 0.2

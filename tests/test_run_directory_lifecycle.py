@@ -20,6 +20,7 @@ import pytest
 pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.model_build import STATE_DICT_KEY  # noqa: E402
+from tests._training_values import sweep_space  # noqa: E402
 
 
 @pytest.fixture
@@ -373,7 +374,7 @@ def test_a_name_is_reserved_by_the_directory_that_takes_it_first(
         create_run_directory(composing)
 
     sweep = opened_sweep(tmp_path, real_hpo_base_config)
-    trial = open_trial(sweep, "a", {"lr": 0.01})
+    trial = open_trial(sweep, "a", {"optimizer.head_lr": 0.01})
     config = detection_config(tmp_path.parent / "run-data")
     with pytest.raises(RunDirectoryExistsError, match=re.escape(str(sweep))):
         opened_run(tmp_path, config, experiment_id=sweep.name)
@@ -416,7 +417,7 @@ def _trial(tmp_path, point: dict | None = None, **extra) -> tuple[Path, list[flo
         "split": {"val_ratio": 0.34, "seed": 3}}, **extra)
     sweep = opened_sweep(tmp_path, base_config)
     reported: list[float] = []
-    _run_hpo_trial(point or {"lr": 0.01}, reported.append, sweep, "a")
+    _run_hpo_trial(point or {"optimizer.head_lr": 0.01}, reported.append, sweep, "a")
     (trial_dir,) = run_dirs(tmp_path)
     return trial_dir, reported
 
@@ -439,7 +440,7 @@ def test_an_hpo_trial_is_a_run_directory_reporting_the_sweeps_one_objective(tmp_
 
     record = read_record(trial_dir / RUN_FILE)
     objective = {"selection_metric": "loss", "higher_is_better": False}
-    assert record["trial_params"] == {"lr": 0.01}
+    assert record["trial_params"] == {"optimizer.head_lr": 0.01}
     assert record["resolved"]["partition"]["samples"]
     assert record["resolved"]["objective"] == objective
     assert observe(trial_dir).state == "completed"
@@ -497,7 +498,8 @@ def test_the_sweep_the_live_summary_and_a_trial_read_one_recorded_objective(
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", one_trial)
     result = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config,
-                                          n_trials=1, search_seed=0, auto_tensorboard=False)
+                                          param_space=sweep_space(), n_trials=1, search_seed=0,
+                                          auto_tensorboard=False)
     sweep = observe(find_sweep(result["sweep"]["sweep_id"], project=tmp_path))
     (trial_dir,) = run_dirs(tmp_path)
     trial = observe(trial_dir)

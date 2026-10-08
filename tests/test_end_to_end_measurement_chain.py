@@ -22,9 +22,13 @@ pytest.importorskip("pycocotools")
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 
+from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._chain_fixtures import (  # noqa: E402
     IMG, STEMS, SUBJECT, draw_reference_selection, object_at, run_the_chain, synthetic_capture,
     train_on,
+)
+from tests._verified_checkpoint_fixtures import (  # noqa: E402
+    SAMPLE_DETECTOR_PASS, SAMPLE_MAX_DETS,
 )
 
 
@@ -61,7 +65,7 @@ def test_the_tiny_detector_trains_and_finds_one_object_per_frame(tmp_path: Path)
     """The model the chain rests on: a real training pass, and predictions stable enough that a
     count measured over them is a fact about the chain rather than about a fit."""
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.execution import Stated, prepare_pass
+    from tcip_mcp.pipelines.execution import prepare
 
     root = tmp_path / "ds"
     images_dir = synthetic_capture(root)
@@ -71,7 +75,8 @@ def test_the_tiny_detector_trains_and_finds_one_object_per_frame(tmp_path: Path)
     checkpoint_path = train_on(selection_dir, tmp_path, "exp-chain-train")
 
     checkpoint = load_registered_checkpoint(checkpoint_path, project=tmp_path)
-    p = prepare_pass(checkpoint, Stated(tile=False, conf=0.5), device="cpu")
+    p = prepare(checkpoint, Stated(tile=False, conf=0.5, max_dets=SAMPLE_MAX_DETS),
+                device="cpu").runnable()
     results = p.predict([str(images_dir / f"{stem}.png") for stem in STEMS[:3]])
 
     assert [r["count"] for r in results] == [1, 1, 1], results
@@ -111,6 +116,24 @@ def test_a_reference_document_edited_after_its_read_is_never_measured(tmp_path: 
     recorded = assessment_mod.read_assessment(tmp_path, assessed["assessment_id"])
     (retained,) = [f for f in recorded.reference.ground_truth if f.ground_truth == moved]
     assert retained.digest != ground_truth_digest(moved)
+
+
+def test_a_frame_assessment_stating_no_cap_refuses_naming_it(tmp_path: Path):
+    """Calibration frames of one size establish nothing about the frames a pass later publishes
+    on, which may be larger at the same density: an assessment over frames stating no
+    ``max_dets`` refuses naming it, and the same assessment stating one passes."""
+    from tests._chain_fixtures import assess, confirm_count_trait
+
+    root = tmp_path / "ds"
+    synthetic_capture(root)
+    selection_dir = tmp_path / "selection"
+    draw_reference_selection(tmp_path, root, selection_dir)
+    checkpoint_path = train_on(selection_dir, tmp_path, "exp-chain-uncapped")
+    confirm_count_trait(tmp_path)
+
+    refused = assess(tmp_path, checkpoint_path, selection_dir, max_dets=None)
+    assert "max_dets" in refused.get("error", ""), refused
+    assert assess(tmp_path, checkpoint_path, selection_dir)["passed"] is True
 
 
 def test_the_assessment_passes_and_the_bucket_published_under_it_names_it(tmp_path: Path):
@@ -173,7 +196,8 @@ def test_the_chain_delivers_a_csv_whose_validated_column_reads_true(tmp_path: Pa
 
     unassessed = "unassessed/2026-01-01"
     published = run_inference(tmp_path, checkpoint_path=chain.checkpoint_path,
-                              images_dir=str(chain.images_dir), bucket=unassessed)
+                              images_dir=str(chain.images_dir), bucket=unassessed,
+                              stated=Stated(**SAMPLE_DETECTOR_PASS))
     assert "error" not in published, published
     refused_csv = tmp_path / "unassessed_counts.csv"
     refused = deliver_per_image_counts(tmp_path, str(chain.root), unassessed, str(refused_csv),

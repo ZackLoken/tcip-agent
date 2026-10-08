@@ -214,7 +214,7 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     channel-aware loader, never as a stringified BandGroupRef."""
     pytest.importorskip("torch")
 
-    from tests._verified_checkpoint_fixtures import foreign_checkpoint
+    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS, foreign_checkpoint
 
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.execution import Stated
@@ -246,7 +246,8 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     job = InferenceJob(
         job_id="t2", actor="user:tester", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         dataset_root=str(tmp_path), bucket="out", project=str(tmp_path), stated=Stated(
-            tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nms"),
+            tile=False, conf=0.25, max_dets=SAMPLE_MAX_DETS, cross_tile_nms=0.7, overlap=0.2,
+            postprocess="nms"),
     )
     _worker(job)
 

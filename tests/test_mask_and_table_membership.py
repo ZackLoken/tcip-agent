@@ -25,6 +25,7 @@ from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
 )
 from tcip_mcp.tools.data_tools import draw_splits  # noqa: E402
 from tests._producer_fixtures import painted_frame  # noqa: E402
+from tests._chain_fixtures import training_config  # noqa: E402
 from tests._verified_checkpoint_fixtures import partition_side  # noqa: E402
 
 STEMS = ("a", "b", "c", "d", "e", "f", "g", "h")
@@ -38,7 +39,7 @@ def _resolved(project: Path, experiment_id: str, task: str, data_cfg: dict):
     from tcip_mcp.pipelines.training.subprocess_worker import prepare_run_context
     from tests._verified_checkpoint_fixtures import opened_run
 
-    run_dir = opened_run(project, {"model_source": {"task": task}, "data": data_cfg},
+    run_dir = opened_run(project, training_config({"task": task}, data_cfg),
                          experiment_id=experiment_id)
     ctx = prepare_run_context(observe(run_dir))
     val = ctx.val_loader.dataset if ctx.val_loader is not None else None
@@ -519,7 +520,7 @@ def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(tmp_path:
     model = bespoke_models.build_bespoke_semantic_seg(num_classes=count)
     loader = DataLoader(train_ds, batch_size=1, collate_fn=task_collate("semantic_seg"))
     result = evaluate(model, loader, torch.device("cpu"), "semantic_seg",
-                      dims={"in_chans": 3, "num_classes": count})
+                      dims={"in_chans": 3, "num_classes": count}, conf_threshold=None)
 
     assert sorted(result["per_class_iou"]) == [0, 1, 2]
 

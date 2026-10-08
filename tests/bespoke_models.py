@@ -149,11 +149,9 @@ def train_bespoke(ctx) -> None:
     device = ctx.device
     model = ctx.build_model().to(device)
 
-    optimizer = ctx.build_optimizer(
-        "adamw", model, backbone_lr=1e-3, head_lr=1e-3, weight_decay=0.0
-    )
+    optimizer = ctx.build_optimizer(model)
     epochs = int(ctx.config.get("epochs", 2))
-    scheduler = ctx.build_scheduler(optimizer, {"type": "cosine"}, epochs)
+    scheduler = ctx.build_scheduler(optimizer, epochs)
 
     best = float("inf")
     best_state = None

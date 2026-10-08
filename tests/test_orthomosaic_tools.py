@@ -12,7 +12,10 @@ import tifffile
 
 from tcip_mcp.pipelines.execution import Stated
 from tests import _trait_fixtures as fx
-from tests._mapping_fixtures import GRID_COLUMNS, register_plant_registry_for, write_plant_csv
+from tests._mapping_fixtures import (
+    GRID_COLUMNS, POSITION_ERROR_M, register_plant_registry_for, write_plant_csv,
+)
+from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS, SAMPLE_MAX_DETS
 
 torch = pytest.importorskip("torch")
 
@@ -27,7 +30,8 @@ TIEPOINT_NATIVE_Y = 4_800_000.0
 PIXEL_SCALE = 0.5  # native-CRS units (m) per pixel
 
 TILE = 32
-RASTER_PASS = Stated(conf=0.0, tile_size=TILE, overlap=0.2)
+RASTER_PASS = Stated(conf=0.0, max_dets=SAMPLE_MAX_DETS, tile_size=TILE, overlap=0.2,
+                     cross_tile_nms=SAMPLE_CROSS_TILE_NMS)
 """The execution values every raster pass here states."""
 SCOPE = {"subject": fx.COUNT_SUBJECT, "attributes": []}
 pytestmark = pytest.mark.usefixtures("confirmed_count_aggregate")
@@ -478,7 +482,8 @@ def test_canopy_segments_attribute_by_containment_and_name_every_gap(tmp_path):
     _write_canopy_document(raster_path, [
         (5.0, 5.0, 15.0, 15.0), (45.0, 5.0, 55.0, 15.0), (0.0, 55.0, 5.0, 60.0)])
 
-    result = _deliver(tmp_path, bucket, registry, ["plot0", "plot2"], canopy_subject="canopy")
+    result = _deliver(tmp_path, bucket, registry, ["plot0", "plot2"], canopy_subject="canopy",
+                      position_error_m=POSITION_ERROR_M)
 
     assert "error" not in result, result
     assert result["detections_unattributed"] == 2
@@ -492,12 +497,42 @@ def test_canopy_segments_attribute_by_containment_and_name_every_gap(tmp_path):
     assert sorted(pm["plants_without_segment"]) == ["plot1", "plot3"]
     assert pm["plants_with_ambiguous_detections"] == []
     assert pm["detections_unattributed_by_source"] == {
-        "outside_segments": 1, "overlapping_segments": 0, "segment_without_plant": 1}
+        "outside_segments": 1, "overlapping_segments": 0, "segment_without_plant": 1,
+        "segment_plant_within_position_error": 0}
     assert {t["plot_name"] for t in pm["segment_ties"]} == {"plot0", "plot2"}
     assert all(t["clearance_m"] > 0 for t in pm["segment_ties"])
 
-    refused = _deliver(tmp_path, bucket, registry, ["plot0", "plot1"], canopy_subject="canopy")
+    refused = _deliver(tmp_path, bucket, registry, ["plot0", "plot1"], canopy_subject="canopy",
+                      position_error_m=POSITION_ERROR_M)
     assert "plot1" in refused["error"] and "inside no canopy segment" in refused["error"]
+
+
+def test_a_plant_within_the_position_error_is_disclosed_as_such_and_its_segment_holds_a_plant(
+    tmp_path,
+):
+    """A plant half a meter inside its segment's boundary, under a 1 m position error, leaves its
+    segment untied: the delivery names it within the position error, counts its segment as one
+    holding a plant, and names why the detection inside that segment went unattributed."""
+    from tcip_mcp.delivery import read_delivery_events
+
+    _root, raster_path, bucket = _canopy_setup(tmp_path, [
+        (8.0, 8.0, 12.0, 12.0),    # inside segment 0: attributed to plot0
+        (48.0, 8.0, 52.0, 12.0),   # inside segment 1, whose plant is within the position error
+    ])
+    registry = _plant_registry(tmp_path, _plants_csv_at(tmp_path, raster_path, [
+        ("plot0", 10.0, 10.0), ("plot2", 46.0, 10.0)]))  # plot2: 1 px (0.5 m) from the edge
+    _write_canopy_document(raster_path, [(5.0, 5.0, 15.0, 15.0), (45.0, 5.0, 55.0, 15.0)])
+
+    result = _deliver(tmp_path, bucket, registry, ["plot0"], canopy_subject="canopy",
+                      position_error_m=1.0)
+
+    assert "error" not in result, result
+    (event,) = read_delivery_events(tmp_path)
+    pm = event.model_dump(mode="json")["plant_mapping"]
+    assert pm["plants_within_position_error"] == ["plot2"]
+    assert pm["segments_without_plant"] == 0
+    assert pm["detections_unattributed_by_source"]["segment_plant_within_position_error"] == 1
+    assert pm["detections_unattributed_by_source"]["segment_without_plant"] == 0
 
 
 def test_an_ambiguous_overlap_drops_both_implicated_plants_and_keeps_the_third(tmp_path):
@@ -510,8 +545,10 @@ def test_an_ambiguous_overlap_drops_both_implicated_plants_and_keeps_the_third(t
     _write_canopy_document(raster_path, [
         (0.0, 0.0, 20.0, 20.0), (15.0, 0.0, 35.0, 20.0), (45.0, 45.0, 55.0, 55.0)])
 
-    result = _deliver(tmp_path, bucket, registry, ["plot2"], canopy_subject="canopy")
-    refused = _deliver(tmp_path, bucket, registry, ["plot0", "plot2"], canopy_subject="canopy")
+    result = _deliver(tmp_path, bucket, registry, ["plot2"], canopy_subject="canopy",
+                      position_error_m=POSITION_ERROR_M)
+    refused = _deliver(tmp_path, bucket, registry, ["plot0", "plot2"], canopy_subject="canopy",
+                      position_error_m=POSITION_ERROR_M)
 
     assert "error" not in result, result
     assert _rows(tmp_path) == {"plot2": _rows(tmp_path)["plot2"]}
@@ -537,7 +574,8 @@ def test_canopy_subject_refuses_a_missing_canopy_document(tmp_path):
     registry = _plant_registry(tmp_path, _plants_csv_at(tmp_path, raster_path, [
         ("plot0", 10.0, 10.0)]))
 
-    result = _deliver(tmp_path, bucket, registry, ["plot0"], canopy_subject="canopy")
+    result = _deliver(tmp_path, bucket, registry, ["plot0"], canopy_subject="canopy",
+                      position_error_m=POSITION_ERROR_M)
 
     assert "author the canopy boundaries" in result["error"]
     assert "has no record" in result["error"]

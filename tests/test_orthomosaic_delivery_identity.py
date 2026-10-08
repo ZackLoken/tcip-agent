@@ -28,12 +28,12 @@ pytestmark = pytest.mark.usefixtures("confirmed_count_aggregate")
 
 def _produced_bucket(tmp_path: Path, raster_path: Path) -> str:
     """A bucket from the real producer: run_inference's whole-raster regime; its name."""
-    from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
+    from tests.test_orthomosaic_tools import RASTER_PASS
 
     result = run_inference(
         tmp_path, _bespoke_detection_checkpoint(tmp_path), bucket=BUCKET,
-        raster_path=str(raster_path), stated=Stated(conf=0.0, tile_size=TILE))
+        raster_path=str(raster_path), stated=RASTER_PASS.model_copy(update={"overlap": None}))
     assert "error" not in result, result
     return result["bucket"]
 

@@ -19,7 +19,7 @@ from tcip_mcp.pipelines.data.selection import ClassScope, read_selection
 from tcip_mcp.pipelines.data.split_construction import partition_samples
 from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
 from tcip_mcp.tools.data_tools import draw_splits
-from tests._chain_fixtures import BESPOKE_DETECTION, BLOB_BUILDER, run_config
+from tests._chain_fixtures import BESPOKE_DETECTION, BLOB_BUILDER, run_config, training_config
 from tests._producer_fixtures import label_image, labeled_frame, registry_over
 from tests._verified_checkpoint_fixtures import partition_side
 
@@ -617,7 +617,7 @@ def test_the_preflight_smoke_batch_is_the_batch_the_bound_run_trains(tmp_path: P
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
-    config = {"model_source": {"task": "detection"}, "data": _run_data_cfg(root, out)}
+    config = training_config({"task": "detection"}, _run_data_cfg(root, out))
     config["data"]["dataset_source"] = {
         "builder": RECORDING_DATASET, "task": "detection",
     }
@@ -903,11 +903,7 @@ def test_preflight_flags_a_redraw_whose_members_hold_one_foreground_group(tmp_pa
 
 def _preflight_config(root: Path, selection_dir: Path, **overrides) -> dict:
     data_cfg = _run_data_cfg(root, selection_dir, **overrides)
-    return {
-        "model_source": {"builder": BESPOKE_DETECTION,
-                         "task": "detection"},
-        "data": data_cfg, "batch_size": 2,
-    }
+    return training_config({"builder": BESPOKE_DETECTION, "task": "detection"}, data_cfg)
 
 
 def test_preflight_config_admits_a_bound_selection_with_no_issues(tmp_path: Path):
@@ -993,7 +989,7 @@ def test_a_bound_detection_run_stating_no_metric_selects_by_the_composite_object
     chain.synthetic_capture(root)
     chain.draw_reference_selection(tmp_path, root, tmp_path / "selection")
     config = chain.run_config(tmp_path / "selection")
-    assert "evaluation" not in config
+    assert "selection_metric" not in config["evaluation"]
 
     observation = observe(worker_run(tmp_path, config, experiment_id="exp-default-objective"))
 

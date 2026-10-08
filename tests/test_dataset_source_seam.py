@@ -220,15 +220,12 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(tmp_pa
     admits its samples whatever loads them, so a config naming no place refuses here by naming the
     missing key, the one refusal every route shares."""
     from tcip_mcp.tools.training_tools import preflight_config
+    from tests._chain_fixtures import training_config
 
     data: dict = {"dataset_source": DATASET_SOURCE}
-    config = {
-        "model_source": {"builder": GT_ANCHOR_DETECTOR,
-                         "builder_kwargs": {"gt_boxes_wh": [(10, 10)]},
-                         "task": "grape_bunch_count"},
-        "data": data,
-        "batch_size": 1,
-    }
+    config = training_config({"builder": GT_ANCHOR_DETECTOR,
+                              "builder_kwargs": {"gt_boxes_wh": [(10, 10)]},
+                              "task": "grape_bunch_count"}, data, batch_size=1)
     result = preflight_config(tmp_path, config, smoke=False)
     assert not result["valid"]
     assert result["issues"] == ["Missing 'data.images_dir'"]

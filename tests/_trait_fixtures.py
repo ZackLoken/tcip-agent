@@ -22,7 +22,8 @@ def entry(name: str, delivers: Sequence[str], **fields: Any) -> TraitEntry:
         "milestone_fractions": (), "milestone_on": "", "majority_milestone": "",
         "phenology_prefix": "", "majority_label": "",
         "count_objective": "", "localization": "", "localization_tolerance": "half_class_avg_size",
-        "localization_tolerance_frac": 0.5, "count_bias_tolerance_frac": None,
+        "localization_tolerance_frac": 0.5, "iou_jitter_px": None, "iou_margin": None,
+        "count_bias_tolerance_frac": None,
         "count_error_tolerance": None, "classifier_agreement_floor": None,
         "ordinal_agreement_floor": None, "regression_skill_floor": None,
         "regression_criterion": "", "scale_tolerance_frac": None,
@@ -69,6 +70,11 @@ _FLOORS: dict[str, Any] = {
 exercises."""
 
 COUNT_SPEC = entry(COUNT_TRAIT, ("stem_count",), **_FLOORS)
+
+IOU_JITTER_PX = 12.0
+"""A sample repeat-annotation displacement in pixels an ``iou_match`` trait authors."""
+IOU_MARGIN = 0.05
+"""A sample absolute IoU margin an ``iou_match`` trait authors."""
 
 
 def with_floors(base: TraitEntry) -> TraitEntry:

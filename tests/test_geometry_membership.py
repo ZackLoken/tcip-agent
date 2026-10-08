@@ -31,6 +31,7 @@ from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
     auto_train_val, partition_samples,
 )
 from tests._producer_fixtures import label_image, write_image  # noqa: E402
+from tests._training_values import evaluation_block  # noqa: E402
 from tests._verified_checkpoint_fixtures import partition_side as recorded_side  # noqa: E402
 
 IMG = 64
@@ -106,10 +107,11 @@ def _recorded(project: Path, task: str, data_cfg: dict, **config) -> dict:
     import copy
 
     from tcip_mcp.experiments import run_resolution
+    from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import opened_run
 
-    run_dir = opened_run(project, {"model_source": {"task": task},
-                                   "data": copy.deepcopy(data_cfg), **config})
+    run_dir = opened_run(project, training_config({"task": task}, copy.deepcopy(data_cfg),
+                                                  **config))
     return run_resolution(run_dir.name, project=project)["partition"]
 
 
@@ -134,7 +136,8 @@ def test_auto_val_off_trains_on_every_admitted_sample_and_records_them(tmp_path:
     stems = ["a_0_0", "b_0_0", "c_0_0"]
     images_dir = _labeled(tmp_path / "ds", stems, task=task)
     data_cfg = {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}, "auto_val": False}
-    record = _recorded(tmp_path, task, data_cfg, evaluation={"selection_metric": "loss"})
+    record = _recorded(tmp_path, task, data_cfg,
+                       evaluation=evaluation_block(selection_metric="loss"))
 
     train_ds, val_ds, partition = auto_train_val(tmp_path, task, data_cfg, None)
 
@@ -199,7 +202,8 @@ def test_the_train_only_and_drawn_routes_record_one_directory_the_same_way(tmp_p
     images_dir = _labeled(tmp_path / "train_ds", stems)
 
     whole_cfg = {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}, "auto_val": False}
-    whole = _recorded(tmp_path, "detection", whole_cfg, evaluation={"selection_metric": "loss"})
+    whole = _recorded(tmp_path, "detection", whole_cfg,
+                      evaluation=evaluation_block(selection_metric="loss"))
 
     drawn_cfg = {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}, "auto_val": True,
                  "split": {"val_ratio": 0.5, "seed": 1}}

@@ -28,13 +28,15 @@ def _detection_checkpoint(tmp_path: Path) -> str:
 
 
 def _tiled_pass(tmp_path: Path, ckpt: str):
-    """The tiled pass ``ckpt`` runs at tile 64, overlap 0.2, NMS at 0.3 and conf 0."""
+    """The tiled pass ``ckpt`` runs at tile 64, overlap 0.2, NMS at 0.3, conf 0 and the sample
+    cap."""
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.execution import Stated, prepare_pass
+    from tcip_mcp.pipelines.execution import Stated, prepare
+    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
 
-    return prepare_pass(load_registered_checkpoint(ckpt, project=tmp_path), Stated(
-        tile=True, tile_size=TILE, overlap=0.2, postprocess="nms", cross_tile_nms=0.3, conf=0.0),
-        device="cpu")
+    return prepare(load_registered_checkpoint(ckpt, project=tmp_path), Stated(
+        tile=True, tile_size=TILE, overlap=0.2, postprocess="nms", cross_tile_nms=0.3, conf=0.0,
+        max_dets=SAMPLE_MAX_DETS), device="cpu").runnable()
 
 
 def _sliced(p, source, execution=None, **kwargs) -> dict:

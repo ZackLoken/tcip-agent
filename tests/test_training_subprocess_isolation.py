@@ -10,6 +10,8 @@ torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.schemas import train_config
+from tests._chain_fixtures import training_config
+from tests._training_values import tune_arguments
 
 
 # ── persist the training run's class space ───────────────────────────
@@ -175,7 +177,7 @@ def test_ctx_should_cancel_and_dispatch_classification_honor_the_cancellation(tm
     from tcip_mcp.pipelines.training.envelope import TrainContext, dispatch_train_body
     from tcip_mcp.pipelines.training.run_registry import TrainRun
 
-    config = {"training_source": BESPOKE_LOOP}
+    config = training_config({}, {}, training_source=BESPOKE_LOOP)
     run = TrainRun(id="run_ctx_cancel", config=config, spec=train_config(config),
                    objective={"selection_metric": "loss", "higher_is_better": False},
                    project=tmp_path, output_dir=str(tmp_path))
@@ -329,7 +331,8 @@ def test_gpu_device_pinning_round_robins(monkeypatch):
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
     seen = set()
     for _ in range(4):
-        env = training_tools._child_env_for_launch(train_config({}))
+        env = training_tools._child_env_for_launch(
+            train_config(training_config({}, {}, device=None)))
         seen.add(env["CUDA_VISIBLE_DEVICES"])
     assert seen == {"0", "1"}
 
@@ -351,7 +354,8 @@ def test_gpu_pinning_skipped_when_device_explicit(monkeypatch):
 
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
 
-    env = training_tools._child_env_for_launch(train_config({"device": "cuda:1"}))
+    env = training_tools._child_env_for_launch(
+        train_config(training_config({}, {}, device="cuda:1")))
     assert "CUDA_VISIBLE_DEVICES" not in env
 
 
@@ -368,7 +372,8 @@ def test_gpu_pinning_noop_with_single_gpu(monkeypatch):
             return 1
 
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
-    env = training_tools._child_env_for_launch(train_config({}))
+    env = training_tools._child_env_for_launch(
+        train_config(training_config({}, {}, device=None)))
     assert "CUDA_VISIBLE_DEVICES" not in env
 
 
@@ -512,11 +517,9 @@ def test_tune_search_accepts_explicit_resources_per_trial(tmp_path):
     tune_search(
         obj,
         param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
-        metric="objective", mode="min", num_samples=4,
-        search_alg="random", scheduler="none",
-        resources_per_trial={"cpu": 1.0, "gpu": 0.0},
-        sweep_dir=tmp_path / "explicit", seed=0
-    )
+        sweep_dir=tmp_path / "explicit",
+        **tune_arguments(num_samples=4, scheduler="none",
+                         resources_per_trial={"cpu": 1.0, "gpu": 0.0}))
     assert (tmp_path / "explicit").is_dir()
 
 
@@ -541,11 +544,9 @@ def test_tune_search_runs_despite_deprecated_ray_result_dir_variables(tmp_path, 
     tune_search(
         obj,
         param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
-        metric="objective", mode="min", num_samples=2,
-        search_alg="random", scheduler="none",
-        resources_per_trial={"cpu": 1.0, "gpu": 0.0},
-        sweep_dir=tmp_path / "sweep_store" / "redirected", seed=0
-    )
+        sweep_dir=tmp_path / "sweep_store" / "redirected",
+        **tune_arguments(num_samples=2, scheduler="none",
+                         resources_per_trial={"cpu": 1.0, "gpu": 0.0}))
 
     assert (tmp_path / "sweep_store" / "redirected").is_dir()
     assert os.environ["TUNE_RESULT_DIR"] == machine_scratch

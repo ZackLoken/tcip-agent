@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from tests._chain_fixtures import BESPOKE_DETECTION
+from tests._training_values import evaluation_block
 
 
 @pytest.fixture
@@ -69,7 +70,7 @@ def _detection_config(images_dir: Path, builder: str = BESPOKE_DETECTION) -> dic
         {"builder": builder, "builder_kwargs": {"min_size": 64, "max_size": 96},
          "task": "detection"},
         {"images_dir": str(images_dir), "scope": {"subject": "bud"}, "auto_val": False},
-        batch_size=1, evaluation={"selection_metric": "loss"})
+        batch_size=1, evaluation=evaluation_block(selection_metric="loss"))
 
 
 def _launch_record(res: dict) -> dict:

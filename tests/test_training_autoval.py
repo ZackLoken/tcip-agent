@@ -26,6 +26,7 @@ from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import label_image  # noqa: E402
+from tests._chain_fixtures import BLOB_BUILDER, training_config  # noqa: E402
 
 IMG = 64
 
@@ -493,14 +494,13 @@ def test_one_preflight_reads_a_sources_header_once_for_its_sizes(tmp_path: Path,
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
-    cfg = {
-        "model_source": dict(BUILT_DETECTOR),
-        "data": {"images_dir": str(images_dir), "scope": {"subject": "bud"},
-                 "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-                 "split": {"val_ratio": 0.2, "holdout_ratio": 0.1, "calibration_ratio": 0.15,
-                           "seed": 1}},
-        "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
-    }
+    cfg = training_config(
+        BUILT_DETECTOR,
+        {"images_dir": str(images_dir), "scope": {"subject": "bud"},
+         "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+         "split": {"val_ratio": 0.2, "holdout_ratio": 0.1, "calibration_ratio": 0.15,
+                   "seed": 1}},
+        batch_size=1, stages=[{"freeze_to": 0, "epochs": 1}])
     probed = _probe_spy(monkeypatch)
 
     result = preflight_config(tmp_path, cfg, smoke=True)
@@ -661,7 +661,6 @@ def test_a_spatial_split_records_raster_content_identity(tmp_path: Path):
 
 
 def test_train_emits_val_loss_with_autoval(tmp_path: Path):
-    from tests._chain_fixtures import BLOB_BUILDER, training_config
     from tests._producer_fixtures import seed_labeled_images
 
     images_dir = seed_labeled_images(tmp_path / "ds" / "images" / UNDATED_BUCKET, _BUD, n=8,

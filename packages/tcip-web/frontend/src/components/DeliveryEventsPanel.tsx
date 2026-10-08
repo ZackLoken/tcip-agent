@@ -58,21 +58,18 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
         <div className="mt-2 text-[11px] text-tcip-muted" data-testid="canopy-disclosure">
           {(() => {
             const pm = record.plant_mapping;
-            const delivered = pm.segment_ties.length - pm.plants_with_ambiguous_detections.length;
-            const registered =
-              delivered +
-              pm.plants_without_segment.length +
-              pm.plants_outside_raster.length +
-              pm.plants_with_ambiguous_detections.length;
             return (
               <>
                 <div>
-                  {`Canopy segments (${pm.plant_registry.name}): ${delivered}/${registered} ` +
+                  {`Canopy segments (${pm.plant_registry.name}): ${record.population.length} ` +
                     `registry plant(s) delivered, ${pm.segments_without_plant} segment(s) ` +
                     "with no plant"}
                 </div>
                 {pm.plants_without_segment.length > 0 && (
                   <div>{`No segment: ${pm.plants_without_segment.join(", ")}`}</div>
+                )}
+                {pm.plants_within_position_error.length > 0 && (
+                  <div>{`Within the position error: ${pm.plants_within_position_error.join(", ")}`}</div>
                 )}
                 {pm.plants_outside_raster.length > 0 && (
                   <div>{`Outside the raster: ${pm.plants_outside_raster.join(", ")}`}</div>

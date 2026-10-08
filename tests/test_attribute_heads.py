@@ -27,8 +27,12 @@ from tcip_mcp import subject_registry as cr  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 
 from tests._chain_fixtures import ATTRIBUTE, PLANTS, VALUES, attributed_series  # noqa: E402
-from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, SQUARE_64_DETECTOR  # noqa: E402
+from tests._verified_checkpoint_fixtures import (  # noqa: E402
+    BUILT_DETECTOR, SAMPLE_MAX_DETS, SQUARE_64_DETECTOR,
+)
 
+UNFILTERED = Stated(tile=False, conf=0.0, max_dets=SAMPLE_MAX_DETS)
+"""An untiled pass keeping every box at the sample cap."""
 SUBJECT = "object"
 COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
 GRADE = cr.Attribute("grade", "ordinal", ("low", "mid", "high"))
@@ -73,7 +77,7 @@ def test_two_attributes_train_two_heads_publish_both_values_and_deliver(tmp_path
 
     series = attributed_series(tmp_path, fractions=(0.0, 1.0), assessed=False,
                                attributes=(OPENING, COLOR), model_source=SQUARE_64_DETECTOR,
-                               stated=Stated(tile=False, conf=0.0),
+                               stated=UNFILTERED,
                                experiment_id="exp-two-heads")
 
     selection = read_selection(tmp_path / "selection", project=tmp_path)
@@ -88,7 +92,7 @@ def test_two_attributes_train_two_heads_publish_both_values_and_deliver(tmp_path
     assessed = assess_checkpoint(tmp_path, checkpoint_path=series.checkpoint_path,
                                  trait=series.trait, delivery_kind="state_crossing_dates",
                                  selection_dir=str(tmp_path / "selection"),
-                                 stated=Stated(tile=False, conf=0.0))
+                                 stated=UNFILTERED)
     assert "error" not in assessed, assessed
     assert "passed" in assessed
 
@@ -153,7 +157,7 @@ def test_a_scope_with_no_attribute_builds_the_plain_detector_and_writes_no_attri
     assert results and all("attributes" not in r for r in results), results
 
     published = run_inference(tmp_path, checkpoint, str(images_dir), bucket="plain",
-                              stated=Stated(tile=False, conf=0.0))
+                              stated=UNFILTERED)
     assert "error" not in published, published
     assert len(_documents(tmp_path, "plain")) == 2
     for written in _documents(tmp_path, "plain").values():
@@ -282,7 +286,7 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
     subject, keeps one box carrying the whole call's value."""
     pytest.importorskip("sahi")
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.execution import prepare_pass
+    from tcip_mcp.pipelines.execution import prepare
     from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.tools.model_tools import register_model
@@ -302,9 +306,10 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
     source = tmp_path / "frame.png"
     painted_frame(200, 200, (0, 0, 0), [((100, 20, 150, 60), (255, 0, 0))]).save(source)
 
-    p = prepare_pass(load_registered_checkpoint(str(ckpt), project=tmp_path),
-                     Stated(tile=True, tile_size=128, overlap=0.25, postprocess=postprocess,
-                            cross_tile_nms=0.3, conf=0.0), device="cpu", tile_batch_size=2)
+    p = prepare(load_registered_checkpoint(str(ckpt), project=tmp_path),
+                Stated(tile=True, tile_size=128, overlap=0.25, postprocess=postprocess,
+                       cross_tile_nms=0.3, conf=0.0, max_dets=SAMPLE_MAX_DETS),
+                device="cpu", tile_batch_size=2).runnable()
     result = p.predictor.predict_sliced(str(source), execution=p.execution,
                                         tile_batch_size=p.tile_batch_size, require_masks=False)
 

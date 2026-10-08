@@ -12,6 +12,10 @@ GRID_COLUMNS = ("plot_number", "row_number", "col_number")
 """The plant-grid position columns a breeding layout's registry CSV carries beside each plant's
 location, written as :func:`write_plant_csv`'s ``extra``."""
 
+POSITION_ERROR_M = 0.5
+"""A sample error bound in meters a project states for its registry positions in the canopy
+regime."""
+
 
 def write_plant_csv(path: Path, plants: list[dict], *, extra: tuple[str, ...] = ()) -> Path:
     """A plant-locations CSV at ``path``, one row per entry of ``plants``: its ``plot``,

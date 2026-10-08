@@ -53,8 +53,8 @@ early_stopping:
 ```
 
 Early stopping runs by default whenever the run has a validation loader, at `patience: 7` and
-`min_delta: 0.0001` when the block states neither (provisional defaults the owner ruled; derive
-or tune them per dataset's own convergence noise rather than relying on them). `enabled: false`
+`min_delta: 0.0001` when the block states neither (owner ruling; state your own where a
+dataset's convergence noise calls for it). `enabled: false`
 opts out. It reads the validation pass, so a run with no validation loader is never stopped
 early.
 
@@ -75,6 +75,7 @@ comparability metrics are rejected:
 ```yaml
 evaluation:
   trait: catkin
+  conf_threshold: ...    # a detector's: the confidence its validation counts boxes at
   selection_metric: f1   # optional, omit to use the task's default (objective/loss)
 ```
 
@@ -89,7 +90,11 @@ The example below is representative, not exhaustive; the config is an open dict,
 reads (device/seed/deterministic/mixed_precision/stages/optimizer/scheduler/lr_scaling/
 stage_warmup_epochs/enforce_monotonic_unfreeze/gradient_accumulation_steps/
 checkpoint_every_n_epochs/log_every_n_batches/early_stopping). Read that docstring rather than assuming this
-example is complete. Every one of those keys, `evaluation` included, sits at the top level of
+example is complete. The tuned values ship no default: `schemas.TrainConfigSchema` and its
+`DefaultTrainerRegime` (the blocks the default trainer reads when no `training_source` names a
+loop of your own) say which a config states, a detector's `evaluation.conf_threshold` under any
+trainer, each stated by the config or swept by a search,
+and a config leaving one unstated is refused naming it. Every one of those keys, `evaluation` included, sits at the top level of
 the config beside `model_source` and `data`. There is no `training` section: a config that
 nests keys under one is refused by `preflight_config` by name, since nothing would read them.
 
@@ -109,8 +114,12 @@ config = {
         # the run's own train/val draw: its seed and its val share are both stated
         "split": {"seed": 7, "val_ratio": 0.2},  # 0.2 an example value
     },
-    "batch_size": 4,
-    "stages": [...],
+    # each ... below is a value you tune for this dataset
+    "batch_size": ...,
+    "stages": [{"freeze_to": ..., "epochs": ...}],
+    "optimizer": {"name": "adamw", "backbone_lr": ..., "head_lr": ..., "weight_decay": ...},
+    "scheduler": {"type": "cosine", "eta_min": ...},
+    "checkpoint_every_n_epochs": ...,
     "mixed_precision": True,
     "device": "cuda",
     "seed": 42,             # optional, reproducible init/shuffle when set
@@ -176,7 +185,7 @@ once under its own name. A relaunch is a new directory naming its parent.
   other `val_` metrics, `selection`, ...) at its epoch, tagged by the key, through the run's one
   writer (`ctx.log_metrics`, which the default trainer uses too); and `batch_loss` ten
   times an epoch, at batch ends spaced evenly over that epoch's own batch count, and after
-  every batch of an epoch with fewer than ten (a provisional cadence the owner ruled), or every
+  every batch of an epoch with fewer than ten (owner ruling), or every
   `log_every_n_batches` training batches counted across the run when the config states that override
 - The same per-batch emission (`ctx.log_batch`) writes a per-batch row to the run's
   `metrics.jsonl`, which the Training tab shows as the in-progress epoch's line
@@ -192,19 +201,30 @@ objective the sweep resolves from its base config, in that objective's own direc
 task/data; match them to the space and budget; the defaults are a starting point, not a rule:
 
 ```python
-run_hyperparameter_search(base_config=config, n_trials=20, search_alg="optuna", scheduler="asha",
-        search_seed=17)
+run_hyperparameter_search(
+    base_config=config, n_trials=20, search_alg="optuna", scheduler="asha", search_seed=17,
+    param_space={"optimizer.head_lr": {"type": "loguniform", "low": ..., "high": ...},
+                 "batch_size": {"type": "categorical", "choices": [...]}})
 ```
+- `param_space` (required) names each swept value by its config key or a dotted path into one
+  (`optimizer.head_lr`), each range or choice set from the data and the model in hand. The base
+  config may leave a swept value unstated; every other value a training config requires it
+  states. Before the sweep starts its config is checked at the corner of every axis's first value
+  and at each choice and range end with the other axes held there; other combinations and a
+  range's interior are checked as each trial applies its point, a trial whose config refuses
+  ending failed.
 - `search_seed` (required) seeds the search algorithm itself, native or backend, and is recorded
   in the sweep's input so a relaunch replays it; it is distinct from `data.split.seed`. The
   `17` above is an arbitrary example value.
 - `search_alg`: `random`/`grid` (native), plus `optuna`, `bayesopt`, `hyperopt`, all
-  installed by default. An uninstalled or unoffered pick errors clearly (never silently swapped),
+  installed by default. `grid` enumerates every discrete axis, and an `int` axis wider than
+  `hpo.GRID_AXIS_LIMIT` values refuses by name; every other search samples an `int` axis from
+  its bounds. An uninstalled or unoffered pick errors clearly (never silently swapped),
   and so does `split_draws` above one with a backend pick.
   Call `hpo.available_search_algs()` for the live list on this box.
 - `scheduler`: `asha`, `hyperband`, `pbt`, `median`, or `none` to run every trial to
   completion. `grace_period`/`reduction_factor` tune the halving schedulers.
-- `warm_start=True` seeds the search with a known-good baseline; `max_concurrent` bounds
+- `baseline_params` seeds the search with a point you state; `max_concurrent` bounds
   parallel trials (default 1, safe for single-GPU training).
 - A sweep is its own directory, `.tcip/experiments/<sweep_id>/` beside the runs: its `sweep.json` input (the objective
   it resolved once included), a heartbeat, its final status once it ends, and one run directory
@@ -228,8 +248,8 @@ run_hyperparameter_search(base_config=config, n_trials=20, search_alg="optuna", 
 
 Use `draw_splits` to draw a selection's train, val, calibration and holdout sides. Each side but
 `train` is stated as a share and `train` takes the remainder; an unstated share takes
-`splits.DEFAULT_SHARES` (provisional, the owner's documented targets, which the group draw rounds
-to whole groups), and the `seed` has no default. A side the draw would leave empty refuses naming
+`splits.DEFAULT_SHARES` (owner ruling, which the group draw rounds to whole groups), and the
+`seed` has no default. A side the draw would leave empty refuses naming
 it. A run drawing its own split takes no default share: it states `val_ratio`, and a run drawing
 a within-image split (the spatial_strip route) reserves a holdout or calibration region only
 where `holdout_ratio` or `calibration_ratio` states one. The samples

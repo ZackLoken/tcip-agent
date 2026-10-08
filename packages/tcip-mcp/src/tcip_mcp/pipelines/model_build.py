@@ -255,12 +255,15 @@ def build_from_model_source(source: "ModelSourceSchema | None",
 
 
 def build_model(config: dict, dims: "Mapping[str, Any]") -> Any:
-    """Build a model from a raw run config (a checkpoint's own ``config`` included), validated
-    once (``schemas.train_config``), via its ``model_source`` builder
-    (:func:`build_from_model_source`), at ``dims`` (:func:`model_dims`)."""
-    from tcip_mcp.pipelines.schemas import train_config
+    """Build a model from a raw run config (a checkpoint's own ``config`` included) via its
+    ``model_source``, validated alone (``schemas.ModelSourceSchema``), and its builder
+    (:func:`build_from_model_source`), at ``dims`` (:func:`model_dims`); the training values the
+    config carries are the trainer's, never read here."""
+    from tcip_mcp.pipelines.schemas import ModelSourceSchema
 
-    return build_from_model_source(train_config(config).model_source, dims)
+    source = config.get(MODEL_SOURCE_KEY)
+    return build_from_model_source(
+        None if source is None else ModelSourceSchema.model_validate(source), dims)
 
 
 def resolve_contract_dims(config: dict, task: str, dims: "Mapping[str, Any]") -> dict:

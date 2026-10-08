@@ -54,10 +54,12 @@ def _infer(tmp_path: Path, ckpt: str, bucket: str = "preds") -> dict:
     ``bucket`` under ``tmp_path``."""
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import SAMPLE_CONF, SAMPLE_MAX_DETS
 
     images_dir, _ = _images(tmp_path)
     return run_inference(tmp_path, ckpt, images_dir=str(images_dir), bucket=bucket,
-                         device="cpu", stated=Stated(tile=False))
+                         device="cpu",
+                         stated=Stated(tile=False, conf=SAMPLE_CONF, max_dets=SAMPLE_MAX_DETS))
 
 
 def _published(tmp_path: Path, bucket: str) -> bool:
@@ -107,14 +109,14 @@ def test_web_inference_worker_refuses_an_unregistered_checkpoint(tmp_path):
     pytest.importorskip("fastapi")
     from tcip_mcp.pipelines.execution import Stated
     from tcip_web.routes.inference import InferenceJob, _worker
+    from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
 
     ckpt = _unregistered(tmp_path)
     images_dir, _ = _images(tmp_path)
 
     job = InferenceJob(job_id="rail1", actor="user:tester", checkpoint_path=ckpt,
                        images_dir=str(images_dir), dataset_root=str(tmp_path), bucket="out",
-                       project=str(tmp_path),
-                       stated=Stated(tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2))
+                       project=str(tmp_path), stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS))
     _worker(job)
     assert job.status == "failed"
     assert "register_model" in job.error
@@ -164,7 +166,9 @@ def test_triage_predictions_admits_a_checkpoint_registered_under_the_project_it_
 
     from tcip_mcp.tools.feedback_tools import triage_predictions
 
-    r = triage_predictions(registered_root, ckpt, str(images_dir))
+    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
+
+    r = triage_predictions(registered_root, ckpt, str(images_dir), max_dets=SAMPLE_MAX_DETS)
     assert "error" not in r, r
 
 
@@ -439,11 +443,12 @@ def test_a_completed_runs_final_status_and_the_load_agree_on_its_digest(tmp_path
 def test_ctx_save_checkpoint_admits_a_state_naming_no_reserved_key(tmp_path):
     """An ordinary bespoke state, through a real ctx.save_checkpoint call."""
     from tcip_mcp.pipelines.training.envelope import TrainContext
+    from tests._chain_fixtures import training_config
     from tests.tiny_trainer_fixtures import trainer_run
 
     run_dir = tmp_path / "out"
     run_dir.mkdir()
-    run = trainer_run({"model_source": {"task": "regression"}, "data": {}}, run_dir,
+    run = trainer_run(training_config({"task": "regression"}, {}), run_dir,
                       project=tmp_path, has_val_loader=False, id="auto-run-4")
     ctx = TrainContext(run=run, train_loader=None)
 

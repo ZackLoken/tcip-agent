@@ -6,6 +6,7 @@ import pytest
 
 from tcip_mcp.pipelines.execution import Stated
 from tests._predictor_fixtures import BOX, StubPredictor, install
+from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
 
 BUCKET = "out/2026-01-01"
 
@@ -86,7 +87,8 @@ def test_web_worker_uses_generic_predictor_and_publishes_its_documents(tmp_path,
     predictor = install(monkeypatch, StubPredictor(train_tile_size=640))
 
     job = _job("t", tmp_path, ckpt, images_dir, Stated(
-        tile=True, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nmm"))
+        tile=True, conf=0.25, max_dets=SAMPLE_MAX_DETS, cross_tile_nms=0.7, overlap=0.2,
+        postprocess="nmm"))
     _worker(job)
 
     assert job.status == "completed"
@@ -121,7 +123,8 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_scope(tmp_path, monkeyp
     install(monkeypatch, StubPredictor(attributes=[[1]]))
 
     job = _job("t3", tmp_path, ckpt, images_dir, Stated(
-        tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nms"))
+        tile=False, conf=0.25, max_dets=SAMPLE_MAX_DETS, cross_tile_nms=0.7, overlap=0.2,
+        postprocess="nms"))
     _worker(job)
 
     assert job.status == "completed"
@@ -146,7 +149,8 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, mo
     predictor = install(monkeypatch, StubPredictor(task="instance_seg", train_tile_size=640))
 
     job = _job("t3", tmp_path, ckpt, images_dir, Stated(
-        tile=True, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nms"))
+        tile=True, conf=0.25, max_dets=SAMPLE_MAX_DETS, cross_tile_nms=0.7, overlap=0.2,
+        postprocess="nms"))
     _worker(job)
 
     assert job.status == "completed"        # no crash
@@ -174,7 +178,8 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
         train_augmentation={"resize": [128, 128]}))
 
     job = _job("t4", tmp_path, ckpt, images_dir, Stated(
-        tile=True, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nms"))
+        tile=True, conf=0.25, max_dets=SAMPLE_MAX_DETS, cross_tile_nms=0.7, overlap=0.2,
+        postprocess="nms"))
     _worker(job)
 
     assert job.status == "completed", job.error
@@ -189,45 +194,43 @@ def _sources(project: Path) -> dict:
     return read_bucket(project, BUCKET).execution.sources
 
 
-def test_web_worker_stamps_explicit_conf_and_max_dets_source_at_the_platform_default(
-    tmp_path, monkeypatch,
-):
-    """A caller-stated conf/max_dets equal to the platform default is recorded 'explicit', the
-    same distinction tile/tile_size already carry, never silently read back as a default."""
+def test_web_worker_stamps_the_stated_conf_and_max_dets_as_explicit(tmp_path, monkeypatch):
+    """A caller-stated conf/max_dets is recorded 'explicit', the same distinction tile/tile_size
+    already carry."""
     from tcip_web.routes.inference import _worker
 
-    from tcip_mcp.pipelines.execution import DEFAULT_CONF, DEFAULT_MAX_DETS
+    from tests._verified_checkpoint_fixtures import SAMPLE_CONF
 
     images_dir = _one_image(tmp_path)
     ckpt = _checkpoint(tmp_path)
     install(monkeypatch, StubPredictor())
 
     job = _job("conf-explicit", tmp_path, ckpt, images_dir, Stated(
-        tile=False, conf=DEFAULT_CONF, cross_tile_nms=0.7, max_dets=DEFAULT_MAX_DETS))
+        tile=False, conf=SAMPLE_CONF, cross_tile_nms=0.7, max_dets=SAMPLE_MAX_DETS))
     _worker(job)
 
     assert job.status == "completed", job.error
+    # The pass ran at the stated values: the one image's one detection landed.
+    assert len(_annotations(tmp_path)) == 1
     sources = _sources(tmp_path)
     assert (sources["conf"], sources["max_dets"]) == ("explicit", "explicit")
 
 
-def test_web_worker_stamps_default_conf_and_max_dets_source_when_unstated(tmp_path, monkeypatch):
-    """An omitted conf/max_dets runs the pass at the platform default, as the explicit-at-default
-    case does, its provenance saying 'default' rather than 'explicit'."""
+def test_web_worker_fails_a_job_stating_no_conf_naming_it(tmp_path, monkeypatch):
+    """A job stating no conf has no basis for one: the worker's pass refuses naming it, and the
+    job fails with that refusal rather than running at a value nobody stated."""
     from tcip_web.routes.inference import _worker
 
     images_dir = _one_image(tmp_path)
     ckpt = _checkpoint(tmp_path)
     install(monkeypatch, StubPredictor())
 
-    job = _job("conf-default", tmp_path, ckpt, images_dir, Stated(tile=False, cross_tile_nms=0.7))
+    job = _job("conf-unstated", tmp_path, ckpt, images_dir,
+               Stated(tile=False, cross_tile_nms=0.7, max_dets=SAMPLE_MAX_DETS))
     _worker(job)
 
-    assert job.status == "completed"
-    # The pass ran unchanged at the platform default: the one image's one detection landed.
-    assert len(_annotations(tmp_path)) == 1
-    sources = _sources(tmp_path)
-    assert (sources["conf"], sources["max_dets"]) == ("default", "default")
+    assert job.status == "failed"
+    assert "conf" in (job.error or ""), job.error
 
 
 def test_web_worker_dropped_boxes_agree_with_the_published_document_on_a_degenerate_box(
@@ -246,7 +249,8 @@ def test_web_worker_dropped_boxes_agree_with_the_published_document_on_a_degener
                                        train_tile_size=640))
 
     job = _job("degenerate", tmp_path, ckpt, images_dir, Stated(
-        tile=True, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nmm"))
+        tile=True, conf=0.25, max_dets=SAMPLE_MAX_DETS, cross_tile_nms=0.7, overlap=0.2,
+        postprocess="nmm"))
     _worker(job)
 
     assert job.status == "completed"
@@ -268,7 +272,8 @@ def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path):
     ckpt = _checkpoint(tmp_path)
 
     job = _job("collision", tmp_path, ckpt, images_dir, Stated(
-        tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nms"))
+        tile=False, conf=0.25, max_dets=SAMPLE_MAX_DETS, cross_tile_nms=0.7, overlap=0.2,
+        postprocess="nms"))
     _worker(job)
 
     assert job.status == "failed"

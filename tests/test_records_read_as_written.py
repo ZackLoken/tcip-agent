@@ -97,13 +97,15 @@ def test_a_sweep_final_status_lacking_its_state_fails_at_the_read(
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.experiments import FINAL_STATUS_FILE, read_record
     from tcip_store import encode_record
+    from tests._training_values import sweep_space
 
     def fake_search(**kw):
         return None
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
     result = tt.run_hyperparameter_search(
-        tmp_path, base_config=real_hpo_base_config, n_trials=1, search_seed=0)
+        tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
+        search_seed=0)
     sweep_id = result["sweep"]["sweep_id"]
     assert tt.monitor_training(tmp_path, sweep_id)["sweep"]["state"] == "completed"
 

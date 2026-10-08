@@ -145,16 +145,19 @@ def test_a_tensor_valued_bespoke_group_setting_survives_a_resume():
     """A setting a bespoke ``get_param_groups`` puts on its group, changed while training, comes
     back whole on a resume restore into an optimizer ``build_optimizer`` builds afresh, a
     multi-element tensor included."""
+    from tcip_mcp.pipelines.schemas import OptimizerSpec
     from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
+    from tests._training_values import adamw_optimizer
 
+    spec = OptimizerSpec.model_validate(adamw_optimizer())
     model = _CustomGroupRegressor()
-    opt = build_optimizer("adamw", model, backbone_lr=1e-4, head_lr=1e-3)
+    opt = build_optimizer(spec, model, backbone_lr=spec.backbone_lr, head_lr=spec.head_lr)
     model(torch.randn(3, 2)).sum().backward()
     opt.step()
     opt.param_groups[0]["custom"] = torch.tensor([3.0, 4.0])
     state = capture_training_state(model, opt)
 
-    resumed = build_optimizer("adamw", model, backbone_lr=1e-4, head_lr=1e-3)
+    resumed = build_optimizer(spec, model, backbone_lr=spec.backbone_lr, head_lr=spec.head_lr)
     assert torch.equal(resumed.param_groups[0]["custom"], torch.tensor([1.0, 2.0]))
     restore_training_state(model, resumed, state, group_settings=True)
     assert torch.equal(resumed.param_groups[0]["custom"], torch.tensor([3.0, 4.0]))

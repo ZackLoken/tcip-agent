@@ -29,9 +29,9 @@ _TILE_GROUP_RE = re.compile(r"^(.*)_\d+_\d+$")
 DEFAULT_GROUP_BY = "tile_prefix"
 
 DEFAULT_SHARES = {"val": 0.15, "calibration": 0.10, "holdout": 0.05}
-"""Provisional: the owner's documented default share of each side beside ``train``, which takes
-the remainder (0.70); soft targets the group draw rounds to whole groups. A door states any of
-them to replace it, a share of zero drawing no such side."""
+"""Owner ruling: the share of each side beside ``train``, which takes the remainder (0.70); soft
+targets the group draw rounds to whole groups. A door states any of them to replace it, a share
+of zero drawing no such side."""
 
 
 def default_group_key(stem: str) -> str:

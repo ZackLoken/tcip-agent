@@ -181,18 +181,28 @@ class TrainContext:
 
         return compute_class_weights(*args, **kwargs)
 
-    def build_optimizer(self, *args: Any, **kwargs: Any) -> Any:
+    def _stated(self, block: str) -> Any:
+        """The run's validated ``block``; refuses (``ValueError``) naming it when the run's
+        config, naming its own ``training_source``, states none."""
+        value = getattr(self.spec, block)
+        if value is None:
+            raise ValueError(f"this run's config states no {block!r} block for the loop to build "
+                             "from; state one beside training_source")
+        return value
+
+    def build_optimizer(self, model: Any) -> Any:
+        """The optimizer the run's validated ``optimizer`` block names over ``model``, at the
+        block's own rates."""
         from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
 
-        return build_optimizer(*args, **kwargs)
+        spec = self._stated("optimizer")
+        return build_optimizer(spec, model, backbone_lr=spec.backbone_lr, head_lr=spec.head_lr)
 
-    def build_scheduler(self, optimizer: Any, config: dict, epochs: int) -> Any:
-        """The scheduler a ``scheduler`` block ``config`` names (``schemas.SchedulerSpec``,
-        which refuses an invalid one) over ``epochs`` epochs."""
-        from tcip_mcp.pipelines.schemas import SchedulerSpec
+    def build_scheduler(self, optimizer: Any, epochs: int) -> Any:
+        """The scheduler the run's validated ``scheduler`` block names, over ``epochs`` epochs."""
         from tcip_mcp.pipelines.training.generic_trainer import _build_scheduler
 
-        return _build_scheduler(optimizer, SchedulerSpec.model_validate(config), epochs)
+        return _build_scheduler(optimizer, self._stated("scheduler"), epochs)
 
     def apply_stage_freeze(self, model: Any, freeze_to: int, *, prev_trainable: int | None = None,
                            enforce_monotonic: bool = True) -> int:
@@ -219,11 +229,16 @@ class TrainContext:
         return restore_training_state(*args, **kwargs)
 
     def evaluate(self, model: Any, loader: Any = None, **kwargs: Any) -> Any:
+        """``evaluation.evaluate`` of ``model`` over ``loader`` (the run's validation loader when
+        omitted), a detector's boxes counted at the run's validated ``evaluation.conf_threshold``;
+        ``kwargs`` are ``evaluate``'s other keywords, and one naming ``conf_threshold`` is refused
+        by the call (``TypeError``)."""
         from tcip_mcp.pipelines.model_build import recorded_model_dims
         from tcip_mcp.pipelines.training.evaluation import evaluate
 
         return evaluate(model, self.val_loader if loader is None else loader,
-                        self.device, self.task, dims=recorded_model_dims(self.config), **kwargs)
+                        self.device, self.task, dims=recorded_model_dims(self.config),
+                        conf_threshold=self.spec.evaluation.conf_threshold, **kwargs)
 
     # ---- measurement primitives (compose for dimensional traits) ----
     def mask_geometry(self, *args: Any, **kwargs: Any) -> Any:

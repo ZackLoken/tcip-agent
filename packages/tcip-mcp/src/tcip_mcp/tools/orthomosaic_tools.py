@@ -33,6 +33,7 @@ def orthomosaic_plant_counts(
     pipeline_version: str = "",
     nn_tolerance_m: float | None = None,
     canopy_subject: str = "",
+    position_error_m: float | None = None,
     acknowledgment_id: str | None = None,
     *,
     door: str,
@@ -53,10 +54,13 @@ def orthomosaic_plant_counts(
     the raster's frame within the tolerance (derived from the plant grid unless stated); with
     ``canopy_subject`` it is attributed by containment in a canopy boundary accepted into the
     raster's own label document, each boundary tied to the one registry plant its position lies in
-    (:mod:`~tcip_mcp.pipelines.postprocessing.segment_attribution`). A population plant matched by
-    no detection gets an explicit ``0``. A population plant this attribution cannot count (outside
-    the frame; in the segment regime, inside no segment or in one whose detection is ambiguous)
-    refuses, naming it and why. The registry's files must still hash to the bytes it registered.
+    with at least ``position_error_m`` of clearance, the project's stated error bound in meters
+    for its registry positions, which the segment regime requires and the nearest-neighbor regime
+    refuses (:mod:`~tcip_mcp.pipelines.postprocessing.segment_attribution`). A population plant
+    matched by no detection gets an explicit ``0``. A population plant this attribution cannot
+    count (outside the frame; in the segment regime, inside no segment, within the position
+    error of its segment's boundary, or in one whose detection is ambiguous) refuses, naming it
+    and why. The registry's files must still hash to the bytes it registered.
 
     Delivered through
     :func:`~tcip_mcp.pipelines.postprocessing.aggregation.deliver_per_plant_aggregate`
@@ -82,6 +86,13 @@ def orthomosaic_plant_counts(
     if canopy_subject and nn_tolerance_m is not None:
         raise ValueError("canopy_subject and nn_tolerance_m are refused together: the segment "
                          "regime attributes by containment and takes no match tolerance.")
+    if canopy_subject and position_error_m is None:
+        raise ValueError("canopy_subject attribution states position_error_m: the error bound in "
+                         "meters of this registry's plant positions, the clearance a position "
+                         "must have inside its canopy boundary for the tie to stand.")
+    if position_error_m is not None and not canopy_subject:
+        raise ValueError("position_error_m is the segment regime's bound and is refused without "
+                         "canopy_subject: the nearest-neighbor regime takes nn_tolerance_m.")
     wanted = population(plants)
     found = read_bucket(dataset_root, bucket)
     raster_path, recorded_identity = found.raster(project), found.raster_identity
@@ -109,7 +120,7 @@ def orthomosaic_plant_counts(
     if canopy_subject:
         counts, disclosure, uncountable = _segment_counts(
             raster_path, recorded_identity, canopy_subject, registered, georef,
-            width, height, boxes, registry_ref)
+            width, height, boxes, registry_ref, cast(float, position_error_m))
         attribution = disclosure["plant_attribution"]
     else:
         require_named_plants(registered)
@@ -152,11 +163,13 @@ def orthomosaic_plant_counts(
 def _segment_counts(
     raster_path: str, recorded_identity: dict, canopy_subject: str,
     registered: list, georef: Any, width: int, height: int, boxes: list, registry_ref: dict,
+    position_error_m: float,
 ) -> tuple[dict[str, int], dict, dict[str, str]]:
     """Per-plant counts under the segment regime: each detection counted to the tied plant whose
-    canopy segment contains its centroid. Returns the counts, the ``CanopySegmentDisclosure`` and
-    each registry plant that regime leaves uncounted, with why. The canopy document is the
-    raster's own label document (:func:`~tcip_mcp.dataset_layout.label_key_of`)."""
+    canopy segment contains its centroid, a tie standing only with ``position_error_m`` of
+    clearance. Returns the counts, the ``CanopySegmentDisclosure`` and each registry plant that
+    regime leaves uncounted, with why. The canopy document is the raster's own label document
+    (:func:`~tcip_mcp.dataset_layout.label_key_of`)."""
     from tcip_annotation.json_io import UnreadableLabelDocumentError, document_at, read_stored
 
     from tcip_mcp.dataset_layout import label_key_of
@@ -177,7 +190,8 @@ def _segment_counts(
     document, version = document_at(key, stored), stored.version
     segments = load_canopy_segments(document, subject=canopy_subject, raster_stem=stem,
                                     raster_identity=recorded_identity)
-    tie = tie_segments_to_plants(segments, registered, georef, width=width, height=height)
+    tie = tie_segments_to_plants(segments, registered, georef, width=width, height=height,
+                                 position_error_m=position_error_m)
     assignments = assign_detections_to_segments(boxes, tie)
     ambiguous_segments = {i for a in assignments if a.source == "overlapping_segments"
                           for i in a.overlapping_segment_indices}
@@ -195,9 +209,11 @@ def _segment_counts(
                             "subject": canopy_subject, "n_segments": len(segments)},
         "segment_ties": [{"segment_index": t.segment_index, "plot_name": t.plot_name,
                           "clearance_m": t.clearance_m} for t in tie.tied],
-        "segments_without_plant": len(tie.untied),
+        "position_error_m": position_error_m,
+        "segments_without_plant": tie.segments_without_plant,
         "plants_outside_raster": tie.plants_outside_raster,
         "plants_without_segment": tie.plants_without_segment,
+        "plants_within_position_error": tie.plants_within_position_error,
         "plants_with_ambiguous_detections": ambiguous,
         "detections_unattributed": sum(by_source.values()),
         "detections_unattributed_by_source": by_source,
@@ -206,6 +222,8 @@ def _segment_counts(
     }
     uncountable = {**{p: "outside the raster's frame" for p in tie.plants_outside_raster},
                    **{p: "inside no canopy segment" for p in tie.plants_without_segment},
+                   **{p: f"within the {position_error_m} m position error of its canopy "
+                         "boundary" for p in tie.plants_within_position_error},
                    **{p: "its segment's detection is ambiguous" for p in ambiguous}}
     return counts, disclosure, uncountable
 
@@ -223,14 +241,16 @@ def deliver_orthomosaic_plant_counts(
     pipeline_version: str = "",
     nn_tolerance_m: float | None = None,
     canopy_subject: str = "",
+    position_error_m: float | None = None,
     acknowledgment_id: str | None = None,
 ) -> dict:
     """Per-plant detection counts from a published whole-raster prediction bucket plus a registered
     plant registry, for the plants ``plants`` names.
 
-    The MCP door over :func:`orthomosaic_plant_counts`, which carries the full contract. An
-    unvalidated bucket ships only under ``acknowledgment_id``, a breeder's recorded acknowledgment
-    of exactly this result, which this door executes and never records.
+    The MCP door over :func:`orthomosaic_plant_counts`, which carries the full contract:
+    ``canopy_subject`` attribution states ``position_error_m``, the registry positions' error
+    bound in meters. An unvalidated bucket ships only under ``acknowledgment_id``, a breeder's
+    recorded acknowledgment of exactly this result, which this door executes and never records.
     """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import load_registry
 
@@ -240,7 +260,7 @@ def deliver_orthomosaic_plant_counts(
             output_csv_path,
             delivered_phenotype, plants, crop=crop, pipeline_version=pipeline_version,
             nn_tolerance_m=nn_tolerance_m, canopy_subject=canopy_subject,
-            acknowledgment_id=acknowledgment_id, door="deliver_orthomosaic_plant_counts",
-            actor=None)
+            position_error_m=position_error_m, acknowledgment_id=acknowledgment_id,
+            door="deliver_orthomosaic_plant_counts", actor=None)
     except ValueError as exc:
         return {"error": str(exc)}

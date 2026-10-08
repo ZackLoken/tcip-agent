@@ -66,15 +66,18 @@ def _frame(bands: int = 3, *, value=255, blobs=BLOBS) -> np.ndarray:
                      for v in np.broadcast_to(np.asarray(value), (bands,))], axis=-1)
 
 
-def _pass(checkpoint, **stated):
+def _pass(checkpoint, reference=None, **stated):
     """The tiled pass ``checkpoint`` runs at the fixture's tile edge and overlap, merging by NMM
-    at 0.5 and keeping every score, with ``stated`` over those."""
-    from tcip_mcp.pipelines.execution import prepare_pass
+    at 0.5 and keeping every score at the sample cap, with ``stated`` over those, made runnable
+    from ``reference`` when one is given."""
+    from tcip_mcp.pipelines.execution import prepare
+    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
 
     values = dict(tile=True, tile_size=TILE, overlap=OVERLAP, postprocess="nmm",
-                  cross_tile_nms=0.5, conf=0.0)
+                  cross_tile_nms=0.5, conf=0.0, max_dets=SAMPLE_MAX_DETS)
     values.update(stated)
-    return prepare_pass(checkpoint, Stated(**values), device="cpu", tile_batch_size=2)
+    return prepare(checkpoint, Stated(**values), device="cpu",
+                   tile_batch_size=2).runnable(reference)
 
 
 def _sliced(p, source, *, require_masks: bool = True, **kwargs):
@@ -85,10 +88,10 @@ def _sliced(p, source, *, require_masks: bool = True, **kwargs):
 
 def _whole(p, source) -> dict:
     """The untiled record of ``source`` under the pass's own conf and cap."""
-    from tcip_mcp.pipelines.execution import untiled_execution
+    from tcip_mcp.pipelines.execution import execution_record
 
-    return p.predictor.predict(source, untiled_execution(
-        p.checkpoint, conf=p.execution.conf, max_dets=p.execution.max_dets))
+    return p.predictor.predict(source, execution_record(
+        p.checkpoint, Stated(conf=p.execution.conf, max_dets=p.execution.max_dets), None, None))
 
 
 def _png(directory: Path, arr: np.ndarray, name: str = "frame.png") -> str:
@@ -334,42 +337,100 @@ def test_a_stated_merge_threshold_never_reaches_the_detectors_own_nms(tmp_path):
     assert p.predictor.model.nms_thresh == 0.45
 
 
-def test_each_merge_runs_at_the_threshold_its_own_metric_derives(tmp_path):
-    """A box nested in another overlaps it at IoU 0.25 and IoS 1: suppression by IoU derives a
-    threshold the pair stays apart under, merging by IoS one it joins under, each merge running at
-    its own metric's value and labeled with that metric."""
+def test_an_iou_merge_derives_its_threshold_and_an_ios_merge_states_one(tmp_path):
+    """A box nested in another overlaps it at IoU 0.25 and IoS 1: suppression by IoU derives,
+    from a reference the caller holds, a threshold the pair stays apart under, and a pass holding
+    no reference refuses it unstated; a merge by IoS has no derivation, so the pass refuses one
+    stated without a threshold and merges the pair under the threshold stated for it."""
     from sahi.prediction import ObjectPrediction
 
-    from tcip_mcp.pipelines.derivations import CROSS_TILE_NMS_DERIVATIONS
+    from tcip_mcp.pipelines.derivations import CROSS_TILE_NMS_DERIVATION
+    from tcip_mcp.pipelines.execution import ExecutionRefusedError, Reference
     from tcip_mcp.pipelines.slicing import cross_tile_merge
 
     _path, checkpoint = _checkpoint(tmp_path)
-    nested = [[[0.0, 0.0, 20.0, 20.0], [5.0, 5.0, 10.0, 10.0]]]
-    merged = {}
-    for postprocess, metric in (("nms", "IOU"), ("nmm", "IOS")):
-        p = _pass(checkpoint, postprocess=postprocess, cross_tile_nms=None)
-        p.derive_merge(nested)
-        assert p.execution.sources["cross_tile_nms"] == CROSS_TILE_NMS_DERIVATIONS[metric]
-        predictions = [ObjectPrediction(bbox=[0, 0, 20, 20], category_id=1, score=0.9),
-                       ObjectPrediction(bbox=[5, 5, 15, 15], category_id=1, score=0.8)]
-        merged[postprocess] = (p.execution.cross_tile_nms,
-                               len(cross_tile_merge(p.execution)(predictions)))
+    nested = Reference(boxes_per_image=[[[0.0, 0.0, 20.0, 20.0], [5.0, 5.0, 10.0, 10.0]]],
+                       counted=None, footprint=None)
+    predictions = [ObjectPrediction(bbox=[0, 0, 20, 20], category_id=1, score=0.9),
+                   ObjectPrediction(bbox=[5, 5, 15, 15], category_id=1, score=0.8)]
 
-    assert merged["nms"] == (pytest.approx(0.30), 2)
-    assert merged["nmm"] == (pytest.approx(0.80), 1)
-    assert "provisional" in CROSS_TILE_NMS_DERIVATIONS["IOS"]
+    with pytest.raises(ExecutionRefusedError, match="cross_tile_nms"):
+        _pass(checkpoint, postprocess="nms", cross_tile_nms=None)
+    p = _pass(checkpoint, nested, postprocess="nms", cross_tile_nms=None)
+    assert p.execution.sources["cross_tile_nms"] == CROSS_TILE_NMS_DERIVATION
+    assert p.execution.cross_tile_nms == pytest.approx(0.30)
+    assert len(cross_tile_merge(p.execution)(predictions)) == 2
+
+    for reference in (None, nested):
+        with pytest.raises(ExecutionRefusedError, match="cross_tile_nms"):
+            _pass(checkpoint, reference, postprocess="nmm", cross_tile_nms=None)
+    stated = _pass(checkpoint, nested, postprocess="nmm", cross_tile_nms=0.8)
+    assert stated.execution.sources["cross_tile_nms"] == "explicit"
+    assert len(cross_tile_merge(stated.execution)(predictions)) == 1
+
+
+def test_a_preparation_runs_nothing_and_its_pass_merges_at_the_threshold_it_resolved(
+        tmp_path, monkeypatch):
+    """``prepare`` readies a checkpoint and holds no pass: nothing it returns predicts. Made
+    runnable, its pass carries the merge threshold resolved once, stated or derived from the
+    reference, and the real merger receives that threshold on every prediction; a threshold with
+    no statement and no reference, or one the reference cannot derive, refuses naming it."""
+    import tcip_mcp.pipelines.slicing as slicing
+    from tcip_mcp.pipelines.derivations import CROSS_TILE_NMS_DERIVATION
+    from tcip_mcp.pipelines.execution import (
+        ExecutionRefusedError, Pass, Preparation, Reference, prepare,
+    )
+    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
+
+    _path, checkpoint = _checkpoint(tmp_path)
+    received: list = []
+    real_merge = slicing.cross_tile_merge
+
+    def recording_merge(execution):
+        received.append(execution.cross_tile_nms)
+        return real_merge(execution)
+
+    monkeypatch.setattr(slicing, "cross_tile_merge", recording_merge)
+    sources = [_png(tmp_path, _frame(), "a.png"), _png(tmp_path, _frame(blobs=(SEAM_BLOB,)),
+                                                       "b.png")]
+
+    def prepared(cross_tile_nms):
+        prep = prepare(checkpoint, Stated(tile=True, tile_size=TILE, overlap=OVERLAP,
+                                          postprocess="nms", cross_tile_nms=cross_tile_nms,
+                                          conf=0.0, max_dets=SAMPLE_MAX_DETS), device="cpu",
+                       tile_batch_size=2)
+        assert isinstance(prep, Preparation) and not hasattr(prep, "predict")
+        assert not any(isinstance(v, Pass) for v in vars(prep).values())
+        return prep
+
+    overlapping = Reference(boxes_per_image=[[[0.0, 0.0, 20.0, 20.0], [5.0, 5.0, 10.0, 10.0]]],
+                            counted=None, footprint=None)
+    apart = Reference(boxes_per_image=[[[0.0, 0.0, 20.0, 20.0], [100.0, 100.0, 20.0, 20.0]]],
+                      counted=None, footprint=None)
+    for cross_tile_nms, reference, source in ((0.5, None, "explicit"),
+                                              (None, overlapping, CROSS_TILE_NMS_DERIVATION)):
+        received.clear()
+        p = prepared(cross_tile_nms).runnable(reference)
+        assert p.execution.sources["cross_tile_nms"] == source
+        p.predict(sources)
+        assert received == [p.execution.cross_tile_nms] * 2
+        assert all(isinstance(t, float) for t in received)
+    for reference in (None, apart):
+        with pytest.raises(ExecutionRefusedError, match="cross_tile_nms"):
+            prepared(None).runnable(reference)
 
 
 def test_the_dry_run_reports_the_record_the_bucket_keeps(tmp_path):
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
 
     ckpt, _checkpoint_record = _checkpoint(tmp_path)
     images = tmp_path / "images" / UNDATED_BUCKET
     images.mkdir(parents=True)
     _png(images, _frame())
     stated = Stated(tile=True, tile_size=TILE, overlap=OVERLAP, conf=0.2,
-                    cross_tile_nms=0.4, max_dets=50, postprocess="greedynmm")
+                    cross_tile_nms=0.4, max_dets=SAMPLE_MAX_DETS, postprocess="greedynmm")
 
     dry = run_inference(tmp_path, ckpt, images_dir=str(images), bucket="sliced",
                         dry_run=True, stated=stated)
@@ -386,7 +447,7 @@ N_CALIBRATION_IMAGES = 20
 def _blob_capture(project: Path) -> Path:
     """Frames of 20px blobs in three rows of four, each image shifted a pixel further right so no
     two share ground truth, labeled with 32px boxes that overlap their row neighbors by 10px (a
-    neighbor tail every metric derives a threshold from), ingested as one capture date of the
+    neighbor tail an IoU threshold derives from), ingested as one capture date of the
     dataset ``ds``; its images directory."""
     from tcip_annotation.state import Annotation, BBox
 
@@ -411,17 +472,16 @@ def _blob_capture(project: Path) -> Path:
 
 
 def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(tmp_path, monkeypatch):
-    """A tiled assessment resolves its unstated merge threshold from the calibration side's
-    ground truth in the metric its postprocess compares over before any image is predicted; every
-    reference slice and every slice of the bucket published under it is merged at that one value,
-    and the bucket records the assessment's execution."""
+    """A tiled assessment merging by IoS at its stated threshold merges every reference slice and
+    every slice of the bucket published under it at that one value, and the bucket records the
+    assessment's execution."""
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.pipelines.derivations import CROSS_TILE_NMS_DERIVATIONS
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.inference_tools import run_inference
     from tests import _trait_fixtures as fx
+    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
 
     fx.seed_confirmed_count(tmp_path, measured_subject="bud")
     images = _blob_capture(tmp_path)
@@ -443,7 +503,8 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(tmp_path, monkeypat
     assessment = assess_checkpoint(
         tmp_path, checkpoint_path=ckpt, trait=fx.COUNT_TRAIT, delivery_kind="per_image_count",
         selection_dir=str(selection), device="cpu",
-        stated=Stated(tile=True, tile_size=TILE, overlap=OVERLAP, postprocess="nmm"))
+        stated=Stated(tile=True, tile_size=TILE, overlap=OVERLAP, postprocess="nmm",
+                      cross_tile_nms=0.8, max_dets=SAMPLE_MAX_DETS))
     assert "error" not in assessment, assessment
     reference_passes = len(merged_at)
     published = run_inference(tmp_path, ckpt, images_dir=str(images), bucket="blob/2026-01-01",
@@ -451,7 +512,7 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(tmp_path, monkeypat
     assert "error" not in published, published
 
     execution = assessment["execution"]
-    assert execution["sources"]["cross_tile_nms"] == CROSS_TILE_NMS_DERIVATIONS["IOS"]
+    assert execution["sources"]["cross_tile_nms"] == "explicit"
     assert reference_passes > 0 and len(merged_at) > reference_passes
     assert set(merged_at) == {execution["cross_tile_nms"]}
     assert read_bucket(published["dataset_root"], "blob/2026-01-01").execution.record() == (
@@ -470,8 +531,17 @@ def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(tmp_path):
     images.mkdir(parents=True)
     _png(images, _frame())
 
+    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
+
+    for merge in ("nms", "nmm"):
+        unstated = run_inference(tmp_path, ckpt, images_dir=str(images), bucket="sliced",
+                                 stated=Stated(conf=0.0, max_dets=SAMPLE_MAX_DETS,
+                                               postprocess=merge))
+        assert "cross_tile_nms" in unstated.get("error", ""), (merge, unstated)
+
     response = run_inference(tmp_path, ckpt, images_dir=str(images), bucket="sliced",
-                             stated=Stated(conf=0.0, postprocess="nmm"))
+                             stated=Stated(conf=0.0, max_dets=SAMPLE_MAX_DETS, postprocess="nmm",
+                                           cross_tile_nms=0.6))
 
     assert "error" not in response, response
     execution = read_bucket(response["dataset_root"], "sliced").execution

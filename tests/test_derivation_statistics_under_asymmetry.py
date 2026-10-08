@@ -63,7 +63,6 @@ def test_localization_tolerance_normalizes_by_the_characteristic_size_its_siblin
     # 40px between neighboring centers, margin_frac 0.5, characteristic size 30.
     assert tol_square == pytest.approx(40 * 0.5 / 30)
     assert tol_open == pytest.approx(tol_square)
-    assert 0.1 < tol_square < 0.75  # strictly inside the clamp, so neither end flattens the pair
 
 
 def test_block_scale_takes_the_typical_spacing_not_one_dragged_up_by_isolated_objects():

@@ -17,6 +17,7 @@ from tcip_mcp.pipelines.components.losses import (  # noqa: E402
 from tcip_mcp.pipelines.data.augmentations import (  # noqa: E402
     RandomRotation, ToTensor, build_augmentation, get_augmentation_preset,
 )
+from tests._training_values import tune_arguments  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -307,11 +308,6 @@ def test_random_rotation_rotates_semantic_mask():
 # HPO: Ray Tune search algorithms + schedulers are agent-selectable
 # --------------------------------------------------------------------------
 
-def test_get_default_baseline_params_subset_of_space():
-    from tcip_mcp.pipelines.training.hpo import get_default_baseline_params, get_default_space
-    assert set(get_default_baseline_params()).issubset(set(get_default_space()))
-
-
 def test_to_tune_space_maps_every_param_type():
     pytest.importorskip("ray")
     from ray import tune
@@ -358,9 +354,7 @@ def test_tune_search_normalizes_search_alg_case_before_deciding_grid(tmp_path, m
         hpo.tune_search(
             objective_fn=lambda config, report: None,
             param_space={"bs": {"type": "categorical", "choices": [2, 4]}},
-            search_alg="Grid",
-            sweep_dir=tmp_path / "sweep", seed=0
-        )
+            sweep_dir=tmp_path / "sweep", **tune_arguments(search_alg="Grid"))
 
     assert captured["grid"] is True
 
@@ -468,8 +462,8 @@ def test_available_search_algs_lists_natives_and_installed_backends():
 
 
 @pytest.mark.ray_cluster
-def test_tune_search_warm_start_and_optimizes(tmp_path):
-    """End-to-end Ray Tune: a real sweep runs every trial and evaluates the warm-start point.
+def test_tune_search_evaluates_its_baseline_and_optimizes(tmp_path):
+    """End-to-end Ray Tune: a real sweep runs every trial and evaluates the baseline point.
     Uses a pure-math objective, each trial writing the point it trained, so no training is
     needed."""
     pytest.importorskip("ray")
@@ -487,24 +481,28 @@ def test_tune_search_warm_start_and_optimizes(tmp_path):
     tune_search(
         obj,
         param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
-        metric="objective", mode="min", num_samples=6,
-        search_alg="random", scheduler="none",
-        warm_start=True, baseline_params={"x": 2.0},
-        sweep_dir=tmp_path / "hpo" / "sweep", seed=0,
+        sweep_dir=tmp_path / "hpo" / "sweep",
+        **tune_arguments(num_samples=6, scheduler="none", baseline_params={"x": 2.0}),
     )
     points = [json.loads(p.read_text(encoding="utf-8")) for p in seen.iterdir()]
     assert len(points) == 6
-    assert 2.0 in points  # the warm-start point, the exact minimum, was trained
+    assert 2.0 in points  # the baseline point, the exact minimum, was trained
 
 
 def test_run_hyperparameter_search_exposes_agent_search_choices_not_pinned():
     """run_hyperparameter_search lets the agent choose search_alg and scheduler; it takes no
-    ``pruner`` or ``direction`` parameter."""
+    ``pruner`` or ``direction`` parameter, and the search space is the caller's to state, no
+    default space or default baseline shipping beside it."""
     import inspect
 
+    from tcip_mcp.pipelines.training import hpo
     from tcip_mcp.tools.training_tools import run_hyperparameter_search
     params = inspect.signature(run_hyperparameter_search).parameters
     assert "search_alg" in params and "scheduler" in params
     assert "pruner" not in params and "direction" not in params
+    assert params["param_space"].default is inspect.Parameter.empty
+    assert "warm_start" not in params
+    assert not hasattr(hpo, "get_default_space")
+    assert not hasattr(hpo, "get_default_baseline_params")
     assert params["search_alg"].default == "random"
     assert params["scheduler"].default == "asha"

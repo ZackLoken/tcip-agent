@@ -15,13 +15,12 @@ def _fixture_config(root: Path) -> Path:
     """A valid config: a builder the operator's own process imports (never called, since no
     --smoke is passed here) over two labeled frames of the subject its scope names
     (``_verified_checkpoint_fixtures.detection_images``)."""
+    from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import SCOPED_DATA, detection_images
 
-    config = {
-        "model_source": {"builder": "tcip_mcp.pipelines.model_build:build_model",
-                         "task": "detection"},
-        "data": {**detection_images(root / "data", SCOPED_DATA["scope"]), **SCOPED_DATA},
-    }
+    config = training_config(
+        {"builder": "tcip_mcp.pipelines.model_build:build_model", "task": "detection"},
+        {**detection_images(root / "data", SCOPED_DATA["scope"]), **SCOPED_DATA})
     config_path = root / "config.json"
     config_path.write_text(json.dumps(config), encoding="utf-8")
     return config_path

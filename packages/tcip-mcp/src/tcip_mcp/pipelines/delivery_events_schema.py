@@ -111,9 +111,10 @@ class CanopySegmentDisclosure(BaseModel):
 
     Names the registry and raster identity the same way :class:`PlantRegistryDisclosure` does, plus
     the canopy document this delivery read its boundaries from, the resolved segment-to-plant ties,
-    and every plant this delivery's own rows do not cover, by name and by reason: outside the
-    raster's frame, inside no segment, or inside a segment whose own detection was ambiguous
-    (:data:`~tcip_mcp.pipelines.postprocessing.segment_attribution.SegmentAssignment`'s
+    the position error in meters the ties were held to, and the registry plants attribution
+    excluded, by name and by reason: outside the raster's frame, inside no segment, within the
+    position error of its segment's boundary, or inside a segment whose own detection was
+    ambiguous (:data:`~tcip_mcp.pipelines.postprocessing.segment_attribution.SegmentAssignment`'s
     ``"overlapping_segments"`` source). Every key is required.
     """
 
@@ -123,9 +124,13 @@ class CanopySegmentDisclosure(BaseModel):
     raster_identity: dict
     canopy_segments: CanopySegmentsDocument
     segment_ties: list[SegmentTieDisclosure]
+    position_error_m: float
+    """The registry positions' error bound in meters the ties were held to, the project's
+    stated value."""
     segments_without_plant: int
     plants_outside_raster: list[str]
     plants_without_segment: list[str]
+    plants_within_position_error: list[str]
     plants_with_ambiguous_detections: list[str]
     detections_unattributed: int
     detections_unattributed_by_source: dict[UnattributedSegmentSource, int]

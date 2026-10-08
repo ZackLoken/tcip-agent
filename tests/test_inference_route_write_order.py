@@ -9,6 +9,7 @@ import pytest
 
 from tests._audit_fixtures import audit_rows
 from tests._predictor_fixtures import StubPredictor, install
+from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS, SAMPLE_MAX_DETS
 
 DATE = "2025-06-01"
 
@@ -29,7 +30,7 @@ def _job(job_id, images_dir, bucket, ckpt, project):
     return InferenceJob(
         job_id=job_id, actor="user:tester", project=str(project), checkpoint_path=str(ckpt),
         dataset_root=str(dataset_root_of(images_dir)), images_dir=str(images_dir), bucket=bucket,
-        stated=Stated(tile=False, conf=0.25, postprocess="nms"))
+        stated=Stated(tile=False, conf=0.25, max_dets=SAMPLE_MAX_DETS, postprocess="nms"))
 
 
 def _launch_through_the_route(client, dataset, bucket, ckpt, *, tile: bool):
@@ -39,7 +40,7 @@ def _launch_through_the_route(client, dataset, bucket, ckpt, *, tile: bool):
 
     resp = client.post("/api/inference/launch", json={
         "user": "tester", "checkpoint_path": str(ckpt), "dataset_root": str(dataset), "date": DATE,
-        "bucket": bucket, "stated": {"tile": tile}})
+        "bucket": bucket, "stated": {"tile": tile, **SAMPLE_DETECTOR_PASS}})
     assert resp.status_code == 200, resp.text
     job = _get(resp.json()["job_id"])
     job.thread.join(60)
@@ -124,7 +125,7 @@ def test_a_pass_failing_after_its_first_document_publishes_nothing_on_either_doo
 
     with pytest.raises(OSError, match="disk full"):
         run_inference(tmp_path, ckpt, str(images_dir), bucket=f"mcp/{DATE}",
-                      stated=Stated(tile=False))
+                      stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS))
 
     for bucket in (f"gui/{DATE}", f"mcp/{DATE}"):
         assert _documents(dataset, bucket) == []
@@ -150,7 +151,7 @@ def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_publishe
 
     job = _launch_through_the_route(client, dataset, f"run/{DATE}", ckpt, tile=True)
     mcp = run_inference(tmp_path, ckpt, str(images_dir), bucket=f"mcp/{DATE}",
-                        stated=Stated(tile=True))
+                        stated=Stated(tile=True, **SAMPLE_DETECTOR_PASS))
 
     assert job.status == "failed"
     assert job.error == mcp["error"]
@@ -259,7 +260,7 @@ def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_lines(tmp_path, mon
             _worker(_job(door, images_dir, bucket, ckpt, tmp_path))
         else:
             result = run_inference(tmp_path, ckpt, str(images_dir), bucket=bucket,
-                                   stated=Stated(tile=False))
+                                   stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS))
             assert "error" not in result, result
         rows[door] = audit_rows(dataset)[before:]
         assert _record(dataset, bucket)["producer"]["experiment_id"] == Path(ckpt).parent.name

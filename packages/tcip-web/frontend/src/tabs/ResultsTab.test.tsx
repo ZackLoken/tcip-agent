@@ -735,10 +735,12 @@ describe("ResultsTab delivery events (read-only)", () => {
           subject: "canopy",
           n_segments: 3,
         },
+        position_error_m: 0.5,
         segment_ties: [
           { segment_index: 0, plot_name: "plot0", clearance_m: 0.8 },
           { segment_index: 1, plot_name: "plot1", clearance_m: 1.2 },
         ],
+        plants_within_position_error: ["plot7"],
         segments_without_plant: 1,
         plants_outside_raster: ["plot9"],
         plants_without_segment: ["plot8"],
@@ -748,6 +750,7 @@ describe("ResultsTab delivery events (read-only)", () => {
           outside_segments: 1,
           overlapping_segments: 1,
           segment_without_plant: 0,
+          segment_plant_within_position_error: 0,
         },
         detections_unattributed_scope: "delivered_raster",
         plant_attribution: "segment",
@@ -759,8 +762,11 @@ describe("ResultsTab delivery events (read-only)", () => {
     const row = await screen.findByTestId("delivery-with-canopy");
 
     expect(within(row).getByTestId("canopy-disclosure")).toBeInTheDocument();
-    expect(within(row).getByText(/Canopy segments \(orchard-block\): 1\/4/)).toBeInTheDocument();
+    expect(
+      within(row).getByText(/Canopy segments \(orchard-block\): 1 registry plant\(s\) delivered/),
+    ).toBeInTheDocument();
     expect(within(row).getByText(/No segment: plot8/)).toBeInTheDocument();
+    expect(within(row).getByText(/Within the position error: plot7/)).toBeInTheDocument();
     expect(within(row).getByText(/Outside the raster: plot9/)).toBeInTheDocument();
     expect(within(row).getByText(/Ambiguous detection: plot1/)).toBeInTheDocument();
     expect(within(row).queryByText(/Plant registry orchard-block:/)).not.toBeInTheDocument();
@@ -912,6 +918,47 @@ describe("ResultsTab count export", () => {
       },
       filename: "plant_counts.csv",
     });
+  });
+
+  it("drops the position error with the canopy subject it belongs to", async () => {
+    const panel = await renderCountPanel();
+    const downloadCountCsv = vi.spyOn(resultsApi, "downloadCountCsv").mockResolvedValue({
+      blob: new Blob(["x"]),
+      headers: {
+        savedTo: "C:/proj/results_export/plant_counts.csv",
+        validated: true,
+        acknowledgedBy: "",
+      },
+    });
+
+    fireEvent.change(controlFollowing(panel, "Kind"), {
+      target: { value: "orthomosaic_plant_counts" },
+    });
+    chooseBucket(panel);
+    fireEvent.change(within(panel).getByLabelText(/plants to deliver/i), {
+      target: { value: "PLOT-01" },
+    });
+    fireEvent.change(controlFollowing(panel, "Plant registry (registered by name)"), {
+      target: { value: "reg" },
+    });
+    fireEvent.change(controlFollowing(panel, "Delivered phenotype"), {
+      target: { value: "stem_count" },
+    });
+    const canopy = within(panel).getByPlaceholderText("canopy_subject (optional)");
+    fireEvent.change(canopy, { target: { value: "canopy" } });
+    fireEvent.change(within(panel).getByLabelText("position_error_m"), {
+      target: { value: "0.7" },
+    });
+    fireEvent.change(canopy, { target: { value: "" } });
+    fireEvent.change(controlFollowing(panel, "Filename"), {
+      target: { value: "plant_counts.csv" },
+    });
+    fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
+
+    await waitFor(() => expect(downloadCountCsv).toHaveBeenCalled());
+    const delivery = downloadCountCsv.mock.calls[0][0].delivery;
+    expect(delivery).not.toHaveProperty("position_error_m");
+    expect(delivery).not.toHaveProperty("canopy_subject");
   });
 
   it("shows the second-delivery sentence naming the saved path when the count export's audit line is lost", async () => {

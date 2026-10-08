@@ -12,6 +12,7 @@ import pytest
 torch = pytest.importorskip("torch")
 import torch.nn as nn
 from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
+from tests._training_values import adamw_optimizer, sgd_optimizer  # noqa: E402
 
 
 # ====================================================================
@@ -90,18 +91,31 @@ class TestSamplers:
 # Optimizer Factory & Trainer Config
 # ====================================================================
 
+def _built(block: dict, model):
+    """The optimizer ``block`` (validated through ``schemas.OptimizerSpec``) builds over
+    ``model`` at its own rates."""
+    from tcip_mcp.pipelines.schemas import OptimizerSpec
+    from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
+
+    spec = OptimizerSpec.model_validate(block)
+    return build_optimizer(spec, model, backbone_lr=spec.backbone_lr, head_lr=spec.head_lr)
+
+
 class TestOptimizerFactory:
     def test_build_adamw(self):
-        from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
-        model = nn.Linear(10, 5)
-        opt = build_optimizer("adamw", model, head_lr=1e-3)
-        assert isinstance(opt, torch.optim.AdamW)
+        assert isinstance(_built(adamw_optimizer(), nn.Linear(10, 5)), torch.optim.AdamW)
 
-    def test_build_sgd(self):
-        from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
-        model = nn.Linear(10, 5)
-        opt = build_optimizer("sgd", model, head_lr=1e-2)
+    def test_build_sgd_at_its_stated_momentum(self):
+        opt = _built(sgd_optimizer(), nn.Linear(10, 5))
         assert isinstance(opt, torch.optim.SGD)
+        assert opt.param_groups[0]["momentum"] == sgd_optimizer()["momentum"]
+
+    def test_a_builder_refuses_a_setting_it_does_not_read(self):
+        from tcip_mcp.pipelines.training.optimizer_factory import _OPTIMIZER_BUILDERS
+
+        with pytest.raises(TypeError, match="momentum"):
+            _OPTIMIZER_BUILDERS["adamw"](nn.Linear(10, 5).parameters(), lr=1e-3,
+                                         weight_decay=0.0, momentum=0.8)
 
     def test_optimizer_builders_available(self):
         from tcip_mcp.pipelines.training.optimizer_factory import _OPTIMIZER_BUILDERS
@@ -111,13 +125,11 @@ class TestOptimizerFactory:
     def test_lamb_raises_when_torch_optimizer_missing(self):
         """lamb must never silently fall back to AdamW when torch_optimizer isn't installed."""
         from importlib.util import find_spec
-        from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
 
         if find_spec("torch_optimizer") is not None:
             pytest.skip("torch_optimizer is importable in this environment")
-        model = nn.Linear(10, 5)
         with pytest.raises(ImportError, match="torch_optimizer"):
-            build_optimizer("lamb", model, head_lr=1e-3)
+            _built({**adamw_optimizer(), "name": "lamb"}, nn.Linear(10, 5))
 
 
 # ====================================================================

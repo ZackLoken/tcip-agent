@@ -62,8 +62,10 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
     model = models[0]
 
     device = torch.device("cpu")
-    on_holdout = evaluate(model, val_loader, device, "regression", dims={"in_chans": 1})
-    on_training = evaluate(model, train_loader, device, "regression", dims={"in_chans": 1})
+    on_holdout = evaluate(model, val_loader, device, "regression", dims={"in_chans": 1},
+                          conf_threshold=None)
+    on_training = evaluate(model, train_loader, device, "regression", dims={"in_chans": 1},
+                           conf_threshold=None)
     # The two loaders must be distinguishable at all, or nothing below can discriminate.
     assert on_holdout["loss"] > 3.0 * on_training["loss"] > 0.0
     assert on_holdout["mae"] != pytest.approx(on_training["mae"], rel=0.1)

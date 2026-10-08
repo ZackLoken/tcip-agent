@@ -14,22 +14,22 @@ import torch
 from torch import nn
 
 from tcip_mcp.pipelines.model_build import STATE_DICT_KEY
-from tcip_mcp.pipelines.schemas import DEFAULT_BACKBONE_LR, DEFAULT_HEAD_LR, DEFAULT_WEIGHT_DECAY
+from tcip_mcp.pipelines.schemas import OptimizerSpec
 
 
-def _build_sgd(params, *, lr: float, weight_decay: float, momentum: float = 0.9, **kw):
+def _build_sgd(params, *, lr: float, weight_decay: float, momentum: float):
     return torch.optim.SGD(params, lr=lr, momentum=momentum, weight_decay=weight_decay)
 
 
-def _build_adam(params, *, lr: float, weight_decay: float, **kw):
+def _build_adam(params, *, lr: float, weight_decay: float):
     return torch.optim.Adam(params, lr=lr, weight_decay=weight_decay)
 
 
-def _build_adamw(params, *, lr: float, weight_decay: float, **kw):
+def _build_adamw(params, *, lr: float, weight_decay: float):
     return torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
 
 
-def _build_lamb(params, *, lr: float, weight_decay: float, **kw):
+def _build_lamb(params, *, lr: float, weight_decay: float):
     """LAMB optimizer, requires the optional ``torch_optimizer`` package."""
     try:
         from torch_optimizer import Lamb
@@ -50,14 +50,11 @@ _OPTIMIZER_BUILDERS: dict[str, Callable[..., torch.optim.Optimizer]] = {
 }
 
 
-def build_optimizer(
-    name: str,
-    model: nn.Module,
-    backbone_lr: float = DEFAULT_BACKBONE_LR,
-    head_lr: float = DEFAULT_HEAD_LR,
-    weight_decay: float = DEFAULT_WEIGHT_DECAY,
-) -> torch.optim.Optimizer:
-    """Build an optimizer with differential LR.
+def build_optimizer(spec: OptimizerSpec, model: nn.Module, *, backbone_lr: float,
+                    head_lr: float) -> torch.optim.Optimizer:
+    """The optimizer ``spec`` names over ``model`` at ``backbone_lr``/``head_lr`` (the block's own
+    rates, or a stage's scaled ones), with the block's weight decay and, for ``sgd``, its
+    momentum; each registered builder takes the settings it reads and no other.
 
     If model has `get_param_groups(backbone_lr, head_lr)`, uses those
     param groups. Otherwise gives all params the head_lr.
@@ -70,8 +67,9 @@ def build_optimizer(
 
     from tcip_mcp.pipelines.model_build import resolve_named
 
-    factory = resolve_named(name, _OPTIMIZER_BUILDERS, kind="optimizer")
-    return factory(param_groups, lr=head_lr, weight_decay=weight_decay)
+    factory = resolve_named(spec.name, _OPTIMIZER_BUILDERS, kind="optimizer")
+    settings = {} if spec.momentum is None else {"momentum": spec.momentum}
+    return factory(param_groups, lr=head_lr, weight_decay=spec.weight_decay, **settings)
 
 
 def compute_lr_scale(effective_batch: int, reference_batch: int, power: float) -> float:

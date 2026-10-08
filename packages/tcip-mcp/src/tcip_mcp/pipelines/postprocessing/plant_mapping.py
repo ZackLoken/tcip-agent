@@ -91,9 +91,10 @@ GpsSource = Literal["sequence", "nearest_neighbor", "unmapped"]
 none within the gate."""
 
 UnattributedSegmentSource = Literal["outside_segments", "overlapping_segments",
-                                    "segment_without_plant"]
-"""Why a canopy-segment assignment names no plant: no segment holds the detection, several do, or
-the one that does is tied to no plant."""
+                                    "segment_without_plant", "segment_plant_within_position_error"]
+"""Why a canopy-segment assignment names no plant: no segment holds the detection, several do, the
+one that does contains no plant, or it contains one whose position lies within the position error
+of its boundary."""
 
 SegmentSource = Literal["segment_containment", UnattributedSegmentSource]
 """Where a canopy-segment assignment's plant came from: one tied segment containing the detection,

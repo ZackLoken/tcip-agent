@@ -46,7 +46,8 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
     import tcip_mcp.pipelines.training.eval_runners as runners
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._producer_fixtures import admit_over
-    from tests._verified_checkpoint_fixtures import finished_run
+    from tcip_mcp.pipelines.execution import Stated
+    from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS, finished_run
 
     images_dir = _two_subject_dataset(tmp_path / "ds")
     scope = admit_over(images_dir, subject="leaf").scope
@@ -61,7 +62,8 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
 
-    res = evaluate_model(tmp_path, run_dir.name, str(images_dir))
+    res = evaluate_model(tmp_path, run_dir.name, str(images_dir),
+                         stated=Stated(**SAMPLE_DETECTOR_PASS))
     assert "error" not in res, res
 
     dataset = captured["ds"]

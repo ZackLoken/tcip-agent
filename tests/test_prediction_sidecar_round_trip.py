@@ -36,7 +36,10 @@ def test_the_record_the_publication_writes_is_the_record_the_reader_takes_back(
 ):
     from tcip_mcp.buckets import read_bucket
 
-    result = _publish(tmp_path, monkeypatch, tile=True, tile_size=64, conf=0.3)
+    from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS, SAMPLE_MAX_DETS
+
+    result = _publish(tmp_path, monkeypatch, tile=True, tile_size=64, conf=0.3,
+                      max_dets=SAMPLE_MAX_DETS, cross_tile_nms=SAMPLE_CROSS_TILE_NMS)
 
     assert "error" not in result, result
     bucket = read_bucket(result["dataset_root"], result["bucket"])

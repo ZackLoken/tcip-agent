@@ -366,6 +366,7 @@ class OrthomosaicPlantCountsDelivery(BaseModel):
     crop: str = ""
     pipeline_version: str = ""
     canopy_subject: str = ""
+    position_error_m: float | None = None
 
 
 class ExportCountCsvPayload(BaseModel):
@@ -431,7 +432,8 @@ def export_count_csv(payload: ExportCountCsvPayload, request: Request) -> Respon
                 root, str(dataset_root), delivery.bucket, registry_record, str(saved_path),
                 delivery.delivered_phenotype, delivery.plants, crop=delivery.crop,
                 pipeline_version=delivery.pipeline_version,
-                canopy_subject=delivery.canopy_subject, acknowledgment_id=acknowledgment_id,
+                canopy_subject=delivery.canopy_subject,
+                position_error_m=delivery.position_error_m, acknowledgment_id=acknowledgment_id,
                 door="results.export_count_csv", actor=person)
     except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(exc, {"saved_path": str(saved_path)}) from exc

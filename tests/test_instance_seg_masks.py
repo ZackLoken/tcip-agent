@@ -24,6 +24,9 @@ from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tcip_mcp.pipelines.model_contract import check_model_contract  # noqa: E402
 from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor  # noqa: E402
 from tests import bespoke_models  # noqa: E402
+from tests._verified_checkpoint_fixtures import (  # noqa: E402
+    SAMPLE_CROSS_TILE_NMS, SAMPLE_DETECTOR_PASS, SAMPLE_MAX_DETS,
+)
 
 # What the smokes below synthesize their batch at, the shape a run resolves for itself.
 _SMOKE_DIMS = {"in_chans": 3, "num_classes": 1, "img_size": 64}
@@ -122,6 +125,9 @@ def test_predict_sliced_require_masks_false_reaches_real_slicing_path_for_instan
 # --------------------------------------------------------------------------
 
 TILE = 64
+TILED_PASS = Stated(tile_size=TILE, conf=0.0, max_dets=SAMPLE_MAX_DETS,
+                    cross_tile_nms=SAMPLE_CROSS_TILE_NMS)
+"""The execution values a tiled inference pass here states."""
 
 
 @pytest.fixture(scope="module")
@@ -160,13 +166,13 @@ def test_predict_sliced_require_masks_false_returns_boxes_only(instance_seg_ckpt
     """The opt-out tiles normally and returns no masks key at all, never a partial one, while the
     same predictor's untiled path still carries masks (an opt-out, not a global downgrade)."""
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.execution import prepare_pass
+    from tcip_mcp.pipelines.execution import prepare
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     checkpoint = load_registered_checkpoint(instance_seg_ckpt, project=tmp_path)
-    tiled_pass = prepare_pass(checkpoint, Stated(tile=True, tile_size=TILE, overlap=0.2,
-                                                 postprocess="nms", cross_tile_nms=0.3, conf=0.5),
-                              device="cpu")
+    tiled_pass = prepare(checkpoint, Stated(tile=True, tile_size=TILE, overlap=0.2,
+                                            postprocess="nms", **SAMPLE_DETECTOR_PASS),
+                         device="cpu").runnable()
     pred = tiled_pass.predictor
     assert pred.task == "instance_seg"
     img = gray_frame(tmp_path / "images" / UNDATED_BUCKET)
@@ -178,7 +184,8 @@ def test_predict_sliced_require_masks_false_returns_boxes_only(instance_seg_ckpt
     assert tiled["tiles"] >= 4  # 128px image at tile 64 -> a 2x2+ lattice, i.e. it really sliced
     assert tiled["count"] == len(tiled["boxes"]) == len(tiled["scores"])
 
-    untiled = prepare_pass(checkpoint, Stated(tile=False, conf=0.5), device="cpu")
+    untiled = prepare(checkpoint, Stated(tile=False, **SAMPLE_DETECTOR_PASS),
+                      device="cpu").runnable()
     assert "masks" in untiled.predict([img])[0]
 
 
@@ -223,7 +230,7 @@ def test_run_inference_instance_seg_unset_tile_writes_tiled(instance_seg_ckpt, t
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     gray_frame(images_dir)
     r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), bucket="preds/2026-01-01",
-                      device="cpu", stated=Stated(tile_size=TILE, conf=0.0))
+                      device="cpu", stated=TILED_PASS)
     assert "error" not in r
     assert r["execution"]["tile_size"] == TILE
     assert _document(r, images_dir) is not None
@@ -254,7 +261,7 @@ def test_a_masked_bucket_delivers_the_same_counts_on_every_read(instance_seg_ckp
     fx.seed_confirmed_count(tmp_path)
     bucket = "baseline/2026-01-01"
     ran = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), bucket=bucket,
-                        device="cpu", stated=Stated(tile_size=TILE, conf=0.0))
+                        device="cpu", stated=TILED_PASS)
     assert "error" not in ran, ran
 
     refused = deliver_per_image_counts(tmp_path, str(tmp_path), bucket,
@@ -285,7 +292,7 @@ def test_run_inference_never_stamps_a_mask_threshold_into_annotation_attributes(
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     gray_frame(images_dir)
     r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), bucket="preds/2026-01-01",
-                      device="cpu", stated=Stated(tile_size=TILE, conf=0.0))  # a masked detection
+                      device="cpu", stated=TILED_PASS)  # a masked detection
     assert "error" not in r
 
     for ann in tcip_store.read(_document(r, images_dir))["annotations"]:
@@ -301,7 +308,7 @@ def test_run_inference_instance_seg_explicit_tile_true_writes_tiled(instance_seg
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     gray_frame(images_dir)
     r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), bucket="preds/2026-01-01",
-                      device="cpu", stated=Stated(tile=True, tile_size=TILE, conf=0.0))
+                      device="cpu", stated=TILED_PASS.model_copy(update={"tile": True}))
     assert "error" not in r
     assert _document(r, images_dir) is not None
 
@@ -325,7 +332,9 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_masks(instance_seg_
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     checkpoint = load_registered_checkpoint(instance_seg_ckpt, project=tmp_path)
     admitted = checkpoint_admission(checkpoint, images_dir)
-    r = run_full_frame_evaluation(checkpoint, admitted, stated=Stated(tile_size=TILE, overlap=0.2))
+    r = run_full_frame_evaluation(checkpoint, admitted,
+                                  stated=Stated(tile_size=TILE, overlap=0.2,
+                                                **SAMPLE_DETECTOR_PASS))
     samples = admitted.every_sample()
     trained = build_dataset("instance_seg", scope=admitted.scope, samples=samples,
                             sizes=resolve_sizes("instance_seg", {"num_channels": 3}, samples))

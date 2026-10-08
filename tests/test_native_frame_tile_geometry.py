@@ -90,7 +90,8 @@ def _stub_predictor(model, *, task: str = "detection") -> GenericPredictor:
 
 
 def _sliced(pred, source, *, tile_resize, **kwargs) -> dict:
-    """``predict_sliced`` at this module's lattice: ``TILE`` edge, no overlap, NMS at 0.3."""
+    """``predict_sliced`` at this module's lattice: ``TILE`` edge, no overlap, NMS at the sample
+    merge threshold (``tiled_record``'s)."""
     from tests._verified_checkpoint_fixtures import tiled_record
 
     return pred.predict_sliced(
@@ -470,24 +471,25 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
     its recorded augmentation chain pins a real resize the native-frame regime alone must run each
     tile through and undo, so the two runs are not merely two identical no-resize calls."""
     import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
-    from tcip_mcp.pipelines.execution import Stated, tiled_execution, untiled_execution
+    from tcip_mcp.pipelines.execution import Stated, execution_record
     from tcip_mcp.pipelines.slicing import resolve_tile_geometry
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
-    from tests._verified_checkpoint_fixtures import verified_checkpoint
+    from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS, verified_checkpoint
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
     _native_frame_gt(images_dir)
     checkpoint = verified_checkpoint(tmp_path)
+    stated = Stated(**SAMPLE_DETECTOR_PASS)
 
     monkeypatch.setattr(predictor_mod, "GenericPredictor",
                         lambda *a, **kw: _persisted_regime_predictor())
     persisted = run_full_frame_evaluation(
-        checkpoint, checkpoint_admission(checkpoint, images_dir), stated=Stated())
+        checkpoint, checkpoint_admission(checkpoint, images_dir), stated=stated)
     monkeypatch.setattr(predictor_mod, "GenericPredictor",
                         lambda *a, **kw: _native_frame_regime_predictor())
     native = run_full_frame_evaluation(
-        checkpoint, checkpoint_admission(checkpoint, images_dir), stated=Stated())
+        checkpoint, checkpoint_admission(checkpoint, images_dir), stated=stated)
     monkeypatch.undo()
 
     persisted_execution, native_execution = persisted["execution"], native["execution"]
@@ -505,10 +507,10 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
     p_geo = resolve_tile_geometry(persisted_predictor, tiled=True, tile_size=None, overlap=None)
     n_geo = resolve_tile_geometry(native_predictor, tiled=True, tile_size=None, overlap=None)
     assert n_geo.tile_resize == (TILE * 2, TILE * 2)
-    base = untiled_execution(checkpoint, conf=0.0, max_dets=None)
+    unfiltered = stated.model_copy(update={"conf": 0.0})
     r_p, r_n = (predictor.predict_sliced(
         str(images_dir / "a.png"),
-        execution=tiled_execution(base, geo, postprocess=None, cross_tile_nms=None),
+        execution=execution_record(checkpoint, unfiltered, geo, None),
         tile_batch_size=8, require_masks=False)
         for predictor, geo in ((persisted_predictor, p_geo), (native_predictor, n_geo)))
     assert ({tuple(b) for b in r_p["boxes"]} == {tuple(b) for b in r_n["boxes"]}
@@ -522,7 +524,7 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
     import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
-    from tests._verified_checkpoint_fixtures import verified_checkpoint
+    from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS, verified_checkpoint
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
@@ -543,8 +545,8 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
 
     checkpoint = verified_checkpoint(tmp_path)
     monkeypatch.setattr(predictor_mod, "GenericPredictor", _spy_predictor)
-    r = run_full_frame_evaluation(
-        checkpoint, checkpoint_admission(checkpoint, images_dir), stated=Stated())
+    r = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
+                                  stated=Stated(**SAMPLE_DETECTOR_PASS))
 
     assert "error" not in r
     assert captured["execution"].tile_resize == (TILE * 2, TILE * 2)

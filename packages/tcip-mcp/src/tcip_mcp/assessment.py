@@ -35,7 +35,7 @@ from tcip_mcp.traits import (
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.selection import Sample, Selection
-    from tcip_mcp.pipelines.execution import Pass
+    from tcip_mcp.pipelines.execution import Pass, Preparation
     from tcip_mcp.traits import TraitEntry, TraitRevision
 
 ASSESSMENTS_DIR = Path(".tcip/assessments")
@@ -285,13 +285,15 @@ def _reference_sides(project: Path, selection_dir: str
 
 def _prepared(project: Path, *, checkpoint_path: str, trait: str, delivery_kind: str,
               stated: Stated, device: str | None,
-              tile_batch_size: int) -> tuple[TraitRevision, Pass]:
+              tile_batch_size: int) -> tuple[TraitRevision, Preparation]:
     """``trait``'s latest confirmed revision stating a ``delivery_kind`` operationalization, and the
-    pass the registered checkpoint runs under ``stated``. A checkpoint whose head does not produce
-    what the kind measures refuses (:class:`AssessmentRefusedError`)."""
+    registered checkpoint readied for a pass under ``stated``, a detector's at the staged conf
+    floor the count fit collects at (``operating_point.STAGED_CONF_FLOOR``). A checkpoint whose
+    head does not produce what the kind measures refuses (:class:`AssessmentRefusedError`)."""
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.operationalization import confirmed_revision
-    from tcip_mcp.pipelines.execution import prepare_pass
+    from tcip_mcp.pipelines.execution import prepare
+    from tcip_mcp.pipelines.operating_point import STAGED_CONF_FLOOR
 
     revision = confirmed_revision(delivery_kind, project=project, trait=trait)
     checkpoint = load_registered_checkpoint(checkpoint_path, project=project)
@@ -304,8 +306,9 @@ def _prepared(project: Path, *, checkpoint_path: str, trait: str, delivery_kind:
         raise AssessmentRefusedError(
             f"{checkpoint_path} is a {checkpoint.task!r} checkpoint, and a "
             f"{delivery_kind} delivery is measured off a {expected} head.")
-    return revision, prepare_pass(checkpoint, stated, device=device,
-                                  tile_batch_size=tile_batch_size)
+    if delivery_kind in DETECTOR_KINDS:
+        stated = stated.model_copy(update={"conf": STAGED_CONF_FLOOR})
+    return revision, prepare(checkpoint, stated, device=device, tile_batch_size=tile_batch_size)
 
 
 def _admit_reference(samples: list[Sample], scope: Any) -> list[Sample]:
@@ -374,9 +377,10 @@ def assess(
     ``selection_dir``, for a ``delivery_kind`` delivery of ``trait``'s latest confirmed revision,
     and record the result as a new assessment; return it.
 
-    ``stated`` is what the caller states of the execution record; the rest is the checkpoint's own
-    geometry, a derivation over the calibration side's ground truth (the merge threshold, the
-    detection cap), or the operating point the trait's count objective fits there (the conf).
+    ``stated`` is what the caller states of the execution record, a detector's ``max_dets`` among
+    it, since the frames a pass of this checkpoint later publishes on are not known here; the rest
+    is the checkpoint's own geometry, a derivation over the calibration side's ground truth (the
+    merge threshold), or the operating point the trait's count objective fits there (the conf).
 
     Refuses before any inference when the selection holds no calibration or no holdout side, when
     the checkpoint's head does not produce what the kind measures, and when a state-crossing
@@ -386,28 +390,29 @@ def assess(
     """
     from tcip_mcp.pipelines.data.selection import source_digests
 
-    revision, p = _prepared(project, checkpoint_path=checkpoint_path, trait=trait,
-                            delivery_kind=delivery_kind, stated=stated, device=device,
-                            tile_batch_size=tile_batch_size)
+    revision, prep = _prepared(project, checkpoint_path=checkpoint_path, trait=trait,
+                               delivery_kind=delivery_kind, stated=stated, device=device,
+                               tile_batch_size=tile_batch_size)
     _selection, cal, hold = _reference_sides(project, selection_dir)
     state = revision.entry.positive_state
-    if delivery_kind == STATE_CROSSING_DATES and p.scope.state_ids(state) is None:
+    if delivery_kind == STATE_CROSSING_DATES and prep.scope.state_ids(state) is None:
         raise AssessmentRefusedError(
             f"{checkpoint_path} classifies no {state}: a state fraction is measured off a "
             "classifier of the trait's positive state.")
-    admitted = _admit_reference(cal + hold, p.scope)
+    admitted = _admit_reference(cal + hold, prep.scope)
     cal, hold = admitted[:len(cal)], admitted[len(cal):]
     reads = _reference_reads(cal + hold)
     digest_of = source_digests(cal + hold)
     disjointness, failures = _disjointness(digest_of, cal, hold,
-                                           _run_sides(project, p.checkpoint.experiment_id))
+                                           _run_sides(project, prep.checkpoint.experiment_id))
     run_dir = _open_run(project)
     retained, measured = _retained(run_dir, cal + hold, reads)
     m_cal, m_hold = measured[:len(cal)], measured[len(cal):]
     if delivery_kind in DETECTOR_KINDS:
-        criterion, criterion_failures = _detection(p, m_cal, m_hold, revision.entry,
-                                                   delivery_kind, digest_of)
+        p, criterion, criterion_failures = _detection(prep, m_cal, m_hold, revision.entry,
+                                                      delivery_kind, digest_of)
     else:
+        p = prep.runnable()
         criterion, criterion_failures = _scalar(p, m_hold, revision.entry, digest_of)
     return _finish(project, run_dir, revision, {
         "delivery_kind": delivery_kind, "producer": p.checkpoint.producer,
@@ -418,30 +423,19 @@ def assess(
     })
 
 
-def _count_fit(p: Pass, entry: TraitEntry, counts: list[int],
-               merge_boxes: Callable[[], list[list[list[float]]]],
+def _count_fit(p: Pass, entry: TraitEntry,
                collect: Callable[[Execution], tuple[list[dict], list[dict]]]
                ) -> tuple[dict, list[str], list[dict], list[dict]]:
-    """The count criterion over a reference: the cap derived from ``counts`` (the calibration
-    side's per-image object counts) where unstated, the merge threshold derived from
-    ``merge_boxes`` (the calibration side's ground truth) where unstated, the calibration and
-    holdout records ``collect`` predicts under the pass's record at the staged conf floor, and the
-    conf the count objective fits there (:func:`~tcip_mcp.pipelines.operating_point.
-    count_criterion`) written into the pass's record.
+    """The count criterion over a reference: the calibration and holdout records ``collect``
+    predicts under the pass's record, which :func:`_prepared` stated at the staged conf floor, and
+    the conf the count objective fits there
+    (:func:`~tcip_mcp.pipelines.operating_point.count_criterion`) written into the pass's record.
     ``(evidence, failures, calibration records, holdout records)``."""
-    from tcip_mcp.pipelines.derivations import MAX_DETS_DERIVATION, derive_max_dets_from_counts
     from tcip_mcp.pipelines.operating_point import (
-        STAGED_CONF_FLOOR, STAGED_CONF_FLOOR_SOURCE, count_criterion,
-        detector_operating_point_holder,
+        STAGED_CONF_FLOOR, count_criterion, detector_operating_point_holder,
     )
 
-    if p.execution.sources.get("max_dets") != "explicit":
-        p.execution = p.execution.with_value(
-            "max_dets", derive_max_dets_from_counts(counts), MAX_DETS_DERIVATION)
-    if p.execution.tiled:
-        p.derive_merge(merge_boxes())
-    staged = p.execution.with_value("conf", STAGED_CONF_FLOOR, STAGED_CONF_FLOOR_SOURCE)
-    cal_records, hold_records = collect(staged)
+    cal_records, hold_records = collect(p.execution)
     holder, path = detector_operating_point_holder(p.predictor.model)
     conf, evidence, failures = count_criterion(
         cal_records, hold_records, entry, staged_conf_floor_attribute_path=path,
@@ -450,13 +444,14 @@ def _count_fit(p: Pass, entry: TraitEntry, counts: list[int],
     return evidence, failures, cal_records, hold_records
 
 
-def _reference_dataset(p: Pass, samples: list[Sample]) -> Any:
-    """The detection loader over ``samples`` under the pass's scope, at the width it reads at."""
+def _reference_dataset(prep: Preparation, samples: list[Sample]) -> Any:
+    """The detection loader over ``samples`` under the prepared pass's scope, at the width its
+    predictor reads at."""
     from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
 
-    return build_dataset("detection", tiling=None, samples=samples, scope=p.scope,
-                         sizes=resolve_sizes("detection", {"num_channels": p.predictor.in_chans},
-                                             samples))
+    return build_dataset("detection", tiling=None, samples=samples, scope=prep.scope,
+                         sizes=resolve_sizes("detection",
+                                             {"num_channels": prep.predictor.in_chans}, samples))
 
 
 def _records(p: Pass, ds: Any, digest_of: dict[str, str], execution: Execution) -> list[dict]:
@@ -471,22 +466,25 @@ def _records(p: Pass, ds: Any, digest_of: dict[str, str], execution: Execution) 
             for k, r in zip(ds.stems, results, strict=True)]
 
 
-def _detection(p: Pass, cal: list[Sample], hold: list[Sample], entry: TraitEntry,
-               delivery_kind: str, digest_of: dict[str, str]) -> tuple[dict, list[str]]:
-    """The count criterion over the reference (:func:`_count_fit`), each side's loader built once,
-    every fitted value from the calibration side, plus the classifier agreement over matched
-    instances for a state-fraction delivery. ``digest_of`` is keyed by each sample's location,
-    which reading the retained copies leaves unchanged."""
-    from tcip_mcp.pipelines.data.splits import count_label_lines
+def _detection(prep: Preparation, cal: list[Sample], hold: list[Sample], entry: TraitEntry,
+               delivery_kind: str, digest_of: dict[str, str]) -> tuple[Pass, dict, list[str]]:
+    """The pass made runnable from the calibration side's ground truth (its merge threshold, where
+    unstated; the frames a pass of it later publishes on are unknown here, so its cap is the
+    stated one), the count criterion over the reference (:func:`_count_fit`), each
+    side's loader built once, every fitted value from the calibration side, plus the classifier
+    agreement over matched instances for a state-fraction delivery. ``digest_of`` is keyed by each
+    sample's location, which reading the retained copies leaves unchanged."""
+    from tcip_mcp.pipelines.execution import Reference
     from tcip_mcp.pipelines.training.evaluation import gt_objects, gt_records
 
-    cal_ds, hold_ds = _reference_dataset(p, cal), _reference_dataset(p, hold)
-    evidence, failures, cal_records, hold_records = _count_fit(
-        p, entry, [count_label_lines(cal_ds.document(k), p.scope) for k in cal_ds.stems],
-        lambda: [[a["bbox"] for a in gt_objects(
+    cal_ds, hold_ds = _reference_dataset(prep, cal), _reference_dataset(prep, hold)
+    p = prep.runnable(Reference(
+        boxes_per_image=[[a["bbox"] for a in gt_objects(
             {"gt": gt_records(cal_ds.det_targets(cal_ds.document(k)))})] for k in cal_ds.stems],
-        lambda execution: (_records(p, cal_ds, digest_of, execution),
-                           _records(p, hold_ds, digest_of, execution)))
+        counted=None, footprint=None))
+    evidence, failures, cal_records, hold_records = _count_fit(
+        p, entry, lambda execution: (_records(p, cal_ds, digest_of, execution),
+                                     _records(p, hold_ds, digest_of, execution)))
     measured: dict[str, Any] = {"count": evidence}
     if delivery_kind == STATE_CROSSING_DATES:
         from tcip_mcp.pipelines.operating_point import classifier_criterion
@@ -498,7 +496,7 @@ def _detection(p: Pass, cal: list[Sample], hold: list[Sample], entry: TraitEntry
                                   evidence["conf"]), entry)
         measured["classifier"] = classifier
         failures = [*failures, *classifier_failures]
-    return measured, failures
+    return p, measured, failures
 
 
 def _classification_items(records: list[dict], scope: Any, entry: TraitEntry, criterion: dict,
@@ -571,7 +569,8 @@ def assess_reserved_regions(
 
     The bands are predicted through the tiled pass the whole mosaic is later published under, the
     tile edge the split was drawn at, the count criterion fitted as :func:`assess` fits it, every
-    derived value from the calibration region alone. Each band is a reference sample of the
+    derived value from the calibration region alone, an unstated cap scaling the calibration
+    bands' density to the whole mosaic it publishes. Each band is a reference sample of the
     mosaic, its region named. The reference's scope is the training mosaic's recorded content
     identity. Refuses (:class:`AssessmentRefusedError`) a delivery that is not a count, a checkpoint
     no run of this project produced, a run with no reserved regions, a stated tile edge other than
@@ -591,6 +590,7 @@ def assess_reserved_regions(
     from tcip_mcp.pipelines.data.selection import DOCUMENT, Sample, source_digests
     from tcip_mcp.pipelines.data.split_construction import partition_samples
     from tcip_mcp.pipelines.derivations import derive_block_scale_px
+    from tcip_mcp.pipelines.execution import Reference
     from tcip_mcp.pipelines.operating_point import spatial_disjointness
     from tcip_mcp.pipelines.raster_source import BandGroupRef, open_raster
     from tcip_mcp.pipelines.training.evaluation import gt_records
@@ -598,11 +598,11 @@ def assess_reserved_regions(
     if delivery_kind not in (PER_IMAGE_COUNT, PER_PLANT_COUNT_AGGREGATE):
         raise AssessmentRefusedError(f"a mosaic's reserved regions answer for a count, not a "
                                 f"{delivery_kind} delivery.")
-    revision, p = _prepared(project, checkpoint_path=checkpoint_path, trait=trait,
-                            delivery_kind=delivery_kind,
-                            stated=stated.model_copy(update={"tile": True}), device=device,
-                            tile_batch_size=tile_batch_size)
-    experiment_id = p.checkpoint.experiment_id
+    revision, prep = _prepared(project, checkpoint_path=checkpoint_path, trait=trait,
+                               delivery_kind=delivery_kind,
+                               stated=stated.model_copy(update={"tile": True}), device=device,
+                               tile_batch_size=tile_batch_size)
+    experiment_id = prep.checkpoint.experiment_id
     if experiment_id is None:
         raise AssessmentRefusedError(
             "no run of this project produced this checkpoint, so no mosaic's "
@@ -616,12 +616,12 @@ def assess_reserved_regions(
     (mosaic,) = partition_samples(resolved["partition"])
     stem = mosaic.member
     tile_size, overlap = int(spatial["tile_size"]), float(spatial["overlap"])
-    if p.execution.tile_size != tile_size:
+    if prep.tile_size != tile_size:
         raise AssessmentRefusedError(
             f"the run's reserved regions were tiled at {tile_size}px and this pass runs at "
-            f"{p.execution.tile_size}px; the assessed pass and the published one run at one tile "
+            f"{prep.tile_size}px; the assessed pass and the published one run at one tile "
             "edge.")
-    scope = p.scope.admitted_for(DOCUMENT, f"experiment {experiment_id!r}")
+    scope = prep.scope.admitted_for(DOCUMENT, f"experiment {experiment_id!r}")
     (mosaic,) = _admit_reference([mosaic], scope)
     document = mosaic.read
     reads = _reference_reads([mosaic])
@@ -667,6 +667,12 @@ def assess_reserved_regions(
                       group=name, side=side, rect=cast(Any, tuple(rect)), image=source)
                for side, side_bands in bands.items() for name, rect in side_bands.items()]
     digest_of = source_digests(samples)
+    p = prep.runnable(Reference(
+        boxes_per_image=[[a["bbox"] for a in gt_records(blocks.select_gt_for_band(gt, rect))]
+                         for rect in bands["calibration"].values()],
+        counted=[(band_counts["calibration"][name], float((x1 - x0) * (y1 - y0)))
+                 for name, (x0, y0, x1, y1) in bands["calibration"].items()],
+        footprint=float(int(spatial["width"]) * int(spatial["height"]))))
 
     def collect(execution: Execution) -> tuple[list[dict], list[dict]]:
         with open_raster(source, p.predictor.in_chans) as reader:
@@ -680,11 +686,7 @@ def assess_reserved_regions(
                     _band_records(reader, bands["holdout"], p, execution, gt=gt,
                                   digest_of=digest_of, source=str(source)))
 
-    evidence, failures, _cal, _hold = _count_fit(
-        p, revision.entry, list(band_counts["calibration"].values()),
-        lambda: [[a["bbox"] for a in gt_records(blocks.select_gt_for_band(gt, rect))]
-                 for rect in bands["calibration"].values()],
-        collect)
+    evidence, failures, _cal, _hold = _count_fit(p, revision.entry, collect)
     disjointness, disjoint_failures = _disjointness(
         digest_of, [s for s in samples if s.side == "calibration"],
         [s for s in samples if s.side == "holdout"], _run_sides(project, experiment_id))

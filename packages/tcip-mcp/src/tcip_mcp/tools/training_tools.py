@@ -787,13 +787,12 @@ def _run_hpo_trial(point: dict, report, sweep: Path, trial_id: str) -> None:
 def run_hyperparameter_search(
     project: Path,
     base_config: dict,
-    param_space: dict | None = None,
+    param_space: dict,
     n_trials: int = 5,
     search_alg: str = "random",
     scheduler: str = "asha",
     grace_period: int = 5,
     reduction_factor: int = 3,
-    warm_start: bool = False,
     baseline_params: dict | None = None,
     max_concurrent: int = 1,
     resources_per_trial: dict | None = None,
@@ -830,9 +829,12 @@ def run_hyperparameter_search(
     time, is a ``TrainingDetail`` whose ``sweep`` is the sweep's group: its trial rows and what
     they amount to (``experiments.sweep_outcome``).
 
-    Refuses (``{"error": ..., "issues": [...]}``, nothing minted): a ``base_config`` that fails
-        preflight; an unimportable builder or training source, or a config with no ``data``
-        section, at every point the search space could resolve a trial's config to; a
+    Refuses (``{"error": ..., "issues": [...]}``, nothing minted): a ``param_space`` that is
+        not a search space (``hpo.space_axes``, a grid's int axis past its bound included); a
+        ``base_config`` that fails preflight, an unimportable builder or training source, or a
+        config with no ``data`` section, at any point :func:`_preflight_points` checks (the
+        first corner and each single-axis choice and range end; every trial validates its own
+        point when it runs); a
         ``param_space`` axis naming ``data.split.seed`` while ``split_draws`` draws at
         most one partition (:func:`caller_split_seed_refusal`); ``split_draws`` above 1 on an
         unbound, built-in detection config with tiling on that admits exactly one trainable source
@@ -843,10 +845,12 @@ def run_hyperparameter_search(
         ``{"state": "canceled", ...}``, its final status recording the same.
 
     Args:
-        base_config: Base training config each trial modifies.
-        param_space: Param-space dict (see ``hpo.get_default_space``); default when omitted.
-            A ``data.split.seed`` axis is refused whenever ``split_draws`` draws at most one
-            partition; above 1 it belongs to ``split_draws``/``split_draw_seeds``.
+        base_config: Base training config each trial modifies; it may leave unstated a value
+            ``param_space`` names, and every other value a training config requires it states.
+        param_space: Param-space dict (see ``hpo.space_axes``), each key a config key or a
+            dotted path into one (``optimizer.head_lr``). A ``data.split.seed`` axis is refused
+            whenever ``split_draws`` draws at most one partition; above 1 it belongs to
+            ``split_draws``/``split_draw_seeds``.
         n_trials: Number of trials; a whole number of at least one on a call that reads a
             ``trial_budget`` bound.
         search_alg: Search algorithm, see the list above.
@@ -855,8 +859,7 @@ def run_hyperparameter_search(
             trial early.
         reduction_factor: Halving factor for ``asha``/``hyperband`` (fraction of trials kept at
             each rung).
-        warm_start: Seed the search with ``baseline_params`` as a known-good starting point.
-        baseline_params: Hyperparameter values to seed the search with when ``warm_start=True``.
+        baseline_params: Hyperparameter values to seed the search with, ``None`` for none.
         max_concurrent: Trials to run at once (default 1, safe for single-GPU training).
         resources_per_trial: Ray resource request per trial, omit to derive one from the host's
             real GPU count and ``max_concurrent`` (see ``hpo._default_trial_resources``); an
@@ -885,7 +888,7 @@ def run_hyperparameter_search(
             ``data.auto_val`` is off, ``search_alg`` is not a native one
             (``random``/``grid``/``variant_generator``), ``scheduler`` is not ``none``,
             ``split_draw_seeds`` is given at a length other than ``split_draws`` or names the same
-            seed twice, ``warm_start``'s ``baseline_params`` names ``data.split.seed``,
+            seed twice, ``baseline_params`` names ``data.split.seed``,
             ``param_space`` already sweeps ``data.split.seed`` itself, or ``param_space`` sweeps
             any other ``data.*`` axis. The outcome groups trials by point (params minus the seed)
             and chooses the best by mean over each point's draws; see ``best_value_spread``, and
@@ -897,7 +900,7 @@ def run_hyperparameter_search(
     opened = open_sweep(
         project, base_config, param_space, n_trials=n_trials, search_alg=search_alg,
         scheduler=scheduler,
-        grace_period=grace_period, reduction_factor=reduction_factor, warm_start=warm_start,
+        grace_period=grace_period, reduction_factor=reduction_factor,
         baseline_params=baseline_params, max_concurrent=max_concurrent,
         resources_per_trial=resources_per_trial, split_draws=split_draws,
         split_draw_seeds=split_draw_seeds, search_seed=search_seed, trial_budget=trial_budget,
@@ -914,25 +917,23 @@ def run_hyperparameter_search(
 
 
 def open_sweep(
-    project: Path, base_config: dict, param_space: dict | None, *, n_trials: int, search_alg: str,
-    scheduler: str, grace_period: int, reduction_factor: int, warm_start: bool,
-    baseline_params: dict | None, max_concurrent: int, resources_per_trial: dict | None,
+    project: Path, base_config: dict, param_space: dict, *, n_trials: int, search_alg: str,
+    scheduler: str, grace_period: int, reduction_factor: int, baseline_params: dict | None,
+    max_concurrent: int, resources_per_trial: dict | None,
     split_draws: int, split_draw_seeds: list[int] | None,
     search_seed: int, trial_budget: int | None, relaunched_from: str | None, actor: str | None,
 ) -> Path | dict:
-    """Check a sweep's arguments: the first point the search space could resolve a trial to
-    (:func:`_preflight_points`) resolved once (:func:`_preflight`), whose objective every trial
-    records and whose partition answers whether its draws can vary (:func:`_spatial_draws_issue`),
-    then the structure (:func:`_structural_issues`) of every other point. Create the sweep's
+    """Check a sweep's arguments: the first corner of the search space (:func:`_preflight_points`)
+    resolved once (:func:`_preflight`), whose objective every trial records and whose partition
+    answers whether its draws can vary (:func:`_spatial_draws_issue`), then the structure
+    (:func:`_structural_issues`) of each single-axis choice and range end it lists; every other
+    point is validated by its own trial. Create the sweep's
     directory under ``project``, named by ``experiments.mint_experiment_id("hpo")``, with its
     ``sweep.json`` written once, carrying the objective and
     every argument resolved as its ``input``, then the act's one audit line by ``actor`` naming
     the sweep (``AuditEntryNotWrittenError`` when it cannot be appended). Returns the opened sweep's
     directory, or the refusal ``{"error", "issues"}`` with nothing created."""
-    from tcip_mcp.pipelines.training.hpo import get_default_space, split_draw_search_space
-
-    if param_space is None:
-        param_space = get_default_space()
+    from tcip_mcp.pipelines.training.hpo import split_draw_search_space
 
     # Both reach a written record: the space into the sweep's input, the base config into every
     # trial's run.json once a sampled point is applied to it.
@@ -959,7 +960,7 @@ def open_sweep(
     # whatever preflight would have hit first.
     draws_refusal = _split_draws_refusal(
         base_config, param_space, search_alg, scheduler,
-        split_draws, split_draw_seeds, warm_start, baseline_params)
+        split_draws, split_draw_seeds, baseline_params)
     if draws_refusal is not None:
         return {"error": draws_refusal, "issues": []}
 
@@ -967,7 +968,10 @@ def open_sweep(
     if seed_axis_refusal is not None:
         return {"error": f"{seed_axis_refusal.reason} {seed_axis_refusal.remedy}", "issues": []}
 
-    (first_label, first_point), *rest = _preflight_points(param_space)
+    try:
+        (first_label, first_point), *rest = _preflight_points(param_space, search_alg)
+    except (KeyError, TypeError, ValueError) as exc:
+        return {"error": f"param_space is not a search space: {exc!r}", "issues": []}
     preflight, resolution = _preflight(project, _apply_hpo_params(base_config, first_point),
                                        smoke=False, overfit=False)
     if resolution is None or not preflight["valid"]:
@@ -991,7 +995,7 @@ def open_sweep(
 
     budget_refusal = _trial_budget_refusal(
         reads_bound=reads_bound, split_draws=split_draws, n_trials=n_trials,
-        search_alg=search_alg, warm_start=warm_start, trial_budget=trial_budget,
+        search_alg=search_alg, trial_budget=trial_budget,
         relaunched_from=relaunched_from, search_param_space=search_param_space,
         baseline_params=baseline_params,
     )
@@ -1006,8 +1010,8 @@ def open_sweep(
     record = {"created": now_iso(), "objective": objective, "input": {
         "n_trials": n_trials, "search_alg": search_alg, "scheduler": scheduler,
         "grace_period": grace_period, "reduction_factor": reduction_factor,
-        "max_concurrent": max_concurrent, "warm_start": warm_start,
-        "baseline_params": baseline_params, "resources_per_trial": resources_per_trial,
+        "max_concurrent": max_concurrent, "baseline_params": baseline_params,
+        "resources_per_trial": resources_per_trial,
         "param_space": param_space, "base_config": base_config,
         "relaunched_from": relaunched_from, "split_draws": split_draws,
         "split_draw_seeds": resolved_draw_seeds, "search_seed": search_seed,
@@ -1077,7 +1081,6 @@ def run_sweep(directory: Path) -> SweepGroup:
             grace_period=given["grace_period"],
             reduction_factor=given["reduction_factor"],
             seed=given["search_seed"],
-            warm_start=given["warm_start"],
             baseline_params=given["baseline_params"],
             max_concurrent=given["max_concurrent"],
             sweep_dir=directory,
@@ -1098,36 +1101,14 @@ def run_sweep(directory: Path) -> SweepGroup:
 
 
 def _apply_hpo_params(base_config: dict, params: dict) -> dict:
-    """Apply flat HPO params onto a deep copy of ``base_config``, its progressive-unfreeze
-    schedule left untouched:
-
-      - ``lr``           -> ``optimizer["head_lr"]``, plus ``optimizer["backbone_lr"]`` scaled by
-                            the backbone/head ratio ``base_config`` trains at
-                            (``schemas.OptimizerSpec``'s effective rates)
-      - ``weight_decay`` -> ``optimizer["weight_decay"]``
-      - anything else    -> the top level of ``cfg`` (``batch_size`` included)
-    """
+    """Apply HPO params onto a deep copy of ``base_config``: a dotted key (``optimizer.head_lr``)
+    at the nested field it names, any other key (``batch_size``) at the top level."""
     import copy
 
     cfg = copy.deepcopy(base_config)
 
-    from tcip_mcp.pipelines.schemas import OptimizerSpec
-
     for key, value in params.items():
-        if key == "lr":
-            # The backbone/head ratio base_config trains at: its validated optimizer block's
-            # effective rates, the platform's defaults for any it leaves unstated.
-            base_optimizer = OptimizerSpec.model_validate(base_config.get("optimizer") or {})
-            backbone_head_ratio = base_optimizer.backbone_lr / base_optimizer.head_lr
-            lr = float(value)
-            optimizer = cfg.setdefault("optimizer", {})
-            optimizer["head_lr"] = lr
-            optimizer["backbone_lr"] = lr * backbone_head_ratio
-        elif key == "weight_decay":
-            cfg.setdefault("optimizer", {})["weight_decay"] = value
-        elif "." in key:
-            # A dotted path (e.g. "model_source.builder") reaches the nested field it names,
-            # rather than landing as a literal top-level key nothing reads.
+        if "." in key:
             *path, leaf = key.split(".")
             node = cfg
             for i, part in enumerate(path):
@@ -1182,7 +1163,7 @@ def _split_draws_argument_refusal(split_draws: object) -> str | None:
 
 
 def _trial_budget_refusal(
-    *, reads_bound: bool, split_draws: int, n_trials: object, search_alg: str, warm_start: bool,
+    *, reads_bound: bool, split_draws: int, n_trials: object, search_alg: str,
     trial_budget: object, relaunched_from: str | None, search_param_space: dict,
     baseline_params: dict | None,
 ) -> str | None:
@@ -1192,8 +1173,7 @@ def _trial_budget_refusal(
 
     Runs its two argument clauses first (an ``n_trials`` or ``trial_budget`` that is not a positive
     ``int``, a ``bool`` excluded by name), then counts Ray's own variant count over
-    ``search_param_space`` via :func:`~tcip_mcp.pipelines.training.hpo.planned_trial_count` (a
-    space that cannot be counted or generated answers its own refusal, naming the exception), then
+    ``search_param_space`` via :func:`~tcip_mcp.pipelines.training.hpo.planned_trial_count`, then
     its two bound clauses: a launch above one draw naming no ``trial_budget`` refuses naming the
     budget Ray's own count would admit; a stated ``trial_budget`` the count exceeds refuses naming
     the count, the budget, and whether even one draw exceeds it (``count // split_draws`` is one
@@ -1213,19 +1193,12 @@ def _trial_budget_refusal(
 
     from tcip_mcp.pipelines.training.hpo import planned_trial_count
 
-    try:
-        count = planned_trial_count(
-            search_param_space, n_trials, search_alg, split_draws, warm_start, baseline_params)
-    except (ValueError, KeyError, TypeError, IndexError, OverflowError) as exc:
-        return (f"the sweep's param_space cannot be counted as a search space: {exc!r}; correct "
-                "the axis that exception names, since tune_search builds the same space and "
-                "would meet it too, or run at split_draws=1 stating no trial_budget, where no "
-                "count is taken.")
-
+    count = planned_trial_count(
+        search_param_space, n_trials, search_alg, split_draws, baseline_params)
     per_draw = count // split_draws
-    warm_state = "on" if warm_start else "off"
+    baseline = "given" if baseline_params else "none"
     built = (f"Ray's own variant count over the space this call builds: n_trials={n_trials} "
-             f"sample(s), search_alg={search_alg!r}, warm start {warm_state}, {per_draw} per draw")
+             f"sample(s), search_alg={search_alg!r}, baseline {baseline}, {per_draw} per draw")
 
     if split_draws > 1 and trial_budget is None and relaunched_from is None:
         return (f"split_draws={split_draws} pairs every sampled point with {split_draws} "
@@ -1247,8 +1220,8 @@ def _trial_budget_refusal(
 
 
 def _split_draws_refusal(
-    base_config: dict, param_space: dict | None, search_alg: str,
-    scheduler: str, split_draws: int, split_draw_seeds: list[int] | None, warm_start: bool,
+    base_config: dict, param_space: dict, search_alg: str,
+    scheduler: str, split_draws: int, split_draw_seeds: list[int] | None,
     baseline_params: dict | None,
 ) -> str | None:
     """Every reason of the paired path's own a sweep refuses ``split_draws`` above 1 for before
@@ -1283,16 +1256,16 @@ def _split_draws_refusal(
         return (f"split_draw_seeds repeats {repeated}: a spread over the same partition drawn "
                 "twice is not a spread, and group_split_draws only counts a point eligible on "
                 "its distinct planned seeds, not on one seed completed twice.")
-    if warm_start and baseline_params and SPLIT_DRAW_SEED_KEY in baseline_params:
-        return (f"warm_start's baseline_params names {SPLIT_DRAW_SEED_KEY!r}: Ray's own "
+    if baseline_params and SPLIT_DRAW_SEED_KEY in baseline_params:
+        return (f"baseline_params names {SPLIT_DRAW_SEED_KEY!r}: Ray's own "
                 "preset-variant pinning would pin every draw to that one seed instead of "
                 f"pairing the grid; drop {SPLIT_DRAW_SEED_KEY!r} from baseline_params.")
-    if SPLIT_DRAW_SEED_KEY in (param_space or {}):
+    if SPLIT_DRAW_SEED_KEY in param_space:
         return (f"param_space already sweeps {SPLIT_DRAW_SEED_KEY}, the same axis split_draws "
                 "adds as a paired grid; state the crossing through split_draws/"
                 "split_draw_seeds, not a second data.split.seed axis.")
     other_data_axes = sorted(
-        k for k in (param_space or {}) if k.startswith("data.") and k != SPLIT_DRAW_SEED_KEY)
+        k for k in param_space if k.startswith("data.") and k != SPLIT_DRAW_SEED_KEY)
     if other_data_axes:
         return (f"split_draws pairs the identical partition with every sampled point at each "
                 f"draw, and param_space sweeps {other_data_axes} beside it: a data.* axis other "
@@ -1342,7 +1315,7 @@ _SEED_AXIS_REMEDY = (
     "foreground groups across them); an unbound config keeps auto_val on; search_alg "
     "is one the native generator builds (random, grid, variant_generator, or unset); scheduler "
     "prunes nothing (none, fifo, or unset); split_draw_seeds is one per draw and distinct; no "
-    "baseline_params names the seed under a warm start; no other data.* axis is in param_space; "
+    "baseline_params names no seed; no other data.* axis is in param_space; "
     "a trial_budget is stated on a launch that is not a relaunch, and Ray's variant count over "
     "the sweep fits under it; and, for a built-in detection config with tiling on, more than one "
     "trainable source is admitted under data.images_dir (a single admitted source's own "
@@ -1366,48 +1339,22 @@ def caller_split_seed_refusal(param_space: dict, split_draws: int) -> SeedAxisRe
     return SeedAxisRefusal(reason=_SEED_AXIS_REASON, remedy=_SEED_AXIS_REMEDY)
 
 
-def _first_sampled_point(param_space: dict) -> dict:
-    """One deterministic point from ``param_space``, spanning its declared range or choices."""
-    point: dict = {}
-    for key, spec in param_space.items():
-        if not isinstance(spec, dict):
-            # Not this platform's own {"type": ...} shape (a caller-composed space bypassing
-            # get_default_space): take a value outright rather than guess a range from it.
-            point[key] = spec[0] if isinstance(spec, list) and spec else spec
-            continue
-        kind = spec.get("type")
-        if kind == "categorical":
-            choices = spec.get("choices") or [None]
-            point[key] = choices[0]
-        elif kind in ("loguniform", "uniform", "int"):
-            point[key] = spec["low"] if "low" in spec else spec.get("high", 0)
-        else:
-            point[key] = spec.get("low", spec.get("choices", [None])[0])
-    return point
+def _preflight_points(param_space: dict, search_alg: str) -> list[tuple[str, dict]]:
+    """The points a sweep's preflight checks, read through the one reader of the space's shape
+    (``hpo.space_axes`` as ``search_alg`` grids it, refusing as it refuses): the corner at every
+    axis's first value, plus one variant per categorical choice and one per range end, each
+    holding every other axis at that corner. Combinations of several axes away from the corner,
+    and a range's interior, are not among them; each trial's own config is validated when its
+    point is applied."""
+    from tcip_mcp.pipelines.training.hpo import search_alg_key, space_axes
 
-
-def _preflight_points(param_space: dict) -> list[tuple[str, dict]]:
-    """Every point a sweep's preflight checks: the first sampled corner,
-    plus one variant per categorical choice and one per numeric bound, each holding every other
-    axis at its first sampled value.
-    """
-    base = _first_sampled_point(param_space)
+    axes = space_axes(param_space, grid=search_alg_key(search_alg) == "grid")
+    base = {key: values[0] for key, (_kind, values) in axes.items()}
     points: list[tuple[str, dict]] = [("the first sampled point", dict(base))]
-    for key, spec in param_space.items():
-        if not isinstance(spec, dict):
-            continue
-        kind = spec.get("type")
-        if kind == "categorical":
-            for choice in spec.get("choices") or []:
-                variant = dict(base)
-                variant[key] = choice
-                points.append((f"{key}={choice!r}", variant))
-        elif kind in ("loguniform", "uniform", "int"):
-            for bound in ("low", "high"):
-                if bound in spec:
-                    variant = dict(base)
-                    variant[key] = spec[bound]
-                    points.append((f"{key} {bound}={spec[bound]!r}", variant))
+    for key, (kind, values) in axes.items():
+        labels = ([f"{key}={v!r}" for v in values] if kind == "categorical"
+                  else [f"{key} low={values[0]!r}", f"{key} high={values[1]!r}"])
+        points.extend((label, {**base, key: value}) for label, value in zip(labels, values))
     return points
 
 
@@ -1472,10 +1419,11 @@ def evaluate_model(
             with ``images_dir`` (``label_queries.admit``) before any regime runs, a refusal naming
             both. The task is the checkpoint's own.
         stated: The execution values to state rather than derive (``execution.Stated``): the
-            operating ``conf`` and detection cap ``max_dets`` P/R/F1 are reported at, and on the
-            delivery-grade path the ``tile_size``, ``overlap``, ``postprocess`` and
-            ``cross_tile_nms``. The resolved record, each value's source with it, is returned under
-            ``execution``.
+            operating ``conf`` and detection cap ``max_dets`` P/R/F1 are reported at, both
+            required of a detector, and on the delivery-grade path the ``tile_size``,
+            ``overlap``, ``postprocess`` and ``cross_tile_nms`` (derived from the evaluated
+            ground truth when unstated). The resolved record, each value's source with it, is
+            returned under ``execution``.
         iou_threshold: The IoU a match must reach under the IoU convention.
         tiling: Optional detection tiling dict ({enabled, tile_size, overlap, ...}) for a
             tile-level eval. None + a run id reuses the run's training tiling; None + a checkpoint
@@ -1494,7 +1442,7 @@ def evaluate_model(
         run_full_frame_evaluation, run_test_evaluation,
     )
     from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
-    from tcip_mcp.pipelines.execution import prepare_pass
+    from tcip_mcp.pipelines.execution import prepare
 
     from tcip_mcp.operationalization import OperationalizationRefusedError, latest_confirmed
     from tcip_mcp.traits import TraitUnknownError
@@ -1556,7 +1504,7 @@ def evaluate_model(
     # The checkpoint's own untiled pass: the width its predictor reads images at sizes the loader,
     # and its execution record governs the model that scores them.
     try:
-        pass_ = prepare_pass(checkpoint, stated.model_copy(update={"tile": False}))
+        pass_ = prepare(checkpoint, stated.model_copy(update={"tile": False})).runnable()
     except ValueError as exc:
         return {"error": str(exc)}
     predictor = pass_.predictor

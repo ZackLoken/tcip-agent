@@ -13,6 +13,13 @@ pytest.importorskip("pycocotools")
 
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
+from tests._verified_checkpoint_fixtures import (  # noqa: E402
+    SAMPLE_CONF, SAMPLE_CROSS_TILE_NMS, SAMPLE_MAX_DETS,
+)
+
+CONF_AND_MERGE = {"conf": SAMPLE_CONF, "cross_tile_nms": SAMPLE_CROSS_TILE_NMS}
+"""The conf and merge threshold a tiled pass over these single-object references states, its cap
+stated beside them."""
 
 # seed_bud_trait_spec (conftest.py) confirms bud_opening in this test's project, so the
 # trait/subject="bud" call sites resolve.
@@ -20,14 +27,13 @@ pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# max_dets honored verbatim (no rescuing sentinel)
+# max_dets honored verbatim
 # ══════════════════════════════════════════════════════════════════════════
 
-def test_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
-    """training_tools.evaluate_model's use_tiled_inference branch must honor an explicit max_dets
-    verbatim, even at or below 100: that's the exact value _max_dets_from_density's own floor
-    legitimately derives for a sparse dataset, so silently substituting 1000 would clobber a real
-    value."""
+def test_gating_path_honors_explicit_max_dets_verbatim(tmp_path, monkeypatch):
+    """training_tools.evaluate_model's use_tiled_inference branch hands a stated max_dets on
+    verbatim, at any value: no floor and no substitute stands between the statement and the
+    evaluation."""
     import tcip_mcp.pipelines.training.eval_runners as runners
     from tcip_mcp.tools.training_tools import evaluate_model
 
@@ -45,15 +51,13 @@ def test_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
 
     evaluate_model(tmp_path, str(ckpt), str(images_dir), use_tiled_inference=True,
                    stated=Stated(max_dets=50))
-    assert captured["stated"].max_dets == 50  # honored verbatim, not bumped to 1000
+    assert captured["stated"].max_dets == 50
 
 
-def test_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypatch):
+def test_gating_path_refuses_an_unstated_max_dets(tmp_path, monkeypatch):
     """The door's own pass-through: an unstated max_dets reaches run_full_frame_evaluation as
-    None, and the runner itself, not the door, resolves it to the delivery-grade default. Proven
-    on the runner's own result rather than a fake's captured kwarg, since the door no longer
-    resolves this value itself."""
-    from tcip_mcp.pipelines.execution import DEFAULT_MAX_DETS
+    None, and the runner, which derives no cap from the evaluated reference, refuses naming it.
+    Proven on the runner's own answer rather than a fake's captured kwarg."""
     from tcip_mcp.tools.training_tools import evaluate_model
 
     images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
@@ -62,10 +66,8 @@ def test_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypatch)
     ckpt = registered_checkpoint(tmp_path)
 
     r = evaluate_model(tmp_path, str(ckpt), str(images_dir), use_tiled_inference=True,
-                       stated=Stated(tile_size=128, overlap=0.0))
-    assert "error" not in r, r
-    assert r["execution"]["max_dets"] == DEFAULT_MAX_DETS == 1000
-    assert r["execution"]["sources"]["max_dets"] == "default"
+                       stated=Stated(tile_size=128, overlap=0.0, **CONF_AND_MERGE))
+    assert "max_dets" in r.get("error", ""), r
 
 
 def _detector(monkeypatch, *, in_chans: int = 3, **answer) -> StubPredictor:
@@ -92,10 +94,9 @@ def _captured_execution(monkeypatch) -> dict:
     return captured
 
 
-def test_diagnostic_path_hands_an_unset_cap_on_unstated(tmp_path, monkeypatch):
-    """The diagnostic regime resolves no cap of its own: an unset one reaches the runner as the
-    pass the one execution resolver prepared, defaulted and recorded as a default."""
-    from tcip_mcp.pipelines.execution import DEFAULT_MAX_DETS
+def test_diagnostic_path_refuses_an_unset_cap_before_the_runner(tmp_path, monkeypatch):
+    """The diagnostic regime resolves no cap of its own: an unset one refuses naming it, and the
+    runner is never handed a pass."""
     from tcip_mcp.tools.training_tools import evaluate_model
 
     captured = _captured_execution(monkeypatch)
@@ -104,9 +105,9 @@ def test_diagnostic_path_hands_an_unset_cap_on_unstated(tmp_path, monkeypatch):
 
     ckpt = registered_checkpoint(tmp_path)
 
-    evaluate_model(tmp_path, str(ckpt), str(images_dir))
-    assert captured["execution"].max_dets == DEFAULT_MAX_DETS
-    assert captured["execution"].sources["max_dets"] == "default"
+    r = evaluate_model(tmp_path, str(ckpt), str(images_dir), stated=Stated(conf=SAMPLE_CONF))
+    assert "max_dets" in r.get("error", ""), r
+    assert "execution" not in captured
 
 
 def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
@@ -118,7 +119,8 @@ def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
 
     ckpt = registered_checkpoint(tmp_path)
 
-    evaluate_model(tmp_path, str(ckpt), str(images_dir), stated=Stated(max_dets=7))
+    evaluate_model(tmp_path, str(ckpt), str(images_dir),
+                   stated=Stated(conf=SAMPLE_CONF, max_dets=7))
     assert captured["execution"].max_dets == 7
     assert captured["execution"].sources["max_dets"] == "explicit"
 
@@ -149,9 +151,10 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(tmp_path
     assert captured["checkpoint"].data_config["scope"]["subject"] == "bud"
     assert captured["stated"].tile_size is None and captured["stated"].overlap is None
 
-    from tcip_mcp.pipelines.execution import prepare_pass
+    from tcip_mcp.pipelines.execution import prepare
 
-    record = prepare_pass(captured["checkpoint"], Stated(tile=True)).execution
+    record = prepare(captured["checkpoint"], Stated(
+        tile=True, max_dets=SAMPLE_MAX_DETS, **CONF_AND_MERGE)).runnable().execution
     assert (record.tile_size, record.overlap) == (384, 0.15)
 
 
@@ -232,7 +235,7 @@ def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path, monkeypatch)
                      (130, 130, 150, 150), (170, 170, 190, 190)),
               scores=(0.9, 0.8, 0.7, 0.6, 0.5))
     r = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
-                                  stated=Stated(max_dets=2))
+                                  stated=Stated(max_dets=2, **CONF_AND_MERGE))
     assert r["execution"]["max_dets"] == 2  # honored verbatim
     assert r["max_dets_cap_saturated_frac"] == 1.0  # the one image hit the cap, now visible
 
@@ -258,17 +261,16 @@ def test_the_gate_reads_its_references_at_the_predictors_own_width(tmp_path, mon
     _detector(monkeypatch, in_chans=1, boxes=((10, 10, 40, 40),), scores=(0.9,))
     checkpoint = verified_checkpoint(tmp_path)
     r = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
-                                  stated=Stated())
+                                  stated=Stated(max_dets=SAMPLE_MAX_DETS, **CONF_AND_MERGE))
 
     assert r["scored_images"] == 4
     assert r["tp"] == 4
 
 
 def test_run_full_frame_evaluation_records_merge_and_execution(tmp_path, monkeypatch):
-    """The runner's record carries the execution record whose conf/max_dets/cross_tile_nms read
-    source "explicit" when stated (a stated value equal to the default included) and "default"
-    when not, and cross_tile_nms the merge threshold the pass ran at; a direct call stating
-    max_dets=2 records 2 as explicit."""
+    """The runner's record carries the execution record the pass ran under: its conf, cap and
+    merge threshold each the stated one, recorded ``explicit``, the merge threshold the one the
+    predictor merged at; a direct call stating max_dets=2 records 2."""
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
@@ -276,22 +278,16 @@ def test_run_full_frame_evaluation_records_merge_and_execution(tmp_path, monkeyp
                                  box=(10, 10, 30, 30))
     checkpoint = verified_checkpoint(tmp_path)
     detector = _detector(monkeypatch)
-    r_default = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
-                                          stated=Stated())
-    r_stated = run_full_frame_evaluation(
-        checkpoint, checkpoint_admission(checkpoint, images_dir),
-        stated=Stated(conf=0.5, cross_tile_nms=0.3, max_dets=2))
+    r = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
+                                  stated=Stated(max_dets=2, **CONF_AND_MERGE))
 
-    assert [execution.cross_tile_nms for execution in detector.executions] == [0.3, 0.3]
-    for r in (r_default, r_stated):
-        assert r["execution"]["postprocess"] == "nms"
-        assert r["execution"]["cross_tile_nms"] == 0.3
-
-    for name in ("conf", "max_dets", "cross_tile_nms"):
-        assert r_default["execution"]["sources"][name] == "default"
-        # A stated value equal to the platform default is still recorded as explicit.
-        assert r_stated["execution"]["sources"][name] == "explicit"
-    assert r_stated["execution"]["max_dets"] == 2
+    assert [execution.cross_tile_nms for execution in detector.executions] == [
+        SAMPLE_CROSS_TILE_NMS]
+    assert r["execution"]["postprocess"] == "nms"
+    assert (r["execution"]["conf"], r["execution"]["max_dets"],
+            r["execution"]["cross_tile_nms"]) == (SAMPLE_CONF, 2, SAMPLE_CROSS_TILE_NMS)
+    assert {r["execution"]["sources"][name]
+            for name in ("conf", "max_dets", "cross_tile_nms")} == {"explicit"}
 
 
 def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(tmp_path, monkeypatch):
@@ -316,7 +312,7 @@ def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(tmp_pa
     # Admits valid work: the same eight images, their documents carrying boxes, score.
     seed_bud_images(images_dir, n=8, size=128, box=(10, 10, 30, 30))
     scored = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
-                                       stated=Stated())
+                                       stated=Stated(max_dets=SAMPLE_MAX_DETS, **CONF_AND_MERGE))
     assert scored["scored_images"] == 8
 
 

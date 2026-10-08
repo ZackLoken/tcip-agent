@@ -18,6 +18,7 @@ from tcip_mcp.pipelines.derivations import (
     num_classes_from_distribution,
     probe_channels,
 )
+from tests import _trait_fixtures as fx
 
 
 def test_probe_channels_from_raster(tmp_path):
@@ -48,34 +49,44 @@ def test_derive_cross_tile_nms_dense_cluster_exceeds_sparse():
     # overlapping dense objects aren't merged; sparse boxes (offset 16px -> IoU ~0.111) sit lower.
     dense = [[(0, 0, 20, 20), (4, 0, 20, 20), (8, 0, 20, 20), (12, 0, 20, 20)]]
     sparse = [[(0, 0, 20, 20), (16, 0, 20, 20), (32, 0, 20, 20)]]
-    t_dense = derive_cross_tile_nms(dense, metric="IOU")
-    t_sparse = derive_cross_tile_nms(sparse, metric="IOU")
+    t_dense = derive_cross_tile_nms(dense)
+    t_sparse = derive_cross_tile_nms(sparse)
     assert t_dense is not None and t_sparse is not None
     assert t_dense > t_sparse
-    assert 0.2 <= t_sparse <= 0.8 and 0.2 <= t_dense <= 0.8
-    # p99 of the neighbor-IoU tail + margin
+    # p99 of the neighbor-IoU tail + margin, at either density.
     assert t_dense == pytest.approx(0.6667 + 0.05, abs=1e-2)
+    assert t_sparse == pytest.approx(0.1111 + 0.05, abs=1e-3)
 
 
 def test_derive_cross_tile_nms_no_overlap_returns_none():
-    # No genuine neighbor overlap anywhere -> underivable -> caller must fall back to an honest
-    # default.
+    # No genuine neighbor overlap anywhere -> underivable -> the caller states a threshold.
     boxes = [[(0, 0, 20, 20), (100, 100, 20, 20)], [(0, 0, 20, 20)]]
-    assert derive_cross_tile_nms(boxes, metric="IOU") is None
-    assert derive_cross_tile_nms([], metric="IOS") is None
+    assert derive_cross_tile_nms(boxes) is None
+    assert derive_cross_tile_nms([]) is None
 
 
-def test_derive_cross_tile_nms_clamped_to_upper_bound():
-    # Near-duplicate boxes (IoU ~0.90) would exceed the range; the result is clamped to the ceiling.
-    boxes = [[(0, 0, 20, 20), (1, 0, 20, 20)]]
-    assert derive_cross_tile_nms(boxes, metric="IOU") == pytest.approx(0.8)
+def test_derive_cross_tile_nms_answers_near_duplicates_unbounded_and_refuses_full_overlap():
+    # Near-duplicate neighbors (IoU 19/21) answer their own tail plus the margin; neighbors that
+    # overlap fully leave the margin nowhere below 1 to land.
+    near = [[(0, 0, 20, 20), (1, 0, 20, 20)]]
+    assert derive_cross_tile_nms(near) == pytest.approx(19 / 21 + 0.05)
+    with pytest.raises(ValueError, match="cross_tile_nms"):
+        derive_cross_tile_nms([[(0, 0, 20, 20), (0, 0, 20, 20)]])
 
 
-def test_derive_cross_tile_nms_reads_the_tail_in_the_merges_own_metric():
-    # A box nested in another: IoU 0.25, IoS 1. The two metrics' tails derive different thresholds.
+def test_derive_cross_tile_nms_refuses_where_the_margin_exhausts_the_interval():
+    # Two 100 px boxes 2 px apart overlap at IoU 98/102: the 0.05 margin carries the threshold
+    # past 1 and refuses naming the margin, while a 0.01 margin answers below it.
+    boxes = [[(0, 0, 100, 100), (2, 0, 100, 100)]]
+    with pytest.raises(ValueError, match="margin 0.05"):
+        derive_cross_tile_nms(boxes)
+    assert derive_cross_tile_nms(boxes, margin=0.01) == pytest.approx(98 / 102 + 0.01)
+
+
+def test_derive_cross_tile_nms_reads_the_neighbor_iou_tail():
+    # A box nested in another: IoU 0.25, so the threshold sits a margin above it.
     nested = [[(0, 0, 20, 20), (5, 5, 10, 10)]]
-    assert derive_cross_tile_nms(nested, metric="IOU") == pytest.approx(0.25 + 0.05)
-    assert derive_cross_tile_nms(nested, metric="IOS") == pytest.approx(0.8)
+    assert derive_cross_tile_nms(nested) == pytest.approx(0.25 + 0.05)
 
 
 def test_derive_localization_tolerance_frac_tight_spacing_stays_tighter_than_loose():
@@ -89,10 +100,19 @@ def test_derive_localization_tolerance_frac_tight_spacing_stays_tighter_than_loo
     t_loose = derive_localization_tolerance_frac(loose)
     assert t_tight is not None and t_loose is not None
     assert t_tight < t_loose
-    # p10 nn-dist (10) * margin_frac (0.5) / char_size (20) = 0.25, no clamping.
+    # p10 nn-dist * margin_frac (0.5) / char_size (20): 10 -> 0.25, 100 -> 2.5.
     assert t_tight == pytest.approx(0.25)
-    # Loose spacing's raw fraction (2.5) exceeds the clamp ceiling.
-    assert t_loose == pytest.approx(0.75)
+    assert t_loose == pytest.approx(2.5)
+
+
+def test_derive_localization_tolerance_frac_refuses_a_zero_spacing_percentile_only():
+    """The refusal is the selected spacing percentile at zero: boxes all sharing one center
+    refuse, and one coincident pair among thirty spaced boxes leaves the percentile positive."""
+    stacked = [[(0, 0, 20, 20), (0, 0, 20, 20), (0, 0, 20, 20)]]
+    with pytest.raises(ValueError, match="spacing is 0 px"):
+        derive_localization_tolerance_frac(stacked)
+    spaced = [(100.0 * i, 0, 20, 20) for i in range(1, 29)]
+    assert derive_localization_tolerance_frac([spaced + [(0, 0, 20, 20)] * 2]) > 0
 
 
 def test_derive_localization_tolerance_frac_no_same_image_neighbor_returns_none():
@@ -112,7 +132,15 @@ def test_derive_sliver_frac_wide_spread_lower_than_tight_spread():
     assert f_tight is not None and f_wide is not None
     assert f_wide < f_tight
     assert f_wide == pytest.approx(0.36, abs=1e-2)
-    assert f_tight == pytest.approx(0.9)  # clamped to the ceiling
+    assert f_tight == pytest.approx(0.96, abs=1e-2)
+
+
+def test_derive_sliver_frac_can_exceed_one_when_small_boxes_drag_the_mean_down():
+    # One tiny box among ten large ones: the low percentile sits near 100 and the mean near 91.
+    sizes = [1.0] + [100.0] * 10
+    assert derive_sliver_frac(sizes) == pytest.approx(
+        float(np.percentile(sizes, 10)) / float(np.mean(sizes)))
+    assert derive_sliver_frac(sizes) > 1
 
 
 def test_derive_sliver_frac_no_boxes_returns_none():
@@ -127,34 +155,57 @@ def test_derive_sliver_frac_too_few_samples_returns_none():
     assert derive_sliver_frac([10.0, 20.0, 30.0, 40.0]) is None  # 4 < default min_samples=5
 
 
+JITTER = {"jitter_px": fx.IOU_JITTER_PX, "margin": fx.IOU_MARGIN}
+"""The sample trait-authored jitter and margin the IoU derivation takes."""
+
+
 def test_derive_iou_match_threshold_exact_value():
-    # char size 60 -> achievable_iou = (60-15)/(60+15) = 0.6 -> threshold = 0.6 - margin(0.1) = 0.5.
+    # char size 60 -> modeled IoU (60-12)/(60+12) = 2/3 -> threshold 2/3 - margin 0.05.
     boxes = [[(0, 0, 60, 60)]]
-    assert derive_iou_match_threshold(boxes) == pytest.approx(0.5)
+    assert derive_iou_match_threshold(boxes, **JITTER) == pytest.approx(2 / 3 - 0.05)
 
 
 def test_derive_iou_match_threshold_scales_with_object_size():
     # Larger characteristic size -> higher achievable IoU under the same jitter -> higher threshold.
-    small = derive_iou_match_threshold([[(0, 0, 60, 60)]])
-    large = derive_iou_match_threshold([[(0, 0, 300, 300)]])
+    small = derive_iou_match_threshold([[(0, 0, 60, 60)]], **JITTER)
+    large = derive_iou_match_threshold([[(0, 0, 300, 300)]], **JITTER)
     assert small is not None and large is not None
     assert large > small
 
 
-def test_derive_iou_match_threshold_clamped_to_upper_bound():
-    # A very large object's achievable IoU under jitter approaches 1.0 -> clamped at 0.7.
-    assert derive_iou_match_threshold([[(0, 0, 1000, 1000)]]) == pytest.approx(0.7)
+@pytest.mark.parametrize("size, jitter_px, margin", [(1000, 12.0, 0.05), (60, 0.0, 0.0),
+                                                     (60, 50.0, 0.0)])
+def test_derive_iou_match_threshold_answers_the_modeled_value_at_either_end(size, jitter_px,
+                                                                           margin):
+    """No cutoff stands over the model: a large box, an exact repeat and a near-disjoint one each
+    answer the modeled IoU less the margin."""
+    expected = (size - jitter_px) / (size + jitter_px) - margin
+    assert derive_iou_match_threshold([[(0, 0, size, size)]], jitter_px=jitter_px,
+                                      margin=margin) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("jitter_px", [60.0, 90.0])
+def test_derive_iou_match_threshold_refuses_a_jitter_at_or_past_the_box_size(jitter_px):
+    with pytest.raises(ValueError, match="iou_jitter_px"):
+        derive_iou_match_threshold([[(0, 0, 60, 60)]], jitter_px=jitter_px, margin=0.0)
+
+
+@pytest.mark.parametrize("margin", [0.5, 0.8])
+def test_derive_iou_match_threshold_refuses_a_margin_that_swallows_the_modeled_iou(margin):
+    # Boxes of 60 px 20 px apart model IoU 0.5: a margin of 0.5 or more leaves no threshold.
+    with pytest.raises(ValueError, match="iou_margin"):
+        derive_iou_match_threshold([[(0, 0, 60, 60)]], jitter_px=20.0, margin=margin)
 
 
 def test_derive_iou_match_threshold_no_boxes_returns_none():
-    assert derive_iou_match_threshold([]) is None
-    assert derive_iou_match_threshold([[], []]) is None
-    assert derive_iou_match_threshold([[(0, 0, 0, 0)]]) is None
+    assert derive_iou_match_threshold([], **JITTER) is None
+    assert derive_iou_match_threshold([[], []], **JITTER) is None
+    assert derive_iou_match_threshold([[(0, 0, 0, 0)]], **JITTER) is None
 
 
 @pytest.mark.parametrize("fn", [
     derive_localization_tolerance_frac,
-    derive_iou_match_threshold, functools.partial(derive_cross_tile_nms, metric="IOU"),
+    functools.partial(derive_iou_match_threshold, **JITTER), derive_cross_tile_nms,
 ])
 def test_derive_box_functions_raise_valueerror_on_malformed_gt_boxes(fn):
     # A bare Python operation on malformed input raises whatever exception type it happens to hit

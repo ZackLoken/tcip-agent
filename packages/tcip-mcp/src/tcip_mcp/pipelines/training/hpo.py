@@ -75,26 +75,6 @@ SPLIT_DRAW_SEED_KEY = "data.split.seed"
 point."""
 
 
-def get_default_space() -> dict:
-    """A small, safe starting space the agent overrides per dataset (never a fixed recipe).
-
-    Each key maps to ``{'type': ..., ...}``:
-      - ``categorical``: ``{'choices': [...]}``
-      - ``loguniform`` / ``uniform``: ``{'low': float, 'high': float}``
-      - ``int``: ``{'low': int, 'high': int}`` (both bounds inclusive)
-    """
-    return {
-        "lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2},
-        "batch_size": {"type": "categorical", "choices": [2, 4, 8]},
-        "weight_decay": {"type": "loguniform", "low": 1e-5, "high": 1e-2},
-    }
-
-
-def get_default_baseline_params() -> dict:
-    """A known-good point to warm-start (subset of the default space)."""
-    return {"lr": 3e-4, "batch_size": 4, "weight_decay": 1e-4}
-
-
 def available_search_algs() -> list[str]:
     """Search algorithms usable on this machine: natives + backends whose module imports."""
     algs = ["random", "grid"]
@@ -109,41 +89,79 @@ def available_schedulers() -> list[str]:
     return ["asha", "hyperband", "pbt", "median", "none"]
 
 
+GRID_AXIS_LIMIT = 10_000
+"""The most values one gridded int axis may enumerate: an engineering bound, chosen and not
+measured, on what a grid materializes as a list before Ray expands it into trials, so a range
+meant for sampling is refused by name rather than allocated."""
+
+
+def space_axes(param_space: dict, *, grid: bool) -> dict[str, tuple[str, list]]:
+    """Each axis of the platform param-space dict as its type and the values it reaches the ends
+    of: a ``categorical`` axis's ``choices``, a ``loguniform``/``uniform`` axis's float
+    ``low``/``high``, an ``int`` axis's inclusive ``low``/``high``. Each key is a config key or a
+    dotted path into one (``optimizer.head_lr``). Refuses an axis not in that shape: a missing
+    key (``KeyError``) or a spec that is no mapping (``TypeError``), and by name (``ValueError``)
+    an unknown type, an ``int`` axis whose ``low`` exceeds its ``high`` and a ``categorical`` axis
+    with no choices, neither of which yields a value to train, an ``int`` axis whose inclusive
+    ``low`` or ``high`` is no int64 value, the values Ray's integer sampler draws (numpy's
+    ``Generator.integers``, whose exclusive end may reach ``2**63``), and, under ``grid`` (a grid
+    search enumerating every discrete axis), an ``int`` axis spanning more than
+    :data:`GRID_AXIS_LIMIT` values, before anything is enumerated."""
+    import numpy as np
+
+    drawable = np.iinfo(np.int64)
+    axes: dict[str, tuple[str, list]] = {}
+    for name, spec in param_space.items():
+        ptype = spec["type"]
+        if ptype in ("loguniform", "uniform"):
+            values = [spec["low"], spec["high"]]
+        elif ptype == "int":
+            values = [int(spec["low"]), int(spec["high"])]
+            if values[0] > values[1]:
+                raise ValueError(f"param_space axis {name!r}: int low {spec['low']} exceeds high "
+                                 f"{spec['high']}")
+            if values[0] < drawable.min or values[1] > drawable.max:
+                raise ValueError(
+                    f"param_space axis {name!r}: int [{values[0]}, {values[1]}] reaches past "
+                    f"[{drawable.min}, {drawable.max}], the int64 values the sampler draws")
+            span = values[1] - values[0] + 1
+            if grid and span > GRID_AXIS_LIMIT:
+                raise ValueError(
+                    f"param_space axis {name!r}: a grid over int [{values[0]}, {values[1]}] "
+                    f"enumerates {span} values, past the {GRID_AXIS_LIMIT} one grid axis may "
+                    "hold; narrow it or sample it under a search_alg other than grid")
+        elif ptype == "categorical":
+            values = list(spec["choices"])
+            if not values:
+                raise ValueError(f"param_space axis {name!r}: categorical with no choices")
+        else:
+            raise ValueError(f"param_space axis {name!r}: unknown param type {ptype!r}")
+        axes[name] = (ptype, values)
+    return axes
+
+
 def _to_tune_space(
     param_space: dict, grid: bool = False, grid_keys: frozenset[str] = frozenset(),
 ) -> dict:
-    """Convert the platform param-space dict into a Ray Tune search space.
-
+    """Convert the platform param-space dict (:func:`space_axes`) into a Ray Tune search space.
     ``grid=True`` enumerates every discrete axis (categorical / int) via ``grid_search``;
-    continuous axes stay sampled. ``grid_keys`` names axes forced to ``grid_search`` regardless of
-    ``grid``. Raises ``ValueError`` naming an ``int`` axis whose ``low`` exceeds its ``high`` or a
-    ``categorical`` axis with no choices: neither yields a single value to train.
-    """
+    continuous axes stay sampled. ``grid_keys`` names categorical axes forced to ``grid_search``
+    regardless of ``grid``."""
     from ray import tune
 
     space: dict[str, Any] = {}
-    for name, spec in param_space.items():
-        ptype = spec["type"]
+    for name, (ptype, values) in space_axes(param_space, grid=grid).items():
         as_grid = grid or name in grid_keys
         if ptype == "loguniform":
-            space[name] = tune.loguniform(spec["low"], spec["high"])
+            space[name] = tune.loguniform(*values)
         elif ptype == "uniform":
-            space[name] = tune.uniform(spec["low"], spec["high"])
+            space[name] = tune.uniform(*values)
+        elif ptype == "int" and as_grid:
+            space[name] = tune.grid_search(list(range(values[0], values[1] + 1)))
         elif ptype == "int":
-            vals = list(range(int(spec["low"]), int(spec["high"]) + 1))
-            if not vals:
-                raise ValueError(f"param_space axis {name!r}: int low {spec['low']} exceeds high "
-                                 f"{spec['high']}")
-            space[name] = (
-                tune.grid_search(vals) if as_grid else tune.randint(spec["low"], spec["high"] + 1)
-            )
-        elif ptype == "categorical":
-            choices = list(spec["choices"])
-            if not choices:
-                raise ValueError(f"param_space axis {name!r}: categorical with no choices")
-            space[name] = tune.grid_search(choices) if as_grid else tune.choice(choices)
+            space[name] = tune.randint(values[0], values[1] + 1)
         else:
-            raise ValueError(f"Unknown param type: {ptype}")
+            space[name] = tune.grid_search(values) if as_grid else tune.choice(values)
     return space
 
 
@@ -420,30 +438,24 @@ def split_draw_search_space(
 
 
 def _search_space_and_points(
-    param_space: dict | None, search_alg: str | None, split_draws: int, warm_start: bool,
-    baseline_params: dict | None,
+    param_space: dict, search_alg: str | None, split_draws: int, baseline_params: dict | None,
 ) -> tuple[dict, list[dict] | None, str]:
     """The Ray Tune space, warm-start preset points, and the normalized search-algorithm name: the
-    platform's own ``param_space`` (or
-    ``get_default_space()`` for an empty or ``None`` one) turned into Ray's own space, gridded over
-    every discrete axis under ``grid`` and over :data:`SPLIT_DRAW_SEED_KEY` above one draw, plus
-    the warm-start baseline filtered to the space's own keys.
+    platform's own ``param_space`` turned into Ray's own space, gridded over every discrete axis
+    under ``grid`` and over :data:`SPLIT_DRAW_SEED_KEY` above one draw, plus ``baseline_params``,
+    when given, filtered to the space's own keys.
     """
     normalized_search_alg = search_alg_key(search_alg)
     grid_keys = frozenset({SPLIT_DRAW_SEED_KEY}) if split_draws > 1 else frozenset()
-    space = _to_tune_space(param_space or get_default_space(),
-                           grid=(normalized_search_alg == "grid"), grid_keys=grid_keys)
-    points = None
-    if warm_start:
-        baseline = baseline_params or get_default_baseline_params()
-        filtered = {k: v for k, v in baseline.items() if k in space}
-        points = [filtered] if filtered else None
-    return space, points, normalized_search_alg
+    space = _to_tune_space(param_space, grid=(normalized_search_alg == "grid"),
+                           grid_keys=grid_keys)
+    filtered = {k: v for k, v in (baseline_params or {}).items() if k in space}
+    return space, [filtered] if filtered else None, normalized_search_alg
 
 
 def planned_trial_count(
     param_space: dict, num_samples: int, search_alg: str | None, split_draws: int,
-    warm_start: bool, baseline_params: dict | None,
+    baseline_params: dict | None,
 ) -> int:
     """How many trials ``tune_search`` would launch for this sweep, read off the specification
     :func:`_search_space_and_points` prepares for the launch itself: under a native search, Ray's
@@ -452,13 +464,12 @@ def planned_trial_count(
     trials ``ray.tune.TuneConfig`` asks it for. A negative ``num_samples`` counts zero. Builds no
     searcher and draws no trial.
 
-    Propagates whatever ``_to_tune_space`` raises on a space it cannot build (``ValueError``,
-    ``KeyError``, ``TypeError``, ``OverflowError``, or ``MemoryError`` for an enormous axis span).
+    Propagates whatever ``_to_tune_space`` raises on a space it cannot build.
     """
     from ray.tune.search.variant_generator import _count_variants
 
     space, points, normalized_search_alg = _search_space_and_points(
-        param_space, search_alg, split_draws, warm_start, baseline_params)
+        param_space, search_alg, split_draws, baseline_params)
     if normalized_search_alg not in _NATIVE_SEARCH:
         return max(num_samples, 0)
     return _count_variants({"config": space, "num_samples": num_samples}, points or [])
@@ -466,43 +477,43 @@ def planned_trial_count(
 
 def tune_search(
     objective_fn: Callable[[dict, Callable[[float], None]], Any],
-    param_space: dict | None = None,
+    param_space: dict,
     *,
-    metric: str = "objective",
-    mode: str = "min",
-    num_samples: int = 20,
-    search_alg: str | None = "random",
-    scheduler: str | None = "asha",
-    grace_period: int = 5,
-    reduction_factor: int = 3,
+    metric: str,
+    mode: str,
+    num_samples: int,
+    search_alg: str | None,
+    scheduler: str | None,
+    grace_period: int,
+    reduction_factor: int,
     seed: int,
-    max_concurrent: int = 1,
-    warm_start: bool = False,
-    baseline_params: dict | None = None,
+    max_concurrent: int,
+    baseline_params: dict | None,
     sweep_dir: Path,
-    resources_per_trial: dict | None = None,
-    split_draws: int = 1,
+    resources_per_trial: dict | None,
+    split_draws: int,
 ) -> None:
     """Run an HPO sweep on Ray Tune, its results in Ray's experiment store at ``sweep_dir``.
     A cancel requested of that directory
-    (``experiments.request_cancel``) stops it (:func:`_build_sweep_stopper`).
+    (``experiments.request_cancel``) stops it (:func:`_build_sweep_stopper`). Every argument is
+    the sweep's own, stated by its caller.
 
     Args:
         objective_fn: ``fn(config, report)``, trains one trial for the trial's ``config`` and calls
             ``report(value)`` for each step it wants the searcher/scheduler to see.
-        param_space: platform param-space dict (see ``get_default_space``); ``None`` uses it.
+        param_space: platform param-space dict (see :func:`_to_tune_space`).
         metric / mode: the reported metric name and whether to ``min`` or ``max`` it.
         num_samples: number of trials (with a grid space, samples over the grid); the count
             launched is :func:`planned_trial_count`'s.
         search_alg / scheduler: agent-selected names (see module docstring). ``None`` schedules
         nothing; native ``random``/``grid`` need no searcher backend.
         seed: the searcher's own seed, the sweep's stated one; required.
-        max_concurrent: trials to run at once (default 1, safe for single-GPU training).
-        warm_start: seed the search with ``baseline_params`` (or the default baseline).
+        max_concurrent: trials to run at once.
+        baseline_params: a point to seed the search with, ``None`` for none.
         sweep_dir: the local directory Ray persists the sweep's trial results in, its parent
             Ray's ``storage_path`` and its name Ray's experiment name.
         resources_per_trial: Ray resource request per trial (``{"cpu": ..., "gpu": ...}``, GPU as a
-            fraction for sharing). Omit to derive one from the host's real GPU count and
+            fraction for sharing). ``None`` derives one from the host's real GPU count and
             ``max_concurrent``. A cluster this sweep starts is sized to ``cpu`` times
             ``max_concurrent`` CPUs (:func:`_ray_session`).
         split_draws: Above 1, ``param_space`` must already carry a ``SPLIT_DRAW_SEED_KEY`` grid
@@ -511,7 +522,7 @@ def tune_search(
             ``constant_grid_search``, so every sampled point is trained once per seed whether
             ``search_alg`` is ``random`` or ``grid``; a backend ``search_alg`` refuses.
     """
-    if split_draws > 1 and SPLIT_DRAW_SEED_KEY not in (param_space or {}):
+    if split_draws > 1 and SPLIT_DRAW_SEED_KEY not in param_space:
         raise ValueError(
             f"tune_search: split_draws={split_draws} pairs {SPLIT_DRAW_SEED_KEY!r} as a grid "
             "axis with every sampled point, and param_space carries no such axis: pass it "
@@ -525,7 +536,7 @@ def tune_search(
     # The normalized name is the helper's third return, read at every branch point below;
     # result["search_alg"] stays the caller's own string.
     space, points, normalized_search_alg = _search_space_and_points(
-        param_space, search_alg, split_draws, warm_start, baseline_params)
+        param_space, search_alg, split_draws, baseline_params)
     resources = resources_per_trial or _default_trial_resources(max_concurrent)
 
     searcher = build_search_alg(normalized_search_alg, seed=seed, points_to_evaluate=points,

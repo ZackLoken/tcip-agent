@@ -17,6 +17,7 @@ pytest.importorskip("torchvision")
 
 from tcip_mcp.pipelines.components.necks import FPN, PAN  # noqa: E402
 from tests._producer_fixtures import run_over  # noqa: E402
+from tests._training_values import adamw_optimizer, evaluation_block  # noqa: E402
 
 
 def _features():
@@ -100,12 +101,12 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
     ds, data = run_over("detection", str(images_dir), subject="bud")
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
-    from tests._chain_fixtures import ADAMW, training_config
+    from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import built_detector
 
     # No val_loader below: loss is the only metric coherent to select on without one.
-    cfg = training_config(built_detector(detector="fcos"), data, optimizer=ADAMW,
-                          evaluation={"selection_metric": "loss"})
+    cfg = training_config(built_detector(detector="fcos"), data, optimizer=adamw_optimizer(),
+                          evaluation=evaluation_block(selection_metric="loss"))
     run = trainer_run(
         cfg, tmp_path / "out", has_val_loader=False, id="auto-run-8", project=tmp_path
     )

@@ -5,5 +5,5 @@ DEFAULT_SCORER = "combined"
 registers combining every signal."""
 
 DEFAULT_REVIEW_BUDGET = 50
-"""How many images a review queue returns when no budget is named. Provisional: a working queue
-length, derived from no data."""
+"""How many images a review queue returns when no budget is named: an engineering bound on one
+queue's length, a sitting's worth of review, which a caller naming a budget replaces."""

@@ -50,7 +50,8 @@ def assess_checkpoint(
     delivered kind of a trait, and record the result as an assessment.
 
     The operating point is fitted on the calibration side (the trait's count objective picks the
-    conf; an unstated merge threshold and detection cap derive from its ground truth) and the
+    conf; an unstated merge threshold derives from its ground truth, and a detector's
+    ``max_dets`` is stated, since the frames it later publishes on are not known here) and the
     criterion the kind rests on is measured over the holdout side: the held-out count bias, pooled
     and per class, localization and dispersion for a count; that plus the classifier's agreement
     over matched instances for ``state_crossing_dates``; the scalar skill for an ordinal or

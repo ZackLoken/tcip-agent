@@ -340,19 +340,20 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
         report(0.2)
 
     def fake_search(**kw):
-        kw["objective_fn"]({"lr": 0.1}, lambda value: None)
+        kw["objective_fn"]({"optimizer.head_lr": 0.1}, lambda value: None)
+
+    from tests._chain_fixtures import training_config
+    from tests._training_values import sweep_space
 
     monkeypatch.setattr(tt, "_run_hpo_trial", fake_trial)
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
     hpo_result = tt.run_hyperparameter_search(
         root,
-        base_config={
-            "model_source": {"builder": BESPOKE_DETECTION,
-                             "task": "detection"},
-            "data": {"images_dir": str(root / "images" / "2026-03-04"),
-                     "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}},
-        },
-        n_trials=1, search_seed=0
+        base_config=training_config(
+            {"builder": BESPOKE_DETECTION, "task": "detection"},
+            {"images_dir": str(root / "images" / "2026-03-04"),
+             "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}}),
+        param_space=sweep_space(), n_trials=1, search_seed=0
     )
     sweep_id = hpo_result["sweep"]["sweep_id"]
 
@@ -388,7 +389,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
 
     sweep = tt.monitor_training(dest, sweep_id)["sweep"]
     assert sweep["state"] == "completed"
-    assert [t["trial_params"] for t in sweep["trials"]] == [{"lr": 0.1}]
+    assert [t["trial_params"] for t in sweep["trials"]] == [{"optimizer.head_lr": 0.1}]
 
     selection = ts.read(selection_key(dest / "splits_out"))
     assert selection["scope"]["subject"] == "bud"

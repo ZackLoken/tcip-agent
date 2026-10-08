@@ -4,7 +4,6 @@ its scored result; ``evaluation.py`` keeps the metrics computation itself.
 
 from __future__ import annotations
 
-from functools import partial
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -57,9 +56,9 @@ def run_test_evaluation(
     task = checkpoint.task
     model = pass_.predictor.governed(execution).to(device)
 
-    scored = partial(evaluate, model, loader, device, task, dims=pass_.predictor.dims,
-                     iou_threshold=iou_threshold, score_weights=score_weights, trait=trait)
-    metrics = scored() if execution.conf is None else scored(conf_threshold=execution.conf)
+    metrics = evaluate(model, loader, device, task, dims=pass_.predictor.dims,
+                       conf_threshold=execution.conf, iou_threshold=iou_threshold,
+                       score_weights=score_weights, trait=trait)
     tiled = run_tiling(task, tiling) is not None
     common = {
         "model_path": checkpoint.path, "task": task, **checkpoint.producer,
@@ -74,23 +73,23 @@ def run_full_frame_evaluation(
     checkpoint, admitted: "Admission", *, stated: Stated,
     iou_threshold: float = 0.5, device: str | None = None, trait: TraitEntry | None = None,
 ) -> dict:
-    """``checkpoint`` evaluated full frame: its tiled pass over ``stated``
-    (:func:`~tcip_mcp.pipelines.execution.prepare_pass`, whose refusals propagate) merged across
-    tiles and matched to the full-frame ground truth of the detection loader a run over
+    """``checkpoint`` evaluated full frame: its tiled pass over ``stated`` (its conf and cap the
+    stated ones), merged across tiles at the stated merge threshold or the one the evaluated
+    ground truth derives (:func:`~tcip_mcp.pipelines.execution.execution_record`, whose refusals
+    propagate), and matched to the full-frame ground truth of the detection loader a run over
     ``admitted`` builds, under ``trait``'s criterion when given. Returns
     :func:`~tcip_mcp.pipelines.training.evaluation.detection_metrics`, by mask for an
     instance-segmentation checkpoint and by box otherwise, beside the reference's object and
     detection counts and the pass's ``execution`` record. An empty admission, and a document
     carrying the subject only in geometry a detector cannot read, refuse by name."""
-    from tcip_mcp.pipelines.execution import prepare_pass
+    from tcip_mcp.pipelines.execution import Reference, prepare
     from tcip_mcp.pipelines.operating_point import cap_saturated_frac
     from tcip_mcp.pipelines.training.evaluation import (
         detection_metrics, gt_objects, gt_records, prediction_record,
     )
 
-    pass_ = prepare_pass(checkpoint, stated.model_copy(update={"tile": True}), device=device)
-    predictor, execution = pass_.predictor, pass_.execution
-    assert execution.conf is not None and execution.max_dets is not None, "a detector's record"
+    prep = prepare(checkpoint, stated.model_copy(update={"tile": True}), device=device)
+    predictor = prep.predictor
     by_mask = predictor.task == "instance_seg"
 
     # The loader a run over this same ground truth builds, over the samples the producer admits.
@@ -106,13 +105,19 @@ def run_full_frame_evaluation(
         sizes=resolve_sizes(predictor.task, {"num_channels": predictor.in_chans},
                             measured_samples))
     assert isinstance(measured, DocumentDataset), "a detector's build over samples is one of these"
+    gt_by_key = {key: gt_records(measured.det_targets(measured.document(key)))
+                 for key in measured.stems}
+    pass_ = prep.runnable(Reference(
+        boxes_per_image=[[a["bbox"] for a in gt_objects({"gt": gt})] for gt in gt_by_key.values()],
+        counted=None, footprint=None))
+    execution = pass_.execution
+    assert execution.conf is not None and execution.max_dets is not None, "a detector's record"
     per_image = [
         prediction_record(
             predictor.predict_sliced(measured.image_of(key), execution=execution,
                                      tile_batch_size=pass_.tile_batch_size, require_masks=by_mask),
-            gt_records(measured.det_targets(measured.document(key))),
-            image_id=measured.sample_of(key).member)
-        for key in measured.stems]
+            gt, image_id=measured.sample_of(key).member)
+        for key, gt in gt_by_key.items()]
 
     common = {
         "model_path": checkpoint.path, "task": predictor.task, **checkpoint.producer,
