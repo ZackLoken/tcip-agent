@@ -5,6 +5,7 @@
  */
 
 import { NO_SUBJECT_DRAFT_COLOR } from "@/lib/symbology";
+import type { DrawingBox } from "@/store/types";
 
 export interface DraftStroke {
   points: [number, number][];
@@ -16,18 +17,13 @@ export interface DraftStroke {
 }
 
 /** A box's corners as bounds in ascending order, whichever corner the drag started at. */
-export function boxBounds(d: {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-}): [number, number, number, number] {
+export function boxBounds(d: DrawingBox): [number, number, number, number] {
   return [Math.min(d.x1, d.x2), Math.min(d.y1, d.y2), Math.max(d.x1, d.x2), Math.max(d.y1, d.y2)];
 }
 
 /** The box being dragged out: its bounds in ascending order and its own subject's color. */
 export function boxDraft(
-  d: { x1: number; y1: number; x2: number; y2: number; subject: string },
+  d: DrawingBox,
   colorFor: (subject: string) => string,
 ): { bounds: [number, number, number, number]; color: string } {
   return { bounds: boxBounds(d), color: colorFor(d.subject) };

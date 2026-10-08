@@ -15,7 +15,7 @@ import { draftStrokes } from "@/lib/draftStrokes";
 import { ringsBbox } from "@/lib/polygonGeometry";
 import type { ReviewItem } from "@/lib/reviewItems";
 import { DOTTED_DASH, DRAFT_DASH, FLAG_MARK, FOCUS_HALO, MATCH_COLORS } from "@/lib/symbology";
-import type { Proposal } from "@/store/types";
+import type { Box, PointShape, Proposal } from "@/store/types";
 
 const RED = subjectColor("subject_a");
 const OTHER = subjectColor("other");
@@ -102,14 +102,8 @@ describe("measureCanvasHost", () => {
 
 describe("buildAnnotateShapes", () => {
   const base = {
-    boxes: [] as {
-      x1: number;
-      y1: number;
-      x2: number;
-      y2: number;
-      subject: string;
-      attributes: Record<string, string>;
-    }[],
+    boxes: [] as Box[],
+    points: [] as PointShape[],
     polygons: [
       {
         rings: [
@@ -512,7 +506,13 @@ describe("buildAnnotateShapes", () => {
 });
 
 describe("the shapes the server render is fed", () => {
-  const args = { boxes: [], activeSubject: "subject_a", visible: true, colorFor: subjectColor };
+  const args = {
+    boxes: [],
+    points: [],
+    activeSubject: "subject_a",
+    visible: true,
+    colorFor: subjectColor,
+  };
 
   it("are what buildAnnotateShapes produces, the records the renderer's own tests read", async () => {
     const polygon = buildAnnotateShapes({
@@ -562,6 +562,7 @@ describe("buildAnnotateShapes proposals", () => {
   const base = {
     boxes: [],
     polygons: [],
+    points: [],
     mode: "polygon",
     activeSubject: "subject_a",
     visible: true,

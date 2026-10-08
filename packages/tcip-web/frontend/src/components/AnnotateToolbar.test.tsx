@@ -127,9 +127,9 @@ describe("AnnotateToolbar draw mode", () => {
     act(() => {
       const s = useStore.getState();
       s.setActiveSubject("tip");
-      s.addPoint({ x: 1, y: 2, subject: "tip", attributes: {} });
-      s.addPoint({ x: 3, y: 4, subject: "tip", attributes: {} });
-      s.addPoint({ x: 5, y: 6, subject: "other", attributes: {} });
+      s.add("points", { x: 1, y: 2, subject: "tip", attributes: {} });
+      s.add("points", { x: 3, y: 4, subject: "tip", attributes: {} });
+      s.add("points", { x: 5, y: 6, subject: "other", attributes: {} });
     });
     // The pill shows the active subject's own count: a placed point is an annotation like any other.
     expect(screen.getByText("(2)")).toBeInTheDocument();

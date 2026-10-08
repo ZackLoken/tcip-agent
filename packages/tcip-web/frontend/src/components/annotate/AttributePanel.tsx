@@ -7,6 +7,7 @@ import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { saveRegistry } from "@/lib/registrySave";
 import type { ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
+import { TOOL_ARRAY } from "@/store/types";
 
 /** Per-instance attribute editing + a geometry-less (image/plant-level) rating entry, plus
  *  authoring new attributes and values onto the active subject: the selected shape's
@@ -19,18 +20,15 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
   const polygons = useStore((s) => s.canvas.polygons);
   const points = useStore((s) => s.canvas.points);
   const imageAnnotations = useStore((s) => s.canvas.imageAnnotations);
-  const updateBox = useStore((s) => s.updateBox);
-  const updatePolygon = useStore((s) => s.updatePolygon);
-  const updatePoint = useStore((s) => s.updatePoint);
-  const addImageAnnotation = useStore((s) => s.addImageAnnotation);
-  const updateImageAnnotation = useStore((s) => s.updateImageAnnotation);
-  const deleteImageAnnotation = useStore((s) => s.deleteImageAnnotation);
+  const add = useStore((s) => s.add);
+  const update = useStore((s) => s.update);
+  const remove = useStore((s) => s.remove);
 
   // The focused annotation's own shape; a focused proposal has no attributes to set.
   const focusedShape =
     focused?.kind !== "annotation"
       ? undefined
-      : { box: boxes, polygon: polygons, point: points }[focused.shape][focused.ref];
+      : { boxes, polygons, points }[TOOL_ARRAY[focused.shape]][focused.ref];
   const selected =
     focused && focusedShape ? { kind: focused.shape, idx: focused.ref, shape: focusedShape } : null;
 
@@ -43,16 +41,11 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
 
   const setInstanceAttr = (attr: string, value: string) => {
     if (!selected) return;
-    if (selected.kind === "box") {
-      const b = boxes[selected.idx];
-      updateBox(selected.idx, { ...b, attributes: withAttr(b.attributes, attr, value) });
-    } else if (selected.kind === "polygon") {
-      const p = polygons[selected.idx];
-      updatePolygon(selected.idx, { ...p, attributes: withAttr(p.attributes, attr, value) });
-    } else {
-      const p = points[selected.idx];
-      updatePoint(selected.idx, { ...p, attributes: withAttr(p.attributes, attr, value) });
-    }
+    const { shape } = selected;
+    update(TOOL_ARRAY[selected.kind], selected.idx, {
+      ...shape,
+      attributes: withAttr(shape.attributes, attr, value),
+    });
   };
 
   function saveGrownRegistry(next: Registry) {
@@ -280,7 +273,7 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
                 type="button"
                 className="ml-auto text-tcip-muted hover:text-tcip-fp"
                 title="Remove this rating"
-                onClick={() => deleteImageAnnotation(i)}
+                onClick={() => remove("imageAnnotations", i)}
               >
                 ✕
               </button>
@@ -290,7 +283,7 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
               attributes={a.attributes}
               registry={registry}
               onChange={(attr, value) =>
-                updateImageAnnotation(i, {
+                update("imageAnnotations", i, {
                   ...a,
                   attributes: withAttr(a.attributes, attr, value),
                 })
@@ -303,7 +296,10 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
           type="button"
           className="tcip-btn mt-1 w-full text-[11px]"
           disabled={!activeSubject}
-          onClick={() => activeSubject && addImageAnnotation(activeSubject)}
+          onClick={() =>
+            activeSubject &&
+            add("imageAnnotations", { subject: activeSubject, attributes: {}, iscrowd: false })
+          }
         >
           + Rating for {activeSubject ?? "…"}
         </button>

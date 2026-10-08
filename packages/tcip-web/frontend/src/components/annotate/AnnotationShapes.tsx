@@ -8,19 +8,16 @@ import { derivedBoxFromPolygon } from "@/lib/polygonGeometry";
 import { focusesAnnotation, type MatchTypes, type ReviewItem } from "@/lib/reviewItems";
 import { useSubjectColors } from "@/lib/subjectColors";
 import { authorshipLabel, lineStyleOf, outlineColor, type strokeWidths } from "@/lib/symbology";
-import type { Box, Mode, PointShape, PolygonShape } from "@/store/types";
+import type { Mode, ToolContent } from "@/store/types";
 
 /**
  * The committed boxes, polygons and points (content layer). Memoized, and crucially, the mouse
- * cursor is not one of its props, so a mouse move (which only updates cursor-following
- * overlays) does not re-render/reconcile these hundreds to thousands of Konva nodes. It
- * re-renders only when the shapes, the focus, the active subject, the match types or the
- * zoom-derived sizes change.
+ * cursor is not one of its props, so a mouse move that changes nothing else (which only
+ * updates cursor-following overlays) does not re-render/reconcile these hundreds to thousands
+ * of Konva nodes; a move that changes a prop it does read (the hovered index, the dragging
+ * index) or a recolor re-renders them.
  */
-interface AnnotationShapesProps {
-  boxes: Box[];
-  polygons: PolygonShape[];
-  points: PointShape[];
+interface AnnotationShapesProps extends ToolContent {
   mode: Mode;
   activeSubject: string | null;
   /** Each array's match types, aligned with it (`matchTypes`). */

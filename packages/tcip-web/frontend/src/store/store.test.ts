@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { serializeCanvas, type CanvasLabels } from "@/lib/labelSerde";
+import { serializeCanvas } from "@/lib/labelSerde";
 import { useStore } from "@/store";
-import type { Box, ImageLabels } from "@/store/types";
+import { CONTENT_EDITS } from "@/store/slices/canvas";
+import type { Box, CanvasContent, ImageLabels } from "@/store/types";
 
-const canvasToAnnotations = (labels: CanvasLabels) => serializeCanvas(labels).annotations;
+const canvasToAnnotations = (labels: CanvasContent) => serializeCanvas(labels).annotations;
 
 const s = () => useStore.getState();
 
@@ -84,9 +85,9 @@ describe("canvas store", () => {
     expect(s().canvas.polygons[0].rings).toHaveLength(2);
   });
 
-  it("addBox pushes an undo snapshot that undo restores", () => {
+  it("add pushes an undo snapshot that undo restores", () => {
     expect(s().canvas.boxes).toHaveLength(0);
-    s().addBox({ x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {} });
+    s().add("boxes", { x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {} });
     expect(s().canvas.boxes).toHaveLength(1);
     expect(s().canvas.undoStack).toHaveLength(1);
     s().undo();
@@ -94,10 +95,10 @@ describe("canvas store", () => {
     expect(s().canvas.redoStack).toHaveLength(1);
   });
 
-  it("dragBox moves a box without pushing an undo snapshot", () => {
-    s().addBox({ x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {} });
+  it("drag moves a box without pushing an undo snapshot", () => {
+    s().add("boxes", { x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {} });
     const before = s().canvas.undoStack.length;
-    s().dragBox(0, { x1: 2, y1: 3, x2: 9, y2: 11, subject: "subject_a", attributes: {} });
+    s().drag("boxes", 0, { x1: 2, y1: 3, x2: 9, y2: 11, subject: "subject_a", attributes: {} });
     expect(s().canvas.boxes[0]).toEqual({
       x1: 2,
       y1: 3,
@@ -206,7 +207,7 @@ describe("splitPolygon", () => {
       flags: [],
     });
     // A second polygon after it, so the split's own effect on later indices is checked too.
-    s().addPolygon({ rings: [RING_B], subject: "subject_a", attributes: {} });
+    s().add("polygons", { rings: [RING_B], subject: "subject_a", attributes: {} });
     useStore.setState((st) => ({ annotateUi: { ...st.annotateUi, hoveredPolygonIdx: 1 } }));
 
     s().splitPolygon(0, [PIECE_A, PIECE_B]);
@@ -236,7 +237,7 @@ describe("splitPolygon", () => {
 
   it("one undo restores the parent and its selection", () => {
     loadOnePolygon();
-    s().addPoint({ x: 1, y: 1, subject: "tip", attributes: {} });
+    s().add("points", { x: 1, y: 1, subject: "tip", attributes: {} });
     s().setFocus({ kind: "point", index: 0 });
     s().splitPolygon(0, [PIECE_A, PIECE_B]);
     expect(s().canvas.polygons).toHaveLength(2);
@@ -250,11 +251,11 @@ describe("splitPolygon", () => {
 
   it("undo restores an annotation focus and never a proposal's, whose bucket may have changed", () => {
     const point = { x: 1, y: 1, subject: "tip", attributes: {} };
-    s().addPoint(point);
+    s().add("points", point);
     s().setFocus({ kind: "point", index: 0 });
-    s().addPoint(point);
+    s().add("points", point);
     s().setFocus({ kind: "proposal", index: 4 });
-    s().addPoint(point);
+    s().add("points", point);
 
     s().undo();
     expect(s().canvas.focus).toBeNull();
@@ -272,8 +273,8 @@ describe("canvas store points", () => {
 
   const pt = (x: number, y: number, subject = "tip") => ({ x, y, subject, attributes: {} });
 
-  it("addPoint pushes an undo snapshot that undo restores", () => {
-    s().addPoint(pt(10, 20));
+  it("adding a point pushes an undo snapshot that undo restores", () => {
+    s().add("points", pt(10, 20));
     expect(s().canvas.points).toEqual([pt(10, 20)]);
     expect(s().canvas.dirty).toBe(true);
     expect(s().canvas.undoStack).toHaveLength(1);
@@ -284,41 +285,43 @@ describe("canvas store points", () => {
     expect(s().canvas.points).toEqual([pt(10, 20)]);
   });
 
-  it("dragPoint repositions without pushing an undo snapshot", () => {
-    s().addPoint(pt(10, 20));
+  it("dragging a point repositions it without pushing an undo snapshot", () => {
+    s().add("points", pt(10, 20));
     const before = s().canvas.undoStack.length;
-    s().dragPoint(0, 33, 44);
+    s().drag("points", 0, pt(33, 44));
     expect(s().canvas.points[0]).toMatchObject({ x: 33, y: 44, subject: "tip" });
-    // Like dragBox/dragVertex: a live drag must not flood the 30-entry undo stack.
+    // Like a box or vertex drag: a live drag must not flood the 30-entry undo stack.
     expect(s().canvas.undoStack.length).toBe(before);
     expect(s().canvas.dirty).toBe(true);
   });
 
-  it("dragPoint on a missing index is a no-op (a stale drag can outlive its point)", () => {
-    s().addPoint(pt(10, 20));
-    s().dragPoint(5, 1, 1);
+  it("a drag on a missing index is a no-op (a stale drag can outlive its point)", () => {
+    s().add("points", pt(10, 20));
+    s().drag("points", 5, pt(1, 1));
     expect(s().canvas.points).toEqual([pt(10, 20)]);
   });
 
-  it("deletePoint removes it and keeps the selection pointing at the same annotation", () => {
-    s().addPoint(pt(1, 1, "a"));
-    s().addPoint(pt(2, 2, "b"));
-    s().addPoint(pt(3, 3, "c"));
+  it("removing a point keeps the selection pointing at the same annotation", () => {
+    s().add("points", pt(1, 1, "a"));
+    s().add("points", pt(2, 2, "b"));
+    s().add("points", pt(3, 3, "c"));
     s().setFocus({ kind: "point", index: 2 });
-    s().deletePoint(0); // an earlier point goes: the selection shifts down with it
+    s().remove("points", 0); // an earlier point goes: the selection shifts down with it
     expect(s().canvas.points.map((p) => p.subject)).toEqual(["b", "c"]);
     expect(s().canvas.focus).toEqual({ kind: "point", index: 1 });
-    s().deletePoint(1); // the selected point itself goes
+    s().remove("points", 1); // the selected point itself goes
     expect(s().canvas.focus).toBeNull();
   });
 
-  it("deleting a shape of another kind leaves the focus alone", () => {
-    s().addPoint(pt(1, 1, "a"));
-    s().addBox({ x1: 0, y1: 0, x2: 5, y2: 5, subject: "a", attributes: {} });
+  it("removing an item of another array leaves the focus alone", () => {
+    s().add("points", pt(1, 1, "a"));
+    s().add("boxes", { x1: 0, y1: 0, x2: 5, y2: 5, subject: "a", attributes: {} });
+    s().add("imageAnnotations", { subject: "a", attributes: {}, iscrowd: false });
     s().setFocus({ kind: "box", index: 0 });
-    s().deletePoint(0);
+    s().remove("points", 0);
+    s().remove("imageAnnotations", 0);
     expect(s().canvas.focus).toEqual({ kind: "box", index: 0 });
-    s().deleteBox(0);
+    s().remove("boxes", 0);
     expect(s().canvas.focus).toBeNull();
   });
 
@@ -331,16 +334,16 @@ describe("canvas store points", () => {
     expect(s().canvas.focus).toBeNull();
   });
 
-  it("updatePoint edits attributes in place (undoable), leaving the position alone", () => {
-    s().addPoint(pt(10, 20));
-    s().updatePoint(0, { ...s().canvas.points[0], attributes: { stage: "open" } });
+  it("update edits a point's attributes in place (undoable), leaving the position alone", () => {
+    s().add("points", pt(10, 20));
+    s().update("points", 0, { ...s().canvas.points[0], attributes: { stage: "open" } });
     expect(s().canvas.points[0]).toMatchObject({ x: 10, y: 20, attributes: { stage: "open" } });
     s().undo();
     expect(s().canvas.points[0].attributes).toEqual({});
   });
 
   it("loadLabelsIntoCanvas adopts loaded points and leaves the focus to the context rule", () => {
-    s().addPoint(pt(1, 1));
+    s().add("points", pt(1, 1));
     s().setFocus({ kind: "point", index: 0 });
     s().loadLabelsIntoCanvas({
       image_path: "x",
@@ -432,7 +435,7 @@ describe("focus follows the image and the bucket", () => {
       s().loadLabelsIntoCanvas(loaded("1.jpg", [first]));
       s().setFocus({ kind: "box", index: 0 });
       s().pushUndo();
-      s().dragBox(0, { ...first, x2: 11, y2: 11 });
+      s().drag("boxes", 0, { ...first, x2: 11, y2: 11 });
     }
 
     it("a rollback leaves the focus the image change cleared, so the next image does not inherit it", () => {
@@ -491,15 +494,15 @@ describe("content-based dirty tracking", () => {
 
   it("drawing a shape and deleting it again leaves the canvas clean", () => {
     loadOnePolygon();
-    s().addBox(box);
+    s().add("boxes", box);
     expect(s().canvas.dirty).toBe(true);
-    s().deleteBox(0);
+    s().remove("boxes", 0);
     expect(s().canvas.dirty).toBe(false);
   });
 
   it("undoing back to the loaded content leaves the canvas clean", () => {
     loadOnePolygon();
-    s().addBox(box);
+    s().add("boxes", box);
     s().undo();
     expect(s().canvas.dirty).toBe(false);
     s().redo();
@@ -507,10 +510,10 @@ describe("content-based dirty tracking", () => {
   });
 
   it("a loaded document re-baselines: deleting a loaded shape then undoing it is clean again", () => {
-    s().addBox(box);
+    s().add("boxes", box);
     s().loadLabelsIntoCanvas(answered([{ ...box, index: 0, authorship: "person" }]));
     expect(s().canvas.undoStack).toHaveLength(0);
-    s().deleteBox(0);
+    s().remove("boxes", 0);
     expect(s().canvas.dirty).toBe(true);
     s().undo();
     expect(s().canvas.dirty).toBe(false);
@@ -525,9 +528,9 @@ describe("content-based dirty tracking", () => {
     it("refuses every content edit and leaves the canvas as it was", () => {
       withDocumentOneBox();
       const before = s().canvas;
-      s().addBox({ ...box, x2: 9 });
-      s().deleteBox(0);
-      s().updateBox(0, { ...box, x2: 8 });
+      s().add("boxes", { ...box, x2: 9 });
+      s().remove("boxes", 0);
+      s().update("boxes", 0, { ...box, x2: 8 });
       s().undo();
       s().redo();
       expect(s().canvas.boxes).toBe(before.boxes);
@@ -537,8 +540,8 @@ describe("content-based dirty tracking", () => {
 
     const heldWithHistory = () => {
       s().loadLabelsIntoCanvas(answered([]));
-      s().addBox(box);
-      s().addBox({ ...box, x2: 9 });
+      s().add("boxes", box);
+      s().add("boxes", { ...box, x2: 9 });
       s().undo();
       s().holdForSave("/d/a/1.jpg");
       return s().canvas;
@@ -562,7 +565,7 @@ describe("content-based dirty tracking", () => {
       withDocumentOneBox();
       s().loadLabelsIntoCanvas(answered([{ ...box, index: 3, authorship: "person" }]));
       expect(s().canvas.saving).toBeNull();
-      s().addBox({ ...box, x2: 9 });
+      s().add("boxes", { ...box, x2: 9 });
       expect(s().canvas.boxes).toHaveLength(2);
     });
 
@@ -582,9 +585,9 @@ describe("content-based dirty tracking", () => {
 
   it("a genuine change stays dirty", () => {
     loadOnePolygon();
-    s().addBox(box);
-    s().deleteBox(0);
-    s().addBox({ ...box, x2: 6 });
+    s().add("boxes", box);
+    s().remove("boxes", 0);
+    s().add("boxes", { ...box, x2: 6 });
     expect(s().canvas.dirty).toBe(true);
   });
 
@@ -619,43 +622,54 @@ describe("the hold on the canvas covers every content edit", () => {
       completion: {},
       flags: [],
     });
-    s().addBox({ ...box, x2: 9 });
-    s().addBox({ ...box, x2: 8 });
+    s().add("boxes", { ...box, x2: 9 });
+    s().add("boxes", { ...box, x2: 8 });
     s().undo();
     s().setCurrentPolygon(RING_B);
     useStore.setState((st) => ({ gui: { ...st.gui, active_subject: "subject_a" } }));
   }
 
-  const ACTIONS: [string, () => unknown][] = [
-    ["pushUndo", () => s().pushUndo()],
-    ["undo", () => s().undo()],
-    ["rollbackLast", () => s().rollbackLast()],
-    ["redo", () => s().redo()],
-    ["addBox", () => s().addBox({ ...box, x2: 7 })],
-    ["updateBox", () => s().updateBox(0, { ...box, x2: 6 })],
-    ["dragBox", () => s().dragBox(0, { ...box, x2: 6 })],
-    ["deleteBox", () => s().deleteBox(0)],
-    ["addPolygon", () => s().addPolygon({ ...polygon, rings: [RING_B] })],
-    ["updatePolygon", () => s().updatePolygon(0, { ...polygon, rings: [RING_B] })],
-    ["dragVertex", () => s().dragVertex(0, 0, 0, [3, 3])],
-    ["deletePolygon", () => s().deletePolygon(0)],
-    ["splitPolygon", () => s().splitPolygon(0, [RING_A, RING_B])],
-    ["addPoint", () => s().addPoint({ x: 2, y: 2, subject: "subject_a", attributes: {} })],
-    ["updatePoint", () => s().updatePoint(0, { x: 3, y: 3, subject: "subject_a", attributes: {} })],
-    ["dragPoint", () => s().dragPoint(0, 9, 9)],
-    ["deletePoint", () => s().deletePoint(0)],
-    ["setCurrentPolygon", () => s().setCurrentPolygon(RING_A)],
-    ["commitCurrentPolygon", () => s().commitCurrentPolygon()],
-    ["addImageAnnotation", () => s().addImageAnnotation("subject_a")],
-    ["updateImageAnnotation", () => s().updateImageAnnotation(0, { ...rating, iscrowd: true })],
-    ["deleteImageAnnotation", () => s().deleteImageAnnotation(0)],
+  const point = { x: 2, y: 2, subject: "subject_a", attributes: {} };
+  const RUNS: [(typeof CONTENT_EDITS)[number], string, () => unknown][] = [
+    ["pushUndo", "", () => s().pushUndo()],
+    ["undo", "", () => s().undo()],
+    ["rollbackLast", "", () => s().rollbackLast()],
+    ["redo", "", () => s().redo()],
+    ["add", "boxes", () => s().add("boxes", { ...box, x2: 7 })],
+    ["add", "polygons", () => s().add("polygons", { ...polygon, rings: [RING_B] })],
+    ["add", "points", () => s().add("points", point)],
+    ["add", "imageAnnotations", () => s().add("imageAnnotations", rating)],
+    ["update", "boxes", () => s().update("boxes", 0, { ...box, x2: 6 })],
+    ["update", "polygons", () => s().update("polygons", 0, { ...polygon, rings: [RING_B] })],
+    ["update", "points", () => s().update("points", 0, { ...point, x: 3 })],
+    [
+      "update",
+      "imageAnnotations",
+      () => s().update("imageAnnotations", 0, { ...rating, iscrowd: true }),
+    ],
+    ["drag", "boxes", () => s().drag("boxes", 0, { ...box, x2: 6 })],
+    ["drag", "polygons", () => s().drag("polygons", 0, { ...polygon, rings: [RING_B] })],
+    ["drag", "points", () => s().drag("points", 0, { ...point, x: 9 })],
+    [
+      "drag",
+      "imageAnnotations",
+      () => s().drag("imageAnnotations", 0, { ...rating, iscrowd: true }),
+    ],
+    ["remove", "boxes", () => s().remove("boxes", 0)],
+    ["remove", "polygons", () => s().remove("polygons", 0)],
+    ["remove", "points", () => s().remove("points", 0)],
+    ["remove", "imageAnnotations", () => s().remove("imageAnnotations", 0)],
+    ["dragVertex", "", () => s().dragVertex(0, 0, 0, [3, 3])],
+    ["splitPolygon", "", () => s().splitPolygon(0, [RING_A, RING_B])],
+    ["setCurrentPolygon", "", () => s().setCurrentPolygon(RING_A)],
+    ["commitCurrentPolygon", "", () => s().commitCurrentPolygon()],
   ];
 
-  it("lists every action it checks, so a new one is a decision", () => {
-    expect(ACTIONS).toHaveLength(22);
+  it("runs every action the hold covers, and only those", () => {
+    expect(new Set(RUNS.map(([edit]) => edit))).toEqual(new Set(CONTENT_EDITS));
   });
 
-  it.each(ACTIONS)("%s changes the canvas unheld and does nothing held", (_name, run) => {
+  it.each(RUNS)("%s %s changes the canvas unheld and does nothing held", (_edit, _on, run) => {
     arrange();
     const unheld = s().canvas;
     run();

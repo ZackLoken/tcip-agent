@@ -10,6 +10,7 @@ import {
   imageFlags,
   keptItems,
   matchTypes,
+  NO_MATCHES,
   nearestNeighborOrder,
   reviewItems,
   scopedOrder,
@@ -99,7 +100,7 @@ const items = (mode: Mode, reviewing = true, flags: Flag[] = []) =>
   reviewItems({
     canvas,
     proposals,
-    matches: matchTypes(canvas, proposals, reviewing),
+    matches: matchTypes()(canvas, proposals, reviewing),
     reviewing,
     mode,
     flags,
@@ -113,13 +114,24 @@ describe("match types", () => {
     expect(annotationMatch(undefined, proposals)).toBe("annotation_only");
   });
 
-  it("matchTypes aligns with the canvas arrays and is all null while not reviewing", () => {
-    expect(matchTypes(canvas, proposals, true).boxes).toEqual([
+  it("matchTypes aligns with each canvas array and is all null while not reviewing", () => {
+    expect(matchTypes()(canvas, proposals, true).boxes).toEqual([
       "matched",
       "matched",
       "annotation_only",
     ]);
-    expect(matchTypes(canvas, proposals, false).boxes).toEqual([null, null, null]);
+    expect(matchTypes()(canvas, proposals, false).boxes).toEqual([null, null, null]);
+  });
+
+  it("matchTypes keeps an unchanged array's match types when another array changes", () => {
+    const matchesOf = matchTypes();
+    const before = matchesOf(canvas, proposals, true);
+    const after = matchesOf({ ...canvas, boxes: [...canvas.boxes, box(0, 40)] }, proposals, true);
+    expect(after.boxes).not.toBe(before.boxes);
+    expect(after.boxes.at(-1)).toBe("annotation_only");
+    expect(after.polygons).toBe(before.polygons);
+    expect(after.points).toBe(before.points);
+    expect(matchesOf(canvas, [...proposals], true).polygons).not.toBe(before.polygons);
   });
 });
 
@@ -149,7 +161,7 @@ describe("reviewItems", () => {
       reviewItems({
         canvas: { ...canvas, boxes: [{ ...box(80, 0), authorship }] },
         proposals: [],
-        matches: matchTypes({ ...canvas, boxes: [{ ...box(80, 0), authorship }] }, [], reviewing),
+        matches: matchTypes()({ ...canvas, boxes: [box(80, 0)] }, [], reviewing),
         reviewing,
         mode: "box",
         flags: [],
@@ -170,7 +182,7 @@ describe("reviewItems", () => {
     const listed = reviewItems({
       canvas: tools,
       proposals: decided,
-      matches: matchTypes(tools, decided, true),
+      matches: matchTypes()(tools, decided, true),
       reviewing: true,
       mode: "box",
       flags: [],
@@ -338,7 +350,7 @@ describe("flags on items", () => {
     const [item] = reviewItems({
       canvas: concave,
       proposals: [],
-      matches: matchTypes(concave, [], false),
+      matches: NO_MATCHES,
       reviewing: false,
       mode: "polygon",
       flags: [],

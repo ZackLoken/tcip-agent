@@ -88,6 +88,9 @@ export interface Box extends CanvasShape {
   y2: number;
 }
 
+/** The box being dragged out: its two corners, in drag order, and the subject it is drawn for. */
+export type DrawingBox = Pick<Box, "x1" | "y1" | "x2" | "y2" | "subject">;
+
 /** A polygon on the canvas: every ring of one annotation. The drawing tool authors exactly one ring
  *  (a person draws one contour); a loaded occlusion-split shape can carry several, and all of them
  *  are drawn, hit-tested and saved together as the single annotation they are. */
@@ -107,16 +110,38 @@ export function isFinished(state: SubjectState | null | undefined): boolean {
   return (FINISHED_STATES as readonly string[]).includes(state ?? "");
 }
 
+/** The canvas' saved content, empty: each tool's shapes, and the geometry-less (image/plant-level)
+ *  ratings, kept so they round-trip losslessly on save. Its keys are the content's only list. */
+export const NO_CONTENT = {
+  boxes: [] as Box[],
+  polygons: [] as PolygonShape[],
+  points: [] as PointShape[],
+  imageAnnotations: [] as Annotation[],
+};
+
+export type CanvasContent = typeof NO_CONTENT;
+
+/** The content arrays of any record carrying them, and nothing else. */
+export const contentOf = (record: CanvasContent): CanvasContent =>
+  Object.fromEntries(
+    Object.keys(NO_CONTENT).map((key) => [key, record[key as keyof CanvasContent]]),
+  ) as CanvasContent;
+
+/** The content array each tool's shapes live in. */
+export const TOOL_ARRAY = {
+  box: "boxes",
+  polygon: "polygons",
+  point: "points",
+} as const satisfies Record<Mode, keyof CanvasContent>;
+
+/** The content arrays the tools draw and edit: every one but the geometry-less ratings. */
+export type ToolContent = Pick<CanvasContent, (typeof TOOL_ARRAY)[Mode]>;
+
 /** The Annotate canvas' load payload, split from the unified annotation list by geometry kind. */
-export interface ImageLabels {
+export interface ImageLabels extends CanvasContent {
   image_path: string;
   img_width: number;
   img_height: number;
-  boxes: Box[];
-  polygons: PolygonShape[];
-  points: PointShape[];
-  // Geometry-less (image/plant-level) ratings, kept so they round-trip losslessly on save.
-  imageAnnotations: Annotation[];
   // Each subject the document holds or marks, by state; a subject absent here is unannotated.
   completion: Record<string, SubjectState>;
   // Every flag raised on the image, oldest first, resolved ones kept.
