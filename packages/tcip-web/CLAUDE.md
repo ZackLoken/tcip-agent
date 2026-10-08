@@ -37,8 +37,9 @@ line as `composer_ready_version`; no harness promises it), what the harness's ow
 restricts and leaves open (`confinement`, recorded on every launch), and the preparation the
 launch runs first when the
 harness takes its MCP server or its tool approvals only through its own configuration (the
-Antigravity row registers the server through `agy mcp add` and allows every tcip tool in agy's
-settings file, both writes to the breeder's own agy configuration, recorded on the launch). The
+Antigravity row registers the server through `agy mcp add` and allows every tcip tool and the
+ritual's own `tcip doctor` line for the open project, and nothing else, in agy's settings
+file, both writes to the breeder's own agy configuration, recorded on the launch). The
 MCP server a launch hands its harness has one producer, `mcp_server`, written as the JSON
 configuration file Claude's row passes, registered through `agy mcp add` for Antigravity's and
 rendered as `-c` overrides for Codex's. The ritual is pasted together with every request staged by
@@ -56,9 +57,7 @@ is added only after its harness's real flags are read from the installed CLI and
 (`tools/smoke_terminal_e2e.py <id>`) passes: the smoke opens a scratch project, then asks for one
 `report_friction` call carrying a token only that request names, and passes when the project's
 friction reports hold exactly one report carrying it, of the requested category, at the poll
-that first sees one. The Antigravity row does not pass it: agy asks before running the ritual's
-`tcip doctor`, which its preparation does not allow, and whether to allow it is the owner's
-decision.
+that first sees one.
 
 Claude's row passes `CLAUDE_SETTINGS`, `agent_terminal.settings.json`; its `confinement` sentence
 states what that file enforces, and its academic WebFetch grants are generated from the

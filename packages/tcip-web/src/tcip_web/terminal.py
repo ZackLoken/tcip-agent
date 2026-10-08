@@ -18,7 +18,7 @@ import tempfile
 import threading
 import time
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Callable, Iterable, Optional
 
 from tcip_mcp.agent_identity import TERMINAL_SESSION_ENV
@@ -150,11 +150,64 @@ def run_to_completion(argv: list[str], step: str) -> str:
     return subprocess.list2cmdline(argv)
 
 
-def allow_tcip_tools(settings: Path) -> str:
-    """Add an ``mcp(tcip/<tool>)`` entry for every registered tool to the ``permissions.allow``
-    list of the Antigravity settings file ``settings``, keeping everything else in it, and
-    return one line saying how many were added; raises :class:`PreparationFailedError` when the
-    file does not parse as a JSON object."""
+DOCTOR_PATH_REFUSES = frozenset('"$`\\!\r\n“”„')
+"""The characters the doctor line refuses in a project path, so the line is one double-quoted
+argument on one line under Bash and PowerShell: the double quote and the typographic double
+quotes PowerShell reads as one, which close the quoted segment; the dollar, which both shells
+expand inside double quotes; the backtick, a command substitution under Bash and the escape
+character under PowerShell; the backslash, an escape under Bash before some
+of the characters that may follow it; Bash's history expansion mark, expanded in an interactive
+shell with history expansion on; and a line break, which the ritual's one-line contract
+excludes. A typographic single quote is literal inside double quotes under both shells and is
+admitted."""
+
+_REGEX_LITERAL_ESCAPES = frozenset(".^$*+?()[]{}|\\")
+
+_DOCTOR_LINE_HEAD = 'tcip doctor "'
+"""What the ritual's doctor line opens with, before the project's path and its closing quote."""
+
+
+def _regex_literal(text: str) -> str:
+    """``text`` as a regular expression matching exactly it, a backslash before each of the
+    metacharacters RE2, JavaScript and Python share."""
+    return "".join(f"\\{c}" if c in _REGEX_LITERAL_ESCAPES else c for c in text)
+
+
+def doctor_command(project: PurePath) -> str:
+    """The one spelling of the ritual's doctor step for ``project``: ``tcip doctor`` and the
+    project's path, forward-slashed, in double quotes. Raises ``ValueError`` naming the
+    characters when the path holds one of :data:`DOCTOR_PATH_REFUSES`."""
+    text = project.as_posix()
+    held = sorted(set(text) & DOCTOR_PATH_REFUSES)
+    if held:
+        raise ValueError(f"the project path {text!r} holds {held!r}, which the doctor line "
+                         "refuses")
+    return f'{_DOCTOR_LINE_HEAD}{text}"'
+
+
+def _command_entry(line: str) -> str:
+    """agy's allow entry for exactly the command ``line``, in the regex form agy's settings
+    spell a command with arguments: the line between anchors as :func:`_regex_literal`."""
+    return f"command(regex:^{_regex_literal(line)}$)"
+
+
+def doctor_command_entry(project: PurePath) -> str:
+    """agy's allow entry for exactly :func:`doctor_command`'s line and nothing else. Raises
+    what :func:`doctor_command` raises."""
+    return _command_entry(doctor_command(project))
+
+
+_DOCTOR_ENTRY_PREFIX = _command_entry(_DOCTOR_LINE_HEAD).removesuffix("$)")
+"""What every doctor entry opens with, whatever its project: the entry of the line's head."""
+
+
+def allow_tcip_tools(settings: Path, project: Optional[Path]) -> str:
+    """Add an ``mcp(tcip/<tool>)`` entry for every registered tool and, for a ``project``,
+    :func:`doctor_command_entry` to the ``permissions.allow`` list of the Antigravity settings
+    file ``settings``, dropping the doctor entries of other projects and keeping everything
+    else in it, and return one line saying how many were added and dropped; raises
+    :class:`PreparationFailedError` when the file does not parse as a JSON object, and what
+    :func:`doctor_command` raises."""
     from tcip_mcp.server import list_registered_tools
 
     try:
@@ -164,22 +217,32 @@ def allow_tcip_tools(settings: Path) -> str:
     if not isinstance(body, dict):
         raise PreparationFailedError(f"{settings} does not hold a JSON object")
     allow = body.setdefault("permissions", {}).setdefault("allow", [])
-    missing = [entry for entry in (f"mcp(tcip/{name})" for name in list_registered_tools())
-               if entry not in allow]
-    if missing:
-        allow.extend(missing)
+    wanted = [f"mcp(tcip/{name})" for name in list_registered_tools()]
+    if project is not None:
+        wanted.append(doctor_command_entry(project))
+    stale = [entry for entry in allow if entry.startswith(_DOCTOR_ENTRY_PREFIX)
+             and entry not in wanted]
+    missing = [entry for entry in wanted if entry not in allow]
+    if missing or stale:
+        allow[:] = [entry for entry in allow if entry not in stale] + missing
         settings.parent.mkdir(parents=True, exist_ok=True)
         settings.write_text(json.dumps(body, indent=2) + "\n", encoding="utf-8")
-    return f"allowed {len(missing)} tcip tools in {settings}"
+    return (f"allowed {len(missing)} tcip entries in {settings}, dropped {len(stale)} doctor "
+            "entries of other projects")
 
 
 def prepare_antigravity(executable: str, project: Optional[OpenProject]) -> list[str]:
     """Antigravity's launch preparation: register :func:`mcp_server` for ``project`` as its
-    ``tcip`` server through ``agy mcp add``, and allow every tcip tool in its settings file."""
+    ``tcip`` server through ``agy mcp add``, and allow every tcip tool and the ritual's own
+    doctor line for ``project`` in its settings file; a path the doctor line refuses fails the
+    preparation naming it."""
     server = mcp_server(project)
     add = run_to_completion([executable, "mcp", "add", "tcip", "--", server.command, *server.args],
                             step="`agy mcp add`")
-    return [add, allow_tcip_tools(ANTIGRAVITY_SETTINGS)]
+    try:
+        return [add, allow_tcip_tools(ANTIGRAVITY_SETTINGS, project.root if project else None)]
+    except ValueError as exc:
+        raise PreparationFailedError(f"the doctor allowance was not written: {exc}") from exc
 
 
 PROVIDERS: tuple[Provider, ...] = (
@@ -204,10 +267,11 @@ PROVIDERS: tuple[Provider, ...] = (
         name="Antigravity",
         executable="agy",
         args=("--add-dir", WORKSPACE_ARG, "--sandbox"),
-        composer_ready="\x1b[?1049l",
-        composer_ready_version="1.3.0",
+        composer_ready="\x1b[0 q\r\x1b[J",
+        composer_ready_version="1.3.1",
         confinement=("agy's --sandbox turns on its terminal restrictions, whose extent agy "
-                     "defines; every tcip tool is allowed in agy's own settings file."),
+                     "defines; every tcip tool and the read-only tcip doctor are allowed in "
+                     "agy's own settings file."),
         prepare=prepare_antigravity,
     ),
     Provider(
@@ -320,9 +384,16 @@ def session_ritual(project: Optional[OpenProject]) -> str:
                 "initialize_project, or open one in the GUI, then restart the terminal to work on "
                 f"it. {_RITUAL_FRICTION}")
     _, record = existing_project(project.root)
-    return (f"{_RITUAL_HEADER}Project: {record['display_name']} ({project.root}). Run the ritual "
-            "first: load_project_memory (kind='reports' and kind='retrospectives'), "
-            f"inspect_project, then tcip doctor {project.root}. {_RITUAL_FRICTION}")
+    try:
+        doctor = doctor_command(project.root)
+    except ValueError as exc:
+        return (f"{_RITUAL_HEADER}Project: {record['display_name']}. Its doctor step cannot be "
+                f"spelled on a shell line: {exc}. Run load_project_memory (kind='reports' and "
+                "kind='retrospectives') and inspect_project, then file this with report_friction "
+                f"before any project work. {_RITUAL_FRICTION}")
+    return (f"{_RITUAL_HEADER}Project: {record['display_name']}. Run the ritual first: "
+            "load_project_memory (kind='reports' and kind='retrospectives'), inspect_project, "
+            f"then {doctor}. {_RITUAL_FRICTION}")
 
 
 VERSION_PROBE_TIMEOUT_S = 15
