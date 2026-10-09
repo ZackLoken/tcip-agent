@@ -317,17 +317,15 @@ def snapshot_model_source(spec: "TrainConfigSchema", run_dir: Path) -> dict:
     """
     import hashlib
 
-    builder, training_source = spec.model_source.builder, spec.training_source
     files: list[str] = list(spec.model_source.source_files or [])
     dataset_source = spec.data.dataset_source
-    dataset_builder = None
     if dataset_source is not None:
-        dataset_builder = dataset_source.builder
         files.extend(dataset_source.source_files or [])
     snapshot_errors: list[str] = []
     # Snapshot the agent's training-loop + dataset modules too (best-effort, resolve mod:fn ->
     # file).
-    for dotted in (builder, training_source, dataset_builder):
+    for dotted in (spec.model_source.builder, spec.training_source,
+                   dataset_source.builder if dataset_source is not None else None):
         if isinstance(dotted, str) and dotted:
             mod_name, _ = _split_dotted(dotted)
             try:
@@ -362,12 +360,4 @@ def snapshot_model_source(spec: "TrainConfigSchema", run_dir: Path) -> dict:
         entries.append({"file": f"{sha[:8]}/{p.name}", "src": str(p),
                         "sha256": sha, "bytes": len(data)})
 
-    return {
-        "builder": builder,
-        "training_source": training_source,
-        "dataset_builder": dataset_builder,
-        "declared_files": files,
-        "files": entries,
-        "missing": missing,
-        "snapshot_errors": snapshot_errors,
-    }
+    return {"files": entries, "missing": missing, "snapshot_errors": snapshot_errors}
