@@ -84,9 +84,7 @@ def test_detection_anchor_count_with_p2():
 
 def test_detection_anchor_free_e2e(tmp_path: Path):
     from torchvision.utils import save_image
-    from torch.utils.data import DataLoader
-    from tcip_mcp.pipelines.training.generic_trainer import train
-    from tcip_mcp.pipelines.training.collation import task_collate
+    from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train
     from tests._producer_fixtures import label_image
     from tests.tiny_trainer_fixtures import trainer_run
     from tcip_annotation.state import Annotation, BBox
@@ -99,7 +97,6 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
                     [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))], 64, 64)
 
     ds, data = run_over("detection", str(images_dir), subject="bud")
-    loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
     from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import built_detector
@@ -110,6 +107,7 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
     run = trainer_run(
         cfg, tmp_path / "out", has_val_loader=False, id="auto-run-8", project=tmp_path
     )
+    loader, _ = run_loaders(run, ds, None)
     run = train(run, loader, val_loader=None)
     assert run.status == "completed", run.status_error
     assert math.isfinite(run.metrics_history[-1]["train_loss"])

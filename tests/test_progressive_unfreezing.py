@@ -23,10 +23,8 @@ from tests._chain_fixtures import BESPOKE_CLASSIFIER
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 from torch import nn  # noqa: E402
-from torch.utils.data import DataLoader  # noqa: E402
 
-from tcip_mcp.pipelines.training.generic_trainer import train
-from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
+from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train  # noqa: E402
 from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 from tcip_mcp.pipelines.training.optimizer_factory import (  # noqa: E402
     GROUPS_KEY, OPTIMIZER_STATE_KEY, capture_training_state, captured_sources, compute_lr_scale,
@@ -239,14 +237,8 @@ def test_a_restore_dropping_a_parameter_a_stateless_optimizer_held_is_refused():
 
 
 def test_freeze_to_is_per_stage_for_a_wrapped_bespoke_backbone():
-    """A wrapped agent-written backbone must freeze per stage, not all-or-nothing.
-
-    Regression: _freeze_sequential_fraction saw a wrapper's sole named child (a
-    ``stages`` ModuleList) and froze the entire backbone for any freeze_to >= 1,
-    so intermediate schedule stages silently trained heads-only. A module whose
-    stages live one level down inside a ModuleList is the common shape when the
-    agent composes its own staged backbone.
-    """
+    """A wrapped agent-written backbone, its stages one level down inside a ModuleList, freezes
+    per stage, not all-or-nothing."""
     import torch.nn as nn
 
     from tcip_mcp.pipelines.components.backbones import BackboneWrapper
@@ -287,7 +279,9 @@ def test_freeze_to_is_per_stage_for_a_wrapped_bespoke_backbone():
 _save_png = partial(write_noise_image, size=IMG)
 
 
-def _classification_loader(tmp_path: Path, n: int = 6, batch_size: int = 2) -> DataLoader:
+def _classification_loader(tmp_path: Path, run, n: int = 6):
+    """``run``'s training loader over ``n`` two-label frames under ``tmp_path``, built by the
+    platform's own loader builder (``generic_trainer.run_loaders``) at the run's batch size."""
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     rows = []
     for i in range(n):
@@ -299,7 +293,7 @@ def _classification_loader(tmp_path: Path, n: int = 6, batch_size: int = 2) -> D
         w.writerow(("stem", "label"))
         w.writerows(rows)
     ds = dataset_over("classification", str(images_dir), str(csv_path))
-    return DataLoader(ds, batch_size=batch_size, collate_fn=task_collate("classification"))
+    return run_loaders(run, ds, None)[0]
 
 
 def _model_source() -> dict:
@@ -327,25 +321,23 @@ def _cfg(stages, **extra) -> dict:
 # --------------------------------------------------------------------------
 
 def test_monotonic_unfreeze_guard_fails(tmp_path: Path):
-    loader = _classification_loader(tmp_path)
     # Stage 0 fully unfreezes; stage 1 re-freezes the backbone -> guard must fire.
     cfg = _cfg([{"freeze_to": 0, "epochs": 1}, {"freeze_to": -1, "epochs": 1}])
     run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
                       id="auto-run-46")
-    run = train(run, loader, val_loader=None)
+    run = train(run, _classification_loader(tmp_path, run), val_loader=None)
     assert run.status == "failed"
     assert "Non-decreasing unfreeze" in run.status_error
 
 
 def test_warmup_lr_ramps_at_stage_boundary(tmp_path: Path):
-    loader = _classification_loader(tmp_path)
     cfg = _cfg(
         [{"freeze_to": -1, "epochs": 1}, {"freeze_to": 0, "epochs": 2}],
         stage_warmup_epochs=2,
     )
     run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
                       id="auto-run-47")
-    run = train(run, loader, val_loader=None)
+    run = train(run, _classification_loader(tmp_path, run), val_loader=None)
     assert run.status == "completed", run.status_error
 
     stage1 = [m for m in run.metrics_history if m["stage"] == 1]
@@ -362,10 +354,10 @@ def test_lr_scaling_is_relative_to_the_first_stage_effective_batch(tmp_path: Pat
     window holds three of the four batches it targets: one optimizer step against three."""
     stages = [{"freeze_to": -1, "epochs": 1},
               {"freeze_to": 0, "epochs": 1, "gradient_accumulation_steps": 4}]
-    loader = _classification_loader(tmp_path, batch_size=2)
-    cfg = _cfg(stages, lr_scaling={"scale_power": 0.5})
-    run = train(trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
-                            id="auto-run-48"), loader)
+    cfg = _cfg(stages, lr_scaling={"scale_power": 0.5}, batch_size=2)
+    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
+                      id="auto-run-48")
+    run = train(run, _classification_loader(tmp_path, run))
     assert run.status == "completed", run.status_error
     assert [m["target_eff_batch"] for m in run.metrics_history] == [2, 8]
     assert [m["optimizer_steps"] for m in run.metrics_history] == [3, 1]
@@ -374,11 +366,10 @@ def test_lr_scaling_is_relative_to_the_first_stage_effective_batch(tmp_path: Pat
 
 
 def test_two_stage_handoff_smoke(tmp_path: Path):
-    loader = _classification_loader(tmp_path)
     cfg = _cfg([{"freeze_to": -1, "epochs": 1}, {"freeze_to": 0, "epochs": 1}])
     run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
                       id="auto-run-50")
-    run = train(run, loader, val_loader=None)
+    run = train(run, _classification_loader(tmp_path, run), val_loader=None)
     assert run.status == "completed", run.status_error
     assert all(math.isfinite(m["train_loss"]) for m in run.metrics_history)
     tps = [m["trainable_params"] for m in run.metrics_history]

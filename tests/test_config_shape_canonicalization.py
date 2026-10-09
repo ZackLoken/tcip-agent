@@ -1,7 +1,5 @@
-"""A training config has one shape: every key ``generic_trainer.train()`` reads sits at the top
-level beside ``model_source`` and ``data``. A nested ``training`` section is refused by name,
-since a key under it would be read by nothing and the run would train at the trainer's own
-defaults in silence; there is no hoist and no precedence rule between two placements."""
+"""A training config has one shape: every key the trainer reads sits at the top level beside
+``model_source`` and ``data``, and a nested ``training`` section is refused by name."""
 
 import copy
 
@@ -54,14 +52,27 @@ FLAT_CONFIG: dict = training_config(
 
 
 def _required_paths() -> list[str]:
-    """Every tuned value the schema requires of a config the default trainer runs, by its dotted
-    path, read off the schema itself: its required top-level fields, the default trainer's regime,
-    and the required fields of the optimizer and of the stated schedule."""
+    """Every value the schema requires, by its dotted path, read off the schema itself: its
+    required top-level fields and the required fields of the optimizer and of the stated
+    schedule."""
     top = [n for n, f in TrainConfigSchema.model_fields.items() if f.is_required()]
     blocks = {"optimizer": OptimizerSpec, "scheduler": type(train_config(FLAT_CONFIG).scheduler)}
     nested = [f"{block}.{n}" for block, model in blocks.items()
               for n, f in model.model_fields.items() if f.is_required()]
-    return [*top, *DefaultTrainerRegime._fields, *nested]
+    return [*top, *nested]
+
+
+TRAINER_READ_PATHS = ["batch_size", "evaluation.conf_threshold", *DefaultTrainerRegime._fields]
+"""The values training reads under the default trainer that the schema leaves to the launch
+door."""
+
+
+def _door_issues(config: dict) -> list[str]:
+    """The issues the launch door's structural check reports for ``config``, which the schema
+    admits."""
+    from tcip_mcp.tools.training_tools import _structural_issues
+
+    return _structural_issues(train_config(config))
 
 
 def test_a_flat_config_validates_with_no_issue():
@@ -69,17 +80,25 @@ def test_a_flat_config_validates_with_no_issue():
 
 
 @pytest.mark.parametrize("path", _required_paths())
-def test_a_config_stating_no_tuned_value_is_refused_naming_it(path):
+def test_a_config_stating_no_required_value_is_refused_naming_it(path):
     issues = _issues_of(_without(FLAT_CONFIG, path))
     assert _names(issues, path), issues
 
 
+@pytest.mark.parametrize("path", TRAINER_READ_PATHS)
+def test_a_config_stating_no_tuned_value_is_admitted_and_refused_at_the_door_naming_it(path):
+    stated = _without(FLAT_CONFIG, path)
+    assert _issues_of(stated) == []
+    assert _names(_door_issues(stated), path)
+
+
 def test_a_config_naming_its_own_loop_states_only_what_its_loop_reads():
-    """The default trainer's regime is required of a config the default trainer runs; a config
-    naming its own ``training_source`` leaves unstated what its loop never reads."""
+    """The door requires the default trainer's regime of a config the default trainer runs; a
+    config naming its own ``training_source`` leaves unstated what its loop never reads."""
     custom = {k: v for k, v in FLAT_CONFIG.items() if k not in DefaultTrainerRegime._fields}
-    assert _names(_issues_of(custom), "stages")
-    assert _issues_of({**custom, "training_source": "my_loops:train"}) == []
+    assert _names(_door_issues(custom), "stages")
+    looped = _door_issues({**custom, "training_source": "tests.bespoke_models:train_bespoke"})
+    assert not any("unstated" in issue for issue in looped), looped
 
 
 def test_an_optimizer_naming_none_is_the_platforms_own():
@@ -206,41 +225,48 @@ def test_lr_scaling_requires_its_power_and_names_no_reference_batch():
         {**FLAT_CONFIG, "lr_scaling": {"scale_power": 0.5, "reference_effective_batch": 64}}))
 
 
-def test_the_loaders_read_the_batch_size_the_schema_validated():
+def test_the_loaders_read_the_batch_size_the_schema_validated(tmp_path):
     """The batch size the schema admits is the one the loaders are built at, coerced the same
     way, and one it refuses builds no loader."""
     pytest.importorskip("torch")
-    from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.pipelines.training.generic_trainer import run_loaders
-    from tests.tiny_trainer_fixtures import ConstantImageDataset
+    from tests.tiny_trainer_fixtures import ConstantImageDataset, regressor_config, trainer_run
 
     dataset = ConstantImageDataset([0.1, 0.2, 0.3], [0.2, 0.4, 0.6])
     assert _issues_of({**FLAT_CONFIG, "batch_size": "3"}) == []
-    train_loader, _ = run_loaders(
-        train_config({**FLAT_CONFIG, "batch_size": "3", "num_workers": "0"}),
-        "regression", dataset, None)
+    run = trainer_run(regressor_config(batch_size="3", num_workers="0"), tmp_path / "out",
+                      project=tmp_path, has_val_loader=True)
+    train_loader, _ = run_loaders(run, dataset, None)
     assert (train_loader.batch_size, train_loader.num_workers) == (3, 0)
     with pytest.raises(ValueError, match="batch_size"):
         train_config({**FLAT_CONFIG, "batch_size": 0})
 
 
 def test_model_source_refuses_an_undeclared_key_by_name():
-    """A misspelled model_source key is dropped silently by every reader today; the schema names
-    it rather than building the model at the builder's own defaults."""
+    """A misspelled model_source key is refused by name where the config is validated."""
     issues = _issues_of({"model_source": {
         "builder": "m:f", "builder_kwargs": {}, "anchor_ratio": [0.5, 1.0, 2.0],
     }})
     assert any("anchor_ratio" in issue for issue in issues)
 
 
-def test_model_source_admits_every_declared_key():
-    """Every declared key, including the fifth (image_stats_sampling), validates with no issue."""
+def test_model_source_admits_every_declared_key(tmp_path):
+    """Every declared key validates with no issue, image_stats_sampling as the normalization
+    derivation's own producer (``derivations.image_stats_provenance``) renders it."""
+    pytest.importorskip("torch")
+    from PIL import Image
+
+    from tcip_mcp.pipelines.derivations import band_normalization_stats, image_stats_provenance
+
+    image = tmp_path / "a.png"
+    Image.new("RGB", (8, 8), (20, 40, 60)).save(image)
+    result = band_normalization_stats([image], 3)
+    assert result is not None
+    mean, std, _ = result
     issues = _issues_of({**FLAT_CONFIG, "model_source": {
-        "builder": "m:f", "builder_kwargs": {"image_mean": [0.1], "image_std": [0.2]},
+        "builder": "m:f", "builder_kwargs": {"image_mean": mean, "image_std": std},
         "task": "detection", "source_files": ["m.py"],
-        "image_stats_sampling": {"windows": [["a.tif", None]], "seed": None,
-                                 "pixel_fraction": 1.0, "window_size": None,
-                                 "max_windows_per_image": None},
+        "image_stats_sampling": image_stats_provenance(result),
     }, "data": {}})
     assert issues == []
 

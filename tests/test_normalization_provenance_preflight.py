@@ -43,6 +43,18 @@ def _label(images_dir, *stems, width=16, height=16):
                     width, height)
 
 
+def _derived(paths, num_channels: int = 3) -> tuple[dict, dict]:
+    """The ``builder_kwargs`` statistics and their ``image_stats_sampling`` record, both from the
+    exact normalization derivation (``derivations.band_normalization_stats``) over ``paths``,
+    every one of which it must read, rendered by ``derivations.image_stats_provenance``."""
+    from tcip_mcp.pipelines.derivations import band_normalization_stats, image_stats_provenance
+
+    result = band_normalization_stats(paths, num_channels)
+    assert result is not None and len(result[2]) == len(paths), result
+    mean, std, _ = result
+    return {"image_mean": mean, "image_std": std}, image_stats_provenance(result)
+
+
 def test_preflight_refuses_statistics_with_no_provenance(tmp_path):
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -69,11 +81,8 @@ def test_preflight_refuses_a_window_path_outside_images_dir(tmp_path):
     outside = tmp_path / "elsewhere.jpg"
     Image.new("RGB", (16, 16)).save(outside)
 
-    cfg = _cfg(imgs, builder_kwargs={"image_mean": [0.1, 0.2, 0.3],
-                                           "image_std": [0.1, 0.1, 0.1]},
-              image_stats_sampling={"windows": [[str(outside), None]], "seed": None,
-                                    "pixel_fraction": 1.0, "window_size": None,
-                                    "max_windows_per_image": None})
+    builder_kwargs, record = _derived([outside])
+    cfg = _cfg(imgs, builder_kwargs=builder_kwargs, image_stats_sampling=record)
 
     r = preflight_config(tmp_path, cfg)
     assert r["valid"] is False
@@ -81,43 +90,21 @@ def test_preflight_refuses_a_window_path_outside_images_dir(tmp_path):
     assert r["image_stats_containment"] == "checked"
 
 
-def test_preflight_admits_a_sampling_record_naming_images_inside_images_dir(tmp_path):
-    pytest.importorskip("torch")
-    from PIL import Image
-
-    from tcip_mcp.tools.training_tools import preflight_config
-
-    imgs = tmp_path / "images" / UNDATED_BUCKET
-    imgs.mkdir(parents=True)
-    a = imgs / "a.jpg"
-    Image.new("RGB", (16, 16)).save(a)
-    _label(imgs, "a")
-
-    cfg = _cfg(imgs, builder_kwargs={"image_mean": [0.1, 0.2, 0.3],
-                                           "image_std": [0.1, 0.1, 0.1]},
-              image_stats_sampling={"windows": [[str(a), None]], "seed": None,
-                                    "pixel_fraction": 1.0, "window_size": None,
-                                    "max_windows_per_image": None})
-
-    r = preflight_config(tmp_path, cfg)
-    assert not any("image_stats_sampling" in i or "outside" in i for i in r["issues"]), r["issues"]
-    assert r.get("image_stats_containment") == "checked", r
-
-
 def test_preflight_records_not_checked_when_no_membership_resolved(tmp_path):
     """A config naming no locations resolves no membership, so there are no sources to check the
     window paths against; preflight says so explicitly rather than silently skipping or passing.
     The missing locations are their own named issues, beside this."""
     pytest.importorskip("torch")
+    from PIL import Image
+
     from tcip_mcp.tools.training_tools import preflight_config
 
+    image = tmp_path / "a.png"
+    Image.new("RGB", (16, 16)).save(image)
+    builder_kwargs, record = _derived([image])
     cfg = training_config(
-        {"builder": BESPOKE_DETECTION,
-         "builder_kwargs": {"image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]},
-         "task": "detection",
-         "image_stats_sampling": {"windows": [["a.tif", None]], "seed": None,
-                                  "pixel_fraction": 1.0, "window_size": None,
-                                  "max_windows_per_image": None}},
+        {"builder": BESPOKE_DETECTION, "builder_kwargs": builder_kwargs, "task": "detection",
+         "image_stats_sampling": record},
         {"dataset_source": {"builder": BESPOKE_CLASSIFIER}})
 
     r = preflight_config(tmp_path, cfg)
@@ -127,12 +114,10 @@ def test_preflight_records_not_checked_when_no_membership_resolved(tmp_path):
 
 def test_preflight_admits_the_exact_derivations_own_record(tmp_path):
     """derivations.image_stats_provenance renders the exact sibling's (mean, std, paths_read)
-    tuple into the record preflight checks; that record must pass containment, not just a
-    hand-assembled one shaped like it."""
+    tuple over an image the run admits into a record preflight admits as contained."""
     pytest.importorskip("torch")
     from PIL import Image
 
-    from tcip_mcp.pipelines.derivations import band_normalization_stats, image_stats_provenance
     from tcip_mcp.tools.training_tools import preflight_config
 
     imgs = tmp_path / "images" / UNDATED_BUCKET
@@ -141,11 +126,8 @@ def test_preflight_admits_the_exact_derivations_own_record(tmp_path):
     Image.new("RGB", (16, 16)).save(a)
     _label(imgs, "a")
 
-    result = band_normalization_stats([a], 3)
-    assert result is not None
-    mean, std, _ = result
-    cfg = _cfg(imgs, builder_kwargs={"image_mean": mean, "image_std": std},
-              image_stats_sampling=image_stats_provenance(result))
+    builder_kwargs, record = _derived([a])
+    cfg = _cfg(imgs, builder_kwargs=builder_kwargs, image_stats_sampling=record)
 
     r = preflight_config(tmp_path, cfg)
     assert not any("image_stats_sampling" in i or "outside" in i for i in r["issues"]), r["issues"]
@@ -191,7 +173,6 @@ def test_preflight_admits_the_exact_derivations_record_over_a_band_group_dataset
     import tifffile
 
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
-    from tcip_mcp.pipelines.derivations import band_normalization_stats, image_stats_provenance
     from tcip_mcp.pipelines.image_utils import list_logical_images
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -203,12 +184,8 @@ def test_preflight_admits_the_exact_derivations_record_over_a_band_group_dataset
     write_band_group_manifest(imgs, "cap", {"Green": band_a, "Red": band_b})
     _label(imgs, "cap", width=8, height=8)
 
-    ref = list_logical_images(imgs)["cap"]
-    result = band_normalization_stats([ref], 2)
-    assert result is not None
-    mean, std, _ = result
-    cfg = _cfg(imgs, builder_kwargs={"image_mean": mean, "image_std": std},
-              image_stats_sampling=image_stats_provenance(result))
+    builder_kwargs, record = _derived([list_logical_images(imgs)["cap"]], 2)
+    cfg = _cfg(imgs, builder_kwargs=builder_kwargs, image_stats_sampling=record)
 
     r = preflight_config(tmp_path, cfg)
     assert not any("outside" in i for i in r["issues"]), r["issues"]
@@ -239,14 +216,9 @@ def test_preflight_keeps_every_sample_of_a_two_date_selection(tmp_path):
         "the fixture must hold one member name on two dates for this to bite")
     assert {Path(s.source).parent.name for s in bound} == set(DATES)
 
-    model_source = {"builder": BESPOKE_DETECTION,
-                    "builder_kwargs": {"image_mean": [0.1, 0.2, 0.3],
-                                       "image_std": [0.1, 0.1, 0.1]},
-                    "task": "detection",
-                    "image_stats_sampling": {
-                        "windows": [[str(s.source), None] for s in bound], "seed": None,
-                        "pixel_fraction": 1.0, "window_size": None,
-                        "max_windows_per_image": None}}
+    builder_kwargs, record = _derived([s.source for s in bound])
+    model_source = {"builder": BESPOKE_DETECTION, "builder_kwargs": builder_kwargs,
+                    "task": "detection", "image_stats_sampling": record}
     r = preflight_config(tmp_path, run_config(out, model_source))
 
     assert r["image_stats_containment"] == "checked"

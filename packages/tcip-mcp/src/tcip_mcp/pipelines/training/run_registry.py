@@ -6,12 +6,13 @@ import logging
 import random
 import time
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tcip_mcp.experiments import RunObservation
-    from tcip_mcp.pipelines.schemas import TrainConfigSchema
+    from tcip_mcp.pipelines.schemas import TrainConfigSchema, TrainerReads
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,12 @@ class TrainRun:
     # Every checkpoint the run's body saved, by tag, and the one it declared its deliverable.
     saved: dict[str, Path] = field(default_factory=dict)
     deliverable: Path | None = None
+
+    @cached_property
+    def reads(self) -> TrainerReads:
+        """What training this run reads, its spec admitted once (``trainer_reads``, which
+        refuses naming whatever is unstated)."""
+        return self.spec.trainer_reads()
 
     @property
     def wall_clock_exceeded(self) -> bool:

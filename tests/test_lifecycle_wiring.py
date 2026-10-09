@@ -11,13 +11,11 @@ def _stock_run(root: Path, builder: str, epochs: int, experiment_id: str,
                builder_kwargs: dict | None = None) -> Path:
     """A run of the regression ``builder`` at ``builder_kwargs`` under ``root`` over a
     regression dataset of its own on disk, opened by the launcher's own writer and run in-process
-    through the envelope's stock trainer over tiny in-memory regression loaders. Returns the run
-    directory."""
-    from torch.utils.data import DataLoader
-
+    through the envelope's stock trainer over tiny in-memory regression datasets, its loaders
+    built by the platform's own loader builder. Returns the run directory."""
     from tcip_mcp.experiments import observe
-    from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
+    from tcip_mcp.pipelines.training.generic_trainer import run_loaders
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests.tiny_trainer_fixtures import (
         ConstantImageDataset, regressor_config, write_regression_dataset,
@@ -25,17 +23,15 @@ def _stock_run(root: Path, builder: str, epochs: int, experiment_id: str,
 
     train_ds = ConstantImageDataset([0.1, 0.3, 0.5, 0.7], [0.2, 0.6, 1.0, 1.4])
     val_ds = ConstantImageDataset([0.2, 0.6], [0.4, 1.2])
-    collate = task_collate("regression")
     images_dir, csv_path = write_regression_dataset(
         root / f"{experiment_id}-data", [0.1, 0.3, 0.5, 0.7], [0.2, 0.6, 1.0, 1.4])
     config = regressor_config(epochs, builder=builder, builder_kwargs=builder_kwargs, data={
         "images_dir": str(images_dir), "labels_dir": str(csv_path), "num_channels": 1,
         "split": {"seed": 0, "val_ratio": 0.15}})
     run_dir = opened_run(root, config, experiment_id=experiment_id)
-    run_training_envelope(TrainContext(
-        run=observed_run(observe(run_dir)),
-        train_loader=DataLoader(train_ds, batch_size=2, collate_fn=collate),
-        val_loader=DataLoader(val_ds, batch_size=2, collate_fn=collate)))
+    run = observed_run(observe(run_dir))
+    train_loader, val_loader = run_loaders(run, train_ds, val_ds)
+    run_training_envelope(TrainContext(run=run, train_loader=train_loader, val_loader=val_loader))
     return run_dir
 
 

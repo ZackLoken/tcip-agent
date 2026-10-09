@@ -396,7 +396,8 @@ class RunObservation:
     @property
     def resolution(self) -> dict | None:
         """What a run's input resolved to at launch (its ``data``, ``partition`` and
-        ``objective``), ``None`` for a sweep trial whose sampled point failed to resolve."""
+        ``objective``), ``None`` for a sweep trial whose sampled point was refused at its
+        admission or failed to resolve."""
         return self.record["resolved"]
 
     @cached_property

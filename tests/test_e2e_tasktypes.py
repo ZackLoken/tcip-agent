@@ -27,10 +27,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
-from torch.utils.data import DataLoader
 
-from tcip_mcp.pipelines.training.generic_trainer import train
-from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
+from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train  # noqa: E402
 from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tests._chain_fixtures import (  # noqa: E402
@@ -54,19 +52,24 @@ def _model_source(builder: str, task: str, **kwargs) -> dict:
     return {"builder": builder, "builder_kwargs": kwargs, "task": task}
 
 
-def _train_config(model_source: dict, data: dict) -> dict:
+def _train_config(model_source: dict, data: dict, batch_size: int) -> dict:
     from tests._chain_fixtures import training_config
 
     # No val_loader at any call site below: loss is the only metric coherent to select on
     # without one, detection/instance_seg's own default (objective) needs a validation pass.
-    return training_config(model_source, data, optimizer=adamw_optimizer(),
+    return training_config(model_source, data, optimizer=adamw_optimizer(), batch_size=batch_size,
                            evaluation=evaluation_block(selection_metric="loss"))
 
 
-def _run(model_source: dict, data: dict, tmp_path: Path, run_id: str):
-    """A run of :func:`_train_config` writing into ``tmp_path / "out"``, with no val loader."""
-    return trainer_run(_train_config(model_source, data), tmp_path / "out",
-                       has_val_loader=False, id=run_id, project=tmp_path)
+def _trained(model_source: dict, data: dict, dataset, tmp_path: Path, run_id: str, *,
+             batch_size: int = 2):
+    """A run of :func:`_train_config` at ``batch_size`` writing into ``tmp_path / "out"``,
+    trained with no val loader over ``dataset`` through the loaders the platform builds for it
+    (``generic_trainer.run_loaders``)."""
+    run = trainer_run(_train_config(model_source, data, batch_size), tmp_path / "out",
+                      has_val_loader=False, id=run_id, project=tmp_path)
+    loader, _ = run_loaders(run, dataset, None)
+    return train(run, loader, val_loader=None)
 
 
 def _assert_trained(run, output_dir: Path) -> None:
@@ -91,12 +94,10 @@ def test_detection_e2e(tmp_path: Path):
                     [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))], IMG, IMG)
 
     dataset, data = run_over("detection", str(images_dir), subject="bud")
-    loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("detection"))
 
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
-    run = _run(BUILT_DETECTOR, data, tmp_path, "auto-run-15")
-    run = train(run, loader, val_loader=None)
+    run = _trained(BUILT_DETECTOR, data, dataset, tmp_path, "auto-run-15")
     _assert_trained(run, tmp_path / "out")
 
 
@@ -113,12 +114,10 @@ def test_instance_seg_e2e(tmp_path: Path):
     # Guard the polygon -> mask rasterization path (datasets.py). With the mask_rcnn
     # detector these masks now reach the Mask R-CNN mask loss during training.
     assert dataset[0][1]["masks"].shape[0] > 0
-    loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("instance_seg"))
 
     model_source = _model_source(BESPOKE_INSTANCE_SEG, "instance_seg", min_size=IMG,
                                  max_size=IMG * 2)
-    run = _run(model_source, data, tmp_path, "auto-run-16")
-    run = train(run, loader, val_loader=None)
+    run = _trained(model_source, data, dataset, tmp_path, "auto-run-16")
     _assert_trained(run, tmp_path / "out")
 
 
@@ -138,11 +137,9 @@ def test_semantic_seg_e2e(tmp_path: Path):
         painted_frame(IMG, IMG, 0, [(block, 1)], mode="L").save(masks_dir / f"img{i}.png")
 
     dataset, data = run_over("semantic_seg", str(images_dir), str(masks_dir))
-    loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("semantic_seg"))
 
     model_source = _model_source(BESPOKE_SEMANTIC_SEG, "semantic_seg")
-    run = _run(model_source, data, tmp_path, "auto-run-17")
-    run = train(run, loader, val_loader=None)
+    run = _trained(model_source, data, dataset, tmp_path, "auto-run-17")
     _assert_trained(run, tmp_path / "out")
 
 
@@ -163,11 +160,9 @@ def test_ordinal_e2e(tmp_path: Path):
     _write_csv(csv_path, rows, ("stem", "rank"))
 
     dataset, data = run_over("ordinal", str(images_dir), str(csv_path))
-    loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("ordinal"))
 
     model_source = _model_source(BESPOKE_ORDINAL, "ordinal")
-    run = _run(model_source, data, tmp_path, "auto-run-18")
-    run = train(run, loader, val_loader=None)
+    run = _trained(model_source, data, dataset, tmp_path, "auto-run-18", batch_size=3)
     _assert_trained(run, tmp_path / "out")
 
 
@@ -186,10 +181,8 @@ def test_ordinal_derives_num_ranks_from_data(tmp_path: Path):
     dataset, data = run_over("ordinal", str(images_dir), str(csv_path))
     assert data["num_ranks"] == 7 and data.get("num_classes") is None
 
-    loader = DataLoader(dataset, batch_size=7, collate_fn=task_collate("ordinal"))
     model_source = _model_source(BESPOKE_ORDINAL, "ordinal")
-    run = _run(model_source, data, tmp_path, "auto-run-19")
-    run = train(run, loader, val_loader=None)
+    run = _trained(model_source, data, dataset, tmp_path, "auto-run-19", batch_size=7)
     _assert_trained(run, tmp_path / "out")
 
 
@@ -248,18 +241,14 @@ def test_regression_e2e(tmp_path: Path):
     _write_csv(csv_path, rows, ("stem", "value"))
 
     dataset, data = run_over("regression", str(images_dir), str(csv_path))
-    loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("regression"))
 
     model_source = _model_source(BESPOKE_REGRESSOR, "regression")
-    run = _run(model_source, data, tmp_path, "auto-run-20")
-    run = train(run, loader, val_loader=None)
+    run = _trained(model_source, data, dataset, tmp_path, "auto-run-20", batch_size=3)
     _assert_trained(run, tmp_path / "out")
 
 
 def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
-    """evaluate_model must actually run for ordinal, not just build_dataset/train directly: it
-    threads a CSV path into its own dataset build, since OrdinalDataset requires csv_path and
-    ds_kwargs must not stay images_dir-only."""
+    """evaluate_model runs end to end for ordinal over a CSV of ranks and reports its metrics."""
     from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.tools.training_tools import evaluate_model
 
@@ -272,10 +261,8 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     _write_csv(csv_path, rows, ("stem", "rank"))
 
     dataset, data = run_over("ordinal", str(images_dir), str(csv_path))
-    loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("ordinal"))
     model_source = _model_source(BESPOKE_ORDINAL, "ordinal")
-    run = _run(model_source, data, tmp_path, "auto-run-21")
-    run = train(run, loader, val_loader=None)
+    run = _trained(model_source, data, dataset, tmp_path, "auto-run-21", batch_size=3)
     _assert_trained(run, tmp_path / "out")
 
     ckpt_path = str(tmp_path / "out" / "model_best.pt")
@@ -290,7 +277,7 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
 
 
 def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
-    """evaluate_model must actually run for regression, same fix as the ordinal case above."""
+    """evaluate_model runs end to end for regression over a CSV of values."""
     from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.tools.training_tools import evaluate_model
 
@@ -303,10 +290,8 @@ def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     _write_csv(csv_path, rows, ("stem", "value"))
 
     dataset, data = run_over("regression", str(images_dir), str(csv_path))
-    loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("regression"))
     model_source = _model_source(BESPOKE_REGRESSOR, "regression")
-    run = _run(model_source, data, tmp_path, "auto-run-22")
-    run = train(run, loader, val_loader=None)
+    run = _trained(model_source, data, dataset, tmp_path, "auto-run-22", batch_size=3)
     _assert_trained(run, tmp_path / "out")
 
     ckpt_path = str(tmp_path / "out" / "model_best.pt")

@@ -1,17 +1,12 @@
 """Pydantic v2 config schemas. A training config's platform-owned keys are typed here, its
-``model_source`` and ``data`` blocks included, and every reader takes them from the validated
-model (:func:`train_config`); a bespoke ``training_source`` may read its own additional
-top-level keys.
-
-A training config has one shape: every key ``generic_trainer.train()`` reads (``batch_size``,
-``stages``, ``mixed_precision``, ``device``, ``seed``, ``evaluation``, ...) sits at the top level
-of the config, beside ``model_source`` and ``data``. A config carrying a ``training`` key is
-refused by name.
+``model_source`` and ``data`` blocks included (:func:`train_config`), each at the top level of
+the config; a bespoke ``training_source`` may read its own additional top-level keys. A config
+carrying a ``training`` key is refused by name.
 """
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, NamedTuple, get_args
+from typing import Annotated, Literal, NamedTuple, cast, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -119,8 +114,8 @@ class EvaluationSpec(BaseModel):
     trait: str | None = None
     selection_metric: str | None = None
     conf_threshold: float | None = Field(None, ge=0, le=1)
-    """The confidence a detector's validation counts boxes at, required of a detector run under
-    every trainer by :class:`TrainConfigSchema`'s own validation."""
+    """The confidence a detector's validation counts boxes at, read through
+    :meth:`TrainConfigSchema.trainer_reads`."""
     iou_threshold: float = 0.5
     score_weights: dict | None = None
 
@@ -149,10 +144,10 @@ class ImageStatsSampling(BaseModel):
 
     Rendered by ``derivations.image_stats_provenance`` from whichever of
     ``band_normalization_stats`` (the exact derivation) or ``band_normalization_stats_sampled``
-    (the windowed one) produced the statistics; never hand-assembled. ``windows`` pairs each
-    source's label with the rectangle read from it, or ``None`` for the exact derivation's own
-    whole-image read (``pixel_fraction`` is then ``1.0`` and ``seed``/``window_size``/
-    ``max_windows_per_image`` are ``None``, an exhaustive read fabricates no seed).
+    (the windowed one) produced the statistics. ``windows`` pairs each source's label with the
+    rectangle read from it, or ``None`` for the exact derivation's own whole-image read
+    (``pixel_fraction`` is then ``1.0`` and ``seed``/``window_size``/``max_windows_per_image``
+    are ``None``).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -177,8 +172,7 @@ class ModelSourceSchema(BaseModel):
 
 
 class DatasetSourceSchema(BaseModel):
-    """A bespoke dataset builder (``datasets.build_from_dataset_source``); a key outside these
-    fields refuses by name."""
+    """A bespoke dataset builder; a key outside these fields refuses by name."""
 
     model_config = ConfigDict(extra="forbid")
     builder: str = Field(min_length=1)
@@ -307,7 +301,7 @@ NESTED_TRAINING_SECTION_REFUSAL = (
 
 
 class DefaultTrainerRegime(NamedTuple):
-    """The blocks the default trainer (``generic_trainer.train``) reads, each stated."""
+    """The blocks the default trainer reads, each stated."""
 
     stages: list[StageSpec]
     optimizer: OptimizerSpec
@@ -315,14 +309,21 @@ class DefaultTrainerRegime(NamedTuple):
     checkpoint_every_n_epochs: int
 
 
+class TrainerReads(NamedTuple):
+    """What training under a config reads (:meth:`TrainConfigSchema.trainer_reads`): the loaders'
+    batch size, the config's ``evaluation.conf_threshold`` (stated for a detector), and the
+    default trainer's regime (``None`` for a config naming its own ``training_source``)."""
+
+    batch_size: int
+    conf_threshold: float | None
+    regime: DefaultTrainerRegime | None
+
+
 class TrainConfigSchema(_Recorded):
-    """The one training config shape: trainer keys at the top level, no nested section. A run's
-    config is validated once by its producer (:func:`checked_train_config`), and the trainer, its
-    loaders, preflight, the model builder and every record of the run read that one validated
-    model, ``model_source``, ``data`` and ``training_source`` included; a key outside these
-    fields is a bespoke loop's own and is kept as stated. A config naming no ``training_source``
-    runs the default trainer and states its regime (:meth:`default_trainer_regime`); one naming
-    its own loop states what that loop reads."""
+    """The one training config shape: trainer keys at the top level, no nested section; a key
+    outside these fields is a bespoke loop's own and is kept as stated. It requires
+    ``model_source`` and ``data`` alone; what training reads besides is
+    :meth:`trainer_reads`."""
 
     model_config = ConfigDict(extra="allow", protected_namespaces=())
     model_source: ModelSourceSchema
@@ -330,7 +331,7 @@ class TrainConfigSchema(_Recorded):
     training_source: str | None = Field(None, min_length=1)
     """A bespoke ``train(ctx)`` loop, a dotted ``module:function``; ``None`` for the default
     trainer."""
-    batch_size: int = Field(ge=1)
+    batch_size: int | None = Field(None, ge=1)
     num_workers: int = Field(0, ge=0)
     sampler: str = "random"
     augmentation: dict | None = None
@@ -361,26 +362,38 @@ class TrainConfigSchema(_Recorded):
             raise ValueError(NESTED_TRAINING_SECTION_REFUSAL)
         return values
 
-    @model_validator(mode="after")
-    def _the_config_states_what_its_trainer_reads(self) -> TrainConfigSchema:
-        from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
-
-        if (self.model_source.task in DETECTION_TASKS
-                and self.evaluation.conf_threshold is None):
-            raise ValueError("evaluation.conf_threshold unstated: a detector's validation counts "
-                             "its boxes at a confidence the run states, under any trainer")
-        if self.training_source is None:
-            self.default_trainer_regime()
-        return self
-
     def default_trainer_regime(self) -> DefaultTrainerRegime:
         """The regime the default trainer runs at. Refuses (``ValueError``) naming every block of
         it this config leaves unstated."""
         missing = [name for name in DefaultTrainerRegime._fields if getattr(self, name) is None]
         if missing:
-            raise ValueError(f"{missing} unstated: a config naming no training_source trains "
-                             "under the default trainer, which reads each of them")
+            raise ValueError(f"{missing} unstated: the default trainer reads each of them")
         return DefaultTrainerRegime(*(getattr(self, name) for name in DefaultTrainerRegime._fields))
+
+    def trainer_reads(self) -> TrainerReads:
+        """What training under this config reads, each stated: the loaders' ``batch_size``, a
+        detector's ``evaluation.conf_threshold``, and, when the config names no
+        ``training_source``, the default trainer's regime (:meth:`default_trainer_regime`).
+        Refuses (``ValueError``) naming every one of them the config leaves unstated."""
+        from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+
+        unstated = []
+        if self.batch_size is None:
+            unstated.append("batch_size unstated: a run's loaders draw batches of the size its "
+                            "config states, under any trainer")
+        if (self.model_source.task in DETECTION_TASKS
+                and self.evaluation.conf_threshold is None):
+            unstated.append("evaluation.conf_threshold unstated: a detector's validation counts "
+                            "its boxes at a confidence the run states, under any trainer")
+        regime = None
+        if self.training_source is None:
+            try:
+                regime = self.default_trainer_regime()
+            except ValueError as exc:
+                unstated.append(str(exc))
+        if unstated:
+            raise ValueError("; ".join(unstated))
+        return TrainerReads(cast(int, self.batch_size), self.evaluation.conf_threshold, regime)
 
 
 def checked_train_config(config: dict) -> tuple[TrainConfigSchema | None, list[str]]:
@@ -394,7 +407,7 @@ def checked_train_config(config: dict) -> tuple[TrainConfigSchema | None, list[s
 
 
 def train_config(config: dict) -> TrainConfigSchema:
-    """``config`` validated as the trainer reads it (:func:`checked_train_config`). Refuses
+    """``config`` validated against the schema (:func:`checked_train_config`). Refuses
     (``ValueError``) naming every issue it reports."""
     spec, issues = checked_train_config(config)
     if spec is None:

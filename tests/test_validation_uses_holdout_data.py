@@ -36,7 +36,6 @@ def _config(epochs: int, **overrides) -> dict:
 def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path, monkeypatch):
     """The ``val_`` metrics an epoch records equal a real evaluation of that epoch's model on the
     holdout loader, and differ from the same evaluation run over the training loader."""
-    train_loader, val_loader = opposed_regression_loaders(TRAIN_INTENSITIES, VAL_INTENSITIES)
     models: list = []
     capture_model(monkeypatch, models)
 
@@ -52,6 +51,7 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
                       "labels_dir": str(csv_path), "split": {"seed": 1, "val_ratio": 0.15}}
     out_dir = opened_run(tmp_path, config)
     run = observed_run(observe(out_dir))
+    train_loader, val_loader = opposed_regression_loaders(run, TRAIN_INTENSITIES, VAL_INTENSITIES)
     # The production wiring: the trainer hands each row to the envelope's sink, which logs it
     # to the run's own metrics log.
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader)
@@ -85,13 +85,13 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
 def test_best_checkpoint_and_early_stopping_follow_the_holdout_loader(tmp_path, monkeypatch):
     """With holdout loss worsening while training loss improves, the run stops early and keeps the
     first epoch's checkpoint: both decisions read the holdout loader, not the training one."""
-    train_loader, val_loader = opposed_regression_loaders(TRAIN_INTENSITIES, VAL_INTENSITIES)
     models: list = []
     capture_model(monkeypatch, models)
 
     out_dir = tmp_path / "out"
     config = _config(4, early_stopping={"enabled": True, "patience": 1, "min_delta": 1e-4})
     run = trainer_run(config, out_dir, project=tmp_path, has_val_loader=True, id="auto-run-76")
+    train_loader, val_loader = opposed_regression_loaders(run, TRAIN_INTENSITIES, VAL_INTENSITIES)
     run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "completed", run.status_error

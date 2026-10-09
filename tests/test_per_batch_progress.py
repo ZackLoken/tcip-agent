@@ -30,19 +30,40 @@ TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
 VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
 
 
-def _context(tmp_path, hook_calls: list, **extra) -> TrainContext:
-    """A context over a regression run opened by the launcher's own producer, three training
-    batches an epoch, recording every epoch hook call into ``hook_calls``."""
+def _context(tmp_path, hook_calls: list, intensities=TRAIN_INTENSITIES, **extra) -> TrainContext:
+    """A context over a regression run of training frames at ``intensities`` opened by the
+    launcher's own producer, its loaders built for that run (by default three training batches
+    an epoch), recording every epoch hook call into ``hook_calls``; ``extra`` are config keys."""
     images_dir, csv_path = write_regression_dataset(
-        tmp_path / "ds", TRAIN_INTENSITIES, [2.0 * c for c in TRAIN_INTENSITIES])
+        tmp_path / "ds", intensities, [2.0 * c for c in intensities])
     config = regressor_config(2, data={
         "num_channels": 1, "scope": {}, "images_dir": str(images_dir),
         "labels_dir": str(csv_path), "split": {"seed": 1, "val_ratio": 0.15}}, **extra)
-    run_dir = opened_run(tmp_path, config)
-    train_loader, val_loader = opposed_regression_loaders(TRAIN_INTENSITIES, VAL_INTENSITIES)
-    return TrainContext(run=observed_run(observe(run_dir)), train_loader=train_loader,
-                        val_loader=val_loader,
+    run = observed_run(observe(opened_run(tmp_path, config)))
+    train_loader, val_loader = opposed_regression_loaders(run, intensities, VAL_INTENSITIES)
+    return TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
                         epoch_hook=lambda epoch, metrics: hook_calls.append(epoch))
+
+
+def test_a_run_admits_what_its_training_reads_once(tmp_path, monkeypatch):
+    """Building a run's loaders, training it and evaluating it twice read one admission of what
+    its training reads."""
+    from tcip_mcp.pipelines.schemas import TrainConfigSchema
+
+    calls: list[int] = []
+    real = TrainConfigSchema.trainer_reads
+
+    def counted(self):
+        calls.append(1)
+        return real(self)
+
+    monkeypatch.setattr(TrainConfigSchema, "trainer_reads", counted)
+    ctx = _context(tmp_path, [])
+    assert ctx.default_train().status == "completed"
+    model = ctx.build_model()
+    ctx.evaluate(model)
+    ctx.evaluate(model)
+    assert calls == [1]
 
 
 def test_the_trainer_logs_a_batch_row_at_the_stated_cadence_and_no_reader_takes_it_for_an_epoch(
@@ -70,15 +91,8 @@ def test_a_config_stating_no_cadence_logs_ten_batch_rows_every_epoch(tmp_path, n
     """No stated cadence: each of two epochs logs ten rows (every batch of a shorter epoch),
     spaced evenly over the epoch, the gaps between them never differing by more than one batch,
     the last at the epoch's own final batch."""
-    from torch.utils.data import DataLoader
-
-    from tcip_mcp.pipelines.training.collation import task_collate
-    from tests.tiny_trainer_fixtures import ConstantImageDataset
-
-    ctx = _context(tmp_path, [])
     intensities = [0.1 + 0.6 * i / n_batches for i in range(n_batches)]
-    ctx.train_loader = DataLoader(ConstantImageDataset(intensities, [2.0 * c for c in intensities]),
-                                  batch_size=1, collate_fn=task_collate("regression"))
+    ctx = _context(tmp_path, [], intensities, batch_size=1)
     assert ctx.default_train().status == "completed"
     batches = batch_rows(read_rows(ctx.run_dir / METRICS_FILE)[0])
     for epoch in (1, 2):

@@ -17,7 +17,6 @@ from tests._chain_fixtures import BESPOKE_CLASSIFIER
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
-from torch.utils.data import DataLoader
 torchvision = pytest.importorskip("torchvision")
 from torchvision.utils import save_image
 
@@ -81,36 +80,31 @@ class TestFullClassificationPipeline:
         pred_keys = [k for k in out if k.startswith("head0")]
         assert len(pred_keys) > 0
 
-        # --- Step 3: Build dataset + dataloader ---
-        from tcip_mcp.pipelines.training.collation import task_collate
-
+        # --- Step 3: Build dataset ---
         images_dir, csv_path = tiny_classification_data
         dataset, data = run_over("classification", images_dir, csv_path)
         assert data["num_classes"] == 2
         assert dataset.num_samples == 12
 
+        # --- Step 4: Create run, its loaders, and train 2 epochs ---
+        from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train
+        from tests._chain_fixtures import training_config
+        from tests.tiny_trainer_fixtures import trainer_run
+
+        config = training_config(
+            model_source, data, stages=[{"freeze_to": -1, "epochs": 2}], batch_size=4,
+            optimizer=adamw_optimizer(),
+            early_stopping={"enabled": True, "patience": 10, "min_delta": 1e-4})
+        run = trainer_run(config, output_dir, project=tmp_path, has_val_loader=True,
+                          id="auto-run-32")
         # Train/val split: exercises the val_loader + early-stopping wiring on this run.
-        collate = task_collate("classification")
         train_ds, val_ds = torch.utils.data.random_split(dataset, [8, 4])
-        loader = DataLoader(train_ds, batch_size=4, shuffle=True, collate_fn=collate)
-        val_loader = DataLoader(val_ds, batch_size=4, shuffle=False, collate_fn=collate)
+        loader, val_loader = run_loaders(run, train_ds, val_ds)
 
         # Verify one batch works
         batch_images, batch_targets = next(iter(loader))
         assert batch_images.shape[0] == 4
         assert "labels" in batch_targets
-
-        # --- Step 4: Create run and train 2 epochs ---
-        from tcip_mcp.pipelines.training.generic_trainer import train
-        from tests._chain_fixtures import training_config
-        from tests.tiny_trainer_fixtures import trainer_run
-
-        config = training_config(
-            model_source, data, stages=[{"freeze_to": -1, "epochs": 2}],
-            optimizer=adamw_optimizer(),
-            early_stopping={"enabled": True, "patience": 10, "min_delta": 1e-4})
-        run = trainer_run(config, output_dir, project=tmp_path,
-                          has_val_loader=val_loader is not None, id="auto-run-32")
 
         rows: list[tuple[int, dict]] = []
         completed_run = train(run, loader, val_loader=val_loader,
@@ -194,8 +188,7 @@ class TestDetectionPipelineRealData:
     """End-to-end: build → train → infer using real bud images (nested schema)."""
 
     def test_build_train_infer(self, detection_output_dir, tmp_path):
-        from tcip_mcp.pipelines.training.generic_trainer import train
-        from tcip_mcp.pipelines.training.collation import task_collate
+        from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train
         from tests._verified_checkpoint_fixtures import built_detector
         from tests.tiny_trainer_fixtures import trainer_run
 
@@ -226,10 +219,6 @@ class TestDetectionPipelineRealData:
 
         # Use up to 4 images for fast training
         subset = torch.utils.data.Subset(dataset, list(range(min(4, dataset.num_samples))))
-        loader = DataLoader(
-            subset, batch_size=2, shuffle=True,
-            collate_fn=task_collate("detection"),
-        )
 
         # --- Step 3: Train 1 epoch ---
         from tests._chain_fixtures import training_config
@@ -238,6 +227,7 @@ class TestDetectionPipelineRealData:
                                  evaluation=evaluation_block(selection_metric="loss"))
         run = trainer_run(config, detection_output_dir, project=tmp_path, has_val_loader=False,
                           id="auto-run-33")
+        loader, _ = run_loaders(run, subset, None)
         completed = train(run, loader, val_loader=None)
 
         assert completed.status == "completed"

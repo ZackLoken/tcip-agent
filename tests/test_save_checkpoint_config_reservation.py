@@ -62,10 +62,10 @@ def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(tmp_
         "num_channels": 1, "scope": {}, "images_dir": str(tmp_path / "images"),
         "labels_dir": str(tmp_path / "labels"),
         "split": {"selection_dir": str(tmp_path / "selection")}})
-    train_loader, val_loader = opposed_regression_loaders([0.1, 0.4, 0.7], [0.2, 0.6])
-    trained = train(trainer_run(config, tmp_path / "trainer", project=tmp_path,
-                                has_val_loader=True, id="trainer"),
-                    train_loader, val_loader=val_loader)
+    run = trainer_run(config, tmp_path / "trainer", project=tmp_path, has_val_loader=True,
+                      id="trainer")
+    train_loader, val_loader = opposed_regression_loaders(run, [0.1, 0.4, 0.7], [0.2, 0.6])
+    trained = train(run, train_loader, val_loader=val_loader)
     assert trained.status == "completed", trained.status_error
     bespoke = trainer_run(config, tmp_path / "bespoke", project=tmp_path, has_val_loader=True,
                           id="bespoke")

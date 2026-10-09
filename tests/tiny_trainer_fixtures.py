@@ -197,8 +197,8 @@ class AlwaysDivergedModel(MeanIntensityRegressor):
     """Reports a non-finite loss unconditionally, for exercising a diverged run end to end.
 
     With ``cancel_at_call`` and ``cancel_output_dir`` given, the training forward with that
-    one-based call count requests the run's own cancellation (``experiments.request_cancel``,
-    what ``TrainRun.should_cancel()`` reads) at that output directory, so a test can place a
+    one-based call count requests the run's own cancellation (``experiments.request_cancel``)
+    at that output directory, so a test can place a
     cancel at an exact point in the batch stream; both are record values, so the builder's
     kwargs stay a config.
     """
@@ -241,8 +241,7 @@ def trainer_run(config: dict, output_dir, *, project, has_val_loader: bool, id: 
 
     spec = train_config(config)
     return TrainRun(id=id, spec=spec,
-                    objective=resolve_objective(spec, spec.model_source.task,
-                                                project=Path(project),
+                    objective=resolve_objective(spec, project=Path(project),
                                                 has_val_loader=has_val_loader),
                     project=Path(project), output_dir=str(output_dir))
 
@@ -296,54 +295,44 @@ def regressor_config(epochs: int = 1, *, builder: str = MEAN_INTENSITY_REGRESSOR
 
 def classifier_config(epochs: int, **overrides) -> dict:
     """A :func:`~tests._chain_fixtures.training_config` of the mean-intensity classifier
-    (weight -1) over one-band, two-class frames: ``epochs`` epochs of one unfrozen stage, AdamW
-    at 0.2, no epoch checkpoints, with ``overrides`` in place of their keys."""
+    (weight -1) over one-band, two-class frames: ``epochs`` epochs of one unfrozen stage in
+    batches of three, AdamW at 0.2, no epoch checkpoints, with ``overrides`` in place of their
+    keys."""
     from tests._chain_fixtures import training_config
 
     return training_config(
         {"builder": MEAN_INTENSITY_CLASSIFIER, "builder_kwargs": {"init_weight": -1.0},
          "task": "classification"},
         {"num_channels": 1, "num_classes": 2, "scope": {}},
-        **{"stages": [{"freeze_to": 0, "epochs": epochs}],
+        **{"batch_size": 3, "stages": [{"freeze_to": 0, "epochs": epochs}],
            "optimizer": {"name": "adamw", "backbone_lr": 0.2, "head_lr": 0.2,
                          "weight_decay": 0.0},
            "checkpoint_every_n_epochs": 0, **overrides})
 
 
-def separable_classifier_loaders():
+def separable_classifier_loaders(run):
     """A classification training loader of six frames (three of negative intensity, three of
-    positive, batches of three) and a validation loader of four (two each, one batch), labeled 0
-    for negative intensity and 1 for positive."""
-    from torch.utils.data import DataLoader
+    positive) and a validation loader of four (two each), labeled 0 for negative intensity and 1
+    for positive, built by the platform's own loader builder (``generic_trainer.run_loaders``)
+    for ``run``."""
+    from tcip_mcp.pipelines.training.generic_trainer import run_loaders
 
-    from tcip_mcp.pipelines.training.collation import task_collate
-
-    collate = task_collate("classification")
     train_ds = ConstantImageDataset(
         [-2.0, -1.5, -1.0, 1.0, 1.5, 2.0], [0, 0, 0, 1, 1, 1], key="labels", cast=int)
     val_ds = ConstantImageDataset([-1.8, -0.4, 0.4, 1.8], [0, 0, 1, 1], key="labels", cast=int)
-    return (DataLoader(train_ds, batch_size=3, collate_fn=collate),
-            DataLoader(val_ds, batch_size=4, collate_fn=collate))
+    return run_loaders(run, train_ds, val_ds)
 
 
-def opposed_regression_loaders(train_intensities, val_intensities, *, shuffle_seed=None):
+def opposed_regression_loaders(run, train_intensities, val_intensities):
     """A regression training loader over ``train_intensities`` fit by weight +2 and a holdout
-    loader over ``val_intensities`` fit by weight -5, batches of two. ``shuffle_seed`` makes the
-    training loader shuffle from a generator of its own seeded with it; ``None`` keeps its order
-    fixed."""
-    from torch.utils.data import DataLoader
-
-    from tcip_mcp.pipelines.training.collation import task_collate
+    loader over ``val_intensities`` fit by weight -5, built by the platform's own loader builder
+    (``generic_trainer.run_loaders``) for ``run``."""
+    from tcip_mcp.pipelines.training.generic_trainer import run_loaders
 
     train_ds = ConstantImageDataset(train_intensities, [2.0 * c for c in train_intensities])
     val_ds = ConstantImageDataset(
         val_intensities, [-5.0 * c for c in val_intensities], height=8, width=12)
-    collate = task_collate("regression")
-    shuffling: dict = {}
-    if shuffle_seed is not None:
-        shuffling = {"shuffle": True, "generator": torch.Generator().manual_seed(shuffle_seed)}
-    return (DataLoader(train_ds, batch_size=2, collate_fn=collate, **shuffling),
-            DataLoader(val_ds, batch_size=2, collate_fn=collate))
+    return run_loaders(run, train_ds, val_ds)
 
 
 def capture_model(monkeypatch, sink: list) -> None:

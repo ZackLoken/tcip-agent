@@ -199,11 +199,9 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
     import csv
 
     from PIL import Image
-    from torch.utils.data import DataLoader
 
     from tcip_mcp.experiments import RUN_FILE, read_record
-    from tcip_mcp.pipelines.training.collation import task_collate
-    from tcip_mcp.pipelines.training.generic_trainer import train
+    from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train
     from tcip_mcp.registry_paths import stored_path
     from tests.tiny_trainer_fixtures import trainer_run
 
@@ -219,9 +217,10 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
         w.writerow(("stem", "label"))
         w.writerows(rows)
 
-    def build_loader():
+    def build_loader(run):
+        """``run``'s training loader over the six frames (``generic_trainer.run_loaders``)."""
         ds = dataset_over("classification", str(images_dir), str(csv_path))
-        return DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
+        return run_loaders(run, ds, None)[0]
 
     _ds, data = run_over("classification", str(images_dir), str(csv_path))
     from tests._chain_fixtures import BESPOKE_CLASSIFIER, training_config
@@ -230,16 +229,16 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
         {"builder": BESPOKE_CLASSIFIER, "task": "classification"},
         data, stages=[{"freeze_to": -1, "epochs": 2}], optimizer=adamw_optimizer(), seed=3)
     # Generate the resumable checkpoint directly (not through the envelope).
-    train(trainer_run(dict(cfg), tmp_path / "out", project=tmp_path, has_val_loader=False,
-                      id="resume-source"),
-          build_loader())
+    source = trainer_run(dict(cfg), tmp_path / "out", project=tmp_path, has_val_loader=False,
+                         id="resume-source")
+    train(source, build_loader(source))
     ckpt = tmp_path / "out" / "checkpoint_epoch_1.pt"
     assert ckpt.is_file()
 
     launched = {**cfg, "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path),
                                 "split": {"seed": 3, "val_ratio": 0.15}}}
-    ctx, run_dir = _context(tmp_path, launched, train_loader=build_loader(), val_loader=None,
-                            resume_from=str(ckpt))
+    ctx, run_dir = _context(tmp_path, launched, val_loader=None, resume_from=str(ckpt))
+    ctx.train_loader = build_loader(ctx.run)
     run_training_envelope(ctx)
 
     assert ctx.run.status == "completed"

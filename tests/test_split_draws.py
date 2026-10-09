@@ -138,8 +138,8 @@ def test_run_hyperparameter_search_admits_n_trials_not_a_count_at_one_draw_with_
     tmp_path, real_hpo_base_config, monkeypatch, value,
 ):
     """coverage. n_trials=0 or -1 at one draw with no trial_budget reads no bound at all, so the
-    budget leg is never called and the call behaves exactly as it did before this family: the
-    search is reached and n_trials is passed through unread by the door."""
+    budget leg is never called: the search is reached and n_trials is passed through unread by
+    the door."""
     import tcip_mcp.tools.training_tools as tt
 
     captured = _search(monkeypatch)
@@ -526,6 +526,27 @@ def test_run_hyperparameter_search_reports_the_seed_axis_refusal_over_a_prefligh
 
     assert "error" in result and "cannot be replayed as recorded" in result["error"]
     assert "preflight" not in result["error"]
+    assert not ran
+
+
+def test_the_seed_axis_refusal_answers_before_a_later_points_schema_error(
+    tmp_path, real_hpo_base_config, monkeypatch,
+):
+    """A later point the schema refuses (a batch size of 0) is checked after the sweep-level
+    refusals, so a caller-supplied seed axis answers first."""
+    import tcip_mcp.tools.training_tools as tt
+
+    ran = []
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
+
+    result = tt.run_hyperparameter_search(
+        tmp_path, base_config=real_hpo_base_config,
+        param_space={"data.split.seed": {"type": "categorical", "choices": [1, 2]},
+                     "batch_size": {"type": "categorical", "choices": [2, 0]}},
+        n_trials=1, scheduler="none", search_seed=0
+    )
+
+    assert "error" in result and "cannot be replayed as recorded" in result["error"], result
     assert not ran
 
 

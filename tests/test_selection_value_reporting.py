@@ -43,7 +43,6 @@ def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(tmp_pa
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._verified_checkpoint_fixtures import opened_run
 
-    train_loader, val_loader = opposed_regression_loaders(TRAIN_INTENSITIES, VAL_INTENSITIES)
     callbacks: list[dict] = []
     images_dir, csv_path = write_regression_dataset(
         tmp_path / "ds", TRAIN_INTENSITIES, [2.0 * c for c in TRAIN_INTENSITIES])
@@ -52,6 +51,7 @@ def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(tmp_pa
                       "labels_dir": str(csv_path)}
     out_dir = opened_run(tmp_path, config)
     run = observed_run(observe(out_dir))
+    train_loader, val_loader = opposed_regression_loaders(run, TRAIN_INTENSITIES, VAL_INTENSITIES)
     # The production wiring: the trainer hands each row to the envelope's sink, which logs it
     # to the run's own metrics log and fires the hook a trial prunes on.
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
@@ -96,12 +96,12 @@ def test_the_plateau_scheduler_steps_on_the_validation_loss_under_its_declared_k
         return real_step(self, metrics, *args, **kwargs)
 
     monkeypatch.setattr(plateau, "step", step)
-    train_loader, val_loader = opposed_regression_loaders(TRAIN_INTENSITIES, VAL_INTENSITIES)
     from tests._training_values import schedule
 
     config = {**_config(), "scheduler": schedule("plateau")}
     run = trainer_run(config, tmp_path / "out", project=tmp_path, has_val_loader=True,
                       id="auto-run-plateau")
+    train_loader, val_loader = opposed_regression_loaders(run, TRAIN_INTENSITIES, VAL_INTENSITIES)
     run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "completed", run.status_error
@@ -111,10 +111,10 @@ def test_the_plateau_scheduler_steps_on_the_validation_loss_under_its_declared_k
 def test_epoch_record_follows_a_configured_selection_metric(tmp_path):
     """An explicit ``evaluation.selection_metric`` drives both the checkpoint objective and the
     reported ``selection``, so the two still name the same number."""
-    train_loader, val_loader = opposed_regression_loaders(TRAIN_INTENSITIES, VAL_INTENSITIES)
+    config = _config({"selection_metric": "mae"})
     out_dir = tmp_path / "out"
-    run = trainer_run(_config({"selection_metric": "mae"}), out_dir, project=tmp_path,
-                      has_val_loader=True, id="auto-run-64")
+    run = trainer_run(config, out_dir, project=tmp_path, has_val_loader=True, id="auto-run-64")
+    train_loader, val_loader = opposed_regression_loaders(run, TRAIN_INTENSITIES, VAL_INTENSITIES)
     run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "completed", run.status_error
@@ -133,10 +133,10 @@ def test_epoch_record_follows_a_configured_selection_metric(tmp_path):
 def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(tmp_path):
     """``f1`` is higher-is-better; model_best.pt must hold the epoch with the highest val f1,
     not the lowest."""
-    train_loader, val_loader = separable_classifier_loaders()
     config = classifier_config(5, evaluation={"selection_metric": "f1"})
     run = trainer_run(config, tmp_path / "out", project=tmp_path, has_val_loader=True,
                       id="auto-run-65")
+    train_loader, val_loader = separable_classifier_loaders(run)
     run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "completed", run.status_error
@@ -156,9 +156,10 @@ def test_a_run_selecting_on_a_metric_its_task_does_not_produce_fails_naming_both
     """``f1`` is declared (a detection/classification metric) but regression's own ``evaluate()``
     never produces it; the run must fail naming the requested metric and the keys validation did
     produce, not silently fall back to the training loss under a name nobody chose."""
-    train_loader, val_loader = opposed_regression_loaders(TRAIN_INTENSITIES, VAL_INTENSITIES)
-    run = trainer_run(_config({"selection_metric": "f1"}), tmp_path / "out", project=tmp_path,
-                      has_val_loader=True, id="auto-run-66")
+    config = _config({"selection_metric": "f1"})
+    run = trainer_run(config, tmp_path / "out", project=tmp_path, has_val_loader=True,
+                      id="auto-run-66")
+    train_loader, val_loader = opposed_regression_loaders(run, TRAIN_INTENSITIES, VAL_INTENSITIES)
     run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "failed"
@@ -172,9 +173,9 @@ def test_a_loss_selected_run_with_no_validation_loader_still_completes_and_selec
 ):
     """No validation loader means no metric but the training loss exists; a run selecting on the
     default (loss) metric must still complete and choose the lowest-loss epoch."""
-    train_loader, _ = opposed_regression_loaders(TRAIN_INTENSITIES, VAL_INTENSITIES)
     run = trainer_run(_config(), tmp_path / "out", project=tmp_path, has_val_loader=False,
                       id="auto-run-67")
+    train_loader, _ = opposed_regression_loaders(run, TRAIN_INTENSITIES, VAL_INTENSITIES)
     run = train(run, train_loader, val_loader=None)
 
     assert run.status == "completed", run.status_error

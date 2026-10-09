@@ -53,7 +53,7 @@ def prepare_run_context(
     train_ds, val_ds = recorded_datasets(
         task, spec.data, partition_samples(partition), partition_spatial(partition),
         run_transforms(spec))
-    train_loader, val_loader = run_loaders(spec, task, train_ds, val_ds)
+    train_loader, val_loader = run_loaders(run_obj, train_ds, val_ds)
     if val_loader is None and task in DETECTION_TASKS:
         logger.warning(
             "No validation loader for %s run %s: best-model selection reads the training loss "
