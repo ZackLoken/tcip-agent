@@ -58,15 +58,16 @@ def _offer(queue: asyncio.Queue, data: str) -> None:
 
 
 class LaunchedProgram(BaseModel):
-    """What a launch ran: the provider row's id, the executable, the version it declares, what
-    the row states its harness's own enforcement restricts and leaves open (``None`` for a
-    ``TCIP_TERMINAL_CMD`` override, which runs no row's arguments), why delivery to it rests on a
+    """What a launch ran: the provider row's id, the rendered argv, the version its executable
+    (the first element) declares, what the row states its harness's own enforcement restricts
+    and leaves open (``None`` for a ``TCIP_TERMINAL_CMD`` override, which runs no row's
+    arguments), why delivery to it rests on a
     composer sequence recorded on another version (``None`` when the versions agree, and for an
     override), and the steps the row's preparation took before the launch, empty when it has
     none."""
 
     provider: str
-    executable: str
+    argv: list[str]
     version: Optional[str]
     confinement: Optional[str]
     delivery_unverified: Optional[str]
@@ -163,8 +164,9 @@ class TerminalSession:
             if self._launch.ritual is not None:
                 self._launch = _Launch(gen=self._launch.gen + 1)
             project = store.opened
+            launch = pty_host.project_launch(project)
             try:
-                ritual = pty_host.session_ritual(project)
+                ritual = pty_host.session_ritual(launch)
             except ValueError as exc:
                 return str(exc)
             command = pty_host.resolve_terminal_command(provider)
@@ -172,11 +174,11 @@ class TerminalSession:
                 return provider.unavailable_reason
             prepared: list[str] = []
             if not command[1]:
-                prepared, problem = pty_host.prepare_launch(command[0][0], provider, project)
+                prepared, problem = pty_host.prepare_launch(command[0][0], provider, launch)
                 if problem is not None:
                     return problem
             env = pty_host.spawn_env(self.id)
-            argv = pty_host.render_argv(command[0], project, env)
+            argv = pty_host.render_argv(command[0], launch, env)
             program = pty_host.launched_program(argv, command[1])
             launched = LaunchedProgram(
                 provider=provider.id, prepared=prepared,
