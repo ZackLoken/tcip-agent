@@ -96,8 +96,7 @@ def _source(stated: dict):
 
 
 def _admitted_samples(root: Path):
-    """Two samples, admitted the way every run's own membership is: a builder is handed the
-    producer's records, never a list a test wrote by hand."""
+    """Two samples, admitted the way every run's own membership is."""
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from PIL import Image
@@ -199,8 +198,8 @@ def test_known_task_registry_stays_the_default(tmp_path: Path):
 
 def test_builder_kwargs_configure_the_builder(tmp_path: Path):
     """The builder's own configuration is its ``builder_kwargs`` and nothing else: the lowest
-    boundary takes the producer's four names as required arguments, so there is no second,
-    looser entrance a caller could hand other context through."""
+    boundary requires the dataset source, the task, the samples, the scope and the
+    transforms."""
     import inspect
 
     from tcip_mcp.pipelines.data.datasets import build_from_dataset_source
@@ -252,14 +251,18 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(tmp_pa
 
 
 def test_snapshot_records_dataset_builder(tmp_path: Path):
+    """The dataset builder's module is copied from the builder the config names, with no
+    ``source_files`` declaring it."""
     from tcip_mcp.pipelines.model_build import SNAPSHOT_DIR, snapshot_model_source
     from tcip_mcp.pipelines.schemas import train_config
     from tests._chain_fixtures import training_config
 
     spec = train_config(training_config({"builder": GT_ANCHOR_DETECTOR, "task": "detection"},
-                                        {"dataset_source": DATASET_SOURCE}))
+                                        {"dataset_source": {"builder": BESPOKE_DS}}))
     manifest = snapshot_model_source(spec, tmp_path)
-    assert manifest["dataset_builder"] == BESPOKE_DS
-    [entry] = [e for e in manifest["files"] if e["src"] == __file__]
+    [entry] = [e for e in manifest["files"]
+               if Path(e["src"]).resolve() == Path(__file__).resolve()]
     assert len(entry["sha256"]) == 64
     assert (tmp_path / SNAPSHOT_DIR / entry["file"]).read_bytes() == Path(__file__).read_bytes()
+    assert spec.record()["data"]["dataset_source"]["builder"] == BESPOKE_DS
+    assert set(manifest) == {"files", "missing", "snapshot_errors"}

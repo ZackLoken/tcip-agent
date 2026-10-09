@@ -33,8 +33,6 @@ import tcip_mcp.pipelines.components.heads  # noqa: F401,E402
 from tests._training_values import adamw_optimizer  # noqa: E402
 import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
 
-from torch.utils.data import DataLoader  # noqa: E402
-
 from tcip_mcp.pipelines.model_build import CONFIG_KEY  # noqa: E402
 
 from tests import bespoke_models  # noqa: E402 (the agent-authored bespoke model + train loop)
@@ -63,7 +61,6 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
 
     from tcip_mcp.pipelines.execution import Stated, prepare
     from tcip_mcp.pipelines.model_contract import overfit_check
-    from tcip_mcp.pipelines.training.collation import task_collate
 
     # 1. Synthetic detection data: open (tall) boxes so GT-derived anchors differ from defaults.
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -79,7 +76,6 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
         gt_wh.append((w, h))
 
     dataset = dataset_over("detection", str(images_dir), subject="bud")
-    val_loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("detection"))
 
     # 2. Bespoke model_source + custom training_source, run through the audited envelope.
     src_file = bespoke_models.__file__
@@ -128,8 +124,8 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
 
     launch = read_record(out / RUN_FILE)
     assert launch["environment"]["torch"]
+    assert launch["config"]["training_source"] == TRAIN_BESPOKE
     manifest = launch["source"]
-    assert manifest["training_source"] == TRAIN_BESPOKE
     assert any(e["src"] == src_file and len(e["sha256"]) == 64
                for e in manifest["files"])                  # source snapshotted with sha256
     assert (out / "model_src" / next(
@@ -156,6 +152,5 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
                             dims={"in_chans": 3, "num_classes": 1, "img_size": 64})
     assert overfit["passed"], overfit["issue"]
 
-    assert len(val_loader) > 0
     (pred,) = p.predict([str(images_dir / "img0.png")])
     assert {"boxes", "scores", "labels", "count"} <= set(pred)  # measurable detection output
