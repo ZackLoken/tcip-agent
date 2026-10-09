@@ -37,9 +37,14 @@ line as `composer_ready_version`; no harness promises it), what the harness's ow
 restricts and leaves open (`confinement`, recorded on every launch), and the preparation the
 launch runs first when the
 harness takes its MCP server or its tool approvals only through its own configuration (the
-Antigravity row registers the server through `agy mcp add` and allows every tcip tool and the
-ritual's own `tcip doctor` line for the open project, and nothing else, in agy's settings
-file, both writes to the breeder's own agy configuration, recorded on the launch). The
+Antigravity row registers the server through `agy mcp add` and allows every tcip tool and,
+when the launch spelled it, the ritual's own doctor line for the open project in agy's settings
+file, keeping the file's other entries, both writes to the breeder's own agy configuration,
+recorded on the launch). The ritual's doctor line has one producer, `doctor_command`, running
+`tcip_web.cli doctor` under the backend's own interpreter, the one `mcp_server` runs, so the
+line is the same literal under any harness's `PATH`; each launch spells it once
+(`project_launch`), and the ritual, agy's allow entry and Claude's rendered settings each read
+that one outcome. The
 MCP server a launch hands its harness has one producer, `mcp_server`, written as the JSON
 configuration file Claude's row passes, registered through `agy mcp add` for Antigravity's and
 rendered as `-c` overrides for Codex's. The ritual is pasted together with every request staged by
@@ -59,8 +64,12 @@ is added only after its harness's real flags are read from the installed CLI and
 friction reports hold exactly one report carrying it, of the requested category, at the poll
 that first sees one.
 
-Claude's row passes `CLAUDE_SETTINGS`, `agent_terminal.settings.json`; its `confinement` sentence
-states what that file enforces, and its academic WebFetch grants are generated from the
+Claude's row passes a settings file each launch writes from `CLAUDE_SETTINGS`,
+`agent_terminal.settings.json`, with the read-only tcip console commands
+(`READ_ONLY_CONSOLE_COMMANDS`, under both invocations) and, when the launch spelled it, the
+ritual's own doctor line allowed under both shells;
+its `confinement` sentence states what that file enforces, and the shipped file's academic
+WebFetch grants are generated from the
 `cv-research` document by `tools/generate_harness_discovery.py`. Those
 permission lists merge (union) with the repo root's own, gitignored, developer-local `.claude/settings.json` and
 the user's own settings rather than replacing them: list-valued settings keys merge across sources
@@ -69,8 +78,9 @@ therefore widens the breeder lane too. Don't extend or edit that file without ca
 explicitly.
 
 Each launch records what it ran: create and restart answer a `TerminalLaunch` (the provider id,
-the executable and the version it declares, never probed on a `TCIP_TERMINAL_CMD` override, the
-argv run before the launch, and the session-start ritual `session_ritual` builds for the open
+the rendered argv and the version its executable declares, never probed on a
+`TCIP_TERMINAL_CMD` override, the preparation run before the launch, and the session-start
+ritual `session_ritual` builds for the open
 project), with one
 `agent_terminal_started` line in the open project's audit log per launch (none when no project is
 open). The rail prints the ritual; the session delivers it, then the requests the rail submits,

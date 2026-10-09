@@ -215,7 +215,7 @@ export interface CreateSessionRequest {
 
 export interface LaunchedProgram {
   provider: string;
-  executable: string;
+  argv: string[];
   version: string | null;
   confinement: string | null;
   delivery_unverified: string | null;

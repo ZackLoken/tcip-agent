@@ -86,7 +86,7 @@ const RITUAL = "[TCIP session-start ritual] Project: Demo. Run the ritual first.
 const PROVIDER = { id: "harness", name: "A harness", unavailable_reason: null };
 const LAUNCHED = {
   provider: "harness",
-  executable: "/bin/harness",
+  argv: ["/bin/harness"],
   version: null,
   confinement: null,
   delivery_unverified: null as string | null,

@@ -23,7 +23,16 @@ from tests._audit_fixtures import audit_rows
 FAKE = Path(__file__).parent / "fake_terminal_app.py"
 LAUNCH = {"provider": pty_host.PROVIDERS[0].id, "user": "tester"}
 ABSENT = "definitely-not-a-real-cli-xyz"
-_PLACEHOLDERS = (pty_host.WORKSPACE_ARG, pty_host.MCP_CONFIG_ARG, pty_host.CODEX_MCP_ARG)
+_PLACEHOLDERS = (pty_host.WORKSPACE_ARG, pty_host.MCP_CONFIG_ARG, pty_host.CLAUDE_SETTINGS_ARG,
+                 pty_host.CODEX_MCP_ARG)
+INTERPRETER = pty_host.backend_interpreter()
+"""The interpreter this backend runs, the one every launch's MCP server and doctor line name."""
+
+
+def _doctor_entry(interpreter: str, project: Path) -> str:
+    """agy's allow entry for the doctor line of ``interpreter`` and ``project``."""
+    return pty_host._command_entry(pty_host.doctor_command(interpreter, project))
+
 
 if pty_host.os.name == "nt":
     pytest.importorskip("winpty")
@@ -68,6 +77,12 @@ def _fake_executable(directory: Path) -> Path:
                            encoding="utf-8")
         wrapper.chmod(0o755)
     return wrapper
+
+
+def _ritual_doctor_line(ritual: str) -> str:
+    """The doctor step ``ritual`` names: what follows its last step's ``, then`` up to its
+    closing friction sentence."""
+    return ritual.removesuffix(f". {pty_host._RITUAL_FRICTION}").split(", then ", 1)[1]
 
 
 # ── unit-ish: command resolution + preflight ────────────────────────────
@@ -122,8 +137,8 @@ def test_rendering_replaces_each_placeholder_and_leaves_every_other_argument(ope
     from tcip_web.state import store
 
     literal, workspace, config = pty_host.render_argv(
-        ["--literal", pty_host.WORKSPACE_ARG, pty_host.MCP_CONFIG_ARG], opened,
-        pty_host.spawn_env("term_test"))
+        ["--literal", pty_host.WORKSPACE_ARG, pty_host.MCP_CONFIG_ARG],
+        pty_host.project_launch(opened), pty_host.spawn_env("term_test"))
 
     assert (literal, workspace) == ("--literal", str(store.workspace))
     server = json.loads(Path(config).read_text(encoding="utf-8"))["mcpServers"]["tcip"]
@@ -131,7 +146,7 @@ def test_rendering_replaces_each_placeholder_and_leaves_every_other_argument(ope
 
 
 def test_the_ritual_for_no_project_says_the_session_has_none():
-    ritual = pty_host.session_ritual(None)
+    ritual = pty_host.session_ritual(pty_host.project_launch(None))
     assert "has no project" in ritual
     assert "initialize_project" in ritual
 
@@ -197,7 +212,10 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
     row, client, monkeypatch, tmp_path, opened, opened_project,
 ):
     """The fake program, standing as the row's executable, receives exactly the arguments the
-    row renders, with no placeholder left in them, after the row's preparation ran with it."""
+    row renders, with no placeholder left in them, after the row's preparation ran with it, and
+    the launch's record and audit line carry that argv. The settings file Claude's row is handed
+    holds the shipped lists plus, under both shells, each read-only console command under both
+    invocations and the ritual's doctor line; the shipped file names no console command."""
     from tcip_mcp.server import list_registered_tools
 
     monkeypatch.setattr(pty_host, "PROVIDERS", (dataclasses.replace(
@@ -207,37 +225,44 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
     monkeypatch.setattr(pty_host, "ANTIGRAVITY_SETTINGS", settings)
     argv_file = tmp_path / "argv.json"
     monkeypatch.setenv("FAKE_TERMINAL_ARGV_FILE", str(argv_file))
-    rendered: list[list[str]] = []
-    render = pty_host.render_argv
-
-    def _recording_render(argv: list[str], project: OpenProject | None,
-                          env: dict[str, str]) -> list[str]:
-        rendered.append(render(argv, project, env))
-        return rendered[-1]
-
-    monkeypatch.setattr(pty_host, "render_argv", _recording_render)
 
     created = client.post("/api/terminal/sessions", json={**LAUNCH, "provider": row.id}).json()
     sid = created["session_id"]
     with client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}") as ws:
         _read_until(ws, "FAKE_TERMINAL_READY")
 
-    (launched,) = rendered
+    launched = created["launched"]["argv"]
     assert json.loads(argv_file.read_text(encoding="utf-8")) == launched[1:]
     assert not any(placeholder in arg for arg in launched for placeholder in _PLACEHOLDERS)
+    if "--settings" in launched:
+        shipped = json.loads(pty_host.CLAUDE_SETTINGS.read_text(encoding="utf-8"))
+        handed = json.loads(Path(launched[launched.index("--settings") + 1]).read_text(
+            encoding="utf-8"))
+        line = _ritual_doctor_line(created["ritual"])
+        commands = [f"{invocation} {command}:*"
+                    for invocation in ("python -m tcip_web.cli", "tcip")
+                    for command in ("scan-dataset", "inspect-compute-resources",
+                                    "render-failure-cases")]
+        assert handed["permissions"]["deny"] == shipped["permissions"]["deny"]
+        assert handed["permissions"]["allow"] == [
+            *shipped["permissions"]["allow"],
+            *(f"{shell}({entry})" for shell in ("Bash", "PowerShell")
+              for entry in [*commands, line])]
+        assert not any("tcip" in entry for entries in shipped["permissions"].values()
+                       for entry in entries if not entry.startswith("mcp__tcip__"))
     if row.prepare is None:
         expected_prepared: list[str] = []
     else:
-        server = pty_host.mcp_server(opened)
+        server = pty_host.mcp_server(pty_host.project_launch(opened))
         expected_prepared = [
             pty_host.subprocess.list2cmdline(
                 [launched[0], "mcp", "add", "tcip", "--", server.command, *server.args]),
             f"allowed {len(list_registered_tools()) + 1} tcip entries in {settings}, dropped 0 "
-            "doctor entries of other projects",
+            "other doctor entries",
         ]
         allowed = json.loads(settings.read_text(encoding="utf-8"))["permissions"]["allow"]
         assert allowed == [*(f"mcp(tcip/{name})" for name in list_registered_tools()),
-                           pty_host.doctor_command_entry(opened.root)]
+                           _doctor_entry(INTERPRETER, opened.root)]
     assert created["launched"]["prepared"] == expected_prepared
     assert created["launched"]["confinement"] == row.confinement
     assert created["launched"]["delivery_unverified"] == row.delivery_unverified(
@@ -245,13 +270,14 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
     (line,) = audit_rows(opened_project, "agent_terminal_started")
     assert line["arguments"]["prepared"] == expected_prepared
     assert line["arguments"]["confinement"] == row.confinement
+    assert line["arguments"]["argv"] == launched
 
 
 def test_a_launch_preparation_that_fails_refuses_the_launch_naming_it(
     client, monkeypatch, tmp_path, opened_project,
 ):
     """A row whose preparation step exits non-zero spawns nothing and records nothing."""
-    def prepare(executable: str, project: OpenProject | None) -> list[str]:
+    def prepare(executable: str, launch: pty_host.ProjectLaunch | None) -> list[str]:
         return [pty_host.run_to_completion([executable, "fail", "tcip"], "the fake step")]
 
     row = dataclasses.replace(pty_host.PROVIDERS[0], executable=str(_fake_executable(
@@ -272,50 +298,83 @@ def test_allowing_the_tcip_tools_keeps_the_rest_of_the_settings_and_is_idempoten
     from tcip_mcp.server import list_registered_tools
 
     settings = tmp_path / "settings.json"
-    other = pty_host.doctor_command_entry(tmp_path / "other project")
-    settings.write_text(json.dumps({
-        "model": "kept", "permissions": {"allow": ["command(git log)", other], "deny": ["x"]}}),
-        encoding="utf-8")
     project = tmp_path / "valley (north)"
+    line = pty_host.doctor_command(INTERPRETER, project)
+    other_project = _doctor_entry(INTERPRETER, tmp_path / "other project")
+    other_interpreter = _doctor_entry("/old/env/bin/python", project)
+    settings.write_text(json.dumps({
+        "model": "kept", "permissions": {
+            "allow": ["command(git log)", other_project, other_interpreter], "deny": ["x"]}}),
+        encoding="utf-8")
 
-    first = pty_host.allow_tcip_tools(settings, project)
-    second = pty_host.allow_tcip_tools(settings, project)
+    first = pty_host.allow_tcip_tools(settings, line)
+    second = pty_host.allow_tcip_tools(settings, line)
 
     names = list_registered_tools()
-    assert first == (f"allowed {len(names) + 1} tcip entries in {settings}, dropped 1 doctor "
-                     "entries of other projects")
-    nothing = f"allowed 0 tcip entries in {settings}, dropped 0 doctor entries of other projects"
-    assert second == nothing
+    assert first == (f"allowed {len(names) + 1} tcip entries in {settings}, dropped 2 other "
+                     "doctor entries")
+    assert second == f"allowed 0 tcip entries in {settings}, dropped 0 other doctor entries"
     body = json.loads(settings.read_text(encoding="utf-8"))
     assert body["model"] == "kept"
     assert body["permissions"]["deny"] == ["x"]
     assert body["permissions"]["allow"] == [
         "command(git log)", *(f"mcp(tcip/{name})" for name in names),
-        pty_host.doctor_command_entry(project)]
+        pty_host._command_entry(line)]
 
     # A launch with no project runs no doctor: the entry of the last project goes too.
     assert pty_host.allow_tcip_tools(settings, None) == (
-        f"allowed 0 tcip entries in {settings}, dropped 1 doctor entries of other projects")
+        f"allowed 0 tcip entries in {settings}, dropped 1 other doctor entries")
     assert json.loads(settings.read_text(encoding="utf-8"))["permissions"]["allow"] == [
         "command(git log)", *(f"mcp(tcip/{name})" for name in names)]
 
     settings.write_text("[]", encoding="utf-8")
     with pytest.raises(pty_host.PreparationFailedError, match="does not hold a JSON object"):
-        pty_host.allow_tcip_tools(settings, project)
+        pty_host.allow_tcip_tools(settings, line)
+
+
+def test_the_doctor_line_runs_the_console_command_under_the_mcp_servers_interpreter(
+    opened, monkeypatch,
+):
+    """The doctor line names the interpreter the launch's MCP server runs, and running
+    ``tcip_web.cli`` as a module reaches the ``main`` the ``tcip`` console script names."""
+    import runpy
+    import tomllib
+
+    import tcip_web.cli
+
+    launch = pty_host.project_launch(opened)
+    line = pty_host.doctor_command(INTERPRETER, opened.root)
+    assert line.startswith(f"{pty_host.mcp_server(launch).command} -m tcip_web.cli doctor ")
+    pyproject = Path(__file__).parents[1] / "packages" / "tcip-web" / "pyproject.toml"
+    scripts = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["scripts"]
+    assert scripts["tcip"] == "tcip_web.cli:main"
+
+    reached: list[bool] = []
+
+    def main() -> int:
+        reached.append(True)
+        return 0
+
+    monkeypatch.setattr(tcip_web.cli, "main", main)
+    with pytest.raises(SystemExit) as exited:
+        runpy.run_module("tcip_web.cli", run_name="__main__")
+    assert reached == [True] and exited.value.code == 0
 
 
 def test_the_doctor_allowance_is_the_rituals_own_line_and_nothing_else(opened):
     """One renderer spells the ritual's doctor step, and agy's entry admits exactly that line
-    (its regex evaluated under Python's ``re``; agy's own matching is proven by the live
-    smoke): not the line with anything after it, not another project's, not an unquoted
-    spelling, and no handwritten grammar of what a path may hold exists beside it."""
+    (its regex evaluated under Python's ``re``): not the line with anything after it, not
+    another project's, not an unquoted spelling. The stale-entry recognizer matches what the
+    renderer writes and nothing it refuses."""
     opened_project = opened.root
-    line = pty_host.doctor_command(opened_project)
-    assert line == f'tcip doctor "{opened_project.as_posix()}"'
-    ritual = pty_host.session_ritual(opened)
-    assert ritual[ritual.index("tcip doctor"):].split(". ")[0] == line
+    line = pty_host.doctor_command(INTERPRETER, opened_project)
+    head = f"{INTERPRETER} -m tcip_web.cli doctor"
+    assert line == f'{head} "{opened_project.as_posix()}"'
+    launch = pty_host.project_launch(opened)
+    assert launch == pty_host.ProjectLaunch(opened, line, None)
+    assert _ritual_doctor_line(pty_host.session_ritual(launch)) == line
 
-    entry = pty_host.doctor_command_entry(opened_project)
+    entry = pty_host._command_entry(line)
     assert entry.startswith("command(regex:^") and entry.endswith("$)")
     pattern = re.compile(entry[len("command(regex:"):-1])
     assert pattern.fullmatch(line)
@@ -323,22 +382,64 @@ def test_the_doctor_allowance_is_the_rituals_own_line_and_nothing_else(opened):
                  " $(dir)", "\nWrite-Output x", " C:/second", " --help", '"', ' "C:/second"'):
         assert not pattern.fullmatch(f"{line}{tail}"), tail
     assert not pattern.fullmatch(line[:-1])
-    assert not pattern.fullmatch(f'tcip doctor "{opened_project.parent.as_posix()}"')
-    assert not pattern.fullmatch(f"tcip doctor {opened_project.as_posix()}")
+    assert not pattern.fullmatch(f'{head} "{opened_project.parent.as_posix()}"')
+    assert not pattern.fullmatch(f"{head} {opened_project.as_posix()}")
+    assert not pattern.fullmatch(f'tcip doctor "{opened_project.as_posix()}"')
     for position in range(len(line)):
         changed = line[:position] + ("y" if line[position] != "y" else "z") + line[position + 1:]
         assert not pattern.fullmatch(changed), changed
 
-    spaced = pty_host.doctor_command_entry(Path("S:/Savanna Institute (north)/o'neil & sons, b.1"))
+    spaced = _doctor_entry(INTERPRETER, Path("S:/Savanna Institute (north)/o'neil & sons, b.1"))
     assert re.compile(spaced[len("command(regex:"):-1]).fullmatch(
-        'tcip doctor "S:/Savanna Institute (north)/o\'neil & sons, b.1"')
+        f'{head} "S:/Savanna Institute (north)/o\'neil & sons, b.1"')
     assert not re.compile(spaced[len("command(regex:"):-1]).fullmatch(
-        'tcip doctor "S:/Savanna Institute (north)/o\'neil & sons, bX1"')
-    assert spaced.startswith(pty_host._DOCTOR_ENTRY_PREFIX)
+        f'{head} "S:/Savanna Institute (north)/o\'neil & sons, bX1"')
+    assert pty_host._DOCTOR_ENTRY.fullmatch(spaced)
+    assert not pty_host._DOCTOR_ENTRY.fullmatch("command(regex:^git log$)")
+    for interpreter in ("/two words/python", "/em space/python", "", "/conda(alt)/python",
+                        "/a&b/python"):
+        with pytest.raises(ValueError, match="the interpreter"):
+            pty_host.doctor_command(interpreter, opened_project)
+        refused = pty_host._command_entry(f'{interpreter} -m tcip_web.cli doctor "/p"')
+        assert not pty_host._DOCTOR_ENTRY.fullmatch(refused), refused
 
-    curly = pty_host.doctor_command_entry(Path("S:/o\u2019neil \u2018north\u2019 block"))
+    curly = _doctor_entry(INTERPRETER, Path("S:/o\u2019neil \u2018north\u2019 block"))
     assert re.compile(curly[len("command(regex:"):-1]).fullmatch(
-        'tcip doctor "S:/o\u2019neil \u2018north\u2019 block"')
+        f'{head} "S:/o\u2019neil \u2018north\u2019 block"')
+
+
+@pytest.mark.parametrize("interpreter", [INTERPRETER, "/env bin/python"],
+                         ids=["spelled", "refused"])
+def test_the_ritual_agys_entry_and_claudes_settings_name_one_doctor_line(
+    interpreter, opened, tmp_path, monkeypatch,
+):
+    """The ritual's doctor step, the command agy's regex entry admits and the command Claude's
+    added doctor entries name are one string, each read from its consumer's own output over the
+    launch's one :func:`project_launch`; when the step cannot be spelled, the ritual says so
+    naming why, agy's preparation fails naming it, and Claude's settings add no doctor entry."""
+    monkeypatch.setattr(pty_host, "backend_interpreter", lambda: interpreter)
+    launch = pty_host.project_launch(opened)
+    ritual = pty_host.session_ritual(launch)
+    settings = tmp_path / "agy-settings.json"
+    monkeypatch.setattr(pty_host, "ANTIGRAVITY_SETTINGS", settings)
+    monkeypatch.setattr(pty_host, "run_to_completion", lambda argv, step: "added")
+    (claude_settings,) = pty_host.render_argv([pty_host.CLAUDE_SETTINGS_ARG], launch,
+                                              pty_host.spawn_env("term_test"))
+    handed = json.loads(Path(claude_settings).read_text(encoding="utf-8"))
+    doctor_entries = [entry for entry in handed["permissions"]["allow"] if " doctor " in entry]
+
+    if interpreter != INTERPRETER:
+        assert "cannot be spelled on a shell line: the interpreter" in ritual
+        with pytest.raises(pty_host.PreparationFailedError, match="the interpreter"):
+            pty_host.prepare_antigravity("agy", launch)
+        assert doctor_entries == []
+        return
+    line = _ritual_doctor_line(ritual)
+    pty_host.prepare_antigravity("agy", launch)
+    (agy_entry,) = [entry for entry in json.loads(settings.read_text(encoding="utf-8"))
+                    ["permissions"]["allow"] if entry.startswith("command(regex:")]
+    assert re.compile(agy_entry[len("command(regex:"):-1]).fullmatch(line)
+    assert doctor_entries == [f"Bash({line})", f"PowerShell({line})"]
 
 
 SHELL_READS_INSIDE_DOUBLE_QUOTES = {
@@ -360,46 +461,87 @@ fails its case. A typographic single quote (U+2018 to U+201B) is literal inside 
 under both shells and is not here."""
 
 
-@pytest.mark.parametrize("held", sorted(SHELL_READS_INSIDE_DOUBLE_QUOTES),
-                         ids=[f"U+{ord(c):04X}" for c in sorted(SHELL_READS_INSIDE_DOUBLE_QUOTES)])
-def test_a_project_path_holding_a_refused_character_is_refused_by_name(
-    held, tmp_path, monkeypatch,
+SHELL_READS_IN_A_BARE_WORD = {
+    **SHELL_READS_INSIDE_DOUBLE_QUOTES,
+    " ": "ends a word under Bash and PowerShell", "\t": "ends a word under Bash and PowerShell",
+    "\v": "ends a word under PowerShell", "\f": "ends a word under PowerShell",
+    " ": "PowerShell reads a no-break space as whitespace",
+    "\u0085": "PowerShell reads a next-line mark as whitespace",
+    **{c: "PowerShell reads a Unicode space separator as whitespace"
+       for c in "            "
+                "  　"},
+    " ": "PowerShell reads a line separator as whitespace",
+    " ": "PowerShell reads a paragraph separator as whitespace",
+    "|": "a pipe under both", "&": "a background or call operator under both",
+    ";": "ends a command under both", "(": "opens a subshell or subexpression under both",
+    ")": "closes a subshell or subexpression under both", "<": "a redirection under both",
+    ">": "a redirection under both", "'": "opens a quoted segment under both",
+    "*": "a Bash glob", "?": "a Bash glob", "[": "a Bash glob and a PowerShell type literal",
+    "]": "closes a Bash glob", "{": "Bash brace expansion and a PowerShell script block",
+    "}": "closes a brace expansion or a script block", "~": "Bash tilde expansion",
+    "#": "opens a comment under both", "@": "PowerShell splatting and arrays",
+    ",": "PowerShell's array operator",
+    "‘": "PowerShell reads a left single quotation mark as a quote",
+    "’": "PowerShell reads a right single quotation mark as a quote",
+    "‚": "PowerShell reads a single low-9 quotation mark as a quote",
+    "‛": "PowerShell reads a single high-reversed-9 quotation mark as a quote",
+}
+"""Each character the renderer refuses in the unquoted interpreter, by what Bash or PowerShell
+does with it outside quotes, written from the shells' grammars rather than read off the
+renderer's set."""
+
+_REFUSED = [("project path", c) for c in sorted(SHELL_READS_INSIDE_DOUBLE_QUOTES)] + [
+    ("interpreter", c) for c in sorted(SHELL_READS_IN_A_BARE_WORD)]
+"""Each argument of the doctor line with a character it refuses."""
+
+
+@pytest.mark.parametrize("where, held", _REFUSED,
+                         ids=[f"{where.split()[-1]}-U+{ord(c):04X}" for where, c in _REFUSED])
+def test_a_doctor_line_argument_holding_a_refused_character_is_refused_by_name(
+    where, held, tmp_path, monkeypatch,
 ):
-    """The renderer refuses a path holding a character the doctor line refuses, naming that
-    character; the ritual then says the doctor step cannot be spelled, on one line, and the
-    Antigravity preparation fails naming it, instead of rendering a line a shell could read as
-    anything but the one literal argument on one line. The path is a POSIX one, so a backslash
-    is a path character and not a separator."""
+    """The renderer refuses a project path or an interpreter holding a character the doctor
+    line refuses, naming that argument and that character; the launch's doctor step is that
+    refusal, the ritual then says the step cannot be spelled, on one line, and the Antigravity
+    preparation fails naming it, instead of rendering a line a shell could read as anything but
+    the one literal command on one line. The paths are POSIX ones, so a backslash is a path
+    character and not a separator."""
     from pathlib import PurePosixPath
 
-    project = PurePosixPath(f"/projects/valley{held}block")
+    project = PurePosixPath(f"/projects/valley{held if where == 'project path' else ''}block")
+    interpreter = f"/env/bin{held if where == 'interpreter' else ''}/python"
     with pytest.raises(ValueError, match="the doctor line refuses") as refused:
-        pty_host.doctor_command(project)
+        pty_host.doctor_command(interpreter, project)
+    assert str(refused.value).startswith(f"the {where} ")
     assert repr(held) in str(refused.value) or held in str(refused.value)
-    with pytest.raises(ValueError, match="the doctor line refuses"):
-        pty_host.doctor_command_entry(project)
 
     # Resolving the path on Windows would read the POSIX backslash as a separator.
     monkeypatch.setattr("tcip_mcp.project_record.existing_project", lambda _p: (
         project, {"id": "abc", "display_name": "Valley", "site": "s"}))
+    monkeypatch.setattr(pty_host, "backend_interpreter", lambda: interpreter)
     opened = OpenProject(project, "abc")  # type: ignore[arg-type]
-    ritual = pty_host.session_ritual(opened)
+    launch = pty_host.project_launch(opened)
+    assert launch == pty_host.ProjectLaunch(opened, None, str(refused.value))
+    ritual = pty_host.session_ritual(launch)
     assert "cannot be spelled on a shell line" in ritual and "report_friction" in ritual
-    assert "tcip doctor" not in ritual and "\n" not in ritual and "\r" not in ritual
+    assert f'doctor "{project.as_posix()}"' not in ritual
+    assert "\n" not in ritual and "\r" not in ritual
 
     settings = tmp_path / "settings.json"
     monkeypatch.setattr(pty_host, "ANTIGRAVITY_SETTINGS", settings)
     monkeypatch.setattr(pty_host, "run_to_completion", lambda argv, step: "added")
     with pytest.raises(pty_host.PreparationFailedError, match="the doctor line refuses"):
-        pty_host.prepare_antigravity("agy", opened)
+        pty_host.prepare_antigravity("agy", launch)
     assert not settings.exists()
 
 
 def test_the_written_mcp_configuration_is_the_one_server_the_launch_states(opened):
-    server = pty_host.mcp_server(opened)
+    launch = pty_host.project_launch(opened)
+    server = pty_host.mcp_server(launch)
     assert server.args == ("-m", "tcip_mcp", "--project", opened.root.as_posix())
+    assert pty_host.mcp_server(None).args == ("-m", "tcip_mcp")
 
-    (config,) = pty_host.render_argv([pty_host.MCP_CONFIG_ARG], opened,
+    (config,) = pty_host.render_argv([pty_host.MCP_CONFIG_ARG], launch,
                                      pty_host.spawn_env("term_test"))
 
     written = json.loads(Path(config).read_text(encoding="utf-8"))["mcpServers"]["tcip"]
@@ -412,7 +554,8 @@ def test_the_codex_overrides_name_the_one_server_and_forward_the_spawn_environme
     import tomllib
 
     env = pty_host.spawn_env("term_test")
-    rendered = pty_host.render_argv(["--literal", pty_host.CODEX_MCP_ARG], opened, env)
+    launch = pty_host.project_launch(opened)
+    rendered = pty_host.render_argv(["--literal", pty_host.CODEX_MCP_ARG], launch, env)
 
     assert rendered[0] == "--literal"
     flags, overrides = rendered[1::2], rendered[2::2]
@@ -420,7 +563,7 @@ def test_the_codex_overrides_name_the_one_server_and_forward_the_spawn_environme
     parsed: dict = {}
     for override in overrides:
         parsed.update(tomllib.loads(override)["mcp_servers"]["tcip"])
-    server = pty_host.mcp_server(opened)
+    server = pty_host.mcp_server(launch)
     assert (parsed["command"], parsed["args"]) == (server.command, list(server.args))
     assert set(parsed["env_vars"]) == set(env)
     assert pty_host.TERMINAL_SESSION_ENV in parsed["env_vars"]
@@ -956,11 +1099,11 @@ def test_concurrent_creates_spawn_single_session():
 
 
 def test_create_answers_the_launched_executable_and_no_version_for_an_override(client):
-    """An override's launch records its executable, no version and no row's confinement."""
+    """An override's launch records its argv, no version and no row's confinement."""
     body = client.post("/api/terminal/sessions", json=LAUNCH).json()
 
     launched = body["launched"]
-    assert Path(launched["executable"]).name == Path(sys.executable).name
+    assert launched["argv"] == pty_host._override_argv()
     assert launched["version"] is None
     assert launched["confinement"] is None
     assert launched["delivery_unverified"] is None
@@ -973,7 +1116,8 @@ def test_the_resolved_cli_is_probed_for_the_version_it_declares(monkeypatch):
 
     launched = pty_host.launched_program(*command)
 
-    assert Path(launched["executable"]).name == Path(sys.executable).name
+    assert launched["argv"] == command[0]
+    assert Path(launched["argv"][0]).name == Path(sys.executable).name
     assert launched["version"].startswith("Python ")
 
 
@@ -1051,7 +1195,7 @@ def test_each_launch_leaves_one_audit_line_in_the_open_projects_log(client, open
     rows = audit_rows(opened_project, "agent_terminal_started")
     assert [row["arguments"]["session_id"] for row in rows] == [sid, sid]
     assert [row["arguments"]["provider"] for row in rows] == [LAUNCH["provider"]] * 2
-    assert Path(rows[0]["arguments"]["executable"]).name == Path(sys.executable).name
+    assert rows[0]["arguments"]["argv"] == pty_host._override_argv()
     assert rows[0]["arguments"]["version"] is None
     assert [row["actor"] for row in rows] == ["user:tester"] * 2
     assert "source" not in rows[0]
@@ -1079,22 +1223,24 @@ def test_the_create_and_restart_responses_answer_the_launched_provider_and_progr
     created = client.post("/api/terminal/sessions", json=LAUNCH).json()
     sid = created["session_id"]
     assert created["launched"]["provider"] == LAUNCH["provider"]
-    assert Path(created["launched"]["executable"]).name == Path(sys.executable).name
+    assert Path(created["launched"]["argv"][0]).name == Path(sys.executable).name
 
     restarted = client.post(f"/api/terminal/sessions/{sid}/restart", json=LAUNCH).json()
     assert restarted["existing"] is False
     assert restarted["launched"]["provider"] == LAUNCH["provider"]
-    assert Path(restarted["launched"]["executable"]).name == Path(sys.executable).name
+    assert Path(restarted["launched"]["argv"][0]).name == Path(sys.executable).name
 
 
 def test_create_and_restart_answer_the_ritual_the_library_builds_for_the_open_project(
     client, opened,
 ):
     created = client.post("/api/terminal/sessions", json=LAUNCH).json()
-    assert created["ritual"] == pty_host.session_ritual(opened)
+    assert created["ritual"] == pty_host.session_ritual(pty_host.project_launch(opened))
     assert "Test project" in created["ritual"]
-    for step in ("load_project_memory", "inspect_project", "tcip doctor"):
+    for step in ("load_project_memory", "inspect_project"):
         assert step in created["ritual"]
+    line = pty_host.doctor_command(INTERPRETER, opened.root)
+    assert _ritual_doctor_line(created["ritual"]) == line
 
     attached = client.post("/api/terminal/sessions", json=LAUNCH).json()
     assert attached["existing"] is True

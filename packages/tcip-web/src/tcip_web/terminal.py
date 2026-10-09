@@ -44,9 +44,11 @@ MCP_CONFIG_ARG = "{mcp_config}"
 CODEX_MCP_ARG = "{codex_mcp}"
 """A whole argument: the Codex configuration overrides :func:`codex_mcp_overrides` renders, as
 several arguments."""
+CLAUDE_SETTINGS_ARG = "{claude_settings}"
+"""A whole argument: the path of the Claude settings :func:`write_claude_settings` writes."""
 
 CLAUDE_SETTINGS = Path(__file__).resolve().parent / "agent_terminal.settings.json"
-"""The settings file Claude Code's row passes: its permission lists."""
+"""Claude Code's row's shipped permission lists, which :func:`write_claude_settings` renders."""
 
 PREPARATION_TIMEOUT_S = 60
 
@@ -59,28 +61,32 @@ class PreparationFailedError(Exception):
     """A row's launch preparation did not complete; the message names the step and why."""
 
 
-PrepareFn = Callable[[str, Optional[OpenProject]], list[str]]
-"""A row's launch preparation: given the resolved executable and the session's project, it
-runs to completion and returns one line per step it took, or raises
-:class:`PreparationFailedError`."""
+@dataclass(frozen=True)
+class ProjectLaunch:
+    """A launch for an open project: the project, and its ritual's doctor step as
+    :func:`project_launch` spelled it once, the line or the reason it cannot be spelled, exactly
+    one of the two set."""
+
+    project: OpenProject
+    doctor_line: Optional[str]
+    doctor_refused: Optional[str]
+
+
+PrepareFn = Callable[[str, Optional[ProjectLaunch]], list[str]]
+"""A row's launch preparation: given the resolved executable and the launch's
+:class:`ProjectLaunch` (``None`` for no project), it runs to completion and returns one line per
+step it took, or raises :class:`PreparationFailedError`."""
 
 
 @dataclass(frozen=True)
 class Provider:
     """One agent harness the terminal launches: the id a session names it by, its display name,
     the executable looked up on ``PATH``, the arguments after it, in which an argument equal to
-    :data:`WORKSPACE_ARG`, :data:`MCP_CONFIG_ARG` or :data:`CODEX_MCP_ARG` is rendered by
-    :func:`render_argv`, the output sequence the harness version ``composer_ready_version``
-    names (its ``--version`` line) was recorded writing when its composer appeared, which no
-    harness promises, what the harness's own enforcement restricts under those arguments and what
-    it leaves open, recorded on every launch, and the preparation the launch
-    runs first when the harness takes its MCP server or its tool approvals only through its own
-    configuration, ``None`` for a harness that takes them on the command line.
-
-    A row is listed only for a harness that turns bracketed paste on, since the session-start
-    ritual and staged requests reach the agent only as a :func:`paste`, written once the agent
-    has bracketed paste on and has written ``composer_ready`` since it started: a harness can turn
-    bracketed paste on while a loading screen still discards input."""
+    :data:`WORKSPACE_ARG`, :data:`MCP_CONFIG_ARG`, :data:`CLAUDE_SETTINGS_ARG` or
+    :data:`CODEX_MCP_ARG` is rendered by :func:`render_argv`, the output sequence the harness
+    version ``composer_ready_version`` names (its ``--version`` line) was recorded writing when
+    its composer appeared, what the harness's own enforcement restricts under those arguments
+    and leaves open, and the preparation the launch runs first, ``None`` for none."""
 
     id: str
     name: str
@@ -117,18 +123,23 @@ class McpServer:
     args: tuple[str, ...]
 
 
-def mcp_server(project: Optional[OpenProject]) -> McpServer:
-    """This interpreter running ``tcip_mcp`` for ``project``'s directory, for no project when
-    ``None``."""
-    args = ("-m", "tcip_mcp", *(("--project", project.root.as_posix()) if project else ()))
-    return McpServer(Path(sys.executable).as_posix(), args)
+def backend_interpreter() -> str:
+    """This backend's Python interpreter, forward-slashed."""
+    return Path(sys.executable).as_posix()
 
 
-def codex_mcp_overrides(project: Optional[OpenProject], env_names: Iterable[str]) -> list[str]:
-    """:func:`mcp_server` for ``project`` as Codex's ``tcip`` server in ``-c key=value``
+def mcp_server(launch: Optional[ProjectLaunch]) -> McpServer:
+    """:func:`backend_interpreter` running ``tcip_mcp`` for the directory of ``launch``'s
+    project, for no project when ``launch`` is ``None``."""
+    project = ("--project", launch.project.root.as_posix()) if launch else ()
+    return McpServer(backend_interpreter(), ("-m", "tcip_mcp", *project))
+
+
+def codex_mcp_overrides(launch: Optional[ProjectLaunch], env_names: Iterable[str]) -> list[str]:
+    """:func:`mcp_server` for ``launch`` as Codex's ``tcip`` server in ``-c key=value``
     overrides, each value TOML (a JSON string or array of strings is valid TOML), forwarding the
     variables ``env_names`` names to the server and approving its tools without asking."""
-    server = mcp_server(project)
+    server = mcp_server(launch)
     settings = {"command": server.command, "args": list(server.args),
                 "env_vars": sorted(env_names), "default_tools_approval_mode": "approve"}
     return [arg for key, value in settings.items()
@@ -150,21 +161,33 @@ def run_to_completion(argv: list[str], step: str) -> str:
     return subprocess.list2cmdline(argv)
 
 
-DOCTOR_PATH_REFUSES = frozenset('"$`\\!\r\n“”„')
-"""The characters the doctor line refuses in a project path, so the line is one double-quoted
+DOCTOR_QUOTED_REFUSES = frozenset('"$`\\!\r\n“”„')
+"""The characters the doctor line refuses in its double-quoted project path, so the path is one
 argument on one line under Bash and PowerShell: the double quote and the typographic double
 quotes PowerShell reads as one, which close the quoted segment; the dollar, which both shells
 expand inside double quotes; the backtick, a command substitution under Bash and the escape
-character under PowerShell; the backslash, an escape under Bash before some
-of the characters that may follow it; Bash's history expansion mark, expanded in an interactive
-shell with history expansion on; and a line break, which the ritual's one-line contract
-excludes. A typographic single quote is literal inside double quotes under both shells and is
-admitted."""
+character under PowerShell; the backslash, an escape under Bash before some of the characters
+that may follow it; Bash's history expansion mark, expanded in an interactive shell with history
+expansion on; and a line break, which the ritual's one-line contract excludes. A typographic
+single quote is literal inside double quotes under both shells and is admitted."""
+
+DOCTOR_TOKEN_REFUSES = frozenset("|&;()<>'\"$`\\!*?[]{}~#@,‘’‚‛“”„")
+"""The characters besides whitespace the doctor line refuses in its unquoted interpreter, so it
+is one word naming one command under Bash and PowerShell: what Bash reads outside quotes as an
+operator, a quote, an expansion, an escape or a comment, ``| & ; ( ) < > ' " $ ` \\ ! * ? [ ] {
+} ~ #``; what PowerShell reads there as one, ``| & ; ( ) { } < > ' " ` $ @ , [ ] #``; and the
+typographic single and double quotes PowerShell reads as quotes. Every whitespace character
+(``str.isspace``) is refused there too, since PowerShell ends a word at Unicode whitespace."""
+
+_DOCTOR_LINE = '{} -m tcip_web.cli doctor "{}"'
+"""The doctor line with a ``{}`` for each of :data:`_DOCTOR_ARGUMENTS`."""
+
+_DOCTOR_ARGUMENTS = (("interpreter", DOCTOR_TOKEN_REFUSES, True),
+                     ("project path", DOCTOR_QUOTED_REFUSES, False))
+"""Each argument of :data:`_DOCTOR_LINE`, in order, with the characters it refuses and whether
+it refuses every whitespace character as well."""
 
 _REGEX_LITERAL_ESCAPES = frozenset(".^$*+?()[]{}|\\")
-
-_DOCTOR_LINE_HEAD = 'tcip doctor "'
-"""What the ritual's doctor line opens with, before the project's path and its closing quote."""
 
 
 def _regex_literal(text: str) -> str:
@@ -173,16 +196,29 @@ def _regex_literal(text: str) -> str:
     return "".join(f"\\{c}" if c in _REGEX_LITERAL_ESCAPES else c for c in text)
 
 
-def doctor_command(project: PurePath) -> str:
-    """The one spelling of the ritual's doctor step for ``project``: ``tcip doctor`` and the
-    project's path, forward-slashed, in double quotes. Raises ``ValueError`` naming the
-    characters when the path holds one of :data:`DOCTOR_PATH_REFUSES`."""
-    text = project.as_posix()
-    held = sorted(set(text) & DOCTOR_PATH_REFUSES)
-    if held:
-        raise ValueError(f"the project path {text!r} holds {held!r}, which the doctor line "
-                         "refuses")
-    return f'{_DOCTOR_LINE_HEAD}{text}"'
+def doctor_command(interpreter: str, project: PurePath) -> str:
+    """The one spelling of the ritual's doctor step for ``project``: :data:`_DOCTOR_LINE` of
+    ``interpreter``, unquoted, and the project's path, forward-slashed, in double quotes. Raises
+    ``ValueError`` naming the argument when one is empty or holds a character
+    :data:`_DOCTOR_ARGUMENTS` refuses it, naming those characters."""
+    values = (interpreter, project.as_posix())
+    for (name, refused, blank), value in zip(_DOCTOR_ARGUMENTS, values):
+        held = sorted(c for c in set(value) if c in refused or (blank and c.isspace()))
+        if held or not value:
+            raise ValueError(f"the {name} {value!r} holds {held or 'nothing'!r}, which the "
+                             "doctor line refuses")
+    return _DOCTOR_LINE.format(*values)
+
+
+def project_launch(project: Optional[OpenProject]) -> Optional[ProjectLaunch]:
+    """The launch for ``project``, ``None`` for no project, its doctor step spelled once:
+    :func:`doctor_command` of :func:`backend_interpreter`, or the refusal it raises."""
+    if project is None:
+        return None
+    try:
+        return ProjectLaunch(project, doctor_command(backend_interpreter(), project.root), None)
+    except ValueError as exc:
+        return ProjectLaunch(project, None, str(exc))
 
 
 def _command_entry(line: str) -> str:
@@ -191,23 +227,29 @@ def _command_entry(line: str) -> str:
     return f"command(regex:^{_regex_literal(line)}$)"
 
 
-def doctor_command_entry(project: PurePath) -> str:
-    """agy's allow entry for exactly :func:`doctor_command`'s line and nothing else. Raises
-    what :func:`doctor_command` raises."""
-    return _command_entry(doctor_command(project))
+def _entry_argument(refused: frozenset[str], blank: bool) -> str:
+    """A regular expression matching, as :func:`_regex_literal` writes it, an argument of one or
+    more characters outside ``refused`` and, when ``blank``, not whitespace (``\\s``, the
+    characters ``str.isspace`` admits)."""
+    bare = re.escape("".join(sorted(refused | _REGEX_LITERAL_ESCAPES))) + ("\\s" if blank else "")
+    escaped = re.escape("".join(sorted(_REGEX_LITERAL_ESCAPES - refused)))
+    return f"(?:[^{bare}]|\\\\[{escaped}])+"
 
 
-_DOCTOR_ENTRY_PREFIX = _command_entry(_DOCTOR_LINE_HEAD).removesuffix("$)")
-"""What every doctor entry opens with, whatever its project: the entry of the line's head."""
+_ENTRY_PARTS = _command_entry(_DOCTOR_LINE.format(*("\0" for _ in _DOCTOR_ARGUMENTS))).split("\0")
+_DOCTOR_ENTRY = re.compile(re.escape(_ENTRY_PARTS[0]) + "".join(
+    _entry_argument(refused, blank) + re.escape(part)
+    for (_, refused, blank), part in zip(_DOCTOR_ARGUMENTS, _ENTRY_PARTS[1:])))
+"""Every :func:`_command_entry` of a line :func:`doctor_command` renders, whatever its
+arguments: :data:`_DOCTOR_LINE` with each argument admitted by :data:`_DOCTOR_ARGUMENTS`."""
 
 
-def allow_tcip_tools(settings: Path, project: Optional[Path]) -> str:
-    """Add an ``mcp(tcip/<tool>)`` entry for every registered tool and, for a ``project``,
-    :func:`doctor_command_entry` to the ``permissions.allow`` list of the Antigravity settings
-    file ``settings``, dropping the doctor entries of other projects and keeping everything
-    else in it, and return one line saying how many were added and dropped; raises
-    :class:`PreparationFailedError` when the file does not parse as a JSON object, and what
-    :func:`doctor_command` raises."""
+def allow_tcip_tools(settings: Path, doctor_line: Optional[str]) -> str:
+    """Add an ``mcp(tcip/<tool>)`` entry for every registered tool and, when given, the
+    :func:`_command_entry` of ``doctor_line`` to the ``permissions.allow`` list of the
+    Antigravity settings file ``settings``, dropping every other doctor entry and keeping
+    everything else in it, and return one line saying how many were added and dropped; raises
+    :class:`PreparationFailedError` when the file does not parse as a JSON object."""
     from tcip_mcp.server import list_registered_tools
 
     try:
@@ -218,31 +260,30 @@ def allow_tcip_tools(settings: Path, project: Optional[Path]) -> str:
         raise PreparationFailedError(f"{settings} does not hold a JSON object")
     allow = body.setdefault("permissions", {}).setdefault("allow", [])
     wanted = [f"mcp(tcip/{name})" for name in list_registered_tools()]
-    if project is not None:
-        wanted.append(doctor_command_entry(project))
-    stale = [entry for entry in allow if entry.startswith(_DOCTOR_ENTRY_PREFIX)
-             and entry not in wanted]
+    if doctor_line is not None:
+        wanted.append(_command_entry(doctor_line))
+    stale = [entry for entry in allow if _DOCTOR_ENTRY.fullmatch(entry) and entry not in wanted]
     missing = [entry for entry in wanted if entry not in allow]
     if missing or stale:
         allow[:] = [entry for entry in allow if entry not in stale] + missing
         settings.parent.mkdir(parents=True, exist_ok=True)
         settings.write_text(json.dumps(body, indent=2) + "\n", encoding="utf-8")
-    return (f"allowed {len(missing)} tcip entries in {settings}, dropped {len(stale)} doctor "
-            "entries of other projects")
+    return (f"allowed {len(missing)} tcip entries in {settings}, dropped {len(stale)} other "
+            "doctor entries")
 
 
-def prepare_antigravity(executable: str, project: Optional[OpenProject]) -> list[str]:
-    """Antigravity's launch preparation: register :func:`mcp_server` for ``project`` as its
-    ``tcip`` server through ``agy mcp add``, and allow every tcip tool and the ritual's own
-    doctor line for ``project`` in its settings file; a path the doctor line refuses fails the
-    preparation naming it."""
-    server = mcp_server(project)
+def prepare_antigravity(executable: str, launch: Optional[ProjectLaunch]) -> list[str]:
+    """Antigravity's launch preparation: register :func:`mcp_server` for ``launch`` as its
+    ``tcip`` server through ``agy mcp add``, and allow every tcip tool and the launch's doctor
+    line in its settings file; a doctor step that could not be spelled fails the preparation
+    naming why."""
+    server = mcp_server(launch)
     add = run_to_completion([executable, "mcp", "add", "tcip", "--", server.command, *server.args],
                             step="`agy mcp add`")
-    try:
-        return [add, allow_tcip_tools(ANTIGRAVITY_SETTINGS, project.root if project else None)]
-    except ValueError as exc:
-        raise PreparationFailedError(f"the doctor allowance was not written: {exc}") from exc
+    if launch is not None and launch.doctor_refused is not None:
+        raise PreparationFailedError(f"the doctor allowance was not written: "
+                                     f"{launch.doctor_refused}")
+    return [add, allow_tcip_tools(ANTIGRAVITY_SETTINGS, launch.doctor_line if launch else None)]
 
 
 PROVIDERS: tuple[Provider, ...] = (
@@ -251,7 +292,7 @@ PROVIDERS: tuple[Provider, ...] = (
         name="Claude Code",
         executable="claude",
         args=(
-            "--settings", str(CLAUDE_SETTINGS),
+            "--settings", CLAUDE_SETTINGS_ARG,
             "--add-dir", WORKSPACE_ARG,
             "--permission-mode", "default",
             "--mcp-config", MCP_CONFIG_ARG, "--strict-mcp-config",
@@ -259,8 +300,10 @@ PROVIDERS: tuple[Provider, ...] = (
         composer_ready="\x1b[?1049h",
         composer_ready_version="2.1.292 (Claude Code)",
         confinement=("Claude Code enforces the deny and allow lists of "
-                     "agent_terminal.settings.json, merged with the user's own Claude Code "
-                     "settings; a tool call neither list decides asks first."),
+                     "agent_terminal.settings.json, with the read-only tcip console commands "
+                     "allowed and, when the launch spelled it, the ritual's own doctor line, "
+                     "merged with the user's own Claude Code settings; a tool call neither list "
+                     "decides asks first."),
     ),
     Provider(
         id="antigravity",
@@ -270,8 +313,8 @@ PROVIDERS: tuple[Provider, ...] = (
         composer_ready="\x1b[0 q\r\x1b[J",
         composer_ready_version="1.3.1",
         confinement=("agy's --sandbox turns on its terminal restrictions, whose extent agy "
-                     "defines; every tcip tool and the read-only tcip doctor are allowed in "
-                     "agy's own settings file."),
+                     "defines; every tcip tool and, when the launch spelled it, the ritual's own "
+                     "read-only doctor line are allowed in agy's own settings file."),
         prepare=prepare_antigravity,
     ),
     Provider(
@@ -313,37 +356,66 @@ def resolve_terminal_command(provider: Provider) -> Optional[tuple[list[str], bo
     return [executable, *provider.args], False
 
 
-def write_mcp_config(project: Optional[OpenProject]) -> Path:
-    """Write :func:`mcp_server` for ``project`` as a JSON MCP configuration and return its
-    path."""
-    server = mcp_server(project)
-    config = {"mcpServers": {"tcip": {"command": server.command, "args": list(server.args)}}}
-    dest = Path(tempfile.mkdtemp(prefix="tcip_mcp_")) / "tcip.mcp.json"
-    dest.write_text(json.dumps(config, indent=2), encoding="utf-8")
+def _write_launch_file(name: str, body: dict) -> Path:
+    """``body`` written as JSON to ``name`` in a new temporary directory; its path."""
+    dest = Path(tempfile.mkdtemp(prefix="tcip_launch_")) / name
+    dest.write_text(json.dumps(body, indent=2), encoding="utf-8")
     return dest
 
 
-def render_argv(argv: list[str], project: Optional[OpenProject],
+def write_mcp_config(launch: Optional[ProjectLaunch]) -> Path:
+    """Write :func:`mcp_server` for ``launch`` as a JSON MCP configuration and return its
+    path."""
+    server = mcp_server(launch)
+    return _write_launch_file("tcip.mcp.json", {
+        "mcpServers": {"tcip": {"command": server.command, "args": list(server.args)}}})
+
+
+READ_ONLY_CONSOLE_COMMANDS = ("scan-dataset", "inspect-compute-resources", "render-failure-cases")
+"""The ``tcip`` console commands Claude's row allows under any arguments, each read-only."""
+
+_CONSOLE_INVOCATIONS = ("python -m tcip_web.cli", "tcip")
+"""The two invocations of the ``tcip`` console command: its module and its script."""
+
+
+def write_claude_settings(launch: Optional[ProjectLaunch]) -> Path:
+    """Write :data:`CLAUDE_SETTINGS` with a ``Bash(<line>)`` and a ``PowerShell(<line>)`` entry
+    added to its allow list for each of :data:`READ_ONLY_CONSOLE_COMMANDS` under each of
+    :data:`_CONSOLE_INVOCATIONS`, with any arguments, and for the launch's doctor line when it
+    spelled one, and return its path."""
+    body = json.loads(CLAUDE_SETTINGS.read_text(encoding="utf-8"))
+    lines = [f"{invocation} {command}:*" for invocation in _CONSOLE_INVOCATIONS
+             for command in READ_ONLY_CONSOLE_COMMANDS]
+    if launch is not None and launch.doctor_line is not None:
+        lines.append(launch.doctor_line)
+    body["permissions"]["allow"] += [f"{shell}({line})" for shell in ("Bash", "PowerShell")
+                                     for line in lines]
+    return _write_launch_file("settings.json", body)
+
+
+def render_argv(argv: list[str], launch: Optional[ProjectLaunch],
                 env: dict[str, str]) -> list[str]:
     """``argv`` with each :data:`WORKSPACE_ARG` replaced by the backend's workspace, each
-    :data:`MCP_CONFIG_ARG` by a configuration :func:`write_mcp_config` writes for ``project``,
-    and each :data:`CODEX_MCP_ARG` by :func:`codex_mcp_overrides` for ``project`` forwarding
-    every variable of ``env``, the environment the launch spawns with."""
+    :data:`MCP_CONFIG_ARG` by a configuration :func:`write_mcp_config` writes, each
+    :data:`CLAUDE_SETTINGS_ARG` by the settings :func:`write_claude_settings` writes, and each
+    :data:`CODEX_MCP_ARG` by :func:`codex_mcp_overrides` forwarding every variable of ``env``,
+    the environment the launch spawns with, each for ``launch``."""
     values = {WORKSPACE_ARG: lambda: [str(store.workspace)],
-              MCP_CONFIG_ARG: lambda: [str(write_mcp_config(project))],
-              CODEX_MCP_ARG: lambda: codex_mcp_overrides(project, env)}
+              MCP_CONFIG_ARG: lambda: [str(write_mcp_config(launch))],
+              CLAUDE_SETTINGS_ARG: lambda: [str(write_claude_settings(launch))],
+              CODEX_MCP_ARG: lambda: codex_mcp_overrides(launch, env)}
     return [rendered for arg in argv for rendered in (values[arg]() if arg in values else [arg])]
 
 
 def prepare_launch(executable: str, provider: Provider,
-                   project: Optional[OpenProject]) -> tuple[list[str], Optional[str]]:
-    """Run ``provider.prepare`` with the resolved ``executable`` for ``project``: the steps it
+                   launch: Optional[ProjectLaunch]) -> tuple[list[str], Optional[str]]:
+    """Run ``provider.prepare`` with the resolved ``executable`` and ``launch``: the steps it
     took (empty for a row with no preparation) and the reason it failed, ``None`` when it
     succeeded, prefixed with the row's name."""
     if provider.prepare is None:
         return [], None
     try:
-        return provider.prepare(executable, project), None
+        return provider.prepare(executable, launch), None
     except PreparationFailedError as exc:
         return [], f"{provider.name}'s launch preparation failed: {exc}"
 
@@ -371,42 +443,41 @@ _RITUAL_FRICTION = ("If any mandated action is blocked or errors, that itself is
                     "report_friction, never a silent skip.")
 
 
-def session_ritual(project: Optional[OpenProject]) -> str:
-    """The session-start directive for an agent launched for ``project``, as one line: the
-    display name its record holds now and the ritual to run first, or what a session with no
-    project can do when ``project`` is ``None``. Raises what
-    :func:`tcip_mcp.project_record.existing_project` raises for a record that will not read."""
+def session_ritual(launch: Optional[ProjectLaunch]) -> str:
+    """The session-start directive for an agent of ``launch``, as one line: the display name its
+    project's record holds now and the ritual to run first, its doctor step the launch's doctor
+    line or the refusal naming why it cannot be spelled, or what a session with no project can do
+    when ``launch`` is ``None``. Raises what :func:`tcip_mcp.project_record.existing_project`
+    raises for a record that will not read."""
     from tcip_mcp.project_record import existing_project
 
-    if project is None:
+    if launch is None:
         return (f"{_RITUAL_HEADER}This session has no project: the GUI had none open when the "
                 "terminal started, so every tool that acts on a project refuses. Create one with "
                 "initialize_project, or open one in the GUI, then restart the terminal to work on "
                 f"it. {_RITUAL_FRICTION}")
-    _, record = existing_project(project.root)
-    try:
-        doctor = doctor_command(project.root)
-    except ValueError as exc:
+    _, record = existing_project(launch.project.root)
+    if launch.doctor_line is None:
         return (f"{_RITUAL_HEADER}Project: {record['display_name']}. Its doctor step cannot be "
-                f"spelled on a shell line: {exc}. Run load_project_memory (kind='reports' and "
-                "kind='retrospectives') and inspect_project, then file this with report_friction "
-                f"before any project work. {_RITUAL_FRICTION}")
+                f"spelled on a shell line: {launch.doctor_refused}. Run load_project_memory "
+                "(kind='reports' and kind='retrospectives') and inspect_project, then file this "
+                f"with report_friction before any project work. {_RITUAL_FRICTION}")
     return (f"{_RITUAL_HEADER}Project: {record['display_name']}. Run the ritual first: "
             "load_project_memory (kind='reports' and kind='retrospectives'), inspect_project, "
-            f"then {doctor}. {_RITUAL_FRICTION}")
+            f"then {launch.doctor_line}. {_RITUAL_FRICTION}")
 
 
 VERSION_PROBE_TIMEOUT_S = 15
 
 
 def launched_program(argv: list[str], override: bool) -> dict:
-    """``{"executable", "version"}`` for ``argv``: its first element, and what that executable
-    declares to ``--version`` (probed at every call, so a harness updated in place is seen at its
-    next launch; stdin closed, time bounded), ``None`` for an ``override`` or an executable that
-    does not answer cleanly."""
+    """``{"argv", "version"}`` for ``argv``: the argv itself, and what its executable, the first
+    element, declares to ``--version`` (probed at every call, so a harness updated in place is
+    seen at its next launch; stdin closed, time bounded), ``None`` for an ``override`` or an
+    executable that does not answer cleanly."""
     executable = argv[0]
     if override:
-        return {"executable": executable, "version": None}
+        return {"argv": argv, "version": None}
     version: Optional[str] = None
     try:
         probe = subprocess.run(
@@ -422,7 +493,7 @@ def launched_program(argv: list[str], override: bool) -> dict:
             version = first_line[0].strip()
     except (OSError, subprocess.TimeoutExpired):
         logger.debug("version probe of %s did not answer", executable, exc_info=True)
-    return {"executable": executable, "version": version}
+    return {"argv": argv, "version": version}
 
 
 def spawn_env(session_id: str) -> dict[str, str]:
