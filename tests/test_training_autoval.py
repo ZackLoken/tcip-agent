@@ -15,13 +15,11 @@ import pytest
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
-from torch.utils.data import DataLoader  # noqa: E402
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tests._producer_fixtures import train_val as _train_val
 from tests._verified_checkpoint_fixtures import partition_side as recorded_side  # noqa: E402
-from tcip_mcp.pipelines.training.generic_trainer import train
-from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
+from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train  # noqa: E402
 from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tests._image_fixtures import write_noise_image  # noqa: E402
@@ -101,7 +99,7 @@ def test_auto_train_val_detection_splits(tmp_path: Path):
 
 def test_auto_train_val_malformed_group_by_raises(tmp_path: Path):
     """An unrecognized split.group_by is a caller-config error and must propagate,
-    not degrade silently to (full_train_ds, None) like other failures in this function."""
+    not degrade silently to (full_train_ds, None)."""
     images_dir, _all_stems = _detection_dataset(tmp_path / "ds")
     data_cfg = {
         "images_dir": str(images_dir),
@@ -686,12 +684,10 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
     }
     train_ds, val_ds, _, resolved = _train_val(tmp_path, "detection", data_cfg)
     assert val_ds is not None
-    train_loader = DataLoader(train_ds, batch_size=2, collate_fn=task_collate("detection"))
-    val_loader = DataLoader(val_ds, batch_size=2, collate_fn=task_collate("detection"))
 
     run = trainer_run(training_config(BLOB_BUILDER, resolved.record()), tmp_path / "out",
-                      project=tmp_path,
-                      has_val_loader=val_loader is not None, id="auto-run-77")
+                      project=tmp_path, has_val_loader=True, id="auto-run-77")
+    train_loader, val_loader = run_loaders(run, train_ds, val_ds)
     run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "completed", run.status_error

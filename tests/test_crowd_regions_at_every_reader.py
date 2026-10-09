@@ -151,24 +151,20 @@ def test_a_crop_keeps_each_rows_crowd_flag_with_its_box(tmp_path: Path):
 def test_the_trainer_and_the_validation_loss_hand_the_heads_objects_only(tmp_path: Path):
     """Both hand-offs to a model's training forward, the training step and the validation loss,
     withhold every crowd row the loader keeps."""
-    from torch.utils.data import DataLoader
-
-    from tcip_mcp.pipelines.training.collation import task_collate
-    from tcip_mcp.pipelines.training.generic_trainer import train
+    from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train
     from tests._chain_fixtures import training_config
     from tests.tiny_trainer_fixtures import trainer_run
 
     loader_ds = _detection_loader(tmp_path / "ds")
     assert loader_ds[0][1]["iscrowd"].tolist() == [0, 1]  # the loader keeps every row
-    collate = task_collate("detection")
     RecordingDetector.handed.clear()
     config = training_config(
         {"builder": f"{__name__}:build_recording_detector", "task": "detection"},
         {"num_channels": 3, "scope": {"subject": SUBJECT, "attributes": []}})
     run = trainer_run(config, tmp_path / "run", project=tmp_path, has_val_loader=True,
                       id="crowd-run")
-    completed = train(run, DataLoader(loader_ds, batch_size=2, collate_fn=collate),
-                      val_loader=DataLoader(loader_ds, batch_size=2, collate_fn=collate))
+    train_loader, val_loader = run_loaders(run, loader_ds, loader_ds)
+    completed = train(run, train_loader, val_loader=val_loader)
 
     assert completed.status == "completed", completed.status
     assert len(RecordingDetector.handed) >= 2  # one training step and one validation-loss pass

@@ -134,18 +134,18 @@ class TrainContext:
                      resume_from=self.resume_from)
 
     # ---- craft library passthroughs (compose, don't reinvent) ----
-    def build_dataset(self, task: str | None = None, *, samples: Any,
-                      sizes: "Mapping[str, int] | None" = None, **kwargs: Any) -> Any:
-        """The factory, over the samples you were handed. ``sizes`` and ``scope`` unstated are
-        the ones this run's data block records, so a loader you build here reads at its width
-        and count whichever subset of samples it holds."""
+    def build_dataset(self, *, samples: Any, sizes: "Mapping[str, int] | None" = None,
+                      **kwargs: Any) -> Any:
+        """The factory for this run's task, over the samples you were handed. ``sizes`` and
+        ``scope`` unstated are the ones this run's data block records, so a loader you build here
+        reads at its width and count whichever subset of samples it holds."""
         from tcip_mcp.pipelines.data.datasets import build_dataset, stated_sizes
 
         data = self.spec.data
         if sizes is None:
             sizes = stated_sizes(data)
         kwargs.setdefault("scope", data.recorded_scope)
-        return build_dataset(task or self.task, samples=samples, sizes=sizes, **kwargs)
+        return build_dataset(self.task, samples=samples, sizes=sizes, **kwargs)
 
     def tiled_dataset(self, base: Any, **kwargs: Any) -> Any:
         """Wrap a detection dataset in the native-resolution tiler (same derived sliver cutoff
@@ -155,10 +155,10 @@ class TrainContext:
 
         return TiledDetectionDataset(base, **kwargs)
 
-    def task_collate(self, task: str | None = None) -> Any:
+    def task_collate(self) -> Any:
         from tcip_mcp.pipelines.training.collation import task_collate
 
-        return task_collate(task or self.task)
+        return task_collate(self.task)
 
     def build_sampler(self, name: str, dataset: Any, *, num_workers: int | None = None,
                       batch_size: int | None = None) -> Any:
@@ -225,7 +225,8 @@ class TrainContext:
 
     def evaluate(self, model: Any, loader: Any = None, **kwargs: Any) -> Any:
         """``evaluation.evaluate`` of ``model`` over ``loader`` (the run's validation loader when
-        omitted), a detector's boxes counted at the run's validated ``evaluation.conf_threshold``;
+        omitted), a detector's boxes counted at the run's stated confidence
+        (``TrainRun.reads``);
         ``kwargs`` are ``evaluate``'s other keywords, and one naming ``conf_threshold`` is refused
         by the call (``TypeError``)."""
         from tcip_mcp.pipelines.model_build import recorded_model_dims
@@ -233,7 +234,7 @@ class TrainContext:
 
         return evaluate(model, self.val_loader if loader is None else loader,
                         self.device, self.task, dims=recorded_model_dims(self.spec),
-                        conf_threshold=self.spec.evaluation.conf_threshold, **kwargs)
+                        conf_threshold=self.run.reads.conf_threshold, **kwargs)
 
     # ---- measurement primitives (compose for dimensional traits) ----
     def mask_geometry(self, *args: Any, **kwargs: Any) -> Any:
@@ -305,16 +306,15 @@ class TrainContext:
         self.tb.flush()
 
     def log_metrics(self, epoch: int, metrics: dict) -> None:
-        """Epoch metric sink, the default trainer's and a custom loop's: one epoch row in the run's
-        own metrics log plus each scalar at ``epoch`` in TensorBoard."""
+        """Epoch metric sink: one epoch row in the run's own metrics log plus each scalar at
+        ``epoch`` in TensorBoard."""
         self._epoch_sink(epoch, metrics)
         self._write_scalars(metrics, epoch)
 
     def log_batch(self, step: int, epoch: int, metrics: dict) -> None:
-        """Per-batch sink, the default trainer's and a custom loop's: one per-batch row at
-        ``step`` within ``epoch`` in the run's own metrics log (:meth:`_metrics_row`), the
-        Training tab's progress and never an epoch row, so ``epoch_hook`` does not fire; plus each
-        scalar at ``step`` in TensorBoard. The caller chooses the cadence."""
+        """Per-batch sink: one per-batch row at ``step`` within ``epoch`` in the run's own metrics
+        log (:meth:`_metrics_row`), never an epoch row, so ``epoch_hook`` does not fire; plus each
+        scalar at ``step`` in TensorBoard."""
         from tcip_mcp.experiments import EPOCH_KEY, METRICS_FILE, STEP_KEY, append_row
 
         append_row(self.run_dir / METRICS_FILE,

@@ -782,10 +782,7 @@ def test_a_full_frame_evaluation_merges_at_the_threshold_its_ground_truth_derive
 
 
 def test_evaluation_result_refuses_a_key_extra_shares_with_common():
-    """A key present in both common and extra is a programming error, not a precedence rule:
-    extra silently shadowing a common identity field (or the reverse) would defeat the
-    unification evaluation_result exists to enforce, so this refuses naming the key rather than
-    pick a winner."""
+    """A key present in both common and extra is refused naming the key."""
     from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
 
     common = {
@@ -804,10 +801,8 @@ def test_evaluation_result_refuses_a_key_extra_shares_with_common():
 # --------------------------------------------------------------------------
 
 torchvision = pytest.importorskip("torchvision")
-from torch.utils.data import DataLoader  # noqa: E402
 
-from tcip_mcp.pipelines.training.generic_trainer import train
-from tcip_mcp.pipelines.training.collation import task_collate
+from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train  # noqa: E402
 from tests._producer_fixtures import run_over  # noqa: E402
 from tests._training_values import adamw_optimizer  # noqa: E402
 from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
@@ -845,21 +840,27 @@ def _stored(tmp_path, annotations, size: int = 100):
     return json_io.read_label_document(key)
 
 
-def _cfg(model_source, data: dict) -> dict:
+def _cfg(model_source, data: dict, **overrides) -> dict:
     from tests._chain_fixtures import training_config
 
-    return training_config(model_source, data, optimizer=adamw_optimizer())
+    return training_config(model_source, data, optimizer=adamw_optimizer(), **overrides)
+
+
+def _loaders(run, ds):
+    """``run``'s train and validation loaders, both over ``ds``
+    (``generic_trainer.run_loaders``)."""
+    return run_loaders(run, ds, ds)
 
 
 def test_validate_detection_returns_metrics_and_objective(tmp_path):
     ds, data = run_over("detection", str(_four_bud_images(tmp_path)), subject="bud")
-    loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     run = trainer_run(_cfg(BUILT_DETECTOR, data), tmp_path / "out", project=tmp_path,
                       has_val_loader=True, id="auto-run-23")
-    run = train(run, loader, val_loader=loader)  # no AttributeError on model.heads
+    loader, val_loader = _loaders(run, ds)
+    run = train(run, loader, val_loader=val_loader)  # no AttributeError on model.heads
 
     last = run.metrics_history[-1]
     for k in ("val_loss", "val_precision", "val_recall", "val_f1", "val_map50", "val_map",
@@ -886,7 +887,6 @@ def test_train_center_match_trait_records_governing_criterion(tmp_path):
     from tcip_mcp.pipelines.training.envelope import TrainContext
 
     ds, data = run_over("detection", str(_four_bud_images(tmp_path)), subject="bud")
-    loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
@@ -896,7 +896,8 @@ def test_train_center_match_trait_records_governing_criterion(tmp_path):
     out_dir.mkdir()
     (out_dir / METRICS_FILE).touch()
     run = trainer_run(cfg, out_dir, project=tmp_path, has_val_loader=True, id="auto-run-24")
-    ctx = TrainContext(run=run, train_loader=loader, val_loader=loader)
+    loader, val_loader = _loaders(run, ds)
+    ctx = TrainContext(run=run, train_loader=loader, val_loader=val_loader)
     run = ctx.default_train()
     ctx.tb.close()
 
@@ -920,13 +921,13 @@ def test_validate_classification_metrics(tmp_path):
         w.writerow(("stem", "label"))
         w.writerows(rows)
     ds, data = run_over("classification", str(images_dir), str(csv_path))
-    loader = DataLoader(ds, batch_size=3, collate_fn=task_collate("classification"))
 
     model_source = {"builder": BESPOKE_CLASSIFIER,
                     "task": "classification"}
-    run = trainer_run(_cfg(model_source, data), tmp_path / "out", project=tmp_path,
+    run = trainer_run(_cfg(model_source, data, batch_size=3), tmp_path / "out", project=tmp_path,
                       has_val_loader=True, id="auto-run-25")
-    run = train(run, loader, val_loader=loader)
+    loader, val_loader = _loaders(run, ds)
+    run = train(run, loader, val_loader=val_loader)
 
     assert run.status == "completed", run.status_error
     last = run.metrics_history[-1]

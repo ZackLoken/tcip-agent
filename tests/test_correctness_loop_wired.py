@@ -390,10 +390,9 @@ def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(tmp_path,
     import csv
 
     from PIL import Image
-    from torch.utils.data import DataLoader
 
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
-    from tcip_mcp.pipelines.training.collation import task_collate
+    from tcip_mcp.pipelines.training.generic_trainer import run_loaders
 
     monkeypatch.chdir(tmp_path)
     imgs, table = tmp_path / "images" / UNDATED_BUCKET, tmp_path / "labels.csv"
@@ -416,10 +415,10 @@ def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(tmp_path,
     assert (resolved.num_channels, resolved.num_classes) == (3, 3)
     config = training_config({"builder": BESPOKE_CLASSIFIER, "task": "classification"},
                              resolved.record())
-    loader = DataLoader(train_ds, batch_size=2, collate_fn=task_collate("classification"))
-    ctx = TrainContext(run=trainer_run(config, tmp_path / "out", project=tmp_path,
-                                       has_val_loader=False, id="auto-run-62"),
-                       train_loader=loader, val_loader=None)
+    run = trainer_run(config, tmp_path / "out", project=tmp_path, has_val_loader=False,
+                      id="auto-run-62")
+    loader, _ = run_loaders(run, train_ds, None)
+    ctx = TrainContext(run=run, train_loader=loader, val_loader=None)
 
     report = ctx.check_contract()
     over = ctx.overfit_check(steps=3)

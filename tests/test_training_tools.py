@@ -1,6 +1,7 @@
 """Tests for training_tools: validator/StageSpec alignment, HPO param plumbing, HPO trial
-reporting (per-epoch trace + failed-trial sentinels), HPO/train regime parity, experiment
-immutability on relaunch, and canonical-format confidence parsing in get_worst_predictions."""
+reporting (each epoch as it completes; only a completed trial can be the sweep's best),
+HPO/train regime parity, experiment immutability on relaunch, and canonical-format confidence
+parsing in get_worst_predictions."""
 
 from __future__ import annotations
 
@@ -11,11 +12,11 @@ from pathlib import Path
 
 import pytest
 
-from tests._chain_fixtures import BESPOKE_CLASSIFIER, BESPOKE_DETECTION, training_config
+from tests._chain_fixtures import (
+    BESPOKE_CLASSIFIER, BESPOKE_DETECTION, TRAIN_BESPOKE, training_config,
+)
 from tests._training_values import evaluation_block
 
-# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
-# test's pinned platform state root so trait="bud_opening" call sites keep resolving.
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
@@ -52,14 +53,13 @@ def _damaged(image: Path, stored: bytes) -> None:
 
 
 # --------------------------------------------------------------------------
-# preflight_config: per-stage 'lr' is optional (trainer never reads it)
+# preflight_config: stages
 # --------------------------------------------------------------------------
 
 def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    # launch_training's own default stage shape: freeze_to + epochs, no lr.
     cfg = training_config(
         {"builder": BESPOKE_DETECTION, "task": "detection"}, _labeled(tmp_path),
         stages=[{"freeze_to": -1, "epochs": 5}, {"freeze_to": 2, "epochs": 10}])
@@ -78,9 +78,7 @@ def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
 
 
 def test_preflight_config_refuses_a_nested_training_section_by_name(tmp_path):
-    """The config has one placement: a ``training`` section is refused naming the move, since
-    every key under it would be read by nothing and the run would train at the trainer's own
-    defaults in silence."""
+    """The config has one placement: a ``training`` section is refused naming the move."""
     from tcip_mcp.tools.training_tools import preflight_config
 
     flat = training_config({"builder": BESPOKE_DETECTION, "task": "detection"},
@@ -419,9 +417,8 @@ def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
 
 
 def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(tmp_path):
-    """``TrainingSection``/``TrainConfigSchema`` both allow extra keys of any type, so a
-    non-mapping ``evaluation`` block reaches ``eval_cfg.get(...)`` unchecked; it must become a
-    named issue, not an ``AttributeError`` that crashes the whole preflight call."""
+    """A non-mapping ``evaluation`` block is a named issue, never an exception that crashes the
+    preflight call."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -568,29 +565,44 @@ def _built_groups(config: dict) -> list[tuple[float, float]]:
     from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
     from tests.tiny_trainer_fixtures import build_two_rate_regressor
 
-    spec = train_config(config).default_trainer_regime().optimizer
+    regime = train_config(config).trainer_reads().regime
+    assert regime is not None
+    spec = regime.optimizer
     optimizer = build_optimizer(spec, build_two_rate_regressor(),
                                 backbone_lr=spec.backbone_lr, head_lr=spec.head_lr)
     return [(g["lr"], g["weight_decay"]) for g in optimizer.param_groups]
 
 
-@pytest.mark.parametrize("training_source", [None, "my_loops:train"])
-def test_a_detector_config_refuses_an_unstated_validation_conf_under_any_trainer(
-        training_source):
-    """A detector's validation counts boxes at the run's own ``evaluation.conf_threshold``, under
-    the default trainer or a loop of its own: a detector config stating none refuses naming it,
-    one stating it is admitted, and a head that counts no boxes needs none."""
+@pytest.mark.parametrize("training_source", [None, TRAIN_BESPOKE])
+@pytest.mark.parametrize("unstated, named", [
+    ("evaluation", "evaluation.conf_threshold unstated"),
+    ("batch_size", "batch_size unstated"),
+    ("stages", "['stages'] unstated")])
+def test_the_launch_door_refuses_what_a_trainer_reads_unstated_and_the_schema_admits_it(
+        tmp_path, training_source, unstated, named):
+    """What a trainer reads is asked at the launch door, never by the schema: a detector config
+    stating no ``evaluation.conf_threshold`` or no ``batch_size``, under the default trainer or a
+    loop of its own, and a default-trainer config stating no ``stages``, are each refused by
+    ``preflight_config`` naming the key, while ``train_config`` admits each as a checkpoint's
+    config; a config naming its own loop and no ``stages`` is admitted by the door. A head that
+    counts no boxes needs no confidence."""
     from tcip_mcp.pipelines.schemas import train_config
+    from tcip_mcp.tools.training_tools import preflight_config
 
     loop = {} if training_source is None else {"training_source": training_source}
-    detector = training_config({"builder": BESPOKE_DETECTION, "task": "detection"}, {}, **loop)
-    with pytest.raises(ValueError, match=r"evaluation\.conf_threshold"):
-        train_config({**detector, "evaluation": {}})
-    assert train_config(detector).evaluation.conf_threshold == (
-        detector["evaluation"]["conf_threshold"])
+    config = training_config({"builder": BESPOKE_DETECTION, "task": "detection"},
+                             _labeled(tmp_path), **loop)
+    config.pop(unstated)
+    report = preflight_config(tmp_path, config)
+    if unstated == "stages" and training_source is not None:
+        assert report["valid"] is True, report["issues"]
+    else:
+        assert any(named in issue for issue in report["issues"]), report["issues"]
+    train_config(config)
+
     classifier = training_config({"builder": BESPOKE_CLASSIFIER, "task": "classification"}, {},
                                  evaluation={}, **loop)
-    assert train_config(classifier).evaluation.conf_threshold is None
+    assert train_config(classifier).trainer_reads().conf_threshold is None
 
 
 def _applied(base: dict, params: dict) -> dict:
@@ -655,8 +667,8 @@ def test_apply_hpo_params_refuses_a_dotted_key_through_a_non_mapping_intermediat
 
 
 def test_preflight_points_covers_every_categorical_choice_and_both_numeric_bounds():
-    """The preflight checks more than the first corner: one point per categorical choice, and one
-    point per numeric bound (low and high)."""
+    """The preflight checks more than the first corner: every categorical choice and both numeric
+    bounds (low and high) are held by some point, and no point is listed twice."""
     from tcip_mcp.tools.training_tools import _preflight_points
 
     space = {
@@ -665,17 +677,43 @@ def test_preflight_points_covers_every_categorical_choice_and_both_numeric_bound
     }
     points = _preflight_points(space, "random")
 
-    builder_values = {p["model_source.builder"] for _, p in points if "model_source.builder" in p}
-    assert builder_values == {"a:b", "c:d", "e:f"}
-    lr_values = {p["optimizer.head_lr"] for label, p in points
-                 if "optimizer.head_lr" in p and "optimizer.head_lr" in label}
-    assert lr_values == {1e-5, 1e-2}
+    assert {p["model_source.builder"] for _, p in points} == {"a:b", "c:d", "e:f"}
+    assert {p["optimizer.head_lr"] for _, p in points} == {1e-5, 1e-2}
+    held = [sorted(p.items()) for _, p in points]
+    assert len(held) == len({repr(p) for p in held}) == 4, points
+
+    repeated = _preflight_points({"batch_size": {"type": "categorical", "choices": [2, 4, 4]}},
+                                 "random")
+    assert [p for _, p in repeated] == [{"batch_size": 2}, {"batch_size": 4}], repeated
+
+
+def test_a_trials_combined_point_is_admitted_as_the_launch_door_admits_it(tmp_path):
+    """Each point a sweep checks before it opens can pass while a combination of two axes away
+    from the corner does not: a default-trainer config with no ``stages``. Its trial ends failed
+    naming why, resolving nothing; a combination the door admits opens its trial resolved."""
+    from tcip_mcp.experiments import RUN_FILE, observe, read_record
+    from tcip_mcp.tools.training_tools import open_trial
+    from tests._verified_checkpoint_fixtures import opened_sweep
+
+    base = training_config({"builder": BESPOKE_DETECTION, "task": "detection"},
+                           _labeled(tmp_path))
+    sweep = opened_sweep(tmp_path, base, param_space={
+        "training_source": {"type": "categorical", "choices": [TRAIN_BESPOKE, None]},
+        "stages": {"type": "categorical", "choices": [base["stages"], None]}})
+
+    refused = open_trial(sweep, "refused", {"training_source": None, "stages": None})
+    final = observe(refused).final
+    assert final is not None and final["state"] == "failed"
+    assert "['stages'] unstated" in final["status_error"]
+    assert read_record(refused / RUN_FILE)["resolved"] is None
+    admitted = open_trial(sweep, "admitted", {"training_source": TRAIN_BESPOKE, "stages": None})
+    assert observe(admitted).final is None
+    assert read_record(admitted / RUN_FILE)["resolved"] is not None
 
 
 # --------------------------------------------------------------------------
-# _run_hpo_trial: reports the composite (lower=better) each epoch + final, with
-# failed / empty trials reporting +inf so a dead trial can never win a min sweep.
-# The trial runs directly (no Ray) so the training machinery can be stubbed.
+# _run_hpo_trial: each epoch's selection value is reported as it completes; only a completed
+# trial is eligible for the sweep's best. Run directly (no Ray) so training can be stubbed.
 # --------------------------------------------------------------------------
 
 class _FakeDataset:
@@ -692,27 +730,38 @@ class _TiledFakeDataset(_FakeDataset):
     overlap = 0.2
 
 
-def _detection_base() -> dict:
+def _detection_base(project: Path) -> dict:
+    """A detection base config over :func:`_labeled`'s frames under ``project``, selecting on
+    the loss."""
     return training_config({"builder": BESPOKE_DETECTION, "task": "detection"},
-                           {"images_dir": "imgs"})
+                           _labeled(project), evaluation=evaluation_block(selection_metric="loss"))
 
 
-def _trial(point: dict, report, base: dict, project: Path, name: str = "t0", *,
-           metric: str = "loss", higher_is_better: bool = False) -> Path:
-    """One HPO trial ``name`` run as its sweep runs it (``_run_hpo_trial``), under one sweep of
-    ``project`` over ``base`` optimizing ``metric`` in its direction, the sweep's record written
-    by the writer its opening uses (``experiments.write_record``) on its first trial. Returns
-    the trial's run directory."""
+def _classifier_base(project: Path, **overrides) -> dict:
+    """A classification base config over :func:`_labeled`'s frames under ``project``, selecting
+    on accuracy, ``overrides`` in place of their keys."""
+    return training_config({"builder": BESPOKE_CLASSIFIER, "task": "classification"},
+                           _labeled(project), evaluation={"selection_metric": "accuracy"},
+                           **overrides)
+
+
+def _the_sweep(project: Path) -> Path:
+    """The one sweep directory of ``project``."""
     from tcip_mcp import experiments
-    from tcip_mcp.audit import now_iso
-    from tcip_mcp.tools.training_tools import _run_hpo_trial
 
-    sweep = experiments.experiment_dir("hpo_trials", project=project)
-    if not sweep.is_dir():
-        experiments.create_run_directory(sweep)
-        experiments.write_record(sweep / experiments.SWEEP_FILE, {
-            "created": now_iso(), "input": {"base_config": base, "split_draws": 1},
-            "objective": {"selection_metric": metric, "higher_is_better": higher_is_better}})
+    (sweep,) = experiments.sweep_dirs(project)
+    return sweep
+
+
+def _trial(point: dict, report, base: dict, project: Path, name: str = "t0") -> Path:
+    """One HPO trial ``name`` run as its sweep runs it (``_run_hpo_trial``), under the one sweep
+    of ``project`` over ``base`` the sweep door opens (``opened_sweep``) on its first trial.
+    Returns the trial's run directory."""
+    from tcip_mcp import experiments
+    from tcip_mcp.tools.training_tools import _run_hpo_trial
+    from tests._verified_checkpoint_fixtures import opened_sweep
+
+    sweep = _the_sweep(project) if experiments.sweep_dirs(project) else opened_sweep(project, base)
     _run_hpo_trial(point, report, sweep, name)
     return sweep / f"{sweep.name}_{name}"
 
@@ -741,10 +790,9 @@ def _sweep_outcome(project: Path) -> dict:
 
 
 def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
-    """Stub dataset building + training + loaders so a trial runs instantly, no Ray: the
-    resolution builds stand-in datasets and records no samples, and the child builds the same
-    stand-ins from that record."""
-    import torch.utils.data as tud
+    """Stub dataset building + training so a trial runs instantly, no Ray: the resolution builds
+    stand-in datasets and records no samples, and the child builds the same stand-ins from that
+    record."""
     from tcip_mcp.pipelines.data import samplers
     from tcip_mcp.pipelines.data import split_construction as sc
     from tcip_mcp.pipelines.training import generic_trainer as gt
@@ -762,7 +810,6 @@ def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
     monkeypatch.setattr(sc, "recorded_datasets", lambda *a, **k: (ds, ds))
     monkeypatch.setattr(gt, "train", fake_train)
     monkeypatch.setattr(samplers, "build_sampler", lambda *a, **k: None)
-    monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())
 
 
 def _spaces_searched(monkeypatch) -> list:
@@ -801,7 +848,7 @@ def test_run_hpo_trial_reports_each_epoch_and_its_result_is_the_best_of_them(
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
     reported: list = []
-    _trial({"optimizer.head_lr": 3e-4}, reported.append, _detection_base(), tmp_path)
+    _trial({"optimizer.head_lr": 3e-4}, reported.append, _detection_base(tmp_path), tmp_path)
     assert reported == [50.0, 40.0, 30.0]
     assert _sweep_outcome(tmp_path)["best_value"] == 30.0
 
@@ -818,7 +865,8 @@ def test_run_hpo_trial_that_fails_has_no_result(monkeypatch, tmp_path):
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
     reported: list = []
-    trial_dir = _trial({"optimizer.head_lr": 3e-4}, reported.append, _detection_base(), tmp_path)
+    trial_dir = _trial({"optimizer.head_lr": 3e-4}, reported.append, _detection_base(tmp_path),
+                       tmp_path)
     assert reported == []
     assert observe(trial_dir).state == "failed"
     assert _sweep_outcome(tmp_path)["best_value"] is None
@@ -838,12 +886,8 @@ def test_run_hpo_trial_result_is_the_highest_value_for_a_higher_is_better_metric
         return _complete(run)
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
-    base = training_config({"builder": BESPOKE_CLASSIFIER, "task": "classification"},
-                           {"images_dir": "imgs"},
-                           evaluation={"selection_metric": "accuracy"})
     reported: list = []
-    _trial({"optimizer.head_lr": 3e-4}, reported.append, base, tmp_path, metric="accuracy",
-           higher_is_better=True)
+    _trial({"optimizer.head_lr": 3e-4}, reported.append, _classifier_base(tmp_path), tmp_path)
     assert reported == [0.5, 0.9, 0.6]
     assert _sweep_outcome(tmp_path)["best_value"] == 0.9
 
@@ -855,11 +899,9 @@ def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
     is the one completed trial's, never the failed one's."""
     pytest.importorskip("torch")
 
-    base = training_config({"builder": BESPOKE_CLASSIFIER, "task": "classification"},
-                           {"images_dir": "imgs"},
-                           evaluation={"selection_metric": "accuracy"})
+    base = _classifier_base(tmp_path)
 
-    def fake_train_ok(run, train_loader, val_loader, task="classification",
+    def fake_train_ok(run, train_loader, val_loader,
                       epoch_callback=None, batch_callback=None, resume_from=""):
         if epoch_callback:
             epoch_callback(0, _row(0.7, metric="accuracy"))
@@ -867,17 +909,15 @@ def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train_ok)
     real: list = []
-    _trial({"optimizer.head_lr": 3e-4}, real.append, base, tmp_path, "real", metric="accuracy",
-           higher_is_better=True)
+    _trial({"optimizer.head_lr": 3e-4}, real.append, base, tmp_path, "real")
 
-    def fake_train_fails(run, train_loader, val_loader, task="classification",
+    def fake_train_fails(run, train_loader, val_loader,
                          epoch_callback=None, batch_callback=None, resume_from=""):
         raise RuntimeError("boom")
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train_fails)
     failed: list = []
-    _trial({"optimizer.head_lr": 1e-2}, failed.append, base, tmp_path, "failed", metric="accuracy",
-           higher_is_better=True)
+    _trial({"optimizer.head_lr": 1e-2}, failed.append, base, tmp_path, "failed")
 
     outcome = _sweep_outcome(tmp_path)
     assert (outcome["best_params"], outcome["best_value"]) == ({"optimizer.head_lr": 3e-4}, 0.7)
@@ -897,8 +937,7 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
         return run
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=captured)
-    base = training_config({"builder": BESPOKE_CLASSIFIER, "task": "classification"},
-                           {"images_dir": "imgs"}, augmentation={"horizontal_flip": 0.5})
+    base = _classifier_base(tmp_path, augmentation={"horizontal_flip": 0.5})
     _trial({"optimizer.head_lr": 3e-4}, [].append, base, tmp_path)
     assert captured["transforms"] is not None       # augmentation was built + passed
     assert captured["model_source"]["builder"] == BESPOKE_CLASSIFIER
@@ -914,7 +953,7 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_data_cfg_handed_to_auto_trai
 
     captured: dict = {}
     _patch_hpo_trial_machinery(monkeypatch, _completed_train, captured=captured)
-    _trial({"data.split.seed": 7}, [].append, _detection_base(), tmp_path)
+    _trial({"data.split.seed": 7}, [].append, _detection_base(tmp_path), tmp_path)
     assert captured["data"].split.seed == 7
 
 
@@ -939,7 +978,7 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_trials_own_records(monkeypat
     from tcip_mcp.pipelines.data import split_construction as sc
     monkeypatch.setattr(sc, "auto_train_val", _fake_auto_train_val_serving_tiles)
 
-    trial_dir = _trial({"data.split.seed": 7}, [].append, _detection_base(), tmp_path)
+    trial_dir = _trial({"data.split.seed": 7}, [].append, _detection_base(tmp_path), tmp_path)
 
     run = read_record(trial_dir / RUN_FILE)
     assert run["config"]["data"]["split"]["seed"] == 7
@@ -960,7 +999,7 @@ def test_run_hpo_trial_geometry_stamp_from_a_tiled_dataset_reaches_the_resolved_
     from tcip_mcp.pipelines.data import split_construction as sc
     monkeypatch.setattr(sc, "auto_train_val", _fake_auto_train_val_serving_tiles)
 
-    trial_dir = _trial({"data.split.seed": 7}, [].append, _detection_base(), tmp_path)
+    trial_dir = _trial({"data.split.seed": 7}, [].append, _detection_base(tmp_path), tmp_path)
 
     assert read_record(trial_dir / RUN_FILE)["resolved"]["data"]["tiling"]["tile_size"] == 224
 
@@ -984,12 +1023,10 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
          "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
          "split": {"val_ratio": 0.25, "holdout_ratio": 0.1, "calibration_ratio": 0}})
 
-    import torch.utils.data as tud
     from tcip_mcp.pipelines.data import samplers
     from tcip_mcp.pipelines.training import generic_trainer as gt
     monkeypatch.setattr(gt, "train", _completed_train)
     monkeypatch.setattr(samplers, "build_sampler", lambda *a, **k: None)
-    monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())
 
     trial_dir = _trial({"data.split.seed": 3}, [].append, base, tmp_path)
 
@@ -1015,7 +1052,8 @@ def test_a_trials_launch_record_carries_the_seed_it_trained_under(monkeypatch, t
         return run
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
-    trial_dir = _trial({"optimizer.head_lr": 3e-4}, [].append, _detection_base(), tmp_path)
+    trial_dir = _trial({"optimizer.head_lr": 3e-4}, [].append, _detection_base(tmp_path),
+                       tmp_path)
 
     recorded = read_record(trial_dir / RUN_FILE)["config"]["seed"]
     assert recorded is not None and recorded == captured["seed"]
@@ -1041,7 +1079,7 @@ def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(tmp_
         builder_kwargs={"good_calls": 1}, batch_size=4,
         data={"images_dir": str(images_dir), "labels_dir": str(csv_path), "auto_val": False})
     reported: list = []
-    _trial({}, reported.append, base_config, tmp_path, metric="loss")
+    _trial({}, reported.append, base_config, tmp_path)
 
     import math
     assert math.isfinite(reported[0])  # epoch 1's real score, reported before the run died
@@ -1090,9 +1128,8 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path):
 def test_a_launch_config_that_json_cannot_hold_is_refused_before_the_run_starts(
     tmp_path, monkeypatch
 ):
-    """The caller's config is stored twice, as the launch config and as the experiment's
-    snapshot, so the field that will not encode is named before either write and before a
-    subprocess is spawned for a run whose provenance could not be recorded."""
+    """The caller's config reaches the run's record, so the field that will not encode is named
+    before any write and before a subprocess is spawned."""
     from tcip_mcp.tools import training_tools
 
     monkeypatch.chdir(tmp_path)
@@ -1107,8 +1144,8 @@ def test_a_launch_config_that_json_cannot_hold_is_refused_before_the_run_starts(
 
 
 def test_an_ordinary_launch_config_passes_the_boundary_to_preflight(tmp_path, monkeypatch):
-    """The refusal above must not stop a legitimate config: it reaches preflight and comes
-    back with preflight's own verdict rather than a refusal from the boundary check."""
+    """The refusal above must not stop a legitimate config: it reaches preflight admitted, with
+    no issue."""
     from tcip_mcp.tools import training_tools
 
     monkeypatch.chdir(tmp_path)
@@ -1119,13 +1156,14 @@ def test_an_ordinary_launch_config_passes_the_boundary_to_preflight(tmp_path, mo
         return {"valid": False, "issues": ["stub"]}, None
 
     monkeypatch.setattr(training_tools, "_preflight", stub_preflight)
+    config = training_config({"builder": BESPOKE_DETECTION, "task": "detection"},
+                             _labeled(tmp_path))
 
-    result = training_tools.launch_training(tmp_path, {"model_source": {"builder": "m:f"}},
-                                            actor=None)
+    result = training_tools.launch_training(tmp_path, config, actor=None)
 
     assert result == {"error": "Invalid config", "issues": ["stub"]}
     [(spec, issues)] = seen
-    assert spec is None and any(issue.startswith("model_source.task") for issue in issues)
+    assert spec is not None and issues == []
 
 
 def test_a_sweep_payload_that_json_cannot_hold_is_refused_before_any_trial_runs(
@@ -1191,15 +1229,16 @@ def test_an_ordinary_sweep_payload_still_runs_its_search(tmp_path, monkeypatch):
     assert seen == [_CHOICE_SPACE]
 
 
-@pytest.mark.parametrize("choices", [[-1.0, 1e-3], [1e-3, -1.0]],
-                         ids=["the-first-corner", "a-later-corner"])
+@pytest.mark.parametrize("choices, label", [
+    ([-1.0, 1e-3], "the first sampled point"), ([1e-3, -1.0], "optimizer.head_lr=-1.0")],
+    ids=["the-first-corner", "a-later-corner"])
 def test_a_sweep_opens_over_a_base_omitting_what_its_space_sweeps_and_refuses_an_invalid_point(
-    tmp_path, monkeypatch, choices,
+    tmp_path, monkeypatch, choices, label,
 ):
     """A base config may leave unstated what its search space names: the sweep validates each
     point applied to it, so a base omitting ``optimizer.head_lr`` opens over a space naming it,
-    and a corner whose applied config the schema refuses is named by its path with nothing
-    opened, whether it is the first corner or a later one."""
+    and a corner whose applied config the schema refuses is named by its path and its point's
+    label with nothing opened, whether it is the first corner or a later one."""
     from tcip_mcp import experiments
     from tcip_mcp.tools import training_tools
     from tests._verified_checkpoint_fixtures import SWEEP_ARGUMENTS
@@ -1215,6 +1254,7 @@ def test_a_sweep_opens_over_a_base_omitting_what_its_space_sweeps_and_refuses_an
         actor=None, **arguments)
 
     assert isinstance(refused, dict), refused
+    assert refused["error"] == f"the sweep's base config fails preflight at {label}", refused
     assert any(issue.startswith("optimizer.head_lr") for issue in refused["issues"]), refused
     assert experiments.sweep_dirs(tmp_path) == []
 
@@ -1307,9 +1347,7 @@ def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_a
     pytest.importorskip("torch")
     import math
 
-    from tcip_mcp.experiments import (
-        RUN_FILE, experiment_dir, observe, read_record, request_cancel,
-    )
+    from tcip_mcp.experiments import RUN_FILE, observe, read_record, request_cancel
     from tests.tiny_trainer_fixtures import regressor_config, write_regression_dataset
 
     images_dir, csv_path = write_regression_dataset(
@@ -1324,9 +1362,9 @@ def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_a
         # already on record by the time the sweep's cancel takes effect mid-training.
         reported.append(value)
         if len(reported) == 1:
-            request_cancel(experiment_dir("hpo_trials", project=tmp_path))
+            request_cancel(_the_sweep(tmp_path))
 
-    trial_dir = _trial({}, report, base_config, tmp_path, metric="loss")
+    trial_dir = _trial({}, report, base_config, tmp_path)
 
     assert math.isfinite(reported[0])  # epoch 1's real score, reported before the cancel
     assert observe(trial_dir).state == "canceled"

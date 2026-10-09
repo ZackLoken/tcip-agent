@@ -38,10 +38,9 @@ def _config(stages: list[dict], **extra) -> dict:
     return regressor_config(**{"seed": 3, "stages": stages, **extra})
 
 
-def _train(tmp_path, config: dict, name: str, *, shuffle_seed=None, **kwargs):
-    train_loader, val_loader = opposed_regression_loaders(
-        TRAIN_INTENSITIES, VAL_INTENSITIES, shuffle_seed=shuffle_seed)
+def _train(tmp_path, config: dict, name: str, **kwargs):
     run = trainer_run(config, tmp_path / name, project=tmp_path, has_val_loader=True, id=name)
+    train_loader, val_loader = opposed_regression_loaders(run, TRAIN_INTENSITIES, VAL_INTENSITIES)
     return train(run, train_loader, val_loader=val_loader, **kwargs)
 
 
@@ -143,7 +142,9 @@ def test_a_resume_puts_back_the_buffer_and_the_tensor_setting_its_capture_holds(
     from tests._chain_fixtures import built_model
 
     config = _config([{"freeze_to": 0, "epochs": 1}], builder=COUNTING_REGRESSOR)
-    stated = train_config(config).default_trainer_regime().optimizer
+    regime = train_config(config).trainer_reads().regime
+    assert regime is not None
+    stated = regime.optimizer
 
     def built_pair():
         model = built_model(config)
@@ -213,12 +214,12 @@ def test_a_run_resumed_across_a_stage_boundary_trains_as_the_uninterrupted_run(
                      early_stopping={"enabled": True, "patience": 1, "min_delta": 1e-4},
                      checkpoint_every_n_epochs=1, stage_warmup_epochs=warmup_epochs,
                      scheduler=schedule(scheduler))
-    straight = _train(tmp_path, config, "straight", shuffle_seed=11)
+    straight = _train(tmp_path, config, "straight")
     assert straight.status == "completed", straight.status_error
     assert len(straight.metrics_history) > resume_epoch
 
     checkpoint = tmp_path / "straight" / f"checkpoint_epoch_{resume_epoch}.pt"
-    resumed = _train(tmp_path, config, "resumed", shuffle_seed=11, resume_from=str(checkpoint))
+    resumed = _train(tmp_path, config, "resumed", resume_from=str(checkpoint))
     assert resumed.status == "completed", resumed.status_error
 
     keys = ("stage", "lr", "train_loss", "val_loss", "selection")
@@ -348,19 +349,3 @@ def test_a_onecycle_schedule_trains_at_the_stated_sgd_momentum():
     scheduler.step()
 
     assert [g["momentum"] for g in optimizer.param_groups] == [spec.optimizer.momentum]
-
-
-def test_a_loader_stating_no_batch_size_is_refused(tmp_path):
-    from torch.utils.data import BatchSampler, DataLoader, SequentialSampler
-
-    from tcip_mcp.pipelines.training.collation import task_collate
-    from tests.tiny_trainer_fixtures import ConstantImageDataset
-
-    dataset = ConstantImageDataset(TRAIN_INTENSITIES, [2.0 * c for c in TRAIN_INTENSITIES])
-    loader = DataLoader(dataset, batch_sampler=BatchSampler(SequentialSampler(dataset), 2, False),
-                        collate_fn=task_collate("regression"))
-    assert loader.batch_size is None
-    run = trainer_run(_config([{"freeze_to": 0, "epochs": 1}]), tmp_path / "sampled",
-                      project=tmp_path, has_val_loader=False, id="sampled")
-    run = train(run, loader)
-    assert run.status == "failed" and "batch_size" in run.status_error

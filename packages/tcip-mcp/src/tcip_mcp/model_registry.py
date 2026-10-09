@@ -137,7 +137,7 @@ def entry_facts(entry: dict) -> dict:
     from tcip_mcp.pipelines.model_build import METRICS_KEY
 
     checkpoint = VerifiedCheckpoint(
-        path=entry["checkpoint_path"], sha256=entry["sha256"], entry=entry,
+        path=entry["checkpoint_path"], entry=entry,
         payload=checkpoint_payload(entry["checkpoint_path"], entry["sha256"]))
     if entry["experiment_id"] is None:
         metrics, source = entry["metrics"], "caller"
@@ -171,12 +171,16 @@ class VerifiedCheckpoint:
 
     path: str
     """The path the caller named, as given."""
-    sha256: str
-    """The digest of the exact bytes ``payload`` was unpickled from."""
     payload: dict
     """The loaded checkpoint, read with ``weights_only=True``."""
     entry: dict
-    """The one registered entry of this digest (:func:`registered_entries`)."""
+    """The one registered entry of the digest of the bytes ``payload`` was unpickled from
+    (:func:`registered_entries`)."""
+
+    @property
+    def sha256(self) -> str:
+        """The digest of the exact bytes ``payload`` was unpickled from, its entry's."""
+        return self.entry["sha256"]
 
     @property
     def experiment_id(self) -> str | None:
@@ -192,9 +196,8 @@ class VerifiedCheckpoint:
     @cached_property
     def spec(self) -> TrainConfigSchema:
         """The run config the checkpoint's payload carries, validated once
-        (``schemas.train_config``, which refuses (``ValueError``) one that is invalid or absent).
-        The config validates whole, so a registered checkpoint's config states the training
-        regime its trainer would read."""
+        (``schemas.train_config``, which refuses (``ValueError``) one that is invalid or absent):
+        a config stating its ``model_source`` and ``data`` validates with no training regime."""
         from tcip_mcp.pipelines.model_build import CONFIG_KEY
         from tcip_mcp.pipelines.schemas import train_config
 
@@ -282,8 +285,7 @@ def load_registered_checkpoint(checkpoint_path: str | Path, *, project: Path) ->
     if entry is None:
         raise _unregistered_checkpoint_error(ckpt, digest, root)
     payload = _load_verified_payload(data, source=f"{ckpt} (sha256 {digest})")
-    return VerifiedCheckpoint(path=str(checkpoint_path), sha256=digest, payload=payload,
-                              entry=entry)
+    return VerifiedCheckpoint(path=str(checkpoint_path), payload=payload, entry=entry)
 
 
 def _write_registry_entry(txn: tcip_store.Txn, key: Key,

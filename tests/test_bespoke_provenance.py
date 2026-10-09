@@ -14,7 +14,7 @@ import pytest
 
 from tests._chain_fixtures import BESPOKE_CLASSIFIER, GT_ANCHOR_DETECTOR
 
-torch = pytest.importorskip("torch")
+pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 from tcip_mcp.pipelines.execution import Stated, prepare  # noqa: E402
@@ -32,14 +32,21 @@ def _model_source() -> dict:
             "task": "detection", "source_files": [__file__]}
 
 
-def _snapshot(config: dict, exp_dir: Path) -> dict:
+def _snapshot(config: dict, exp_dir: Path) -> tuple[dict, dict]:
     """``snapshot_model_source`` over a run of ``config``'s ``model_source`` over no data, its
-    other keys in place of :func:`~tests._chain_fixtures.training_config`'s, validated."""
+    other keys in place of :func:`~tests._chain_fixtures.training_config`'s, validated, beside
+    the config that run records (``TrainConfigSchema.record``)."""
     from tcip_mcp.pipelines.schemas import train_config
     from tests._chain_fixtures import training_config
 
     source = config.pop("model_source")
-    return snapshot_model_source(train_config(training_config(source, {}, **config)), exp_dir)
+    spec = train_config(training_config(source, {}, **config))
+    return snapshot_model_source(spec, exp_dir), spec.record()
+
+
+_SNAPSHOT_KEYS = {"files", "missing", "snapshot_errors"}
+"""What a source snapshot records: the files it copied, the ones it could not find and the
+modules it could not import; the names of the sources are the run's config's."""
 
 
 _DATA = {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}}
@@ -53,14 +60,16 @@ _DATA = {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}}
 def test_snapshot_model_source_copies_files_and_records_provenance(tmp_path):
     exp_dir = tmp_path / "exp"
     exp_dir.mkdir()
-    manifest = _snapshot({"model_source": _model_source(), "seed": 123}, exp_dir)
+    manifest, recorded = _snapshot({"model_source": _model_source(), "seed": 123}, exp_dir)
 
     expected_sha = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     entry = next(e for e in manifest["files"] if e["sha256"] == expected_sha)
     stored = (exp_dir / "model_src" / entry["file"]).read_bytes()  # content-addressed destination
     assert hashlib.sha256(stored).hexdigest() == expected_sha
-    assert manifest["builder"] == GT_ANCHOR_DETECTOR
-    assert "seed" not in manifest
+    builder_module = Path(bespoke_models.__file__).resolve()
+    assert any(Path(e["src"]).resolve() == builder_module for e in manifest["files"])
+    assert recorded["model_source"]["builder"] == GT_ANCHOR_DETECTOR
+    assert set(manifest) == _SNAPSHOT_KEYS
     assert manifest["missing"] == []
     assert manifest["snapshot_errors"] == []
 
@@ -75,7 +84,7 @@ def test_snapshot_model_source_records_missing_files(tmp_path):
     src = _model_source()
     missing_path = str(tmp_path / "does_not_exist.py")
     src["source_files"] = [__file__, missing_path]
-    manifest = _snapshot({"model_source": src}, exp_dir)
+    manifest, _ = _snapshot({"model_source": src}, exp_dir)
 
     assert manifest["missing"] == [missing_path]
     assert any(e["src"] == __file__ for e in manifest["files"])  # the real file still captured
@@ -84,7 +93,7 @@ def test_snapshot_model_source_records_missing_files(tmp_path):
 def test_snapshot_model_source_records_import_error(tmp_path):
     exp_dir = tmp_path / "exp"
     exp_dir.mkdir()
-    manifest = _snapshot(
+    manifest, _ = _snapshot(
         {"model_source": {"builder": "definitely_not_a_real_module_xyz:build",
                           "task": "detection"}}, exp_dir)
 
@@ -98,9 +107,7 @@ def test_snapshot_model_source_records_import_error(tmp_path):
 
 def test_snapshot_model_source_dedups_same_file_reached_two_ways(tmp_path):
     """The auto-appended builder module __file__ (absolute) and a differently-spelled
-    source_files entry for the same physical file (e.g. via a relative/dotted path) must dedup
-    by content, not merely by exact path-string equality: a naive ``str(p) in seen`` dedup
-    misses this because the two spellings never compare equal as strings."""
+    source_files entry for the same physical file (e.g. via a relative path) are one entry."""
     exp_dir = tmp_path / "exp"
     exp_dir.mkdir()
     real = Path(__file__).resolve()
@@ -111,7 +118,7 @@ def test_snapshot_model_source_dedups_same_file_reached_two_ways(tmp_path):
 
     src = _model_source()
     src["source_files"] = [str(real), alt_spelling]
-    manifest = _snapshot({"model_source": src}, exp_dir)
+    manifest, _ = _snapshot({"model_source": src}, exp_dir)
 
     expected_sha = hashlib.sha256(real.read_bytes()).hexdigest()
     matches = [e for e in manifest["files"] if e["sha256"] == expected_sha]
@@ -132,7 +139,7 @@ def test_snapshot_model_source_basename_collision_does_not_clobber(tmp_path):
 
     src = {"builder": GT_ANCHOR_DETECTOR, "task": "detection",
            "source_files": [str(a_dir / "model.py"), str(b_dir / "model.py")]}
-    manifest = _snapshot({"model_source": src}, exp_dir)
+    manifest, _ = _snapshot({"model_source": src}, exp_dir)
 
     a_path, b_path = str(a_dir / "model.py"), str(b_dir / "model.py")
     file_entries = [e for e in manifest["files"] if e["src"] in (a_path, b_path)]
@@ -147,16 +154,26 @@ def test_snapshot_model_source_basename_collision_does_not_clobber(tmp_path):
 
 # A pass rebuilds the bespoke model from its builder (no exec) and predicts.
 
+def _written_checkpoint(config: dict, path: Path, **payload) -> Path:
+    """A checkpoint of the model ``config`` builds, written at ``path`` by the trainer's own
+    writer (``generic_trainer.write_checkpoint``) carrying the config every checkpoint of a run
+    under it carries (``generic_trainer.checkpoint_config``), ``payload`` beside them."""
+    from tcip_mcp.pipelines.schemas import train_config
+    from tcip_mcp.pipelines.training.generic_trainer import checkpoint_config, write_checkpoint
+
+    return write_checkpoint({STATE_DICT_KEY: built_model(config).state_dict(),
+                             CONFIG_KEY: checkpoint_config(train_config(config)), **payload},
+                            path)
+
+
 def test_a_pass_rebuilds_a_bespoke_detector_and_predicts(tmp_path):
     from PIL import Image
 
     config = training_config(_model_source(), _DATA)
-    model = built_model(config)
-    assert isinstance(model, bespoke_models.BespokeGNDetector)  # built via the importable builder
+    assert isinstance(built_model(config), bespoke_models.BespokeGNDetector)
 
-    ckpt = tmp_path / "model_best.pt"
-    torch.save({STATE_DICT_KEY: model.state_dict(), METRICS_KEY: {"val_loss": 0.3, "epoch": 1},
-                CONFIG_KEY: config}, ckpt)
+    ckpt = _written_checkpoint(config, tmp_path / "model_best.pt",
+                               **{METRICS_KEY: {"val_loss": 0.3, "epoch": 1}})
 
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.model_tools import register_model
@@ -186,9 +203,7 @@ def test_predictor_loads_at_the_two_channels_its_run_recorded(tmp_path):
 
     src = {"builder": BESPOKE_CLASSIFIER, "task": "classification"}
     config = training_config(src, {"num_channels": 2, "num_classes": 2, "scope": {}})
-    model = built_model(config)
-    ckpt = tmp_path / "model_best.pt"
-    torch.save({STATE_DICT_KEY: model.state_dict(), CONFIG_KEY: config}, ckpt)
+    ckpt = _written_checkpoint(config, tmp_path / "model_best.pt")
 
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.model_tools import register_model
@@ -205,6 +220,24 @@ def test_predictor_loads_at_the_two_channels_its_run_recorded(tmp_path):
     np.save(img, arr)
     (out,) = p.predict([str(img)])
     assert out  # decoded and forwarded at 2 channels with no shape-mismatch error
+
+
+def test_a_checkpoint_stating_its_model_source_and_data_alone_registers_and_prepares(tmp_path):
+    """A foreign checkpoint whose config states what inference reads, the model source and the
+    data block, and no training regime, registers, loads and readies a pass."""
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.tools.model_tools import register_model
+
+    ckpt = _written_checkpoint({"model_source": _model_source(), "data": _DATA},
+                               tmp_path / "foreign.pt")
+    assert "error" not in register_model(tmp_path, name="foreign", checkpoint_path=str(ckpt))
+    checkpoint = load_registered_checkpoint(str(ckpt), project=tmp_path)
+
+    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
+
+    p = prepare(checkpoint, Stated(tile=False, conf=0.0, max_dets=SAMPLE_MAX_DETS),
+                device="cpu").runnable()
+    assert p.predictor.task == "detection"
 
 
 # A completed run's registry entry.

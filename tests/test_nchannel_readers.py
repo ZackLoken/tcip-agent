@@ -43,10 +43,7 @@ def test_build_dataset_grayscale_yields_one_channel(tmp_path):
 
 def test_grayscale_classification_end_to_end(tmp_path):
     pytest.importorskip("torchvision")
-    from torch.utils.data import DataLoader
-
-    from tcip_mcp.pipelines.training.generic_trainer import train
-    from tcip_mcp.pipelines.training.collation import task_collate
+    from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train
     from tests.tiny_trainer_fixtures import trainer_run
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -59,11 +56,11 @@ def test_grayscale_classification_end_to_end(tmp_path):
 
     ds, data = run_over("classification", str(images_dir), str(tmp_path / "labels.csv"),
                         stated={"num_channels": 1})
-    loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
     from tests._chain_fixtures import training_config
 
     cfg = training_config({"builder": BESPOKE_CLASSIFIER, "task": "classification"}, data)
-    run = train(trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
-                            id="auto-run-39"),
-                loader)
+    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
+                      id="auto-run-39")
+    loader, _ = run_loaders(run, ds, None)
+    run = train(run, loader)
     assert run.status == "completed"  # 1-channel data + 1-channel model trains end to end

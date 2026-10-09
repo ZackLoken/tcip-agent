@@ -704,8 +704,7 @@ def resolve_run(spec: TrainConfigSchema, *, project: Path, objective: dict | Non
         project, task, spec.data, run_transforms(spec), tallies_out=tallies_out)
     data = effective_data_geometry(data, train_ds)
     if objective is None:
-        objective = resolve_objective(spec, task, project=project,
-                                      has_val_loader=val_ds is not None)
+        objective = resolve_objective(spec, project=project, has_val_loader=val_ds is not None)
     return ResolvedRun(train_ds, val_ds, spec, data, partition, objective)
 
 

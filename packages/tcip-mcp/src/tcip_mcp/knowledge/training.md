@@ -64,7 +64,7 @@ The run ends when its last stage plateaus or runs its epochs.
 
 Early stopping and `model_best.pt` share the same selection criterion; there is no separate
 `metric`/`mode` key on `early_stopping`. Both are driven by `evaluation.selection_metric`
-(defaults to the composite objective for detection/instance_seg, `val_loss` otherwise), and both
+(defaults to the composite objective for detection/instance_seg, `loss` otherwise), and both
 compare in whichever direction `evaluation.HIGHER_IS_BETTER_BY_METRIC` declares for that metric,
 not always "lower wins": selecting on `f1` keeps the highest-F1 checkpoint, selecting on `loss`
 keeps the lowest-loss one. A `selection_metric` with no declared direction is refused. For a
@@ -90,11 +90,13 @@ The example below is representative, not exhaustive; the config is an open dict,
 reads (device/seed/deterministic/mixed_precision/stages/optimizer/scheduler/lr_scaling/
 stage_warmup_epochs/enforce_monotonic_unfreeze/gradient_accumulation_steps/
 checkpoint_every_n_epochs/log_every_n_batches/early_stopping). Read that docstring rather than assuming this
-example is complete. The tuned values ship no default: `schemas.TrainConfigSchema` and its
-`DefaultTrainerRegime` (the blocks the default trainer reads when no `training_source` names a
-loop of your own) say which a config states, a detector's `evaluation.conf_threshold` under any
-trainer, each stated by the config or swept by a search,
-and a config leaving one unstated is refused naming it. Every one of those keys, `evaluation` included, sits at the top level of
+example is complete. The tuned values ship no default: a launch (`preflight_config`,
+`launch_training`, a sweep's every checked point and every trial) requires `batch_size`, a detector's
+`evaluation.conf_threshold` under any trainer, and the `DefaultTrainerRegime` blocks (what the
+default trainer reads when no `training_source` names a loop of your own), each stated by the
+config or swept by a search, and refuses a config leaving one unstated, naming it. The schema
+itself requires only `model_source` and `data`, so a checkpoint's config validates as what
+inference reads. Every one of those keys, `evaluation` included, sits at the top level of
 the config beside `model_source` and `data`. There is no `training` section: a config that
 nests keys under one is refused by `preflight_config` by name, since nothing would read them.
 
@@ -209,10 +211,12 @@ run_hyperparameter_search(
 - `param_space` (required) names each swept value by its config key or a dotted path into one
   (`optimizer.head_lr`), each range or choice set from the data and the model in hand. The base
   config may leave a swept value unstated; every other value a training config requires it
-  states. Before the sweep starts its config is checked at the corner of every axis's first value
-  and at each choice and range end with the other axes held there; other combinations and a
-  range's interior are checked as each trial applies its point, a trial whose config refuses
-  ending failed.
+  states. Before the sweep starts its config is checked once at the corner of every axis's first
+  value and once at each other choice and range end with the other axes held there; other
+  combinations and a range's interior are checked as each trial applies its point: a trial whose
+  config the schema refuses opens nothing and errors naming why, and one the launch door's other
+  checks refuse (an unstated value the trainer reads, a source that will not import, a data
+  location that does not exist) ends failed naming why.
 - `search_seed` (required) seeds the search algorithm itself, native or backend, and is recorded
   in the sweep's input so a relaunch replays it; it is distinct from `data.split.seed`. The
   `17` above is an arbitrary example value.

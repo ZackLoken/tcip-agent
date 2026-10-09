@@ -29,7 +29,6 @@ def _scalar_steps(log_dir: Path, tag: str) -> list[int]:
 
 
 def test_classification_training_writes_train_and_val_scalars_every_epoch(tmp_path):
-    train_loader, val_loader = separable_classifier_loaders()
     config = classifier_config(3)
     from tcip_mcp.experiments import METRICS_FILE
     from tcip_mcp.pipelines.training.envelope import TrainContext
@@ -38,6 +37,7 @@ def test_classification_training_writes_train_and_val_scalars_every_epoch(tmp_pa
     out_dir.mkdir()
     (out_dir / METRICS_FILE).touch()
     run = trainer_run(config, out_dir, project=tmp_path, has_val_loader=True, id="auto-run-42")
+    train_loader, val_loader = separable_classifier_loaders(run)
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader)
     run = ctx.default_train()
     ctx.tb.close()
@@ -83,9 +83,9 @@ def test_the_epoch_console_line_carries_validation_metrics_beyond_loss(tmp_path,
     not only the loss a plain reader would take for the whole story."""
     import logging
 
-    train_loader, val_loader = separable_classifier_loaders()
     run = trainer_run(classifier_config(2), tmp_path / "out", project=tmp_path, has_val_loader=True,
                       id="auto-run-43")
+    train_loader, val_loader = separable_classifier_loaders(run)
     with caplog.at_level(logging.INFO, logger="tcip_mcp.pipelines.training.generic_trainer"):
         run = train(run, train_loader, val_loader=val_loader)
     assert run.status == "completed", run.status_error

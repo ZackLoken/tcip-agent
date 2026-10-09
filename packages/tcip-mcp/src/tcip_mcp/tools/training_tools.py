@@ -53,17 +53,26 @@ def data_with_selection(data: DataSpec, selection_dir: str) -> DataSpec:
 def preflight_config(project: Path, config: dict, smoke: bool = False,
                      overfit: bool = False) -> dict:
     """Validate a training configuration before launching (:func:`_preflight`'s report)."""
-    return _preflight(project, *checked_train_config(config), smoke=smoke, overfit=overfit)[0]
+    return _preflight(project, *_admitted(config, {}), smoke=smoke, overfit=overfit)[0]
+
+
+def _admitted(config: dict, point: dict) -> tuple[TrainConfigSchema | None, list[str]]:
+    """``config`` with ``point`` applied (:func:`_apply_hpo_params`) as the launch door admits
+    it: validated once (``schemas.checked_train_config``) and, when it validates, its structure
+    (:func:`_structural_issues`). The spec, ``None`` when it did not validate, and every issue."""
+    try:
+        spec, issues = checked_train_config(_apply_hpo_params(config, point))
+    except ValueError as exc:
+        return None, [str(exc)]
+    return spec, (issues if spec is None else _structural_issues(spec))
 
 
 def _preflight(project: Path, spec: TrainConfigSchema | None, issues: list[str], *, smoke: bool,
                overfit: bool) -> tuple[dict, ResolvedRun | None]:
-    """Check a training configuration its caller validated once
-    (``schemas.checked_train_config``: ``spec``, ``None`` with the schema's ``issues`` when it
-    refused) before launching a run of ``project``, and resolve it once
-    (:func:`~tcip_mcp.pipelines.data.split_construction.resolve_run`) when its structure
-    (:func:`_structural_issues`) admits that. Returns the report and the resolution, ``None`` when
-    structure refused first.
+    """Check a training configuration its caller admitted once (:func:`_admitted`: ``spec``,
+    ``None`` when the schema refused, and its ``issues``) before launching a run of ``project``,
+    and resolve it once (:func:`~tcip_mcp.pipelines.data.split_construction.resolve_run`) when
+    no issue stands. Returns the report and the resolution, ``None`` when an issue stood first.
 
     Config structure, one placement for everything::
 
@@ -91,7 +100,7 @@ def _preflight(project: Path, spec: TrainConfigSchema | None, issues: list[str],
     """
     from tcip_mcp.pipelines.data.label_queries import admits
 
-    issues = list(issues) if spec is None else _structural_issues(spec)
+    issues = list(issues)
     warnings: list[str] = []
     split = spec.data.split if spec is not None else None
     if split is not None and split.selection_dir and split.redraw_within_selection:
@@ -232,13 +241,17 @@ def _preflight(project: Path, spec: TrainConfigSchema | None, issues: list[str],
 
 
 def _structural_issues(spec: TrainConfigSchema) -> list[str]:
-    """What stops the validated config ``spec`` before anything reads its data: a
-    ``model_source`` or ``data.dataset_source`` builder or a ``training_source`` that does not
-    import, and a ``data`` block that names no locations
-    (``split_construction.data_dir_issues``)."""
+    """What stops the validated config ``spec`` before anything reads its data: what training
+    reads left unstated (``TrainConfigSchema.trainer_reads``'s refusal), a ``model_source`` or
+    ``data.dataset_source`` builder or a ``training_source`` that does not import, and a
+    ``data`` block that names no locations (``split_construction.data_dir_issues``)."""
     from tcip_mcp.pipelines.model_build import _import_dotted, import_source_builder
 
     issues: list[str] = []
+    try:
+        spec.trainer_reads()
+    except ValueError as exc:
+        issues.append(str(exc))
     try:
         import_source_builder(spec.model_source.builder, spec.model_source.source_files)
     except Exception as exc:
@@ -270,7 +283,8 @@ def open_run(
     ``run.json``: the validated launch config ``spec``, seeded (``run_registry.seeded``) and
     recorded as it dumps (``TrainConfigSchema.record``), as the run's input, ``resolved`` as what
     that input resolved to (``split_construction.resolve_run``'s record, ``None`` for an HPO
-    trial whose resolution failed, which then ends ``failed``), the environment and the dataset
+    trial refused at its admission or whose resolution failed, which then ends ``failed``), the
+    environment and the dataset
     identity of ``spec``'s data block (``split_construction.dataset_identity``), the run's
     sources copied into the directory (``model_build.snapshot_model_source``), the run it was
     relaunched from and the checkpoint it resumes from, its wall clock, the model contract
@@ -341,7 +355,7 @@ def launch_training(
                          "mints every run's id and answers it as experiment_id."}
     # smoke=True: build the model and run the correctness contract before spawning the training
     # subprocess, so a broken builder returns here instead of wasting a full audited run.
-    validation, resolution = _preflight(project, *checked_train_config(config), smoke=True,
+    validation, resolution = _preflight(project, *_admitted(config, {}), smoke=True,
                                         overfit=overfit_check)
     if not validation["valid"]:
         return {"error": "Invalid config", "issues": validation["issues"]}
@@ -704,23 +718,24 @@ _CANCEL_DURING_RUN_REASON = "the sweep was canceled by request before it could f
 def open_trial(sweep: Path, trial_id: str, point: dict) -> Path:
     """Open the trial ``trial_id`` of the sweep at ``sweep`` as a run directory beneath it named
     ``<sweep id>_<trial_id>``, and return it. The sweep's recorded base config with ``point``
-    applied (:func:`_apply_hpo_params`), validated once as the trial's config
-    (``schemas.train_config``), is resolved against its project through the one run producer
-    (``split_construction.resolve_run``, at the sweep's own objective) and the directory opened
-    (:func:`open_run`) with ``point`` as its ``trial_params``, whatever the resolution did: a
-    resolution that fails is the trial's final status ``failed`` naming why. A config the
-    validation refuses raises before any directory is opened: a config that never validated is
-    no trial, and a failed-trial record for it would fabricate one."""
-    from tcip_mcp.pipelines.schemas import train_config
-
+    applied, admitted as the launch door admits a config (:func:`_admitted`) and, when it stands,
+    resolved against its project through the one run producer
+    (``split_construction.resolve_run``, at the sweep's own objective), and the directory opened
+    (:func:`open_run`) with ``point`` as its ``trial_params``: an admission issue or a
+    resolution that fails is the trial's final status ``failed`` naming why. A config the schema
+    refuses raises ``ValueError`` naming every issue before any directory is opened."""
     record = experiments.observe(sweep).record
-    spec = train_config(_apply_hpo_params(record["input"]["base_config"], point))
+    spec, issues = _admitted(record["input"]["base_config"], point)
+    if spec is None:
+        raise ValueError(f"trial {trial_id}'s config is refused: {'; '.join(issues)}")
     trial_dir = sweep / f"{sweep.name}_{trial_id}"
-    try:
-        resolved, status_error = resolve_run(spec, project=experiments.project_of_run(sweep),
-                                             objective=record["objective"]).record, None
-    except Exception as exc:  # noqa: BLE001, whatever stops the resolution fails the trial
-        resolved, status_error = None, str(exc)
+    resolved, status_error = None, "; ".join(issues) or None
+    if status_error is None:
+        try:
+            resolved = resolve_run(spec, project=experiments.project_of_run(sweep),
+                                   objective=record["objective"]).record
+        except Exception as exc:  # noqa: BLE001, whatever stops the resolution fails the trial
+            status_error = str(exc)
     open_run(trial_dir, spec, resolved, trial_params=point)
     if status_error is not None:
         experiments.write_final_status(trial_dir, "failed", status_error, checkpoint=None)
@@ -729,8 +744,9 @@ def open_trial(sweep: Path, trial_id: str, point: dict) -> Path:
 
 def _run_hpo_trial(point: dict, report, sweep: Path, trial_id: str) -> None:
     """Train one HPO trial of the sweep at ``sweep`` (:func:`open_trial`), reporting every
-    ``selection`` its metrics log records, which is the trial's result. A trial whose point failed
-    to resolve ends at its opening; otherwise its body runs through
+    ``selection`` its metrics log records, which is the trial's result. A trial whose point was
+    refused at its admission or failed to resolve ends at its opening; otherwise its body runs
+    through
     ``subprocess_worker.run_directory``. A sweep canceled before the trial started opens nothing.
     """
     from tcip_mcp.pipelines.training.subprocess_worker import run_directory
@@ -801,8 +817,8 @@ def run_hyperparameter_search(
         not a search space (``hpo.space_axes``, a grid's int axis past its bound included); a
         ``base_config`` that fails preflight, an unimportable builder or training source, or a
         config with no ``data`` section, at any point :func:`_preflight_points` checks (the
-        first corner and each single-axis choice and range end; every trial validates its own
-        point when it runs); a
+        first corner and each single-axis choice and range end, each point once; every trial's
+        own point is admitted when its trial opens); a
         ``param_space`` axis naming ``data.split.seed`` while ``split_draws`` draws at
         most one partition (:func:`caller_split_seed_refusal`); ``split_draws`` above 1 on an
         unbound, built-in detection config with tiling on that admits exactly one trainable source
@@ -891,12 +907,12 @@ def open_sweep(
     split_draws: int, split_draw_seeds: list[int] | None,
     search_seed: int, trial_budget: int | None, relaunched_from: str | None, actor: str | None,
 ) -> Path | dict:
-    """Check a sweep's arguments: the first corner of the search space (:func:`_preflight_points`)
-    applied to ``base_config`` and validated once (``schemas.checked_train_config``), its data
-    block the one every split-draw check reads, then resolved once (:func:`_preflight`), whose
-    objective every trial records and whose partition answers whether its draws can vary
-    (:func:`_spatial_draws_issue`), then the structure (:func:`_structural_issues`) of each
-    single-axis choice and range end it lists; every other point is validated by its own trial.
+    """Check a sweep's arguments: the first point :func:`_preflight_points` lists applied to
+    ``base_config`` and admitted once (:func:`_admitted`), its data block the one every
+    split-draw check reads, then resolved once (:func:`_preflight`), whose objective every trial
+    records and whose partition answers whether its draws can vary
+    (:func:`_spatial_draws_issue`), then each other point it lists admitted the same way; every
+    trial's own point is admitted when its trial opens (:func:`open_trial`).
     Create the sweep's
     directory under ``project``, named by ``experiments.mint_experiment_id("hpo")``, with its
     ``sweep.json`` written once, carrying the objective and
@@ -927,11 +943,7 @@ def open_sweep(
         (first_label, first_point), *rest = _preflight_points(param_space, search_alg)
     except (KeyError, TypeError, ValueError) as exc:
         return {"error": f"param_space is not a search space: {exc!r}", "issues": []}
-    try:
-        first_spec, first_issues = checked_train_config(
-            _apply_hpo_params(base_config, first_point))
-    except ValueError as exc:
-        first_spec, first_issues = None, [str(exc)]
+    first_spec, first_issues = _admitted(base_config, first_point)
     if first_spec is None:
         return {"error": f"the sweep's base config fails preflight at {first_label}",
                 "issues": first_issues}
@@ -954,17 +966,13 @@ def open_sweep(
     if seed_axis_refusal is not None:
         return {"error": f"{seed_axis_refusal.reason} {seed_axis_refusal.remedy}", "issues": []}
 
-    preflight, resolution = _preflight(project, first_spec, [], smoke=False, overfit=False)
+    preflight, resolution = _preflight(project, first_spec, first_issues, smoke=False,
+                                       overfit=False)
     if resolution is None or not preflight["valid"]:
         return {"error": f"the sweep's base config fails preflight at {first_label}",
                 "issues": preflight["issues"]}
     for label, point in rest:
-        try:
-            spec, issues = checked_train_config(_apply_hpo_params(base_config, point))
-        except ValueError as exc:
-            spec, issues = None, [str(exc)]
-        if spec is not None:
-            issues = _structural_issues(spec)
+        issues = _admitted(base_config, point)[1]
         if issues:
             return {"error": f"the sweep's base config fails preflight at {label}",
                     "issues": issues}
@@ -1321,9 +1329,9 @@ def _preflight_points(param_space: dict, search_alg: str) -> list[tuple[str, dic
     """The points a sweep's preflight checks, read through the one reader of the space's shape
     (``hpo.space_axes`` as ``search_alg`` grids it, refusing as it refuses): the corner at every
     axis's first value, plus one variant per categorical choice and one per range end, each
-    holding every other axis at that corner. Combinations of several axes away from the corner,
-    and a range's interior, are not among them; each trial's own config is validated when its
-    point is applied."""
+    holding every other axis at that corner, each point listed once. Combinations of several
+    axes away from the corner, and a range's interior, are not among them; each trial's own
+    config is admitted when its trial opens."""
     from tcip_mcp.pipelines.training.hpo import search_alg_key, space_axes
 
     axes = space_axes(param_space, grid=search_alg_key(search_alg) == "grid")
@@ -1332,7 +1340,10 @@ def _preflight_points(param_space: dict, search_alg: str) -> list[tuple[str, dic
     for key, (kind, values) in axes.items():
         labels = ([f"{key}={v!r}" for v in values] if kind == "categorical"
                   else [f"{key} low={values[0]!r}", f"{key} high={values[1]!r}"])
-        points.extend((label, {**base, key: value}) for label, value in zip(labels, values))
+        for label, value in zip(labels, values):
+            point = {**base, key: value}
+            if all(point != listed for _, listed in points):
+                points.append((label, point))
     return points
 
 

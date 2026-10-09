@@ -198,15 +198,17 @@ def run_transforms(spec: TrainConfigSchema) -> Any:
     return build_augmentation(augmentation)
 
 
-def run_loaders(spec: TrainConfigSchema, task: str, train_ds: Any, val_ds: Any
+def run_loaders(run: TrainRun, train_ds: Any, val_ds: Any
                 ) -> tuple[DataLoader, DataLoader | None]:
-    """A run's train loader and, when ``val_ds`` is given, its val loader, at a validated
-    config's (``schemas.train_config``) ``batch_size``, ``num_workers`` and ``sampler``, seeded
-    from its ``seed``."""
+    """``run``'s train loader and, when ``val_ds`` is given, its val loader, collating for the
+    task its config names, at the batch size the run reads (``TrainRun.reads``) and its config's
+    ``num_workers`` and ``sampler``, seeded from its ``seed``."""
     from tcip_mcp.pipelines.data.samplers import build_sampler
     from tcip_mcp.pipelines.training.collation import task_collate
 
-    batch_size, num_workers = spec.batch_size, spec.num_workers
+    spec = run.spec
+    task = spec.model_source.task
+    batch_size, num_workers = run.reads.batch_size, spec.num_workers
     loader_kwargs = seeded_loader_kwargs(spec.seed, num_workers=num_workers)
     # Built after the loader context is known: read order depends on the worker regime too.
     sampler = build_sampler(spec.sampler, train_ds,
@@ -322,8 +324,7 @@ class _ResumeState:
 
     ``best`` is the run's best epoch so far and ``stage_best`` the current stage's, each an
     :func:`_epoch_state` or ``None``; ``warmup_groups`` are the param groups (:data:`GROUPS_KEY`)
-    of the capture the current stage warms up from, which :func:`_warmup_starts` reads by
-    membership, ``None`` for a stage with no warmup.
+    of the capture the current stage warms up from, ``None`` for a stage with no warmup.
     """
 
     scheduler_state_dict: Any
@@ -482,13 +483,12 @@ def resolve_selection_metric(
     return resolved
 
 
-def resolve_objective(spec: TrainConfigSchema, task: str, *, project: Path,
-                      has_val_loader: bool) -> dict:
+def resolve_objective(spec: TrainConfigSchema, *, project: Path, has_val_loader: bool) -> dict:
     """A run's objective: ``selection_metric``, :func:`resolve_selection_metric` over its
-    ``task``, its validated config's (``schemas.train_config``) ``evaluation`` trait
-    (:func:`config_trait` in ``project``) and ``selection_metric``, and ``higher_is_better``, that
-    metric's declared direction."""
-    metric = resolve_selection_metric(task, config_trait(spec, project),
+    validated config's (``schemas.train_config``) task, ``evaluation`` trait (:func:`config_trait`
+    in ``project``) and ``selection_metric``, and ``higher_is_better``, that metric's declared
+    direction."""
+    metric = resolve_selection_metric(spec.model_source.task, config_trait(spec, project),
                                       spec.evaluation.selection_metric,
                                       has_val_loader=has_val_loader)
     return {"selection_metric": metric, "higher_is_better": HIGHER_IS_BETTER_BY_METRIC[metric]}
@@ -593,15 +593,14 @@ def train(
 
     The model is built from the validated config's ``model_source``
     (``model_build.build_from_model_source``), for the task that model source names.
-    ``epoch_callback(epoch:int, epoch_metrics:dict)`` is how each epoch's row reaches the run's
-    metrics log and, under HPO, the pruner. It may raise to abort the run (e.g.
-    ``optuna.TrialPruned``); its scalars are the epoch's TensorBoard scalars, so a caller wanting
-    them passes a sink that writes both (``TrainContext.log_metrics``).
-    ``batch_callback(step:int, epoch:int, metrics:dict)`` is how a per-batch row reaches the
-    run's metrics log and its TensorBoard (``TrainContext.log_batch``).
+    ``epoch_callback(epoch:int, epoch_metrics:dict)`` receives each epoch's row and may raise to
+    abort the run (e.g. ``optuna.TrialPruned``). ``batch_callback(step:int, epoch:int,
+    metrics:dict)`` receives each per-batch row.
 
-    Every key below is read from ``run.spec``, the run's config validated once by its producer
-    (``schemas.train_config``), and its checkpoints carry that spec (:func:`checkpoint_config`):
+    Every key below is read from ``run.spec``, the batch size, confidence and regime from what
+    the run reads (``TrainRun.reads``; for a config naming its own loop, the regime its
+    ``default_trainer_regime`` states, refusing naming whatever is unstated), and its checkpoints
+    carry that spec (:func:`checkpoint_config`):
 
     - ``device`` (str, default cuda-if-available else cpu)
     - ``seed`` (int | None), ``deterministic`` (bool, default False), RNG seeding before model
@@ -618,7 +617,7 @@ def train(
     - ``stage_warmup_epochs`` (int, default 0), ``enforce_monotonic_unfreeze`` (bool, default
       True).
     - ``gradient_accumulation_steps`` (int, default 1), and a per-stage override. The physical
-      batch is ``train_loader.batch_size``; a loader with none is refused. An epoch's last window
+      batch is the config's ``batch_size``. An epoch's last window
       may hold fewer batches than the accumulation, and its loss is averaged over the batches it
       holds.
     - ``checkpoint_every_n_epochs`` (int), periodic resumable checkpoints.
@@ -653,7 +652,10 @@ def train(
         # Failable setup lives inside the try so an invalid/unwritable output_dir
         # marks the run "failed" instead of stranding it at "running" forever.
         spec = run.spec
-        stages, optimizer_spec, scheduler_spec, ckpt_every = spec.default_trainer_regime()
+        reads = run.reads
+        # A config naming its own loop reaches here only when that loop asks for this trainer.
+        regime = reads.regime if reads.regime is not None else spec.default_trainer_regime()
+        stages, optimizer_spec, scheduler_spec, ckpt_every = regime
         out_dir = Path(run.output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -677,11 +679,7 @@ def train(
         base_backbone_lr = optimizer_spec.backbone_lr
         base_head_lr = optimizer_spec.head_lr
         stage_warmup_epochs = spec.stage_warmup_epochs
-        physical_batch = getattr(train_loader, "batch_size", None)
-        if physical_batch is None:
-            raise ValueError(
-                "the training loader states no batch_size, so the run's effective batch is not "
-                "known; build it with a batch_size (generic_trainer.run_loaders).")
+        physical_batch = reads.batch_size
 
         def accumulation(stage: StageSpec) -> int:
             if stage.gradient_accumulation_steps is None:
@@ -894,7 +892,7 @@ def train(
                 if val_loader is not None:
                     val_metrics = _validate(
                         model, val_loader, device, task, dims=dims,
-                        conf_threshold=spec.evaluation.conf_threshold,
+                        conf_threshold=reads.conf_threshold,
                         iou_threshold=spec.evaluation.iou_threshold,
                         score_weights=spec.evaluation.score_weights,
                         trait=trait,
