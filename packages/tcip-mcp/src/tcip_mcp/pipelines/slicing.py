@@ -18,6 +18,7 @@ from sahi.prediction import ObjectPrediction
 from sahi.slicing import get_slice_bboxes
 
 from tcip_annotation.mask_contours import mask_to_polygon_rings
+from tcip_mcp.pipelines.execution import cross_tile_merge_of
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.execution import Execution
@@ -187,17 +188,18 @@ def predictions_from_rows(rows: list[dict], full_shape: list[int],
 
 
 def cross_tile_merge(execution: Execution) -> PostprocessPredictions:
-    """The SAHI postprocess a tiled execution record names, at its threshold over its own match
-    metric, class-agnostic over the one subject so two slices' calls of one object merge whatever
+    """The SAHI postprocess a tiled execution record's merge names, at its threshold over that
+    postprocess's match metric (:func:`~tcip_mcp.pipelines.execution.cross_tile_merge_of`),
+    class-agnostic over the one subject so two slices' calls of one object merge whatever
     their attribute values (a merged box keeps the category of the member SAHI keeps, the
     higher-scoring), on SAHI's numpy backend, so the merge leaves the process environment as it
     found it."""
     # SAHI's torchvision backend picks its device by writing CUDA_VISIBLE_DEVICES for the process.
     set_postprocess_backend("numpy")
-    assert execution.merge_type is not None, "a tiled record names its merge"
-    return POSTPROCESS_NAME_TO_CLASS[execution.merge_type](
-        match_threshold=execution.cross_tile_nms, match_metric=execution.match_metric,
-        class_agnostic=True)
+    assert execution.postprocess is not None, "a tiled record names its merge"
+    merge_type, match_metric = cross_tile_merge_of(execution.postprocess)
+    return POSTPROCESS_NAME_TO_CLASS[merge_type](
+        match_threshold=execution.cross_tile_nms, match_metric=match_metric, class_agnostic=True)
 
 
 class TcipDetectionModel(DetectionModel):
