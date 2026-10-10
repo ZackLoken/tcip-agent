@@ -11,6 +11,7 @@ Provides: progressive unfreezing, early stopping, mixed precision, gradient accu
 from __future__ import annotations
 
 import functools
+import itertools
 import logging
 import math
 import random
@@ -39,6 +40,7 @@ from tcip_mcp.pipelines.model_build import (
 from tcip_mcp.pipelines.schemas import (
     CosineSchedule,
     DataSpec,
+    HorizonSchedule,
     OneCycleSchedule,
     PlateauSchedule,
     SchedulerSpec,
@@ -331,9 +333,10 @@ class _ResumeState:
     """The resume contract beside the training state the checkpoint carries at its top level
     (:func:`capture_training_state`'s keys): each field one key of the checkpoint.
 
-    ``best`` is the run's best epoch so far and ``stage_best`` the current stage's, each an
-    :func:`_epoch_state` or ``None``; ``warmup_groups`` are the param groups (:data:`GROUPS_KEY`)
-    of the capture the current stage warms up from, ``None`` for a stage with no warmup.
+    ``best`` is the run's best epoch over the stages before the current one and ``stage_best``
+    the current stage's, each an :func:`_epoch_state` or ``None``; ``warmup_groups`` are the
+    param groups (:data:`GROUPS_KEY`) of the capture the current stage warms up from, ``None``
+    for a stage with no warmup.
     """
 
     scheduler_state_dict: Any
@@ -391,13 +394,13 @@ def _save_checkpoint(
 # Scheduler builder
 # ====================================================================
 
-def _build_scheduler(optimizer, spec: SchedulerSpec, epochs: int):
-    """The scheduler ``spec.type`` names (``schemas.SCHEDULER_TYPES``) over ``epochs`` epochs,
-    at the settings ``spec`` carries; a onecycle schedule cycles the rate alone, the optimizer's
-    stated momentum the one it trains at."""
+def _build_scheduler(optimizer, spec: SchedulerSpec):
+    """The scheduler ``spec.type`` names (``schemas.SCHEDULER_TYPES``) at the settings ``spec``
+    carries, a horizon-bound one over the block's own ``horizon_epochs``; a onecycle schedule
+    cycles the rate alone, the optimizer's stated momentum the one it trains at."""
     if isinstance(spec, CosineSchedule):
         return torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=epochs, eta_min=spec.eta_min
+            optimizer, T_max=spec.horizon_epochs, eta_min=spec.eta_min
         )
     elif isinstance(spec, PlateauSchedule):
         return torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -405,7 +408,7 @@ def _build_scheduler(optimizer, spec: SchedulerSpec, epochs: int):
         )
     elif isinstance(spec, OneCycleSchedule):
         return torch.optim.lr_scheduler.OneCycleLR(
-            optimizer, max_lr=spec.max_lr, total_steps=epochs, cycle_momentum=False)
+            optimizer, max_lr=spec.max_lr, total_steps=spec.horizon_epochs, cycle_momentum=False)
     return torch.optim.lr_scheduler.StepLR(
         optimizer, step_size=spec.step_size, gamma=spec.gamma
     )
@@ -527,11 +530,14 @@ def _selection_value(task: str, val_metrics: dict, avg_loss: float, metric: str)
     )
 
 
-def _improves(candidate: float, incumbent: float, *, higher_is_better: bool) -> bool:
-    """Whether ``candidate`` beats ``incumbent`` as a selection value, in the direction the run's
-    selection metric improves in.
+def _improves(candidate: float, incumbent: float, *, higher_is_better: bool,
+              min_delta: float = 0.0) -> bool:
+    """Whether ``candidate`` beats ``incumbent`` by more than ``min_delta`` as a selection value,
+    in the direction the run's selection metric improves in.
     """
-    return candidate > incumbent if higher_is_better else candidate < incumbent
+    if higher_is_better:
+        return candidate > incumbent + min_delta
+    return candidate < incumbent - min_delta
 
 
 def apply_stage_freeze(
@@ -617,10 +623,12 @@ def train(
     - ``seed`` (int | None), ``deterministic`` (bool, default False), RNG seeding before model
       build.
     - ``mixed_precision`` (bool, default True), AMP, only when ``device`` is cuda.
-    - ``stages`` (list of ``{freeze_to, epochs, gradient_accumulation_steps}``), at least one.
+    - ``stages`` (list of ``{freeze_to, gradient_accumulation_steps}``), at least one.
     - ``optimizer`` (``schemas.OptimizerSpec``), the one source of learning rate, stated for the
       first stage's target effective batch.
-    - ``scheduler`` (``schemas.SchedulerSpec``; ``type`` one of ``schemas.SCHEDULER_TYPES``).
+    - ``scheduler`` (``schemas.SchedulerSpec``; ``type`` one of ``schemas.SCHEDULER_TYPES``): a
+      stage under a ``schemas.HorizonSchedule`` ends once the scheduler has stepped its
+      ``horizon_epochs`` times.
     - ``lr_scaling`` (``{scale_power, max_lr}``, absent for none): each stage's learning rates
       scaled by ``(its target effective batch / the first stage's) ** scale_power``, capped at the
       optional ``max_lr``. The target is nominal (the loader's batch size times the stage's
@@ -636,10 +644,10 @@ def train(
       loss reaches ``batch_callback`` once; unstated, :data:`BATCH_ROWS_PER_EPOCH` times an
       epoch at the evenly spaced batch ends :func:`batch_row_ends` derives from the loader's
       length, or after every batch of a shorter epoch.
-    - ``early_stopping`` (``schemas.EarlyStoppingSpec``, on unless ``enabled`` is false): with a
-      validation loader, a stage whose selection value has not improved by ``min_delta`` for
-      ``patience`` epochs ends, and the next stage starts. With no validation loader it is
-      inert.
+    - ``early_stopping`` (``schemas.EarlyStoppingSpec``): a stage whose selection value has not
+      improved by ``min_delta`` for ``patience`` epochs ends, and the next stage starts; the run
+      ends completed with its last stage or with the first stage whose best does not improve by
+      ``min_delta`` on its predecessor's, the stages after it never run.
     - ``evaluation`` (``schemas.EvaluationSpec``), passed through to
       ``_validate``/``evaluate``.
 
@@ -665,7 +673,9 @@ def train(
         reads = run.reads
         # A config naming its own loop reaches here only when that loop asks for this trainer.
         regime = reads.regime if reads.regime is not None else spec.default_trainer_regime()
-        stages, optimizer_spec, scheduler_spec, ckpt_every = regime
+        stages, optimizer_spec, scheduler_spec, ckpt_every, stop_rule = regime
+        horizon = (scheduler_spec.horizon_epochs if isinstance(scheduler_spec, HorizonSchedule)
+                   else None)
         out_dir = Path(run.output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         stamp = checkpoint_stamp(run)
@@ -698,10 +708,6 @@ def train(
             return stage.gradient_accumulation_steps
 
         first_eff_batch = physical_batch * accumulation(stages[0])
-        es = spec.early_stopping
-        # (patience, min_delta) when a stage can end on its plateau; inert with no val loader.
-        plateau_rule = ((es.patience, es.min_delta) if es.enabled and val_loader is not None
-                        else None)
         prev_trainable = None     # trainable param count of the previous stage
         trait = config_trait(spec, run.project)
         selection_metric = run.objective["selection_metric"]
@@ -791,11 +797,9 @@ def train(
             warmup_starts = (None if warmup_groups is None
                              else _warmup_starts(model, optimizer, warmup_groups, target_lrs))
 
-            stage_epochs = stage.epochs
             # Inter-stage LR warmup from the handed-off learning rates (default off).
-            warmup_n = min(stage_warmup_epochs, stage_epochs) if warmup_starts is not None else 0
-            sched_epochs = max(1, stage_epochs - warmup_n)
-            scheduler = _build_scheduler(optimizer, scheduler_spec, sched_epochs)
+            warmup_n = stage_warmup_epochs if warmup_starts is not None else 0
+            scheduler = _build_scheduler(optimizer, scheduler_spec)
             is_plateau = isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau)
 
             start_epoch = 0
@@ -811,8 +815,11 @@ def train(
                 # checkpoint.
                 ckpt = current = None
 
-            for epoch in range(start_epoch, stage_epochs):
-                if run.should_cancel() or (plateau_rule and es_counter >= plateau_rule[0]):
+            for epoch in itertools.count(start_epoch):
+                if run.should_cancel() or (horizon is not None and epoch - warmup_n >= horizon):
+                    break
+                if es_counter >= stop_rule.patience:
+                    logger.info("Stage %d plateaued at epoch %d", stage_idx, run.current_epoch)
                     break
                 run.current_epoch += 1
                 model.train()
@@ -950,21 +957,13 @@ def train(
                 if _improves(sel, stage_incumbent, higher_is_better=higher_is_better):
                     stage_best = _epoch_state(model, optimizer, selection=sel, stage=stage_idx,
                                               epoch=run.current_epoch, metrics=epoch_metrics)
-                    run_incumbent = best["selection"] if best else losing_side
-                    if _improves(sel, run_incumbent, higher_is_better=higher_is_better):
-                        best = stage_best
 
-                # The stage's plateau, on the same selection objective; the margin applies on the
-                # same side of es_best that higher_is_better says an improvement lands on.
-                if plateau_rule:
-                    patience, min_delta = plateau_rule
-                    margin = min_delta if higher_is_better else -min_delta
-                    if _improves(sel, es_best + margin, higher_is_better=higher_is_better):
-                        es_best, es_counter = sel, 0
-                    else:
-                        es_counter += 1
-                    if es_counter >= patience:
-                        logger.info("Stage %d plateaued at epoch %d", stage_idx, run.current_epoch)
+                # The stage's plateau, on the same selection objective.
+                if _improves(sel, es_best, higher_is_better=higher_is_better,
+                             min_delta=stop_rule.min_delta):
+                    es_best, es_counter = sel, 0
+                else:
+                    es_counter += 1
 
                 if ckpt_every > 0 and run.current_epoch % ckpt_every == 0:
                     _save_checkpoint(
@@ -976,13 +975,27 @@ def train(
                         global_step=global_step, metrics=epoch_metrics,
                     )
 
-            if diverged or run.should_cancel():
+            canceled = run.should_cancel()
+            if diverged or (stage_best is None and canceled):
                 break  # stop before starting the next stage
             if stage_best is None:
                 raise RuntimeError(
                     f"stage {stage_idx} produced no selectable epoch: its {selection_metric!r} "
                     "never took a value that ranks, so there is no state to start the next stage "
                     "from or to deliver.")
+            # The run's best before this stage is the best of the stage before it.
+            previous, selection = best, stage_best["selection"]
+            if previous is None or _improves(selection, previous["selection"],
+                                             higher_is_better=higher_is_better):
+                best = stage_best
+            if canceled:
+                break
+            if previous is not None and not _improves(
+                    selection, previous["selection"], higher_is_better=higher_is_better,
+                    min_delta=stop_rule.min_delta):
+                logger.info("Stage %d did not improve on stage %d; the run ends", stage_idx,
+                            previous["stage"])
+                break
             handoff = stage_best
 
         # Saved on a normal completion or a cancellation; skipped for a diverged run (its

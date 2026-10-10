@@ -43,7 +43,8 @@ def children(monkeypatch) -> list:
 @pytest.fixture
 def launch(tmp_path, monkeypatch, children):
     """``launch_training`` in the project ``tmp_path``, over a tiny regression dataset, with
-    ``epochs`` stages and any other top-level keys; TensorBoard is not started."""
+    its stage ending at its schedule's ``horizon`` and any other top-level keys; TensorBoard is
+    not started."""
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
     from tcip_mcp.tools.training_tools import launch_training
@@ -52,8 +53,8 @@ def launch(tmp_path, monkeypatch, children):
     images_dir, csv_path = write_regression_dataset(
         tmp_path / "ds", intensities=[0.0, 0.25, 0.5, 1.0], values=[0.1, 0.3, 0.5, 0.9])
 
-    def _launch(epochs: int = 1, *, resume_from: str = "", **extra) -> dict:
-        config = regressor_config(epochs, data={
+    def _launch(horizon: int = 1, *, resume_from: str = "", **extra) -> dict:
+        config = regressor_config(horizon, data={
             "images_dir": str(images_dir), "labels_dir": str(csv_path),
             "split": {"seed": 0, "val_ratio": 0.15}}, **extra)
         return launch_training(tmp_path, config, resume_from=resume_from, actor=None)
@@ -115,7 +116,7 @@ def test_a_cancel_requested_by_id_ends_the_child_canceled(launch, tmp_path):
     from tcip_mcp.experiments import METRICS_FILE, observe, read_rows
     from tcip_mcp.tools.training_tools import cancel_training
 
-    res = launch(epochs=200)
+    res = launch(horizon=200)
     assert "error" not in res, res
     run_dir = Path(res["output_dir"])
     _until("the child's first epoch row", lambda: read_rows(run_dir / METRICS_FILE)[0])
@@ -131,14 +132,14 @@ def test_a_resume_is_a_new_directory_that_leaves_its_source_untouched(launch, tm
     from tcip_mcp.experiments import RUN_FILE, read_record
     from tcip_mcp.registry_paths import stored_path
 
-    first = launch(epochs=2, checkpoint_every_n_epochs=1)
+    first = launch(horizon=2, checkpoint_every_n_epochs=1)
     source = Path(first["output_dir"])
     assert _wait_final(source)["state"] == "completed"
     epoch_checkpoints = sorted(source.glob("checkpoint_epoch_*.pt"))
     assert epoch_checkpoints, sorted(p.name for p in source.iterdir())
     before = _contents(source)
 
-    resumed = launch(epochs=3, resume_from=str(epoch_checkpoints[-1]))
+    resumed = launch(horizon=3, resume_from=str(epoch_checkpoints[-1]))
     assert "error" not in resumed, resumed
     run_dir = Path(resumed["output_dir"])
     assert run_dir != source
@@ -157,7 +158,7 @@ def test_a_child_killed_before_its_final_status_reads_running_then_interrupted(
     life is older than the heartbeat window."""
     from tcip_mcp import experiments
 
-    res = launch(epochs=200)
+    res = launch(horizon=200)
     assert "error" not in res, res
     run_dir = Path(res["output_dir"])
     [child] = children
@@ -181,7 +182,7 @@ def test_progress_logged_after_the_final_status_never_reopens_the_run(launch, tm
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tcip_mcp.tools.training_tools import monitor_training
 
-    res = launch(epochs=2)
+    res = launch(horizon=2)
     run_dir = Path(res["output_dir"])
     assert _wait_final(run_dir)["state"] == "completed"
     before = {name: (run_dir / name).read_bytes() for name in (FINAL_STATUS_FILE, METRICS_FILE)}

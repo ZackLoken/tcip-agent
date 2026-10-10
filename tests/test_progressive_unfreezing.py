@@ -322,7 +322,7 @@ def _cfg(stages, **extra) -> dict:
 
 def test_monotonic_unfreeze_guard_fails(tmp_path: Path):
     # Stage 0 fully unfreezes; stage 1 re-freezes the backbone -> guard must fire.
-    cfg = _cfg([{"freeze_to": 0, "epochs": 1}, {"freeze_to": -1, "epochs": 1}])
+    cfg = _cfg([{"freeze_to": 0}, {"freeze_to": -1}])
     run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
                       id="auto-run-46")
     run = train(run, _classification_loader(tmp_path, run), val_loader=None)
@@ -331,17 +331,16 @@ def test_monotonic_unfreeze_guard_fails(tmp_path: Path):
 
 
 def test_warmup_lr_ramps_at_stage_boundary(tmp_path: Path):
-    cfg = _cfg(
-        [{"freeze_to": -1, "epochs": 1}, {"freeze_to": 0, "epochs": 2}],
-        stage_warmup_epochs=2,
-    )
+    """The second stage warms up for two epochs with its schedule suppressed, then runs its
+    schedule's one-epoch horizon."""
+    cfg = _cfg([{"freeze_to": -1}, {"freeze_to": 0}], stage_warmup_epochs=2)
     run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
                       id="auto-run-47")
     run = train(run, _classification_loader(tmp_path, run), val_loader=None)
     assert run.status == "completed", run.status_error
 
     stage1 = [m for m in run.metrics_history if m["stage"] == 1]
-    assert len(stage1) == 2
+    assert len(stage1) == 3
     assert 0 < stage1[0]["lr"] < stage1[1]["lr"]
     assert stage1[1]["lr"] == pytest.approx(BASE_BB_LR)
     for m in run.metrics_history:
@@ -352,8 +351,7 @@ def test_lr_scaling_is_relative_to_the_first_stage_effective_batch(tmp_path: Pat
     """Batch size 2 targets an effective batch of 2 in the first stage and 8 in the second, so
     the multiplier is (8/2)^0.5 == 2.0. Six samples make three batches, so the second stage's one
     window holds three of the four batches it targets: one optimizer step against three."""
-    stages = [{"freeze_to": -1, "epochs": 1},
-              {"freeze_to": 0, "epochs": 1, "gradient_accumulation_steps": 4}]
+    stages = [{"freeze_to": -1}, {"freeze_to": 0, "gradient_accumulation_steps": 4}]
     cfg = _cfg(stages, lr_scaling={"scale_power": 0.5}, batch_size=2)
     run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
                       id="auto-run-48")
@@ -366,7 +364,7 @@ def test_lr_scaling_is_relative_to_the_first_stage_effective_batch(tmp_path: Pat
 
 
 def test_two_stage_handoff_smoke(tmp_path: Path):
-    cfg = _cfg([{"freeze_to": -1, "epochs": 1}, {"freeze_to": 0, "epochs": 1}])
+    cfg = _cfg([{"freeze_to": -1}, {"freeze_to": 0}])
     run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
                       id="auto-run-50")
     run = train(run, _classification_loader(tmp_path, run), val_loader=None)

@@ -11,6 +11,7 @@ from tcip_mcp.pipelines.schemas import (
     NESTED_TRAINING_SECTION_REFUSAL,
     SCHEDULER_TYPES,
     DefaultTrainerRegime,
+    EarlyStoppingSpec,
     OptimizerSpec,
     StageSpec,
     TrainConfigSchema,
@@ -48,16 +49,17 @@ FLAT_CONFIG: dict = training_config(
     {"builder": "module:build_net", "builder_kwargs": {}, "task": "detection"},
     {"images_dir": str(Path(__file__).parent / "images")},
     num_workers=0, mixed_precision=True, optimizer=adamw_optimizer(),
-    stages=[{"freeze_to": -1, "epochs": 5}, {"freeze_to": 2, "epochs": 10}],
+    stages=[{"freeze_to": -1}, {"freeze_to": 2}],
     evaluation=evaluation_block(selection_metric="f1"))
 
 
 def _required_paths() -> list[str]:
     """Every value the schema requires, by its dotted path, read off the schema itself: its
-    required top-level fields and the required fields of the optimizer and of the stated
-    schedule."""
+    required top-level fields and the required fields of the optimizer, of the stated schedule
+    and of the stop rule."""
     top = [n for n, f in TrainConfigSchema.model_fields.items() if f.is_required()]
-    blocks = {"optimizer": OptimizerSpec, "scheduler": type(train_config(FLAT_CONFIG).scheduler)}
+    blocks = {"optimizer": OptimizerSpec, "scheduler": type(train_config(FLAT_CONFIG).scheduler),
+              "early_stopping": EarlyStoppingSpec}
     nested = [f"{block}.{n}" for block, model in blocks.items()
               for n, f in model.model_fields.items() if f.is_required()]
     return [*top, *nested]
@@ -175,8 +177,9 @@ def test_an_empty_training_section_is_refused_too():
 
 
 def test_top_level_stages_are_typed_by_stage_spec():
-    issues = _issues_of({**FLAT_CONFIG, "stages": [{"freeze_to": 0}]})
-    assert any("stages.0.epochs" in issue for issue in issues)
+    """A stage carries no epoch count: one stating ``epochs`` is refused by name."""
+    issues = _issues_of({**FLAT_CONFIG, "stages": [{"freeze_to": 0, "epochs": 5}]})
+    assert any("stages.0.epochs" in issue for issue in issues), issues
 
 
 def test_the_trainer_reads_the_flat_config_as_given(tmp_path, monkeypatch):
@@ -194,29 +197,31 @@ def test_the_trainer_reads_the_flat_config_as_given(tmp_path, monkeypatch):
 
 def test_stage_spec_refuses_a_per_stage_lr():
     """train() reads learning rates from the optimizer block alone, so a stage lr is refused."""
-    StageSpec.model_validate({"freeze_to": -1, "epochs": 5})
+    StageSpec.model_validate({"freeze_to": -1})
     with pytest.raises(ValidationError, match="lr"):
-        StageSpec.model_validate({"freeze_to": -1, "epochs": 5, "lr": 1e-3})
+        StageSpec.model_validate({"freeze_to": -1, "lr": 1e-3})
 
 
 def test_a_stage_states_its_own_gradient_accumulation():
     """train() reads a stage's own accumulation, so the schema admits it."""
-    stages = [{"freeze_to": -1, "epochs": 5},
-              {"freeze_to": 0, "epochs": 5, "gradient_accumulation_steps": 4}]
+    stages = [{"freeze_to": -1}, {"freeze_to": 0, "gradient_accumulation_steps": 4}]
     assert _issues_of({**FLAT_CONFIG, "stages": stages}) == []
 
 
-def test_early_stopping_is_on_by_default_at_its_ruled_rule_and_opts_out_by_name():
-    from tcip_mcp.pipelines.schemas import train_config
-
-    unstated = train_config(_without(FLAT_CONFIG, "early_stopping")).early_stopping
-    assert (unstated.enabled, unstated.patience, unstated.min_delta) == (True, 7, 1e-4)
-    stated = train_config({**FLAT_CONFIG, "early_stopping": {"patience": 3}}).early_stopping
-    assert (stated.enabled, stated.patience, stated.min_delta) == (True, 3, 1e-4)
-    assert not train_config(
-        {**FLAT_CONFIG, "early_stopping": {"enabled": False}}).early_stopping.enabled
+def test_the_stop_rule_validates_as_stated_and_refuses_a_zero_patience_and_an_on_switch():
+    """The stop rule's two values are the config's own, read as stated, and neither has a
+    default; a patience of zero and an ``enabled`` key, since nothing but the rule ends a stage,
+    are refused by name."""
+    stated = train_config({**FLAT_CONFIG, "early_stopping": {"patience": 3, "min_delta": 0.02}})
+    assert stated.early_stopping is not None
+    assert (stated.early_stopping.patience, stated.early_stopping.min_delta) == (3, 0.02)
+    for value in ("patience", "min_delta"):
+        issues = _issues_of(_without(FLAT_CONFIG, f"early_stopping.{value}"))
+        assert any(f"early_stopping.{value}" in issue for issue in issues), issues
     assert any("early_stopping.patience" in issue for issue in _issues_of(
-        {**FLAT_CONFIG, "early_stopping": {"patience": 0}}))
+        {**FLAT_CONFIG, "early_stopping": {"patience": 0, "min_delta": 0.0}}))
+    assert any("early_stopping.enabled" in issue for issue in _issues_of(
+        {**FLAT_CONFIG, "early_stopping": {"enabled": True, "patience": 3, "min_delta": 0.0}}))
 
 
 def test_lr_scaling_requires_its_power_and_names_no_reference_batch():

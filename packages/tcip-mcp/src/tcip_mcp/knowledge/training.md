@@ -12,18 +12,17 @@ Multi-stage training for transfer learning:
 ```yaml
 stages:
   - freeze_to: -1    # Freeze entire backbone, train head only
-    epochs: 5
   - freeze_to: 2     # Unfreeze last 2 backbone layers
-    epochs: 10
   - freeze_to: 0     # Full fine-tuning
-    epochs: 10
 ```
 
-Illustrative shape: the stage count, freeze depths, and epoch counts above are one example, not
-a template; derive them per dataset (backbone size, object difficulty, data volume) rather than
-pinning this shape.
+Illustrative shape: the stage count and freeze depths above are one example, not a template;
+derive them per dataset (backbone size, object difficulty, data volume) rather than pinning this
+shape.
 
-Each stage has its own epoch count, freeze depth and, optionally, its own
+A stage carries no epoch count (a stage stating `epochs` is refused by name): it trains until
+the stop rule below ends it, or until a horizon-bound schedule reaches its horizon. Each stage
+has its own freeze depth and, optionally, its own
 `gradient_accumulation_steps`. Learning rate is not per-stage: the top-level `optimizer` block's
 `backbone_lr`/`head_lr` are stated for the first stage's target effective batch (a per-stage `lr`
 key is refused by name). The physical batch is the loader's `batch_size` and stays fixed for the
@@ -47,22 +46,30 @@ from its last weights. `model_best.pt` is the run's best epoch across every stag
 
 ```yaml
 early_stopping:
-  enabled: true
-  patience: 7        # Epochs without improvement before stopping
-  min_delta: 0.0001  # Minimum change to count as improvement
+  patience: ...   # epochs without an improvement of min_delta before a stage ends
+  min_delta: ...  # the smallest change in the selection value that counts as improvement
 ```
 
-Early stopping runs by default whenever the run has a validation loader, at `patience: 7` and
-`min_delta: 0.0001` when the block states neither (owner ruling; state your own where a
-dataset's convergence noise calls for it). `enabled: false`
-opts out. It reads the validation pass, so a run with no validation loader is never stopped
-early.
+The block is required and ships no default: both values are yours to set from the project in
+hand, and to state with your reason. Set `min_delta` from the selection metric's own
+epoch-to-epoch noise on this data (a change smaller than that noise is not an improvement), and
+`patience` from the project's earlier runs where they exist (how many flat epochs preceded a
+later gain); with no earlier run, choose one and say why. The rule reads the run's selection
+value, which is the training loss for a run with no validation loader selecting on `loss`.
 
-Early stopping ends a stage, not the run: a stage whose selection value has not improved by
+The stop rule ends a stage and the run. A stage whose selection value has not improved by
 `min_delta` for `patience` epochs ends, and the next stage starts from that stage's best epoch.
-The run ends when its last stage plateaus or runs its epochs.
+The run ends completed with its last stage, or with the first stage whose best does not improve
+by `min_delta` on the best of the stage before it; the stages after that one never run, and the
+run's last epoch row names the stage that ended it.
 
-Early stopping and `model_best.pt` share the same selection criterion; there is no separate
+A `cosine` or `onecycle` schedule is built over the `horizon_epochs` its block states, and a
+stage under it ends once the schedule has run that many epochs past the stage's warmup, unless
+its plateau ended it first. A `plateau` or `step` schedule has no horizon, and a stage under it
+ends on its plateau alone. `stage_warmup_epochs` warms each stage after the first up from its
+predecessor's rates with the schedule held, whatever the schedule.
+
+The stop rule and `model_best.pt` share the same selection criterion; there is no separate
 `metric`/`mode` key on `early_stopping`. Both are driven by `evaluation.selection_metric`
 (defaults to the composite objective for detection/instance_seg, `loss` otherwise), and both
 compare in whichever direction `evaluation.HIGHER_IS_BETTER_BY_METRIC` declares for that metric,
@@ -119,9 +126,10 @@ config = {
     },
     # each ... below is a value you tune for this dataset
     "batch_size": ...,
-    "stages": [{"freeze_to": ..., "epochs": ...}],
+    "stages": [{"freeze_to": ...}],
     "optimizer": {"name": "adamw", "backbone_lr": ..., "head_lr": ..., "weight_decay": ...},
-    "scheduler": {"type": "cosine", "eta_min": ...},
+    "scheduler": {"type": "cosine", "eta_min": ..., "horizon_epochs": ...},
+    "early_stopping": {"patience": ..., "min_delta": ...},
     "checkpoint_every_n_epochs": ...,
     "mixed_precision": True,
     "device": "cuda",

@@ -510,7 +510,7 @@ def test_one_preflight_reads_a_sources_header_once_for_its_sizes(tmp_path: Path,
          "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
          "split": {"val_ratio": 0.2, "holdout_ratio": 0.1, "calibration_ratio": 0.15,
                    "seed": 1}},
-        batch_size=1, stages=[{"freeze_to": 0, "epochs": 1}])
+        batch_size=1, stages=[{"freeze_to": 0}])
     probed = _probe_spy(monkeypatch)
 
     result = preflight_config(tmp_path, cfg, smoke=True)

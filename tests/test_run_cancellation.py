@@ -4,6 +4,7 @@ import pytest
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import CLASSIFIER_SOURCE
 from tests._producer_fixtures import run_over  # noqa: E402
+from tests._training_values import schedule
 
 torch = pytest.importorskip("torch")
 
@@ -47,7 +48,8 @@ def test_cancel_before_training_yields_canceled(tmp_path):
     from tests._chain_fixtures import training_config
 
     cfg = training_config(CLASSIFIER_SOURCE, data,
-                          stages=[{"freeze_to": -1, "epochs": 3}])
+                          stages=[{"freeze_to": -1}],
+                          scheduler=schedule("cosine", horizon_epochs=3))
     run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
                       id="cancel-run-2")
     (tmp_path / "out").mkdir()

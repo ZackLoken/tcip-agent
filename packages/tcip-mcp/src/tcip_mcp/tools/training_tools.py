@@ -326,9 +326,10 @@ def launch_training(
     separate OS process, writing into the run's own directory
     (``<project>/.tcip/experiments/<experiment_id>/``). Use monitor_training to monitor progress
     and cancel_training to stop a run. The platform itself stops a run only when it is dead (two
-    consecutive full training passes with no finite batch loss) or stagnant against its own
-    validation metric (early stopping); a run launched with no validation loader gets divergence as
-    its only automatic stop.
+    consecutive full training passes with no finite batch loss) or when its stages end it: its
+    last stage ended (on its ``early_stopping`` plateau, or at a horizon-bound schedule's
+    horizon), or a stage whose best did not improve by ``min_delta`` on the stage before it, on
+    the run's selection value (the training loss for a run with no validation loader).
 
     Writes the run's ``run.json`` once, then the act's one audit line naming the minted
     ``experiment_id`` (``AuditEntryNotWrittenError`` when it cannot be appended, and no subprocess

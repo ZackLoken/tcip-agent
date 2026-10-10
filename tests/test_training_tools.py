@@ -62,15 +62,16 @@ def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
     from tcip_mcp.tools.training_tools import preflight_config
 
     cfg = training_config(
-        DETECTION_SOURCE, _labeled(tmp_path),
-        stages=[{"freeze_to": -1, "epochs": 5}, {"freeze_to": 2, "epochs": 10}])
+        DETECTION_SOURCE, _labeled(tmp_path), stages=[{"freeze_to": -1}, {"freeze_to": 2}])
     r = preflight_config(tmp_path, cfg)
     assert r["valid"] is True, r["issues"]
 
-    # 'epochs' is still required per provided stage.
-    cfg["stages"] = [{"freeze_to": 0}]
-    r2 = preflight_config(tmp_path, cfg)
+    # A stage carries no epoch count, and the stop rule that ends it is stated.
+    r2 = preflight_config(tmp_path, {**cfg, "stages": [{"freeze_to": 0, "epochs": 5}]})
     assert any(i.startswith("stages.0.epochs:") for i in r2["issues"]), r2["issues"]
+    unstopped = {k: v for k, v in cfg.items() if k != "early_stopping"}
+    r4 = preflight_config(tmp_path, unstopped)
+    assert any("'early_stopping'" in i and "unstated" in i for i in r4["issues"]), r4["issues"]
 
     # No stages at all is refused naming them: no schedule ships as a default.
     del cfg["stages"]
@@ -214,12 +215,12 @@ def test_preflight_config_refuses_a_per_stage_lr_by_name(tmp_path):
 
     cfg = training_config(DETECTION_SOURCE,
                           _labeled(tmp_path),
-                          stages=[{"freeze_to": -1, "epochs": 5, "lr": 1e-3}])
+                          stages=[{"freeze_to": -1, "lr": 1e-3}])
     r = preflight_config(tmp_path, cfg)
     assert r["valid"] is False
     assert any(i.startswith("stages.0.lr:") for i in r["issues"]), r["issues"]
 
-    cfg["stages"] = [{"freeze_to": -1, "epochs": 5}]
+    cfg["stages"] = [{"freeze_to": -1}]
     assert preflight_config(tmp_path, cfg)["valid"] is True
 
 
@@ -636,7 +637,7 @@ def test_apply_hpo_params_optimizer_axes_reach_optimizer_param_groups():
 def test_apply_hpo_params_preserves_base_config_stages():
     """Sweeping a rate must not overwrite the agent's own progressive-unfreeze schedule with a
     hardcoded recipe: base_config's stages survive unchanged."""
-    custom_stages = [{"freeze_to": -1, "epochs": 2}, {"freeze_to": 0, "epochs": 8}]
+    custom_stages = [{"freeze_to": -1}, {"freeze_to": 2}, {"freeze_to": 0}]
     out = _applied(_base("x:y", stages=custom_stages), {"optimizer.head_lr": 3e-3})
     assert out["stages"] == custom_stages
 

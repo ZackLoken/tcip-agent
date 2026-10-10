@@ -7,9 +7,10 @@ from tcip_mcp.pipelines.model_build import METRICS_KEY
 from tests._verified_checkpoint_fixtures import opened_run
 
 
-def _stock_run(root: Path, builder: str, epochs: int, experiment_id: str,
+def _stock_run(root: Path, builder: str, horizon: int, experiment_id: str,
                builder_kwargs: dict | None = None) -> Path:
-    """A run of the regression ``builder`` at ``builder_kwargs`` under ``root`` over a
+    """A run of the regression ``builder`` at ``builder_kwargs``, its stage ending at its
+    schedule's ``horizon``, under ``root`` over a
     regression dataset of its own on disk, opened by the launcher's own writer and run in-process
     through the envelope's stock trainer over tiny in-memory regression datasets, its loaders
     built by the platform's own loader builder. Returns the run directory."""
@@ -25,7 +26,7 @@ def _stock_run(root: Path, builder: str, epochs: int, experiment_id: str,
     val_ds = ConstantImageDataset([0.2, 0.6], [0.4, 1.2])
     images_dir, csv_path = write_regression_dataset(
         root / f"{experiment_id}-data", [0.1, 0.3, 0.5, 0.7], [0.2, 0.6, 1.0, 1.4])
-    config = regressor_config(epochs, builder=builder, builder_kwargs=builder_kwargs, data={
+    config = regressor_config(horizon, builder=builder, builder_kwargs=builder_kwargs, data={
         "images_dir": str(images_dir), "labels_dir": str(csv_path), "num_channels": 1,
         "split": {"seed": 0, "val_ratio": 0.15}})
     run_dir = opened_run(root, config, experiment_id=experiment_id)

@@ -29,8 +29,8 @@ TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
 VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
 
 
-def _config(epochs: int, **overrides) -> dict:
-    return regressor_config(epochs, builder_kwargs={"init_weight": 0.0}, **overrides)
+def _config(horizon: int, **overrides) -> dict:
+    return regressor_config(horizon, builder_kwargs={"init_weight": 0.0}, **overrides)
 
 
 def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path, monkeypatch):
@@ -89,7 +89,7 @@ def test_best_checkpoint_and_early_stopping_follow_the_holdout_loader(tmp_path, 
     capture_model(monkeypatch, models)
 
     out_dir = tmp_path / "out"
-    config = _config(4, early_stopping={"enabled": True, "patience": 1, "min_delta": 1e-4})
+    config = _config(4, early_stopping={"patience": 1, "min_delta": 1e-4})
     run = trainer_run(config, out_dir, project=tmp_path, has_val_loader=True, id="auto-run-76")
     train_loader, val_loader = opposed_regression_loaders(run, TRAIN_INTENSITIES, VAL_INTENSITIES)
     run = train(run, train_loader, val_loader=val_loader)

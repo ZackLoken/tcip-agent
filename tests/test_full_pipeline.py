@@ -22,7 +22,7 @@ from torchvision.utils import save_image
 
 from tests import REPO_ROOT, bespoke_models  # noqa: E402
 from tests._producer_fixtures import run_over  # noqa: E402
-from tests._training_values import adamw_optimizer, evaluation_block  # noqa: E402
+from tests._training_values import adamw_optimizer, evaluation_block, schedule  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -89,9 +89,8 @@ class TestFullClassificationPipeline:
         config = training_config(
             model_source, {"images_dir": images_dir, "labels_dir": csv_path,
                            "split": {"seed": 0, "val_ratio": 0.34}},
-            stages=[{"freeze_to": -1, "epochs": 2}], batch_size=4,
-            optimizer=adamw_optimizer(),
-            early_stopping={"enabled": True, "patience": 10, "min_delta": 1e-4})
+            stages=[{"freeze_to": -1}], batch_size=4,
+            optimizer=adamw_optimizer(), scheduler=schedule("cosine", horizon_epochs=2))
         observation = observe(worker_run(tmp_path, config))
 
         assert observation.state == "completed", observation.final
@@ -193,7 +192,7 @@ class TestDetectionPipelineRealData:
 
         config = training_config(model_source, {**data, "images_dir": str(images_dir),
                                                 "auto_val": False},
-                                 stages=[{"freeze_to": 0, "epochs": 1}],
+                                 stages=[{"freeze_to": 0}],
                                  evaluation=evaluation_block(selection_metric="loss"))
         observation = observe(worker_run(tmp_path, config))
 
