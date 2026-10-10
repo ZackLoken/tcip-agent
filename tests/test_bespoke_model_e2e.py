@@ -31,7 +31,7 @@ pytest.importorskip("torchvision")
 import tcip_mcp.pipelines.components.backbones  # noqa: F401,E402
 import tcip_mcp.pipelines.components.necks  # noqa: F401,E402
 import tcip_mcp.pipelines.components.heads  # noqa: F401,E402
-from tests._training_values import adamw_optimizer  # noqa: E402
+from tests._training_values import adamw_optimizer, schedule  # noqa: E402
 import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
 
 from tcip_mcp.pipelines.model_build import CONFIG_KEY  # noqa: E402
@@ -80,7 +80,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
 
     # 2. Bespoke model_source + custom training_source, run through the audited envelope.
     src_file = bespoke_models.__file__
-    # train_bespoke reads its own epochs beside the loaders' batch and the blocks
+    # train_bespoke runs its scheduler's horizon beside the loaders' batch and the blocks
     # ctx.build_optimizer, ctx.build_scheduler and ctx.evaluate read.
     config = training_config(
         {"builder": GT_ANCHOR_DETECTOR,
@@ -88,7 +88,8 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
          "task": "detection", "source_files": [src_file]},
         {"images_dir": str(images_dir), "num_channels": 3,
          "scope": asdict(dataset.scope), "split": {"seed": 0, "val_ratio": 0.15}},
-        training_source=TRAIN_BESPOKE, epochs=2, seed=0, optimizer=adamw_optimizer())
+        training_source=TRAIN_BESPOKE, scheduler=schedule("cosine", horizon_epochs=2), seed=0,
+        optimizer=adamw_optimizer())
     from tests._verified_checkpoint_fixtures import worker_run
 
     out = worker_run(tmp_path, config, experiment_id="expBespoke")

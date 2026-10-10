@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from tcip_annotation.state import Annotation, BBox
 
 from tcip_mcp.pipelines.execution import Stated
-from tests._training_values import evaluation_block, schedule, sgd_optimizer
+from tests._training_values import evaluation_block, schedule, sgd_optimizer, stop_rule
 
 if TYPE_CHECKING:
     from tcip_web.state import OpenProject
@@ -118,22 +118,23 @@ def run_config(selection_dir: Path, model_source: dict = REGION_BUILDER,
 
 def training_config(model_source: dict, data: dict, **overrides: Any) -> dict:
     """A one-epoch CPU run of ``model_source`` over the ``data`` section, every other key the
-    toy detectors train at (the optimizer, schedule and evaluation blocks the sample ones of
-    ``tests._training_values``), with a copy of each of ``overrides`` in place of its key."""
+    toy detectors train at (the optimizer, schedule, stop rule and evaluation blocks the sample
+    ones of ``tests._training_values``, the schedule's one-epoch horizon ending the stage), with a
+    copy of each of ``overrides`` in place of its key."""
     import copy
 
     return {
         "model_source": copy.deepcopy(model_source),
         "data": data,
         "batch_size": 2,
-        "stages": [{"freeze_to": -1, "epochs": 1}],
+        "stages": [{"freeze_to": -1}],
         "mixed_precision": False,
         "device": "cpu",
         "checkpoint_every_n_epochs": 1,
-        "early_stopping": {"enabled": False},
+        "early_stopping": stop_rule(),
         "evaluation": evaluation_block(),
         "optimizer": sgd_optimizer(),
-        "scheduler": schedule("cosine"),
+        "scheduler": schedule("cosine", horizon_epochs=1),
         "gradient_accumulation_steps": 1,
         **copy.deepcopy(overrides),
     }

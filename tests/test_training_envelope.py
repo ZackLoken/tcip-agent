@@ -22,7 +22,7 @@ from tcip_mcp.experiments import observe  # noqa: E402
 from tcip_mcp.pipelines.model_build import CONFIG_KEY, METRICS_KEY, STATE_DICT_KEY  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope  # noqa: E402
 from tests._producer_fixtures import dataset_over  # noqa: E402
-from tests._training_values import adamw_optimizer  # noqa: E402
+from tests._training_values import adamw_optimizer, schedule  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     completed_checkpoint,
     detection_config,
@@ -234,7 +234,8 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
     launched = training_config(
         CLASSIFIER_SOURCE, {"images_dir": str(images_dir), "labels_dir": str(csv_path),
                             "split": {"seed": 3, "val_ratio": 0.15}},
-        stages=[{"freeze_to": -1, "epochs": 2}], optimizer=adamw_optimizer(), seed=3)
+        stages=[{"freeze_to": -1}], scheduler=schedule("cosine", horizon_epochs=2),
+        optimizer=adamw_optimizer(), seed=3)
     # Generate the resumable checkpoint by training a first run directly (not through the
     # envelope).
     source, source_dir = _context(tmp_path, launched)

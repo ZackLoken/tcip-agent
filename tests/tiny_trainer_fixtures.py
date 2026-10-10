@@ -15,6 +15,7 @@ from torch.nn import functional
 from torch.utils.data import Dataset
 
 from tests import REPO_ROOT
+from tests._training_values import schedule
 
 
 class ConstantImageDataset(Dataset):
@@ -284,13 +285,14 @@ REGRESSOR_ADAMW = {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weigh
 """The AdamW section the one-weight regressors here train at."""
 
 
-def regressor_config(epochs: int = 1, *, builder: str = MEAN_INTENSITY_REGRESSOR,
+def regressor_config(horizon: int = 1, *, builder: str = MEAN_INTENSITY_REGRESSOR,
                      builder_kwargs: dict | None = None, data: dict | None = None,
                      **overrides) -> dict:
     """A :func:`~tests._chain_fixtures.training_config` of the regression ``builder`` (by
     default the mean-intensity regressor) at ``builder_kwargs`` over ``data`` (by default
-    one-band frames with no scope): ``epochs`` epochs of one unfrozen stage at
-    :data:`REGRESSOR_ADAMW`, no epoch checkpoints, with ``overrides`` in place of their keys."""
+    one-band frames with no scope): one unfrozen stage at :data:`REGRESSOR_ADAMW` under a cosine
+    schedule of ``horizon`` epochs, no epoch checkpoints, with ``overrides`` in place of their
+    keys."""
     from tests._chain_fixtures import training_config
 
     source: dict = {"builder": builder, "source_files": [TINY_TRAINER_FILE], "task": "regression"}
@@ -298,22 +300,24 @@ def regressor_config(epochs: int = 1, *, builder: str = MEAN_INTENSITY_REGRESSOR
         source["builder_kwargs"] = builder_kwargs
     return training_config(
         source, data if data is not None else {"num_channels": 1, "scope": {}},
-        **{"stages": [{"freeze_to": 0, "epochs": epochs}], "optimizer": REGRESSOR_ADAMW,
+        **{"stages": [{"freeze_to": 0}], "optimizer": REGRESSOR_ADAMW,
+           "scheduler": schedule("cosine", horizon_epochs=horizon),
            "checkpoint_every_n_epochs": 0, **overrides})
 
 
-def classifier_config(epochs: int, **overrides) -> dict:
+def classifier_config(horizon: int, **overrides) -> dict:
     """A :func:`~tests._chain_fixtures.training_config` of the mean-intensity classifier
-    (weight -1) over one-band, two-class frames: ``epochs`` epochs of one unfrozen stage in
-    batches of three, AdamW at 0.2, no epoch checkpoints, with ``overrides`` in place of their
-    keys."""
+    (weight -1) over one-band, two-class frames: one unfrozen stage in batches of three under a
+    cosine schedule of ``horizon`` epochs, AdamW at 0.2, no epoch checkpoints, with
+    ``overrides`` in place of their keys."""
     from tests._chain_fixtures import training_config
 
     return training_config(
         {"builder": MEAN_INTENSITY_CLASSIFIER, "builder_kwargs": {"init_weight": -1.0},
          "source_files": [TINY_TRAINER_FILE], "task": "classification"},
         {"num_channels": 1, "num_classes": 2, "scope": {}},
-        **{"batch_size": 3, "stages": [{"freeze_to": 0, "epochs": epochs}],
+        **{"batch_size": 3, "stages": [{"freeze_to": 0}],
+           "scheduler": schedule("cosine", horizon_epochs=horizon),
            "optimizer": {"name": "adamw", "backbone_lr": 0.2, "head_lr": 0.2,
                          "weight_decay": 0.0},
            "checkpoint_every_n_epochs": 0, **overrides})

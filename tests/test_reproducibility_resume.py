@@ -49,7 +49,7 @@ import tcip_mcp.pipelines.components.heads  # noqa: F401,E402
 import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
 from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train  # noqa: E402
 from tests._producer_fixtures import dataset_over  # noqa: E402
-from tests._training_values import adamw_optimizer  # noqa: E402
+from tests._training_values import adamw_optimizer, schedule  # noqa: E402
 
 
 def _classification_data(tmp_path: Path, n: int = 6):
@@ -72,11 +72,12 @@ def _model_source():
     return dict(CLASSIFIER_SOURCE)
 
 
-def _cfg(stages, **extra):
+def _cfg(stages, horizon: int = 1, **extra):
+    """A classifier config of ``stages``, each ending at its cosine schedule's ``horizon``."""
     from tests._chain_fixtures import training_config
 
     return training_config(_model_source(), {}, stages=stages, optimizer=adamw_optimizer(),
-                           **extra)
+                           scheduler=schedule("cosine", horizon_epochs=horizon), **extra)
 
 
 def _run_dir(project: Path, name: str) -> Path:
@@ -107,7 +108,7 @@ def test_seeded_train_reproducible(tmp_path):
     data = _classification_data(tmp_path)
 
     def run_once(name):
-        run = _trained(data, tmp_path, _cfg([{"freeze_to": -1, "epochs": 1}], seed=7), name)
+        run = _trained(data, tmp_path, _cfg([{"freeze_to": -1}], seed=7), name)
         return run.metrics_history[0]["train_loss"]
 
     assert run_once("a") == pytest.approx(run_once("b"))
@@ -115,7 +116,7 @@ def test_seeded_train_reproducible(tmp_path):
 
 def test_resume_continues_epochs(tmp_path):
     data = _classification_data(tmp_path)
-    cfg = _cfg([{"freeze_to": -1, "epochs": 2}])
+    cfg = _cfg([{"freeze_to": -1}], 2)
 
     _trained(data, tmp_path, cfg, "out")
     ckpt = _run_dir(tmp_path, "out") / "checkpoint_epoch_1.pt"
@@ -131,7 +132,7 @@ def test_resume_continues_epochs(tmp_path):
 
 def test_resume_skips_completed_stage_and_restores_optimizer(tmp_path):
     data = _classification_data(tmp_path)
-    cfg = _cfg([{"freeze_to": -1, "epochs": 1}, {"freeze_to": 0, "epochs": 1}])
+    cfg = _cfg([{"freeze_to": -1}, {"freeze_to": 0}])
 
     _trained(data, tmp_path, cfg, "out")
     ckpt = _run_dir(tmp_path, "out") / "checkpoint_epoch_1.pt"  # end of stage 0
@@ -151,7 +152,7 @@ def test_resume_restores_rng_state_not_just_reseeds(tmp_path):
     from a generator of its own seeded from the run's config, whose position the checkpoint
     captures beside the global streams."""
     data = _classification_data(tmp_path)
-    cfg = _cfg([{"freeze_to": -1, "epochs": 2}], seed=11)
+    cfg = _cfg([{"freeze_to": -1}], 2, seed=11)
 
     # Straight-through baseline: both epochs in one uninterrupted run.
     straight = _trained(data, tmp_path, cfg, "straight")
@@ -178,7 +179,7 @@ def test_resume_from_a_checkpoint_missing_a_resume_key_refuses_naming_it(tmp_pat
     """A checkpoint lacking a key the resume reads fails the run naming that key, rather than
     resuming from a guessed default."""
     data = _classification_data(tmp_path)
-    cfg = _cfg([{"freeze_to": -1, "epochs": 2}])
+    cfg = _cfg([{"freeze_to": -1}], 2)
 
     _trained(data, tmp_path, cfg, "out")
     ckpt_path = _run_dir(tmp_path, "out") / "checkpoint_epoch_1.pt"
@@ -194,7 +195,7 @@ def test_resume_from_a_checkpoint_missing_a_resume_key_refuses_naming_it(tmp_pat
 
 def test_resume_from_a_checkpoint_missing_its_scheduler_state_refuses_naming_it(tmp_path):
     data = _classification_data(tmp_path)
-    cfg = _cfg([{"freeze_to": -1, "epochs": 2}])
+    cfg = _cfg([{"freeze_to": -1}], 2)
 
     _trained(data, tmp_path, cfg, "out")
     ckpt_path = _run_dir(tmp_path, "out") / "checkpoint_epoch_1.pt"
@@ -210,7 +211,7 @@ def test_resume_from_a_checkpoint_missing_its_scheduler_state_refuses_naming_it(
 
 def test_a_resume_whose_optimizer_restore_raises_fails_the_run(tmp_path, monkeypatch):
     data = _classification_data(tmp_path)
-    cfg = _cfg([{"freeze_to": -1, "epochs": 2}])
+    cfg = _cfg([{"freeze_to": -1}], 2)
 
     _trained(data, tmp_path, cfg, "out")
 
@@ -244,7 +245,7 @@ def test_a_cuda_resume_restores_the_rng_streams(tmp_path, monkeypatch):
     import tcip_mcp.pipelines.training.generic_trainer as trainer
 
     data = _classification_data(tmp_path)
-    cfg = _cfg([{"freeze_to": -1, "epochs": 2}], device="cuda")
+    cfg = _cfg([{"freeze_to": -1}], 2, device="cuda")
 
     _trained(data, tmp_path, cfg, "out")
     ckpt_path = _run_dir(tmp_path, "out") / "checkpoint_epoch_1.pt"
@@ -328,7 +329,7 @@ def test_resume_from_non_resumable_checkpoint_fails_loudly(tmp_path):
     # Resuming a checkpoint without optimizer state (e.g. model_best.pt) must fail
     # loudly, not silently restart from scratch.
     data = _classification_data(tmp_path)
-    cfg = _cfg([{"freeze_to": -1, "epochs": 1}])
+    cfg = _cfg([{"freeze_to": -1}])
 
     _trained(data, tmp_path, cfg, "out")
     best = _run_dir(tmp_path, "out") / "model_best.pt"  # weights, no optimizer_state_dict

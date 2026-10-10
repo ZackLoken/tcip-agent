@@ -30,29 +30,25 @@ holds), and that location is read and recorded."""
 
 
 class StageSpec(BaseModel):
-    """One progressive-unfreeze step: the trainer reads ``freeze_to``, ``epochs`` and the stage's
-    own ``gradient_accumulation_steps``, while the learning rate comes from the top-level
-    ``optimizer`` block, never per stage. Any other key, a per-stage ``lr`` included, is refused
-    by name."""
+    """One progressive-unfreeze step: the trainer reads ``freeze_to`` and the stage's own
+    ``gradient_accumulation_steps``, while the learning rate comes from the top-level
+    ``optimizer`` block, never per stage. Any other key, a per-stage ``lr`` or ``epochs``
+    included, is refused by name."""
 
     model_config = ConfigDict(extra="forbid")
-    epochs: int = Field(ge=1)
     freeze_to: int = 0
     gradient_accumulation_steps: int | None = Field(None, ge=1)
     """``None``, stated or not, is the run's own top-level ``gradient_accumulation_steps``."""
 
 
 class EarlyStoppingSpec(BaseModel):
-    """A stage's plateau rule, on whenever the run has a validation loader unless ``enabled`` is
-    false: a stage ends once its selection value has not improved by ``min_delta`` for
-    ``patience`` epochs."""
+    """The stop rule that ends a stage and the run: a stage ends once its selection value has not
+    improved by ``min_delta`` for ``patience`` epochs, and the run ends with the stage whose best
+    does not improve by ``min_delta`` on the best of the stage before it."""
 
     model_config = ConfigDict(extra="forbid")
-    enabled: bool = True
-    patience: int = Field(7, ge=1)
-    """Owner ruling."""
-    min_delta: float = Field(1e-4, ge=0)
-    """Owner ruling."""
+    patience: int = Field(ge=1)
+    min_delta: float = Field(ge=0)
 
 
 class OptimizerSpec(BaseModel):
@@ -76,10 +72,17 @@ class OptimizerSpec(BaseModel):
         return self
 
 
-class CosineSchedule(BaseModel):
-    """Cosine annealing over a stage's epochs down to ``eta_min``."""
+class HorizonSchedule(BaseModel):
+    """A schedule built over its own ``horizon_epochs`` scheduled epochs, the most a stage under
+    it runs past its warmup."""
 
     model_config = ConfigDict(extra="forbid")
+    horizon_epochs: int = Field(ge=1)
+
+
+class CosineSchedule(HorizonSchedule):
+    """Cosine annealing over the block's horizon down to ``eta_min``."""
+
     type: Literal["cosine"]
     eta_min: float
 
@@ -94,10 +97,9 @@ class PlateauSchedule(BaseModel):
     patience: int
 
 
-class OneCycleSchedule(BaseModel):
-    """One cycle over a stage's epochs peaking at ``max_lr``."""
+class OneCycleSchedule(HorizonSchedule):
+    """One cycle over the block's horizon peaking at ``max_lr``."""
 
-    model_config = ConfigDict(extra="forbid")
     type: Literal["onecycle"]
     max_lr: float
 
@@ -331,6 +333,7 @@ class DefaultTrainerRegime(NamedTuple):
     optimizer: OptimizerSpec
     scheduler: SchedulerSpec
     checkpoint_every_n_epochs: int
+    early_stopping: EarlyStoppingSpec
 
 
 class TrainerReads(NamedTuple):
@@ -371,8 +374,7 @@ class TrainConfigSchema(_Recorded):
     stage_warmup_epochs: int = Field(0, ge=0)
     enforce_monotonic_unfreeze: bool = True
     checkpoint_every_n_epochs: int | None = Field(None, ge=0)
-    early_stopping: EarlyStoppingSpec = Field(
-        default_factory=lambda: EarlyStoppingSpec.model_validate({}))
+    early_stopping: EarlyStoppingSpec | None = None
     lr_scaling: LrScalingSpec | None = None
     log_every_n_batches: int | None = Field(None, ge=1)
     """``None``: ``generic_trainer.BATCH_ROWS_PER_EPOCH`` rows an epoch
@@ -425,7 +427,7 @@ def checked_train_config(config: dict, project: Path | None = None
     """``config`` validated once against the schema, its paths located against ``project``
     (:data:`ResolvedPath`; ``None`` admits absolute paths only): the validated config and no
     issues, or ``None`` and one issue string per type or structure error (e.g.
-    ``batch_size="big"``, a stage missing ``epochs``, a nested ``training`` section, a missing
+    ``batch_size="big"``, a stage stating ``epochs``, a nested ``training`` section, a missing
     ``model_source.task``, a relative path with no project)."""
     try:
         return TrainConfigSchema.model_validate(config, context={"project": project}), []

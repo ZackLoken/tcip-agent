@@ -37,7 +37,7 @@ def test_a_classification_config_launches_with_images_and_csv_only(
          "task": "classification"},
         {"images_dir": str(images_dir), "labels_dir": str(csv_path),
          "split": {"seed": 0, "val_ratio": 0.15}},
-        batch_size=4, stages=[{"freeze_to": 0, "epochs": 1}], checkpoint_every_n_epochs=0)
+        batch_size=4, stages=[{"freeze_to": 0}], checkpoint_every_n_epochs=0)
 
     res = launch_training(tmp_path, cfg, actor=None)
 

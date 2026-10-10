@@ -33,8 +33,11 @@ def _train_loader(run):
     return run_loaders(run, train_ds, None)[0]
 
 
-def _config(builder: str, builder_kwargs: dict, *, epochs: int, batch_size: int = 2) -> dict:
-    return regressor_config(epochs, builder=builder, builder_kwargs=builder_kwargs,
+def _config(builder: str, builder_kwargs: dict, *, horizon: int, batch_size: int = 2) -> dict:
+    """A regression run of ``builder`` whose stage the schedule's ``horizon`` ends, its stop
+    rule's patience (``_training_values.stop_rule``) past both that horizon and the two
+    diverged passes that stop a run."""
+    return regressor_config(horizon, builder=builder, builder_kwargs=builder_kwargs,
                             batch_size=batch_size)
 
 
@@ -45,7 +48,7 @@ def test_a_run_whose_loss_never_recovers_stops_after_two_diverged_epochs(tmp_pat
     """Every batch is non-finite, at two different loader shapes: the trigger is two consecutive
     full passes with no finite loss, never a batch-count-derived threshold, so both shapes stop
     at exactly the same epoch with the same wording."""
-    run = trainer_run(_config(ALWAYS_DIVERGED_MODEL, {}, epochs=30, batch_size=batch_size),
+    run = trainer_run(_config(ALWAYS_DIVERGED_MODEL, {}, horizon=30, batch_size=batch_size),
                       tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-9")
     run = train(run, _train_loader(run), val_loader=None)
 
@@ -58,7 +61,7 @@ def test_a_run_whose_loss_never_recovers_stops_after_two_diverged_epochs(tmp_pat
 def test_a_healthy_run_never_trips_the_divergence_check(tmp_path):
     """A run whose loss stays finite throughout completes normally and carries no divergence
     text, proving the counter never fires on a model that never produces a bad batch."""
-    run = trainer_run(_config(MEAN_INTENSITY_REGRESSOR, {"init_weight": 0.0}, epochs=3),
+    run = trainer_run(_config(MEAN_INTENSITY_REGRESSOR, {"init_weight": 0.0}, horizon=3),
                       tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-10")
     run = train(run, _train_loader(run), val_loader=None)
 
@@ -71,7 +74,7 @@ def test_one_fully_diverged_epoch_followed_by_recovery_completes(tmp_path):
     """One fully diverged epoch, short of the two-pass rule, followed by a recovery to finite
     losses completes the run: the counter resets on the first epoch with a finite loss."""
     run = trainer_run(
-        _config(TRANSIENT_BUILDER, {"bad_batches": 3, "init_weight": 0.0}, epochs=3),
+        _config(TRANSIENT_BUILDER, {"bad_batches": 3, "init_weight": 0.0}, horizon=3),
         tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-11")
     run = train(run, _train_loader(run), val_loader=None)
 
@@ -86,7 +89,7 @@ def test_a_single_finite_loss_among_bad_batches_does_not_count_the_epoch_as_dive
     (wrongly) counted too. Neither epoch's mean loss is finite, so the run then ends as having
     no selectable epoch, not as diverged."""
     run = trainer_run(
-        _config(STEP_COUNTED_BUILDER, {"finite_at": [2]}, epochs=2),  # epoch 1's middle batch only
+        _config(STEP_COUNTED_BUILDER, {"finite_at": [2]}, horizon=2),  # epoch 1's middle batch only
         tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-12")
     run = train(run, _train_loader(run), val_loader=None)  # three batches/epoch
 
@@ -99,8 +102,8 @@ def test_a_single_finite_loss_among_bad_batches_does_not_count_the_epoch_as_dive
 def test_stage_boundary_resets_the_diverged_epoch_counter(tmp_path):
     """One fully diverged epoch at the end of stage 0 and another at the start of stage 1 must
     not stop the run: the counter resets at every stage boundary, so the two never add up."""
-    config = _config(STEP_COUNTED_BUILDER, {"finite_at": [1, 2, 3, 10, 11, 12]}, epochs=2)
-    config["stages"] = [{"freeze_to": 0, "epochs": 2}, {"freeze_to": 0, "epochs": 2}]
+    config = _config(STEP_COUNTED_BUILDER, {"finite_at": [1, 2, 3, 10, 11, 12]}, horizon=2)
+    config["stages"] = [{"freeze_to": 0}, {"freeze_to": 0}]
     run = trainer_run(
         config, tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-13"
     )
@@ -116,7 +119,7 @@ def test_cancel_requested_during_the_second_diverged_epoch_still_ends_failed(tmp
     the epoch that trips the two-pass rule ends failed, not canceled."""
     out_dir = str(tmp_path / "out")
     kwargs = {"cancel_at_call": 5, "cancel_output_dir": out_dir}
-    run = trainer_run(_config(ALWAYS_DIVERGED_MODEL, kwargs, epochs=30),
+    run = trainer_run(_config(ALWAYS_DIVERGED_MODEL, kwargs, horizon=30),
                       out_dir, project=tmp_path, has_val_loader=False, id="auto-run-14")
     # Three batches/epoch: epoch 2 is calls 4, 5, 6.
     run = train(run, _train_loader(run), val_loader=None)

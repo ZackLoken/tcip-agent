@@ -200,7 +200,7 @@ def test_preflight_smoke_blocks_broken_builder(tmp_path, monkeypatch):
          "task": "detection"},
         {"images_dir": str(imgs), "scope": {"subject": "leaf"},
          "split": {"seed": 0, "val_ratio": 0.15}},
-        batch_size=1, stages=[{"freeze_to": 0, "epochs": 1}])
+        batch_size=1, stages=[{"freeze_to": 0}])
     # Fast path (no smoke) is structurally valid: the builder imports fine.
     assert preflight_config(tmp_path, cfg)["valid"] is True
     # Smoke path builds + runs the contract and catches the measurement-boundary violation.
@@ -219,7 +219,7 @@ def test_preflight_smoke_passes_valid_builder(tmp_path, monkeypatch):
     cfg = training_config(
         BUILT_DETECTOR, {"images_dir": str(imgs), "scope": {"subject": "leaf"},
                          "split": {"seed": 0, "val_ratio": 0.15}},
-        batch_size=1, stages=[{"freeze_to": 0, "epochs": 1}])
+        batch_size=1, stages=[{"freeze_to": 0}])
     r = preflight_config(tmp_path, cfg, smoke=True, overfit=True)
     assert r["valid"] is True, r["issues"]
     assert r["smoke"]["ok"] is True
@@ -245,7 +245,7 @@ def test_preflight_builds_and_smokes_at_the_count_the_run_resolved(tmp_path, mon
          "task": "semantic_seg"},
         {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
          "split": {"seed": 0, "val_ratio": 0.15}},
-        batch_size=1, stages=[{"freeze_to": 0, "epochs": 1}])
+        batch_size=1, stages=[{"freeze_to": 0}])
 
     r = preflight_config(tmp_path, cfg, smoke=True)
 
@@ -276,7 +276,7 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(tmp_path, monk
          "task": "semantic_seg"},
         {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
          "split": {"seed": 0, "val_ratio": 0.15}},
-        batch_size=1, stages=[{"freeze_to": 0, "epochs": 1}])
+        batch_size=1, stages=[{"freeze_to": 0}])
 
     synthetic = preflight_config(tmp_path, cfg, smoke=True)
 
@@ -315,7 +315,7 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
          "split": {"seed": 0, "val_ratio": 0.15},
          "dataset_source": {"builder": f"{Path(__file__).stem}:_bespoke_task_dataset",
                             "source_files": [__file__]}},
-        stages=[{"freeze_to": 0, "epochs": 1}])
+        stages=[{"freeze_to": 0}])
     r = preflight_config(tmp_path, cfg, smoke=True, overfit=True)
     assert r["valid"] is True, r["issues"]
     # The contract actually ran: a real batch stood in for the missing synthetic schema.
@@ -367,7 +367,7 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
          "split": {"seed": 0, "val_ratio": 0.15},
          "dataset_source": {"builder": f"{Path(__file__).stem}:_unbuildable_dataset",
                             "source_files": [__file__]}},
-        stages=[{"freeze_to": 0, "epochs": 1}])
+        stages=[{"freeze_to": 0}])
     r = preflight_config(tmp_path, cfg, smoke=True)
     assert r["valid"] is False
     # Only the builder raises this text, so the refusal is the unbuildable dataset's own.

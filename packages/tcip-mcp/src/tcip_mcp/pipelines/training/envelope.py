@@ -192,11 +192,12 @@ class TrainContext:
         spec = self._stated("optimizer")
         return build_optimizer(spec, model, backbone_lr=spec.backbone_lr, head_lr=spec.head_lr)
 
-    def build_scheduler(self, optimizer: Any, epochs: int) -> Any:
-        """The scheduler the run's validated ``scheduler`` block names, over ``epochs`` epochs."""
+    def build_scheduler(self, optimizer: Any) -> Any:
+        """The scheduler the run's validated ``scheduler`` block names, at the block's own
+        settings and horizon."""
         from tcip_mcp.pipelines.training.generic_trainer import _build_scheduler
 
-        return _build_scheduler(optimizer, self._stated("scheduler"), epochs)
+        return _build_scheduler(optimizer, self._stated("scheduler"))
 
     def apply_stage_freeze(self, model: Any, freeze_to: int, *, prev_trainable: int | None = None,
                            enforce_monotonic: bool = True) -> int:

@@ -96,9 +96,10 @@ def test_the_plateau_scheduler_steps_on_the_validation_loss_under_its_declared_k
         return real_step(self, metrics, *args, **kwargs)
 
     monkeypatch.setattr(plateau, "step", step)
-    from tests._training_values import schedule
+    from tests._training_values import schedule, stop_rule
 
-    config = {**_config(), "scheduler": schedule("plateau")}
+    # The holdout loss worsens from the first epoch on, so the plateau ends the stage at three.
+    config = {**_config(), "scheduler": schedule("plateau"), "early_stopping": stop_rule(2)}
     run = trainer_run(config, tmp_path / "out", project=tmp_path, has_val_loader=True,
                       id="auto-run-plateau")
     train_loader, val_loader = opposed_regression_loaders(run, TRAIN_INTENSITIES, VAL_INTENSITIES)

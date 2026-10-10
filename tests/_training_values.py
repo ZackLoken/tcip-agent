@@ -1,20 +1,28 @@
 """The sample blocks a test config states, since the platform ships no default for any of them:
-the optimizer, schedule and evaluation blocks ``_chain_fixtures.training_config`` builds its run
-from (and a test states over it as an override), and a sample search space and search."""
+the optimizer, schedule, stop rule and evaluation blocks ``_chain_fixtures.training_config``
+builds its run from (and a test states over it as an override), and a sample search space and
+search."""
 
 SCHEDULE_SETTINGS = {
-    "cosine": {"eta_min": 1e-6},
+    "cosine": {"eta_min": 1e-6, "horizon_epochs": 3},
     "plateau": {"factor": 0.3, "patience": 2},
-    "onecycle": {"max_lr": 2e-2},
+    "onecycle": {"max_lr": 2e-2, "horizon_epochs": 3},
     "step": {"step_size": 3, "gamma": 0.5},
 }
 """A sample of each scheduler type's own settings."""
 
 
-def schedule(kind: str) -> dict:
+def schedule(kind: str, **stated) -> dict:
     """A ``scheduler`` block of type ``kind`` stating its own sample settings
-    (:data:`SCHEDULE_SETTINGS`)."""
-    return {"type": kind, **SCHEDULE_SETTINGS[kind]}
+    (:data:`SCHEDULE_SETTINGS`), with ``stated`` over them."""
+    return {"type": kind, **SCHEDULE_SETTINGS[kind], **stated}
+
+
+def stop_rule(patience: int = 50, min_delta: float = 0.0) -> dict:
+    """An ``early_stopping`` block; the default patience sits past the horizons
+    :data:`SCHEDULE_SETTINGS` states, so a sample stage under a horizon-bound schedule ends at
+    its horizon unless the test states a longer one."""
+    return {"patience": patience, "min_delta": min_delta}
 
 
 def adamw_optimizer() -> dict:
