@@ -16,7 +16,7 @@ from tests._chain_fixtures import (
     BESPOKE_CLASSIFIER, BESPOKE_DETECTION, BESPOKE_MODELS, CLASSIFIER_SOURCE, DETECTION_SOURCE,
     TRAIN_BESPOKE, training_config,
 )
-from tests._training_values import evaluation_block
+from tests._training_values import evaluation_block, fifo_search
 
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
@@ -943,7 +943,7 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
         return run
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=captured)
-    base = _classifier_base(tmp_path, augmentation={"horizontal_flip": 0.5})
+    base = _classifier_base(tmp_path, augmentation={"horizontal_flip": {"p": 0.5}})
     _trial({"optimizer.head_lr": 3e-4}, [].append, base, tmp_path)
     assert captured["transforms"] is not None       # augmentation was built + passed
     assert captured["model_source"]["builder"] == BESPOKE_CLASSIFIER
@@ -1158,13 +1158,14 @@ def test_a_sweep_payload_that_json_cannot_hold_is_refused_before_any_trial_runs(
 
     with pytest.raises(TypeError) as space_refused:
         training_tools.run_hyperparameter_search(tmp_path, {"model_source": {"builder": "m:f"}},
-                                                 param_space={"lr": Path("lr.txt")}, search_seed=0)
+                                                 param_space={"lr": Path("lr.txt")}, n_trials=1,
+                                                 **fifo_search(), search_seed=0)
     assert "param_space.lr" in str(space_refused.value)
 
     with pytest.raises(TypeError) as config_refused:
         training_tools.run_hyperparameter_search(
             tmp_path, {"model_source": {"builder": Path("m.py")}},
-            param_space=_CHOICE_SPACE, search_seed=0)
+            param_space=_CHOICE_SPACE, n_trials=1, **fifo_search(), search_seed=0)
     assert "base_config.model_source.builder" in str(config_refused.value)
 
 
@@ -1183,7 +1184,7 @@ def test_a_space_not_in_the_search_space_shape_is_refused_before_any_trial(tmp_p
     result = training_tools.run_hyperparameter_search(
         tmp_path, training_config(DETECTION_SOURCE,
                                   _labeled(tmp_path)),
-        param_space={"optimizer.head_lr": [0.1, 0.01]}, n_trials=1, search_seed=0)
+        param_space={"optimizer.head_lr": [0.1, 0.01]}, n_trials=1, **fifo_search(), search_seed=0)
 
     assert "param_space is not a search space" in result["error"], result
     assert seen == []
@@ -1200,7 +1201,8 @@ def test_an_ordinary_sweep_payload_still_runs_its_search(tmp_path, monkeypatch):
     base_config = training_config(DETECTION_SOURCE,
                                   _labeled(tmp_path))
     result = training_tools.run_hyperparameter_search(
-        tmp_path, base_config, param_space=_CHOICE_SPACE, n_trials=1, search_seed=0)
+        tmp_path, base_config, param_space=_CHOICE_SPACE, n_trials=1, **fifo_search(),
+        search_seed=0)
 
     assert result["sweep"]["state"] == "completed", result
     assert seen == [_CHOICE_SPACE]
@@ -1273,7 +1275,8 @@ def test_run_hyperparameter_search_admits_an_lr_sweep_beside_a_base_config_selec
     base_config = {**real_hpo_base_config,
                    "evaluation": evaluation_block(selection_metric="map")}
     result = training_tools.run_hyperparameter_search(
-        tmp_path, base_config, param_space=_CHOICE_SPACE, n_trials=1, search_seed=0)
+        tmp_path, base_config, param_space=_CHOICE_SPACE, n_trials=1, **fifo_search(),
+        search_seed=0)
 
     assert result["sweep"]["state"] == "completed", result
     assert seen == [_CHOICE_SPACE]
@@ -1296,7 +1299,7 @@ def test_hpo_admits_a_categorical_evaluation_axis_naming_the_same_metric_at_ever
         "choices": [evaluation_block(selection_metric="map")] * 2,
     }}
     result = training_tools.run_hyperparameter_search(
-        tmp_path, base_config, param_space=param_space, n_trials=1, search_seed=0)
+        tmp_path, base_config, param_space=param_space, n_trials=1, **fifo_search(), search_seed=0)
 
     assert "error" not in result, result
     assert seen == [param_space]

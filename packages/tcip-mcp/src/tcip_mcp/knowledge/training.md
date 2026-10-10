@@ -135,10 +135,11 @@ config = {
     "device": "cuda",
     "seed": 42,             # optional, reproducible init/shuffle when set
     "deterministic": False,  # optional, cuDNN deterministic algorithms (slower)
+    # optional; each transform states every value its constructor takes
     "augmentation": {
-        "horizontal_flip": 0.5,
-        "random_crop": {"min_scale": 0.8}
-    }
+        "horizontal_flip": {"p": ...},
+        "random_crop": {"size": [..., ...], "min_scale": ..., "max_scale": ...},
+    },
 }
 ```
 
@@ -149,10 +150,13 @@ samples each name their own.
 
 ## Samplers
 
-The top-level `sampler` config key picks the train loader's sampling strategy by name
-(`build_sampler` in `pipelines/data/samplers.py`). Registered names: `random` (the default:
-plain DataLoader shuffle), `class_balanced`, `oversample`, `weighted_random` (imbalance
-handling, weights auto-computed from the dataset's class distribution), and `tile_locality`.
+The top-level `sampler` config key is a block naming the train loader's sampler beside that
+sampler's own values (`build_sampler` in `pipelines/data/samplers.py`); with no block the loader
+draws every sample once an epoch in shuffled order. Registered names: `class_balanced`,
+`oversample` (which states its `min_count`, the count every class is duplicated up to:
+`{"name": "oversample", "min_count": ...}`), `weighted_random` (imbalance handling, weights
+auto-computed from the dataset's class distribution), and `tile_locality`. A block missing a
+value its sampler requires, or stating one it does not take, is refused at preflight by name.
 
 `tile_locality` matters for windowed tiled training on full-width strip-layout rasters:
 there a fully shuffled tile order forces the same strips to be decoded over and over, since
@@ -164,8 +168,8 @@ loading it deals bands onto per-worker lanes and interleaves them in batches, ma
 DataLoader's round-robin batch dispatch, so every worker keeps its own banded read stream.
 It consumes the loader context (`num_workers`, and `batch_size` when workers > 1) and
 requires a tiled dataset over at least one windowed source; it refuses anything else,
-naming why. Whole-frame training and whole-decode sources gain nothing from it; keep
-`random` there.
+naming why. Whole-frame training and whole-decode sources gain nothing from it; state no
+sampler there.
 
 ## Tools
 
@@ -208,12 +212,15 @@ once under its own name. A relaunch is a new directory naming its parent.
 
 `run_hyperparameter_search` runs a Ray Tune sweep that trains each trial for real, toward the one
 objective the sweep resolves from its base config, in that objective's own direction. The search
-*algorithm* and trial *scheduler* are yours to choose per
-task/data; match them to the space and budget; the defaults are a starting point, not a rule:
+*algorithm*, the trial *scheduler* with its settings and the trial count are yours to choose per
+task/data and to state; match them to the space and budget, since none has a default:
 
 ```python
 run_hyperparameter_search(
-    base_config=config, n_trials=20, search_alg="optuna", scheduler="asha", search_seed=17,
+    base_config=config, n_trials=..., search_alg="optuna", search_seed=17,
+    scheduler={"name": "asha", "time_attr": "training_iteration", "max_t": ...,
+               "grace_period": ..., "reduction_factor": ..., "brackets": ...,
+               "stop_last_trials": ...},
     param_space={"optimizer.head_lr": {"type": "loguniform", "low": ..., "high": ...},
                  "batch_size": {"type": "categorical", "choices": [...]}})
 ```
@@ -226,6 +233,8 @@ run_hyperparameter_search(
   config the schema refuses opens nothing and errors naming why, and one the launch door's other
   checks refuse (an unstated value the trainer reads, a source that will not import, a data
   location that does not exist) ends failed naming why.
+- `n_trials` (required) is the number of sampled points, the trials launched being Ray's count
+  over them (`hpo.planned_trial_count`).
 - `search_seed` (required) seeds the search algorithm itself, native or backend, and is recorded
   in the sweep's input so a relaunch replays it; it is distinct from `data.split.seed`. The
   `17` above is an arbitrary example value.
@@ -235,8 +244,13 @@ run_hyperparameter_search(
   its bounds. An uninstalled or unoffered pick errors clearly (never silently swapped),
   and so does `split_draws` above one with a backend pick.
   Call `hpo.available_search_algs()` for the live list on this box.
-- `scheduler`: `asha`, `hyperband`, `pbt`, `median`, or `none` to run every trial to
-  completion. `grace_period`/`reduction_factor` tune the halving schedulers.
+- `scheduler`: a block naming `asha`, `hyperband`, `pbt`, `median`, or `fifo` to run every
+  trial to completion (`{"name": "fifo"}`), beside every setting that scheduler's Ray Tune class
+  takes, the objective and `pbt`'s mutations (the search space) excepted; a setting left
+  unstated or one the class does not take is refused by name (`hpo.scheduler_settings`). Each
+  trial reports once per epoch row carrying its `selection` value, so `time_attr:
+  "training_iteration"` counts those epochs and `max_t` is the most epochs a trial runs under a
+  halving scheduler; every scheduler's `time_attr` is stated like its other settings.
 - `baseline_params` seeds the search with a point you state; `max_concurrent` bounds
   parallel trials (default 1, safe for single-GPU training).
 - A sweep is its own directory, `.tcip/experiments/<sweep_id>/` beside the runs: its `sweep.json` input (the objective

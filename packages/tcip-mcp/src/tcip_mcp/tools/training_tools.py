@@ -783,11 +783,6 @@ def run_hyperparameter_search(
     project: Path,
     base_config: dict,
     param_space: dict,
-    n_trials: int = 5,
-    search_alg: str = "random",
-    scheduler: str = "asha",
-    grace_period: int = 5,
-    reduction_factor: int = 3,
     baseline_params: dict | None = None,
     max_concurrent: int = 1,
     resources_per_trial: dict | None = None,
@@ -795,6 +790,9 @@ def run_hyperparameter_search(
     split_draws: int = 1,
     split_draw_seeds: list[int] | None = None,
     *,
+    n_trials: int,
+    search_alg: str,
+    scheduler: dict,
     search_seed: int,
     trial_budget: int | None = None,
     relaunched_from: str | None = None,
@@ -805,7 +803,7 @@ def run_hyperparameter_search(
     ``available_search_algs`` / ``available_schedulers`` for the live list):
       - ``search_alg``: ``random``/``grid`` (native), or a backend, ``optuna``, ``bayesopt``,
         ``hyperopt``, each constructed with ``search_seed``.
-      - ``scheduler``: ``asha`` (async HyperBand), ``hyperband``, ``pbt``, ``median``, or ``none``
+      - ``scheduler``: ``asha`` (async HyperBand), ``hyperband``, ``pbt``, ``median``, or ``fifo``
         to run every trial to completion.
 
     Trials optimize the objective ``base_config`` resolves to once (its selection metric and the
@@ -849,11 +847,10 @@ def run_hyperparameter_search(
         n_trials: Number of trials; a whole number of at least one on a call that reads a
             ``trial_budget`` bound.
         search_alg: Search algorithm, see the list above.
-        scheduler: Trial scheduler, see the list above.
-        grace_period: Minimum epochs before a halving scheduler (``asha``/``hyperband``) can stop a
-            trial early.
-        reduction_factor: Halving factor for ``asha``/``hyperband`` (fraction of trials kept at
-            each rung).
+        scheduler: Trial scheduler, a block naming one of the list above as its ``name`` beside
+            every setting that scheduler's Ray class takes (``hpo.scheduler_settings``), its
+            objective and ``pbt``'s mutations excepted; ``{"name": "fifo"}`` takes none. Refused
+            naming each setting left unstated or not taken.
         baseline_params: Hyperparameter values to seed the search with, ``None`` for none.
         max_concurrent: Trials to run at once (default 1, safe for single-GPU training).
         resources_per_trial: Ray resource request per trial, omit to derive one from the host's
@@ -881,7 +878,7 @@ def run_hyperparameter_search(
             selection's own train-plus-val samples, calibration untouched; refused when those
             samples resolve to fewer than two foreground groups. Otherwise refused when
             ``data.auto_val`` is off, ``search_alg`` is not a native one
-            (``random``/``grid``/``variant_generator``), ``scheduler`` is not ``none``,
+            (``random``/``grid``/``variant_generator``), ``scheduler`` is not ``fifo``,
             ``split_draw_seeds`` is given at a length other than ``split_draws`` or names the same
             seed twice, ``baseline_params`` names ``data.split.seed``,
             ``param_space`` already sweeps ``data.split.seed`` itself, or ``param_space`` sweeps
@@ -894,9 +891,7 @@ def run_hyperparameter_search(
     """
     opened = open_sweep(
         project, base_config, param_space, n_trials=n_trials, search_alg=search_alg,
-        scheduler=scheduler,
-        grace_period=grace_period, reduction_factor=reduction_factor,
-        baseline_params=baseline_params, max_concurrent=max_concurrent,
+        scheduler=scheduler, baseline_params=baseline_params, max_concurrent=max_concurrent,
         resources_per_trial=resources_per_trial, split_draws=split_draws,
         split_draw_seeds=split_draw_seeds, search_seed=search_seed, trial_budget=trial_budget,
         relaunched_from=relaunched_from, actor=None)
@@ -913,12 +908,13 @@ def run_hyperparameter_search(
 
 def open_sweep(
     project: Path, base_config: dict, param_space: dict, *, n_trials: int, search_alg: str,
-    scheduler: str, grace_period: int, reduction_factor: int, baseline_params: dict | None,
+    scheduler: dict, baseline_params: dict | None,
     max_concurrent: int, resources_per_trial: dict | None,
     split_draws: int, split_draw_seeds: list[int] | None,
     search_seed: int, trial_budget: int | None, relaunched_from: str | None, actor: str | None,
 ) -> Path | dict:
-    """Check a sweep's arguments: the first point :func:`_preflight_points` lists applied to
+    """Check a sweep's arguments: its scheduler block (``hpo.scheduler_settings``), the first
+    point :func:`_preflight_points` lists applied to
     ``base_config`` and admitted once (:func:`_admitted`), its data block the one every
     split-draw check reads, then resolved once (:func:`_preflight`), whose objective every trial
     records and whose partition answers whether its draws can vary
@@ -933,7 +929,9 @@ def open_sweep(
     one audit line by ``actor`` naming the sweep (``AuditEntryNotWrittenError`` when it cannot be
     appended). Returns the opened sweep's directory, or the refusal ``{"error", "issues"}`` with
     nothing created."""
-    from tcip_mcp.pipelines.training.hpo import resolved_draw_seeds, split_draw_search_space
+    from tcip_mcp.pipelines.training.hpo import (
+        resolved_draw_seeds, scheduler_settings, split_draw_search_space,
+    )
 
     # Both reach a written record: the space into the sweep's input, the base config into every
     # trial's run.json once a sampled point is applied to it.
@@ -948,6 +946,10 @@ def open_sweep(
     argument_refusal = _split_draws_argument_refusal(split_draws)
     if argument_refusal is not None:
         return {"error": argument_refusal, "issues": []}
+    try:
+        scheduler_settings(scheduler)
+    except ValueError as exc:
+        return {"error": str(exc), "issues": []}
 
     # Below the leg that makes split_draws an integer, so this comparison never meets another
     # type, and computed once so every leg that reads it agrees on whether a bound is read.
@@ -1014,7 +1016,6 @@ def open_sweep(
         return {"error": str(exc), "issues": []}
     record = {"created": now_iso(), "objective": objective, "input": {
         "n_trials": n_trials, "search_alg": search_alg, "scheduler": scheduler,
-        "grace_period": grace_period, "reduction_factor": reduction_factor,
         "max_concurrent": max_concurrent, "baseline_params": baseline_params,
         "resources_per_trial": resources_per_trial,
         "param_space": param_space, "base_config": base_config,
@@ -1082,8 +1083,6 @@ def run_sweep(directory: Path) -> SweepGroup:
             num_samples=given["n_trials"],
             search_alg=given["search_alg"],
             scheduler=given["scheduler"],
-            grace_period=given["grace_period"],
-            reduction_factor=given["reduction_factor"],
             seed=given["search_seed"],
             baseline_params=given["baseline_params"],
             max_concurrent=given["max_concurrent"],
@@ -1223,7 +1222,7 @@ def _trial_budget_refusal(
 
 def _split_draws_refusal(
     data: DataSpec, param_space: dict, search_alg: str,
-    scheduler: str, split_draws: int, split_draw_seeds: list[int] | None,
+    scheduler: dict, split_draws: int, split_draw_seeds: list[int] | None,
     baseline_params: dict | None,
 ) -> str | None:
     """Every reason of the paired path's own a sweep refuses ``split_draws`` above 1 for before
@@ -1234,7 +1233,7 @@ def _split_draws_refusal(
     if split_draws <= 1:
         return None
     from tcip_mcp.pipelines.training.hpo import (
-        SPLIT_DRAW_SEED_KEY, _NATIVE_SEARCH, _NO_SCHEDULER, search_alg_key,
+        FIFO_SCHEDULER, SPLIT_DRAW_SEED_KEY, _NATIVE_SEARCH, search_alg_key,
     )
 
     if not data.split.selection_dir and not data.auto_val:
@@ -1244,10 +1243,10 @@ def _split_draws_refusal(
         native = sorted(_NATIVE_SEARCH)
         return (f"split_draws pairs a grid axis through Ray's own BasicVariantGenerator, which "
                 f"only a native search_alg ({native}) builds; search_alg={search_alg!r} does not.")
-    if (scheduler or "none").lower() not in _NO_SCHEDULER:
+    if scheduler["name"] != FIFO_SCHEDULER:
         return (f"split_draws makes each draw a blocked comparison, and a pruning scheduler "
-                f"({scheduler!r}) could end one draw before another completes; pass "
-                "scheduler='none' with split_draws.")
+                f"({scheduler['name']!r}) could end one draw before another completes; pass "
+                f"scheduler={{'name': {FIFO_SCHEDULER!r}}} with split_draws.")
     if split_draw_seeds is not None and len(split_draw_seeds) != split_draws:
         return (f"split_draw_seeds has {len(split_draw_seeds)} seed(s) but split_draws="
                 f"{split_draws}: one seed per draw.")
@@ -1313,8 +1312,8 @@ _SEED_AXIS_REMEDY = (
     "unbound alike: a config bound to a selection redraws train and val inside the selection's "
     "own train and val samples (the selection must be readable and resolve at least two "
     "foreground groups across them); an unbound config keeps auto_val on; search_alg "
-    "is one the native generator builds (random, grid, variant_generator, or unset); scheduler "
-    "prunes nothing (none, fifo, or unset); split_draw_seeds is one per draw and distinct; no "
+    "is one the native generator builds (random, grid, variant_generator); scheduler "
+    "prunes nothing (fifo); split_draw_seeds is one per draw and distinct; no "
     "baseline_params names no seed; no other data.* axis is in param_space; "
     "a trial_budget is stated on a launch that is not a relaunch, and Ray's variant count over "
     "the sweep fits under it; and, for a built-in detection config with tiling on, more than one "

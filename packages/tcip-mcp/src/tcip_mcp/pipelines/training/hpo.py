@@ -4,8 +4,9 @@ The search algorithms and trial schedulers a sweep can name:
   - search algorithms: ``random``/``grid`` are native; ``optuna``, ``bayesopt``, ``hyperopt``
     need their pip backend and are installed by default. Each is constructed with the sweep's
     own seed.
-  - trial schedulers: ``asha`` (async HyperBand), ``hyperband``, ``pbt``, ``median``; ``none``
-    runs every trial to completion.
+  - trial schedulers: ``asha`` (async HyperBand), ``hyperband``, ``pbt``, ``median``; ``fifo``
+    runs every trial to completion. A sweep states every setting its scheduler's Ray class takes
+    (:func:`scheduler_settings`).
 """
 
 from __future__ import annotations
@@ -48,10 +49,9 @@ _ENV_VARS_RAY_TUNE_REFUSES = ("TUNE_RESULT_DIR", "RAY_AIR_LOCAL_CACHE_DIR")
 _NATIVE_SEARCH = {"random", "grid", "variant_generator"}
 
 
-def search_alg_key(search_alg: str | None) -> str:
-    """The searcher a sweep names: ``random`` where it names none, its own name lower-cased
-    otherwise, a blank one included."""
-    return "random" if search_alg is None else search_alg.lower()
+def search_alg_key(search_alg: str) -> str:
+    """The searcher a sweep names, its own name lower-cased."""
+    return search_alg.lower()
 
 
 _SEARCH_BACKENDS: dict[str, tuple[str, str, str, str]] = {
@@ -63,15 +63,17 @@ _SEARCH_BACKENDS: dict[str, tuple[str, str, str, str]] = {
 Ray wrapper class constructed directly, and that class's own seed keyword. Not offered: nevergrad
 (its wrapper takes no seed), ax (its wrapper fails to set up a real space under the installed
 Ray), and zoopt, hpbandster, hebo (abandoned upstreams)."""
-# Scheduler aliases -> Ray's create_scheduler name.
-_SCHEDULER_ALIASES = {
-    "asha": "async_hyperband", "async_hyperband": "async_hyperband",
-    "hyperband": "hyperband", "pbt": "pbt",
-    "median": "median_stopping_rule", "median_stopping_rule": "median_stopping_rule",
+FIFO_SCHEDULER = "fifo"
+"""The scheduler that runs every trial to completion and prunes none."""
+_SCHEDULERS = {
+    "asha": "AsyncHyperBandScheduler", "hyperband": "HyperBandScheduler",
+    "pbt": "PopulationBasedTraining", "median": "MedianStoppingRule",
+    FIFO_SCHEDULER: "FIFOScheduler",
 }
-_NO_SCHEDULER = {"none", "fifo", ""}
-# Schedulers that consume the grace-period / reduction-factor early-stopping knobs.
-_HALVING_SCHEDULERS = {"async_hyperband", "hyperband"}
+"""Each scheduler a sweep can name, and its class in ``ray.tune.schedulers``."""
+_SWEEP_SUPPLIED = {"metric", "mode", "hyperparam_mutations"}
+"""The scheduler settings a sweep's own facts supply: its objective and, for ``pbt``, its search
+space."""
 
 SPLIT_DRAW_SEED_KEY = "data.split.seed"
 """The dotted param-space key a sweep's ``split_draws`` axis sweeps, paired with every sampled
@@ -89,7 +91,7 @@ def available_search_algs() -> list[str]:
 
 def available_schedulers() -> list[str]:
     """Trial schedulers Ray Tune offers (all native, none need an extra backend)."""
-    return ["asha", "hyperband", "pbt", "median", "none"]
+    return list(_SCHEDULERS)
 
 
 GRID_AXIS_LIMIT = 10_000
@@ -169,7 +171,7 @@ def _to_tune_space(
 
 
 def build_search_alg(
-    name: str | None, *, seed: int, points_to_evaluate: list[dict] | None = None,
+    name: str, *, seed: int, points_to_evaluate: list[dict] | None = None,
     constant_grid_search: bool = False,
 ):
     """Build the Ray Tune searcher ``name`` names, constructed with ``seed``.
@@ -210,28 +212,37 @@ def build_search_alg(
     return wrapper(points_to_evaluate=points, **{seed_kw: seed})
 
 
-def build_scheduler(
-    name: str | None, *, grace_period: int = 5, reduction_factor: int = 3,
-    hyperparam_mutations: dict | None = None,
-):
-    """Build a Ray Tune trial scheduler, or ``None`` to run every trial to completion.
+def scheduler_settings(scheduler: dict) -> tuple[type, dict]:
+    """The Ray Tune scheduler class ``scheduler["name"]`` names (:data:`_SCHEDULERS`) and the
+    rest of ``scheduler`` as its settings. Refuses (``ValueError``) an unknown name, and by name
+    every setting that class takes that the block leaves unstated and every one it states that
+    the class does not take, the settings a sweep supplies itself (:data:`_SWEEP_SUPPLIED`)
+    excepted."""
+    from ray.tune import schedulers
 
-    ``metric``/``mode`` are not passed. ``pbt`` takes ``hyperparam_mutations`` (the search
-    space).
-    """
-    key = (str(name).lower() if name is not None else None)
-    if key is None or key in _NO_SCHEDULER:
-        return None
-    ray_name = _SCHEDULER_ALIASES.get(key, key)
+    from tcip_mcp.pipelines.model_build import keyword_parameters, resolve_named
 
-    from ray.tune.schedulers import create_scheduler
+    name = scheduler.get("name", "")
+    cls = getattr(schedulers, resolve_named(name, _SCHEDULERS, kind="scheduler"))
+    settings = {k: v for k, v in scheduler.items() if k != "name"}
+    taken = keyword_parameters(cls)[0] - _SWEEP_SUPPLIED
+    unstated, untaken = sorted(taken - set(settings)), sorted(set(settings) - taken)
+    if unstated or untaken:
+        raise ValueError(f"scheduler {name!r} takes {sorted(taken)}: unstated {unstated}, "
+                         f"not taken {untaken}")
+    return cls, settings
 
-    kwargs: dict[str, Any] = {}
-    if ray_name in _HALVING_SCHEDULERS:
-        kwargs.update(grace_period=grace_period, reduction_factor=reduction_factor)
-    if ray_name == "pbt" and hyperparam_mutations:
-        kwargs["hyperparam_mutations"] = hyperparam_mutations
-    return create_scheduler(ray_name, **kwargs)
+
+def build_scheduler(scheduler: dict, *, hyperparam_mutations: dict):
+    """The Ray Tune trial scheduler the block ``scheduler`` states (:func:`scheduler_settings`),
+    ``pbt`` mutating over ``hyperparam_mutations`` (the search space). ``metric``/``mode`` are
+    not passed."""
+    from tcip_mcp.pipelines.model_build import keyword_parameters
+
+    cls, settings = scheduler_settings(scheduler)
+    if "hyperparam_mutations" in keyword_parameters(cls)[0]:
+        settings["hyperparam_mutations"] = hyperparam_mutations
+    return cls(**settings)
 
 
 def _default_trial_resources(max_concurrent: int) -> dict[str, float]:
@@ -438,7 +449,7 @@ def split_draw_search_space(param_space: dict, draw_seeds: list[int] | None) -> 
 
 
 def _search_space_and_points(
-    param_space: dict, search_alg: str | None, split_draws: int, baseline_params: dict | None,
+    param_space: dict, search_alg: str, split_draws: int, baseline_params: dict | None,
 ) -> tuple[dict, list[dict] | None, str]:
     """The Ray Tune space, warm-start preset points, and the normalized search-algorithm name: the
     platform's own ``param_space`` turned into Ray's own space, gridded over every discrete axis
@@ -454,7 +465,7 @@ def _search_space_and_points(
 
 
 def planned_trial_count(
-    param_space: dict, num_samples: int, search_alg: str | None, split_draws: int,
+    param_space: dict, num_samples: int, search_alg: str, split_draws: int,
     baseline_params: dict | None,
 ) -> int:
     """How many trials ``tune_search`` would launch for this sweep, read off the specification
@@ -482,10 +493,8 @@ def tune_search(
     metric: str,
     mode: str,
     num_samples: int,
-    search_alg: str | None,
-    scheduler: str | None,
-    grace_period: int,
-    reduction_factor: int,
+    search_alg: str,
+    scheduler: dict,
     seed: int,
     max_concurrent: int,
     baseline_params: dict | None,
@@ -505,8 +514,10 @@ def tune_search(
         metric / mode: the reported metric name and whether to ``min`` or ``max`` it.
         num_samples: number of trials (with a grid space, samples over the grid); the count
             launched is :func:`planned_trial_count`'s.
-        search_alg / scheduler: agent-selected names (see module docstring). ``None`` schedules
-        nothing; native ``random``/``grid`` need no searcher backend.
+        search_alg: the searcher's name (see module docstring); native ``random``/``grid`` need
+            no searcher backend.
+        scheduler: the trial scheduler's block, its ``name`` and every setting its Ray class
+            takes (:func:`scheduler_settings`).
         seed: the searcher's own seed, the sweep's stated one; required.
         max_concurrent: trials to run at once.
         baseline_params: a point to seed the search with, ``None`` for none.
@@ -541,10 +552,7 @@ def tune_search(
 
     searcher = build_search_alg(normalized_search_alg, seed=seed, points_to_evaluate=points,
                                 constant_grid_search=split_draws > 1)
-    sched = build_scheduler(
-        scheduler, grace_period=grace_period, reduction_factor=reduction_factor,
-        hyperparam_mutations=space,
-    )
+    sched = build_scheduler(scheduler, hyperparam_mutations=space)
 
     # Concurrency: a backend searcher must be wrapped (TuneConfig.max_concurrent_trials is
     # ignored once Ray wraps a searcher). The native BasicVariantGenerator honors

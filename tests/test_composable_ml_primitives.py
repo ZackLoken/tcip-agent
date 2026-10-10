@@ -61,11 +61,6 @@ class TestDatasets:
 
 
 class TestSamplers:
-    def test_build_sampler_random(self):
-        from tcip_mcp.pipelines.data.samplers import build_sampler
-        sampler = build_sampler("random", None)
-        assert sampler is None
-
     def test_weighted_random_sampler(self):
         from tcip_mcp.pipelines.data.samplers import build_sampler
 
@@ -83,7 +78,7 @@ class TestSamplers:
                 return torch.zeros(3, 32, 32), {"label": labels[idx]}
 
         ds = FakeDataset()
-        sampler = build_sampler("weighted_random", ds)
+        sampler = build_sampler({"name": "weighted_random"}, ds)
         assert sampler is not None
 
 

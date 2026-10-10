@@ -175,7 +175,7 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
     ckpt = _checkpoint(tmp_path)
     predictor = install(monkeypatch, StubPredictor(
         boxes=(), scores=(), task="detection", train_tile_size=None, train_native_size=[64, 64],
-        train_augmentation={"resize": [128, 128]}))
+        train_augmentation={"resize": {"size": [128, 128]}}))
 
     job = _job("t4", tmp_path, ckpt, images_dir, Stated(
         tile=True, conf=0.25, cross_tile_nms=0.7, overlap=0.2,

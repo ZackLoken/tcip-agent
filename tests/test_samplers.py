@@ -248,7 +248,7 @@ def test_tile_locality_refuses_unknown_worker_regime(monkeypatch):
 
     _patch_gdal_cache(monkeypatch, 62_000_000)
     with pytest.raises(ValueError, match="num_workers"):
-        build_sampler("tile_locality", _two_source_dataset())
+        build_sampler({"name": "tile_locality"}, _two_source_dataset())
 
 
 def test_tile_locality_refuses_multi_worker_without_batch_size(monkeypatch):
@@ -256,7 +256,7 @@ def test_tile_locality_refuses_multi_worker_without_batch_size(monkeypatch):
 
     _patch_gdal_cache(monkeypatch, 62_000_000)
     with pytest.raises(ValueError, match="batch_size"):
-        build_sampler("tile_locality", _two_source_dataset(), num_workers=2)
+        build_sampler({"name": "tile_locality"}, _two_source_dataset(), num_workers=2)
 
 
 def test_tile_locality_refuses_windowed_source_without_dtype_size(monkeypatch):
@@ -287,28 +287,53 @@ def test_build_sampler_builds_tile_locality_through_the_factory(monkeypatch):
     from tcip_mcp.pipelines.data.samplers import TileLocalitySampler, build_sampler
 
     _patch_gdal_cache(monkeypatch, 62_000_000)
-    sampler = build_sampler("tile_locality", _two_source_dataset(),
+    sampler = build_sampler({"name": "tile_locality"}, _two_source_dataset(),
                             num_workers=2, batch_size=4)
     assert isinstance(sampler, TileLocalitySampler)
 
 
-def test_build_sampler_default_random_unchanged_by_loader_context():
-    """A config without a sampler key resolves to 'random' and still yields None (plain
-    DataLoader shuffle), with or without the loader context supplied."""
-    from tcip_mcp.pipelines.data.samplers import build_sampler
-
-    assert build_sampler("random", None) is None
-    assert build_sampler("random", None, num_workers=8, batch_size=4) is None
-
-
-def test_build_sampler_existing_names_still_build_with_no_new_arguments():
-    """The imbalance samplers neither require nor receive the loader context: they build
-    with the bare historical call and with the context present but ignored."""
+def test_build_sampler_imbalance_samplers_build_with_or_without_the_loader_context():
+    """The imbalance samplers neither require nor receive the loader context: each block builds
+    with the context absent and with it present but ignored."""
     from tcip_mcp.pipelines.data import samplers
 
     ds = _TinyClassDataset()
-    for name in ("class_balanced", "oversample", "weighted_random"):
+    for block in ({"name": "class_balanced"}, {"name": "oversample", "min_count": 3},
+                  {"name": "weighted_random"}):
         for kwargs in ({}, {"num_workers": 4, "batch_size": 8}):
-            sampler = samplers.build_sampler(name, ds, **kwargs)
-            assert sampler is not None
+            sampler = samplers.build_sampler(block, ds, **kwargs)
             assert len(list(iter(sampler))) >= len(ds)
+
+
+@pytest.mark.parametrize("block, named", [
+    ({"name": "oversample"}, "min_count"),
+    ({"name": "class_balanced", "min_count": 5}, "min_count"),
+    ({"name": "random"}, "Unknown sampler 'random'"),
+    ({"name": "tile_locality", "num_workers": 4}, "train loader supplies"),
+], ids=["oversample-without-its-count", "a-count-its-sampler-does-not-take", "random",
+        "the-loaders-own-worker-count"])
+def test_a_sampler_block_its_sampler_refuses_is_refused_at_preflight_by_name(block, named):
+    """guard. The oversampler's count has no default: a config naming the oversampler with no
+    ``min_count``, or a sampler stated with a value it does not take, refuses naming it where
+    training's reads are checked; ``random`` is no sampler name, the absent block being the
+    shuffled loader; and the loader's own worker count and batch size are the loader's to
+    supply, refused in a block by name."""
+    from tcip_mcp.pipelines.schemas import train_config
+    from tests.tiny_trainer_fixtures import classifier_config
+
+    with pytest.raises(ValueError, match=named):
+        train_config(classifier_config(1, sampler=block)).trainer_reads()
+
+
+def test_a_stated_oversampler_count_is_the_count_the_train_loader_draws_at(tmp_path):
+    """guard. The train loader a run builds (``generic_trainer.run_loaders``) draws through the
+    oversampler at the count its config states: four samples of two classes, two each,
+    duplicated up to five per class, read 4 + 2 * 3 * 2 indices an epoch."""
+    from tcip_mcp.pipelines.training.generic_trainer import run_loaders
+    from tests.tiny_trainer_fixtures import classifier_config, trainer_run
+
+    run = trainer_run(classifier_config(1, sampler={"name": "oversample", "min_count": 5}),
+                      tmp_path / "out", project=tmp_path, has_val_loader=False)
+    train_loader, _ = run_loaders(run, _TinyClassDataset(), None)
+
+    assert len(list(iter(train_loader.sampler))) == 4 + 2 * 3 * 2

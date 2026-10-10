@@ -213,8 +213,8 @@ def run_loaders(run: TrainRun, train_ds: Any, val_ds: Any
     batch_size, num_workers = run.reads.batch_size, spec.num_workers
     loader_kwargs = seeded_loader_kwargs(spec.seed, num_workers=num_workers)
     # Built after the loader context is known: read order depends on the worker regime too.
-    sampler = build_sampler(spec.sampler, train_ds,
-                            num_workers=num_workers, batch_size=batch_size)
+    sampler = None if spec.sampler is None else build_sampler(
+        spec.sampler, train_ds, num_workers=num_workers, batch_size=batch_size)
     train_loader = DataLoader(
         train_ds, batch_size=batch_size, shuffle=(sampler is None), sampler=sampler,
         collate_fn=task_collate(task), num_workers=num_workers, **loader_kwargs)

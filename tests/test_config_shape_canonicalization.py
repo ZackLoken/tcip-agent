@@ -105,10 +105,11 @@ def test_a_config_naming_its_own_loop_states_only_what_its_loop_reads():
     assert not any("unstated" in issue for issue in looped), looped
 
 
-def test_an_optimizer_naming_none_is_the_platforms_own():
-    unnamed = _without(FLAT_CONFIG, "optimizer.name")
-    optimizer = train_config(unnamed).optimizer
-    assert optimizer is not None and optimizer.name == OptimizerSpec.model_fields["name"].default
+def test_an_optimizer_naming_no_family_is_refused_naming_it():
+    """guard. The optimizer's family has no default: a block naming none is refused naming
+    ``optimizer.name``, and the same block naming it is admitted."""
+    assert _names(_issues_of(_without(FLAT_CONFIG, "optimizer.name")), "optimizer.name")
+    assert _issues_of(FLAT_CONFIG) == []
 
 
 @pytest.mark.parametrize("kind", SCHEDULER_TYPES)
