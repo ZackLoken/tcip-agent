@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import re
 
 import numpy as np
 import pytest
@@ -83,12 +84,12 @@ def test_derive_cross_tile_nms_answers_near_duplicates_unbounded_and_refuses_ful
 
 
 def test_derive_cross_tile_nms_refuses_where_the_margin_exhausts_the_interval():
-    # Two 100 px boxes 2 px apart overlap at IoU 98/102: the 0.05 margin carries the threshold
-    # past 1 and refuses naming the margin, while a 0.01 margin answers below it.
-    boxes = [[(0, 0, 100, 100), (2, 0, 100, 100)]]
+    # Two 100 px boxes 2 px apart overlap at IoU 98/102, past 0.95: the margin carries the
+    # threshold past 1 and refuses naming it, while 3 px apart (IoU 97/103) answers below 1.
     with pytest.raises(ValueError, match="margin 0.05"):
-        derive_cross_tile_nms(_regions(boxes))
-    assert derive_cross_tile_nms(_regions(boxes), margin=0.01) == pytest.approx(98 / 102 + 0.01)
+        derive_cross_tile_nms(_regions([[(0, 0, 100, 100), (2, 0, 100, 100)]]))
+    assert derive_cross_tile_nms(_regions([[(0, 0, 100, 100), (3, 0, 100, 100)]])) == (
+        pytest.approx(97 / 103 + 0.05))
 
 
 def test_derive_cross_tile_nms_reads_the_neighbor_iou_tail():
@@ -108,7 +109,7 @@ def test_derive_localization_tolerance_frac_tight_spacing_stays_tighter_than_loo
     t_loose = derive_localization_tolerance_frac(loose)
     assert t_tight is not None and t_loose is not None
     assert t_tight < t_loose
-    # p10 nn-dist * margin_frac (0.5) / char_size (20): 10 -> 0.25, 100 -> 2.5.
+    # half the p10 nn-dist over char_size (20): 10 -> 0.25, 100 -> 2.5.
     assert t_tight == pytest.approx(0.25)
     assert t_loose == pytest.approx(2.5)
 
@@ -158,9 +159,42 @@ def test_derive_sliver_frac_no_boxes_returns_none():
 
 def test_derive_sliver_frac_too_few_samples_returns_none():
     # A single box's ratio to itself is trivially ~1.0 regardless of the class's real variation:
-    # not a spread, just noise. Below min_samples must refuse rather than derive from it.
+    # not a spread, just noise. Below five sizes it must refuse rather than derive from it.
     assert derive_sliver_frac([25.6]) is None
-    assert derive_sliver_frac([10.0, 20.0, 30.0, 40.0]) is None  # 4 < default min_samples=5
+    assert derive_sliver_frac([10.0, 20.0, 30.0, 40.0]) is None  # 4 sizes, fewer than five
+
+
+def _label_percentile(label: str) -> float:
+    """The percentile a derivation label names, as its ``p<N>``."""
+    match = re.search(r"\bp(\d+)\b", label)
+    assert match, label
+    return float(match.group(1))
+
+
+def test_the_localization_tolerance_is_the_method_its_label_names():
+    """The criterion's tolerance and label, as an assessment resolves them, agree: half the
+    labeled percentile of a spread of nearest-neighbor spacings over the characteristic size."""
+    pytest.importorskip("torch")
+    from tcip_mcp.pipelines.training.evaluation import localization_frac
+
+    spacings = [5.0, 8.0, 13.0, 21.0, 34.0, 55.0, 89.0, 144.0]
+    frac, label = localization_frac(fx.COUNT_SPEC, [[[0.0, 0.0, 20.0, 20.0], [d, 0.0, 20.0, 20.0]]
+                                                   for d in spacings])
+    assert label.startswith("half the p"), label
+    nearest = [d for d in spacings for _ in range(2)]
+    assert frac == pytest.approx(0.5 * np.percentile(nearest, _label_percentile(label)) / 20)
+
+
+def test_the_sliver_cutoff_is_the_method_its_label_names():
+    """The registered label's percentile over the mean is the cutoff derived from a spread of
+    characteristic sizes."""
+    from tcip_mcp.pipelines.derivations import _STATIC_DERIVATION_IMPLEMENTATIONS
+
+    label = next(name for name, impl in _STATIC_DERIVATION_IMPLEMENTATIONS.items()
+                 if impl == "tcip_mcp.pipelines.derivations.derive_sliver_frac")
+    sizes = [3.0, 5.0, 8.0, 13.0, 21.0, 34.0, 55.0, 89.0]
+    assert derive_sliver_frac(sizes) == pytest.approx(
+        np.percentile(sizes, _label_percentile(label)) / np.mean(sizes))
 
 
 JITTER = {"jitter_px": fx.IOU_JITTER_PX, "margin": fx.IOU_MARGIN}

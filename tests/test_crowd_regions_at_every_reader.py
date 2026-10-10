@@ -374,7 +374,9 @@ def test_the_derived_spacing_and_cross_tile_nms_ignore_crowd_regions(tmp_path: P
     objects of the calibration reference: stacked crowd regions beside them move neither."""
     from tests import _trait_fixtures as fx
 
-    from tcip_mcp.pipelines.derivations import derive_cross_tile_nms
+    from tcip_mcp.pipelines.derivations import (
+        LOCALIZATION_TOLERANCE_DERIVATION, derive_cross_tile_nms,
+    )
     from tcip_mcp.pipelines.training.evaluation import (
         gt_objects, localization_frac, records_from_annotation,
     )
@@ -393,7 +395,7 @@ def test_the_derived_spacing_and_cross_tile_nms_ignore_crowd_regions(tmp_path: P
     boxes = {crowd: [[a["bbox"] for a in gt_objects(r)] for r in records(crowd)]
              for crowd in (True, False)}
     with_crowd, without = (localization_frac(fx.COUNT_SPEC, boxes[c]) for c in (True, False))
-    assert without[1] == "GT nearest-neighbor spacing (p10 + margin)", without
+    assert without[1] == LOCALIZATION_TOLERANCE_DERIVATION, without
     assert with_crowd == without
     from tests._verified_checkpoint_fixtures import objects_over
 

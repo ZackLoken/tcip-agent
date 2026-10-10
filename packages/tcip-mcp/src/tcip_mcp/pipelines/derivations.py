@@ -32,13 +32,12 @@ def num_classes_from_distribution(class_distribution: dict[int, int]) -> int:
     return int(max(class_distribution)) + 1
 
 
-def gt_aspect_ratios(class_distribution_boxes: list[tuple[float, float]],
-                     quantiles: tuple[float, float] = (0.1, 0.9)) -> list[float] | None:
+def gt_aspect_ratios(class_distribution_boxes: list[tuple[float, float]]) -> list[float] | None:
     """Aspect ratios (h/w) spanning the GT box-shape distribution, for anchor coverage.
 
-    Returns a small ratio set covering the p10..p90 of GT box aspect ratios (plus 1.0).
-    ``class_distribution_boxes`` is a list of ``(w, h)`` in pixels. Returns ``None`` when no valid
-    box gives a ratio.
+    Returns a small ratio set covering the p10..p90 of GT box aspect ratios (plus 1.0), the two
+    quantiles this method's own settings, not measured. ``class_distribution_boxes`` is a list of
+    ``(w, h)`` in pixels. Returns ``None`` when no valid box gives a ratio.
 
     Wiring (derive, then pass to the builder)::
 
@@ -58,7 +57,7 @@ def gt_aspect_ratios(class_distribution_boxes: list[tuple[float, float]],
         # Underivable: a pinned (0.5, 1, 2) returned as if derived would be indistinguishable from
         # a real result, so the caller states its own.
         return None
-    lo, hi = np.quantile(ratios, quantiles[0]), np.quantile(ratios, quantiles[1])
+    lo, hi = np.quantile(ratios, 0.1), np.quantile(ratios, 0.9)
     out = sorted({round(float(lo), 2), 1.0, round(float(hi), 2)})
     return [r for r in out if r > 0]
 
@@ -143,19 +142,26 @@ def _neighbor_min_center_distances(boxes: np.ndarray) -> list[float]:
     return dist.min(axis=1).tolist()
 
 
+LOCALIZATION_TOLERANCE_DERIVATION = ("half the p10 of the GT nearest-neighbor center spacing over "
+                                     "the mean characteristic size")
+"""The label a criterion names a tolerance :func:`derive_localization_tolerance_frac` derived
+by."""
+
+
 def derive_localization_tolerance_frac(
-    gt_boxes_per_image: Sequence[Sequence[Sequence[float]]], *,
-    percentile: float = 10.0, margin_frac: float = 0.5,
+    gt_boxes_per_image: Sequence[Sequence[Sequence[float]]],
 ) -> float | None:
     """Center-match tolerance, as a fraction of the class's characteristic size, from the GT's own
     nearest-neighbor spacing, or ``None`` if underivable.
 
     Takes each GT box's distance to its nearest same-image neighbor, pools that across images,
-    takes a low percentile with a safety margin, and normalizes by the characteristic size
-    ``gt_class_avg_size`` measures. No image anywhere has two or more of this class -> ``None``.
-    Refuses (``ValueError``) when the selected spacing percentile is zero, as many boxes as that
-    percentile reaches sharing a same-class center, where the model states no tolerance a match
-    could fall within; a coincident pair below that share leaves the percentile positive.
+    takes half its 10th percentile, and normalizes by the characteristic size
+    ``gt_class_avg_size`` measures (:data:`LOCALIZATION_TOLERANCE_DERIVATION`); the percentile
+    and the half are this method's own settings, not measured. No image anywhere has two or more
+    of this class -> ``None``. Refuses (``ValueError``) when the spacing percentile is zero, as
+    many boxes as that percentile reaches sharing a same-class center, where the model states no
+    tolerance a match could fall within; a coincident pair below that share leaves the percentile
+    positive.
 
     ``gt_boxes_per_image`` is one list of ``[x, y, w, h]`` boxes (COCO xywh, px) per image, already
     filtered to the trait's own class.
@@ -176,13 +182,13 @@ def derive_localization_tolerance_frac(
     avg_size = float(np.mean(sizes))
     if avg_size <= 0:
         return None
-    spacing = float(np.percentile(dists, percentile))
+    spacing = float(np.percentile(dists, 10))
     if spacing <= 0:
         raise ValueError(
-            f"the reference's p{percentile:g} nearest same-class center spacing is {spacing:g} px: "
-            "that percentile of its boxes share a center, so the spacing model derives no "
+            f"the reference's p10 nearest same-class center spacing is {spacing:g} px: that "
+            "percentile of its boxes share a center, so the spacing model derives no "
             "center-match tolerance")
-    return spacing * margin_frac / avg_size
+    return spacing * 0.5 / avg_size
 
 
 @dataclass(frozen=True)
@@ -203,27 +209,28 @@ def char_sizes(boxes: Iterable[np.ndarray]) -> list[float]:
     return [s for arr in boxes for s in box_sizes(arr).tolist() if s > 0]
 
 
-OBJECT_DENSITY_DERIVATION = ("p99 of the counted regions' objects per pixel; a frame keeps "
-                             "ceil(density x its pixels) detections")
+OBJECT_DENSITY_DERIVATION = ("p99 over the object-bearing regions of their objects per pixel; a "
+                             "frame keeps ceil(density x its pixels) detections")
 """The label an execution record names a density :func:`derive_object_density` derived by."""
 
 
 def derive_object_density(regions: Sequence[Region]) -> float:
     """The object density (objects per pixel) a frame's detection cap scales by
-    (:func:`detection_cap`): the 0.99 quantile of the ``regions``' densities, each its object
-    count over its area. The quantile is this method's own setting, not measured; a frame denser
-    than it can still exceed its cap. Refuses (``ValueError``) no regions, and a quantile of zero,
-    which no frame's cap could rest on."""
+    (:func:`detection_cap`): the 0.99 quantile of the densities of the ``regions`` holding at
+    least one object, each its object count over its area. The quantile is this method's own
+    setting, not measured; a frame denser than it can still exceed its cap. Refuses
+    (``ValueError``) no regions, and regions none of which holds an object, which no frame's cap
+    could rest on."""
     import numpy as np
 
     if not regions:
         raise ValueError("an object density is derived from counted regions, and none were "
                          "counted.")
-    density = float(np.quantile([len(r.boxes) / r.area for r in regions], 0.99))
-    if density <= 0:
-        raise ValueError(f"the 0.99 quantile of the densities of the {len(regions)} counted "
-                         "regions is zero, so no frame's detection cap has a basis.")
-    return density
+    bearing = [len(r.boxes) / r.area for r in regions if len(r.boxes)]
+    if not bearing:
+        raise ValueError(f"none of the {len(regions)} counted regions is object-bearing, so no "
+                         "frame's detection cap has a basis.")
+    return float(np.quantile(bearing, 0.99))
 
 
 def detection_cap(density: float, pixels: float) -> int:
@@ -326,17 +333,16 @@ def derive_iou_match_threshold(
     return modeled - margin
 
 
-def derive_sliver_frac(
-    char_sizes: Sequence[float], *, percentile: float = 10.0, min_samples: int = 5,
-) -> float | None:
+def derive_sliver_frac(char_sizes: Sequence[float]) -> float | None:
     """Tile-seam sliver cutoff, as a fraction of the class's characteristic size, from the GT's own
     size spread, or ``None`` if underivable.
 
-    Takes a low percentile of this dataset's own characteristic-size distribution relative to its
+    Takes the 10th percentile of this dataset's own characteristic-size distribution over its
     mean, so a class with wide natural size variation gets a lower cutoff. The ratio is positive
     for any positive sizes and can exceed 1 when a few small boxes drag the mean below the low
     percentile; the consumer multiplies it back by that mean, so it stays a size cutoff either way.
-    Fewer than ``min_samples`` positive sizes -> ``None``.
+    Fewer than five positive sizes -> ``None``. The percentile and the five are this method's own
+    settings, not measured.
 
     ``char_sizes`` is ``sqrt(w*h)`` per GT box (px), already filtered to the trait's own class; see
     :func:`char_sizes`.
@@ -344,12 +350,12 @@ def derive_sliver_frac(
     import numpy as np
     char_sizes = _validate_char_sizes(char_sizes, fn_name="derive_sliver_frac")
     sizes = [s for s in char_sizes if s > 0]
-    if len(sizes) < min_samples:
+    if len(sizes) < 5:
         return None
     mean = float(np.mean(sizes))
     if mean <= 0:
         return None
-    return float(np.percentile(sizes, percentile)) / mean
+    return float(np.percentile(sizes, 10)) / mean
 
 
 def derive_block_scale_px(
@@ -587,26 +593,25 @@ def image_stats_provenance(
     }
 
 
-CROSS_TILE_NMS_DERIVATION = "GT neighbor-IoU distribution (p99 + margin)"
+CROSS_TILE_NMS_DERIVATION = "p99 of the GT neighbor-IoU tail plus 0.05"
 """The ``derived_from`` label :func:`derive_cross_tile_nms`'s value is stamped under. A merge
 comparing detections by IoS has no derivation: its threshold is the project's to state."""
 
 
-def derive_cross_tile_nms(regions: Sequence[Region], *,
-                          percentile: float = 99.0, margin: float = 0.05) -> float | None:
+def derive_cross_tile_nms(regions: Sequence[Region]) -> float | None:
     """Cross-tile merge threshold for a merge comparing detections by IoU, from the GT
     neighbor-IoU distribution, or None if underivable.
 
     The merge joins two detections whose overlap exceeds this threshold, so it sits just above how
     much real neighboring GT objects overlap: per region each object's max overlap with any other
-    object, the nonzero tail pooled across ``regions``, its ``percentile`` plus ``margin``. No two
-    objects of one region overlapping returns None. Refuses (``ValueError``) a result at or above
-    1: the ``margin`` added to the neighbors' own tail exhausts the IoU interval, so this method
-    states no threshold for this reference, though a smaller margin or a stated value could.
+    object, the nonzero tail pooled across ``regions``, its 99th percentile plus 0.05
+    (:data:`CROSS_TILE_NMS_DERIVATION`). No two objects of one region overlapping returns None.
+    Refuses (``ValueError``) a result at or above 1: the margin added to the neighbors' own tail
+    exhausts the IoU interval, so this method states no threshold for this reference.
 
-    ``percentile`` (99) takes the overlap nearly every real neighboring pair stays under, and
-    ``margin`` (0.05) the step above it a seam duplicate must clear; both are this method's own
-    chosen settings, not measured.
+    The percentile takes the overlap nearly every real neighboring pair stays under, and the
+    margin the step above it a seam duplicate must clear; both are this method's own chosen
+    settings, not measured.
     """
     import numpy as np
 
@@ -615,12 +620,13 @@ def derive_cross_tile_nms(regions: Sequence[Region], *,
         tail.extend(v for v in _neighbor_max_ious(region.boxes) if v > 0.0)
     if not tail:
         return None
-    threshold = float(np.percentile(tail, percentile)) + margin
+    overlap = float(np.percentile(tail, 99))
+    threshold = overlap + 0.05
     if threshold >= 1.0:
         raise ValueError(
-            f"the reference's neighboring boxes overlap up to IoU {threshold - margin:.3g} at "
-            f"p{percentile:g}, and the margin {margin:g} carries the threshold to "
-            f"{threshold:.3g}, past the IoU interval; state cross_tile_nms")
+            f"the reference's neighboring boxes overlap up to IoU {overlap:.3g} at p99, and the "
+            f"margin 0.05 carries the threshold to {threshold:.3g}, past the IoU interval; state "
+            "cross_tile_nms")
     return threshold
 
 
@@ -630,10 +636,10 @@ _STATIC_DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
         "tcip_mcp.pipelines.derivations.num_classes_from_distribution"
     ),
     CROSS_TILE_NMS_DERIVATION: "tcip_mcp.pipelines.derivations.derive_cross_tile_nms",
-    "GT nearest-neighbor spacing (p10 + margin)": (
+    LOCALIZATION_TOLERANCE_DERIVATION: (
         "tcip_mcp.pipelines.derivations.derive_localization_tolerance_frac"
     ),
-    "GT characteristic-size spread (p10 / mean)": (
+    "p10 of the GT characteristic sizes over their mean": (
         "tcip_mcp.pipelines.derivations.derive_sliver_frac"
     ),
     IOU_MATCH_DERIVATION: "tcip_mcp.pipelines.derivations.derive_iou_match_threshold",
