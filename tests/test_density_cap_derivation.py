@@ -1,4 +1,5 @@
-"""The derived object density is the 0.99 quantile of the counted regions' densities.
+"""The derived object density is the 0.99 quantile of the densities of the counted regions
+holding at least one object.
 
 ``derive_object_density`` is the one formula behind every frame's detection cap (the density
 times the frame's pixels, rounded up). It reads the tail of the reference's density distribution,

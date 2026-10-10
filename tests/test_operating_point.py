@@ -96,11 +96,11 @@ def test_set_detector_operating_point_one_stage():
     assert m.detector.score_thresh == 0.4 and m.detector.nms_thresh == 0.6
 
 
-def test_the_object_density_is_its_quantile_at_every_density_and_refuses_no_positive_one():
-    """The 0.99 quantile of the counted regions' objects per pixel, a sparse scene included, with
-    no floor and no multiplier over it; a reference whose selected quantile is zero yields no
-    positive density and refuses, an all-empty one and a sparse one holding a single object
-    alike."""
+def test_the_object_density_is_its_quantile_over_the_object_bearing_regions():
+    """The 0.99 quantile of the objects per pixel of the counted regions holding an object, with
+    no floor and no multiplier over it: a sparse reference whose one object-bearing region sits
+    among empty ones derives that region's density, and a reference with no object-bearing region
+    refuses naming them."""
     from tcip_mcp.pipelines.derivations import derive_object_density
     from tests._verified_checkpoint_fixtures import objects_over
 
@@ -111,9 +111,10 @@ def test_the_object_density_is_its_quantile_at_every_density_and_refuses_no_posi
     assert derive_object_density(counted(80, frame) * 20) == pytest.approx(80 / frame)
     assert derive_object_density(counted(2, frame) * 20) == pytest.approx(2 / frame)
     assert derive_object_density(counted(10, frame * 10) * 3) == pytest.approx(1 / frame)
-    for sparse in ([0] * 5, [0] * 199 + [1]):
-        with pytest.raises(ValueError, match="quantile of the densities"):
-            derive_object_density([r for n in sparse for r in counted(n, frame)])
+    sparse = [r for n in [0] * 199 + [1] for r in counted(n, frame)]
+    assert derive_object_density(sparse) == pytest.approx(1 / frame)
+    with pytest.raises(ValueError, match="object-bearing"):
+        derive_object_density([r for _ in range(5) for r in counted(0, frame)])
 
 
 # --- the cross-tile merge threshold ---
@@ -168,6 +169,30 @@ def test_a_tiled_pass_records_its_derived_merge_threshold_by_the_derivations_nam
 
     assert p.execution.cross_tile_nms == pytest.approx(0.4786, abs=1e-2)
     assert p.execution.sources["cross_tile_nms"] == CROSS_TILE_NMS_DERIVATION
+
+
+def test_a_tiled_passs_derived_merge_threshold_is_the_method_its_label_names(tmp_path):
+    """Over a spread of neighbor overlaps, the threshold a tiled pass records is the labeled
+    percentile of the tail plus the labeled margin."""
+    import re
+
+    import numpy as np
+
+    from tests.test_derivations import _label_percentile
+
+    offsets = range(1, 16)
+    records = [{"width": 400, "height": 400, "image_id": f"o_{d}",
+                "gt": [{"category_id": 1, "bbox": [100, 100, 20, 20], "iscrowd": 0},
+                       {"category_id": 1, "bbox": [100 + d, 100, 20, 20], "iscrowd": 0}]}
+               for d in offsets]
+    p = _tiled_pass(tmp_path, records)
+
+    label = p.execution.sources["cross_tile_nms"]
+    margin = re.search(r"plus ([\d.]+)$", label)
+    assert margin, label
+    tail = [(20 - d) / (20 + d) for d in offsets for _ in range(2)]
+    assert p.execution.cross_tile_nms == pytest.approx(
+        np.percentile(tail, _label_percentile(label)) + float(margin.group(1)))
 
 
 def test_a_stated_merge_threshold_is_never_relabeled_derived(tmp_path):

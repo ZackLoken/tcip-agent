@@ -62,7 +62,7 @@ def test_localization_tolerance_normalizes_by_the_characteristic_size_its_siblin
     tol_square = derive_localization_tolerance_frac(square)
     tol_open = derive_localization_tolerance_frac(open)
     assert tol_square is not None and tol_open is not None
-    # 40px between neighboring centers, margin_frac 0.5, characteristic size 30.
+    # Half the 40px between neighboring centers, over characteristic size 30.
     assert tol_square == pytest.approx(40 * 0.5 / 30)
     assert tol_open == pytest.approx(tol_square)
 

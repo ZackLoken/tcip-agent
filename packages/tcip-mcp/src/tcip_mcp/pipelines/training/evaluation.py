@@ -220,11 +220,11 @@ def localization_frac(trait: TraitEntry, boxes_per_image: list[list[list[float]]
     ground truth's own nearest-neighbor spacing (``boxes_per_image`` one list of xywh boxes per
     image), else, when no two same-class objects sit close enough to derive it, the trait
     revision's stated ``localization_tolerance_frac``."""
-    from tcip_mcp.pipelines.derivations import derive_localization_tolerance_frac
+    from tcip_mcp.pipelines import derivations
 
-    frac = derive_localization_tolerance_frac(boxes_per_image)
+    frac = derivations.derive_localization_tolerance_frac(boxes_per_image)
     if frac is not None:
-        return frac, "GT nearest-neighbor spacing (p10 + margin)"
+        return frac, derivations.LOCALIZATION_TOLERANCE_DERIVATION
     return trait.localization_tolerance_frac, (
         f"the trait's stated localization_tolerance_frac ({trait.localization_tolerance}); no "
         "same-class neighbor in this ground truth to derive one from")
