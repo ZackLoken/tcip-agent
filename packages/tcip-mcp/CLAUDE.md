@@ -26,7 +26,7 @@ src/tcip_mcp/
     model_contract.py        # the measurement boundary a bespoke model must pass
                               # (check_model_contract, overfit_check)
     proposal.py               # auto-labeling engine seam: a registered or dotted Proposer
-    execution.py               # one pass's execution record (conf, cap, tile geometry, merge)
+    execution.py               # one pass's execution record (conf, density, tile geometry, merge)
                                 # and prepare, which readies a Preparation whose runnable
                                 # builds the one Pass from a complete record
     operating_point.py          # the criteria an assessment judges against: count, classifier,

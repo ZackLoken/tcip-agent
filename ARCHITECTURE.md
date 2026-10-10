@@ -1178,15 +1178,15 @@ Side B: the three checkpoint writers in `pipelines/training/generic_trainer.py` 
 
 ## S32. One execution record for every pass
 
-Must agree: the same model and stated values yield the same conf, cap, tile edge, overlap and merge whichever entry point asks for them, and the record executed is the record stamped.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/execution.py` (`def prepare_pass(`, preparing a record from the one `Stated` mapping a caller hands it or restoring one exactly, refusing a stated value the restored record differs on).
-Side B: every pass prepares through it: `tools/inference_tools.py`, `packages/tcip-web/src/tcip_web/routes/inference.py`, `assessment.py` (both assessment kinds, through `_prepared`), and `pipelines/training/eval_runners.py` (the full-frame regime); the bucket record and `assessment.json` both carry `Execution.record()`.
+Must agree: the same model, stated values and reference yield the same conf, object density, tile edge, overlap and merge whichever entry point asks for them, and the record executed is the record stamped.
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/execution.py` (`def prepare(`, readying a pass from the one `Stated` mapping a caller hands it, its record resolved by `execution_record` when `Preparation.runnable` runs, or restoring a record exactly through `Execution.of`, refusing a stated value the restored record differs on).
+Side B: every pass prepares through it: `tools/inference_tools.py`, `packages/tcip-web/src/tcip_web/routes/inference.py`, `assessment.py` (both assessment kinds, through `_prepared`), and `pipelines/training/eval_runners.py` (both regimes); the bucket record and the assessment record both carry `Execution.record()`.
 
-## S33. Shared inference defaults DEFAULT_CONF / DEFAULT_NMS_IOU / DEFAULT_MAX_DETS
+## S33. No inference default beside the stated execution values
 
-Must agree: the MCP entry point and the GUI entry point start from the same unresolved defaults, and both read a caller's unstated parameter off the `None` sentinel rather than off equality with the default, so a caller who states the default value is honored as an override instead of being resolved as if they had stated nothing.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/execution.py` (`DEFAULT_CONF = 0.5`, with `DEFAULT_NMS_IOU`, `DEFAULT_OVERLAP` and `DEFAULT_MAX_DETS` declared beside it).
-Side B: `packages/tcip-web/src/tcip_web/routes/inference.py` (`stated=payload.stated`: the GUI launch carries the one `Stated` mapping unresolved, `None` where omitted, and its worker resolves it through `prepare_pass`, which records each value's source, `explicit` or `default`, on the execution record) and `packages/tcip-mcp/src/tcip_mcp/pipelines/training/eval_runners.py` (the tile-level regime resolving its conf and cap through `untiled_execution`).
+Must agree: the MCP entry point and the GUI entry point start from the same unresolved values, and both read a caller's unstated parameter off the `None` sentinel, so a value a caller states is honored as stated.
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/execution.py` (`Stated`, every field `None` until a caller states it; an unstated conf refuses, an unstated merge threshold derives from a reference or refuses, the object density and tile lattice come from a reference or the checkpoint, and only the merge kind and the batch sizes keep documented defaults, `DEFAULT_POSTPROCESS`, `DEFAULT_TILE_BATCH_SIZE` and `DEFAULT_IMAGE_BATCH_SIZE`).
+Side B: `packages/tcip-web/src/tcip_web/routes/inference.py` (`stated=payload.stated`: the GUI launch carries the one `Stated` mapping unresolved, `None` where omitted, and its worker resolves it through `prepare`, which records each value's source on the execution record) and `packages/tcip-mcp/src/tcip_mcp/pipelines/training/eval_runners.py` (the tile-level regime evaluating under a prepared pass's record through `evaluation.evaluate`).
 
 ## S34. One delivery gate behind every delivery path
 
