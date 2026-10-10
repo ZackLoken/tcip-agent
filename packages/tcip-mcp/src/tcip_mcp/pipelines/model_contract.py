@@ -179,11 +179,7 @@ def check_model_contract(
     when a batch is synthesized here; a caller handing over ``sample_batch`` states none. A
     detector whose ``dims`` carry ``attributes`` must also return ``attributes`` per image.
 
-    ``{"ok": bool, "issues": [...], "train_loss": float|None, "eval_output_type": str|None,
-    "operating_point_knobs": list[str]|None}``. ``operating_point_knobs`` is which of
-    score_thresh/detections_per_img the model exposes wherever it holds them
-    (:func:`~tcip_mcp.pipelines.operating_point.detector_operating_point_holder`), for a detection
-    or instance segmentation task; ``None`` for every other task.
+    ``{"ok": bool, "issues": [...], "train_loss": float|None, "eval_output_type": str|None}``.
 
     ``sample_batch`` is an ``(images, targets)`` pair from this run's own dataset, required for a
     task outside ``_SYNTHESIZABLE_TASKS``.
@@ -193,18 +189,7 @@ def check_model_contract(
     issues: list[str] = []
     report: dict[str, Any] = {"ok": False, "issues": issues, "train_loss": None,
                               "eval_output_type": None, "not_smokeable": None,
-                              "gradient_magnitudes": None, "operating_point_knobs": None}
-    if task in DETECTION_TASKS:
-        # Which of score_thresh/detections_per_img the model exposes, wherever it holds
-        # them (detector_operating_point_holder), a fact beside the smoke's own pass/fail verdict.
-        from tcip_mcp.pipelines.operating_point import (
-            OPERATING_POINT_ATTRS, detector_operating_point_holder,
-        )
-
-        holder, _path = detector_operating_point_holder(model)
-        report["operating_point_knobs"] = (
-            sorted(attr for attr in OPERATING_POINT_ATTRS if hasattr(holder, attr))
-            if holder is not None else [])
+                              "gradient_magnitudes": None}
     # Never invent a batch shape: a green report earned against a guessed one proves nothing, so
     # a caller with no schema or no dimensions is told to smoke a real batch instead.
     report["not_smokeable"] = no_batch_reason(task, dims, sample_batch)

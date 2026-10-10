@@ -10,15 +10,14 @@ pytest.importorskip("torch")
 
 
 def _records():
-    from tcip_mcp.pipelines.training.evaluation import gt_record, image_record
+    from tcip_mcp.pipelines.training.evaluation import gt_record, prediction_record
 
-    return [
-        image_record(100, 100, [gt_record([10.0, 10.0, 20.0, 20.0], 1, 0),
-                                gt_record([60.0, 60.0, 20.0, 20.0], 1, 0)],
-                     [{"category_id": 1, "bbox": [10.0, 10.0, 20.0, 20.0], "score": 0.5},
-                      {"category_id": 1, "bbox": [61.0, 61.0, 20.0, 20.0], "score": 0.9},
-                      {"category_id": 1, "bbox": [0.0, 80.0, 10.0, 10.0], "score": 0.3}]),
-    ]
+    dt = [{"category_id": 1, "bbox": [10.0, 10.0, 20.0, 20.0], "score": 0.5},
+          {"category_id": 1, "bbox": [61.0, 61.0, 20.0, 20.0], "score": 0.9},
+          {"category_id": 1, "bbox": [0.0, 80.0, 10.0, 10.0], "score": 0.3}]
+    return [prediction_record(dt, [gt_record([10.0, 10.0, 20.0, 20.0], 1, 0),
+                                   gt_record([60.0, 60.0, 20.0, 20.0], 1, 0)],
+                              width=100, height=100, cap=None, count=len(dt))]
 
 
 def test_an_evaluations_counts_are_the_matchers_inclusive_at_the_threshold():
@@ -47,7 +46,7 @@ def test_the_scorers_matchings_and_the_evaluations_counts_agree_over_one_referen
                                                                (60, 80)]]))]
     preds = [Annotation(subject="fruit", geometry=BBox(11, 11, 30, 30), score=0.8),
              Annotation(subject="fruit", geometry=BBox(0, 80, 10, 90), score=0.6)]
-    record = records_from_annotation(gt, preds, width=100, height=100)
+    record = records_from_annotation(gt, preds, width=100, height=100, cap=None)
     metrics = detection_metrics([record], trait=None, conf_threshold=0.5, iou_threshold=0.5,
                                 by_mask=True)
 
@@ -65,7 +64,7 @@ def test_masks_that_share_a_box_but_not_a_region_do_not_match_on_either_route():
     upper = Polygon(rings=[[(60, 60), (80, 60), (80, 80)]])
     gt = [Annotation(subject="fruit", geometry=lower)]
     preds = [Annotation(subject="fruit", geometry=upper, score=0.9)]
-    record = records_from_annotation(gt, preds, width=100, height=100)
+    record = records_from_annotation(gt, preds, width=100, height=100, cap=None)
     metrics = detection_metrics([record], trait=None, conf_threshold=0.5, iou_threshold=0.5,
                                 by_mask=True)
 
@@ -98,8 +97,9 @@ def test_one_scoring_matches_each_class_once_per_distinct_criterion(monkeypatch)
           Annotation(subject="fruit", geometry=BBox(60, 60, 80, 80))]
     preds = [Annotation(subject="leaf", geometry=BBox(10, 10, 30, 30), score=0.9),
              Annotation(subject="fruit", geometry=BBox(60, 60, 80, 80), score=0.9)]
-    metrics = detection_metrics([records_from_annotation(gt, preds, width=100, height=100)],
-                                trait=None, conf_threshold=0.5, iou_threshold=0.5, by_mask=False)
+    metrics = detection_metrics(
+        [records_from_annotation(gt, preds, width=100, height=100, cap=None)],
+        trait=None, conf_threshold=0.5, iou_threshold=0.5, by_mask=False)
 
     assert (metrics["tp"], metrics["fp"], metrics["fn"]) == (2, 0, 0)
     assert set(calls.values()) == {1}, calls
@@ -115,7 +115,7 @@ def test_a_detection_of_another_subject_on_an_object_is_a_miss_and_a_false_find_
           Annotation(subject="fruit", geometry=BBox(60, 60, 80, 80))]
     preds = [Annotation(subject="fruit", geometry=BBox(10, 10, 30, 30), score=0.5),
              Annotation(subject="fruit", geometry=BBox(60, 60, 80, 80), score=0.9)]
-    record = records_from_annotation(gt, preds, width=100, height=100)
+    record = records_from_annotation(gt, preds, width=100, height=100, cap=None)
     metrics = detection_metrics([record], trait=None, conf_threshold=0.5, iou_threshold=0.5,
                                 by_mask=False)
 

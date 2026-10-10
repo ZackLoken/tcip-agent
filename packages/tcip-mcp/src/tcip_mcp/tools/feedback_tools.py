@@ -195,7 +195,6 @@ def triage_predictions(
     low: float = 0.3,
     high: float = 0.8,
     subject: str | None = None,
-    max_dets: int | None = None,
 ) -> dict:
     """Sort a checkpoint's own predictions by confidence into needs-review and unscoreable
     queues; this door writes nothing.
@@ -203,7 +202,7 @@ def triage_predictions(
     Routes predictions between ``low`` and ``high`` into the needs-review queue, and separates out
     predictions with no confidence-bearing signal at all (e.g. a regression head's point estimate)
     into their own ``unscoreable_images`` list. A detector predicts at ``low``, so every box the
-    band can hold exists, and at the stated ``max_dets``, refusing without one.
+    band can hold exists, each frame capped at the object density its checkpoint recorded.
 
     Args:
         checkpoint_path: Trained model checkpoint (drives predictions).
@@ -212,8 +211,6 @@ def triage_predictions(
         high: Upper confidence bound for the needs-review band.
         subject: The subject whose finished images (marked complete in their label document)
             are skipped; omitted triages every candidate image.
-        max_dets: The most boxes a detector's frame keeps; required of a detector, refused for
-            any other head.
     """
     checkpoint, refusal = _load_or_refuse(located(checkpoint_path, project), project)
     if refusal is not None:
@@ -232,8 +229,7 @@ def triage_predictions(
     from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
 
     detector = checkpoint.task in DETECTION_TASKS
-    prep, refusal = _untiled(checkpoint, Stated(conf=low if detector else None,
-                                                max_dets=max_dets))
+    prep, refusal = _untiled(checkpoint, Stated(conf=low if detector else None))
     if refusal is not None:
         return refusal
     try:

@@ -14,10 +14,10 @@ from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
 from tests._producer_fixtures import gray_frame  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
-    SAMPLE_CONF, SAMPLE_DETECTOR_PASS, SAMPLE_MAX_DETS, project_checkpoint,
+    SAMPLE_CONF, SAMPLE_DETECTOR_PASS, project_checkpoint,
 )
 
-UNTILED = Stated(tile=False, conf=SAMPLE_CONF, max_dets=SAMPLE_MAX_DETS)
+UNTILED = Stated(tile=False, conf=SAMPLE_CONF)
 """The execution values every untiled run here states."""
 
 BUCKET = "out/2026-01-01"

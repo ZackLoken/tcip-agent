@@ -18,35 +18,20 @@ import { selectProjectRoot } from "@/store/slices/gui";
 // A job can still be stopped only while it is pending/running.
 const CANCELLABLE: ReadonlySet<InferenceStatus> = new Set(["pending", "running"]);
 
-type StatedField = "conf" | "max_dets" | "cross_tile_nms";
+type StatedField = "conf" | "cross_tile_nms";
 
-/** The execution values a run without an assessment states, one input each. */
-const STATED_INPUTS: {
-  field: StatedField;
-  label: string;
-  placeholder: string;
-  max?: number;
-  step: string;
-}[] = [
+/** The execution values a run without an assessment states, one input each, every one a
+ *  fraction in [0, 1]. */
+const STATED_INPUTS: { field: StatedField; label: string; placeholder: string }[] = [
   {
     field: "conf",
     label: "Confidence threshold (a detector run without an assessment)",
     placeholder: "the score a box is kept at",
-    max: 1,
-    step: "any",
-  },
-  {
-    field: "max_dets",
-    label: "Detection cap (a detector run without an assessment)",
-    placeholder: "the most boxes one frame keeps",
-    step: "1",
   },
   {
     field: "cross_tile_nms",
     label: "Cross-tile merge threshold (a tiled run without an assessment)",
     placeholder: "the IoU above which two tiles' detections are one object",
-    max: 1,
-    step: "any",
   },
 ];
 
@@ -116,7 +101,6 @@ export function InferenceTab() {
   const [assessmentId, setAssessmentId] = useState("");
   const [statedInputs, setStatedInputs] = useState<Record<StatedField, string>>({
     conf: "",
-    max_dets: "",
     cross_tile_nms: "",
   });
   const [jobs, setJobs] = useState<InferenceJob[]>([]);
@@ -464,7 +448,7 @@ export function InferenceTab() {
           placeholder="the assessment id this checkpoint earned"
         />
 
-        {STATED_INPUTS.map(({ field, label, placeholder, max, step }) => (
+        {STATED_INPUTS.map(({ field, label, placeholder }) => (
           <div key={field}>
             <label className="tcip-label mb-1" htmlFor={`inference-${field}`}>
               {label}
@@ -474,8 +458,8 @@ export function InferenceTab() {
               className="tcip-input w-full mb-3 font-mono"
               type="number"
               min={0}
-              max={max}
-              step={step}
+              max={1}
+              step="any"
               value={statedInputs[field]}
               onChange={(e) => setStatedInputs((prev) => ({ ...prev, [field]: e.target.value }))}
               placeholder={placeholder}
@@ -484,12 +468,13 @@ export function InferenceTab() {
         ))}
 
         <p className="text-[11px] text-tcip-muted mb-3">
-          Every execution value (conf, cap, tiling, cross-tile merge) is the named assessment's own.
-          Without one, a detector's run states its conf and cap above, and a tiled run its merge
-          threshold, since no reference stands behind any of them; the tiling follows this
-          checkpoint as the agent-facing door resolves it. Only predictions published under an
-          assessment can deliver validated numbers. Each date publishes once, as its own bucket
-          under the name above.
+          Every execution value (conf, object density, tiling, cross-tile merge) is the named
+          assessment&apos;s own. Without one, a detector&apos;s run states its conf above, and a
+          tiled run its merge threshold, since no reference stands behind either; the density is the
+          one this checkpoint recorded, each image keeping at most its density times its pixels,
+          rounded up, and the tiling follows this checkpoint as the agent-facing door resolves it.
+          Only predictions published under an assessment can deliver validated numbers. Each date
+          publishes once, as its own bucket under the name above.
         </p>
 
         <button

@@ -182,7 +182,7 @@ def test_records_from_annotation_omits_a_point_and_its_category() -> None:
         [Annotation(subject="prompt", geometry=Point(5.0, 5.0)),
          Annotation(subject="bud", geometry=BOX)],
         [Annotation(subject="bud", geometry=BOX, score=0.8)],
-        width=100, height=80)
+        width=100, height=80, cap=None)
     assert len(rec["gt"]) == 1 and len(rec["dt"]) == 1
     # 'prompt' minted no category, so the box keeps id 1 rather than being pushed to 2 by a subject
     # that contributes no record at all.
@@ -202,7 +202,7 @@ def test_worst_predictions_does_not_count_a_point_as_a_detection(tmp_path: Path)
     label_image(image, [Annotation(subject="bud", geometry=BOX)], 100, 80)
     bucket = published(tmp_path, "pred/2026-01-01", [
         {"image": str(image), "width": 100, "height": 80,
-         "boxes": [[BOX.x1, BOX.y1, BOX.x2, BOX.y2]], "scores": [1.0], "labels": [1]}],
+         "boxes": [[BOX.x1, BOX.y1, BOX.x2, BOX.y2]], "scores": [1.0], "labels": [1], "cap": 2}],
         scope={"subject": "bud"})
     # A point beside the published box, as an edit in place would leave it: no head emits one.
     json_io.write_label_document(bucket.document_key(image.stem), [
@@ -371,7 +371,7 @@ def test_the_proposals_route_pairs_no_proposal_with_a_point(
     label_image(img, [Annotation(subject="bud", geometry=Point(20.0, 20.0))], 100, 80)
     bucket = published(tmp_path, "baseline/2026-01-01", [
         {"image": str(img), "width": 100, "height": 80,
-         "boxes": [[BOX.x1, BOX.y1, BOX.x2, BOX.y2]], "scores": [0.9], "labels": [1]}],
+         "boxes": [[BOX.x1, BOX.y1, BOX.x2, BOX.y2]], "scores": [0.9], "labels": [1], "cap": 2}],
         scope={"subject": "bud"})
 
     resp = client.get("/api/annotate/proposals", params={

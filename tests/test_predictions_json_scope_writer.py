@@ -35,7 +35,7 @@ GRADE = cr.Attribute("grade", "ordinal", ("low", "mid", "high"))
 
 def _result(*, boxes, scores, labels, attributes=None, width=100, height=80) -> dict:
     result = {"image": "img1.jpg", "boxes": boxes, "scores": scores, "labels": labels,
-              "width": width, "height": height}
+              "width": width, "height": height, "cap": len(boxes) + 1}
     if attributes is not None:
         result["attributes"] = attributes
     return result

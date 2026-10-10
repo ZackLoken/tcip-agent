@@ -91,7 +91,7 @@ def test_projects_report_per_date_subject_model_availability(client, workspace_d
                 [Annotation(subject="bush", geometry=BBox(2, 2, 6, 6))], 8, 8)
     published(proj, "baseline/2026-02-11", [
         {"image": str(proj / "images" / "2026-02-11" / "img.png"), "width": 8, "height": 8,
-         "boxes": [[1.0, 1.0, 7.0, 7.0]], "scores": [0.9], "labels": [1]}],
+         "boxes": [[1.0, 1.0, 7.0, 7.0]], "scores": [0.9], "labels": [1], "cap": 2}],
         scope={"subject": "bud"})
 
     hz = _listed(client)["currant_bud_valley-farm"]

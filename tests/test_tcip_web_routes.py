@@ -60,7 +60,8 @@ def _write_pred(dataset_root: Path, preds: dict[str, list[tuple]], *, w: int = 1
     return published(dataset_root.parent, f"{name}/2-11-26", [
         {"image": str(dataset_root / "images" / "2-11-26" / image), "width": w, "height": h,
          "boxes": [list(p[:4]) for p in boxes], "scores": [p[4] for p in boxes],
-         "labels": [1] * len(boxes)} for image, boxes in preds.items()],
+         "labels": [1] * len(boxes), "cap": len(boxes) + 1}
+        for image, boxes in preds.items()],
         scope={"subject": subject})
 
 
@@ -74,7 +75,7 @@ def _published_bucket(project: Path, name: str, image: Path, labels: list[int], 
     published(project, name, [{
         "image": str(image), "width": 100, "height": 80,
         "boxes": [[40.0, 32.0, 60.0, 48.0]] * len(labels), "scores": [0.9] * len(labels),
-        "labels": labels}], scope=scope)
+        "labels": labels, "cap": len(labels) + 1}], scope=scope)
     return name
 
 
@@ -1013,30 +1014,29 @@ def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset
     assert job.status == "completed"
 
 
-def test_inference_launch_resolves_explicit_conf_and_max_dets_source_from_the_payload(
+def test_inference_launch_resolves_explicit_conf_source_from_the_payload(
     opened_client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
-    """A caller-stated conf/max_dets travels on the job as stated, which the worker's pass
-    records as stated."""
-    from tests._verified_checkpoint_fixtures import SAMPLE_CONF, SAMPLE_MAX_DETS
+    """A caller-stated conf travels on the job as stated, which the worker's pass records as
+    stated."""
+    from tests._verified_checkpoint_fixtures import SAMPLE_CONF
 
     ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
 
     resp = opened_client.post("/api/inference/launch", json={
         "user": "tester", "checkpoint_path": ckpt, "dataset_root": dataset_root, "date": date,
-        "bucket": BUCKET, "stated": {"conf": SAMPLE_CONF, "max_dets": SAMPLE_MAX_DETS},
+        "bucket": BUCKET, "stated": {"conf": SAMPLE_CONF},
     })
     assert resp.status_code == 200, resp.text
     job = inference_routes._get(resp.json()["job_id"])
     assert job.stated.conf == SAMPLE_CONF
-    assert job.stated.max_dets == SAMPLE_MAX_DETS
 
 
-def test_inference_launch_carries_an_omitted_conf_and_max_dets_as_unstated(
+def test_inference_launch_carries_an_omitted_conf_as_unstated(
     opened_client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
-    """An omitted conf/max_dets travels on the job as unstated, never as a value; the worker's
-    pass, holding no reference, refuses them by name."""
+    """An omitted conf travels on the job as unstated, never as a value; the worker's pass,
+    holding no reference, refuses it by name."""
     ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
 
     resp = opened_client.post("/api/inference/launch", json={
@@ -1046,7 +1046,6 @@ def test_inference_launch_carries_an_omitted_conf_and_max_dets_as_unstated(
     assert resp.status_code == 200, resp.text
     job = inference_routes._get(resp.json()["job_id"])
     assert job.stated.conf is None
-    assert job.stated.max_dets is None
 
 
 # ── /api/state ───────────────────────────────────────────────────────────

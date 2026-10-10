@@ -1,12 +1,10 @@
 """Where a detector's operating-point knobs live: the module itself, its ``.detector.roi_heads``,
 or its ``.detector``, resolved independently of what a given call actually applies.
 
-A module exposing a knob on itself, with no ``.detector`` to route through, reaches a validated
+A module exposing its knobs on itself, with no ``.detector`` to route through, reaches a validated
 operating point via the ``getattr`` chain falling through to the module itself. The interface is
-stated once (:func:`~tcip_mcp.pipelines.operating_point.detector_operating_point_holder`), read
-by both the setter and the model contract, and the two unstated-floor producers (a module with no
-knob, the review route's own unknowns) share one gate name distinct from a stated floor the pick
-does not clear.
+stated once (:func:`~tcip_mcp.pipelines.operating_point.detector_operating_point_holder`), and a
+knob set on a model exposing none refuses naming it.
 """
 
 from __future__ import annotations
@@ -93,22 +91,22 @@ def test_holder_refuses_when_the_module_and_its_detectors_roi_heads_both_expose_
         detector_operating_point_holder(model)
 
 
-def test_set_detector_operating_point_returns_the_attribute_path():
+def test_set_detector_operating_point_sets_each_knob_on_the_holder():
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
 
-    model = SimpleNamespace(score_thresh=0.5)
-    applied, attribute_path = set_detector_operating_point(model, score_thresh=0.2)
-    assert applied["score_thresh"] == 0.2
-    assert attribute_path == "self"
+    model = SimpleNamespace(score_thresh=0.5, detections_per_img=100)
+    set_detector_operating_point(model, score_thresh=0.2, detections_per_img=3)
+    assert (model.score_thresh, model.detections_per_img) == (0.2, 3)
 
 
-def test_set_detector_operating_point_reports_no_path_when_nothing_matches():
+@pytest.mark.parametrize("model", [SimpleNamespace(unrelated=1),
+                                   SimpleNamespace(score_thresh=0.5)],
+                         ids=["no knob", "no cap knob"])
+def test_set_detector_operating_point_refuses_a_knob_the_model_does_not_expose(model):
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
 
-    model = SimpleNamespace(unrelated=1)
-    applied, attribute_path = set_detector_operating_point(model, score_thresh=0.2)
-    assert applied.get("score_thresh") is None
-    assert attribute_path is None
+    with pytest.raises(ValueError, match="exposes no (score_thresh|detections_per_img)"):
+        set_detector_operating_point(model, score_thresh=0.2, detections_per_img=3)
 
 
 def _checkpoint(tmp_path, builder: str) -> str:
@@ -124,7 +122,8 @@ def _checkpoint(tmp_path, builder: str) -> str:
 def _assessed(tmp_path: Path, builder: str) -> dict:
     """The assessment of ``builder``'s checkpoint over a drawn selection of images, each its own
     size, labeled at exactly the box ``BareScoreThreshDetector``/``BareNoKnobDetector`` always
-    predict for that size, so every image matches and no two collide on content."""
+    predict for that size, so every image matches and no two collide on content; its record, or
+    the door's error."""
     from PIL import Image
     from tcip_annotation.state import Annotation, BBox
 
@@ -146,41 +145,21 @@ def _assessed(tmp_path: Path, builder: str) -> dict:
                         holdout_ratio=0.25)
     assert "error" not in drawn, drawn
     confirm_count_trait(tmp_path)
-    record = assess(tmp_path, _checkpoint(tmp_path, builder), selection_dir, device="cpu",
-                    tile=False)
-    assert "error" not in record, record
-    return record
+    return assess(tmp_path, _checkpoint(tmp_path, builder), selection_dir, device="cpu",
+                  tile=False)
 
 
-def test_a_bespoke_module_exposing_its_own_knob_is_assessed_at_its_stated_floor(tmp_path):
-    """A hand-rolled, non-torchvision module exposing score_thresh on itself is assessed at the
+def test_a_bespoke_module_exposing_its_own_knobs_is_assessed_at_its_stated_floor(tmp_path):
+    """A hand-rolled, non-torchvision module exposing both knobs on itself is assessed at the
     staged floor applied there, and its record names the attribute path it was applied on."""
     record = _assessed(tmp_path, BARE_SCORE_THRESH_DETECTOR)
 
+    assert "error" not in record, record
     assert record["criterion"]["count"]["staged_conf_floor_attribute_path"] == "self"
-    assert "conf_floor_unstated" not in record["failures"]
     assert "conf_censored" not in record["failures"]
 
 
-def test_a_module_exposing_no_knob_fails_unstated_not_censored(tmp_path):
-    """A module exposing no operating-point knob under any recognized name has no floor the
-    platform can state, and fails with conf_floor_unstated, never conf_censored."""
-    record = _assessed(tmp_path, BARE_NO_KNOB_DETECTOR)
+def test_a_module_exposing_no_knob_refuses_naming_the_knob_it_lacks(tmp_path):
+    refused = _assessed(tmp_path, BARE_NO_KNOB_DETECTOR)
 
-    assert record["passed"] is False
-    assert record["criterion"]["count"]["staged_conf_floor_attribute_path"] is None
-    assert "conf_floor_unstated" in record["failures"]
-    assert "conf_censored" not in record["failures"]
-
-
-def test_model_contract_records_the_holders_own_knobs():
-    from tcip_mcp.pipelines.model_contract import check_model_contract
-
-    with_knob, without_knob = (
-        _built({"builder": builder, "task": "detection", "source_files": [BESPOKE_MODELS]})
-        for builder in (BARE_SCORE_THRESH_DETECTOR, BARE_NO_KNOB_DETECTOR))
-
-    dims = {"in_chans": 3, "num_classes": 1, "img_size": 64}
-    assert check_model_contract(with_knob, "detection", dims=dims)["operating_point_knobs"] == [
-        "score_thresh"]
-    assert check_model_contract(without_knob, "detection", dims=dims)["operating_point_knobs"] == []
+    assert "score_thresh" in refused.get("error", ""), refused

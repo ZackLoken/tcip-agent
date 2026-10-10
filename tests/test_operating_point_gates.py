@@ -109,7 +109,7 @@ def _tp_zero_bias_zero_records(id_prefix: str, *, n_images: int = 10, objects_pe
             gt.append({"category_id": 0, "bbox": _box(cx, cy), "iscrowd": 0})
             dt.append({"category_id": 0, "bbox": _box(cx + 2000, cy), "score": 0.9})
         records.append({"width": 4000, "height": 4000, "image_id": f"{id_prefix}_{i}",
-                        "gt": gt, "dt": dt, "cap_hit": False})
+                        "gt": gt, "dt": dt, "count": len(dt), "cap": len(dt) + 1})
     return records
 
 
@@ -143,7 +143,7 @@ def test_an_authored_dispersion_tolerance_fails_one_bad_image_among_many():
 def test_an_all_negative_calibration_or_holdout_fails_as_insufficient():
     real = _records("c")
     all_negative = [{"width": 400, "height": 400, "image_id": f"n_{i}", "gt": [], "dt": [],
-                     "cap_hit": False} for i in range(3)]
+                     "count": 0, "cap": 1} for i in range(3)]
 
     assert "insufficient_holdout_gt" in _criterion(real, all_negative, floor=0.0)[2]
     assert "insufficient_calibration_gt" in _criterion(all_negative, real, floor=0.0)[2]
@@ -169,7 +169,7 @@ def test_padding_with_empty_records_cannot_dilute_the_equivalence_test():
     loosened = fx.with_fields(ENTRY, count_bias_tolerance_frac=1.0)
     hold_real = _records("h", shift=3.0)
     padding = [{"width": 400, "height": 400, "image_id": f"h_pad_{i}", "gt": [], "dt": [],
-                "cap_hit": False} for i in range(8)]
+                "count": 0, "cap": 1} for i in range(8)]
 
     _c, padded, padded_failures = _criterion(_records("c"), hold_real + padding, entry=loosened,
                                              floor=0.3)
@@ -197,12 +197,13 @@ def test_an_f1_objective_picks_f1_max_and_labels_it_accordingly(objective):
 
 
 def test_cap_saturated_frac_is_the_share_of_records_that_hit_the_cap():
-    assert cap_saturated_frac([{"cap_hit": True}, {"cap_hit": False}]) == pytest.approx(0.5)
+    assert cap_saturated_frac([{"count": 4, "cap": 4}, {"count": 3, "cap": 4}]) == (
+        pytest.approx(0.5))
     assert cap_saturated_frac([]) == 0.0
 
 
 def test_cap_saturation_is_surfaced_but_never_fails_the_criterion():
-    cal = [dict(r, cap_hit=True) for r in _records("c")]
+    cal = [dict(r, cap=r["count"]) for r in _records("c")]
     _conf, evidence, failures = _criterion(cal, _records("h", shift=3.0), floor=0.3)
     assert evidence["calibration_cap_saturated_frac"] == pytest.approx(1.0)
     assert not any("cap" in f for f in failures)

@@ -29,15 +29,14 @@ def _detection_checkpoint(tmp_path: Path) -> str:
 
 
 def _tiled_pass(tmp_path: Path, ckpt: str):
-    """The tiled pass ``ckpt`` runs at tile 64, overlap 0.2, NMS at 0.3, conf 0 and the sample
-    cap."""
+    """The tiled pass ``ckpt`` runs at tile 64, overlap 0.2, NMS at 0.3, conf 0 and the
+    checkpoint's own density."""
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Stated, prepare
-    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
 
     return prepare(load_registered_checkpoint(ckpt, project=tmp_path), Stated(
-        tile=True, tile_size=TILE, overlap=0.2, postprocess="nms", cross_tile_nms=0.3, conf=0.0,
-        max_dets=SAMPLE_MAX_DETS), device="cpu").runnable()
+        tile=True, tile_size=TILE, overlap=0.2, postprocess="nms", cross_tile_nms=0.3, conf=0.0),
+        device="cpu").runnable()
 
 
 def _sliced(p, source, execution=None, **kwargs) -> dict:
@@ -51,7 +50,7 @@ def test_predict_sliced_shape_and_bounds(tmp_path):
 
     r = _sliced(p, gray_frame(tmp_path))
 
-    assert {"image", "width", "height", "boxes", "scores", "labels", "count", "cap_hit"} <= set(r)
+    assert {"image", "width", "height", "boxes", "scores", "labels", "count", "cap"} <= set(r)
     assert isinstance(r["count"], int) and r["count"] == len(r["boxes"])
     assert r["tiles"] >= 4  # 128px image at tile 64 -> a 2x2+ lattice
     for b in r["boxes"]:
@@ -59,22 +58,24 @@ def test_predict_sliced_shape_and_bounds(tmp_path):
         assert 0 <= b[1] <= r["height"] and 0 <= b[3] <= r["height"]
 
 
-def test_predict_sliced_stamps_cap_hit_when_the_full_frame_cap_truncates(tmp_path):
-    """The post-merge full-frame cap truncates a dense result and stamps ``cap_hit`` from the
-    pre-truncation count; sitting exactly at the cap still reads as hit."""
+def test_predict_sliced_keeps_at_most_the_full_frame_cap(tmp_path):
+    """The post-merge cap, the density times the frame's pixels, truncates a dense result and is
+    written on the record beside the count kept, which reaches it exactly when the frame held at
+    least that many detections."""
     p = _tiled_pass(tmp_path, _detection_checkpoint(tmp_path))
     img = gray_frame(tmp_path)
-    uncapped = _sliced(p, img, p.execution.with_value("max_dets", None, "explicit"))
+    pixels = 128 * 128
+    uncapped = _sliced(p, img, p.execution.with_value("density", 1.0, "explicit"))
     assert uncapped["count"] > 1, "the bespoke model must produce more than one raw detection " \
         "for this test to force a real truncation, not merely assert an untested edge"
 
     outcomes = {}
     for cap in (uncapped["count"] - 1, uncapped["count"], uncapped["count"] + 1):
-        r = _sliced(p, img, p.execution.with_value("max_dets", cap, "explicit"))
-        outcomes[cap - uncapped["count"]] = (r["cap_hit"], r["count"])
+        r = _sliced(p, img, p.execution.with_value("density", (cap - 0.5) / pixels, "explicit"))
+        outcomes[cap - uncapped["count"]] = (r["cap"], r["count"])
 
-    assert outcomes == {-1: (True, uncapped["count"] - 1), 0: (True, uncapped["count"]),
-                        1: (False, uncapped["count"])}
+    n = uncapped["count"]
+    assert outcomes == {-1: (n - 1, n - 1), 0: (n, n), 1: (n + 1, n)}
 
 
 def test_predict_sliced_whole_decode_refuses_prior_or_progress_by_name(tmp_path):
@@ -92,13 +93,13 @@ def test_predict_sliced_whole_decode_refuses_prior_or_progress_by_name(tmp_path)
 
 
 def test_the_prepared_pass_tiles_when_asked_and_not_otherwise(tmp_path):
-    from tests._verified_checkpoint_fixtures import predicted_over
+    from tests._verified_checkpoint_fixtures import SAMPLE_OVERLAP, predicted_over
 
     ckpt = _detection_checkpoint(tmp_path)
     images_dir = str(Path(gray_frame(tmp_path)).parent)
 
     tiled, tiled_results = predicted_over(tmp_path, ckpt, images_dir, tile=True,
-                                          tile_size=TILE, conf=0.0)
+                                          tile_size=TILE, overlap=SAMPLE_OVERLAP, conf=0.0)
     whole, whole_results = predicted_over(tmp_path, ckpt, images_dir, tile=False, conf=0.0)
 
     assert tiled.execution.tile_size == TILE and len(tiled_results) == 1

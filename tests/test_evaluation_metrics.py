@@ -29,10 +29,10 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     concordance_correlation_coefficient,
     detection_metrics,
     gt_class_avg_size,
-    image_record,
     ordinal_metrics,
     pick_count_unbiased,
     pick_f1_max,
+    prediction_record,
     quadratic_weighted_kappa,
     r_squared,
     regression_metrics,
@@ -82,7 +82,7 @@ def test_composite_objective_has_no_score_for_a_degenerate_epoch():
 # --------------------------------------------------------------------------
 
 def _rec(gt, dt, w=100, h=100):
-    return image_record(w, h, gt, dt)
+    return prediction_record(dt, gt, width=w, height=h, cap=None, count=len(dt))
 
 
 def test_detection_map50_perfect():
@@ -659,9 +659,10 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(tmp_pa
         # detection.
         trait = fx.latest("bud_opening", tmp_path) if task == "detection" else None
         dims = {"ordinal": {"num_ranks": 3}, "regression": {}}.get(task, {"num_classes": 2})
+        detector = task in ("detection", "instance_seg")
         result = evaluate(model, loader, device, task, dims={"in_chans": 3, **dims}, trait=trait,
-                          conf_threshold=(VALIDATION_CONF if task in ("detection", "instance_seg")
-                                          else None))
+                          conf_threshold=VALIDATION_CONF if detector else None,
+                          density=1.0 if detector else None)
         returned.update(result)
 
     per_image = [
@@ -707,7 +708,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
         "iou_threshold", "execution", "eval_regime",
     }
     full_frame_only_fields = {
-        "scored_images", "tallies", "max_dets_cap_saturated_frac",
+        "scored_images", "tallies", "cap_saturated_frac",
     }
 
     from tcip_mcp.pipelines.execution import prepare
@@ -756,9 +757,7 @@ def test_a_full_frame_evaluation_merges_at_the_threshold_its_ground_truth_derive
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
     from tests._predictor_fixtures import StubPredictor, install
     from tests._producer_fixtures import label_image
-    from tests._verified_checkpoint_fixtures import (
-        SAMPLE_CONF, SAMPLE_MAX_DETS, registered_checkpoint,
-    )
+    from tests._verified_checkpoint_fixtures import SAMPLE_CONF, registered_checkpoint
 
     checkpoint = load_registered_checkpoint(registered_checkpoint(tmp_path), project=tmp_path)
     images_dir = tmp_path / "ff" / "images" / UNDATED_BUCKET
@@ -769,16 +768,18 @@ def test_a_full_frame_evaluation_merges_at_the_threshold_its_ground_truth_derive
     install(monkeypatch, StubPredictor(task="detection", in_chans=3, width=32, height=32,
                                        boxes=(), scores=()))
     admission = checkpoint_admission(checkpoint, images_dir)
-    stated = Stated(tile_size=32, overlap=0.0, conf=SAMPLE_CONF, max_dets=SAMPLE_MAX_DETS)
+    stated = Stated(tile_size=32, overlap=0.0, conf=SAMPLE_CONF)
 
     if not derives:
         with pytest.raises(ExecutionRefusedError, match="cross_tile_nms"):
             run_full_frame_evaluation(checkpoint, admission, stated=stated)
         return
+    from tests._verified_checkpoint_fixtures import objects_over
+
     execution = run_full_frame_evaluation(checkpoint, admission, stated=stated)["execution"]
-    xywh = [[x1, y1, x2 - x1, y2 - y1] for x1, y1, x2, y2 in boxes]
     assert execution["sources"]["cross_tile_nms"] == CROSS_TILE_NMS_DERIVATION
-    assert execution["cross_tile_nms"] == pytest.approx(derive_cross_tile_nms([xywh]))
+    assert execution["cross_tile_nms"] == pytest.approx(
+        derive_cross_tile_nms([objects_over([list(b) for b in boxes], 32 * 32)]))
 
 
 def test_evaluation_result_refuses_a_key_extra_shares_with_common():
@@ -962,11 +963,10 @@ def _crowd_records() -> list[dict]:
     from tcip_mcp.pipelines.training.evaluation import gt_record
 
     return [
-        image_record(100, 100, [gt_record(_OBJECT, 1, 0), gt_record(_CROWD, 1, 1)],
-                                [{"category_id": 1, "bbox": _OBJECT, "score": 0.9},
-                                 {"category_id": 1, "bbox": [55.0, 55.0, 30.0, 30.0],
-                                  "score": 0.9}]),
-        image_record(100, 100, [gt_record(_CROWD, 1, 1)], []),
+        _rec([gt_record(_OBJECT, 1, 0), gt_record(_CROWD, 1, 1)],
+             [{"category_id": 1, "bbox": _OBJECT, "score": 0.9},
+              {"category_id": 1, "bbox": [55.0, 55.0, 30.0, 30.0], "score": 0.9}]),
+        _rec([gt_record(_CROWD, 1, 1)], []),
     ]
 
 
@@ -1020,10 +1020,10 @@ def test_a_detector_output_stating_no_boxes_refuses_rather_than_reading_as_no_de
     target = {"boxes": torch.zeros((0, 4)), "labels": torch.zeros((0,), dtype=torch.int64),
               "iscrowd": torch.zeros((0,), dtype=torch.int64)}
     with pytest.raises(KeyError, match="boxes"):
-        records_from_detector(target, {}, width=10, height=10)
+        records_from_detector(target, {}, width=10, height=10, cap=1)
     empty = {"boxes": torch.zeros((0, 4)), "labels": torch.zeros((0,), dtype=torch.int64),
              "scores": torch.zeros((0,))}
-    assert records_from_detector(target, empty, width=10, height=10)["dt"] == []
+    assert records_from_detector(target, empty, width=10, height=10, cap=1)["dt"] == []
 
 
 def test_a_ground_truth_record_is_one_shape_from_a_target_and_from_its_annotation(tmp_path):
@@ -1039,7 +1039,7 @@ def test_a_ground_truth_record_is_one_shape_from_a_target_and_from_its_annotatio
         Annotation(subject="bur", geometry=BBox(50.0, 50.0, 90.0, 90.0), iscrowd=True)])
     listed = json_det_targets(document.annotations, registry_scope(tmp_path, "bur"))
     record = records_from_annotation(document.annotations, [], width=100,
-                                     height=100, name_id={"bur": 1})
+                                     height=100, cap=None, name_id={"bur": 1})
     # The annotation route also names each record's annotation, by its index in the document.
     assert [
         {k: v for k, v in g.items() if k != "index"} for g in record["gt"]
@@ -1061,7 +1061,7 @@ def test_a_detectors_record_reads_both_sides_on_the_stored_grid(tmp_path):
     listed = json_det_targets(document.annotations, registry_scope(tmp_path, "bur"))
     output = {"boxes": torch.tensor([[10.1, 10.1, 40.3, 30.3]]),
               "labels": torch.tensor([1]), "scores": torch.tensor([0.9])}
-    record = records_from_detector(target_tensors(listed), output, width=100, height=100)
+    record = records_from_detector(target_tensors(listed), output, width=100, height=100, cap=2)
     assert [g["bbox"] for g in record["gt"]] == [[10.3, 20.7, 29.8, 40.2]]
     assert [d["bbox"] for d in record["dt"]] == [[10.1, 10.1, 30.2, 20.2]]
 
@@ -1071,7 +1071,7 @@ def _reference_records(tmp_path, reference: list, detections: list) -> list[dict
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
 
     return [records_from_annotation(_stored(tmp_path, reference).annotations, detections,
-                                    width=100, height=100)]
+                                    width=100, height=100, cap=None)]
 
 
 @pytest.mark.parametrize("crowd_only", [True, False], ids=["crowd_only", "empty"])

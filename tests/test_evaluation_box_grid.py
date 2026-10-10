@@ -36,7 +36,7 @@ def test_a_prediction_off_the_stored_grid_is_put_on_it_before_scoring():
     from tcip_mcp.pipelines.training.evaluation import records_from_detector
 
     target, output = _detector_pass([ON_GRID_BOX], [SUB_QUANTUM_BOX])
-    record = records_from_detector(target, output, width=200, height=200)
+    record = records_from_detector(target, output, width=200, height=200, cap=2)
 
     assert record["dt"][0]["bbox"] == QUANTIZED_BOX
 
@@ -47,7 +47,7 @@ def test_ground_truth_already_on_the_stored_grid_is_unchanged():
     from tcip_mcp.pipelines.training.evaluation import records_from_detector
 
     target, output = _detector_pass([ON_GRID_BOX], [])
-    record = records_from_detector(target, output, width=200, height=200)
+    record = records_from_detector(target, output, width=200, height=200, cap=1)
 
     x1, y1, x2, y2 = ON_GRID_BOX
     assert record["gt"][0]["bbox"] == [x1, y1, x2 - x1, y2 - y1]
@@ -61,7 +61,7 @@ def test_an_annotation_prediction_off_the_stored_grid_is_put_on_it_before_scorin
     gt = [Annotation(subject="target", geometry=BBox(*ON_GRID_BOX))]
     preds = [Annotation(subject="target", geometry=BBox(*SUB_QUANTUM_BOX), score=0.9)]
 
-    record = records_from_annotation(gt, preds, width=200, height=200)
+    record = records_from_annotation(gt, preds, width=200, height=200, cap=None)
 
     x1, y1, x2, y2 = ON_GRID_BOX
     assert record["gt"][0]["bbox"] == [x1, y1, x2 - x1, y2 - y1]
@@ -95,7 +95,7 @@ def test_scoring_labels_read_back_from_disk_is_unaffected_by_the_shared_grid(tmp
 
     stored = json_io.read_label_document(label).annotations
     preds = [Annotation(subject=a.subject, geometry=a.geometry, score=0.9) for a in stored]
-    record = records_from_annotation(stored, preds, width=200, height=200)
+    record = records_from_annotation(stored, preds, width=200, height=200, cap=None)
 
     metrics = detection_metrics([record], trait=None, iou_threshold=0.5, conf_threshold=0.25,
                                 by_mask=False)

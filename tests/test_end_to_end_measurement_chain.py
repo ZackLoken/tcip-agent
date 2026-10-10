@@ -27,9 +27,7 @@ from tests._chain_fixtures import (  # noqa: E402
     IMG, STEMS, SUBJECT, draw_reference_selection, object_at, run_the_chain, synthetic_capture,
     train_on,
 )
-from tests._verified_checkpoint_fixtures import (  # noqa: E402
-    SAMPLE_DETECTOR_PASS, SAMPLE_MAX_DETS,
-)
+from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS  # noqa: E402
 
 
 def test_a_drawn_reference_selection_records_each_samples_ground_truth_digest(tmp_path: Path):
@@ -75,8 +73,7 @@ def test_the_tiny_detector_trains_and_finds_one_object_per_frame(tmp_path: Path)
     checkpoint_path = train_on(selection_dir, tmp_path, "exp-chain-train")
 
     checkpoint = load_registered_checkpoint(checkpoint_path, project=tmp_path)
-    p = prepare(checkpoint, Stated(tile=False, conf=0.5, max_dets=SAMPLE_MAX_DETS),
-                device="cpu").runnable()
+    p = prepare(checkpoint, Stated(tile=False, conf=0.5), device="cpu").runnable()
     results = p.predict([str(images_dir / f"{stem}.png") for stem in STEMS[:3]])
 
     assert [r["count"] for r in results] == [1, 1, 1], results
@@ -118,22 +115,34 @@ def test_a_reference_document_edited_after_its_read_is_never_measured(tmp_path: 
     assert retained.digest != ground_truth_digest(moved)
 
 
-def test_a_frame_assessment_stating_no_cap_refuses_naming_it(tmp_path: Path):
-    """Calibration frames of one size establish nothing about the frames a pass later publishes
-    on, which may be larger at the same density: an assessment over frames stating no
-    ``max_dets`` refuses naming it, and the same assessment stating one passes."""
+def test_a_frame_assessments_reference_derives_the_density_that_governs_its_pass(tmp_path: Path):
+    """An assessment over frames states no cap: its calibration frames' own objects derive the
+    density its record carries, over the one the checkpoint recorded of its training frames,
+    which here is half of it: every calibration frame holds a second object no training frame
+    holds."""
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.data.selection import read_selection
+    from tcip_mcp.pipelines.derivations import OBJECT_DENSITY_DERIVATION
     from tests._chain_fixtures import assess, confirm_count_trait
 
     root = tmp_path / "ds"
     synthetic_capture(root)
     selection_dir = tmp_path / "selection"
     draw_reference_selection(tmp_path, root, selection_dir)
-    checkpoint_path = train_on(selection_dir, tmp_path, "exp-chain-uncapped")
+    checkpoint_path = train_on(selection_dir, tmp_path, "exp-chain-density")
     confirm_count_trait(tmp_path)
+    for sample in read_selection(str(selection_dir), project=tmp_path).on("calibration"):
+        held = json_io.read_label_document(sample.ground_truth).annotations
+        json_io.write_label_document(
+            sample.ground_truth,
+            [*held, Annotation(subject=SUBJECT, geometry=BBox(50, 50, 60, 60))], IMG, IMG)
 
-    refused = assess(tmp_path, checkpoint_path, selection_dir, max_dets=None)
-    assert "max_dets" in refused.get("error", ""), refused
-    assert assess(tmp_path, checkpoint_path, selection_dir)["passed"] is True
+    assessed = assess(tmp_path, checkpoint_path, selection_dir)
+
+    trained = load_registered_checkpoint(checkpoint_path, project=tmp_path)
+    assert trained.spec.data.train_object_density == pytest.approx(1 / (IMG * IMG))
+    assert assessed["execution"]["sources"]["density"] == OBJECT_DENSITY_DERIVATION
+    assert assessed["execution"]["density"] == pytest.approx(2 / (IMG * IMG))
 
 
 def test_the_assessment_passes_and_the_bucket_published_under_it_names_it(tmp_path: Path):

@@ -135,7 +135,7 @@ def test_decode_inverts_the_recorded_scope(tmp_path):
 
     data, _dropped = encode_predictions(
         {"image": "pred.jpg", "boxes": [[10, 10, 40, 40]], "scores": [0.9], "labels": [1],
-         "attributes": [[1]], "width": 640, "height": 480},
+         "attributes": [[1]], "width": 640, "height": 480, "cap": 2},
         created_by="model:x", scope=scope)
     preds = json_io.label_document(data).annotations
     assert [(p.subject, p.attributes) for p in preds] == [("bud", {"color": "blue"})]
@@ -287,7 +287,7 @@ def test_records_from_annotation_honors_a_global_name_id():
     rec = records_from_annotation(
         [Ann(subject="bud", geometry=B(0, 0, 10, 10))],
         [Ann(subject="bud", geometry=B(0, 0, 10, 10), score=0.9)],
-        width=100, height=100, name_id=name_id)
+        width=100, height=100, cap=None, name_id=name_id)
     assert {r["category_id"] for r in rec["gt"]} == {2}
     assert {r["category_id"] for r in rec["dt"]} == {2}
 

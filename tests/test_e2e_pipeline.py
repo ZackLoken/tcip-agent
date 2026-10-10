@@ -69,7 +69,7 @@ def project_dir(tmp_path: Path) -> Path:
         # Predictions: 1 matching (TP) + 1 false positive (FP), the confidence in each score.
         results.append({"image": str(images / f"{name}.jpg"), "width": 640, "height": 480,
                         "boxes": [[288, 216, 352, 264], [499.2, 374.4, 524.8, 393.6]],
-                        "scores": [0.92, 0.60], "labels": [1, 1]})
+                        "scores": [0.92, 0.60], "labels": [1, 1], "cap": 3})
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 

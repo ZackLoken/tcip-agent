@@ -36,6 +36,7 @@ from tcip_mcp.traits import (
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.selection import Sample, Selection
     from tcip_mcp.pipelines.execution import Pass, Preparation
+    from tcip_mcp.pipelines.schemas import TilingSpec
     from tcip_mcp.traits import TraitEntry, TraitRevision
 
 ASSESSMENTS_DIR = Path(".tcip/assessments")
@@ -379,10 +380,10 @@ def assess(
     and record the result as a new assessment; return it. Each path is
     :func:`~tcip_mcp.registry_paths.located` against ``project``.
 
-    ``stated`` is what the caller states of the execution record, a detector's ``max_dets`` among
-    it, since the frames a pass of this checkpoint later publishes on are not known here; the rest
-    is the checkpoint's own geometry, a derivation over the calibration side's ground truth (the
-    merge threshold), or the operating point the trait's count objective fits there (the conf).
+    ``stated`` is what the caller states of the execution record; the rest is the checkpoint's own
+    geometry, a derivation over the calibration side's ground truth (the object density, any tile
+    geometry the checkpoint does not record, the merge threshold), or the operating point the
+    trait's count objective fits there (the conf).
 
     Refuses before any inference when the selection holds no calibration or no holdout side, when
     the checkpoint's head does not produce what the kind measures, and when a state-crossing
@@ -439,10 +440,10 @@ def _count_fit(p: Pass, entry: TraitEntry,
     )
 
     cal_records, hold_records = collect(p.execution)
-    holder, path = detector_operating_point_holder(p.predictor.model)
+    _, path = detector_operating_point_holder(p.predictor.model)
     conf, evidence, failures = count_criterion(
         cal_records, hold_records, entry, staged_conf_floor_attribute_path=path,
-        staged_conf_floor=STAGED_CONF_FLOOR if hasattr(holder, "score_thresh") else None)
+        staged_conf_floor=STAGED_CONF_FLOOR)
     p.execution = p.execution.with_value("conf", conf, evidence["conf_derived_from"])
     return evidence, failures, cal_records, hold_records
 
@@ -461,30 +462,26 @@ def _records(p: Pass, ds: Any, digest_of: dict[str, str], execution: Execution) 
     """One evaluation record per sample of the loader ``ds``, predicted under ``execution``
     (:func:`~tcip_mcp.pipelines.training.evaluation.prediction_record`), the sample's source digest
     as its ``image_id``."""
-    from tcip_mcp.pipelines.training.evaluation import gt_records, prediction_record
+    from tcip_mcp.pipelines.training.evaluation import gt_records, result_record
 
     results = (p.predict([ds.image_of(k) for k in ds.stems], execution=execution)
                if ds.stems else [])
-    return [prediction_record(r, gt_records(ds.det_targets(ds.document(k))), image_id=digest_of[k])
+    return [result_record(r, gt_records(ds.det_targets(ds.document(k))), image_id=digest_of[k])
             for k, r in zip(ds.stems, results, strict=True)]
 
 
 def _detection(prep: Preparation, cal: list[Sample], hold: list[Sample], entry: TraitEntry,
                delivery_kind: str, digest_of: dict[str, str]) -> tuple[Pass, dict, list[str]]:
-    """The pass made runnable from the calibration side's ground truth (its merge threshold, where
-    unstated; the frames a pass of it later publishes on are unknown here, so its cap is the
-    stated one), the count criterion over the reference (:func:`_count_fit`), each
+    """The pass made runnable from the calibration side's ground truth (its frames' object
+    density, and its merge threshold and tile geometry where unstated and unrecorded), the count
+    criterion over the reference (:func:`_count_fit`), each
     side's loader built once, every fitted value from the calibration side, plus the classifier
     agreement over matched instances for a state-fraction delivery. ``digest_of`` is keyed by each
     sample's location, which reading the retained copies leaves unchanged."""
     from tcip_mcp.pipelines.execution import Reference
-    from tcip_mcp.pipelines.training.evaluation import gt_objects, gt_records
 
     cal_ds, hold_ds = _reference_dataset(prep, cal), _reference_dataset(prep, hold)
-    p = prep.runnable(Reference(
-        boxes_per_image=[[a["bbox"] for a in gt_objects(
-            {"gt": gt_records(cal_ds.det_targets(cal_ds.document(k)))})] for k in cal_ds.stems],
-        counted=None, footprint=None))
+    p = prep.runnable(Reference(regions=cal_ds.regions))
     evidence, failures, cal_records, hold_records = _count_fit(
         p, entry, lambda execution: (_records(p, cal_ds, digest_of, execution),
                                      _records(p, hold_ds, digest_of, execution)))
@@ -570,25 +567,22 @@ def assess_reserved_regions(
     into ``k_cal`` and ``k_test`` buffered bands, for a count delivery of ``trait``; record the
     result as a new assessment and return it.
 
-    The bands are predicted through the tiled pass the whole mosaic is later published under, the
-    tile edge the split was drawn at, the count criterion fitted as :func:`assess` fits it, every
-    derived value from the calibration region alone, an unstated cap scaling the calibration
-    bands' density to the whole mosaic it publishes. Each band is a reference sample of the
-    mosaic, its region named. The reference's scope is the training mosaic's recorded content
-    identity. Refuses (:class:`AssessmentRefusedError`) a delivery that is not a count, a checkpoint
-    no run of this project produced, a run with no reserved regions, a stated tile edge other than
-    the split's, regions not attested complete, too few
-    bands carrying ground truth, a band not held out from the run's training regions, a mosaic that
-    changed since the split, and a mosaic label document only the model stands behind.
+    The bands are laid at the lattice the run trained at (its ``data.tiling``) and predicted
+    through the tiled pass the whole mosaic is later published under, the count criterion fitted
+    as :func:`assess` fits it, every derived value from the calibration region alone, the object
+    density among them, which caps each frame a pass under it predicts at that frame's own
+    pixels. Each band is a reference sample of the mosaic, its region named. The reference's
+    scope is the training mosaic's recorded content identity. Refuses
+    (:class:`AssessmentRefusedError`) a delivery that is not a count, a checkpoint no run of this
+    project produced, a run with no reserved regions, regions not attested complete, too few
+    bands carrying ground truth, a band not held out from the run's training regions, a mosaic
+    that changed since the split, and a mosaic label document only the model stands behind.
     """
     import numpy as np
 
     from tcip_mcp.experiments import run_resolution
-    from tcip_annotation.json_io import xywh
-    from tcip_annotation.state import object_rows
-
     from tcip_mcp.pipelines import block_calibration as blocks
-    from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS, crowd_of
+    from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS, object_region
     from tcip_mcp.pipelines.data.label_queries import json_det_targets
     from tcip_mcp.pipelines.data.selection import DOCUMENT, Sample, source_digests
     from tcip_mcp.pipelines.data.split_construction import partition_samples
@@ -596,7 +590,6 @@ def assess_reserved_regions(
     from tcip_mcp.pipelines.execution import Reference
     from tcip_mcp.pipelines.operating_point import spatial_disjointness
     from tcip_mcp.pipelines.raster_source import BandGroupRef, open_raster
-    from tcip_mcp.pipelines.training.evaluation import gt_records
 
     if delivery_kind not in (PER_IMAGE_COUNT, PER_PLANT_COUNT_AGGREGATE):
         raise AssessmentRefusedError(f"a mosaic's reserved regions answer for a count, not a "
@@ -618,12 +611,8 @@ def assess_reserved_regions(
             "calibration and holdout region (train it with data.split.calibration_ratio set).")
     (mosaic,) = partition_samples(resolved.partition)
     stem = mosaic.member
-    tile_size, overlap = spatial.tile_size, spatial.overlap
-    if prep.tile_size != tile_size:
-        raise AssessmentRefusedError(
-            f"the run's reserved regions were tiled at {tile_size}px and this pass runs at "
-            f"{prep.tile_size}px; the assessed pass and the published one run at one tile "
-            "edge.")
+    lattice = cast("TilingSpec", resolved.data.tiling)
+    tile_size, overlap = cast(int, lattice.tile_size), cast(float, lattice.overlap)
     scope = prep.scope.admitted_for(DOCUMENT, f"experiment {experiment_id!r}")
     (mosaic,) = _admit_reference([mosaic], scope)
     document = mosaic.read
@@ -637,17 +626,17 @@ def assess_reserved_regions(
     target = json_det_targets(document.annotations, scope)
     gt = {k: np.asarray(target[k]) for k in PER_BOX_KEYS if k in target}
     gt["boxes"] = gt["boxes"].astype(np.float32).reshape(-1, 4)
-    objects = gt["boxes"][object_rows(crowd_of(gt))]
-    calibration_objects = objects[blocks.centered_in(objects, cal_rect)]
     plants = None
     if resolved.data.plant_csv_paths:
         from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
 
         plants = read_plant_csvs([Path(c) for c in resolved.data.plant_csv_paths]) or None
     try:
+        cx0, cy0, cx1, cy1 = cal_rect
         buffer_px, scale_source = derive_block_scale_px(
             tile_size=tile_size, plants=plants,
-            gt_boxes_per_image=[[xywh(*box) for box in calibration_objects.tolist()]],
+            objects=object_region(blocks.select_gt_for_band(gt, cal_rect),
+                                  (cx1 - cx0) * (cy1 - cy0)),
             raster_path=None if isinstance(source, BandGroupRef) else source)
         bands = {"calibration": blocks.band_rects(cal_rect, k_cal, tile_size, overlap, buffer_px,
                                                   "cal"),
@@ -661,21 +650,19 @@ def assess_reserved_regions(
         raise AssessmentRefusedError(
             f"band(s) {leaks} are not held out from run {experiment_id!r}'s "
             "training regions, so they cannot stand as its reference.")
-    band_counts = {side: {name: sum(object_rows(crowd_of(blocks.select_gt_for_band(gt, rect))))
-                          for name, rect in side_bands.items()}
-                   for side, side_bands in bands.items()}
+    band_regions = {side: {name: object_region(blocks.select_gt_for_band(gt, (x0, y0, x1, y1)),
+                                               (x1 - x0) * (y1 - y0))
+                           for name, (x0, y0, x1, y1) in side_bands.items()}
+                    for side, side_bands in bands.items()}
+    band_counts = {side: {name: len(region.boxes) for name, region in regions.items()}
+                   for side, regions in band_regions.items()}
     for side, counts in band_counts.items():
         blocks.check_feasibility(counts, side=side)
     samples = [Sample(member=name, source=mosaic.source, ground_truth=mosaic.ground_truth,
                       group=name, side=side, rect=cast(Any, tuple(rect)), image=source)
                for side, side_bands in bands.items() for name, rect in side_bands.items()]
     digest_of = source_digests(samples)
-    p = prep.runnable(Reference(
-        boxes_per_image=[[a["bbox"] for a in gt_records(blocks.select_gt_for_band(gt, rect))]
-                         for rect in bands["calibration"].values()],
-        counted=[(band_counts["calibration"][name], float((x1 - x0) * (y1 - y0)))
-                 for name, (x0, y0, x1, y1) in bands["calibration"].items()],
-        footprint=float(spatial.width * spatial.height)))
+    p = prep.runnable(Reference(regions=list(band_regions["calibration"].values())))
 
     def collect(execution: Execution) -> tuple[list[dict], list[dict]]:
         with open_raster(source, p.predictor.in_chans) as reader:
@@ -714,8 +701,9 @@ def _band_records(reader: Any, bands: dict[str, tuple[int, int, int, int]], p: P
                   source: str) -> list[dict]:
     """One evaluation record per band (:func:`~tcip_mcp.pipelines.training.evaluation.
     prediction_record`): the tiled prediction under ``execution`` over the band widened on every
-    side (clipped to the mosaic) by the overlap its lattice states between neighbors, keeping the
-    detections and the ground truth centered in the band itself, in band coordinates, the band
+    side (clipped to the mosaic) by the overlap its lattice states between neighbors, the frame
+    that forward ran on, keeping the detections and the ground truth centered in the band
+    itself, in that frame's coordinates, the band as the record's scored ``region``, the band
     sample's source digest as its ``image_id``."""
     import numpy as np
 
@@ -724,7 +712,7 @@ def _band_records(reader: Any, bands: dict[str, tuple[int, int, int, int]], p: P
     from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS
     from tcip_mcp.pipelines.raster_source import Rect, _RegionView
     from tcip_mcp.pipelines.slicing import slice_lattice
-    from tcip_mcp.pipelines.training.evaluation import gt_records, prediction_record
+    from tcip_mcp.pipelines.training.evaluation import gt_records, result_record
 
     tile_size = cast(int, execution.tile_size)
     halo = tile_size - slice_lattice(tile_size, 2 * tile_size, tile_size,
@@ -739,14 +727,15 @@ def _band_records(reader: Any, bands: dict[str, tuple[int, int, int, int]], p: P
         result = p.predictor.predict_sliced(
             _RegionView(reader, Rect(hx0, hy0, hx1, hy1)), execution=execution,
             tile_batch_size=p.tile_batch_size, require_masks=False, source_label=name)
-        boxes = np.asarray(result["boxes"], dtype=np.float64).reshape(-1, 4) + [hx0, hy0, hx0, hy0]
-        kept = blocks.centered_in(boxes, inner)
+        region = (ix0 - hx0, iy0 - hy0, ix1 - hx0, iy1 - hy0)
+        kept = blocks.centered_in(np.asarray(result["boxes"], dtype=np.float64).reshape(-1, 4),
+                                  region)
         rows = {key: [v for v, k in zip(result[key], kept) if k]
                 for key in PER_BOX_KEYS if key in result}
-        records.append(prediction_record(
-            {**result, **rows, "width": ix1 - ix0, "height": iy1 - iy0,
-             "boxes": (boxes[kept] - [ix0, iy0, ix0, iy0]).tolist()},
-            gt_records(blocks.select_gt_for_band(gt, inner)), image_id=digest_of[location]))
+        band = blocks.select_gt_for_band(gt, inner)
+        band["boxes"] += [region[0], region[1], region[0], region[1]]
+        records.append(result_record({**result, **rows}, gt_records(band),
+                                     image_id=digest_of[location], region=region))
     return records
 
 

@@ -19,10 +19,10 @@ from tcip_mcp.pipelines.operating_point import (  # noqa: E402
     count_criterion,
 )
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
-    image_record,
     derive_operating_point_curve,
     gt_class_avg_size,
     pick_count_unbiased,
+    prediction_record,
     scaled_to,
 )
 from tests import _trait_fixtures as fx  # noqa: E402
@@ -51,14 +51,13 @@ def _gt_records(prefix, n, *, swap_classes, classes=(1, 2), offset=0.0):
             gt.append({"bbox": box, "category_id": cat, "iscrowd": 0})
             dt.append({"bbox": box, "category_id": classes[1] if swap_classes else cat,
                        "score": 0.9})
-        recs.append({**image_record(FRAME, FRAME, gt, dt, image_id=f"{prefix}{i}"),
-                     "cap_hit": False})
+        recs.append(_record(prefix, i, gt, dt))
     return recs
 
 
 def _record(prefix, i, gt, dt):
-    return {**image_record(FRAME, FRAME, gt, dt, image_id=f"{prefix}{i}"),
-            "cap_hit": False}
+    return prediction_record(dt, gt, width=FRAME, height=FRAME, cap=len(dt) + 1, count=len(dt),
+                             image_id=f"{prefix}{i}")
 
 
 def test_a_class_compensating_reference_the_pooled_bias_calls_unbiased_fails_per_class():

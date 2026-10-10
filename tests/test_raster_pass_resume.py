@@ -49,11 +49,11 @@ def _run(project: Path, ckpt: str, raster_path: Path, bucket: str, *, conf: floa
          **kwargs) -> dict:
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
-    from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS, SAMPLE_MAX_DETS
+    from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS
 
     call_kwargs = {
         "raster_path": str(raster_path), "bucket": bucket,
-        "stated": Stated(conf=conf, max_dets=SAMPLE_MAX_DETS, tile_size=TILE, overlap=0.0,
+        "stated": Stated(conf=conf, tile_size=TILE, overlap=0.0,
                          cross_tile_nms=SAMPLE_CROSS_TILE_NMS), "tile_batch_size": 1,
         "device": "cpu",
     }

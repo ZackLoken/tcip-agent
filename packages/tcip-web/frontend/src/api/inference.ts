@@ -33,8 +33,8 @@ export interface InferenceJob {
 }
 
 /** A run over one capture date's images into a bucket name not yet published under the dataset
- *  root; every execution value ``stated`` leaves unset the platform derives from the checkpoint,
- *  and an ``assessment_id`` runs that assessment's execution record and publishes under it. */
+ *  root, under the execution values ``stated`` names (``run_inference`` resolves or refuses the
+ *  rest); an ``assessment_id`` runs that assessment's execution record and publishes under it. */
 export interface LaunchInferenceBody {
   checkpoint_path: string;
   dataset_root: string;

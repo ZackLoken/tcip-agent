@@ -71,7 +71,8 @@ def _publish(project: Path, bucket: str, images: list[Path]) -> str:
     from tests._chain_fixtures import published
 
     results = [{"image": str(p), "width": 8, "height": 8, "boxes": [[1.0, 1.0, 3.0, 3.0]],
-                "scores": [0.9], "labels": [1], "attributes": [[BLOOM_STATE.values.index("open")]]}
+                "scores": [0.9], "labels": [1], "cap": 2,
+                "attributes": [[BLOOM_STATE.values.index("open")]]}
                for p in images]
     return published(project, bucket, results, scope={"subject": "flower"},
                      registry=FLOWERS).name

@@ -43,7 +43,7 @@ def test_a_scored_prediction_document_reads_whole(tmp_path: Path):
     key = _stored(tmp_path / "images" / UNDATED_BUCKET / "p.png",
                   [Annotation(subject=SUBJECT, geometry=BOX, score=0.8)])
 
-    assert [a.score for a in json_io.read_predictions(key)] == [0.8]
+    assert [a.score for a in json_io.read_predictions(key).annotations] == [0.8]
 
 
 @pytest.mark.parametrize("reader", ["pairing", "evaluation_record"])
@@ -61,7 +61,7 @@ def test_no_reader_stands_in_a_score_for_a_prediction_stating_none(tmp_path: Pat
         if reader == "pairing":
             pair_proposals(gt, preds, {"kind": "iou", "iou_threshold": 0.5})
         else:
-            records_from_annotation(gt, preds, width=IMG, height=IMG)
+            records_from_annotation(gt, preds, width=IMG, height=IMG, cap=None)
 
 
 def test_the_instance_loader_builds_its_target_from_the_polygons_it_reads(tmp_path: Path):

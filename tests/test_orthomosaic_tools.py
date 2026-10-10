@@ -15,7 +15,7 @@ from tests import _trait_fixtures as fx
 from tests._mapping_fixtures import (
     GRID_COLUMNS, POSITION_ERROR_M, register_plant_registry_for, write_plant_csv,
 )
-from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS, SAMPLE_MAX_DETS
+from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS
 
 torch = pytest.importorskip("torch")
 
@@ -29,7 +29,7 @@ TIEPOINT_NATIVE_Y = 4_800_000.0
 PIXEL_SCALE = 0.5  # native-CRS units (m) per pixel
 
 TILE = 32
-RASTER_PASS = Stated(conf=0.0, max_dets=SAMPLE_MAX_DETS, tile_size=TILE, overlap=0.2,
+RASTER_PASS = Stated(conf=0.0, tile_size=TILE, overlap=0.2,
                      cross_tile_nms=SAMPLE_CROSS_TILE_NMS)
 """The execution values every raster pass here states."""
 SCOPE = {"subject": fx.COUNT_SUBJECT}
@@ -126,7 +126,7 @@ def _raster_bucket(project: Path, raster_path: Path,
     height, width = tifffile.imread(str(raster_path)).shape[:2]
     result = {"image": str(raster_path), "width": width, "height": height,
               "boxes": [list(b) for b in boxes], "scores": [0.9] * len(boxes),
-              "labels": [1] * len(boxes)}
+              "labels": [1] * len(boxes), "cap": len(boxes) + 1}
     return published(project, f"{name}/2026-01-01", [result], scope=SCOPE,
                      raster_path=raster_path)
 
@@ -237,9 +237,10 @@ def test_a_raster_pass_with_no_basis_for_its_tile_edge_refuses_before_writing(tm
     _write_geo_raster(raster_path)
 
     refused = run_inference(tmp_path, _bespoke_detection_checkpoint(tmp_path),
-                            bucket="preds/2026-01-01", raster_path=str(raster_path))
+                            bucket="preds/2026-01-01", raster_path=str(raster_path),
+                            stated=RASTER_PASS.model_copy(update={"tile_size": None}))
 
-    assert "tile_size could not be resolved" in refused["error"]
+    assert "has no tile_size" in refused["error"], refused
     assert not _published(tmp_path, "preds/2026-01-01")
 
 

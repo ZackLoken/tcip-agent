@@ -237,7 +237,7 @@ def image_proposals(bucket: str, key: Key) -> tuple["Bucket", list]:
     document = found.document_key(key.parts[-1])
     if document is None:
         raise ValueError(f"bucket {bucket!r} holds no proposals for {key.parts[-1]}")
-    return found, read_predictions(document)
+    return found, read_predictions(document).annotations
 
 
 def verdict_key_of(key: Key, bucket: str) -> Key:

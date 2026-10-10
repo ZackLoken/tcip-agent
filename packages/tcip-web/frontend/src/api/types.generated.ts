@@ -519,7 +519,6 @@ export interface Stated {
   postprocess?: string | null;
   cross_tile_nms?: number | null;
   conf?: number | null;
-  max_dets?: number | null;
 }
 
 export interface GuiState {

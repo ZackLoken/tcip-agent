@@ -160,7 +160,8 @@ def buckets_by_date(dataset_root: str | Path, dates: list[str]) -> dict[str, lis
 def pass_documents(p: Pass, results: Iterable[dict]) -> Iterator[Document]:
     """Each of a pass's ``results`` encoded as the document it publishes: a detector's (a pass
     whose execution record states a conf) as its prediction document under the pass's scope,
-    stamped with the checkpoint that predicted it
+    carrying the cap its frame was predicted under and stamped with the checkpoint that predicted
+    it
     (:func:`~tcip_mcp.pipelines.postprocessing.export.encode_predictions`), any other head's as
     its own output (:func:`~tcip_mcp.pipelines.postprocessing.export.encode_head_output`)."""
     from tcip_mcp.pipelines.postprocessing.export import encode_head_output, encode_predictions

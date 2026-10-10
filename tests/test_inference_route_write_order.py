@@ -9,7 +9,7 @@ import pytest
 
 from tests._audit_fixtures import audit_rows
 from tests._predictor_fixtures import StubPredictor, install
-from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS, SAMPLE_MAX_DETS
+from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
 
 DATE = "2025-06-01"
 
@@ -30,7 +30,7 @@ def _job(job_id, images_dir, bucket, ckpt, project):
     return InferenceJob(
         job_id=job_id, actor="user:tester", project=str(project), checkpoint_path=str(ckpt),
         dataset_root=str(dataset_root_of(images_dir)), images_dir=str(images_dir), bucket=bucket,
-        stated=Stated(tile=False, conf=0.25, max_dets=SAMPLE_MAX_DETS, postprocess="nms"))
+        stated=Stated(tile=False, conf=0.25, postprocess="nms"))
 
 
 def _launch_through_the_route(client, dataset, bucket, ckpt, *, tile: bool):
@@ -155,7 +155,7 @@ def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_publishe
 
     assert job.status == "failed"
     assert job.error == mcp["error"]
-    assert "tile_size could not be resolved" in mcp["error"]
+    assert "has no tile_size" in mcp["error"]
     assert _documents(dataset, job.bucket) == []
     assert not _published(dataset, job.bucket)
     assert audit_rows(dataset) == []
@@ -223,7 +223,7 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(tmp_path, monke
     assert job.error is None
     bucket = read_bucket(tmp_path, job.bucket)
     for stem in ("a", "b"):
-        (annotation,) = json_io.read_predictions(bucket.document_key(stem))
+        (annotation,) = json_io.read_predictions(bucket.document_key(stem)).annotations
         assert annotation.score == pytest.approx(0.9)
 
     record = _record(tmp_path, job.bucket)

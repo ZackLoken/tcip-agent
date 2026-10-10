@@ -4,9 +4,8 @@ import pytest
 
 from tcip_mcp.pipelines.execution import Stated
 from tests._producer_fixtures import write_image
-from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
 
-STATED = Stated(tile=False, conf=0.25, max_dets=SAMPLE_MAX_DETS, cross_tile_nms=0.7, overlap=0.2)
+STATED = Stated(tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2)
 """The execution values every inference job here states."""
 
 

@@ -42,24 +42,25 @@ def run_test_evaluation(
     score_weights: dict | None = None, tiling: TilingSpec | None = None,
     trait: TraitEntry | None = None,
 ) -> dict:
-    """Score ``loader`` against the untiled ``pass_``'s model, governed by the pass's execution
-    record as inference governs it, and return the result (:func:`evaluation_result`) with that
-    record under ``execution``; ``trait`` is the confirmed entry whose criterion governs the
-    count, as ``evaluate`` reads it.
+    """Score ``loader`` against the untiled ``pass_``'s model, its in-model score threshold the
+    pass's conf and each image capped at the pass's density (``evaluation.evaluate``), and return
+    the result (:func:`evaluation_result`) with that record under ``execution``; ``trait`` is the
+    confirmed entry whose criterion governs the count, as ``evaluate`` reads it.
 
     ``tiling`` describes the loader's regime for provenance only: a tile-level run scores
     per-tile predictions against per-tile ground truth, a diagnostic, not the delivery regime.
     """
     from tcip_mcp.pipelines.data.datasets import run_tiling
+    from tcip_mcp.pipelines.operating_point import set_detector_operating_point
     from tcip_mcp.pipelines.training.evaluation import evaluate
 
-    checkpoint, execution = pass_.checkpoint, pass_.execution
+    checkpoint, execution, predictor = pass_.checkpoint, pass_.execution, pass_.predictor
     task = checkpoint.task
-    model = pass_.predictor.governed(execution).to(device)
 
-    metrics = evaluate(model, loader, device, task, dims=pass_.predictor.dims,
+    set_detector_operating_point(predictor.model, score_thresh=execution.conf)
+    metrics = evaluate(predictor.model.to(device), loader, device, task, dims=predictor.dims,
                        conf_threshold=execution.conf, iou_threshold=iou_threshold,
-                       score_weights=score_weights, trait=trait)
+                       score_weights=score_weights, trait=trait, density=execution.density)
     tiled = run_tiling(task, tiling) is not None
     common = {
         "model_path": checkpoint.path, "task": task, **checkpoint.producer,
@@ -74,11 +75,12 @@ def run_full_frame_evaluation(
     checkpoint, admitted: "Admission", *, stated: Stated,
     iou_threshold: float = 0.5, device: str | None = None, trait: TraitEntry | None = None,
 ) -> dict:
-    """``checkpoint`` evaluated full frame: its tiled pass over ``stated`` (its conf and cap the
-    stated ones), merged across tiles at the stated merge threshold or the one the evaluated
-    ground truth derives (:func:`~tcip_mcp.pipelines.execution.execution_record`, whose refusals
-    propagate), and matched to the full-frame ground truth of the detection loader a run over
-    ``admitted`` builds, under ``trait``'s criterion when given. Returns
+    """``checkpoint`` evaluated full frame: its tiled pass over ``stated`` (its conf the stated
+    one), its density, any tile geometry the checkpoint does not record and its merge threshold
+    unless stated derived from the evaluated ground truth
+    (:func:`~tcip_mcp.pipelines.execution.execution_record`, whose refusals propagate), matched
+    to the full-frame ground truth of the detection loader a run over ``admitted`` builds, under
+    ``trait``'s criterion when given. Returns
     :func:`~tcip_mcp.pipelines.training.evaluation.detection_metrics`, by mask for an
     instance-segmentation checkpoint and by box otherwise, beside the reference's object and
     detection counts and the pass's ``execution`` record. An empty admission, and a document
@@ -86,7 +88,7 @@ def run_full_frame_evaluation(
     from tcip_mcp.pipelines.execution import Reference, prepare
     from tcip_mcp.pipelines.operating_point import cap_saturated_frac
     from tcip_mcp.pipelines.training.evaluation import (
-        detection_metrics, gt_objects, gt_records, prediction_record,
+        detection_metrics, gt_objects, gt_records, result_record,
     )
 
     prep = prepare(checkpoint, stated.model_copy(update={"tile": True}), device=device)
@@ -108,16 +110,12 @@ def run_full_frame_evaluation(
     assert isinstance(measured, DocumentDataset), "a detector's build over samples is one of these"
     gt_by_key = {key: gt_records(measured.det_targets(measured.document(key)))
                  for key in measured.stems}
-    pass_ = prep.runnable(Reference(
-        boxes_per_image=[[a["bbox"] for a in gt_objects({"gt": gt})] for gt in gt_by_key.values()],
-        counted=None, footprint=None))
+    pass_ = prep.runnable(Reference(regions=measured.regions))
     execution = pass_.execution
-    assert execution.conf is not None and execution.max_dets is not None, "a detector's record"
-    per_image = [
-        prediction_record(
-            predictor.predict_sliced(measured.image_of(key), execution=execution,
-                                     tile_batch_size=pass_.tile_batch_size, require_masks=by_mask),
-            gt, image_id=measured.sample_of(key).member)
+    assert execution.conf is not None, "a detector's record"
+    per_image = [result_record(predictor.predict_sliced(
+        measured.image_of(key), execution=execution, tile_batch_size=pass_.tile_batch_size,
+        require_masks=by_mask), gt, image_id=measured.sample_of(key).member)
         for key, gt in gt_by_key.items()]
 
     common = {
@@ -134,6 +132,6 @@ def run_full_frame_evaluation(
         **metrics,
         "n_gt": sum(len(gt_objects(r)) for r in per_image),
         "n_pred": sum(len(r["dt"]) for r in per_image),
-        "max_dets_cap_saturated_frac": cap_saturated_frac(per_image),
+        "cap_saturated_frac": cap_saturated_frac(per_image),
         "scored_images": len(per_image), "tallies": admitted.tallies,
     })

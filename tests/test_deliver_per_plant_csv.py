@@ -66,7 +66,7 @@ def _bucket(project: Path, dataset_root: Path, date: str, counts: dict[str, int]
 
     results = [{"image": str(dataset_root / "images" / date / f"{stem}.jpg"), "width": 8,
                 "height": 8, "boxes": [[1.0, 1.0, 3.0, 3.0]] * n, "scores": [0.9] * n,
-                "labels": [1] * n} for stem, n in counts.items()]
+                "labels": [1] * n, "cap": n + 1} for stem, n in counts.items()]
     return published(project, f"{name}/{date}", results, scope=SCOPE).name
 
 

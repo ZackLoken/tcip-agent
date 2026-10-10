@@ -230,14 +230,13 @@ def test_a_pass_rebuilds_a_bespoke_detector_and_predicts(tmp_path):
     from PIL import Image
 
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS, registered_checkpoint
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     checkpoint = load_registered_checkpoint(registered_checkpoint(
         tmp_path, model_source=_model_source(), data=_DATA,
         metrics={"val_loss": 0.3, "epoch": 1}), project=tmp_path)
 
-    p = prepare(checkpoint, Stated(tile=False, conf=0.0, max_dets=SAMPLE_MAX_DETS),
-                device="cpu").runnable()
+    p = prepare(checkpoint, Stated(tile=False, conf=0.0), device="cpu").runnable()
     assert type(p.predictor.model).__qualname__ == bespoke_models.BespokeGNDetector.__qualname__
     assert p.predictor.task == "detection"
     assert p.predictor.in_chans == 3

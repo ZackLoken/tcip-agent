@@ -45,7 +45,7 @@ def test_encode_predictions_stamps_model_provenance(tmp_path):
 
     data, _dropped = encode_predictions(
         {"image": "pred.jpg", "width": 100, "height": 80,
-         "boxes": [[10, 10, 30, 30]], "scores": [0.9], "labels": [1]},
+         "boxes": [[10, 10, 30, 30]], "scores": [0.9], "labels": [1], "cap": 10},
         created_by="model:best_bud", scope=registry_scope(tmp_path, "bud"))
     obj = data["annotations"][0]
     assert obj["created_by"] == "model:best_bud"

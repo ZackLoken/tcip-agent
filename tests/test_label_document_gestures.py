@@ -137,7 +137,7 @@ def test_accepting_a_model_proposal_carries_no_attribute_value_into_the_document
     result = {**predicted(image, ["blue"], (color,)), "width": WIDTH, "height": HEIGHT}
     bucket = published(tmp_path, f"model/{DATE}", [result], scope={"subject": "bud"},
                        registry=registry)
-    (proposal,) = json_io.read_predictions(bucket.document_key(image.stem))
+    (proposal,) = json_io.read_predictions(bucket.document_key(image.stem)).annotations
     assert proposal.attributes == {"color": "blue"}
 
     _save(tmp_path, image, [], gestures=Gestures(bucket=bucket.name, accept=frozenset({0})))
@@ -589,16 +589,17 @@ def _counted(annotations: list, proposals: list, criterion: dict) -> dict:
     """The assessment's governing count over one image's annotations and proposals."""
     from tcip_annotation.json_io import xywh
     from tcip_mcp.pipelines.training.evaluation import (
-        dt_record, governing_counts, gt_record, image_record,
+        dt_record, governing_counts, gt_record, prediction_record,
     )
 
     def box(a) -> list[float]:
         g = a.geometry
         return xywh(g.x1, g.y1, g.x2, g.y2)
 
-    record = image_record(
-        WIDTH, HEIGHT, [gt_record(box(a), 1, a.iscrowd) for a in annotations],
-        [dt_record(box(p), 1, p.score) for p in proposals])
+    record = prediction_record(
+        [dt_record(box(p), 1, p.score) for p in proposals],
+        [gt_record(box(a), 1, a.iscrowd) for a in annotations],
+        width=WIDTH, height=HEIGHT, cap=None, count=len(proposals))
     return governing_counts([record], criterion, conf_threshold=0.0)
 
 

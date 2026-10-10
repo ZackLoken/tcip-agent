@@ -85,7 +85,7 @@ def test_a_named_bucket_sets_the_mode_from_its_own_document_not_the_label(
     _label(root, "bud", date, "detect", "IMG_0000", 1)
     published(root, "preds", [{
         "image": str(frame), "width": 100, "height": 100, "boxes": [[10.0, 10.0, 20.0, 20.0]],
-        "scores": [0.9], "labels": [1],
+        "scores": [0.9], "labels": [1], "cap": 2,
         "masks": [{"segmentation": [[10.0, 10.0, 20.0, 10.0, 20.0, 20.0]]}]}],
         scope={"subject": "bud"})
 
