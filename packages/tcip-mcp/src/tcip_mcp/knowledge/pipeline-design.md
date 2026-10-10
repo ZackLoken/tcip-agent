@@ -106,22 +106,28 @@ Tailor the architecture to the data in hand, derived rather than pinned:
 
 Three seams support bespoke work; the platform guarantees integrity around it:
 
-- `pipelines.data.datasets.build_dataset(task, (dataset_source, layout), **kwargs)` builds from
-  a `dataset_source`: an *importable* builder you wrote (`{"builder": "my_module:build_ds",
-  "builder_kwargs": {...}, "source_files": [...]}`, mirroring `model_source`), imported from
-  the run's layout (`ctx.build_dataset(dataset_source=...)` pairs it with the run's own). It
-  receives the
-  samples the platform's own producer named for the side being built and the class space they
-  were admitted under (`samples` / `scope` / `transforms` / `task`), each sample carrying the
-  logical image its pixels are read from as `image` (a `BandGroupRef` for a grouped capture),
-  sizing the dataset it builds itself, plus your own
-  `builder_kwargs`, and must return a torch `Dataset`. Never a directory, a document path or a
-  format flag, on any route including your own `ctx.build_dataset` call, which is this same
-  factory: the platform names the samples and your builder builds over them, so a strip split
-  over your own samples composes the tiled wrapper inside `train(ctx)`. `builder_kwargs`
-  configure your builder and may not restate `samples`, `scope`, `task` or `transforms`; a
-  builder that did would train on membership or a class space the run's own record does not
-  describe, so the seam refuses it by name, as it refuses any kwarg beyond those four. `scope` is
+- `pipelines.data.datasets.build_from_dataset_source((dataset_source, layout), task=,
+  samples=, scope=, transforms=)` builds from a `dataset_source`: an *importable* builder you
+  wrote (`{"builder": "my_module:build_ds", "builder_kwargs": {...}, "source_files": [...]}`,
+  mirroring `model_source`), imported from the run's layout. A run naming one in its
+  `data.dataset_source` builds its loaders, and `ctx.build_dataset`'s, through it;
+  `build_dataset` builds the platform's own loaders only. It receives the samples the
+  platform's own producer named for the side being built and the class space they were
+  admitted under (`samples` / `scope` / `transforms` / `task`), each sample carrying the logical
+  image its pixels are read from as `image` (a `BandGroupRef` for a grouped capture), sizing the
+  dataset it builds itself, plus your own `builder_kwargs`, and must return a torch `Dataset`.
+  Never a directory, a document path or a format flag: the platform names the samples and your
+  builder builds over them, so a strip split over your own samples composes the tiled wrapper
+  inside `train(ctx)` at the lattice it states (`ctx.tiled_dataset(base, tile_size=,
+  overlap=)`). The platform resolves no `data.tiling` for a bespoke run and refuses a config
+  stating one beside its `dataset_source`. `ctx.build_dataset` takes `samples` and `transforms`
+  and nothing else, and builds over the samples you hand it, whole: through the run's builder,
+  or through the platform's factory at the run's recorded `sizes` and `tiling`, under the run's
+  `scope` either way. A within-image split's region views are the run's own `ctx.train_loader`
+  and `ctx.val_loader`; `ctx.build_dataset` builds no view of them. `builder_kwargs` configure
+  your builder and may not restate
+  `samples`, `scope`, `task` or `transforms`; a builder that did would train on membership or a
+  class space the run's own record does not describe, so the seam refuses it by name. `scope` is
   a `ClassScope`: its `subject` and `attributes`, every attribute the registry declares for that
   subject (name, type, values in declared order, a value's id its position there), both `None`
   where the ground truth carries its own classes (a mask raster, a table row): derive the class

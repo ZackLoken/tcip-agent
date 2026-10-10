@@ -54,7 +54,7 @@ measurement-agreement/method-comparison contexts specifically because of that de
 (not the IoU@0.5 comparability convention) determines detection counts/F1, matching what governs
 delivery (see Metrics by Task Type above); omit it and the IoU@0.5 convention governs instead. For
 a tile-trained checkpoint, `evaluate_model` reports in one of two regimes: the default tile-level
-run is a diagnostic only (matches training-time val mAP, not the shipped full-frame count);
+run is a diagnostic only, scored over per-tile ground truth, not the shipped full-frame count;
 `use_tiled_inference=True` reconstructs predictions to full frame and is the delivery-grade metric
 to report for gating. An untiled checkpoint has no regime split; its one run already is the
 delivery metric (see `evaluate_model`'s own docstring for the full precedence). Either a run id or
@@ -66,9 +66,17 @@ The full-frame result records the `execution` record the pass ran under, the one
 bucket's record carries: each value beside its source in `sources`, `explicit` when the caller
 stated it; `cross_tile_nms` holds the merge threshold the evaluation ran at, in the metric
 `postprocess` compares over. `evaluate_model` takes what it states of that record as `stated`, as
-`run_inference` does. A detector's `conf` and `max_dets` are stated, no default standing behind
-either; the full-frame evaluation derives an unstated `cross_tile_nms` from the evaluated ground
-truth for an IoU merge. A value with neither a statement nor a basis refuses naming it.
+`run_inference` does. A detector's `conf` is stated, no default standing behind it. No detection
+cap is stated anywhere: the record carries an object `density` (objects per pixel) and each frame
+keeps at most `ceil(density x its pixels)` detections, every forward of it, training validation
+included, run under that cap set in the model, and a model exposing no cap knob refuses; the cap
+is written on the frame's prediction row, a validation row's too, and on its published
+prediction document, and a frame whose count reaches it is saturated. The density is
+the one the evaluated ground truth derives on the full-frame evaluation and an assessment's
+reference, else the one the checkpoint recorded of the regions it trained on (frames, or tiles
+for a tiled run). The full-frame evaluation also derives an unstated `cross_tile_nms` for an IoU merge, and
+a tile edge and overlap the checkpoint does not record, from the evaluated ground truth. A value
+with neither a statement nor a basis refuses naming it.
 An evaluation answers for no delivery: only an assessment does.
 
 `rank_registered_models` requires a `metric` (no default) and resolves its ranking direction from
@@ -83,9 +91,9 @@ platform's own `default_train` measured them); `include_unverified=True` also ra
 
 A delivered number rests on an assessment: one record of what a checkpoint measured, for one
 delivery kind of a trait's confirmed revision, against a held-out reference. `assess_checkpoint`
-fits every derived value (the conf the trait's count objective picks, the merge threshold) on a
-drawn selection's `calibration` side alone, a detector's `max_dets` stated since the frames its
-pass later publishes on are not known there, and judges it on the `holdout` side
+fits every derived value (the conf the trait's count objective picks, the object density, the
+merge threshold) on a drawn selection's `calibration` side alone, and judges it on the `holdout`
+side
 against the revision's authored floors and tolerances, measuring the copy of the reference it
 retains. Every field the kind's criterion reads (its localization, tolerances, floors and,
 for a regression, the statistic) is required when the operationalization is proposed, so a
