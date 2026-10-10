@@ -50,11 +50,6 @@ def tiny_classification_data(tmp_path):
     return str(images_dir), str(csv_path)
 
 
-@pytest.fixture()
-def output_dir(tmp_path):
-    return str(tmp_path / "run_output")
-
-
 # ---------------------------------------------------------------------------
 # Test: full classification pipeline
 # ---------------------------------------------------------------------------
@@ -62,10 +57,11 @@ def output_dir(tmp_path):
 class TestFullClassificationPipeline:
     """End-to-end: bespoke builder → train → checkpoint → predict."""
 
-    def test_build_train_infer(self, tiny_classification_data, output_dir, tmp_path):
+    def test_build_train_infer(self, tiny_classification_data, tmp_path):
         # --- Step 1: A bespoke classification model_source ---
         model_source = {
             "builder": BESPOKE_CLASSIFIER,
+            "source_files": [bespoke_models.__file__],
             "task": "classification",
         }
 
@@ -86,58 +82,39 @@ class TestFullClassificationPipeline:
         assert data["num_classes"] == 2
         assert dataset.num_samples == 12
 
-        # --- Step 4: Create run, its loaders, and train 2 epochs ---
-        from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train
+        # --- Step 4: A run the launcher's producer opens, trained 2 epochs by the child ---
+        from tcip_mcp.experiments import METRICS_FILE, epoch_rows, observe, read_rows
         from tests._chain_fixtures import training_config
-        from tests.tiny_trainer_fixtures import trainer_run
+        from tests._verified_checkpoint_fixtures import worker_run
 
         config = training_config(
-            model_source, data, stages=[{"freeze_to": -1, "epochs": 2}], batch_size=4,
+            model_source, {"images_dir": images_dir, "labels_dir": csv_path,
+                           "split": {"seed": 0, "val_ratio": 0.34}},
+            stages=[{"freeze_to": -1, "epochs": 2}], batch_size=4,
             optimizer=adamw_optimizer(),
             early_stopping={"enabled": True, "patience": 10, "min_delta": 1e-4})
-        run = trainer_run(config, output_dir, project=tmp_path, has_val_loader=True,
-                          id="auto-run-32")
-        # Train/val split: exercises the val_loader + early-stopping wiring on this run.
-        train_ds, val_ds = torch.utils.data.random_split(dataset, [8, 4])
-        loader, val_loader = run_loaders(run, train_ds, val_ds)
+        observation = observe(worker_run(tmp_path, config))
 
-        # Verify one batch works
-        batch_images, batch_targets = next(iter(loader))
-        assert batch_images.shape[0] == 4
-        assert "labels" in batch_targets
-
-        rows: list[tuple[int, dict]] = []
-        completed_run = train(run, loader, val_loader=val_loader,
-                              epoch_callback=lambda epoch, metrics: rows.append((epoch, metrics)))
-
-        assert completed_run.status == "completed"
-        assert completed_run.current_epoch == 2
-        assert len(completed_run.metrics_history) == 2
-        # val_loader + early-stopping wiring
-        assert "val_loss" in completed_run.metrics_history[-1]
-
-        # Verify output files exist
-        out = Path(output_dir)
+        assert observation.state == "completed", observation.final
+        out = observation.directory
         assert (out / "model_best.pt").is_file()
         assert (out / "model_final.pt").is_file()
-        # Every epoch's row reached the log through the run's own sink.
-        assert [epoch for epoch, _ in rows] == [1, 2]
-        assert "train_loss" in rows[0][1]
+        # Every epoch's row reached the log through the run's own sink, val_loss included.
+        rows = epoch_rows(read_rows(out / METRICS_FILE)[0])
+        assert [row["epoch"] for row in rows] == [1, 2]
+        assert "train_loss" in rows[0] and "val_loss" in rows[-1]
 
         # Verify checkpoint has required keys
         ckpt = torch.load(out / "model_best.pt", map_location="cpu", weights_only=False)
         assert STATE_DICT_KEY in ckpt
         assert "model_source" in ckpt[CONFIG_KEY] and "model_source" not in ckpt
 
-        # --- Step 5: Register the checkpoint, load it verified, and run inference ---
-        from tcip_mcp.pipelines.execution import Stated, prepare
-        from tcip_mcp.tools.model_tools import register_model
+        # --- Step 5: Load the checkpoint its completion registered, and run inference ---
         from tcip_mcp.model_registry import load_registered_checkpoint
+        from tcip_mcp.pipelines.execution import Stated, prepare
 
-        ckpt_path = str(out / "model_best.pt")
-        result = register_model(tmp_path, name="test-classifier", checkpoint_path=ckpt_path)
-        assert "error" not in result, result
-        checkpoint = load_registered_checkpoint(ckpt_path, project=tmp_path)
+        assert observation.checkpoint is not None
+        checkpoint = load_registered_checkpoint(observation.checkpoint["path"], project=tmp_path)
         p = prepare(checkpoint, Stated(tile=False), device="cpu").runnable()
 
         # Pick some test images
@@ -175,11 +152,6 @@ def _sample_date() -> str | None:
     return None
 
 
-@pytest.fixture()
-def detection_output_dir(tmp_path):
-    return str(tmp_path / "det_output")
-
-
 @pytest.mark.skipif(
     _sample_date() is None,
     reason="No nested-schema sample project (set TCIP_SAMPLE_PROJECT to a converted dataset)",
@@ -187,10 +159,8 @@ def detection_output_dir(tmp_path):
 class TestDetectionPipelineRealData:
     """End-to-end: build → train → infer using real bud images (nested schema)."""
 
-    def test_build_train_infer(self, detection_output_dir, tmp_path):
-        from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train
+    def test_build_train_infer(self, tmp_path):
         from tests._verified_checkpoint_fixtures import built_detector
-        from tests.tiny_trainer_fixtures import trainer_run
 
         # --- Step 1: A bespoke detection model_source at the real images' larger input sizes ---
         model_source = built_detector(min_size=320, max_size=512)
@@ -217,23 +187,19 @@ class TestDetectionPipelineRealData:
         assert target["labels"].ndim == 1
         assert any(len(dataset[i][1]["labels"]) > 0 for i in range(min(dataset.num_samples, 8)))
 
-        # Use up to 4 images for fast training
-        subset = torch.utils.data.Subset(dataset, list(range(min(4, dataset.num_samples))))
-
-        # --- Step 3: Train 1 epoch ---
+        # --- Step 3: A run the launcher's producer opens over the date, trained 1 epoch ---
+        from tcip_mcp.experiments import observe
         from tests._chain_fixtures import training_config
+        from tests._verified_checkpoint_fixtures import worker_run
 
-        config = training_config(model_source, data, stages=[{"freeze_to": 0, "epochs": 1}],
+        config = training_config(model_source, {**data, "images_dir": str(images_dir),
+                                                "auto_val": False},
+                                 stages=[{"freeze_to": 0, "epochs": 1}],
                                  evaluation=evaluation_block(selection_metric="loss"))
-        run = trainer_run(config, detection_output_dir, project=tmp_path, has_val_loader=False,
-                          id="auto-run-33")
-        loader, _ = run_loaders(run, subset, None)
-        completed = train(run, loader, val_loader=None)
+        observation = observe(worker_run(tmp_path, config))
 
-        assert completed.status == "completed"
-        assert completed.current_epoch == 1
-
-        out = Path(detection_output_dir)
+        assert observation.state == "completed", observation.final
+        out = observation.directory
         assert (out / "model_best.pt").is_file()
 
         # Verify checkpoint format
@@ -241,15 +207,12 @@ class TestDetectionPipelineRealData:
         assert STATE_DICT_KEY in ckpt
         assert "model_source" in ckpt[CONFIG_KEY] and "model_source" not in ckpt
 
-        # --- Step 4: Register the checkpoint, load it verified, and run inference ---
-        from tcip_mcp.pipelines.execution import Stated, prepare
-        from tcip_mcp.tools.model_tools import register_model
+        # --- Step 4: Load the checkpoint its completion registered, and run inference ---
         from tcip_mcp.model_registry import load_registered_checkpoint
+        from tcip_mcp.pipelines.execution import Stated, prepare
 
-        ckpt_path = str(out / "model_best.pt")
-        result = register_model(tmp_path, name="test-detector", checkpoint_path=ckpt_path)
-        assert "error" not in result, result
-        checkpoint = load_registered_checkpoint(ckpt_path, project=tmp_path)
+        assert observation.checkpoint is not None
+        checkpoint = load_registered_checkpoint(observation.checkpoint["path"], project=tmp_path)
         detector = prepare(checkpoint, Stated(tile=False, conf=0.01, max_dets=SAMPLE_MAX_DETS),
                            device="cpu").runnable()
 

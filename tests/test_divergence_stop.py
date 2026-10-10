@@ -18,8 +18,8 @@ from tests.tiny_trainer_fixtures import (
     regressor_config,
     trainer_run,
 )
-TRANSIENT_BUILDER = "tests.tiny_trainer_fixtures:build_transiently_diverged_model"
-STEP_COUNTED_BUILDER = "tests.tiny_trainer_fixtures:build_step_counted_divergence_model"
+TRANSIENT_BUILDER = "tiny_trainer_fixtures:build_transiently_diverged_model"
+STEP_COUNTED_BUILDER = "tiny_trainer_fixtures:build_step_counted_divergence_model"
 
 TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
 DIVERGED_PASSES_PHRASE = "2 consecutive full training passes"
@@ -143,7 +143,7 @@ def test_launch_training_real_subprocess_reports_the_diverged_stop(tmp_path, mon
         tmp_path, intensities=[0.0, 0.0, 0.0, 0.0], values=[0.1, 0.2, 0.3, 0.4])
 
     cfg = regressor_config(
-        5, builder="tests.tiny_trainer_fixtures:build_pixel_sum_divide_model", batch_size=4,
+        5, builder="tiny_trainer_fixtures:build_pixel_sum_divide_model", batch_size=4,
         data={"images_dir": str(images_dir), "labels_dir": str(csv_path),
               "split": {"seed": 0, "val_ratio": 0.15}})
     res = launch_training(tmp_path, cfg, actor=None)

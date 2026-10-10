@@ -18,7 +18,7 @@ from tcip_mcp.model_registry import ModelRegistry, registry_index_key
 
 pytest.importorskip("torch")
 
-from tests._verified_checkpoint_fixtures import checkpoint_file  # noqa: E402
+from tests._verified_checkpoint_fixtures import produced_checkpoint  # noqa: E402
 
 # Distinct payloads per run, so a hash attributed to the wrong entry is visible.
 _RUNS = {
@@ -39,7 +39,7 @@ def test_registered_models_are_recorded_in_the_index_not_copied_into_the_registr
     for name, content in _RUNS.items():
         run_dir = root / ".tcip" / "experiments" / name / "artifacts"
         run_dir.mkdir(parents=True)
-        ckpt = checkpoint_file(run_dir / "model_best.pt", content)
+        ckpt = produced_checkpoint(run_dir / "model_best.pt", content)
         reg.register_model(name, str(ckpt), metrics={"val_map50": 0.42})
 
     models_dir = root / ".tcip" / "models"
@@ -65,9 +65,9 @@ def test_registering_a_checkpoint_again_supersedes_its_earlier_entry(tmp_path: P
     root.mkdir()
     reg = ModelRegistry(str(root))
 
-    ckpt_v1 = checkpoint_file(tmp_path / "model_epoch8.pt", "epoch-8-weights")
-    ckpt_v2 = checkpoint_file(tmp_path / "model_epoch19.pt", "epoch-19-weights-after-resume")
-    companion = checkpoint_file(tmp_path / "leaf_model.pt", "a separate run")
+    ckpt_v1 = produced_checkpoint(tmp_path / "model_epoch8.pt", "epoch-8-weights")
+    ckpt_v2 = produced_checkpoint(tmp_path / "model_epoch19.pt", "epoch-19-weights-after-resume")
+    companion = produced_checkpoint(tmp_path / "leaf_model.pt", "a separate run")
 
     reg.register_model("currant_bud_detector_v1", str(ckpt_v1),
                        metrics={"val_map50": 0.61})

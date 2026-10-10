@@ -21,11 +21,12 @@ from tcip_mcp.audit import audit_log_key  # noqa: E402
 from tcip_mcp.experiments import observe  # noqa: E402
 from tcip_mcp.pipelines.model_build import CONFIG_KEY, METRICS_KEY, STATE_DICT_KEY  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope  # noqa: E402
-from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
+from tests._producer_fixtures import dataset_over  # noqa: E402
 from tests._training_values import adamw_optimizer  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     completed_checkpoint,
     detection_config,
+    detector_declaring,
 )
 
 
@@ -49,7 +50,8 @@ def _context(tmp_path, config: dict, **kwargs) -> tuple[TrainContext, Path]:
 def _bespoke(tmp_path, body: str) -> dict:
     """A detector run over two frames of its own whose training body is ``body`` of this
     module."""
-    return detection_config(tmp_path / "data", training_source=f"{__name__}:{body}")
+    return detection_config(tmp_path / "data", model_source=detector_declaring(__file__),
+                            training_source=f"{Path(__file__).stem}:{body}")
 
 
 def _agent_train(ctx):
@@ -71,7 +73,13 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
     assert ctx.run.status == "completed"
     assert [row["epoch"] for row in read_rows(run_dir / METRICS_FILE)[0]] == [1]
     best = torch.load(run_dir / "model_best.pt", weights_only=False)
-    assert best[CONFIG_KEY]["model_source"] == config["model_source"]
+    stored = best[CONFIG_KEY]["model_source"]
+    assert {**stored, "source_files": None} == {**config["model_source"], "source_files": None}
+    # Each declared file is named by its copy in the run's own snapshot.
+    copies = [tmp_path / name for name in stored["source_files"]]
+    assert [copy.read_bytes() for copy in copies] == [
+        Path(name).read_bytes() for name in config["model_source"]["source_files"]]
+    assert all(copy.is_relative_to(run_dir / "model_src") for copy in copies)
     assert "model_source" not in best
 
     # Body is bracketed on the append-only audit log (open running + close completed).
@@ -203,7 +211,6 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
     from tcip_mcp.experiments import RUN_FILE, read_record
     from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train
     from tcip_mcp.registry_paths import stored_path
-    from tests.tiny_trainer_fixtures import trainer_run
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -222,21 +229,19 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
         ds = dataset_over("classification", str(images_dir), str(csv_path))
         return run_loaders(run, ds, None)[0]
 
-    _ds, data = run_over("classification", str(images_dir), str(csv_path))
-    from tests._chain_fixtures import BESPOKE_CLASSIFIER, training_config
+    from tests._chain_fixtures import CLASSIFIER_SOURCE, training_config
 
-    cfg = training_config(
-        {"builder": BESPOKE_CLASSIFIER, "task": "classification"},
-        data, stages=[{"freeze_to": -1, "epochs": 2}], optimizer=adamw_optimizer(), seed=3)
-    # Generate the resumable checkpoint directly (not through the envelope).
-    source = trainer_run(dict(cfg), tmp_path / "out", project=tmp_path, has_val_loader=False,
-                         id="resume-source")
-    train(source, build_loader(source))
-    ckpt = tmp_path / "out" / "checkpoint_epoch_1.pt"
+    launched = training_config(
+        CLASSIFIER_SOURCE, {"images_dir": str(images_dir), "labels_dir": str(csv_path),
+                            "split": {"seed": 3, "val_ratio": 0.15}},
+        stages=[{"freeze_to": -1, "epochs": 2}], optimizer=adamw_optimizer(), seed=3)
+    # Generate the resumable checkpoint by training a first run directly (not through the
+    # envelope).
+    source, source_dir = _context(tmp_path, launched)
+    train(source.run, build_loader(source.run))
+    ckpt = source_dir / "checkpoint_epoch_1.pt"
     assert ckpt.is_file()
 
-    launched = {**cfg, "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path),
-                                "split": {"seed": 3, "val_ratio": 0.15}}}
     ctx, run_dir = _context(tmp_path, launched, val_loader=None, resume_from=str(ckpt))
     ctx.train_loader = build_loader(ctx.run)
     run_training_envelope(ctx)
@@ -285,14 +290,15 @@ def test_envelope_default_path_runs_default_train_and_audits(tmp_path, monkeypat
 
     captured = {}
 
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     def _stub_train(run, train_loader, val_loader=None,
                     epoch_callback=None, batch_callback=None, resume_from=""):
         captured["epoch_callback"] = epoch_callback
         captured["batch_callback"] = batch_callback
         captured["called"] = True
-        run.saved["model_final"] = checkpoint_file(Path(run.output_dir) / "model_final.pt", "stub")
+        run.saved["model_final"] = produced_checkpoint(
+            Path(run.output_dir) / "model_final.pt", "stub")
         run.status = "completed"
         return run
 

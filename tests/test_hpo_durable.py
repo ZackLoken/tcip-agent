@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import pytest
 
-from tests._chain_fixtures import BARE_SCORE_THRESH_DETECTOR, BESPOKE_DETECTION, training_config
+from tests._chain_fixtures import (
+    BARE_SCORE_THRESH_DETECTOR, BESPOKE_DETECTION, BESPOKE_MODELS, training_config,
+)
 from tests._training_values import evaluation_block, sweep_space
 
 
@@ -138,7 +140,7 @@ def test_run_hyperparameter_search_refuses_before_minting_when_the_base_config_f
         param_space=sweep_space(), n_trials=1, search_seed=0)
 
     assert "error" in result
-    assert any("not importable" in issue for issue in result["issues"]), result
+    assert any("not.a" in issue for issue in result["issues"]), result
     assert not captured
     assert not tt.experiments.experiments_dir(tmp_path).exists()
 
@@ -154,6 +156,7 @@ def test_run_hyperparameter_search_checks_a_swept_placeholder_axis_at_its_resolv
     result = tt.run_hyperparameter_search(
         tmp_path, base_config={**real_hpo_base_config,
                                "model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
+                                                "source_files": [BESPOKE_MODELS],
                                                 "task": "detection"}},
         param_space={"model_source.builder": {
             "type": "categorical", "choices": [BESPOKE_DETECTION]}},
@@ -175,6 +178,7 @@ def test_run_hyperparameter_search_refuses_a_swept_axis_any_of_whose_choices_fai
     result = tt.run_hyperparameter_search(
         tmp_path, base_config={**real_hpo_base_config,
                                "model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
+                                                "source_files": [BESPOKE_MODELS],
                                                 "task": "detection"}},
         param_space={"model_source.builder": {"type": "categorical", "choices": choices}},
         n_trials=1, search_seed=0)
@@ -193,6 +197,7 @@ def test_run_hyperparameter_search_admits_a_swept_axis_whose_every_choice_resolv
     result = tt.run_hyperparameter_search(
         tmp_path, base_config={**real_hpo_base_config,
                                "model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
+                                                "source_files": [BESPOKE_MODELS],
                                                 "task": "detection"}},
         param_space={"model_source.builder": {
             "type": "categorical",

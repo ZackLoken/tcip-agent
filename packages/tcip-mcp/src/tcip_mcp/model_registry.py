@@ -27,11 +27,14 @@ from tcip_mcp.registry_paths import (
     RegistryPathTraversalError,
     checkpoint_registry_path_for,
     is_external_form,
+    located,
     resolved_registry_path,
+    runtime_paths,
 )
 
 if TYPE_CHECKING:
     from tcip_mcp.experiments import RunObservation
+    from tcip_mcp.pipelines.model_build import SourceLayout
     from tcip_mcp.pipelines.schemas import TrainConfigSchema
 
 logger = logging.getLogger(__name__)
@@ -63,13 +66,13 @@ def _checkpoint_entry_file(project_path: Path, raw: str) -> Path | None:
     return resolved if resolved.is_file() and resolved.is_relative_to(project_path) else None
 
 
-def checkpoint_files(project_path: str | Path) -> frozenset[Path]:
-    """Every checkpoint file under the project, resolved: each file in ``.tcip/models``, each file
-    a registry entry names under the project, and each ``.pt`` file a run directory
-    (``experiments.run_dirs``, a sweep's trials included) holds beside its run record."""
+def checkpoint_files(root: Path) -> frozenset[Path]:
+    """Every checkpoint file under the established project root ``root``: each file in
+    ``.tcip/models``, each file a registry entry names under the project, and each ``.pt`` file a
+    run directory (``experiments.run_dirs``, a sweep's trials included) holds beside its run
+    record."""
     from tcip_mcp.experiments import run_dirs
 
-    root = Path(project_path).resolve()
     found = {p for p in (root / ".tcip" / "models").glob("*") if p.is_file()}
     found |= {path for path in (_checkpoint_entry_file(root, e["checkpoint_path"])
                                 for e in read_registry_index(root)) if path is not None}
@@ -77,12 +80,12 @@ def checkpoint_files(project_path: str | Path) -> frozenset[Path]:
     return frozenset(found)
 
 
-def registry_checkpoint_disclosures(project_path: str | Path) -> dict[str, list]:
-    """What the project's registry index says of checkpoints outside its tree:
-    ``checkpoint_paths_unresolved``, every stored path that is not a designed-external claim
-    (:func:`~tcip_mcp.registry_paths.is_external_form`) and names no file under the project, as
-    stored; ``external_checkpoints``, every designed-external path with whether it exists."""
-    root = Path(project_path).resolve()
+def registry_checkpoint_disclosures(root: Path) -> dict[str, list]:
+    """What the registry index of the established project root ``root`` says of checkpoints
+    outside its tree: ``checkpoint_paths_unresolved``, every stored path that is not a
+    designed-external claim (:func:`~tcip_mcp.registry_paths.is_external_form`) and names no file
+    under the project, as stored; ``external_checkpoints``, every designed-external path with
+    whether it exists."""
     stored = sorted(e["checkpoint_path"] for e in read_registry_index(root))
     return {
         "checkpoint_paths_unresolved": [
@@ -111,24 +114,21 @@ def run_entry(observation: "RunObservation") -> dict | None:
 
 def registered_entries(project_path: str | Path) -> list[dict]:
     """Every checkpoint the project can load, one entry per sha256, its one owner: the completed
-    training run whose final status names those bytes (:func:`run_entry`; the earliest to
-    complete when two do), else the foreign entry of the index registering them, with
-    ``experiment_id`` ``None``. Runs' entries come first, in completion order."""
+    training run whose final status names those bytes (:func:`run_entry`), else the foreign
+    entry of the index registering them, with ``experiment_id`` ``None``. Runs' entries come
+    first, in completion order."""
     from tcip_mcp.experiments import run_observations
 
     runs = sorted((entry for entry in map(run_entry, run_observations(project_path))
                    if entry is not None), key=lambda entry: entry["registered_at"])
-    owners: dict[str, dict] = {}
-    for entry in [
-        *runs,
-        *({**e, "experiment_id": None} for e in read_registry_index(project_path)),
-    ]:
-        owners.setdefault(entry["sha256"], entry)
-    return list(owners.values())
+    owned = {entry["sha256"] for entry in runs}
+    return [*runs, *({**e, "experiment_id": None} for e in read_registry_index(project_path)
+                     if e["sha256"] not in owned)]
 
 
-def entry_facts(entry: dict) -> dict:
-    """What ``entry``'s checkpoint says of itself, read from its payload
+def entry_facts(entry: dict, project: Path) -> dict:
+    """What ``entry``'s checkpoint, a checkpoint of ``project``, says of itself, read from its
+    payload
     (:func:`checkpoint_payload`): the ``metrics`` a ranking reads with their ``metrics_source``.
     A run's metrics are the ones its payload carries, sourced ``"trainer"``, or
     ``"training_source"`` when the payload's config (:attr:`VerifiedCheckpoint.spec`) names a
@@ -137,7 +137,7 @@ def entry_facts(entry: dict) -> dict:
     from tcip_mcp.pipelines.model_build import METRICS_KEY
 
     checkpoint = VerifiedCheckpoint(
-        path=entry["checkpoint_path"], entry=entry,
+        path=entry["checkpoint_path"], entry=entry, project=project,
         payload=checkpoint_payload(entry["checkpoint_path"], entry["sha256"]))
     if entry["experiment_id"] is None:
         metrics, source = entry["metrics"], "caller"
@@ -170,12 +170,15 @@ class VerifiedCheckpoint:
     """
 
     path: str
-    """The path the caller named, as given."""
+    """The established location the checkpoint was read from."""
     payload: dict
     """The loaded checkpoint, read with ``weights_only=True``."""
     entry: dict
     """The one registered entry of the digest of the bytes ``payload`` was unpickled from
     (:func:`registered_entries`)."""
+    project: Path
+    """The project the checkpoint was loaded for, the root its config's stored paths read
+    against."""
 
     @property
     def sha256(self) -> str:
@@ -195,19 +198,48 @@ class VerifiedCheckpoint:
 
     @cached_property
     def spec(self) -> TrainConfigSchema:
-        """The run config the checkpoint's payload carries, validated once
+        """The run config the checkpoint's payload carries, its stored paths
+        (``experiments.CONFIG_PATHS``) read against :attr:`project`, validated once
         (``schemas.train_config``, which refuses (``ValueError``) one that is invalid or absent):
-        a config stating its ``model_source`` and ``data`` validates with no training regime."""
-        from tcip_mcp.pipelines.model_build import CONFIG_KEY
+        a config stating its ``model_source`` and ``data`` validates with no training regime.
+        A source file it declares (``model_build.source_seams``') that does not exist refuses
+        (``ValueError``) naming it and how to carry the run whole, before anything is
+        imported."""
+        from tcip_mcp.experiments import CONFIG_PATHS
+        from tcip_mcp.pipelines.model_build import CONFIG_KEY, source_seams
         from tcip_mcp.pipelines.schemas import train_config
 
-        return train_config(self.payload.get(CONFIG_KEY, {}))
+        spec = train_config(runtime_paths(self.payload.get(CONFIG_KEY, {}), CONFIG_PATHS,
+                                          self.project))
+        absent = [file for _field, _dotted, files in source_seams(spec) for file in files or []
+                  if not Path(file).is_file()]
+        if absent:
+            raise ValueError(
+                f"{self.path} binds its source to {absent}, which {self.project} does not hold: a "
+                "checkpoint carries its run's source snapshot and loads only beside that run. "
+                "Load it in the project holding the run directory those paths name, or carry that "
+                "run whole into this project (archive_project, then import_project).")
+        return spec
+
+    @cached_property
+    def layout(self) -> SourceLayout:
+        """The run snapshot the checkpoint's model imports from, the one its payload's
+        ``SNAPSHOT_KEY`` digest names, as the record of the run of :attr:`project` that took it
+        states it (``model_build.owning_run_layout``, which refuses a config declaring no file, or
+        a snapshot and files no run of :attr:`project` took)."""
+        from tcip_mcp.pipelines.model_build import SNAPSHOT_KEY, owning_run_layout
+
+        return owning_run_layout(self.spec, self.payload.get(SNAPSHOT_KEY), self.project)
 
     @property
     def task(self) -> str:
         """The task the checkpoint's model is for, its validated config's ``model_source.task``;
         raises ``ValueError`` for a config that does not validate."""
         return self.spec.model_source.task
+
+
+class CheckpointNotFoundError(FileNotFoundError):
+    """No file is at the location a checkpoint was named by."""
 
 
 class UnregisteredCheckpointError(ValueError):
@@ -269,23 +301,26 @@ def checkpoint_payload(checkpoint_path: str | Path, sha256: str) -> dict:
     return _load_verified_payload(data, source=f"{checkpoint_path} (sha256 {digest})")
 
 
-def load_registered_checkpoint(checkpoint_path: str | Path, *, project: Path) -> VerifiedCheckpoint:
-    """The checkpoint at ``checkpoint_path``, read once and unpickled from the same bytes its
+def load_registered_checkpoint(checkpoint_path: Path, *, project: Path) -> VerifiedCheckpoint:
+    """The checkpoint at the established location ``checkpoint_path`` (its caller's arrival
+    located it, ``registry_paths.located``), read once and unpickled from the same bytes its
     digest is taken over, when ``project``'s :func:`registered_entries` name that digest.
 
     Raises :class:`UnregisteredCheckpointError` naming the path, the digest and the root searched
-    when none does, and ``FileNotFoundError`` for a missing file.
+    when none does, and :class:`CheckpointNotFoundError` when no file is at the location.
     """
     ckpt = Path(checkpoint_path)
     root = str(project)
-    with open(ckpt, "rb") as f:
-        data = f.read()
+    try:
+        data = ckpt.read_bytes()
+    except FileNotFoundError as exc:
+        raise CheckpointNotFoundError(f"Checkpoint not found: {ckpt}") from exc
     digest = _sha256_of_bytes(data)
     entry = next((e for e in registered_entries(root) if e["sha256"] == digest), None)
     if entry is None:
         raise _unregistered_checkpoint_error(ckpt, digest, root)
     payload = _load_verified_payload(data, source=f"{ckpt} (sha256 {digest})")
-    return VerifiedCheckpoint(path=str(checkpoint_path), payload=payload, entry=entry)
+    return VerifiedCheckpoint(path=str(ckpt), payload=payload, entry=entry, project=Path(project))
 
 
 def _write_registry_entry(txn: tcip_store.Txn, key: Key,
@@ -362,8 +397,9 @@ class ModelRegistry:
 
         Args:
             name: Model name (e.g. '<crop>_<trait>_detector_v1').
-            checkpoint_path: Path to the .pt checkpoint file; its config is the one its payload
-                carries (:attr:`VerifiedCheckpoint.spec`).
+            checkpoint_path: Path to the .pt checkpoint file
+                (:func:`~tcip_mcp.registry_paths.located` against the project); its config is the
+                one its payload carries (:attr:`VerifiedCheckpoint.spec`).
             metrics: Evaluation metrics dict.
             tags: Optional tags for filtering.
 
@@ -375,7 +411,7 @@ class ModelRegistry:
             AuditEntryNotWrittenError: the write committed but its own audit line could not be
                 appended.
         """
-        ckpt = Path(checkpoint_path)
+        ckpt = located(checkpoint_path, self._project_path)
         if not ckpt.is_file():
             raise FileNotFoundError(
                 f"register_model: checkpoint_path {checkpoint_path!r} does not exist, refusing to "
@@ -406,7 +442,8 @@ class ModelRegistry:
                     for m in registered_entries(self._project_path)
                     if tag is None or tag in m["tags"]]
         # A path the resolution above refused names no file to read facts from; its error says so.
-        return [m if "checkpoint_path_error" in m else {**m, **entry_facts(m)} for m in resolved]
+        return [m if "checkpoint_path_error" in m
+                else {**m, **entry_facts(m, Path(self._project_path))} for m in resolved]
 
 
 def verified(entry: dict) -> bool:

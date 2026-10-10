@@ -19,7 +19,7 @@ from tcip_mcp.pipelines.data.selection import ClassScope, read_selection
 from tcip_mcp.pipelines.data.split_construction import partition_samples
 from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
 from tcip_mcp.tools.data_tools import draw_splits
-from tests._chain_fixtures import BESPOKE_DETECTION, BLOB_BUILDER, run_config, training_config
+from tests._chain_fixtures import BLOB_BUILDER, DETECTION_SOURCE, run_config, training_config
 from tests._producer_fixtures import label_image, labeled_frame, registry_over
 from tests._producer_fixtures import train_val as _train_val
 from tests._verified_checkpoint_fixtures import partition_side
@@ -134,21 +134,15 @@ class _RecordingDataset(Dataset):
         return torch.zeros(3, 8, 8), {"boxes": torch.zeros(0, 4), "labels": torch.zeros(0)}
 
 
-_RECORDED_BUILDS: list[_RecordingDataset] = []
-
-
 def build_recording_dataset(samples=None, scope=None, **kwargs) -> _RecordingDataset:
     """The ``dataset_source`` builder the bespoke-seam tests register through the seam's dotted
-    escape. Records every data-location key it was handed, so a test can state that none was, and
-    appends itself to :data:`_RECORDED_BUILDS` for a caller that cannot reach the built dataset."""
+    escape. Records every data-location key it was handed, so a test can state that none was."""
     located = {k: v for k, v in kwargs.items()
                if k in ("images_dir", "labels_dir", "csv_path", "coco_data", "stems")}
-    built = _RecordingDataset(samples or [], scope, located)
-    _RECORDED_BUILDS.append(built)
-    return built
+    return _RecordingDataset(samples or [], scope, located)
 
 
-RECORDING_DATASET = f"{__name__}:build_recording_dataset"
+RECORDING_DATASET = f"{Path(__file__).stem}:build_recording_dataset"
 """The ``dataset_source`` builder of :func:`build_recording_dataset`."""
 
 
@@ -521,7 +515,7 @@ def test_a_bound_run_threads_a_bespoke_dataset_source(tmp_path: Path):
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
     data_cfg = _run_data_cfg(root, out)
-    data_cfg["dataset_source"] = {"builder": RECORDING_DATASET}
+    data_cfg["dataset_source"] = {"builder": RECORDING_DATASET, "source_files": [__file__]}
 
     train_ds, _val_ds, _, _data = _train_val(tmp_path, "detection", data_cfg)
 
@@ -545,7 +539,7 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(tmp_pa
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
-    source = {"builder": RECORDING_DATASET}
+    source = {"builder": RECORDING_DATASET, "source_files": [__file__]}
 
     bound_cfg = _run_data_cfg(root, out)
     bound_cfg["dataset_source"] = source
@@ -596,22 +590,22 @@ def test_the_preflight_smoke_batch_is_the_batch_the_bound_run_trains(tmp_path: P
     here would smoke a batch holding the validation and calibration members the run never trains
     on, which is not the batch whose measurement boundary the contract proves."""
     from tcip_mcp.pipelines.data.split_construction import resolve_run
+    from tcip_mcp.pipelines.model_build import staged_sources
     from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.tools.training_tools import _one_real_batch
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
-    config = training_config({"builder": BESPOKE_DETECTION, "task": "detection"},
+    config = training_config(DETECTION_SOURCE,
                              _run_data_cfg(root, out))
-    config["data"]["dataset_source"] = {"builder": RECORDING_DATASET}
+    config["data"]["dataset_source"] = {"builder": RECORDING_DATASET, "source_files": [__file__]}
+    spec = train_config(config)
 
-    before = len(_RECORDED_BUILDS)
-    batch, why = _one_real_batch(
-        "detection", resolve_run(train_config(config), project=tmp_path).train_ds)
+    smoked = resolve_run(spec, staged_sources(spec, tmp_path).layout, project=tmp_path).train_ds
+    batch, why = _one_real_batch("detection", smoked)
 
     assert why is None and batch is not None
-    smoked = _RECORDED_BUILDS[before]  # the training side, built first
     assert sorted(s.location for s in smoked.seen_samples) == sorted(
         s.location for s in drawn.on("train"))
     held_out = {s.location for s in drawn.on("val") + drawn.on("calibration")}
@@ -869,7 +863,7 @@ def test_preflight_flags_a_redraw_whose_members_hold_one_foreground_group(tmp_pa
 
 def _preflight_config(root: Path, selection_dir: Path, **overrides) -> dict:
     data_cfg = _run_data_cfg(root, selection_dir, **overrides)
-    return training_config({"builder": BESPOKE_DETECTION, "task": "detection"}, data_cfg)
+    return training_config(DETECTION_SOURCE, data_cfg)
 
 
 def test_preflight_config_admits_a_bound_selection_with_no_issues(tmp_path: Path):

@@ -22,15 +22,17 @@ def test_two_runs_each_produce_only_their_own_weights(tmp_path):
 
 
 def test_a_tag_naming_a_run_never_makes_that_run_a_producer(tmp_path):
-    """A foreign checkpoint registered with an ``experiment:<id>`` tag, for a run that never
-    completed with it, loads naming no producing run: the tag is caller metadata no producer
-    resolver reads."""
+    """A foreign checkpoint, one a run completed under another root, registered with an
+    ``experiment:<id>`` tag naming a run of this project that never completed with it, loads
+    naming no producing run: the tag is caller metadata no producer resolver reads."""
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.model_tools import register_model
-    from tests._verified_checkpoint_fixtures import checkpoint_file, detection_config, opened_run
+    from tests._verified_checkpoint_fixtures import (
+        detection_config, opened_run, produced_checkpoint,
+    )
 
     opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="exp-rail1")
-    forged = checkpoint_file(tmp_path / "forged.pt", "a checkpoint no run completed with")
+    forged = produced_checkpoint(tmp_path / "forged.pt", "completed under another root")
     registered = register_model(name="exp-rail1-forged", checkpoint_path=str(forged),
                                 project=tmp_path, tags=["experiment:exp-rail1"])
     assert "error" not in registered, registered
@@ -42,10 +44,10 @@ def test_a_replacements_registry_event_names_the_superseded_entry(tmp_path):
     import tcip_store as ts
     from tcip_mcp.audit import audit_log_key
     from tcip_mcp.model_registry import ModelRegistry
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     reg = ModelRegistry(str(tmp_path))
-    ckpt = checkpoint_file(tmp_path / "a.pt", "first content")
+    ckpt = produced_checkpoint(tmp_path / "a.pt", "first content")
     reg.register_model("m", str(ckpt), tags=["first"])
     reg.register_model("m-renamed", str(ckpt))
 
@@ -58,10 +60,10 @@ def test_a_replacements_registry_event_names_the_superseded_entry(tmp_path):
 
 def test_caller_tag_still_round_trips_and_filters(tmp_path):
     from tcip_mcp.model_registry import ModelRegistry
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     reg = ModelRegistry(str(tmp_path))
-    ckpt = checkpoint_file(tmp_path / "m.pt", "weights")
+    ckpt = produced_checkpoint(tmp_path / "m.pt", "weights")
     reg.register_model("m", str(ckpt), tags=["current"])
 
     assert [m["name"] for m in reg.list_models(tag="current")] == ["m"]
@@ -76,7 +78,7 @@ def test_a_checkpoint_carrying_no_weights_refuses_at_registration_naming_the_fie
     torch = pytest.importorskip("torch")
     from tcip_mcp.model_registry import ModelRegistry
     from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     weightless = tmp_path / "weightless.pt"
     torch.save({CONFIG_KEY: {}}, weightless)
@@ -86,7 +88,7 @@ def test_a_checkpoint_carrying_no_weights_refuses_at_registration_naming_the_fie
         registry.register_model("weightless", str(weightless))
 
     assert registry.list_models() == []
-    registry.register_model("weighted", str(checkpoint_file(tmp_path / "w.pt", "weights")))
+    registry.register_model("weighted", str(produced_checkpoint(tmp_path / "w.pt", "weights")))
     assert [m["name"] for m in registry.list_models()] == ["weighted"]
 
 
@@ -104,9 +106,9 @@ def test_an_indexed_checkpoint_carrying_no_weights_refuses_at_load_naming_the_fi
         ModelRegistry, load_registered_checkpoint, registry_index_key,
     )
     from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
-    weighted = checkpoint_file(tmp_path / "w.pt", "weights")
+    weighted = produced_checkpoint(tmp_path / "w.pt", "weights")
     ModelRegistry(str(tmp_path)).register_model("weighted", str(weighted))
     weightless = tmp_path / "weightless.pt"
     torch.save({CONFIG_KEY: {}}, weightless)

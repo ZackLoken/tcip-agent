@@ -7,6 +7,7 @@ and the behavioral ``check_model_contract`` / ``overfit_check`` utilities on rea
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import pytest
 
@@ -14,7 +15,7 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 from tcip_mcp.pipelines.model_build import build_from_model_source  # noqa: E402
-from tcip_mcp.pipelines.schemas import ModelSourceSchema, checked_train_config  # noqa: E402
+from tcip_mcp.pipelines.schemas import checked_train_config  # noqa: E402
 from tcip_mcp.pipelines.model_contract import (  # noqa: E402
     TCIPModel,
     check_model_contract,
@@ -34,14 +35,22 @@ def _bespoke_builder(**kwargs):
 
 
 def _source(builder: str):
-    """``builder``'s classification ``model_source``, validated."""
-    return ModelSourceSchema.model_validate(
-        {"builder": builder, "builder_kwargs": {}, "task": "classification"})
+    """``builder``'s classification ``model_source`` declaring this module, validated in a run
+    config over no data, and the layout its admission stages (``model_build.staged_sources``)."""
+    from tcip_mcp.pipelines.model_build import staged_sources
+    from tcip_mcp.pipelines.schemas import train_config
+    from tests import REPO_ROOT
+    from tests._chain_fixtures import training_config
+
+    spec = train_config(training_config(
+        {"builder": builder, "builder_kwargs": {}, "source_files": [__file__],
+         "task": "classification"}, {}))
+    return spec.model_source, staged_sources(spec, REPO_ROOT).layout
 
 
 def test_build_from_model_source_imports_builder():
-    model = build_from_model_source(_source(f"{__name__}:_bespoke_builder"),
-                                    {"in_chans": 3, "num_classes": 2})
+    source, layout = _source(f"{Path(__file__).stem}:_bespoke_builder")
+    model = build_from_model_source(source, layout, {"in_chans": 3, "num_classes": 2})
     assert isinstance(model, TCIPModel)
 
 
@@ -52,7 +61,8 @@ def test_a_config_stating_no_model_source_is_refused_at_validation():
 
 def test_build_from_model_source_bad_builder_raises():
     with pytest.raises(ValueError, match="not found|Invalid dotted"):
-        build_from_model_source(_source(f"{__name__}:does_not_exist"), {"in_chans": 3})
+        source, layout = _source(f"{Path(__file__).stem}:does_not_exist")
+        build_from_model_source(source, layout, {"in_chans": 3})
 
 
 # --------------------------------------------------------------------------

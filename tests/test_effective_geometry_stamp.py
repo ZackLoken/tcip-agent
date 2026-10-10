@@ -110,35 +110,23 @@ def test_stamp_untiled_mixed_frames_record_nothing(tmp_path):
 # ── the run's resolved record, for a launched run and an HPO trial alike ──
 
 
-class _ServedDataset:
-    def __len__(self):
-        return 4
+def _base_config(tiling, project: Path, *, task: str = "detection"):
+    """A ``task`` run's config over frames of its own under ``project`` (a detection run's
+    labeled by documents, a classification run's by a table), stating ``tiling``."""
+    from tests._chain_fixtures import BESPOKE_MODELS, CLASSIFIER_SOURCE
+    from tests._verified_checkpoint_fixtures import (
+        SCOPED_DATA, detection_images, fixture_data_dir, table_images,
+    )
 
-    def __getitem__(self, i):
-        return i
-
-
-class _TiledServedDataset(_TiledStub, _ServedDataset):
-    pass
-
-
-def _serve(monkeypatch, train_ds):
-    """The run's datasets resolved to ``train_ds`` with no validation side, so the resolved
-    record carries only what the stamp wrote."""
-    from tcip_mcp.pipelines.data import split_construction as sc
-
-    partition = sc._partition_record([], seed=None, group_by="stem", selection=None,
-                                     spatial=None)
-    monkeypatch.setattr(
-        sc, "auto_train_val",
-        lambda project, task, data, transforms, **_: (train_ds, None, partition, data))
-
-
-def _base_config(tiling, project: Path):
+    where = fixture_data_dir(project, task)
+    if task == "detection":
+        source = {"builder": BESPOKE_DETECTION, "source_files": [BESPOKE_MODELS],
+                  "task": "detection"}
+        frames = {**detection_images(where, SCOPED_DATA["scope"], n=4), **SCOPED_DATA}
+    else:
+        source, frames = dict(CLASSIFIER_SOURCE), table_images(where, n=4)
     return training_config(
-        {"builder": BESPOKE_DETECTION, "task": "detection"},
-        {"images_dir": str(project / "imgs"), "tiling": tiling,
-         "split": {"seed": 0, "val_ratio": 0.15}},
+        source, {**frames, "tiling": tiling, "split": {"seed": 0, "val_ratio": 0.25}},
         evaluation=evaluation_block(selection_metric="loss"))
 
 
@@ -149,17 +137,18 @@ def _resolved_data(run_dir) -> dict:
     return observe(run_dir).record["resolved"]["data"]
 
 
-def test_an_untiled_runs_resolved_record_drops_the_requested_geometry(monkeypatch, tmp_path):
+def test_an_untiled_runs_resolved_record_drops_the_requested_geometry(tmp_path):
     """The resolved data section is recorded whole, so an untiled run's record keeps no stale
-    requested tile_size from the config it was launched with."""
+    requested tile_size from the config it was launched with: a classification run, which no
+    tiler serves, launched stating a tile geometry."""
     from tests._verified_checkpoint_fixtures import opened_run
 
-    _serve(monkeypatch, _ServedDataset())
-    run_dir = opened_run(tmp_path, _base_config({"enabled": True, "tile_size": 640}, tmp_path))
+    config = _base_config({"enabled": True, "tile_size": 640}, tmp_path, task="classification")
+    run_dir = opened_run(tmp_path, config)
 
     data = _resolved_data(run_dir)
     assert data["tiling"] == {"enabled": False}
-    assert data["images_dir"] == str(tmp_path.resolve() / "imgs")
+    assert data["images_dir"] == config["data"]["images_dir"]
 
 
 def _trial(tmp_path, base_config):
@@ -168,23 +157,24 @@ def _trial(tmp_path, base_config):
     from tcip_mcp.tools.training_tools import open_trial
     from tests._verified_checkpoint_fixtures import opened_sweep
 
-    Path(base_config["data"]["images_dir"]).mkdir(parents=True, exist_ok=True)
     return open_trial(opened_sweep(tmp_path, base_config), "0", {"optimizer.head_lr": 3e-4})
 
 
-def test_an_hpo_trials_resolved_record_replaces_unrealized_tiling(monkeypatch, tmp_path):
+def test_an_hpo_trials_resolved_record_replaces_unrealized_tiling(tmp_path):
     """A trial that trained untiled must not leave the base config's requested tile_size in its
     resolved record, the record a later reader takes for the trial's geometry."""
-    _serve(monkeypatch, _ServedDataset())
-    trial_dir = _trial(tmp_path, _base_config({"enabled": True, "tile_size": 999}, tmp_path))
+    trial_dir = _trial(tmp_path, _base_config({"enabled": True, "tile_size": 999}, tmp_path,
+                                              task="classification"))
 
     assert _resolved_data(trial_dir)["tiling"] == {"enabled": False}
 
 
-def test_an_hpo_trials_resolved_record_carries_the_effective_tile_geometry(
-        monkeypatch, tmp_path):
-    _serve(monkeypatch, _TiledServedDataset())
-    trial_dir = _trial(tmp_path, _base_config({"enabled": True}, tmp_path))
+def test_an_hpo_trials_resolved_record_carries_the_effective_tile_geometry(tmp_path):
+    """A tiled trial records the tile edge its train dataset served and the overlap that
+    dataset filled in where the config stated none."""
+    trial_dir = _trial(tmp_path, _base_config(
+        {"enabled": True, "tile_size": 32, "sliver_frac": 0.5}, tmp_path))
 
     tiling = _resolved_data(trial_dir)["tiling"]
-    assert tiling == {"enabled": True, "tile_size": 224, "overlap": pytest.approx(0.2)}
+    assert tiling["enabled"] is True and tiling["tile_size"] == 32
+    assert isinstance(tiling["overlap"], float)

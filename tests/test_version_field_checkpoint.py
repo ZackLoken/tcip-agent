@@ -3,36 +3,19 @@ once its digest has verified it."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
-torch = pytest.importorskip("torch")
-torchvision = pytest.importorskip("torchvision")
+pytest.importorskip("torch")
+pytest.importorskip("torchvision")
 
-from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
-from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, register_checkpoint  # noqa: E402
-
-
-def _bespoke_checkpoint(path: Path) -> str:
-    """A real, unpicklable tcip checkpoint at path, the platform's own producer's shape."""
-    from tests._chain_fixtures import built_model, training_config
-
-    config = training_config(BUILT_DETECTOR,
-                             {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}})
-    payload = {
-        CONFIG_KEY: config,
-        STATE_DICT_KEY: built_model(config).state_dict(),
-    }
-    torch.save(payload, str(path))
-    return str(path)
+from tcip_mcp.pipelines.model_build import STATE_DICT_KEY  # noqa: E402
+from tests._verified_checkpoint_fixtures import registered_checkpoint  # noqa: E402
 
 
 def test_a_version_one_checkpoint_loads_through_the_platforms_own_registration(tmp_path):
     from tcip_mcp.model_registry import load_registered_checkpoint
 
-    ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
-    register_checkpoint(tmp_path, ckpt, name="version-one-model")
+    ckpt = registered_checkpoint(tmp_path)
 
     verified = load_registered_checkpoint(ckpt, project=tmp_path)
     assert STATE_DICT_KEY in verified.payload

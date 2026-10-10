@@ -72,12 +72,16 @@ def build_linear(**_: Any) -> torch.nn.Module:
 
 
 def predictor_for(tmp_path: Path, builder: str, task: str) -> Any:
-    """The predictor a scorer reads, built from ``tests.scorer_models:<builder>`` through the
+    """The predictor a scorer reads, built from ``scorer_models:<builder>`` through the
     platform's own checkpoint registration, load and ``GenericPredictor``."""
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
-    from tests._verified_checkpoint_fixtures import foreign_checkpoint
+    from tests import REPO_ROOT
+    from tests._chain_fixtures import BESPOKE_MODELS
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    src = {"builder": f"tests.scorer_models:{builder}", "builder_kwargs": {}, "task": task}
-    path = foreign_checkpoint(tmp_path, model_source=src)
+    src = {"builder": f"scorer_models:{builder}", "builder_kwargs": {},
+           "source_files": [str(REPO_ROOT / "tests" / "scorer_models.py"), BESPOKE_MODELS],
+           "task": task}
+    path = registered_checkpoint(tmp_path, model_source=src)
     return GenericPredictor(load_registered_checkpoint(path, project=tmp_path), device="cpu")

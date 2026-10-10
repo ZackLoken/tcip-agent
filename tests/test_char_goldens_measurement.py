@@ -266,7 +266,7 @@ def test_golden_evaluate_model_hands_the_diagnostic_its_stated_cap_and_refuses_n
     from tcip_mcp.pipelines.training import eval_runners as runners
     from tcip_mcp.tools import training_tools as training_tools_mod
     from tests._verified_checkpoint_fixtures import (
-        SAMPLE_CONF, SAMPLE_MAX_DETS, foreign_checkpoint,
+        SAMPLE_CONF, SAMPLE_MAX_DETS, registered_checkpoint,
     )
 
     captured: dict = {}
@@ -291,7 +291,7 @@ def test_golden_evaluate_model_hands_the_diagnostic_its_stated_cap_and_refuses_n
         Image.new("RGB", (64, 64)).save(images_dir / "a.png")
         label_image(images_dir / "a.png", [Annotation(subject="bud", geometry=BBox(5, 5, 20, 20))],
                     64, 64)
-        ckpt = foreign_checkpoint(tmp)
+        ckpt = registered_checkpoint(tmp)
 
         refused = training_tools_mod.evaluate_model(tmp, str(ckpt), str(images_dir),
                                                     stated=Stated(conf=SAMPLE_CONF))
@@ -316,7 +316,7 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
     from tcip_mcp.pipelines.schemas import TilingSpec
     from tcip_mcp.tools import training_tools as training_tools_mod
     from tests._verified_checkpoint_fixtures import (
-        SAMPLE_CONF, SAMPLE_DETECTOR_PASS, foreign_checkpoint,
+        SAMPLE_CONF, SAMPLE_DETECTOR_PASS, registered_checkpoint,
     )
 
     from tests._producer_fixtures import label_image
@@ -351,15 +351,11 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
             return {"width": 64, "height": 64, "boxes": [], "scores": [], "labels": [],
                     "cap_hit": False}
 
-    # Checkpoints are built (a real bespoke model, through the unpatched build_model) before the
-    # model/predictor stubs below go in, so the fixture's own checkpoint save is never stubbed.
-    def _prepare(root_name, name):
-        root = tmp_path / root_name
-        return _dataset(root), foreign_checkpoint(tmp_path, name=name)
-
-    tile_ds = _prepare("tile", "conf-tile-level")
-    single_ds = _prepare("single", "conf-single-pass")
-    ff_default_ds = _prepare("ff-default", "conf-full-frame-default")
+    # The checkpoint is built through the unpatched build_model before the stubs below go in.
+    checkpoint = registered_checkpoint(tmp_path)
+    tile_ds, single_ds, ff_default_ds = (
+        (_dataset(tmp_path / root_name), checkpoint)
+        for root_name in ("tile", "single", "ff-default"))
 
     monkeypatch.setattr(evaluation, "evaluate",
                         lambda *a, **k: {"loss": 0.1, "precision": 0.4, "recall": 0.5, "f1": 0.44})

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from tests._chain_fixtures import BESPOKE_CLASSIFIER
+from tests._chain_fixtures import CLASSIFIER_SOURCE
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
@@ -301,7 +301,7 @@ def _model_source() -> dict:
     # LR-schedule / freeze / warmup logic. The smaller backbone routes through the identical
     # BackboneWrapper.freeze_to path and cuts per-test model-construction cost. The tv_* freeze
     # branch stays covered by test_freeze_to_is_per_stage_for_tv_backbones (kept on resnet50).
-    return {"builder": BESPOKE_CLASSIFIER, "task": "classification"}
+    return dict(CLASSIFIER_SOURCE)
 
 
 def _cfg(stages, **extra) -> dict:

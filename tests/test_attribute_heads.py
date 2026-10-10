@@ -18,7 +18,6 @@ import pytest
 
 pytest.importorskip("torch")
 
-from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
 pytest.importorskip("torchvision")
 import torch  # noqa: E402
 
@@ -288,26 +287,21 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
     pytest.importorskip("sahi")
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import prepare
-    from tcip_mcp.pipelines.data.label_queries import registry_scope
-    from tests._chain_fixtures import built_model, training_config
-    from tcip_mcp.tools.model_tools import register_model
-    from tests._producer_fixtures import painted_frame, registry_over
+    from tests._producer_fixtures import painted_frame
+    from tests._chain_fixtures import BESPOKE_MODELS
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    registry_over(tmp_path / "ds", cr.SubjectRegistry(
-        subjects=(cr.Subject(name=SUBJECT, attributes=(WHOLE,)),)))
-    scope = registry_scope(tmp_path / "ds" / "images", SUBJECT)
-    config = training_config({"builder": "tests.bespoke_models:build_whole_blob_detector",
-                              "builder_kwargs": {}, "task": "detection"},
-                             {"num_channels": 3, "scope": asdict(scope)})
-    ckpt = tmp_path / "model_best.pt"
-    model = built_model(config)
-    torch.save({STATE_DICT_KEY: model.state_dict(), CONFIG_KEY: config}, str(ckpt))
-    assert "error" not in register_model(name="whole", checkpoint_path=str(ckpt),
-                                         project=tmp_path)
+    ckpt = registered_checkpoint(
+        tmp_path,
+        model_source={"builder": "bespoke_models:build_whole_blob_detector",
+                      "builder_kwargs": {}, "source_files": [BESPOKE_MODELS],
+                      "task": "detection"},
+        data={"num_channels": 3, "scope": {"subject": SUBJECT}},
+        registry=cr.SubjectRegistry(subjects=(cr.Subject(name=SUBJECT, attributes=(WHOLE,)),)))
     source = tmp_path / "frame.png"
     painted_frame(200, 200, (0, 0, 0), [((100, 20, 150, 60), (255, 0, 0))]).save(source)
 
-    p = prepare(load_registered_checkpoint(str(ckpt), project=tmp_path),
+    p = prepare(load_registered_checkpoint(ckpt, project=tmp_path),
                 Stated(tile=True, tile_size=128, overlap=0.25, postprocess=postprocess,
                        cross_tile_nms=0.3, conf=0.0, max_dets=SAMPLE_MAX_DETS),
                 device="cpu", tile_batch_size=2).runnable()

@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from tests._chain_fixtures import GT_ANCHOR_DETECTOR
+from tests import REPO_ROOT
+from tests._chain_fixtures import BESPOKE_MODELS, GT_ANCHOR_DETECTOR
 
 torch = pytest.importorskip("torch")
 
@@ -44,8 +45,12 @@ def build_bespoke_ds(**kwargs) -> _CountingDataset:
     return _CountingDataset(**kwargs)
 
 
-BESPOKE_DS = "tests.test_dataset_source_seam:build_bespoke_ds"
+BESPOKE_DS = "test_dataset_source_seam:build_bespoke_ds"
 """The ``dataset_source`` builder of :func:`build_bespoke_ds`."""
+BESPOKE_DS_FILE = str(REPO_ROOT / "tests" / "test_dataset_source_seam.py")
+"""The file :data:`BESPOKE_DS` is defined in, which its ``source_files`` declare; never this
+module's own ``__file__``, which names a run's snapshot copy once a run has bound the module
+there."""
 
 
 class _PointDataset(Dataset):
@@ -84,7 +89,7 @@ def build_point_ds(**kwargs) -> _PointDataset:
 DATASET_SOURCE = {
     "builder": BESPOKE_DS,
     "builder_kwargs": {"marker": "bespoke", "rows": ["s0", "s1"]},
-    "source_files": [__file__],
+    "source_files": [BESPOKE_DS_FILE],
 }
 
 
@@ -93,6 +98,14 @@ def _source(stated: dict):
     from tcip_mcp.pipelines.schemas import DatasetSourceSchema
 
     return DatasetSourceSchema.model_validate(stated)
+
+
+def _bespoke(stated: dict):
+    """``stated`` validated as a run's ``data.dataset_source`` with the layout a run declaring it
+    imports from, this repository as its project (``datasets.BespokeSource``)."""
+    from tests._producer_fixtures import staged_layout
+
+    return _source(stated), staged_layout(REPO_ROOT, {"dataset_source": stated})
 
 
 def _admitted_samples(root: Path):
@@ -129,10 +142,10 @@ def test_build_dataset_routes_to_dataset_source(tmp_path: Path):
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
     samples = _admitted_samples(tmp_path / "ds")
-    ds = build_dataset("grape_bunch_count", dataset_source=_source(DATASET_SOURCE),
+    ds = build_dataset("grape_bunch_count", dataset_source=_bespoke(DATASET_SOURCE),
                        samples=samples, sizes={}, scope=_scope(), transforms=None)
 
-    assert isinstance(ds, _CountingDataset)
+    assert type(ds).__qualname__ == "_CountingDataset"
     assert ds.samples == list(samples)       # the producer's own membership, unchanged
     assert ds.scope == _scope()              # the class space they were admitted under, whole
     assert ds.rows == ["s0", "s1"]           # the builder's own configuration, from its own kwargs
@@ -151,26 +164,26 @@ def test_a_bespoke_builder_is_handed_only_what_the_producer_named(tmp_path: Path
     from tcip_mcp.pipelines.schemas import TilingSpec
 
     samples = _admitted_samples(tmp_path / "ds")
-    source = _source(DATASET_SOURCE)
+    bespoke = _bespoke(DATASET_SOURCE)
     for unowned in ({"labels_dir": "X:/elsewhere"}, {"images_dir": "X:/elsewhere"},
                     {"csv_path": "X:/elsewhere/table.csv"}, {"stems": ["s0"]},
                     {"val_images_dir": "X:/elsewhere/val"},
                     {"label_format": "coco"}, {"coco_path": "X:/elsewhere/instances.json"},
                     {"subject": "leaf"}):
         with pytest.raises(ValueError, match="was given"):
-            build_dataset("grape_bunch_count", dataset_source=source, samples=samples,
+            build_dataset("grape_bunch_count", dataset_source=bespoke, samples=samples,
                           sizes={}, scope=_scope(), **unowned)
 
     # A tiling is refused beside a builder that composes its own.
     with pytest.raises(ValueError, match="beside a dataset_source"):
-        build_dataset("grape_bunch_count", dataset_source=source, samples=samples,
+        build_dataset("grape_bunch_count", dataset_source=bespoke, samples=samples,
                       sizes={"num_channels": 3}, scope=_scope(),
                       tiling=TilingSpec.model_validate({"enabled": True}))
 
     # Admits valid work: the producer's own samples and class space reach the builder unchanged.
-    built = build_dataset("grape_bunch_count", dataset_source=source, samples=samples,
+    built = build_dataset("grape_bunch_count", dataset_source=bespoke, samples=samples,
                           sizes={}, scope=_scope(), transforms=None)
-    assert isinstance(built, _CountingDataset)
+    assert type(built).__qualname__ == "_CountingDataset"
     assert built.samples == list(samples) and built.scope == _scope()
 
 
@@ -181,10 +194,11 @@ def test_builder_kwargs_may_not_restate_what_the_producer_named():
     from tcip_mcp.pipelines.data.datasets import build_from_dataset_source
 
     for reserved in ("samples", "scope", "task", "transforms"):
+        stated = {"builder": BESPOKE_DS, "builder_kwargs": {reserved: "foreign"},
+                  "source_files": [BESPOKE_DS_FILE]}
         with pytest.raises(ValueError, match="restates"):
-            build_from_dataset_source(
-                _source({"builder": BESPOKE_DS, "builder_kwargs": {reserved: "foreign"}}),
-                samples=[], scope=_scope(), task="detection", transforms=None)
+            build_from_dataset_source(_bespoke(stated), samples=[], scope=_scope(),
+                                      task="detection", transforms=None)
 
 
 def test_known_task_registry_stays_the_default(tmp_path: Path):
@@ -198,8 +212,8 @@ def test_known_task_registry_stays_the_default(tmp_path: Path):
 
 def test_builder_kwargs_configure_the_builder(tmp_path: Path):
     """The builder's own configuration is its ``builder_kwargs`` and nothing else: the lowest
-    boundary requires the dataset source, the task, the samples, the scope and the
-    transforms."""
+    boundary requires the dataset source with the layout it imports from, the task, the samples,
+    the scope and the transforms."""
     import inspect
 
     from tcip_mcp.pipelines.data.datasets import build_from_dataset_source
@@ -207,12 +221,13 @@ def test_builder_kwargs_configure_the_builder(tmp_path: Path):
     required = {name for name, p in
                 inspect.signature(build_from_dataset_source).parameters.items()
                 if p.default is inspect.Parameter.empty}
-    assert required == {"dataset_source", "task", "samples", "scope", "transforms"}
+    assert required == {"bespoke", "task", "samples", "scope", "transforms"}
 
     samples = _admitted_samples(tmp_path / "ds")
-    ds = build_from_dataset_source(
-        _source({"builder": BESPOKE_DS, "builder_kwargs": {"marker": "pinned"}}),
-        task="grape_bunch_count", samples=samples, scope=_scope(), transforms=None)
+    stated = {"builder": BESPOKE_DS, "builder_kwargs": {"marker": "pinned"},
+              "source_files": [BESPOKE_DS_FILE]}
+    ds = build_from_dataset_source(_bespoke(stated), task="grape_bunch_count",
+                                   samples=samples, scope=_scope(), transforms=None)
     assert ds.marker == "pinned" and ds.samples == list(samples)
 
     with pytest.raises(ValueError, match="builder_kwargs"):
@@ -229,6 +244,7 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(tmp_pa
     data: dict = {"dataset_source": DATASET_SOURCE}
     config = training_config({"builder": GT_ANCHOR_DETECTOR,
                               "builder_kwargs": {"gt_boxes_wh": [(10, 10)]},
+                              "source_files": [BESPOKE_MODELS],
                               "task": "grape_bunch_count"}, data, batch_size=1)
     result = preflight_config(tmp_path, config, smoke=False)
     assert not result["valid"]
@@ -243,26 +259,29 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(tmp_pa
     admitted = preflight_config(tmp_path, {**config, "data": located_data}, smoke=False)
     assert admitted["issues"] == [], admitted["issues"]
 
-    # A non-importable builder is caught honestly, over that same real place.
+    # A builder no declared file holds is refused naming source_files, over that same place.
     bad_data = {**located_data, "dataset_source": {"builder": "no.such:fn"}}
     result = preflight_config(tmp_path, {**config, "data": bad_data}, smoke=False)
     assert not result["valid"]
-    assert any("dataset_source.builder not importable" in i for i in result["issues"])
+    assert any(i.startswith("source_files: ") and "no.such" in i for i in result["issues"])
 
 
-def test_snapshot_records_dataset_builder(tmp_path: Path):
-    """The dataset builder's module is copied from the builder the config names, with no
-    ``source_files`` declaring it."""
-    from tcip_mcp.pipelines.model_build import SNAPSHOT_DIR, snapshot_model_source
+def test_snapshot_copies_the_dataset_builders_module_as_that_module(tmp_path: Path):
+    """The dataset builder's module, declared under its ``source_files``, is copied at its path
+    under its import root; a dataset builder none of them holds refuses the snapshot by name."""
+    from tcip_mcp.pipelines.model_build import snapshot_model_source
     from tcip_mcp.pipelines.schemas import train_config
     from tests._chain_fixtures import training_config
 
-    spec = train_config(training_config({"builder": GT_ANCHOR_DETECTOR, "task": "detection"},
-                                        {"dataset_source": {"builder": BESPOKE_DS}}))
-    manifest = snapshot_model_source(spec, tmp_path)
-    [entry] = [e for e in manifest["files"]
-               if Path(e["src"]).resolve() == Path(__file__).resolve()]
-    assert len(entry["sha256"]) == 64
-    assert (tmp_path / SNAPSHOT_DIR / entry["file"]).read_bytes() == Path(__file__).read_bytes()
-    assert spec.record()["data"]["dataset_source"]["builder"] == BESPOKE_DS
-    assert set(manifest) == {"files", "missing", "snapshot_errors"}
+    model_source = {"builder": GT_ANCHOR_DETECTOR, "source_files": [BESPOKE_MODELS],
+                    "task": "detection"}
+    spec = train_config(training_config(model_source, {"dataset_source": DATASET_SOURCE}))
+    record, copies = snapshot_model_source(spec, tmp_path)
+
+    entry = record["files"][str(Path(BESPOKE_DS_FILE).resolve())]
+    assert entry["file"] == "model_src/test_dataset_source_seam.py"
+    assert copies[entry["file"]] == Path(__file__).read_bytes()
+    undeclared = train_config(training_config(model_source,
+                                              {"dataset_source": {"builder": BESPOKE_DS}}))
+    with pytest.raises(ValueError, match="test_dataset_source_seam"):
+        snapshot_model_source(undeclared, tmp_path)

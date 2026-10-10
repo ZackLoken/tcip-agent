@@ -19,6 +19,7 @@ from tcip_mcp import subject_registry  # noqa: E402
 from tcip_mcp.pipelines.data.label_queries import registry_scope  # noqa: E402
 from tcip_mcp.pipelines.model_build import (  # noqa: E402
     CONFIG_KEY,
+    SNAPSHOT_KEY,
     STATE_DICT_KEY,
     recorded_model_dims,
     resolve_contract_dims,
@@ -28,10 +29,11 @@ from tcip_mcp.pipelines.schemas import checked_train_config, train_config  # noq
 from tcip_mcp.pipelines.training.envelope import TrainContext
 from tests._chain_fixtures import built_model, training_config
 from tests._producer_fixtures import registry_over  # noqa: E402
-from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 
-PROBE_NET = f"{__name__}:build_probe_net"
+PROBE_NET = f"{Path(__file__).stem}:build_probe_net"
 """The ``model_source`` builder of :func:`build_probe_net`."""
+PROBE_FILES = [__file__]
+"""The ``source_files`` a model source naming :data:`PROBE_NET` declares."""
 
 
 def build_probe_net(*, num_classes: int = 2, in_chans: int = 3, attributes: tuple = ()):
@@ -151,53 +153,46 @@ def test_contract_dims_count_only_the_subject_for_a_scope_declaring_no_attribute
     assert dims == {"in_chans": 3, "num_classes": 1, "img_size": 224}
 
 
-def test_snapshot_captures_each_dotted_module_not_its_top_level_package(tmp_path, monkeypatch):
-    """Each of the three bespoke seams resolves to the module its own reference names. A snapshot
-    that resolved the package instead would record the package's ``__init__`` as the run's code:
-    a manifest that looks complete (nothing missing, no errors) while holding none of the agent's
-    builder, loop, or dataset source."""
-    monkeypatch.syspath_prepend(str(tmp_path))
+def test_snapshot_copies_each_dotted_module_at_its_module_path(tmp_path):
+    """Each of the three bespoke seams' modules, declared under its source's ``source_files`` and
+    lying outside the project, is copied at its path under its import root, the module its own
+    reference names, so the copy binds as that module and never as its top-level package."""
     pkg = _agent_package(tmp_path, "agent_code_seams", {
         "nets": "def build_net(**kwargs):\n    return None\n",
         "loops": "def train(ctx):\n    return {}\n",
         "sources": "def build_ds(**kwargs):\n    return None\n",
     })
 
+    declared = [pkg / "nets.py", pkg / "loops.py", pkg / "sources.py", pkg / "__init__.py"]
     spec = train_config(training_config(
-        {"builder": "agent_code_seams.nets:build_net", "task": "detection"},
-        {"dataset_source": {"builder": "agent_code_seams.sources:build_ds"}},
+        {"builder": "agent_code_seams.nets:build_net",
+         "source_files": [str(declared[0]), str(declared[1]), str(declared[3])],
+         "task": "detection"},
+        {"dataset_source": {"builder": "agent_code_seams.sources:build_ds",
+                            "source_files": [str(declared[2])]}},
         training_source="agent_code_seams.loops:train"))
-    exp_dir = tmp_path / "exp"
-    exp_dir.mkdir()
-    manifest = snapshot_model_source(spec, exp_dir)
+    record, copies = snapshot_model_source(spec, tmp_path / "project")
 
-    captured = {Path(e["src"]).resolve() for e in manifest["files"]}
-    assert captured == {(pkg / "nets.py").resolve(), (pkg / "loops.py").resolve(),
-                        (pkg / "sources.py").resolve()}
-    assert (pkg / "__init__.py").resolve() not in captured
-    assert manifest["missing"] == []
-    assert manifest["snapshot_errors"] == []
-    for entry in manifest["files"]:
-        copied = exp_dir / "model_src" / entry["file"]
-        assert copied.read_bytes() == Path(entry["src"]).read_bytes()
+    for src in declared:
+        copy = record["files"][str(src.resolve())]["file"]
+        assert copy == f"model_src/agent_code_seams/{src.name}"
+        assert copies[copy] == src.read_bytes()
 
 
-def test_snapshot_captures_the_module_of_a_builder_spelled_without_a_colon(tmp_path, monkeypatch):
+def test_snapshot_captures_the_module_of_a_builder_spelled_without_a_colon(tmp_path):
     """``module.path.function`` is the other accepted builder spelling; the function name is the
     last segment, so the module is everything before it, not the first segment."""
-    monkeypatch.syspath_prepend(str(tmp_path))
     pkg = _agent_package(tmp_path, "agent_code_dotted", {
         "detectors": "def build_net(**kwargs):\n    return None\n",
     })
 
-    exp_dir = tmp_path / "exp"
-    exp_dir.mkdir()
-    manifest = snapshot_model_source(train_config(training_config(
-        {"builder": "agent_code_dotted.detectors.build_net", "task": "detection"}, {})), exp_dir)
+    record, _copies = snapshot_model_source(train_config(training_config(
+        {"builder": "agent_code_dotted.detectors.build_net", "task": "detection",
+         "source_files": [str(pkg / "detectors.py"), str(pkg / "__init__.py")]}, {})),
+        tmp_path / "project")
 
-    captured = {Path(e["src"]).resolve() for e in manifest["files"]}
-    assert captured == {(pkg / "detectors.py").resolve()}
-    assert manifest["snapshot_errors"] == []
+    assert record["files"][str((pkg / "detectors.py").resolve())]["file"] == (
+        "model_src/agent_code_dotted/detectors.py")
 
 
 def test_a_missing_or_empty_builder_refuses_at_the_configs_validation():
@@ -214,7 +209,8 @@ def test_a_missing_or_empty_builder_refuses_at_the_configs_validation():
 
 def _probe_config() -> dict:
     """A classification run's recorded config: table ground truth records the empty scope."""
-    return training_config({"builder": PROBE_NET, "task": "classification"},
+    return training_config({"builder": PROBE_NET, "source_files": PROBE_FILES,
+                            "task": "classification"},
                            {"num_channels": 5, "num_classes": 7, "scope": {}})
 
 
@@ -282,7 +278,8 @@ def test_a_run_builds_at_the_width_and_heads_its_admitted_data_records(tmp_path)
                     [Annotation(subject="leaf", geometry=BBox(8, 8, 24, 24),
                                 attributes={"condition": condition})], 64, 64)
     _dataset, data = run_over("detection", images_dir, subject="leaf")
-    config = training_config({"builder": PROBE_NET, "task": "detection"}, data)
+    config = training_config({"builder": PROBE_NET, "source_files": PROBE_FILES,
+                              "task": "detection"}, data)
 
     shapes = _param_shapes(built_model(config))
 
@@ -297,20 +294,30 @@ def test_a_saved_checkpoint_rebuilds_the_architecture_its_config_builds(tmp_path
     the inference-side rebuild to reconstruct the same architecture the run trained. Both sides
     are produced here by the real build path, so a stamp that records less than the builder was
     called with shows up as a shape difference rather than passing on a restated literal."""
-    config = _probe_config()
-    trained = built_model(config)
-    assert _param_shapes(trained)["head.weight"] == (7, 6, 1, 1)  # the recorded count took effect
+    from tcip_mcp.experiments import CONFIG_PATHS, observe
+    from tcip_mcp.pipelines.model_build import (
+        SNAPSHOT_DIR, build_from_model_source, owning_run_layout,
+    )
+    from tcip_mcp.pipelines.training.run_registry import observed_run
+    from tcip_mcp.registry_paths import runtime_paths
+    from tests._verified_checkpoint_fixtures import fixture_data_dir, opened_run, table_images
 
-    (tmp_path / "out").mkdir()
-    ctx = TrainContext(run=trainer_run(config, tmp_path / "out",
-                                       project=tmp_path,
-                                       has_val_loader=True, id="auto-run-40"),
+    config = training_config({"builder": PROBE_NET, "source_files": PROBE_FILES,
+                              "task": "classification"},
+                             {**table_images(fixture_data_dir(tmp_path, "probe"), n=4),
+                              "split": {"seed": 0, "val_ratio": 0.25}})
+    ctx = TrainContext(run=observed_run(observe(opened_run(tmp_path, config))),
                        train_loader=None)
+    trained = ctx.build_model()
+    assert _param_shapes(trained)["head.weight"] == (2, 6, 1, 1)  # the recorded count took effect
     path = ctx.save_checkpoint({STATE_DICT_KEY: trained.state_dict()}, "model_best")
 
     loaded = torch.load(path, map_location="cpu", weights_only=False)
     assert "model_source" not in loaded  # the config is the one place the model source lives
-    rebuilt = built_model(loaded[CONFIG_KEY])
+    spec = train_config(runtime_paths(loaded[CONFIG_KEY], CONFIG_PATHS, tmp_path))
+    layout = owning_run_layout(spec, loaded[SNAPSHOT_KEY], tmp_path)
+    assert layout.root == ctx.run_dir / SNAPSHOT_DIR
+    rebuilt = build_from_model_source(spec.model_source, layout, recorded_model_dims(spec))
     assert _param_shapes(rebuilt) == _param_shapes(trained)
 
 

@@ -89,7 +89,8 @@ class TrainContext:
         its config records (:func:`~tcip_mcp.pipelines.model_build.recorded_model_dims`)."""
         from tcip_mcp.pipelines.model_build import build_from_model_source, recorded_model_dims
 
-        return build_from_model_source(self.spec.model_source, recorded_model_dims(self.spec))
+        return build_from_model_source(self.spec.model_source, self.run.layout,
+                                       recorded_model_dims(self.spec))
 
     def _contract_args(self, **overrides: Any) -> dict:
         """What the smoke runs against: the dims this run resolved, or one batch off its own train
@@ -138,13 +139,16 @@ class TrainContext:
                       **kwargs: Any) -> Any:
         """The factory for this run's task, over the samples you were handed. ``sizes`` and
         ``scope`` unstated are the ones this run's data block records, so a loader you build here
-        reads at its width and count whichever subset of samples it holds."""
+        reads at its width and count whichever subset of samples it holds, and a
+        ``dataset_source`` you name imports from this run's layout."""
         from tcip_mcp.pipelines.data.datasets import build_dataset, stated_sizes
 
         data = self.spec.data
         if sizes is None:
             sizes = stated_sizes(data)
         kwargs.setdefault("scope", data.recorded_scope)
+        if kwargs.get("dataset_source") is not None:
+            kwargs["dataset_source"] = (kwargs["dataset_source"], self.run.layout)
         return build_dataset(self.task, samples=samples, sizes=sizes, **kwargs)
 
     def tiled_dataset(self, base: Any, **kwargs: Any) -> Any:
@@ -322,33 +326,31 @@ class TrainContext:
         self._write_scalars(metrics, step)
 
     def save_checkpoint(self, state: dict, tag: str = "checkpoint") -> str:
-        """Write ``state`` once under ``tag``, stamped with this run's config
-        (``generic_trainer.checkpoint_config``), record it in ``run.saved``, and return the path
+        """Write ``state`` once under ``tag``, stamped with this run's config and source snapshot
+        (``generic_trainer.checkpoint_stamp``), record it in ``run.saved``, and return the path
         written.
         A tag already written refuses with ``FileExistsError``. A ``metrics`` key in ``state`` is
         the deliverable's metrics, sourced ``training_source``.
 
-        Refuses (``ValueError``) a ``state`` carrying a ``config`` key: the checkpoint's
-        ``config`` is always this run's own.
+        Refuses (``ValueError``) a ``state`` carrying a key the stamp writes: the checkpoint's
+        config and snapshot are always this run's own.
         """
         from tcip_mcp.experiments import require_open
-        from tcip_mcp.pipelines.model_build import CONFIG_KEY
-
-        require_open(self.run_dir)
-        if CONFIG_KEY in state:
-            raise ValueError(
-                "ctx.save_checkpoint: state carries a 'config' key, reserved for this run's own "
-                "launch config, the record every publishing door reads this run's scope from; "
-                "name a bespoke loop's own field something else."
-            )
         from tcip_mcp.pipelines.training.generic_trainer import (
-            checkpoint_config,
             checkpoint_path,
+            checkpoint_stamp,
             write_checkpoint,
         )
 
-        config = checkpoint_config(self.spec)
-        self.run.saved[tag] = write_checkpoint({**state, CONFIG_KEY: config},
+        require_open(self.run_dir)
+        stamp = checkpoint_stamp(self.run)
+        if reserved := sorted(set(state) & set(stamp)):
+            raise ValueError(
+                f"ctx.save_checkpoint: state carries {reserved}, reserved for this run's own "
+                "launch config, the record every publishing door reads this run's scope from, and "
+                "its source snapshot; name a bespoke loop's own field something else."
+            )
+        self.run.saved[tag] = write_checkpoint({**state, **stamp},
                                                checkpoint_path(self.run_dir, tag))
         return str(self.run.saved[tag])
 
@@ -395,9 +397,9 @@ def dispatch_train_body(ctx: TrainContext) -> None:
     training_source = run.spec.training_source
     try:
         if training_source:
-            from tcip_mcp.pipelines.model_build import _import_dotted
+            from tcip_mcp.pipelines.model_build import import_source_builder
 
-            agent_train = _import_dotted(training_source)
+            agent_train = import_source_builder(training_source, run.layout)
             agent_train(ctx)  # the agent's custom loop drives training through ctx
             if run.status not in FINAL_STATES:
                 # A custom loop that never set a final status returned without canceling or

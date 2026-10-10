@@ -22,8 +22,10 @@ from tcip_mcp.pipelines.data.split_construction import (
 )
 from tcip_mcp.pipelines.execution import Stated
 from tcip_mcp.pipelines.schemas import TilingSpec, checked_train_config
+from tcip_mcp.registry_paths import located
 
 if TYPE_CHECKING:
+    from tcip_mcp.pipelines.model_build import StagedSources
     from tcip_mcp.pipelines.schemas import DataSpec, TrainConfigSchema
 
 logger = logging.getLogger(__name__)
@@ -36,16 +38,17 @@ _gpu_round_robin = itertools.count()
 _OVERFIT_CHECK_LOCK = threading.Lock()
 
 
-def data_with_selection(data: DataSpec, selection_dir: str) -> DataSpec:
-    """The data block choosing ``selection_dir`` over ``data`` would launch with: ``split``
-    replaced wholesale by one naming only ``selection_dir``, and the stated ``scope`` and
-    ``labels_dir`` dropped, since a bound run reads its scope and each sample's ground truth off
-    the selection.
+def data_with_selection(data: DataSpec, selection_dir: str, project: Path) -> DataSpec:
+    """The data block choosing ``selection_dir`` (located against ``project``) over ``data``
+    would launch with: ``split`` replaced wholesale by one naming only ``selection_dir``, and the
+    stated ``scope`` and ``labels_dir`` dropped, since a bound run reads its scope and each
+    sample's ground truth off the selection.
     """
     from tcip_mcp.pipelines import schemas
 
     kept = data.record(exclude={"scope": True, "labels_dir": True, "split": True})
-    return schemas.DataSpec.model_validate({**kept, "split": {"selection_dir": selection_dir}})
+    return schemas.DataSpec.model_validate({**kept, "split": {"selection_dir": selection_dir}},
+                                           context={"project": project})
 
 # Lazy imports of heavy dependencies inside tool functions to keep server startup fast.
 
@@ -53,24 +56,30 @@ def data_with_selection(data: DataSpec, selection_dir: str) -> DataSpec:
 def preflight_config(project: Path, config: dict, smoke: bool = False,
                      overfit: bool = False) -> dict:
     """Validate a training configuration before launching (:func:`_preflight`'s report)."""
-    return _preflight(project, *_admitted(config, {}), smoke=smoke, overfit=overfit)[0]
+    return _preflight(project, *_admitted(config, {}, project), smoke=smoke, overfit=overfit)[0]
 
 
-def _admitted(config: dict, point: dict) -> tuple[TrainConfigSchema | None, list[str]]:
-    """``config`` with ``point`` applied (:func:`_apply_hpo_params`) as the launch door admits
-    it: validated once (``schemas.checked_train_config``) and, when it validates, its structure
-    (:func:`_structural_issues`). The spec, ``None`` when it did not validate, and every issue."""
+def _admitted(config: dict, point: dict, project: Path
+              ) -> tuple[TrainConfigSchema | None, StagedSources | None, list[str]]:
+    """``config`` with ``point`` applied (:func:`_apply_hpo_params`), admitted: validated once
+    against ``project`` (``schemas.checked_train_config``) and, when it validates, its structure
+    (:func:`_structural_issues`). The spec, ``None`` when it did not validate, its staged
+    sources, ``None`` when none were taken, and every issue."""
     try:
-        spec, issues = checked_train_config(_apply_hpo_params(config, point))
+        spec, issues = checked_train_config(_apply_hpo_params(config, point), project)
     except ValueError as exc:
-        return None, [str(exc)]
-    return spec, (issues if spec is None else _structural_issues(spec))
+        return None, None, [str(exc)]
+    if spec is None:
+        return None, None, issues
+    return spec, *_structural_issues(spec, project)
 
 
-def _preflight(project: Path, spec: TrainConfigSchema | None, issues: list[str], *, smoke: bool,
+def _preflight(project: Path, spec: TrainConfigSchema | None, sources: StagedSources | None,
+               issues: list[str], *, smoke: bool,
                overfit: bool) -> tuple[dict, ResolvedRun | None]:
     """Check a training configuration its caller admitted once (:func:`_admitted`: ``spec``,
-    ``None`` when the schema refused, and its ``issues``) before launching a run of ``project``,
+    ``None`` when the schema refused, its staged ``sources``, every import below reading their
+    layout, and its ``issues``) before launching a run of ``project``,
     and resolve it once (:func:`~tcip_mcp.pipelines.data.split_construction.resolve_run`) when
     no issue stands. Returns the report and the resolution, ``None`` when an issue stood first.
 
@@ -131,8 +140,8 @@ def _preflight(project: Path, spec: TrainConfigSchema | None, issues: list[str],
     if not issues:
         counts: dict[str, int] = {}
         try:
-            assert spec is not None, "a config with no structural issue validated"
-            resolution = resolve_run(spec, project=project, tallies_out=counts)
+            assert spec is not None and sources is not None, "a config with no issue was staged"
+            resolution = resolve_run(spec, sources.layout, project=project, tallies_out=counts)
         except Exception as exc:  # noqa: BLE001, whatever stops the resolution stops the launch
             issues.append(str(exc))
         # Trainable-sample coverage, never gating: a run admitting a fraction of its annotated
@@ -153,7 +162,7 @@ def _preflight(project: Path, spec: TrainConfigSchema | None, issues: list[str],
         from tcip_mcp.pipelines.data.split_construction import partition_samples
 
         resolved_split = resolution.data.split
-        known = {str(Path(s.source).resolve()) for s in partition_samples(resolution.partition)}
+        known = {str(s.source) for s in partition_samples(resolution.partition)}
         reserved = sorted(f"{side}_ratio" for side in REFERENCE_SIDES
                           if getattr(resolved_split, f"{side}_ratio"))
         if reserved and resolution.spatial is None:
@@ -163,8 +172,7 @@ def _preflight(project: Path, spec: TrainConfigSchema | None, issues: list[str],
                 "region is cut from (a detection task with tiling enabled over one admitted "
                 "source); draw a selection with draw_splits for a reference.")
         if sampling_record is not None:
-            bad = sorted({label for label, _ in sampling_record.windows
-                          if str(Path(label).resolve()) not in known})
+            bad = sorted({label for label, _ in sampling_record.windows if label not in known})
             result["image_stats_containment"] = "checked"
             if bad:
                 issues.append(
@@ -178,7 +186,7 @@ def _preflight(project: Path, spec: TrainConfigSchema | None, issues: list[str],
     # config can't build and the contract would just re-report the same failure. Overfit stays a
     # voluntary, non-gating diagnostic (a valid model can fail 20 steps on noise).
     if smoke and not issues:
-        assert resolution is not None, "a config with no issue resolved"
+        assert resolution is not None and sources is not None, "a config with no issue resolved"
         try:
             from tcip_mcp.pipelines.model_build import (
                 build_from_model_source, recorded_model_dims, resolve_contract_dims,
@@ -191,7 +199,7 @@ def _preflight(project: Path, spec: TrainConfigSchema | None, issues: list[str],
             task = resolved_spec.model_source.task
             built_at = recorded_model_dims(resolved_spec)
             dims = resolve_contract_dims(resolved_spec, built_at)
-            model = build_from_model_source(resolved_spec.model_source, built_at)
+            model = build_from_model_source(resolved_spec.model_source, sources.layout, built_at)
             report = check_model_contract(model, task, dims=dims)
             batch, why_no_batch = None, None
             if report.get("not_smokeable"):
@@ -240,12 +248,17 @@ def _preflight(project: Path, spec: TrainConfigSchema | None, issues: list[str],
     return result, resolution
 
 
-def _structural_issues(spec: TrainConfigSchema) -> list[str]:
-    """What stops the validated config ``spec`` before anything reads its data: what training
-    reads left unstated (``TrainConfigSchema.trainer_reads``'s refusal), a ``model_source`` or
-    ``data.dataset_source`` builder or a ``training_source`` that does not import, and a
-    ``data`` block that names no locations (``split_construction.data_dir_issues``)."""
-    from tcip_mcp.pipelines.model_build import _import_dotted, import_source_builder
+def _structural_issues(spec: TrainConfigSchema, project: Path
+                       ) -> tuple[StagedSources | None, list[str]]:
+    """The staged sources of the validated config ``spec`` of ``project``
+    (``model_build.staged_sources``, ``None`` when they refuse) and what stops it before
+    anything reads its data: what training reads left unstated
+    (``TrainConfigSchema.trainer_reads``'s refusal), declared source files a run of ``project``
+    cannot place or read (the snapshot's refusal, before anything imports), a ``model_source``
+    or ``data.dataset_source`` builder or a ``training_source`` that does not import from their
+    layout, and a ``data`` block that names no locations
+    (``split_construction.data_dir_issues``)."""
+    from tcip_mcp.pipelines.model_build import import_source_builder, source_seams, staged_sources
 
     issues: list[str] = []
     try:
@@ -253,28 +266,20 @@ def _structural_issues(spec: TrainConfigSchema) -> list[str]:
     except ValueError as exc:
         issues.append(str(exc))
     try:
-        import_source_builder(spec.model_source.builder, spec.model_source.source_files)
-    except Exception as exc:
-        issues.append(f"model_source.builder not importable: {exc}")
-
-    if spec.training_source is not None:
+        sources = staged_sources(spec, project)
+    except (ValueError, OSError) as exc:
+        return None, [*issues, f"source_files: {exc}", *data_dir_issues(spec.data)]
+    for field, dotted, _files in source_seams(spec):
         try:
-            _import_dotted(spec.training_source)
+            import_source_builder(dotted, sources.layout)
         except Exception as exc:
-            issues.append(f"training_source not importable: {exc}")
-
-    dataset_source = spec.data.dataset_source
-    if dataset_source is not None:
-        try:
-            import_source_builder(dataset_source.builder, dataset_source.source_files)
-        except Exception as exc:
-            issues.append(f"data.dataset_source.builder not importable: {exc}")
+            issues.append(f"{field} not importable: {exc}")
     issues.extend(data_dir_issues(spec.data))
-    return issues
+    return sources, issues
 
 
 def open_run(
-    run_dir: Path, spec: TrainConfigSchema, resolved: dict | None, *,
+    run_dir: Path, spec: TrainConfigSchema, sources: StagedSources, resolved: dict | None, *,
     relaunched_from: str | None = None, resume_from: str | None = None,
     max_wall_clock_seconds: float | None = None, model_contract: dict | None = None,
     trial_params: dict | None = None,
@@ -286,26 +291,26 @@ def open_run(
     trial refused at its admission or whose resolution failed, which then ends ``failed``), the
     environment and the dataset
     identity of ``spec``'s data block (``split_construction.dataset_identity``), the run's
-    sources copied into the directory (``model_build.snapshot_model_source``), the run it was
+    source snapshot its admission took (``sources``, ``model_build.snapshot_model_source``'s
+    record and copies, the copies laid out in the directory), the run it was
     relaunched from and the checkpoint it resumes from, its wall clock, the model contract
     preflight proved, and an HPO trial's sampled point. Refuses an existing directory
     (``experiments.RunDirectoryExistsError``)."""
     from tcip_mcp.pipelines.data.split_construction import dataset_identity, partition_samples
-    from tcip_mcp.pipelines.model_build import capture_env, snapshot_model_source
+    from tcip_mcp.pipelines.model_build import capture_env
     from tcip_mcp.pipelines.training.run_registry import seeded
 
     spec = seeded(spec)
     dataset_id, fingerprint = dataset_identity(
         spec.data, partition_samples(resolved["partition"]) if resolved else ())
-    experiments.open_run_directory(run_dir, lambda directory: {
+    experiments.open_run_directory(run_dir, {
         "created": now_iso(), "config": spec.record(), "resolved": resolved,
         "environment": capture_env(),
-        "dataset": {"id": dataset_id, "fingerprint": fingerprint},
-        "source": snapshot_model_source(spec, directory),
+        "dataset": {"id": dataset_id, "fingerprint": fingerprint}, "source": sources.record,
         "relaunched_from": relaunched_from, "resume_from": resume_from,
         "max_wall_clock_seconds": max_wall_clock_seconds, "model_contract": model_contract,
         "trial_params": trial_params,
-    })
+    }, sources.copies)
 
 
 @tool()
@@ -353,13 +358,15 @@ def launch_training(
     if "experiment_id" in config:
         return {"error": "launch_training: config.experiment_id is not a setting; the platform "
                          "mints every run's id and answers it as experiment_id."}
+    resume = str(located(resume_from, project)) if resume_from else None
     # smoke=True: build the model and run the correctness contract before spawning the training
     # subprocess, so a broken builder returns here instead of wasting a full audited run.
-    validation, resolution = _preflight(project, *_admitted(config, {}), smoke=True,
+    spec, sources, issues = _admitted(config, {}, project)
+    validation, resolution = _preflight(project, spec, sources, issues, smoke=True,
                                         overfit=overfit_check)
     if not validation["valid"]:
         return {"error": "Invalid config", "issues": validation["issues"]}
-    assert resolution is not None, "a valid config resolved"
+    assert resolution is not None and sources is not None, "a valid config resolved"
 
     # The top-level key, never the smoke sub-report: overfit_check runs beside the contract's
     # build, on the same batch; preflight_config already rendered it for storage.
@@ -380,14 +387,15 @@ def launch_training(
     experiment_id = experiments.mint_experiment_id()
     try:
         run_dir = experiments.experiment_dir(experiment_id, project=project)
-        open_run(run_dir, resolution.spec, resolution.record, relaunched_from=relaunched_from,
-                 resume_from=resume_from or None, max_wall_clock_seconds=max_wall_clock_seconds,
+        open_run(run_dir, resolution.spec, sources, resolution.record,
+                 relaunched_from=relaunched_from, resume_from=resume,
+                 max_wall_clock_seconds=max_wall_clock_seconds,
                  model_contract=model_contract_record)
     except (StoreError, ValueError, OSError) as exc:
         return {"error": f"launch_training: {exc}"}
     record_event_or_raise("launch_training", {
         "experiment_id": experiment_id, "relaunched_from": relaunched_from,
-        "resume_from": resume_from or None}, actor=actor, scope=project)
+        "resume_from": resume}, actor=actor, scope=project)
 
     proc = _start_worker(run_dir, _child_env_for_launch(resolution.spec))
 
@@ -621,7 +629,8 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
                 "replaced_split_keys": replaced_split_keys,
             })
             continue
-        issues = selection_compatibility(data_with_selection(data, candidate_dir), selection,
+        issues = selection_compatibility(data_with_selection(data, candidate_dir, project),
+                                         selection,
                                          candidate_dir)
         counts = selection.counts()
         entry: dict = {
@@ -718,25 +727,27 @@ _CANCEL_DURING_RUN_REASON = "the sweep was canceled by request before it could f
 def open_trial(sweep: Path, trial_id: str, point: dict) -> Path:
     """Open the trial ``trial_id`` of the sweep at ``sweep`` as a run directory beneath it named
     ``<sweep id>_<trial_id>``, and return it. The sweep's recorded base config with ``point``
-    applied, admitted as the launch door admits a config (:func:`_admitted`) and, when it stands,
+    applied, admitted (:func:`_admitted`) and, when it stands,
     resolved against its project through the one run producer
     (``split_construction.resolve_run``, at the sweep's own objective), and the directory opened
     (:func:`open_run`) with ``point`` as its ``trial_params``: an admission issue or a
     resolution that fails is the trial's final status ``failed`` naming why. A config the schema
-    refuses raises ``ValueError`` naming every issue before any directory is opened."""
+    refuses, or whose sources cannot be staged, raises ``ValueError`` naming every issue before
+    any directory is opened."""
     record = experiments.observe(sweep).record
-    spec, issues = _admitted(record["input"]["base_config"], point)
-    if spec is None:
+    project = experiments.project_of_run(sweep)
+    spec, sources, issues = _admitted(record["input"]["base_config"], point, project)
+    if spec is None or sources is None:
         raise ValueError(f"trial {trial_id}'s config is refused: {'; '.join(issues)}")
     trial_dir = sweep / f"{sweep.name}_{trial_id}"
     resolved, status_error = None, "; ".join(issues) or None
     if status_error is None:
         try:
-            resolved = resolve_run(spec, project=experiments.project_of_run(sweep),
+            resolved = resolve_run(spec, sources.layout, project=project,
                                    objective=record["objective"]).record
         except Exception as exc:  # noqa: BLE001, whatever stops the resolution fails the trial
             status_error = str(exc)
-    open_run(trial_dir, spec, resolved, trial_params=point)
+    open_run(trial_dir, spec, sources, resolved, trial_params=point)
     if status_error is not None:
         experiments.write_final_status(trial_dir, "failed", status_error, checkpoint=None)
     return trial_dir
@@ -915,10 +926,13 @@ def open_sweep(
     trial's own point is admitted when its trial opens (:func:`open_trial`).
     Create the sweep's
     directory under ``project``, named by ``experiments.mint_experiment_id("hpo")``, with its
-    ``sweep.json`` written once, carrying the objective and
-    every argument resolved as its ``input``, then the act's one audit line by ``actor`` naming
-    the sweep (``AuditEntryNotWrittenError`` when it cannot be appended). Returns the opened sweep's
-    directory, or the refusal ``{"error", "issues"}`` with nothing created."""
+    ``sweep.json`` written once, carrying the objective and every argument as its ``input``:
+    ``base_config`` as the caller stated it, never a sampled point's values, its paths stored
+    against ``project`` (``experiments.RECORD_PATHS``), and ``data.split`` rewritten only for a
+    bound config redrawing inside its selection (:func:`_data_for_split_draws`); then the act's
+    one audit line by ``actor`` naming the sweep (``AuditEntryNotWrittenError`` when it cannot be
+    appended). Returns the opened sweep's directory, or the refusal ``{"error", "issues"}`` with
+    nothing created."""
     from tcip_mcp.pipelines.training.hpo import resolved_draw_seeds, split_draw_search_space
 
     # Both reach a written record: the space into the sweep's input, the base config into every
@@ -943,7 +957,7 @@ def open_sweep(
         (first_label, first_point), *rest = _preflight_points(param_space, search_alg)
     except (KeyError, TypeError, ValueError) as exc:
         return {"error": f"param_space is not a search space: {exc!r}", "issues": []}
-    first_spec, first_issues = _admitted(base_config, first_point)
+    first_spec, first_sources, first_issues = _admitted(base_config, first_point, project)
     if first_spec is None:
         return {"error": f"the sweep's base config fails preflight at {first_label}",
                 "issues": first_issues}
@@ -966,13 +980,13 @@ def open_sweep(
     if seed_axis_refusal is not None:
         return {"error": f"{seed_axis_refusal.reason} {seed_axis_refusal.remedy}", "issues": []}
 
-    preflight, resolution = _preflight(project, first_spec, first_issues, smoke=False,
-                                       overfit=False)
+    preflight, resolution = _preflight(project, first_spec, first_sources, first_issues,
+                                       smoke=False, overfit=False)
     if resolution is None or not preflight["valid"]:
         return {"error": f"the sweep's base config fails preflight at {first_label}",
                 "issues": preflight["issues"]}
     for label, point in rest:
-        issues = _admitted(base_config, point)[1]
+        issues = _admitted(base_config, point, project)[2]
         if issues:
             return {"error": f"the sweep's base config fails preflight at {label}",
                     "issues": issues}
@@ -1397,8 +1411,9 @@ def evaluate_model(
       ``run_full_frame_evaluation``).
 
     Args:
-        experiment_id_or_ckpt: A completed run's id (uses the checkpoint its final status
-            names) or a checkpoint path. Either way the resolved checkpoint must be registered in
+        experiment_id_or_ckpt: The id of a run of this project (uses the checkpoint its final
+            status names; a run that completed none refuses), else a checkpoint path. Either way
+            the resolved checkpoint must be registered in
             this project's registry (``register_model``, explicit mode for a foreign or bespoke
             checkpoint) or this door refuses before loading it.
         images_dir: The capture directory of the evaluation split.
@@ -1441,25 +1456,27 @@ def evaluate_model(
     except (TraitUnknownError, OperationalizationRefusedError) as exc:
         return {"error": str(exc)}
 
-    ckpt = experiment_id_or_ckpt
-    by_run = not Path(ckpt).is_file()
-    if by_run:
-        observation = experiments.find_observation(experiment_id_or_ckpt, project=project)
-        completed = observation.checkpoint if observation is not None else None
-        if completed is None:
-            return {"error": f"Not a checkpoint path or a completed run's id: "
-                             f"{experiment_id_or_ckpt}"}
-        ckpt = completed["path"]
-    if not Path(ckpt).is_file():
-        return {"error": f"Checkpoint not found: {ckpt}"}
+    images_dir = str(located(images_dir, project))
+    labels_dir = labels_dir and str(located(labels_dir, project))
 
-    from tcip_mcp.model_registry import UnregisteredCheckpointError, load_registered_checkpoint
+    from tcip_mcp.model_registry import (
+        CheckpointNotFoundError, UnregisteredCheckpointError, load_registered_checkpoint,
+    )
 
+    run_dir = experiments.find_run(experiment_id_or_ckpt, project=project)
+    by_run = run_dir is not None
     try:
+        if run_dir is not None:
+            completed = experiments.observe(run_dir).checkpoint
+            if completed is None:
+                return {"error": f"run {experiment_id_or_ckpt} has completed no checkpoint"}
+            ckpt = Path(completed["path"])
+        else:
+            ckpt = located(experiment_id_or_ckpt, project)
         checkpoint = load_registered_checkpoint(ckpt, project=project)
         task = checkpoint.task
         scope = checkpoint.spec.data.recorded_scope
-    except (UnregisteredCheckpointError, ValueError) as exc:
+    except (CheckpointNotFoundError, UnregisteredCheckpointError, ValueError) as exc:
         return {"error": str(exc)}
     run_tiling = checkpoint.spec.data.tiling
     stated = stated or Stated()

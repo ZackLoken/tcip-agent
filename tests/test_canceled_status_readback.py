@@ -4,6 +4,8 @@ spelled into a fixture."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 
@@ -14,12 +16,12 @@ def test_a_canceled_inference_job_reads_as_canceled(tmp_path, monkeypatch):
 
     from tcip_mcp.pipelines.execution import Stated
     from tcip_web.routes import inference
-    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS, foreign_checkpoint
+    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS, registered_checkpoint
 
     images_dir = tmp_path / "images" / "2026-01-01"
     images_dir.mkdir(parents=True)
     Image.new("RGB", (16, 16)).save(images_dir / "img.jpg")
-    ckpt = foreign_checkpoint(tmp_path)
+    ckpt = registered_checkpoint(tmp_path)
 
     job = inference.InferenceJob(job_id="canceled-job", actor="user:tester", checkpoint_path=ckpt,
                                  images_dir=str(images_dir), dataset_root=str(tmp_path),
@@ -45,8 +47,9 @@ def _train_stops_on_cancel(ctx):
 def test_a_canceled_training_run_derives_as_canceled_from_its_directory(tmp_path):
     pytest.importorskip("torch")
     from tcip_mcp.experiments import observe
-    from tests._verified_checkpoint_fixtures import finished_run
+    from tests._verified_checkpoint_fixtures import detector_declaring, finished_run
 
-    run_dir = finished_run(tmp_path, training_source=f"{__name__}:_train_stops_on_cancel")
+    run_dir = finished_run(tmp_path, model_source=detector_declaring(__file__),
+                           training_source=f"{Path(__file__).stem}:_train_stops_on_cancel")
 
     assert observe(run_dir).state == "canceled"

@@ -28,8 +28,6 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train  # noqa: E402
-from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tests._chain_fixtures import (  # noqa: E402
     BESPOKE_INSTANCE_SEG, BESPOKE_ORDINAL, BESPOKE_REGRESSOR, BESPOKE_SEMANTIC_SEG,
@@ -49,7 +47,10 @@ _save_png = partial(write_noise_image, size=IMG)
 
 
 def _model_source(builder: str, task: str, **kwargs) -> dict:
-    return {"builder": builder, "builder_kwargs": kwargs, "task": task}
+    from tests._chain_fixtures import BESPOKE_MODELS
+
+    return {"builder": builder, "builder_kwargs": kwargs, "source_files": [BESPOKE_MODELS],
+            "task": task}
 
 
 def _train_config(model_source: dict, data: dict, batch_size: int) -> dict:
@@ -61,24 +62,26 @@ def _train_config(model_source: dict, data: dict, batch_size: int) -> dict:
                            evaluation=evaluation_block(selection_metric="loss"))
 
 
-def _trained(model_source: dict, data: dict, dataset, tmp_path: Path, run_id: str, *,
-             batch_size: int = 2):
-    """A run of :func:`_train_config` at ``batch_size`` writing into ``tmp_path / "out"``,
-    trained with no val loader over ``dataset`` through the loaders the platform builds for it
-    (``generic_trainer.run_loaders``)."""
-    run = trainer_run(_train_config(model_source, data, batch_size), tmp_path / "out",
-                      has_val_loader=False, id=run_id, project=tmp_path)
-    loader, _ = run_loaders(run, dataset, None)
-    return train(run, loader, val_loader=None)
+def _trained(model_source: dict, data: dict, tmp_path: Path, *, batch_size: int = 2):
+    """The observation of a run of ``tmp_path`` over :func:`_train_config` at ``batch_size``,
+    opened by the launcher's own producer over the places ``data`` names with no validation side
+    and trained to its end by the child's own entry."""
+    from tcip_mcp.experiments import observe
+    from tests._verified_checkpoint_fixtures import worker_run
+
+    return observe(worker_run(tmp_path, _train_config(model_source, {**data, "auto_val": False},
+                                                      batch_size)))
 
 
-def _assert_trained(run, output_dir: Path) -> None:
-    assert run.status == "completed", run.status_error
-    assert run.current_epoch == 1
-    assert run.metrics_history
-    train_loss = run.metrics_history[-1]["train_loss"]
+def _assert_trained(observation) -> None:
+    from tcip_mcp.experiments import EPOCH_KEY, METRICS_FILE, epoch_rows, read_rows
+
+    assert observation.state == "completed", observation.final
+    rows = epoch_rows(read_rows(observation.directory / METRICS_FILE)[0])
+    assert [row[EPOCH_KEY] for row in rows] == [1]
+    train_loss = rows[-1]["train_loss"]
     assert math.isfinite(train_loss), f"non-finite train_loss: {train_loss}"
-    assert (output_dir / "model_best.pt").is_file()
+    assert (observation.directory / "model_best.pt").is_file()
 
 
 # --------------------------------------------------------------------------
@@ -93,12 +96,10 @@ def test_detection_e2e(tmp_path: Path):
         label_image(images_dir / f"img{i}.png",
                     [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))], IMG, IMG)
 
-    dataset, data = run_over("detection", str(images_dir), subject="bud")
-
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
-    run = _trained(BUILT_DETECTOR, data, dataset, tmp_path, "auto-run-15")
-    _assert_trained(run, tmp_path / "out")
+    _assert_trained(_trained(BUILT_DETECTOR, {"images_dir": str(images_dir),
+                                              "scope": {"subject": "bud"}}, tmp_path))
 
 
 def test_instance_seg_e2e(tmp_path: Path):
@@ -110,15 +111,15 @@ def test_instance_seg_e2e(tmp_path: Path):
         label_image(images_dir / f"img{i}.png", [Annotation(subject="bud", geometry=square)],
                     IMG, IMG)
 
-    dataset, data = run_over("instance_seg", str(images_dir), subject="bud")
+    dataset, _data = run_over("instance_seg", str(images_dir), subject="bud")
     # Guard the polygon -> mask rasterization path (datasets.py). With the mask_rcnn
     # detector these masks now reach the Mask R-CNN mask loss during training.
     assert dataset[0][1]["masks"].shape[0] > 0
 
     model_source = _model_source(BESPOKE_INSTANCE_SEG, "instance_seg", min_size=IMG,
                                  max_size=IMG * 2)
-    run = _trained(model_source, data, dataset, tmp_path, "auto-run-16")
-    _assert_trained(run, tmp_path / "out")
+    _assert_trained(_trained(model_source, {"images_dir": str(images_dir),
+                                            "scope": {"subject": "bud"}}, tmp_path))
 
 
 # --------------------------------------------------------------------------
@@ -136,11 +137,9 @@ def test_semantic_seg_e2e(tmp_path: Path):
         _save_png(images_dir / f"img{i}.png")
         painted_frame(IMG, IMG, 0, [(block, 1)], mode="L").save(masks_dir / f"img{i}.png")
 
-    dataset, data = run_over("semantic_seg", str(images_dir), str(masks_dir))
-
     model_source = _model_source(BESPOKE_SEMANTIC_SEG, "semantic_seg")
-    run = _trained(model_source, data, dataset, tmp_path, "auto-run-17")
-    _assert_trained(run, tmp_path / "out")
+    _assert_trained(_trained(model_source, {"images_dir": str(images_dir),
+                                            "labels_dir": str(masks_dir)}, tmp_path))
 
 
 def _write_csv(path: Path, rows: list[tuple[str, object]], header: tuple[str, str]) -> None:
@@ -159,11 +158,10 @@ def test_ordinal_e2e(tmp_path: Path):
     csv_path = tmp_path / "ranks.csv"
     _write_csv(csv_path, rows, ("stem", "rank"))
 
-    dataset, data = run_over("ordinal", str(images_dir), str(csv_path))
-
     model_source = _model_source(BESPOKE_ORDINAL, "ordinal")
-    run = _trained(model_source, data, dataset, tmp_path, "auto-run-18", batch_size=3)
-    _assert_trained(run, tmp_path / "out")
+    _assert_trained(_trained(model_source, {"images_dir": str(images_dir),
+                                            "labels_dir": str(csv_path)}, tmp_path,
+                             batch_size=3))
 
 
 def test_ordinal_derives_num_ranks_from_data(tmp_path: Path):
@@ -178,12 +176,13 @@ def test_ordinal_derives_num_ranks_from_data(tmp_path: Path):
     csv_path = tmp_path / "ranks.csv"
     _write_csv(csv_path, rows, ("stem", "rank"))
 
-    dataset, data = run_over("ordinal", str(images_dir), str(csv_path))
+    _dataset, data = run_over("ordinal", str(images_dir), str(csv_path))
     assert data["num_ranks"] == 7 and data.get("num_classes") is None
 
     model_source = _model_source(BESPOKE_ORDINAL, "ordinal")
-    run = _trained(model_source, data, dataset, tmp_path, "auto-run-19", batch_size=7)
-    _assert_trained(run, tmp_path / "out")
+    _assert_trained(_trained(model_source, {"images_dir": str(images_dir),
+                                            "labels_dir": str(csv_path)}, tmp_path,
+                             batch_size=7))
 
 
 def test_ordinal_num_ranks_stated_raises(tmp_path: Path):
@@ -240,16 +239,14 @@ def test_regression_e2e(tmp_path: Path):
     csv_path = tmp_path / "values.csv"
     _write_csv(csv_path, rows, ("stem", "value"))
 
-    dataset, data = run_over("regression", str(images_dir), str(csv_path))
-
     model_source = _model_source(BESPOKE_REGRESSOR, "regression")
-    run = _trained(model_source, data, dataset, tmp_path, "auto-run-20", batch_size=3)
-    _assert_trained(run, tmp_path / "out")
+    _assert_trained(_trained(model_source, {"images_dir": str(images_dir),
+                                            "labels_dir": str(csv_path)}, tmp_path,
+                             batch_size=3))
 
 
 def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     """evaluate_model runs end to end for ordinal over a CSV of ranks and reports its metrics."""
-    from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.tools.training_tools import evaluate_model
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -260,17 +257,13 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     csv_path = tmp_path / "ranks.csv"
     _write_csv(csv_path, rows, ("stem", "rank"))
 
-    dataset, data = run_over("ordinal", str(images_dir), str(csv_path))
     model_source = _model_source(BESPOKE_ORDINAL, "ordinal")
-    run = _trained(model_source, data, dataset, tmp_path, "auto-run-21", batch_size=3)
-    _assert_trained(run, tmp_path / "out")
+    observation = _trained(model_source, {"images_dir": str(images_dir),
+                                          "labels_dir": str(csv_path)}, tmp_path, batch_size=3)
+    _assert_trained(observation)
 
-    ckpt_path = str(tmp_path / "out" / "model_best.pt")
-    reg = register_model(name="ordinal-model", checkpoint_path=ckpt_path,
-                         project=tmp_path)
-    assert "error" not in reg, reg
-
-    result = evaluate_model(tmp_path, ckpt_path, str(images_dir), str(csv_path))
+    result = evaluate_model(tmp_path, observation.directory.name, str(images_dir),
+                            str(csv_path))
     assert "error" not in result, result
     assert "mae" in result
     assert "quadratic_weighted_kappa" in result
@@ -278,7 +271,6 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
 
 def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     """evaluate_model runs end to end for regression over a CSV of values."""
-    from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.tools.training_tools import evaluate_model
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -289,17 +281,13 @@ def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     csv_path = tmp_path / "values.csv"
     _write_csv(csv_path, rows, ("stem", "value"))
 
-    dataset, data = run_over("regression", str(images_dir), str(csv_path))
     model_source = _model_source(BESPOKE_REGRESSOR, "regression")
-    run = _trained(model_source, data, dataset, tmp_path, "auto-run-22", batch_size=3)
-    _assert_trained(run, tmp_path / "out")
+    observation = _trained(model_source, {"images_dir": str(images_dir),
+                                          "labels_dir": str(csv_path)}, tmp_path, batch_size=3)
+    _assert_trained(observation)
 
-    ckpt_path = str(tmp_path / "out" / "model_best.pt")
-    reg = register_model(name="regression-model", checkpoint_path=ckpt_path,
-                         project=tmp_path)
-    assert "error" not in reg, reg
-
-    result = evaluate_model(tmp_path, ckpt_path, str(images_dir), str(csv_path))
+    result = evaluate_model(tmp_path, observation.directory.name, str(images_dir),
+                            str(csv_path))
     assert "error" not in result, result
     assert "mae" in result
     assert "r_squared" in result

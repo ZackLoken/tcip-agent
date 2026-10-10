@@ -226,17 +226,6 @@ def test_unresolvable_proposal_engine_raises_valueerror():
 # -- rail: prioritize_review_queue marks a bound run's calibration-side candidates ------------
 
 
-def _bespoke_checkpoint_payload() -> dict:
-    from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY
-    from tests._chain_fixtures import built_model, training_config
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
-
-    config = training_config(BUILT_DETECTOR,
-                             {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}})
-    model = built_model(config)
-    return {CONFIG_KEY: config, STATE_DICT_KEY: model.state_dict()}
-
-
 def _bound_checkpoint(project: Path, manifest_dir: Path, experiment_id: str) -> tuple[Path, str]:
     """A run of ``project`` bound to the selection at ``manifest_dir``, run through the child's
     own entry (its data resolved and recorded, its body saving the model its config builds), so
@@ -357,8 +346,8 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(tm
 
 
 def test_prioritize_review_queue_unbound_run_carries_no_marks(tmp_path, monkeypatch):
-    """A checkpoint no run of the project produced has nothing bound to check against: no
-    ``reference_member`` on any entry."""
+    """A checkpoint whose registry entry names no producing run has nothing bound to check
+    against: no ``reference_member`` on any entry."""
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     ckpt = foreign_checkpoint(tmp_path)
@@ -372,6 +361,35 @@ def test_prioritize_review_queue_unbound_run_carries_no_marks(tmp_path, monkeypa
     assert "error" not in r, r
     assert r["queue"], r
     assert all("reference_member" not in entry for entry in r["queue"])
+
+
+def test_the_queue_operation_reads_the_locations_its_arrival_established(tmp_path, monkeypatch):
+    """The queue the web route launches over the checkpoint and images directory its own arrival
+    located ranks them as given: nothing beneath the arrival locates either again."""
+    import tcip_mcp.model_registry as model_registry
+    import tcip_mcp.tools.feedback_tools as feedback_tools
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    ckpt = Path(registered_checkpoint(tmp_path))
+    images = tmp_path / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
+    (images / "a.jpg").write_bytes(b"x")
+    _stub_scorer(monkeypatch)
+    located_again: list = []
+
+    def located(path, project):
+        located_again.append(path)
+        return Path(path)
+
+    for module in (feedback_tools, model_registry):
+        monkeypatch.setattr(module, "located", located)
+
+    r = feedback_tools.ranked_review_queue(tmp_path, ckpt, images, method="combined", budget=5,
+                                           subject=None)
+
+    assert "error" not in r, r
+    assert r["queue"], r
+    assert located_again == []
 
 
 # -- rail: calibration marks are decided by each sample's own recorded source ------------------

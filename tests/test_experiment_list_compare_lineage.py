@@ -3,12 +3,16 @@ writer opened under the test's project."""
 
 
 def _opened(project, experiment_id: str, builder: str = "my_models:tree_detector", **facts):
-    """A run of ``project`` of a detector built by ``builder`` over its own two frames, opened by
-    the launcher's own writer; ``facts`` are ``open_run``'s other keywords."""
+    """A run of ``project`` of a detector built by ``builder``, declared in a ``my_models.py`` of
+    its own, over its own two frames, opened by the launcher's own writer; ``facts`` are
+    ``open_run``'s other keywords."""
     from tests._verified_checkpoint_fixtures import detection_config, fixture_data_dir, opened_run
 
-    config = detection_config(fixture_data_dir(project, experiment_id),
-                              model_source={"builder": builder, "task": "detection"})
+    models = fixture_data_dir(project, experiment_id) / "my_models.py"
+    models.parent.mkdir(parents=True, exist_ok=True)
+    models.write_text("", encoding="utf-8")
+    config = detection_config(fixture_data_dir(project, experiment_id), model_source={
+        "builder": builder, "source_files": [str(models)], "task": "detection"})
     return opened_run(project, config, experiment_id=experiment_id, **facts)
 
 

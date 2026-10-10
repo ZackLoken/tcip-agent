@@ -437,15 +437,13 @@ def test_the_queue_refuses_a_label_document_that_will_not_read_by_name(tmp_path:
     from tcip_mcp.tools.feedback_tools import _prepare_queue_sources
 
     image = _image(tmp_path)
-    checkpoint = tmp_path / "model.pt"
-    checkpoint.write_bytes(b"only its presence is read before the queue drops finished images")
     _save(tmp_path, image, [], gestures=Gestures(complete={"bud": True}))
-    _sources, skipped, error = _prepare_queue_sources(str(checkpoint), str(image.parent), "bud")
+    _sources, skipped, error = _prepare_queue_sources(str(image.parent), "bud")
     assert (skipped, error) == (1, None)
 
     ts.replace(image_label_key(image), {"annotations": {}})
 
-    _sources, _skipped, error = _prepare_queue_sources(str(checkpoint), str(image.parent), "bud")
+    _sources, _skipped, error = _prepare_queue_sources(str(image.parent), "bud")
     assert error is not None and "annotations" in error["error"]
 
 
@@ -548,15 +546,12 @@ def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(
 
     root = open_new_project(tmp_path / "proj").root
     image = _image(root)
-    checkpoint = root / "model.pt"
-    checkpoint.write_bytes(b"only its presence is read before the queue drops finished images")
     _save(root, image, [])
 
     def readers() -> tuple[int, int, str]:
         counts = admit(image.parent, members=[image.stem],
                        scope=registry_scope(image.parent, "bud")).tallies
-        _sources, skipped, _error = _prepare_queue_sources(str(checkpoint), str(image.parent),
-                                                           "bud")
+        _sources, skipped, _error = _prepare_queue_sources(str(image.parent), "bud")
         listed = client.get("/api/annotate/labels", params={"image_path": str(image)}).json()
         return counts.get("negative", 0), skipped, listed["completion"].get("bud", "unannotated")
 

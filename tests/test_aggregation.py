@@ -52,7 +52,6 @@ def _deliver(project: Path, results: list[dict], out: Path, delivered_phenotype:
 
 
 def test_no_extract_plant_id_helper_exists_anymore():
-    """The filename-guessing fallback is deleted, not just unused; this locks its absence."""
     import tcip_mcp.pipelines.postprocessing.aggregation as agg_module
 
     assert not hasattr(agg_module, "_extract_plant_id")
@@ -128,42 +127,43 @@ def test_plant_id_fn_override_keeps_series_together():
 # ── identity provenance pass-through (build_plant_mapping's honest signals) ──
 
 
-def _mapped_rows(*assigned: tuple[str, str, float]) -> list[dict]:
-    """Per-image count rows carrying the assignment rows ``MappingBuild.rows`` produces, one per
-    ``(image, source, distance_m)``, each assigned to plant ``P1``."""
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        Assignment, ImageStamp, MappingBuild, PlantRecord,
-    )
+def _mapped_rows(project, *assigned: tuple[str, float]) -> list[dict]:
+    """Per-image count rows carrying the assignment rows ``MappingBuild.rows`` produces for a
+    mapping built through the platform's own producers (``map_captures``, one capture of each of
+    its two plots), each produced assignment restated with one ``(source, distance_m)`` of
+    ``assigned`` and counted toward one plant."""
+    from dataclasses import replace
 
-    plant = PlantRecord(plot_name="P1", accession_name="A", plot_number=None, row_number=None,
-                        col_number=None, lat=0.0, lon=0.0)
-    build = MappingBuild(
-        name="m", dataset_root="r", dataset_id="d", built_at="t", dates_requested=None,
-        dates=["2024-05-01"], nn_tolerance_m={"value": 1.0, "source": "stated"},
-        plant_registry={}, capture_identity={}, capture_digests={}, unreadable={},
-        assignments={"2024-05-01": [Assignment.of(
-            ImageStamp(path=image, stem=image, date_folder="2024-05-01", kind="image",
-                       name=image, timestamp=None, lat=None, lon=None, h_pos_err=None,
-                       readable=True), plant, source, distance)  # type: ignore[arg-type]
-            for image, source, distance in assigned]})
-    return [{**row, "plant_id": row["plot_name"], "count": 1}
-            for row in build.rows()["2024-05-01"]]
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
+    from tests._mapping_fixtures import map_captures
+    from tests._web_fixtures import named_project
+
+    date = "2026-02-11"
+    named_project(project, "Orchard")
+    map_captures(project, project / "ds", [date])
+    build = load_mapping(project, "valley")
+    assert build is not None and len(build.assignments[date]) == len(assigned)
+    restated = replace(build, assignments={date: [
+        replace(a, source=source, distance_m=distance)
+        for a, (source, distance) in zip(build.assignments[date], assigned)]})
+    return [{**row, "plant_id": "P1", "count": 1} for row in restated.rows()[date]]
 
 
-def test_plant_id_source_passes_through_when_uniform():
-    out = aggregate_per_plant(_mapped_rows(("a", "sequence", 1.0), ("b", "sequence", 2.0)),
+def test_plant_id_source_passes_through_when_uniform(tmp_path):
+    out = aggregate_per_plant(_mapped_rows(tmp_path, ("sequence", 1.0), ("sequence", 2.0)),
                               strategy="count", value_key="count")
     assert out[0]["plant_id_source"] == "sequence"
 
 
-def test_plant_id_source_reports_mixed_when_not_uniform():
-    out = aggregate_per_plant(_mapped_rows(("a", "sequence", 1.0), ("b", "nearest_neighbor", 2.0)),
-                              strategy="count", value_key="count")
+def test_plant_id_source_reports_mixed_when_not_uniform(tmp_path):
+    out = aggregate_per_plant(
+        _mapped_rows(tmp_path, ("sequence", 1.0), ("nearest_neighbor", 2.0)),
+        strategy="count", value_key="count")
     assert out[0]["plant_id_source"] == "mixed"
 
 
-def test_plant_id_distance_m_max_tracked():
-    out = aggregate_per_plant(_mapped_rows(("a", "sequence", 1.5), ("b", "sequence", 4.2)),
+def test_plant_id_distance_m_max_tracked(tmp_path):
+    out = aggregate_per_plant(_mapped_rows(tmp_path, ("sequence", 1.5), ("sequence", 4.2)),
                               strategy="count", value_key="count")
     assert out[0]["plant_id_distance_m_max"] == pytest.approx(4.2)
 
@@ -306,10 +306,9 @@ def test_a_delivery_refuses_a_unit_mismatched_against_crops_yml(tmp_path):
 
 
 def test_a_delivery_never_labels_a_pixel_value_with_crops_yml_units(tmp_path):
-    """A px-suffixed value_key must not inherit crops.yml's declared physical unit as a fallback:
-    that shipped a 124-pixel measurement labeled 'mm' under a real mm-declared trait. The units
-    column must be blank, not the declared unit, whenever the value's own key implies no physical
-    unit at all."""
+    """A px-suffixed value_key does not inherit crops.yml's declared physical unit: the units
+    column is blank, not the declared unit, whenever the value's own key implies no physical
+    unit."""
     from tcip_mcp.traits import crops_units
 
     assert crops_units()["bark_thickness"] == "mm"
@@ -326,13 +325,8 @@ def test_a_delivery_never_labels_a_pixel_value_with_crops_yml_units(tmp_path):
 
 
 def test_units_never_fall_back_with_no_value_key_at_all():
-    """A results list not produced by aggregate_per_plant (no value_key present) must not inherit
-    crops.yml's declared unit either; there is nothing to cross-check it against.
-
-    Asserted on the resolution rather than on a delivered file, because a row that names no
-    quantity is refused at the door now: there is nothing for a confirmed operationalization to
-    check it against.
-    """
+    """A results list with no value_key resolves no unit: crops.yml's declared unit is not
+    inherited when nothing names the quantity it would describe."""
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
     from tcip_mcp.traits import crops_units
 

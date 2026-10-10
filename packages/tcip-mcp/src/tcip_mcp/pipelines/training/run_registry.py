@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tcip_mcp.experiments import RunObservation
+    from tcip_mcp.pipelines.model_build import SourceLayout
     from tcip_mcp.pipelines.schemas import TrainConfigSchema, TrainerReads
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,8 @@ class TrainRun:
     objective: dict
     # The project the run belongs to, obtained once by the process running it.
     project: Path
+    # The laid-out source files every import the run makes reads (``model_build.SourceLayout``).
+    layout: SourceLayout
     status: str = "running"
     current_epoch: int = 0
     current_stage: int = 0
@@ -79,17 +82,21 @@ class TrainRun:
 def observed_run(observation: RunObservation, *, origin: str = "training") -> TrainRun:
     """The :class:`TrainRun` of an observed run, of ``origin``: named for its directory, training
     under its validated launch config (``RunObservation.spec``) with the data block its launch
-    resolved (``RunObservation.resolved_data``) laid over it, toward the objective that
-    resolution carries. A run whose input resolved to nothing ended at its opening and has
-    none."""
+    resolved (``RunObservation.resolved_data``) laid over it and its source files bound to the
+    run's own snapshot (``model_build.snapshot_bound``), which it imports from as the record
+    states it (``model_build.run_layout``), toward the objective that resolution carries. A run
+    whose input resolved to nothing ended at its opening and has none."""
     from tcip_mcp.experiments import project_of_run
+    from tcip_mcp.pipelines.model_build import run_layout, snapshot_bound
 
     resolved, data = observation.resolution, observation.resolved_data
     assert resolved is not None and data is not None, (
         "a run whose input resolved to nothing ended at its opening")
-    return TrainRun(id=observation.directory.name,
-                    spec=observation.spec.model_copy(update={"data": data}),
-                    objective=resolved["objective"], project=project_of_run(observation.directory),
+    spec = snapshot_bound(observation.spec.model_copy(update={"data": data}),
+                          observation.record["source"], observation.directory)
+    return TrainRun(id=observation.directory.name, spec=spec, objective=resolved["objective"],
+                    project=project_of_run(observation.directory),
+                    layout=run_layout(observation.directory, observation.record["source"]),
                     output_dir=str(observation.directory), origin=origin)
 
 

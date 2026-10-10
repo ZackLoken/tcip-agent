@@ -64,11 +64,11 @@ def _canonical_dataset(root: Path, date: str = "2-11-26") -> Path:
 def _detection_config(images_dir: Path, builder: str = BESPOKE_DETECTION) -> dict:
     """A one-image-per-batch ``training_config`` of the detection ``builder`` at 64/96 px over
     every admitted image of ``images_dir``, selecting on its loss since nothing is held out."""
-    from tests._chain_fixtures import training_config
+    from tests._chain_fixtures import BESPOKE_MODELS, training_config
 
     return training_config(
         {"builder": builder, "builder_kwargs": {"min_size": 64, "max_size": 96},
-         "task": "detection"},
+         "source_files": [BESPOKE_MODELS], "task": "detection"},
         {"images_dir": str(images_dir), "scope": {"subject": "bud"}, "auto_val": False},
         batch_size=1, evaluation=evaluation_block(selection_metric="loss"))
 
@@ -195,7 +195,7 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
     project.mkdir()
 
     images_dir = _canonical_dataset(project / "ds")
-    config = _detection_config(images_dir, "tests.bespoke_models:build_diverging_detection")
+    config = _detection_config(images_dir, "bespoke_models:build_diverging_detection")
     res = training_tools.launch_training(project, config, overfit_check=True, actor=None)
     assert "error" not in res, res
 

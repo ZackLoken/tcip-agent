@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import torch
@@ -32,11 +32,14 @@ from tcip_mcp.pipelines.data.selection import (
     DOCUMENT, MASK, SHAPE_DESCRIPTIONS, TABLE, ClassScope, Sample, refuse_unreadable_samples,
 )
 from tcip_mcp.pipelines.image_utils import (
-    frame_size, image_dimensions, load_image, pil_to_tensor, pixel_array,
+    frame_size, load_image, pil_to_tensor, pixel_array,
     to_pil_if_faithful,
 )
 from tcip_mcp.pipelines.execution import DEFAULT_OVERLAP
 from tcip_mcp.pipelines.schemas import DatasetSourceSchema, DataSpec, TilingSpec
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.model_build import SourceLayout
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +121,10 @@ class BaseImageDataset(BaseDataset):
         """One mask sample's raster as the integer class ids it carries, decoded from the bytes its
         one read answered (``stored``,
         :func:`~tcip_mcp.pipelines.data.label_queries.acquired`)."""
-        return np.array(raster_source.PhotographicSource(sample.stored.value, 1).image)
+        import io
+
+        opened = Image.open(io.BytesIO(sample.stored.value))
+        return np.array(raster_source.PhotographicSource(opened, 1).image)
 
     def _init_from_samples(self, samples: Sequence[Sample]) -> None:
         """Index a recorded sample list: each sample's own source and ground truth.
@@ -412,8 +418,8 @@ def _validated_keep_regions(
 ) -> list[tuple[int, int, int, int]] | None:
     """``keep_regions`` as int 4-tuples, or ``None`` when no filter was asked for.
 
-    A malformed rect refuses by name rather than silently keeping or dropping tiles it never
-    described. An empty sequence is a real filter that keeps nothing, distinct from ``None``.
+    A malformed rect refuses by name. An empty sequence is a real filter that keeps nothing,
+    distinct from ``None``.
     """
     if keep_regions is None:
         return None
@@ -436,18 +442,16 @@ class TiledDetectionDataset(BaseImageDataset):
     slices of SAHI's lattice (:func:`~tcip_mcp.pipelines.slicing.slice_lattice`) with labels
     clipped/remapped to slice space.
 
-    Slice membership is computed at ``__init__`` without holding any source's pixels. Sources
-    whose backend opens without a decode (``raster_source.opens_windowed``: a GDAL-served
-    raster, a memory-mapped ``.npy``) are opened through the process source pool, so their dims
-    come from the open source and layout refusals surface here; every other container is
-    measured through ``image_utils.image_dimensions`` (the header for a TIFF or a photograph,
-    the loaded array for a numpy container), whose refusals surface here too; a refusal of the
-    pixels themselves surfaces at first read.
-    ``__getitem__`` reads a windowed
-    stem one slice window at a time through the pool, and a whole-decode stem by decoding once
-    and indexing the slice; both emit the same target dict shape as ``DetectionDataset``. The
-    dataset itself never holds an open source object, so it pickles into spawned DataLoader
-    workers.
+    Slice membership is computed at ``__init__``. Each source's frame comes from its
+    :class:`~tcip_mcp.pipelines.raster_source.SourceHeader` (a TIFF's or a photograph's header,
+    a numpy container's array, which for a ``.npz`` is its pixels loaded), and the same header
+    is handed to the process source pool (``raster_source.pooled_source``), which holds open a
+    source whose backend reads windows without a decode (a GDAL-served raster, a memory-mapped
+    ``.npy``); layout refusals surface here, and a refusal of the pixels themselves surfaces at
+    first read. ``__getitem__`` reads a windowed stem one slice window at a time through the
+    pool, and a whole-decode stem by decoding once and indexing the slice; both emit the same
+    target dict shape as ``DetectionDataset``. The dataset itself never holds an open source
+    object, so it pickles into spawned DataLoader workers.
 
     ``keep_regions``, when given, is a sequence of half-open pixel rects ``(x0, y0, x1, y1)``
     in each image's own full-resolution frame: only slices lying fully inside one of them are
@@ -497,20 +501,13 @@ class TiledDetectionDataset(BaseImageDataset):
         stems_data: list[tuple[str, np.ndarray, dict[str, np.ndarray], int, int]] = []
         object_sizes: list[float] = []
         for stem in base.stems:
-            img_source = base.image_of(stem)
-            windowed = raster_source.opens_windowed(img_source, self.expected_channels)
-            if windowed:
-                # Opened now, so an unreadable layout refuses here rather than mid-epoch.
-                src = raster_source.pooled_source(img_source, self.expected_channels)
-                w, h = int(src.width), int(src.height)
-                channels = int(src.num_channels)
-                itemsize: int | None = int(np.dtype(src.dtype).itemsize)
-            else:
-                # Measured without a pooled reader: opening a whole-decode source would hold its
-                # pixels resident.
-                w, h = image_dimensions(img_source, self.expected_channels)
-                channels = None
-                itemsize = None
+            # Acquired now, so an unreadable layout refuses here rather than mid-epoch.
+            header = raster_source.SourceHeader(base.image_of(stem))
+            w, h = header.frame_at(self.expected_channels)
+            src = raster_source.pooled_source(header, self.expected_channels)
+            windowed = src is not None
+            channels = None if src is None else int(src.num_channels)
+            itemsize = None if src is None else int(np.dtype(src.dtype).itemsize)
             self._source_frames[stem] = {
                 "width": int(w), "height": int(h), "channels": channels,
                 "dtype_itemsize": itemsize, "windowed": windowed,
@@ -582,10 +579,10 @@ class TiledDetectionDataset(BaseImageDataset):
 
     @property
     def source_frames(self) -> dict[str, dict[str, Any]]:
-        """Per-stem frame facts recorded when the index was built: ``width``, ``height``,
-        ``channels`` and ``dtype_itemsize`` (both ``None`` for a source no pooled reader was
-        opened for, whose dimensions came from ``image_dimensions``), and ``windowed`` (whether
-        this source reads through a windowed backend)."""
+        """Per-stem frame facts recorded when the index was built: ``width`` and ``height`` (the
+        source header's frame), ``channels`` and ``dtype_itemsize`` (both ``None`` for a source
+        no pooled reader was opened for), and ``windowed`` (whether this source reads through a
+        windowed backend)."""
         return {stem: dict(info) for stem, info in self._source_frames.items()}
 
     @property
@@ -603,13 +600,15 @@ class TiledDetectionDataset(BaseImageDataset):
         Refuses when the recorded frame disagrees with the pooled source's own dims, or the
         returned window's shape disagrees with the requested rect.
         """
-        src = raster_source.pooled_source(self.image_of(stem), self.expected_channels)
-        if (src.width, src.height) != (info["width"], info["height"]):
+        src = raster_source.pooled_source(
+            raster_source.SourceHeader(self.image_of(stem)), self.expected_channels)
+        if src is None or (src.width, src.height) != (info["width"], info["height"]):
+            opened = "a whole decode" if src is None else f"{src.width}x{src.height}"
             raise ValueError(
                 f"tiled dataset frame changed for stem {stem!r}: indexed at "
-                f"{info['width']}x{info['height']} but the source now opens as "
-                f"{src.width}x{src.height} at {self.expected_channels} channels. Cropping here "
-                f"would displace every box."
+                f"{info['width']}x{info['height']} through a windowed reader but the source now "
+                f"opens as {opened} at {self.expected_channels} channels. Cropping here would "
+                f"displace every box."
             )
         x0, y0, x1, y1 = s
         region, _spec = src.read_region(raster_source.Rect(x0, y0, x1, y1))
@@ -794,11 +793,17 @@ def builtin_loader(task: str, dataset_source: DatasetSourceSchema | None = None
     return None if dataset_source else _DATASET_MAP.get(task)
 
 
+BespokeSource = tuple[DatasetSourceSchema, "SourceLayout"]
+"""A run's ``data.dataset_source`` and the layout of its run's declared files it imports from
+(``model_build.SourceLayout``), arriving together."""
+
+
 def build_from_dataset_source(
-    dataset_source: DatasetSourceSchema, *, task: str, samples: Sequence[Sample],
-    scope: ClassScope, transforms: Any,
+    bespoke: BespokeSource, *, task: str, samples: Sequence[Sample], scope: ClassScope,
+    transforms: Any,
 ) -> Dataset:
-    """Import the agent's dataset builder ``dataset_source`` names and call it.
+    """Import the agent's dataset builder a ``dataset_source`` names from its run's layout
+    (``bespoke``, :data:`BespokeSource`; ``model_build.import_source_builder``) and call it.
 
     The builder is called with a context of ``samples`` (the sample list for the side being built,
     each carrying its logical image, :func:`~tcip_mcp.pipelines.data.label_queries.resolved`),
@@ -811,7 +816,8 @@ def build_from_dataset_source(
     """
     from tcip_mcp.pipelines.model_build import import_source_builder
 
-    fn = import_source_builder(dataset_source.builder, dataset_source.source_files)
+    dataset_source, layout = bespoke
+    fn = import_source_builder(dataset_source.builder, layout)
     builder_kwargs = dataset_source.builder_kwargs or {}
     context = {"task": task, "samples": resolved(samples), "scope": scope,
                "transforms": transforms}
@@ -929,11 +935,12 @@ def run_tiling(task: str, tiling: TilingSpec | None) -> TilingSpec | None:
 
 
 def build_dataset(
-    task: str, dataset_source: DatasetSourceSchema | None = None, *,
+    task: str, dataset_source: BespokeSource | None = None, *,
     samples: Sequence[Sample], sizes: "Mapping[str, int]", scope: ClassScope,
     transforms: Any = None, tiling: TilingSpec | None = None, **unowned: Any,
 ) -> Dataset:
-    """Factory: build a dataset by task type, or via a bespoke ``dataset_source`` builder.
+    """Factory: build a dataset by task type, or via a bespoke builder ``dataset_source`` names
+    with the layout it imports from (:data:`BespokeSource`).
 
     ``samples`` is the producer's own sample list, required on every route: each sample reads its
     own source and the ground truth that answers for it, its own label document, its own mask
@@ -966,8 +973,8 @@ def build_dataset(
                 "none for a dataset it does not build. Drop ['tiling'], or put it in "
                 "dataset_source.builder_kwargs."
             )
-        return build_from_dataset_source(
-            dataset_source, task=task, samples=samples, scope=scope, transforms=transforms)
+        return build_from_dataset_source(dataset_source, task=task, samples=samples,
+                                         scope=scope, transforms=transforms)
 
     from tcip_mcp.pipelines.model_build import resolve_named
 

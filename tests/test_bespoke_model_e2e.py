@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
+import hashlib
 from functools import partial
 from pathlib import Path
 
@@ -125,11 +126,12 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     launch = read_record(out / RUN_FILE)
     assert launch["environment"]["torch"]
     assert launch["config"]["training_source"] == TRAIN_BESPOKE
-    manifest = launch["source"]
-    assert any(e["src"] == src_file and len(e["sha256"]) == 64
-               for e in manifest["files"])                  # source snapshotted with sha256
-    assert (out / "model_src" / next(
-        e["file"] for e in manifest["files"] if e["src"] == src_file)).is_file()
+    [entry] = launch["source"]["files"].values()            # source snapshotted with sha256
+    copy = out / entry["file"]
+    assert copy.read_bytes() == Path(src_file).read_bytes()
+    assert entry["sha256"] == hashlib.sha256(copy.read_bytes()).hexdigest()
+    assert [Path(f).resolve() for f in checkpoint.spec.model_source.source_files] == [
+        copy.resolve()]                                     # the checkpoint binds that copy
 
     # ---- (b) the custom loop's metrics + the audit bracket were recorded via ctx/envelope ----
     metric_rows = read_rows(out / METRICS_FILE)[0]

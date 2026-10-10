@@ -18,7 +18,6 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.execution import Execution
     from tcip_mcp.pipelines.slicing import TcipDetectionModel
 
-from tcip_mcp.pipelines.derivations import probe_channels
 from tcip_mcp.pipelines.execution import DEFAULT_IMAGE_BATCH_SIZE, DEFAULT_TILE_BATCH_SIZE
 from tcip_mcp.pipelines.model_build import (
     STATE_DICT_KEY,
@@ -78,7 +77,7 @@ class GenericPredictor:
         self.dims = recorded_model_dims(spec)
         self.in_chans = self.dims["in_chans"]
         self.attribute_sizes = [len(a.values) for a in self.dims.get("attributes", ())]
-        self.model = build_from_model_source(spec.model_source, self.dims)
+        self.model = build_from_model_source(spec.model_source, checkpoint.layout, self.dims)
         self.model.load_state_dict(checkpoint.payload[STATE_DICT_KEY])
         self.model.to(self.device)
         self.model.eval()
@@ -205,9 +204,10 @@ class GenericPredictor:
 
         A :class:`WindowedRasterReader` (has ``.read_window``) serves each slice from its own
         window and names the result by ``source_label``; any other source decodes whole once. Its
-        band count must equal ``in_chans`` (the reader's ``num_channels``, or a non-photographic
-        file's probed bands) or it refuses before any slice is read. A non-detection task falls
-        back to :meth:`predict` on a decoded source and refuses on a reader.
+        band count must equal ``in_chans`` (the reader's ``num_channels``, or the band count a
+        non-photographic file's decode serves) or it refuses before any slice is read. A
+        non-detection task falls back to :meth:`predict` on a decoded source and refuses on a
+        reader.
 
         The record's ``tile_resize`` stretches each slice PIL represents faithfully and maps the
         result back. ``require_masks`` on an ``instance_seg`` checkpoint adds ``masks``, one
@@ -236,31 +236,29 @@ class GenericPredictor:
                     f"task, got {self.task!r}: a raster too large to decode whole has no untiled "
                     "fallback.")
             return self.predict(cast("str | Path | BandGroupRef", source), execution)
-        from tcip_mcp.pipelines.raster_source import photographic_container
-
         reader = cast("WindowedRasterReader", source)
         decoded = cast("str | Path | BandGroupRef", source)
-        # load_image converts a photographic frame to in_chans itself; an array has no coercion.
-        bands = (reader.num_channels if windowed
-                 else self.in_chans if photographic_container(decoded, self.in_chans)
-                 else probe_channels(decoded))
-        if bands != self.in_chans:
-            raise ValueError(
-                f"source has {bands} channel(s) but the model expects in_chans={self.in_chans}; "
-                "refusing to silently truncate/pad the band count the model was trained on.")
+        # The count checked is the one the source serves at in_chans: a photograph decodes to
+        # in_chans itself, an array serves its own bands.
         interpretations: tuple[str, ...] | None
         if windowed:
             height, width, label = reader.height, reader.width, source_label
             interpretations = getattr(reader, "band_interpretations", None)
+            bands = reader.num_channels
 
             def read(x0: int, y0: int, x1: int, y1: int) -> np.ndarray:
                 return reader.read_window(y0, y1, x0, x1)
         else:
             arr, interpretations = pixel_array(load_image(decoded, self.in_chans))
             (width, height), label = frame_size(arr), source_path_of(decoded)
+            bands = int(arr.shape[-1])
 
             def read(x0: int, y0: int, x1: int, y1: int) -> np.ndarray:
                 return arr[y0:y1, x0:x1]
+        if bands != self.in_chans:
+            raise ValueError(
+                f"source has {bands} channel(s) but the model expects in_chans={self.in_chans}; "
+                "refusing to silently truncate/pad the band count the model was trained on.")
 
         tile_size, tile_resize = cast(int, execution.tile_size), execution.tile_resize
         model_edge = min(int(tile_resize[0]), int(tile_resize[1])) if tile_resize else tile_size

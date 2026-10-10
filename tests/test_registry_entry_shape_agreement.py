@@ -21,11 +21,12 @@ _RUNS = {
 
 
 def _checkpoint(path: Path, content: str) -> Path:
-    """A checkpoint file the verified reader admits at ``path``, holding ``content``."""
+    """A checkpoint at ``path`` a run completed under a root of its own, its bytes one per
+    ``content`` (``_verified_checkpoint_fixtures.produced_checkpoint``)."""
     pytest.importorskip("torch")
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
-    return checkpoint_file(path, content)
+    return produced_checkpoint(path, content)
 
 
 def _doctor():

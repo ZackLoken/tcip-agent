@@ -23,7 +23,7 @@ from tests.tiny_trainer_fixtures import (
     trainer_run,
 )
 
-BUILDER = "tests.tiny_trainer_fixtures:build_data_scaled_gradient_model"
+BUILDER = "tiny_trainer_fixtures:build_data_scaled_gradient_model"
 
 # Deliberately spread over three orders of magnitude: a step that carried a neighbor's gradient
 # too would land nowhere near the batch's own.
@@ -62,8 +62,8 @@ def _record_steps(monkeypatch, steps: list) -> None:
     fed: list = []
     real_build_model, real_build_optimizer = gt.build_from_model_source, gt.build_optimizer
 
-    def build_model(source, dims):
-        model = real_build_model(source, dims)
+    def build_model(source, plan, dims):
+        model = real_build_model(source, plan, dims)
 
         def record(module, args):
             if module.training:
