@@ -186,8 +186,44 @@ def test_a_stacked_multipage_tiff_still_reads_whole(tmp_path: Path) -> None:
     assert np.array_equal(region, tifffile.imread(str(path)))
 
 
+def test_a_whole_decoded_tiff_is_opened_once_and_never_through_gdal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stacked TIFF's header already says the whole decode serves it, so opening and reading
+    it acquires the file once through tifffile, decodes off that handle, and never opens GDAL."""
+    path, num_channels = _whole_tiff(tmp_path)
+    tiffs: list = []
+    real_init = tifffile.TiffFile.__init__
+
+    def counted(self, file, *args, **kwargs):
+        tiffs.append(file)
+        real_init(self, file, *args, **kwargs)
+
+    def no_gdal(*args, **kwargs):
+        raise AssertionError(f"GDAL opened {args}")
+
+    monkeypatch.setattr(tifffile.TiffFile, "__init__", counted)
+    monkeypatch.setattr(raster_source, "open_gdal_dataset", no_gdal)
+    with open_raster(path, num_channels) as src:
+        region, _spec = src.read_region(Rect(0, 0, src.width, src.height))
+    assert region.shape == (20, 14, 5)
+    assert len(tiffs) == 1
+
+
+def test_an_array_reader_materializes_the_layout_it_is_handed() -> None:
+    """The decoded shape and axis order an array reader serves are its layout's, never a second
+    reading of the array's own shape: a layout stating a 12x8 decode of 96 values is the frame
+    served."""
+    values = np.arange(96, dtype=np.uint8).reshape(8, 12)
+    layout = raster_source._array_layout((12, 8), 1, Path("stack.npz"))
+    with raster_source.NpzSource(values, layout) as src:
+        assert (src.height, src.width, src.num_channels) == (12, 8, 1)
+        region, _spec = src.read_region(Rect(0, 0, 8, 12))
+    assert np.array_equal(region[:, :, 0], values.reshape(12, 8))
+
+
 def test_a_shape_the_whole_decode_would_transpose_is_not_served_windowed(tmp_path: Path) -> None:
-    """``load_multiband`` reads a channel-first-looking shape into channel-last order and
+    """The whole decode reads a channel-first-looking shape into channel-last order and
     ``image_dimensions`` applies the same reading to the header, so a raster the reinterpretation
     fires on has to go whole; served windowed it would report one frame and measure as another."""
     from tcip_mcp.pipelines.image_utils import image_dimensions
@@ -249,20 +285,20 @@ _TIFF_LAYOUTS = {
 def test_the_probe_and_the_frame_read_one_band_count_off_a_tiff_header(
     tmp_path: Path, name: str,
 ) -> None:
-    """``probe_channels`` and ``tiff_frame`` read the header the same way: the probe's count is
-    the count the file serves at, and the frame served at that count carries it, for a one-row
-    RGB, a palette, a planar, a striped and a stacked TIFF."""
+    """``probe_channels`` and ``image_dimensions`` read the header the same way: the probe's count
+    is the count the file serves at, the frame served at that count is the one measured, and it
+    is the frame the header's own layout states with no hint, for a one-row RGB, a palette, a
+    planar, a striped and a stacked TIFF."""
     from tcip_mcp.pipelines.derivations import probe_channels
-    from tcip_mcp.pipelines.image_utils import display_frame
+    from tcip_mcp.pipelines.image_utils import image_dimensions
 
     path, bands = _TIFF_LAYOUTS[name](tmp_path)
     probed = probe_channels(path)
     assert probed == bands
-    frame = raster_source.tiff_frame(path, probed)
-    assert frame is not None and frame[2] == probed
+    own = raster_source._layout(raster_source.SourceHeader(path).tiff, None).frame
     with open_raster(path, probed) as src:
-        assert (src.height, src.width, src.num_channels) == frame
-    assert display_frame(path) == (frame[1], frame[0])
+        assert (src.height, src.width, src.num_channels) == own
+        assert image_dimensions(path, probed) == (src.width, src.height)
 
 
 def test_a_tiff_series_that_is_not_a_2d_image_is_refused_by_name(
@@ -277,7 +313,7 @@ def test_a_tiff_series_that_is_not_a_2d_image_is_refused_by_name(
     with pytest.raises(ValueError, match=r"\(2, 5, 20, 30\)"):
         probe_channels(path)
     with pytest.raises(ValueError, match=r"\(2, 5, 20, 30\)"):
-        raster_source.tiff_frame(path, 5)
+        raster_source.SourceHeader(path).frame_at(5)
 
     opened: list[str] = []
     real_open = raster_source.open_gdal_dataset
@@ -333,7 +369,7 @@ def test_a_palette_row_reinterpreted_by_its_hint_serves_its_expanded_pixels(
     img.save(str(path))
     rgb = np.asarray(img.convert("RGB"))
 
-    assert raster_source.tiff_frame(path, 1) == (20, 3, 1)
+    assert raster_source.SourceHeader(path).frame_at(1) == (3, 20)
     with open_raster(path, 1) as src:
         assert isinstance(src, TiffWholeSource)
         assert (src.height, src.width, src.num_channels) == (20, 3, 1)
@@ -367,13 +403,9 @@ def test_a_palette_tiff_the_table_cannot_expand_is_refused_everywhere(tmp_path: 
     with pytest.raises(ValueError, match=r"shaped \(3, 2\) holds no RGB palette"):
         probe_channels(path)
     with pytest.raises(ValueError, match="holds no RGB palette"):
-        raster_source.tiff_frame(path, 3)
+        raster_source.SourceHeader(path).frame_at(3)
     with pytest.raises(ValueError, match="holds no RGB palette"):
         open_raster(path, 3)
-    with pytest.raises(ValueError, match="holds no RGB palette"):
-        raster_source.opens_windowed(path, 3)
-    with pytest.raises(ValueError, match="holds no RGB palette"):
-        raster_source.level_dims(path, 3)
 
 
 def test_an_unreadable_tiff_fails_naming_the_file(tmp_path: Path) -> None:
@@ -386,7 +418,7 @@ def test_an_unreadable_tiff_fails_naming_the_file(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match=r"broken\.tif"):
         probe_channels(path)
     with pytest.raises(ValueError, match=r"broken\.tif"):
-        raster_source.tiff_frame(path, 3)
+        raster_source.SourceHeader(path).frame_at(3)
     with pytest.raises(ValueError, match=r"broken\.tif"):
         open_raster(path, 3)
 
@@ -487,8 +519,8 @@ def test_windowed_and_whole_decodes_of_one_tiff_agree(tmp_path: Path) -> None:
         bands = [source.read_window(y0, min(y0 + 5, 23), 0, 17) for y0 in range(0, 23, 5)]
     assembled = np.concatenate(bands, axis=0)
 
-    header = raster_source._tiff_header(path)
-    with TiffWholeSource(path, header, raster_source._layout(header, 3)) as whole:
+    header = raster_source.SourceHeader(path)
+    with TiffWholeSource(header, raster_source._layout(header.tiff, 3)) as whole:
         decoded, _spec = whole.read_region(Rect(0, 0, whole.width, whole.height))
 
     assert np.array_equal(assembled, decoded)
@@ -622,27 +654,54 @@ def test_a_distorting_target_size_refuses(tmp_path: Path, name: str) -> None:
 # ── The process-local pool of open sources ───────────────────────────────
 
 
+def _pooled(source, num_channels: int):
+    """``pooled_source`` of ``source`` through a fresh header."""
+    return raster_source.pooled_source(raster_source.SourceHeader(source), num_channels)
+
+
 def test_the_pool_serves_one_open_source_per_file_and_channel_count(tmp_path: Path) -> None:
     path, _ = _gdal_tiff(tmp_path)
-    first = raster_source.pooled_source(path, 3)
-    assert raster_source.pooled_source(path, 3) is first
-    assert raster_source.pooled_source(path, 1) is not first
+    first = _pooled(path, 3)
+    assert isinstance(first, raster_source.GdalSource)
+    assert _pooled(path, 3) is first
+    assert _pooled(path, 1) is not first
+
+
+def test_the_pool_holds_no_reader_for_a_source_that_decodes_whole(tmp_path: Path) -> None:
+    """A whole-decode source answers no reader and leaves the pool empty, so no decoded pixels
+    sit resident there."""
+    path, num_channels = _whole_tiff(tmp_path)
+    assert _pooled(path, num_channels) is None
+    assert not raster_source._POOL
 
 
 def test_the_pool_key_changes_when_a_band_member_is_rewritten(tmp_path: Path) -> None:
     ref, num_channels = _band_group(tmp_path)
-    before = raster_source.source_pool_key(ref, num_channels)
+    before = raster_source.source_version(raster_source.SourceHeader(ref))
     member = next(iter(ref.bands.values()))
     stat = member.stat()
     os.utime(member, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
-    assert raster_source.source_pool_key(ref, num_channels) != before
+    assert raster_source.source_version(raster_source.SourceHeader(ref)) != before
+
+
+@pytest.mark.parametrize("name", ["band_group", "gdal_tiff"])
+def test_a_headers_path_is_read_off_its_source_and_never_set_beside_it(
+        tmp_path: Path, name: str) -> None:
+    from tcip_mcp.pipelines.image_utils import source_path_of
+
+    source, _ = _BACKENDS[name][0](tmp_path)
+    header = raster_source.SourceHeader(source)
+    assert header.path == Path(source_path_of(source))
+    with pytest.raises(AttributeError):
+        header.path = tmp_path / "elsewhere.tif"  # type: ignore[misc]
 
 
 def test_a_forked_worker_starts_with_an_empty_pool(tmp_path: Path, monkeypatch) -> None:
     path, _ = _gdal_tiff(tmp_path)
-    parent_source = raster_source.pooled_source(path, 3)
+    parent_source = _pooled(path, 3)
+    assert parent_source is not None
     monkeypatch.setattr(os, "getpid", lambda: 424242)
-    child_source = raster_source.pooled_source(path, 3)
+    child_source = _pooled(path, 3)
     assert child_source is not parent_source
     assert not parent_source.closed  # the parent still owns what it opened
     parent_source.close()
@@ -654,13 +713,14 @@ def test_the_pool_evicts_the_least_recently_used_source_over_budget(
     second_path = tmp_path / "other.npy"
     np.save(str(second_path), _distinctive_array(18, 11, channels=5))
 
-    first = raster_source.pooled_source(first_path, num_channels)
+    first = _pooled(first_path, num_channels)
     monkeypatch.setattr(raster_source, "_memory_budget_bytes", lambda: 1)
-    second = raster_source.pooled_source(second_path, num_channels)
+    second = _pooled(second_path, num_channels)
 
+    assert first is not None and second is not None
     assert first.closed
     assert not second.closed
-    assert raster_source.pooled_source(first_path, num_channels) is not first
+    assert _pooled(first_path, num_channels) is not first
 
 
 def test_a_gdal_source_accounts_no_resident_pixels(tmp_path: Path) -> None:
@@ -686,37 +746,34 @@ def test_a_photographic_source_accounts_its_peak_resident_frames(tmp_path: Path)
 
 
 @pytest.mark.parametrize("name", sorted(_BACKENDS))
-def test_opens_windowed_names_the_backends_that_open_without_decoding(
+def test_the_header_opens_windowed_only_the_backends_that_open_without_decoding(
         tmp_path: Path, name: str) -> None:
-    """Only GDAL-served rasters and memory-mapped .npy answer windowed; a band group answers
-    false whatever its members open through, and every other backend decodes every pixel at
-    construction time."""
-    build, _backend = _BACKENDS[name]
+    """Only GDAL-served rasters and memory-mapped .npy come back as a windowed reader, the backend
+    ``open_raster`` serves them through; a band group answers none whatever its members open
+    through, as does every backend that decodes every pixel at construction time. Every source's
+    header frame is the frame its open reader serves."""
+    build, backend = _BACKENDS[name]
     source, num_channels = build(tmp_path)
-    expected = name in ("gdal_tiff", "npy")
-    assert raster_source.opens_windowed(source, num_channels) is expected
-
-
-@pytest.mark.parametrize("name", sorted(_BACKENDS))
-def test_level_dims_before_and_after_opening_agree(tmp_path: Path, name: str) -> None:
-    """The header-only answer and the open reader's own name the same overview levels: none, for
-    every source here (a GDAL-served raster with a pyramid is covered beside the pyramid's
-    build)."""
-    build, _backend = _BACKENDS[name]
-    source, num_channels = build(tmp_path)
+    header = raster_source.SourceHeader(source)
+    served = header.windowed(num_channels)
     with open_raster(source, num_channels) as src:
-        assert raster_source.level_dims(source, num_channels) == src.level_dims() == []
+        assert header.frame_at(num_channels) == (src.width, src.height)
+        if name in ("gdal_tiff", "npy"):
+            assert served is not None and type(served).__name__ == backend
+            with served:
+                assert (served.width, served.height) == (src.width, src.height)
+                assert served.level_dims() == src.level_dims() == []
+        else:
+            assert served is None
 
 
-def test_opens_windowed_refuses_an_unopenable_tiff_naming_it(tmp_path: Path) -> None:
-    """The header-only probe raises the header's own refusal; it never answers a capability for
-    a file it could not read."""
+def test_the_header_refuses_an_unopenable_tiff_naming_it(tmp_path: Path) -> None:
+    """The header read raises its own refusal; it never answers a frame for a file it could not
+    read."""
     path = tmp_path / "broken.tif"
     path.write_bytes(b"II*\x00garbage")
     with pytest.raises(ValueError, match=r"broken\.tif"):
-        raster_source.opens_windowed(path, 3)
-    with pytest.raises(ValueError, match=r"broken\.tif"):
-        raster_source.level_dims(path, 3)
+        raster_source.SourceHeader(path).frame_at(3)
 
 
 # ── Reads that were always valid and must stay so ────────────────────────
@@ -752,8 +809,6 @@ def test_a_band_group_whose_members_disagree_on_the_frame_refuses(tmp_path: Path
         read_band_group_manifest,
         write_band_group_manifest,
     )
-    from tcip_mcp.pipelines.image_utils import load_multiband
-
     d = tmp_path / "grouped"
     d.mkdir()
     green = d / "cap_G.tif"
@@ -765,19 +820,17 @@ def test_a_band_group_whose_members_disagree_on_the_frame_refuses(tmp_path: Path
 
     with pytest.raises(ValueError, match="disagree on the frame"):
         raster_source.open_raster(ref, 2)
-    with pytest.raises(ValueError):
-        load_multiband(ref, 2)
 
 
 def test_a_channel_first_shaped_npy_is_left_alone_at_a_mismatched_count(tmp_path: Path) -> None:
     """The channel-first transpose fires only when the leading axis matches the count asked for:
     a (5, 40, 24) array read at 3 channels stays exactly as it was stored."""
-    from tcip_mcp.pipelines.image_utils import load_multiband
+    from tcip_mcp.pipelines.image_utils import load_image
 
     path = tmp_path / "cfirst.npy"
     arr = np.arange(5 * 40 * 24, dtype=np.uint8).reshape(5, 40, 24)
     np.save(str(path), arr)
-    got = load_multiband(path, 3)
+    got = load_image(path, 3)
     assert got.shape == (5, 40, 24)
     assert np.array_equal(got, arr)
 
@@ -882,22 +935,43 @@ def test_region_view_reports_no_band_interpretations_for_a_parent_that_carries_n
 _IDENTITY_KW = dict(seed=7, window_size=8, max_windows=50)
 
 
+def _identity(path: Path, num_channels: int, *, seed: int, window_size: int, max_windows: int):
+    """``raster_content_identity`` of ``path`` opened at ``num_channels``."""
+    from tcip_mcp.pipelines.raster_source import raster_content_identity
+
+    with open_raster(path, num_channels) as src:
+        return raster_content_identity(
+            src, seed=seed, window_size=window_size, max_windows=max_windows)
+
+
+def _matches(recorded: dict, path: Path) -> bool:
+    """Whether ``open_as_recorded`` of ``path`` answers the fresh identity, which then is the
+    recorded one, beside a reader opened at the recorded count."""
+    from dataclasses import asdict
+
+    from tcip_mcp.pipelines.raster_source import open_as_recorded
+
+    src, fresh = open_as_recorded(recorded, path)
+    with src:
+        assert src.num_channels == recorded["num_channels"]
+    assert fresh is None or asdict(fresh) == recorded
+    return fresh is not None
+
+
 def test_raster_content_identity_agrees_across_gdal_and_npy_backends_for_same_content(
     tmp_path: Path,
 ) -> None:
     """Two entirely different backends (a GDAL-served GeoTIFF, a memory-mapped .npy) reading the
     same pixel content resolve the same identity: the checksum is the discriminating term, never
     a GDAL-only attribute."""
-    from tcip_mcp.pipelines.raster_source import raster_content_identity
-
     arr = _distinctive_array(24, 20)
     tif_path = tmp_path / "content.tif"
     npy_path = tmp_path / "content.npy"
     _write_striped_tiff(tif_path, arr, rowsperstrip=4)
     np.save(str(npy_path), arr)
 
-    tif_identity = raster_content_identity(tif_path, 3, **_IDENTITY_KW)
-    npy_identity = raster_content_identity(npy_path, 3, **_IDENTITY_KW)
+    tif_identity = _identity(tif_path, 3, **_IDENTITY_KW)
+    npy_identity = _identity(npy_path, 3, **_IDENTITY_KW)
 
     assert tif_identity.pixel_checksum == npy_identity.pixel_checksum
     assert (tif_identity.width, tif_identity.height, tif_identity.num_channels) == (
@@ -908,14 +982,12 @@ def test_raster_content_identity_agrees_across_gdal_and_npy_backends_for_same_co
 def test_raster_content_identity_differs_for_different_content_same_dimensions(
     tmp_path: Path,
 ) -> None:
-    from tcip_mcp.pipelines.raster_source import raster_content_identity
-
     a_path, b_path = tmp_path / "a.npy", tmp_path / "b.npy"
     np.save(str(a_path), _distinctive_array(24, 20))
     np.save(str(b_path), np.zeros((24, 20, 3), dtype=np.uint8))
 
-    a_identity = raster_content_identity(a_path, 3, **_IDENTITY_KW)
-    b_identity = raster_content_identity(b_path, 3, **_IDENTITY_KW)
+    a_identity = _identity(a_path, 3, **_IDENTITY_KW)
+    b_identity = _identity(b_path, 3, **_IDENTITY_KW)
 
     assert (a_identity.width, a_identity.height) == (b_identity.width, b_identity.height)
     assert a_identity.pixel_checksum != b_identity.pixel_checksum
@@ -926,13 +998,11 @@ def test_raster_content_identity_deterministic_under_matching_recorded_parameter
 ) -> None:
     """Two calls agree when both recompute under the identity's own recorded seed, window size
     and window count: the parameters that travel with the identity."""
-    from tcip_mcp.pipelines.raster_source import raster_content_identity
-
     path = tmp_path / "content.npy"
     np.save(str(path), _distinctive_array(30, 22))
 
-    first = raster_content_identity(path, 3, **_IDENTITY_KW)
-    second = raster_content_identity(
+    first = _identity(path, 3, **_IDENTITY_KW)
+    second = _identity(
         path, 3, seed=first.seed, window_size=first.window_size, max_windows=first.max_windows)
 
     assert first.pixel_checksum == second.pixel_checksum
@@ -940,16 +1010,14 @@ def test_raster_content_identity_deterministic_under_matching_recorded_parameter
 
 
 def test_raster_content_identity_band_interpretations_present_only_on_gdal(tmp_path: Path) -> None:
-    from tcip_mcp.pipelines.raster_source import raster_content_identity
-
     tif_path = tmp_path / "content.tif"
     npy_path = tmp_path / "content.npy"
     arr = _distinctive_array(24, 20)
     _write_striped_tiff(tif_path, arr, rowsperstrip=4)
     np.save(str(npy_path), arr)
 
-    tif_identity = raster_content_identity(tif_path, 3, **_IDENTITY_KW)
-    npy_identity = raster_content_identity(npy_path, 3, **_IDENTITY_KW)
+    tif_identity = _identity(tif_path, 3, **_IDENTITY_KW)
+    npy_identity = _identity(npy_path, 3, **_IDENTITY_KW)
 
     assert tif_identity.band_interpretations == ("red", "green", "blue")
     assert npy_identity.band_interpretations is None
@@ -958,55 +1026,101 @@ def test_raster_content_identity_band_interpretations_present_only_on_gdal(tmp_p
 def test_raster_content_identity_geotransform_optional_never_load_bearing(tmp_path: Path) -> None:
     """A raster with no georeferencing tags (every fixture this module writes) still resolves a
     fully usable identity: the geotransform term is absent, the checksum is not."""
-    from tcip_mcp.pipelines.raster_source import raster_content_identity
-
     tif_path = tmp_path / "content.tif"
     _write_striped_tiff(tif_path, _distinctive_array(24, 20), rowsperstrip=4)
 
-    identity = raster_content_identity(tif_path, 3, **_IDENTITY_KW)
+    identity = _identity(tif_path, 3, **_IDENTITY_KW)
     assert identity.geotransform is None
     assert identity.pixel_checksum  # a real, usable identity despite no geotransform
 
     npy_path = tmp_path / "content.npy"
     np.save(str(npy_path), _distinctive_array(24, 20))
-    npy_identity = raster_content_identity(npy_path, 3, **_IDENTITY_KW)
+    npy_identity = _identity(npy_path, 3, **_IDENTITY_KW)
     assert npy_identity.geotransform is None  # not a GeoTIFF; still a fully usable identity
 
 
-def test_raster_content_identity_refuses_only_when_unopenable(tmp_path: Path) -> None:
-    from tcip_mcp.pipelines.raster_source import raster_content_identity
-
-    with pytest.raises(ValueError):
-        raster_content_identity(tmp_path / "nonexistent.npy", 3, **_IDENTITY_KW)
-
-
-# ── content_identity: raster_content_identity under the platform's own budget ────────────────
-
-
-def test_content_identity_with_an_explicit_channel_count_matches_the_direct_call(
-    tmp_path: Path,
+def test_an_identity_reads_its_geotransform_off_the_open_reader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An explicit channel count gives exactly the value the direct ``raster_content_identity``
-    call under the platform's constants computes. A grayscale photograph is the discriminating
-    input: ``probe_channels`` reads it at 1 while ``image_route_channel_count`` reads it at 3, so
-    the two counts disagree and only the explicit count threaded through can match."""
-    from PIL import Image
+    """A georeferenced GeoTIFF's identity carries the geotransform its tags state, and records it
+    without opening the file again: the header the reader was opened from already holds it."""
+    import tifffile as tifffile_module
 
-    from tcip_mcp.pipelines.raster_source import (
-        CONTENT_IDENTITY_MAX_WINDOWS, CONTENT_IDENTITY_SEED, CONTENT_IDENTITY_WINDOW_SIZE,
-        content_identity, raster_content_identity,
+    from tests._geotiff_fixtures import (
+        PIXEL_SCALE, TIEPOINT_NATIVE_X, TIEPOINT_NATIVE_Y, UTM_15N_EPSG, write_geotiff,
     )
 
-    path = tmp_path / "gray.png"
-    Image.fromarray(_distinctive_gray(20, 16), mode="L").save(path)
+    path = tmp_path / "geo.tif"
+    write_geotiff(path, shape=(24, 20, 3))
+    with open_raster(path, 3) as src:
+        assert isinstance(src, raster_source.GdalSource)
+        opened: list[str] = []
+        real = tifffile_module.TiffFile
 
-    explicit = content_identity(path, 1)
-    old_spelling = raster_content_identity(
-        path, 1, seed=CONTENT_IDENTITY_SEED, window_size=CONTENT_IDENTITY_WINDOW_SIZE,
-        max_windows=CONTENT_IDENTITY_MAX_WINDOWS)
+        def counting(*args, **kwargs):
+            opened.append(str(args[0]))
+            return real(*args, **kwargs)
 
-    assert explicit == old_spelling
-    assert explicit != content_identity(path)
+        monkeypatch.setattr(tifffile_module, "TiffFile", counting)
+        identity = raster_source.raster_content_identity(src, **_IDENTITY_KW)
+        monkeypatch.undo()
+    assert opened == []
+    assert identity.geotransform == {
+        "tiepoint_pixel_x": 0.0, "tiepoint_pixel_y": 0.0,
+        "tiepoint_native_x": TIEPOINT_NATIVE_X, "tiepoint_native_y": TIEPOINT_NATIVE_Y,
+        "pixel_scale_x": PIXEL_SCALE, "pixel_scale_y": PIXEL_SCALE, "epsg": UTM_15N_EPSG,
+    }
+
+
+def test_a_georeferenced_mismatch_check_computes_one_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Checking a raster against its recorded identity and georeferencing samples it once: the
+    geotransform compared is the one the content check's own fresh identity carries."""
+    from dataclasses import asdict
+
+    from tests._geotiff_fixtures import write_geotiff
+
+    path = tmp_path / "geo.tif"
+    write_geotiff(path, shape=(24, 20, 3), random=True)
+    with open_raster(path, 3) as src:
+        recorded = asdict(raster_source.content_identity(src))
+    computed: list = []
+    real = raster_source.raster_content_identity
+
+    def counting(*args, **kwargs):
+        computed.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(raster_source, "raster_content_identity", counting)
+    reader, fresh = raster_source.open_as_recorded(recorded, path)
+    reader.close()
+    assert raster_source.georeferenced_raster_identity_mismatch(recorded, fresh) is None
+    assert len(computed) == 1
+
+    unrecorded = {k: v for k, v in recorded.items() if k != "geotransform"}
+    with pytest.raises(KeyError, match="geotransform"):
+        raster_source.georeferenced_raster_identity_mismatch(unrecorded, fresh)
+
+
+def test_a_frame_question_opens_no_gdal_dataset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The frame of a GDAL-served TIFF, at a stated count or at the route's, comes off its header
+    alone: no dataset is opened to measure it."""
+    from tcip_mcp.pipelines.image_utils import image_dimensions
+
+    path, num_channels = _gdal_tiff(tmp_path)
+    with open_raster(path, num_channels) as src:
+        assert isinstance(src, raster_source.GdalSource)
+        served = (src.width, src.height)
+
+    def refuse(*_a, **_k):
+        raise AssertionError("a frame question opened a GDAL dataset")
+
+    monkeypatch.setattr(raster_source, "open_gdal_dataset", refuse)
+    assert image_dimensions(path, num_channels) == served
+    assert raster_source.SourceHeader(path).display_frame == served
 
 
 def _distinctive_gray(height: int, width: int) -> np.ndarray:
@@ -1018,44 +1132,64 @@ def _distinctive_gray(height: int, width: int) -> np.ndarray:
     return arr
 
 
-def test_content_identity_with_no_channel_count_uses_the_image_route_rule(tmp_path: Path) -> None:
-    """Omitting ``num_channels`` resolves the same channel count
-    :func:`image_route_channel_count` gives the source."""
-    from PIL import Image
-
-    from tcip_mcp.pipelines.raster_source import content_identity, image_route_channel_count
-
-    path = tmp_path / "photo.png"
-    Image.fromarray(_distinctive_gray(20, 16), mode="L").save(path)
-
-    identity = content_identity(path)
-    assert identity.num_channels == image_route_channel_count(path) == 3
-
-
-def test_image_route_channel_count_expands_a_grayscale_photograph_to_three(tmp_path: Path) -> None:
+def test_the_route_count_expands_a_grayscale_photograph_to_three(tmp_path: Path) -> None:
     """A grayscale photographic frame opens at three channels on a plain serve (PIL's own RGB
-    expansion), the same override :func:`content_identity`'s default relies on."""
+    expansion)."""
     from PIL import Image
-
-    from tcip_mcp.pipelines.raster_source import image_route_channel_count
 
     path = tmp_path / "gray.png"
     Image.fromarray(_distinctive_gray(20, 16), mode="L").save(path)
 
-    assert image_route_channel_count(path) == 3
+    header = raster_source.SourceHeader(path)
+    assert (header.channels, header.route_channels) == (1, 3)
 
 
-def test_image_route_channel_count_leaves_an_array_container_at_its_own_band_count(
+def test_a_photographs_header_and_its_decode_share_one_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reading a photograph's count and frame and then opening it at the route count opens the
+    file through PIL once: the reader decodes the image the header opened."""
+    import PIL.Image
+
+    path, _ = _photographic(tmp_path)
+    opened: list = []
+    real = PIL.Image.open
+
+    def counting(*args, **kwargs):
+        opened.append(args[0])
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(PIL.Image, "open", counting)
+    header = raster_source.SourceHeader(path)
+    frame = header.display_frame
+    with header.open(header.route_channels) as src:
+        assert (src.width, src.height) == frame
+    assert len(opened) == 1
+
+
+def test_a_grayscale_with_alpha_photograph_is_served_at_the_route_count(tmp_path: Path) -> None:
+    """A two-band photograph (PIL's ``LA``) has no PIL mode at its own count, so the route opens
+    it at three like every photograph; its display frame is the one that reader serves."""
+    from PIL import Image
+
+    path = tmp_path / "gray_alpha.png"
+    Image.new("LA", (16, 20)).save(path)
+    header = raster_source.SourceHeader(path)
+    assert (header.channels, header.route_channels) == (2, 3)
+    assert header.display_frame == (16, 20)
+    with header.open_at_route_count() as src:
+        assert (src.width, src.height, src.num_channels) == (16, 20, 3)
+
+
+def test_the_route_count_leaves_an_array_container_at_its_own_band_count(
     tmp_path: Path,
 ) -> None:
     """A non-photographic container (an .npy raster) is never subject to the photographic
     override: its own probed band count is what a plain serve opens it at."""
-    from tcip_mcp.pipelines.raster_source import image_route_channel_count
-
     path = tmp_path / "single_band.npy"
     np.save(str(path), _distinctive_gray(20, 16))
 
-    assert image_route_channel_count(path) == 1
+    assert raster_source.SourceHeader(path).route_channels == 1
 
 
 # ── raster_identity_matches: the claim-scope comparison ──────────────────────────────────────
@@ -1064,24 +1198,20 @@ def test_image_route_channel_count_leaves_an_array_container_at_its_own_band_cou
 def test_raster_identity_matches_same_file(tmp_path: Path) -> None:
     from dataclasses import asdict
 
-    from tcip_mcp.pipelines.raster_source import raster_content_identity, raster_identity_matches
-
     path = tmp_path / "content.npy"
     np.save(str(path), _distinctive_array(24, 20))
-    recorded = asdict(raster_content_identity(path, 3, **_IDENTITY_KW))
-    assert raster_identity_matches(recorded, path) is True
+    recorded = asdict(_identity(path, 3, **_IDENTITY_KW))
+    assert _matches(recorded, path) is True
 
 
 def test_raster_identity_matches_false_for_different_content(tmp_path: Path) -> None:
     from dataclasses import asdict
 
-    from tcip_mcp.pipelines.raster_source import raster_content_identity, raster_identity_matches
-
     a_path, b_path = tmp_path / "a.npy", tmp_path / "b.npy"
     np.save(str(a_path), _distinctive_array(24, 20))
     np.save(str(b_path), np.zeros((24, 20, 3), dtype=np.uint8))
-    recorded = asdict(raster_content_identity(a_path, 3, **_IDENTITY_KW))
-    assert raster_identity_matches(recorded, b_path) is False
+    recorded = asdict(_identity(a_path, 3, **_IDENTITY_KW))
+    assert _matches(recorded, b_path) is False
 
 
 def test_raster_identity_matches_recomputes_under_the_recorded_parameters_not_a_new_default(
@@ -1092,25 +1222,11 @@ def test_raster_identity_matches_recomputes_under_the_recorded_parameters_not_a_
     recorded parameters drove the comparison."""
     from dataclasses import asdict
 
-    from tcip_mcp.pipelines.raster_source import raster_content_identity, raster_identity_matches
-
     path = tmp_path / "content.npy"
     np.save(str(path), _distinctive_array(30, 22))
-    recorded = asdict(raster_content_identity(path, 3, seed=1, window_size=4, max_windows=3))
+    recorded = asdict(_identity(path, 3, seed=1, window_size=4, max_windows=3))
     # A differently-parameterized fresh call would disagree on the checksum; matches() must not
     # take that path, it must recompute under recorded's own seed/window_size/max_windows.
-    off_default = raster_content_identity(path, 3, seed=99, window_size=6, max_windows=2)
+    off_default = _identity(path, 3, seed=99, window_size=6, max_windows=2)
     assert off_default.pixel_checksum != recorded["pixel_checksum"]
-    assert raster_identity_matches(recorded, path) is True
-
-
-def test_raster_identity_matches_raises_when_source_unopenable(tmp_path: Path) -> None:
-    from dataclasses import asdict
-
-    from tcip_mcp.pipelines.raster_source import raster_content_identity, raster_identity_matches
-
-    path = tmp_path / "content.npy"
-    np.save(str(path), _distinctive_array(24, 20))
-    recorded = asdict(raster_content_identity(path, 3, **_IDENTITY_KW))
-    with pytest.raises(ValueError):
-        raster_identity_matches(recorded, tmp_path / "nonexistent.npy")
+    assert _matches(recorded, path) is True

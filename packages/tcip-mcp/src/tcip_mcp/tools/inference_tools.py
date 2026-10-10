@@ -3,8 +3,10 @@ delivering a bucket's per-image counts."""
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from collections.abc import Callable
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any, cast
 
@@ -13,6 +15,7 @@ from tcip_store import (
 )
 
 from tcip_mcp.pipelines.execution import DEFAULT_TILE_BATCH_SIZE, Stated
+from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 
 logger = logging.getLogger(__name__)
@@ -24,16 +27,18 @@ bucket's dataset root and name."""
 
 
 def infer(
-    project: Path, *, checkpoint_path: str, images_dir: str | None, raster_path: str | None,
+    project: Path, *, checkpoint_path: Path, images_dir: str | None, raster_path: str | None,
     bucket: str, assessment_id: str | None, stated: Stated | None, device: str | None,
     tile_batch_size: int, dry_run: bool, require_masks: bool, resume: bool,
     progress: Callable[[int, int], None] | None = None,
     canceled: Callable[[], bool] | None = None, actor: str | None,
 ) -> dict:
-    """Run a registered checkpoint's pass over the capture ``images_dir``
-    (:func:`~tcip_mcp.dataset_layout.parse_capture_dir`, which refuses any other directory) or
-    ``raster_path`` and publish its predictions as the bucket named ``bucket`` under their dataset
-    root (:func:`~tcip_mcp.buckets.source_root`) by ``actor``, answering the publication's result or
+    """Run the registered checkpoint at ``checkpoint_path``'s pass over the capture
+    ``images_dir`` (:func:`~tcip_mcp.dataset_layout.parse_capture_dir`, which refuses any other
+    directory) or ``raster_path``, each a location its caller's arrival established, and
+    publish its predictions as the bucket named
+    ``bucket`` under their dataset root (:func:`~tcip_mcp.buckets.source_root`) by ``actor``,
+    answering the publication's result or
     the error dict naming a refusal. ``progress`` is called with ``(done, total)`` images once the
     pass is prepared and after each image, and ``canceled`` asked before each image: once it
     answers true the pass stops at that image boundary and publishes the documents predicted, or
@@ -77,46 +82,52 @@ def infer(
     except (ExecutionRefusedError, ValueError) as exc:
         return {"error": str(exc)}
 
-    raster_identity = None
-    if raster_path is not None:
-        from tcip_mcp.pipelines.data.split_construction import raster_identity as identity_of
-        from tcip_mcp.pipelines.image_utils import resolve_image_path
+    # A raster pass reads its raster through one reader, opened at the model's count: the
+    # identity it records and the predictions it publishes are of the one frame that reader serves.
+    with ExitStack() as held:
+        reader, raster_identity = None, None
+        if raster_path is not None:
+            from tcip_mcp.pipelines.image_utils import resolve_image_path
+            from tcip_mcp.pipelines.raster_source import content_identity, open_raster
 
-        try:
-            raster_identity = decode_value(encode_record(identity_of(
-                resolve_image_path(raster_path))))
-        except ValueError as exc:
-            return {"error": f"raster content identity could not be computed for "
-                             f"{raster_path}: {exc}"}
-    pass_identity = {"raster_identity": raster_identity, **checkpoint.producer,
-                     "assessment_id": assessment_id, "tile_batch_size": tile_batch_size,
-                     "require_masks": require_masks}
-    if recorded is not None:
-        differing = sorted(k for k in recorded.keys() | pass_identity.keys()
-                           if recorded.get(k) != pass_identity.get(k))
-        if differing:
-            return {"error": f"resume=True but the recorded pass toward bucket {bucket!r} differs "
-                             f"from this call in {differing}: a resumed pass is the identical "
-                             "pass."}
-    if dry_run:
-        return {"dry_run": True, "dataset_root": str(root), "bucket": bucket,
-                "bucket_exists": store.exists(bucket_key(root, bucket)),
-                "execution": p.execution.record(), "assessment_id": assessment_id}
+            try:
+                reader = held.enter_context(
+                    open_raster(resolve_image_path(raster_path), p.predictor.in_chans))
+                raster_identity = decode_value(encode_record(
+                    dataclasses.asdict(content_identity(reader))))
+            except (FileNotFoundError, ValueError) as exc:
+                return {"error": f"raster content identity could not be computed for "
+                                 f"{raster_path}: {exc}"}
+        pass_identity = {"raster_identity": raster_identity, **checkpoint.producer,
+                         "assessment_id": assessment_id, "tile_batch_size": tile_batch_size,
+                         "require_masks": require_masks}
+        if recorded is not None:
+            differing = sorted(k for k in recorded.keys() | pass_identity.keys()
+                               if recorded.get(k) != pass_identity.get(k))
+            if differing:
+                return {"error": f"resume=True but the recorded pass toward bucket {bucket!r} "
+                                 f"differs from this call in {differing}: a resumed pass is the "
+                                 "identical pass."}
+        if dry_run:
+            return {"dry_run": True, "dataset_root": str(root), "bucket": bucket,
+                    "bucket_exists": store.exists(bucket_key(root, bucket)),
+                    "execution": p.execution.record(), "assessment_id": assessment_id}
 
-    results: Any
-    if raster_path is not None:
-        try:
-            results = [_raster_pass(project, root, bucket, p, raster_path,
-                                    {**pass_identity, "execution": p.execution.record()},
-                                    require_masks=require_masks, resumed=recorded is not None)]
-        except VersionConflictError:
-            return {"error": f"a raster pass toward bucket {bucket!r} is already recorded: resume "
-                             "it (resume=True), or name a bucket no pass has been recorded "
-                             "toward."}
-    else:
-        results = list(_image_results(p, progress, canceled))
-        if not results and canceled is not None and canceled():
-            return {"dataset_root": str(root), "bucket": bucket, "image_count": 0}
+        results: Any
+        if reader is not None:
+            try:
+                results = [_raster_pass(project, root, bucket, p, reader, str(raster_path),
+                                        {**pass_identity, "execution": p.execution.record()},
+                                        require_masks=require_masks,
+                                        resumed=recorded is not None)]
+            except VersionConflictError:
+                return {"error": f"a raster pass toward bucket {bucket!r} is already recorded: "
+                                 "resume it (resume=True), or name a bucket no pass has been "
+                                 "recorded toward."}
+        else:
+            results = list(_image_results(p, progress, canceled))
+            if not results and canceled is not None and canceled():
+                return {"dataset_root": str(root), "bucket": bucket, "image_count": 0}
     try:
         published = publish(project, root, bucket, pass_documents(p, results),
                             producer=p.checkpoint.producer, scope=p.scope, execution=p.execution,
@@ -209,8 +220,10 @@ def run_inference(
             value it records differently refuses by name, and so does a different checkpoint,
             raster, assessment, tile batch size or mask choice.
     """
-    return infer(project, checkpoint_path=checkpoint_path, images_dir=images_dir,
-                 raster_path=raster_path, bucket=bucket, assessment_id=assessment_id,
+    return infer(project, checkpoint_path=located(checkpoint_path, project),
+                 images_dir=images_dir and str(located(images_dir, project)),
+                 raster_path=raster_path and str(located(raster_path, project)),
+                 bucket=bucket, assessment_id=assessment_id,
                  stated=stated, device=device, tile_batch_size=tile_batch_size, dry_run=dry_run,
                  require_masks=require_masks, resume=resume, actor=None)
 
@@ -229,13 +242,11 @@ def _progress_keys(project: Path, root: Path, bucket: str) -> list[Key]:
     return store.keys(RASTER_PASS_PROGRESS_STORE, str(project), (canonical_path(root), bucket))
 
 
-def _raster_pass(project: Path, root: Path, bucket: str, p: Any, raster_path: str,
+def _raster_pass(project: Path, root: Path, bucket: str, p: Any, reader: Any, label: str,
                  pass_identity: dict, *, require_masks: bool, resumed: bool) -> dict:
-    """The one tiled pass over the raster: its identity recorded first on a fresh pass, each
-    flushed tile batch recorded as it lands, the batches already recorded fed back in on a
-    resumed one."""
-    from tcip_mcp.pipelines.raster_source import open_raster
-
+    """The one tiled pass over the open raster ``reader`` (``label`` naming it): its identity
+    recorded first on a fresh pass, each flushed tile batch recorded as it lands, the batches
+    already recorded fed back in on a resumed one."""
     prior: dict[str, list] | None = None
     if resumed:
         indexed = sorted((int(key.parts[-1][len("batch-"):]), key)
@@ -254,11 +265,9 @@ def _raster_pass(project: Path, root: Path, bucket: str, p: Any, raster_path: st
         store.replace(_progress_key(project, root, bucket, f"batch-{start:06d}"), batch,
                       expect=Version.ABSENT)
 
-    with open_raster(raster_path, p.predictor.in_chans) as reader:
-        return p.predictor.predict_sliced(
-            reader, execution=p.execution, tile_batch_size=p.tile_batch_size,
-            require_masks=require_masks, source_label=str(raster_path), prior=prior,
-            progress=record)
+    return p.predictor.predict_sliced(
+        reader, execution=p.execution, tile_batch_size=p.tile_batch_size,
+        require_masks=require_masks, source_label=label, prior=prior, progress=record)
 
 
 def _clear_raster_pass_progress(project: Path, root: Path, bucket: str) -> None:
@@ -288,7 +297,7 @@ def deliver_per_image_counts(project: Path, dataset_root: str, bucket: str, outp
     Args:
         dataset_root: The dataset root the bucket is published under.
         bucket: The published bucket's name.
-        output_path: The CSV to write; a relative path is under the project.
+        output_path: The CSV to write.
         trait: The trait whose confirmed per-image-count operationalization this rests on.
         acknowledgment_id: A breeder's recorded acknowledgment of this unvalidated result.
     """
@@ -299,7 +308,7 @@ def deliver_per_image_counts(project: Path, dataset_root: str, bucket: str, outp
 
     try:
         return deliver_per_image_counts_csv(
-            project, dataset_root, bucket, str(Path(project, output_path)),
+            project, located(dataset_root, project), bucket, str(located(output_path, project)),
             trait=trait, acknowledgment_id=acknowledgment_id, door="deliver_per_image_counts",
             actor=None)
     except (DeliveryRefusedError, OperationalizationRefusedError, TraitUnknownError,

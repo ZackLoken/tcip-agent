@@ -186,8 +186,7 @@ def test_get_bands_endpoint_never_decodes_pixels_for_a_plain_rgb_photo(
         called.append(1)
         raise AssertionError("no raster should be opened for a plain <=3-band source")
 
-    monkeypatch.setattr(raster_source, "open_raster", _fail_if_called)
-    monkeypatch.setattr(raster_source, "open_array_source", _fail_if_called)
+    monkeypatch.setattr(raster_source.SourceHeader, "open", _fail_if_called)
 
     plain = grouped_dataset / "images" / "2026-05-01" / "plain_002.jpg"
     resp = client.get("/api/images/bands", params={"path": str(plain)})
@@ -214,7 +213,7 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     channel-aware loader, never as a stringified BandGroupRef."""
     pytest.importorskip("torch")
 
-    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS, foreign_checkpoint
+    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS, registered_checkpoint
 
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.execution import Stated
@@ -223,7 +222,7 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     images_dir = tmp_path / "images" / "2026-01-01"
     images_dir.mkdir(parents=True)
     _write_group(images_dir, "cap_001")
-    ckpt = foreign_checkpoint(tmp_path)
+    ckpt = registered_checkpoint(tmp_path)
 
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.pipelines.image_utils import source_path_of

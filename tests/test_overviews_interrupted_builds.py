@@ -16,11 +16,11 @@ import tifffile
 
 from tcip_mcp.pipelines import overviews as overviews_module
 from tcip_mcp.pipelines.overviews import (
-    _predicted_sidecar_bytes,
     build_overviews,
     overview_dims,
     overview_levels,
     overview_sidecar,
+    plan_overview_build,
     sidecar_valid,
 )
 
@@ -113,19 +113,23 @@ def test_a_sidecar_is_invalid_when_a_deeper_pyramid_level_is_unwritten(tmp_path:
     assert sidecar_valid(path) is False
 
 
-def test_the_progress_denominator_scales_with_the_pyramid_area() -> None:
+def test_the_progress_denominator_scales_with_the_pyramid_area(tmp_path: Path) -> None:
     """Progress is reported against the pyramid's pixel count, so quadrupling a raster's pixels
     quadruples the denominator. A denominator that grew with the raster's edges instead would be
     passed by the sidecar's first few kilobytes and report a fresh build as nearly finished."""
-    levels = [2, 4, 8]
-    short = _predicted_sidecar_bytes(32768, 256, 1, 1, levels)
-    tall = _predicted_sidecar_bytes(32768, 1024, 1, 1, levels)
-    assert tall == 4 * short
+    import rasterio
 
-    wider_and_taller = _predicted_sidecar_bytes(65536, 512, 1, 1, levels)
-    assert wider_and_taller == 4 * short
+    def predicted(name: str, arr: np.ndarray) -> int:
+        path = tmp_path / name
+        tifffile.imwrite(str(path), arr)
+        with rasterio.open(str(path)) as ds:
+            plan = plan_overview_build(ds)
+        assert plan["levels"] == [2, 4]
+        return plan["predicted"]
 
-    assert _predicted_sidecar_bytes(32768, 256, 3, 2, levels) == 6 * short
+    short = predicted("short.tif", np.zeros((8, 4096), dtype=np.uint8))
+    assert predicted("tall.tif", np.zeros((32, 4096), dtype=np.uint8)) == 4 * short
+    assert predicted("deep.tif", np.zeros((8, 4096, 3), dtype=np.uint16)) == 6 * short
 
 
 def test_reported_progress_never_overstates_how_much_of_the_sidecar_is_written(

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, get_args
 
 if TYPE_CHECKING:
-    from tcip_mcp.pipelines.raster_source import RasterSource, WindowSampling
+    from tcip_mcp.pipelines.raster_source import RasterSource
 
 # The bounds a ``percent_clip`` render stretches between, as percentiles of the band's own values:
 # the display clip the band-composite route offers a viewer.
@@ -36,23 +36,22 @@ class BandRange:
 
 @dataclass(frozen=True)
 class SampledBandRanges:
-    """Per-band display bounds read from a sample of a raster's pixels, with the sample itself.
+    """Per-band display bounds read from a sample of a raster's pixels.
 
     ``ranges`` bounds the spread of the pixels actually read and never claims to be the raster's
     own min/max: a more extreme value in a window the sample missed is invisible here.
-    ``clip_bounds`` holds, per band and in the same order, the ``percentiles`` cut points of those
-    same pixels, drawn from a bounded reservoir of them rather than from all of them, so
-    ``clip_sample_size`` (how many pixel samples the reservoir held) says how many values each cut
-    point was read off. When the reservoir held every pixel the windows covered, the cut points are
-    that sample's exact percentiles; below that they are estimates of them.
-    ``sampling`` names the windows that were read, so a caller can say what the numbers describe.
+    ``clip_bounds`` holds, per band and in the same order, the requested percentile cut points of
+    those same pixels, drawn from a bounded reservoir of them rather than from all of them: when
+    the reservoir held every pixel the windows covered, the cut points are that sample's exact
+    percentiles; below that they are estimates of them. ``seed`` reproduces the window draw and
+    ``pixel_fraction`` is the share of the raster's pixels the windows covered (1.0 when they
+    covered every pixel), so a caller can say what the numbers describe.
     """
 
     ranges: list[BandRange]
     clip_bounds: list[tuple[float, float]]
-    percentiles: tuple[float, float]
-    clip_sample_size: int
-    sampling: WindowSampling
+    seed: int
+    pixel_fraction: float
 
 
 def band_ranges(pixels) -> list[BandRange]:
@@ -207,18 +206,18 @@ def _reservoir_take(reservoir, seen: int, values, size: int, rng):
     return reservoir, seen
 
 
-def sampled_band_ranges(src: "RasterSource", *, label: str, seed: int,
+def sampled_band_ranges(src: "RasterSource", *, seed: int,
                         window_size: int, max_windows: int, reservoir_size: int,
                         percentiles: tuple[float, float] = DISPLAY_CLIP_PERCENTILES,
                         ) -> SampledBandRanges:
     """Per-band display bounds from a seeded sample of the open reader ``src``'s pixel windows,
-    in one pass, the sampling record naming the source as ``label``.
+    in one pass.
 
     A raster far too large to decode whole is described from the windows
     ``raster_source.sample_windows`` picks and from nothing else. One walk of those windows
     produces each band's min/max and each band's ``percentiles`` cut points off a bounded
     reservoir of the pixels walked. The result is a sample's bounds, never the raster's, and
-    says so through its :class:`SampledBandRanges` type and the returned sampling record;
+    says so through its :class:`SampledBandRanges` type, seed and covered fraction;
     :func:`band_ranges` gives the exact range of decoded pixels.
 
     ``seed`` and ``reservoir_size`` are required; the reservoir holds at most ``reservoir_size`` x
@@ -252,13 +251,10 @@ def sampled_band_ranges(src: "RasterSource", *, label: str, seed: int,
     # sample_windows always returns at least one window for a raster with positive dimensions,
     # so the loop above ran at least once.
     assert lows is not None and highs is not None and reservoir is not None
-    sampling = raster_source.WindowSampling(
-        tuple((label, rect) for rect in windows), int(seed), float(fraction))
     return SampledBandRanges(
         ranges=[BandRange(float(lo), float(hi)) for lo, hi in zip(lows, highs)],
         clip_bounds=[clip_bounds(reservoir[:, i], percentiles)
                      for i in range(reservoir.shape[1])],
-        percentiles=(float(percentiles[0]), float(percentiles[1])),
-        clip_sample_size=int(reservoir.shape[0]),
-        sampling=sampling,
+        seed=int(seed),
+        pixel_fraction=float(fraction),
     )

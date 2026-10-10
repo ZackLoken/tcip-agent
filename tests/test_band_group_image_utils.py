@@ -1,5 +1,5 @@
 """image_utils.list_logical_images / resolve_image_path, and the BandGroupRef-accepting
-overloads of load_image / load_multiband / image_dimensions.
+overloads of load_image / image_dimensions.
 
 Uses the real DJI multispectral sample (copied into tmp_path, never mutated in place) for at least
 one grouped-capture decode, plus synthetic 2-band fixtures for the cheaper/faster edge cases.
@@ -198,9 +198,8 @@ def test_list_logical_images_with_a_corrupt_manifest_beside_a_same_stem_raw_file
 
 
 def test_list_logical_images_does_not_raise_when_stems_are_all_distinct(grouped_dir):
-    """A rail must admit valid work: the ordinary (non-colliding) grouped_dir fixture used
-    throughout this file must keep resolving cleanly; the new refusal is scoped to a genuine
-    collision, not triggered by every group's mere presence."""
+    """A directory of band groups and plain images whose stems are all distinct resolves every
+    stem: the stem-collision refusal answers a collision, never a group's presence."""
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
     logical = list_logical_images(grouped_dir)
@@ -237,47 +236,42 @@ def test_logical_image_name_agrees_with_source_paths_basename(grouped_dir):
 
 
 def test_probe_channels_of_a_plain_tif_does_not_decode_pixels(grouped_dir, monkeypatch):
-    """probe_channels reads a TIFF's header-only series shape when it can, never paying for a
-    full pixel decode just to learn the band count."""
+    """probe_channels reads a TIFF's band count off its header, never decoding a pixel: no
+    tifffile decode, of the whole file or of a page, runs."""
     import tifffile as _tifffile
 
     from tcip_mcp.pipelines.derivations import probe_channels
 
-    called = []
-    real_imread = _tifffile.imread
+    def no_decode(*a, **kw):
+        raise AssertionError("a TIFF was decoded to answer its band count")
 
-    def _spy_imread(*a, **kw):
-        called.append(True)
-        return real_imread(*a, **kw)
-
-    monkeypatch.setattr(_tifffile, "imread", _spy_imread)
-    n = probe_channels(grouped_dir / "loose.tif")
-    assert n == 1
-    assert called == []  # header-only path succeeded; the full decode was never reached
+    monkeypatch.setattr(_tifffile.TiffFile, "asarray", no_decode)
+    monkeypatch.setattr(_tifffile.TiffPage, "asarray", no_decode)
+    assert probe_channels(grouped_dir / "loose.tif") == 1
 
 
 # ── BandGroupRef-accepting decode overloads (synthetic) ────────────────────────────────
 
 
-def test_display_frame_of_a_band_group(grouped_dir):
-    from tcip_mcp.pipelines.image_utils import display_frame, resolve_image_path
+def test_the_frame_of_a_band_group_at_its_own_count(grouped_dir):
+    from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_path
 
     ref = resolve_image_path(grouped_dir / "cap.bandgroup")
-    assert display_frame(ref) == (8, 8)
+    assert image_dimensions(ref, 2) == (8, 8)
 
 
-def test_load_multiband_stacks_siblings_in_declared_order(grouped_dir):
-    from tcip_mcp.pipelines.image_utils import load_multiband, resolve_image_path
+def test_load_image_stacks_siblings_in_declared_order(grouped_dir):
+    from tcip_mcp.pipelines.image_utils import load_image, resolve_image_path
 
     ref = resolve_image_path(grouped_dir / "cap.bandgroup")
-    arr = load_multiband(ref, 2)
+    arr = load_image(ref, 2)
     assert arr.shape == (8, 8, 2)
     # Declared order is {"Green": band_a (111), "Red": band_b (222)}.
     assert int(arr[0, 0, 0]) == 111
     assert int(arr[0, 0, 1]) == 222
 
 
-def test_load_image_dispatches_a_band_group_to_load_multiband(grouped_dir):
+def test_load_image_of_a_band_group_is_an_array(grouped_dir):
     from tcip_mcp.pipelines.image_utils import load_image, resolve_image_path
 
     ref = resolve_image_path(grouped_dir / "cap.bandgroup")
@@ -286,12 +280,87 @@ def test_load_image_dispatches_a_band_group_to_load_multiband(grouped_dir):
     assert arr.shape == (8, 8, 2)
 
 
-def test_probe_channels_of_a_band_group_sums_each_siblings_own_count(grouped_dir):
+def test_a_band_groups_header_and_reader_state_one_band_per_member(grouped_dir):
+    """A group of single-band members is as many bands as it has members, and the reader its
+    header opens serves exactly those bands, each member's own values."""
     from tcip_mcp.pipelines.derivations import probe_channels
     from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tcip_mcp.pipelines.raster_source import Rect, SourceHeader
 
     ref = resolve_image_path(grouped_dir / "cap.bandgroup")
-    assert probe_channels(ref) == 2  # 1 band each, summed (never assumed)
+    header = SourceHeader(ref)
+    assert probe_channels(ref) == header.channels == 2
+    with header.open(header.channels) as reader:
+        assert reader.num_channels == header.channels
+        pixels, _spec = reader.read_region(Rect(0, 0, 1, 1))
+    assert pixels[0, 0].tolist() == [111, 222]
+
+
+def test_a_band_group_of_channel_first_single_band_arrays_is_admitted_as_it_is_read(tmp_path):
+    """A member stored as a ``(1, H, W)`` array is one band read the way it is opened, at one
+    band: the header admits it and states the frame and count the reader serves."""
+    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tcip_mcp.pipelines.raster_source import Rect, SourceHeader
+
+    d = tmp_path / "images"
+    d.mkdir()
+    np.save(str(d / "cap_a.npy"), np.full((1, 8, 12), 7, dtype=np.uint8))
+    np.savez(str(d / "cap_b.npz"), band=np.full((1, 8, 12), 9, dtype=np.uint8))
+    write_band_group_manifest(d, "cap", {"A": d / "cap_a.npy", "B": d / "cap_b.npz"})
+
+    header = SourceHeader(resolve_image_path(d / "cap.bandgroup"))
+    assert header.channels == 2
+    assert header.frame_at(2) == (12, 8)
+    with header.open(header.channels) as reader:
+        assert (reader.width, reader.height, reader.num_channels) == (12, 8, 2)
+        pixels, _spec = reader.read_region(Rect(0, 0, 1, 1))
+    assert pixels[0, 0].tolist() == [7, 9]
+
+
+@pytest.mark.parametrize("save", [np.save, np.savez], ids=["npy", "npz"])
+def test_a_band_group_naming_a_four_dimensional_array_is_refused_at_its_header(tmp_path, save):
+    """An array of four dimensions is no image of one band: the header refuses it, naming the
+    member file and its shape, before any count, frame or reader is answered."""
+    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tcip_mcp.pipelines.raster_source import SourceHeader
+
+    d = tmp_path / "images"
+    d.mkdir()
+    ext = ".npy" if save is np.save else ".npz"
+    for name in ("cap_a", "cap_b"):
+        save(str(d / f"{name}{ext}"), np.zeros((1, 8, 12, 2), dtype=np.uint8))
+    write_band_group_manifest(d, "cap", {"A": d / f"cap_a{ext}", "B": d / f"cap_b{ext}"})
+
+    header = SourceHeader(resolve_image_path(d / "cap.bandgroup"))
+    with pytest.raises(ValueError,
+                       match=r"cap_a\.np[yz]' decodes to an array shaped \(1, 8, 12, 2\)"):
+        _ = header.channels
+    with pytest.raises(ValueError, match=r"shaped \(1, 8, 12, 2\)"):
+        header.open(2)
+
+
+def test_a_band_group_naming_a_multi_band_member_is_refused_at_its_header(tmp_path):
+    """A member holding three bands is not one band of a group: its header refuses it by
+    name."""
+    from PIL import Image
+
+    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tcip_mcp.pipelines.raster_source import SourceHeader
+
+    d = tmp_path / "images"
+    d.mkdir()
+    Image.new("RGB", (8, 8), (255, 0, 0)).save(d / "cap_rgb.png")
+    Image.new("L", (8, 8), 123).save(d / "cap_gray.png")
+    write_band_group_manifest(d, "cap", {"Red": d / "cap_rgb.png", "Gray": d / "cap_gray.png"})
+
+    header = SourceHeader(resolve_image_path(d / "cap.bandgroup"))
+    with pytest.raises(ValueError, match="'Red'.*cap_rgb.png.*holds 3 bands"):
+        _ = header.channels
+    with pytest.raises(ValueError, match="holds 3 bands"):
+        header.open(2)
 
 
 # ── BandGroupRef-accepting decode overloads (real DJI data) ────────────────────────────
@@ -302,7 +371,7 @@ def test_real_dji_capture_decodes_as_a_4_band_stack(tmp_path):
     from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
     from tcip_mcp.pipelines.derivations import probe_channels
     from tcip_mcp.pipelines.image_utils import (
-        display_frame, load_image, resolve_image_path,
+        image_dimensions, load_image, resolve_image_path,
     )
 
     d = tmp_path / "images"
@@ -314,7 +383,7 @@ def test_real_dji_capture_decodes_as_a_4_band_stack(tmp_path):
     logical_stem = sorted(p.stem for p in d.glob("*.bandgroup"))[0]
     ref = resolve_image_path(d / f"{logical_stem}.bandgroup")
     assert probe_channels(ref) == 4
-    assert display_frame(ref) == (2592, 1944)  # the real DJI M3M frame size
+    assert image_dimensions(ref, 4) == (2592, 1944)  # the real DJI M3M frame size
 
     arr = load_image(ref, 4)
     assert isinstance(arr, np.ndarray)

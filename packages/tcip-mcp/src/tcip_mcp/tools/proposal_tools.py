@@ -23,9 +23,11 @@ from tcip_annotation.viz import render_candidates, render_detections
 
 from tcip_mcp.audit import now_iso, record_event_or_raise
 from tcip_mcp.pipelines.image_utils import (
-    BandGroupIncompleteError, display_frame, resolve_image_path,
+    BandGroupIncompleteError, resolve_image_path,
 )
+from tcip_mcp.pipelines.raster_source import SourceHeader
 from tcip_mcp.project_paths import viz_output_path
+from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 
 if TYPE_CHECKING:
@@ -150,7 +152,8 @@ def propose_annotations(
     resolve back to the source image. Omitting ``grid_cells`` runs the whole frame.
 
     Args:
-        image_path: Absolute path to the image file.
+        image_path: The image file (:func:`~tcip_mcp.registry_paths.located` against the
+            project).
         engine: Proposal engine: a registered name or a dotted 'module:factory' the agent brings.
         engine_params: Engine-specific knobs forwarded to the engine. Omit for the engine's own
             defaults.
@@ -163,6 +166,7 @@ def propose_annotations(
     """
     from tcip_mcp.pipelines.proposal import resolve_proposer
 
+    image_path = str(located(image_path, project))
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
@@ -170,116 +174,118 @@ def propose_annotations(
     try:
         source = resolve_image_path(img)
         proposer = resolve_proposer(engine)
+        raster = SourceHeader(source).open_at_route_count()
     except (FileNotFoundError, BandGroupIncompleteError, ValueError, ImportError) as e:
         return {"error": str(e)}
+    # The region crop, the engine's pass, the render and the staged content identity all read
+    # this one reader.
+    with raster:
+        # A region is cropped and offset entirely here, before the engine ever sees an image path.
+        propose_path = image_path
+        crop_tmp: Path | None = None
+        origin = (0.0, 0.0)
+        region_info: dict | None = None
+        if grid_cells is not None:
+            if not grid_cells:
+                return {"error": "grid_cells is empty; name at least one cell to scope the region."}
+            if tile_size is None:
+                return {"error": "grid_cells requires tile_size, the cell edge of the grid the "
+                                 "cells were read off (overlay_reference_grid echoes it back, "
+                                 "with overlap). Without it a cell name resolves against a grid "
+                                 "nobody rendered."}
+            from tcip_mcp.pipelines.reference_grid import reference_cells
 
-    # A region is cropped and offset entirely here, before the engine ever sees an image path.
-    # grid_cells=None skips this branch, taking the whole-frame path below.
-    propose_path = image_path
-    crop_tmp: Path | None = None
-    origin = (0.0, 0.0)
-    region_info: dict | None = None
-    if grid_cells is not None:
-        if not grid_cells:
-            return {"error": "grid_cells is empty; name at least one cell to scope the region."}
-        if tile_size is None:
-            return {"error": "grid_cells requires tile_size, the cell edge of the grid the "
-                             "cells were read off (overlay_reference_grid echoes it back, with "
-                             "overlap). Without it a cell name resolves against a grid nobody "
-                             "rendered."}
-        from tcip_mcp.pipelines.raster_source import image_route_channel_count, open_raster
-        from tcip_mcp.pipelines.reference_grid import reference_cells
-
-        try:
-            with open_raster(source, image_route_channel_count(source)) as src:
-                cells = reference_cells(src.width, src.height, tile_size, overlap, clamp=True)
+            try:
+                cells = reference_cells(raster.width, raster.height, tile_size, overlap,
+                                        clamp=True)
                 rect = _region_rect_from_cells(cells, grid_cells)
-                pixels, _spec = src.read_region(rect)
-        except ValueError as e:
-            return {"error": str(e)}
-        if pixels.dtype != "uint8" or pixels.shape[-1] != 3:
-            return {"error": "A region crop is handed to the engine as an RGB image, and "
-                             f"{img.name} reads as {pixels.shape[-1]} band(s) of {pixels.dtype}. "
-                             "Propose over the whole frame instead, or bring an engine that reads "
-                             "this source itself."}
-        crop_tmp = _write_region_crop(pixels)
-        propose_path = str(crop_tmp)
-        origin = (float(rect.x0), float(rect.y0))
-        region_info = {"grid_cells": list(grid_cells), "tile_size": tile_size, "overlap": overlap,
-                       "rect": [rect.x0, rect.y0, rect.x1, rect.y1]}
+                pixels, _spec = raster.read_region(rect)
+            except ValueError as e:
+                return {"error": str(e)}
+            if pixels.dtype != "uint8" or pixels.shape[-1] != 3:
+                return {"error": "A region crop is handed to the engine as an RGB image, and "
+                                 f"{img.name} reads as {pixels.shape[-1]} band(s) of "
+                                 f"{pixels.dtype}. Propose over the whole frame instead, or "
+                                 "bring an engine that reads this source itself."}
+            crop_tmp = _write_region_crop(pixels)
+            propose_path = str(crop_tmp)
+            origin = (float(rect.x0), float(rect.y0))
+            region_info = {"grid_cells": list(grid_cells), "tile_size": tile_size,
+                           "overlap": overlap, "rect": [rect.x0, rect.y0, rect.x1, rect.y1]}
 
-    try:
         try:
-            candidates = proposer.propose(propose_path, **(engine_params or {}))
-        except ImportError as e:
-            return {"error": str(e)}
-        except FileNotFoundError as e:
-            return {"error": str(e)}
-    finally:
-        if crop_tmp is not None:
-            crop_tmp.unlink(missing_ok=True)
+            try:
+                candidates = proposer.propose(propose_path, **(engine_params or {}))
+            except ImportError as e:
+                return {"error": str(e)}
+            except FileNotFoundError as e:
+                return {"error": str(e)}
+        finally:
+            if crop_tmp is not None:
+                crop_tmp.unlink(missing_ok=True)
 
-    if region_info is not None:
-        candidates = _offset_candidates(candidates, origin)
+        if region_info is not None:
+            candidates = _offset_candidates(candidates, origin)
 
-    if not candidates:
-        # A prior run's record must not outlive this one finding nothing to propose.
+        if not candidates:
+            # A prior run's record must not outlive this one finding nothing to propose.
+            try:
+                stale = _staging_key_for(image_path)
+            except ValueError:
+                pass
+            else:
+                if ts.delete(stale):
+                    record_event_or_raise("propose_annotations",
+                                          {"image_path": image_path, "staged": 0},
+                                          actor=None, scope=stale.root)
+            return {
+                "image_path": None,
+                "engine": engine,
+                "summary": f"Engine {engine!r} proposed no candidates",
+                "staged": False,
+                "candidates": [],
+            }
+
+        # An engine's own candidates are refused here, where they arrive, when unstorable, no
+        # polygon or stating no confidence of their own.
         try:
-            stale = _staging_key_for(image_path)
-        except ValueError:
-            pass
+            ts.check_json_value(candidates, path="candidates")
+            for candidate in candidates:
+                Polygon(rings=candidate["rings"])
+                candidate["score"] = float(candidate["score"])
+        except (KeyError, TypeError, ValueError) as exc:
+            return {"error": f"Engine {engine!r} proposed a candidate this platform cannot "
+                             f"hold: {exc}"}
+
+        from tcip_mcp.tools.vision_tools import _read_for_display
+
+        read = _read_for_display(raster)
+        out = render_candidates(read.pixels, candidates, native_size=read.native_size,
+                                output_path=viz_output_path(project, "candidates"))
+
+        # The envelope records the engine so stage_proposals's assignments regime stamps the
+        # right producer.
+        envelope: dict = {"engine": engine, "candidates": candidates}
+        if region_info is not None:
+            envelope["region"] = region_info
+
+        try:
+            address = _staging_key_for(image_path)
+        except ValueError as exc:
+            staged = False
+            stage_note = f" Not staged: {exc}"
         else:
-            if ts.delete(stale):
-                record_event_or_raise("propose_annotations",
-                                      {"image_path": image_path, "staged": 0},
-                                      actor=None, scope=stale.root)
-        return {
-            "image_path": None,
-            "engine": engine,
-            "summary": f"Engine {engine!r} proposed no candidates",
-            "staged": False,
-            "candidates": [],
-        }
+            import dataclasses
 
-    # An engine's own candidates are refused here, where they arrive, when unstorable, no polygon
-    # or stating no confidence of their own.
-    try:
-        ts.check_json_value(candidates, path="candidates")
-        for candidate in candidates:
-            Polygon(rings=candidate["rings"])
-            candidate["score"] = float(candidate["score"])
-    except (KeyError, TypeError, ValueError) as exc:
-        return {"error": f"Engine {engine!r} proposed a candidate this platform cannot hold: {exc}"}
+            from tcip_mcp.pipelines.raster_source import content_identity
 
-    from tcip_mcp.tools.vision_tools import _read_for_display
-
-    read = _read_for_display(source)
-    out = render_candidates(read.pixels, candidates, native_size=read.native_size,
-                            output_path=viz_output_path(project, "candidates"))
-
-    # The envelope records the engine so stage_proposals's assignments regime stamps the right
-    # producer.
-    envelope: dict = {"engine": engine, "candidates": candidates}
-    if region_info is not None:
-        envelope["region"] = region_info
-
-    try:
-        address = _staging_key_for(image_path)
-    except ValueError as exc:
-        staged = False
-        stage_note = f" Not staged: {exc}"
-    else:
-        import dataclasses
-
-        from tcip_mcp.pipelines.raster_source import content_identity
-
-        envelope["image_identity"] = dataclasses.asdict(content_identity(source))
-        ts.replace(address, envelope)
-        record_event_or_raise("propose_annotations", {
-            "image_path": image_path, "staged": len(candidates)}, actor=None,
-            scope=address.root)
-        staged = True
-        stage_note = ""
+            envelope["image_identity"] = dataclasses.asdict(content_identity(raster))
+            ts.replace(address, envelope)
+            record_event_or_raise("propose_annotations", {
+                "image_path": image_path, "staged": len(candidates)}, actor=None,
+                scope=address.root)
+            staged = True
+            stage_note = ""
 
     region_note = f" (region {grid_cells})" if region_info is not None else ""
     return {
@@ -317,24 +323,32 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
     if envelope is None:
         return {"error": f"No proposals found for {img.stem}. Run propose_annotations first."}
 
-    from tcip_mcp.pipelines.raster_source import raster_identity_matches
+    from tcip_mcp.pipelines.raster_source import open_as_recorded
+    from tcip_mcp.tools.vision_tools import (
+        _box_dict,
+        _name_map,
+        _read_for_display,
+        _subject_indexer,
+    )
 
+    # One reader, opened at the count the identity recorded, verifies the content and renders it.
+    identity = envelope["image_identity"]
     try:
-        matches = raster_identity_matches(envelope["image_identity"], source)
+        raster, fresh = open_as_recorded(identity, source)
+        with raster:
+            if fresh is None:
+                return {"error": f"{image_path} does not match the image propose_annotations "
+                                 "ran on: its content has changed since that run staged these "
+                                 "candidates. Run propose_annotations again on the current "
+                                 "image."}
+            read = _read_for_display(raster)
     except ValueError as exc:
-        return {"error": f"Could not verify {image_path} against its staged proposals: {exc}"}
-
-    if not matches:
-        return {"error": f"{image_path} does not match the image propose_annotations ran on: "
-                          "its content has changed since that run staged these candidates. "
-                          "Run propose_annotations again on the current image."}
+        return {"error": f"Could not read {image_path} to verify it against its staged "
+                         f"proposals: {exc}"}
 
     engine = envelope["engine"]
     candidates = envelope["candidates"]
     cand_map = {c["candidate_id"]: c for c in candidates}
-
-    # The frame the identity just verified against the image, opened at the route count.
-    identity = envelope["image_identity"]
     w, h = int(identity["width"]), int(identity["height"])
 
     # Build name-based predictions (created_by=<engine>, score = the proposal score); each keeps
@@ -365,16 +379,7 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
     except ValueError as exc:
         return {"error": str(exc)}
 
-    # Render final result for QA
-    from tcip_mcp.tools.vision_tools import (
-        _box_dict,
-        _name_map,
-        _read_for_display,
-        _subject_indexer,
-    )
-
     idx, index = _subject_indexer()
-    read = _read_for_display(source)
     out = render_detections(read.pixels, [_box_dict(a, index) for a in proposals],
                             native_size=read.native_size, class_names=_name_map(idx),
                             output_path=viz_output_path(project, "staged"))
@@ -448,7 +453,7 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: t
         img_source = resolve_image_path(img)
     except (FileNotFoundError, BandGroupIncompleteError, ValueError) as exc:
         return {"error": str(exc)}
-    img_w, img_h = display_frame(img_source)
+    img_w, img_h = SourceHeader(img_source).display_frame
 
     # A rounding-slop margin in pixels, not a fraction of the image size: a fractional margin
     # admits a normalized [0,1] ring at every real image size, the bug this check exists to refuse.
@@ -591,7 +596,7 @@ def stage_proposals(
     the platform validates no subject name.
 
     Args:
-        image_path: Absolute path to the dataset image (same as propose_annotations, for the
+        image_path: The dataset image, as propose_annotations takes it (the same one, for the
             assignments regime).
         assignments: List of dicts, each with 'candidate_id' (int) and 'subject' (name). Refused
             alongside boxes/polygons or model_name.
@@ -607,6 +612,7 @@ def stage_proposals(
         return {"error": "provide assignments (propose_annotations's staged candidates), or "
                          "boxes/polygons (explicit shapes) with model_name."}
 
+    image_path = str(located(image_path, project))
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}

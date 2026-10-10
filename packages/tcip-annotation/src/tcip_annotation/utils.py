@@ -31,33 +31,34 @@ def _read_orientation_tag(img: Image.Image) -> int | None:
         return None
 
 
+_ORIENTATION_OPS = {
+    2: lambda i: i.transpose(Image.Transpose.FLIP_LEFT_RIGHT),
+    3: lambda i: i.rotate(180, expand=True),
+    4: lambda i: i.transpose(Image.Transpose.FLIP_TOP_BOTTOM),
+    5: lambda i: i.transpose(Image.Transpose.FLIP_LEFT_RIGHT).rotate(270, expand=True),
+    6: lambda i: i.rotate(270, expand=True),
+    7: lambda i: i.transpose(Image.Transpose.FLIP_LEFT_RIGHT).rotate(90, expand=True),
+    8: lambda i: i.rotate(90, expand=True),
+}
+"""The operation each EXIF Orientation tag value names, applied to bring a frame upright."""
+
+
 def auto_orient_image(img: Image.Image) -> Image.Image:
     """Apply EXIF orientation correction to a PIL Image."""
     try:
-        orientation = _read_orientation_tag(img)
-        ops = {
-            2: lambda i: i.transpose(Image.Transpose.FLIP_LEFT_RIGHT),
-            3: lambda i: i.rotate(180, expand=True),
-            4: lambda i: i.transpose(Image.Transpose.FLIP_TOP_BOTTOM),
-            5: lambda i: i.transpose(Image.Transpose.FLIP_LEFT_RIGHT).rotate(270, expand=True),
-            6: lambda i: i.rotate(270, expand=True),
-            7: lambda i: i.transpose(Image.Transpose.FLIP_LEFT_RIGHT).rotate(90, expand=True),
-            8: lambda i: i.rotate(90, expand=True),
-        }
-        if orientation in ops:
-            img = ops[orientation](img)
+        op = _ORIENTATION_OPS.get(_read_orientation_tag(img) or 1)
+        if op is not None:
+            img = op(img)
     except Exception:
         logger.debug("EXIF orientation correction failed", exc_info=True)
     return img
 
 
-def get_image_dimensions(path: str) -> tuple[int, int]:
-    """Return (width, height) of an image, applying EXIF orientation.
-
-    Header-only, no pixel decode.
-    """
-    with Image.open(path) as img:
-        w, h = img.size
-        orientation = _read_orientation_tag(img) or 1
-    # Orientations 5-8 include a 90°/270° rotation, so the oriented axes swap.
-    return (h, w) if orientation in (5, 6, 7, 8) else (w, h)
+def oriented_size(img: Image.Image) -> tuple[int, int]:
+    """``(width, height)`` of the opened image ``img`` once its EXIF orientation is applied, from
+    its header alone, no pixel decode: the tag's operation (:data:`_ORIENTATION_OPS`) applied to a
+    two-pixel probe says whether the axes swap."""
+    w, h = img.size
+    op = _ORIENTATION_OPS.get(_read_orientation_tag(img) or 1)
+    swaps = op is not None and op(Image.new("L", (2, 1))).size == (1, 2)
+    return (h, w) if swaps else (w, h)

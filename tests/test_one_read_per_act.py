@@ -341,9 +341,20 @@ def test_a_selection_bound_run_resolves_each_image_once(tmp_path: Path, monkeypa
 def test_a_comparison_render_reads_its_documents_and_bucket_once(tmp_path: Path, monkeypatch):
     from tcip_mcp.tools.vision_tools import visualize
 
+    from PIL import Image
+
     frame, _other = _published_frames(tmp_path)
     counts = _counting_reads(monkeypatch)
     scans = _counting_scans(monkeypatch)
+    opened: list = []
+    real_open = Image.open
+
+    def counted_open(fp, *args, **kwargs):
+        if Path(str(fp)) == frame:
+            opened.append(fp)
+        return real_open(fp, *args, **kwargs)
+
+    monkeypatch.setattr(Image, "open", counted_open)
 
     result = visualize(tmp_path, "comparison", str(frame), bucket="published",
                        conf_threshold=0.0)
@@ -353,6 +364,7 @@ def test_a_comparison_render_reads_its_documents_and_bucket_once(tmp_path: Path,
     assert len(counts) == 3, counts
     assert set(counts.values()) == {1}, counts
     assert scans == Counter({str(frame.parent): 1}), scans
+    assert len(opened) == 1, opened
 
 
 def test_a_folder_scoring_resolves_its_images_once(tmp_path: Path, monkeypatch):

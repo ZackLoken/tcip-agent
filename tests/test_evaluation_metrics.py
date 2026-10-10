@@ -922,7 +922,9 @@ def test_validate_classification_metrics(tmp_path):
         w.writerows(rows)
     ds, data = run_over("classification", str(images_dir), str(csv_path))
 
-    model_source = {"builder": BESPOKE_CLASSIFIER,
+    from tests._chain_fixtures import BESPOKE_MODELS
+
+    model_source = {"builder": BESPOKE_CLASSIFIER, "source_files": [BESPOKE_MODELS],
                     "task": "classification"}
     run = trainer_run(_cfg(model_source, data, batch_size=3), tmp_path / "out", project=tmp_path,
                       has_val_loader=True, id="auto-run-25")

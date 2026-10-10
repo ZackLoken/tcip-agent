@@ -61,22 +61,21 @@ def test_tiled_detection_reads_multiband_and_keeps_boxes_on_their_pixels(tmp_pat
 
 
 def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(tmp_path):
-    """Refuse when the labels' own frame disagrees with the decode: the real scramble case.
-
-    The annotation stack measures with PIL, which reports a 40x24x5 GeoTIFF as 5x40, so labels
-    authored through it genuinely disagree with the multi-band decode. Comparing two decoders
-    instead would prove nothing: they share a branch and agree by construction.
-    """
+    """A label document authored in a frame other than the one the raster decodes in (here
+    the 5x40 PIL reports for a 40x24x5 TIFF) is refused by the tiled dataset, naming both
+    frames."""
     import pytest
     import tifffile
     from tcip_annotation.state import Annotation, BBox
-    from tcip_annotation.utils import get_image_dimensions
+    from PIL import Image
+    from tcip_annotation.utils import oriented_size
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
     tifffile.imwrite(images_dir / "a.tif", _patched())
 
-    pil_w, pil_h = get_image_dimensions(str(images_dir / "a.tif"))
+    with Image.open(images_dir / "a.tif") as opened:
+        pil_w, pil_h = oriented_size(opened)
     assert (pil_w, pil_h) == (5, 40), "fixture assumes PIL misreads this multi-band raster"
     label_image(images_dir / "a.tif", [Annotation(subject="bud", geometry=BBox(1, 12, 4, 18))],
                 pil_w, pil_h, keep_empty=True)

@@ -3,10 +3,17 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 
 import { api } from "@/api/client";
 import { StructuredRefusalError } from "@/api/http";
-import { resultsApi, type DeliveryEventRecord } from "@/api/inference";
+import {
+  isCanopySegmentDisclosure,
+  isPlantMappingDisclosure,
+  isPlantRegistryDisclosure,
+  resultsApi,
+  type DeliveryEventRecord,
+} from "@/api/inference";
 import { useStore } from "@/store";
 import { ResultsTab } from "@/tabs/ResultsTab";
 import { mockDatasetTree } from "@/test/datasetTree";
+import { DELIVERY_RECORDS } from "@/test/deliveryRecords";
 import { openTestProject } from "@/test/store";
 import { TRAIT_LISTINGS } from "@/test/traitRecords";
 
@@ -550,86 +557,45 @@ describe("ResultsTab meaning refusals", () => {
 });
 
 describe("ResultsTab delivery events (read-only)", () => {
-  const DELIVERY_EVENT: DeliveryEventRecord = {
-    event_id: "abc123",
-    trait: "subject_a",
-    trait_revision: 1,
-    trait_revision_sha256: "b".repeat(64),
-    delivery_kind: "state_crossing_dates",
-    door: "results.export_csv",
-    output_path: "C:/proj/results_export/subject_a_phenology.csv",
-    output_sha256: "a".repeat(64),
-    producer: { checkpoint_sha256: "c".repeat(64), experiment_id: "exp-1" },
-    buckets: [
-      {
-        dataset_root: "C:/data",
-        bucket: "baseline/2026-01-01",
-        date: "2026-01-01",
-        assessment_id: "assessment-1",
-        validated: true,
-        reason: null,
-      },
-      {
-        dataset_root: "C:/data",
-        bucket: "baseline/2026-01-08",
-        date: "2026-01-08",
-        assessment_id: null,
-        validated: false,
-        reason: "no assessment answers for it",
-      },
-    ],
-    scale_assessment_id: null,
-    validated: false,
-    acknowledgment: null,
-    population: ["P1"],
-    require_all_dates_complete: null,
-    produced_at: "2026-02-03T12:00:00+00:00",
-    plant_mapping: null,
-  };
+  async function servedRow(record: DeliveryEventRecord): Promise<HTMLElement> {
+    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [record] });
+    render(<ResultsTab />);
+    return screen.findByTestId(`delivery-${record.event_id}`);
+  }
 
   it("lists what shipped, with each bucket's gate finding and no confirm/withdraw controls", async () => {
-    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [DELIVERY_EVENT] });
+    const record = DELIVERY_RECORDS.validated;
+    const row = await servedRow(record);
 
-    render(<ResultsTab />);
-    const row = await screen.findByTestId("delivery-abc123");
-
-    expect(within(row).getByText("subject_a")).toBeInTheDocument();
-    expect(within(row).getByText("revision 1, state_crossing_dates")).toBeInTheDocument();
-    expect(within(row).getByText("results.export_csv")).toBeInTheDocument();
-    expect(within(row).getByText(/2026-02-03T12:00:00\+00:00/)).toBeInTheDocument();
+    expect(within(row).getByText(record.trait)).toBeInTheDocument();
     expect(
-      within(row).getByText("C:/proj/results_export/subject_a_phenology.csv"),
+      within(row).getByText(`revision ${record.trait_revision}, ${record.delivery_kind}`),
     ).toBeInTheDocument();
-    expect(
-      within(row).getByText("baseline/2026-01-01: validated by assessment assessment-1"),
-    ).toBeInTheDocument();
-    expect(
-      within(row).getByText("baseline/2026-01-08: not validated (no assessment answers for it)"),
-    ).toBeInTheDocument();
+    expect(within(row).getByText(record.door)).toBeInTheDocument();
+    expect(within(row).getByText(record.produced_at)).toBeInTheDocument();
+    expect(within(row).getByText(record.output_path)).toBeInTheDocument();
+    for (const bucket of record.buckets) {
+      expect(
+        within(row).getByText(`${bucket.bucket}: validated by assessment ${bucket.assessment_id}`),
+      ).toBeInTheDocument();
+    }
     expect(within(row).queryByRole("button", { name: /confirm/i })).not.toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: /withdraw/i })).not.toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: /correction/i })).not.toBeInTheDocument();
   });
 
-  it("renders the acknowledging breeder's name and reason on an acknowledged delivery", async () => {
-    const acknowledged: DeliveryEventRecord = {
-      ...DELIVERY_EVENT,
-      event_id: "acked",
-      acknowledgment: {
-        acknowledgment_id: "ack-1",
-        acknowledged_by: "user:breeder",
-        reason: "calibration is not ready yet",
-        result_sha256: "c".repeat(64),
-        recorded_at: "2026-02-03T11:59:00+00:00",
-      },
-    };
-    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [acknowledged] });
+  it("renders the acknowledging breeder's name and reason, and each bucket's missing assessment", async () => {
+    const record = DELIVERY_RECORDS.acknowledged_mapping;
+    const row = await servedRow(record);
 
-    render(<ResultsTab />);
-    const row = await screen.findByTestId("delivery-acked");
-
-    expect(within(row).getByText("user:breeder")).toBeInTheDocument();
-    expect(within(row).getByText("calibration is not ready yet")).toBeInTheDocument();
+    if (!record.acknowledgment) throw new Error("the fixture delivery was not acknowledged");
+    expect(within(row).getByText(record.acknowledgment.acknowledged_by)).toBeInTheDocument();
+    expect(within(row).getByText(record.acknowledgment.reason)).toBeInTheDocument();
+    for (const bucket of record.buckets) {
+      expect(
+        within(row).getByText(`${bucket.bucket}: not validated (${bucket.reason})`),
+      ).toBeInTheDocument();
+    }
   });
 
   it("renders nothing extra when this project has no deliveries yet", async () => {
@@ -659,147 +625,79 @@ describe("ResultsTab delivery events (read-only)", () => {
   });
 
   it("renders the plant mapping's dates_delivered, images_unattributed and plant_attribution", async () => {
-    const withMapping: DeliveryEventRecord = {
-      ...DELIVERY_EVENT,
-      event_id: "with-mapping",
-      plant_mapping: {
-        name: "valley",
-        dataset_id: "ds-1",
-        dataset_root: "C:/data",
-        built_at: "2026-02-01T00:00:00+00:00",
-        record_sha256: "0".repeat(64),
-        nn_tolerance_m: { value: 3, source: "stated" },
-        capture_identity: {},
-        captures_unverified: [],
-        plant_csvs_unverified: [],
-        dates_delivered: ["2026-01-01", "2026-01-08"],
-        images_unattributed: 2,
-        images_unattributed_scope: "delivered_dates",
-        plant_attribution: "image",
-      },
-    };
-    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [withMapping] });
-
-    render(<ResultsTab />);
-    const row = await screen.findByTestId("delivery-with-mapping");
+    const record = DELIVERY_RECORDS.acknowledged_mapping;
+    const pm = record.plant_mapping;
+    if (!pm || !isPlantMappingDisclosure(pm)) throw new Error("the fixture cites no mapping");
+    const row = await servedRow(record);
 
     expect(
-      within(row).getByText(/Delivered dates 2026-01-01, 2026-01-08: 2 attributed to no plant/),
+      within(row).getByText(
+        `Delivered dates ${pm.dates_delivered.join(", ")}: ${pm.images_unattributed} ` +
+          `attributed to no plant (${pm.plant_attribution}-level attribution)`,
+      ),
     ).toBeInTheDocument();
-    expect(within(row).getByText(/image-level attribution/)).toBeInTheDocument();
+    expect(within(row).queryByText(/archived as/)).not.toBeInTheDocument();
   });
 
   it("renders the orthomosaic door's own registry disclosure, not the walked-mapping form", async () => {
-    // Covers deliver_orthomosaic_plant_counts's PlantRegistryDisclosure: no dates_delivered or
-    // record_sha256 to render, since no walked mapping exists for a whole-raster frame.
-    const withRegistry: DeliveryEventRecord = {
-      ...DELIVERY_EVENT,
-      event_id: "with-registry",
-      door: "deliver_orthomosaic_plant_counts",
-      plant_mapping: {
-        plant_registry: { name: "orchard-block", digest: "0".repeat(64) },
-        raster_identity: { width: 4096, height: 4096 },
-        nn_tolerance_m: { value: 1.5, source: "grid_pitch" },
-        detections_unattributed: 3,
-        detections_unattributed_scope: "delivered_raster",
-        plant_attribution: "detection",
-        plants_outside_raster: ["plot9"],
-      },
-    };
-    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [withRegistry] });
+    const record = DELIVERY_RECORDS.registry;
+    const pm = record.plant_mapping;
+    if (!pm || !isPlantRegistryDisclosure(pm)) throw new Error("the fixture names no registry");
+    const row = await servedRow(record);
 
-    render(<ResultsTab />);
-    const row = await screen.findByTestId("delivery-with-registry");
-
-    expect(within(row).getByText(/Plant registry orchard-block:/)).toBeInTheDocument();
     expect(
-      within(row).getByText(/3 detection\(s\) attributed to no plant on the delivered raster/),
+      within(row).getByText(
+        `Plant registry ${pm.plant_registry.name}: ${pm.detections_unattributed} ` +
+          "detection(s) attributed to no plant on the delivered raster " +
+          `(${pm.plant_attribution}-level attribution)`,
+      ),
     ).toBeInTheDocument();
-    expect(within(row).getByText(/detection-level attribution/)).toBeInTheDocument();
-    expect(within(row).getByText(/Outside the raster: plot9/)).toBeInTheDocument();
+    expect(
+      within(row).getByText(`Outside the raster: ${pm.plants_outside_raster.join(", ")}`),
+    ).toBeInTheDocument();
     expect(within(row).queryByText(/Delivered dates/)).not.toBeInTheDocument();
   });
 
   it("renders the orthomosaic door's own canopy-segment disclosure, narrowed before the registry form", async () => {
-    const withCanopy: DeliveryEventRecord = {
-      ...DELIVERY_EVENT,
-      event_id: "with-canopy",
-      door: "deliver_orthomosaic_plant_counts",
-      plant_mapping: {
-        plant_registry: { name: "orchard-block", digest: "0".repeat(64) },
-        raster_identity: { width: 4096, height: 4096 },
-        canopy_segments: {
-          capture: "2024-06-01",
-          stem: "mosaic",
-          sha256: "1".repeat(64),
-          subject: "canopy",
-          n_segments: 3,
-        },
-        position_error_m: 0.5,
-        segment_ties: [
-          { segment_index: 0, plot_name: "plot0", clearance_m: 0.8 },
-          { segment_index: 1, plot_name: "plot1", clearance_m: 1.2 },
-        ],
-        plants_within_position_error: ["plot7"],
-        segments_without_plant: 1,
-        plants_outside_raster: ["plot9"],
-        plants_without_segment: ["plot8"],
-        plants_with_ambiguous_detections: ["plot1"],
-        detections_unattributed: 2,
-        detections_unattributed_by_source: {
-          outside_segments: 1,
-          overlapping_segments: 1,
-          segment_without_plant: 0,
-          segment_plant_within_position_error: 0,
-        },
-        detections_unattributed_scope: "delivered_raster",
-        plant_attribution: "segment",
-      },
-    };
-    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [withCanopy] });
-
-    render(<ResultsTab />);
-    const row = await screen.findByTestId("delivery-with-canopy");
+    const record = DELIVERY_RECORDS.canopy;
+    const pm = record.plant_mapping;
+    if (!pm || !isCanopySegmentDisclosure(pm)) throw new Error("the fixture names no segments");
+    const row = await servedRow(record);
 
     expect(within(row).getByTestId("canopy-disclosure")).toBeInTheDocument();
     expect(
-      within(row).getByText(/Canopy segments \(orchard-block\): 1 registry plant\(s\) delivered/),
+      within(row).getByText(
+        `Canopy segments (${pm.plant_registry.name}): ${record.population.length} registry ` +
+          `plant(s) delivered, ${pm.segments_without_plant} segment(s) with no plant`,
+      ),
     ).toBeInTheDocument();
-    expect(within(row).getByText(/No segment: plot8/)).toBeInTheDocument();
-    expect(within(row).getByText(/Within the position error: plot7/)).toBeInTheDocument();
-    expect(within(row).getByText(/Outside the raster: plot9/)).toBeInTheDocument();
-    expect(within(row).getByText(/Ambiguous detection: plot1/)).toBeInTheDocument();
-    expect(within(row).queryByText(/Plant registry orchard-block:/)).not.toBeInTheDocument();
+    expect(
+      within(row).getByText(`No segment: ${pm.plants_without_segment.join(", ")}`),
+    ).toBeInTheDocument();
+    expect(
+      within(row).getByText(
+        `Within the position error: ${pm.plants_within_position_error.join(", ")}`,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(row).getByText(`Outside the raster: ${pm.plants_outside_raster.join(", ")}`),
+    ).toBeInTheDocument();
+    expect(
+      within(row).getByText(
+        `Ambiguous detection: ${pm.plants_with_ambiguous_detections.join(", ")}`,
+      ),
+    ).toBeInTheDocument();
+    expect(within(row).queryByText(/Plant registry/)).not.toBeInTheDocument();
     expect(within(row).queryByText(/Delivered dates/)).not.toBeInTheDocument();
   });
 
   it("renders the archived key beside a cited mapping once a rebuild has moved past it", async () => {
-    const withMapping: DeliveryEventRecord = {
-      ...DELIVERY_EVENT,
-      event_id: "moved-on",
-      plant_mapping: {
-        name: "valley",
-        dataset_id: "ds-1",
-        dataset_root: "C:/data",
-        built_at: "2026-02-01T00:00:00+00:00",
-        record_sha256: "0".repeat(64),
-        nn_tolerance_m: { value: 3, source: "stated" },
-        capture_identity: {},
-        captures_unverified: [],
-        plant_csvs_unverified: [],
-        dates_delivered: ["2026-01-01"],
-        images_unattributed: 0,
-        images_unattributed_scope: "delivered_dates",
-        plant_attribution: "image",
-      },
-      plant_mapping_resolved_key: "valley@0123456789ab",
-    };
-    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [withMapping] });
+    const record = DELIVERY_RECORDS.archived_mapping;
+    const row = await servedRow(record);
 
-    render(<ResultsTab />);
-    const row = await screen.findByTestId("delivery-moved-on");
-
-    expect(within(row).getByText(/archived as valley@0123456789ab/)).toBeInTheDocument();
+    expect(
+      within(row).getByText(new RegExp(`archived as ${record.plant_mapping_resolved_key}`)),
+    ).toBeInTheDocument();
   });
 });
 

@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.raster_source import SourceHeader
 
 
 @dataclass(frozen=True)
@@ -54,44 +55,40 @@ def meters_per_crs_unit(epsg: int) -> tuple[float | None, str]:
     return crs.axis_info[0].unit_conversion_factor, ""
 
 
-def resolve_pixel_size(source: Path | BandGroupRef) -> tuple[PixelSize | None, str]:
-    """``source``'s own real-world pixel size from its georeferencing tags alone, as
+def resolve_pixel_size(header: "SourceHeader") -> tuple[PixelSize | None, str]:
+    """``header``'s source's own real-world pixel size from its georeferencing tags alone, as
     ``(pixel_size, reason)``: ``reason`` the empty string on success and the first failing
     condition's clause otherwise, checked in this order:
 
-    1. ``source`` is a raster at all (:func:`~tcip_mcp.pipelines.image_utils.capture_kind`); a
-      photographic capture or a band group is never opened here.
-    2. :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.read_geotransform` returns.
-      Its own exceptions are mapped to a short clause never carrying the server's absolute path:
-      :class:`RotatedRasterError` -> "it is rotated or sheared", :class:`GeoreferencingError` ->
-      "its georeferencing tags are incomplete"; a :class:`ValueError` from ``tifffile`` on a
-      container that is not a TIFF -> "it is not a TIFF"; ``OSError`` -> "it could not be read".
+    1. The source is a raster at all (its header's ``kind`` an array container's); a
+      photographic capture or a band group is never read here.
+    2. Its header's georeference read
+      (:attr:`~tcip_mcp.pipelines.raster_source.SourceHeader.georeference`) found a geotransform,
+      its outcome mapped to a short clause never carrying the server's absolute path: a source
+      with no TIFF tags -> "it is not a TIFF", a header that cannot be read -> "it could not be
+      read", :class:`RotatedRasterError` -> "it is rotated or sheared", any other refusal ->
+      "its georeferencing tags are incomplete".
     3. Its CRS spans a known number of meters per unit (:func:`meters_per_crs_unit`).
     4. ``pixel_scale_x`` and ``pixel_scale_y`` are both positive.
     5. ``pixel_scale_x`` and ``pixel_scale_y`` agree within :data:`_ANISOTROPY_REL_TOL`.
     """
-    from tcip_mcp.pipelines.image_utils import capture_kind
-
-    if capture_kind(source) != "raster":
-        return None, "it is not a raster"
-    assert isinstance(source, Path)  # capture_kind's "raster" answer is Path-only, never a group
-
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
-        GeoreferencingError,
+        GeoTransform,
         RotatedRasterError,
-        read_geotransform,
     )
 
+    if header.kind in ("photo", "group"):
+        return None, "it is not a raster"
     try:
-        gt = read_geotransform(source)
-    except RotatedRasterError:
-        return None, "it is rotated or sheared"
-    except GeoreferencingError:
-        return None, "its georeferencing tags are incomplete"
+        gt = header.georeference
     except ValueError:
-        return None, "it is not a TIFF"
-    except OSError:
         return None, "it could not be read"
+    if gt is None:
+        return None, "it is not a TIFF"
+    if isinstance(gt, RotatedRasterError):
+        return None, "it is rotated or sheared"
+    if not isinstance(gt, GeoTransform):
+        return None, "its georeferencing tags are incomplete"
 
     factor, reason = meters_per_crs_unit(gt.epsg)
     if factor is None:

@@ -26,8 +26,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
-_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp"}
-
 
 class ProjectSummary(BaseModel):
     # The record's three fields, each null beside record_problem when the record will not read.
@@ -54,13 +52,10 @@ def _summarize(project_dir: Path, record: dict) -> ProjectSummary:
     (:func:`tcip_mcp.workspace.project_records`)."""
     from tcip_web.routes.dataset import _subjects_by_date
 
+    from tcip_mcp.pipelines.image_utils import logical_image_count
+
     st = project_dir.stat()
-    images_dir = dataset_layout.image_root(project_dir)
-    image_count = 0
-    if images_dir.is_dir():
-        image_count = sum(
-            1 for f in images_dir.rglob("*") if f.is_file() and f.suffix.lower() in _IMAGE_EXTS
-        )
+    image_count = logical_image_count(project_dir)
     dates = dataset_layout.list_dates(project_dir)
     subjects_by_date, label_problem = _subjects_by_date(project_dir, dates)
     return ProjectSummary(

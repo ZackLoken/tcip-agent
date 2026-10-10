@@ -49,44 +49,30 @@ DELIVERY_EVENT_GOLDEN: dict[str, Any] = {
         "name": "valley", "dataset_id": "ds-1",
         "dataset_root": "dü", "built_at": "2026-03-04T12:00:00+00:00",
         "record_sha256": "0" * 64, "nn_tolerance_m": {"value": 3.0, "source": "stated"},
-        "capture_identity": {"2026-03-04": "0" * 16}, "captures_unverified": [],
+        "capture_digests": {"2026-03-04": {"capture": "0" * 16}}, "captures_unverified": [],
         "plant_csvs_unverified": [], "dates_delivered": ["2026-03-04"],
         "images_unattributed": 0, "images_unattributed_scope": "delivered_dates",
         "plant_attribution": "image"},
     "produced_at": "2026-03-04T12:00:00+00:00"}
-"""One completed delivery, with the gate's finding for the bucket it shipped."""
-
-
-def test_the_delivery_events_golden_validates_against_its_declared_shape():
-    """The delivery-event golden validates as a ``DeliveryEventRecord``."""
-    from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord
-
-    DeliveryEventRecord.model_validate(DELIVERY_EVENT_GOLDEN)
+"""The shape of one completed phenology delivery's event, with the gate's finding for the bucket
+it shipped and its plant mapping's disclosure."""
 
 
 def test_a_selection_record_carries_each_sample_s_own_source_label_group_and_side(tmp_path):
-    """A selection's record is its sample list: each entry names its own source and label rather
-    than a shared root, with no per-date members block or bare id list."""
+    """A selection's record, as ``draw_splits`` writes it over real images and their label
+    documents, is its sample list: each entry names its own source and label rather than a
+    shared root, with no per-date members block or bare id list."""
     import tcip_store as ts
 
-    from tcip_mcp.dataset_layout import label_key
     from tcip_mcp.pipelines.data import selection
-    from tcip_mcp.pipelines.data.label_queries import registry_scope
+    from tcip_mcp.tools.data_tools import draw_splits
+    from tests.test_training_autoval import _detection_dataset
 
-    selection.write_selection(
-        tmp_path / "splits",
-        selection.Selection(
-            samples=(
-                selection.Sample(member="a_1", source=str(tmp_path / "images/2026-03-04/a_1.jpg"),
-                                 ground_truth=label_key(tmp_path, "2026-03-04", "a_1"),
-                                 group="a", side="train",
-                                 ground_truth_digest="7f3a1b9c2d4e5f60"),
-            ),
-            scope=registry_scope(tmp_path, "bud"), seed=42,
-            group_by="stem", dataset_fingerprint="7ac1",
-        ),
-        project=tmp_path,
-    )
+    _detection_dataset(tmp_path / "ds")
+    drawn = draw_splits(tmp_path, str(tmp_path / "ds"), seed=1, subject="bud", val_ratio=0.25,
+                        calibration_ratio=0, holdout_ratio=0, group_by="stem",
+                        output_path=str(tmp_path / "splits"))
+    assert "error" not in drawn, drawn
     fresh = ts.read(selection.selection_key(tmp_path / "splits"))
 
     assert "members" not in fresh and "splits" not in fresh and "date" not in fresh
@@ -94,28 +80,37 @@ def test_a_selection_record_carries_each_sample_s_own_source_label_group_and_sid
 
 
 def test_the_delivery_events_golden_carries_every_key_a_delivery_records(tmp_path):
-    """A real delivery through the chain's own producers leaves an event whose keys, and whose
-    bucket finding's keys, are exactly the golden's."""
+    """A real phenology delivery through a plant mapping, every record of it made by the
+    platform's own producers, leaves an event whose keys are exactly the golden's: at the event,
+    its bucket finding, its producer and its plant mapping's disclosure."""
     import pytest
 
     pytest.importorskip("torch")
-    from tcip_mcp.delivery import read_delivery_events
-    from tcip_mcp.tools.inference_tools import deliver_per_image_counts
+    from tcip_mcp.tools.phenology_tools import build_plant_mapping
+    from tests import test_plant_mapping_binding as binding
+    from tests._mapping_fixtures import register_plant_registry_for
+    from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 
-    from tests import _trait_fixtures as fx
-    from tests._chain_fixtures import run_the_chain
-
-    chain = run_the_chain(tmp_path, experiment_id="exp-golden-event")
-    delivered = deliver_per_image_counts(tmp_path, str(chain.root), chain.bucket,
-                                         output_path=str(tmp_path / "out.csv"),
-                                         trait=fx.COUNT_TRAIT)
+    binding._init(tmp_path)
+    dataset_root = binding._dataset(tmp_path)
+    images_root, plant_csv, preds_by_date = binding._write_scene(dataset_root)
+    built = build_plant_mapping(tmp_path, name="valley", images_root=str(images_root),
+                                plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+    assert "error" not in built, built
+    _seed_currant_bloom_trait(tmp_path)
+    delivered = binding._deliver(
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=binding.POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
+        output_csv_path=str(tmp_path / "out.csv"))
     assert "error" not in delivered, delivered
-    (event,) = read_delivery_events(tmp_path)
-    fresh = event.model_dump(mode="json")
+    (fresh,) = binding._events(tmp_path)
     golden = DELIVERY_EVENT_GOLDEN
     assert set(golden) == set(fresh)
     assert set(golden["buckets"][0]) == set(fresh["buckets"][0])
     assert set(golden["producer"]) == set(fresh["producer"])
+    assert set(golden["plant_mapping"]) == set(fresh["plant_mapping"])
+    assert set(golden["plant_mapping"]["nn_tolerance_m"]) == set(
+        fresh["plant_mapping"]["nn_tolerance_m"])
 
 
 def test_the_traits_golden_carries_every_field_the_proposing_and_confirming_producers_write(

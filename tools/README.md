@@ -43,6 +43,10 @@ breeder or an operator runs against a project are documented in `README.md` and
 - `generate_trait_fixture.py` - writes `frontend/src/test/traitListings.json`, the trait
   listings the frontend tests read, by proposing and confirming traits in a scratch project and
   serving them through the traits route. Run after changing the trait record's shape.
+- `generate_delivery_fixture.py` - writes `frontend/src/test/deliveryEvents.json`, the delivery
+  events the frontend tests read, by making real deliveries in scratch projects and serving them
+  through the delivery-events route; `tests/test_generated_frontend_fixtures.py` holds the file
+  to what a regeneration serves. Run after changing a delivery's record or that route.
 - `generate_harness_discovery.py` - renders the thin `.claude/skills/<name>/SKILL.md` and
   `.agents/skills/<name>/SKILL.md` files, plus the generated block in `AGENTS.md`, from the
   canonical knowledge documents under `packages/tcip-mcp/src/tcip_mcp/knowledge/`. Run after

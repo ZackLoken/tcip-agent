@@ -11,6 +11,7 @@ import pytest
 from PIL import Image
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.pipelines.raster_source import SourceHeader
 
 
 def _display(image_path: str) -> tuple[np.ndarray, tuple[int, int]]:
@@ -496,22 +497,22 @@ class TestDisplayRead:
         """The artifact bound is the read's target, not a resize after a whole decode; the native
         frame the annotations live in is reported unchanged."""
         from tcip_mcp.pipelines.display_bounds import VIZ_ARTIFACT_MAX_EDGE
-        from tcip_mcp.tools.vision_tools import _display_for_path
+        from tcip_mcp.tools.vision_tools import _display_of
 
         images = tmp_path / "images" / UNDATED_BUCKET
         images.mkdir(parents=True)
         path = images / "big.jpg"
         Image.new("RGB", (VIZ_ARTIFACT_MAX_EDGE * 2, VIZ_ARTIFACT_MAX_EDGE)).save(path)
 
-        read = _display_for_path(str(path))
+        read = _display_of(SourceHeader(path))
         assert read.pixels.shape[:2] == (VIZ_ARTIFACT_MAX_EDGE // 2, VIZ_ARTIFACT_MAX_EDGE)
         assert read.native_size == (VIZ_ARTIFACT_MAX_EDGE * 2, VIZ_ARTIFACT_MAX_EDGE)
         assert (read.rect.width, read.rect.height) == read.native_size
 
     def test_a_source_within_the_bound_is_read_at_native_resolution(self, viz_dataset: Path):
-        from tcip_mcp.tools.vision_tools import _display_for_path
+        from tcip_mcp.tools.vision_tools import _display_of
 
-        read = _display_for_path(str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"))
+        read = _display_of(SourceHeader(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"))
         assert read.pixels.shape[:2] == (480, 640)
         assert (read.rect.width, read.rect.height) == (640, 480)
 
@@ -527,11 +528,11 @@ class TestDisplayRead:
         import tifffile
 
         from tcip_annotation.viz import render_canvas_state
-        from tcip_mcp.tools.vision_tools import _read_for_display
+        from tcip_mcp.tools.vision_tools import _display_of
 
         path = tmp_path / "skinny.tif"
         tifffile.imwrite(str(path), np.full(shape, 100, dtype=np.uint8))
-        read = _read_for_display(path, max_edge=1600)
+        read = _display_of(SourceHeader(path), max_edge=1600)
         assert read.native_size == (shape[1], shape[0])
         assert read.pixels.shape[:2] == tuple(1600 if n > 1 else 1 for n in shape)
 
@@ -549,7 +550,7 @@ class TestDisplayRead:
         sliver of their dtype's range, and passing them through unstretched renders it black."""
         import tifffile
 
-        from tcip_mcp.tools.vision_tools import _display_for_path
+        from tcip_mcp.tools.vision_tools import _display_of
 
         images = tmp_path / "images" / UNDATED_BUCKET
         images.mkdir(parents=True)
@@ -557,24 +558,24 @@ class TestDisplayRead:
         arr = np.stack([np.linspace(100, 400, 12, dtype=np.uint16)] * 10)
         tifffile.imwrite(str(path), np.stack([arr, arr + 50, arr + 90], axis=-1))
 
-        pixels = _display_for_path(str(path)).pixels
+        pixels = _display_of(SourceHeader(path)).pixels
         assert pixels.dtype == np.uint8
         assert pixels.max() == 255
 
     def test_a_region_read_reports_the_rect_it_served(self, viz_dataset: Path):
-        from tcip_mcp.tools.vision_tools import _display_for_path
+        from tcip_mcp.tools.vision_tools import _display_of
 
-        read = _display_for_path(str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"),
-                                 region=(100.0, 50.0, 200.0, 150.0))
+        read = _display_of(SourceHeader(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"),
+                           region=(100.0, 50.0, 200.0, 150.0))
         assert (read.rect.x0, read.rect.y0, read.rect.x1, read.rect.y1) == (100, 50, 300, 200)
         assert read.pixels.shape[:2] == (150, 200)
 
     def test_a_region_hanging_off_the_edge_is_clamped_into_the_raster(self, viz_dataset: Path):
         """A human can pan past the image, so a viewport is clamped rather than refused."""
-        from tcip_mcp.tools.vision_tools import _display_for_path
+        from tcip_mcp.tools.vision_tools import _display_of
 
-        read = _display_for_path(str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"),
-                                 region=(500.0, 400.0, 400.0, 400.0))
+        read = _display_of(SourceHeader(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"),
+                           region=(500.0, 400.0, 400.0, 400.0))
         assert (read.rect.x1, read.rect.y1) == (640, 480)
         assert read.pixels.shape[:2] == (80, 140)
 

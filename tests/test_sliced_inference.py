@@ -12,8 +12,6 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
-
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 pytest.importorskip("sahi")
 
@@ -28,32 +26,49 @@ WIDE_BLOB = (20, 95, 190, 120)
 BLOBS = (SEAM_BLOB, INNER_BLOB, WIDE_BLOB)
 
 
-COLOR = {"name": "color", "type": "categorical", "values": ["red", "green", "blue"]}
-"""An attribute whose value is the band a blob is bright in, as the blob detector calls it."""
+TRAINING_HEIGHT = 180
+"""The height of a training frame: :data:`FRAME` cropped short of square, every blob kept whole,
+so an untiled run records no square frame edge a stated tile edge could contradict."""
 
 
 def _checkpoint(tmp_path: Path, *, in_chans: int = 3, with_masks: bool = False,
-                by_band: bool = False, tiling: dict | None = None,
-                data: dict | None = None):
-    """A registered bright-blob checkpoint, loaded through the platform's own loader; with
-    ``by_band`` its recorded scope declares :data:`COLOR`."""
+                by_band: bool = False, tiling: dict | None = None):
+    """The bright-blob checkpoint a run under ``tmp_path`` completed over two ``in_chans``-band
+    frames of its own holding :data:`BLOBS`, each labeled (with ``with_masks``, by polygon),
+    tiled as ``tiling`` states and otherwise untiled; registered by completing, its path and its
+    load through the platform's own loader. With ``by_band`` its frames' registry declares the
+    attribute whose value is the band a blob is bright in, as the blob detector calls it."""
+    import tifffile
+
+    from tcip_annotation.state import Annotation, BBox, Polygon
+    from tcip_mcp import subject_registry as cr
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tests._chain_fixtures import BLOB_BUILDER, built_model, training_config
-    from tcip_mcp.tools.model_tools import register_model
+    from tests._chain_fixtures import BLOB_BUILDER
+    from tests._producer_fixtures import label_image, registry_over
+    from tests._verified_checkpoint_fixtures import fixture_data_dir, registered_checkpoint
 
     task = "instance_seg" if with_masks else "detection"
-    model_source = {**BLOB_BUILDER, "builder_kwargs": {"with_masks": with_masks}, "task": task}
-    ckpt = tmp_path / "model_best.pt"
-    scope = {"subject": "bud", "attributes": [COLOR] if by_band else []}
-    data_cfg = {"num_channels": in_chans, "scope": scope,
-                **(data or {}), **({"tiling": tiling} if tiling else {})}
-    config = training_config(model_source, data_cfg)
-    model = built_model(config)
-    torch.save({STATE_DICT_KEY: model.state_dict(), CONFIG_KEY: config}, str(ckpt))
-    result = register_model(name="blob", checkpoint_path=str(ckpt),
-                            project=tmp_path)
-    assert "error" not in result, result
-    return str(ckpt), load_registered_checkpoint(str(ckpt), project=tmp_path)
+    dataset = fixture_data_dir(tmp_path, "blobs")
+    if by_band:
+        color = cr.Attribute("color", "categorical", ("red", "green", "blue"))
+        registry_over(dataset, cr.SubjectRegistry(
+            subjects=(cr.Subject(name="bud", attributes=(color,)),)))
+    images = dataset / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
+    annotations = [Annotation(subject="bud", attributes={"color": "red"} if by_band else {},
+                              geometry=Polygon([[(x0, y0), (x1, y0), (x1, y1), (x0, y1)]])
+                              if with_masks else BBox(x0, y0, x1, y1))
+                   for x0, y0, x1, y1 in BLOBS]
+    for index in range(2):
+        frame = images / f"frame{index}.tif"
+        tifffile.imwrite(str(frame), _frame(bands=in_chans)[:TRAINING_HEIGHT])
+        label_image(frame, annotations, FRAME, TRAINING_HEIGHT)
+    ckpt = registered_checkpoint(
+        tmp_path,
+        model_source={**BLOB_BUILDER, "builder_kwargs": {"with_masks": with_masks}, "task": task},
+        data={"images_dir": str(images), "num_channels": in_chans, "scope": {"subject": "bud"},
+              "tiling": tiling or {"enabled": False}})
+    return ckpt, load_registered_checkpoint(ckpt, project=tmp_path)
 
 
 def _frame(bands: int = 3, *, value=255, blobs=BLOBS) -> np.ndarray:
@@ -524,8 +539,8 @@ def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(tmp_path):
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
 
-    ckpt, _checkpoint_record = _checkpoint(tmp_path, tiling={"tile_size": TILE,
-                                                             "overlap": OVERLAP})
+    ckpt, _checkpoint_record = _checkpoint(  # sliver_frac stated: three boxes derive no spread
+        tmp_path, tiling={"tile_size": TILE, "overlap": OVERLAP, "sliver_frac": 0.5})
     images = tmp_path / "images" / UNDATED_BUCKET
     images.mkdir(parents=True)
     _png(images, _frame())

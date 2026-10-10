@@ -48,11 +48,13 @@ nn_tolerance_m."""
 
 @dataclass
 class ImageStamp:
-    """Per-capture metadata: EXIF for an ``image``, structural facts for a ``band_group`` or
-    ``raster``. ``name`` is the capture's file name, ``readable`` whether an ``image``'s EXIF read
-    (``None`` for the other kinds), and ``manifest_sha256``/``members`` a ``band_group``'s own."""
+    """Per-capture metadata: EXIF for a photograph, structural facts for a band group or an array
+    raster. ``kind`` is the capture's
+    :attr:`~tcip_mcp.pipelines.raster_source.SourceHeader.kind` (``"photo"``, ``"group"``, or an
+    array container's ``"tif"``/``"npy"``/``"npz"``), ``name`` its file name, ``readable`` whether
+    a photograph's EXIF read (``None`` for the other kinds), and ``manifest_sha256``/``members`` a
+    band group's own."""
 
-    path: str
     stem: str
     date_folder: str
     kind: str
@@ -168,8 +170,8 @@ class MappingBuild:
 
     ``dataset_id`` is the dataset identity record's minted id; ``dataset_root`` is spelled
     against the owning project by :func:`~tcip_mcp.registry_paths.stored_path`.
-    ``capture_digests`` is ``capture_identity``'s per-capture counterpart
-    (:func:`capture_digests`, one entry per stem, derived from the same row builder).
+    ``capture_digests`` is the identity of the captures each date was built from
+    (:func:`capture_digests`, one entry per stem).
     """
 
     __pydantic_config__ = _DECODED
@@ -184,7 +186,6 @@ class MappingBuild:
     plant_registry: dict
     """The named :data:`PLANT_REGISTRY_STORE` record this build's plants were read from:
     ``{"name": ..., "digest": ...}``."""
-    capture_identity: dict[str, str]
     capture_digests: dict[str, dict[str, str]]
     unreadable: dict[str, list[str]]
     assignments: dict[str, list[Assignment]]
@@ -207,20 +208,15 @@ class MappingBuild:
     @classmethod
     def from_record(cls, raw: object, project: Path | str, name: str) -> "MappingBuild":
         """The build the stored record ``raw`` under ``name`` holds, carrying the record's own
-        digest (:func:`record_digest`). A document that does not decode as this record, or whose
-        ``capture_identity`` names a date ``capture_digests`` does not, raises ``ValueError``
-        naming the project and the name."""
+        digest (:func:`record_digest`). A document that does not decode as this record raises
+        ``ValueError`` naming the project and the name."""
         from pydantic import ValidationError
 
-        problem = f"plant mapping {name!r} under {project} is not a record this reader decodes"
         try:
             build = _MAPPING_RECORD.validate_json(encode_record(raw))
         except ValidationError as exc:
-            raise ValueError(f"{problem}: {exc}") from exc
-        undigested = sorted(set(build.capture_identity) - set(build.capture_digests))
-        if undigested:
-            raise ValueError(f"{problem}: capture_identity names {undigested}, which "
-                             "capture_digests carries no digest map for")
+            raise ValueError(f"plant mapping {name!r} under {project} is not a record this "
+                             f"reader decodes: {exc}") from exc
         return replace(build, record_sha256=record_digest(raw))
 
     def rows(self) -> dict[str, list[dict]]:
@@ -302,7 +298,7 @@ class MappingBuild:
             "built_at": self.built_at,
             "record_sha256": self.record_sha256,
             "nn_tolerance_m": self.nn_tolerance_m,
-            "capture_identity": self.capture_identity,
+            "capture_digests": self.capture_digests,
             "captures_unverified": verified["captures_unverified"],
             "plant_csvs_unverified": verified["plant_csvs_unverified"],
             "dates_delivered": dates_delivered,
@@ -341,18 +337,18 @@ def _exif_dms_to_decimal(dms, ref, *, axis: str, negative: str, positive: str,
 
 
 def read_image_stamp(path: Path, date_folder: str) -> ImageStamp:
-    """One ``image`` capture's EXIF stamp.
+    """One photograph's EXIF stamp.
 
-    The ``try`` covers ``Image.open`` alone: a capture PIL cannot open (a HEIC with no decoder
-    installed, a locked file) becomes a stamp with ``readable=False``; an image that opens and
-    carries no EXIF stays ``readable=True`` with ``None`` fields. A capture time, GPS coordinate or
-    positioning error present in malformed form, and a GPS coordinate whose hemisphere reference is
-    missing, raise ``ValueError`` naming the image.
+    A photograph PIL cannot open (a HEIC with no decoder installed, a locked file) becomes a
+    stamp with ``readable=False``; one that opens and carries no EXIF stays ``readable=True``
+    with ``None`` fields. A capture time, GPS coordinate or positioning error present in
+    malformed form, and a GPS coordinate whose hemisphere reference is missing, raise
+    ``ValueError`` naming the image.
     """
     from tcip_mcp.pipelines.image_utils import exif_capture_time, parse_capture_time
 
     stamp = ImageStamp(
-        path=str(path), stem=path.stem, date_folder=date_folder, kind="image", name=path.name,
+        stem=path.stem, date_folder=date_folder, kind="photo", name=path.name,
         timestamp=None, lat=None, lon=None, h_pos_err=None, readable=True,
     )
     try:
@@ -390,46 +386,46 @@ def read_image_stamp(path: Path, date_folder: str) -> ImageStamp:
 def _read_date_stamps(
     logical: dict[str, "Path | BandGroupRef"], date_folder: str
 ) -> list[ImageStamp]:
-    """A date's stamps for every logical capture ``list_logical_images`` enumerated: EXIF for an
-    ``image``, the manifest's own digest and member names for a ``band_group``, bare identity for
-    a ``raster`` (no EXIF to read for either)."""
+    """A date's stamps for every logical capture ``list_logical_images`` enumerated, by its
+    header's ``kind``: EXIF for a photograph, the manifest's own digest and member names for a
+    band group, bare identity for an array raster (no EXIF to read for either)."""
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.image_utils import capture_kind
+    from tcip_mcp.pipelines.raster_source import SourceHeader
 
     stamps: list[ImageStamp] = []
     for stem in sorted(logical):
         source = logical[stem]
-        kind = capture_kind(source)
-        if kind == "band_group":
+        kind = SourceHeader(source).kind
+        if kind == "group":
             assert isinstance(source, BandGroupRef)
             manifest_sha256 = hashlib.sha256(source.manifest_path.read_bytes()).hexdigest()
             members = tuple(sorted(p.name for p in source.bands.values()))
             stamps.append(ImageStamp(
-                path=str(source.manifest_path), stem=stem, date_folder=date_folder, kind=kind,
-                name=source.manifest_path.name, timestamp=None, lat=None, lon=None,
-                h_pos_err=None, readable=None, manifest_sha256=manifest_sha256, members=members,
+                stem=stem, date_folder=date_folder, kind=kind, name=source.manifest_path.name,
+                timestamp=None, lat=None, lon=None, h_pos_err=None, readable=None,
+                manifest_sha256=manifest_sha256, members=members,
             ))
-        elif kind == "raster":
+        elif kind == "photo":
+            assert isinstance(source, Path)
+            stamps.append(read_image_stamp(source, date_folder))
+        else:
             p = source
             assert isinstance(p, Path)
             stamps.append(ImageStamp(
-                path=str(p), stem=stem, date_folder=date_folder, kind=kind, name=p.name,
+                stem=stem, date_folder=date_folder, kind=kind, name=p.name,
                 timestamp=None, lat=None, lon=None, h_pos_err=None, readable=None,
             ))
-        else:
-            assert isinstance(source, Path)
-            stamps.append(read_image_stamp(source, date_folder))
     return stamps
 
 
 def _capture_row(s: ImageStamp) -> list[object]:
     """The fields one capture's identity commits to: a manifest's own digest and the member names
-    it claims for a ``band_group``, bare identity for a ``raster`` (neither carries EXIF), EXIF for
-    an ``image``.
+    it claims for a band group, bare identity for an array raster (neither carries EXIF), EXIF
+    for a photograph.
     """
-    if s.kind == "band_group":
+    if s.kind == "group":
         return [s.name, s.kind, s.manifest_sha256, list(s.members)]
-    if s.kind == "raster":
+    if s.kind != "photo":
         return [s.name, s.kind]
     return [
         s.name, s.kind,
@@ -442,20 +438,12 @@ def _row_digest(row: Sequence[object]) -> str:
     return hashlib.sha256(json.dumps(row, sort_keys=False).encode("utf-8")).hexdigest()[:16]
 
 
-def capture_identity(stamps: list[ImageStamp]) -> str:
-    """The sha256[:16] over every capture ``list_logical_images`` enumerated for one date.
+def capture_digests(stamps: list[ImageStamp]) -> dict[str, str]:
+    """One digest per capture, keyed by stem, over that capture's own :func:`_capture_row`.
 
     An EXIF/manifest identity, never an image-content identity: it certifies the inputs the
     assignment was made from, not the pixels a phenotype was counted over (the prediction bucket's
     own stamps carry that).
-    """
-    rows = [_capture_row(s) for s in sorted(stamps, key=lambda s: s.name)]
-    return _row_digest(rows)
-
-
-def capture_digests(stamps: list[ImageStamp]) -> dict[str, str]:
-    """One digest per capture, keyed by stem, over that capture's own :func:`_capture_row` alone:
-    ``capture_identity``'s per-capture counterpart.
     """
     return {s.stem: _row_digest(_capture_row(s)) for s in stamps}
 
@@ -521,7 +509,7 @@ def read_plant_csvs(paths: Iterable[Path]) -> list[PlantRecord]:
 
 
 class ShapefileRows(NamedTuple):
-    """One :func:`read_plant_shapefile` call's rows and bookkeeping. ``rows`` carries
+    """A plant-locations shapefile's rows and bookkeeping. ``rows`` carries
     :data:`PLANT_CSV_COLUMNS`' seven keys per feature: the five attribute columns as the DBF
     value's ``str()`` verbatim (empty when the field is unresolved, exactly the rule
     :func:`_shapefile_field_value` states), and ``WGS84_centroid_x``/``WGS84_centroid_y`` as the
@@ -808,9 +796,10 @@ def verify_registry_csv_bytes(
 def parse_plant_registry_csvs(
     csv_paths: list[Path], project: Path | str,
 ) -> tuple[list[dict], str, int]:
-    """Parse ``csv_paths`` into the registry's own ``{path, sha256, n_plants}`` entries, each
-    ``path`` spelled against ``project`` by :func:`~tcip_mcp.registry_paths.stored_path`,
-    the content digest over every parsed row and the total plant count, committing nothing.
+    """Parse the absolute ``csv_paths`` into the registry's own ``{path, sha256, n_plants}``
+    entries, each ``path`` spelled against ``project`` by
+    :func:`~tcip_mcp.registry_paths.stored_path`, the content digest over every parsed row and the
+    total plant count, committing nothing.
 
     Raises :class:`NoGeoreferencedPlantsError`, naming every file that parsed no georeferenced,
     named plant or is not UTF-8 text (a binary file, a shapefile's own ``.shp``/``.shx``/``.dbf``
@@ -822,7 +811,7 @@ def parse_plant_registry_csvs(
     csvs_meta: list[dict] = []
     all_plants: list[PlantRecord] = []
     for p in csv_paths:
-        data = Path(p).read_bytes() if Path(p).is_file() else b""
+        data = p.read_bytes() if p.is_file() else b""
         try:
             records = read_plant_csv_bytes(data)
         except UnicodeDecodeError:
@@ -1022,8 +1011,8 @@ def assign_plants(
 ) -> list[Assignment]:
     """Assign each image to a plant by sequence-anchored NN matching: its nearest unclaimed plant
     within the sequence gate, else its nearest plant within the loosest gate
-    (:func:`match_gates`), else none. A stamp with no position (a ``band_group`` or ``raster``, or
-    an ``image`` with no usable EXIF position) is unmapped."""
+    (:func:`match_gates`), else none. A stamp with no position (a band group or an array raster,
+    or a photograph with no usable EXIF position) is unmapped."""
     out: list[Assignment] = []
     gates = match_gates(nn_tolerance_m)
     claimed: set[int] = set()
@@ -1143,7 +1132,6 @@ def build_mapping(
     images_root = Path(images_root)
     dates_walked: list[str] = []
     assignments: dict[str, list[Assignment]] = {}
-    capture_ids: dict[str, str] = {}
     capture_digests_by_date: dict[str, dict[str, str]] = {}
     unreadable: dict[str, list[str]] = {}
     n_stamps = 0
@@ -1160,10 +1148,9 @@ def build_mapping(
             stamps = _read_date_stamps(logical, date)
             n_stamps += len(stamps)
             n_positioned += sum(1 for s in stamps if s.position is not None)
-            capture_ids[date] = capture_identity(stamps)
             capture_digests_by_date[date] = capture_digests(stamps)
             unreadable[date] = sorted(
-                s.name for s in stamps if s.kind == "image" and s.readable is False)
+                s.name for s in stamps if s.kind == "photo" and s.readable is False)
             assignments[date] = assign_plants(stamps, plants, nn_tolerance_m=tolerance["value"])
 
     if n_stamps == 0:
@@ -1186,7 +1173,6 @@ def build_mapping(
         dates=sorted(dates_walked),
         nn_tolerance_m=tolerance,
         plant_registry=plant_registry,
-        capture_identity=capture_ids,
         capture_digests=capture_digests_by_date,
         unreadable=unreadable,
         assignments=assignments,
@@ -1311,11 +1297,12 @@ def persist_mapping(build: MappingBuild, project: Path | str, *, supersede: bool
 
 
 def build_plant_mapping(
-    project: Path | str, name: str, images_root: Path | str, plant_registry: str, *,
+    project: Path | str, name: str, images_root: Path, plant_registry: str, *,
     dates: Optional[list[str]] = None, nn_tolerance_m: Optional[float] = None,
     supersede: bool = False, actor: str | None,
 ) -> MappingBuild:
-    """Map the captures under ``images_root`` to the plants of ``project``'s registry
+    """Map the captures under the established location ``images_root`` to the plants of
+    ``project``'s registry
     ``plant_registry`` (:func:`build_mapping`) and persist the mapping under ``name`` by ``actor``
     (:func:`persist_mapping`, whose receipt is the act's one audit line); return the build.
 
@@ -1327,15 +1314,14 @@ def build_plant_mapping(
     from tcip_mcp.pipelines.data.splits import same_directory
 
     plant_mapping_key(project, name)
-    images = Path(images_root).resolve()
-    dataset = dataset_root_of(images)
-    if dataset is None or not same_directory(image_root(dataset), images):
+    dataset = dataset_root_of(images_root)
+    if dataset is None or not same_directory(image_root(dataset), images_root):
         raise ValueError(f"{images_root} is not a dataset's own images/ root; a mapping maps the "
                          "image tree of a dataset registered with register_dataset")
     identity = require_dataset_identity(dataset)
     registry = load_registry(project, plant_registry)
     build = build_mapping(
-        images, [Path(e["path"]) for e in registry_csv_entries(registry, project)],
+        images_root, [Path(e["path"]) for e in registry_csv_entries(registry, project)],
         name=name, dataset_root=dataset, dataset_id=identity["id"], project=project,
         plant_registry={"name": plant_registry, "digest": registry["digest"]},
         dates=dates, nn_tolerance_m=nn_tolerance_m)
@@ -1429,9 +1415,9 @@ def _describe_capture(stamps_by_stem: dict[str, ImageStamp], stem: str) -> str:
     s = stamps_by_stem.get(stem)
     if s is None:
         return stem
-    if s.kind == "band_group":
+    if s.kind == "group":
         return f"band group manifest {s.name!r}"
-    if s.kind == "raster":
+    if s.kind != "photo":
         return f"raster {s.name!r}"
     return f"image {s.name!r}"
 
@@ -1464,15 +1450,15 @@ def verify_mapping_inputs(
     position is disclosed rather than compared.
 
     When every mapped capture of a date was read (``missing_stems`` empty and ``read_set`` equal to
-    the recorded stems :func:`assignment_is_attributed` calls attributed), the whole date's
-    identity (:func:`capture_identity`) is recomputed over every capture the date enumerates, the
-    unmapped ones (a raster, a band group) included, and compared against the record, refusing on a
-    mismatch and naming the capture(s) whose own :func:`capture_digests` entry moved; a capture
-    verified this way is not also listed in ``captures_unverified``. Under a partial read that
-    digest does not run, so an in-place EXIF timestamp or band-group manifest change on a read
-    capture goes undetected when some other mapped capture of the same date was not read.
+    the recorded stems :func:`assignment_is_attributed` calls attributed), every capture the date
+    enumerates, the unmapped ones (an array raster, a band group) included, has its digest
+    (:func:`capture_digests`) recomputed and compared against the record, refusing by name on any
+    capture whose digest moved; a capture verified this way is not also listed in
+    ``captures_unverified``. Under a partial read those digests are not compared, so an in-place
+    EXIF timestamp or band-group manifest change on a read capture goes undetected when some
+    other mapped capture of the same date was not read.
 
-    Never raises: returns ``{"refusal": str}`` for any of the above; otherwise
+    Returns ``{"refusal": str}`` for any of the above; otherwise
     ``{"captures_unverified": [...], "plant_csvs_unverified": [...]}``, entries in ``build.dates``
     order and, within a date, sorted by name. A missing plant CSV is disclosed in
     ``plant_csvs_unverified``; a rewritten one refuses (restore the file's registered bytes, or
@@ -1556,7 +1542,7 @@ def verify_mapping_inputs(
         was_unreadable = set(build.unreadable.get(date, []))
         for s in stamps:
             row = recorded_by_stem[s.stem]
-            if s.kind == "image":
+            if s.kind == "photo":
                 if s.name not in was_unreadable and s.readable is False:
                     return {"refusal": (
                         f"{s.name} (date {date}) was readable when this mapping was built and "
@@ -1586,21 +1572,17 @@ def verify_mapping_inputs(
             captures_unverified.append(f"{date}/{name}")
 
         if full_mapped_coverage:
-            new_identity = capture_identity(observed)
-            if new_identity != build.capture_identity.get(date):
-                new_digests = capture_digests(observed)
-                recorded_digests = build.capture_digests.get(date, {})
-                stamps_by_stem = {s.stem: s for s in observed}
-                moved = sorted(
-                    _describe_capture(stamps_by_stem, stem)
-                    for stem in set(new_digests) | set(recorded_digests)
-                    if new_digests.get(stem) != recorded_digests.get(stem)
-                )
-                detail = (
-                    ", ".join(moved) if moved else "a capture whose identity does not decompose"
-                )
+            new_digests = capture_digests(observed)
+            recorded_digests = build.capture_digests[date]
+            stamps_by_stem = {s.stem: s for s in observed}
+            moved = sorted(
+                _describe_capture(stamps_by_stem, stem)
+                for stem in set(new_digests) | set(recorded_digests)
+                if new_digests.get(stem) != recorded_digests.get(stem)
+            )
+            if moved:
                 return {"refusal": (
-                    f"date {date}: {detail} changed since this mapping was built; "
+                    f"date {date}: {', '.join(moved)} changed since this mapping was built; "
                     "rebuild to cover the images actually on disk")}
 
     return {

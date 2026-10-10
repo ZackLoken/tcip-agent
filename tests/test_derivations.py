@@ -281,6 +281,34 @@ def test_derive_block_scale_px_plant_pitch_via_projected_geotransform(tmp_path):
     assert px == pytest.approx(200, rel=0.05)  # ~100m / 0.5 m-per-px = ~200px
 
 
+def test_derive_block_scale_px_reads_the_rasters_header_once(tmp_path, monkeypatch):
+    """The refusal of an unreadable raster and the pixel size the plant pitch converts through
+    come off one header read."""
+    from tcip_mcp.pipelines import raster_source
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
+    from tests._geotiff_fixtures import write_geotiff
+
+    plants = [
+        PlantRecord("p0", "a0", 0, 0, 0, 45.0, -93.0),
+        PlantRecord("p1", "a1", 0, 0, 0, 45.000898, -93.0),
+    ]
+    raster_path = tmp_path / "mosaic.tif"
+    write_geotiff(raster_path)
+    reads: list = []
+    real = raster_source.tiff_header
+
+    def counting(tif):
+        reads.append(tif.filehandle.path)
+        return real(tif)
+
+    monkeypatch.setattr(raster_source, "tiff_header", counting)
+    _px, source = derive_block_scale_px(
+        tile_size=16, gt_boxes_per_image=[[(0, 0, 20, 20)]], plants=plants,
+        raster_path=str(raster_path))
+    assert "plant grid pitch" in source
+    assert len(reads) == 1
+
+
 def test_derive_block_scale_px_converts_a_foot_unit_raster_through_its_crs(tmp_path):
     """A raster in US survey feet (EPSG 2264) converts the plant-pitch meters through the CRS's
     own unit conversion factor, not a naive meter-blind pixel-scale division."""
@@ -354,10 +382,10 @@ def test_derive_block_scale_px_unprojected_raster_falls_back_to_gt_spacing(monke
         PlantRecord("p1", "a1", 0, 0, 0, 45.000898, -93.0),
     ]
 
-    def _boom(path):
+    def _boom(tags, path):
         raise orthomosaic_mapping.GeoreferencingError("no geokeys")
 
-    monkeypatch.setattr(orthomosaic_mapping, "read_geotransform", _boom)
+    monkeypatch.setattr(orthomosaic_mapping, "geotransform_of", _boom)
     raster_path = tmp_path / "mosaic.tif"
     # a real georeferenced raster: without the stub above the plant path would win, so this
     # test exercises the GeoreferencingError fallback rather than an empty file's own decline
@@ -391,7 +419,7 @@ def test_derive_block_scale_px_truncated_raster_refuses_named(tmp_path):
 def test_derive_block_scale_px_npy_raster_refuses_named_for_no_georeference(tmp_path):
     """guard. An .npy array container is a raster by suffix but carries no georeferencing tags at
     all; it is refused by name, distinct from the truncated-file words above, rather than tried
-    through read_geotransform."""
+    through the header's georeference read."""
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
 
     plants = [

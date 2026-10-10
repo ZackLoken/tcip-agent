@@ -23,8 +23,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AmbiguousImageStemError", "BandGroupIncompleteError", "BandGroupRef", "IMAGE_EXTS",
-    "bucket_logical_identities", "capture_kind", "display_frame",
-    "image_dimensions", "list_logical_images", "load_image", "load_multiband",
+    "bucket_logical_identities",
+    "image_dimensions", "list_logical_images", "load_image",
     "logical_image_name", "pil_to_tensor", "pixel_array",
     "refuse_incomplete_band_group", "resolve_image_path", "resolve_image_paths",
     "source_path_of", "stem_collision_key", "stem_of",
@@ -99,6 +99,15 @@ def bucket_logical_identities(images_dir: str | Path) -> dict[str, list[Path]]:
     return {key: [path for path, _ref in entries] for key, entries in _scan_identities(d).items()}
 
 
+def logical_image_count(root: str | Path) -> int:
+    """How many logical images every capture under the dataset root ``root`` holds
+    (:func:`bucket_logical_identities`, each identity of an ambiguous stem counted)."""
+    from tcip_mcp import dataset_layout
+
+    return sum(len(ids) for date in dataset_layout.list_dates(root)
+               for ids in bucket_logical_identities(dataset_layout.image_dir(root, date)).values())
+
+
 def list_logical_images(images_dir: str | Path) -> dict[str, "Path | BandGroupRef"]:
     """Every logical image in ``images_dir``, by exact stem.
 
@@ -129,19 +138,6 @@ def _refuse_ambiguous(d: Path, keys: "Iterable[list[tuple[Path, BandGroupRef | N
             f"{d}: {names} name more than one logical image under one case-folded stem, "
             "refusing to silently keep one. Rename so each logical image has its own stem."
         )
-
-
-def capture_kind(source: "Path | BandGroupRef") -> str:
-    """The kind of capture ``list_logical_images`` enumerated a stem under: ``"band_group"`` for
-    a :class:`BandGroupRef`, ``"raster"`` for the suffixes ``load_multiband`` treats as an array
-    container (``raster_source.ARRAY_CONTAINER_EXTS``: ``.npy``/``.npz``/``.tif``/``.tiff``),
-    ``"image"`` for the rest (``.jpg``/``.jpeg``/``.png``/``.bmp``/``.heic``).
-    """
-    if isinstance(source, BandGroupRef):
-        return "band_group"
-    if Path(source).suffix.lower() in raster_source.ARRAY_CONTAINER_EXTS:
-        return "raster"
-    return "image"
 
 
 def refuse_incomplete_band_group(source: "Path | BandGroupRef") -> "Path | BandGroupRef":
@@ -192,17 +188,10 @@ def resolve_image_path(image_path: str | Path) -> "Path | BandGroupRef":
 
 
 def image_path_dimensions(image_path: str | Path) -> tuple[int, int]:
-    """:func:`display_frame` of the logical image ``image_path`` names
-    (:func:`resolve_image_path`, a grouped capture folded into its one frame). Its refusals
-    propagate."""
-    return display_frame(resolve_image_path(image_path))
-
-
-def display_frame(source: "str | Path | BandGroupRef") -> tuple[int, int]:
-    """``(width, height)`` of ``source`` as the image route's plain read opens it, at
-    :func:`~tcip_mcp.pipelines.raster_source.image_route_channel_count`: the frame a viewer draws
-    the raster in and annotation coordinates are measured in."""
-    return image_dimensions(source, raster_source.image_route_channel_count(source))
+    """:attr:`~tcip_mcp.pipelines.raster_source.SourceHeader.display_frame` of the logical image
+    ``image_path`` names (:func:`resolve_image_path`, a grouped capture folded into its one
+    frame). Its refusals propagate."""
+    return raster_source.SourceHeader(resolve_image_path(image_path)).display_frame
 
 
 def source_path_of(source: "str | Path | BandGroupRef") -> str:
@@ -270,25 +259,9 @@ def parse_capture_time(raw: object):
 
 
 def image_dimensions(path: "str | Path | BandGroupRef", num_channels: int) -> tuple[int, int]:
-    """``(width, height)`` as ``load_image`` will decode it at ``num_channels``, without decoding
-    pixels where possible. :func:`display_frame` is the frame a viewer and annotations use.
-
-    A :class:`BandGroupRef` reads its dims from one sibling band file (a group's members share one
-    spatial frame).
-    """
-    if isinstance(path, BandGroupRef):
-        one_band = next(iter(path.bands.values()))
-        return image_dimensions(one_band, 1)
-    path = Path(path)
-    ext = path.suffix.lower()
-    if raster_source.photographic_container(path, num_channels):
-        from tcip_annotation.utils import get_image_dimensions
-
-        return get_image_dimensions(str(path))  # header-only, EXIF-aware
-    if ext in (".tif", ".tiff"):
-        frame = raster_source.tiff_frame(path, num_channels)
-        return int(frame[1]), int(frame[0])
-    return frame_size(load_multiband(path, num_channels))
+    """``(width, height)`` as ``load_image`` will decode it at ``num_channels``
+    (:meth:`~tcip_mcp.pipelines.raster_source.SourceHeader.frame_at`)."""
+    return raster_source.SourceHeader(path).frame_at(num_channels)
 
 
 def frame_size(img) -> tuple[int, int]:
@@ -361,16 +334,3 @@ def load_image(path: "str | Path | BandGroupRef", num_channels: int):
         return to_pil_if_faithful(
             pixels, band_interpretations=getattr(src, "band_interpretations", None)
         )
-
-
-def load_multiband(path: "str | Path | BandGroupRef", num_channels: int) -> np.ndarray:
-    """Load a multi-band image as ``[H, W, C]`` through ``raster_source``'s array backends.
-
-    A :class:`BandGroupRef` decodes each sibling file (each already a supported single-band
-    source) and stacks them into one ``[H, W, C]`` array in the manifest's declared band order.
-
-    A photographic container (anything outside ``.npy`` / ``.npz`` / ``.tif`` / ``.tiff``) raises
-    ``ValueError`` at any channel count.
-    """
-    with raster_source.open_array_source(path, num_channels) as src:
-        return src.read_region(Rect(0, 0, src.width, src.height))[0]

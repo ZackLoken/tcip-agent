@@ -19,8 +19,7 @@ from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS, SAMPLE_MA
 
 torch = pytest.importorskip("torch")
 
-from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
-from tests._chain_fixtures import BESPOKE_DETECTION  # noqa: E402
+from tests._chain_fixtures import BESPOKE_DETECTION, BESPOKE_MODELS  # noqa: E402
 pytest.importorskip("torchvision")
 
 # UTM zone 15N: the same real projected CRS test_orthomosaic_mapping.py uses.
@@ -33,7 +32,7 @@ TILE = 32
 RASTER_PASS = Stated(conf=0.0, max_dets=SAMPLE_MAX_DETS, tile_size=TILE, overlap=0.2,
                      cross_tile_nms=SAMPLE_CROSS_TILE_NMS)
 """The execution values every raster pass here states."""
-SCOPE = {"subject": fx.COUNT_SUBJECT, "attributes": []}
+SCOPE = {"subject": fx.COUNT_SUBJECT}
 pytestmark = pytest.mark.usefixtures("confirmed_count_aggregate")
 
 
@@ -46,7 +45,7 @@ def _write_geo_raster(path: Path, *, height: int = 64, width: int = 64, channels
                       rowsperstrip: int = 8, tiepoint_x: float = TIEPOINT_NATIVE_X,
                       seed: int = 0) -> np.ndarray:
     """A raster carrying both real georeferencing tags and real (random, decodable) pixel
-    content, so it works for both :func:`read_geotransform` and a tiling inference pass.
+    content, so it works for both the header's georeference read and a tiling inference pass.
 
     ``tiepoint_x``/``seed`` vary the two halves independently, so a caller can write a
     pixel-identical copy at a moved tiepoint, or different content at the same one."""
@@ -64,28 +63,24 @@ def _write_geo_raster(path: Path, *, height: int = 64, width: int = 64, channels
 
 def _bespoke_detection_checkpoint(
         tmp_path: Path, *, in_chans: int = 3, tile_size: int = TILE) -> str:
-    """Write a bespoke detection checkpoint under ``tmp_path`` and register it in that project's
-    model registry, so a caller can hand its bare path to a door that resolves the registry
-    itself."""
-    from tests._chain_fixtures import built_model, training_config
-    from tcip_mcp.tools.model_tools import register_model
+    """The checkpoint an untiled bespoke detection run under ``tmp_path`` completed over frames
+    of its own, registered in that project's model registry by completing."""
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    model_source = {"builder": BESPOKE_DETECTION,
-                    "builder_kwargs": {"min_size": tile_size, "max_size": tile_size * 2},
-                    "task": "detection"}
-    config = training_config(model_source, {"num_channels": in_chans, "scope": dict(SCOPE)})
-    model = built_model(config)
-    ckpt = tmp_path / "model_best.pt"
-    torch.save({CONFIG_KEY: config, STATE_DICT_KEY: model.state_dict()}, str(ckpt))
-    result = register_model(tmp_path, name="test-model", checkpoint_path=str(ckpt))
-    assert "error" not in result, result
-    return str(ckpt)
+    return registered_checkpoint(
+        tmp_path, model_source={"builder": BESPOKE_DETECTION, "task": "detection",
+                                "source_files": [BESPOKE_MODELS],
+                                "builder_kwargs": {"min_size": tile_size,
+                                                   "max_size": tile_size * 2}},
+        data={"num_channels": in_chans, "scope": dict(SCOPE), "tiling": {"enabled": False}})
 
 
 def _pixel_to_wgs84(raster_path: Path, px: float, py: float) -> tuple[float, float]:
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import OrthomosaicGeoreference
+    from tcip_mcp.pipelines.raster_source import SourceHeader
 
-    return OrthomosaicGeoreference.from_file(raster_path).pixel_to_wgs84(px, py)
+    return OrthomosaicGeoreference.of(
+        SourceHeader(raster_path).georeference).pixel_to_wgs84(px, py)
 
 
 def _plant_registry(project: Path, plant_csv: Path, *, name: str = "reg") -> str:
@@ -290,6 +285,29 @@ def test_detections_are_counted_to_their_nearest_plant_at_detection_granularity(
     assert {r["delivered_phenotype"] for r in rows.values()} == {"stem_count"}
     (event,) = read_delivery_events(tmp_path)
     assert event.door == "test_orthomosaic"
+
+
+def test_a_delivery_reads_the_rasters_georeferencing_once(tmp_path, monkeypatch):
+    """The identity check and the pixel-to-world mapping read the raster's georeferencing tags
+    through one header read: the reader the check opened carries what the mapping needs."""
+    raster_path = _raster(tmp_path)
+    _write_geo_raster(raster_path)
+    bucket = _raster_bucket(tmp_path, raster_path, [(8.0, 8.0, 12.0, 12.0)])
+    registry = _plant_registry(tmp_path, _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS))
+    reads: list = []
+    real = tifffile.TiffFile
+
+    def counting(*args, **kwargs):
+        if Path(str(args[0])) == raster_path:
+            reads.append(args[0])
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(tifffile, "TiffFile", counting)
+    delivered = _deliver(tmp_path, bucket, registry, _GRID)
+    assert "error" not in delivered, delivered
+    # Two acts: the attempt the delivery gate refuses for its acknowledgment, then the
+    # acknowledged one; each reads the raster's header once.
+    assert len(reads) == 2
 
 
 def test_a_far_detection_is_counted_to_no_plant(tmp_path):
