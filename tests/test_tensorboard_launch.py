@@ -191,6 +191,33 @@ def test_launch_reports_the_platform_lifetime_tie(monkeypatch, tmp_path):
         tb.stop_tensorboard(str(tmp_path))
 
 
+def test_a_board_is_tracked_under_the_one_spelling_the_store_keys_its_directory_by(
+    monkeypatch, tmp_path
+):
+    """A board launched under one spelling of a log directory that does not exist yet is found
+    and stopped under any spelling ``canonical_path`` equates with it, and only those: a case
+    variant of the missing tail on a platform whose case rule folds case, a second directory on
+    one that does not."""
+    from tcip_mcp.pipelines.training import tensorboard_manager as tb
+    from tcip_store import canonical_path
+
+    monkeypatch.setattr(
+        tb, "_tensorboard_argv",
+        lambda logdir, port: [sys.executable, "-c", "import time; time.sleep(30)"],
+    )
+    launched, other = str(tmp_path / "Board"), str(tmp_path / "BOARD")
+    one_directory = canonical_path(launched) == canonical_path(other)
+
+    info = tb.launch_tensorboard(launched)
+    try:
+        assert (tb.running_url(other) == info["url"]) is one_directory
+        assert (tb.stop_tensorboard(other)["status"] == "stopped") is one_directory
+        assert (tb.running_url(launched) is None) is one_directory
+    finally:
+        tb.stop_tensorboard(launched)
+        tb.stop_tensorboard(other)
+
+
 def test_the_guardians_grace_leaves_a_second_under_the_stop_wait():
     """The guardian's kill lands before ``stop_tensorboard`` gives up waiting on it."""
     from tcip_mcp.pipelines.training import tensorboard_manager as tb

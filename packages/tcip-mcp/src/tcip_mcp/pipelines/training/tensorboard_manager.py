@@ -19,8 +19,9 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import IO, cast
+
+from tcip_store import canonical_path
 
 if sys.platform == "win32":
     import ctypes
@@ -201,11 +202,6 @@ def _guardian_argv(argv: list[str]) -> list[str]:
     ]
 
 
-def _key_of(logdir: str) -> str:
-    """The tracking key a child is indexed by: its log directory, resolved."""
-    return str(Path(logdir).resolve())
-
-
 def _collect_output(handle) -> str:
     """Read back (and close) what a finished child wrote to its capture file."""
     try:
@@ -226,8 +222,8 @@ def _release_output(entry: _Launched) -> None:
 
 
 def launch_tensorboard(logdir: str) -> dict:
-    """Launch a TensorBoard process for the given log directory, tracked by that directory
-    resolved.
+    """Launch a TensorBoard process for the given log directory, tracked by the directory's one
+    spelling (``tcip_store.canonical_path``), which the child is handed and the answer carries.
 
     Returns dict with 'url', 'port', 'pid', 'logdir', 'lifetime_tie', or ``{'error': ..., 'output':
     ...}`` when the process died during startup. If TensorBoard is already running for this logdir,
@@ -239,7 +235,7 @@ def launch_tensorboard(logdir: str) -> dict:
     """
     from tcip_mcp.web_client import LOOPBACK_HOST, free_port
 
-    key = logdir = _key_of(logdir)
+    key = logdir = canonical_path(logdir)
 
     entry = _running(key)
     if entry is not None:
@@ -304,7 +300,7 @@ def _running(key: str) -> _Launched | None:
 
 def running_url(logdir: str) -> str | None:
     """The URL the TensorBoard tracked under ``logdir`` serves at, ``None`` when none runs."""
-    entry = _running(_key_of(logdir))
+    entry = _running(canonical_path(logdir))
     return entry.url if entry is not None else None
 
 
@@ -320,7 +316,7 @@ def stop_tensorboard(logdir: str) -> dict:
     a TensorBoard the guardian had not yet stopped; the answer is then ``stopped`` or
     ``kill_unconfirmed`` for the guardian itself.
     """
-    key = _key_of(logdir)
+    key = canonical_path(logdir)
     if key not in _TB_PROCESSES:
         return {"status": "not_running"}
 

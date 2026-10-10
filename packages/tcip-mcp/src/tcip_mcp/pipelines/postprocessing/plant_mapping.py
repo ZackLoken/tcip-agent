@@ -1343,9 +1343,10 @@ _receipt_cursor: dict[str, str] = {}
 _receipt_seen: dict[str, dict[str, set[str]]] = {}
 
 
-def _scan_receipts(project: Path | str, root_key: str, *, after: Optional[str]) -> None:
+def _scan_receipts(project: Path | str, *, after: Optional[str]) -> None:
     from tcip_mcp.audit import acts_of
 
+    root_key = tcip_store.canonical_path(project)
     entries, cursor = acts_of(project, ("plant_mapping_built",), after=after)
     seen = _receipt_seen.setdefault(root_key, {})
     for entry in entries:
@@ -1356,11 +1357,11 @@ def _scan_receipts(project: Path | str, root_key: str, *, after: Optional[str]) 
 def _require_receipt(project: Path | str, name: str, record_sha256: str) -> None:
     """Refuse unless a ``plant_mapping_built`` event under ``name`` names ``record_sha256`` in
     the project's own audit log; any matching receipt admits, the latest or not."""
-    root_key = str(Path(project).resolve())
+    root_key = tcip_store.canonical_path(project)
     if root_key not in _receipt_cursor:
-        _scan_receipts(project, root_key, after=None)
+        _scan_receipts(project, after=None)
     if record_sha256 not in _receipt_seen.get(root_key, {}).get(name, set()):
-        _scan_receipts(project, root_key, after=_receipt_cursor.get(root_key))
+        _scan_receipts(project, after=_receipt_cursor.get(root_key))
     if record_sha256 not in _receipt_seen.get(root_key, {}).get(name, set()):
         raise ValueError(
             f"plant mapping {name!r} under {project} carries no plant_mapping_built "
