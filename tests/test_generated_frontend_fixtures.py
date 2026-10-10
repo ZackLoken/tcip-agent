@@ -34,16 +34,22 @@ def _generator():
 PER_RUN = frozenset({
     "event_id", "acknowledgment_id", "assessment_id", "dataset_id", "experiment_id",
     "produced_at", "recorded_at", "built_at", "output_sha256", "result_sha256", "record_sha256",
-    "checkpoint_sha256"})
+    "checkpoint_sha256", "digest"})
 """The record fields two productions of the same scenes fill differently: minted ids, the
-times things happened, and digests over what carries those (a run's weights, a written output, a
-record holding a time)."""
+times things happened, and digests over what carries those or over a file the scene writes in
+the platform's own line endings (a run's weights, a written output, a record holding a time, a
+plant registry)."""
+
+FLOAT_PLACES = 6
+"""The decimal places a served float is compared to: a geometric value's last bits differ
+between the platforms the scenes run on, and a delivered meter value carries no more."""
 
 
 def _normalized(fixture: dict[str, dict]) -> dict[str, dict]:
     """``fixture`` with each :data:`PER_RUN` string replaced by a string placeholder numbered by
     first appearance, so equal values stay equal and distinct ones distinct and a value of any
-    other type is kept as served, and an archived mapping key that is exactly the name
+    other type is kept as served, each float rounded to :data:`FLOAT_PLACES`, and an archived
+    mapping key that is exactly the name
     :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.archived_mapping_name` gives the
     cited record replaced by that record's placeholder. Every other value is kept as served."""
     from tcip_mcp.pipelines.postprocessing.plant_mapping import archived_mapping_name
@@ -57,6 +63,8 @@ def _normalized(fixture: dict[str, dict]) -> dict[str, dict]:
             return [walk(v) for v in value]
         if key in PER_RUN and isinstance(value, str):
             return seen.setdefault(value, f"<{key} {len(seen)}>")
+        if isinstance(value, float):
+            return round(value, FLOAT_PLACES)
         return value
 
     out: dict[str, dict] = {}
