@@ -25,14 +25,15 @@ from tcip_mcp.cli import bound_project
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument("--path", required=True,
-                        help="Absolute path to an image file (single-image match) or an images "
-                             "directory (aggregate).")
+                        help="An image file (single-image match) or an images directory "
+                             "(aggregate); a relative one is under --project, and refused "
+                             "without it.")
     parser.add_argument("--bucket", required=True,
                         help="The name of the bucket, published under --path's dataset root, "
                              "whose documents are scored.")
     parser.add_argument("--project", default=None,
-                        help="The project the trait's confirmed revision is read from. Required "
-                             "with --trait.")
+                        help="The project a relative --path lies under and the trait's "
+                             "confirmed revision is read from. Required with --trait.")
     parser.add_argument("--iou-threshold", type=float, default=0.5,
                         help="IoU threshold for a positive match (the AP@0.5 comparability "
                              "convention).")
@@ -47,24 +48,27 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                              "metric. Absent -> the IoU convention governs.")
     args = parser.parse_args(argv)
 
-    trait = None
-    if args.trait:
-        if args.project is None:
-            parser.error("--trait requires --project, the project its confirmed revision is in")
-        from tcip_mcp.operationalization import latest_confirmed
-
-        trait = latest_confirmed(args.trait, bound_project(args.project)).entry
+    if args.trait and args.project is None:
+        parser.error("--trait requires --project, the project its confirmed revision is in")
+    if args.project is not None:
+        project = bound_project(args.project)
     else:
         from tcip_store import bind
 
         bind()
+        project = None
+    trait = None
+    if args.trait and project is not None:
+        from tcip_mcp.operationalization import latest_confirmed
+
+        trait = latest_confirmed(args.trait, project).entry
 
     from tcip_mcp.tools.annotation_tools import score_predictions
 
     stated = {} if args.conf_threshold is None else {"conf_threshold": args.conf_threshold}
     result = score_predictions(
         args.path, args.bucket, iou_threshold=args.iou_threshold, detail=args.detail,
-        trait=trait, **stated)
+        trait=trait, project=project, **stated)
     print(json.dumps(result, indent=2))
     return 1 if "error" in result else 0
 

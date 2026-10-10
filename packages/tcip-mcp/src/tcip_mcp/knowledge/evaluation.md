@@ -43,8 +43,8 @@ measurement-agreement/method-comparison contexts specifically because of that de
 | `evaluate_model` | Evaluate a checkpoint on a held-out dataset; returns the result and writes nothing |
 | `assess_checkpoint` | Assess a checkpoint for one delivery kind of a confirmed trait against a drawn selection's calibration and holdout sides, recording the assessment a delivery rests on |
 | `assess_reserved_regions` | The same assessment over a mosaic's reserved, attested-complete regions, for a checkpoint trained on a within-image split |
-| `annotation_tools.score_predictions` (library call) / `tcip score-predictions` (logged command) | Score on-disk predictions vs GT: an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN. It scores the object's localization, never an attribute head's call |
-| `tcip render-failure-cases` (logged command) | Surface + render the N images with highest triage error |
+| `annotation_tools.score_predictions` (library call) / `tcip score-predictions` (command) | Score on-disk predictions vs GT: an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN. It scores the object's localization, never an attribute head's call |
+| `tcip render-failure-cases` (command) | Surface + render the N images with highest triage error |
 | `experiment_tools.compare_experiments` (library call) | Side-by-side metrics across experiments |
 | `get_experiment` (`view='lineage'`) | Trace data → model → predictions chain |
 | `list_experiments` | List every run of the project, and every sweep with its trial runs under it |

@@ -8,6 +8,7 @@ from pathlib import Path
 from tcip_mcp.server import tool
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.data.splits import DEFAULT_GROUP_BY, DEFAULT_SHARES
+from tcip_mcp.registry_paths import located
 
 
 @tool()
@@ -80,12 +81,11 @@ def freeze_selection(project: Path, experiment_id: str, output_path: str | None 
         return {"error": f"this run's own source {a_source!r} does not resolve under a dataset "
                          "root (dataset_root_of), so the frozen selection has no dataset to "
                          "record a fingerprint for."}
-    if output_path is None:
-        output_path = str(dataset_root / "splits" / f"frozen-{experiment_id}")
-    out_dir = Path(output_path)
+    out_dir = (located(output_path, project) if output_path is not None
+               else dataset_root / "splits" / f"frozen-{experiment_id}")
     existing, existing_error = read_selection_checked(out_dir, project=project)
     if existing is not None or existing_error is not None:
-        return {"error": f"a selection already exists at {output_path!r}: "
+        return {"error": f"a selection already exists at {str(out_dir)!r}: "
                          f"{existing_error or 'freeze_selection never overwrites one.'}"}
 
     try:
@@ -120,7 +120,7 @@ def _scan_dataset(root: str) -> dict:
     from tcip_mcp.dataset_layout import LABEL_DOCUMENTS, image_dir, label_key_of, list_dates
     from tcip_mcp.pipelines.image_utils import list_logical_images, source_path_of
 
-    root_path = Path(root).resolve()
+    root_path = Path(root)
     images = [source_path_of(source) for capture in list_dates(root_path)
               for source in list_logical_images(image_dir(root_path, capture)).values()]
     return {
@@ -135,15 +135,19 @@ def scan_dataset(folder_path: str) -> dict:
     (:func:`_scan_dataset`), and how many images their own label document pairs with.
 
     Args:
-        folder_path: Path to the dataset root directory.
+        folder_path: Path to the dataset root directory
+            (:func:`~tcip_mcp.registry_paths.located` with no project, so absolute).
     """
-    if not Path(folder_path).is_dir():
-        return {"error": f"Directory not found: {folder_path}"}
-
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError
 
     try:
-        scan = _scan_dataset(folder_path)
+        root = located(folder_path, None)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    if not root.is_dir():
+        return {"error": f"Directory not found: {folder_path}"}
+    try:
+        scan = _scan_dataset(str(root))
     except AmbiguousImageStemError as exc:
         return {"error": str(exc)}
 
@@ -236,6 +240,23 @@ def draw_splits(
             explicitly: a directory of ``<stem>.png`` masks, or a ``.csv`` table of one row per
             image; the images are the dataset's own ``images/`` tree either way.
     """
+    return draw_splits_at(
+        project, str(located(folder_path, project)), seed=seed, val_ratio=val_ratio,
+        calibration_ratio=calibration_ratio, holdout_ratio=holdout_ratio, group_by=group_by,
+        group_key_map=group_key_map, stratify_foreground=stratify_foreground,
+        output_path=output_path and str(located(output_path, project)), subject=subject,
+        ground_truth=ground_truth and str(located(ground_truth, project)))
+
+
+def draw_splits_at(
+    project: Path, folder_path: str, *, seed: int, val_ratio: float, calibration_ratio: float,
+    holdout_ratio: float, group_by: str, group_key_map: dict[str, str] | None,
+    stratify_foreground: bool, output_path: str | None, subject: str | None,
+    ground_truth: str | None,
+) -> dict:
+    """The selection drawn over the dataset root ``folder_path`` as :func:`draw_splits` states
+    it, written at ``output_path`` and read against ``ground_truth``, each a location already
+    established (absolute)."""
     if not Path(folder_path).is_dir():
         return {"error": f"Directory not found: {folder_path}"}
 
@@ -261,8 +282,7 @@ def draw_splits(
             return {"error": f"{folder_path} holds no capture under images/ whose images "
                              f"{ground_truth} could answer for; ingest them with ingest_images."}
     else:
-        captures = sorted({key.parts[0] for key in tcip_store.keys(
-            LABEL_DOCUMENTS, str(Path(folder_path).resolve()))})
+        captures = sorted({key.parts[0] for key in tcip_store.keys(LABEL_DOCUMENTS, folder_path)})
         places = [(c, image_dir(folder_path, c), None) for c in captures]
         if not places:
             return {"error": f"{folder_path} holds no label document for draw_splits to draw a "

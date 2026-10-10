@@ -100,7 +100,8 @@ def _worker(job: InferenceJob) -> None:
             job.done, job.total = done, total
 
         result = infer(
-            Path(job.project), checkpoint_path=job.checkpoint_path, images_dir=job.images_dir,
+            Path(job.project), checkpoint_path=Path(job.checkpoint_path),
+            images_dir=job.images_dir,
             raster_path=None, bucket=job.bucket, assessment_id=job.assessment_id,
             stated=job.stated, device=None, tile_batch_size=DEFAULT_TILE_BATCH_SIZE,
             dry_run=False, require_masks=True, resume=False, progress=progress,

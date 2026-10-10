@@ -59,11 +59,15 @@ def test_dataset_entry_path_resolves_a_relative_entry_against_the_project_root(t
 def test_dataset_entry_path_leaves_an_external_absolute_entry_unchanged(tmp_path: Path):
     from tcip_mcp.tools.project_tools import dataset_entry_path
 
+    project = tmp_path / "proj"
+    project.mkdir()
     external = tmp_path / "external"
-    external.mkdir()
-    entry = {"path": str(external)}
+    _make_dataset(external)
+    assert "error" not in register_dataset(project, str(external), crop="currant")
 
-    assert dataset_entry_path(tmp_path / "proj", entry) == Path(str(external))
+    (entry,) = read_datasets(project)
+    assert entry["path"] == str(external.resolve())
+    assert dataset_entry_path(project, entry) == external.resolve()
 
 
 def test_register_dataset_stores_a_nested_relative_path_with_posix_separators(tmp_path: Path):

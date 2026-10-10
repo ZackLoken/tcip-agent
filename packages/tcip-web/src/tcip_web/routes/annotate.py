@@ -259,10 +259,10 @@ _pq_registry = jobstore.JobRegistry()
 def _pq_worker(job: PriorityQueueJob) -> None:
     try:
         job.status = "running"
-        from tcip_mcp.tools.feedback_tools import prioritize_review_queue
+        from tcip_mcp.tools.feedback_tools import ranked_review_queue
 
-        result = prioritize_review_queue(
-            Path(job.project), checkpoint_path=job.checkpoint_path, images_dir=job.images_dir,
+        result = ranked_review_queue(
+            Path(job.project), Path(job.checkpoint_path), Path(job.images_dir),
             method=job.method, budget=job.budget, subject=job.subject)
         if "error" in result:
             job.status, job.error = "failed", result["error"]
@@ -286,7 +286,7 @@ class LaunchPriorityQueuePayload(BaseModel):
 
 @router.post("/queue/launch")
 def launch_priority_queue(payload: LaunchPriorityQueuePayload) -> dict:
-    """Launch :func:`~tcip_mcp.tools.feedback_tools.prioritize_review_queue` for the open project
+    """Launch :func:`~tcip_mcp.tools.feedback_tools.ranked_review_queue` for the open project
     on a background thread; a checkpoint or images directory outside the allowed roots is refused
     and a missing one answers 404."""
     checkpoint_path = allowed_path(payload.checkpoint_path)

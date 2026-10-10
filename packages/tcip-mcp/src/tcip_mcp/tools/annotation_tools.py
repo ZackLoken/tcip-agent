@@ -17,6 +17,7 @@ from tcip_annotation.matching import REVIEW_CONF_FLOOR, Matching
 from tcip_mcp.buckets import Bucket, read_bucket, source_root
 from tcip_mcp.dataset_layout import label_key_of
 from tcip_mcp.pipelines.image_utils import image_path_dimensions
+from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_mcp.workspace import BoundProject
 
@@ -38,10 +39,14 @@ def read_annotations(image_path: str, bucket: str | None = None) -> dict:
     document this schema cannot read returns an ``error``.
 
     Args:
-        image_path: Absolute path to the image file.
+        image_path: Absolute path to the image file (:func:`~tcip_mcp.registry_paths.located`
+            with no project).
         bucket: The name of the published bucket whose document for this image to read, if any.
     """
-    img = Path(image_path)
+    try:
+        img = located(image_path, None)
+    except ValueError as exc:
+        return {"error": str(exc)}
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
@@ -81,7 +86,8 @@ def save_annotations(
     name -> value name).
 
     Args:
-        image_path: Absolute path to the image file.
+        image_path: The image file (:func:`~tcip_mcp.registry_paths.located` against the
+            project).
         annotations: List of ``{subject, bbox?/points?/rings?/point?, attributes?}`` dicts (pixel
             coords); an empty list writes an empty document.
 
@@ -94,6 +100,7 @@ def save_annotations(
     from tcip_mcp.dataset_layout import save_label_document
     from tcip_mcp.web_client import PANEL_EVENT_LABELS_WRITTEN, post_panel_event
 
+    image_path = str(located(image_path, bound.root))
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
@@ -163,7 +170,8 @@ def _evaluate_image(image: Path, bucket: Bucket, iou_threshold: float, conf_thre
            "iou_threshold": iou_threshold, "conf_threshold": conf_threshold,
            "matches": [list(pair) for pair in one.matching.pairs]}
     if detail:
-        out.update(img_w=one.width, img_h=one.height,
+        img_w, img_h = one.header.display_frame
+        out.update(img_w=img_w, img_h=img_h,
                    detections=_detection_breakdown(one.matching, one.gt, one.preds))
     return out
 
@@ -189,10 +197,12 @@ def _evaluate_folder(images_dir: str, bucket: Bucket, iou_threshold: float,
     counts = {"tp": "total_tp", "fp": "total_fp", "fn": "total_fn"}
     totals = {counts.get(k, k): v for k, v in _rounded(_totals(m)).items()}
     return {"path": images_dir, "image_count": len(predicted),
-            "not_predicted": [source_path_of(one.image) for one in scored if one.preds is None],
+            "not_predicted": [source_path_of(one.header.source) for one in scored
+                              if one.preds is None],
             "map": round(m["map"], 4), "map50": round(m["map50"], 4), **totals,
             "governing_criterion": m["governing_criterion"],
-            "per_image": [{"image": Path(source_path_of(one.image)).name, **_counts(one.matching)}
+            "per_image": [{"image": Path(source_path_of(one.header.source)).name,
+                           **_counts(one.matching)}
                           for one in predicted]}
 
 
@@ -203,6 +213,8 @@ def score_predictions(
     conf_threshold: float = REVIEW_CONF_FLOOR,
     detail: bool = False,
     trait: TraitEntry | None = None,
+    *,
+    project: Path | None = None,
 ) -> dict:
     """Score a published bucket's predictions against the images' own label documents through the
     platform's one matcher.
@@ -216,8 +228,9 @@ def score_predictions(
     object class, never an attribute head's call.
 
     Args:
-        path: Absolute path to an image file (single-image match) or an images directory
-            (aggregate).
+        path: An image file (single-image match) or an images directory (aggregate)
+            (:func:`~tcip_mcp.registry_paths.located` against ``project``; with none held, a
+            relative path refuses).
         bucket: The name of the bucket, published under ``path``'s dataset root, whose documents
             are scored.
         iou_threshold: IoU threshold for a positive match (the AP@0.5 comparability convention).
@@ -230,14 +243,17 @@ def score_predictions(
             reported TP/FP/FN count; map50 stays a labeled comparability metric. Absent -> the IoU
             convention governs.
     """
-    p = Path(path)
+    try:
+        p = located(path, project)
+    except ValueError as exc:
+        return {"error": str(exc)}
     if not p.exists():
         return {"error": f"Path not found: {path}"}
     try:
         found = read_bucket(source_root([p]), bucket)
         if p.is_file():
             return _evaluate_image(p, found, iou_threshold, conf_threshold, detail, trait)
-        return _evaluate_folder(path, found, iou_threshold, conf_threshold, trait)
+        return _evaluate_folder(str(p), found, iou_threshold, conf_threshold, trait)
     except (UnreadableLabelDocumentError, ValueError) as exc:
         return {"error": str(exc)}
 
@@ -274,7 +290,7 @@ def write_subject_registry(
 
     try:
         result = subject_registry.replace_registry(
-            dataset_root, registry, expect=None, allow_removals=allow_removals,
+            located(dataset_root, project), registry, expect=None, allow_removals=allow_removals,
             allow_type_changes=allow_type_changes, actor=None)
     except (subject_registry.RegistryError, VersionConflictError, AuditEntryNotWrittenError) as exc:
         return {"error": str(exc)}

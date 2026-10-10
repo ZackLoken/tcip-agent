@@ -34,11 +34,11 @@ def test_archive_project_refuses_a_non_empty_destination(tmp_path):
 
 
 def test_archive_project_refuses_a_zip_destination_inside_the_project_or_already_written(
-    tmp_path,
+    tmp_path, monkeypatch,
 ):
     """The ZIP form takes the directory form's refusals: a destination inside the project would
     bundle its own truncated self, and a written archive is never written over; a relative path
-    refuses rather than resolving against wherever the process runs."""
+    names a location under the project, never under wherever the process runs."""
     root = one_labeled_capture(tmp_path / "project")
     outside = tmp_path / "bundle.zip"
 
@@ -52,7 +52,13 @@ def test_archive_project_refuses_a_zip_destination_inside_the_project_or_already
     assert "already exists" in again["error"]
     assert outside.read_bytes() == written
 
-    assert "relative" in archive_project(root, output_path="archive.zip")["error"]
+    elsewhere = tmp_path / "cwd"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    assert "inside the project" in archive_project(root, output_path="archive.zip")["error"]
+    assert "error" not in archive_project(root, output_path="../beside.zip")
+    assert (tmp_path / "beside.zip").is_file()
+    assert list(elsewhere.iterdir()) == []
 
 
 def test_archive_project_refuses_both_output_path_and_output_dir(tmp_path):

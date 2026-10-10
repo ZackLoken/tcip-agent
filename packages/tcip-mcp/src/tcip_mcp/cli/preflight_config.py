@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 
 from tcip_mcp.cli import bound_project
 
@@ -34,10 +33,12 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                              "never gates, a noisy-but-valid model can fail it.")
     args = parser.parse_args(argv)
 
-    config = json.loads(Path(args.config).read_text(encoding="utf-8"))
     project = bound_project(args.project)
 
+    from tcip_mcp.registry_paths import located
     from tcip_mcp.tools.training_tools import preflight_config
+
+    config = json.loads(located(args.config, project).read_text(encoding="utf-8"))
 
     result = preflight_config(project, config, smoke=args.smoke, overfit=args.overfit)
     print(json.dumps(result, indent=2))

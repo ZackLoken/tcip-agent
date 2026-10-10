@@ -9,8 +9,9 @@ path.
     tcip render-failure-cases --dataset-root <root> --bucket <name> --project <project>
         [--task detect|segment] [--top-k N] [--class-names NAMES]
 
-``--project`` names where this run's audit line and the rendered images land; the bucket named
-``--bucket`` under ``--dataset-root`` is what gets read, beside its images' label documents.
+``--project`` names where the rendered images land and what a relative ``--dataset-root`` lies
+under; the bucket named ``--bucket`` under ``--dataset-root`` is what gets read, beside its images'
+label documents.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                         help="The dataset root the bucket is published under.")
     parser.add_argument("--bucket", required=True, help="The published bucket's name.")
     parser.add_argument("--project", required=True,
-                         help="The project this run's audit line and renders land under.")
+                         help="The project the renders land under.")
     parser.add_argument("--task", default="detect", choices=("detect", "segment"))
     parser.add_argument("--top-k", type=int, default=10, help="Number of worst cases to render.")
     parser.add_argument("--class-names", default="", help="Comma-separated class names.")

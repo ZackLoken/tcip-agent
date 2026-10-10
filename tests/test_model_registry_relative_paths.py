@@ -17,13 +17,14 @@ from tcip_mcp.model_registry import ModelRegistry, read_registry_index, registry
 from tcip_mcp.registry_paths import is_external_form
 
 
-def _checkpoint(path: Path, marker: str) -> None:
-    """A checkpoint file at ``path`` the verified reader admits, its bytes distinct per
-    ``marker``."""
+def _checkpoint(path: Path, content: str) -> None:
+    """A checkpoint at ``path`` a run completed under a root of its own
+    (``_verified_checkpoint_fixtures.produced_checkpoint``), its bytes distinct per
+    ``content``."""
     pytest.importorskip("torch")
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
-    checkpoint_file(path, marker)
+    produced_checkpoint(path, content)
 
 
 def test_absent_registry_answers_empty_for_a_fresh_project(tmp_path: Path):
@@ -38,7 +39,7 @@ def test_archive_project_carries_a_registered_checkpoint_outside_models(tmp_path
     weights_dir = project / "weights"
     weights_dir.mkdir()
     ckpt = weights_dir / "m.pt"
-    _checkpoint(ckpt, "weights outside the .tcip/models convenience location")
+    _checkpoint(ckpt, "weights")
     ModelRegistry(str(project)).register_model("m", str(ckpt))
     out = tmp_path / "out.zip"
 
@@ -78,47 +79,42 @@ def test_is_external_form_rejects_every_relative_spelling(spelling: str):
 
 def test_dataset_and_checkpoint_spellers_agree_on_the_same_geometry(tmp_path: Path):
     """One containment core: a checkpoint and a dataset both sitting under the same project
-    root spell relative, and both sitting on a genuinely separate tree spell absolute, agreeing
-    with each other rather than each registry re-deriving its own notion of containment."""
-    from tcip_mcp.registry_paths import stored_path
+    root are recorded relative by their own registries, and both sitting on a genuinely
+    separate tree are recorded absolute, the two registries' records agreeing with each other."""
+    from tcip_mcp.tools.project_tools import read_datasets, register_dataset
 
     project = tmp_path / "proj"
     nested_dataset = project / "datasets" / "main"
     nested_dataset.mkdir(parents=True)
-    ckpt_dir = project / ".tcip" / "models"
-    ckpt_dir.mkdir(parents=True)
-    ckpt = ckpt_dir / "m.pt"
-    _checkpoint(ckpt, "weights")
+    _checkpoint(project / ".tcip" / "models" / "m.pt", "weights")
 
     reg = ModelRegistry(str(project))
-    entry = reg.register_model("m", str(ckpt))
+    entry = reg.register_model("m", str(project / ".tcip" / "models" / "m.pt"))
+    assert "error" not in register_dataset(project, str(nested_dataset), "chestnut")
     stored_ckpt = read_registry_index(project)[0]["checkpoint_path"]
-    dataset_path = stored_path(nested_dataset, project)
+    (dataset_entry,) = read_datasets(project)
 
     assert not is_external_form(stored_ckpt)
-    assert not is_external_form(dataset_path)
+    assert not is_external_form(dataset_entry["path"])
     assert Path(entry["checkpoint_path"]).is_absolute()
 
     outside = tmp_path / "elsewhere"
-    outside.mkdir()
-    outside_ckpt = outside / "m2.pt"
-    _checkpoint(outside_ckpt, "other weights")
-    reg.register_model("m2", str(outside_ckpt))
+    _checkpoint(outside / "m2.pt", "other weights")
+    reg.register_model("m2", str(outside / "m2.pt"))
+    assert "error" not in register_dataset(project, str(outside), "chestnut")
     stored_outside = read_registry_index(project)[1]["checkpoint_path"]
-    outside_dataset_path = stored_path(outside, project)
+    outside_entry = next(e for e in read_datasets(project) if e["id"] != dataset_entry["id"])
 
     assert is_external_form(stored_outside)
-    assert is_external_form(outside_dataset_path)
+    assert is_external_form(outside_entry["path"])
 
 
 # ── response surfaces: resolved absolute, including a relative-root process case ───────────
 
 
 def _register_internal_checkpoint(project: Path) -> tuple[ModelRegistry, str]:
-    ckpt_dir = project / ".tcip" / "experiments" / "exp1"
-    ckpt_dir.mkdir(parents=True)
-    ckpt = ckpt_dir / "model_final.pt"
-    _checkpoint(ckpt, "a resolved-response fixture's own weights")
+    ckpt = project / ".tcip" / "models" / "m.pt"
+    _checkpoint(ckpt, "weights")
     reg = ModelRegistry(str(project))
     reg.register_model("m", str(ckpt))
     return reg, str(ckpt)
@@ -148,10 +144,8 @@ def test_rank_registered_models_tool_answers_resolved_absolute(tmp_path: Path):
     from tcip_mcp.tools.model_tools import rank_registered_models
 
     project = tmp_path / "proj"
-    ckpt_dir = project / ".tcip" / "experiments" / "exp1"
-    ckpt_dir.mkdir(parents=True)
-    ckpt = ckpt_dir / "model_final.pt"
-    _checkpoint(ckpt, "best-model fixture weights")
+    ckpt = project / ".tcip" / "models" / "m.pt"
+    _checkpoint(ckpt, "weights")
     ModelRegistry(str(project)).register_model("m", str(ckpt), metrics={"val_map50": 0.9})
 
     result = rank_registered_models(project, metric="val_map50", higher_is_better=True,
@@ -163,10 +157,8 @@ def test_rank_registered_models_tool_answers_resolved_absolute(tmp_path: Path):
 
 def test_explicit_register_model_return_is_resolved_absolute(tmp_path: Path):
     project = tmp_path / "proj"
-    ckpt_dir = project / ".tcip" / "models"
-    ckpt_dir.mkdir(parents=True)
-    ckpt = ckpt_dir / "m.pt"
-    _checkpoint(ckpt, "explicit-mode weights")
+    ckpt = project / ".tcip" / "models" / "m.pt"
+    _checkpoint(ckpt, "weights")
 
     entry = ModelRegistry(str(project)).register_model("m", str(ckpt))
 
@@ -176,7 +168,7 @@ def test_explicit_register_model_return_is_resolved_absolute(tmp_path: Path):
 def test_a_completed_runs_registry_entry_answers_its_checkpoint_resolved_absolute(
     tmp_path: Path,
 ):
-    """A run's final status names its checkpoint relative to its own directory; the registry's
+    """A run's final status stores its checkpoint relative to the project; the registry's
     listing of that run answers the path resolved absolute."""
     from tcip_mcp.experiments import experiment_dir
     from tcip_mcp.tools.project_tools import initialize_project
@@ -205,11 +197,12 @@ def test_resolved_registry_path_refuses_a_traversal_in_either_grammar(tmp_path: 
 
 
 def test_resolved_registry_path_admits_a_legitimate_relative_value(tmp_path: Path):
-    from tcip_mcp.registry_paths import resolved_registry_path
+    from tcip_mcp.registry_paths import resolved_registry_path, stored_path
 
-    result = resolved_registry_path(tmp_path, ".tcip/models/m.pt")
+    target = (tmp_path / ".tcip" / "models" / "m.pt").resolve()
+    result = resolved_registry_path(tmp_path, stored_path(target, tmp_path))
 
-    assert result == (tmp_path / ".tcip" / "models" / "m.pt").resolve()
+    assert result == target
 
 
 # ── resolved_registry_path's empty-value refusal, and its admits-valid-work partner ────────
@@ -223,9 +216,10 @@ def test_resolved_registry_path_refuses_an_empty_value(tmp_path: Path):
 
 
 def test_resolved_registry_path_admits_a_non_empty_value(tmp_path: Path):
-    from tcip_mcp.registry_paths import resolved_registry_path
+    from tcip_mcp.registry_paths import resolved_registry_path, stored_path
 
-    assert resolved_registry_path(tmp_path, "m.pt") == (tmp_path / "m.pt").resolve()
+    target = (tmp_path / "m.pt").resolve()
+    assert resolved_registry_path(tmp_path, stored_path(target, tmp_path)) == target
 
 
 # ── checkpoint_registry_path_for's root gate, and its admits-valid-work partner ────────────
@@ -303,7 +297,7 @@ def test_a_symlink_to_a_checkpoint_outside_root_stores_the_resolved_external_loc
     real_dir = tmp_path / "real_weights"
     real_dir.mkdir()
     real = real_dir / "m.pt"
-    _checkpoint(real, "the real bytes behind the symlink")
+    _checkpoint(real, "weights")
     link_dir = project / ".tcip" / "models"
     link_dir.mkdir(parents=True)
     link = link_dir / "m_link.pt"
@@ -329,7 +323,7 @@ def test_a_symlink_to_a_checkpoint_under_root_stores_the_resolved_internal_locat
     real_dir = project / "weights_home"
     real_dir.mkdir(parents=True)
     real = real_dir / "m.pt"
-    _checkpoint(real, "the real bytes behind an in-tree symlink")
+    _checkpoint(real, "weights")
     link_dir = project / ".tcip" / "models"
     link_dir.mkdir(parents=True)
     link = link_dir / "m_link.pt"

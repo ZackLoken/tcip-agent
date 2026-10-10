@@ -16,6 +16,7 @@ from typing import Any, Callable, Mapping, TypeVar, overload
 from tcip_store import Key, append
 
 from tcip_mcp import agent_identity
+from tcip_mcp.registry_paths import located
 
 logger = logging.getLogger(__name__)
 
@@ -192,9 +193,11 @@ def audited(
 ) -> Callable:
     """Decorate a door taking a ``project`` parameter (refused without one) so each call leaves one
     line in one log: the project's, or with ``scope_arg`` the dataset root that argument resolves
-    to at call time (:func:`dataset_scope_of`; no root means the project's). ``project`` and
-    ``workspace`` are not recorded as arguments; an ``actor`` parameter is recorded as the entry's
-    actor. A failed append after a return raises
+    to at call time (:func:`dataset_scope_of`; no root means the project's). A set ``scope_arg``
+    reaches the door as the location it names against ``project``
+    (:func:`~tcip_mcp.registry_paths.located`), and the entry keeps the caller's spelling.
+    ``project`` and ``workspace`` are not recorded as arguments; an ``actor`` parameter is
+    recorded as the entry's actor. A failed append after a return raises
     :class:`MutationCommittedWithoutAuditLineError`; after a raise the body's exception
     propagates and the failed append is logged. A declared scope that cannot be resolved refuses
     the call.
@@ -221,22 +224,22 @@ def audited(
             project = logged_args.pop("project")
             logged_args.pop("workspace", None)
             entry = audit_entry(tool_name, logged_args, logged_args.pop(ACTOR_KEY, None))
+            where = bound.arguments.get(scope_arg) if scope_arg else None
+            if scope_arg and where is not None:
+                bound.arguments[scope_arg] = where = located(where, project)
 
             def record() -> None:
                 """Resolve the scope, stamp the duration, and append. Raises what it cannot do."""
                 # Resolved after the body, so a tool that creates the dataset it names is
                 # recorded in that dataset's own log rather than the project's.
-                scope = None
-                raw = logged_args.get(scope_arg) if scope_arg else None
-                if raw is not None:
-                    scope = dataset_scope_of(Path(project, raw))
+                scope = dataset_scope_of(where) if where is not None else None
                 entry["duration_ms"] = round((time.monotonic() - t0) * 1000, 1)
                 append(audit_log_key(scope if scope is not None else project), entry)
 
             # One entry per call by construction: the two paths are exclusive, and neither
             # writer sits inside a handler that could run the other.
             try:
-                result = func(*args, **kwargs)
+                result = func(*bound.args, **bound.kwargs)
             except Exception as body_exc:
                 entry["status"] = "exception"
                 entry["error"] = str(body_exc)

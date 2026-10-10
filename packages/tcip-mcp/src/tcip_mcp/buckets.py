@@ -95,10 +95,12 @@ class Bucket:
 
 
 def read_bucket(dataset_root: str | Path, name: str) -> Bucket:
-    """The bucket named ``name`` under ``dataset_root``, as its record states it. No record, or one
-    that does not decode, refuses (:class:`NotABucketError`) naming it."""
+    """The bucket named ``name`` under ``dataset_root``, a root its caller already located,
+    carried as the bucket's root, as its record states it. No record, or one that does not decode,
+    refuses (:class:`NotABucketError`) naming it."""
     from tcip_mcp.dataset_layout import bucket_key
 
+    dataset_root = Path(dataset_root)
     try:
         record = tcip_store.read(bucket_key(dataset_root, name), default=None)
     except tcip_store.DecodeError as exc:
@@ -111,7 +113,7 @@ def read_bucket(dataset_root: str | Path, name: str) -> Bucket:
     execution = record.pop("execution")
     scope = ClassScope.of(record)
     del record["scope"]
-    return Bucket(root=Path(dataset_root), name=name, scope=scope,
+    return Bucket(root=dataset_root, name=name, scope=scope,
                   execution=Execution.of(execution) if execution is not None else None, **record)
 
 

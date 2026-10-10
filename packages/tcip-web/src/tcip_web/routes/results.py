@@ -55,8 +55,8 @@ def _evidence_roots(root: Path) -> list[Path]:
 
 
 def _is_root(resolved: Path, root: Path) -> bool:
-    """Whether ``resolved`` is ``root`` itself."""
-    return resolved == root.resolve()
+    """Whether ``resolved`` is the established root ``root`` itself."""
+    return resolved == root
 
 
 def _belonging(root: Path, path: str, admits=within) -> Path:
@@ -429,7 +429,7 @@ def export_count_csv(payload: ExportCountCsvPayload, request: Request) -> Respon
             from tcip_mcp.tools.orthomosaic_tools import orthomosaic_plant_counts
 
             result = orthomosaic_plant_counts(
-                root, str(dataset_root), delivery.bucket, registry_record, str(saved_path),
+                root, dataset_root, delivery.bucket, registry_record, saved_path,
                 delivery.delivered_phenotype, delivery.plants, crop=delivery.crop,
                 pipeline_version=delivery.pipeline_version,
                 canopy_subject=delivery.canopy_subject,

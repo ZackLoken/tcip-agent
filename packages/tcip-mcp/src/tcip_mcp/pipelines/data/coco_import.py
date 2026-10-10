@@ -41,9 +41,11 @@ def _read_coco(document: Path) -> tuple[dict, str]:
     return coco, stored.version.token
 
 
-def import_coco_document(document: str | Path, dataset_root: str | Path, *, date: str) -> dict:
+def import_coco_document(document: str | Path, dataset_root: str | Path, *, date: str,
+                         project: Path) -> dict:
     """Write one per-image label document for every image ``document`` lists, keyed under the
-    capture ``date`` of ``dataset_root``, and record the import on the dataset's audit log with
+    capture ``date`` of ``dataset_root`` (both :func:`~tcip_mcp.registry_paths.located` against
+    ``project``), and record the import on the dataset's audit log with
     the document's path and the digest of the one read of its bytes, in one commit with the
     documents: an import that writes nothing leaves no line.
 
@@ -70,11 +72,13 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
     from tcip_mcp import dataset_layout
     from tcip_mcp.audit import audit_entry, audit_log_key
     from tcip_mcp.pipelines.image_utils import (
-        BandGroupRef, display_frame, list_logical_images, refuse_incomplete_band_group,
+        BandGroupRef, list_logical_images, refuse_incomplete_band_group,
     )
+    from tcip_mcp.pipelines.raster_source import SourceHeader
+    from tcip_mcp.registry_paths import located
     from tcip_mcp.subject_registry import registry_for_dataset_root
 
-    document, root = Path(document).resolve(), Path(dataset_root).resolve()
+    document, root = located(document, project), located(dataset_root, project)
     source = str(document)
     coco, digest = _read_coco(document)
     categories, by_image, problems = parse_coco_annotations(coco, decode_rle=_rle_mask)
@@ -122,7 +126,7 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
         if stem in stems:
             problems.append(f"image {name!r} is the capture {stem!r} another record already names")
         stems.add(stem)
-        width, height = display_frame(refuse_incomplete_band_group(found))
+        width, height = SourceHeader(refuse_incomplete_band_group(found)).display_frame
         stated = (record.get("width"), record.get("height"))
         if stated != (None, None) and stated != (width, height):
             problems.append(f"image {name!r} is stated as {stated}, but decodes to "

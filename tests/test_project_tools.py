@@ -363,11 +363,11 @@ def test_import_project_admits_a_bundle_holding_a_registered_run_checkpoint(tmp_
 def _internal_foreign_checkpoint(src: Path) -> Path:
     """A foreign checkpoint registered from inside the project's own tree."""
     from tcip_mcp.model_registry import ModelRegistry
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     weights = src / ".tcip" / "models" / "internal.pt"
     weights.parent.mkdir(parents=True, exist_ok=True)
-    checkpoint_file(weights, "weights registered from inside the project")
+    produced_checkpoint(weights, "weights registered from inside the project")
     ModelRegistry(str(src)).register_model("internal", str(weights))
     return weights
 
@@ -449,16 +449,16 @@ def test_import_project_discloses_a_designed_external_checkpoint_separately_from
     ``checkpoint_paths_unresolved``, which names only an entry expected to resolve under the
     tree that does not."""
     from tcip_mcp.model_registry import ModelRegistry
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     src = tmp_path / "src_project"
     _initialized(src)
     internal_dir = src / ".tcip" / "models"
     internal_dir.mkdir(parents=True, exist_ok=True)
-    internal_ckpt = checkpoint_file(internal_dir / "internal.pt", "internal weights")
+    internal_ckpt = produced_checkpoint(internal_dir / "internal.pt", "internal weights")
     external_dir = tmp_path / "elsewhere"
     external_dir.mkdir()
-    external_ckpt = checkpoint_file(external_dir / "external.pt", "external weights")
+    external_ckpt = produced_checkpoint(external_dir / "external.pt", "external weights")
 
     reg = ModelRegistry(str(src))
     reg.register_model("m_internal", str(internal_ckpt))
@@ -482,11 +482,11 @@ def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(tmp_pa
     """A checkpoint sitting under .tcip/models/ that is also a registry entry is one file to
     the two checkpoint arms that recognize it; it lands in the bundle once."""
     from tcip_mcp.model_registry import ModelRegistry, checkpoint_files
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     src = tmp_path / "src_project"
     _initialized(src)
-    ckpt = checkpoint_file(src / ".tcip" / "models" / "m.pt", "weights")
+    ckpt = produced_checkpoint(src / ".tcip" / "models" / "m.pt", "weights")
     ModelRegistry(str(src)).register_model("m", str(ckpt))
 
     assert Path(ckpt).resolve() in checkpoint_files(src)
@@ -511,12 +511,12 @@ def test_a_checkpoint_registered_from_anywhere_in_the_project_travels_only_with_
     import zipfile
 
     from tcip_mcp.model_registry import ModelRegistry
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     src = tmp_path / "src_project"
     _initialized(src)
     (src / "weights").mkdir()
-    ckpt = checkpoint_file(src / "weights" / "foreign.pt", "weights registered in the project")
+    ckpt = produced_checkpoint(src / "weights" / "foreign.pt", "weights registered in the project")
     ModelRegistry(str(src)).register_model("foreign", str(ckpt))
 
     without = archive_project(src, str(tmp_path / "without.zip"), include_models=False)
@@ -531,18 +531,22 @@ def test_a_checkpoint_registered_from_anywhere_in_the_project_travels_only_with_
 
 
 def test_archive_project_admits_a_symlink_spelled_project(tmp_path: Path):
-    """A project reached through a symlink archives rather than raising ValueError out of the
-    door: archive_project resolves the project once and uses that resolved root for both
+    """A project reached through a symlink and established once (``existing_project``) archives
+    rather than raising ValueError out of the door: the established root serves both
     member.relative_to and the include_models comparison."""
+    from tcip_mcp.project_record import existing_project
+    from tests._web_fixtures import new_project
+
     real = tmp_path / "real_project"
     _make_dataset(real)
+    new_project(real)
     link = tmp_path / "linked_project"
     try:
         link.symlink_to(real, target_is_directory=True)
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"symlinks not available on this machine: {exc}")
 
-    result = archive_project(link, str(tmp_path / "export.zip"))
+    result = archive_project(existing_project(link)[0], str(tmp_path / "export.zip"))
 
     assert "error" not in result
     assert result["files_added"] > 0
@@ -737,19 +741,16 @@ def test_initialize_project_refuses_an_empty_display_name_leaving_nothing_on_dis
     assert not dest.exists()
 
 
-def test_initialize_project_scaffolds_a_relative_path_where_it_resolves(tmp_path: Path,
-                                                                        monkeypatch):
-    """A relative project_path scaffolds and records at the absolute location it resolves to,
-    rather than the record write refusing a relative root after ``.tcip`` already exists."""
-    from tcip_mcp.project_record import read_record
-
+def test_initialize_project_refuses_a_relative_path_and_scaffolds_nothing(tmp_path: Path,
+                                                                         monkeypatch):
+    """A door that holds no project has no root to read a relative project_path against: it
+    refuses naming the absolute spelling, and nothing is scaffolded under the process's cwd."""
     monkeypatch.chdir(tmp_path)
 
     result = initialize_project("relative_proj", "Test project", "north orchard")
 
-    assert "error" not in result
-    assert (tmp_path / "relative_proj" / ".tcip").is_dir()
-    assert read_record(tmp_path / "relative_proj")["site"] == "north orchard"
+    assert "absolute path" in result["error"]
+    assert not (tmp_path / "relative_proj").exists()
 
 
 def test_initialize_project_refuses_a_present_but_invalid_record(tmp_path: Path):

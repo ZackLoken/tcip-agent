@@ -7,7 +7,7 @@ import os
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from tcip_mcp.registry_paths import nearest_containing_ancestor
+from tcip_mcp.registry_paths import located, nearest_containing_ancestor
 
 __all__ = [
     "allowed_optional", "allowed_path", "allowed_roots", "assert_path_allowed",
@@ -102,8 +102,20 @@ def _excluded_by_name(resolved: Path) -> bool:
     return ".imports" in resolved.parts or ".removed" in resolved.parts
 
 
+def _in_open_project(path: str | Path) -> Path:
+    """``path`` located against the open project
+    (:func:`~tcip_mcp.registry_paths.located`), against none when no project is open."""
+    from tcip_web.state import NoProjectOpenError, store
+
+    try:
+        root = store.held().root
+    except NoProjectOpenError:
+        root = None
+    return located(path, root)
+
+
 def assert_path_allowed(path: str | Path) -> Path:
-    """Resolve ``path`` and ensure it sits under an allowed root; return the resolved path.
+    """Locate ``path`` (:func:`_in_open_project`), ensure it sits under an allowed root, return it.
 
     A path that does not exist yet (a file about to be written) is judged by its nearest existing
     ancestor. An ``.imports`` or ``.removed`` staging tree is never admitted, by name
@@ -111,7 +123,7 @@ def assert_path_allowed(path: str | Path) -> Path:
     and on any resolution or comparison error.
     """
     try:
-        resolved = Path(path).resolve()
+        resolved = _in_open_project(path)
         anchor = _existing_anchor(resolved)
     except (OSError, RuntimeError) as exc:
         raise ValueError(f"path {path!s} cannot be examined: {exc}") from exc
@@ -133,12 +145,13 @@ def assert_path_allowed(path: str | Path) -> Path:
 
 
 def resolved_path(path: str) -> Path:
-    """``path`` resolved for a route, unconfined; a path that cannot be resolved answers 400."""
+    """``path`` located for a route (:func:`_in_open_project`), unconfined; a path that cannot be
+    located answers 400."""
     from fastapi import HTTPException
 
     try:
-        return Path(path).resolve()
-    except (OSError, RuntimeError) as exc:
+        return _in_open_project(path)
+    except (OSError, RuntimeError, ValueError) as exc:
         raise HTTPException(400, f"cannot resolve {path}: {exc}") from exc
 
 

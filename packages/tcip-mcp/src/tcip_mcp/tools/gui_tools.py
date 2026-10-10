@@ -99,8 +99,10 @@ def focus_human_attention(
 
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import image_dir, label_key
+    from tcip_mcp.registry_paths import located
     from tcip_mcp.web_client import ANNOTATE_MODES, PANEL_EVENT_ANNOTATE_FOCUS, post_panel_event
 
+    dataset_root = str(located(dataset_root, bound.root))
     try:
         idir = image_dir(dataset_root, date)
     except ValueError as exc:

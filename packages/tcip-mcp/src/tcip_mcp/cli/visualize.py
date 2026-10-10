@@ -2,7 +2,7 @@ r"""Render annotations, predictions, a GT-vs-prediction comparison, or a sample 
 command line.
 
 Wraps ``vision_tools.visualize``: saved under the project's ``.tcip/artifacts/viz/``, path
-returned. --project is required, since the artifact and the audit line land under it.
+returned. --project is required: the artifact lands under it and a relative --path lies under it.
 
 Usage:
     tcip visualize --source annotations --path <image.jpg> \
@@ -31,7 +31,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                         help="Image file (annotations/predictions/comparison) or dataset "
                              "folder (dataset).")
     parser.add_argument("--project", required=True,
-                        help="The project the artifact and the audit line land under.")
+                        help="The project the artifact lands under.")
     parser.add_argument("--task", default="detect", choices=["detect", "segment"])
     parser.add_argument("--class-names", default="",
                         help="Comma-separated class names (e.g. 'fruit,shoot').")
