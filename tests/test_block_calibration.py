@@ -21,7 +21,7 @@ from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tests import _trait_fixtures as fx  # noqa: E402
 from tests._chain_fixtures import (  # noqa: E402
-    BESPOKE_DETECTION, SAVE_BUILT_WEIGHTS, training_config,
+    BESPOKE_DETECTION, BESPOKE_MODELS, SAVE_BUILT_WEIGHTS, training_config,
 )
 from tests._mapping_fixtures import write_plant_csv  # noqa: E402
 from tests._producer_fixtures import image_label_key, label_image  # noqa: E402
@@ -61,7 +61,7 @@ def _write_mosaic(path: Path, *, seed: int = 0, georeferenced: bool = False,
 
 _BLOCK_MODEL_SOURCE = {"builder": BESPOKE_DETECTION,
                        "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
-                       "task": "detection"}
+                       "source_files": [BESPOKE_MODELS], "task": "detection"}
 
 
 def _completed_over(project: Path, data_cfg: dict, experiment_id: str) -> dict:

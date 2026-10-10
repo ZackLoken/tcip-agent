@@ -185,7 +185,7 @@ def test_photographic_construction_opens_no_raster_backend(tmp_path, monkeypatch
     def _refuse(*_a, **_k):
         raise AssertionError("construction must not open a raster backend for photographic sources")
 
-    monkeypatch.setattr(raster_source, "open_raster", _refuse)
+    monkeypatch.setattr(raster_source.SourceHeader, "open", _refuse)
     ds = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=0.5)
     assert len(ds) == 16
 
@@ -194,8 +194,39 @@ def test_windowed_construction_registers_the_source_in_the_pool(tmp_path):
     images_dir, _arr = _tiff_project(tmp_path)
     ds = _tiled(images_dir)
     tiff = str(images_dir / "img0.tif")
-    assert any(key[0] == tiff for key in raster_source._POOL)
+    assert any(version[0] == tiff for version, _channels in raster_source._POOL)
     assert ds.source_frames[_only_source(ds)]["windowed"] is True
+
+
+def test_the_index_opens_a_windowed_source_once_and_reads_through_that_reader(
+    tmp_path, monkeypatch,
+):
+    """Building the index opens the raster once, and that pooled reader is the one a tile is
+    read through: no probe reader is opened beside it, and a read opens nothing new."""
+    images_dir, _arr = _tiff_project(tmp_path)
+    opened: list = []
+    real_open = raster_source.open_gdal_dataset
+
+    def counted(path, overview=None):
+        opened.append((path, overview))
+        return real_open(path, overview)
+
+    monkeypatch.setattr(raster_source, "open_gdal_dataset", counted)
+    ds = _tiled(images_dir)
+    assert len(opened) == 1
+    (indexed,) = raster_source._POOL.values()
+
+    readers: list = []
+    real_read = raster_source.GdalSource.read_region
+
+    def recording(self, rect, **kwargs):
+        readers.append(self)
+        return real_read(self, rect, **kwargs)
+
+    monkeypatch.setattr(raster_source.GdalSource, "read_region", recording)
+    ds[0]
+    assert readers == [indexed]
+    assert len(opened) == 1
 
 
 def test_an_unopenable_windowed_layout_refuses_at_construction(tmp_path):

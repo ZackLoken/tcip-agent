@@ -17,11 +17,10 @@ from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
     native_to_pixel,
     pixel_to_native,
     plants_in_frame,
-    read_geotransform,
 )
-from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.pipelines.raster_source import open_raster
-from tests._chain_fixtures import BESPOKE_DETECTION, BESPOKE_INSTANCE_SEG
+from tests._chain_fixtures import BESPOKE_DETECTION, BESPOKE_INSTANCE_SEG, BESPOKE_MODELS
 
 from tests._geotiff_fixtures import (
     PIXEL_SCALE,
@@ -29,6 +28,7 @@ from tests._geotiff_fixtures import (
     TIEPOINT_NATIVE_Y,
     UTM_15N_EPSG,
     build_geokeys as _geokeys,
+    geotransform_of_file as read_geotransform,
     write_geotiff as _write_geotiff,
 )
 
@@ -127,7 +127,7 @@ def test_pixel_to_wgs84_matches_independent_pyproj_transform(tmp_path: Path) -> 
 
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path)
-    georef = OrthomosaicGeoreference.from_file(path)
+    georef = OrthomosaicGeoreference(read_geotransform(path))
     lat, lon = georef.pixel_to_wgs84(30.0, 40.0)
 
     # A second, independently-constructed Transformer: exercises whether OrthomosaicGeoreference
@@ -147,7 +147,7 @@ def test_pixel_to_wgs84_central_meridian_known_reference(tmp_path: Path) -> None
     northing, a hand-verifiable check independent of trusting pyproj's own round-trip."""
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path)
-    georef = OrthomosaicGeoreference.from_file(path)
+    georef = OrthomosaicGeoreference(read_geotransform(path))
     _lat, lon = georef.pixel_to_wgs84(0.0, 0.0)  # tiepoint pixel -> native (500000, 4800000)
     assert lon == pytest.approx(-93.0, abs=1e-6)
 
@@ -163,7 +163,7 @@ def test_wgs84_to_pixel_matches_independent_pyproj_inverse_at_asymmetric_pixel(
 
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path)
-    georef = OrthomosaicGeoreference.from_file(path)
+    georef = OrthomosaicGeoreference(read_geotransform(path))
     px, py = 30.0, 47.0
     lat, lon = georef.pixel_to_wgs84(px, py)
 
@@ -217,7 +217,7 @@ def test_plants_in_frame_partitions_by_the_rasters_own_recorded_dimensions(tmp_p
 
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path, width=64, height=64, shape=(64, 64, 3))
-    georef = OrthomosaicGeoreference.from_file(path)
+    georef = OrthomosaicGeoreference(read_geotransform(path))
 
     inside_lat, inside_lon = georef.pixel_to_wgs84(10.0, 10.0)
     outside_lat, outside_lon = georef.pixel_to_wgs84(-5.0, 10.0)  # negative column: outside
@@ -241,7 +241,7 @@ def test_plants_in_frame_edge_pixel_at_width_or_height_is_outside(tmp_path: Path
 
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path, width=64, height=64, shape=(64, 64, 3))
-    georef = OrthomosaicGeoreference.from_file(path)
+    georef = OrthomosaicGeoreference(read_geotransform(path))
     width_edge_lat, width_edge_lon = georef.pixel_to_wgs84(64.0, 10.0)
     height_edge_lat, height_edge_lon = georef.pixel_to_wgs84(10.0, 64.0)
     plants = [
@@ -306,7 +306,7 @@ def _sliced(predictor, execution, source, **kwargs) -> dict:
 def _windowed_multiband_tiff(path: Path, *, height: int = 96, width: int = 96,
                               channels: int = 4, rowsperstrip: int = 12) -> np.ndarray:
     """A small multi-band raster with real pixel content (not all-zero, so a from-scratch
-    detector's convolutions see something), decodable by both ``load_multiband`` (the full-array
+    detector's convolutions see something), decodable by both ``load_image`` (the full-array
     path) and the windowed raster layer (``open_raster``): strip-based, contiguous samples, no
     compression.
     """
@@ -325,10 +325,7 @@ def _bespoke_detection_checkpoint(tmp_path: Path, raster_path: Path, *, in_chans
     ``raster_path`` itself via ``derivations.band_normalization_stats``, mirroring how a real
     multispectral model_source is built, not a pinned placeholder.
     """
-    import torch
-
     from tcip_mcp.pipelines.derivations import band_normalization_stats
-    from tests._chain_fixtures import built_model, training_config
 
     builder_kwargs: dict = {"min_size": tile_size, "max_size": tile_size * 2}
     if in_chans != 3:
@@ -338,14 +335,34 @@ def _bespoke_detection_checkpoint(tmp_path: Path, raster_path: Path, *, in_chans
         builder_kwargs["image_mean"] = mean
         builder_kwargs["image_std"] = std
 
-    model_source = {"builder": BESPOKE_DETECTION,
-                    "builder_kwargs": builder_kwargs, "task": "detection"}
-    config = training_config(model_source, {"num_channels": in_chans,
-                                            "scope": {"subject": "bud", "attributes": []}})
-    model = built_model(config)
-    ckpt = tmp_path / "model_best.pt"
-    torch.save({CONFIG_KEY: config, STATE_DICT_KEY: model.state_dict()}, str(ckpt))
-    return str(ckpt)
+    return _raster_checkpoint(tmp_path, {"builder": BESPOKE_DETECTION,
+                                         "builder_kwargs": builder_kwargs,
+                                         "source_files": [BESPOKE_MODELS], "task": "detection"},
+                              in_chans, tiling={"enabled": False})
+
+
+def _raster_checkpoint(tmp_path: Path, model_source: dict, channels: int, **data) -> str:
+    """The checkpoint a run under ``tmp_path`` of ``model_source`` completed over two labeled
+    ``channels``-band rasters of its own, ``data``'s keys laid over its data section; registered
+    by completing. The frames are not square, so the run records no frame edge a stated tile
+    edge could contradict."""
+    from tcip_annotation.state import Annotation, BBox, Polygon
+
+    from tests._producer_fixtures import label_image
+    from tests._verified_checkpoint_fixtures import fixture_data_dir, registered_checkpoint
+
+    geometry = (Polygon([[(8, 8), (24, 8), (24, 24), (8, 24)]])
+                if model_source["task"] == "instance_seg" else BBox(8, 8, 24, 24))
+    images = fixture_data_dir(tmp_path, "rasters") / "images" / UNDATED_BUCKET
+    images.mkdir(parents=True)
+    for index in range(2):
+        frame = images / f"frame{index}.tif"
+        arr = _windowed_multiband_tiff(frame, height=48, width=64, channels=channels)
+        label_image(frame, [Annotation(subject="bud", geometry=geometry)],
+                    arr.shape[1], arr.shape[0])
+    return registered_checkpoint(tmp_path, model_source=model_source, data={
+        "images_dir": str(images), "num_channels": channels, "scope": {"subject": "bud"},
+        **data})
 
 
 def test_predict_sliced_windowed_source_matches_full_array_predict_sliced(tmp_path: Path) -> None:
@@ -355,12 +372,9 @@ def test_predict_sliced_windowed_source_matches_full_array_predict_sliced(tmp_pa
     """
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
-    from tests._verified_checkpoint_fixtures import register_checkpoint
-
     path = tmp_path / "mosaic.tif"
     arr = _windowed_multiband_tiff(path)
     ckpt = _bespoke_detection_checkpoint(tmp_path, path, in_chans=arr.shape[-1])
-    register_checkpoint(tmp_path, ckpt, name="ortho-detection")
 
     full = _pass(tmp_path, ckpt)
     full_result = _sliced(full.predictor, full.execution, str(path))
@@ -383,19 +397,9 @@ def _bespoke_instance_seg_checkpoint(
         tmp_path: Path, *, in_chans: int = 3, tile_size: int = TILE) -> str:
     """A real bespoke Mask R-CNN checkpoint (RGB only, no multispectral norm derivation needed
     for this end-to-end mask-shape test)."""
-    import torch
-
-    from tests._chain_fixtures import built_model, training_config
-
-    model_source = {"builder": BESPOKE_INSTANCE_SEG,
-                    "builder_kwargs": {"min_size": tile_size, "max_size": tile_size * 2},
-                    "task": "instance_seg"}
-    config = training_config(model_source, {"num_channels": in_chans,
-                                            "scope": {"subject": "bud", "attributes": []}})
-    model = built_model(config)
-    ckpt = tmp_path / "instance_seg_best.pt"
-    torch.save({CONFIG_KEY: config, STATE_DICT_KEY: model.state_dict()}, str(ckpt))
-    return str(ckpt)
+    return _raster_checkpoint(tmp_path, {
+        "builder": BESPOKE_INSTANCE_SEG, "task": "instance_seg", "source_files": [BESPOKE_MODELS],
+        "builder_kwargs": {"min_size": tile_size, "max_size": tile_size * 2}}, in_chans)
 
 
 def test_predict_sliced_windowed_and_full_array_sources_produce_matching_masks(
@@ -405,12 +409,10 @@ def test_predict_sliced_windowed_and_full_array_sources_produce_matching_masks(
     detection-for-detection, masks included."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
-    from tests._verified_checkpoint_fixtures import register_checkpoint
 
     path = tmp_path / "mosaic.tif"
     _windowed_multiband_tiff(path, channels=3)
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
-    register_checkpoint(tmp_path, ckpt, name="ortho-instance-seg")
 
     full = _pass(tmp_path, ckpt)
     full_result = _sliced(full.predictor, full.execution, str(path))
@@ -437,12 +439,10 @@ def test_predict_sliced_windowed_source_require_masks_false_carries_no_masks_key
     empty one, mirroring ``predict_sliced``'s own opt-out contract."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
-    from tests._verified_checkpoint_fixtures import register_checkpoint
 
     path = tmp_path / "mosaic.tif"
     _windowed_multiband_tiff(path, channels=3)
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
-    register_checkpoint(tmp_path, ckpt, name="ortho-instance-seg")
 
     p = _pass(tmp_path, ckpt)
     with open_raster(path, 3) as reader:
@@ -456,7 +456,6 @@ def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(tmp_p
     ``encode_predictions`` to a polygon at the same full-mosaic pixels."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
-    from tests._verified_checkpoint_fixtures import register_checkpoint
     from tcip_annotation import json_io
     from tcip_annotation.state import Polygon
     from tcip_mcp.pipelines.data.label_queries import registry_scope
@@ -465,7 +464,6 @@ def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(tmp_p
     path = tmp_path / "mosaic.tif"
     _windowed_multiband_tiff(path, channels=3)
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
-    register_checkpoint(tmp_path, ckpt, name="ortho-instance-seg")
 
     p = _pass(tmp_path, ckpt)
     with open_raster(path, 3) as reader:
@@ -589,7 +587,7 @@ def test_assign_detections_to_plants_maps_near_and_leaves_far_unmapped(tmp_path:
 
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path)
-    georef = OrthomosaicGeoreference.from_file(path)
+    georef = OrthomosaicGeoreference(read_geotransform(path))
     plants = read_plant_csvs([_plant_grid_csv(tmp_path, georef, _PLANT_PIXELS)])
     assert len(plants) == 4
 
@@ -623,7 +621,7 @@ def test_assign_detections_to_plants_matches_within_the_tolerance_it_is_given(
 
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path)
-    georef = OrthomosaicGeoreference.from_file(path)
+    georef = OrthomosaicGeoreference(read_geotransform(path))
     plants = read_plant_csvs([_plant_grid_csv(tmp_path, georef, _PLANT_PIXELS)])
 
     det_px = (20.0, 10.0)
@@ -645,7 +643,7 @@ def test_assign_detections_to_plants_no_boxes_returns_empty(tmp_path: Path) -> N
 
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path)
-    georef = OrthomosaicGeoreference.from_file(path)
+    georef = OrthomosaicGeoreference(read_geotransform(path))
     plants = read_plant_csvs([_plant_grid_csv(tmp_path, georef, _PLANT_PIXELS)])
 
     assert assign_detections_to_plants([], georef, plants, nn_tolerance_m=1.0) == []

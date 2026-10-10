@@ -168,7 +168,7 @@ def test_build_plant_mapping_over_an_unregistered_images_dir_names_register_data
 
 
 def test_build_plant_mapping_admits_the_dataset_images_root_spelled_variously(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
@@ -186,9 +186,8 @@ def test_build_plant_mapping_admits_the_dataset_images_root_spelled_variously(
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in res, res
 
-    monkeypatch.chdir(dataset_root)
     res = build_plant_mapping(
-        tmp_path, name="relative", images_root="images",
+        tmp_path, name="relative", images_root=str(images_root.relative_to(tmp_path)),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in res, res
 
@@ -282,7 +281,6 @@ def test_deliver_phenology_milestones_refuses_a_record_with_provenance_and_no_re
         "built_at": "2026-02-11T00:00:00+00:00", "dates_requested": None, "dates": list(DATES),
         "nn_tolerance_m": {"value": 10.0, "source": "stated"},
         "plant_registry": {"name": "unregistered", "digest": "0" * 64},
-        "capture_identity": {d: "0" * 16 for d in DATES},
         "capture_digests": {d: {} for d in DATES}, "unreadable": {d: [] for d in DATES},
         "assignments": {d: [] for d in DATES}, "supersedes": None,
     }
@@ -649,11 +647,8 @@ def test_a_capture_unreadable_at_build_is_never_read_so_replacing_it_only_disclo
 def test_a_receipt_that_cannot_be_written_fails_persist_mapping_and_the_record_stays_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """At the pipeline level: ``persist_mapping``'s own contract, not the MCP tool's ``@audited``
-    wrapper (which writes its own, separate audit line for the call and would otherwise also
-    contend for the same lock this test holds for the whole body). This calls
-    ``plant_mapping.build_mapping`` directly rather than through ``build_plant_mapping`` so the
-    tool's wrapper does not contend for that lock."""
+    """``persist_mapping`` raises when its receipt cannot be written under a held audit lock,
+    and the record it wrote stays refused by ``load_mapping``."""
     from tcip_mcp.audit import AuditEntryNotWrittenError, audit_log_key
     from tcip_store.sqlite_backend import SqliteBackend
 
@@ -767,6 +762,33 @@ def test_a_supersede_whose_receipt_fails_answers_409_and_the_archive_still_loads
     assert archived is not None and archived.record_sha256 == archived_digest
 
 
+def test_a_delivery_made_from_another_directory_names_the_projects_dataset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The mapping stores its dataset root relative to the project, and the delivery that cites
+    it records that root against the project too, whatever directory the process works in."""
+    project = tmp_path / "project"
+    _init(project)
+    dataset_root = _dataset(project)
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
+    built = build_plant_mapping(project, name="valley", images_root=str(images_root),
+                                plant_registry=register_plant_registry_for(project, [plant_csv]))
+    assert "error" not in built, built
+    _seed_currant_bloom_trait(project)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    delivered = _deliver(
+        project, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
+        dataset_root=dataset_root, buckets=preds_by_date.values(),
+        output_csv_path=str(project / "out.csv"))
+
+    assert "error" not in delivered, delivered
+    (event,) = _events(project)
+    assert Path(event["plant_mapping"]["dataset_root"]) == dataset_root.resolve()
+
+
 # ── rails 9, 10: the full round trip through the platform's own producers ───────────────
 
 
@@ -805,7 +827,8 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
     pm = events[0]["plant_mapping"]
     assert pm["name"] == "valley"
     assert pm["record_sha256"] == build.record_sha256
-    assert set(pm["capture_identity"].keys()) == set(DATES)
+    assert pm["capture_digests"] == build.capture_digests
+    assert set(pm["capture_digests"]) == set(DATES)
 
     # A rebuild under the same name is cited by the delivery just recorded, so it refuses
     # without supersede; with it, the rebuild reads back and still delivers.
@@ -1042,8 +1065,8 @@ def test_plant_mapping_names_lists_legal_names_and_omits_a_stray_file(
 def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_through_their_own(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Rail 13's delivery half: two projects mapping one registered dataset under the same
-    mapping name each build and deliver through their own record, never the other's."""
+    """Two projects mapping one registered dataset under the same mapping name each build and
+    deliver through their own record, never the other's."""
     proj_a, proj_b = tmp_path / "proj_a", tmp_path / "proj_b"
     for proj in (proj_a, proj_b):
         named_project(proj, proj.name)
@@ -1179,22 +1202,21 @@ def test_a_band_group_written_under_a_mapped_date_refuses_the_delivery_the_same_
     assert not out_csv.exists()
 
 
-# ── the mapping rider: per-capture digests beside capture_identity ──────────────────────
+# ── per-capture digests ─────────────────────────────────────────────────────────────────
 
 
 def test_build_mapping_persists_and_reads_back_capture_digests(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A build through the platform's own producer carries one digest per capture, keyed by
-    stem, alongside the per-date capture_identity; both derive from the same row builder, so
-    capture_identity's own recompute (round-tripped here) agrees with capture_digests entry by
-    entry. The receipt still verifies over the new record shape: load_mapping would refuse
-    before returning anything if record_sha256, computed at persist over the whole record,
-    disagreed with the receipt written for it."""
+    stem, and a recompute over the captures on disk agrees with it entry by entry. The receipt
+    still verifies over the record: load_mapping would refuse before returning anything if
+    record_sha256, computed at persist over the whole record, disagreed with the receipt written
+    for it."""
     from tcip_mcp.pipelines.image_utils import list_logical_images
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         _read_date_stamps,
-        capture_identity,
+        capture_digests,
         record_digest,
     )
 
@@ -1215,7 +1237,7 @@ def test_build_mapping_persists_and_reads_back_capture_digests(
     assert set(build.capture_digests[date]) == recorded_stems
 
     stamps = _read_date_stamps(list_logical_images(images_root / date), date)
-    assert capture_identity(stamps) == build.capture_identity[date]
+    assert capture_digests(stamps) == build.capture_digests[date]
 
     # Not build.record_sha256: that came from load_mapping's own read of this same raw document,
     # so comparing it back to record_digest(raw) would prove nothing.
@@ -1245,9 +1267,8 @@ def test_a_band_group_manifest_rewritten_in_place_refuses_the_delivery_naming_th
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The band group's own membership is unchanged (the same two files, the same stem), so the
-    added/missing-stem checks never fire; only the whole-date identity recompute catches a
-    manifest rewritten in place, and capture_digests now lets the refusal name the band group's
-    own manifest rather than only the date."""
+    added/missing-stem checks never fire; only the whole-date digest recompute catches a
+    manifest rewritten in place, and names the band group's own manifest."""
     from tcip_mcp.pipelines.data.band_groups import (
         band_group_manifest_path,
         detect_and_write_band_groups,
@@ -1315,9 +1336,9 @@ def test_a_date_with_an_unreadable_image_a_raster_and_a_band_group_builds_and_de
     # the unreadable image carries readable=False, before build_mapping ever touches a store.
     logical = list_logical_images(date_dir)
     stamps_by_stem = {s.stem: s for s in _read_date_stamps(logical, DATES[0])}
-    assert stamps_by_stem["bad"].kind == "image" and stamps_by_stem["bad"].readable is False
-    assert stamps_by_stem["raster"].kind == "raster" and stamps_by_stem["raster"].readable is None
-    assert stamps_by_stem["aux"].kind == "band_group" and stamps_by_stem["aux"].readable is None
+    assert stamps_by_stem["bad"].kind == "photo" and stamps_by_stem["bad"].readable is False
+    assert stamps_by_stem["raster"].kind == "npy" and stamps_by_stem["raster"].readable is None
+    assert stamps_by_stem["aux"].kind == "group" and stamps_by_stem["aux"].readable is None
 
     build_res = build_plant_mapping(
         tmp_path, name="valley", images_root=str(images_root),

@@ -153,10 +153,12 @@ def test_focus_annotate_lands_on_the_grouped_capture_by_manifest_name(grouped_da
 
 def test_display_read_composites_a_group_into_rgb_pixels(grouped_dataset):
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.tools.vision_tools import _display_for_path
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tcip_mcp.pipelines.raster_source import SourceHeader
+    from tcip_mcp.tools.vision_tools import _display_of
 
     manifest = image_dir(grouped_dataset, "2026-04-01") / "capture_001.bandgroup"
-    read = _display_for_path(str(manifest))
+    read = _display_of(SourceHeader(resolve_image_path(manifest)))
     assert read.pixels.shape == (16, 16, 3)
     assert read.pixels.dtype == np.uint8
     assert read.native_size == (16, 16)
@@ -168,17 +170,19 @@ def test_display_read_of_a_plain_photo_is_the_files_own_pixels(grouped_dataset):
     from PIL import Image
 
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.tools.vision_tools import _display_for_path
+    from tcip_mcp.pipelines.raster_source import SourceHeader
+    from tcip_mcp.tools.vision_tools import _display_of
 
     plain = image_dir(grouped_dataset, "2026-04-01") / "plain_002.jpg"
-    read = _display_for_path(str(plain))
+    read = _display_of(SourceHeader(plain))
     assert np.array_equal(read.pixels, np.asarray(Image.open(plain).convert("RGB")))
 
 
 def test_display_read_of_a_plain_3band_rgb_geotiff_keeps_its_true_colors(tmp_path):
     """An ordinary 3-band RGB .tif is a real, pre-existing supported format: it must reach the
     renderer as its own pixels, not as a synthetic per-channel min-max stretch of them."""
-    from tcip_mcp.tools.vision_tools import _display_for_path
+    from tcip_mcp.pipelines.raster_source import SourceHeader
+    from tcip_mcp.tools.vision_tools import _display_of
 
     d = tmp_path / "images"
     d.mkdir()
@@ -191,13 +195,14 @@ def test_display_read_of_a_plain_3band_rgb_geotiff_keeps_its_true_colors(tmp_pat
     path = d / "plain_rgb.tif"
     tifffile.imwrite(str(path), rgb, photometric="rgb")
 
-    assert np.array_equal(_display_for_path(str(path)).pixels, rgb)
+    assert np.array_equal(_display_of(SourceHeader(path)).pixels, rgb)
 
 
 def test_display_read_still_stretches_a_genuinely_multiband_geotiff(tmp_path):
     """The scoping above must not swallow the real non-standard case: a raster with more bands
     than any true-color reading covers is composited to three display bands and stretched."""
-    from tcip_mcp.tools.vision_tools import _display_for_path
+    from tcip_mcp.pipelines.raster_source import SourceHeader
+    from tcip_mcp.tools.vision_tools import _display_of
 
     d = tmp_path / "images"
     d.mkdir()
@@ -209,7 +214,7 @@ def test_display_read_still_stretches_a_genuinely_multiband_geotiff(tmp_path):
     path = d / "multiband.tif"
     tifffile.imwrite(str(path), arr)
 
-    pixels = _display_for_path(str(path)).pixels
+    pixels = _display_of(SourceHeader(path)).pixels
     assert pixels.shape == (10, 12, 3)      # three display bands out of six
     assert pixels.dtype == np.uint8
     assert (pixels.min(), pixels.max()) == (0, 255)   # each band stretched across the range

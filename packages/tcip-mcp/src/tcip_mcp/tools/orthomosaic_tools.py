@@ -23,10 +23,10 @@ _PER_PLANT_VALUE_KEY = "count"
 
 def orthomosaic_plant_counts(
     project: Path,
-    dataset_root: str,
+    dataset_root: Path,
     bucket: str,
     registry_record: dict,
-    output_csv_path: str,
+    output_csv_path: Path,
     delivered_phenotype: str,
     plants: list[str],
     crop: str = "",
@@ -41,7 +41,8 @@ def orthomosaic_plant_counts(
 ) -> dict:
     """Per-plant detection counts from the whole-raster prediction bucket ``bucket`` published under
     ``dataset_root``, for exactly the
-    plants ``plants`` names, delivered as a ``per_plant_count_aggregate`` CSV under ``project`` by
+    plants ``plants`` names, delivered as a ``per_plant_count_aggregate`` CSV at
+    ``output_csv_path`` (both locations their caller's arrival established) under ``project`` by
     ``actor`` through the door ``door`` names, over the registered plant registry
     ``registry_record``
     (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.load_registry`).
@@ -81,8 +82,9 @@ def orthomosaic_plant_counts(
         assignment_is_attributed, read_plant_csv_bytes, registry_csv_entries,
         require_named_plants, resolve_nn_tolerance_m, verify_registry_csv_bytes,
     )
-    from tcip_mcp.pipelines.raster_source import georeferenced_raster_identity_mismatch
-
+    from tcip_mcp.pipelines.raster_source import (
+        georeferenced_raster_identity_mismatch, open_as_recorded,
+    )
     if canopy_subject and nn_tolerance_m is not None:
         raise ValueError("canopy_subject and nn_tolerance_m are refused together: the segment "
                          "regime attributes by containment and takes no match tolerance.")
@@ -99,7 +101,12 @@ def orthomosaic_plant_counts(
     if raster_path is None or recorded_identity is None:
         raise ValueError(f"bucket {bucket!r} is a bucket of per-image predictions, not of one "
                          "raster: deliver its counts through deliver_per_image_counts.")
-    mismatch = georeferenced_raster_identity_mismatch(recorded_identity, raster_path)
+    raster, fresh = open_as_recorded(recorded_identity, raster_path)
+    with raster:
+        # The header's one georeference outcome: the identity's geotransform is derived from it,
+        # and only it carries the reason a raster with none was refused.
+        georeference = raster.georeference
+    mismatch = georeferenced_raster_identity_mismatch(recorded_identity, fresh)
     if mismatch is not None:
         raise ValueError(f"{raster_path} is no longer the raster bucket {bucket!r} was predicted "
                          f"on. {mismatch}")
@@ -112,7 +119,7 @@ def orthomosaic_plant_counts(
     boxes = [[b.x1, b.y1, b.x2, b.y2] for key in found.document_keys
              for b in (bbox_of(cast("BBox | Polygon", a.geometry))
                        for a in detection_annotations(read_label_document(key).annotations))]
-    georef = OrthomosaicGeoreference.from_file(raster_path)
+    georef = OrthomosaicGeoreference.of(georeference)
     width, height = int(recorded_identity["width"]), int(recorded_identity["height"])
     registry_ref = {"name": registry_record["name"], "digest": registry_record["digest"]}
 
@@ -151,7 +158,7 @@ def orthomosaic_plant_counts(
     from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE
 
     delivered = deliver_per_plant_aggregate(
-        project, results, str(Path(project, output_csv_path)),
+        project, results, str(output_csv_path),
         delivered_phenotype=delivered_phenotype, delivery_kind=PER_PLANT_COUNT_AGGREGATE,
         buckets=[found], plants=wanted, crop=crop, pipeline_version=pipeline_version,
         door=door, plant_mapping=disclosure, acknowledgment_id=acknowledgment_id, actor=actor)
@@ -253,14 +260,15 @@ def deliver_orthomosaic_plant_counts(
     recorded acknowledgment of exactly this result, which this door executes and never records.
     """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import load_registry
+    from tcip_mcp.registry_paths import located
 
     try:
         return orthomosaic_plant_counts(
-            project, dataset_root, bucket, load_registry(project, plant_registry),
-            output_csv_path,
-            delivered_phenotype, plants, crop=crop, pipeline_version=pipeline_version,
-            nn_tolerance_m=nn_tolerance_m, canopy_subject=canopy_subject,
-            position_error_m=position_error_m, acknowledgment_id=acknowledgment_id,
+            project, located(dataset_root, project), bucket, load_registry(project, plant_registry),
+            located(output_csv_path, project), delivered_phenotype, plants, crop=crop,
+            pipeline_version=pipeline_version, nn_tolerance_m=nn_tolerance_m,
+            canopy_subject=canopy_subject, position_error_m=position_error_m,
+            acknowledgment_id=acknowledgment_id,
             door="deliver_orthomosaic_plant_counts", actor=None)
     except ValueError as exc:
         return {"error": str(exc)}

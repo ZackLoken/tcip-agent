@@ -20,10 +20,13 @@ from tcip_web.routes import images as images_route
 
 @pytest.fixture(autouse=True)
 def _clear_stats_cache():
-    """The per-raster stats cache is process-global; a fresh test starts from an empty one."""
+    """The per-raster stats and band-count caches are process-global; a fresh test starts from
+    empty ones."""
     images_route._stats_cache.clear()
+    images_route._count_cache.clear()
     yield
     images_route._stats_cache.clear()
+    images_route._count_cache.clear()
 
 
 def _quadrant_rgb(path: Path, width: int = 400, height: int = 300) -> np.ndarray:
@@ -302,14 +305,14 @@ def test_the_view_and_labels_routes_measure_the_frame_the_image_routes_reader_op
     route's plain read opens it at: the canvas frame the labels route answers is the view route's
     advertised extent, and every read the view route advertises lies inside the reader's frame
     and serves."""
-    from tcip_mcp.pipelines.raster_source import image_route_channel_count, open_raster
+    from tcip_mcp.pipelines.raster_source import SourceHeader
 
     images = tmp_path / "rgb_ds" / "images" / "2026-01-01"
     images.mkdir(parents=True)
     path = images / "rgb_row.tif"
     tifffile.imwrite(str(path), np.tile(np.array([20, 100, 220], dtype=np.uint8), (1, 200_000, 1)),
                      photometric="rgb")
-    with open_raster(path, image_route_channel_count(path)) as raster:
+    with SourceHeader(path).open_at_route_count() as raster:
         frame = (raster.width, raster.height)
     reads = client.get("/api/images/view", params={
         "path": str(path), "display_pixels": 1_000_000, "x0": 0, "y0": 0, "x1": 200_000,
@@ -828,8 +831,20 @@ def test_a_percent_clip_region_stretches_between_the_cached_cut_points(
     resp = client.get("/api/images", params={
         "path": str(path), "display_pixels": DISPLAY, "bands": "0,1,2", "stretch": "percent_clip",
         "x0": 0, "y0": 0, "x1": 20, "y1": 24})
-    stats = images_route._raster_stats(path, 4)
+    stats = _cached_stats(path)
     _renders_as(resp, _composite(arr[:, :20], "percent_clip", stats.clip_bounds[:3]))
+
+
+def _cached_stats(path: Path):
+    """The stats the route cached for ``path`` read at its own band count, under the route's
+    own key, so a miss fails rather than computes."""
+    from tcip_mcp.pipelines.raster_source import SourceHeader
+
+    header = SourceHeader(path)
+    stats = images_route._stats_cache.get(
+        (*images_route._source_identity(header), header.channels))
+    assert stats is not None, "the route left no stats for this raster"
+    return stats
 
 
 def _five_band_float_with_one_nan(path: Path, *, height: int = 24, width: int = 40) -> np.ndarray:
@@ -918,18 +933,182 @@ def test_cold_band_stats_open_the_raster_once(client: TestClient, tmp_path: Path
     from tcip_mcp.pipelines import raster_source
 
     opened: list = []
-    real = raster_source.open_raster
+    real = raster_source.SourceHeader.open
 
     def counted(*args, **kwargs):
         opened.append(args)
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(raster_source, "open_raster", counted)
+    monkeypatch.setattr(raster_source.SourceHeader, "open", counted)
     path = tmp_path / "capture.npz"
     np.savez(str(path), bands=np.random.default_rng(3).integers(0, 1000, size=(24, 40, 4)))
     body = client.get("/api/images/bands", params={"path": str(path)}).json()
     assert body["band_count"] == 4 and body["pixel_fraction"] == 1.0
     assert len(opened) == 1
+
+
+def test_a_described_raster_is_described_again_without_an_open(
+    client: TestClient, tmp_path: Path, monkeypatch,
+):
+    """The cache is what makes a second description free: asking for one raster's bands twice
+    opens it once in total."""
+    from tcip_mcp.pipelines import raster_source
+
+    opened: list = []
+    real = raster_source.SourceHeader.open
+
+    def counted(*args, **kwargs):
+        opened.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(raster_source.SourceHeader, "open", counted)
+    path = tmp_path / "capture.tif"
+    _multiband(path)
+    first = client.get("/api/images/bands", params={"path": str(path)}).json()
+    assert client.get("/api/images/bands", params={"path": str(path)}).json() == first
+    assert len(opened) == 1
+
+
+@pytest.mark.parametrize("bands", [5, 3], ids=["with_stats", "count_only"])
+def test_a_warm_description_reads_nothing_off_the_file(
+    client: TestClient, tmp_path: Path, monkeypatch, bands: int,
+):
+    """A repeated description of an unchanged container answers from the caches: the band count
+    from its own, the statistics (where the count calls for them) from theirs, so not even the
+    array that states the count is loaded."""
+    path = tmp_path / "stack.npz"
+    np.savez(str(path), image=np.zeros((24, 40, bands), dtype=np.uint8))
+    first = client.get("/api/images/bands", params={"path": str(path)}).json()
+    assert first["band_count"] == bands
+    assert bool(first["bands"]) == (bands > 3)
+
+    loads: list = []
+    real = np.load
+
+    def counted(*args, **kwargs):
+        loads.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(np, "load", counted)
+    assert client.get("/api/images/bands", params={"path": str(path)}).json() == first
+    assert loads == []
+
+
+def test_one_reading_of_a_raster_is_sampled_once_whichever_route_asks_first(
+    client: TestClient, tmp_path: Path, monkeypatch,
+):
+    """A description and a plain region of one float four-band raster both read it at its own
+    four bands, so its statistics are computed and cached once for both."""
+    path = tmp_path / "float4.tif"
+    rng = np.random.default_rng(5)
+    tifffile.imwrite(str(path), rng.random((24, 40, 4)).astype(np.float32))
+    computed: list = []
+    real = images_route._stats_of
+
+    def counted(*args, **kwargs):
+        computed.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(images_route, "_stats_of", counted)
+    assert client.get("/api/images/bands", params={"path": str(path)}).status_code == 200
+    resp = client.get("/api/images", params={
+        "path": str(path), "display_pixels": DISPLAY, "x0": 0, "y0": 0, "x1": 20, "y1": 24})
+    assert resp.status_code == 200, resp.text
+    assert len(computed) == 1
+    assert len(images_route._stats_cache) == 1
+
+
+def test_a_band_group_rewritten_to_name_another_member_is_described_afresh(
+    client: TestClient, tmp_path: Path,
+):
+    """A manifest rewritten to name a different file of the same size and timestamp is a
+    different group: its warm description is read again, not answered from the old entry."""
+    import os
+
+    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+
+    d = tmp_path / "images"
+    d.mkdir()
+    for name, value in (("cap_a", 10), ("cap_b", 50), ("cap_c", 90)):
+        np.save(str(d / f"{name}.npy"), np.full((8, 12), value, dtype=np.uint8))
+    stamp = (d / "cap_a.npy").stat().st_mtime_ns
+    os.utime(d / "cap_c.npy", ns=(stamp, stamp))
+    manifest = write_band_group_manifest(d, "cap", {"A": d / "cap_a.npy", "B": d / "cap_b.npy"})
+    first = client.get("/api/images/bands", params={"path": str(manifest)}).json()
+    assert first["bands"][0]["max"] == 10
+
+    write_band_group_manifest(d, "cap", {"A": d / "cap_c.npy", "B": d / "cap_b.npy"})
+    again = client.get("/api/images/bands", params={"path": str(manifest)}).json()
+    assert again["bands"][0]["max"] == 90
+
+
+def test_a_cold_region_stretch_samples_through_the_reader_that_served_the_region(
+    client: TestClient, tmp_path: Path, monkeypatch,
+):
+    """A region stretched by the raster's own sampled bounds on a cold cache reads those bounds
+    through the reader that served the region: one open for the whole request."""
+    from tcip_mcp.pipelines import raster_source
+
+    opened: list = []
+    real = raster_source.SourceHeader.open
+
+    def counted(*args, **kwargs):
+        opened.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(raster_source.SourceHeader, "open", counted)
+    path = tmp_path / "capture.tif"
+    _multiband(path)
+    resp = client.get("/api/images", params={
+        "path": str(path), "display_pixels": DISPLAY, "bands": "0,1,2",
+        "x0": 0, "y0": 0, "x1": 20, "y1": 24})
+    assert resp.status_code == 200, resp.text
+    assert len(images_route._stats_cache) == 1
+    assert len(opened) == 1
+
+
+def test_the_view_route_reads_one_header_and_opens_the_raster_once(
+    client: TestClient, tmp_path: Path, monkeypatch,
+):
+    """Planning a view off a pyramid reads the raster's frame and its levels from one header read
+    and one GDAL open of the raster itself; each level is its own handle. A view within the cap
+    needs no level, and reads the header alone."""
+    from tcip_mcp.pipelines import raster_source
+    from tcip_mcp.pipelines.overviews import build_overviews
+
+    path = tmp_path / "wide.tif"
+    _wide_raster(path)
+    build_overviews(path)
+    headers: list = []
+    rasters: list = []
+    real_header, real_open = raster_source.tiff_header, raster_source.open_gdal_dataset
+
+    def header(tif):
+        headers.append(tif.filehandle.path)
+        return real_header(tif)
+
+    def gdal(dataset_path, overview=None):
+        if overview is None:
+            rasters.append(dataset_path)
+        return real_open(dataset_path, overview)
+
+    monkeypatch.setattr(raster_source, "tiff_header", header)
+    monkeypatch.setattr(raster_source, "open_gdal_dataset", gdal)
+    reads = client.get("/api/images/view", params={
+        "path": str(path), "display_pixels": SMALL_DISPLAY, "x0": 0, "y0": 0, "x1": 5000,
+        "y1": 64}).json()["reads"]
+    assert reads and all(r["level"] > 0 for r in reads)
+    assert len(headers) == 1
+    assert len(rasters) == 1
+
+    headers.clear()
+    rasters.clear()
+    native = client.get("/api/images/view", params={
+        "path": str(path), "display_pixels": DISPLAY, "x0": 0, "y0": 0, "x1": 100,
+        "y1": 64}).json()["reads"]
+    assert native and all(r["level"] == 0 for r in native)
+    assert len(headers) == 1
+    assert rasters == []
 
 
 def test_get_bands_reads_an_oversized_rasters_stats_off_its_overviews(
@@ -998,7 +1177,7 @@ def test_a_region_of_an_oversized_raster_stretches_by_its_overview_bounds(
     resp = client.get("/api/images", params={
         "path": str(path), "display_pixels": SMALL_DISPLAY, "bands": "0,1,2",
         "x0": 0, "y0": 0, "x1": 256, "y1": 64})
-    stats = images_route._raster_stats(path, 4)
+    stats = _cached_stats(path)
     assert stats.overview_size == (1024, 13)
     bounds = [(r.minimum, r.maximum) for r in stats.ranges[:3]]
     _renders_as(resp, _composite(arr[:, :256], "minmax", bounds))

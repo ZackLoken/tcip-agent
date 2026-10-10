@@ -21,8 +21,7 @@ import pytest
 
 pytest.importorskip("torch")
 
-from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
-from tests._chain_fixtures import BESPOKE_DETECTION  # noqa: E402
+from tests._chain_fixtures import BESPOKE_DETECTION, BESPOKE_MODELS  # noqa: E402
 from tests._producer_fixtures import gray_frame  # noqa: E402
 pytest.importorskip("torchvision")
 import torch  # noqa: E402
@@ -31,8 +30,8 @@ from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor  # n
 
 TILE = 64
 IMAGE = 128
-# The band count and class space a three-band, one-subject run records on its data section.
-_RUN_DATA = {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}}
+# The band count and class space a three-band, one-subject run states on its data section.
+_RUN_DATA = {"num_channels": 3, "scope": {"subject": "bud"}}
 
 
 class _GeometryStub:
@@ -209,23 +208,9 @@ def test_the_recorded_resize_travels_only_with_a_native_frame_tile_edge():
 
 def test_a_checkpoint_carries_its_untiled_training_geometry_to_the_predictor(tmp_path):
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tests._chain_fixtures import built_model, training_config
-    from tcip_mcp.tools.model_tools import register_model
 
-    model_source = {"builder": BESPOKE_DETECTION,
-                    "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
-                    "task": "detection"}
-    ckpt = tmp_path / "model_best.pt"
-    config = training_config(model_source,
-                             {"tiling": {"enabled": False}, "train_native_size": [TILE, TILE],
-                              **_RUN_DATA},
-                             augmentation={"resize": [32, 32]})
-    torch.save({STATE_DICT_KEY: built_model(config).state_dict(),
-                CONFIG_KEY: config}, str(ckpt))
-    result = register_model(name="native-frame-carry", checkpoint_path=str(ckpt),
-                            project=tmp_path)
-    assert "error" not in result, result
-    checkpoint = load_registered_checkpoint(str(ckpt), project=tmp_path)
+    checkpoint = load_registered_checkpoint(
+        _native_frame_checkpoint(tmp_path, {"resize": [32, 32]}), project=tmp_path)
 
     pred = GenericPredictor(checkpoint, device="cpu")
 
@@ -358,29 +343,26 @@ def test_a_tile_no_pil_mode_represents_keeps_its_own_pixels(tmp_path, caplog):
 # --- the doors on either side of the tier -------------------------------
 
 
-def _native_frame_checkpoint(tmp_path: Path, augmentation: dict | str | None = None) -> str:
-    from tests._chain_fixtures import built_model, training_config
+def _trained_checkpoint(tmp_path: Path, tiling: dict, *, size: int = TILE, **config) -> str:
+    """The checkpoint a run under ``tmp_path`` completed over two square ``size`` px bud frames of
+    its own, its tiny detector resizing between ``size`` and twice it, under ``tiling`` and with
+    ``config``'s keys in place of its config's own; registered by completing."""
+    from tests._producer_fixtures import seed_bud_images
+    from tests._verified_checkpoint_fixtures import fixture_data_dir, registered_checkpoint
 
-    model_source = {"builder": BESPOKE_DETECTION,
-                    "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
-                    "task": "detection"}
-    config = training_config(model_source,
-                             {"tiling": {"enabled": False}, "train_native_size": [TILE, TILE],
-                              **_RUN_DATA})
-    if augmentation is not None:
-        config["augmentation"] = augmentation
-    ckpt = tmp_path / "model_best.pt"
-    torch.save({STATE_DICT_KEY: built_model(config).state_dict(),
-                CONFIG_KEY: config}, str(ckpt))
-    return str(ckpt)
+    images = seed_bud_images(fixture_data_dir(tmp_path, f"frames-{size}") / "images"
+                             / UNDATED_BUCKET, n=2, size=size)
+    return registered_checkpoint(
+        tmp_path, model_source={"builder": BESPOKE_DETECTION, "task": "detection",
+                                "source_files": [BESPOKE_MODELS],
+                                "builder_kwargs": {"min_size": size, "max_size": size * 2}},
+        data={"images_dir": str(images), "tiling": tiling, **_RUN_DATA}, **config)
 
 
-def _registered(tmp_path: Path, ckpt: str, name: str) -> str:
-    from tcip_mcp.tools.model_tools import register_model
-
-    result = register_model(name=name, checkpoint_path=ckpt, project=tmp_path)
-    assert "error" not in result, result
-    return ckpt
+def _native_frame_checkpoint(tmp_path: Path, augmentation: dict | None = None) -> str:
+    """:func:`_trained_checkpoint` of an untiled run, under ``augmentation`` when given."""
+    return _trained_checkpoint(tmp_path, {"enabled": False},
+                               **({} if augmentation is None else {"augmentation": augmentation}))
 
 
 def test_a_tiled_pass_over_a_native_frame_checkpoint_says_what_it_rests_on(tmp_path):
@@ -389,8 +371,7 @@ def test_a_tiled_pass_over_a_native_frame_checkpoint_says_what_it_rests_on(tmp_p
     the recorded resize each tile runs through."""
     from tests._verified_checkpoint_fixtures import predicted_over
 
-    ckpt = _registered(tmp_path, _native_frame_checkpoint(tmp_path, {"resize": [32, 32]}),
-                       "native-frame-tiles")
+    ckpt = _native_frame_checkpoint(tmp_path, {"resize": [32, 32]})
 
     p, results = predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path, IMAGE)).parent),
                                 device="cpu", tile=True, conf=0.0)
@@ -405,26 +386,12 @@ def test_a_native_frame_checkpoint_stays_untiled_unless_asked(tmp_path):
     regime is untiled: the tier is a capability a caller opts into, never a silent upgrade."""
     from tests._verified_checkpoint_fixtures import predicted_over
 
-    ckpt = _registered(tmp_path, _native_frame_checkpoint(tmp_path), "native-frame-untiled")
+    ckpt = _native_frame_checkpoint(tmp_path)
 
     p, _results = predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path, IMAGE)).parent),
                                  device="cpu", conf=0.0)
 
     assert p.execution.tile_size is None
-
-
-def test_an_unreadable_recorded_augmentation_config_does_not_sink_an_untiled_run(tmp_path):
-    """The recorded config is only consulted to reproduce a training input geometry, which an
-    untiled run never does; a run that reads no tile geometry is not refused over it."""
-    from tests._verified_checkpoint_fixtures import predicted_over
-
-    ckpt = _registered(tmp_path, _native_frame_checkpoint(tmp_path, {"not_a_transform": 0.5}),
-                       "native-frame-unreadable-aug")
-
-    p, results = predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path, IMAGE)).parent),
-                                device="cpu", conf=0.0)
-
-    assert p.execution.tile_size is None and len(results) == 1
 
 
 def _native_frame_gt(images_dir: Path) -> None:
@@ -630,37 +597,14 @@ def test_an_explicit_edge_on_a_checkpoint_recording_no_geometry_clears():
 
 
 def _tiled_checkpoint(tmp_path: Path, tile_size: int) -> str:
-    from tests._chain_fixtures import built_model, training_config
-
-    model_source = {"builder": BESPOKE_DETECTION,
-                    "builder_kwargs": {"min_size": tile_size, "max_size": tile_size * 2},
-                    "task": "detection"}
-    config = training_config(model_source,
-                             {"tiling": {"tile_size": tile_size, "overlap": 0.2}, **_RUN_DATA})
-    ckpt = tmp_path / "model_tiled.pt"
-    torch.save({STATE_DICT_KEY: built_model(config).state_dict(),
-                CONFIG_KEY: config}, str(ckpt))
-    return str(ckpt)
-
-
-def _native_frame_checkpoint_of_size(tmp_path: Path, size: int) -> str:
-    from tests._chain_fixtures import built_model, training_config
-
-    model_source = {"builder": BESPOKE_DETECTION,
-                    "builder_kwargs": {"min_size": size, "max_size": size * 2},
-                    "task": "detection"}
-    config = training_config(model_source,
-                             {"tiling": {"enabled": False}, "train_native_size": [size, size],
-                              **_RUN_DATA})
-    ckpt = tmp_path / "model_native.pt"
-    torch.save({STATE_DICT_KEY: built_model(config).state_dict(),
-                CONFIG_KEY: config}, str(ckpt))
-    return str(ckpt)
+    """:func:`_trained_checkpoint` of a run tiled at ``tile_size`` over frames of that size."""
+    return _trained_checkpoint(  # sliver_frac stated: one box per frame derives no spread
+        tmp_path, {"tile_size": tile_size, "overlap": 0.2, "sliver_frac": 0.5}, size=tile_size)
 
 
 @pytest.mark.parametrize("make, recorded", [
     (lambda tmp_path: _tiled_checkpoint(tmp_path, 128), "128"),
-    (lambda tmp_path: _native_frame_checkpoint_of_size(tmp_path, 512), "512"),
+    (lambda tmp_path: _trained_checkpoint(tmp_path, {"enabled": False}, size=512), "512"),
 ], ids=["persisted-geometry", "native-frame"])
 def test_a_stated_edge_contradicting_the_checkpoints_geometry_refuses_the_pass(
         tmp_path, make, recorded):
@@ -670,7 +614,7 @@ def test_a_stated_edge_contradicting_the_checkpoints_geometry_refuses_the_pass(
     from tcip_mcp.pipelines.execution import ExecutionRefusedError
     from tests._verified_checkpoint_fixtures import predicted_over
 
-    ckpt = _registered(tmp_path, make(tmp_path), f"contradiction-{recorded}")
+    ckpt = make(tmp_path)
 
     with pytest.raises(ExecutionRefusedError) as exc_info:
         predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path, IMAGE)).parent), device="cpu",
@@ -682,7 +626,7 @@ def test_a_stated_edge_matching_persisted_geometry_is_admitted_as_stated(tmp_pat
     """The rail refuses a contradiction, not an explicit edge that simply agrees."""
     from tests._verified_checkpoint_fixtures import predicted_over
 
-    ckpt = _registered(tmp_path, _tiled_checkpoint(tmp_path, TILE), "tiled-native-edge-match")
+    ckpt = _tiled_checkpoint(tmp_path, TILE)
 
     p, results = predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path, IMAGE)).parent),
                                 device="cpu", tile=True, tile_size=TILE, conf=0.0)

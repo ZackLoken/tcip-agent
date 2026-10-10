@@ -15,30 +15,12 @@ if TYPE_CHECKING:
 
 
 def probe_channels(image_path: "str | Path | BandGroupRef") -> int:
-    """Band count of a raster read from disk.
+    """Band count of a raster read from disk, as its own header states it
+    (:attr:`~tcip_mcp.pipelines.raster_source.SourceHeader.channels`): a grouped capture's
+    one band per member."""
+    from tcip_mcp.pipelines.raster_source import SourceHeader
 
-    A :class:`~tcip_mcp.pipelines.data.band_groups.BandGroupRef` (sibling single-band files grouped
-    as one logical image) probes each sibling on its own and sums them.
-    """
-    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.raster_source import tiff_channel_count
-
-    if isinstance(image_path, BandGroupRef):
-        return sum(probe_channels(p) for p in image_path.bands.values())
-    path = Path(image_path)
-    ext = path.suffix.lower()
-    if ext in (".npy", ".npz"):
-        import numpy as np
-        arr = np.load(str(path))
-        if ext == ".npz":
-            with arr as container:
-                arr = container[container.files[0]]
-        return int(arr.shape[-1]) if arr.ndim == 3 else 1
-    if ext in (".tif", ".tiff"):
-        return tiff_channel_count(path)
-    from PIL import Image
-    with Image.open(path) as im:
-        return len(im.getbands())  # RGB->3, L->1, RGBA->4, already header-only (PIL is lazy)
+    return SourceHeader(image_path).channels
 
 
 def num_classes_from_distribution(class_distribution: dict[int, int]) -> int:
@@ -352,43 +334,35 @@ def derive_block_scale_px(
             )
         if raster_path is not None:
             from tcip_mcp.pipelines import pixel_size as pixel_size_module
-            from tcip_mcp.pipelines.image_utils import capture_kind
-            from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
-                GeoreferencingError,
-                RotatedRasterError,
-                read_geotransform,
-            )
-            from tcip_mcp.pipelines.raster_source import UNGEOREFERENCED_ARRAY_EXTS
+            from tcip_mcp.pipelines.raster_source import SourceHeader
 
             raster = Path(raster_path)
-            if not raster.is_file() or capture_kind(raster) != "raster":
+            header = SourceHeader(raster)
+            if not raster.is_file() or header.kind == "photo":
                 raise ValueError(
                     "derive_block_scale_px: raster_path is not a raster file this derivation can "
                     f"read a pixel size from ({raster}); pass the training raster, or "
                     "raster_path=None to use the GT-object-spacing-derived block scale")
-            if raster.suffix.casefold() in UNGEOREFERENCED_ARRAY_EXTS:
+            if header.kind != "tif":
                 raise ValueError(
                     f"derive_block_scale_px: raster_path ({raster}) is an array container, which "
                     "carries no georeferencing tags, so there is no pixel size to read; pass "
                     "raster_path=None to use the GT-object-spacing-derived block scale instead")
             try:
-                read_geotransform(raster)
-            except (GeoreferencingError, RotatedRasterError):
-                pass
-            except (ValueError, OSError) as exc:
+                header.georeference  # the one header read; an unreadable raster refuses here
+            except ValueError as exc:
                 raise ValueError(
                     f"derive_block_scale_px: raster_path could not be opened as a raster "
                     f"({raster}): {exc}"
                 ) from exc
-            else:
-                resolved, _reason = pixel_size_module.resolve_pixel_size(raster)
-                if resolved is not None:
-                    pitch_px = pitch_m / resolved.meters_per_px
-                    return (
-                        max(tile_size, round(pitch_px)),
-                        f"plant grid pitch ({pitch_m:.2f}m) via {resolved.source_clause}, "
-                        "floored at tile_size",
-                    )
+            resolved, _reason = pixel_size_module.resolve_pixel_size(header)
+            if resolved is not None:
+                pitch_px = pitch_m / resolved.meters_per_px
+                return (
+                    max(tile_size, round(pitch_px)),
+                    f"plant grid pitch ({pitch_m:.2f}m) via {resolved.source_clause}, "
+                    "floored at tile_size",
+                )
 
     gt_boxes_per_image = _validate_gt_boxes_per_image(
         gt_boxes_per_image, fn_name="derive_block_scale_px")

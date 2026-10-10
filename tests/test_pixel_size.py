@@ -9,7 +9,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from tcip_mcp.pipelines.pixel_size import resolve_pixel_size
+from tcip_mcp.pipelines.pixel_size import resolve_pixel_size as _resolve_header
+from tcip_mcp.pipelines.raster_source import SourceHeader
 from tests._geotiff_fixtures import UTM_15N_EPSG as _UTM_15N_EPSG
 from tests._geotiff_fixtures import write_geotiff as _write_shared_geotiff
 
@@ -24,6 +25,11 @@ def _write_geotiff(
         path, width=5, height=5, shape=(5, 5, 3), pixel_scale=pixel_scale,
         projected_epsg=projected_epsg, model_type=model_type,
         include_transformation_tag=include_transformation_tag)
+
+
+def resolve_pixel_size(path: Path):
+    """The resolver over ``path``'s header."""
+    return _resolve_header(SourceHeader(path))
 
 
 def _refused(path: Path) -> str:
@@ -64,10 +70,10 @@ class TestRasterPixelSize:
         assert str(path.parent) not in reason
         assert "\\" not in reason and "/" not in reason
 
-    def test_a_geographic_model_type_is_refused_by_read_geotransforms_own_check(self, tmp_path):
+    def test_a_geographic_model_type_is_refused_by_the_tag_reads_own_check(self, tmp_path):
         """Distinct from the projected-model-type-but-geographic-CRS case below: here
-        GTModelTypeGeoKey itself names the geographic model type (2), so read_geotransform
-        refuses before this module ever reaches pyproj."""
+        GTModelTypeGeoKey itself names the geographic model type (2), so the header's
+        georeference read refuses before this module ever reaches pyproj."""
         path = tmp_path / "geographic_model_type.tif"
         _write_geotiff(path, model_type=2)
         assert _refused(path) == "its georeferencing tags are incomplete"
@@ -83,9 +89,9 @@ class TestRasterPixelSize:
         assert _refused(path) == "its pixel scale is zero or negative"
 
     def test_a_geographic_crs_under_a_projected_model_type_has_no_pixel_size(self, tmp_path):
-        """The raster's own GTModelTypeGeoKey says Projected (read_geotransform admits it), but
-        the EPSG it names resolves to a geographic CRS: a disagreement this module's own
-        is_projected check catches, distinct from read_geotransform's own model-type refusal."""
+        """The raster's own GTModelTypeGeoKey says Projected (the tag read admits it), but the
+        EPSG it names resolves to a geographic CRS: a disagreement this module's own is_projected
+        check catches, distinct from the tag read's own model-type refusal."""
         path = tmp_path / "geo.tif"
         _write_geotiff(path, projected_epsg=4326)
         assert _refused(path) == "its georeferencing is not projected"
@@ -120,6 +126,11 @@ class TestRasterPixelSize:
         path = tmp_path / "array.npy"
         np.save(path, np.zeros((5, 5, 3), dtype=np.uint8))
         assert _refused(path) == "it is not a TIFF"
+
+    def test_an_unreadable_tiff_could_not_be_read(self, tmp_path):
+        path = tmp_path / "broken.tif"
+        path.write_bytes(b"not a real tiff")
+        assert _refused(path) == "it could not be read"
 
     def test_a_photographic_capture_has_no_pixel_size(self, tmp_path):
         path = tmp_path / "photo.jpg"

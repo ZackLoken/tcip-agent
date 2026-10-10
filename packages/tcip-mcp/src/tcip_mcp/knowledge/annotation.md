@@ -78,16 +78,22 @@ A collaborator's delivery in a schema other than COCO is yours to convert: read 
 one-off converter script that emits a COCO document, and import it. COCO is the one built-in
 import.
 
-## Coordinate frame: upright, EXIF applied once
+## Coordinate frame: the reading and its count, a photograph's EXIF applied once
 
-Every coordinate (normalized or pixel) lives in the EXIF-upright frame. Images are
-decoded through one entry point, `load_image` (`image_utils.py`) / `get_image_dimensions`, and
-both orient through one shared EXIF orientation-tag read, so the GUI canvas, the model,
-tiling, and viz all share one pixel space. This matters most for
+An image's frame depends on how it is read and at what band count: `SourceHeader`
+(`raster_source.py`) answers it, `display_frame` for the frame the GUI canvas and the image
+route serve, `frame_at(n)` and `open(n)` for a read at `n` bands (the model's count). An array
+whose axes read differently at different counts (a `(3, 64, 4)` raster displays 64 wide and 3
+tall, and opens at three bands 4 wide and 64 tall) has different frames for those reads, so
+annotation coordinates
+are authored and compared in the frame of the read that produced them. For a photograph the
+frame is EXIF-upright: its size and its decoded pixels go through one shared EXIF
+orientation-tag read. This matters most for
 Orientation-6 phone/camera JPEGs whose stored frame is transposed (e.g. 5712×4284 ↔
 4284×5712): denormalizing an upright-authored box against the raw sensor frame scatters
 every box. Do not re-open images with a bare `PIL.Image.open` for anything coordinate-
-bearing (denormalizing, cropping, drawing); go through `load_image`.
+bearing (denormalizing, cropping, drawing); read the frame and the pixels through
+`SourceHeader` or the readers it opens.
 
 ## Stages
 

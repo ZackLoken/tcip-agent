@@ -26,7 +26,9 @@ from tcip_annotation.viz import (
 
 from tcip_mcp.pipelines.display_bounds import VIZ_ARTIFACT_MAX_EDGE
 from tcip_annotation.matching import REVIEW_CONF_FLOOR
+from tcip_mcp.pipelines.raster_source import SourceHeader
 from tcip_mcp.project_paths import viz_output_path
+from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_mcp.workspace import BoundProject
 
@@ -34,8 +36,7 @@ if TYPE_CHECKING:
     import numpy as np
 
     from tcip_mcp.buckets import Bucket
-    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.raster_source import Rect
+    from tcip_mcp.pipelines.raster_source import RasterSource, Rect
 
 
 class DisplayRead(NamedTuple):
@@ -67,10 +68,9 @@ def _clamped_rect(region: tuple[float, float, float, float], width: int, height:
                 clamp(x0 + region[2], x0 + 1, width), clamp(y0 + region[3], y0 + 1, height))
 
 
-def _read_for_display(source: "str | Path | BandGroupRef", *,
-                      max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
+def _read_for_display(raster: "RasterSource", *, max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
                       region: tuple[float, float, float, float] | None = None) -> DisplayRead:
-    """Read ``source`` as display pixels a renderer can draw on.
+    """Read the open ``raster`` as display pixels a renderer can draw on.
 
     The raster layer serves the region (an ``(x, y, w, h)`` rectangle in the raster's own grid, or
     the whole frame) at or under ``max_edge`` through ``display_bounds.plan_read``, off the
@@ -81,18 +81,15 @@ def _read_for_display(source: "str | Path | BandGroupRef", *,
     bands composited and independently min-max stretched, through ``composite_display_rgb``.
     """
     from tcip_mcp.pipelines.band_stats import composite_display_rgb
-    from tcip_mcp.pipelines.derivations import probe_channels
     from tcip_mcp.pipelines.display_bounds import plan_read, planned_read
-    from tcip_mcp.pipelines.raster_source import Rect, open_raster
+    from tcip_mcp.pipelines.raster_source import Rect
 
-    channels = probe_channels(source)
-    with open_raster(source, channels) as raster:
-        native = (int(raster.width), int(raster.height))
-        rect = (Rect(0, 0, raster.width, raster.height) if region is None
-                else _clamped_rect(region, raster.width, raster.height))
-        plan = plan_read(rect, raster.width, raster.height, raster.level_dims(),
-                         rect.width * rect.height, max_edge)
-        pixels, _spec = planned_read(raster, rect, plan)
+    native = (int(raster.width), int(raster.height))
+    rect = (Rect(0, 0, raster.width, raster.height) if region is None
+            else _clamped_rect(region, raster.width, raster.height))
+    plan = plan_read(rect, raster.width, raster.height, raster.level_dims(),
+                     rect.width * rect.height, max_edge)
+    pixels, _spec = planned_read(raster, rect, plan)
     bands = int(pixels.shape[-1])
     idxs = [0, 1, 2] if bands >= 3 else [0, 0, 0]
     plain = bands in (1, 3, 4) and pixels.dtype == "uint8"
@@ -100,13 +97,12 @@ def _read_for_display(source: "str | Path | BandGroupRef", *,
                        rect, native)
 
 
-def _display_for_path(image_path: str | Path, *, max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
-                      region: tuple[float, float, float, float] | None = None) -> DisplayRead:
-    """Display pixels of the logical image ``image_path`` names
-    (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`, whose refusals propagate)."""
-    from tcip_mcp.pipelines.image_utils import resolve_image_path
-
-    return _read_for_display(resolve_image_path(image_path), max_edge=max_edge, region=region)
+def _display_of(header: "SourceHeader", *, max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
+                region: tuple[float, float, float, float] | None = None) -> DisplayRead:
+    """:func:`_read_for_display` of the source ``header`` describes, opened once at the image
+    route's count (:meth:`~tcip_mcp.pipelines.raster_source.SourceHeader.open_at_route_count`)."""
+    with header.open_at_route_count() as raster:
+        return _read_for_display(raster, max_edge=max_edge, region=region)
 
 
 def _subject_indexer() -> tuple[dict[str, int], Callable[[str], int]]:
@@ -223,6 +219,7 @@ def visualize(
             for the image is rendered (source='predictions' and 'comparison', where it is
             required).
     """
+    path = str(located(path, project))
     if source == "annotations":
         return _viz_annotations(project, path, task=task, class_names=class_names)
     if source in ("predictions", "comparison") and not bucket:
@@ -276,7 +273,7 @@ def _viz_annotations(
     idx, index = _subject_indexer()
 
     n_points = _n_points(anns)
-    read = _read_for_display(source)
+    read = _display_of(SourceHeader(source))
     if task == "detect":
         shapes = _boxable(anns)
         out = render_detections(read.pixels, [_box_dict(a, index) for a in shapes],
@@ -343,7 +340,7 @@ def _viz_predictions(
     idx, index = _subject_indexer()
 
     n_points = _n_points(preds)
-    read = _read_for_display(source)
+    read = _display_of(SourceHeader(source))
     if task == "detect":
         shapes = _boxable(preds)
         out = render_detections(
@@ -414,7 +411,7 @@ def _viz_comparison(
     tp_matches = [(gpos[g], ppos[p]) for g, p in one.matching.pairs]
     tp, fp, fn = one.matching.counts
 
-    read = _read_for_display(one.image)
+    read = _display_of(one.header)
     out = render_comparison(read.pixels, gt_dicts, pred_dicts, native_size=read.native_size,
                             matches=tp_matches, class_names=_name_map(idx),
                             output_path=viz_output_path(project, "comparison"))
@@ -452,9 +449,10 @@ def get_worst_predictions(bucket: Bucket, top_k: int = 8) -> dict:
 
 
 def _ranked(bucket: Bucket, top_k: int) -> tuple[dict, dict[str, tuple]]:
-    """:func:`get_worst_predictions`'s answer beside the one read it ranked over
-    (:func:`~tcip_mcp.pipelines.training.evaluation.bucket_reads` of the bucket's own documents),
-    by stem."""
+    """The ``top_k`` worst-scoring images of ``bucket`` by the count-mismatch and confidence
+    heuristic (its capture, the ranked stems with their scores, how many were scored and the
+    capture's labeled stems the bucket holds no document for), beside the read the ranking was
+    made over: each stem's source, ground truth and predictions."""
     from tcip_annotation.json_io import detection_annotations
 
     from tcip_mcp.dataset_layout import capture_label_keys, image_dir
@@ -529,7 +527,7 @@ def render_failure_cases(
     from tcip_mcp.buckets import read_bucket
 
     try:
-        worst, by_stem = _ranked(read_bucket(dataset_root, bucket), top_k)
+        worst, by_stem = _ranked(read_bucket(located(dataset_root, project), bucket), top_k)
     except (UnreadableLabelDocumentError, ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}
 
@@ -542,7 +540,7 @@ def render_failure_cases(
     for item in worst_items:
         stem = item["stem"]
         source, gt, preds = by_stem[stem]
-        read = _read_for_display(source)
+        read = _display_of(SourceHeader(source))
 
         idx, index = _subject_indexer()
         gt_dicts = [_box_dict(a, index) for a in _boxable(gt)]
@@ -607,7 +605,7 @@ def _viz_dataset_sample(
             anns = _labels_at(label_key(root, capture, stem))
         except UnreadableLabelDocumentError as exc:
             return {"error": str(exc)}
-        read = _read_for_display(source)
+        read = _display_of(SourceHeader(source))
         if anns is not None:
             idx, index = _subject_indexer()
             if task == "detect":
@@ -706,6 +704,7 @@ def capture_live_canvas(
                          "canvas only while it has this project open.",
                 "refresh_answer": ping}
 
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.registry_paths import resolved_registry_path
 
     src_image = str(resolved_registry_path(project, state["image_path"]))
@@ -726,7 +725,8 @@ def capture_live_canvas(
     if crop_to_viewport and viewport and viewport.get("w") and viewport.get("h"):
         region = (float(viewport.get("x", 0)), float(viewport.get("y", 0)),
                   float(viewport["w"]), float(viewport["h"]))
-    read = _display_for_path(src_image, max_edge=max_edge, region=region)
+    read = _display_of(SourceHeader(resolve_image_path(src_image)), max_edge=max_edge,
+                       region=region)
     try:
         out = render_canvas_state(read.pixels, shapes,
                                   region=(read.rect.x0, read.rect.y0, read.rect.x1, read.rect.y1),
@@ -804,21 +804,23 @@ def overlay_reference_grid(
     actually rendered.
 
     Args:
-        image_path: Absolute path to the image file.
+        image_path: The image file (:func:`~tcip_mcp.registry_paths.located` against
+            ``project``).
         tile_size: Cell edge in native pixels; omitted derives a legible default.
         overlap: Cell overlap as a fraction of tile_size, training tiling's semantics.
     """
+    from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.pipelines.reference_grid import (
         derive_pointing_tile_size,
         grid_geometry,
         reference_cells,
     )
 
-    img = Path(image_path)
+    img = located(image_path, project)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    display = _display_for_path(image_path)
+    display = _display_of(SourceHeader(resolve_image_path(img)))
     w, h = display.native_size
     if tile_size is None:
         tile_size = derive_pointing_tile_size(w, h)

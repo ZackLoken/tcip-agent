@@ -1,130 +1,50 @@
 import { describe, expect, it } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 
-import type { DeliveryEventRecord } from "@/api/inference";
+import { isCanopySegmentDisclosure } from "@/api/inference";
 import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
-
-const BASE: DeliveryEventRecord = {
-  event_id: "evt-base",
-  door: "results.export_csv",
-  delivery_kind: "state_crossing_dates",
-  trait: "subject_a",
-  trait_revision: 1,
-  trait_revision_sha256: "b".repeat(64),
-  output_path: "C:/proj/results_export/subject_a_phenology.csv",
-  output_sha256: "a".repeat(64),
-  producer: { checkpoint_sha256: "c".repeat(64), experiment_id: "exp-1" },
-  buckets: [
-    {
-      dataset_root: "C:/data",
-      bucket: "baseline/2026-01-01",
-      date: "2026-01-01",
-      assessment_id: "assessment-1",
-      validated: true,
-      reason: null,
-    },
-  ],
-  scale_assessment_id: null,
-  validated: true,
-  acknowledgment: null,
-  population: ["P-001"],
-  require_all_dates_complete: null,
-  plant_mapping: null,
-  produced_at: "2026-02-03T12:00:00+00:00",
-};
+import { DELIVERY_RECORDS } from "@/test/deliveryRecords";
 
 describe("DeliveryEventsPanel bucket findings", () => {
-  it("names the assessment behind a validated bucket and the reason behind one that is not", () => {
-    const record: DeliveryEventRecord = {
-      ...BASE,
-      event_id: "with-buckets",
-      validated: false,
-      acknowledgment: {
-        acknowledgment_id: "ack-1",
-        acknowledged_by: "user:breeder",
-        reason: "shipping before assessing",
-        result_sha256: "0".repeat(64),
-        recorded_at: "2026-02-03T11:59:00+00:00",
-      },
-      buckets: [
-        {
-          dataset_root: "C:/data",
-          bucket: "baseline/2026-01-01",
-          date: "2026-01-01",
-          assessment_id: "assessment-1",
-          validated: true,
-          reason: null,
-        },
-        {
-          dataset_root: "C:/data",
-          bucket: "baseline/2026-01-08",
-          date: "2026-01-08",
-          assessment_id: null,
-          validated: false,
-          reason: "no assessment answers for it",
-        },
-      ],
-    };
-
+  it("names the assessment behind a validated bucket", () => {
+    const record = DELIVERY_RECORDS.validated;
     render(<DeliveryEventsPanel records={[record]} loadError={null} />);
-    const row = screen.getByTestId("delivery-with-buckets");
+    const row = screen.getByTestId(`delivery-${record.event_id}`);
 
-    expect(
-      within(row).getByText("baseline/2026-01-01: validated by assessment assessment-1"),
-    ).toBeInTheDocument();
-    expect(
-      within(row).getByText("baseline/2026-01-08: not validated (no assessment answers for it)"),
-    ).toBeInTheDocument();
-    expect(within(row).getByText("user:breeder")).toBeInTheDocument();
-    expect(within(row).getByText("shipping before assessing")).toBeInTheDocument();
+    for (const bucket of record.buckets) {
+      expect(
+        within(row).getByText(`${bucket.bucket}: validated by assessment ${bucket.assessment_id}`),
+      ).toBeInTheDocument();
+    }
+    expect(within(row).queryByText("Acknowledged by")).not.toBeInTheDocument();
+  });
+
+  it("names the reason behind an unvalidated bucket and the breeder who acknowledged it", () => {
+    const record = DELIVERY_RECORDS.acknowledged_mapping;
+    if (!record.acknowledgment) throw new Error("the fixture delivery was not acknowledged");
+    render(<DeliveryEventsPanel records={[record]} loadError={null} />);
+    const row = screen.getByTestId(`delivery-${record.event_id}`);
+
+    for (const bucket of record.buckets) {
+      expect(
+        within(row).getByText(`${bucket.bucket}: not validated (${bucket.reason})`),
+      ).toBeInTheDocument();
+    }
+    expect(within(row).getByText(record.acknowledgment.acknowledged_by)).toBeInTheDocument();
+    expect(within(row).getByText(record.acknowledgment.reason)).toBeInTheDocument();
   });
 
   it("counts the plants a canopy delivery delivered from its recorded population", () => {
-    const record: DeliveryEventRecord = {
-      ...BASE,
-      event_id: "canopy",
-      delivery_kind: "per_plant_count_aggregate",
-      population: ["P-001"],
-      plant_mapping: {
-        plant_registry: { name: "registry-a", digest: "d".repeat(64) },
-        raster_identity: { width: 100, height: 100 },
-        canopy_segments: {
-          capture: "2026-01-01",
-          stem: "mosaic",
-          sha256: "e".repeat(64),
-          subject: "canopy",
-          n_segments: 2,
-        },
-        segment_ties: [
-          { segment_index: 0, plot_name: "P-001", clearance_m: 2.0 },
-          { segment_index: 1, plot_name: "P-002", clearance_m: 2.0 },
-        ],
-        position_error_m: 0.5,
-        segments_without_plant: 0,
-        plants_outside_raster: [],
-        plants_without_segment: [],
-        plants_within_position_error: [],
-        plants_with_ambiguous_detections: [],
-        detections_unattributed: 0,
-        detections_unattributed_by_source: {},
-        detections_unattributed_scope: "delivered_raster",
-        plant_attribution: "segment",
-      },
-    };
-
+    const record = DELIVERY_RECORDS.canopy;
+    const pm = record.plant_mapping;
+    if (!pm || !isCanopySegmentDisclosure(pm)) throw new Error("the fixture names no segments");
     render(<DeliveryEventsPanel records={[record]} loadError={null} />);
 
     expect(
       within(screen.getByTestId("canopy-disclosure")).getByText(
-        "Canopy segments (registry-a): 1 registry plant(s) delivered, 0 segment(s) with no plant",
+        `Canopy segments (${pm.plant_registry.name}): ${record.population.length} registry ` +
+          `plant(s) delivered, ${pm.segments_without_plant} segment(s) with no plant`,
       ),
     ).toBeInTheDocument();
-  });
-
-  it("shows no acknowledgment for a validated record", () => {
-    render(<DeliveryEventsPanel records={[BASE]} loadError={null} />);
-    const row = screen.getByTestId("delivery-evt-base");
-
-    expect(within(row).queryByText("Acknowledged by")).not.toBeInTheDocument();
   });
 });

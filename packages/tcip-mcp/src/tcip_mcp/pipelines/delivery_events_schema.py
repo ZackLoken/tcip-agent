@@ -52,7 +52,7 @@ class PlantMappingDisclosure(BaseModel):
     built_at: str
     record_sha256: str
     nn_tolerance_m: MatchTolerance
-    capture_identity: dict[str, str]
+    capture_digests: dict[str, dict[str, str]]
     captures_unverified: list[str]
     plant_csvs_unverified: list[str]
     dates_delivered: list[str]

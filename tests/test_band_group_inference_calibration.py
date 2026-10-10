@@ -20,7 +20,6 @@ import tifffile
 
 torch = pytest.importorskip("torch")
 
-from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
 from tests._chain_fixtures import BESPOKE_DETECTION  # noqa: E402
 from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS  # noqa: E402
 pytest.importorskip("torchvision")
@@ -39,8 +38,10 @@ def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
 
 
 def _detection_checkpoint(tmp_path: Path) -> str:
-    from tcip_mcp.tools.model_tools import register_model
-    from tests._chain_fixtures import built_model, training_config
+    """A 2-channel detector a run in ``tmp_path`` completed over grouped captures of its own,
+    registered by completing; its path."""
+    from tests._chain_fixtures import BESPOKE_MODELS
+    from tests._verified_checkpoint_fixtures import fixture_data_dir, registered_checkpoint
 
     model_source = {
         "builder": BESPOKE_DETECTION,
@@ -48,16 +49,12 @@ def _detection_checkpoint(tmp_path: Path) -> str:
             "min_size": TILE, "max_size": TILE * 2,
             "image_mean": [0.5, 0.5], "image_std": [0.25, 0.25],
         },
+        "source_files": [BESPOKE_MODELS],
         "task": "detection",
     }
-    config = training_config(model_source,
-                             {"num_channels": 2, "scope": {"subject": "bud", "attributes": []}})
-    model = built_model(config)
-    ckpt = tmp_path / "model_best.pt"
-    torch.save({STATE_DICT_KEY: model.state_dict(), CONFIG_KEY: config}, str(ckpt))
-    result = register_model(tmp_path, name="band-group-test-model", checkpoint_path=str(ckpt))
-    assert "error" not in result, result
-    return str(ckpt)
+    images_dir = _grouped_dataset(fixture_data_dir(tmp_path, "grouped"))
+    return registered_checkpoint(tmp_path, model_source=model_source, data={
+        "images_dir": str(images_dir), "num_channels": 2, "scope": {"subject": "bud"}})
 
 
 def _grouped_dataset(root: Path) -> Path:

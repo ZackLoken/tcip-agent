@@ -122,7 +122,9 @@ def test_accept_refuses_when_the_images_content_has_changed_since_the_proposal_r
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A rewrite under the same name after propose_annotations ran means the staged candidates no
-    longer describe what stage_proposals would be confirming."""
+    longer describe what stage_proposals would be confirming; the refusal is answered before any
+    pixel of the changed image is read for display."""
+    from tcip_mcp.tools import vision_tools
     from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations
 
     img_path = tmp_path / "images" / UNDATED_BUCKET / "changed.jpg"
@@ -133,11 +135,19 @@ def test_accept_refuses_when_the_images_content_has_changed_since_the_proposal_r
     assert "error" not in proposed, proposed
 
     _make_image(img_path, fill=(200, 10, 10))
+    displayed: list = []
+    real = vision_tools._read_for_display
 
+    def counted(*args, **kwargs):
+        displayed.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(vision_tools, "_read_for_display", counted)
     accepted = stage_proposals(
         tmp_path, image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" in accepted
     assert str(img_path) in accepted["error"]
+    assert displayed == []
 
 
 def test_the_envelope_carries_image_identity_at_the_dataset_rooted_location(
@@ -396,6 +406,39 @@ def test_accept_reports_an_unsampleable_image_as_an_error_dict(
         tmp_path, image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" in accepted
     assert str(img_path) in accepted["error"]
+
+
+def test_a_region_proposal_and_its_accept_each_open_the_image_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A proposal's region crop, its render and its recorded identity read one reader, and the
+    accept verifies the identity and renders through one reader: a phase that opened the image
+    again for itself would be a second open."""
+    from tcip_mcp.pipelines import raster_source
+    from tcip_mcp.tools.proposal_tools import propose_annotations, stage_proposals
+
+    img_path = tmp_path / "images" / UNDATED_BUCKET / "region.jpg"
+    _make_image(img_path)
+    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    opened: list = []
+    real = raster_source.SourceHeader.open
+
+    def counted(*args, **kwargs):
+        opened.append(args[0])
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(raster_source.SourceHeader, "open", counted)
+    proposed = propose_annotations(tmp_path, image_path=str(img_path), engine="stub",
+                                   grid_cells=["A1"], tile_size=32)
+    assert "error" not in proposed, proposed
+    assert proposed["staged"] is True
+    assert len(opened) == 1
+
+    opened.clear()
+    accepted = stage_proposals(
+        tmp_path, image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "bud"}])
+    assert "error" not in accepted, accepted
+    assert len(opened) == 1
 
 
 def test_a_staging_is_one_publication_with_one_audit_line(

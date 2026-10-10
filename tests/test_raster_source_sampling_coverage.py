@@ -14,7 +14,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from tcip_mcp.pipelines.raster_source import raster_content_identity, sample_windows
+from tcip_mcp.pipelines.raster_source import open_raster, raster_content_identity, sample_windows
+
+
+def _identity(path: Path, *, seed: int, window_size: int, max_windows: int):
+    """``raster_content_identity`` of the three-band ``path`` opened once."""
+    with open_raster(path, 3) as src:
+        return raster_content_identity(
+            src, seed=seed, window_size=window_size, max_windows=max_windows)
 
 
 def _content_array(height: int, width: int) -> np.ndarray:
@@ -37,8 +44,7 @@ def test_a_sample_that_takes_every_grid_cell_claims_the_whole_raster(tmp_path: P
     assert any(cell.width != cell.height for cell in cells), (
         "the grid must hold cells that are not square")
 
-    identity = raster_content_identity(
-        path, 3, seed=3, window_size=window_size, max_windows=50)
+    identity = _identity(path, seed=3, window_size=window_size, max_windows=50)
     assert identity.pixel_fraction == pytest.approx(1.0)
 
 
@@ -53,8 +59,7 @@ def test_a_partial_sample_claims_only_the_share_of_pixels_it_read(tmp_path: Path
     assert len(cells) == 2
     assert all((cell.width, cell.height) == (16, 12) for cell in cells)
 
-    identity = raster_content_identity(
-        path, 3, seed=5, window_size=window_size, max_windows=2)
+    identity = _identity(path, seed=5, window_size=window_size, max_windows=2)
     assert identity.pixel_fraction == pytest.approx(2 / 3)
 
 
@@ -67,8 +72,8 @@ def test_a_taller_than_wide_sample_claims_the_same_share_as_its_transpose(tmp_pa
     np.save(str(tall_path), _content_array(48, 12))
     np.save(str(wide_path), _content_array(12, 48))
 
-    tall = raster_content_identity(tall_path, 3, seed=5, window_size=window_size, max_windows=2)
-    wide = raster_content_identity(wide_path, 3, seed=5, window_size=window_size, max_windows=2)
+    tall = _identity(tall_path, seed=5, window_size=window_size, max_windows=2)
+    wide = _identity(wide_path, seed=5, window_size=window_size, max_windows=2)
 
     assert (tall.width, tall.height) == (wide.height, wide.width)
     assert tall.pixel_fraction == pytest.approx(wide.pixel_fraction)

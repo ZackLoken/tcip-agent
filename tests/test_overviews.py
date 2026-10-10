@@ -16,7 +16,8 @@ from tcip_mcp.pipelines.overviews import (
     overview_sidecar,
     sidecar_valid,
 )
-from tcip_mcp.pipelines.raster_source import Rect, TiffWholeSource, level_dims, open_raster
+from tcip_mcp.pipelines import raster_source
+from tcip_mcp.pipelines.raster_source import Rect, TiffWholeSource, open_raster
 
 
 def _wide_raster(tmp_path: Path, *, width: int = 8192, height: int = 8) -> tuple[Path, np.ndarray]:
@@ -52,8 +53,8 @@ def test_build_overviews_writes_a_sidecar_gdal_serves_reduced_reads_from(tmp_pat
     assert fractions and fractions[-1] == pytest.approx(1.0)
 
     with open_raster(path, 1) as src:
-        # The header-only answer and the open reader's own agree on the levels it serves from.
-        assert level_dims(path, 1) == src.level_dims() == overview_dims(path)
+        # The path-holding answer and the open reader's own agree on the levels it serves from.
+        assert src.level_dims() == overview_dims(path)
         region, spec = src.read_region(Rect(0, 0, 8192, 8), target_size=(4096, 4))
     assert region.shape == (4, 4096, 1)
     assert spec.resample == "average"
@@ -65,8 +66,8 @@ def test_a_raster_the_hint_sends_whole_serves_no_level_off_its_own_pyramid(
     tmp_path: Path,
 ) -> None:
     """A pyramid is a GDAL reader's to serve from: a TIFF the caller's hint reinterprets, so the
-    whole decode serves it, answers no level before and after opening even though its sidecar
-    holds levels."""
+    whole decode serves it, answers no level, and its acquisition hands back no reader to ask,
+    even though its sidecar holds levels."""
     path = tmp_path / "three_row.tif"
     arr = np.zeros((3, 2048, 4), dtype=np.uint8)
     arr[..., 0] = np.arange(2048, dtype=np.uint16).reshape(1, 2048) % 251
@@ -77,9 +78,92 @@ def test_a_raster_the_hint_sends_whole_serves_no_level_off_its_own_pyramid(
 
     with open_raster(path, 3) as src:
         assert isinstance(src, TiffWholeSource)
-        assert level_dims(path, 3) == src.level_dims() == []
+        assert src.level_dims() == []
+    assert raster_source.SourceHeader(path).windowed(3) is None
     with open_raster(path, 4) as src:
-        assert level_dims(path, 4) == src.level_dims() == [(1024, 2)]
+        assert src.level_dims() == overview_dims(path) == [(1024, 2)]
+
+
+def test_an_open_reader_enumerates_its_levels_without_reopening_the_raster(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An open GDAL reader answers its levels through the handle it holds and one handle per
+    level, never by opening the raster itself again."""
+    path, _arr = _wide_raster(tmp_path)
+    build_overviews(path)
+    opened: list[int | None] = []
+    real = raster_source.open_gdal_dataset
+
+    def counting(dataset_path, overview=None):
+        opened.append(overview)
+        return real(dataset_path, overview)
+
+    with open_raster(path, 1) as src:
+        monkeypatch.setattr(raster_source, "open_gdal_dataset", counting)
+        assert src.level_dims() == [(4096, 4), (2048, 2), (1024, 1)]
+    assert opened == [0, 1, 2]
+
+
+class _InProcessChild:
+    """A stand-in for the build's child process that runs the unchanged child program in this
+    process, so what it opens is counted beside what the parent opens."""
+
+    def __init__(self, args: list, **_kwargs) -> None:
+        import contextlib
+        import io
+        import sys
+
+        _exe, _flag, program, *argv = args
+        out = io.StringIO()
+        saved = sys.argv
+        sys.argv = ["-c", *argv]
+        try:
+            with contextlib.redirect_stdout(out):
+                exec(compile(program, "<build child>", "exec"), {"__name__": "__main__"})
+        finally:
+            sys.argv = saved
+        self.stdout = io.StringIO(out.getvalue())
+        self.stderr = io.StringIO("")
+        self.returncode = 0
+
+    def poll(self) -> int:
+        return self.returncode
+
+    def wait(self, timeout: float | None = None) -> int:
+        return self.returncode
+
+
+def test_a_build_acquires_the_raster_once_across_parent_and_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Building a pyramid acquires the raster once in all: one TIFF header and one GDAL open of
+    its main dataset plan the levels and write them, whichever process they run in."""
+    import rasterio
+
+    from tcip_mcp.pipelines import overviews
+
+    path, _arr = _wide_raster(tmp_path)
+    headers: list = []
+    mains: list = []
+    real_init, real_open = tifffile.TiffFile.__init__, rasterio.open
+
+    def header(self, file, *args, **kwargs):
+        if Path(str(file)) == path:
+            headers.append(file)
+        real_init(self, file, *args, **kwargs)
+
+    def gdal(fp, *args, **kwargs):
+        if Path(str(fp)) == path and "overview_level" not in kwargs:
+            mains.append(fp)
+        return real_open(fp, *args, **kwargs)
+
+    monkeypatch.setattr(tifffile.TiffFile, "__init__", header)
+    monkeypatch.setattr(rasterio, "open", gdal)
+    monkeypatch.setattr(overviews.subprocess, "Popen", _InProcessChild)
+    build_overviews(path)
+    assert len(headers) == 1
+    assert len(mains) == 1
+    assert sidecar_valid(path)
 
 
 def test_a_decimated_read_is_served_from_the_pyramid_not_by_decoding_the_base(

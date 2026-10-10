@@ -6,7 +6,7 @@ import pytest
 torch = pytest.importorskip("torch")
 from PIL import Image  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
-from tests._chain_fixtures import BESPOKE_CLASSIFIER  # noqa: E402
+from tests._chain_fixtures import CLASSIFIER_SOURCE  # noqa: E402
 from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
 
 
@@ -58,7 +58,7 @@ def test_grayscale_classification_end_to_end(tmp_path):
                         stated={"num_channels": 1})
     from tests._chain_fixtures import training_config
 
-    cfg = training_config({"builder": BESPOKE_CLASSIFIER, "task": "classification"}, data)
+    cfg = training_config(CLASSIFIER_SOURCE, data)
     run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
                       id="auto-run-39")
     loader, _ = run_loaders(run, ds, None)

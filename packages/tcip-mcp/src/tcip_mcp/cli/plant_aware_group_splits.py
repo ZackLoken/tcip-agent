@@ -52,14 +52,8 @@ def derive_plant_group_key_map(
     georeferenced or whose nearest plant falls outside tolerance, with its cause, once all stems
     have been checked.
     """
-    import tifffile
-
-    from tcip_mcp.pipelines.image_utils import display_frame
-    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
-        GeoreferencingError,
-        OrthomosaicGeoreference,
-        RotatedRasterError,
-    )
+    from tcip_mcp.pipelines.raster_source import SourceHeader
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import OrthomosaicGeoreference
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         nearest_plant,
         resolve_nn_tolerance_m,
@@ -75,11 +69,11 @@ def derive_plant_group_key_map(
     for stem in sorted(stem_to_raster):
         path = stem_to_raster[stem]
         try:
-            georef = OrthomosaicGeoreference.from_file(path)
-            width, height = display_frame(path)
+            header = SourceHeader(path)
+            georef = OrthomosaicGeoreference.of(header.georeference)
+            width, height = header.display_frame
             lat, lon = georef.pixel_to_wgs84(width / 2.0, height / 2.0)
-        except (RotatedRasterError, GeoreferencingError, OSError, ValueError,
-                tifffile.TiffFileError) as exc:
+        except ValueError as exc:  # the header's read refusal or its georeference refusal
             failures.append(f"{stem} ({path}): could not georeference - {exc}")
             continue
 
@@ -137,11 +131,14 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     from tcip_mcp.dataset_layout import parse_image_path
     from tcip_mcp.pipelines.data.splits import member_identity
     from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
-    from tcip_mcp.tools.data_tools import _scan_dataset, draw_splits
+    from tcip_mcp.registry_paths import located
+    from tcip_mcp.pipelines.data.splits import DEFAULT_GROUP_BY
+    from tcip_mcp.tools.data_tools import _scan_dataset, draw_splits_at
 
     project = bound_project(args.project)
 
-    scan = _scan_dataset(args.dataset_root)
+    dataset_root = str(located(args.dataset_root, project))
+    scan = _scan_dataset(dataset_root)
     stem_to_raster: dict[str, Path] = {}
     for p in scan["images"]:
         _root, date, stem = parse_image_path(p)
@@ -150,7 +147,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         print(f"error: no images found under {args.dataset_root}", file=sys.stderr)
         return 1
 
-    plants = read_plant_csvs(Path(p) for p in args.plant_csv_paths)
+    plants = read_plant_csvs(located(p, project) for p in args.plant_csv_paths)
     if not plants:
         print(f"error: {args.plant_csv_paths} parsed to zero plant records", file=sys.stderr)
         return 1
@@ -166,16 +163,12 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     n_groups = len(set(group_key_map.values()))
     print(f"Resolved {len(group_key_map)} stem(s) to {n_groups} plant/plot group(s).")
 
-    result = draw_splits(
-        project,
-        folder_path=args.dataset_root,
-        val_ratio=args.val_ratio,
-        calibration_ratio=args.calibration_ratio,
-        holdout_ratio=args.holdout_ratio,
-        seed=args.seed,
-        group_key_map=group_key_map,
-        output_path=args.output_path,
-        subject=args.subject,
+    result = draw_splits_at(
+        project, dataset_root, seed=args.seed, val_ratio=args.val_ratio,
+        calibration_ratio=args.calibration_ratio, holdout_ratio=args.holdout_ratio,
+        group_by=DEFAULT_GROUP_BY, group_key_map=group_key_map, stratify_foreground=True,
+        output_path=args.output_path and str(located(args.output_path, project)),
+        subject=args.subject, ground_truth=None,
     )
     if "error" in result:
         print(f"error: draw_splits refused: {result['error']}", file=sys.stderr)

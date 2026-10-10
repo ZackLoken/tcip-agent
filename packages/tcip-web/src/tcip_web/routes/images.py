@@ -20,6 +20,7 @@ import uuid
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
@@ -190,7 +191,13 @@ class _RasterStats:
         return self.pixel_fraction is not None and self.pixel_fraction < 1.0
 
 
+_V = TypeVar("_V")
 _stats_cache: "OrderedDict[tuple, _RasterStats]" = OrderedDict()
+"""Each raster's display statistics, under its :func:`_source_identity` and the band count it
+is read at."""
+_count_cache: "OrderedDict[tuple, int]" = OrderedDict()
+"""Each source's own band count, under its version on disk
+(:func:`~tcip_mcp.pipelines.raster_source.source_version`)."""
 _stats_lock = threading.Lock()
 
 
@@ -260,8 +267,8 @@ def get_view_reads(
     area_cap: int = Depends(display_cap),
 ) -> ViewReads:
     """The reads that serve the view ``[x0, x1) x [y0, y1)`` of the raster at ``path``, clipped
-    to its extent, measured off the header for a TIFF or a photograph and by loading the array
-    for a numpy container (``image_dimensions``).
+    to its extent, its frame read off its header (``raster_source.SourceHeader``) and, for a view
+    past the cap, its levels off the windowed reader that header opens.
 
     A view of at most the display's area cap is served by the native region-serving cells it
     intersects. A larger view is planned as one display read (``display_bounds.plan_read``); when
@@ -272,22 +279,13 @@ def get_view_reads(
     are sized by :func:`~tcip_mcp.pipelines.reference_grid.derive_serving_tile_size` under the
     same cap and the edge limit of the encoding each is served in. The frame and the levels are
     the ones the image route's own plain read opens the raster at
-    (``raster_source.image_route_channel_count``, read once for both). Refuses a view with no
-    pixels inside the raster.
+    (``SourceHeader.route_channels``). Refuses a view with no pixels inside the raster.
     """
-    from tcip_mcp.pipelines.image_utils import image_dimensions
-    from tcip_mcp.pipelines.raster_source import (
-        Rect,
-        image_route_channel_count,
-        level_dims,
-        level_window,
-        rects_overlap,
-    )
+    from tcip_mcp.pipelines.raster_source import Rect, SourceHeader, level_window, rects_overlap
     from tcip_mcp.pipelines.reference_grid import derive_serving_tile_size, reference_cells
 
-    source = resolved_image(path)[1]
-    open_channels = image_route_channel_count(source)
-    width, height = image_dimensions(source, open_channels)
+    header = SourceHeader(resolved_image(path)[1])
+    width, height = header.display_frame
     x1, y1 = min(x1, width), min(y1, height)
     if not (x0 < x1 and y0 < y1):
         raise HTTPException(400, f"view [{y0}:{y1}, {x0}:{x1}] holds no pixel of this "
@@ -307,7 +305,11 @@ def get_view_reads(
 
     if within_cap(view.width, view.height, area_cap):
         return cells(0, width, height, view)
-    dims = level_dims(source, open_channels)
+    reader = header.windowed(header.route_channels)
+    dims = []
+    if reader is not None:
+        with reader:
+            dims = reader.level_dims()
     plan = plan_read(view, width, height, dims, area_cap)
     if plan.level == 0:
         return ViewReads(reads=[ServingCell(name="view", level=0, x0=x0, y0=y0, x1=x1, y1=y1,
@@ -343,24 +345,6 @@ def _band_index(token: str, declared_names: "list[str] | None", total_bands: int
     return idx
 
 
-def _sidecar_identity(source) -> "tuple[int, int] | None":
-    """The overview sidecar's ``(mtime_ns, size)`` for a GDAL-readable raster, or ``None`` when it
-    has none. Part of the render key.
-    """
-    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.overviews import overview_sidecar
-
-    if isinstance(source, BandGroupRef):
-        return None
-    if Path(source).suffix.lower() not in (".tif", ".tiff"):
-        return None
-    try:
-        st = overview_sidecar(source).stat()
-    except OSError:
-        return None
-    return int(st.st_mtime_ns), int(st.st_size)
-
-
 def _overviews_required(path: str, reason: str) -> HTTPException:
     """The one refusal for a read that needs a raster's overview pyramid and has none, carrying the
     condition as a header and, after ``reason``, the request that builds the pyramid.
@@ -390,72 +374,78 @@ def _overview_stats(raster, dims: list[tuple[int, int]]):
     return band_ranges(pixels), clips, (plan.width, plan.height)
 
 
-def _source_identity(source, num_channels: int) -> tuple:
-    """What identifies a raster to everything cached about it here: the identity the raster layer
-    pools an open source under, plus its overview sidecar's, since a pyramid appearing changes
-    which pixels a read of it returns."""
+def _source_identity(header) -> tuple:
+    """``(version, sidecar)``: what identifies the raster ``header`` describes on disk to
+    everything cached about it here, read off the filesystem without opening the raster: its
+    version (:func:`~tcip_mcp.pipelines.raster_source.source_version`) and, for a TIFF, its
+    overview sidecar's (:func:`~tcip_mcp.pipelines.raster_source.file_version`; ``None`` when it
+    has none), since a pyramid appearing changes which pixels a read of it returns."""
     from tcip_mcp.pipelines import raster_source
+    from tcip_mcp.pipelines.overviews import overview_sidecar
 
-    return (raster_source.source_pool_key(source, num_channels), _sidecar_identity(source))
+    sidecar = None
+    if header.kind == "tif":
+        try:
+            sidecar = raster_source.file_version(overview_sidecar(header.path))
+        except FileNotFoundError:
+            pass
+    return raster_source.source_version(header), sidecar
 
 
-def _raster_stats(source, num_channels: int) -> _RasterStats:
-    """``source``'s per-band display bounds, one set per raster: the bounds a region stretch uses
-    and ``/api/images/bands`` reports.
+def _memo(cache: "OrderedDict[tuple, _V]", key: tuple, compute: "Callable[[], _V]") -> "_V":
+    """What ``cache`` holds under ``key``; on a miss, ``compute()``'s answer, stored there with
+    the :data:`_STATS_CACHE_MAX` most recently used kept. A concurrent miss on the same key
+    computes twice and stores the same value."""
+    with _stats_lock:
+        hit = cache.get(key)
+        if hit is not None:
+            cache.move_to_end(key)
+            return hit
+    value = compute()
+    with _stats_lock:
+        cache[key] = value
+        cache.move_to_end(key)
+        while len(cache) > _STATS_CACHE_MAX:
+            cache.popitem(last=False)
+    return value
+
+
+def _stats_of(raster) -> _RasterStats:
+    """The per-band display bounds of the open ``raster``, in band order.
 
     A raster the :data:`_STATS_MAX_WINDOWS` windows can hold is read from native pixels by the
     seeded window sample (covering all of them, and so exact, when its grid fits), and past it a
     single reduced read of the whole frame comes off an overview level. A GDAL-backed raster past
     it with no overview levels is refused; every other backend keeps reading native windows.
-
-    A concurrent miss on the same raster computes twice and stores the same numbers.
     """
-    key = _source_identity(source, num_channels)
     sample_budget = _STATS_MAX_WINDOWS * _STATS_WINDOW_SIZE**2
-    with _stats_lock:
-        hit = _stats_cache.get(key)
-        if hit is not None:
-            _stats_cache.move_to_end(key)
-            return hit
-
     from tcip_mcp.pipelines import raster_source
     from tcip_mcp.pipelines.band_stats import sampled_band_ranges
-    from tcip_mcp.pipelines.image_utils import source_path_of
 
-    with raster_source.open_raster(source, num_channels) as raster:
-        dtype = str(raster.dtype)
-        channels = int(raster.num_channels)
-        # Only a backend that reads them from the file exposes these; nothing here infers them.
-        interpretations = getattr(raster, "band_interpretations", None)
-        oversized = raster.width * raster.height > sample_budget
-        if oversized and isinstance(raster, raster_source.GdalSource):
-            dims = raster.level_dims()
-            if not dims:
-                raise _overviews_required(
-                    str(raster.path),
-                    f"this {raster.width}x{raster.height} raster holds "
-                    f"{raster.width * raster.height} pixels, over the {sample_budget} its "
-                    "display statistics can be read from native pixels for.")
-            ranges, clips, served = _overview_stats(raster, dims)
-            stats = _RasterStats(dtype=dtype, num_channels=channels, ranges=ranges,
-                                 clip_bounds=clips, overview_size=served,
-                                 interpretations=interpretations)
-        else:
-            sampled = sampled_band_ranges(
-                raster, label=source_path_of(source), seed=_STATS_SEED,
-                window_size=_STATS_WINDOW_SIZE, max_windows=_STATS_MAX_WINDOWS,
-                reservoir_size=_STATS_RESERVOIR_SIZE)
-            stats = _RasterStats(
-                dtype=dtype, num_channels=channels, ranges=list(sampled.ranges),
-                clip_bounds=list(sampled.clip_bounds), seed=sampled.sampling.seed,
-                pixel_fraction=sampled.sampling.pixel_fraction,
-                interpretations=interpretations)
-    with _stats_lock:
-        _stats_cache[key] = stats
-        _stats_cache.move_to_end(key)
-        while len(_stats_cache) > _STATS_CACHE_MAX:
-            _stats_cache.popitem(last=False)
-    return stats
+    dtype = str(raster.dtype)
+    channels = int(raster.num_channels)
+    # Only a backend that reads them from the file exposes these; nothing here infers them.
+    interpretations = getattr(raster, "band_interpretations", None)
+    oversized = raster.width * raster.height > sample_budget
+    if oversized and isinstance(raster, raster_source.GdalSource):
+        dims = raster.level_dims()
+        if not dims:
+            raise _overviews_required(
+                str(raster.path),
+                f"this {raster.width}x{raster.height} raster holds "
+                f"{raster.width * raster.height} pixels, over the {sample_budget} its "
+                "display statistics can be read from native pixels for.")
+        ranges, clips, served = _overview_stats(raster, dims)
+        return _RasterStats(dtype=dtype, num_channels=channels, ranges=ranges,
+                            clip_bounds=clips, overview_size=served,
+                            interpretations=interpretations)
+    sampled = sampled_band_ranges(
+        raster, seed=_STATS_SEED, window_size=_STATS_WINDOW_SIZE,
+        max_windows=_STATS_MAX_WINDOWS, reservoir_size=_STATS_RESERVOIR_SIZE)
+    return _RasterStats(
+        dtype=dtype, num_channels=channels, ranges=list(sampled.ranges),
+        clip_bounds=list(sampled.clip_bounds), seed=sampled.seed,
+        pixel_fraction=sampled.pixel_fraction, interpretations=interpretations)
 
 
 def _sampled_bounds(stats: _RasterStats, idxs: "list[int]", stretch: str
@@ -549,8 +539,6 @@ def serve_image(
         band_ranges,
         composite_display_rgb,
     )
-    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.derivations import probe_channels
     from tcip_mcp.pipelines.overviews import overview_levels
 
     if stretch not in STRETCH_MODES:
@@ -577,23 +565,15 @@ def serve_image(
                  f"of {area_cap} pixels and no edge past {_DISPLAY_ENCODING.max_edge}")
 
     band_tokens = _parse_band_tokens(bands) if bands is not None else None
-    composite_requested = bands is not None or isinstance(source, BandGroupRef)
-    try:
-        probed = probe_channels(source)
-    except Exception as exc:
-        # A truncated or otherwise unreadable file fails its header probe here, before any
-        # raster is opened: the request's own fault, answered as one.
-        raise HTTPException(400, f"could not open this image: {exc}") from exc
-    open_channels = (
-        probed if composite_requested
-        else raster_source.image_route_channel_count(source, probed)
-    )
+    header = raster_source.SourceHeader(source)
+    composite_requested = bands is not None or header.kind == "group"
     encoding = _NATIVE_ENCODING if native and not level else _DISPLAY_ENCODING
 
     # Requested params only: the scale a read is served at depends on the raster's own size and on
     # whether an overview level exists, neither known at lookup time, so it returns as a header.
+    identity = _source_identity(header)
     key = hashlib.md5(
-        f"{RENDER_CACHE_VERSION}:{_source_identity(source, open_channels)}:{area_cap}:"
+        f"{RENDER_CACHE_VERSION}:{identity}:{area_cap}:"
         f"{encoding.pil_format}:{sorted(encoding.options.items())}:{bands}:{stretch}:{corners}:"
         f"{level}".encode()
     ).hexdigest()
@@ -614,9 +594,16 @@ def serve_image(
         except (OSError, ValueError):
             pass  # an unreadable cache entry is rendered again, never served as-is
 
+    try:
+        own_channels = header.channels
+    except Exception as exc:
+        # A truncated or otherwise unreadable file fails its header read here, before any
+        # raster is opened: the request's own fault, answered as one.
+        raise HTTPException(400, f"could not open this image: {exc}") from exc
+    open_channels = own_channels if composite_requested else header.route_channels
     opening = True
     try:
-        with raster_source.open_raster(source, open_channels) as raster:
+        with header.open(open_channels) as raster:
             opening = False
             dims = raster.level_dims()
             grid_w, grid_h = dims[level - 1] if 0 < level <= len(dims) else (
@@ -657,20 +644,21 @@ def serve_image(
                 served_size = (plan.width, plan.height)
             channels = int(raster.num_channels)
             dtype = raster.dtype
+            composite = composite_requested or channels not in (1, 3, 4)
+            # A region's bounds come from the raster's own sample, a whole view's from the pixels
+            # it served; a scale that reads no pixel statistic (a dtype ceiling) asks for neither.
+            integer = np.issubdtype(dtype, np.integer)
+            wants_bounds = (not (stretch == "none" and integer)) if composite else not integer
+            sampled = None
+            if wants_bounds and not whole_view:
+                sampled = _memo(_stats_cache, (*identity, open_channels),
+                                lambda: _stats_of(raster))
 
-        composite = composite_requested or channels not in (1, 3, 4)
-        declared_names = list(source.bands) if isinstance(source, BandGroupRef) else None
+        declared_names = list(header.group.bands) if header.kind == "group" else None
         if band_tokens is None:
             idxs = [min(i, channels - 1) for i in range(3)]
         else:
             idxs = [_band_index(t, declared_names, channels) for t in band_tokens]
-
-        # A region's bounds come from the raster's own sample, a whole view's from the pixels it
-        # served; a scale that reads no pixel statistic (a dtype ceiling) asks for neither.
-        integer = np.issubdtype(dtype, np.integer)
-        wants_bounds = (not (stretch == "none" and integer)) if composite else not integer
-        sampled = (_raster_stats(source, open_channels)
-                   if wants_bounds and not whole_view else None)
 
         if composite and stretch == "none" and integer:
             rgb = composite_display_rgb(pixels, idxs, stretch, None)
@@ -722,10 +710,12 @@ def get_bands(path: str = Query(...)) -> dict:
     (``band_count > 3``) the frontend uses to decide whether to show the picker at all.
 
     ``path`` may be a plain raster or a ``.bandgroup`` manifest naming a grouped multi-band
-    capture. ``band_count`` comes from the channel probe (``probe_channels``: the header for a
+    capture. ``band_count`` comes from its header (``SourceHeader.channels``: the header for a
     TIFF or a photograph, the loaded array for a numpy container). A plain (non-grouped) raster
-    at ``band_count <= 3`` reads nothing past that probe; a ``.bandgroup``-grouped capture always
-    gets the full per-band stats, even at exactly 3 bands.
+    at ``band_count <= 3`` reads nothing past that header; a ``.bandgroup``-grouped capture always
+    gets the full per-band stats, even at exactly 3 bands. The count is cached under the
+    source's version on disk and the stats under its :func:`_source_identity` and that count,
+    so a repeated call for an unchanged raster reads nothing.
 
     The response says which read produced the stats. A raster whose pixels fit the
     native-sampling budget, and any raster a backend decodes whole at open, carries ``sampled``,
@@ -739,18 +729,23 @@ def get_bands(path: str = Query(...)) -> dict:
     A band carries ``interpretation`` (``red``, ``alpha``, and the rest) where the backend reads it
     from the file; the key is absent where nothing knows.
     """
-    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.derivations import probe_channels
+    from tcip_mcp.pipelines import raster_source
 
     source = resolved_image(path)[1]
-    n = probe_channels(source)
-    if n <= 3 and not isinstance(source, BandGroupRef):
+    header = raster_source.SourceHeader(source)
+    version, sidecar = _source_identity(header)
+    n = _memo(_count_cache, version, lambda: header.channels)
+    if n <= 3 and header.kind != "group":
         return {"band_count": n, "bands": []}
 
-    stats = _raster_stats(source, n)
-    if isinstance(source, BandGroupRef):
-        names = list(source.bands)
-        wavelengths = source.central_wavelength_nm or {}
+    def read_stats() -> _RasterStats:
+        with header.open(n) as raster:
+            return _stats_of(raster)
+
+    stats = _memo(_stats_cache, (version, sidecar, n), read_stats)
+    if header.kind == "group":
+        names = list(header.group.bands)
+        wavelengths = header.group.central_wavelength_nm or {}
     else:
         names = [str(i) for i in range(stats.num_channels)]
         wavelengths = {}

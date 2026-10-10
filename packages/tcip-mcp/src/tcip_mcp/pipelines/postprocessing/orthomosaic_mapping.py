@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Sequence, cast
+from typing import TYPE_CHECKING, ClassVar, Sequence
 
 if TYPE_CHECKING:
     import pyproj
@@ -35,16 +35,15 @@ _MODEL_TYPE_PROJECTED = 1
 WGS84_EPSG = 4326
 
 
-class RotatedRasterError(ValueError):
-    """A GeoTIFF carries a ``ModelTransformationTag``: a rotated or sheared raster, for which
-    the tiepoint + pixel-scale affine this module implements is the wrong math. Refused rather
-    than silently mis-georeferencing every pixel this module would otherwise resolve."""
-
-
 class GeoreferencingError(ValueError):
     """A GeoTIFF is missing (or carries an unusable form of) a tag this module needs to resolve
     a pixel's real-world coordinate: pixel scale, tiepoint, a geokey directory, or a projected
     CRS identified by that directory."""
+
+
+class RotatedRasterError(GeoreferencingError):
+    """A GeoTIFF carries a ``ModelTransformationTag``: a rotated or sheared raster, for which
+    the tiepoint + pixel-scale affine this module implements is the wrong math."""
 
 
 @dataclass
@@ -53,7 +52,7 @@ class GeoTransform:
 
     ``tiepoint_pixel_*``/``tiepoint_native_*`` are one matched pixel/real-world pair (usually,
     but not necessarily, pixel (0, 0)); ``pixel_scale_*`` is the real-world size of one pixel in
-    that CRS's units. ``epsg`` identifies the CRS itself, read from the file rather than assumed.
+    that CRS's units. ``epsg`` identifies the CRS itself, as the file states it.
     """
 
     tiepoint_pixel_x: float
@@ -65,42 +64,34 @@ class GeoTransform:
     epsg: int
 
 
-def read_geotransform(path: str | Path) -> GeoTransform:
-    """Read the georeferencing tags from a GeoTIFF's first page.
+def geotransform_of(tags: "tifffile.TiffTags", path: Path) -> GeoTransform:
+    """The georeferencing one TIFF page's ``tags`` state, ``path`` naming the file in a refusal.
 
     Raises :class:`RotatedRasterError` if a ``ModelTransformationTag`` is present, and
     :class:`GeoreferencingError` if the pixel scale, tiepoint, or a projected CRS can't be
     determined from the tags that are.
     """
-    import tifffile
-
-    path = Path(path)
-    with tifffile.TiffFile(str(path)) as tif:
-        # pages[0] is always the keyframe, a full TiffPage, per tifffile's own page-caching
-        # contract; only a later page can come back as a lighter TiffFrame sharing its tags.
-        page = cast("tifffile.TiffPage", tif.pages[0])
-        tags = page.tags
-        if _MODEL_TRANSFORMATION_TAG in tags:
-            raise RotatedRasterError(
-                f"{path}: carries a ModelTransformationTag (rotation/shear). The simple "
-                "tiepoint + pixel-scale affine this module implements is wrong for that case; "
-                "refusing rather than guessing."
-            )
-        scale_tag = tags.get(_MODEL_PIXEL_SCALE_TAG)
-        tiepoint_tag = tags.get(_MODEL_TIEPOINT_TAG)
-        geokey_tag = tags.get(_GEO_KEY_DIRECTORY_TAG)
-        if scale_tag is None or tiepoint_tag is None:
-            raise GeoreferencingError(
-                f"{path}: missing ModelPixelScaleTag and/or ModelTiepointTag; cannot resolve a "
-                "pixel to a real-world coordinate without both."
-            )
-        if geokey_tag is None:
-            raise GeoreferencingError(
-                f"{path}: missing GeoKeyDirectoryTag; cannot determine the raster's CRS."
-            )
-        scale_x, scale_y = float(scale_tag.value[0]), float(scale_tag.value[1])
-        tiepoint = tiepoint_tag.value
-        epsg = _read_projected_epsg(geokey_tag.value, path)
+    if _MODEL_TRANSFORMATION_TAG in tags:
+        raise RotatedRasterError(
+            f"{path}: carries a ModelTransformationTag (rotation/shear). The simple "
+            "tiepoint + pixel-scale affine this module implements is wrong for that case; "
+            "refusing rather than guessing."
+        )
+    scale_tag = tags.get(_MODEL_PIXEL_SCALE_TAG)
+    tiepoint_tag = tags.get(_MODEL_TIEPOINT_TAG)
+    geokey_tag = tags.get(_GEO_KEY_DIRECTORY_TAG)
+    if scale_tag is None or tiepoint_tag is None:
+        raise GeoreferencingError(
+            f"{path}: missing ModelPixelScaleTag and/or ModelTiepointTag; cannot resolve a "
+            "pixel to a real-world coordinate without both."
+        )
+    if geokey_tag is None:
+        raise GeoreferencingError(
+            f"{path}: missing GeoKeyDirectoryTag; cannot determine the raster's CRS."
+        )
+    scale_x, scale_y = float(scale_tag.value[0]), float(scale_tag.value[1])
+    tiepoint = tiepoint_tag.value
+    epsg = _read_projected_epsg(geokey_tag.value, path)
 
     return GeoTransform(
         tiepoint_pixel_x=float(tiepoint[0]),
@@ -209,8 +200,14 @@ class OrthomosaicGeoreference:
         self._to_wgs84: "pyproj.Transformer | None" = None
 
     @classmethod
-    def from_file(cls, path: str | Path) -> "OrthomosaicGeoreference":
-        return cls(read_geotransform(path))
+    def of(cls, georeference: "GeoTransform | GeoreferencingError | None",
+           ) -> "OrthomosaicGeoreference":
+        """The georeference a raster's one georeference read answered (an open reader's or a TIFF
+        header's ``georeference``). Raises the reason that read refused, or
+        :class:`GeoreferencingError` for a raster whose reader reads no GeoTIFF tags."""
+        if isinstance(georeference, GeoTransform):
+            return cls(georeference)
+        raise georeference or GeoreferencingError("this raster carries no GeoTIFF tags to read")
 
     def pixel_to_native(self, pixel_x: float, pixel_y: float) -> tuple[float, float]:
         """(easting, northing) in this raster's own native projected CRS."""

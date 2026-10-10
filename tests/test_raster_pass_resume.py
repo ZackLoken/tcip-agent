@@ -16,7 +16,6 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
 pytest.importorskip("torchvision")
 
 import tcip_store  # noqa: E402
@@ -27,19 +26,14 @@ from tests.test_orthomosaic_tools import (  # noqa: E402
 
 
 def _instance_seg_checkpoint(tmp_path: Path) -> str:
-    from tests._chain_fixtures import built_model, training_config
-    from tcip_mcp.tools.model_tools import register_model
+    """The checkpoint a fixed-mask instance_seg run under ``tmp_path`` completed over frames of
+    its own, registered by completing."""
+    from tests._chain_fixtures import BESPOKE_MODELS
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    model_source = {"builder": "tests.bespoke_models:build_fixed_mask_instance_seg",
-                    "task": "instance_seg"}
-    config = training_config(model_source,
-                             {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}})
-    model = built_model(config)
-    ckpt = tmp_path / "instance_seg.pt"
-    torch.save({CONFIG_KEY: config, STATE_DICT_KEY: model.state_dict()}, str(ckpt))
-    result = register_model(tmp_path, name="instance-seg-test-model", checkpoint_path=str(ckpt))
-    assert "error" not in result, result
-    return str(ckpt)
+    return registered_checkpoint(tmp_path, model_source={
+        "builder": "bespoke_models:build_fixed_mask_instance_seg",
+        "source_files": [BESPOKE_MODELS], "task": "instance_seg"})
 
 
 def _setup(tmp_path: Path) -> tuple[str, Path]:
@@ -291,10 +285,10 @@ def test_content_identity_failure_after_open_refuses_naming_the_raster(tmp_path,
     import tcip_mcp.pipelines.raster_source as raster_source_module
 
     ckpt, raster_path = _setup(tmp_path)
-    real_open_raster = raster_source_module.open_raster
+    real_open = raster_source_module.SourceHeader.open
 
-    def _flaky_open_raster(source, num_channels):
-        reader = real_open_raster(source, num_channels)
+    def _flaky_open(header, num_channels):
+        reader = real_open(header, num_channels)
 
         def _raise(*args, **kwargs):
             raise OSError("simulated disk read failure")
@@ -302,7 +296,7 @@ def test_content_identity_failure_after_open_refuses_naming_the_raster(tmp_path,
         reader.read_region = _raise
         return reader
 
-    monkeypatch.setattr(raster_source_module, "open_raster", _flaky_open_raster)
+    monkeypatch.setattr(raster_source_module.SourceHeader, "open", _flaky_open)
 
     result = _run(tmp_path, ckpt, raster_path, "preds/2026-01-01")
 

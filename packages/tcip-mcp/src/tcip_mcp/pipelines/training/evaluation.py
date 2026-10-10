@@ -300,8 +300,8 @@ def governing_counts(per_image: list[dict], criterion: dict, *, conf_threshold: 
 
 
 def counted(by_image: list[dict[int, Any]], criterion: dict, class_id: int | None = None) -> dict:
-    """:func:`governing_counts`'s answer from the per-image matchings ``by_image`` under
-    ``criterion``."""
+    """tp/fp/fn/precision/recall/f1 from the per-image matchings ``by_image`` under
+    ``criterion``, for ``class_id`` or every class."""
     m = _count_stats(by_image, class_id)
     return {"tp": int(m["tp"]), "fp": int(m["fp"]), "fn": int(m["fn"]),
             **{k: round(m[k], 6) for k in ("precision", "recall", "f1")}, "criterion": criterion}
@@ -619,16 +619,16 @@ def bucket_reads(images: Sequence[Any], bucket: Any) -> list[tuple[Any, list, li
 
 
 class ScoredImage(NamedTuple):
-    """One image of a bucket's scoring (:func:`score_bucket`): the logical image it names, its
-    ground truth, the bucket's predictions for it (``None`` where the bucket names no document for
-    it, which leaves it out of every aggregate), its frame, and its governing matching, indices
-    into ``gt`` and ``preds`` (every object missed where unpredicted)."""
+    """One image of a bucket's scoring: the image's :class:`~tcip_mcp.pipelines.raster_source.
+    SourceHeader` (the logical image as its ``source``, its frame read off it, and a render
+    opening the image through it), its ground truth, the bucket's predictions for it (``None``
+    where the bucket names no document for it, which leaves it out of every aggregate), and its
+    governing matching, indices into ``gt`` and ``preds`` (every object missed where
+    unpredicted)."""
 
-    image: Any
+    header: Any
     gt: list
     preds: list | None
-    width: int
-    height: int
     matching: Any
 
 
@@ -643,17 +643,16 @@ def score_bucket(images: Sequence[Any], bucket: Any, *, iou_threshold: float,
     from tcip_annotation.matching import Matching, merged
     from tcip_annotation.state import polygonal
 
-    from tcip_mcp.pipelines.image_utils import display_frame
+    from tcip_mcp.pipelines.raster_source import SourceHeader
 
-    read = [
-        (src, gt, preds, *display_frame(src)) for src, gt, preds in bucket_reads(images, bucket)
-    ]
+    read = [(SourceHeader(src), gt, preds) for src, gt, preds in bucket_reads(images, bucket)]
     name_id = subject_category_ids(
-        [a for _s, gt, preds, _w, _h in read for a in (*gt, *(preds or ()))]
+        [a for _h, gt, preds in read for a in (*gt, *(preds or ()))]
     )
-    records = [records_from_annotation(gt, preds or [], width=w, height=h, name_id=name_id)
-               for _s, gt, preds, w, h in read]
-    predicted = [k for k, (_s, _gt, preds, _w, _h) in enumerate(read) if preds is not None]
+    records = [records_from_annotation(gt, preds or [], width=header.display_frame[0],
+                                       height=header.display_frame[1], name_id=name_id)
+               for header, gt, preds in read]
+    predicted = [k for k, (_h, _gt, preds) in enumerate(read) if preds is not None]
     metrics = detection_metrics(
         [records[k] for k in predicted], trait=trait, conf_threshold=conf_threshold,
         iou_threshold=iou_threshold,
@@ -671,8 +670,8 @@ def score_bucket(images: Sequence[Any], bucket: Any, *, iou_threshold: float,
                         unpaired=[di[d] for d in m.unpaired], ignored={di[d] for d in m.ignored},
                         missed=[gi[g] for g in m.missed])
 
-    return [ScoredImage(src, gt, preds, w, h, annotated(records[k], by_image[k]))
-            for k, (src, gt, preds, w, h) in enumerate(read)], metrics
+    return [ScoredImage(header, gt, preds, annotated(records[k], by_image[k]))
+            for k, (header, gt, preds) in enumerate(read)], metrics
 
 
 def classification_metrics(

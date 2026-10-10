@@ -359,7 +359,7 @@ export interface PlantMappingDisclosure {
   built_at: string;
   record_sha256: string;
   nn_tolerance_m: MatchTolerance;
-  capture_identity: Record<string, string>;
+  capture_digests: Record<string, Record<string, string>>;
   captures_unverified: string[];
   plant_csvs_unverified: string[];
   dates_delivered: string[];

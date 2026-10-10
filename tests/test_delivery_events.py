@@ -171,7 +171,7 @@ def test_a_plant_mapping_missing_a_disclosure_key_raises_and_writes_nothing(tmp_
     bad_mapping = {
         "name": "valley", "dataset_id": "ds-1", "dataset_root": "data",
         "built_at": "2026-02-01T00:00:00+00:00", "record_sha256": "0" * 64,
-        "nn_tolerance_m": {"value": 3, "source": "stated"}, "capture_identity": {},
+        "nn_tolerance_m": {"value": 3, "source": "stated"}, "capture_digests": {},
         "captures_unverified": [], "plant_csvs_unverified": [],
         "images_unattributed_scope": "delivered_dates",
     }
@@ -183,60 +183,71 @@ def test_a_plant_mapping_missing_a_disclosure_key_raises_and_writes_nothing(tmp_
     assert not (tmp_path / "out" / "counts.csv").exists()
 
 
-def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid() -> None:
-    """No two of the three ``plant_mapping`` disclosure shapes share a required key set: a dict
-    validates against exactly the one model whose keys it carries, and a hybrid combining keys
-    from two shapes resolves to none."""
-    from pydantic import ValidationError
+def _delivered_disclosure(project: Path, deliver) -> dict:
+    """The ``plant_mapping`` disclosure the one delivery ``deliver()`` records under
+    ``project``, its delivered ``stem_count`` confirmed there first, as its JSON form."""
+    from tcip_mcp.delivery import read_delivery_events
+    from tests import _trait_fixtures as fx
 
+    fx.seed_delivery_traits(project)
+    fx.seed_confirmed_aggregate(project, "stem_count", value_keys=["count"])
+    delivered = deliver()
+    assert "error" not in delivered, delivered
+    (event,) = read_delivery_events(project)
+    return event.model_dump(mode="json")["plant_mapping"]
+
+
+def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(tmp_path: Path) -> None:
+    """No two of the three ``plant_mapping`` disclosure shapes share a required key set: each
+    disclosure its own producer records validates against exactly its own model, and a hybrid
+    combining keys from two shapes resolves to none."""
+    from pydantic import TypeAdapter, ValidationError
+
+    from tcip_mcp.buckets import read_bucket
     from tcip_mcp.pipelines.delivery_events_schema import (
         CanopySegmentDisclosure,
         DeliveryEventRecord,
         PlantMappingDisclosure,
         PlantRegistryDisclosure,
     )
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_disclosure
+    from tcip_mcp.tools.phenology_tools import build_plant_mapping
+    from tests import test_orthomosaic_tools as ortho
+    from tests import test_plant_mapping_binding as binding
+    from tests._mapping_fixtures import register_plant_registry_for
 
-    mapping = {
-        "name": "valley", "dataset_id": "ds-1", "dataset_root": "data",
-        "built_at": "2026-02-01T00:00:00+00:00",
-        "record_sha256": "0" * 64, "nn_tolerance_m": {"value": 3, "source": "stated"},
-        "capture_identity": {}, "captures_unverified": [], "plant_csvs_unverified": [],
-        "dates_delivered": [], "images_unattributed": 0,
-        "images_unattributed_scope": "delivered_dates", "plant_attribution": "image",
-    }
-    registry = {
-        "plant_registry": {"name": "reg", "digest": "0" * 64},
-        "raster_identity": {"width": 10, "height": 10},
-        "nn_tolerance_m": {"value": 1, "source": "stated"}, "detections_unattributed": 0,
-        "detections_unattributed_scope": "delivered_raster", "plant_attribution": "detection",
-        "plants_outside_raster": [],
-    }
-    canopy = {
-        "plant_registry": {"name": "reg", "digest": "0" * 64},
-        "raster_identity": {"width": 10, "height": 10},
-        "canopy_segments": {"capture": "2026-01-01", "stem": "x", "sha256": "0" * 64,
-                            "subject": "canopy", "n_segments": 1},
-        "position_error_m": POSITION_ERROR_M,
-        "segment_ties": [], "segments_without_plant": 0, "plants_outside_raster": [],
-        "plants_without_segment": [], "plants_within_position_error": [],
-        "plants_with_ambiguous_detections": [], "detections_unattributed": 0,
-        "detections_unattributed_by_source": {
-            "outside_segments": 0, "overlapping_segments": 0, "segment_without_plant": 0,
-            "segment_plant_within_position_error": 0},
-        "detections_unattributed_scope": "delivered_raster", "plant_attribution": "segment",
-    }
+    mapped = tmp_path / "mapped"
+    binding._init(mapped)
+    dataset_root = binding._dataset(mapped)
+    images_root, plant_csv, preds_by_date = binding._write_scene(dataset_root)
+    built = build_plant_mapping(mapped, name="valley", images_root=str(images_root),
+                                plant_registry=register_plant_registry_for(mapped, [plant_csv]))
+    assert "error" not in built, built
+    buckets = {date: read_bucket(dataset_root, name) for date, name in preds_by_date.items()}
+    mapping = plant_mapping_disclosure(mapped, "valley", buckets, binding.POPULATION)
+
+    nearest = tmp_path / "nearest"
+    raster_path = ortho._raster(nearest)
+    ortho._write_geo_raster(raster_path)
+    bucket = ortho._raster_bucket(nearest, raster_path, [(8.0, 8.0, 12.0, 12.0)])
+    reg = ortho._plant_registry(
+        nearest, ortho._plant_grid_csv(nearest, raster_path, ortho._PLANT_PIXELS))
+    registry = _delivered_disclosure(
+        nearest, lambda: ortho._deliver(nearest, bucket, reg, ortho._GRID))
+
+    segmented = tmp_path / "segmented"
+    _root, raster_path, bucket = ortho._canopy_setup(segmented, [(8.0, 8.0, 12.0, 12.0)])
+    reg = ortho._plant_registry(segmented, ortho._plants_csv_at(
+        segmented, raster_path, [("plot0", 10.0, 10.0)]))
+    ortho._write_canopy_document(raster_path, [(5.0, 5.0, 15.0, 15.0)])
+    canopy = _delivered_disclosure(segmented, lambda: ortho._deliver(
+        segmented, bucket, reg, ["plot0"], canopy_subject="canopy",
+        position_error_m=POSITION_ERROR_M))
+
+    union = TypeAdapter(DeliveryEventRecord.model_fields["plant_mapping"].annotation)
 
     def _resolved(pm: dict) -> object:
-        record = {
-            "event_id": "e", "door": "d", "delivery_kind": STATE_CROSSING_DATES, "trait": "t",
-            "trait_revision": 1, "trait_revision_sha256": "0" * 64,
-            "output_path": "out.csv", "output_sha256": "0" * 64,
-            "producer": {"checkpoint_sha256": "0" * 64, "experiment_id": None}, "buckets": [],
-            "scale_assessment_id": None, "validated": True, "acknowledgment": None,
-            "population": [], "require_all_dates_complete": None,
-            "plant_mapping": pm, "produced_at": "t",
-        }
-        return DeliveryEventRecord.model_validate(record).plant_mapping
+        return union.validate_python(pm)
 
     assert isinstance(_resolved(mapping), PlantMappingDisclosure)
     assert isinstance(_resolved(registry), PlantRegistryDisclosure)

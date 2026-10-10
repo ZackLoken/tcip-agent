@@ -168,7 +168,6 @@ def _persist_synthetic_mapping(
         built_at="2026-02-11T00:00:00+00:00", dates_requested=None,
         dates=sorted(assignments), nn_tolerance_m={"value": 10.0, "source": "stated"},
         plant_registry={"name": registry_name, "digest": registry_digest},
-        capture_identity={d: "0" * 16 for d in assignments},
         capture_digests={d: {} for d in assignments}, unreadable={d: [] for d in assignments},
         assignments=assignments,
     )
@@ -304,7 +303,7 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(tmp_path: Path)
         built_at="2026-02-11T00:00:00+00:00", dates_requested=None,
         dates=[DATE], nn_tolerance_m={"value": 10.0, "source": "stated"},
         plant_registry={"name": "unregistered", "digest": "0" * 64},
-        capture_identity={DATE: "0" * 16}, capture_digests={DATE: {}}, unreadable={DATE: []},
+        capture_digests={DATE: {}}, unreadable={DATE: []},
         assignments={DATE: [blank, named]},
     )
     assert build.unattributed() == 1

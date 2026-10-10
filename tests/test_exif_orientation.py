@@ -1,9 +1,9 @@
 """EXIF-orientation regression: the training loader must read the same upright frame the
-labels are authored in (and that ``get_image_dimensions`` / the GUI / eval already use).
+labels are authored in (and that ``image_dimensions`` / the GUI / eval already use).
 
 A JPEG tagged EXIF Orientation 6 stores its sensor frame rotated from the upright one, and a
 label document records its pixel boxes and its width and height in the upright frame. If
-``load_image`` ever returns the raw sensor frame while ``get_image_dimensions`` returns the
+``load_image`` ever returns the raw sensor frame while ``image_dimensions`` returns the
 upright one, the loader reads upright boxes against a raw ``(w, h)`` and scatters every box,
 with in-loop mAP blind to it (raw-vs-raw). These tests assert the frames are one, by
 construction and spatially, through the real dataset classes.
@@ -79,19 +79,38 @@ def test_orientation6_fixture_is_real(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------
-# 2. The invariant: load_image returns the exact frame get_image_dimensions does.
+# 2. The invariant: load_image returns the exact frame image_dimensions does.
 # --------------------------------------------------------------------------
 
-def test_load_image_frame_matches_get_image_dimensions(tmp_path: Path) -> None:
+def test_load_image_frame_matches_image_dimensions(tmp_path: Path) -> None:
     """Both readers share one orientation-tag read, so this guards the axis-swap rule
     each applies from it, not whether the tag read itself agrees."""
-    from tcip_annotation.utils import get_image_dimensions
-    from tcip_mcp.pipelines.image_utils import load_image
+    from tcip_mcp.pipelines.image_utils import image_dimensions, load_image
 
     images_dir, _ = _make_orient6_dataset(tmp_path)
     p = str(images_dir / "m.jpg")
     # upright, not (UP_H, UP_W)
-    assert load_image(p, 3).size == get_image_dimensions(p) == (UP_W, UP_H)
+    assert load_image(p, 3).size == image_dimensions(p, 3) == (UP_W, UP_H)
+
+
+@pytest.mark.parametrize("orientation", range(1, 9))
+def test_the_header_frame_and_the_decoded_frame_agree_at_every_orientation(
+    tmp_path: Path, orientation: int,
+) -> None:
+    """The size read off a photograph's header and the frame its decode serves are one
+    orientation rule, at each of the eight EXIF orientations."""
+    from tcip_annotation.utils import oriented_size
+    from tcip_mcp.pipelines.raster_source import PhotographicSource
+
+    path = tmp_path / f"o{orientation}.jpg"
+    image = Image.new("RGB", (UP_H, UP_W))
+    exif = image.getexif()
+    exif[274] = orientation
+    image.save(path, format="JPEG", exif=exif)
+    with Image.open(path) as opened:
+        header_size = oriented_size(opened)
+    with PhotographicSource(Image.open(path), 3) as decoded:
+        assert header_size == (decoded.width, decoded.height)
 
 
 # --------------------------------------------------------------------------
@@ -119,7 +138,7 @@ def test_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
 
 # --------------------------------------------------------------------------
 # 4. The tiled (SAHI-style) path inherits the same single frame at both seams
-#    (__init__ dims via get_image_dimensions, __getitem__ pixels via load_image).
+#    (__init__ dims via the source pool's acquisition, __getitem__ pixels via load_image).
 # --------------------------------------------------------------------------
 
 def test_tiled_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
@@ -134,7 +153,7 @@ def test_tiled_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
 
     # The marker (20,30,55,60) lies fully inside the origin tile [0:64, 0:64] in the upright
     # frame. Assert on that specific tile so the test discriminates a raw revert at either
-    # seam: __init__ dims (get_image_dimensions) or __getitem__ pixels (load_image).
+    # seam: __init__ dims (the source pool's acquisition) or __getitem__ pixels (load_image).
     origin_idx = next(i for i, e in enumerate(tiled._index) if e["slice"][:2] == (0, 0))
     tile_t, target = tiled[origin_idx]
     assert tile_t.shape[1:] == (64, 64)  # a full slice
@@ -154,14 +173,14 @@ def test_tiled_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------
 
 def test_train_and_eval_read_paths_share_one_frame(tmp_path: Path) -> None:
-    from tcip_annotation.utils import get_image_dimensions
     from tcip_mcp.pipelines.image_utils import load_image
+    from tcip_mcp.pipelines.raster_source import SourceHeader
 
     images_dir, _ = _make_orient6_dataset(tmp_path)
     p = str(images_dir / "m.jpg")
 
     train_frame = load_image(p, 3).size          # training loader read
-    eval_frame = get_image_dimensions(p)          # eval / viz / GUI read
+    eval_frame = SourceHeader(p).display_frame    # eval / viz / GUI read
     ds_frame = dataset_over('detection', str(images_dir), subject="bud")[0][0].shape[1:]
 
     assert train_frame == eval_frame == (UP_W, UP_H)

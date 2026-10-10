@@ -288,6 +288,31 @@ def test_main_cli_end_to_end(tmp_path: Path, project: Path, four_plant_csv: Path
     assert ts.exists(selection_key(out_dir))
 
 
+def test_the_command_locates_its_dataset_root_once(
+    tmp_path: Path, project: Path, four_plant_csv: Path, monkeypatch,
+) -> None:
+    """The dataset root arrives once for the whole command: the census and the draw read the
+    location the command established, and no step locates it again."""
+    import tcip_mcp.registry_paths as registry_paths
+    import tcip_mcp.tools.data_tools as data_tools
+
+    dataset_root = _four_plant_dataset(tmp_path)
+    real = registry_paths.located
+    answered: list[Path] = []
+
+    def counted(path, root):
+        answered.append(real(path, root))
+        return answered[-1]
+
+    monkeypatch.setattr(registry_paths, "located", counted)
+    monkeypatch.setattr(data_tools, "located", counted)
+    rc = main([str(dataset_root), "--project", str(project), "--plant-csv", str(four_plant_csv),
+               "--subject", SUBJECT, "--seed", "3"])
+
+    assert rc == 0
+    assert answered.count(dataset_root.resolve()) == 1, answered
+
+
 def test_the_cli_and_the_tool_draw_one_selection_at_the_default_shares(
     tmp_path: Path, project: Path, four_plant_csv: Path,
 ) -> None:
