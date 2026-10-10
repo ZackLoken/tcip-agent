@@ -39,7 +39,7 @@ def deliver_per_plant_csv(
 
     Args:
         results: ``aggregate_per_plant``'s own output, one dict per plant.
-        output_path: Where to write the CSV; a relative path is under the project.
+        output_path: Where to write the CSV.
         delivered_phenotype: The crop-vocabulary phenotype this CSV ships under.
         delivery_kind: ``per_plant_count_aggregate``, ``per_plant_ordinal_aggregate`` or
             ``per_plant_regression_aggregate``.
@@ -56,16 +56,18 @@ def deliver_per_plant_csv(
     from tcip_mcp.pipelines.postprocessing import plant_mapping as mapping
     from tcip_mcp.pipelines.postprocessing.aggregation import deliver_per_plant_aggregate
     from tcip_mcp.pipelines.postprocessing.phenology import population
+    from tcip_mcp.registry_paths import located
     from tcip_mcp.traits import TraitUnknownError
 
     try:
-        delivered = [read_bucket(dataset_root, b) for b in buckets]
+        root = located(dataset_root, project)
+        delivered = [read_bucket(root, b) for b in buckets]
         wanted = population(plants)
         disclosure = (mapping.plant_mapping_disclosure(
             project, plant_mapping, by_recorded_date(delivered), wanted)
             if plant_mapping else None)
         return deliver_per_plant_aggregate(
-            project, results, str(Path(project, output_path)),
+            project, results, str(located(output_path, project)),
             delivered_phenotype=delivered_phenotype, delivery_kind=delivery_kind,
             buckets=delivered, plants=wanted, crop=crop,
             pipeline_version=pipeline_version, door="deliver_per_plant_csv",

@@ -6,11 +6,27 @@ carrying a ``training`` key is refused by name.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated, Literal, NamedTuple, cast, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    AfterValidator, BaseModel, ConfigDict, Field, ValidationError, ValidationInfo,
+    model_validator,
+)
 
 from tcip_mcp.pipelines.data.selection import ClassScope
+
+
+def _located(path: str, info: ValidationInfo) -> str:
+    from tcip_mcp.registry_paths import located
+
+    return str(located(path, (info.context or {}).get("project")))
+
+
+ResolvedPath = Annotated[str, AfterValidator(_located)]
+"""A path a config states, located once where the config enters
+(:func:`~tcip_mcp.registry_paths.located` against the ``project`` its validation context
+holds), and that location is read and recorded."""
 
 
 class StageSpec(BaseModel):
@@ -151,7 +167,7 @@ class ImageStatsSampling(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    windows: list[tuple[str, ImageStatsWindow | None]]
+    windows: list[tuple[ResolvedPath, ImageStatsWindow | None]]
     seed: int | None = None
     pixel_fraction: float
     window_size: int | None = None
@@ -167,7 +183,7 @@ class ModelSourceSchema(BaseModel):
     builder_kwargs: dict | None = None
     task: str = Field(min_length=1)
     """The run's task (detection, instance_seg, classification, ...)."""
-    source_files: list[str] | None = None
+    source_files: list[ResolvedPath] | None = None
     image_stats_sampling: ImageStatsSampling | None = None
 
 
@@ -177,7 +193,7 @@ class DatasetSourceSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
     builder: str = Field(min_length=1)
     builder_kwargs: dict | None = None
-    source_files: list[str] | None = None
+    source_files: list[ResolvedPath] | None = None
 
 
 class SplitSpec(BaseModel):
@@ -185,7 +201,7 @@ class SplitSpec(BaseModel):
     parameters a run drawing its own split states."""
 
     model_config = ConfigDict(extra="forbid")
-    selection_dir: str | None = None
+    selection_dir: ResolvedPath | None = None
     redraw_within_selection: bool = False
     seed: int | None = None
     group_by: str | None = None
@@ -273,8 +289,8 @@ class DataSpec(_Recorded):
     by name."""
 
     model_config = ConfigDict(extra="forbid")
-    images_dir: str | None = None
-    labels_dir: str | None = None
+    images_dir: ResolvedPath | None = None
+    labels_dir: ResolvedPath | None = None
     dataset_source: DatasetSourceSchema | None = None
     split: SplitSpec = Field(default_factory=lambda: SplitSpec.model_validate({}))
     auto_val: bool = True
@@ -284,7 +300,7 @@ class DataSpec(_Recorded):
     num_classes: int | None = None
     num_ranks: int | None = None
     train_native_size: list[int] | None = None
-    plant_csv_paths: list[str] | None = None
+    plant_csv_paths: list[ResolvedPath] | None = None
 
     @property
     def recorded_scope(self) -> ClassScope:
@@ -396,20 +412,23 @@ class TrainConfigSchema(_Recorded):
         return TrainerReads(cast(int, self.batch_size), self.evaluation.conf_threshold, regime)
 
 
-def checked_train_config(config: dict) -> tuple[TrainConfigSchema | None, list[str]]:
-    """``config`` validated once against the schema: the validated config and no issues, or
-    ``None`` and one issue string per type or structure error (e.g. ``batch_size="big"``, a stage
-    missing ``epochs``, a nested ``training`` section, a missing ``model_source.task``)."""
+def checked_train_config(config: dict, project: Path | None = None
+                         ) -> tuple[TrainConfigSchema | None, list[str]]:
+    """``config`` validated once against the schema, its paths located against ``project``
+    (:data:`ResolvedPath`; ``None`` admits absolute paths only): the validated config and no
+    issues, or ``None`` and one issue string per type or structure error (e.g.
+    ``batch_size="big"``, a stage missing ``epochs``, a nested ``training`` section, a missing
+    ``model_source.task``, a relative path with no project)."""
     try:
-        return TrainConfigSchema.model_validate(config), []
+        return TrainConfigSchema.model_validate(config, context={"project": project}), []
     except ValidationError as e:
         return None, _issues(e)
 
 
-def train_config(config: dict) -> TrainConfigSchema:
+def train_config(config: dict, project: Path | None = None) -> TrainConfigSchema:
     """``config`` validated against the schema (:func:`checked_train_config`). Refuses
     (``ValueError``) naming every issue it reports."""
-    spec, issues = checked_train_config(config)
+    spec, issues = checked_train_config(config, project)
     if spec is None:
         raise ValueError(f"invalid training config: {'; '.join(issues)}")
     return spec

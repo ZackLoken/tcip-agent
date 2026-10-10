@@ -5,8 +5,8 @@ Wraps ``vision_tools.overlay_reference_grid``: square cells of ``--tile-size`` n
 spreadsheet-style ('A1' top-left), rendered in yellow on the cells' true boundaries. Every response
 echoes the full grid geometry (tile_size, overlap, cols, rows, width, height): pass the echoed
 tile_size/overlap to ``propose_annotations(grid_cells=...)`` so a cell name resolves against the
-grid that was actually rendered. --project is required, since the artifact and the audit line land
-under it.
+grid that was actually rendered. --project is required: the artifact lands under it and a
+relative --image lies under it.
 
 Usage:
     tcip overlay-reference-grid --image <path> --project <project> \
@@ -23,9 +23,9 @@ from tcip_mcp.cli import bound_project
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
-    parser.add_argument("--image", required=True, help="Absolute path to the image file.")
-    parser.add_argument("--project", required=True,
-                        help="The project the artifact and the audit line land under.")
+    parser.add_argument("--image", required=True,
+                        help="The image file; a relative one is under --project.")
+    parser.add_argument("--project", required=True, help="The project the artifact lands under.")
     parser.add_argument("--tile-size", type=int, default=None,
                         help="Cell edge in native pixels; omitted derives a legible default.")
     parser.add_argument("--overlap", type=float, default=0.0,

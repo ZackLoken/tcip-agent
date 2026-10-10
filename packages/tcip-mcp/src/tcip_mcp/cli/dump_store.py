@@ -42,13 +42,17 @@ def spelled(name: str) -> str:
 
 
 def dump_store(project: Path, out_dir: Path) -> list[Path]:
-    """Write every record and log of every store database under ``project`` into ``out_dir``, a
-    record through :func:`tcip_store.encode_record` and a log one :func:`tcip_store.encode_log_line`
-    per line, and return the files written. Refuses (``ValueError``) an ``out_dir`` inside the
-    project and a log holding entries that will not decode."""
+    """Write every record and log of every store database under ``project``, an established
+    project root (:func:`~tcip_mcp.project_record.existing_project`), into ``out_dir``
+    (:func:`~tcip_mcp.registry_paths.located` against ``project``), a record through
+    :func:`tcip_store.encode_record` and a log one :func:`tcip_store.encode_log_line` per line, and
+    return the files written. Refuses (``ValueError``) an ``out_dir`` inside the project and a log
+    holding entries that will not decode."""
     from tcip_store.file_backend import database_roots
 
-    project, out_dir = project.resolve(), out_dir.resolve()
+    from tcip_mcp.registry_paths import located
+
+    out_dir = located(out_dir, project)
     if out_dir.is_relative_to(project):
         raise ValueError(f"{out_dir} is inside the project {project}; dump it somewhere outside")
     written: list[Path] = []
@@ -86,7 +90,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    print(f"{len(written)} file(s) written under {Path(args.out_dir).resolve()}")
+    print(f"{len(written)} file(s) written")
     return 0
 
 

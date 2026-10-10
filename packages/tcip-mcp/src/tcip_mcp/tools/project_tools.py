@@ -13,6 +13,7 @@ from tcip_store import Key, VersionConflictError, encode_record
 
 from tcip_mcp.server import tool
 from tcip_mcp.audit import audited
+from tcip_mcp.registry_paths import located
 
 
 def _project_dir(project_path: str) -> Path:
@@ -141,8 +142,8 @@ def initialize_project(project_path: str, display_name: str, site: str) -> dict:
     from tcip_mcp.audit import record_event_or_raise
     from tcip_mcp.project_record import create_record
 
-    project = Path(project_path).expanduser().resolve()
     try:
+        project = located(Path(project_path).expanduser(), None)
         record = create_record(project, display_name, site)
     except (ValueError, StoreError) as exc:
         return {"error": str(exc)}
@@ -195,17 +196,12 @@ def inspect_project(project: Path) -> dict:
     if artifacts_dir.is_dir():
         status["artifact_count"] = len(list(artifacts_dir.iterdir()))
 
-    # Data: the canonical layout puts images under <root>/images/<date>/ (see
-    # tcip_mcp.dataset_layout); ingest_images writes there. Count that tree
-    # recursively so date buckets aren't missed, and report the capture dates.
-    image_exts = {".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp"}
+    # The logical images under <root>/images/<date>/ and the capture dates they sit under.
     from tcip_mcp import dataset_layout
+    from tcip_mcp.pipelines.image_utils import logical_image_count
 
-    images_dir = dataset_layout.image_root(project)
-    if images_dir.is_dir():
-        status["image_count"] = sum(
-            1 for f in images_dir.rglob("*") if f.is_file() and f.suffix.lower() in image_exts
-        )
+    if dataset_layout.image_root(project).is_dir():
+        status["image_count"] = logical_image_count(project)
         status["dates"] = dataset_layout.list_dates(project)
 
     from tcip_store import StoreError
@@ -310,8 +306,9 @@ def archive_project(
 def write_archive(
     project: Path, *, output_path: str = "", output_dir: str = "", include_models: bool = False,
 ) -> dict:
-    """Export ``project`` as a portable bundle: a ZIP file, or, given ``output_dir`` instead of
-    ``output_path``, the identical bundle written as a directory tree.
+    """Export ``project``, an established project root
+    (:func:`~tcip_mcp.project_record.existing_project`), as a portable bundle: a ZIP file, or,
+    given ``output_dir`` instead of ``output_path``, the identical bundle written as a tree.
 
     The bundle is every file under the project but the store's own bookkeeping
     (:func:`tcip_store.file_backend.is_bookkeeping`), each store database as a consistent copy
@@ -319,10 +316,10 @@ def write_archive(
     :func:`~tcip_mcp.model_registry.checkpoint_files` names unless ``include_models``;
     ``checkpoints_excluded`` counts those left out.
 
-    Exactly one of ``output_path``/``output_dir`` must be given, as an absolute path. Either
-    refuses a relative path, a destination inside the project (a bundle cannot contain the tree it
-    was drawn from), and a destination that already exists, except an empty directory given as
-    ``output_dir``.
+    Exactly one of ``output_path``/``output_dir`` must be given
+    (:func:`~tcip_mcp.registry_paths.located` against ``project``). Either refuses a destination
+    inside the project (a bundle cannot contain the tree it was drawn from) and a destination that
+    already exists, except an empty directory given as ``output_dir``.
 
     ``size_bytes`` in the response means one thing under ``output_path`` (the written ZIP's own
     compressed byte count, ``stat().st_size`` on the archive) and a different thing under
@@ -341,16 +338,10 @@ def write_archive(
         return {"error": "give either output_path (a ZIP file) or output_dir (a directory "
                          "tree) to archive into"}
 
-    root = Path(project).resolve()
-    if not root.is_dir():
-        return {"error": f"Project directory not found: {project}"}
-    dest = Path(output_path or output_dir)
-    if not dest.is_absolute():
-        return {"error": f"the destination {dest} is a relative path; name it absolutely"}
-    dest = dest.resolve()
-    if dest.is_relative_to(root):
-        return {"error": f"the destination {dest} is inside the project being archived ({root}); "
-                         "choose a destination outside the project"}
+    dest = located(output_path or output_dir, project)
+    if dest.is_relative_to(project):
+        return {"error": f"the destination {dest} is inside the project being archived "
+                         f"({project}); choose a destination outside the project"}
     if dest.exists() and not (output_dir and dest.is_dir() and not any(dest.iterdir())):
         return {"error": f"the destination {dest} already exists; an archive never writes over "
                          "or into anything"}
@@ -359,12 +350,12 @@ def write_archive(
 
     from tcip_mcp.model_registry import checkpoint_files
 
-    checkpoints = frozenset() if include_models else checkpoint_files(root)
-    files = [p for p in root.rglob("*") if p.is_file() and not is_bookkeeping(p.name)]
+    checkpoints = frozenset() if include_models else checkpoint_files(project)
+    files = [p for p in project.rglob("*") if p.is_file() and not is_bookkeeping(p.name)]
     members = [p for p in files if p not in checkpoints]
 
     (dest.parent if output_path else dest).mkdir(parents=True, exist_ok=True)
-    _write_bundle(dest, bool(output_path), root, members)
+    _write_bundle(dest, bool(output_path), project, members)
     size_bytes = (dest.stat().st_size if output_path
                   else sum(p.stat().st_size for p in dest.rglob("*") if p.is_file()))
     return {"files_added": len(members), "size_bytes": size_bytes,
@@ -497,11 +488,12 @@ def import_project(bundle_path: str, destination: str) -> dict:
     from tcip_mcp.audit import record_event_or_raise
     from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S, lock_file_for, path_lock
 
-    bp = Path(bundle_path)
+    try:
+        bp, dest = (located(Path(p).expanduser(), None) for p in (bundle_path, destination))
+    except ValueError as exc:
+        return {"error": str(exc)}
     if not bp.is_file() and not bp.is_dir():
         return {"error": f"bundle not found: {bundle_path}"}
-
-    dest = Path(destination).expanduser().resolve()
     if dest.exists():
         if not dest.is_dir():
             return {"error": f"destination {dest} exists and is not a directory"}

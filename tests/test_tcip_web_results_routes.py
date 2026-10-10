@@ -637,11 +637,11 @@ def test_registered_models_answers_a_resolved_absolute_checkpoint_path(
     absolute over this route, the surface the Inference tab feeds straight back into a launch."""
     pytest.importorskip("torch")
     from tcip_mcp.model_registry import ModelRegistry
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     ckpt_dir = opened_project / ".tcip" / "models"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-    ckpt = checkpoint_file(ckpt_dir / "m.pt", "route fixture weights")
+    ckpt = produced_checkpoint(ckpt_dir / "m.pt", "route fixture weights")
     ModelRegistry(str(opened_project)).register_model("m", str(ckpt))
 
     resp = client.get("/api/results/models/registered")
@@ -687,13 +687,13 @@ def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(
     from tcip_mcp.tools.ingest_tools import ingest_images
     from tcip_store import read_log
     from tcip_web.routes import inference as inference_routes
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     source = opened_project / "raw"
     source.mkdir()
     Image.new("RGB", (16, 16)).save(source / "tree_01.jpg")
     assert "error" not in ingest_images(opened_project, str(source), date_from="2026-02-11")
-    ckpt = checkpoint_file(opened_project / "m.pt", "cancel fixture weights")
+    ckpt = produced_checkpoint(opened_project / "m.pt", "cancel fixture weights")
     ModelRegistry(str(opened_project)).register_model("m", str(ckpt))
     launched = client.post("/api/inference/launch", json={
         "checkpoint_path": str(ckpt), "dataset_root": str(opened_project), "date": "2026-02-11",

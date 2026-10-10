@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from tests._chain_fixtures import (
-    BESPOKE_CLASSIFIER, BESPOKE_DETECTION, run_config, training_config,
+    BESPOKE_CLASSIFIER, BESPOKE_DETECTION, BESPOKE_MODELS, run_config, training_config,
 )
 from tests._training_values import evaluation_block
 
@@ -20,8 +20,8 @@ SUBJECT = "leaf"
 
 
 def _cfg(images_dir, *, builder_kwargs, image_stats_sampling=None):
-    model_source = {"builder": BESPOKE_DETECTION,
-                    "builder_kwargs": builder_kwargs, "task": "detection"}
+    model_source = {"builder": BESPOKE_DETECTION, "builder_kwargs": builder_kwargs,
+                    "source_files": [BESPOKE_MODELS], "task": "detection"}
     if image_stats_sampling is not None:
         model_source["image_stats_sampling"] = image_stats_sampling
     return training_config(
@@ -104,8 +104,8 @@ def test_preflight_records_not_checked_when_no_membership_resolved(tmp_path):
     builder_kwargs, record = _derived([image])
     cfg = training_config(
         {"builder": BESPOKE_DETECTION, "builder_kwargs": builder_kwargs, "task": "detection",
-         "image_stats_sampling": record},
-        {"dataset_source": {"builder": BESPOKE_CLASSIFIER}})
+         "source_files": [BESPOKE_MODELS], "image_stats_sampling": record},
+        {"dataset_source": {"builder": BESPOKE_CLASSIFIER, "source_files": [BESPOKE_MODELS]}})
 
     r = preflight_config(tmp_path, cfg)
     assert r["image_stats_containment"] == "not_checked"
@@ -218,7 +218,8 @@ def test_preflight_keeps_every_sample_of_a_two_date_selection(tmp_path):
 
     builder_kwargs, record = _derived([s.source for s in bound])
     model_source = {"builder": BESPOKE_DETECTION, "builder_kwargs": builder_kwargs,
-                    "task": "detection", "image_stats_sampling": record}
+                    "source_files": [BESPOKE_MODELS], "task": "detection",
+                    "image_stats_sampling": record}
     r = preflight_config(tmp_path, run_config(out, model_source))
 
     assert r["image_stats_containment"] == "checked"
@@ -280,6 +281,38 @@ def test_preflight_reads_the_band_count_over_every_source_the_run_admits(tmp_pat
 
     assert r["valid"] is False
     assert any("different band counts" in i for i in r["issues"]), r["issues"]
+
+
+def test_a_copied_projects_run_reads_its_statistics_windows_from_the_copy(tmp_path):
+    """The images a run's statistics windows name are stored against its project like its data,
+    so a copied project's run reads each window's image from the copy."""
+    pytest.importorskip("torch")
+    import shutil
+
+    from PIL import Image
+
+    import tcip_store as ts
+    from tcip_mcp.experiments import observe
+    from tests._verified_checkpoint_fixtures import opened_run
+
+    project = tmp_path / "project"
+    imgs = project / "images" / UNDATED_BUCKET
+    imgs.mkdir(parents=True)
+    a = imgs / "a.jpg"
+    Image.new("RGB", (16, 16)).save(a)
+    _label(imgs, "a")
+    builder_kwargs, record = _derived([a])
+    run = opened_run(project, _cfg(imgs, builder_kwargs=builder_kwargs,
+                                   image_stats_sampling=record))
+
+    copy = tmp_path / "copy"
+    ts.release_root(project)
+    shutil.copytree(project, copy)
+    sampling = observe(copy / run.relative_to(project)).record["config"]["model_source"][
+        "image_stats_sampling"]
+
+    assert [window[0] for window in sampling["windows"]] == [str((copy / a.relative_to(
+        project)).resolve())]
 
 
 def test_preflight_admits_a_three_channel_config_with_no_statistics(tmp_path):

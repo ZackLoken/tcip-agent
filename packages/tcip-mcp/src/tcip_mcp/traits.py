@@ -458,17 +458,19 @@ def resolve_statement_registry(project: str | Path, dataset_root: str) -> Subjec
     """The registry a ``state_crossing_dates`` operationalization's positive state is checked
     against.
 
-    ``dataset_root`` given: that dataset's own registry. Empty: the project root's own registry,
+    ``dataset_root`` given: that dataset's own registry (:func:`~tcip_mcp.registry_paths.located`
+    against ``project``). Empty: the project root's own registry,
     served when ``project`` is unambiguously the one dataset the project uses (its own
     ``subjects.json`` exists, and the project's dataset registry names at most one dataset).
     Otherwise refuses by name, naming the registered datasets and the ``dataset_root`` parameter.
     """
+    from tcip_mcp.registry_paths import located
     from tcip_mcp.subject_registry import read_registry
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 
     if dataset_root:
         try:
-            return read_registry(dataset_root)
+            return read_registry(located(dataset_root, project))
         except FileNotFoundError as exc:
             raise ValueError(
                 f"dataset_root {dataset_root!r} carries no subject registry of its own. Write one "

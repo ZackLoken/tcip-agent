@@ -11,7 +11,7 @@ import pytest
 
 pytest.importorskip("torch")
 
-from tests._chain_fixtures import BESPOKE_DETECTION, training_config  # noqa: E402
+from tests._chain_fixtures import BESPOKE_DETECTION, BESPOKE_MODELS, training_config  # noqa: E402
 from tests._verified_checkpoint_fixtures import run_to_end  # noqa: E402
 
 
@@ -24,14 +24,17 @@ def test_a_classification_config_launches_with_images_and_csv_only(
     import os
 
     from tcip_mcp.tools.training_tools import launch_training
-    from tests.tiny_trainer_fixtures import MEAN_INTENSITY_CLASSIFIER, write_regression_dataset
+    from tests.tiny_trainer_fixtures import (
+        MEAN_INTENSITY_CLASSIFIER, TINY_TRAINER_FILE, write_regression_dataset,
+    )
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
     images_dir, csv_path = write_regression_dataset(
         tmp_path / "ds", intensities=[0.1, 0.9] * 4, values=[0, 1] * 4)
     cfg = training_config(
-        {"builder": MEAN_INTENSITY_CLASSIFIER, "task": "classification"},
+        {"builder": MEAN_INTENSITY_CLASSIFIER, "source_files": [TINY_TRAINER_FILE],
+         "task": "classification"},
         {"images_dir": str(images_dir), "labels_dir": str(csv_path),
          "split": {"seed": 0, "val_ratio": 0.15}},
         batch_size=4, stages=[{"freeze_to": 0, "epochs": 1}], checkpoint_every_n_epochs=0)
@@ -46,12 +49,13 @@ def test_a_classification_config_launches_with_images_and_csv_only(
 
 def test_a_classification_config_naming_a_missing_csv_is_refused_by_name(tmp_path: Path) -> None:
     from tcip_mcp.tools.training_tools import preflight_config
-    from tests.tiny_trainer_fixtures import MEAN_INTENSITY_CLASSIFIER
+    from tests.tiny_trainer_fixtures import MEAN_INTENSITY_CLASSIFIER, TINY_TRAINER_FILE
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     cfg = training_config(
-        {"builder": MEAN_INTENSITY_CLASSIFIER, "task": "classification"},
+        {"builder": MEAN_INTENSITY_CLASSIFIER, "source_files": [TINY_TRAINER_FILE],
+         "task": "classification"},
         {"images_dir": str(images_dir), "labels_dir": str(tmp_path / "gone.csv")})
 
     result = preflight_config(tmp_path, cfg)
@@ -67,7 +71,8 @@ def test_a_detection_config_names_its_images_alone(tmp_path: Path) -> None:
 
     scope = {"subject": "bud"}
     cfg = training_config(
-        {"builder": BESPOKE_DETECTION, "builder_kwargs": {}, "task": "detection"},
+        {"builder": BESPOKE_DETECTION, "builder_kwargs": {}, "source_files": [BESPOKE_MODELS],
+         "task": "detection"},
         {**detection_images(tmp_path / "ds", scope), "scope": scope,
          "split": {"seed": 0, "val_ratio": 0.15}})
 

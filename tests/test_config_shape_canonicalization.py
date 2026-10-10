@@ -2,6 +2,7 @@
 ``model_source`` and ``data``, and a nested ``training`` section is refused by name."""
 
 import copy
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -45,7 +46,7 @@ def _names(issues: list[str], path: str) -> bool:
 
 FLAT_CONFIG: dict = training_config(
     {"builder": "module:build_net", "builder_kwargs": {}, "task": "detection"},
-    {"images_dir": ""},
+    {"images_dir": str(Path(__file__).parent / "images")},
     num_workers=0, mixed_precision=True, optimizer=adamw_optimizer(),
     stages=[{"freeze_to": -1, "epochs": 5}, {"freeze_to": 2, "epochs": 10}],
     evaluation=evaluation_block(selection_metric="f1"))
@@ -69,10 +70,11 @@ door."""
 
 def _door_issues(config: dict) -> list[str]:
     """The issues the launch door's structural check reports for ``config``, which the schema
-    admits."""
+    admits, for this repository as its project."""
     from tcip_mcp.tools.training_tools import _structural_issues
+    from tests import REPO_ROOT
 
-    return _structural_issues(train_config(config))
+    return _structural_issues(train_config(config), REPO_ROOT)[1]
 
 
 def test_a_flat_config_validates_with_no_issue():
@@ -97,7 +99,7 @@ def test_a_config_naming_its_own_loop_states_only_what_its_loop_reads():
     config naming its own ``training_source`` leaves unstated what its loop never reads."""
     custom = {k: v for k, v in FLAT_CONFIG.items() if k not in DefaultTrainerRegime._fields}
     assert _names(_door_issues(custom), "stages")
-    looped = _door_issues({**custom, "training_source": "tests.bespoke_models:train_bespoke"})
+    looped = _door_issues({**custom, "training_source": "bespoke_models:train_bespoke"})
     assert not any("unstated" in issue for issue in looped), looped
 
 
@@ -181,10 +183,11 @@ def test_the_trainer_reads_the_flat_config_as_given(tmp_path, monkeypatch):
     """What train() reads (run.spec.stages) is the configured schedule itself, with no
     second placement to reconcile against."""
     monkeypatch.chdir(tmp_path)
+    from tests._chain_fixtures import DETECTION_SOURCE
     from tests.tiny_trainer_fixtures import trainer_run
 
-    run = trainer_run(dict(FLAT_CONFIG), tmp_path, project=tmp_path, has_val_loader=True,
-                      id="auto-run-5")
+    run = trainer_run({**FLAT_CONFIG, "model_source": DETECTION_SOURCE}, tmp_path,
+                      project=tmp_path, has_val_loader=True, id="auto-run-5")
     assert run.spec.record()["stages"] == FLAT_CONFIG["stages"]
     assert "training" not in run.spec.record()
 
@@ -265,7 +268,7 @@ def test_model_source_admits_every_declared_key(tmp_path):
     mean, std, _ = result
     issues = _issues_of({**FLAT_CONFIG, "model_source": {
         "builder": "m:f", "builder_kwargs": {"image_mean": mean, "image_std": std},
-        "task": "detection", "source_files": ["m.py"],
+        "task": "detection", "source_files": [str(Path(__file__).parent / "m.py")],
         "image_stats_sampling": image_stats_provenance(result),
     }, "data": {}})
     assert issues == []

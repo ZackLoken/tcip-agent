@@ -13,14 +13,13 @@ def test_archive_then_import_lands_a_registry_naming_the_restored_files(tmp_path
     from tcip_mcp.model_registry import ModelRegistry, read_registry_index
     from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.tools.project_tools import archive_project, import_project, initialize_project
-    from tests._verified_checkpoint_fixtures import checkpoint_file, finished_run
+    from tests._verified_checkpoint_fixtures import finished_run, produced_checkpoint
 
     src = tmp_path / "src_project"
     initialize_project(str(src), "Source project", "north orchard")
     finished_run(src, experiment_id="exp1")
-    foreign = src / ".tcip" / "models" / "foreign.pt"
-    foreign.parent.mkdir(parents=True, exist_ok=True)
-    checkpoint_file(foreign, "a foreign checkpoint's own weights")
+    foreign = produced_checkpoint(src / ".tcip" / "models" / "foreign.pt",
+                                  "a foreign checkpoint's own weights")
     register_model(src, name="foreign", checkpoint_path=str(foreign))
 
     zip_path = tmp_path / "export.zip"

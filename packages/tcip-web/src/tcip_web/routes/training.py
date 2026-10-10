@@ -80,7 +80,7 @@ def relaunch_route(payload: RelaunchPayload) -> dict:
             observation = observe(source)
             spec = observation.spec
             if payload.selection_dir:
-                data = data_with_selection(spec.data, payload.selection_dir)
+                data = data_with_selection(spec.data, payload.selection_dir, project)
                 spec = spec.model_copy(update={"data": data})
             result = launch_training(project, spec.record(), relaunched_from=source.name,
                                      actor=person)

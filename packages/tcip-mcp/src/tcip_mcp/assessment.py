@@ -24,7 +24,7 @@ from tcip_mcp.pipelines.data.selection import (
     GROUND_TRUTH_PATHS, ground_truth_of, ground_truth_record,
 )
 from tcip_mcp.pipelines.execution import DEFAULT_TILE_BATCH_SIZE, Execution, Stated
-from tcip_mcp.registry_paths import PathFields, recorded_paths, runtime_paths, within
+from tcip_mcp.registry_paths import PathFields, located, recorded_paths, runtime_paths, within
 from tcip_mcp.traits import (
     DETECTOR_KINDS,
     PER_IMAGE_COUNT,
@@ -287,7 +287,8 @@ def _prepared(project: Path, *, checkpoint_path: str, trait: str, delivery_kind:
               stated: Stated, device: str | None,
               tile_batch_size: int) -> tuple[TraitRevision, Preparation]:
     """``trait``'s latest confirmed revision stating a ``delivery_kind`` operationalization, and the
-    registered checkpoint readied for a pass under ``stated``, a detector's at the staged conf
+    registered checkpoint at ``checkpoint_path`` (``registry_paths.located`` against ``project``)
+    readied for a pass under ``stated``, a detector's at the staged conf
     floor the count fit collects at (``operating_point.STAGED_CONF_FLOOR``). A checkpoint whose
     head does not produce what the kind measures refuses (:class:`AssessmentRefusedError`)."""
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -296,7 +297,7 @@ def _prepared(project: Path, *, checkpoint_path: str, trait: str, delivery_kind:
     from tcip_mcp.pipelines.operating_point import STAGED_CONF_FLOOR
 
     revision = confirmed_revision(delivery_kind, project=project, trait=trait)
-    checkpoint = load_registered_checkpoint(checkpoint_path, project=project)
+    checkpoint = load_registered_checkpoint(located(checkpoint_path, project), project=project)
     from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
 
     expected = (tuple(sorted(DETECTION_TASKS)) if delivery_kind in DETECTOR_KINDS
@@ -375,7 +376,8 @@ def assess(
 ) -> Assessment:
     """Assess ``checkpoint_path`` against the calibration and holdout sides of the selection at
     ``selection_dir``, for a ``delivery_kind`` delivery of ``trait``'s latest confirmed revision,
-    and record the result as a new assessment; return it.
+    and record the result as a new assessment; return it. Each path is
+    :func:`~tcip_mcp.registry_paths.located` against ``project``.
 
     ``stated`` is what the caller states of the execution record, a detector's ``max_dets`` among
     it, since the frames a pass of this checkpoint later publishes on are not known here; the rest
@@ -390,6 +392,7 @@ def assess(
     """
     from tcip_mcp.pipelines.data.selection import source_digests
 
+    selection_dir = str(located(selection_dir, project))
     revision, prep = _prepared(project, checkpoint_path=checkpoint_path, trait=trait,
                                delivery_kind=delivery_kind, stated=stated, device=device,
                                tile_batch_size=tile_batch_size)
@@ -799,8 +802,9 @@ def assess_physical_scale(
     its sides must share no source digest. Each reference image carries exactly one
     ``reference_subject`` polygon or mask, whose principal-axis extent is its pixel extent;
     ``reference_csv`` (``image_stem, physical_extent, unit``) is the breeder's physical extent of
-    the same object, read once, retained with the reference and measured as read. The scale is
-    the mean implied scale of
+    the same object, read once, retained with the reference and measured as read; each path is
+    :func:`~tcip_mcp.registry_paths.located` against ``project``. The scale is the mean implied
+    scale of
     the calibration side; it passes when the holdout's own relative dispersion and the scale's
     relative deviation from the holdout mean are both within ``scale_tolerance_frac``. Refuses an
     unauthored tolerance, a unit that is not a linear length unit crops.yml declares, a selection
@@ -818,6 +822,8 @@ def assess_physical_scale(
     from tcip_mcp.pipelines.measurement.mask_geometry import principal_axis_extent_of_points
     from tcip_mcp.traits import authored, crops_length_units
 
+    selection_dir = str(located(selection_dir, project))
+    reference_csv = str(located(reference_csv, project))
     revision = latest_confirmed(trait, project)
     authored(revision.entry, ("scale_tolerance_frac",))
     if unit not in crops_length_units():

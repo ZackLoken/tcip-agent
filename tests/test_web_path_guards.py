@@ -108,8 +108,9 @@ def test_every_configured_root_is_honored_not_only_the_first(
 def test_derived_default_canonicalises_the_path_it_admits(tmp_path, monkeypatch) -> None:
     """A path under the derived allow-set (here, the workspace) resolves to an absolute path.
 
-    Callers treat the return value as the path to open, so a dot segment or a relative
-    path must be collapsed. The additive ``TCIP_IMAGE_ROOTS`` list stays empty throughout:
+    Callers treat the return value as the path to open, so a dot segment must be collapsed, and
+    a relative path with no project open has no root to collapse against and refuses. The
+    additive ``TCIP_IMAGE_ROOTS`` list stays empty throughout:
     what admits this path is the workspace, not that list.
     """
     monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
@@ -125,7 +126,8 @@ def test_derived_default_canonicalises_the_path_it_admits(tmp_path, monkeypatch)
 
     monkeypatch.chdir(tmp_path)
     relative = Path("project") / "images" / "IMG_0007.JPG"
-    assert assert_path_allowed(relative) == target.resolve()
+    with pytest.raises(ValueError, match="absolute path"):
+        assert_path_allowed(relative)
 
     monkeypatch.setenv("TCIP_IMAGE_ROOTS", "   ")
     assert image_roots_from_environment() == ()

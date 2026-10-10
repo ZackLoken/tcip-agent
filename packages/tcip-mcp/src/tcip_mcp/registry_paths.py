@@ -37,16 +37,35 @@ def nearest_containing_ancestor(start: Path, root: Path, *, tolerant: bool) -> P
     return None
 
 
+class RelativePathWithoutProjectError(ValueError):
+    """A relative path reached an entry point that holds no project to read it against."""
+
+
+def located(path: str | Path, project: str | Path | None) -> Path:
+    """The absolute location a caller's ``path`` names: a relative one is relative to the
+    project root ``project``, never to the working directory, and an absolute one is itself.
+
+    With no ``project``, a relative ``path`` refuses (:class:`RelativePathWithoutProjectError`)
+    naming the two ways to state it: an absolute path, or a project tool holding its project.
+    """
+    if project is None and not Path(path).is_absolute():
+        raise RelativePathWithoutProjectError(
+            f"{str(path)!r} is relative and nothing here holds a project to read it against: "
+            "state an absolute path, or call the project tool on its project")
+    return (Path(project or "") / path).resolve()
+
+
 def stored_path(path: str | Path, root: str | Path, *, tolerant: bool = True) -> str:
-    """What a record stores for ``path``: relative POSIX when it resolves at or under ``root``
-    (``root`` itself stored ``"."``), its resolved absolute path otherwise.
+    """What a record stores for ``path`` (:func:`located` against ``root``): relative POSIX when
+    it lies at or under ``root`` (``root`` itself stored ``"."``), absolute otherwise, so a stored
+    path stores as itself.
 
     Containment is decided by filesystem identity over the resolved path's own ancestors
     (:func:`nearest_containing_ancestor`, with ``tolerant`` passed through), so an alias or a case
     variant of ``root`` reads as the filesystem sees it, and a path not created yet is placed by
     its nearest existing ancestor. The relative form never carries a ``..`` segment.
     """
-    resolved = Path(path).resolve()
+    resolved = located(path, root)
     ancestor = nearest_containing_ancestor(resolved, Path(root), tolerant=tolerant)
     if ancestor is None:
         return str(resolved)
@@ -64,10 +83,8 @@ def checkpoint_registry_path_for(checkpoint_path: str | Path, root: str | Path) 
     ``checkpoint_path`` resolves under ``root``, absolute otherwise.
 
     ``checkpoint_path`` must already name an existing file; ``root`` must exist as a directory, or
-    this raises :class:`CheckpointRegistryRootUnusableError` naming it. The walk starts at the
-    checkpoint's own resolved parent directory. Spelling is decided on the resolved target, never
-    the name given: a symlinked checkpoint stores its resolved location. The produced relative form
-    is asserted non-empty with no ``..`` segment.
+    this raises :class:`CheckpointRegistryRootUnusableError` naming it, as it does when the
+    ancestor comparison :func:`stored_path` makes (with ``tolerant=False``) cannot be made.
     """
     root_path = Path(root)
     if not root_path.is_dir():
@@ -118,9 +135,10 @@ def resolved_registry_path(root: str | Path, stored: str) -> Path:
 
 PathFields = tuple[tuple[str, ...], ...]
 """The fields of one record shape that name a path, each a sequence of steps from the record's
-top: a key, ``"[]"`` for every item of a list, ``"*"`` for every value of a mapping, or ``"{}"``
-for every key of a mapping. A field whose value is a mapping where a path ends, or a path where a
-key step continues, names no path in that record and is left as it is."""
+top: a key, ``"[]"`` for every item of a list, ``"*"`` for every value of a mapping, ``"{}"``
+for every key of a mapping, or ``"0"`` for the first item of a pair. A field whose value is a
+mapping where a path ends, or a path where a key step continues, names no path in that record
+and is left as it is."""
 
 
 def within(prefix: tuple[str, ...], fields: PathFields) -> PathFields:
@@ -140,6 +158,8 @@ def _each_path(value: Any, steps: tuple[str, ...], convert: Callable[[str], str]
         return {key: _each_path(item, rest, convert) for key, item in value.items()}
     if step == "{}":
         return {convert(key): item for key, item in value.items()}
+    if step == "0":
+        return [_each_path(value[0], rest, convert), *value[1:]]
     if not isinstance(value, dict) or step not in value:
         return value
     return {**value, step: _each_path(value[step], rest, convert)}
@@ -168,7 +188,9 @@ __all__ = [
     "RegistryPathEmptyError",
     "RegistryPathTraversalError",
     "checkpoint_registry_path_for",
+    "RelativePathWithoutProjectError",
     "is_external_form",
+    "located",
     "nearest_containing_ancestor",
     "recorded_paths",
     "resolved_registry_path",

@@ -18,15 +18,11 @@ from tcip_mcp import dataset_layout
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.data.band_groups import MANIFEST_EXT
 from tcip_mcp.pipelines.image_utils import IMAGE_EXTS, bucket_logical_identities, stem_collision_key
+from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 
 logger = logging.getLogger(__name__)
 
-
-# The container families a capture date can be asked of, by extension: EXIF in a photographic file,
-# raster metadata in a GDAL-readable one. Every other ingestible extension is neither.
-_PHOTOGRAPHIC_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".heic"}
-_GDAL_EXTS = {".tif", ".tiff"}
 
 # Default-domain raster metadata items observed to name a capture date, matched case-insensitively
 # in this order: a Sentera-stitched orthomosaic writes ``capture_date``.
@@ -99,15 +95,19 @@ def _gdal_capture_date(path: Path) -> tuple[str | None, str | None]:
 def _capture_iso_date(path: Path) -> tuple[str | None, str | None]:
     """``(ISO YYYY-MM-DD or None, why it could not be read or None)`` for one file.
 
-    Both ``None`` is the readable-but-undated fact: the container was read and states no capture
-    date (a photo with no EXIF date, a raster with no date item, an array file with nowhere to put
-    one). A reason is the different fact that the container itself could not be read this far.
-    Neither outcome stops the file being ingested.
+    Both ``None`` is the undated fact: a photo with no EXIF date, a raster with no date item, or
+    an array file or band group, which has nowhere to put one and is not read. A reason is the
+    different fact that the container itself could not be read this far.
+    Neither outcome stops the file being ingested. The container family is the file's
+    :attr:`~tcip_mcp.pipelines.raster_source.SourceHeader.kind`: EXIF in a photograph, raster
+    metadata in a TIFF, nothing in any other.
     """
-    ext = path.suffix.lower()
-    if ext in _PHOTOGRAPHIC_EXTS:
+    from tcip_mcp.pipelines.raster_source import SourceHeader
+
+    kind = SourceHeader(path).kind
+    if kind == "photo":
         return _photographic_capture_date(path)
-    if ext in _GDAL_EXTS:
+    if kind == "tif":
         return _gdal_capture_date(path)
     return None, None
 
@@ -238,6 +238,7 @@ def ingest_images(
     except ValueError as exc:
         return {"error": str(exc)}
 
+    source = str(located(source, project))
     sources = list(_iter_source_images(source, recursive))
     if not sources:
         return {"error": f"No images found under {source!r}"}
@@ -331,7 +332,7 @@ def ingest_images(
 
 
 @tool()
-def import_coco(document: str, dataset_root: str, date: str) -> dict:
+def import_coco(project: Path, document: str, dataset_root: str, date: str) -> dict:
     """Convert an external dataset-level COCO document into the dataset's per-image label
     documents.
 
@@ -347,7 +348,7 @@ def import_coco(document: str, dataset_root: str, date: str) -> dict:
     nothing.
 
     Args:
-        document: Absolute path to the COCO ``.json`` (an ``images``/``categories`` key).
+        document: Path to the COCO ``.json`` (an ``images``/``categories`` key).
         dataset_root: The dataset the images were ingested into.
         date: The capture under ``images/`` the images sit in, which the documents are keyed
             under; one ``list_dates`` does not list refuses. A COCO document states no capture,
@@ -359,6 +360,6 @@ def import_coco(document: str, dataset_root: str, date: str) -> dict:
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
 
     try:
-        return import_coco_document(document, dataset_root, date=date)
+        return import_coco_document(document, dataset_root, date=date, project=project)
     except (ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}

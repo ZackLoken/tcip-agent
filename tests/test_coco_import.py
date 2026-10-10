@@ -87,7 +87,7 @@ def _written(root: Path) -> list[str]:
 def _import(document: Path, root: Path) -> dict:
     from tcip_mcp.tools.ingest_tools import import_coco
 
-    return import_coco(str(document), str(root), DATE)
+    return import_coco(root, str(document), str(root), DATE)
 
 
 def _loader(task: str, root: Path):
@@ -97,7 +97,9 @@ def _loader(task: str, root: Path):
 
     data = DataSpec.model_validate({"images_dir": str(root / "images" / DATE),
                                     "scope": {"subject": SUBJECT}, "auto_val": False})
-    loader, _, _, _ = auto_train_val(root, task, data, None)
+    from tests._producer_fixtures import staged_layout
+
+    loader, _, _, _ = auto_train_val(root, task, data, None, staged_layout(root, {}))
     return loader
 
 
@@ -438,7 +440,7 @@ def test_an_import_whose_second_document_conflicts_leaves_no_document_written(
     _label_placed_before_the_writes(monkeypatch, _label(root, "tree_02"), _person_label())
 
     with pytest.raises(ValueError, match=r"already holds a label document for \['tree_02'\]"):
-        import_coco_document(document, root, date=DATE)
+        import_coco_document(document, root, date=DATE, project=root)
 
     (kept,) = json_io.read_label_document(_label(root, "tree_02")).annotations
     assert (kept.subject, kept.created_by) == ("leaf", "user:breeder")
@@ -456,7 +458,7 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(tmp_path: Path,
     from tcip_mcp.pipelines.execution import Stated
     from tests._predictor_fixtures import StubPredictor, install
     from tests._verified_checkpoint_fixtures import (
-        SAMPLE_CONF, SAMPLE_MAX_DETS, foreign_checkpoint,
+        SAMPLE_CONF, SAMPLE_MAX_DETS, registered_checkpoint,
     )
 
     root = _dataset(tmp_path).root
@@ -471,7 +473,7 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(tmp_path: Path,
         return real_encode(result, **kwargs)
 
     monkeypatch.setattr(export, "encode_predictions", failing_second_document)
-    ckpt = foreign_checkpoint(tmp_path)
+    ckpt = registered_checkpoint(tmp_path)
     with pytest.raises(OSError):
         itools.run_inference(tmp_path, ckpt, str(root / "images" / DATE),
                              bucket=f"detector/{DATE}",
@@ -495,7 +497,8 @@ def test_an_import_that_committed_no_document_leaves_no_event(tmp_path: Path, mo
 
     _label_placed_before_the_writes(monkeypatch, _label(root, "tree_01"), _person_label())
     with pytest.raises(ValueError, match="already holds a label document"):
-        import_coco_document(_document(tmp_path / "external.json"), root, date=DATE)
+        import_coco_document(_document(tmp_path / "external.json"), root, date=DATE,
+                             project=root)
     assert _written(root) == ["tree_01"]
     assert not [row for row in audit_rows(root) if row["tool"] == "coco_document_imported"]
 
@@ -518,7 +521,7 @@ def test_a_date_that_names_no_capture_refuses(tmp_path: Path, date: str):
     from tcip_mcp.tools.ingest_tools import import_coco
 
     root = _dataset(tmp_path).root
-    result = import_coco(str(_document(tmp_path / "external.json")), str(root), date)
+    result = import_coco(root, str(_document(tmp_path / "external.json")), str(root), date)
     assert "error" in result and "names no capture" in result["error"]
 
 

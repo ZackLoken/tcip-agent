@@ -418,13 +418,13 @@ class PhenologyMeasurement:
 
 
 def measure_phenology(
-    project: Path, *, trait: str, mapping_name: str, dataset_root: str | Path,
+    project: Path, *, trait: str, mapping_name: str, dataset_root: Path,
     buckets: Sequence[str], plants: Sequence[str], require_all_dates_complete: bool,
 ) -> PhenologyMeasurement:
     """Measure ``trait``'s phenology over the buckets named ``buckets`` published under
-    ``dataset_root``, each at the capture date its record states
-    (:func:`~tcip_mcp.buckets.by_recorded_date`), through the plant mapping ``mapping_name``, for
-    exactly ``plants``.
+    the established location ``dataset_root``, each at the
+    capture date its record states (:func:`~tcip_mcp.buckets.by_recorded_date`), through the plant
+    mapping ``mapping_name``, for exactly ``plants``.
 
     Reads the trait's latest confirmed revision stating a ``state_crossing_dates``
     operationalization, bound against the dataset's registry (refusing, ``ValueError``, a dataset

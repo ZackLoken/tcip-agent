@@ -60,11 +60,12 @@ def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(tmp_path
     document (None) must report unknown identity, not a false apples-to-apples True: the two
     demonstrably did not train on the same (known) data."""
     from tests._verified_checkpoint_fixtures import table_images
-    from tests.tiny_trainer_fixtures import MEAN_INTENSITY_CLASSIFIER
+    from tests.tiny_trainer_fixtures import MEAN_INTENSITY_CLASSIFIER, TINY_TRAINER_FILE
 
     opened_run(tmp_path, _config(_make_dataset(tmp_path / "first")), experiment_id="a")
     opened_run(tmp_path, training_config(
-        {"builder": MEAN_INTENSITY_CLASSIFIER, "task": "classification"},
+        {"builder": MEAN_INTENSITY_CLASSIFIER, "source_files": [TINY_TRAINER_FILE],
+         "task": "classification"},
         {**table_images(tmp_path / "loose"), "split": {"seed": 0, "val_ratio": 0.15}}),
         experiment_id="b")
     assert compare_experiments(["a", "b"], project=tmp_path)["same_dataset_fingerprint"] is None

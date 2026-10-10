@@ -39,7 +39,7 @@ def _import_coco(tmp_path: Path):
 
     document = tmp_path / "external.json"
     document.write_text('{"images": [], "annotations": [], "categories": []}', encoding="utf-8")
-    return import_coco(str(document), str(tmp_path), "2025-09-14")
+    return import_coco(tmp_path, str(document), str(tmp_path), "2025-09-14")
 
 
 def _build_plant_mapping(tmp_path: Path):

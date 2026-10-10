@@ -46,10 +46,12 @@ def convert_shp_to_plant_csv(
     field_map: dict[str, str] | None = None,
 ) -> dict:
     """Convert ``shp_path`` (a point or polygon plant-locations shapefile) to ``csv_path`` in
-    ``read_plant_csvs``' schema, reprojecting every feature's own coordinate to WGS84.
+    ``read_plant_csvs``' schema, reprojecting every feature's own coordinate to WGS84. Both paths
+    are :func:`~tcip_mcp.registry_paths.located` with no project, so absolute.
 
     Returns ``{csv_path, n_features, n_parsed, geometry_kinds, missing_fields,
-    skipped_null_geometry}``. Raises ``ValueError`` if the source has no resolvable CRS
+    skipped_null_geometry}``. Raises ``ValueError`` for a relative path, if the source has no
+    resolvable CRS
     (``ShapefileCrsUnknownError``), a feature's geometry is neither point, polygon nor multipolygon,
     has zero features with readable geometry, or if the written CSV fails to round-trip through
     ``read_plant_csvs``.
@@ -59,8 +61,9 @@ def convert_shp_to_plant_csv(
         read_plant_shapefile,
     )
 
-    shp_path = Path(shp_path)
-    csv_path = Path(csv_path)
+    from tcip_mcp.registry_paths import located
+
+    shp_path, csv_path = located(shp_path, None), located(csv_path, None)
 
     result = read_plant_shapefile(shp_path, field_map=field_map)
     if not result.rows:

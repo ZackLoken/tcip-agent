@@ -19,6 +19,7 @@ from pathlib import Path
 
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.postprocessing import phenology
+from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 
 
@@ -54,12 +55,13 @@ def register_plant_registry(project: Path, name: str, csv_paths: list[str], *, c
     """
     from tcip_mcp.pipelines.postprocessing import plant_mapping
 
-    missing = [p for p in csv_paths if not Path(p).is_file()]
+    paths = [located(p, project) for p in csv_paths]
+    missing = [str(p) for p in paths if not p.is_file()]
     if missing:
         return {"error": f"plant CSV(s) not found: {missing}"}
 
     shapefile_suffixes = {".shp", ".shx", ".dbf", ".prj"}
-    shapefile_paths = [p for p in csv_paths if Path(p).suffix.casefold() in shapefile_suffixes]
+    shapefile_paths = [str(p) for p in paths if p.suffix.casefold() in shapefile_suffixes]
     if shapefile_paths:
         return {"error": (
             f"{shapefile_paths} look like shapefile parts, not plant-locations CSVs (this "
@@ -69,7 +71,7 @@ def register_plant_registry(project: Path, name: str, csv_paths: list[str], *, c
 
     try:
         return plant_mapping.register_plant_registry_record(
-            project, name, [Path(p) for p in csv_paths], crop=crop, site=site)
+            project, name, paths, crop=crop, site=site)
     except (plant_mapping.NoGeoreferencedPlantsError, plant_mapping.PlantRegistryNameConflictError,
             ValueError) as exc:
         return {"error": str(exc)}
@@ -125,7 +127,7 @@ def build_plant_mapping(
 
     try:
         return plant_mapping.build_plant_mapping(
-            project, name, images_root, plant_registry, dates=dates,
+            project, name, located(images_root, project), plant_registry, dates=dates,
             nn_tolerance_m=nn_tolerance_m, supersede=supersede, actor=None).served()
     except plant_mapping.MappingRebuildError as exc:
         return {"error": str(exc), "citing_events": exc.event_ids}
@@ -164,7 +166,7 @@ def deliver_phenology_milestones(
         dataset_root: The dataset root the buckets are published under.
         buckets: The name of the published bucket of each delivered date, one per date; each
             stands for the capture date its own record states.
-        output_csv_path: Where to write the CSV; a relative path is under the project.
+        output_csv_path: Where to write the CSV.
         plants: The delivery's population, the plant ids (the mapping's ``plot_name`` values) it
             is for; an empty list refuses.
         require_all_dates_complete: Compute a plant's milestones only when every one of its dates
@@ -182,11 +184,11 @@ def deliver_phenology_milestones(
 
     try:
         measurement = phenology.measure_phenology(
-            project, trait=trait, mapping_name=mapping_name, dataset_root=dataset_root,
-            buckets=buckets, plants=plants,
+            project, trait=trait, mapping_name=mapping_name,
+            dataset_root=located(dataset_root, project), buckets=buckets, plants=plants,
             require_all_dates_complete=require_all_dates_complete)
         delivered = phenology.deliver_phenology(
-            project, measurement, curves=False, output_path=Path(project, output_csv_path),
+            project, measurement, curves=False, output_path=located(output_csv_path, project),
             acknowledgment_id=acknowledgment_id, door="deliver_phenology_milestones", actor=None)
     except phenology.measurement_refusals() as exc:
         return {"error": str(exc)}

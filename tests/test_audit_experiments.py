@@ -185,9 +185,9 @@ def _entry(project: Path, sha256: str) -> dict:
 
 
 def _ckpt(project: Path, name: str, content: bytes) -> str:
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
-    return str(checkpoint_file(project / name, content.decode()))
+    return str(produced_checkpoint(project / name, content.decode()))
 
 
 def test_a_first_registration_and_a_replacement_each_leave_one_row(tmp_path):

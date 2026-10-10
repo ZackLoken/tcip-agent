@@ -47,12 +47,13 @@ def _data(config: dict):
     return train_config(config).data
 
 
-def _chosen(config: dict, selection_dir: str) -> dict:
+def _chosen(config: dict, selection_dir: str, project: Path) -> dict:
     """``config`` with the data block choosing ``selection_dir`` builds
     (``training_tools.data_with_selection``), as the relaunch route launches it."""
     from tcip_mcp.tools.training_tools import data_with_selection
 
-    return {**config, "data": data_with_selection(_data(config), selection_dir).record()}
+    return {**config,
+            "data": data_with_selection(_data(config), selection_dir, project).record()}
 
 
 def _stub_child(monkeypatch) -> None:
@@ -183,8 +184,11 @@ def test_list_split_choices_offers_a_table_selection_for_a_table_configuration(
                         calibration_ratio=0.125, holdout_ratio=0.125, group_by="stem")
     assert "error" not in drawn, drawn
 
+    from tests.tiny_trainer_fixtures import MEAN_INTENSITY_CLASSIFIER, TINY_TRAINER_FILE
+
     opened_run(tmp_path, training_config(
-        {"builder": "m:f", "task": "classification"},
+        {"builder": MEAN_INTENSITY_CLASSIFIER, "source_files": [TINY_TRAINER_FILE],
+         "task": "classification"},
         {"images_dir": str(images_dir), "labels_dir": str(csv_path),
          "split": {"seed": 0, "val_ratio": 0.15}}),
         experiment_id="exp-table-picker")
@@ -268,7 +272,7 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
     # scope, since a bound run reads its scope off the selection.
     other_subject_entry = by_dir[str(other_subject_dir)]
     assert other_subject_entry["enabled"] is True
-    chosen = _chosen(picked_cfg, str(other_subject_dir))
+    chosen = _chosen(picked_cfg, str(other_subject_dir), tmp_path)
     assert "scope" not in chosen["data"]
 
     broken_entry = by_dir[str(broken_dir)]
@@ -368,7 +372,7 @@ def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces
     result = list_split_choices(tmp_path, "exp-drawn-policy")
     entry = next(m for m in result["selections"] if m["selection_dir"] == str(dataset_default))
 
-    candidate = _chosen(cfg, str(dataset_default))
+    candidate = _chosen(cfg, str(dataset_default), tmp_path)
     dropped = sorted(set(cfg["data"]["split"]) - set(candidate["data"]["split"]))
     assert entry["replaced_split_keys"] == dropped
 
@@ -396,7 +400,7 @@ def test_list_split_choices_reports_the_redraw_flag_among_the_keys_a_partition_r
     result = list_split_choices(tmp_path, "exp-redrawn-policy")
     entry = next(m for m in result["selections"] if m["selection_dir"] == str(dataset_default))
 
-    candidate = _chosen(cfg, str(dataset_default))
+    candidate = _chosen(cfg, str(dataset_default), tmp_path)
     dropped = sorted(set(cfg["data"]["split"]) - set(candidate["data"]["split"]))
     assert entry["replaced_split_keys"] == dropped
 
@@ -706,7 +710,7 @@ def test_a_chosen_selection_binds_and_the_runs_own_resolved_record_names_it(tmp_
     _draw(tmp_path, root, chosen, seed=5)
     stated = _bespoke_config(root / "images" / DATES[0])
 
-    run_dir = opened_run(tmp_path, _chosen(stated, str(chosen)),
+    run_dir = opened_run(tmp_path, _chosen(stated, str(chosen), tmp_path),
                          experiment_id="exp-bound-split-record")
 
     binding = observe(run_dir).record["resolved"]["partition"]["selection"]

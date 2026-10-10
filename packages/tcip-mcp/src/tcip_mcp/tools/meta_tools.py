@@ -276,11 +276,12 @@ def read_audit_log(
         limit: Maximum entries to return (default 200), newest first.
     """
     from tcip_mcp.audit import audit_entries, audit_log_key, dataset_scope_of
+    from tcip_mcp.registry_paths import located
 
     if scope is None:
         key = audit_log_key(project)
     else:
-        resolved_scope = dataset_scope_of(scope)
+        resolved_scope = dataset_scope_of(located(scope, project))
         if resolved_scope is None:
             return {
                 "error": (
