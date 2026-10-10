@@ -10,6 +10,7 @@ pushed, identity-stale shapes, ages, tag/creator counts).
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -53,8 +54,10 @@ def _shapes_doc(root: Path) -> dict | None:
     return tcip_store.read(canvas_geometry_key(str(root)), default=None)
 
 
-A_IMG, B_IMG = "C:/img/a.jpg", "C:/img/b.jpg"
-"""Images outside every project; a push stores each as its resolved absolute path."""
+_OUTSIDE = Path(tempfile.gettempdir()).resolve() / "tcip-canvas-liveview"
+A_IMG, B_IMG = str(_OUTSIDE / "a.jpg"), str(_OUTSIDE / "b.jpg")
+"""Images outside every project, absolute on every platform; a push stores each as its resolved
+absolute path."""
 A_STORED, B_STORED = str(Path(A_IMG).resolve()), str(Path(B_IMG).resolve())
 
 SHAPES = [
