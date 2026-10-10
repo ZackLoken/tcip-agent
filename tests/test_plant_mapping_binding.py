@@ -1402,6 +1402,35 @@ def test_second_receipt_scan_in_one_process_reads_only_what_was_appended(
     assert calls[1] is not None
 
 
+def test_two_spellings_of_one_project_share_one_receipt_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The receipt memo is keyed by the store's one spelling of the project, so a load under a
+    second spelling of the same directory is a memo hit and reads the log no further."""
+    _init(tmp_path)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, _ = _write_scene(dataset_root)
+    built = build_plant_mapping(
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
+    assert "error" not in built, built
+
+    calls: list[str | None] = []
+    real_read_log = ts.read_log
+
+    def spy(key, after=None):
+        calls.append(after)
+        return real_read_log(key, after=after)
+
+    monkeypatch.setattr(ts, "read_log", spy)
+    other = Path(f"{tmp_path}/../{tmp_path.name}")
+    assert str(other) != str(tmp_path) and ts.canonical_path(other) == ts.canonical_path(tmp_path)
+
+    assert plant_mapping.load_mapping(tmp_path, "valley") is not None
+    assert plant_mapping.load_mapping(other, "valley") is not None
+    assert calls == [None]
+
+
 def test_a_build_leaves_one_row_its_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

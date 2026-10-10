@@ -546,7 +546,7 @@ def test_a_sweep_and_its_trial_each_have_one_board_whichever_door_launches_it(
     starts it, and a trial's is its own run board: one key per directory."""
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.experiments import board_of, find_sweep
-    from tcip_mcp.pipelines.training.tensorboard_manager import _key_of
+    from tcip_store import canonical_path
 
     trials: list[Path] = []
 
@@ -566,8 +566,8 @@ def test_a_sweep_and_its_trial_each_have_one_board_whichever_door_launches_it(
 
     sweep_dir = find_sweep(sweep_id, project=opened_project)
     assert sweep_dir is not None and board_of(sweep_dir) == sweep_dir
-    assert [_key_of(logdir) for logdir in tb_launches] == [
-        _key_of(str(sweep_dir)), _key_of(str(sweep_dir)), _key_of(str(board_of(trials[0])))]
+    assert [canonical_path(logdir) for logdir in tb_launches] == [
+        canonical_path(sweep_dir), canonical_path(sweep_dir), canonical_path(board_of(trials[0]))]
 
 
 def test_a_recorded_sweep_relaunches_through_the_run_launch_door(
