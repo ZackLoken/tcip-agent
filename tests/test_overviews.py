@@ -43,14 +43,14 @@ def test_build_overviews_writes_a_sidecar_gdal_serves_reduced_reads_from(tmp_pat
     assert not overview_dims(path)
     assert not sidecar_valid(path)
 
-    fractions: list[float] = []
-    sidecar = build_overviews(path, progress_cb=fractions.append)
+    written: list[int] = []
+    sidecar = build_overviews(path, progress_cb=written.append)
 
     assert sidecar == overview_sidecar(path)
     assert sidecar.is_file()
     assert sidecar_valid(path)
     assert overview_dims(path) == [(4096, 4), (2048, 2), (1024, 1)]
-    assert fractions and fractions[-1] == pytest.approx(1.0)
+    assert written and written[-1] == sidecar.stat().st_size
 
     with open_raster(path, 1) as src:
         # The path-holding answer and the open reader's own agree on the levels it serves from.
@@ -207,7 +207,7 @@ def test_a_canceled_build_deletes_the_sidecar(tmp_path: Path) -> None:
     as silent zeros on the next open."""
     path, _ = _wide_raster(tmp_path)
     with pytest.raises(RuntimeError):
-        build_overviews(path, progress_cb=lambda _fraction: False)
+        build_overviews(path, progress_cb=lambda _written: False)
     assert not overview_sidecar(path).exists()
     assert not overview_dims(path)
 

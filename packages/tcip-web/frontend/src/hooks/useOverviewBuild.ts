@@ -4,12 +4,12 @@ import { api } from "@/api/client";
 import { OVERVIEWS_REQUIRED } from "@/api/types.generated";
 
 /** How often the build's progress is read back. Long enough that a minutes-long pyramid build
- *  is not polled thousands of times, short enough that the bar moves while it runs. */
+ *  is not polled thousands of times, short enough that the byte count moves while it runs. */
 const POLL_MS = 700;
 
 /** How long the reported progress may sit at one value before the build is called stalled.
  *
- *  A build that is working reports a rising fraction; one whose worker died reports the same
+ *  A build that is working reports a growing sidecar; one whose worker died reports the same
  *  number forever, and without this the viewer waits on it forever. A documented threshold: no
  *  measurement of how far apart a real build's progress reports fall on a large raster, so it is set well past
  *  what a single pyramid level should take to show any movement at all. */
@@ -18,15 +18,21 @@ export const STALL_MS = 180_000;
 export interface OverviewBuildState {
   /** A build for this image is running: the viewer has a wait to show, not a failure. */
   building: boolean;
-  /** Completion fraction in [0, 1], as the build reports it. */
-  progress: number;
+  /** The sidecar's size on disk as the build last reported it: 0 until it reports, no total
+   *  known while it runs, and a build refused over an existing pyramid reports none. */
+  bytesWritten: number;
   /** Why the build stopped, when it did. */
   error: string | null;
   /** Bumps once the pyramid exists, so the image request can be made again. */
   reloadToken: number;
 }
 
-const IDLE: OverviewBuildState = { building: false, progress: 0, error: null, reloadToken: 0 };
+const IDLE: OverviewBuildState = { building: false, bytesWritten: 0, error: null, reloadToken: 0 };
+
+/** A sidecar byte count as a person reads it, in decimal megabytes. */
+export function writtenLabel(bytes: number): string {
+  return `${(bytes / 1_000_000).toFixed(1)} MB written`;
+}
 
 /**
  * Turn a refused image load into the build that makes it servable.
@@ -59,7 +65,7 @@ export function useOverviewBuild(
 
     let canceled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
-    let lastProgress = -1;
+    let lastWritten = -1;
     let lastMoved = Date.now();
 
     const poll = (jobId: string) => {
@@ -70,7 +76,7 @@ export function useOverviewBuild(
             if (job.status === "completed") {
               setState((s) => ({
                 building: false,
-                progress: 1,
+                bytesWritten: job.bytes_written,
                 error: null,
                 reloadToken: s.reloadToken + 1,
               }));
@@ -80,20 +86,20 @@ export function useOverviewBuild(
               setState((s) => ({ ...s, building: false, error: job.error ?? "build failed" }));
               return;
             }
-            if (job.progress !== lastProgress) {
-              lastProgress = job.progress;
+            if (job.bytes_written !== lastWritten) {
+              lastWritten = job.bytes_written;
               lastMoved = Date.now();
             } else if (Date.now() - lastMoved > STALL_MS) {
               setState((s) => ({
                 ...s,
                 building: false,
-                error: `the build stopped reporting progress (held at ${Math.round(
-                  job.progress * 100,
-                )}% for over ${Math.round(STALL_MS / 1000)}s)`,
+                error: `the build stopped reporting progress (held at ${writtenLabel(
+                  job.bytes_written,
+                )} for over ${Math.round(STALL_MS / 1000)}s)`,
               }));
               return;
             }
-            setState((s) => ({ ...s, progress: job.progress }));
+            setState((s) => ({ ...s, bytesWritten: job.bytes_written }));
             poll(jobId);
           },
           (e: unknown) => {
@@ -109,7 +115,7 @@ export function useOverviewBuild(
       }, POLL_MS);
     };
 
-    setState((s) => ({ ...s, building: true, progress: 0, error: null }));
+    setState((s) => ({ ...s, building: true, bytesWritten: 0, error: null }));
     void (async () => {
       try {
         const job = await api.images.buildOverviews(imagePath);
@@ -117,7 +123,7 @@ export function useOverviewBuild(
         if (job.status === "completed") {
           setState((s) => ({
             building: false,
-            progress: 1,
+            bytesWritten: job.bytes_written,
             error: null,
             reloadToken: s.reloadToken + 1,
           }));

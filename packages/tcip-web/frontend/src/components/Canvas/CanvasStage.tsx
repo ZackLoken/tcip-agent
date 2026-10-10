@@ -7,7 +7,7 @@ import { Image as KonvaImage, Layer, Stage } from "react-konva";
 import Konva from "konva";
 
 import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
-import { useOverviewBuild } from "@/hooks/useOverviewBuild";
+import { useOverviewBuild, writtenLabel } from "@/hooks/useOverviewBuild";
 import { loadImage, type LoadedImage } from "@/lib/imageLoader";
 import { clampView, fitView } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
@@ -472,13 +472,7 @@ export function CanvasStage(props: CanvasStageProps) {
               It is larger than the server serves in one read, so a reduced-resolution copy is being
               built. This runs once per image; it opens normally afterwards.
             </p>
-            <div className="mt-2 h-1 w-full overflow-hidden rounded bg-tcip-bg">
-              <div
-                className="h-full bg-tcip-accent"
-                style={{ width: `${Math.round(overview.progress * 100)}%` }}
-              />
-            </div>
-            <p className="mt-1 font-mono text-tcip-muted">{Math.round(overview.progress * 100)}%</p>
+            <p className="mt-2 font-mono text-tcip-muted">{writtenLabel(overview.bytesWritten)}</p>
           </div>
         </div>
       )}

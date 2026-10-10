@@ -158,7 +158,7 @@ export interface OverviewJob {
   job_id: string;
   path: string;
   status: JobStatus;
-  progress: number;
+  bytes_written: number;
   error: string | null;
 }
 
